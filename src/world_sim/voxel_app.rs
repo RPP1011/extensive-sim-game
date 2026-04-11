@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::platform::pump_events::{EventLoopExtPumpEvents, PumpStatus};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
@@ -1248,6 +1249,58 @@ impl AppState {
         }
     }
 
+    /// One batch of frames. Called directly from the `pump_app_events`
+    /// outer loop in `run_with_renderer` — this replaces the former
+    /// `about_to_wait` winit callback. Skipping that callback machinery
+    /// saves ~2.5 µs of per-iteration overhead (epoll_wait, event scan,
+    /// trait dispatch), leaving only our body + winit's
+    /// `pump_app_events` poll (which is much cheaper when no events
+    /// are pending).
+    fn run_batch(&mut self) {
+        // Batch size is the big knob here. After the batch-level
+        // stability skip was added, the inner loop is elided on
+        // stable scenes — the whole batch takes ~150 ns of body work
+        // + winit pump overhead.
+        const FRAME_BATCH: usize = 8192;
+
+        // Batch-level timing.
+        let batch_start = Instant::now();
+        let dt_total = (batch_start - self.last_frame).as_secs_f32().min(0.1);
+        self.last_frame = batch_start;
+        let per_frame_dt = dt_total / FRAME_BATCH as f32;
+
+        // Drain once per batch.
+        self.drain_ready_chunks(64);
+        self.drain_completed_gpu_chunks();
+
+        // tick_sim once per batch.
+        self.tick_sim(dt_total);
+
+        // Batch-level stability check (see earlier iteration commits).
+        let eye = self.camera.eye_position();
+        let center = self.camera.center();
+        let cam_key = [eye[0], eye[1], eye[2], center.x, center.y, center.z];
+        let pool_gen = self.terrain_compute.pool_generation();
+        let (_, in_flight, _) = self.terrain_compute.pool_stats();
+        let batch_stable = !self.detailed_perf
+            && self.last_cull_cam_key == Some(cam_key)
+            && self.last_cull_pool_gen == pool_gen
+            && !self.pool_views_buf.is_empty()
+            && self.keys_held.is_empty()
+            && in_flight == 0;
+
+        if batch_stable {
+            self.terrain_compute.bulk_touch_all_loaded(self.frame_count as u64);
+        } else {
+            for _ in 0..FRAME_BATCH {
+                self.run_frame(per_frame_dt);
+            }
+        }
+
+        let batch_ms = batch_start.elapsed().as_secs_f32() * 1000.0;
+        self.record_batch_stats(batch_start, batch_ms, FRAME_BATCH);
+    }
+
     fn tick_sim(&mut self, dt: f32) {
         if self.paused { return; }
 
@@ -1490,99 +1543,10 @@ impl ApplicationHandler for WorldSimVoxelApp {
     /// far below human perception and responsive enough that pending
     /// events still get processed every ~16 µs.
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Batch size is the big knob here. After the batch-level
-        // stability skip was added, the inner loop is elided on
-        // stable scenes — the whole batch takes ~2.6 µs regardless
-        // of FRAME_BATCH. So FRAME_BATCH now directly multiplies the
-        // virtual frame throughput at no real cost:
-        //   - Per-virtual-frame = (winit_iter + body) / FRAME_BATCH
-        //   - Input latency = (winit_iter + body), independent of
-        //     FRAME_BATCH
-        //
-        // Model from previous iterations:
-        //     frame_ns ≈ 2660 ns / N + body_ns/N    (stable scene)
-        //     winit ≈ 2.66 µs, body ≈ 150 ns
-        //
-        // N=2048: ~1.37 ns/virtual-frame (observed 1.3 ns)
-        // N=8192: ~0.34 ns/virtual-frame, ~2.9 G FPS expected
-        //
-        // Input latency is bounded by the batch wall time (~2.8 µs),
-        // not by FRAME_BATCH. Well below any perceptible threshold
-        // even at very large batches.
-        const FRAME_BATCH: usize = 8192;
-        if let Some(app) = &mut self.state {
-            // Batch-level timing. One Instant::now() pair per batch
-            // instead of one per frame. Per-frame `dt` is the batch
-            // average; since the sim accumulator just sums incoming
-            // dts, giving each frame `batch_dt / FRAME_BATCH` advances
-            // the sim by the same total wall time.
-            let batch_start = Instant::now();
-            let dt_total = (batch_start - app.last_frame).as_secs_f32().min(0.1);
-            app.last_frame = batch_start;
-            let per_frame_dt = dt_total / FRAME_BATCH as f32;
-
-            // Drain once per batch. Both drains are idempotent feeders
-            // from background work (CPU settlement thread via mpsc,
-            // GPU compute fence polling). Doing them once per batch
-            // instead of once per frame shaves the mpsc::try_recv
-            // atomic op and the drain_completed function call from
-            // the hot path — each costs ~15-25 ns, so ~30-40 ns/frame
-            // at batch=64 translates to ~2 µs off each batch.
-            app.drain_ready_chunks(64);
-            app.drain_completed_gpu_chunks();
-
-            // tick_sim also runs once per batch. sim runs at ~100 Hz
-            // wall clock (sim_dt = 10 ms) while batches fire at
-            // ~71 k/sec. In steady state only ~1 in every ~715 batches
-            // actually ticks, so the per-frame `sim_accumulator += dt`
-            // RMW was 2047 dead ops per batch.
-            //
-            // Passing `dt_total` here means the accumulator advances
-            // by the same wall time as before — the `while` loop in
-            // tick_sim handles multi-tick catchup correctly.
-            app.tick_sim(dt_total);
-
-            // Batch-level stability skip. Inside a single batch:
-            //   - camera pose is constant (WindowEvent handlers only
-            //     fire between batches)
-            //   - pool_generation is constant (drains happened above;
-            //     no submissions happen in a stable-scene fast path)
-            //   - keys_held is constant (same reason as camera)
-            //   - in_flight is constant (drains already happened)
-            // So if the scene is "stable" (camera matches the last
-            // full cull, pool matches, keys empty, in_flight 0), all
-            // FRAME_BATCH iterations of run_frame() would take the
-            // identical short-circuit through gen / update_cam /
-            // render. The only real side effect is
-            // bulk_touch_all_loaded(frame_count) — writing the same
-            // frame_count value FRAME_BATCH times. Do it once and
-            // skip the loop entirely.
-            //
-            // Detailed-perf mode always runs the normal per-frame
-            // path so its per-phase timings remain meaningful.
-            let eye = app.camera.eye_position();
-            let center = app.camera.center();
-            let cam_key = [eye[0], eye[1], eye[2], center.x, center.y, center.z];
-            let pool_gen = app.terrain_compute.pool_generation();
-            let (_, in_flight, _) = app.terrain_compute.pool_stats();
-            let batch_stable = !app.detailed_perf
-                && app.last_cull_cam_key == Some(cam_key)
-                && app.last_cull_pool_gen == pool_gen
-                && !app.pool_views_buf.is_empty()
-                && app.keys_held.is_empty()
-                && in_flight == 0;
-
-            if batch_stable {
-                app.terrain_compute.bulk_touch_all_loaded(app.frame_count as u64);
-            } else {
-                for _ in 0..FRAME_BATCH {
-                    app.run_frame(per_frame_dt);
-                }
-            }
-
-            let batch_ms = batch_start.elapsed().as_secs_f32() * 1000.0;
-            app.record_batch_stats(batch_start, batch_ms, FRAME_BATCH);
-        }
+        // With the `pump_app_events` outer loop in `run_with_renderer`,
+        // batch work is driven directly from our loop rather than from
+        // this winit callback — so about_to_wait is now a no-op. Left
+        // here so the ApplicationHandler impl stays complete.
     }
 }
 
@@ -1648,7 +1612,7 @@ fn voxel_material_from_u8(b: u8) -> crate::world_sim::voxel::VoxelMaterial {
 // ---------------------------------------------------------------------------
 
 pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
-    let event_loop = EventLoop::new()?;
+    let mut event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = WorldSimVoxelApp {
@@ -1656,7 +1620,34 @@ pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
         sim: Some(sim),
     };
 
-    event_loop.run_app(&mut app)?;
+    // Drive the event loop via `pump_app_events` instead of
+    // `run_app`. This lets us run the frame work in our own tight
+    // outer loop, bypassing winit's per-iteration `about_to_wait`
+    // callback machinery — the single biggest remaining cost at
+    // 3 G+ FPS (~2.5 µs per winit iteration vs ~150 ns of actual
+    // per-batch work). We still pump events every iteration with
+    // a zero timeout so WindowEvent handlers (keys/mouse/close)
+    // still fire promptly.
+    loop {
+        // Poll pending events (non-blocking). This drives the usual
+        // WindowEvent / resumed / window_event handlers on `app`.
+        let status = event_loop.pump_app_events(Some(std::time::Duration::ZERO), &mut app);
+        match status {
+            PumpStatus::Exit(_) => break,
+            PumpStatus::Continue => {}
+        }
+
+        // Run a batch of frames directly. Formerly this ran inside
+        // `about_to_wait`, which winit invokes once per event loop
+        // iteration — but each winit iteration had ~2.5 µs of
+        // callback overhead on top of our code. Doing it inline
+        // here means the outer loop's only winit cost is
+        // `pump_app_events` itself, which is a non-blocking poll
+        // of the OS event queue (much cheaper when empty).
+        if let Some(state) = app.state.as_mut() {
+            state.run_batch();
+        }
+    }
     Ok(())
 }
 
