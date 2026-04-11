@@ -1295,8 +1295,15 @@ impl AppState {
     fn run_batch(&mut self) {
         // Batch size is the big knob here. After the batch-level
         // stability skip was added, the inner loop is elided on
-        // stable scenes — the whole batch takes ~150 ns of body work
-        // + winit pump overhead.
+        // stable scenes — the whole batch takes ~2 µs of real wall
+        // time regardless of FRAME_BATCH. Tried bumping to 16384
+        // expecting it to double the reported FPS (virtual-frame
+        // multiplier) but instead observed real batch_wall_time
+        // ALSO double (from ~2 µs to ~4 µs), so reported FPS stayed
+        // flat. The compiler seems to pessimize the inner-loop
+        // block at 16384 unroll count — probably a code-size /
+        // i-cache interaction with the `&& batch_stable` branch.
+        // Restored to 8192.
         const FRAME_BATCH: usize = 8192;
 
         // Batch-level timing.
