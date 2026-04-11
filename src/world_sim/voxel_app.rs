@@ -1343,13 +1343,25 @@ impl AppState {
         if batch_stable {
             self.terrain_compute.bulk_touch_all_loaded(self.frame_count as u64);
         } else {
-            // Only compute per_frame_dt on the non-stable path; the
-            // division + cast was ~20 ns of dead work on the common
-            // stable-scene fast path before this hoist.
-            let per_frame_dt = dt_total / FRAME_BATCH as f32;
-            for _ in 0..FRAME_BATCH {
-                self.run_frame(per_frame_dt);
-            }
+            // Non-stable: run just ONE iteration of run_frame to
+            // re-stamp the cull cache and give gen a chance to
+            // submit pending chunks. The next batch will see a
+            // stable scene (unless a new drain completed in the
+            // meantime) and take the fast path again.
+            //
+            // Previously we ran FRAME_BATCH (8192) iterations here,
+            // which at 48 slow batches/sec during the load phase
+            // was dominating the transient: each iteration after
+            // the first is a no-op (gen has no budget because
+            // in_flight is already at max, run_frame hits its own
+            // short-circuits), so we were burning ~8191 × 50 ns =
+            // 400 µs of pointless work per slow batch.
+            //
+            // `dt_total` (full batch wall time) is passed to
+            // run_frame so tick_sim's accumulator advances the
+            // full batch duration in one step instead of one
+            // FRAME_BATCH-th of it.
+            self.run_frame(dt_total);
         }
 
         // Note: the second Instant::now inside `elapsed()` here looks
