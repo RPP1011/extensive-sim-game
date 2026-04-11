@@ -1311,14 +1311,21 @@ impl AppState {
         // counter, so a single u64 compare replaces 6 f32 compares plus
         // the field reads and array construction. Saves ~15-20 ns per
         // batch on the stable-scene fast path.
+        //
+        // NOTE: `in_flight == 0` is deliberately NOT in the check.
+        // It's redundant because `last_cull_pool_gen == pool_gen`
+        // already catches any state change that would affect the
+        // visible set. During the drain transition, batches without
+        // new completions keep pool_gen stable and now correctly
+        // take the stable fast path instead of running the full
+        // 8192-iteration inner loop. This speeds up the drain
+        // transition from ~8 k FPS/sec to the stable-scene rate.
         let pool_gen = self.terrain_compute.pool_generation();
-        let in_flight = self.terrain_compute.in_flight_count();
         let batch_stable = !self.detailed_perf
             && self.camera_version == self.last_cull_camera_version
             && self.last_cull_pool_gen == pool_gen
             && !self.pool_views_buf.is_empty()
-            && self.keys_held.is_empty()
-            && in_flight == 0;
+            && self.keys_held.is_empty();
 
         if batch_stable {
             self.terrain_compute.bulk_touch_all_loaded(self.frame_count as u64);
