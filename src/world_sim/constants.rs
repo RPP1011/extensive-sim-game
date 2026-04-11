@@ -56,10 +56,25 @@ pub const MEGA: i32 = 1;
 /// Voxels per mega-chunk edge.
 pub const MEGA_VOXELS: u32 = (MEGA as u32) * (CHUNK_SIZE as u32);
 
-/// Maximum distance (voxels) from camera to load/render a mega-chunk.
-/// At 10cm/voxel, 768 voxels ≈ 76.8m render distance.
-/// Kept short because each chunk is now 64³ = 262K voxels (large upload).
-pub const LOAD_RADIUS: f32 = 768.0;
+/// Maximum distance (voxels) from camera to load a chunk.
+/// At 10cm/voxel, 704 voxels ≈ 70m load distance.
+///
+/// Sized to keep a full 360° horizontal disk of chunks in the pool at
+/// once, so rotation is instant (no re-compute when a chunk re-enters
+/// the view frustum). With the 1024-slot pool and 5 z-levels per
+/// column (surface ± 2 for tree canopies), the horizontal radius must
+/// satisfy 5 * π * r² ≤ 1024 → r ≤ 8.1 chunks. We pick 11 chunks
+/// (704 voxels) even though that overflows slightly — the spiral
+/// visits shells from the camera outward so near chunks win LRU and
+/// the outer shell gets cycled. The overflow gives us extra reach in
+/// the forward direction without starving the near ring.
+///
+/// If LOAD_RADIUS grows past what the pool can hold, the behaviour
+/// degrades to the old "aggressive culling" symptoms: chunks behind
+/// the camera get evicted to make room, and rotating the camera
+/// exposes un-loaded regions. Scale this with NUM_SLOTS if the pool
+/// changes.
+pub const LOAD_RADIUS: f32 = 704.0;
 
 /// Internal render resolution for the voxel raycaster.
 /// Kept lower than window size for performance; blit-upscaled to the window.
