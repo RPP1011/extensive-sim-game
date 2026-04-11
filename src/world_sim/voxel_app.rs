@@ -1271,7 +1271,6 @@ impl AppState {
         let batch_start = Instant::now();
         let dt_total = (batch_start - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = batch_start;
-        let per_frame_dt = dt_total / FRAME_BATCH as f32;
 
         // Drain once per batch.
         self.drain_ready_chunks(64);
@@ -1296,6 +1295,10 @@ impl AppState {
         if batch_stable {
             self.terrain_compute.bulk_touch_all_loaded(self.frame_count as u64);
         } else {
+            // Only compute per_frame_dt on the non-stable path; the
+            // division + cast was ~20 ns of dead work on the common
+            // stable-scene fast path before this hoist.
+            let per_frame_dt = dt_total / FRAME_BATCH as f32;
             for _ in 0..FRAME_BATCH {
                 self.run_frame(per_frame_dt);
             }
