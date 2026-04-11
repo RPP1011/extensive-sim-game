@@ -924,6 +924,18 @@ impl AppState {
             return Ok((cull_ms, 0.0, 0.0, present_ms));
         }
 
+        // Stable-scene super-fast path: if the camera and pool are
+        // identical to the previous frame, the renderer's output AND the
+        // last presented swapchain image are already correct. Skip the
+        // entire wait→render→present chain — no fence sync, no queue
+        // submit, no blit, no vkQueuePresentKHR. The display keeps
+        // scanning out the last presented content in IMMEDIATE mode, so
+        // this is a pure win (~0.06 ms of fence + presentation overhead
+        // eliminated on cache-hit frames).
+        if self.renderer.cache_matches(&self.camera, &self.pool_views_buf) {
+            return Ok((cull_ms, 0.0, 0.0, 0.0));
+        }
+
         // Split out the CPU wait on last frame's render_fence so we can see
         // whether the old "raycast" bucket was dominated by the wait (GPU
         // behind because compute is saturating shared resources) or by
