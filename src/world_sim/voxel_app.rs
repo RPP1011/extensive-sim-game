@@ -130,16 +130,27 @@ struct AppState {
     move_speed: f32,
 
     // FPS tracking
-    frame_count: u32,
+    //
+    // u64 because at multi-GFPS the per-batch increment can push a u32
+    // past `u32::MAX` before the 1 Hz reset clears it. With debug-style
+    // overflow checks enabled (anything other than the default release
+    // profile) this trips an `attempt to add with overflow` panic mid-
+    // frame. Headless smoke runs at ~2 GFPS so we missed it for a while;
+    // interactive sessions can briefly hit ~3.5 GFPS where the overflow
+    // window opens up. u64 takes ~146 years to wrap at 4 GFPS, which is
+    // safely "never". Same reasoning for the throughput diagnostics
+    // below — they reset each second too, but a multi-GFPS short-circuit
+    // counter can overflow before the reset.
+    frame_count: u64,
     fps_timer: Instant,
     last_fps: f32,
     last_visible_megas: usize,
     settlement_jump_idx: usize,
 
     // Pool throughput diagnostics (reset each second in the perf log).
-    gen_submitted_this_sec: u32,
-    drain_completed_this_sec: u32,
-    gen_short_circuit_this_sec: u32,
+    gen_submitted_this_sec: u64,
+    drain_completed_this_sec: u64,
+    gen_short_circuit_this_sec: u64,
 
     /// (eye_x, eye_y, eye_z, fwd_x, fwd_y, fwd_z) of the camera at the end of
     /// the last generate_camera_chunks call that submitted 0 chunks. If the
@@ -868,7 +879,7 @@ impl AppState {
                 return;
             }
         };
-        self.drain_completed_this_sec += completed.len() as u32;
+        self.drain_completed_this_sec += completed.len() as u64;
         for (req_id, _chunk_pos) in completed {
             self.pending_chunk_requests.remove(&req_id);
         }
@@ -1216,7 +1227,7 @@ impl AppState {
             self.ema_frame_ms = self.ema_frame_ms * 0.9 + per_frame_ms * 0.1;
         }
 
-        self.frame_count += frames_in_batch as u32;
+        self.frame_count += frames_in_batch as u64;
         let fps_elapsed = batch_start.duration_since(self.fps_timer).as_secs_f32();
         if fps_elapsed >= 1.0 {
             self.fire_fps_log(batch_start, fps_elapsed);
