@@ -1450,7 +1450,18 @@ impl ApplicationHandler for WorldSimVoxelApp {
     /// far below human perception and responsive enough that pending
     /// events still get processed every ~16 µs.
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        const FRAME_BATCH: usize = 8;
+        // Batch size is the big knob here. Trade-off:
+        //   - Larger = winit overhead (~2.6 µs per iteration on this
+        //     system: epoll_wait, event scan, trait dispatch) spreads
+        //     across more frames.
+        //   - Larger = worst-case input latency grows linearly
+        //     (batch_size × ~30 ns of work). At 64 that's ~2 µs,
+        //     still four orders of magnitude below any perceptible
+        //     threshold.
+        // 64 brings the amortized winit cost below the per-frame work
+        // itself (~40 ns), after which further batching is diminishing
+        // returns.
+        const FRAME_BATCH: usize = 64;
         if let Some(app) = &mut self.state {
             // Batch-level timing. One Instant::now() pair per 8 frames
             // instead of one per frame — at ~25 ns each that was 12 %
