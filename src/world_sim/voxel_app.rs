@@ -91,6 +91,17 @@ struct AppState {
     renderer: VoxelRenderer,
     camera: FreeCamera,
 
+    /// Auto-rotate test mode. Enabled by `VOXEL_AUTO_ROTATE=<secs>` where
+    /// `<secs>` is the wall-clock period for one full revolution. When
+    /// enabled, the initial camera is snapped to the surface (no +18 eye
+    /// offset) and a continuous yaw rotation is applied each frame based
+    /// on wall-clock elapsed time, not the per-frame `dt` (which is ~0.25
+    /// ns at multi-GFPS and can't drive angular motion). Used by smoke
+    /// tests to exercise the chunk pool under rotation without needing
+    /// an interactive user.
+    auto_rotate_period: Option<f32>,
+    auto_rotate_last: Instant,
+
     bridge: VoxelBridge,
     sim: WorldSim,
 
@@ -129,19 +140,32 @@ struct AppState {
     last_mouse: Option<(f64, f64)>,
     move_speed: f32,
 
-    // FPS tracking
+    // Monotonic frame counter.
     //
-    // u64 because at multi-GFPS the per-batch increment can push a u32
-    // past `u32::MAX` before the 1 Hz reset clears it. With debug-style
-    // overflow checks enabled (anything other than the default release
-    // profile) this trips an `attempt to add with overflow` panic mid-
-    // frame. Headless smoke runs at ~2 GFPS so we missed it for a while;
-    // interactive sessions can briefly hit ~3.5 GFPS where the overflow
-    // window opens up. u64 takes ~146 years to wrap at 4 GFPS, which is
-    // safely "never". Same reasoning for the throughput diagnostics
-    // below — they reset each second too, but a multi-GFPS short-circuit
-    // counter can overflow before the reset.
+    // u64 and *never* reset, because this doubles as the LRU clock for
+    // terrain_compute's chunk pool. The previous u32 version reset to 0
+    // on every 1 Hz FPS log, which broke the pool in a subtle way:
+    //
+    // terrain_compute's eviction guard is
+    //     refuse if oldest_age + 1 >= current_frame
+    // where `oldest_age = max(slot.last_touched_frame, bulk_touched_frame)`
+    // and `bulk_touched_frame` is explicitly monotonic (never moves
+    // backwards). So after frame_count reset, bulk_touched_frame stayed
+    // at the pre-reset high value (~5 G) while current_frame restarted
+    // at 0. Every loaded slot looked 5 G frames old, and the guard fired
+    // unconditionally — the pool REFUSED every eviction for ~1 s until
+    // the new-second frame_count caught up to the stale bulk_touched.
+    //
+    // User-visible symptom: the pool got stuck roughly half the time
+    // while rotating the camera, so newly-visible chunks couldn't load
+    // and the old render set showed through — "chunks in front of the
+    // camera pop out" and "chunks you just looked at vanish". Strict
+    // monotonicity eliminates both.
+    //
+    // FPS is computed from a delta against `last_log_frame_count`
+    // instead of being derived from a periodically-reset counter.
     frame_count: u64,
+    last_log_frame_count: u64,
     fps_timer: Instant,
     last_fps: f32,
     last_visible_megas: usize,
@@ -334,6 +358,30 @@ impl AppState {
         // visual interest — lots of trees and varied terrain). Fall back to
         // Plains, then Mountains, then whatever is first.
         //
+        // Auto-rotate test mode: read the period (in seconds per full
+        // revolution) from VOXEL_AUTO_ROTATE. Empty or unset → disabled.
+        // Parsing failure logs a warning and disables. When enabled, the
+        // camera starts at the surface (z = surface_z, no +18 eye offset)
+        // so the test exercises ground-level chunk loading.
+        let auto_rotate_period: Option<f32> = std::env::var("VOXEL_AUTO_ROTATE")
+            .ok()
+            .and_then(|v| {
+                if v.is_empty() {
+                    None
+                } else {
+                    match v.parse::<f32>() {
+                        Ok(s) if s > 0.0 => Some(s),
+                        _ => {
+                            eprintln!(
+                                "[voxel] VOXEL_AUTO_ROTATE={:?} is not a positive float, ignoring",
+                                v
+                            );
+                            None
+                        }
+                    }
+                }
+            });
+
         // First-person height (~1.8m = 18 voxels at 10cm/voxel) with a slight
         // downward tilt so the horizon is visible.
         //
@@ -369,10 +417,19 @@ impl AppState {
                     let vy = s.pos.1;
                     let (cell, _, _) = plan_ref.sample(vx, vy);
                     let surface_z = crate::world_sim::terrain::surface_height_at(vx, vy, plan_ref, world_seed);
-                    let eye = glam::Vec3::new(vx, (surface_z + 18) as f32, vy);
-                    let target = eye + glam::Vec3::new(0.0, -3.0, 30.0);
+                    // Auto-rotate mode snaps the camera to the surface
+                    // itself (z = surface_z) instead of the usual +18
+                    // eye height, so the test exercises ground-level
+                    // chunk loading. Look horizontally, not tilted.
+                    let (eye_y, target_offset) = if auto_rotate_period.is_some() {
+                        (surface_z as f32, glam::Vec3::new(0.0, 0.0, 30.0))
+                    } else {
+                        ((surface_z + 18) as f32, glam::Vec3::new(0.0, -3.0, 30.0))
+                    };
+                    let eye = glam::Vec3::new(vx, eye_y, vy);
+                    let target = eye + target_offset;
                     eprintln!("[voxel] Camera at settlement '{}' ({:?}) surface_z={} eye_y={}",
-                        s.name, cell.terrain, surface_z, surface_z + 18);
+                        s.name, cell.terrain, surface_z, eye_y);
                     (eye, target)
                 }
                 None => (glam::Vec3::new(0.0, 500.0, 0.0), glam::Vec3::new(0.0, 497.0, 30.0)),
@@ -385,6 +442,8 @@ impl AppState {
 
         Ok(Self {
             window, ctx, alloc, swapchain, renderer, camera,
+            auto_rotate_period,
+            auto_rotate_last: Instant::now(),
             bridge, sim,
             terrain_compute,
             gpu_megas: HashMap::new(),
@@ -402,6 +461,7 @@ impl AppState {
             last_mouse: None,
             move_speed: 50.0,
             frame_count: 0,
+            last_log_frame_count: 0,
             fps_timer: Instant::now(),
             last_fps: 0.0,
             last_visible_megas: 0,
@@ -1285,8 +1345,13 @@ impl AppState {
     #[cold]
     #[inline(never)]
     fn fire_fps_log(&mut self, batch_start: Instant, fps_elapsed: f32) {
-        self.last_fps = self.frame_count as f32 / fps_elapsed;
-        self.frame_count = 0;
+        // FPS is the delta against the last log snapshot. The counter
+        // itself is strictly monotonic because it doubles as the LRU
+        // clock for terrain_compute — see the field comment for the
+        // full reasoning.
+        let delta_frames = self.frame_count - self.last_log_frame_count;
+        self.last_fps = delta_frames as f32 / fps_elapsed;
+        self.last_log_frame_count = self.frame_count;
         self.fps_timer = batch_start;
         let cam = self.camera.eye_position();
         let status = if self.paused { "PAUSED" } else { "RUNNING" };
@@ -1534,6 +1599,36 @@ impl AppState {
 
     fn update_camera(&mut self, dt: f32) {
         use voxel_engine::camera::{CameraController, InputState};
+
+        // Auto-rotate test mode. Runs *before* the keys_held fast-path
+        // so the rotation still happens while no keys are held. The
+        // per-frame `dt` passed in here is batch-averaged and at multi-
+        // GFPS is ~0.25 ns — useless as an integration step. Track
+        // wall-clock between calls instead.
+        if let Some(period) = self.auto_rotate_period {
+            let now = Instant::now();
+            let wall_dt = now.duration_since(self.auto_rotate_last).as_secs_f32();
+            self.auto_rotate_last = now;
+            // target angular velocity = 2π / period rad/s.
+            // FreeCamera::update applies `yaw += mouse_dx * 0.003`, so
+            // mouse_dx = desired_delta_radians / 0.003.
+            let angular_delta = wall_dt * (std::f32::consts::TAU / period);
+            let mouse_dx = angular_delta / 0.003;
+            self.camera.update(
+                &InputState {
+                    move_forward: 0.0,
+                    move_right: 0.0,
+                    move_up: 0.0,
+                    mouse_dx,
+                    mouse_dy: 0.0,
+                    scroll_delta: 0.0,
+                },
+                dt,
+            );
+            self.camera_version = self.camera_version.wrapping_add(1);
+            // Fall through to the keys_held path so WASD still works
+            // alongside auto-rotate if a user is also driving it.
+        }
 
         // Fast path: if no movement keys are held, nothing about the
         // camera changes this frame. Mouse deltas are applied directly
