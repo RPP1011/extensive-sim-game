@@ -1178,20 +1178,21 @@ impl AppState {
             self.ema_raycast_ms = lerp(self.ema_raycast_ms, raycast_ms);
             self.ema_present_ms = lerp(self.ema_present_ms, present_ms);
         } else {
-            // Fast path: zero clock reads. Work only.
+            // Fast path: zero clock reads, no per-phase timers.
             //
-            // NOT called here — hoisted to `about_to_wait` and run
-            // once per batch:
+            // NOT called here — hoisted to `run_batch` and run once
+            // per batch instead of once per frame:
             //   - drain_ready_chunks / drain_completed_gpu_chunks
-            //     (idempotent feeders)
-            //   - tick_sim (at ~100 Hz sim rate vs ~71 k batches/sec,
-            //     only ~1 in every ~700 batches actually ticks, so
-            //     the per-frame sim_accumulator += dt RMW was ~3
-            //     cycles/frame of pure waste inside the batch loop)
+            //     (idempotent feeders; at batch level we call them
+            //     once instead of FRAME_BATCH times)
+            //   - tick_sim (wall-clock driven; advancing it per frame
+            //     inside the inner loop was ~3 cycles of waste, and
+            //     the non-stable path now only runs a single
+            //     iteration anyway so the distinction barely
+            //     matters)
             //
-            // Unused `dt` on this path — kept as a parameter so the
-            // detailed debug path above can use it without branching.
-            let _ = dt;
+            // `dt` is passed through to update_camera which uses it
+            // for move-speed integration.
             self.generate_camera_chunks(8);
             self.update_camera(dt);
             if let Err(e) = self.render() {
