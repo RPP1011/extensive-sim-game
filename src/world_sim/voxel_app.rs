@@ -128,6 +128,13 @@ struct AppState {
     /// will just find dedup no-ops for the entire 13-chunk radius.
     last_gen_converged_cam: Option<[f32; 6]>,
 
+    /// Reused per-frame buffers for the render's visible-chunk list + the
+    /// stripped version passed to `render_frame_pool`. Pre-allocated to
+    /// avoid heap churn on the 5000 FPS hot path (the old code was
+    /// allocating two ~256-entry Vecs every single frame).
+    visible_buf: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3], f32)>,
+    pool_views_buf: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3])>,
+
     // Per-phase timing EMAs (exponential moving avg, ms). Alpha=0.1.
     ema_drain_cpu_ms: f32,
     ema_drain_gpu_ms: f32,
@@ -338,6 +345,8 @@ impl AppState {
             chunks_loaded: 0,
             pending_chunk_requests: HashMap::new(),
             last_gen_converged_cam: None,
+            visible_buf: Vec::with_capacity(320),
+            pool_views_buf: Vec::with_capacity(320),
             ema_drain_cpu_ms: 0.0,
             ema_drain_gpu_ms: 0.0,
             ema_gen_ms: 0.0,
@@ -859,42 +868,44 @@ impl AppState {
         let cam_pos = self.camera.eye_position();
 
         // --- Phase 3: render directly from the GPU chunk pool ---
+        // Reuse pre-allocated Vecs to avoid per-frame heap churn on the
+        // 5000 FPS hot path.
         let chunk_size_f = CHUNK_SIZE as f32;
-        let mut visible: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3], f32)> = self
-            .terrain_compute
-            .loaded_chunk_views()
-            .filter_map(|v| {
-                let pos = [
-                    v.chunk_pos[0] as f32 * chunk_size_f,
-                    v.chunk_pos[2] as f32 * chunk_size_f, // sim z → engine y (up)
-                    v.chunk_pos[1] as f32 * chunk_size_f, // sim y → engine z
-                ];
-                let max = [pos[0] + dims, pos[1] + dims, pos[2] + dims];
-                if !aabb_vs_frustum(&planes, &pos, &max) {
-                    return None;
-                }
-                let cx = pos[0] + dims * 0.5 - cam_pos[0];
-                let cy = pos[1] + dims * 0.5 - cam_pos[1];
-                let cz = pos[2] + dims * 0.5 - cam_pos[2];
-                let dist2 = cx * cx + cy * cy + cz * cz;
-                if dist2 > LOAD_RADIUS * LOAD_RADIUS * 4.0 {
-                    return None;
-                }
-                Some((v, [1.0f32, 1.0, 1.0, 1.0], pos, [dims, dims, dims], dist2))
-            })
-            .collect();
-        visible.sort_unstable_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
+        self.visible_buf.clear();
+        for v in self.terrain_compute.loaded_chunk_views() {
+            let pos = [
+                v.chunk_pos[0] as f32 * chunk_size_f,
+                v.chunk_pos[2] as f32 * chunk_size_f, // sim z → engine y (up)
+                v.chunk_pos[1] as f32 * chunk_size_f, // sim y → engine z
+            ];
+            let max = [pos[0] + dims, pos[1] + dims, pos[2] + dims];
+            if !aabb_vs_frustum(&planes, &pos, &max) {
+                continue;
+            }
+            let cx = pos[0] + dims * 0.5 - cam_pos[0];
+            let cy = pos[1] + dims * 0.5 - cam_pos[1];
+            let cz = pos[2] + dims * 0.5 - cam_pos[2];
+            let dist2 = cx * cx + cy * cy + cz * cz;
+            if dist2 > LOAD_RADIUS * LOAD_RADIUS * 4.0 {
+                continue;
+            }
+            self.visible_buf
+                .push((v, [1.0f32, 1.0, 1.0, 1.0], pos, [dims, dims, dims], dist2));
+        }
+        self.visible_buf
+            .sort_unstable_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
 
-        for (v, _, _, _, _) in &visible {
+        for (v, _, _, _, _) in self.visible_buf.iter() {
             self.terrain_compute.mark_touched(v.chunk_pos, self.frame_count as u64);
         }
 
-        let pool_views: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3])> =
-            visible.into_iter().map(|(v, c, p, d, _)| (v, c, p, d)).collect();
-        self.last_visible_megas = pool_views.len();
+        self.pool_views_buf.clear();
+        self.pool_views_buf
+            .extend(self.visible_buf.iter().map(|(v, c, p, d, _)| (*v, *c, *p, *d)));
+        self.last_visible_megas = self.pool_views_buf.len();
         let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
 
-        if pool_views.is_empty() {
+        if self.pool_views_buf.is_empty() {
             let t_present = Instant::now();
             self.swapchain.present_cleared_frame(&self.ctx, [0.1, 0.1, 0.15, 1.0])?;
             let present_ms = t_present.elapsed().as_secs_f32() * 1000.0;
@@ -912,7 +923,7 @@ impl AppState {
         let t_raycast = Instant::now();
         let palette_view = self.terrain_compute.palette_view();
         self.renderer
-            .render_frame_pool(&self.ctx, &self.camera, &pool_views, palette_view)?;
+            .render_frame_pool(&self.ctx, &self.camera, &self.pool_views_buf, palette_view)?;
         let raycast_ms = t_raycast.elapsed().as_secs_f32() * 1000.0;
 
         let t_present = Instant::now();
