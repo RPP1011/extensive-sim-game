@@ -530,6 +530,35 @@ impl AppState {
             self.gen_short_circuit_this_sec += 1;
             return;
         }
+
+        // Converged-spiral short-circuit — FIRST, before any expensive
+        // work. Once the pool has been filled with every in-frustum
+        // chunk the spiral can find, re-running the spiral every frame
+        // for the same camera pose produces zero new submissions, so
+        // nothing matters except the camera + in_flight state. Compare
+        // directly against cached engine-space eye + center (6 floats)
+        // so we can bail before cloning the region plan.
+        //
+        // The previous ordering did: pool_stats() → plan.clone() →
+        // axis-swap → forward-vector sqrt → short-circuit check. The
+        // plan.clone() deep-copies three large Vecs (cells/rivers/roads)
+        // on every frame at ~250 k FPS, which was the single biggest
+        // hidden cost in run_frame's `other` bucket.
+        let cam = self.camera.eye_position();
+        let cam_center_v = self.camera.center();
+        let cam_key = [
+            cam[0], cam[1], cam[2],
+            cam_center_v.x, cam_center_v.y, cam_center_v.z,
+        ];
+        if in_flight == 0
+            && self.last_gen_converged_cam.map(|c| c == cam_key).unwrap_or(false)
+        {
+            self.gen_short_circuit_this_sec += 1;
+            return;
+        }
+
+        // Slow path: the spiral might actually submit something, so we
+        // need the region plan and the sim-space conversions.
         let budget = budget.min(MAX_INFLIGHT - in_flight);
         let has_plan = self.sim.state().voxel_world.region_plan.is_some();
         static LOGGED_PLAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -541,15 +570,13 @@ impl AppState {
             None => return,
         };
         let seed = self.sim.state().rng_state;
-        let cam = self.camera.eye_position();
         // Convert engine coords (x, y-up, z) back to sim coords (x, y, z-up).
         let cam_vx = cam[0];
         let cam_vy = cam[2]; // engine z → sim y
         let cam_vz = cam[1]; // engine y → sim z
 
         // Camera forward in sim coords (same axis swap).
-        let cam_center = self.camera.center();
-        let fwd_raw = [cam_center.x - cam[0], cam_center.y - cam[1], cam_center.z - cam[2]];
+        let fwd_raw = [cam_center_v.x - cam[0], cam_center_v.y - cam[1], cam_center_v.z - cam[2]];
         let fwd_len2 = fwd_raw[0] * fwd_raw[0] + fwd_raw[1] * fwd_raw[1] + fwd_raw[2] * fwd_raw[2];
         let (fwd_vx, fwd_vy, fwd_vz) = if fwd_len2 > 1e-6 {
             let inv = 1.0 / fwd_len2.sqrt();
@@ -558,21 +585,6 @@ impl AppState {
         } else {
             (1.0, 0.0, 0.0)
         };
-
-        // Converged-spiral short-circuit. Once the pool has been filled
-        // with every in-frustum chunk the spiral can find (last run
-        // submitted 0), re-running the spiral every frame for the same
-        // camera pose is ~130K dedup comparisons for zero work — 0.11 ms
-        // per frame, or >50% of the frame time at 5000 FPS. Skip the
-        // whole function if (camera hasn't moved) AND (no compute work
-        // is in flight that could free up a slot for a new submission).
-        let cam_key = [cam_vx, cam_vy, cam_vz, fwd_vx, fwd_vy, fwd_vz];
-        if in_flight == 0
-            && self.last_gen_converged_cam.map(|c| c == cam_key).unwrap_or(false)
-        {
-            self.gen_short_circuit_this_sec += 1;
-            return;
-        }
 
         // One-time debug: log camera position and what biome we're looking at
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
