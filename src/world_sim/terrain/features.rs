@@ -23,29 +23,28 @@ const PILLAR_HEIGHT_SALT: u64   = 0xFFFF_5678_0004;
 // Helpers: tree and boulder stampers
 // ---------------------------------------------------------------------------
 
-/// Crown shape — controls the attractor envelope for procedural trees.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CrownShape {
-    Ellipsoid, // symmetric ellipsoid (oak/forest)
-    Cone,      // radius narrows with height (pine/jungle emergent)
-    FlatWide,  // squashed ellipsoid (savanna/acacia)
-    Droopy,    // extends downward (willow)
-}
-
 /// Fully-resolved parameters for a single procedural tree.
-#[derive(Clone, Debug)]
+///
+/// The tree is a 3-level hierarchical grammar:
+///   L0 trunk  — vertical capsule from base to (0,0,trunk_height)
+///   L1 primary branches — num_primary capsules from (0,0,fork_height)
+///   L2 secondary branches — num_secondary capsules from each primary tip
+///   L3 leaf clusters — a sphere at each secondary branch tip
+#[derive(Clone, Copy, Debug)]
 pub struct TreeParams {
     pub trunk_height: i32,
     pub trunk_radius: f32,
-    pub crown_base_z: i32,    // where the crown starts (relative to feature_base_z)
-    pub crown_height: i32,    // vertical extent of crown
-    pub crown_radius_xy: f32, // horizontal spread of crown
-    pub crown_radius_z: f32,  // vertical radius (may differ from crown_height/2)
-    pub crown_shape: CrownShape,
-    pub num_attractors: u32,
-    pub num_clusters: u32,
-    pub branch_radius: f32,
-    pub leaf_radius: f32,
+    pub fork_height: i32, // voxels from base where the trunk forks
+    pub num_primary: i32,
+    pub primary_length: f32,
+    pub primary_elev_min: f32, // degrees from vertical
+    pub primary_elev_max: f32,
+    pub num_secondary: i32,
+    pub secondary_length: f32,
+    pub secondary_elev_min: f32, // degrees from primary direction
+    pub secondary_elev_max: f32,
+    pub branch_radius: f32, // thickness of primary/secondary
+    pub leaf_radius: f32,   // size of leaf cluster at each secondary tip
     pub canopy_material: VoxelMaterial,
 }
 
@@ -60,128 +59,175 @@ pub fn tree_params_for_biome(
     let size_hash = noise::hash_f32(ox, oy, 5, seed.wrapping_add(TREE_HEIGHT_SALT));
     let h_hash = noise::hash_f32(ox, oy, 0, seed.wrapping_add(TREE_HEIGHT_SALT));
 
-    let (trunk_height, trunk_radius, crown_radius_xy) = if size_hash < 0.2 {
-        // Small bush
-        (10 + (h_hash * 10.0) as i32, 1.0_f32, 5.0_f32 + h_hash * 3.0)
+    // Size category
+    let (trunk_height, trunk_radius) = if size_hash < 0.2 {
+        // Bush: 10-20 voxels, thin trunk
+        (10 + (h_hash * 10.0) as i32, 1.0_f32)
     } else if size_hash > 0.8 {
-        // Large
-        (
-            80 + (h_hash * 40.0) as i32,
-            2.0_f32 + h_hash,
-            20.0_f32 + h_hash * 10.0,
-        )
+        // Large tree: 80-120 voxels
+        (80 + (h_hash * 40.0) as i32, 2.5_f32 + h_hash)
     } else {
-        // Standard
-        (
-            40 + (h_hash * 30.0) as i32,
-            1.0_f32 + h_hash * 1.5,
-            12.0_f32 + h_hash * 6.0,
-        )
+        // Standard: 40-70
+        (40 + (h_hash * 30.0) as i32, 1.5_f32 + h_hash * 1.0)
     };
 
-    // Biome-specific crown shape and counts.
-    let (crown_shape, num_attractors, num_clusters, crown_stretch_z) = match terrain {
-        Terrain::Tundra => (CrownShape::Cone, 10u32, 4u32, 1.3_f32),
-        Terrain::Plains => (CrownShape::FlatWide, 12, 4, 0.5),
-        Terrain::Jungle => (CrownShape::Cone, 20, 6, 1.2),
-        Terrain::Swamp => (CrownShape::Droopy, 14, 5, 1.0),
-        _ => (CrownShape::Ellipsoid, 16, 5, 0.9), // Forest default
+    // Biome-specific branching parameters.
+    let (
+        num_primary,
+        num_secondary,
+        fork_height_ratio,
+        primary_elev_min,
+        primary_elev_max,
+        primary_length_ratio,
+        canopy_material,
+    ) = match terrain {
+        Terrain::Plains => (5, 3, 0.75_f32, 50.0_f32, 70.0_f32, 0.45_f32, VoxelMaterial::Leaves),
+        Terrain::Jungle => (3, 4, 0.65, 30.0, 45.0, 0.55, VoxelMaterial::JungleMoss),
+        Terrain::Tundra => (5, 2, 0.30, 25.0, 40.0, 0.35, VoxelMaterial::Leaves),
+        Terrain::Swamp => (4, 3, 0.50, 10.0, 30.0, 0.45, VoxelMaterial::Leaves),
+        _ => (4, 3, 0.55, 35.0, 55.0, 0.40, VoxelMaterial::Leaves), // Forest default
     };
 
-    let crown_base_z = (trunk_height as f32 * 0.55) as i32;
-    let crown_height = (crown_radius_xy * 2.0 * crown_stretch_z) as i32;
-    let crown_radius_z = crown_radius_xy * crown_stretch_z;
-
-    let branch_radius = (trunk_radius * 0.4).max(0.7);
-    let leaf_radius = (crown_radius_xy * 0.35).max(1.5);
-
-    let canopy_material = match terrain {
-        Terrain::Jungle => VoxelMaterial::JungleMoss,
-        _ => VoxelMaterial::Leaves,
-    };
+    let fork_height = (trunk_height as f32 * fork_height_ratio) as i32;
+    let primary_length = trunk_height as f32 * primary_length_ratio;
+    let secondary_length = primary_length * 0.55;
 
     TreeParams {
         trunk_height,
         trunk_radius,
-        crown_base_z,
-        crown_height,
-        crown_radius_xy,
-        crown_radius_z,
-        crown_shape,
-        num_attractors,
-        num_clusters,
-        branch_radius,
-        leaf_radius,
+        fork_height,
+        num_primary,
+        primary_length,
+        primary_elev_min,
+        primary_elev_max,
+        num_secondary,
+        secondary_length,
+        secondary_elev_min: 40.0,
+        secondary_elev_max: 70.0,
+        branch_radius: (trunk_radius * 0.55).max(0.8),
+        leaf_radius: (primary_length * 0.35).max(2.5),
         canopy_material,
     }
 }
 
-/// Generate the i-th attractor point for a tree at origin (ox, oy).
-/// Returns (dx, dy, dz) relative to (ox, oy, feature_base_z).
-pub fn attractor(i: u32, ox: i32, oy: i32, seed: u64, params: &TreeParams) -> (f32, f32, f32) {
-    let s = seed.wrapping_add(0xA77A);
-    let h1 = noise::hash_f32(ox, oy, i as i32 * 7 + 1, s);
-    let h2 = noise::hash_f32(ox, oy, i as i32 * 7 + 2, s);
-    let h3 = noise::hash_f32(ox, oy, i as i32 * 7 + 3, s);
-
-    let angle = h1 * 2.0 * std::f32::consts::PI;
-    let t_z = h3; // [0, 1]
-
-    let radius_factor = match params.crown_shape {
-        CrownShape::Ellipsoid | CrownShape::FlatWide => {
-            let z_norm = 2.0 * t_z - 1.0;
-            (1.0 - z_norm * z_norm).max(0.0).sqrt()
-        }
-        CrownShape::Cone => 1.0 - t_z,
-        CrownShape::Droopy => {
-            if t_z < 0.3 {
-                1.0
-            } else {
-                1.0 - (t_z - 0.3) / 0.7
-            }
-        }
-    };
-
-    let radius = h2.sqrt() * params.crown_radius_xy * radius_factor;
-    let dx = angle.cos() * radius;
-    let dy = angle.sin() * radius;
-
-    let dz = match params.crown_shape {
-        CrownShape::Droopy => {
-            params.crown_base_z as f32 + (t_z - 0.3) * params.crown_height as f32
-        }
-        _ => params.crown_base_z as f32 + t_z * params.crown_height as f32,
-    };
-    (dx, dy, dz)
-}
-
-/// For each of K clusters, compute centroid = average of attractors assigned to it.
-/// Clusters are assigned by `i % K` (round-robin).
-pub fn compute_cluster_centroids(
+/// Returns (dx, dy, dz) relative to the fork point for the i-th primary branch.
+pub fn primary_branch_end(
+    i: i32,
     ox: i32,
     oy: i32,
     seed: u64,
     params: &TreeParams,
-) -> Vec<(f32, f32, f32)> {
-    let k = params.num_clusters.max(1) as usize;
-    let mut sums: Vec<(f32, f32, f32, u32)> = vec![(0.0, 0.0, 0.0, 0); k];
-    for i in 0..params.num_attractors {
-        let cluster_idx = (i as usize) % k;
-        let (dx, dy, dz) = attractor(i, ox, oy, seed, params);
-        sums[cluster_idx].0 += dx;
-        sums[cluster_idx].1 += dy;
-        sums[cluster_idx].2 += dz;
-        sums[cluster_idx].3 += 1;
-    }
-    sums.into_iter()
-        .map(|(sx, sy, sz, n)| {
-            if n == 0 {
-                (0.0, 0.0, 0.0)
-            } else {
-                (sx / n as f32, sy / n as f32, sz / n as f32)
-            }
-        })
-        .collect()
+) -> (f32, f32, f32) {
+    let n = params.num_primary as f32;
+    let angle_base = (i as f32) * std::f32::consts::TAU / n;
+    // Angular jitter ±15% of the slice (±0.3 * (TAU/n) / 2 = ±0.15 * TAU/n)
+    let angle_jitter = (noise::hash_f32(ox, oy, i * 11 + 1, seed.wrapping_add(0xB120)) - 0.5)
+        * (std::f32::consts::TAU / n)
+        * 0.3;
+    let angle = angle_base + angle_jitter;
+
+    // Elevation angle measured FROM VERTICAL: lerp between min and max via hash.
+    let elev_hash = noise::hash_f32(ox, oy, i * 11 + 2, seed.wrapping_add(0xB121));
+    let elev_deg =
+        params.primary_elev_min + elev_hash * (params.primary_elev_max - params.primary_elev_min);
+    let elev_rad = elev_deg * std::f32::consts::PI / 180.0;
+
+    // Length jitter ±20%.
+    let len_hash = noise::hash_f32(ox, oy, i * 11 + 3, seed.wrapping_add(0xB122));
+    let length = params.primary_length * (0.8 + len_hash * 0.4);
+
+    // elev_rad is angle from VERTICAL, so horizontal = sin, vertical = cos.
+    let horiz_dist = length * elev_rad.sin();
+    let dx = angle.cos() * horiz_dist;
+    let dy = angle.sin() * horiz_dist;
+    let dz = length * elev_rad.cos();
+    (dx, dy, dz)
+}
+
+/// Returns (dx, dy, dz) relative to the primary branch END for the j-th
+/// secondary branch off the i-th primary.
+pub fn secondary_branch_end(
+    i: i32,
+    j: i32,
+    primary_end: (f32, f32, f32),
+    ox: i32,
+    oy: i32,
+    seed: u64,
+    params: &TreeParams,
+) -> (f32, f32, f32) {
+    // Primary direction as unit vector.
+    let plen = (primary_end.0 * primary_end.0
+        + primary_end.1 * primary_end.1
+        + primary_end.2 * primary_end.2)
+        .sqrt()
+        .max(0.001);
+    let pdir = (primary_end.0 / plen, primary_end.1 / plen, primary_end.2 / plen);
+
+    // Angle around primary axis.
+    let m = params.num_secondary as f32;
+    let angle_base = (j as f32) * std::f32::consts::TAU / m;
+    let angle_jitter = (noise::hash_f32(
+        ox,
+        oy,
+        (i * 17 + j) * 11 + 1,
+        seed.wrapping_add(0xB130),
+    ) - 0.5)
+        * 0.8;
+    let angle = angle_base + angle_jitter;
+
+    // Elevation from primary direction.
+    let elev_hash = noise::hash_f32(
+        ox,
+        oy,
+        (i * 17 + j) * 11 + 2,
+        seed.wrapping_add(0xB131),
+    );
+    let elev_deg = params.secondary_elev_min
+        + elev_hash * (params.secondary_elev_max - params.secondary_elev_min);
+    let elev_rad = elev_deg * std::f32::consts::PI / 180.0;
+
+    // Length jitter ±20%.
+    let len_hash = noise::hash_f32(
+        ox,
+        oy,
+        (i * 17 + j) * 11 + 3,
+        seed.wrapping_add(0xB132),
+    );
+    let length = params.secondary_length * (0.8 + len_hash * 0.4);
+
+    // Build an orthonormal basis (u, v) perpendicular to pdir.
+    // Pick a helper vector NOT parallel to pdir.
+    let helper = if pdir.2.abs() < 0.9 {
+        (0.0_f32, 0.0_f32, 1.0_f32)
+    } else {
+        (1.0_f32, 0.0_f32, 0.0_f32)
+    };
+    // u = normalize(pdir × helper)
+    let cross_u = (
+        pdir.1 * helper.2 - pdir.2 * helper.1,
+        pdir.2 * helper.0 - pdir.0 * helper.2,
+        pdir.0 * helper.1 - pdir.1 * helper.0,
+    );
+    let ulen = (cross_u.0 * cross_u.0 + cross_u.1 * cross_u.1 + cross_u.2 * cross_u.2)
+        .sqrt()
+        .max(0.001);
+    let u = (cross_u.0 / ulen, cross_u.1 / ulen, cross_u.2 / ulen);
+    // v = pdir × u  (already unit since pdir and u are unit and perpendicular)
+    let v = (
+        pdir.1 * u.2 - pdir.2 * u.1,
+        pdir.2 * u.0 - pdir.0 * u.2,
+        pdir.0 * u.1 - pdir.1 * u.0,
+    );
+
+    // Direction = cos(elev)*pdir + sin(elev)*(cos(angle)*u + sin(angle)*v)
+    let c_elev = elev_rad.cos();
+    let s_elev = elev_rad.sin();
+    let c_ang = angle.cos();
+    let s_ang = angle.sin();
+    let dir_x = c_elev * pdir.0 + s_elev * (c_ang * u.0 + s_ang * v.0);
+    let dir_y = c_elev * pdir.1 + s_elev * (c_ang * u.1 + s_ang * v.1);
+    let dir_z = c_elev * pdir.2 + s_elev * (c_ang * u.2 + s_ang * v.2);
+    (dir_x * length, dir_y * length, dir_z * length)
 }
 
 /// Capsule SDF: distance from point p to capsule(a, b, radius). Negative inside.
@@ -264,7 +310,12 @@ pub fn stamp_tree_biome(
     );
 }
 
-/// Procedurally stamp a tree using the SDF/attractor algorithm.
+/// Procedurally stamp a tree using a 3-level hierarchical branching grammar.
+///
+/// Level 0: trunk (vertical capsule)
+/// Level 1: primary branches (fork from fork_height)
+/// Level 2: secondary branches (fork from primary tips)
+/// Level 3: leaf clusters (spheres at secondary tips)
 pub fn stamp_tree_procedural(
     chunk: &mut Chunk,
     lx: i32,
@@ -283,53 +334,90 @@ pub fn stamp_tree_procedural(
     let feature_base_z = base_z; // absolute world z where trunk starts
 
     let params = tree_params_for_biome(terrain, sub_biome, ox, oy, seed);
-    let centroids = compute_cluster_centroids(ox, oy, seed, &params);
 
-    // Precompute attractors (used twice: leaves and as the scan bounding box).
-    let attractors: Vec<(f32, f32, f32)> = (0..params.num_attractors)
-        .map(|i| attractor(i, ox, oy, seed, &params))
-        .collect();
-
-    // Bounding box for voxel scan.
-    let max_reach_xy = params.crown_radius_xy + params.leaf_radius + 2.0;
-    let min_lx = (lx as f32 - max_reach_xy).floor() as i32;
-    let max_lx = (lx as f32 + max_reach_xy).ceil() as i32;
-    let min_ly = (ly as f32 - max_reach_xy).floor() as i32;
-    let max_ly = (ly as f32 + max_reach_xy).ceil() as i32;
-    let max_reach_z_up =
-        params.trunk_height + params.crown_height + params.leaf_radius as i32 + 2;
-    let max_reach_z_down = if matches!(params.crown_shape, CrownShape::Droopy) {
-        (params.crown_radius_xy + params.leaf_radius) as i32 + 2
-    } else {
-        2
-    };
-    let min_wz = feature_base_z - max_reach_z_down;
-    let max_wz = feature_base_z + max_reach_z_up;
-
-    let trunk_top_z = feature_base_z + params.trunk_height;
     let ox_f = ox as f32;
     let oy_f = oy as f32;
     let fbz = feature_base_z as f32;
+    let fork_z = fbz + params.fork_height as f32;
+    let trunk_top_z = fbz + params.trunk_height as f32;
+
+    // Precompute primary and secondary endpoints in absolute world coords,
+    // plus an aggregate bounding box.
+    let num_primary = params.num_primary.max(0);
+    let num_secondary = params.num_secondary.max(0);
+
+    // Per-primary: absolute end point
+    let mut primary_ends: [(f32, f32, f32); 8] = [(0.0, 0.0, 0.0); 8];
+    // Per-(primary, secondary): absolute end point (max 8 primaries × 8 secondaries)
+    let mut secondary_ends: [[(f32, f32, f32); 8]; 8] = [[(0.0, 0.0, 0.0); 8]; 8];
+    let np = (num_primary as usize).min(8);
+    let ns = (num_secondary as usize).min(8);
+
+    // Track bounding box (absolute world coords).
+    let mut bb_min_x = ox_f - params.trunk_radius - 1.0;
+    let mut bb_max_x = ox_f + params.trunk_radius + 1.0;
+    let mut bb_min_y = oy_f - params.trunk_radius - 1.0;
+    let mut bb_max_y = oy_f + params.trunk_radius + 1.0;
+    let mut bb_min_z = fbz - 1.0;
+    let mut bb_max_z = trunk_top_z + 1.0;
+
+    for i in 0..np {
+        let (pdx, pdy, pdz) = primary_branch_end(i as i32, ox, oy, seed, &params);
+        let pend = (ox_f + pdx, oy_f + pdy, fork_z + pdz);
+        primary_ends[i] = pend;
+
+        let r = params.branch_radius + 1.0;
+        bb_min_x = bb_min_x.min(pend.0 - r);
+        bb_max_x = bb_max_x.max(pend.0 + r);
+        bb_min_y = bb_min_y.min(pend.1 - r);
+        bb_max_y = bb_max_y.max(pend.1 + r);
+        bb_min_z = bb_min_z.min(pend.2 - r);
+        bb_max_z = bb_max_z.max(pend.2 + r);
+
+        for j in 0..ns {
+            let (sdx, sdy, sdz) =
+                secondary_branch_end(i as i32, j as i32, (pdx, pdy, pdz), ox, oy, seed, &params);
+            let send = (pend.0 + sdx, pend.1 + sdy, pend.2 + sdz);
+            secondary_ends[i][j] = send;
+
+            let lr = params.leaf_radius + 1.0;
+            bb_min_x = bb_min_x.min(send.0 - lr);
+            bb_max_x = bb_max_x.max(send.0 + lr);
+            bb_min_y = bb_min_y.min(send.1 - lr);
+            bb_max_y = bb_max_y.max(send.1 + lr);
+            bb_min_z = bb_min_z.min(send.2 - lr);
+            bb_max_z = bb_max_z.max(send.2 + lr);
+        }
+    }
+
+    let min_wx = bb_min_x.floor() as i32;
+    let max_wx = bb_max_x.ceil() as i32;
+    let min_wy = bb_min_y.floor() as i32;
+    let max_wy = bb_max_y.ceil() as i32;
+    let min_wz = bb_min_z.floor() as i32;
+    let max_wz = bb_max_z.ceil() as i32;
 
     for wz in min_wz..=max_wz {
         let llz = wz - base_cz;
         if llz < 0 || llz >= CHUNK_SIZE as i32 {
             continue;
         }
-        for vly in min_ly..=max_ly {
+        for wy in min_wy..=max_wy {
+            let vly = wy - base_y;
             if vly < 0 || vly >= CHUNK_SIZE as i32 {
                 continue;
             }
-            for vlx in min_lx..=max_lx {
+            for wx in min_wx..=max_wx {
+                let vlx = wx - base_x;
                 if vlx < 0 || vlx >= CHUNK_SIZE as i32 {
                     continue;
                 }
 
-                let px = (base_x + vlx) as f32;
-                let py = (base_y + vly) as f32;
+                let px = wx as f32;
+                let py = wy as f32;
                 let pz = wz as f32;
 
-                // Trunk SDF (vertical capsule).
+                // 1. Trunk capsule
                 let trunk_d = capsule_sdf(
                     px,
                     py,
@@ -339,58 +427,80 @@ pub fn stamp_tree_procedural(
                     fbz,
                     ox_f,
                     oy_f,
-                    trunk_top_z as f32,
+                    trunk_top_z,
                     params.trunk_radius,
                 );
+                let mut is_wood = trunk_d <= 0.0;
 
-                // Branch SDFs.
-                let mut min_branch_d = f32::INFINITY;
-                for (i, &(cdx, cdy, cdz)) in centroids.iter().enumerate() {
-                    let t_along =
-                        (i as f32 / params.num_clusters as f32) * 0.4 + 0.55;
-                    let branch_start_z = fbz + params.trunk_height as f32 * t_along;
-                    let d = capsule_sdf(
-                        px,
-                        py,
-                        pz,
-                        ox_f,
-                        oy_f,
-                        branch_start_z,
-                        ox_f + cdx,
-                        oy_f + cdy,
-                        fbz + cdz,
-                        params.branch_radius,
-                    );
-                    if d < min_branch_d {
-                        min_branch_d = d;
+                // 2. Primary branches
+                if !is_wood {
+                    for i in 0..np {
+                        let pend = primary_ends[i];
+                        let d = capsule_sdf(
+                            px,
+                            py,
+                            pz,
+                            ox_f,
+                            oy_f,
+                            fork_z,
+                            pend.0,
+                            pend.1,
+                            pend.2,
+                            params.branch_radius,
+                        );
+                        if d <= 0.0 {
+                            is_wood = true;
+                            break;
+                        }
                     }
                 }
 
-                // Leaf SDFs.
-                let mut min_leaf_d = f32::INFINITY;
-                for &(adx, ady, adz) in &attractors {
-                    let d = sphere_sdf(
-                        px,
-                        py,
-                        pz,
-                        ox_f + adx,
-                        oy_f + ady,
-                        fbz + adz,
-                        params.leaf_radius,
-                    );
-                    if d < min_leaf_d {
-                        min_leaf_d = d;
+                // 3. Secondary branches
+                if !is_wood {
+                    'outer: for i in 0..np {
+                        let pend = primary_ends[i];
+                        for j in 0..ns {
+                            let send = secondary_ends[i][j];
+                            let d = capsule_sdf(
+                                px,
+                                py,
+                                pz,
+                                pend.0,
+                                pend.1,
+                                pend.2,
+                                send.0,
+                                send.1,
+                                send.2,
+                                params.branch_radius * 0.55,
+                            );
+                            if d <= 0.0 {
+                                is_wood = true;
+                                break 'outer;
+                            }
+                        }
                     }
                 }
 
-                let mat = if trunk_d <= 0.0 {
+                let mat = if is_wood {
                     VoxelMaterial::WoodLog
-                } else if min_branch_d <= 0.0 {
-                    VoxelMaterial::WoodLog
-                } else if min_leaf_d <= 0.0 {
-                    params.canopy_material
                 } else {
-                    continue;
+                    // 4. Leaf spheres at secondary tips
+                    let mut leaf_hit = false;
+                    'lo: for i in 0..np {
+                        for j in 0..ns {
+                            let send = secondary_ends[i][j];
+                            let d = sphere_sdf(px, py, pz, send.0, send.1, send.2, params.leaf_radius);
+                            if d <= 0.0 {
+                                leaf_hit = true;
+                                break 'lo;
+                            }
+                        }
+                    }
+                    if leaf_hit {
+                        params.canopy_material
+                    } else {
+                        continue;
+                    }
                 };
 
                 let idx = local_index(vlx as usize, vly as usize, llz as usize);
@@ -561,13 +671,15 @@ pub fn place_surface_features(
     let base_y = cp.y * CHUNK_SIZE as i32;
     let base_z = cp.z * CHUNK_SIZE as i32;
 
-    // Horizontal halo: procedural crown can reach
-    //   crown_radius_xy (up to 30) + leaf_radius (~10.5) + 2 ≈ 43 voxels.
-    const HALO: i32 = 44;
-    // Vertical extent of a tree above its base: trunk (up to 120) + crown height
-    // (up to 2*crown_radius*stretch = ~80) + leaf_radius (~10) ≈ 210.
+    // Horizontal halo: hierarchical recursive trees can reach
+    //   primary_horizontal (~56) + secondary (~44) + leaf_radius (~23) ≈ 123.
+    // Worst case is a large jungle tree (trunk_height 120, primary ratio 0.55).
+    const HALO: i32 = 135;
+    // Vertical extent of a tree above its base: fork_height + primary elevation +
+    // secondary + leaf_radius. Large jungle: ~78 + 69 + 40 + 23 ≈ 210.
     const FEATURE_MAX_Z_ABOVE: i32 = 220;
-    // Droopy willows can reach below the base by crown_radius_xy + leaf_radius.
+    // Secondary branches can point downward from the primary direction,
+    // roughly secondary_length + leaf_radius below fork for droopy trees.
     const FEATURE_MAX_Z_BELOW: i32 = 44;
 
     for ly in -HALO..(CHUNK_SIZE as i32 + HALO) {
