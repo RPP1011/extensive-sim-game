@@ -61,14 +61,14 @@ pub fn tree_params_for_biome(
 
     // Size category
     let (trunk_height, trunk_radius) = if size_hash < 0.2 {
-        // Bush: 10-20 voxels, thin trunk
+        // Bush: 10-20 voxels, thin trunk ~10cm
         (10 + (h_hash * 10.0) as i32, 1.0_f32)
     } else if size_hash > 0.8 {
-        // Large tree: 80-120 voxels
-        (80 + (h_hash * 40.0) as i32, 2.5_f32 + h_hash)
+        // Large tree: 80-120 voxels, thick trunk 40-60cm diameter
+        (80 + (h_hash * 40.0) as i32, 3.5_f32 + h_hash * 1.5)
     } else {
-        // Standard: 40-70
-        (40 + (h_hash * 30.0) as i32, 1.5_f32 + h_hash * 1.0)
+        // Standard: 40-70, trunk 25-40cm diameter
+        (40 + (h_hash * 30.0) as i32, 2.0_f32 + h_hash * 1.0)
     };
 
     // Biome-specific branching parameters.
@@ -92,6 +92,12 @@ pub fn tree_params_for_biome(
     let primary_length = trunk_height as f32 * primary_length_ratio;
     let secondary_length = primary_length * 0.55;
 
+    // Leaf cluster sizing: keep clusters small so individual trees stay
+    // distinct instead of merging into one blob. At 10cm/voxel a real leaf
+    // cluster is ~40-80cm diameter = 2-4 voxel radius. We add a small
+    // proportional component so larger trees get slightly bigger clusters.
+    let leaf_radius = (2.5 + primary_length * 0.08).clamp(2.0, 5.5);
+
     TreeParams {
         trunk_height,
         trunk_radius,
@@ -104,8 +110,8 @@ pub fn tree_params_for_biome(
         secondary_length,
         secondary_elev_min: 40.0,
         secondary_elev_max: 70.0,
-        branch_radius: (trunk_radius * 0.55).max(0.8),
-        leaf_radius: (primary_length * 0.35).max(2.5),
+        branch_radius: (trunk_radius * 0.5).max(1.0),
+        leaf_radius,
         canopy_material,
     }
 }
