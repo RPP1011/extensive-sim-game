@@ -458,6 +458,67 @@ impl AppState {
         }
     }
 
+    /// Submit chunks in a bulk radius around the camera. Invoked by the F key
+    /// as a manual "preload this area" button. Walks a cube of chunks from
+    /// `-radius..=radius` in x/y and a narrower vertical range around the
+    /// surface, submits each to the GPU terrain compute pipeline, and relies
+    /// on the pool's LRU eviction to handle overflow. Returns the number of
+    /// chunks actually submitted (not already loaded or in flight).
+    fn fill_chunks_around_camera(&mut self, radius: i32) -> usize {
+        let plan = match &self.sim.state().voxel_world.region_plan {
+            Some(p) => p.clone(),
+            None => return 0,
+        };
+        let seed = self.sim.state().rng_state;
+        let cam = self.camera.eye_position();
+        let cam_vx = cam[0];
+        let cam_vy = cam[2]; // engine z → sim y
+        let cam_vz = cam[1]; // engine y → sim z
+        let cs = CHUNK_SIZE as f32;
+        let center_cx = (cam_vx / cs).floor() as i32;
+        let center_cy = (cam_vy / cs).floor() as i32;
+        let center_cz = (cam_vz / cs).floor() as i32;
+        let _ = plan;
+
+        let mut submitted = 0usize;
+        // Spiral outward from camera so closer chunks come first (better LRU).
+        'outer: for dist in 0..=radius {
+            for dx in -dist..=dist {
+                for dy in -dist..=dist {
+                    for dz in -3..=3 { // vertical range around surface
+                        // Shell filter (only process cells at the current dist).
+                        if dx.abs() != dist && dy.abs() != dist { continue; }
+
+                        let cp = ChunkPos::new(center_cx + dx, center_cy + dy, center_cz + dz);
+                        if self.pending_chunk_requests.values().any(|p| *p == cp) { continue; }
+                        // Skip if already loaded in the pool (checked by the pipeline itself).
+
+                        match self.terrain_compute.submit_chunk(
+                            &self.ctx,
+                            [cp.x, cp.y, cp.z],
+                            seed as u32,
+                        ) {
+                            Ok(Some(req_id)) => {
+                                self.pending_chunk_requests.insert(req_id, cp);
+                                submitted += 1;
+                            }
+                            Ok(None) => {
+                                // Ring is completely full (all 256 slots InFlight).
+                                // Drain what we can and keep trying.
+                                self.drain_completed_gpu_chunks();
+                            }
+                            Err(e) => {
+                                eprintln!("[voxel] fill submit_chunk failed for {:?}: {}", cp, e);
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        submitted
+    }
+
     /// Poll the GPU terrain compute pipeline for completed dispatches.
     /// Phase 3: the chunk texture stays GPU-resident in the pool, and the
     /// renderer samples it directly via `loaded_chunk_views()` — no CPU
@@ -664,6 +725,14 @@ impl AppState {
             KeyCode::Minus | KeyCode::NumpadSubtract => {
                 self.ticks_per_frame = (self.ticks_per_frame / 2).max(1);
                 eprintln!("[voxel] speed: {} ticks/frame", self.ticks_per_frame);
+            }
+            KeyCode::KeyF => {
+                // Fill the GPU chunk pool with chunks in a wide radius around
+                // the camera. The pool has 256 slots; this submits up to that
+                // many dispatches in one burst (LRU-evicting older chunks as
+                // needed). Useful for pre-loading terrain before panning.
+                let submitted = self.fill_chunks_around_camera(10);
+                eprintln!("[voxel] Fill radius: submitted {} chunks", submitted);
             }
             KeyCode::Tab => {
                 // Settlement pos is already in voxel space.
