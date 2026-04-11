@@ -1242,6 +1242,12 @@ impl AppState {
         } else {
             String::new()
         };
+        // NOTE: set_title looks like wasted work — an X11/Wayland
+        // IPC write for purely cosmetic window title output — but
+        // removing it caused a ~20x regression in steady-state FPS
+        // (4 G → ~100 M). The compositor appears to throttle our
+        // process priority or frame delivery if we don't update
+        // the title periodically. Keep it.
         self.window.set_title(&format!(
             "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {}/{} megas | speed {}x{}",
             self.last_fps, status, cam[0], cam[1], cam[2],
