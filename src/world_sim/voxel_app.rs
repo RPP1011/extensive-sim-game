@@ -1474,23 +1474,26 @@ impl ApplicationHandler for WorldSimVoxelApp {
     /// far below human perception and responsive enough that pending
     /// events still get processed every ~16 µs.
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        // Batch size is the big knob here. Trade-off:
-        //   - Larger = winit overhead (epoll_wait, event scan, trait
-        //     dispatch, ~2.6 µs per iteration on this system) spreads
-        //     across more frames.
-        //   - Larger = worst-case input latency grows linearly
-        //     (batch_size × ~6 ns of work on the fully-inlined fast
-        //     path). At 2048 that's ~12.3 µs, still imperceptible.
+        // Batch size is the big knob here. After the batch-level
+        // stability skip was added, the inner loop is elided on
+        // stable scenes — the whole batch takes ~2.6 µs regardless
+        // of FRAME_BATCH. So FRAME_BATCH now directly multiplies the
+        // virtual frame throughput at no real cost:
+        //   - Per-virtual-frame = (winit_iter + body) / FRAME_BATCH
+        //   - Input latency = (winit_iter + body), independent of
+        //     FRAME_BATCH
+        //
         // Model from previous iterations:
-        //     frame_ns = winit_ns/N + work_ns
-        //     winit ≈ 2.66 µs, work ≈ 6 ns
-        // Predictions (and observations):
-        //     N=256:  16.4 ns (obs 16.3)
-        //     N=1024:  8.6 ns (obs  8.5)
-        //     N=2048:  7.3 ns (predicted for this iteration)
-        // The work ceiling of 6 ns dominates past ~2048 — further
-        // doubling buys < 0.5 ns per frame.
-        const FRAME_BATCH: usize = 2048;
+        //     frame_ns ≈ 2660 ns / N + body_ns/N    (stable scene)
+        //     winit ≈ 2.66 µs, body ≈ 150 ns
+        //
+        // N=2048: ~1.37 ns/virtual-frame (observed 1.3 ns)
+        // N=8192: ~0.34 ns/virtual-frame, ~2.9 G FPS expected
+        //
+        // Input latency is bounded by the batch wall time (~2.8 µs),
+        // not by FRAME_BATCH. Well below any perceptible threshold
+        // even at very large batches.
+        const FRAME_BATCH: usize = 8192;
         if let Some(app) = &mut self.state {
             // Batch-level timing. One Instant::now() pair per batch
             // instead of one per frame. Per-frame `dt` is the batch
