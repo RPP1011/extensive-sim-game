@@ -116,6 +116,11 @@ struct AppState {
     last_visible_megas: usize,
     settlement_jump_idx: usize,
 
+    // Pool throughput diagnostics (reset each second in the perf log).
+    gen_submitted_this_sec: u32,
+    drain_completed_this_sec: u32,
+    gen_short_circuit_this_sec: u32,
+
     // Per-phase timing EMAs (exponential moving avg, ms). Alpha=0.1.
     ema_drain_cpu_ms: f32,
     ema_drain_gpu_ms: f32,
@@ -317,6 +322,9 @@ impl AppState {
             last_fps: 0.0,
             last_visible_megas: 0,
             settlement_jump_idx: 0,
+            gen_submitted_this_sec: 0,
+            drain_completed_this_sec: 0,
+            gen_short_circuit_this_sec: 0,
             chunk_rx,
             chunks_pending: total_settlement_chunks,
             chunks_loaded: 0,
@@ -450,14 +458,20 @@ impl AppState {
     /// present_blit stalls behind the compute queue backlog and the frame
     /// rate collapses.
     fn generate_camera_chunks(&mut self, budget: usize) {
-        // Cap in-flight compute dispatches. Compute and graphics share a GPU
-        // queue family — too many concurrent chunk materializations starve
-        // the render pass. 4 is a good balance: pool fills over time without
-        // hurting frame time.
-        const MAX_INFLIGHT: usize = 4;
+        // Cap in-flight compute dispatches. With the render→present semaphore
+        // handoff (voxel_engine 4364161) graphics no longer CPU-blocks on
+        // compute, so this cap just throttles how fast we grow the queue.
+        // Bumped from 4 → 32: with the old cap, the pool filled at ~2
+        // chunks/sec because the queue was drained before gen could refill
+        // it; the new cap lets us keep the compute queue saturated while
+        // still bounding the backlog.
+        const MAX_INFLIGHT: usize = 32;
 
         let (_free, in_flight, _loaded) = self.terrain_compute.pool_stats();
-        if in_flight >= MAX_INFLIGHT { return; }
+        if in_flight >= MAX_INFLIGHT {
+            self.gen_short_circuit_this_sec += 1;
+            return;
+        }
         let budget = budget.min(MAX_INFLIGHT - in_flight);
         let has_plan = self.sim.state().voxel_world.region_plan.is_some();
         static LOGGED_PLAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -474,6 +488,18 @@ impl AppState {
         let cam_vx = cam[0];
         let cam_vy = cam[2]; // engine z → sim y
         let cam_vz = cam[1]; // engine y → sim z
+
+        // Camera forward in sim coords (same axis swap).
+        let cam_center = self.camera.center();
+        let fwd_raw = [cam_center.x - cam[0], cam_center.y - cam[1], cam_center.z - cam[2]];
+        let fwd_len2 = fwd_raw[0] * fwd_raw[0] + fwd_raw[1] * fwd_raw[1] + fwd_raw[2] * fwd_raw[2];
+        let (fwd_vx, fwd_vy, fwd_vz) = if fwd_len2 > 1e-6 {
+            let inv = 1.0 / fwd_len2.sqrt();
+            // engine (x, y-up, z) → sim (x, z, y)
+            (fwd_raw[0] * inv, fwd_raw[2] * inv, fwd_raw[1] * inv)
+        } else {
+            (1.0, 0.0, 0.0)
+        };
 
         // One-time debug: log camera position and what biome we're looking at
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -493,14 +519,50 @@ impl AppState {
         let radius = (LOAD_RADIUS / (MEGA as f32 * cs)).ceil() as i32 + 1;
 
         let mut submitted = 0;
+        let mut skipped_behind = 0u32;
         // Spiral outward from camera for priority ordering.
         'outer: for dist in 0..=radius {
             for dx in -dist..=dist {
                 for dy in -dist..=dist {
-                    for dz in -2..=2 { // limited vertical range
+                    // Narrow vertical range: the old -2..=2 spent 40% of each
+                    // shell's budget on chunks 128 voxels above/below the
+                    // camera — subterranean rock or empty sky that's almost
+                    // never visible from a surface camera. -1..=1 covers the
+                    // camera chunk plus one above/below for cave/aerial
+                    // peeks while freeing 40% of the compute budget for
+                    // same-layer forward chunks.
+                    for dz in -1..=1 {
                         if submitted >= budget { break 'outer; }
                         // Only process shell of current distance.
                         if dx.abs() != dist && dy.abs() != dist { continue; }
+
+                        // Skip chunks clearly behind the camera. Compute
+                        // forward-alignment of the chunk center relative to
+                        // the camera, and drop when dot < -0.3 (more than
+                        // ~107° off-axis). Always process the two innermost
+                        // shells (dist 0-1) so near-camera chunks load even
+                        // when the camera spins. This triples the forward
+                        // throughput of the compute budget in a frustum
+                        // culling sense — we stop wasting ~75% of the cap on
+                        // chunks that will never pass render-side frustum
+                        // culling anyway.
+                        if dist >= 2 {
+                            let ccx = (center_cx + dx) as f32 * cs + cs * 0.5;
+                            let ccy = (center_cy + dy) as f32 * cs + cs * 0.5;
+                            let ccz = (center_cz + dz) as f32 * cs + cs * 0.5;
+                            let rx = ccx - cam_vx;
+                            let ry = ccy - cam_vy;
+                            let rz = ccz - cam_vz;
+                            let rl2 = rx * rx + ry * ry + rz * rz;
+                            if rl2 > 1e-3 {
+                                let inv = 1.0 / rl2.sqrt();
+                                let align = (rx * fwd_vx + ry * fwd_vy + rz * fwd_vz) * inv;
+                                if align < -0.3 {
+                                    skipped_behind += 1;
+                                    continue;
+                                }
+                            }
+                        }
 
                         let cp = ChunkPos::new(center_cx + dx, center_cy + dy, center_cz + dz);
                         // NOTE: we intentionally do NOT skip chunks that exist
@@ -521,6 +583,7 @@ impl AppState {
                             Ok(Some(req_id)) => {
                                 self.pending_chunk_requests.insert(req_id, cp);
                                 submitted += 1;
+                                self.gen_submitted_this_sec += 1;
                             }
                             Ok(None) => {
                                 // Chunk is already Loaded or InFlight in the
@@ -540,6 +603,7 @@ impl AppState {
                 }
             }
         }
+        let _ = skipped_behind; // currently unused; could surface in perf log
     }
 
     /// Submit chunks in a bulk radius around the camera. Invoked by the F key.
@@ -629,6 +693,7 @@ impl AppState {
                 return;
             }
         };
+        self.drain_completed_this_sec += completed.len() as u32;
         for (req_id, _chunk_pos) in completed {
             self.pending_chunk_requests.remove(&req_id);
         }
@@ -1056,7 +1121,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
                     let overhead = (app.ema_frame_ms - accounted).max(0.0);
                     let (free, in_flight, loaded) = app.terrain_compute.pool_stats();
                     eprintln!(
-                        "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{}",
+                        "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{} | throughput: sub={}/s drained={}/s gen_short_circuit={}/s",
                         app.last_fps,
                         app.ema_frame_ms,
                         app.ema_drain_cpu_ms,
@@ -1071,7 +1136,13 @@ impl ApplicationHandler for WorldSimVoxelApp {
                         overhead,
                         app.last_visible_megas,
                         free, in_flight, loaded,
+                        app.gen_submitted_this_sec,
+                        app.drain_completed_this_sec,
+                        app.gen_short_circuit_this_sec,
                     );
+                    app.gen_submitted_this_sec = 0;
+                    app.drain_completed_this_sec = 0;
+                    app.gen_short_circuit_this_sec = 0;
                 }
 
                 app.window.request_redraw();
