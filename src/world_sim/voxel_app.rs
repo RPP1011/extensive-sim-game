@@ -1071,32 +1071,22 @@ impl AppState {
         Ok((cull_ms, wait_ms, raycast_ms, present_ms))
     }
 
-    /// One complete frame: drain → gen → update_cam → tick_sim → render
-    /// plus the EMA and per-second log. Formerly inlined in the
-    /// `RedrawRequested` winit handler; pulled out so it can be driven
-    /// directly from `about_to_wait`, bypassing winit's redraw queue
-    /// round-trip. At 195k FPS each frame was making an extra trip
-    /// through the window event loop via `request_redraw()` →
-    /// `RedrawRequested`, which showed up as per-frame overhead we
-    /// couldn't see in any perf bucket.
-    fn run_frame(&mut self) {
-        let t_frame_start = Instant::now();
-        let dt = (t_frame_start - self.last_frame).as_secs_f32().min(0.1);
-        self.last_frame = t_frame_start;
+    /// One frame's worth of game work (drain → gen → update_cam → tick_sim
+    /// → render). `dt` is pre-computed by the batch driver in
+    /// `about_to_wait`. Per-frame timing, EMA updates, frame-count and
+    /// fps logging all live in the batch driver too, so on the fast
+    /// path this function makes zero `Instant::now()` calls.
+    ///
+    /// Set `VOXEL_PERF_DETAILED=1` to re-enable the per-phase timers
+    /// for debugging a specific bucket — that path is untouched by the
+    /// batching change.
+    fn run_frame(&mut self, dt: f32) {
+        if self.detailed_perf {
+            // Detailed debug path: per-phase timers. Pays ~14 clock
+            // reads per frame, only used when investigating a specific
+            // bucket.
+            let t_frame_start = Instant::now();
 
-        // At 234 k+ FPS (4.3 µs/frame), the 14 Instant::now() calls
-        // used for per-bucket timing were costing ~2 µs of the frame
-        // (each clock_gettime is ~100-200 ns). Sub-phase buckets all
-        // read 0.00 ms on the steady-state fast path anyway, so we
-        // skip them by default and just measure the whole frame.
-        // Any hidden cost surfaces as `frame_ms` > 0 in the `other`
-        // column, which remains the debugging signal the perf log
-        // was designed for. Set VOXEL_PERF_DETAILED=1 to re-enable
-        // the per-phase timers when debugging a specific bucket.
-        let detailed = self.detailed_perf;
-
-        let (drain_cpu_ms, drain_gpu_ms, gen_ms, update_cam_ms, tick_sim_ms, render_ms,
-             cull_ms, wait_ms, raycast_ms, present_ms) = if detailed {
             let t_drain_cpu = Instant::now();
             self.drain_ready_chunks(64);
             let drain_cpu_ms = t_drain_cpu.elapsed().as_secs_f32() * 1000.0;
@@ -1126,32 +1116,12 @@ impl AppState {
                 }
             };
             let render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
-            (drain_cpu_ms, drain_gpu_ms, gen_ms, update_cam_ms, tick_sim_ms, render_ms,
-             cull_ms, wait_ms, raycast_ms, present_ms)
-        } else {
-            self.drain_ready_chunks(64);
-            self.drain_completed_gpu_chunks();
-            self.generate_camera_chunks(8);
-            self.update_camera(dt);
-            self.tick_sim(dt);
-            match self.render() {
-                Ok(_) => {}
-                Err(e) => eprintln!("[voxel] render error: {}", e),
-            }
-            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        };
 
-        let frame_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
+            let frame_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
 
-        let a = 0.1;
-        let lerp = |old: f32, new: f32| old * (1.0 - a) + new * a;
-        self.ema_frame_ms = lerp(self.ema_frame_ms, frame_ms);
-        if detailed {
-            // Only update the per-bucket EMAs when we actually have
-            // per-bucket data. On the fast path all 10 of these would
-            // be lerp(old, 0.0) = old * 0.9 — 11 scattered float RMW
-            // cycles per frame for no signal. At 360 k FPS that was
-            // ~150 ns/frame of measurement overhead.
+            let a = 0.1;
+            let lerp = |old: f32, new: f32| old * (1.0 - a) + new * a;
+            self.ema_frame_ms = lerp(self.ema_frame_ms, frame_ms);
             self.ema_drain_cpu_ms = lerp(self.ema_drain_cpu_ms, drain_cpu_ms);
             self.ema_drain_gpu_ms = lerp(self.ema_drain_gpu_ms, drain_gpu_ms);
             self.ema_gen_ms = lerp(self.ema_gen_ms, gen_ms);
@@ -1162,14 +1132,39 @@ impl AppState {
             self.ema_wait_ms = lerp(self.ema_wait_ms, wait_ms);
             self.ema_raycast_ms = lerp(self.ema_raycast_ms, raycast_ms);
             self.ema_present_ms = lerp(self.ema_present_ms, present_ms);
+        } else {
+            // Fast path: zero clock reads. Work only.
+            self.drain_ready_chunks(64);
+            self.drain_completed_gpu_chunks();
+            self.generate_camera_chunks(8);
+            self.update_camera(dt);
+            self.tick_sim(dt);
+            if let Err(e) = self.render() {
+                eprintln!("[voxel] render error: {}", e);
+            }
+        }
+    }
+
+    /// Called once per `about_to_wait` visit (i.e. once per batch of
+    /// FRAME_BATCH run_frame() calls). Updates frame_count, does the
+    /// 1 Hz perf log, and updates ema_frame_ms from the batch-level
+    /// measurement. Batch-level timing is applied to every frame in
+    /// the batch as an average, which is exactly what the EMA wants.
+    fn record_batch_stats(&mut self, batch_start: Instant, batch_ms: f32, frames_in_batch: usize) {
+        // Per-frame timing averaged over the batch.
+        let per_frame_ms = batch_ms / frames_in_batch as f32;
+        // In the fast path we only update ema_frame_ms; the detailed
+        // path does per-phase EMAs inside run_frame.
+        if !self.detailed_perf {
+            self.ema_frame_ms = self.ema_frame_ms * 0.9 + per_frame_ms * 0.1;
         }
 
-        self.frame_count += 1;
-        let fps_elapsed = t_frame_start.duration_since(self.fps_timer).as_secs_f32();
+        self.frame_count += frames_in_batch as u32;
+        let fps_elapsed = batch_start.duration_since(self.fps_timer).as_secs_f32();
         if fps_elapsed >= 1.0 {
             self.last_fps = self.frame_count as f32 / fps_elapsed;
             self.frame_count = 0;
-            self.fps_timer = t_frame_start;
+            self.fps_timer = batch_start;
             let cam = self.camera.eye_position();
             let status = if self.paused { "PAUSED" } else { "RUNNING" };
             let loading = if self.chunks_loaded < self.chunks_pending {
@@ -1457,9 +1452,23 @@ impl ApplicationHandler for WorldSimVoxelApp {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         const FRAME_BATCH: usize = 8;
         if let Some(app) = &mut self.state {
+            // Batch-level timing. One Instant::now() pair per 8 frames
+            // instead of one per frame — at ~25 ns each that was 12 %
+            // of the 0.4 µs frame. Per-frame `dt` is the batch average;
+            // since the sim accumulator just sums incoming dts, giving
+            // each frame `batch_dt / FRAME_BATCH` advances the sim by
+            // the same total wall time as the old per-frame measurement.
+            let batch_start = Instant::now();
+            let dt_total = (batch_start - app.last_frame).as_secs_f32().min(0.1);
+            app.last_frame = batch_start;
+            let per_frame_dt = dt_total / FRAME_BATCH as f32;
+
             for _ in 0..FRAME_BATCH {
-                app.run_frame();
+                app.run_frame(per_frame_dt);
             }
+
+            let batch_ms = batch_start.elapsed().as_secs_f32() * 1000.0;
+            app.record_batch_stats(batch_start, batch_ms, FRAME_BATCH);
         }
     }
 }
