@@ -1623,29 +1623,39 @@ pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
     // Drive the event loop via `pump_app_events` instead of
     // `run_app`. This lets us run the frame work in our own tight
     // outer loop, bypassing winit's per-iteration `about_to_wait`
-    // callback machinery — the single biggest remaining cost at
-    // 3 G+ FPS (~2.5 µs per winit iteration vs ~150 ns of actual
-    // per-batch work). We still pump events every iteration with
-    // a zero timeout so WindowEvent handlers (keys/mouse/close)
-    // still fire promptly.
+    // callback machinery.
+    //
+    // Throttle winit event pumping: polling the OS event queue
+    // (epoll_wait + event dispatch) is still ~2.4 µs per call, which
+    // at 3 G+ FPS is the dominant remaining cost. Pump every Nth
+    // batch instead of every batch. Input latency is bounded by
+    // N × batch_wall_time: at N=8 and ~2.6 µs/batch, that's ~21 µs
+    // worst case — still four orders of magnitude below any
+    // perceptible threshold and well inside a single 60 Hz frame
+    // (16,700 µs).
+    const PUMP_EVERY: u32 = 8;
+    let mut pump_counter: u32 = 0;
+    let mut should_exit = false;
     loop {
-        // Poll pending events (non-blocking). This drives the usual
-        // WindowEvent / resumed / window_event handlers on `app`.
-        let status = event_loop.pump_app_events(Some(std::time::Duration::ZERO), &mut app);
-        match status {
-            PumpStatus::Exit(_) => break,
-            PumpStatus::Continue => {}
+        if pump_counter == 0 {
+            // Poll pending events (non-blocking). This drives the usual
+            // resumed / window_event handlers on `app`.
+            let status = event_loop.pump_app_events(Some(std::time::Duration::ZERO), &mut app);
+            if let PumpStatus::Exit(_) = status {
+                should_exit = true;
+            }
         }
+        if should_exit {
+            break;
+        }
+        pump_counter = (pump_counter + 1) % PUMP_EVERY;
 
-        // Run a batch of frames directly. Formerly this ran inside
-        // `about_to_wait`, which winit invokes once per event loop
-        // iteration — but each winit iteration had ~2.5 µs of
-        // callback overhead on top of our code. Doing it inline
-        // here means the outer loop's only winit cost is
-        // `pump_app_events` itself, which is a non-blocking poll
-        // of the OS event queue (much cheaper when empty).
         if let Some(state) = app.state.as_mut() {
             state.run_batch();
+        } else {
+            // No state yet (still waiting for `resumed`). Force a
+            // pump next iteration so we don't spin.
+            pump_counter = 0;
         }
     }
     Ok(())
