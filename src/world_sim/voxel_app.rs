@@ -520,8 +520,27 @@ impl AppState {
         // Radius in chunks to check around camera.
         let radius = (LOAD_RADIUS / (MEGA as f32 * cs)).ceil() as i32 + 1;
 
+        // Build the render frustum planes once so the spiral can reject
+        // candidates that won't pass the render-side frustum test anyway.
+        // Previously we only dropped chunks more than ~107° off-axis via a
+        // forward-alignment dot product, which was way wider than the
+        // render frustum (~90° × 45°). The spiral was happily submitting
+        // ~75% of all chunks within LOAD_RADIUS, most of which would never
+        // be visible. Once the pool filled, LRU eviction kept churning
+        // these off-screen chunks — compute stayed 100% busy, hogging the
+        // GPU SMs and starving the render queue.
+        //
+        // With real frustum culling here + in the render path, a
+        // stationary camera reaches a steady state where all in-frustum
+        // chunks are loaded, the spiral finds nothing new to submit,
+        // compute goes idle, and graphics gets the full GPU.
+        let aspect = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
+        let vp = frustum_vp_matrix(&self.camera, aspect);
+        let frustum_planes = extract_frustum_planes(&vp);
+
         let mut submitted = 0;
         let mut skipped_behind = 0u32;
+        let _ = fwd_vx; let _ = fwd_vy; let _ = fwd_vz; // superseded by frustum
         // Spiral outward from camera for priority ordering.
         'outer: for dist in 0..=radius {
             for dx in -dist..=dist {
@@ -538,31 +557,36 @@ impl AppState {
                         // Only process shell of current distance.
                         if dx.abs() != dist && dy.abs() != dist { continue; }
 
-                        // Skip chunks clearly behind the camera. Compute
-                        // forward-alignment of the chunk center relative to
-                        // the camera, and drop when dot < -0.3 (more than
-                        // ~107° off-axis). Always process the two innermost
-                        // shells (dist 0-1) so near-camera chunks load even
-                        // when the camera spins. This triples the forward
-                        // throughput of the compute budget in a frustum
-                        // culling sense — we stop wasting ~75% of the cap on
-                        // chunks that will never pass render-side frustum
-                        // culling anyway.
-                        if dist >= 2 {
-                            let ccx = (center_cx + dx) as f32 * cs + cs * 0.5;
-                            let ccy = (center_cy + dy) as f32 * cs + cs * 0.5;
-                            let ccz = (center_cz + dz) as f32 * cs + cs * 0.5;
-                            let rx = ccx - cam_vx;
-                            let ry = ccy - cam_vy;
-                            let rz = ccz - cam_vz;
-                            let rl2 = rx * rx + ry * ry + rz * rz;
-                            if rl2 > 1e-3 {
-                                let inv = 1.0 / rl2.sqrt();
-                                let align = (rx * fwd_vx + ry * fwd_vy + rz * fwd_vz) * inv;
-                                if align < -0.3 {
-                                    skipped_behind += 1;
-                                    continue;
-                                }
+                        // Frustum cull ALL chunks — including shells 0-1.
+                        // Previously shells 0-1 were always submitted as
+                        // insurance for camera rotation, but on a
+                        // stationary camera those non-visible shell-0/1
+                        // chunks were getting LRU-churned every frame:
+                        // submitted → evicted → re-submitted → evicted →
+                        // ... keeping the compute queue at 100% even
+                        // though the pool already held every in-frustum
+                        // chunk the render needed. The camera chunk
+                        // itself (dist=0) always passes frustum because
+                        // the camera is inside its AABB.
+                        //
+                        // Sim chunk (cx, cy, cz) → engine-space AABB.
+                        // Engine coords: sim.x → eng.x, sim.z → eng.y (up),
+                        // sim.y → eng.z. So a chunk spanning sim
+                        // (cx..cx+1, cy..cy+1, cz..cz+1) becomes engine
+                        // (cx..cx+1, cz..cz+1, cy..cy+1).
+                        {
+                            let scx = center_cx + dx;
+                            let scy = center_cy + dy;
+                            let scz = center_cz + dz;
+                            let min = [
+                                scx as f32 * cs,
+                                scz as f32 * cs,
+                                scy as f32 * cs,
+                            ];
+                            let max = [min[0] + cs, min[1] + cs, min[2] + cs];
+                            if !aabb_vs_frustum(&frustum_planes, &min, &max) {
+                                skipped_behind += 1;
+                                continue;
                             }
                         }
 
@@ -577,10 +601,11 @@ impl AppState {
                         // chunks already Loaded or InFlight in the pool.
                         if self.pending_chunk_requests.values().any(|p| *p == cp) { continue; }
 
-                        match self.terrain_compute.submit_chunk(
+                        match self.terrain_compute.submit_chunk_with_frame(
                             &self.ctx,
                             [cp.x, cp.y, cp.z],
                             seed as u32,
+                            self.frame_count as u64,
                         ) {
                             Ok(Some(req_id)) => {
                                 self.pending_chunk_requests.insert(req_id, cp);
@@ -688,7 +713,10 @@ impl AppState {
     /// (CPU-generated in a background thread) are handled by
     /// `drain_ready_chunks` and still go through the CPU path.
     fn drain_completed_gpu_chunks(&mut self) {
-        let completed = match self.terrain_compute.try_take_completed(&self.ctx) {
+        let completed = match self
+            .terrain_compute
+            .try_take_completed_with_frame(&self.ctx, self.frame_count as u64)
+        {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("[voxel] try_take_completed failed: {}", e);
