@@ -1669,20 +1669,21 @@ pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
     // event rate is low enough that the queue never backs up.
     const PUMP_EVERY: u32 = 8;
     let mut pump_counter: u32 = 0;
-    let mut should_exit = false;
     loop {
         if pump_counter == 0 {
             // Poll pending events (non-blocking). This drives the usual
-            // resumed / window_event handlers on `app`.
-            let status = event_loop.pump_app_events(Some(std::time::Duration::ZERO), &mut app);
-            if let PumpStatus::Exit(_) = status {
-                should_exit = true;
+            // resumed / window_event handlers on `app`. Breaks out of
+            // the outer loop directly on Exit — no separate should_exit
+            // bool needed.
+            if let PumpStatus::Exit(_) =
+                event_loop.pump_app_events(Some(std::time::Duration::ZERO), &mut app)
+            {
+                break;
             }
         }
-        if should_exit {
-            break;
-        }
-        pump_counter = (pump_counter + 1) % PUMP_EVERY;
+        // PUMP_EVERY is a power of 2, so `& 7` is equivalent to `% 8`
+        // and the compiler should emit a single `and` instruction.
+        pump_counter = (pump_counter + 1) & (PUMP_EVERY - 1);
 
         if let Some(state) = app.state.as_mut() {
             state.run_batch();
