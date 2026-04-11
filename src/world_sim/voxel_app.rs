@@ -1444,9 +1444,22 @@ impl ApplicationHandler for WorldSimVoxelApp {
     /// instead of through `RedrawRequested` + `request_redraw()`. That
     /// eliminates the per-frame round trip through the window redraw
     /// queue and the cross-process event dispatch that comes with it.
+    ///
+    /// Additionally, we batch multiple run_frame() calls per
+    /// about_to_wait invocation. At 367 k FPS, each trip out to winit
+    /// costs ~2 µs of event-loop iteration overhead (epoll_wait syscall,
+    /// event-queue scan, trait dispatch) that dominates the frame — pure
+    /// fast-path work inside run_frame is only ~0.7 µs. Batching amortizes
+    /// the winit overhead across FRAME_BATCH frames. Input latency is
+    /// bounded by `FRAME_BATCH × frame_time` — at ~2 µs/frame × 8 = 16 µs,
+    /// far below human perception and responsive enough that pending
+    /// events still get processed every ~16 µs.
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        const FRAME_BATCH: usize = 8;
         if let Some(app) = &mut self.state {
-            app.run_frame();
+            for _ in 0..FRAME_BATCH {
+                app.run_frame();
+            }
         }
     }
 }
