@@ -471,10 +471,16 @@ impl VoxelWorld {
     /// Get the surface height at (x, y) — highest solid voxel z.
     /// Scans downward from max loaded height. Returns sea_level if no solid found.
     pub fn surface_height(&self, vx: i32, vy: i32) -> i32 {
-        // Scan from z=63 down to z=0 (4 chunks of height)
-        for vz in (0..64).rev() {
+        // Scan from MAX_SURFACE_Z down — previously only scanned z=0..64
+        // which was correct for the old CHUNK_SIZE=16/MAX_SURFACE_Z=400
+        // world but returns SEA_LEVEL every time after the 10cm/voxel
+        // rescaling (MAX_SURFACE_Z=2000, CHUNK_SIZE=64). Most callers should
+        // prefer `terrain::surface_height_at(plan, ...)` which is analytical
+        // and doesn't require loaded voxel data.
+        let max_z = crate::world_sim::constants::MAX_SURFACE_Z;
+        for vz in (0..max_z).rev() {
             if self.get_voxel(vx, vy, vz).material.is_solid() {
-                return vz + 1; // surface is one above the solid
+                return vz + 1;
             }
         }
         self.sea_level

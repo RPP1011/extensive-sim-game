@@ -237,15 +237,26 @@ impl AppState {
         // Camera standing on the surface at the first settlement, looking
         // outward. First-person height (~1.8m = 18 voxels at 10cm/voxel)
         // with a slight downward tilt so the horizon is visible.
-        // Settlement pos is already in voxel space (not world units).
-        let (cam_pos, cam_target) = if let Some(s) = sim.state().settlements.first() {
-            let vx = s.pos.0 as i32;
-            let vy = s.pos.1 as i32;
-            let surface_z = sim.state().voxel_world.surface_height(vx, vy);
+        //
+        // NOTE: sim.state().voxel_world.surface_height() only scans z=0..63,
+        // which is stale after the MAX_SURFACE_Z=2000 rescaling — for most
+        // land chunks it returns SEA_LEVEL as a fallback, placing the camera
+        // inside the ground. Use the plan's surface_height_at instead, which
+        // computes the actual terrain surface from noise + biome without
+        // requiring voxel data to be loaded.
+        let plan = sim.state().voxel_world.region_plan.clone();
+        let world_seed = sim.state().rng_state;
+        let (cam_pos, cam_target) = if let (Some(s), Some(plan_ref)) =
+            (sim.state().settlements.first(), plan.as_ref())
+        {
+            let vx = s.pos.0 as f32;
+            let vy = s.pos.1 as f32;
+            let surface_z = crate::world_sim::terrain::surface_height_at(vx, vy, plan_ref, world_seed);
             // Engine coords: sim x → engine x, sim z → engine y (up), sim y → engine z
-            let eye = glam::Vec3::new(vx as f32, (surface_z + 18) as f32, vy as f32);
+            let eye = glam::Vec3::new(vx, (surface_z + 18) as f32, vy);
             let target = eye + glam::Vec3::new(0.0, -3.0, 30.0); // look forward + slight tilt down
-            eprintln!("[voxel] Camera at settlement '{}' surface ({}, {}, {})", s.name, vx, vy, surface_z + 18);
+            eprintln!("[voxel] Camera at settlement '{}' surface vx={} vy={} surface_z={} eye_y={}",
+                s.name, vx, vy, surface_z, surface_z + 18);
             (eye, target)
         } else {
             (glam::Vec3::new(0.0, 500.0, 0.0), glam::Vec3::new(0.0, 497.0, 30.0))
@@ -750,21 +761,24 @@ impl AppState {
             }
             KeyCode::Tab => {
                 // Teleport to next settlement at first-person surface height.
-                let settlements = &self.sim.state().settlements;
+                // Uses plan-based surface_height_at (voxel_world.surface_height
+                // is stale — only scans z=0..63 which is below the new terrain).
+                let settlements = self.sim.state().settlements.clone();
                 if settlements.is_empty() { return; }
+                let plan = match self.sim.state().voxel_world.region_plan.clone() {
+                    Some(p) => p,
+                    None => return,
+                };
+                let seed = self.sim.state().rng_state;
                 self.settlement_jump_idx = self.settlement_jump_idx % settlements.len();
                 let s = &settlements[self.settlement_jump_idx];
-                let vx = s.pos.0 as i32;
-                let vy = s.pos.1 as i32;
-                let surface_z = self.sim.state().voxel_world.surface_height(vx, vy);
+                let vx = s.pos.0;
+                let vy = s.pos.1;
+                let surface_z = crate::world_sim::terrain::surface_height_at(vx, vy, &plan, seed);
                 // First-person standing position: 18 voxels (~1.8m) above surface.
-                let cam_pos = glam::Vec3::new(
-                    vx as f32,
-                    (surface_z + 18) as f32,
-                    vy as f32,
-                );
+                let cam_pos = glam::Vec3::new(vx, (surface_z + 18) as f32, vy);
                 self.camera.set_position(cam_pos);
-                eprintln!("[voxel] Jumped to '{}' ({:.0},{:.0}) surface={}", s.name, s.pos.0, s.pos.1, surface_z);
+                eprintln!("[voxel] Jumped to '{}' ({:.0},{:.0}) surface_z={}", s.name, vx, vy, surface_z);
                 self.settlement_jump_idx += 1;
             }
             _ => {}
