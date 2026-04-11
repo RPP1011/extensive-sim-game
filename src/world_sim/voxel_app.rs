@@ -134,6 +134,13 @@ struct AppState {
     /// allocating two ~256-entry Vecs every single frame).
     visible_buf: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3], f32)>,
     pool_views_buf: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3])>,
+    /// Cull-cache key: `(camera eye+center, terrain_compute.pool_generation())`
+    /// at the time `pool_views_buf` was last rebuilt. When both components
+    /// match the current frame, `pool_views_buf` is still correct and the
+    /// whole cull loop (frustum test + sort + mark_touched copy) is
+    /// skipped.
+    last_cull_cam_key: Option<[f32; 6]>,
+    last_cull_pool_gen: u64,
 
     // Per-phase timing EMAs (exponential moving avg, ms). Alpha=0.1.
     ema_drain_cpu_ms: f32,
@@ -358,6 +365,8 @@ impl AppState {
             last_gen_converged_cam: None,
             visible_buf: Vec::with_capacity(320),
             pool_views_buf: Vec::with_capacity(320),
+            last_cull_cam_key: None,
+            last_cull_pool_gen: 0,
             ema_drain_cpu_ms: 0.0,
             ema_drain_gpu_ms: 0.0,
             ema_gen_ms: 0.0,
@@ -872,6 +881,44 @@ impl AppState {
     /// `(cull_ms, wait_ms, raycast_ms, present_ms)`.
     fn render(&mut self) -> Result<(f32, f32, f32, f32)> {
         let t_cull = Instant::now();
+
+        // Stable-scene ultra-fast path: if the camera is unchanged AND the
+        // chunk pool hasn't mutated since the last cull, `pool_views_buf`
+        // still holds the correct visibility set in the correct order.
+        // Skip the entire cull pass (frustum test + distance test + sort
+        // + mark_touched fan-out) and go straight to the renderer's own
+        // cache_matches check, which will short-circuit on the same
+        // stability signal and make render() collapse to two comparisons
+        // + two Instant::now calls.
+        //
+        // `mark_touched_slot` is safe to skip because the LRU is only
+        // pressured by submissions (`submit_chunk_with_frame`), and any
+        // submission bumps `pool_generation`, which invalidates the
+        // cache and forces a full cull before eviction decisions are
+        // made.
+        let cur_cam_pos = self.camera.eye_position();
+        let cur_cam_center = self.camera.center();
+        let cur_cam_key = [
+            cur_cam_pos[0], cur_cam_pos[1], cur_cam_pos[2],
+            cur_cam_center.x, cur_cam_center.y, cur_cam_center.z,
+        ];
+        let cur_pool_gen = self.terrain_compute.pool_generation();
+        let cull_cache_hit = self
+            .last_cull_cam_key
+            .map(|k| k == cur_cam_key)
+            .unwrap_or(false)
+            && self.last_cull_pool_gen == cur_pool_gen
+            && !self.pool_views_buf.is_empty();
+        if cull_cache_hit {
+            let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
+            if self.renderer.cache_matches(&self.camera, &self.pool_views_buf) {
+                return Ok((cull_ms, 0.0, 0.0, 0.0));
+            }
+            // Cull cache hit but renderer cache miss is unexpected (same
+            // inputs should hash the same), but fall through to the full
+            // render path just in case.
+        }
+
         let dims = MEGA_VOXELS as f32;
         let aspect = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
         let vp = frustum_vp_matrix(&self.camera, aspect);
@@ -915,6 +962,12 @@ impl AppState {
         self.pool_views_buf
             .extend(self.visible_buf.iter().map(|(v, c, p, d, _)| (*v, *c, *p, *d)));
         self.last_visible_megas = self.pool_views_buf.len();
+
+        // Stamp the cull cache so subsequent frames with the same camera
+        // + pool generation can skip the whole visibility pass.
+        self.last_cull_cam_key = Some(cur_cam_key);
+        self.last_cull_pool_gen = cur_pool_gen;
+
         let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
 
         if self.pool_views_buf.is_empty() {
