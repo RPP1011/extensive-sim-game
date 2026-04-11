@@ -498,6 +498,7 @@ impl AppState {
 
     /// Drain ready chunks from the background generation thread.
     /// Processes up to `budget` chunks per call to avoid stalling the frame.
+    #[inline]
     fn drain_ready_chunks(&mut self, budget: usize) {
         let Some(rx) = self.chunk_rx.as_ref() else { return; };
         let mut count = 0;
@@ -837,6 +838,7 @@ impl AppState {
     /// readback or `VoxelWorld` insert happens here. Settlement chunks
     /// (CPU-generated in a background thread) are handled by
     /// `drain_ready_chunks` and still go through the CPU path.
+    #[inline]
     fn drain_completed_gpu_chunks(&mut self) {
         let completed = match self
             .terrain_compute
@@ -1303,6 +1305,7 @@ impl AppState {
         self.record_batch_stats(batch_start, batch_ms, FRAME_BATCH);
     }
 
+    #[inline]
     fn tick_sim(&mut self, dt: f32) {
         if self.paused { return; }
 
