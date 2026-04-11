@@ -116,6 +116,18 @@ struct AppState {
     last_visible_megas: usize,
     settlement_jump_idx: usize,
 
+    // Per-phase timing EMAs (exponential moving avg, ms). Alpha=0.1.
+    ema_drain_cpu_ms: f32,
+    ema_drain_gpu_ms: f32,
+    ema_gen_ms: f32,
+    ema_update_cam_ms: f32,
+    ema_tick_sim_ms: f32,
+    ema_render_ms: f32,
+    ema_cull_ms: f32,       // sub-phase of render: frustum cull + sort
+    ema_raycast_ms: f32,    // sub-phase of render: render_frame_pool (gbuffer+shadow+light)
+    ema_present_ms: f32,    // sub-phase of render: present_blit
+    ema_frame_ms: f32,
+
     // Background chunk generation
     chunk_rx: mpsc::Receiver<(ChunkPos, Chunk)>,
     chunks_pending: usize,
@@ -234,30 +246,53 @@ impl AppState {
             });
         }
 
-        // Camera standing on the surface at the first settlement, looking
-        // outward. First-person height (~1.8m = 18 voxels at 10cm/voxel)
-        // with a slight downward tilt so the horizon is visible.
+        // Camera placement: pick a scenic settlement (prefer Forest/Jungle for
+        // visual interest — lots of trees and varied terrain). Fall back to
+        // Plains, then Mountains, then whatever is first.
         //
-        // NOTE: sim.state().voxel_world.surface_height() only scans z=0..63,
-        // which is stale after the MAX_SURFACE_Z=2000 rescaling — for most
-        // land chunks it returns SEA_LEVEL as a fallback, placing the camera
-        // inside the ground. Use the plan's surface_height_at instead, which
-        // computes the actual terrain surface from noise + biome without
-        // requiring voxel data to be loaded.
+        // First-person height (~1.8m = 18 voxels at 10cm/voxel) with a slight
+        // downward tilt so the horizon is visible.
+        //
+        // Plan-based surface_height_at (analytical, no voxel data required).
         let plan = sim.state().voxel_world.region_plan.clone();
         let world_seed = sim.state().rng_state;
-        let (cam_pos, cam_target) = if let (Some(s), Some(plan_ref)) =
-            (sim.state().settlements.first(), plan.as_ref())
+        let (cam_pos, cam_target) = if let (Some(plan_ref), settlements) =
+            (plan.as_ref(), &sim.state().settlements)
         {
-            let vx = s.pos.0 as f32;
-            let vy = s.pos.1 as f32;
-            let surface_z = crate::world_sim::terrain::surface_height_at(vx, vy, plan_ref, world_seed);
-            // Engine coords: sim x → engine x, sim z → engine y (up), sim y → engine z
-            let eye = glam::Vec3::new(vx, (surface_z + 18) as f32, vy);
-            let target = eye + glam::Vec3::new(0.0, -3.0, 30.0); // look forward + slight tilt down
-            eprintln!("[voxel] Camera at settlement '{}' surface vx={} vy={} surface_z={} eye_y={}",
-                s.name, vx, vy, surface_z, surface_z + 18);
-            (eye, target)
+            use crate::world_sim::state::Terrain;
+            // Score settlements by biome interestingness. Higher = better.
+            let score_biome = |t: Terrain| -> i32 {
+                match t {
+                    Terrain::Forest => 100,
+                    Terrain::Jungle => 95,
+                    Terrain::Plains => 80,
+                    Terrain::Badlands => 70,
+                    Terrain::Swamp => 65,
+                    Terrain::Tundra => 60,
+                    Terrain::Mountains => 50,
+                    Terrain::Desert => 55,
+                    _ => 20,
+                }
+            };
+            // Look up each settlement's terrain via the region plan.
+            let best = settlements.iter().max_by_key(|s| {
+                let (cell, _, _) = plan_ref.sample(s.pos.0, s.pos.1);
+                score_biome(cell.terrain)
+            });
+            match best {
+                Some(s) => {
+                    let vx = s.pos.0;
+                    let vy = s.pos.1;
+                    let (cell, _, _) = plan_ref.sample(vx, vy);
+                    let surface_z = crate::world_sim::terrain::surface_height_at(vx, vy, plan_ref, world_seed);
+                    let eye = glam::Vec3::new(vx, (surface_z + 18) as f32, vy);
+                    let target = eye + glam::Vec3::new(0.0, -3.0, 30.0);
+                    eprintln!("[voxel] Camera at settlement '{}' ({:?}) surface_z={} eye_y={}",
+                        s.name, cell.terrain, surface_z, surface_z + 18);
+                    (eye, target)
+                }
+                None => (glam::Vec3::new(0.0, 500.0, 0.0), glam::Vec3::new(0.0, 497.0, 30.0)),
+            }
         } else {
             (glam::Vec3::new(0.0, 500.0, 0.0), glam::Vec3::new(0.0, 497.0, 30.0))
         };
@@ -286,6 +321,16 @@ impl AppState {
             chunks_pending: total_settlement_chunks,
             chunks_loaded: 0,
             pending_chunk_requests: HashMap::new(),
+            ema_drain_cpu_ms: 0.0,
+            ema_drain_gpu_ms: 0.0,
+            ema_gen_ms: 0.0,
+            ema_update_cam_ms: 0.0,
+            ema_tick_sim_ms: 0.0,
+            ema_render_ms: 0.0,
+            ema_cull_ms: 0.0,
+            ema_raycast_ms: 0.0,
+            ema_present_ms: 0.0,
+            ema_frame_ms: 0.0,
         })
     }
 
@@ -653,8 +698,10 @@ impl AppState {
         Ok(())
     }
 
-    /// Render one frame.
-    fn render(&mut self) -> Result<()> {
+    /// Render one frame. Returns sub-phase timings in ms:
+    /// `(cull_ms, raycast_ms, present_ms)`.
+    fn render(&mut self) -> Result<(f32, f32, f32)> {
+        let t_cull = Instant::now();
         let dims = MEGA_VOXELS as f32;
         let aspect = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
         let vp = frustum_vp_matrix(&self.camera, aspect);
@@ -662,9 +709,6 @@ impl AppState {
         let cam_pos = self.camera.eye_position();
 
         // --- Phase 3: render directly from the GPU chunk pool ---
-        // Each LoadedChunkView maps a pool slot onto an engine-space AABB.
-        // chunk_pos is in sim coords (x, y, z-up); we swap Y↔Z into engine
-        // coords the same way build_mega_grid did for the legacy path.
         let chunk_size_f = CHUNK_SIZE as f32;
         let mut visible: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3], f32)> = self
             .terrain_compute
@@ -679,9 +723,6 @@ impl AppState {
                 if !aabb_vs_frustum(&planes, &pos, &max) {
                     return None;
                 }
-                // Skip chunks outside the load radius (camera-relative) so we
-                // don't waste draws on pool tail entries that are far from
-                // the viewer.
                 let cx = pos[0] + dims * 0.5 - cam_pos[0];
                 let cy = pos[1] + dims * 0.5 - cam_pos[1];
                 let cz = pos[2] + dims * 0.5 - cam_pos[2];
@@ -694,7 +735,6 @@ impl AppState {
             .collect();
         visible.sort_unstable_by(|a, b| a.4.partial_cmp(&b.4).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Update LRU touched-frame for every chunk we rendered this frame.
         for (v, _, _, _, _) in &visible {
             self.terrain_compute.mark_touched(v.chunk_pos, self.frame_count as u64);
         }
@@ -702,19 +742,27 @@ impl AppState {
         let pool_views: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3])> =
             visible.into_iter().map(|(v, c, p, d, _)| (v, c, p, d)).collect();
         self.last_visible_megas = pool_views.len();
+        let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
 
         if pool_views.is_empty() {
+            let t_present = Instant::now();
             self.swapchain.present_cleared_frame(&self.ctx, [0.1, 0.1, 0.15, 1.0])?;
-            return Ok(());
+            let present_ms = t_present.elapsed().as_secs_f32() * 1000.0;
+            return Ok((cull_ms, 0.0, present_ms));
         }
 
+        let t_raycast = Instant::now();
         let palette_view = self.terrain_compute.palette_view();
         self.renderer
             .render_frame_pool(&self.ctx, &self.camera, &pool_views, palette_view)?;
+        let raycast_ms = t_raycast.elapsed().as_secs_f32() * 1000.0;
+
+        let t_present = Instant::now();
         let src = self.renderer.light_output_image();
         self.swapchain.present_blit(&self.ctx, src, RENDER_WIDTH, RENDER_HEIGHT)?;
+        let present_ms = t_present.elapsed().as_secs_f32() * 1000.0;
 
-        Ok(())
+        Ok((cull_ms, raycast_ms, present_ms))
     }
 
     fn tick_sim(&mut self) {
@@ -900,33 +948,69 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 app.camera.set_move_speed(app.move_speed);
             }
             WindowEvent::RedrawRequested => {
-                let now = Instant::now();
-                let dt = (now - app.last_frame).as_secs_f32().min(0.1);
-                app.last_frame = now;
+                let t_frame_start = Instant::now();
+                let dt = (t_frame_start - app.last_frame).as_secs_f32().min(0.1);
+                app.last_frame = t_frame_start;
 
-                // Drain background-generated settlement chunks.
+                // Phase: CPU chunk drain (settlement pre-gen thread → VoxelWorld)
+                let t_drain_cpu = Instant::now();
                 app.drain_ready_chunks(64);
+                let drain_cpu_ms = t_drain_cpu.elapsed().as_secs_f32() * 1000.0;
 
-                // Drain GPU compute chunks whose fences are signaled (Task 14).
-                // Cheap fence polling — only blocks on memcpy+conversion for
-                // chunks that are actually ready.
-                let t_drain = Instant::now();
+                // Phase: GPU pool drain (fence poll → Loaded state)
+                let t_drain_gpu = Instant::now();
                 app.drain_completed_gpu_chunks();
-                let _drain_ms = t_drain.elapsed().as_secs_f32() * 1000.0;
+                let drain_gpu_ms = t_drain_gpu.elapsed().as_secs_f32() * 1000.0;
 
-                // Submit new GPU terrain dispatches (Task 14). Up to 8 in
-                // flight; each frame we top up the ring without blocking.
+                // Phase: submit new GPU compute dispatches
                 let t_gen = Instant::now();
                 app.generate_camera_chunks(8);
                 let gen_ms = t_gen.elapsed().as_secs_f32() * 1000.0;
 
-                // FPS tracking
+                // Phase: camera update
+                let t_cam = Instant::now();
+                app.update_camera(dt);
+                let update_cam_ms = t_cam.elapsed().as_secs_f32() * 1000.0;
+
+                // Phase: sim tick
+                let t_sim = Instant::now();
+                app.tick_sim();
+                let tick_sim_ms = t_sim.elapsed().as_secs_f32() * 1000.0;
+
+                // Phase: render (sub-phases: cull, raycast, present)
+                let t_render = Instant::now();
+                let (cull_ms, raycast_ms, present_ms) = match app.render() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("[voxel] render error: {}", e);
+                        (0.0, 0.0, 0.0)
+                    }
+                };
+                let render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
+
+                let frame_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
+
+                // EMA smoothing, alpha=0.1
+                let a = 0.1;
+                let lerp = |old: f32, new: f32| old * (1.0 - a) + new * a;
+                app.ema_drain_cpu_ms = lerp(app.ema_drain_cpu_ms, drain_cpu_ms);
+                app.ema_drain_gpu_ms = lerp(app.ema_drain_gpu_ms, drain_gpu_ms);
+                app.ema_gen_ms = lerp(app.ema_gen_ms, gen_ms);
+                app.ema_update_cam_ms = lerp(app.ema_update_cam_ms, update_cam_ms);
+                app.ema_tick_sim_ms = lerp(app.ema_tick_sim_ms, tick_sim_ms);
+                app.ema_render_ms = lerp(app.ema_render_ms, render_ms);
+                app.ema_cull_ms = lerp(app.ema_cull_ms, cull_ms);
+                app.ema_raycast_ms = lerp(app.ema_raycast_ms, raycast_ms);
+                app.ema_present_ms = lerp(app.ema_present_ms, present_ms);
+                app.ema_frame_ms = lerp(app.ema_frame_ms, frame_ms);
+
+                // FPS tracking + per-second log
                 app.frame_count += 1;
-                let fps_elapsed = now.duration_since(app.fps_timer).as_secs_f32();
+                let fps_elapsed = t_frame_start.duration_since(app.fps_timer).as_secs_f32();
                 if fps_elapsed >= 1.0 {
                     app.last_fps = app.frame_count as f32 / fps_elapsed;
                     app.frame_count = 0;
-                    app.fps_timer = now;
+                    app.fps_timer = t_frame_start;
                     let cam = app.camera.eye_position();
                     let status = if app.paused { "PAUSED" } else { "RUNNING" };
                     let loading = if app.chunks_loaded < app.chunks_pending {
@@ -939,32 +1023,27 @@ impl ApplicationHandler for WorldSimVoxelApp {
                         app.last_fps, status, cam[0], cam[1], cam[2],
                         app.last_visible_megas, app.gpu_megas.len(), app.ticks_per_frame, loading,
                     ));
-                }
 
-                app.update_camera(dt);
-                app.tick_sim();
-
-                // Phase 3: GPU-generated chunks stay resident in the compute
-                // pool and are sampled directly by the renderer — no CPU
-                // round-trip. upload_megas() only handled the old
-                // VoxelWorld → GpuMega path for settlement chunks, which are
-                // now covered by the same pool path once the camera enters
-                // their neighborhood. Kept as a no-op timer for log parity.
-                let t_upload = Instant::now();
-                let t_render = Instant::now();
-                if let Err(e) = app.render() {
-                    eprintln!("[voxel] render error: {}", e);
-                }
-                let t_done = Instant::now();
-
-                // Log frame breakdown once per second (alongside FPS update)
-                if fps_elapsed >= 1.0 {
-                    let upload_ms = t_render.duration_since(t_upload).as_secs_f32() * 1000.0;
-                    let render_ms = t_done.duration_since(t_render).as_secs_f32() * 1000.0;
-                    let total_ms = 1000.0 / app.last_fps.max(0.1);
-                    eprintln!("[perf] {:.1} FPS | gen {:.1}ms upload {:.1}ms render {:.1}ms total {:.1}ms | {}/{} megas",
-                        app.last_fps, gen_ms, upload_ms, render_ms, total_ms,
-                        app.last_visible_megas, app.gpu_megas.len());
+                    // Detailed per-phase breakdown (EMAs).
+                    let accounted = app.ema_drain_cpu_ms + app.ema_drain_gpu_ms + app.ema_gen_ms
+                        + app.ema_update_cam_ms + app.ema_tick_sim_ms + app.ema_render_ms;
+                    let overhead = (app.ema_frame_ms - accounted).max(0.0);
+                    eprintln!(
+                        "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} raycast={:.2} present={:.2}] other={:.2} | {} chunks",
+                        app.last_fps,
+                        app.ema_frame_ms,
+                        app.ema_drain_cpu_ms,
+                        app.ema_drain_gpu_ms,
+                        app.ema_gen_ms,
+                        app.ema_update_cam_ms,
+                        app.ema_tick_sim_ms,
+                        app.ema_render_ms,
+                        app.ema_cull_ms,
+                        app.ema_raycast_ms,
+                        app.ema_present_ms,
+                        overhead,
+                        app.last_visible_megas,
+                    );
                 }
 
                 app.window.request_redraw();
