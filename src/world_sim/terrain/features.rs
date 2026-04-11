@@ -680,7 +680,10 @@ pub fn place_surface_features(
     // Horizontal halo: hierarchical recursive trees can reach
     //   primary_horizontal (~56) + secondary (~44) + leaf_radius (~23) ≈ 123.
     // Worst case is a large jungle tree (trunk_height 120, primary ratio 0.55).
-    const HALO: i32 = 135;
+    // Max procedural tree horizontal reach. Matches rmax in the GPU
+    // shader (terrain_materialize.comp). Realistic max is ~60-70;
+    // 75 gives a small safety margin.
+    const HALO: i32 = 75;
     // Vertical extent of a tree above its base: fork_height + primary elevation +
     // secondary + leaf_radius. Large jungle: ~78 + 69 + 40 + 23 ≈ 210.
     const FEATURE_MAX_Z_ABOVE: i32 = 220;
