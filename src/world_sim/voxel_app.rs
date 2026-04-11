@@ -458,12 +458,17 @@ impl AppState {
         }
     }
 
-    /// Submit chunks in a bulk radius around the camera. Invoked by the F key
-    /// as a manual "preload this area" button. Walks a cube of chunks from
-    /// `-radius..=radius` in x/y and a narrower vertical range around the
-    /// surface, submits each to the GPU terrain compute pipeline, and relies
-    /// on the pool's LRU eviction to handle overflow. Returns the number of
-    /// chunks actually submitted (not already loaded or in flight).
+    /// Submit chunks in a bulk radius around the camera. Invoked by the F key.
+    /// For each (cx, cy) column in the horizontal radius, submits chunks at
+    /// the actual *surface* vertical position (not the camera's), plus one
+    /// above and one below. This keeps the total submission count small
+    /// enough that the pool's 256-slot capacity isn't overrun — which would
+    /// otherwise LRU-evict currently-visible chunks and produce visible
+    /// occlusion while the new dispatches complete.
+    ///
+    /// At `radius = 4` this submits at most `(2*4+1)^2 * 3 = 243` chunks,
+    /// just under the 256-slot pool size. Already-loaded chunks return
+    /// `Ok(None)` from `submit_chunk` and aren't counted as new submissions.
     fn fill_chunks_around_camera(&mut self, radius: i32) -> usize {
         let plan = match &self.sim.state().voxel_world.region_plan {
             Some(p) => p.clone(),
@@ -473,25 +478,34 @@ impl AppState {
         let cam = self.camera.eye_position();
         let cam_vx = cam[0];
         let cam_vy = cam[2]; // engine z → sim y
-        let cam_vz = cam[1]; // engine y → sim z
         let cs = CHUNK_SIZE as f32;
         let center_cx = (cam_vx / cs).floor() as i32;
         let center_cy = (cam_vy / cs).floor() as i32;
-        let center_cz = (cam_vz / cs).floor() as i32;
-        let _ = plan;
 
         let mut submitted = 0usize;
-        // Spiral outward from camera so closer chunks come first (better LRU).
+        // Spiral outward so closer chunks come first (better LRU ordering).
         'outer: for dist in 0..=radius {
             for dx in -dist..=dist {
                 for dy in -dist..=dist {
-                    for dz in -3..=3 { // vertical range around surface
-                        // Shell filter (only process cells at the current dist).
-                        if dx.abs() != dist && dy.abs() != dist { continue; }
+                    // Shell filter (only process cells at the current dist).
+                    if dx.abs() != dist && dy.abs() != dist { continue; }
 
-                        let cp = ChunkPos::new(center_cx + dx, center_cy + dy, center_cz + dz);
+                    let cx = center_cx + dx;
+                    let cy = center_cy + dy;
+
+                    // Per-column surface → chunk z. Load surface_cz ± 1 so
+                    // tree canopies above the surface and the underlying
+                    // rock just below are covered.
+                    let col_vx = (cx as f32 + 0.5) * cs;
+                    let col_vy = (cy as f32 + 0.5) * cs;
+                    let surface_z = crate::world_sim::terrain::surface_height_at(
+                        col_vx, col_vy, &plan, seed,
+                    );
+                    let surface_cz = surface_z.div_euclid(CHUNK_SIZE as i32);
+
+                    for dz in -1..=1 {
+                        let cp = ChunkPos::new(cx, cy, surface_cz + dz);
                         if self.pending_chunk_requests.values().any(|p| *p == cp) { continue; }
-                        // Skip if already loaded in the pool (checked by the pipeline itself).
 
                         match self.terrain_compute.submit_chunk(
                             &self.ctx,
@@ -503,9 +517,7 @@ impl AppState {
                                 submitted += 1;
                             }
                             Ok(None) => {
-                                // Ring is completely full (all 256 slots InFlight).
-                                // Drain what we can and keep trying.
-                                self.drain_completed_gpu_chunks();
+                                // Already loaded in the pool — skip.
                             }
                             Err(e) => {
                                 eprintln!("[voxel] fill submit_chunk failed for {:?}: {}", cp, e);
@@ -727,11 +739,11 @@ impl AppState {
                 eprintln!("[voxel] speed: {} ticks/frame", self.ticks_per_frame);
             }
             KeyCode::KeyF => {
-                // Fill the GPU chunk pool with chunks in a wide radius around
-                // the camera. The pool has 256 slots; this submits up to that
-                // many dispatches in one burst (LRU-evicting older chunks as
-                // needed). Useful for pre-loading terrain before panning.
-                let submitted = self.fill_chunks_around_camera(10);
+                // Preload chunks around the camera at the actual terrain
+                // surface height. Radius 4 caps the submission at 243 chunks,
+                // under the pool's 256-slot limit, so currently-visible chunks
+                // don't get LRU-evicted while the new dispatches are pending.
+                let submitted = self.fill_chunks_around_camera(4);
                 eprintln!("[voxel] Fill radius: submitted {} chunks", submitted);
             }
             KeyCode::Tab => {
