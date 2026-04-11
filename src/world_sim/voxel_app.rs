@@ -660,6 +660,25 @@ impl AppState {
         let center_cy = (cam_vy / cs).floor() as i32;
         let center_cz = (cam_vz / cs).floor() as i32;
 
+        // Single-column surface estimate at the camera xy. Used to extend
+        // the per-(cx,cy) z load list down to the actual ground when the
+        // camera is well above the surface (e.g. user pressed E to fly
+        // up). Without this, the spiral only loads dz=-1..=1 around the
+        // camera chunk, missing the surface chunks entirely — visible as
+        // floating tree canopies with no trunks or ground beneath them
+        // (the canopy lives in chunks ~2-3 above the surface, which the
+        // narrow camera-band still loads, but the trunk + ground chunks
+        // 2+ chunks below the camera are skipped).
+        //
+        // Per-column would be more accurate at biome boundaries but FBM
+        // is expensive; one global surface estimate is good enough until
+        // the user complains about ground popping at biome edges.
+        let surface_z = crate::world_sim::terrain::surface_height_at(
+            cam_vx, cam_vy, &plan, seed,
+        );
+        let surface_cz = surface_z.div_euclid(CHUNK_SIZE as i32);
+        let surf_dz_off = surface_cz - center_cz;
+
         // Radius in chunks to check around camera.
         let radius = (LOAD_RADIUS / (MEGA as f32 * cs)).ceil() as i32 + 1;
 
@@ -688,14 +707,36 @@ impl AppState {
         'outer: for dist in 0..=radius {
             for dx in -dist..=dist {
                 for dy in -dist..=dist {
-                    // Narrow vertical range: the old -2..=2 spent 40% of each
-                    // shell's budget on chunks 128 voxels above/below the
-                    // camera — subterranean rock or empty sky that's almost
-                    // never visible from a surface camera. -1..=1 covers the
-                    // camera chunk plus one above/below for cave/aerial
-                    // peeks while freeing 40% of the compute budget for
-                    // same-layer forward chunks.
-                    for dz in -1..=1 {
+                    // Two vertical clusters per (cx,cy) column:
+                    //   1. Camera-local: dz ∈ [-1, 0, 1] around the camera
+                    //      chunk. Covers caves below, the camera's own
+                    //      chunk, and aerial peeks above.
+                    //   2. Surface-local: dz ∈ [surf-1, surf, surf+1]
+                    //      where `surf` is the offset from the camera
+                    //      chunk to the surface chunk. Loads the ground
+                    //      and the column of chunks containing tree
+                    //      trunks even when the camera is well above
+                    //      the surface.
+                    //
+                    // The two clusters overlap entirely when the camera
+                    // is at the surface (surf_dz_off ∈ [-1, 1]); in that
+                    // case the second cluster's submissions are no-ops
+                    // because submit_chunk_with_frame deduplicates.
+                    //
+                    // The old narrow -1..=1 range was a perf optimization
+                    // that assumed a first-person camera at surface
+                    // height, which broke as soon as the user flew up
+                    // with E — visible as floating canopies because the
+                    // trunk/ground chunks 2+ below the camera weren't
+                    // loaded. Restoring correctness here costs at most
+                    // 2x the spiral submissions (the second cluster
+                    // mostly hits already-loaded surface chunks once
+                    // the world is filled in).
+                    let z_offsets: [i32; 6] = [
+                        -1, 0, 1,
+                        surf_dz_off - 1, surf_dz_off, surf_dz_off + 1,
+                    ];
+                    for &dz in &z_offsets {
                         if submitted >= budget { break 'outer; }
                         // Only process shell of current distance.
                         if dx.abs() != dist && dy.abs() != dist { continue; }
