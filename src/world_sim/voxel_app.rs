@@ -1134,8 +1134,17 @@ impl AppState {
             self.ema_present_ms = lerp(self.ema_present_ms, present_ms);
         } else {
             // Fast path: zero clock reads. Work only.
-            self.drain_ready_chunks(64);
-            self.drain_completed_gpu_chunks();
+            //
+            // `drain_ready_chunks` and `drain_completed_gpu_chunks` are
+            // NOT called here — they're hoisted to `about_to_wait` and
+            // run once per batch. Both are idempotent feeders from
+            // background work (CPU settlement thread → voxel world via
+            // mpsc; GPU compute → pool slot state via fence polling).
+            // Running them once per 64-frame batch adds at most one
+            // batch of latency to chunk arrival (~3.5 µs at current
+            // frame times), far below any observable threshold, and
+            // removes the per-frame atomic op inside mpsc::try_recv
+            // from the hot path.
             self.generate_camera_chunks(8);
             self.update_camera(dt);
             self.tick_sim(dt);
@@ -1463,16 +1472,25 @@ impl ApplicationHandler for WorldSimVoxelApp {
         // returns.
         const FRAME_BATCH: usize = 64;
         if let Some(app) = &mut self.state {
-            // Batch-level timing. One Instant::now() pair per 8 frames
-            // instead of one per frame — at ~25 ns each that was 12 %
-            // of the 0.4 µs frame. Per-frame `dt` is the batch average;
-            // since the sim accumulator just sums incoming dts, giving
-            // each frame `batch_dt / FRAME_BATCH` advances the sim by
-            // the same total wall time as the old per-frame measurement.
+            // Batch-level timing. One Instant::now() pair per batch
+            // instead of one per frame. Per-frame `dt` is the batch
+            // average; since the sim accumulator just sums incoming
+            // dts, giving each frame `batch_dt / FRAME_BATCH` advances
+            // the sim by the same total wall time.
             let batch_start = Instant::now();
             let dt_total = (batch_start - app.last_frame).as_secs_f32().min(0.1);
             app.last_frame = batch_start;
             let per_frame_dt = dt_total / FRAME_BATCH as f32;
+
+            // Drain once per batch. Both drains are idempotent feeders
+            // from background work (CPU settlement thread via mpsc,
+            // GPU compute fence polling). Doing them once per batch
+            // instead of once per frame shaves the mpsc::try_recv
+            // atomic op and the drain_completed function call from
+            // the hot path — each costs ~15-25 ns, so ~30-40 ns/frame
+            // at batch=64 translates to ~2 µs off each batch.
+            app.drain_ready_chunks(64);
+            app.drain_completed_gpu_chunks();
 
             for _ in 0..FRAME_BATCH {
                 app.run_frame(per_frame_dt);
