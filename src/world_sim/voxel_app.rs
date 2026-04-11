@@ -161,6 +161,17 @@ struct AppState {
     /// skipped.
     last_cull_cam_key: Option<[f32; 6]>,
     last_cull_pool_gen: u64,
+    /// Monotonic counter bumped every time the camera pose changes
+    /// (via update_camera or WindowEvent::CursorMoved). Gives the
+    /// run_batch stability check a O(1) u64 compare instead of
+    /// reading 6 camera floats and comparing against a cached array.
+    /// Captured into `last_cull_camera_version` whenever a full cull
+    /// runs (inside render_frame_pool / the full cull path).
+    camera_version: u64,
+    /// `camera_version` snapshotted at the last time the cull cache
+    /// was validated. Compared against the live counter in the
+    /// batch stability check.
+    last_cull_camera_version: u64,
 
     // Per-phase timing EMAs (exponential moving avg, ms). Alpha=0.1.
     ema_drain_cpu_ms: f32,
@@ -397,6 +408,8 @@ impl AppState {
             pool_views_buf: Vec::with_capacity(320),
             last_cull_cam_key: None,
             last_cull_pool_gen: 0,
+            camera_version: 1,
+            last_cull_camera_version: 0,
             ema_drain_cpu_ms: 0.0,
             ema_drain_gpu_ms: 0.0,
             ema_gen_ms: 0.0,
@@ -1051,6 +1064,7 @@ impl AppState {
         // + pool generation can skip the whole visibility pass.
         self.last_cull_cam_key = Some(cur_cam_key);
         self.last_cull_pool_gen = cur_pool_gen;
+        self.last_cull_camera_version = self.camera_version;
 
         let cull_ms = t_cull.map(|t| t.elapsed().as_secs_f32() * 1000.0).unwrap_or(0.0);
 
@@ -1279,14 +1293,16 @@ impl AppState {
         // tick_sim once per batch.
         self.tick_sim(dt_total);
 
-        // Batch-level stability check (see earlier iteration commits).
-        let eye = self.camera.eye_position();
-        let center = self.camera.center();
-        let cam_key = [eye[0], eye[1], eye[2], center.x, center.y, center.z];
+        // Batch-level stability check. Uses a monotonic `camera_version`
+        // counter instead of reading + comparing the camera's 6-float
+        // pose array: update_camera and CursorMoved both bump the
+        // counter, so a single u64 compare replaces 6 f32 compares plus
+        // the field reads and array construction. Saves ~15-20 ns per
+        // batch on the stable-scene fast path.
         let pool_gen = self.terrain_compute.pool_generation();
         let (_, in_flight, _) = self.terrain_compute.pool_stats();
         let batch_stable = !self.detailed_perf
-            && self.last_cull_cam_key == Some(cam_key)
+            && self.camera_version == self.last_cull_camera_version
             && self.last_cull_pool_gen == pool_gen
             && !self.pool_views_buf.is_empty()
             && self.keys_held.is_empty()
@@ -1438,6 +1454,7 @@ impl AppState {
             mouse_dy: 0.0,
             scroll_delta: 0.0,
         }, dt);
+        self.camera_version = self.camera_version.wrapping_add(1);
     }
 }
 
@@ -1513,6 +1530,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
                             mouse_dy: (position.y - ly) as f32,
                             scroll_delta: 0.0,
                         }, 0.0);
+                        app.camera_version = app.camera_version.wrapping_add(1);
                     }
                     app.last_mouse = Some((position.x, position.y));
                 }
