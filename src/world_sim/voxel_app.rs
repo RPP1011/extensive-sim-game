@@ -442,8 +442,14 @@ impl AppState {
                         if dx.abs() != dist && dy.abs() != dist { continue; }
 
                         let cp = ChunkPos::new(center_cx + dx, center_cy + dy, center_cz + dz);
-                        if self.sim.state().voxel_world.chunks.contains_key(&cp) { continue; }
-                        // Skip if already dispatched and waiting on GPU.
+                        // NOTE: we intentionally do NOT skip chunks that exist
+                        // in sim.voxel_world.chunks — those are inserted by the
+                        // settlement pre-gen CPU thread for simulation queries,
+                        // but the GPU pool is a separate rendering cache.
+                        // Phase 3 removed the upload_megas path, so without
+                        // submitting here the renderer sees nothing for
+                        // settlement areas. submit_chunk itself is a no-op for
+                        // chunks already Loaded or InFlight in the pool.
                         if self.pending_chunk_requests.values().any(|p| *p == cp) { continue; }
 
                         match self.terrain_compute.submit_chunk(
