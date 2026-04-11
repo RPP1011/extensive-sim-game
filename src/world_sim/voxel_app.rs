@@ -101,8 +101,18 @@ struct AppState {
     dirty_megas: HashSet<MegaPos>,
 
     paused: bool,
+    /// Sim-speed multiplier. ticks_per_frame == 1 means the sim ticks at
+    /// SIM_BASE_HZ; doubling it doubles the sim-time rate (1 real second
+    /// → 2 sim seconds of advancement). Despite the legacy name, it no
+    /// longer corresponds to render frames — the sim is now decoupled
+    /// from the render loop via `sim_accumulator`.
     ticks_per_frame: u32,
     last_frame: Instant,
+    /// Wall-clock leftover since the last `sim.tick()` call. Accumulates
+    /// the render frame `dt`; when it exceeds `SIM_BASE_DT / ticks_per_frame`
+    /// we advance the sim and subtract. Lets the sim run at a fixed
+    /// wall-clock rate regardless of render FPS.
+    sim_accumulator: f32,
 
     keys_held: HashSet<KeyCode>,
     mouse_captured: bool,
@@ -345,6 +355,7 @@ impl AppState {
             dirty_megas: HashSet::new(),
             paused: true, // start paused so sim doesn't run during chunk loading
             ticks_per_frame: 10,
+            sim_accumulator: 0.0,
             last_frame: Instant::now(),
             keys_held: HashSet::new(),
             mouse_captured: false,
@@ -1035,12 +1046,35 @@ impl AppState {
         Ok((cull_ms, wait_ms, raycast_ms, present_ms))
     }
 
-    fn tick_sim(&mut self) {
+    fn tick_sim(&mut self, dt: f32) {
         if self.paused { return; }
 
-        for _ in 0..self.ticks_per_frame {
+        // Wall-clock sim scheduling. Base rate is SIM_BASE_HZ; the user's
+        // ticks_per_frame multiplier scales the effective sim rate so
+        // "ticks_per_frame=2" means the sim advances twice as fast in
+        // wall time. Previously the sim ran literally once per render
+        // frame × ticks_per_frame, which meant at 194 k FPS × 10 it
+        // was burning ~1.9 million sim ticks per second — almost all
+        // of the remaining render-loop cost.
+        const SIM_BASE_HZ: f32 = 10.0;
+        let sim_dt = 1.0 / (SIM_BASE_HZ * self.ticks_per_frame.max(1) as f32);
+
+        self.sim_accumulator += dt;
+        // Cap burst to avoid a death spiral if the render loop stalled.
+        let mut bursts = 0;
+        const MAX_BURST: u32 = 4;
+        let mut ticked = false;
+        while self.sim_accumulator >= sim_dt && bursts < MAX_BURST {
             self.sim.tick();
+            self.sim_accumulator -= sim_dt;
+            bursts += 1;
+            ticked = true;
         }
+        if self.sim_accumulator > sim_dt * MAX_BURST as f32 {
+            // Discard excess to prevent runaway after a long hitch.
+            self.sim_accumulator = 0.0;
+        }
+        if !ticked { return; }
 
         self.bridge.sync_all(self.sim.state_mut());
 
@@ -1244,7 +1278,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
 
                 // Phase: sim tick
                 let t_sim = Instant::now();
-                app.tick_sim();
+                app.tick_sim(dt);
                 let tick_sim_ms = t_sim.elapsed().as_secs_f32() * 1000.0;
 
                 // Phase: render (sub-phases: cull, wait, raycast, present)
