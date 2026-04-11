@@ -1468,6 +1468,11 @@ impl AppState {
                 // First-person standing position: 18 voxels (~1.8m) above surface.
                 let cam_pos = glam::Vec3::new(vx, (surface_z + 18) as f32, vy);
                 self.camera.set_position(cam_pos);
+                // Bump camera_version so the cull cache + stable-scene
+                // fast paths invalidate; otherwise pool_views_buf stays
+                // pinned to the chunks visible from the OLD location until
+                // the next WASD keypress restarts cull regeneration.
+                self.camera_version = self.camera_version.wrapping_add(1);
                 eprintln!("[voxel] Jumped to '{}' ({:.0},{:.0}) surface_z={}", s.name, vx, vy, surface_z);
                 self.settlement_jump_idx += 1;
             }
