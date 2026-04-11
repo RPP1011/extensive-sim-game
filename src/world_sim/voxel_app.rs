@@ -129,7 +129,8 @@ struct AppState {
     ema_tick_sim_ms: f32,
     ema_render_ms: f32,
     ema_cull_ms: f32,       // sub-phase of render: frustum cull + sort
-    ema_raycast_ms: f32,    // sub-phase of render: render_frame_pool (gbuffer+shadow+light)
+    ema_wait_ms: f32,       // sub-phase of render: CPU wait for previous GPU frame
+    ema_raycast_ms: f32,    // sub-phase of render: record/submit gbuffer+shadow+light (no wait)
     ema_present_ms: f32,    // sub-phase of render: present_blit
     ema_frame_ms: f32,
 
@@ -336,6 +337,7 @@ impl AppState {
             ema_tick_sim_ms: 0.0,
             ema_render_ms: 0.0,
             ema_cull_ms: 0.0,
+            ema_wait_ms: 0.0,
             ema_raycast_ms: 0.0,
             ema_present_ms: 0.0,
             ema_frame_ms: 0.0,
@@ -784,8 +786,8 @@ impl AppState {
     }
 
     /// Render one frame. Returns sub-phase timings in ms:
-    /// `(cull_ms, raycast_ms, present_ms)`.
-    fn render(&mut self) -> Result<(f32, f32, f32)> {
+    /// `(cull_ms, wait_ms, raycast_ms, present_ms)`.
+    fn render(&mut self) -> Result<(f32, f32, f32, f32)> {
         let t_cull = Instant::now();
         let dims = MEGA_VOXELS as f32;
         let aspect = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
@@ -833,8 +835,16 @@ impl AppState {
             let t_present = Instant::now();
             self.swapchain.present_cleared_frame(&self.ctx, [0.1, 0.1, 0.15, 1.0])?;
             let present_ms = t_present.elapsed().as_secs_f32() * 1000.0;
-            return Ok((cull_ms, 0.0, present_ms));
+            return Ok((cull_ms, 0.0, 0.0, present_ms));
         }
+
+        // Split out the CPU wait on last frame's render_fence so we can see
+        // whether the old "raycast" bucket was dominated by the wait (GPU
+        // behind because compute is saturating shared resources) or by
+        // command-buffer recording/submit cost.
+        let t_wait = Instant::now();
+        self.renderer.wait_for_previous_frame(&self.ctx)?;
+        let wait_ms = t_wait.elapsed().as_secs_f32() * 1000.0;
 
         let t_raycast = Instant::now();
         let palette_view = self.terrain_compute.palette_view();
@@ -853,7 +863,7 @@ impl AppState {
         )?;
         let present_ms = t_present.elapsed().as_secs_f32() * 1000.0;
 
-        Ok((cull_ms, raycast_ms, present_ms))
+        Ok((cull_ms, wait_ms, raycast_ms, present_ms))
     }
 
     fn tick_sim(&mut self) {
@@ -1068,13 +1078,13 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 app.tick_sim();
                 let tick_sim_ms = t_sim.elapsed().as_secs_f32() * 1000.0;
 
-                // Phase: render (sub-phases: cull, raycast, present)
+                // Phase: render (sub-phases: cull, wait, raycast, present)
                 let t_render = Instant::now();
-                let (cull_ms, raycast_ms, present_ms) = match app.render() {
+                let (cull_ms, wait_ms, raycast_ms, present_ms) = match app.render() {
                     Ok(t) => t,
                     Err(e) => {
                         eprintln!("[voxel] render error: {}", e);
-                        (0.0, 0.0, 0.0)
+                        (0.0, 0.0, 0.0, 0.0)
                     }
                 };
                 let render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
@@ -1091,6 +1101,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 app.ema_tick_sim_ms = lerp(app.ema_tick_sim_ms, tick_sim_ms);
                 app.ema_render_ms = lerp(app.ema_render_ms, render_ms);
                 app.ema_cull_ms = lerp(app.ema_cull_ms, cull_ms);
+                app.ema_wait_ms = lerp(app.ema_wait_ms, wait_ms);
                 app.ema_raycast_ms = lerp(app.ema_raycast_ms, raycast_ms);
                 app.ema_present_ms = lerp(app.ema_present_ms, present_ms);
                 app.ema_frame_ms = lerp(app.ema_frame_ms, frame_ms);
@@ -1121,7 +1132,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
                     let overhead = (app.ema_frame_ms - accounted).max(0.0);
                     let (free, in_flight, loaded) = app.terrain_compute.pool_stats();
                     eprintln!(
-                        "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{} | throughput: sub={}/s drained={}/s gen_short_circuit={}/s",
+                        "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} wait={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{} | throughput: sub={}/s drained={}/s gen_short_circuit={}/s",
                         app.last_fps,
                         app.ema_frame_ms,
                         app.ema_drain_cpu_ms,
@@ -1131,6 +1142,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
                         app.ema_tick_sim_ms,
                         app.ema_render_ms,
                         app.ema_cull_ms,
+                        app.ema_wait_ms,
                         app.ema_raycast_ms,
                         app.ema_present_ms,
                         overhead,
