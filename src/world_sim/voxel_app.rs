@@ -1625,14 +1625,16 @@ pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
     // outer loop, bypassing winit's per-iteration `about_to_wait`
     // callback machinery.
     //
-    // Throttle winit event pumping: polling the OS event queue
-    // (epoll_wait + event dispatch) is still ~2.4 µs per call, which
-    // at 3 G+ FPS is the dominant remaining cost. Pump every Nth
-    // batch instead of every batch. Input latency is bounded by
-    // N × batch_wall_time: at N=8 and ~2.6 µs/batch, that's ~21 µs
-    // worst case — still four orders of magnitude below any
-    // perceptible threshold and well inside a single 60 Hz frame
-    // (16,700 µs).
+    // Throttle winit event pumping: polling the OS event queue is
+    // ~0.69 µs per call. Pumping every Nth batch amortizes that to
+    // 0.69 / N per batch.
+    //
+    // Tried N=32 and observed a ~10x regression with huge variance
+    // (126 M-528 M FPS vs ~4 G baseline), likely because OS event
+    // queue backs up between pumps and each pump then does much
+    // more work (processing 32 batches' worth of queued events is
+    // not linearly equivalent to 32 pumps of 1 batch). N=8 sits
+    // comfortably in the stable zone.
     const PUMP_EVERY: u32 = 8;
     let mut pump_counter: u32 = 0;
     let mut should_exit = false;
