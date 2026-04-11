@@ -102,6 +102,13 @@ struct AppState {
     auto_rotate_period: Option<f32>,
     auto_rotate_last: Instant,
 
+    /// Last chunk the camera was in when `generate_camera_chunks` ran
+    /// its full disk submission. When the camera's current chunk
+    /// matches this, the spiral short-circuits because the required
+    /// chunk set hasn't changed — rotation inside a single chunk is a
+    /// no-op for loading. Reset when any of (cx, cy, cz) differ.
+    last_spiral_chunk: Option<(i32, i32, i32)>,
+
     bridge: VoxelBridge,
     sim: WorldSim,
 
@@ -417,15 +424,20 @@ impl AppState {
                     let vy = s.pos.1;
                     let (cell, _, _) = plan_ref.sample(vx, vy);
                     let surface_z = crate::world_sim::terrain::surface_height_at(vx, vy, plan_ref, world_seed);
-                    // Auto-rotate mode snaps the camera to the surface
-                    // itself (z = surface_z) instead of the usual +18
-                    // eye height, so the test exercises ground-level
-                    // chunk loading. Look horizontally, not tilted.
-                    let (eye_y, target_offset) = if auto_rotate_period.is_some() {
-                        (surface_z as f32, glam::Vec3::new(0.0, 0.0, 30.0))
-                    } else {
-                        ((surface_z + 18) as f32, glam::Vec3::new(0.0, -3.0, 30.0))
-                    };
+                    // Standing eye-height (surface + 18 = 1.8m) with a
+                    // slight downward tilt so the camera ray actually
+                    // meets the ground. Without the -3y tilt, a
+                    // horizontal ray from eye=(..,+18,..) flies parallel
+                    // above a flat ground plane and never hits anything,
+                    // so the distant view looks empty.
+                    //
+                    // Auto-rotate uses the same camera pose as normal
+                    // startup; the earlier experiment of putting the
+                    // camera at z=surface (inside the top voxel) was
+                    // wrong — every DDA ray hit that voxel on step 0
+                    // and the screen rendered as one uniform color.
+                    let eye_y = (surface_z + 18) as f32;
+                    let target_offset = glam::Vec3::new(0.0, -3.0, 30.0);
                     let eye = glam::Vec3::new(vx, eye_y, vy);
                     let target = eye + target_offset;
                     eprintln!("[voxel] Camera at settlement '{}' ({:?}) surface_z={} eye_y={}",
@@ -444,6 +456,7 @@ impl AppState {
             window, ctx, alloc, swapchain, renderer, camera,
             auto_rotate_period,
             auto_rotate_last: Instant::now(),
+            last_spiral_chunk: None,
             bridge, sim,
             terrain_compute,
             gpu_megas: HashMap::new(),
@@ -620,93 +633,61 @@ impl AppState {
     /// dispatches at once means none complete in any reasonable time —
     /// present_blit stalls behind the compute queue backlog and the frame
     /// rate collapses.
-    fn generate_camera_chunks(&mut self, budget: usize) {
-        // Cap in-flight compute dispatches. With the render→present semaphore
-        // handoff (voxel_engine 4364161) graphics no longer CPU-blocks on
-        // compute, so this cap just throttles how fast we grow the queue.
-        // History:
-        //   4  → pool filled at ~2 chunks/sec (queue drained before refill)
-        //   32 → ~24 chunks/sec throughput, initial load ~10 s for 256
-        //        chunks, clean ~1 s transition
-        //   64 → tried to improve the initial-load transient, but drain
-        //        throughput is GPU-bound at ~24 chunks/sec regardless
-        //        of parallelism. Larger in-flight just means more
-        //        drains per batch → more pool_generation bumps → more
-        //        cull cache invalidations → drain transition actually
-        //        got SLOWER (7 k FPS for 2 seconds vs 32 M FPS for 1 s).
-        //        Reverted.
-        const MAX_INFLIGHT: usize = 32;
-
-        let (_free, in_flight, _loaded) = self.terrain_compute.pool_stats();
-        if in_flight >= MAX_INFLIGHT {
-            // Short-circuit counter is a diagnostic only — gated behind
-            // detailed_perf so the fast path doesn't pay for a u32 RMW
-            // every frame. At 140 M+ FPS this was ~0.5 ns/frame (~7 %
-            // of the 7.12 ns frame), dwarfing the debug value.
-            if self.detailed_perf {
-                self.gen_short_circuit_this_sec += 1;
-            }
-            return;
-        }
-
-        // Converged-spiral short-circuit — FIRST, before any expensive
-        // work. Once the pool has been filled with every in-frustum
-        // chunk the spiral can find, re-running the spiral every frame
-        // for the same camera pose produces zero new submissions, so
-        // nothing matters except the camera + in_flight state. Compare
-        // directly against cached engine-space eye + center (6 floats)
-        // so we can bail before cloning the region plan.
+    fn generate_camera_chunks(&mut self, _budget: usize) {
+        // Fixed 8-chunk-radius disk around the camera, 5 z-levels
+        // (surface ± 2). Submits the whole set in one call whenever the
+        // camera crosses into a new chunk; returns immediately if the
+        // camera's current chunk matches the last submission's. Rotation
+        // inside a single chunk is a pure no-op.
         //
-        // The previous ordering did: pool_stats() → plan.clone() →
-        // axis-swap → forward-vector sqrt → short-circuit check. The
-        // plan.clone() deep-copies three large Vecs (cells/rivers/roads)
-        // on every frame at ~250 k FPS, which was the single biggest
-        // hidden cost in run_frame's `other` bucket.
+        // Chunk count per submission: π * 8² * 5 ≈ 1005, just under the
+        // 1024-slot pool. Pool LRU handles eviction when the camera
+        // crosses a boundary (the chunks leaving the new disk become
+        // the oldest and get evicted first).
+        //
+        // This deliberately drops the old spiral + frustum-cull + per-
+        // frame budget + MAX_INFLIGHT machinery. That machinery existed
+        // to keep per-frame work tiny on the assumption that the spiral
+        // ran every frame; with the cache-on-chunk-crossing shortcut the
+        // spiral only runs when the camera physically changes chunks,
+        // which on a normal walking pace is maybe 1/s.
+        const RADIUS: i32 = 8;
+        const RADIUS_SQ: i32 = RADIUS * RADIUS;
+
         let cam = self.camera.eye_position();
-        let cam_center_v = self.camera.center();
-        let cam_key = [
-            cam[0], cam[1], cam[2],
-            cam_center_v.x, cam_center_v.y, cam_center_v.z,
-        ];
-        if in_flight == 0
-            && self.last_gen_converged_cam.map(|c| c == cam_key).unwrap_or(false)
-        {
+        // Convert engine (x, y-up, z) → sim (x, y, z-up).
+        let cam_vx = cam[0];
+        let cam_vy = cam[2];
+        let cam_vz = cam[1];
+
+        let cs = CHUNK_SIZE as f32;
+        let center_cx = (cam_vx / cs).floor() as i32;
+        let center_cy = (cam_vy / cs).floor() as i32;
+        let center_cz = (cam_vz / cs).floor() as i32;
+
+        // Chunk-crossing short-circuit. Camera rotation and
+        // sub-chunk movement leave this unchanged, so the entire
+        // disk-submission loop below is skipped.
+        let cur_chunk = (center_cx, center_cy, center_cz);
+        if self.last_spiral_chunk == Some(cur_chunk) {
             if self.detailed_perf {
                 self.gen_short_circuit_this_sec += 1;
             }
             return;
         }
 
-        // Slow path: the spiral might actually submit something, so we
-        // need the region plan and the sim-space conversions.
-        let budget = budget.min(MAX_INFLIGHT - in_flight);
-        let has_plan = self.sim.state().voxel_world.region_plan.is_some();
-        static LOGGED_PLAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if !LOGGED_PLAN.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            eprintln!("[voxel] generate_camera_chunks: has_plan={}", has_plan);
-        }
+        // We're going to do the full sweep; pull the plan out for the
+        // surface lookup. (The plan is shared-ownership; .clone() here
+        // is a deep copy of several Vecs but only runs once per chunk
+        // crossing.)
         let plan = match &self.sim.state().voxel_world.region_plan {
             Some(p) => p.clone(),
             None => return,
         };
         let seed = self.sim.state().rng_state;
-        // Convert engine coords (x, y-up, z) back to sim coords (x, y, z-up).
-        let cam_vx = cam[0];
-        let cam_vy = cam[2]; // engine z → sim y
-        let cam_vz = cam[1]; // engine y → sim z
 
-        // Camera forward in sim coords (same axis swap).
-        let fwd_raw = [cam_center_v.x - cam[0], cam_center_v.y - cam[1], cam_center_v.z - cam[2]];
-        let fwd_len2 = fwd_raw[0] * fwd_raw[0] + fwd_raw[1] * fwd_raw[1] + fwd_raw[2] * fwd_raw[2];
-        let (fwd_vx, fwd_vy, fwd_vz) = if fwd_len2 > 1e-6 {
-            let inv = 1.0 / fwd_len2.sqrt();
-            // engine (x, y-up, z) → sim (x, z, y)
-            (fwd_raw[0] * inv, fwd_raw[2] * inv, fwd_raw[1] * inv)
-        } else {
-            (1.0, 0.0, 0.0)
-        };
-
-        // One-time debug: log camera position and what biome we're looking at
+        // One-time debug log — preserved from the old impl so operators
+        // see which biome the camera started in.
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             let (cell, _, _) = plan.sample(cam_vx, cam_vy);
@@ -715,178 +696,61 @@ impl AppState {
                 cam_vx, cam_vy, cam_vz, surface, cell.terrain, cell.height);
         }
 
-        let cs = CHUNK_SIZE as f32;
-        let center_cx = (cam_vx / cs).floor() as i32;
-        let center_cy = (cam_vy / cs).floor() as i32;
-        let center_cz = (cam_vz / cs).floor() as i32;
-
-        // Single-column surface estimate at the camera xy. Used to extend
-        // the per-(cx,cy) z load list down to the actual ground when the
-        // camera is well above the surface (e.g. user pressed E to fly
-        // up). Without this, the spiral only loads dz=-1..=1 around the
-        // camera chunk, missing the surface chunks entirely — visible as
-        // floating tree canopies with no trunks or ground beneath them
-        // (the canopy lives in chunks ~2-3 above the surface, which the
-        // narrow camera-band still loads, but the trunk + ground chunks
-        // 2+ chunks below the camera are skipped).
-        //
-        // Per-column would be more accurate at biome boundaries but FBM
-        // is expensive; one global surface estimate is good enough until
-        // the user complains about ground popping at biome edges.
+        // Surface chunk at camera xy — the 5 z-levels are centered here,
+        // not on the camera's own chunk. When the camera is high above
+        // the surface, this loads the ground chunks (with tree trunks +
+        // canopies) instead of useless air above.
         let surface_z = crate::world_sim::terrain::surface_height_at(
             cam_vx, cam_vy, &plan, seed,
         );
         let surface_cz = surface_z.div_euclid(CHUNK_SIZE as i32);
-        let surf_dz_off = surface_cz - center_cz;
 
-        // Radius in chunks to check around camera.
-        let radius = (LOAD_RADIUS / (MEGA as f32 * cs)).ceil() as i32 + 1;
-
-        // Build the render frustum planes once so the spiral can reject
-        // candidates that won't pass the render-side frustum test anyway.
-        // Previously we only dropped chunks more than ~107° off-axis via a
-        // forward-alignment dot product, which was way wider than the
-        // render frustum (~90° × 45°). The spiral was happily submitting
-        // ~75% of all chunks within LOAD_RADIUS, most of which would never
-        // be visible. Once the pool filled, LRU eviction kept churning
-        // these off-screen chunks — compute stayed 100% busy, hogging the
-        // GPU SMs and starving the render queue.
-        //
-        // With real frustum culling here + in the render path, a
-        // stationary camera reaches a steady state where all in-frustum
-        // chunks are loaded, the spiral finds nothing new to submit,
-        // compute goes idle, and graphics gets the full GPU.
-        let aspect = RENDER_WIDTH as f32 / RENDER_HEIGHT as f32;
-        let vp = frustum_vp_matrix(&self.camera, aspect);
-        let frustum_planes = extract_frustum_planes(&vp);
-
-        let mut submitted = 0;
-        let mut skipped_behind = 0u32;
-        let _ = fwd_vx; let _ = fwd_vy; let _ = fwd_vz; // superseded by frustum
-        // Spiral outward from camera for priority ordering.
-        'outer: for dist in 0..=radius {
-            for dx in -dist..=dist {
-                for dy in -dist..=dist {
-                    // Two vertical clusters per (cx,cy) column:
-                    //   1. Camera-local: dz ∈ [-1, 0, 1] around the camera
-                    //      chunk. Covers caves below, the camera's own
-                    //      chunk, and aerial peeks above.
-                    //   2. Surface-local: dz ∈ [surf-1, surf, surf+1]
-                    //      where `surf` is the offset from the camera
-                    //      chunk to the surface chunk. Loads the ground
-                    //      and the column of chunks containing tree
-                    //      trunks even when the camera is well above
-                    //      the surface.
-                    //
-                    // The two clusters overlap entirely when the camera
-                    // is at the surface (surf_dz_off ∈ [-1, 1]); in that
-                    // case the second cluster's submissions are no-ops
-                    // because submit_chunk_with_frame deduplicates.
-                    //
-                    // The old narrow -1..=1 range was a perf optimization
-                    // that assumed a first-person camera at surface
-                    // height, which broke as soon as the user flew up
-                    // with E — visible as floating canopies because the
-                    // trunk/ground chunks 2+ below the camera weren't
-                    // loaded. Restoring correctness here costs at most
-                    // 2x the spiral submissions (the second cluster
-                    // mostly hits already-loaded surface chunks once
-                    // the world is filled in).
-                    let z_offsets: [i32; 6] = [
-                        -1, 0, 1,
-                        surf_dz_off - 1, surf_dz_off, surf_dz_off + 1,
-                    ];
-                    for &dz in &z_offsets {
-                        if submitted >= budget { break 'outer; }
-                        // Only process shell of current distance.
-                        if dx.abs() != dist && dy.abs() != dist { continue; }
-
-                        // Frustum cull ALL chunks — including shells 0-1.
-                        // Previously shells 0-1 were always submitted as
-                        // insurance for camera rotation, but on a
-                        // stationary camera those non-visible shell-0/1
-                        // chunks were getting LRU-churned every frame:
-                        // submitted → evicted → re-submitted → evicted →
-                        // ... keeping the compute queue at 100% even
-                        // though the pool already held every in-frustum
-                        // chunk the render needed. The camera chunk
-                        // itself (dist=0) always passes frustum because
-                        // the camera is inside its AABB.
-                        //
-                        // Sim chunk (cx, cy, cz) → engine-space AABB.
-                        // Engine coords: sim.x → eng.x, sim.z → eng.y (up),
-                        // sim.y → eng.z. So a chunk spanning sim
-                        // (cx..cx+1, cy..cy+1, cz..cz+1) becomes engine
-                        // (cx..cx+1, cz..cz+1, cy..cy+1).
-                        {
-                            let scx = center_cx + dx;
-                            let scy = center_cy + dy;
-                            let scz = center_cz + dz;
-                            let min = [
-                                scx as f32 * cs,
-                                scz as f32 * cs,
-                                scy as f32 * cs,
-                            ];
-                            let max = [min[0] + cs, min[1] + cs, min[2] + cs];
-                            if !aabb_vs_frustum(&frustum_planes, &min, &max) {
-                                skipped_behind += 1;
-                                continue;
-                            }
+        // Submit the whole disk. Inside the pool, `submit_chunk_with_frame`
+        // returns Ok(None) for already-loaded or in-flight chunks, so most
+        // calls after the first chunk-crossing are no-ops. Crossings
+        // produce at most ~40 new chunks (the new ring on the leading
+        // edge) which is well within the MAX_INFLIGHT budget.
+        let mut submitted = 0usize;
+        let cam_frame = self.frame_count;
+        for dx in -RADIUS..=RADIUS {
+            for dy in -RADIUS..=RADIUS {
+                if dx * dx + dy * dy > RADIUS_SQ {
+                    continue;
+                }
+                for dcz in -2..=2i32 {
+                    let cp = ChunkPos::new(
+                        center_cx + dx,
+                        center_cy + dy,
+                        surface_cz + dcz,
+                    );
+                    if self.pending_chunk_requests.values().any(|p| *p == cp) {
+                        continue;
+                    }
+                    match self.terrain_compute.submit_chunk_with_frame(
+                        &self.ctx,
+                        [cp.x, cp.y, cp.z],
+                        seed as u32,
+                        cam_frame,
+                    ) {
+                        Ok(Some(req_id)) => {
+                            self.pending_chunk_requests.insert(req_id, cp);
+                            submitted += 1;
+                            self.gen_submitted_this_sec += 1;
                         }
-
-                        let cp = ChunkPos::new(center_cx + dx, center_cy + dy, center_cz + dz);
-                        // NOTE: we intentionally do NOT skip chunks that exist
-                        // in sim.voxel_world.chunks — those are inserted by the
-                        // settlement pre-gen CPU thread for simulation queries,
-                        // but the GPU pool is a separate rendering cache.
-                        // Phase 3 removed the upload_megas path, so without
-                        // submitting here the renderer sees nothing for
-                        // settlement areas. submit_chunk itself is a no-op for
-                        // chunks already Loaded or InFlight in the pool.
-                        if self.pending_chunk_requests.values().any(|p| *p == cp) { continue; }
-
-                        match self.terrain_compute.submit_chunk_with_frame(
-                            &self.ctx,
-                            [cp.x, cp.y, cp.z],
-                            seed as u32,
-                            self.frame_count as u64,
-                        ) {
-                            Ok(Some(req_id)) => {
-                                self.pending_chunk_requests.insert(req_id, cp);
-                                submitted += 1;
-                                self.gen_submitted_this_sec += 1;
-                            }
-                            Ok(None) => {
-                                // Chunk is already Loaded or InFlight in the
-                                // pool — deduplication, not a failure. Skip
-                                // and keep scanning for new chunks to submit.
-                                // (Also returned when all 256 slots are
-                                // InFlight, which is rare; the next frame
-                                // will drain some and retry.)
-                                continue;
-                            }
-                            Err(e) => {
-                                eprintln!("[voxel] submit_chunk failed for {:?}: {}", cp, e);
-                                break 'outer;
-                            }
+                        Ok(None) => continue,
+                        Err(e) => {
+                            eprintln!("[voxel] submit_chunk failed for {:?}: {}", cp, e);
+                            return;
                         }
                     }
                 }
             }
         }
-        let _ = skipped_behind; // currently unused; could surface in perf log
+        let _ = submitted; // diagnostic only
 
-        // If the spiral found nothing new to submit, remember the current
-        // camera state so the next frame can skip the whole spiral if the
-        // camera hasn't moved. Note we only mark convergence when the
-        // spiral ran to completion (not when it bailed early via
-        // `break 'outer` from an error) — `submitted == 0` at this point
-        // implies a complete sweep that couldn't find anything.
-        if submitted == 0 {
-            self.last_gen_converged_cam = Some(cam_key);
-        } else {
-            self.last_gen_converged_cam = None;
-        }
+        // Remember the chunk we just submitted for so the next frame's
+        // call short-circuits until the camera crosses a boundary.
+        self.last_spiral_chunk = Some(cur_chunk);
     }
 
     /// Submit chunks in a bulk radius around the camera. Invoked by the F key.
@@ -1139,23 +1003,26 @@ impl AppState {
         // 5000 FPS hot path.
         let chunk_size_f = CHUNK_SIZE as f32;
         self.visible_buf.clear();
+        // No culling — just draw every loaded chunk. The user explicitly
+        // asked for this ("let's just stop culling for now"), and at
+        // multi-GFPS drawing a thousand cube-DDA passes per frame is
+        // essentially free. Chunks outside the view frustum get trivially
+        // rasterized to zero fragments, so the cost is just the
+        // cmd_bind_descriptor_sets + cmd_push_constants + draw per chunk.
+        //
+        // Distance is kept only for front-to-back sort ordering, which
+        // maximizes early-depth rejection in the fragment shader.
+        let _ = planes; // frustum no longer used
         for v in self.terrain_compute.loaded_chunk_views() {
             let pos = [
                 v.chunk_pos[0] as f32 * chunk_size_f,
                 v.chunk_pos[2] as f32 * chunk_size_f, // sim z → engine y (up)
                 v.chunk_pos[1] as f32 * chunk_size_f, // sim y → engine z
             ];
-            let max = [pos[0] + dims, pos[1] + dims, pos[2] + dims];
-            if !aabb_vs_frustum(&planes, &pos, &max) {
-                continue;
-            }
             let cx = pos[0] + dims * 0.5 - cam_pos[0];
             let cy = pos[1] + dims * 0.5 - cam_pos[1];
             let cz = pos[2] + dims * 0.5 - cam_pos[2];
             let dist2 = cx * cx + cy * cy + cz * cz;
-            if dist2 > LOAD_RADIUS * LOAD_RADIUS * 4.0 {
-                continue;
-            }
             self.visible_buf
                 .push((v, [1.0f32, 1.0, 1.0, 1.0], pos, [dims, dims, dims], dist2));
         }
