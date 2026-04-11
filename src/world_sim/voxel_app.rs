@@ -1523,8 +1523,42 @@ impl ApplicationHandler for WorldSimVoxelApp {
             // tick_sim handles multi-tick catchup correctly.
             app.tick_sim(dt_total);
 
-            for _ in 0..FRAME_BATCH {
-                app.run_frame(per_frame_dt);
+            // Batch-level stability skip. Inside a single batch:
+            //   - camera pose is constant (WindowEvent handlers only
+            //     fire between batches)
+            //   - pool_generation is constant (drains happened above;
+            //     no submissions happen in a stable-scene fast path)
+            //   - keys_held is constant (same reason as camera)
+            //   - in_flight is constant (drains already happened)
+            // So if the scene is "stable" (camera matches the last
+            // full cull, pool matches, keys empty, in_flight 0), all
+            // FRAME_BATCH iterations of run_frame() would take the
+            // identical short-circuit through gen / update_cam /
+            // render. The only real side effect is
+            // bulk_touch_all_loaded(frame_count) — writing the same
+            // frame_count value FRAME_BATCH times. Do it once and
+            // skip the loop entirely.
+            //
+            // Detailed-perf mode always runs the normal per-frame
+            // path so its per-phase timings remain meaningful.
+            let eye = app.camera.eye_position();
+            let center = app.camera.center();
+            let cam_key = [eye[0], eye[1], eye[2], center.x, center.y, center.z];
+            let pool_gen = app.terrain_compute.pool_generation();
+            let (_, in_flight, _) = app.terrain_compute.pool_stats();
+            let batch_stable = !app.detailed_perf
+                && app.last_cull_cam_key == Some(cam_key)
+                && app.last_cull_pool_gen == pool_gen
+                && !app.pool_views_buf.is_empty()
+                && app.keys_held.is_empty()
+                && in_flight == 0;
+
+            if batch_stable {
+                app.terrain_compute.bulk_touch_all_loaded(app.frame_count as u64);
+            } else {
+                for _ in 0..FRAME_BATCH {
+                    app.run_frame(per_frame_dt);
+                }
             }
 
             let batch_ms = batch_start.elapsed().as_secs_f32() * 1000.0;
