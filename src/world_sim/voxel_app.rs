@@ -121,6 +121,13 @@ struct AppState {
     drain_completed_this_sec: u32,
     gen_short_circuit_this_sec: u32,
 
+    /// (eye_x, eye_y, eye_z, fwd_x, fwd_y, fwd_z) of the camera at the end of
+    /// the last generate_camera_chunks call that submitted 0 chunks. If the
+    /// camera hasn't moved since and the pool has no in-flight dispatches,
+    /// gen short-circuits immediately — the spiral has already converged and
+    /// will just find dedup no-ops for the entire 13-chunk radius.
+    last_gen_converged_cam: Option<[f32; 6]>,
+
     // Per-phase timing EMAs (exponential moving avg, ms). Alpha=0.1.
     ema_drain_cpu_ms: f32,
     ema_drain_gpu_ms: f32,
@@ -330,6 +337,7 @@ impl AppState {
             chunks_pending: total_settlement_chunks,
             chunks_loaded: 0,
             pending_chunk_requests: HashMap::new(),
+            last_gen_converged_cam: None,
             ema_drain_cpu_ms: 0.0,
             ema_drain_gpu_ms: 0.0,
             ema_gen_ms: 0.0,
@@ -503,6 +511,21 @@ impl AppState {
             (1.0, 0.0, 0.0)
         };
 
+        // Converged-spiral short-circuit. Once the pool has been filled
+        // with every in-frustum chunk the spiral can find (last run
+        // submitted 0), re-running the spiral every frame for the same
+        // camera pose is ~130K dedup comparisons for zero work — 0.11 ms
+        // per frame, or >50% of the frame time at 5000 FPS. Skip the
+        // whole function if (camera hasn't moved) AND (no compute work
+        // is in flight that could free up a slot for a new submission).
+        let cam_key = [cam_vx, cam_vy, cam_vz, fwd_vx, fwd_vy, fwd_vz];
+        if in_flight == 0
+            && self.last_gen_converged_cam.map(|c| c == cam_key).unwrap_or(false)
+        {
+            self.gen_short_circuit_this_sec += 1;
+            return;
+        }
+
         // One-time debug: log camera position and what biome we're looking at
         static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -631,6 +654,18 @@ impl AppState {
             }
         }
         let _ = skipped_behind; // currently unused; could surface in perf log
+
+        // If the spiral found nothing new to submit, remember the current
+        // camera state so the next frame can skip the whole spiral if the
+        // camera hasn't moved. Note we only mark convergence when the
+        // spiral ran to completion (not when it bailed early via
+        // `break 'outer` from an error) — `submitted == 0` at this point
+        // implies a complete sweep that couldn't find anything.
+        if submitted == 0 {
+            self.last_gen_converged_cam = Some(cam_key);
+        } else {
+            self.last_gen_converged_cam = None;
+        }
     }
 
     /// Submit chunks in a bulk radius around the camera. Invoked by the F key.
