@@ -853,8 +853,10 @@ impl AppState {
         let raycast_ms = t_raycast.elapsed().as_secs_f32() * 1000.0;
 
         let t_present = Instant::now();
-        let src = self.renderer.light_output_image();
-        // GPU-side wait: the blit reads the renderer's light target, which
+        // Lighting was merged into the gbuffer fragment shader, so the
+        // final post-light color lives in the gbuffer's single RT.
+        let src = self.renderer.gbuffer_output_image();
+        // GPU-side wait: the blit reads the renderer's output, which
         // the renderer queued but did NOT CPU-wait for. The semaphore makes
         // present_blit's submit block on the GPU side until render is done.
         let render_done = self.renderer.render_done_semaphore();
