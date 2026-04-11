@@ -1190,6 +1190,7 @@ impl AppState {
     /// 1 Hz perf log, and updates ema_frame_ms from the batch-level
     /// measurement. Batch-level timing is applied to every frame in
     /// the batch as an average, which is exactly what the EMA wants.
+    #[inline(always)]
     fn record_batch_stats(&mut self, batch_start: Instant, batch_ms: f32, frames_in_batch: usize) {
         // Per-frame timing averaged over the batch.
         let per_frame_ms = batch_ms / frames_in_batch as f32;
@@ -1256,6 +1257,7 @@ impl AppState {
     /// trait dispatch), leaving only our body + winit's
     /// `pump_app_events` poll (which is much cheaper when no events
     /// are pending).
+    #[inline(always)]
     fn run_batch(&mut self) {
         // Batch size is the big knob here. After the batch-level
         // stability skip was added, the inner loop is elided on
