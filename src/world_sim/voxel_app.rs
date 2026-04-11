@@ -1145,17 +1145,24 @@ impl AppState {
 
         let a = 0.1;
         let lerp = |old: f32, new: f32| old * (1.0 - a) + new * a;
-        self.ema_drain_cpu_ms = lerp(self.ema_drain_cpu_ms, drain_cpu_ms);
-        self.ema_drain_gpu_ms = lerp(self.ema_drain_gpu_ms, drain_gpu_ms);
-        self.ema_gen_ms = lerp(self.ema_gen_ms, gen_ms);
-        self.ema_update_cam_ms = lerp(self.ema_update_cam_ms, update_cam_ms);
-        self.ema_tick_sim_ms = lerp(self.ema_tick_sim_ms, tick_sim_ms);
-        self.ema_render_ms = lerp(self.ema_render_ms, render_ms);
-        self.ema_cull_ms = lerp(self.ema_cull_ms, cull_ms);
-        self.ema_wait_ms = lerp(self.ema_wait_ms, wait_ms);
-        self.ema_raycast_ms = lerp(self.ema_raycast_ms, raycast_ms);
-        self.ema_present_ms = lerp(self.ema_present_ms, present_ms);
         self.ema_frame_ms = lerp(self.ema_frame_ms, frame_ms);
+        if detailed {
+            // Only update the per-bucket EMAs when we actually have
+            // per-bucket data. On the fast path all 10 of these would
+            // be lerp(old, 0.0) = old * 0.9 — 11 scattered float RMW
+            // cycles per frame for no signal. At 360 k FPS that was
+            // ~150 ns/frame of measurement overhead.
+            self.ema_drain_cpu_ms = lerp(self.ema_drain_cpu_ms, drain_cpu_ms);
+            self.ema_drain_gpu_ms = lerp(self.ema_drain_gpu_ms, drain_gpu_ms);
+            self.ema_gen_ms = lerp(self.ema_gen_ms, gen_ms);
+            self.ema_update_cam_ms = lerp(self.ema_update_cam_ms, update_cam_ms);
+            self.ema_tick_sim_ms = lerp(self.ema_tick_sim_ms, tick_sim_ms);
+            self.ema_render_ms = lerp(self.ema_render_ms, render_ms);
+            self.ema_cull_ms = lerp(self.ema_cull_ms, cull_ms);
+            self.ema_wait_ms = lerp(self.ema_wait_ms, wait_ms);
+            self.ema_raycast_ms = lerp(self.ema_raycast_ms, raycast_ms);
+            self.ema_present_ms = lerp(self.ema_present_ms, present_ms);
+        }
 
         self.frame_count += 1;
         let fps_elapsed = t_frame_start.duration_since(self.fps_timer).as_secs_f32();
@@ -1306,6 +1313,16 @@ impl AppState {
 
     fn update_camera(&mut self, dt: f32) {
         use voxel_engine::camera::{CameraController, InputState};
+
+        // Fast path: if no movement keys are held, nothing about the
+        // camera changes this frame. Mouse deltas are applied directly
+        // from WindowEvent::CursorMoved (not through update_camera), so
+        // an empty keys_held set means truly nothing to update — avoid
+        // the HashSet lookups AND the per-call view-matrix rebuild in
+        // FreeCamera::update (~0.5 µs/frame at 360 k FPS).
+        if self.keys_held.is_empty() {
+            return;
+        }
 
         let forward = if self.keys_held.contains(&KeyCode::KeyW) { 1.0 }
             else if self.keys_held.contains(&KeyCode::KeyS) { -1.0 }
