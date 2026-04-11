@@ -101,6 +101,11 @@ struct AppState {
     dirty_megas: HashSet<MegaPos>,
 
     paused: bool,
+    /// When true, each phase of run_frame is individually timed. Off by
+    /// default — the 14 Instant::now() calls cost ~2 µs/frame at 230 k+
+    /// FPS, which is ~half the frame. Set VOXEL_PERF_DETAILED=1 to
+    /// re-enable per-phase timings for debugging.
+    detailed_perf: bool,
     /// Sim-speed multiplier. ticks_per_frame == 1 means the sim ticks at
     /// SIM_BASE_HZ; doubling it doubles the sim-time rate (1 real second
     /// → 2 sim seconds of advancement). Despite the legacy name, it no
@@ -354,6 +359,9 @@ impl AppState {
             gpu_megas: HashMap::new(),
             dirty_megas: HashSet::new(),
             paused: true, // start paused so sim doesn't run during chunk loading
+            detailed_perf: std::env::var("VOXEL_PERF_DETAILED")
+                .map(|v| v != "0" && !v.is_empty())
+                .unwrap_or(false),
             ticks_per_frame: 10,
             sim_accumulator: 0.0,
             last_frame: Instant::now(),
@@ -891,7 +899,12 @@ impl AppState {
     /// Render one frame. Returns sub-phase timings in ms:
     /// `(cull_ms, wait_ms, raycast_ms, present_ms)`.
     fn render(&mut self) -> Result<(f32, f32, f32, f32)> {
-        let t_cull = Instant::now();
+        // Only pay for an Instant::now() when the caller is going to
+        // read the sub-phase timings. On the steady-state fast path
+        // (detailed_perf == false), both the start-of-cull and
+        // end-of-cull timestamps are discarded, so we skip them.
+        let detailed = self.detailed_perf;
+        let t_cull = if detailed { Some(Instant::now()) } else { None };
 
         // Stable-scene ultra-fast path: if the camera is unchanged AND the
         // chunk pool hasn't mutated since the last cull, `pool_views_buf`
@@ -942,7 +955,7 @@ impl AppState {
             // draining while the camera is already parked at steady
             // state, which previously kicked off a 20-chunk/sec churn).
             self.terrain_compute.bulk_touch_all_loaded(self.frame_count as u64);
-            let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
+            let cull_ms = t_cull.map(|t| t.elapsed().as_secs_f32() * 1000.0).unwrap_or(0.0);
             return Ok((cull_ms, 0.0, 0.0, 0.0));
         }
 
@@ -995,7 +1008,7 @@ impl AppState {
         self.last_cull_cam_key = Some(cur_cam_key);
         self.last_cull_pool_gen = cur_pool_gen;
 
-        let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
+        let cull_ms = t_cull.map(|t| t.elapsed().as_secs_f32() * 1000.0).unwrap_or(0.0);
 
         if self.pool_views_buf.is_empty() {
             let t_present = Instant::now();
@@ -1059,35 +1072,62 @@ impl AppState {
         let dt = (t_frame_start - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = t_frame_start;
 
-        let t_drain_cpu = Instant::now();
-        self.drain_ready_chunks(64);
-        let drain_cpu_ms = t_drain_cpu.elapsed().as_secs_f32() * 1000.0;
+        // At 234 k+ FPS (4.3 µs/frame), the 14 Instant::now() calls
+        // used for per-bucket timing were costing ~2 µs of the frame
+        // (each clock_gettime is ~100-200 ns). Sub-phase buckets all
+        // read 0.00 ms on the steady-state fast path anyway, so we
+        // skip them by default and just measure the whole frame.
+        // Any hidden cost surfaces as `frame_ms` > 0 in the `other`
+        // column, which remains the debugging signal the perf log
+        // was designed for. Set VOXEL_PERF_DETAILED=1 to re-enable
+        // the per-phase timers when debugging a specific bucket.
+        let detailed = self.detailed_perf;
 
-        let t_drain_gpu = Instant::now();
-        self.drain_completed_gpu_chunks();
-        let drain_gpu_ms = t_drain_gpu.elapsed().as_secs_f32() * 1000.0;
+        let (drain_cpu_ms, drain_gpu_ms, gen_ms, update_cam_ms, tick_sim_ms, render_ms,
+             cull_ms, wait_ms, raycast_ms, present_ms) = if detailed {
+            let t_drain_cpu = Instant::now();
+            self.drain_ready_chunks(64);
+            let drain_cpu_ms = t_drain_cpu.elapsed().as_secs_f32() * 1000.0;
 
-        let t_gen = Instant::now();
-        self.generate_camera_chunks(8);
-        let gen_ms = t_gen.elapsed().as_secs_f32() * 1000.0;
+            let t_drain_gpu = Instant::now();
+            self.drain_completed_gpu_chunks();
+            let drain_gpu_ms = t_drain_gpu.elapsed().as_secs_f32() * 1000.0;
 
-        let t_cam = Instant::now();
-        self.update_camera(dt);
-        let update_cam_ms = t_cam.elapsed().as_secs_f32() * 1000.0;
+            let t_gen = Instant::now();
+            self.generate_camera_chunks(8);
+            let gen_ms = t_gen.elapsed().as_secs_f32() * 1000.0;
 
-        let t_sim = Instant::now();
-        self.tick_sim(dt);
-        let tick_sim_ms = t_sim.elapsed().as_secs_f32() * 1000.0;
+            let t_cam = Instant::now();
+            self.update_camera(dt);
+            let update_cam_ms = t_cam.elapsed().as_secs_f32() * 1000.0;
 
-        let t_render = Instant::now();
-        let (cull_ms, wait_ms, raycast_ms, present_ms) = match self.render() {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("[voxel] render error: {}", e);
-                (0.0, 0.0, 0.0, 0.0)
+            let t_sim = Instant::now();
+            self.tick_sim(dt);
+            let tick_sim_ms = t_sim.elapsed().as_secs_f32() * 1000.0;
+
+            let t_render = Instant::now();
+            let (cull_ms, wait_ms, raycast_ms, present_ms) = match self.render() {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("[voxel] render error: {}", e);
+                    (0.0, 0.0, 0.0, 0.0)
+                }
+            };
+            let render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
+            (drain_cpu_ms, drain_gpu_ms, gen_ms, update_cam_ms, tick_sim_ms, render_ms,
+             cull_ms, wait_ms, raycast_ms, present_ms)
+        } else {
+            self.drain_ready_chunks(64);
+            self.drain_completed_gpu_chunks();
+            self.generate_camera_chunks(8);
+            self.update_camera(dt);
+            self.tick_sim(dt);
+            match self.render() {
+                Ok(_) => {}
+                Err(e) => eprintln!("[voxel] render error: {}", e),
             }
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         };
-        let render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
 
         let frame_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
 
