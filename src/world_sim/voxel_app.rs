@@ -1046,6 +1046,115 @@ impl AppState {
         Ok((cull_ms, wait_ms, raycast_ms, present_ms))
     }
 
+    /// One complete frame: drain → gen → update_cam → tick_sim → render
+    /// plus the EMA and per-second log. Formerly inlined in the
+    /// `RedrawRequested` winit handler; pulled out so it can be driven
+    /// directly from `about_to_wait`, bypassing winit's redraw queue
+    /// round-trip. At 195k FPS each frame was making an extra trip
+    /// through the window event loop via `request_redraw()` →
+    /// `RedrawRequested`, which showed up as per-frame overhead we
+    /// couldn't see in any perf bucket.
+    fn run_frame(&mut self) {
+        let t_frame_start = Instant::now();
+        let dt = (t_frame_start - self.last_frame).as_secs_f32().min(0.1);
+        self.last_frame = t_frame_start;
+
+        let t_drain_cpu = Instant::now();
+        self.drain_ready_chunks(64);
+        let drain_cpu_ms = t_drain_cpu.elapsed().as_secs_f32() * 1000.0;
+
+        let t_drain_gpu = Instant::now();
+        self.drain_completed_gpu_chunks();
+        let drain_gpu_ms = t_drain_gpu.elapsed().as_secs_f32() * 1000.0;
+
+        let t_gen = Instant::now();
+        self.generate_camera_chunks(8);
+        let gen_ms = t_gen.elapsed().as_secs_f32() * 1000.0;
+
+        let t_cam = Instant::now();
+        self.update_camera(dt);
+        let update_cam_ms = t_cam.elapsed().as_secs_f32() * 1000.0;
+
+        let t_sim = Instant::now();
+        self.tick_sim(dt);
+        let tick_sim_ms = t_sim.elapsed().as_secs_f32() * 1000.0;
+
+        let t_render = Instant::now();
+        let (cull_ms, wait_ms, raycast_ms, present_ms) = match self.render() {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[voxel] render error: {}", e);
+                (0.0, 0.0, 0.0, 0.0)
+            }
+        };
+        let render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
+
+        let frame_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
+
+        let a = 0.1;
+        let lerp = |old: f32, new: f32| old * (1.0 - a) + new * a;
+        self.ema_drain_cpu_ms = lerp(self.ema_drain_cpu_ms, drain_cpu_ms);
+        self.ema_drain_gpu_ms = lerp(self.ema_drain_gpu_ms, drain_gpu_ms);
+        self.ema_gen_ms = lerp(self.ema_gen_ms, gen_ms);
+        self.ema_update_cam_ms = lerp(self.ema_update_cam_ms, update_cam_ms);
+        self.ema_tick_sim_ms = lerp(self.ema_tick_sim_ms, tick_sim_ms);
+        self.ema_render_ms = lerp(self.ema_render_ms, render_ms);
+        self.ema_cull_ms = lerp(self.ema_cull_ms, cull_ms);
+        self.ema_wait_ms = lerp(self.ema_wait_ms, wait_ms);
+        self.ema_raycast_ms = lerp(self.ema_raycast_ms, raycast_ms);
+        self.ema_present_ms = lerp(self.ema_present_ms, present_ms);
+        self.ema_frame_ms = lerp(self.ema_frame_ms, frame_ms);
+
+        self.frame_count += 1;
+        let fps_elapsed = t_frame_start.duration_since(self.fps_timer).as_secs_f32();
+        if fps_elapsed >= 1.0 {
+            self.last_fps = self.frame_count as f32 / fps_elapsed;
+            self.frame_count = 0;
+            self.fps_timer = t_frame_start;
+            let cam = self.camera.eye_position();
+            let status = if self.paused { "PAUSED" } else { "RUNNING" };
+            let loading = if self.chunks_loaded < self.chunks_pending {
+                format!(" | loading {}/{}", self.chunks_loaded, self.chunks_pending)
+            } else {
+                String::new()
+            };
+            self.window.set_title(&format!(
+                "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {}/{} megas | speed {}x{}",
+                self.last_fps, status, cam[0], cam[1], cam[2],
+                self.last_visible_megas, self.gpu_megas.len(), self.ticks_per_frame, loading,
+            ));
+
+            let accounted = self.ema_drain_cpu_ms + self.ema_drain_gpu_ms + self.ema_gen_ms
+                + self.ema_update_cam_ms + self.ema_tick_sim_ms + self.ema_render_ms;
+            let overhead = (self.ema_frame_ms - accounted).max(0.0);
+            let (free, in_flight, loaded) = self.terrain_compute.pool_stats();
+            eprintln!(
+                "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} wait={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{} | throughput: sub={}/s drained={}/s gen_short_circuit={}/s",
+                self.last_fps,
+                self.ema_frame_ms,
+                self.ema_drain_cpu_ms,
+                self.ema_drain_gpu_ms,
+                self.ema_gen_ms,
+                self.ema_update_cam_ms,
+                self.ema_tick_sim_ms,
+                self.ema_render_ms,
+                self.ema_cull_ms,
+                self.ema_wait_ms,
+                self.ema_raycast_ms,
+                self.ema_present_ms,
+                overhead,
+                self.last_visible_megas,
+                free, in_flight, loaded,
+                self.gen_submitted_this_sec,
+                self.drain_completed_this_sec,
+                self.gen_short_circuit_this_sec,
+            );
+            self.gen_submitted_this_sec = 0;
+            self.drain_completed_this_sec = 0;
+            self.gen_short_circuit_this_sec = 0;
+        }
+    }
+
     fn tick_sim(&mut self, dt: f32) {
         if self.paused { return; }
 
@@ -1251,118 +1360,24 @@ impl ApplicationHandler for WorldSimVoxelApp {
                 app.move_speed = (app.move_speed + scroll * 10.0).clamp(5.0, 500.0);
                 app.camera.set_move_speed(app.move_speed);
             }
-            WindowEvent::RedrawRequested => {
-                let t_frame_start = Instant::now();
-                let dt = (t_frame_start - app.last_frame).as_secs_f32().min(0.1);
-                app.last_frame = t_frame_start;
-
-                // Phase: CPU chunk drain (settlement pre-gen thread → VoxelWorld)
-                let t_drain_cpu = Instant::now();
-                app.drain_ready_chunks(64);
-                let drain_cpu_ms = t_drain_cpu.elapsed().as_secs_f32() * 1000.0;
-
-                // Phase: GPU pool drain (fence poll → Loaded state)
-                let t_drain_gpu = Instant::now();
-                app.drain_completed_gpu_chunks();
-                let drain_gpu_ms = t_drain_gpu.elapsed().as_secs_f32() * 1000.0;
-
-                // Phase: submit new GPU compute dispatches
-                let t_gen = Instant::now();
-                app.generate_camera_chunks(8);
-                let gen_ms = t_gen.elapsed().as_secs_f32() * 1000.0;
-
-                // Phase: camera update
-                let t_cam = Instant::now();
-                app.update_camera(dt);
-                let update_cam_ms = t_cam.elapsed().as_secs_f32() * 1000.0;
-
-                // Phase: sim tick
-                let t_sim = Instant::now();
-                app.tick_sim(dt);
-                let tick_sim_ms = t_sim.elapsed().as_secs_f32() * 1000.0;
-
-                // Phase: render (sub-phases: cull, wait, raycast, present)
-                let t_render = Instant::now();
-                let (cull_ms, wait_ms, raycast_ms, present_ms) = match app.render() {
-                    Ok(t) => t,
-                    Err(e) => {
-                        eprintln!("[voxel] render error: {}", e);
-                        (0.0, 0.0, 0.0, 0.0)
-                    }
-                };
-                let render_ms = t_render.elapsed().as_secs_f32() * 1000.0;
-
-                let frame_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
-
-                // EMA smoothing, alpha=0.1
-                let a = 0.1;
-                let lerp = |old: f32, new: f32| old * (1.0 - a) + new * a;
-                app.ema_drain_cpu_ms = lerp(app.ema_drain_cpu_ms, drain_cpu_ms);
-                app.ema_drain_gpu_ms = lerp(app.ema_drain_gpu_ms, drain_gpu_ms);
-                app.ema_gen_ms = lerp(app.ema_gen_ms, gen_ms);
-                app.ema_update_cam_ms = lerp(app.ema_update_cam_ms, update_cam_ms);
-                app.ema_tick_sim_ms = lerp(app.ema_tick_sim_ms, tick_sim_ms);
-                app.ema_render_ms = lerp(app.ema_render_ms, render_ms);
-                app.ema_cull_ms = lerp(app.ema_cull_ms, cull_ms);
-                app.ema_wait_ms = lerp(app.ema_wait_ms, wait_ms);
-                app.ema_raycast_ms = lerp(app.ema_raycast_ms, raycast_ms);
-                app.ema_present_ms = lerp(app.ema_present_ms, present_ms);
-                app.ema_frame_ms = lerp(app.ema_frame_ms, frame_ms);
-
-                // FPS tracking + per-second log
-                app.frame_count += 1;
-                let fps_elapsed = t_frame_start.duration_since(app.fps_timer).as_secs_f32();
-                if fps_elapsed >= 1.0 {
-                    app.last_fps = app.frame_count as f32 / fps_elapsed;
-                    app.frame_count = 0;
-                    app.fps_timer = t_frame_start;
-                    let cam = app.camera.eye_position();
-                    let status = if app.paused { "PAUSED" } else { "RUNNING" };
-                    let loading = if app.chunks_loaded < app.chunks_pending {
-                        format!(" | loading {}/{}", app.chunks_loaded, app.chunks_pending)
-                    } else {
-                        String::new()
-                    };
-                    app.window.set_title(&format!(
-                        "World Sim — {:.0} FPS | {} | {:.0},{:.0},{:.0} | {}/{} megas | speed {}x{}",
-                        app.last_fps, status, cam[0], cam[1], cam[2],
-                        app.last_visible_megas, app.gpu_megas.len(), app.ticks_per_frame, loading,
-                    ));
-
-                    // Detailed per-phase breakdown (EMAs).
-                    let accounted = app.ema_drain_cpu_ms + app.ema_drain_gpu_ms + app.ema_gen_ms
-                        + app.ema_update_cam_ms + app.ema_tick_sim_ms + app.ema_render_ms;
-                    let overhead = (app.ema_frame_ms - accounted).max(0.0);
-                    let (free, in_flight, loaded) = app.terrain_compute.pool_stats();
-                    eprintln!(
-                        "[perf] {:.1} FPS frame={:.2}ms | drain_cpu={:.2} drain_gpu={:.2} gen={:.2} cam={:.2} sim={:.2} render={:.2} [cull={:.2} wait={:.2} raycast={:.2} present={:.2}] other={:.2} | visible={} pool=free:{}/inflight:{}/loaded:{} | throughput: sub={}/s drained={}/s gen_short_circuit={}/s",
-                        app.last_fps,
-                        app.ema_frame_ms,
-                        app.ema_drain_cpu_ms,
-                        app.ema_drain_gpu_ms,
-                        app.ema_gen_ms,
-                        app.ema_update_cam_ms,
-                        app.ema_tick_sim_ms,
-                        app.ema_render_ms,
-                        app.ema_cull_ms,
-                        app.ema_wait_ms,
-                        app.ema_raycast_ms,
-                        app.ema_present_ms,
-                        overhead,
-                        app.last_visible_megas,
-                        free, in_flight, loaded,
-                        app.gen_submitted_this_sec,
-                        app.drain_completed_this_sec,
-                        app.gen_short_circuit_this_sec,
-                    );
-                    app.gen_submitted_this_sec = 0;
-                    app.drain_completed_this_sec = 0;
-                    app.gen_short_circuit_this_sec = 0;
-                }
-
-                app.window.request_redraw();
-            }
+            // Frames are now driven by `about_to_wait` (see below), not
+            // by the winit redraw queue. Any RedrawRequested event from
+            // the compositor (e.g. window expose) is harmless here —
+            // the next about_to_wait will render a fresh frame anyway.
+            WindowEvent::RedrawRequested => {}
             _ => {}
+        }
+    }
+
+    /// Called by winit after the event queue is drained, before the
+    /// event loop sleeps/polls again. With `ControlFlow::Poll` this
+    /// fires on every iteration, so we drive frame rendering here
+    /// instead of through `RedrawRequested` + `request_redraw()`. That
+    /// eliminates the per-frame round trip through the window redraw
+    /// queue and the cross-process event dispatch that comes with it.
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(app) = &mut self.state {
+            app.run_frame();
         }
     }
 }
