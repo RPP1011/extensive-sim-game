@@ -1292,7 +1292,7 @@ impl AppState {
         // the field reads and array construction. Saves ~15-20 ns per
         // batch on the stable-scene fast path.
         let pool_gen = self.terrain_compute.pool_generation();
-        let (_, in_flight, _) = self.terrain_compute.pool_stats();
+        let in_flight = self.terrain_compute.in_flight_count();
         let batch_stable = !self.detailed_perf
             && self.camera_version == self.last_cull_camera_version
             && self.last_cull_pool_gen == pool_gen
