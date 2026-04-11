@@ -885,21 +885,31 @@ impl AppState {
         // Stable-scene ultra-fast path: if the camera is unchanged AND the
         // chunk pool hasn't mutated since the last cull, `pool_views_buf`
         // still holds the correct visibility set in the correct order.
-        // Skip the cull loop (frustum test + distance sort + pool_views_buf
-        // rebuild) and go straight to the early return. The renderer's
-        // own cache_matches() would trivially also hit here (same camera,
-        // same pool hash) so we skip it and cull_cache_hit becomes the
-        // sole signal for render-skip.
+        // Skip the cull loop entirely (no frustum test, no sort, no
+        // rebuild, no per-slot touch refresh).
         //
-        // We DO still have to mark_touched_slot on every visible chunk,
-        // though: the LRU guard in submit_chunk_with_frame keys on
-        // last_touched_frame, and if we stop refreshing it the guard
-        // fails and loaded chunks become evictable. Previously this
-        // caused a 20-chunk-per-second eviction→resubmit churn on a
-        // stationary camera — compute saturated on in_flight=32 forever
-        // even though every in-frustum chunk was already loaded. A
-        // single-pass field write per visible chunk is still orders of
-        // magnitude cheaper than the full cull loop.
+        // Correctness of skipping mark_touched_slot relies on a chain of
+        // invariants:
+        //   1. Cull cache hit ⟺ camera + pool_generation unchanged.
+        //   2. Camera + pool stable ⟹ generate_camera_chunks hits its
+        //      own `in_flight == 0 && cam == converged_cam` short-circuit
+        //      and makes no submit_chunk_with_frame calls.
+        //   3. No submit ⟹ LRU guard is never consulted, so stale
+        //      last_touched_frame values on loaded slots don't matter.
+        //
+        // When the camera finally moves:
+        //   - cull_cache_hit goes false the same frame → full cull runs
+        //     and writes fresh last_touched_frame on every visible slot
+        //     (same frame_count value we'd pass here).
+        //   - Next frame's gen uses the NEW camera pose; spiral runs.
+        //     The LRU guard's +1-frame tolerance
+        //     (`oldest_frame + 1 >= current_frame`) comfortably covers
+        //     the 1-frame gap between cull and submit.
+        //
+        // Previously we called mark_touched_slot on every visible slot
+        // every cache-hit frame as insurance. On a 256-slot pool that
+        // was 256 scattered cache-line writes per frame, the single
+        // biggest remaining render-loop cost at ~185k FPS.
         let cur_cam_pos = self.camera.eye_position();
         let cur_cam_center = self.camera.center();
         let cur_cam_key = [
@@ -914,10 +924,13 @@ impl AppState {
             && self.last_cull_pool_gen == cur_pool_gen
             && !self.pool_views_buf.is_empty();
         if cull_cache_hit {
-            let cur_frame = self.frame_count as u64;
-            for (v, _, _, _) in self.pool_views_buf.iter() {
-                self.terrain_compute.mark_touched_slot(v.slot_idx, cur_frame);
-            }
+            // Single O(1) bulk touch instead of walking the 256-slot
+            // pool_views_buf writing last_touched_frame on every entry.
+            // Keeps the LRU guard happy so evictions don't fire during
+            // transient states (e.g. the last few InFlight chunks
+            // draining while the camera is already parked at steady
+            // state, which previously kicked off a 20-chunk/sec churn).
+            self.terrain_compute.bulk_touch_all_loaded(self.frame_count as u64);
             let cull_ms = t_cull.elapsed().as_secs_f32() * 1000.0;
             return Ok((cull_ms, 0.0, 0.0, 0.0));
         }
