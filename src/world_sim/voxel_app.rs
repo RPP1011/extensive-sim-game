@@ -168,6 +168,17 @@ impl AppState {
         let renderer = VoxelRenderer::new(&ctx, RENDER_WIDTH, RENDER_HEIGHT)?;
         eprintln!("[voxel] Renderer ready: {:.1}ms total", t0.elapsed().as_secs_f32() * 1000.0);
 
+        // Pre-record the blit command buffers for each swapchain image now
+        // that we know the renderer's output image handle. present_blit
+        // will use the pre-recorded fast path instead of re-recording the
+        // same barrier/blit/barrier sequence every frame.
+        swapchain.prepare_blit_commands(
+            &ctx,
+            renderer.gbuffer_output_image(),
+            RENDER_WIDTH,
+            RENDER_HEIGHT,
+        )?;
+
         // Show a blank frame immediately so the window isn't frozen.
         let _ = swapchain.present_cleared_frame(&ctx, [0.05, 0.05, 0.08, 1.0]);
 
