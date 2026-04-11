@@ -553,10 +553,17 @@ impl AppState {
         // Cap in-flight compute dispatches. With the render→present semaphore
         // handoff (voxel_engine 4364161) graphics no longer CPU-blocks on
         // compute, so this cap just throttles how fast we grow the queue.
-        // Bumped from 4 → 32: with the old cap, the pool filled at ~2
-        // chunks/sec because the queue was drained before gen could refill
-        // it; the new cap lets us keep the compute queue saturated while
-        // still bounding the backlog.
+        // History:
+        //   4  → pool filled at ~2 chunks/sec (queue drained before refill)
+        //   32 → ~24 chunks/sec throughput, initial load ~10 s for 256
+        //        chunks, clean ~1 s transition
+        //   64 → tried to improve the initial-load transient, but drain
+        //        throughput is GPU-bound at ~24 chunks/sec regardless
+        //        of parallelism. Larger in-flight just means more
+        //        drains per batch → more pool_generation bumps → more
+        //        cull cache invalidations → drain transition actually
+        //        got SLOWER (7 k FPS for 2 seconds vs 32 M FPS for 1 s).
+        //        Reverted.
         const MAX_INFLIGHT: usize = 32;
 
         let (_free, in_flight, _loaded) = self.terrain_compute.pool_stats();
