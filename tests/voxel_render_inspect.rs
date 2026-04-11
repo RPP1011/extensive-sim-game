@@ -22,7 +22,19 @@ use voxel_engine::voxel::grid::VoxelGrid;
 
 const TILE_W: u32 = 400;
 const TILE_H: u32 = 300;
-const CHUNK_RADIUS: i32 = 2; // (2*R)^3 = 64 chunks per biome. At 64³ chunks, 2 = 256m across
+
+// Gallery chunk half-radius. Override with `GALLERY_CHUNK_RADIUS=<N>` env var.
+// Capped at 8 because the CPU-path render_frame builds a single grid sized
+// (2R)^3 × CHUNK_SIZE³ voxels; at 8 that's already ~147M voxels across 7
+// biomes. Larger radii would require switching to render_frame_pool / the
+// GPU pool API, which is a separate substantial task.
+fn gallery_chunk_radius() -> i32 {
+    std::env::var("GALLERY_CHUNK_RADIUS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2)
+        .min(8)
+}
 
 fn try_vulkan() -> Option<VulkanContext> {
     VulkanContext::new().ok()
@@ -58,7 +70,7 @@ fn generate_biome_chunks(
     let surface_z = surface_height_at(center_vx, center_vy, plan, seed);
     let surface_cz = surface_z / CHUNK_SIZE as i32;
 
-    let r = CHUNK_RADIUS;
+    let r = gallery_chunk_radius();
     let mut positions = Vec::new();
     // Bias downward: more underground chunks so bottom edge isn't visible
     for dz in (-r - 1)..(r) {
@@ -235,15 +247,16 @@ fn terrain_gallery() {
     let mut tiles: Vec<Vec<[u8; 4]>> = Vec::new(); // row-major: biome × camera
     let mut labels: Vec<String> = Vec::new();
 
+    let chunk_radius = gallery_chunk_radius();
     for (biome, col, row) in &found_biomes {
         let (world, positions, surface_z) = generate_biome_chunks(&plan, *col, *row, seed);
-        let grid_xy = (CHUNK_RADIUS * 2) as f32 * CHUNK_SIZE as f32;
+        let grid_xy = (chunk_radius * 2) as f32 * CHUNK_SIZE as f32;
         // Z range is biased: (-r-3)..(r-1) = r*2+2 chunks
-        let grid_z = (CHUNK_RADIUS * 2 + 2) as f32 * CHUNK_SIZE as f32;
+        let grid_z = (chunk_radius * 2 + 2) as f32 * CHUNK_SIZE as f32;
         // Camera uses horizontal extent for XZ offsets, vertical for Y
         let center_xz = grid_xy / 2.0;
         // Surface sits near the top of the grid (only r-1 chunks above surface)
-        let surface_y = grid_z - (CHUNK_RADIUS - 1) as f32 * CHUNK_SIZE as f32;
+        let surface_y = grid_z - (chunk_radius - 1) as f32 * CHUNK_SIZE as f32;
 
         eprintln!("  {:?}: col={} row={} surface_z={} chunks={}",
             biome, col, row, surface_z, positions.len());
