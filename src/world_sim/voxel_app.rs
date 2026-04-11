@@ -154,12 +154,11 @@ struct AppState {
     /// allocating two ~256-entry Vecs every single frame).
     visible_buf: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3], f32)>,
     pool_views_buf: Vec<(LoadedChunkView, [f32; 4], [f32; 3], [f32; 3])>,
-    /// Cull-cache key: `(camera eye+center, terrain_compute.pool_generation())`
-    /// at the time `pool_views_buf` was last rebuilt. When both components
-    /// match the current frame, `pool_views_buf` is still correct and the
-    /// whole cull loop (frustum test + sort + mark_touched copy) is
-    /// skipped.
-    last_cull_cam_key: Option<[f32; 6]>,
+    /// Cull-cache key: pool_generation at the time pool_views_buf
+    /// was last rebuilt. Combined with `last_cull_camera_version`,
+    /// gives a O(1) "has anything changed since last cull?" check
+    /// for both the batch stability test in run_batch and the
+    /// per-call cache-hit test inside render().
     last_cull_pool_gen: u64,
     /// Monotonic counter bumped every time the camera pose changes
     /// (via update_camera or WindowEvent::CursorMoved). Gives the
@@ -406,7 +405,6 @@ impl AppState {
             last_gen_converged_cam: None,
             visible_buf: Vec::with_capacity(320),
             pool_views_buf: Vec::with_capacity(320),
-            last_cull_cam_key: None,
             last_cull_pool_gen: 0,
             camera_version: 1,
             last_cull_camera_version: 0,
@@ -991,17 +989,12 @@ impl AppState {
         // every cache-hit frame as insurance. On a 256-slot pool that
         // was 256 scattered cache-line writes per frame, the single
         // biggest remaining render-loop cost at ~185k FPS.
-        let cur_cam_pos = self.camera.eye_position();
-        let cur_cam_center = self.camera.center();
-        let cur_cam_key = [
-            cur_cam_pos[0], cur_cam_pos[1], cur_cam_pos[2],
-            cur_cam_center.x, cur_cam_center.y, cur_cam_center.z,
-        ];
+        // Cull cache hit check: same (camera_version, pool_generation)
+        // scheme as the batch stability check in run_batch. A single
+        // u64 compare replaces the old float-array comparison.
+        let cur_camera_version = self.camera_version;
         let cur_pool_gen = self.terrain_compute.pool_generation();
-        let cull_cache_hit = self
-            .last_cull_cam_key
-            .map(|k| k == cur_cam_key)
-            .unwrap_or(false)
+        let cull_cache_hit = cur_camera_version == self.last_cull_camera_version
             && self.last_cull_pool_gen == cur_pool_gen
             && !self.pool_views_buf.is_empty();
         if cull_cache_hit {
@@ -1062,7 +1055,6 @@ impl AppState {
 
         // Stamp the cull cache so subsequent frames with the same camera
         // + pool generation can skip the whole visibility pass.
-        self.last_cull_cam_key = Some(cur_cam_key);
         self.last_cull_pool_gen = cur_pool_gen;
         self.last_cull_camera_version = self.camera_version;
 
