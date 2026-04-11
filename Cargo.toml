@@ -48,3 +48,14 @@ tungstenite = "0.29.0"
 
 [dev-dependencies]
 proptest = "1.6"
+
+[profile.release]
+# LTO lets the compiler inline across the voxel_engine crate boundary,
+# which matters a lot for the hot render loop: bulk_touch_all_loaded,
+# pool_generation, and the camera accessors all cross-crate calls that
+# are ~1 cycle bodies but cost a call+return without LTO. At 20 M+ FPS
+# (~49 ns/frame), a couple of eliminated function calls per frame is
+# worth the extra link time. `thin` captures most of fat's benefit with
+# a fraction of the cost.
+lto = "thin"
+codegen-units = 1

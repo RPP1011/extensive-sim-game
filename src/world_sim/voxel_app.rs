@@ -118,6 +118,10 @@ struct AppState {
     /// we advance the sim and subtract. Lets the sim run at a fixed
     /// wall-clock rate regardless of render FPS.
     sim_accumulator: f32,
+    /// Cached `1.0 / (SIM_BASE_HZ * ticks_per_frame)`. Recomputed in
+    /// `handle_key` when the user changes `ticks_per_frame`. Avoids
+    /// a float division on every run_frame at 20 M+ FPS.
+    sim_dt: f32,
 
     keys_held: HashSet<KeyCode>,
     mouse_captured: bool,
@@ -364,6 +368,7 @@ impl AppState {
                 .unwrap_or(false),
             ticks_per_frame: 10,
             sim_accumulator: 0.0,
+            sim_dt: 1.0 / (10.0 * 10.0), // SIM_BASE_HZ=10 × ticks_per_frame=10
             last_frame: Instant::now(),
             keys_held: HashSet::new(),
             mouse_captured: false,
@@ -1137,14 +1142,7 @@ impl AppState {
             //
             // `drain_ready_chunks` and `drain_completed_gpu_chunks` are
             // NOT called here — they're hoisted to `about_to_wait` and
-            // run once per batch. Both are idempotent feeders from
-            // background work (CPU settlement thread → voxel world via
-            // mpsc; GPU compute → pool slot state via fence polling).
-            // Running them once per 64-frame batch adds at most one
-            // batch of latency to chunk arrival (~3.5 µs at current
-            // frame times), far below any observable threshold, and
-            // removes the per-frame atomic op inside mpsc::try_recv
-            // from the hot path.
+            // run once per batch.
             self.generate_camera_chunks(8);
             self.update_camera(dt);
             self.tick_sim(dt);
@@ -1228,8 +1226,7 @@ impl AppState {
         // frame × ticks_per_frame, which meant at 194 k FPS × 10 it
         // was burning ~1.9 million sim ticks per second — almost all
         // of the remaining render-loop cost.
-        const SIM_BASE_HZ: f32 = 10.0;
-        let sim_dt = 1.0 / (SIM_BASE_HZ * self.ticks_per_frame.max(1) as f32);
+        let sim_dt = self.sim_dt;
 
         self.sim_accumulator += dt;
         // Cap burst to avoid a death spiral if the render loop stalled.
@@ -1275,10 +1272,12 @@ impl AppState {
             }
             KeyCode::Equal | KeyCode::NumpadAdd => {
                 self.ticks_per_frame = (self.ticks_per_frame * 2).min(1000);
+                self.sim_dt = 1.0 / (10.0 * self.ticks_per_frame as f32);
                 eprintln!("[voxel] speed: {} ticks/frame", self.ticks_per_frame);
             }
             KeyCode::Minus | KeyCode::NumpadSubtract => {
                 self.ticks_per_frame = (self.ticks_per_frame / 2).max(1);
+                self.sim_dt = 1.0 / (10.0 * self.ticks_per_frame as f32);
                 eprintln!("[voxel] speed: {} ticks/frame", self.ticks_per_frame);
             }
             KeyCode::KeyF => {
