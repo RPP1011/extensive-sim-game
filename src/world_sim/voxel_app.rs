@@ -532,7 +532,13 @@ impl AppState {
 
         let (_free, in_flight, _loaded) = self.terrain_compute.pool_stats();
         if in_flight >= MAX_INFLIGHT {
-            self.gen_short_circuit_this_sec += 1;
+            // Short-circuit counter is a diagnostic only — gated behind
+            // detailed_perf so the fast path doesn't pay for a u32 RMW
+            // every frame. At 140 M+ FPS this was ~0.5 ns/frame (~7 %
+            // of the 7.12 ns frame), dwarfing the debug value.
+            if self.detailed_perf {
+                self.gen_short_circuit_this_sec += 1;
+            }
             return;
         }
 
@@ -558,7 +564,9 @@ impl AppState {
         if in_flight == 0
             && self.last_gen_converged_cam.map(|c| c == cam_key).unwrap_or(false)
         {
-            self.gen_short_circuit_this_sec += 1;
+            if self.detailed_perf {
+                self.gen_short_circuit_this_sec += 1;
+            }
             return;
         }
 
