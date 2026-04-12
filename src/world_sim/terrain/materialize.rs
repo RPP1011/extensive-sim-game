@@ -194,13 +194,14 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                             VoxelMaterial::Sand
                         }
                     } else if matches!(terrain, Terrain::Forest) {
-                        // Forest floor: leaf litter and exposed dirt patches
-                        let patch = noise::fbm_2d(vx as f32 * 0.05, vy as f32 * 0.05, seed.wrapping_add(0xF0E5), 2, 2.0, 0.5);
+                        // Forest floor: mostly grass with occasional leaf litter (peat).
+                        // Dirt patches are rare so the forest reads as predominantly green.
+                        let patch = noise::fbm_2d(vx as f32 * 0.04, vy as f32 * 0.04, seed.wrapping_add(0xF0E5), 2, 2.0, 0.5);
                         let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xF100));
-                        if patch > 0.65 {
-                            VoxelMaterial::Dirt // exposed dirt/leaf litter
-                        } else if n > 0.85 {
-                            VoxelMaterial::WoodLog // fallen branch
+                        if patch > 0.78 {
+                            VoxelMaterial::Peat // dark leaf litter
+                        } else if n > 0.95 {
+                            VoxelMaterial::WoodLog // rare fallen branch
                         } else {
                             VoxelMaterial::Grass
                         }
@@ -225,15 +226,15 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
                             VoxelMaterial::RedSand
                         }
                     } else if matches!(terrain, Terrain::Tundra) {
-                        // Tundra: patchy snow over frozen peat
+                        // Tundra: patchy snow over frozen peat (peat-dominant)
                         let n = noise::hash_f32(vx, vy, vz, seed.wrapping_add(0xC01D));
-                        // Use larger-scale noise for snow patch clustering
-                        let patch = noise::fbm_2d(vx as f32 * 0.03, vy as f32 * 0.03, seed.wrapping_add(0xF_0_2), 2, 2.0, 0.5);
-                        if patch > 0.55 {
+                        // Larger scale + higher threshold = smaller, sparser snow patches
+                        let patch = noise::fbm_2d(vx as f32 * 0.015, vy as f32 * 0.015, seed.wrapping_add(0xF_0_2), 3, 2.0, 0.5);
+                        if patch > 0.68 {
                             VoxelMaterial::Snow
-                        } else if n > 0.7 {
+                        } else if patch > 0.6 && n > 0.6 {
                             VoxelMaterial::Ice
-                        } else if n > 0.5 {
+                        } else if n > 0.85 {
                             VoxelMaterial::Gravel
                         } else {
                             VoxelMaterial::Peat

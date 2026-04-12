@@ -482,33 +482,49 @@ fn advance_construction(state: &mut WorldState) {
         };
 
         // Read the builder's CONSTRUCTION tag value for the progress formula.
-        let construction_tag_val = state.entities[builder_idx]
+        let _construction_tag_val = state.entities[builder_idx]
             .npc.as_ref()
             .map(|n| n.behavior_value(tags::CONSTRUCTION))
             .unwrap_or(0.0);
 
-        // Progress increment: 0.05 * (1.0 + construction_tags * 0.01) per 10-tick interval.
-        let increment = 0.05 * (1.0 + construction_tag_val * 0.01);
-
-        // Apply progress to the building.
         let builder_entity_id = state.entities[builder_idx].id;
+
+        // Attach blueprint if not yet present.
+        {
+            let bd = state.entities[building_idx].building.as_ref().unwrap();
+            if bd.blueprint.is_none() {
+                super::voxel_construction::attach_blueprint(state, building_idx);
+            }
+        }
+
+        // Place one blueprint voxel per tick (if builder has materials).
+        let _placed = super::voxel_construction::advance_blueprint_construction(
+            state, building_idx, builder_idx,
+        );
+
+        // Update construction progress based on blueprint completion.
         let completed = {
             let bd = state.entities[building_idx].building.as_mut().unwrap();
-            bd.construction_progress += increment;
-            if bd.construction_progress >= 1.0 {
-                bd.construction_progress = 1.0;
-                bd.built_tick = tick;
-                bd.builder_id = Some(builder_entity_id);
-                true
+            if let Some(ref bp) = bd.blueprint {
+                let total = bp.voxels.len();
+                let done = total - bp.remaining();
+                bd.construction_progress = if total > 0 { done as f32 / total as f32 } else { 1.0 };
+                if bd.construction_progress >= 1.0 {
+                    bd.construction_progress = 1.0;
+                    bd.built_tick = tick;
+                    bd.builder_id = Some(builder_entity_id);
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }
         };
 
-        // Emit CONSTRUCTION + LABOR + MASONRY behavior tags on the builder while working.
+        // Emit CONSTRUCTION behavior tags on the builder.
         let builder_pos = state.entities[builder_idx].pos;
         if let Some(npc) = &mut state.entities[builder_idx].npc {
-            // Record BuiltSomething memory event on completion.
             if completed {
                 npc.memory.record_event(MemoryEvent {
                     tick,
@@ -518,8 +534,6 @@ fn advance_construction(state: &mut WorldState) {
                     emotional_impact: 0.3,
                 });
             }
-
-            // Accumulate construction-related behavior tags on the builder.
             let mut action = ActionTags::empty();
             action.add(tags::CONSTRUCTION, 1.0);
             action.add(tags::LABOR, 0.5);
@@ -528,21 +542,15 @@ fn advance_construction(state: &mut WorldState) {
         }
 
         if completed {
-            // Stamp building voxels into the world now that construction is done.
+            // Rebake nav grids around the completed building.
             let building_pos = state.entities[building_idx].pos;
-            let (bt, fp_w, fp_h) = {
+            let (fp_w, fp_h) = {
                 let bd = state.entities[building_idx].building.as_ref().unwrap();
-                (bd.building_type, bd.footprint_w as usize, bd.footprint_h as usize)
+                (bd.footprint_w as usize, bd.footprint_h as usize)
             };
-            let (bvx, bvy, _) = stamp_building_voxels(
-                state,
-                (building_pos.0, building_pos.1),
-                fp_w, fp_h,
-                building_id, bt,
-            );
+            let (bvx, bvy, _) = world_to_voxel(building_pos.0, building_pos.1, 0.0);
             rebake_nav_grids(state, bvx, bvy, fp_w, fp_h);
 
-            // Chronicle entry for building completion.
             let settlement_name = state.settlements.iter()
                 .find(|s| s.id == settlement_id)
                 .map(|s| s.name.as_str())
