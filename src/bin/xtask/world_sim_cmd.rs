@@ -89,7 +89,7 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
     // Render mode: open Vulkan window
     #[cfg(feature = "app")]
     if args.render {
-        match game::world_sim::voxel_app::run_with_renderer(sim) {
+        match game::world_sim::voxel_app::run_with_renderer(sim, args.world.as_deref()) {
             Ok(()) => return ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("Renderer error: {}", e);

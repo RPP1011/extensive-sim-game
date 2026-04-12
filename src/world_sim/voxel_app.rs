@@ -209,6 +209,9 @@ struct AppState {
     /// Captured into `last_cull_camera_version` whenever a full cull
     /// runs (inside render_frame_pool / the full cull path).
     camera_version: u64,
+    /// When set, the world is bounded to [0, extent) chunks in each axis.
+    /// Camera is clamped inside, and chunk loading skips out-of-bounds positions.
+    world_extent: Option<i32>,
     /// `camera_version` snapshotted at the last time the cull cache
     /// was validated. Compared against the live counter in the
     /// batch stability check.
@@ -243,7 +246,7 @@ struct AppState {
 }
 
 impl AppState {
-    fn new(window: Window, sim: WorldSim) -> Result<Self> {
+    fn new(window: Window, sim: WorldSim, world_preset: Option<&str>) -> Result<Self> {
         let t0 = Instant::now();
         let ctx = VulkanContext::new_with_surface_extensions(&window)?;
         eprintln!("[voxel] Vulkan context: {:.1}ms", t0.elapsed().as_secs_f32() * 1000.0);
@@ -452,6 +455,11 @@ impl AppState {
         let mut camera = FreeCamera::new(cam_pos, cam_target);
         camera.set_move_speed(50.0);
 
+        let world_extent = match world_preset {
+            Some("small") => Some(9i32),
+            _ => None,
+        };
+
         Ok(Self {
             window, ctx, alloc, swapchain, renderer, camera,
             auto_rotate_period,
@@ -492,6 +500,7 @@ impl AppState {
             last_cull_pool_gen: 0,
             camera_version: 1,
             last_cull_camera_version: 0,
+            world_extent,
             ema_drain_cpu_ms: 0.0,
             ema_drain_gpu_ms: 0.0,
             ema_gen_ms: 0.0,
@@ -705,13 +714,17 @@ impl AppState {
         );
         let surface_cz = surface_z.div_euclid(CHUNK_SIZE as i32);
 
-        // Submit the whole disk. Inside the pool, `submit_chunk_with_frame`
-        // returns Ok(None) for already-loaded or in-flight chunks, so most
-        // calls after the first chunk-crossing are no-ops. Crossings
-        // produce at most ~40 new chunks (the new ring on the leading
-        // edge) which is well within the MAX_INFLIGHT budget.
+        // Submit the whole disk. Inside the pool, submit returns
+        // `AlreadyInPool` for chunks we already hold so most calls
+        // after the first chunk-crossing are no-ops. If the pool
+        // can't find an eviction victim outside the current disk
+        // (e.g. stale InFlight from a previous crossing still
+        // draining), submit returns `Refused` and we re-try the
+        // whole sweep on the next batch instead of stamping
+        // `last_spiral_chunk` — otherwise the missing chunks would
+        // stay absent until the camera crossed another boundary.
         let mut submitted = 0usize;
-        let cam_frame = self.frame_count;
+        let mut any_refused = false;
         for dx in -RADIUS..=RADIUS {
             for dy in -RADIUS..=RADIUS {
                 if dx * dx + dy * dy > RADIUS_SQ {
@@ -723,6 +736,13 @@ impl AppState {
                         center_cy + dy,
                         surface_cz + dcz,
                     );
+                    if let Some(extent) = self.world_extent {
+                        if cp.x < 0 || cp.y < 0 || cp.z < 0
+                            || cp.x >= extent || cp.y >= extent || cp.z >= extent
+                        {
+                            continue;
+                        }
+                    }
                     if self.pending_chunk_requests.values().any(|p| *p == cp) {
                         continue;
                     }
@@ -730,14 +750,20 @@ impl AppState {
                         &self.ctx,
                         [cp.x, cp.y, cp.z],
                         seed as u32,
-                        cam_frame,
+                        [center_cx, center_cy, surface_cz],
+                        RADIUS_SQ,
+                        2,
                     ) {
-                        Ok(Some(req_id)) => {
+                        Ok(voxel_engine::terrain_compute::SubmitOutcome::Submitted(req_id)) => {
                             self.pending_chunk_requests.insert(req_id, cp);
                             submitted += 1;
                             self.gen_submitted_this_sec += 1;
                         }
-                        Ok(None) => continue,
+                        Ok(voxel_engine::terrain_compute::SubmitOutcome::AlreadyInPool) => continue,
+                        Ok(voxel_engine::terrain_compute::SubmitOutcome::Refused) => {
+                            any_refused = true;
+                            continue;
+                        }
                         Err(e) => {
                             eprintln!("[voxel] submit_chunk failed for {:?}: {}", cp, e);
                             return;
@@ -748,9 +774,13 @@ impl AppState {
         }
         let _ = submitted; // diagnostic only
 
-        // Remember the chunk we just submitted for so the next frame's
-        // call short-circuits until the camera crosses a boundary.
-        self.last_spiral_chunk = Some(cur_chunk);
+        // Stamp `last_spiral_chunk` only if every disk chunk is now
+        // either Loaded or InFlight — otherwise the short-circuit on
+        // the next batch would skip re-trying the chunks that were
+        // refused this time.
+        if !any_refused {
+            self.last_spiral_chunk = Some(cur_chunk);
+        }
     }
 
     /// Submit chunks in a bulk radius around the camera. Invoked by the F key.
@@ -1526,6 +1556,19 @@ impl AppState {
             scroll_delta: 0.0,
         }, dt);
         self.camera_version = self.camera_version.wrapping_add(1);
+
+        // Clamp camera to world extent if set.
+        if let Some(extent) = self.world_extent {
+            let max_voxel = (extent * CHUNK_SIZE as i32) as f32;
+            let margin = 2.0;
+            let eye = self.camera.eye_position();
+            let clamped_x = eye[0].clamp(margin, max_voxel - margin);
+            let clamped_y = eye[1].clamp(margin, max_voxel - margin);
+            let clamped_z = eye[2].clamp(margin, max_voxel - margin);
+            if clamped_x != eye[0] || clamped_y != eye[1] || clamped_z != eye[2] {
+                self.camera.set_position(glam::Vec3::new(clamped_x, clamped_y, clamped_z));
+            }
+        }
     }
 }
 
@@ -1536,6 +1579,7 @@ impl AppState {
 struct WorldSimVoxelApp {
     state: Option<AppState>,
     sim: Option<WorldSim>,
+    world_preset: Option<String>,
 }
 
 impl ApplicationHandler for WorldSimVoxelApp {
@@ -1556,7 +1600,7 @@ impl ApplicationHandler for WorldSimVoxelApp {
         };
 
         let sim = self.sim.take().expect("sim should be set");
-        match AppState::new(window, sim) {
+        match AppState::new(window, sim, self.world_preset.as_deref()) {
             Ok(app) => {
                 eprintln!("[voxel] Initialized, loading terrain in background...");
                 self.state = Some(app);
@@ -1708,13 +1752,14 @@ fn voxel_material_from_u8(b: u8) -> crate::world_sim::voxel::VoxelMaterial {
 // Public entry point
 // ---------------------------------------------------------------------------
 
-pub fn run_with_renderer(sim: WorldSim) -> Result<()> {
+pub fn run_with_renderer(sim: WorldSim, world_preset: Option<&str>) -> Result<()> {
     let mut event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = WorldSimVoxelApp {
         state: None,
         sim: Some(sim),
+        world_preset: world_preset.map(|s| s.to_string()),
     };
 
     // Drive the event loop via `pump_app_events` instead of
