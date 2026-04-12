@@ -51,7 +51,7 @@ fn npc_harvests_tree_and_collects_wood() {
             for cz in 0..=3 {
                 state
                     .voxel_world
-                    .generate_chunk(ChunkPos::new(cx, cy, cz), 42);
+                    .generate_chunk(ChunkPos::new(cx, cy, cz), 42, None);
             }
         }
     }

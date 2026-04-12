@@ -165,10 +165,10 @@ mod tests {
         // Generate terrain chunks so ground exists.
         state
             .voxel_world
-            .generate_chunk(ChunkPos::new(0, 0, 0), 42);
+            .generate_chunk(ChunkPos::new(0, 0, 0), 42, None);
         state
             .voxel_world
-            .generate_chunk(ChunkPos::new(0, 0, 1), 42);
+            .generate_chunk(ChunkPos::new(0, 0, 1), 42, None);
         // Voxels on terrain are supported and should NOT collapse.
         let surface = state.voxel_world.surface_height(8, 8);
         let mat = state.voxel_world.get_voxel(8, 8, surface - 1).material;

@@ -25,11 +25,11 @@ mod tests {
 
         // Deep underground chunk (z=0 → voxels 0-15): always below any surface,
         // so depth > 80 → deep stone (solid).
-        voxel_world.generate_chunk(ChunkPos::new(5, 5, 0), 42);
+        voxel_world.generate_chunk(ChunkPos::new(5, 5, 0), 42, None);
         // Deep bedrock (z=-10 → voxels -160 to -145): below -120 → always Granite.
-        voxel_world.generate_chunk(ChunkPos::new(5, 5, -10), 42);
+        voxel_world.generate_chunk(ChunkPos::new(5, 5, -10), 42, None);
         // Sky chunk (z=30 → voxels 480-495, well above MAX_SURFACE_Z=400): always air.
-        voxel_world.generate_chunk(ChunkPos::new(5, 5, 30), 42);
+        voxel_world.generate_chunk(ChunkPos::new(5, 5, 30), 42, None);
 
         let underground = voxel_world.chunks.get(&ChunkPos::new(5, 5, 0)).unwrap();
         let solid = underground.voxels.iter().filter(|v| v.material.is_solid()).count();

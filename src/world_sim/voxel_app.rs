@@ -352,7 +352,7 @@ impl AppState {
         if let Some(plan_clone) = plan.clone() {
             std::thread::spawn(move || {
                 for (i, cp) in settlement_chunks.iter().enumerate() {
-                    let chunk = crate::world_sim::terrain::materialize_chunk(*cp, &plan_clone, seed);
+                    let chunk = crate::world_sim::terrain::materialize_chunk(*cp, &plan_clone, seed, None);
                     if chunk_tx.send((*cp, chunk)).is_err() {
                         break;
                     }

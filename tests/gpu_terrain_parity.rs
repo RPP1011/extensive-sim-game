@@ -68,7 +68,7 @@ fn gpu_cpu_parity_baseline() {
     let cp = ChunkPos::new(cx, cy, cz);
     eprintln!("Chunk {cp:?}  surface_z={surface_z}");
 
-    let cpu_chunk = materialize_chunk(cp, &plan, 42);
+    let cpu_chunk = materialize_chunk(cp, &plan, 42, None);
     let gpu_mats = pipeline.generate_chunk(&ctx, [cp.x, cp.y, cp.z], 42u32).expect("dispatch");
 
     let cs = CHUNK_SIZE;

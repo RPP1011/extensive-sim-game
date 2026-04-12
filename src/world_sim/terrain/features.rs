@@ -666,6 +666,7 @@ pub fn place_surface_features(
     _surface_z_local: i32,
     seed: u64,
     plan: Option<&RegionPlan>,
+    clearing_center: Option<(f32, f32)>,
 ) {
     // Halo stamping requires the plan for per-origin biome sampling.
     let plan = match plan {
@@ -677,14 +678,17 @@ pub fn place_surface_features(
     let base_y = cp.y * CHUNK_SIZE as i32;
     let base_z = cp.z * CHUNK_SIZE as i32;
 
-    // Horizontal halo: must stay in lockstep with `rmax` in
-    // terrain_materialize.comp (GPU shader). Back to 75 — 130 made
-    // GPU compute 3x slower and the spiral couldn't keep up with a
-    // rotating camera, which manifested as "too aggressive culling"
-    // (chunks popping out during rotation because the pool couldn't
-    // refill fast enough). Tree-trunk popping is real but will be
-    // fixed with chunk-local tree placement instead.
-    const HALO: i32 = 75;
+    // Horizontal halo: must stay in lockstep with `HALO_RADIUS` in
+    // terrain_materialize.comp (GPU shader). 256 is a conservative upper
+    // bound on the max horizontal reach of the largest procedural tree
+    // (~123 voxels). Both sides are now per-origin (this function always
+    // was; the GPU shader was rewritten to match), so the cost of a
+    // larger halo is proportional to origin density × feature voxels
+    // rather than halo_area × voxel_count — bumping the value does NOT
+    // hit the O(halo²) perf cliff the old per-voxel GPU scan had. Do
+    // not lower below the real max feature reach; smaller values
+    // re-introduce the dashed-trunk bug at chunk boundaries.
+    const HALO: i32 = 256;
     // Vertical extent of a tree above its base: fork_height + primary elevation +
     // secondary + leaf_radius. Large jungle: ~78 + 69 + 40 + 23 ≈ 210.
     const FEATURE_MAX_Z_ABOVE: i32 = 220;
@@ -720,8 +724,26 @@ pub fn place_surface_features(
                 continue;
             }
 
+            // Settlement clearing: suppress features near the center.
+            let density_scale = if let Some((ccx, ccy)) = clearing_center {
+                const CLEARING_RADIUS: f32 = 128.0;
+                const FALLOFF: f32 = 32.0;
+                let ddx = vx as f32 - ccx;
+                let ddy = vy as f32 - ccy;
+                let dist = (ddx * ddx + ddy * ddy).sqrt();
+                if dist < CLEARING_RADIUS {
+                    0.0
+                } else if dist < CLEARING_RADIUS + FALLOFF {
+                    (dist - CLEARING_RADIUS) / FALLOFF
+                } else {
+                    1.0
+                }
+            } else {
+                1.0
+            };
+
             // Tree placement — modulated by large-scale noise for clustering.
-            if params.tree_density > 0.0 {
+            if params.tree_density * density_scale > 0.0 {
                 let td = noise::hash_f32(vx, vy, 0, seed.wrapping_add(TREE_DENSITY_SALT));
                 let cluster = noise::fbm_2d(
                     vx as f32 * 0.025,
@@ -731,7 +753,7 @@ pub fn place_surface_features(
                     2.0,
                     0.5,
                 );
-                let effective_density = params.tree_density * (0.3 + cluster * 1.4);
+                let effective_density = params.tree_density * density_scale * (0.3 + cluster * 1.4);
                 if td < effective_density {
                     stamp_tree_procedural(
                         chunk,
@@ -746,17 +768,17 @@ pub fn place_surface_features(
             }
 
             // Boulder placement.
-            if params.boulder_density > 0.0 {
+            if params.boulder_density * density_scale > 0.0 {
                 let bd = noise::hash_f32(vx, vy, 0, seed.wrapping_add(BOULDER_DENSITY_SALT));
-                if bd < params.boulder_density {
+                if bd < params.boulder_density * density_scale {
                     stamp_boulder(chunk, lx, ly, feature_base_z, seed);
                 }
             }
 
             // Rock pillar placement (desert/badlands).
-            if params.pillar_density > 0.0 {
+            if params.pillar_density * density_scale > 0.0 {
                 let pd = noise::hash_f32(vx, vy, 0, seed.wrapping_add(PILLAR_DENSITY_SALT));
-                if pd < params.pillar_density {
+                if pd < params.pillar_density * density_scale {
                     stamp_pillar(chunk, lx, ly, feature_base_z, seed, params.pillar_material);
                 }
             }
@@ -807,7 +829,7 @@ mod tests {
         let cp = ChunkPos::new(0, 0, 5);
         let mut chunk = make_surface_chunk(cp);
         let surface_local = (CHUNK_SIZE / 2 - 1) as i32;
-        place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, surface_local, 42, None);
+        place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, surface_local, 42, None, None);
         // With plan=None, no features are placed; assert the function is a
         // no-op rather than requiring trees (since biome is now sampled
         // per-origin from the plan).
@@ -820,7 +842,7 @@ mod tests {
         // With no plan, place_surface_features is a no-op.
         let cp = ChunkPos::new(0, 0, 0);
         let mut chunk = Chunk::new_air(cp);
-        place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, CHUNK_SIZE as i32, 42, None);
+        place_surface_features(&mut chunk, cp, Terrain::Forest, SubBiome::DenseForest, CHUNK_SIZE as i32, 42, None, None);
         let any_solid = chunk.voxels.iter().any(|v| v.material.is_solid());
         assert!(!any_solid, "plan=None should be a no-op");
     }

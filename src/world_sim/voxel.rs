@@ -491,10 +491,10 @@ impl VoxelWorld {
     /// If a `region_plan` is set on this world, delegates to the biome-driven
     /// materializer (`terrain::materialize_chunk`).  Otherwise falls back to the
     /// legacy flat-terrain generator (`generate_chunk_legacy`).
-    pub fn generate_chunk(&mut self, cp: ChunkPos, seed: u64) {
+    pub fn generate_chunk(&mut self, cp: ChunkPos, seed: u64, clearing_center: Option<(f32, f32)>) {
         if self.chunks.contains_key(&cp) { return; }
         let chunk = if let Some(ref plan) = self.region_plan {
-            crate::world_sim::terrain::materialize_chunk(cp, plan, seed)
+            crate::world_sim::terrain::materialize_chunk(cp, plan, seed, clearing_center)
         } else {
             self.generate_chunk_legacy(cp, seed)
         };
@@ -563,7 +563,7 @@ impl VoxelWorld {
             for dy in -radius..=radius {
                 for dx in -radius..=radius {
                     let cp = ChunkPos::new(center.x + dx, center.y + dy, center.z + dz);
-                    self.generate_chunk(cp, seed);
+                    self.generate_chunk(cp, seed, None);
                 }
             }
         }
@@ -959,9 +959,9 @@ mod tests {
     #[test]
     fn generate_and_query() {
         let mut world = VoxelWorld::default();
-        world.generate_chunk(ChunkPos::new(0, 0, 0), 42);
-        world.generate_chunk(ChunkPos::new(0, 0, 1), 42);
-        world.generate_chunk(ChunkPos::new(0, 0, 2), 42);
+        world.generate_chunk(ChunkPos::new(0, 0, 0), 42, None);
+        world.generate_chunk(ChunkPos::new(0, 0, 1), 42, None);
+        world.generate_chunk(ChunkPos::new(0, 0, 2), 42, None);
 
         // Bedrock at z=0
         assert_eq!(world.get_voxel(0, 0, 0).material, VoxelMaterial::Granite);
@@ -993,9 +993,9 @@ mod tests {
     #[test]
     fn surface_height() {
         let mut world = VoxelWorld::default();
-        world.generate_chunk(ChunkPos::new(0, 0, 0), 42);
-        world.generate_chunk(ChunkPos::new(0, 0, 1), 42);
-        world.generate_chunk(ChunkPos::new(0, 0, 2), 42);
+        world.generate_chunk(ChunkPos::new(0, 0, 0), 42, None);
+        world.generate_chunk(ChunkPos::new(0, 0, 1), 42, None);
+        world.generate_chunk(ChunkPos::new(0, 0, 2), 42, None);
 
         let h = world.surface_height(8, 8);
         // Should be around 25-35 (surface ≈ 30 ± 5)
@@ -1222,8 +1222,8 @@ mod tests {
         let seed = 42;
 
         // Generate two horizontally adjacent chunks.
-        world.generate_chunk(ChunkPos::new(0, 0, 0), seed);
-        world.generate_chunk(ChunkPos::new(1, 0, 0), seed);
+        world.generate_chunk(ChunkPos::new(0, 0, 0), seed, None);
+        world.generate_chunk(ChunkPos::new(1, 0, 0), seed, None);
 
         // The voxel at x=15 (end of chunk 0) and x=16 (start of chunk 1)
         // should have consistent terrain — no seams.
@@ -1254,13 +1254,13 @@ mod tests {
 
         // Generate chunks in order A, B.
         let mut world1 = VoxelWorld::default();
-        world1.generate_chunk(ChunkPos::new(0, 0, 0), seed);
-        world1.generate_chunk(ChunkPos::new(1, 0, 0), seed);
+        world1.generate_chunk(ChunkPos::new(0, 0, 0), seed, None);
+        world1.generate_chunk(ChunkPos::new(1, 0, 0), seed, None);
 
         // Generate chunks in order B, A.
         let mut world2 = VoxelWorld::default();
-        world2.generate_chunk(ChunkPos::new(1, 0, 0), seed);
-        world2.generate_chunk(ChunkPos::new(0, 0, 0), seed);
+        world2.generate_chunk(ChunkPos::new(1, 0, 0), seed, None);
+        world2.generate_chunk(ChunkPos::new(0, 0, 0), seed, None);
 
         // Voxels should be identical regardless of generation order.
         for vx in 0..32 {
@@ -1467,7 +1467,7 @@ mod tests {
     fn voxel_world_damage_destroys() {
         let mut world = VoxelWorld::default();
         let cp = ChunkPos::new(0, 0, 0);
-        world.generate_chunk(cp, 42);
+        world.generate_chunk(cp, 42, None);
 
         // Find a solid voxel that isn't bedrock
         let vx = 8;
@@ -1495,7 +1495,7 @@ mod tests {
     fn voxel_world_damage_partial() {
         let mut world = VoxelWorld::default();
         let cp = ChunkPos::new(0, 0, 0);
-        world.generate_chunk(cp, 42);
+        world.generate_chunk(cp, 42, None);
 
         let vx = 8;
         let vy = 8;

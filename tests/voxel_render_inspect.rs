@@ -77,7 +77,7 @@ fn generate_biome_chunks(
         for dy in -r..r {
             for dx in -r..r {
                 let cp = ChunkPos::new(center_cx + dx, center_cy + dy, surface_cz + dz);
-                world.generate_chunk(cp, seed);
+                world.generate_chunk(cp, seed, None);
                 positions.push(cp);
             }
         }

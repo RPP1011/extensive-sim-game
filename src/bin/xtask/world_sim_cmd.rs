@@ -2067,7 +2067,7 @@ fn build_small_world(args: &WorldSimArgs) -> WorldState {
         for cy in 0..9 {
             for cx in 0..9 {
                 let cp = ChunkPos::new(cx, cy, cz);
-                state.voxel_world.generate_chunk(cp, seed);
+                state.voxel_world.generate_chunk(cp, seed, Some(center));
             }
         }
     }

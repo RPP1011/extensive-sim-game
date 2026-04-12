@@ -874,7 +874,7 @@ mod tests {
             for dy in -1..=1 {
                 for dx in -1..=1 {
                     state.voxel_world.generate_chunk(
-                        ChunkPos::new(center_cx + dx, center_cy + dy, cz), 42,
+                        ChunkPos::new(center_cx + dx, center_cy + dy, cz), 42, None,
                     );
                 }
             }

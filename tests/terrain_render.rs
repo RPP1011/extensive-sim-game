@@ -65,7 +65,7 @@ fn generate_test_world() -> (VoxelWorld, Vec<ChunkPos>) {
         for dy in -2..=3 {
             for dx in -2..=3 {
                 let cp = ChunkPos::new(center_cx + dx, center_cy + dy, surface_chunk_z + dz);
-                world.generate_chunk(cp, 42);
+                world.generate_chunk(cp, 42, None);
                 positions.push(cp);
             }
         }
@@ -243,8 +243,8 @@ fn terrain_has_biome_variation() {
     // Generate at a surface-ish Z level
     let surface_z = 3; // low, should intersect surface for most biomes
 
-    world.generate_chunk(ChunkPos::new(plains_cx, plains_cy, surface_z), 42);
-    world.generate_chunk(ChunkPos::new(other_cx, other_cy, surface_z), 42);
+    world.generate_chunk(ChunkPos::new(plains_cx, plains_cy, surface_z), 42, None);
+    world.generate_chunk(ChunkPos::new(other_cx, other_cy, surface_z), 42, None);
 
     let count_materials = |cp: ChunkPos| -> HashMap<u8, usize> {
         let mut counts = HashMap::new();

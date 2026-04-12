@@ -80,7 +80,7 @@ fn ore_at(vx: i32, vy: i32, vz: i32, seed: u64, ore_boost: f32) -> Option<VoxelM
 /// - Samples the plan bilinearly at each column (vx, vy) for surface height.
 /// - Adds detail noise (±10 voxels, fbm_2d scale 0.02, 3 octaves).
 /// - Assigns materials by depth layer and biome.
-pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
+pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64, clearing_center: Option<(f32, f32)>) -> Chunk {
     let mut chunk = Chunk::new_air(cp);
     let base_x = cp.x * CHUNK_SIZE as i32;
     let base_y = cp.y * CHUNK_SIZE as i32;
@@ -326,7 +326,7 @@ pub fn materialize_chunk(cp: ChunkPos, plan: &RegionPlan, seed: u64) -> Chunk {
         let (cell, _, _) = plan.sample(cx as f32, cy as f32);
         let surface_z = surface_height_at(cx as f32, cy as f32, plan, seed);
         let surface_z_local = surface_z - base_z;
-        features::place_surface_features(&mut chunk, cp, cell.terrain, cell.sub_biome, surface_z_local, seed, Some(plan));
+        features::place_surface_features(&mut chunk, cp, cell.terrain, cell.sub_biome, surface_z_local, seed, Some(plan), clearing_center);
     }
 
     // 4. Flying islands — only for sky-level chunks in FlyingIslands biome.
@@ -408,7 +408,7 @@ mod tests {
         // Check a range of z chunks around the expected surface
         let mut found_solid = false;
         for dz in -2..=2i32 {
-            let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz + dz), &plan, 42);
+            let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz + dz), &plan, 42, None);
             if chunk.voxels.iter().any(|v| v.material.is_solid()) {
                 found_solid = true;
                 break;
@@ -420,7 +420,7 @@ mod tests {
     #[test]
     fn chunk_deep_underground_is_solid() {
         let plan = test_plan();
-        let chunk = materialize_chunk(ChunkPos::new(5, 5, -5), &plan, 42);
+        let chunk = materialize_chunk(ChunkPos::new(5, 5, -5), &plan, 42, None);
         let solid_count = chunk.voxels.iter().filter(|v| v.material.is_solid()).count();
         let total = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
         assert!(solid_count > total / 2, "deep chunk not mostly solid: {solid_count}/{total}");
@@ -430,7 +430,7 @@ mod tests {
     fn chunk_high_sky_is_air() {
         let plan = test_plan();
         // z=30 in chunk-space → voxel z = 30 * 16 = 480, well above MAX_SURFACE_Z (400)
-        let chunk = materialize_chunk(ChunkPos::new(5, 5, 30), &plan, 42);
+        let chunk = materialize_chunk(ChunkPos::new(5, 5, 30), &plan, 42, None);
         let air_count = chunk.voxels.iter().filter(|v| v.material == VoxelMaterial::Air).count();
         let total = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
         assert_eq!(air_count, total, "sky chunk is not all air");
@@ -467,8 +467,8 @@ mod tests {
         let cy_a = vy_a as i32 / CHUNK_SIZE as i32;
         let cx_b = vx_b as i32 / CHUNK_SIZE as i32;
         let cy_b = vy_b as i32 / CHUNK_SIZE as i32;
-        let chunk_a = materialize_chunk(ChunkPos::new(cx_a, cy_a, cz_a), &plan, 42);
-        let chunk_b = materialize_chunk(ChunkPos::new(cx_b, cy_b, cz_b), &plan, 42);
+        let chunk_a = materialize_chunk(ChunkPos::new(cx_a, cy_a, cz_a), &plan, 42, None);
+        let chunk_b = materialize_chunk(ChunkPos::new(cx_b, cy_b, cz_b), &plan, 42, None);
         let diffs = chunk_a.voxels.iter()
             .zip(chunk_b.voxels.iter())
             .filter(|(a, b)| a.material != b.material)
@@ -499,7 +499,7 @@ mod tests {
             let cx = vx / CHUNK_SIZE as i32;
             let cy = vy / CHUNK_SIZE as i32;
 
-            let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz), &plan, 42);
+            let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz), &plan, 42, None);
             let water = chunk.voxels.iter().filter(|v| v.material == VoxelMaterial::Water).count();
             let total = chunk.voxels.len();
             let water_pct = water as f32 / total as f32;
@@ -534,7 +534,7 @@ mod tests {
             let cy = vy / CHUNK_SIZE as i32;
             let cz = surface_z / CHUNK_SIZE as i32;
 
-            let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz), &plan, 42);
+            let chunk = materialize_chunk(ChunkPos::new(cx, cy, cz), &plan, 42, None);
             // Find the most common non-air material (only check valid material indices)
             let mut counts = [0u32; 46]; // VoxelMaterial has ~42 variants
             for v in &chunk.voxels {
@@ -561,8 +561,8 @@ mod tests {
     fn materialization_is_deterministic() {
         let plan = test_plan();
         let cp = ChunkPos::new(3, 3, 2);
-        let a = materialize_chunk(cp, &plan, 42);
-        let b = materialize_chunk(cp, &plan, 42);
+        let a = materialize_chunk(cp, &plan, 42, None);
+        let b = materialize_chunk(cp, &plan, 42, None);
         for i in 0..a.voxels.len() {
             assert_eq!(a.voxels[i].material, b.voxels[i].material, "voxel {i} differs");
         }
