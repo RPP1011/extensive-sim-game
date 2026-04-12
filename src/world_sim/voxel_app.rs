@@ -249,11 +249,22 @@ impl AppState {
     fn new(window: Window, sim: WorldSim, world_preset: Option<&str>) -> Result<Self> {
         let t0 = Instant::now();
         let ctx = VulkanContext::new_with_surface_extensions(&window)?;
-        eprintln!("[voxel] Vulkan context: {:.1}ms", t0.elapsed().as_secs_f32() * 1000.0);
+        let t_ctx = t0.elapsed();
+        eprintln!("[voxel] Vulkan context: {:.1}ms", t_ctx.as_secs_f32() * 1000.0);
         let mut alloc = VulkanAllocator::new(&ctx)?;
+        let t_alloc = t0.elapsed();
         let mut swapchain = SwapchainContext::new(&ctx, &window)?;
+        let t_swap = t0.elapsed();
         let renderer = VoxelRenderer::new(&ctx, RENDER_WIDTH, RENDER_HEIGHT)?;
-        eprintln!("[voxel] Renderer ready: {:.1}ms total", t0.elapsed().as_secs_f32() * 1000.0);
+        let t_rend = t0.elapsed();
+        eprintln!(
+            "[voxel] Startup phases: ctx={:.0}ms alloc={:.0}ms swap={:.0}ms renderer={:.0}ms (total {:.0}ms)",
+            t_ctx.as_secs_f32() * 1000.0,
+            (t_alloc - t_ctx).as_secs_f32() * 1000.0,
+            (t_swap - t_alloc).as_secs_f32() * 1000.0,
+            (t_rend - t_swap).as_secs_f32() * 1000.0,
+            t_rend.as_secs_f32() * 1000.0,
+        );
 
         // Pre-record the blit command buffers for each swapchain image now
         // that we know the renderer's output image handle. present_blit
@@ -278,6 +289,7 @@ impl AppState {
         let plan = state.voxel_world.region_plan.clone();
 
         // Create GPU terrain compute pipeline and upload region plan + rivers.
+        let t_tc = Instant::now();
         let mut terrain_compute =
             voxel_engine::terrain_compute::TerrainComputePipeline::new(&ctx, &mut alloc)
                 .context("create terrain compute pipeline")?;
@@ -298,9 +310,10 @@ impl AppState {
                 .upload_rivers(&ctx, &mut alloc, &river_points, &river_headers)
                 .context("upload rivers")?;
             eprintln!(
-                "[voxel] GPU terrain compute initialized: {} cells, {} rivers",
+                "[voxel] GPU terrain compute initialized: {} cells, {} rivers ({:.0}ms)",
                 gpu_cells.len(),
-                river_headers.len()
+                river_headers.len(),
+                t_tc.elapsed().as_secs_f32() * 1000.0,
             );
         }
 
@@ -314,11 +327,19 @@ impl AppState {
                 .context("upload palette to pool")?;
         }
 
+        // Flush pipeline cache to disk now that all pipelines are created.
+        // This ensures the cache is saved even if the process is killed.
+        ctx.save_pipeline_cache();
+
         let mut settlement_chunks: Vec<ChunkPos> = Vec::new();
         if let Some(ref plan) = plan {
             use crate::world_sim::terrain::MAX_SURFACE_Z;
             let cs = CHUNK_SIZE as f32;
-            let radius = 3i32; // 3 chunks each direction around each settlement
+            // Small world: GPU terrain compute handles all chunks on-demand,
+            // so only pre-gen a minimal shell for sim entity placement.
+            let is_small = world_preset == Some("small");
+            let radius = if is_small { 1i32 } else { 3i32 };
+            let z_radius = if is_small { 1i32 } else { 2i32 };
 
             for settlement in &state.settlements {
                 // Settlement pos is already in voxel space.
@@ -330,7 +351,7 @@ impl AppState {
 
                 for dx in -radius..=radius {
                     for dy in -radius..=radius {
-                        for dz in -2..=2 {
+                        for dz in -z_radius..=z_radius {
                             let cp = ChunkPos::new(center_cx + dx, center_cy + dy, surface_cz + dz);
                             settlement_chunks.push(cp);
                         }
@@ -456,7 +477,7 @@ impl AppState {
         camera.set_move_speed(50.0);
 
         let world_extent = match world_preset {
-            Some("small") => Some(9i32),
+            Some("small") => Some(12i32),
             _ => None,
         };
 
