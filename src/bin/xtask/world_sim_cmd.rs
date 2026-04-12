@@ -2052,7 +2052,7 @@ struct GridLayout {
 fn build_small_world(args: &WorldSimArgs) -> WorldState {
     use game::world_sim::state::*;
     use game::world_sim::terrain;
-    use game::world_sim::voxel::{CHUNK_SIZE, ChunkPos};
+    use game::world_sim::voxel::CHUNK_SIZE;
 
     let seed = args.seed;
     let mut state = WorldState::new(seed);
@@ -2063,14 +2063,11 @@ fn build_small_world(args: &WorldSimArgs) -> WorldState {
     let plan = terrain::create_small_world_plan(seed, center);
     state.voxel_world.region_plan = Some(plan.clone());
 
-    for cz in 0..9 {
-        for cy in 0..9 {
-            for cx in 0..9 {
-                let cp = ChunkPos::new(cx, cy, cz);
-                state.voxel_world.generate_chunk(cp, seed, Some(center));
-            }
-        }
-    }
+    // CPU chunk pre-generation is skipped. The GPU terrain compute
+    // pipeline generates chunks on-demand via the disk loader, and
+    // all 729 chunks (9³) fit comfortably in the 1024-slot pool.
+    // CPU-side terrain materialization with HALO=256 is far too slow
+    // in debug builds (~330K origin candidates per chunk × 729 chunks).
 
     state.regions.push(RegionState {
         id: 0,
