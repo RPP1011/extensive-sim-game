@@ -117,6 +117,9 @@ pub struct WorldSimArgs {
     /// Open a Vulkan window and render the voxel world (requires --features app)
     #[arg(long)]
     pub render: bool,
+    /// World preset: "small" = fixed 9x9x9 forest test scene (default: infinite)
+    #[arg(long)]
+    pub world: Option<String>,
 }
 
 #[derive(Debug, Parser)]

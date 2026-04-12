@@ -591,6 +591,38 @@ pub fn generate_continent(cols: usize, rows: usize, seed: u64) -> RegionPlan {
 }
 
 // ---------------------------------------------------------------------------
+// Small-world preset
+// ---------------------------------------------------------------------------
+
+/// Create a minimal RegionPlan for the `--world small` test scene.
+pub fn create_small_world_plan(seed: u64, _center: (f32, f32)) -> RegionPlan {
+    use crate::world_sim::state::{Terrain, SubBiome};
+
+    let cell = RegionCell {
+        height: 0.3,
+        moisture: 0.6,
+        temperature: 0.5,
+        terrain: Terrain::Forest,
+        sub_biome: SubBiome::LightForest,
+        settlement: Some(SettlementPlan {
+            kind: SettlementKind::Town,
+            local_pos: (0.5, 0.5),
+        }),
+        dungeons: vec![],
+        has_road: false,
+    };
+
+    RegionPlan {
+        cols: 1,
+        rows: 1,
+        cells: vec![cell],
+        rivers: vec![],
+        roads: vec![],
+        seed,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

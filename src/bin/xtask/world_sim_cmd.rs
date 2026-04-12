@@ -35,6 +35,8 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+    } else if args.world.as_deref() == Some("small") {
+        build_small_world(&args)
     } else if args.peaceful {
         build_peaceful_world(&args)
     } else {
@@ -2044,6 +2046,85 @@ struct GridLayout {
     cols: usize,
     rows: usize,
     spacing: f32,
+}
+
+/// Small-world mode: fixed 9x9x9 chunk forest test scene.
+fn build_small_world(args: &WorldSimArgs) -> WorldState {
+    use game::world_sim::state::*;
+    use game::world_sim::terrain;
+    use game::world_sim::voxel::{CHUNK_SIZE, ChunkPos};
+
+    let seed = args.seed;
+    let mut state = WorldState::new(seed);
+
+    let world_size_voxels = 9 * CHUNK_SIZE as i32;
+    let center = (world_size_voxels as f32 / 2.0, world_size_voxels as f32 / 2.0);
+
+    let plan = terrain::create_small_world_plan(seed, center);
+    state.voxel_world.region_plan = Some(plan.clone());
+
+    for cz in 0..9 {
+        for cy in 0..9 {
+            for cx in 0..9 {
+                let cp = ChunkPos::new(cx, cy, cz);
+                state.voxel_world.generate_chunk(cp, seed);
+            }
+        }
+    }
+
+    state.regions.push(RegionState {
+        id: 0,
+        name: "Clearbrook Forest".into(),
+        terrain: Terrain::Forest,
+        pos: center,
+        monster_density: 0.0,
+        faction_id: None,
+        threat_level: 0.0,
+        has_river: false,
+        has_lake: false,
+        is_coastal: false,
+        river_connections: vec![],
+        dungeon_sites: vec![],
+        sub_biome: SubBiome::LightForest,
+        neighbors: vec![],
+        is_chokepoint: false,
+        elevation: 1,
+        is_floating: false,
+        unrest: 0.0,
+        control: 1.0,
+    });
+
+    let settlement_id = 0u32;
+    let surface_z = terrain::surface_height_at(center.0, center.1, &plan, seed);
+    state.settlements.push(SettlementState::new(settlement_id, "Clearbrook".into(), center));
+
+    let archetypes = ["builder", "builder", "woodcutter", "woodcutter",
+                      "farmer", "miner", "smith", "hunter", "healer", "merchant"];
+    let mut id = 0u32;
+    for (i, archetype) in archetypes.iter().enumerate() {
+        let angle = (i as f32 / archetypes.len() as f32) * std::f32::consts::TAU;
+        let dist = 8.0 + (i as f32) * 2.0;
+        let px = center.0 + angle.cos() * dist;
+        let py = center.1 + angle.sin() * dist;
+
+        let mut npc = Entity::new_npc(id, (px, py));
+        let npc_data = npc.npc.as_mut().unwrap();
+        npc_data.home_settlement_id = Some(settlement_id);
+        npc_data.faction_id = None;
+        npc_data.gold = 0.0;
+        npc_data.morale = 80.0;
+        npc_data.archetype = archetype.to_string();
+        npc_data.name = game::world_sim::naming::generate_personal_name(id, seed);
+        npc.inventory = Some(Inventory::with_capacity(50.0));
+
+        state.entities.push(npc);
+        id += 1;
+    }
+
+    state.next_id = id;
+    eprintln!("[small-world] Generated 9x9x9 forest world with settlement at ({}, {}), surface_z={}",
+        center.0, center.1, surface_z);
+    state
 }
 
 /// Peaceful mode: single forest settlement, no monsters, no gold.
