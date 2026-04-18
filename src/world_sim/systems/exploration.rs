@@ -234,9 +234,10 @@ fn scan_voxel_resources_cached(
 
     let (cvx, cvy, _) = world_to_voxel(entity.pos.0, entity.pos.1, 0.0);
 
-    // Accumulate counts per (cell_x, cell_y, material).
-    let mut counts: std::collections::HashMap<(i32, i32, VoxelMaterial), u32> =
-        std::collections::HashMap::new();
+    // Accumulate counts per (cell_x, cell_y, material). ahash here too —
+    // keyed by a small composite, default SipHash was measurable.
+    let mut counts: std::collections::HashMap<(i32, i32, VoxelMaterial), u32, ahash::RandomState> =
+        std::collections::HashMap::default();
 
     debug_assert_eq!(sight_range_voxels, SIGHT_RANGE_VOXELS);
 
