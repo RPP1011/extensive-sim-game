@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "crates/tactical_sim"]
+exclude = ["crates/world_sim_bench"]
 
 
 [package]
