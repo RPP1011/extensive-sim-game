@@ -14,6 +14,10 @@ use tactical_sim::effects::effect_enum::Effect;
 
 const INNER_STATE_INTERVAL: u64 = 10;
 
+/// Grid cell size for resource spatial index. Matches typical max
+/// perception radius so NPCs only need to check a 3x3 cell neighborhood.
+const RESOURCE_GRID_CELL: f32 = 50.0;
+
 // ---------------------------------------------------------------------------
 // WorldView — pre-computed snapshot of world state for the agent loop
 // ---------------------------------------------------------------------------
@@ -52,6 +56,9 @@ struct WorldView {
 
     // Resource node positions for perception-based discovery
     resources: Vec<(u32, (f32, f32), ResourceType)>, // (entity_id, pos, type)
+    // Spatial grid over `resources` indices for per-NPC O(K) lookup
+    // instead of O(R) full scan. Cell size matches max perception radius.
+    resource_grid: std::collections::HashMap<(i32, i32), Vec<usize>, ahash::RandomState>,
 
     // NPC action types and authority weights for theory of mind (Phase D)
     npc_actions: std::collections::HashMap<u32, (u8, f32), ahash::RandomState>, // entity_id → (action_type, authority)
@@ -175,6 +182,16 @@ impl WorldView {
             })
             .collect();
 
+        // Spatial grid over resources. Cell size 50.0 = max perception
+        // radius (45 * typical mult). Queries visit 3x3 cells around NPC.
+        let mut resource_grid: std::collections::HashMap<(i32, i32), Vec<usize>, ahash::RandomState> =
+            std::collections::HashMap::default();
+        for (i, &(_, pos, _)) in resources.iter().enumerate() {
+            let cx = (pos.0 / RESOURCE_GRID_CELL).floor() as i32;
+            let cy = (pos.1 / RESOURCE_GRID_CELL).floor() as i32;
+            resource_grid.entry((cx, cy)).or_default().push(i);
+        }
+
         // NPC action + authority snapshot for theory of mind
         let mut npc_actions: std::collections::HashMap<u32, (u8, f32), ahash::RandomState> = std::collections::HashMap::default();
         for entity in &state.entities {
@@ -194,7 +211,7 @@ impl WorldView {
             tick, threat, population, food, treasury, faction_id, infrastructure,
             faction_stance, faction_at_war,
             recent_deaths, recent_battles, recent_conquests, season,
-            grid_hostile_count, coworkers, building_owner, resources, npc_actions,
+            grid_hostile_count, coworkers, building_owner, resources, resource_grid, npc_actions,
         }
     }
 
@@ -578,15 +595,26 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
             let base_radius = if npc.personality.curiosity > 0.6 { 45.0 } else { 30.0 };
             let effective_radius = base_radius * npc.passive_effects.perception_mult;
             let perception_radius_sq = effective_radius * effective_radius;
-            for &(rid, rpos, rtype) in &world.resources {
-                let dx = entity.pos.0 - rpos.0;
-                let dy = entity.pos.1 - rpos.1;
-                if dx * dx + dy * dy <= perception_radius_sq {
-                    npc.known_resources.insert(rid, ResourceKnowledge {
-                        pos: rpos,
-                        resource_type: rtype,
-                        observed_tick: world.tick,
-                    });
+            // Spatial grid: only look at the 3×3 cells around NPC instead
+            // of all R resources. Was O(R) per NPC = O(R × NPCs) per tick.
+            let ncx = (entity.pos.0 / RESOURCE_GRID_CELL).floor() as i32;
+            let ncy = (entity.pos.1 / RESOURCE_GRID_CELL).floor() as i32;
+            for dcy in -1..=1i32 {
+                for dcx in -1..=1i32 {
+                    let Some(bucket) = world.resource_grid.get(&(ncx + dcx, ncy + dcy))
+                        else { continue };
+                    for &ri in bucket {
+                        let (rid, rpos, rtype) = world.resources[ri];
+                        let dx = entity.pos.0 - rpos.0;
+                        let dy = entity.pos.1 - rpos.1;
+                        if dx * dx + dy * dy <= perception_radius_sq {
+                            npc.known_resources.insert(rid, ResourceKnowledge {
+                                pos: rpos,
+                                resource_type: rtype,
+                                observed_tick: world.tick,
+                            });
+                        }
+                    }
                 }
             }
         }
