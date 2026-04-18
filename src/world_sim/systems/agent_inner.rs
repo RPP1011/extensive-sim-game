@@ -45,16 +45,16 @@ struct WorldView {
     grid_hostile_count: Vec<u32>,
 
     // Coworker lookup: building_id → list of NPC entity IDs working there
-    coworkers: std::collections::HashMap<u32, Vec<u32>>,
+    coworkers: std::collections::HashMap<u32, Vec<u32>, ahash::RandomState>,
 
     // Building owner lookup: building entity_id → owner NPC entity_id
-    building_owner: std::collections::HashMap<u32, u32>,
+    building_owner: std::collections::HashMap<u32, u32, ahash::RandomState>,
 
     // Resource node positions for perception-based discovery
     resources: Vec<(u32, (f32, f32), ResourceType)>, // (entity_id, pos, type)
 
     // NPC action types and authority weights for theory of mind (Phase D)
-    npc_actions: std::collections::HashMap<u32, (u8, f32)>, // entity_id → (action_type, authority)
+    npc_actions: std::collections::HashMap<u32, (u8, f32), ahash::RandomState>, // entity_id → (action_type, authority)
 }
 
 impl WorldView {
@@ -141,7 +141,7 @@ impl WorldView {
         }
 
         // Coworker lookup
-        let mut coworkers: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+        let mut coworkers: std::collections::HashMap<u32, Vec<u32>, ahash::RandomState> = std::collections::HashMap::default();
         for entity in &state.entities {
             if !entity.alive || entity.kind != EntityKind::Npc { continue; }
             if let Some(npc) = &entity.npc {
@@ -152,7 +152,7 @@ impl WorldView {
         }
 
         // Building owner lookup (building entity id → owner NPC id)
-        let mut building_owner: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+        let mut building_owner: std::collections::HashMap<u32, u32, ahash::RandomState> = std::collections::HashMap::default();
         for entity in &state.entities {
             if !entity.alive { continue; }
             if let Some(b) = &entity.building {
@@ -176,7 +176,7 @@ impl WorldView {
             .collect();
 
         // NPC action + authority snapshot for theory of mind
-        let mut npc_actions: std::collections::HashMap<u32, (u8, f32)> = std::collections::HashMap::new();
+        let mut npc_actions: std::collections::HashMap<u32, (u8, f32), ahash::RandomState> = std::collections::HashMap::default();
         for entity in &state.entities {
             if !entity.alive || entity.kind != EntityKind::Npc { continue; }
             if let Some(npc) = &entity.npc {
@@ -1447,7 +1447,7 @@ fn activate_world_abilities(state: &mut WorldState) {
 fn share_resource_knowledge(state: &mut WorldState) {
     // Phase 1: collect pooled knowledge per settlement.
     let mut pools: std::collections::HashMap<u32, Vec<(u32, ResourceKnowledge)>> =
-        std::collections::HashMap::new();
+        std::collections::HashMap::default();
     for entity in &state.entities {
         if !entity.alive || entity.kind != EntityKind::Npc { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
