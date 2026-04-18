@@ -23,16 +23,22 @@ pub fn advance_construction(state: &mut WorldState) {
     let tick = state.tick;
     let seed_count = state.build_seeds.len();
 
+    // Take pooled flood-fill buffers from SimScratch. Restored at end.
+    let mut visited = std::mem::take(&mut state.sim_scratch.flood_visited);
+    let mut queue = std::mem::take(&mut state.sim_scratch.flood_queue);
+    let mut interior = std::mem::take(&mut state.sim_scratch.flood_interior);
+    let mut boundary = std::mem::take(&mut state.sim_scratch.flood_boundary);
+
     for i in 0..seed_count {
         if state.build_seeds[i].complete { continue; }
 
         let seed = state.build_seeds[i].clone();
-        // grow_room returns the post-growth interior + boundary. Reusing
-        // them for completion checks eliminates three interior_set
-        // HashSet constructions (is_enclosed/has_door/find_door_position).
-        let (interior, boundary) = grow_room(&seed, &mut state.tiles, tick);
+        // grow_room fills `interior` and `boundary` in place via pooled buffers.
+        grow_room(
+            &seed, &mut state.tiles, tick,
+            &mut visited, &mut queue, &mut interior, &mut boundary,
+        );
         if interior.len() as u32 >= seed.minimum_interior && is_enclosed(&boundary, &state.tiles) {
-            // Room complete — place door if needed.
             if !has_door(&boundary, &state.tiles) {
                 if let Some(door_pos) = find_door_position(&boundary, &state.tiles) {
                     state.tiles.insert(door_pos, Tile {
@@ -46,18 +52,27 @@ pub fn advance_construction(state: &mut WorldState) {
         }
     }
 
+    // Restore pooled buffers.
+    state.sim_scratch.flood_visited = visited;
+    state.sim_scratch.flood_queue = queue;
+    state.sim_scratch.flood_interior = interior;
+    state.sim_scratch.flood_boundary = boundary;
+
     // Prune completed seeds older than 500 ticks.
     state.build_seeds.retain(|s| !s.complete || tick.saturating_sub(s.tick) < 500);
 }
 
 /// Grow a room by one step: expand if too small, close if at minimum.
-/// Returns the post-growth (interior, boundary) — caller reuses them for
-/// completion checks instead of re-flooding and rebuilding sets.
+/// Fills `interior` + `boundary` via pooled buffers — caller owns them.
 fn grow_room(
     seed: &BuildSeed,
     tiles: &mut std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
     tick: u64,
-) -> (Vec<TilePos>, Vec<TilePos>) {
+    visited: &mut std::collections::HashSet<TilePos, ahash::RandomState>,
+    queue: &mut std::collections::VecDeque<TilePos>,
+    interior: &mut Vec<TilePos>,
+    boundary: &mut Vec<TilePos>,
+) {
     // Ensure seed position has a floor tile.
     tiles.entry(seed.pos).or_insert(Tile {
         tile_type: TileType::Floor(TileMaterial::Wood),
@@ -66,17 +81,19 @@ fn grow_room(
     });
 
     // Fused flood-fill + boundary computation: single BFS pass.
-    let (mut interior, mut boundary) = flood_fill_with_boundary(seed.pos, tiles);
+    flood_fill_with_boundary(seed.pos, tiles, visited, queue, interior, boundary);
 
     if (interior.len() as u32) < seed.minimum_interior {
         // Below minimum: expand by placing floor tiles on empty boundary positions.
+        // We iterate boundary directly — it's the pooled buffer, but we only
+        // READ from it while MUTATING tiles; no aliasing.
+        let boundary_len = boundary.len();
         let mut expanded = 0u32;
-        // Snapshot boundary since we'll mutate tiles during iteration.
-        let boundary_snapshot: Vec<TilePos> = boundary.clone();
-        for bpos in &boundary_snapshot {
-            if expanded >= 3 { break; } // grow at most 3 tiles per step
-            if !tiles.contains_key(bpos) {
-                tiles.insert(*bpos, Tile {
+        for i in 0..boundary_len {
+            if expanded >= 3 { break; }
+            let bpos = boundary[i];
+            if !tiles.contains_key(&bpos) {
+                tiles.insert(bpos, Tile {
                     tile_type: TileType::Floor(TileMaterial::Wood),
                     placed_by: Some(seed.placed_by),
                     placed_tick: tick,
@@ -85,17 +102,14 @@ fn grow_room(
             }
         }
         // Re-flood to pick up fresh interior + boundary reflecting new floors.
-        // Skip only when nothing expanded.
         if expanded > 0 {
-            let refreshed = flood_fill_with_boundary(seed.pos, tiles);
-            interior = refreshed.0;
-            boundary = refreshed.1;
+            flood_fill_with_boundary(seed.pos, tiles, visited, queue, interior, boundary);
         }
     } else if (interior.len() as u32) < MAX_ROOM_SIZE {
         // At or above minimum: close open boundary with walls. Walls are
         // placed on boundary positions — they stay on the boundary set
         // (just now solid), so we don't need to re-flood.
-        for bpos in &boundary {
+        for bpos in boundary.iter() {
             if !tiles.contains_key(bpos) {
                 tiles.insert(*bpos, Tile {
                     tile_type: TileType::Wall(TileMaterial::Wood),
@@ -105,28 +119,28 @@ fn grow_room(
             }
         }
     }
-
-    (interior, boundary)
 }
 
 /// Flood-fill from a position, collecting connected floor tiles AND the
 /// boundary (non-floor tiles adjacent to the interior) in a single pass.
-/// This replaces `flood_fill_floor` + `compute_boundary` — previously each
-/// visited the same graph separately.
+/// Pooled: `visited`, `queue`, `interior`, `boundary` buffers come from
+/// SimScratch — caller responsible for clear/take/restore.
 fn flood_fill_with_boundary(
     start: TilePos,
     tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
-) -> (Vec<TilePos>, Vec<TilePos>) {
-    let cap = (MAX_ROOM_SIZE as usize) * 4 + 16;
-    let mut visited: std::collections::HashSet<TilePos, ahash::RandomState> =
-        std::collections::HashSet::with_capacity_and_hasher(
-            cap, ahash::RandomState::default());
-    let mut queue = std::collections::VecDeque::with_capacity(cap);
-    let mut interior = Vec::with_capacity(MAX_ROOM_SIZE as usize);
-    let mut boundary = Vec::with_capacity(cap);
+    visited: &mut std::collections::HashSet<TilePos, ahash::RandomState>,
+    queue: &mut std::collections::VecDeque<TilePos>,
+    interior: &mut Vec<TilePos>,
+    boundary: &mut Vec<TilePos>,
+) {
+    visited.clear();
+    queue.clear();
+    interior.clear();
+    boundary.clear();
 
     if !tiles.get(&start).map(|t| t.tile_type.is_floor() || t.tile_type.is_furniture()).unwrap_or(false) {
-        return (vec![start], Vec::new()); // seed is floor by convention
+        interior.push(start); // seed is floor by convention
+        return;
     }
 
     queue.push_back(start);
@@ -146,19 +160,23 @@ fn flood_fill_with_boundary(
                     queue.push_back(neighbor);
                 }
                 _ => {
-                    // Not-a-floor (or no tile at all) adjacent to an interior
-                    // tile — that's the boundary by definition.
                     boundary.push(neighbor);
                 }
             }
         }
     }
-    (interior, boundary)
 }
 
-/// Back-compat wrapper for call sites that only need interior.
+/// Back-compat wrapper for call sites that only need interior (tests).
+#[cfg(test)]
 fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Vec<TilePos> {
-    flood_fill_with_boundary(start, tiles).0
+    let mut visited: std::collections::HashSet<TilePos, ahash::RandomState> =
+        std::collections::HashSet::default();
+    let mut queue = std::collections::VecDeque::new();
+    let mut interior = Vec::new();
+    let mut boundary = Vec::new();
+    flood_fill_with_boundary(start, tiles, &mut visited, &mut queue, &mut interior, &mut boundary);
+    interior
 }
 
 /// Compute boundary positions: tiles adjacent to interior that are not interior.

@@ -357,6 +357,16 @@ pub struct SimScratch {
     pub npc_pos_voxel: Vec<(usize, i32, i32)>,
     /// Visible cell set; cleared + refilled each call.
     pub visible_cells: std::collections::HashSet<(i32, i32), ahash::RandomState>,
+
+    // --- construction::flood_fill_with_boundary ---
+    /// BFS visited set; cleared + refilled each call.
+    pub flood_visited: std::collections::HashSet<TilePos, ahash::RandomState>,
+    /// BFS queue; cleared + refilled each call.
+    pub flood_queue: std::collections::VecDeque<TilePos>,
+    /// BFS result interior; cleared + refilled each call.
+    pub flood_interior: Vec<TilePos>,
+    /// BFS result boundary; cleared + refilled each call.
+    pub flood_boundary: Vec<TilePos>,
 }
 
 impl std::fmt::Debug for SimScratch {
