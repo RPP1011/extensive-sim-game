@@ -1587,38 +1587,23 @@ impl WorldSim {
 
         let postapply_start = Instant::now();
 
-        super::systems::movement::advance_movement(&mut self.state);
-        super::systems::monster_ecology::advance_monster_ecology(&mut self.state);
-        super::systems::death_consequences::advance_death_consequences(&mut self.state);
-        super::systems::agent_inner::update_agent_inner_states(&mut self.state);
-        // Goal stack replaced by flat utility evaluator:
-        // super::systems::goal_eval::evaluate_goals(&mut self.state);
-        // super::systems::world_goap::evaluate_world_goap(&mut self.state);
-        super::systems::action_eval::evaluate_and_act(&mut self.state);
-        super::systems::pathfollow::advance_pathfinding(&mut self.state);
-
-        // WORK STATE — advance NPC work state machine.
-        super::systems::work::advance_work_states(&mut self.state);
-
-        // VOXEL RESOURCE SCANNING — NPCs discover nearby harvestable voxels.
-        super::systems::exploration::scan_all_npc_resources(&mut self.state);
+        run_settlement_sys!("advance_movement", super::systems::movement::advance_movement(&mut self.state));
+        run_settlement_sys!("advance_monster_ecology", super::systems::monster_ecology::advance_monster_ecology(&mut self.state));
+        run_settlement_sys!("advance_death_consequences", super::systems::death_consequences::advance_death_consequences(&mut self.state));
+        run_settlement_sys!("update_agent_inner_states", super::systems::agent_inner::update_agent_inner_states(&mut self.state));
+        run_settlement_sys!("evaluate_and_act", super::systems::action_eval::evaluate_and_act(&mut self.state));
+        run_settlement_sys!("advance_pathfinding", super::systems::pathfollow::advance_pathfinding(&mut self.state));
+        run_settlement_sys!("advance_work_states", super::systems::work::advance_work_states(&mut self.state));
+        run_settlement_sys!("scan_all_npc_resources", super::systems::exploration::scan_all_npc_resources(&mut self.state));
 
         // STRUCTURAL INTEGRITY — collapse unsupported voxels every 10 ticks.
         if self.state.tick % 10 == 0 {
-            super::systems::structural_tick::structural_tick(&mut self.state);
+            run_settlement_sys!("structural_tick", super::systems::structural_tick::structural_tick(&mut self.state));
         }
 
-        // DEBT REPAYMENT — NPCs repay debt from income.
-        super::systems::economy::advance_debt(&mut self.state);
-
-        // Plan execution replaced by action_eval:
-        // super::systems::gathering::advance_plans(&mut self.state);
-
-        // CONTRACTS — match, complete, and expire service contracts.
-        super::systems::contracts::advance_contracts(&mut self.state);
-
-        // BUILDING SPECIALIZATION — buildings develop specialties from worker classes.
-        super::systems::buildings::update_building_specializations(&mut self.state);
+        run_settlement_sys!("advance_debt", super::systems::economy::advance_debt(&mut self.state));
+        run_settlement_sys!("advance_contracts", super::systems::contracts::advance_contracts(&mut self.state));
+        run_settlement_sys!("update_building_specializations", super::systems::buildings::update_building_specializations(&mut self.state));
 
         // Eating now handled by action_eval:
         // super::systems::work::advance_eating(&mut self.state);
@@ -1729,6 +1714,13 @@ impl WorldSim {
         }
 
         profile.total_us = tick_start.elapsed().as_micros() as u64;
+
+        #[cfg(feature = "profile-systems")]
+        {
+            let acc = super::system_profile::thread_drain();
+            profile.system_timings = acc.into_timings();
+        }
+
         self.profile_acc.record(&profile);
         profile
     }
