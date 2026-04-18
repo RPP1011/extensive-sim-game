@@ -44,13 +44,22 @@ fn smoothstep(t: f32) -> f32 {
 }
 
 /// 2D value noise with smoothstep interpolation. Returns [0, 1].
+#[inline]
 pub fn value_noise_2d(x: f32, y: f32, seed: u64, scale: f32) -> f32 {
-    let sx = x / scale;
-    let sy = y / scale;
-    let ix = sx.floor() as i32;
-    let iy = sy.floor() as i32;
-    let fx = smoothstep(sx - sx.floor());
-    let fy = smoothstep(sy - sy.floor());
+    value_noise_2d_unit(x / scale, y / scale, seed)
+}
+
+/// Unit-scale variant: inputs are already in noise-grid space, so no
+/// division by scale and each floor() is computed once (saving 2 floorf
+/// calls per invocation vs the original).
+#[inline]
+pub fn value_noise_2d_unit(sx: f32, sy: f32, seed: u64) -> f32 {
+    let sx_floor = sx.floor();
+    let sy_floor = sy.floor();
+    let ix = sx_floor as i32;
+    let iy = sy_floor as i32;
+    let fx = smoothstep(sx - sx_floor);
+    let fy = smoothstep(sy - sy_floor);
     let s32 = seed as u32 ^ (seed >> 32) as u32;
     let h00 = hash_u32_to_f32(ix, iy, 0, s32);
     let h10 = hash_u32_to_f32(ix + 1, iy, 0, s32);
@@ -97,7 +106,10 @@ pub fn fbm_2d(x: f32, y: f32, seed: u64, octaves: u32, lacunarity: f32, gain: f3
     let mut freq = 1.0f32;
     let mut max_amp = 0.0f32;
     for i in 0..octaves {
-        sum += amp * value_noise_2d(x * freq, y * freq, seed.wrapping_add(i as u64 * 31337), 1.0);
+        // value_noise_2d_unit skips the /1.0 division branch and only
+        // computes floor() once per axis — meaningful when fbm is the
+        // top cost (was 14.66% of total program time via compute_cell_census).
+        sum += amp * value_noise_2d_unit(x * freq, y * freq, seed.wrapping_add(i as u64 * 31337));
         max_amp += amp;
         amp *= gain;
         freq *= lacunarity;
