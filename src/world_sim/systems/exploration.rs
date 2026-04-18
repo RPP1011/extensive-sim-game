@@ -179,10 +179,20 @@ const TARGET_MATERIALS: &[VoxelMaterial] = &[
 /// Scan nearby voxels around an NPC and record harvestable deposits in its
 /// `known_voxel_resources`. This is called as a post-apply step in runtime.rs,
 /// not via the delta system, because it mutates NpcData directly.
-/// Cache of surface heights keyed by (vx, vy). Shared across all NPCs in
-/// a single `scan_all_npc_resources` pass so adjacent NPCs don't recompute
-/// the same FBM noise for overlapping disk positions.
-type SurfaceCache = std::collections::HashMap<(i32, i32), i32, ahash::RandomState>;
+/// Pack (vx, vy) i32 pair into u64. Used as the surface_cache key —
+/// ahash has a fast path for single u64 hashing (one multiply + fold),
+/// measurably cheaper than hashing a (i32,i32) tuple which goes through
+/// write_i32 twice. Identity-hash was attempted and caused catastrophic
+/// bucket collisions on small-origin worlds; do not inline a naive
+/// u64-as-hash scheme here.
+#[inline]
+fn pack_xy(vx: i32, vy: i32) -> u64 {
+    ((vx as u32 as u64) << 32) | (vy as u32 as u64)
+}
+
+/// Cache of surface heights keyed by packed (vx, vy). Persistent on
+/// WorldState; survives across ticks.
+pub type SurfaceCache = std::collections::HashMap<u64, i32, ahash::RandomState>;
 
 /// Precomputed (dx, dy) offsets inside the SIGHT_RANGE_VOXELS disk.
 /// Computed once, shared across all scans. Iterating a Vec<(i32, i32)> is
@@ -237,13 +247,15 @@ fn scan_voxel_resources_cached(
             let vx = cvx + dx;
             let vy = cvy + dy;
 
-            // Fast path: cache hit is two HashMap ops (check-then-insert via
-            // `entry` did an unnecessary insert path). `.get()` avoids that.
-            let surface = match surface_cache.get(&(vx, vy)) {
+            // Fast path: identity-hashed u64 lookup. Cheaper than ahash over
+            // the (i32,i32) tuple; avoids the make_hash/hash_one/write_i32
+            // pipeline visible in the flamegraph.
+            let key = pack_xy(vx, vy);
+            let surface = match surface_cache.get(&key) {
                 Some(&h) => h,
                 None => {
                     let h = state.voxel_world.surface_height(vx, vy);
-                    surface_cache.insert((vx, vy), h);
+                    surface_cache.insert(key, h);
                     h
                 }
             };
