@@ -74,6 +74,35 @@ pub trait System: Send + Sync {
     fn run(&self, ctx: &mut SystemCtx) -> u32;
 }
 
+/// Registry of all systems grouped by `Stage`. Preserves insertion order
+/// within each stage so dispatch is deterministic.
+pub struct SystemRegistry {
+    by_stage: std::collections::HashMap<Stage, Vec<Box<dyn System>>>,
+}
+
+impl SystemRegistry {
+    pub fn new() -> Self {
+        Self { by_stage: std::collections::HashMap::new() }
+    }
+
+    pub fn register<S: System + 'static>(&mut self, sys: S) {
+        self.by_stage.entry(sys.stage()).or_default().push(Box::new(sys));
+    }
+
+    pub fn systems_in(&self, stage: Stage) -> &[Box<dyn System>] {
+        self.by_stage.get(&stage).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Iterator over all (stage, systems) pairs. Used for profiling reports.
+    pub fn all_stages(&self) -> impl Iterator<Item = (Stage, &[Box<dyn System>])> {
+        self.by_stage.iter().map(|(k, v)| (*k, v.as_slice()))
+    }
+}
+
+impl Default for SystemRegistry {
+    fn default() -> Self { Self::new() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,6 +112,13 @@ mod tests {
         fn name(&self) -> &'static str { "dummy" }
         fn stage(&self) -> Stage { Stage::PostApply }
         fn run(&self, _ctx: &mut SystemCtx) -> u32 { 7 }
+    }
+
+    struct StageSystem(Stage, &'static str);
+    impl System for StageSystem {
+        fn name(&self) -> &'static str { self.1 }
+        fn stage(&self) -> Stage { self.0 }
+        fn run(&self, _ctx: &mut SystemCtx) -> u32 { 0 }
     }
 
     #[test]
@@ -95,5 +131,24 @@ mod tests {
     #[test]
     fn backend_default_is_scalar() {
         assert_eq!(Backend::default_for_cpu(), Backend::Scalar);
+    }
+
+    #[test]
+    fn registry_groups_by_stage() {
+        let mut r = SystemRegistry::new();
+        r.register(StageSystem(Stage::PostApply, "a"));
+        r.register(StageSystem(Stage::ApplyHp, "b"));
+        r.register(StageSystem(Stage::PostApply, "c"));
+
+        let hp: Vec<_> = r.systems_in(Stage::ApplyHp).iter().map(|s| s.name()).collect();
+        let post: Vec<_> = r.systems_in(Stage::PostApply).iter().map(|s| s.name()).collect();
+        assert_eq!(hp, vec!["b"]);
+        assert_eq!(post, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn registry_empty_stage_returns_empty_slice() {
+        let r = SystemRegistry::new();
+        assert!(r.systems_in(Stage::ComputeHigh).is_empty());
     }
 }
