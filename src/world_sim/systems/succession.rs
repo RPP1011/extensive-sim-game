@@ -18,8 +18,33 @@ pub fn advance_succession(state: &mut WorldState) {
 
     let tick = state.tick;
 
+    // Build a set of settlements that recently lost a high-level leader.
+    // Previously this was re-scanned per settlement — O(S × W × E) where
+    // S=settlements, W=world_events, E=entities. Now it's O(W) with O(1)
+    // entity lookup via `state.entity()`.
+    let mut settlements_with_leader_death: std::collections::HashSet<u32, ahash::RandomState> =
+        std::collections::HashSet::default();
+    for e in &state.world_events {
+        if let WorldEvent::EntityDied { entity_id, .. } = e {
+            if let Some(ent) = state.entity(*entity_id) {
+                if !ent.alive {
+                    if let Some(npc) = &ent.npc {
+                        let total_level: u32 = npc.classes.iter().map(|c| c.level as u32).sum();
+                        if total_level >= 10 {
+                            if let Some(sid) = npc.home_settlement_id {
+                                settlements_with_leader_death.insert(sid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if settlements_with_leader_death.is_empty() { return; }
+
     for si in 0..state.settlements.len() {
         let sid = state.settlements[si].id;
+        if !settlements_with_leader_death.contains(&sid) { continue; }
 
         // Find all alive NPCs at this settlement, sorted by total class levels.
         let mut npcs_at_settlement: Vec<(usize, u32, u32)> = Vec::new(); // (entity_idx, entity_id, total_level)
@@ -36,23 +61,6 @@ pub fn advance_succession(state: &mut WorldState) {
 
         // Sort by total level descending.
         npcs_at_settlement.sort_by(|a, b| b.2.cmp(&a.2));
-
-        // Check if the former leader recently died (top-level NPC no longer present).
-        // We detect this by checking if any recent death events involve a high-level NPC
-        // from this settlement.
-        let recent_leader_death = state.world_events.iter().any(|e| {
-            if let WorldEvent::EntityDied { entity_id, .. } = e {
-                state.entities.iter().any(|ent| {
-                    ent.id == *entity_id && !ent.alive
-                        && ent.npc.as_ref().map(|n| {
-                            n.home_settlement_id == Some(sid)
-                                && n.classes.iter().map(|c| c.level as u32).sum::<u32>() >= 10
-                        }).unwrap_or(false)
-                })
-            } else { false }
-        });
-
-        if !recent_leader_death { continue; }
 
         // --- Succession crisis ---
         // Top candidate becomes leader.
