@@ -1396,6 +1396,20 @@ impl WorldSim {
     }
 }
 
+macro_rules! run_settlement_sys {
+    ($name:expr, $call:expr) => {{
+        #[cfg(feature = "profile-systems")]
+        {
+            let _t = std::time::Instant::now();
+            $call;
+            let _ns = _t.elapsed().as_nanos() as u64;
+            $crate::world_sim::system_profile::thread_record($name, _ns, 0);
+        }
+        #[cfg(not(feature = "profile-systems"))]
+        { $call; }
+    }};
+}
+
 /// Run all settlement-scoped systems for one settlement.
 /// Extracted so both parallel and sequential paths can call it.
 fn run_settlement_systems(
@@ -1405,64 +1419,64 @@ fn run_settlement_systems(
     buf: &mut Vec<WorldDelta>,
 ) {
     use super::systems::*;
-    economy::compute_economy_for_settlement(state, sid, entities, buf);
-    food::compute_food_for_settlement(state, sid, entities, buf);
-    population::compute_population_for_settlement(state, sid, entities, buf);
-    mentorship::compute_mentorship_for_settlement(state, sid, entities, buf);
-    adventurer_condition::compute_adventurer_condition_for_settlement(state, sid, entities, buf);
-    adventurer_recovery::compute_adventurer_recovery_for_settlement(state, sid, entities, buf);
-    progression::compute_progression_for_settlement(state, sid, entities, state.registry.as_deref(), buf);
-    class_progression::compute_class_progression_for_settlement(state, sid, entities, buf);
-    recruitment::compute_recruitment_for_settlement(state, sid, entities, buf);
-    npc_decisions::compute_npc_decisions_for_settlement(state, sid, entities, buf);
-    price_discovery::compute_price_discovery_for_settlement(state, sid, entities, buf);
-    quests::compute_quests_for_settlement(state, sid, entities, buf);
-    retirement::compute_retirement_for_settlement(state, sid, entities, buf);
-    hobbies::compute_hobbies_for_settlement(state, sid, entities, buf);
-    fears::compute_fears_for_settlement(state, sid, entities, buf);
-    personal_goals::compute_personal_goals_for_settlement(state, sid, entities, buf);
-    journals::compute_journals_for_settlement(state, sid, entities, buf);
-    wound_persistence::compute_wound_persistence_for_settlement(state, sid, entities, buf);
-    addiction::compute_addiction_for_settlement(state, sid, entities, buf);
-    equipment_durability::compute_equipment_durability_for_settlement(state, sid, entities, buf);
-    culture::compute_culture_for_settlement(state, sid, entities, buf);
-    equipping::compute_equipping_for_settlement(state, sid, entities, buf);
-    moods::compute_moods_for_settlement(state, sid, entities, buf);
-    bonds::compute_bonds_for_settlement(state, sid, entities, buf);
-    npc_relationships::compute_npc_relationships_for_settlement(state, sid, entities, buf);
-    npc_reputation::compute_npc_reputation_for_settlement(state, sid, entities, buf);
-    romance::compute_romance_for_settlement(state, sid, entities, buf);
-    rivalries::compute_rivalries_for_settlement(state, sid, entities, buf);
-    companions::compute_companions_for_settlement(state, sid, entities, buf);
-    party_chemistry::compute_party_chemistry_for_settlement(state, sid, entities, buf);
-    nicknames::compute_nicknames_for_settlement(state, sid, entities, buf);
-    legendary_deeds::compute_legendary_deeds_for_settlement(state, sid, entities, buf);
-    folk_hero::compute_folk_hero_for_settlement(state, sid, entities, buf);
-    memorials::compute_memorials_for_settlement(state, sid, entities, buf);
-    trophies::compute_trophies_for_settlement(state, sid, entities, buf);
-    awakening::compute_awakening_for_settlement(state, sid, entities, buf);
-    visions::compute_visions_for_settlement(state, sid, entities, buf);
-    bloodlines::compute_bloodlines_for_settlement(state, sid, entities, buf);
-    divine_favor::compute_divine_favor_for_settlement(state, sid, entities, buf);
-    religion::compute_religion_for_settlement(state, sid, entities, buf);
-    demonic_pacts::compute_demonic_pacts_for_settlement(state, sid, entities, buf);
-    legacy_weapons::compute_legacy_weapons_for_settlement(state, sid, entities, buf);
-    cooldowns::compute_cooldowns_for_settlement(state, sid, entities, buf);
-    battles::compute_battles_for_settlement(state, sid, entities, buf);
-    loot::compute_loot_for_settlement(state, sid, entities, buf);
-    last_stand::compute_last_stand_for_settlement(state, sid, entities, buf);
-    skill_challenges::compute_skill_challenges_for_settlement(state, sid, entities, buf);
-    dungeons::compute_dungeons_for_settlement(state, sid, entities, buf);
-    escalation_protocol::compute_escalation_protocol_for_settlement(state, sid, entities, buf);
-    trade_goods::compute_trade_goods_for_settlement(state, sid, entities, buf);
-    infrastructure::compute_infrastructure_for_settlement(state, sid, entities, buf);
-    crafting::compute_crafting_for_settlement(state, sid, entities, buf);
-    buildings::compute_buildings_for_settlement(state, sid, entities, buf);
-    guild_rooms::compute_guild_rooms_for_settlement(state, sid, entities, buf);
-    guild_tiers::compute_guild_tiers_for_settlement(state, sid, entities, buf);
-    festivals::compute_festivals_for_settlement(state, sid, entities, buf);
-    supply::compute_supply_for_settlement(state, sid, entities, buf);
-    exploration::compute_exploration_for_settlement(state, sid, entities, buf);
+    run_settlement_sys!("economy", economy::compute_economy_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("food", food::compute_food_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("population", population::compute_population_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("mentorship", mentorship::compute_mentorship_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("adventurer_condition", adventurer_condition::compute_adventurer_condition_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("adventurer_recovery", adventurer_recovery::compute_adventurer_recovery_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("progression", progression::compute_progression_for_settlement(state, sid, entities, state.registry.as_deref(), buf));
+    run_settlement_sys!("class_progression", class_progression::compute_class_progression_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("recruitment", recruitment::compute_recruitment_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("npc_decisions", npc_decisions::compute_npc_decisions_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("price_discovery", price_discovery::compute_price_discovery_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("quests", quests::compute_quests_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("retirement", retirement::compute_retirement_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("hobbies", hobbies::compute_hobbies_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("fears", fears::compute_fears_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("personal_goals", personal_goals::compute_personal_goals_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("journals", journals::compute_journals_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("wound_persistence", wound_persistence::compute_wound_persistence_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("addiction", addiction::compute_addiction_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("equipment_durability", equipment_durability::compute_equipment_durability_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("culture", culture::compute_culture_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("equipping", equipping::compute_equipping_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("moods", moods::compute_moods_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("bonds", bonds::compute_bonds_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("npc_relationships", npc_relationships::compute_npc_relationships_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("npc_reputation", npc_reputation::compute_npc_reputation_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("romance", romance::compute_romance_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("rivalries", rivalries::compute_rivalries_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("companions", companions::compute_companions_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("party_chemistry", party_chemistry::compute_party_chemistry_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("nicknames", nicknames::compute_nicknames_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("legendary_deeds", legendary_deeds::compute_legendary_deeds_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("folk_hero", folk_hero::compute_folk_hero_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("memorials", memorials::compute_memorials_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("trophies", trophies::compute_trophies_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("awakening", awakening::compute_awakening_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("visions", visions::compute_visions_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("bloodlines", bloodlines::compute_bloodlines_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("divine_favor", divine_favor::compute_divine_favor_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("religion", religion::compute_religion_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("demonic_pacts", demonic_pacts::compute_demonic_pacts_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("legacy_weapons", legacy_weapons::compute_legacy_weapons_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("cooldowns", cooldowns::compute_cooldowns_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("battles", battles::compute_battles_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("loot", loot::compute_loot_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("last_stand", last_stand::compute_last_stand_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("skill_challenges", skill_challenges::compute_skill_challenges_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("dungeons", dungeons::compute_dungeons_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("escalation_protocol", escalation_protocol::compute_escalation_protocol_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("trade_goods", trade_goods::compute_trade_goods_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("infrastructure", infrastructure::compute_infrastructure_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("crafting", crafting::compute_crafting_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("buildings", buildings::compute_buildings_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("guild_rooms", guild_rooms::compute_guild_rooms_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("guild_tiers", guild_tiers::compute_guild_tiers_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("festivals", festivals::compute_festivals_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("supply", supply::compute_supply_for_settlement(state, sid, entities, buf));
+    run_settlement_sys!("exploration", exploration::compute_exploration_for_settlement(state, sid, entities, buf));
 }
 
 impl WorldSim {

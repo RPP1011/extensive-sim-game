@@ -174,10 +174,8 @@ macro_rules! run_system {
         {
             let _t = std::time::Instant::now();
             $func($state, $out);
-            let _elapsed = _t.elapsed().as_micros();
-            if _elapsed > 100 {
-                eprintln!("  SLOW: {} {}µs", $name, _elapsed);
-            }
+            let _ns = _t.elapsed().as_nanos() as u64;
+            $crate::world_sim::system_profile::thread_record($name, _ns, 0);
         }
         #[cfg(not(feature = "profile-systems"))]
         {
