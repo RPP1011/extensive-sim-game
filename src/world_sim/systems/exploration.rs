@@ -16,6 +16,8 @@ use crate::world_sim::fidelity::Fidelity;
 use crate::world_sim::state::{ActionTags, EntityKind, VoxelResourceKnowledge, WorldState, WorldTeam, tags};
 use crate::world_sim::voxel::{VoxelMaterial, world_to_voxel, VOXEL_SCALE};
 
+use std::sync::OnceLock;
+
 /// Cadence: runs every 3 ticks.
 const EXPLORATION_INTERVAL: u64 = 3;
 
@@ -182,6 +184,28 @@ const TARGET_MATERIALS: &[VoxelMaterial] = &[
 /// the same FBM noise for overlapping disk positions.
 type SurfaceCache = std::collections::HashMap<(i32, i32), i32, ahash::RandomState>;
 
+/// Precomputed (dx, dy) offsets inside the SIGHT_RANGE_VOXELS disk.
+/// Computed once, shared across all scans. Iterating a Vec<(i32, i32)> is
+/// cheaper than two nested i32 ranges with an inner circle test
+/// (flamegraph showed 32% `next<i32>` + 22% div_euclid in the hot path).
+fn disk_offsets() -> &'static [(i32, i32)] {
+    static DISK: OnceLock<Vec<(i32, i32)>> = OnceLock::new();
+    DISK.get_or_init(|| {
+        let r = SIGHT_RANGE_VOXELS;
+        let rsq = (r as i64) * (r as i64);
+        let mut v = Vec::with_capacity((r as usize * 2 + 1).pow(2));
+        for dx in -r..=r {
+            for dy in -r..=r {
+                let d2 = (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64);
+                if d2 <= rsq {
+                    v.push((dx, dy));
+                }
+            }
+        }
+        v
+    })
+}
+
 pub fn scan_voxel_resources(state: &mut WorldState, entity_idx: usize, sight_range_voxels: i32) {
     let mut cache = SurfaceCache::default();
     scan_voxel_resources_cached(state, entity_idx, sight_range_voxels, &mut cache);
@@ -204,21 +228,25 @@ fn scan_voxel_resources_cached(
     let mut counts: std::collections::HashMap<(i32, i32, VoxelMaterial), u32> =
         std::collections::HashMap::new();
 
-    let range_sq = (sight_range_voxels as i64) * (sight_range_voxels as i64);
+    // Precomputed disk (sight_range_voxels must match SIGHT_RANGE_VOXELS).
+    debug_assert_eq!(sight_range_voxels, SIGHT_RANGE_VOXELS);
+    let offsets = disk_offsets();
 
-    for dx in -sight_range_voxels..=sight_range_voxels {
-        for dy in -sight_range_voxels..=sight_range_voxels {
-            let d2 = (dx as i64) * (dx as i64) + (dy as i64) * (dy as i64);
-            if d2 > range_sq {
-                continue;
-            }
-
+    for &(dx, dy) in offsets {
+        {
             let vx = cvx + dx;
             let vy = cvy + dy;
 
-            let surface = *surface_cache
-                .entry((vx, vy))
-                .or_insert_with(|| state.voxel_world.surface_height(vx, vy));
+            // Fast path: cache hit is two HashMap ops (check-then-insert via
+            // `entry` did an unnecessary insert path). `.get()` avoids that.
+            let surface = match surface_cache.get(&(vx, vy)) {
+                Some(&h) => h,
+                None => {
+                    let h = state.voxel_world.surface_height(vx, vy);
+                    surface_cache.insert((vx, vy), h);
+                    h
+                }
+            };
 
             // Scan 21 z values (surface-5 .. surface+15) batched by chunk-z:
             // a chunk is 64 tall, so a 21-voxel vertical scan almost always
