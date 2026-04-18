@@ -3439,7 +3439,7 @@ pub struct NpcData {
     /// Known resource locations discovered through perception or trade.
     /// Key: resource entity ID. Value: (position, resource_type, tick_observed).
     /// Stale entries (>2000 ticks old) become unreliable.
-    pub known_resources: std::collections::HashMap<u32, ResourceKnowledge>,
+    pub known_resources: std::collections::HashMap<u32, ResourceKnowledge, ahash::RandomState>,
 
     /// Known voxel resource deposits (ore veins, stone outcrops, etc.).
     pub known_voxel_resources: Vec<VoxelResourceKnowledge>,
@@ -3459,11 +3459,11 @@ pub struct NpcData {
     pub behavior_profile: Vec<(u32, f32)>,
 
     /// Per-pair relationships with other NPCs. Capped at 20 entries.
-    pub relationships: std::collections::HashMap<u32, Relationship>,
+    pub relationships: std::collections::HashMap<u32, Relationship, ahash::RandomState>,
 
     /// Per-action-type outcome tracking for adaptive behavior (Phase A).
     /// Key: (action_type_discriminant, target_type_hash). Value: EMA of outcomes.
-    pub action_outcomes: std::collections::HashMap<(u8, u32), OutcomeEMA>,
+    pub action_outcomes: std::collections::HashMap<(u8, u32), OutcomeEMA, ahash::RandomState>,
 
     /// Medium-term behavioral orientation (Phase B).
     pub aspiration: Aspiration,
@@ -3873,7 +3873,7 @@ impl Default for NpcData {
             creature_type: CreatureType::Citizen,
             home_den: None,
             pack_leader_id: None,
-            known_resources: std::collections::HashMap::new(),
+            known_resources: std::collections::HashMap::default(),
             known_voxel_resources: Vec::new(),
             harvest_target: None,
             needs: Needs::default(),
@@ -3881,8 +3881,8 @@ impl Default for NpcData {
             personality: Personality::default(),
             emotions: Emotions::default(),
             behavior_profile: Vec::new(),
-            relationships: std::collections::HashMap::new(),
-            action_outcomes: std::collections::HashMap::new(),
+            relationships: std::collections::HashMap::default(),
+            action_outcomes: std::collections::HashMap::default(),
             aspiration: Aspiration::default(),
             passive_effects: PassiveEffects::default(),
             world_abilities: Vec::new(),
