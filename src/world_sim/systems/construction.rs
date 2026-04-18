@@ -68,7 +68,7 @@ fn grow_room(
     seed: &BuildSeed,
     tiles: &mut std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
     tick: u64,
-    visited: &mut std::collections::HashSet<TilePos, ahash::RandomState>,
+    visited: &mut Vec<bool>,
     queue: &mut std::collections::VecDeque<TilePos>,
     interior: &mut Vec<TilePos>,
     boundary: &mut Vec<TilePos>,
@@ -121,19 +121,42 @@ fn grow_room(
     }
 }
 
+/// Side of the local visited grid. Covers ±64 tiles from seed (4× MAX_ROOM_SIZE).
+const FLOOD_GRID_SIDE: i32 = 128;
+const FLOOD_GRID_HALF: i32 = FLOOD_GRID_SIDE / 2;
+const FLOOD_GRID_SIZE: usize = (FLOOD_GRID_SIDE * FLOOD_GRID_SIDE) as usize;
+
+#[inline]
+fn visited_idx(pos: TilePos, origin: TilePos) -> Option<usize> {
+    let lx = pos.x - origin.x + FLOOD_GRID_HALF;
+    let ly = pos.y - origin.y + FLOOD_GRID_HALF;
+    if lx < 0 || lx >= FLOOD_GRID_SIDE || ly < 0 || ly >= FLOOD_GRID_SIDE {
+        None
+    } else {
+        Some((ly * FLOOD_GRID_SIDE + lx) as usize)
+    }
+}
+
 /// Flood-fill from a position, collecting connected floor tiles AND the
 /// boundary (non-floor tiles adjacent to the interior) in a single pass.
-/// Pooled: `visited`, `queue`, `interior`, `boundary` buffers come from
-/// SimScratch — caller responsible for clear/take/restore.
+/// Uses a flat bool grid for visited — zero hashing in the hot loop.
+/// Any tile outside the ±64 window from seed is treated as already-visited
+/// (effectively bounds the BFS; rooms never approach this size).
 fn flood_fill_with_boundary(
     start: TilePos,
     tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
-    visited: &mut std::collections::HashSet<TilePos, ahash::RandomState>,
+    visited: &mut Vec<bool>,
     queue: &mut std::collections::VecDeque<TilePos>,
     interior: &mut Vec<TilePos>,
     boundary: &mut Vec<TilePos>,
 ) {
-    visited.clear();
+    // Ensure visited buffer is sized + zeroed.
+    if visited.len() != FLOOD_GRID_SIZE {
+        visited.clear();
+        visited.resize(FLOOD_GRID_SIZE, false);
+    } else {
+        visited.fill(false);
+    }
     queue.clear();
     interior.clear();
     boundary.clear();
@@ -144,14 +167,19 @@ fn flood_fill_with_boundary(
     }
 
     queue.push_back(start);
-    visited.insert(start);
+    if let Some(i) = visited_idx(start, start) { visited[i] = true; }
 
     while let Some(pos) = queue.pop_front() {
         interior.push(pos);
         if interior.len() > MAX_ROOM_SIZE as usize { break; }
 
         for neighbor in pos.neighbors4() {
-            if !visited.insert(neighbor) { continue; }
+            let i = match visited_idx(neighbor, start) {
+                Some(i) => i,
+                None => continue, // out of window — treat as visited/ignored
+            };
+            if visited[i] { continue; }
+            visited[i] = true;
             match tiles.get(&neighbor) {
                 Some(tile)
                     if tile.tile_type.is_floor() || tile.tile_type.is_furniture()
@@ -170,8 +198,7 @@ fn flood_fill_with_boundary(
 /// Back-compat wrapper for call sites that only need interior (tests).
 #[cfg(test)]
 fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Vec<TilePos> {
-    let mut visited: std::collections::HashSet<TilePos, ahash::RandomState> =
-        std::collections::HashSet::default();
+    let mut visited = Vec::new();
     let mut queue = std::collections::VecDeque::new();
     let mut interior = Vec::new();
     let mut boundary = Vec::new();
