@@ -46,11 +46,24 @@ pub fn structural_tick(state: &mut WorldState) {
 
     for cp in dirty_chunks {
         let unsupported = find_unsupported_voxels(state, cp, &mut buf);
+
+        // Clear dirty after structural processing. Without this the chunk
+        // stays dirty forever (only the Vulkan renderer + NDJSON bridge
+        // otherwise clear it — neither runs in headless bench paths), so
+        // structural_tick rechecks the same chunks every cadence for no
+        // gain. Clearing here turns structural_tick into genuine idle
+        // work once chunks settle.
+        if let Some(chunk) = state.voxel_world.chunks.get_mut(&cp) {
+            chunk.dirty = false;
+        }
+
         if unsupported.is_empty() {
             continue;
         }
 
-        // Remove unsupported voxels (simplified collapse).
+        // Remove unsupported voxels (simplified collapse). set_voxel
+        // re-marks the containing chunk dirty, so the next structural
+        // tick will revisit it — correct: new fragments may emerge.
         for &(vx, vy, vz) in &unsupported {
             state.voxel_world.set_voxel(vx, vy, vz, Voxel::default());
         }
