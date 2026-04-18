@@ -65,8 +65,10 @@ fn grow_room(
         placed_tick: tick,
     });
 
-    let mut interior = flood_fill_floor(seed.pos, tiles);
-    let boundary = compute_boundary(&interior, tiles);
+    // Fused flood-fill + boundary computation: single BFS pass, one
+    // HashSet allocation instead of three. Previously 6.66% (flood_fill)
+    // + 3.71% (compute_boundary) = 10.37% of program time.
+    let (mut interior, boundary) = flood_fill_with_boundary(seed.pos, tiles);
 
     if (interior.len() as u32) < seed.minimum_interior {
         // Below minimum: expand by placing floor tiles on empty boundary positions.
@@ -103,42 +105,56 @@ fn grow_room(
     interior
 }
 
-/// Flood-fill from a position, collecting connected floor tiles.
-fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Vec<TilePos> {
-    // Pre-size visited + queue to bounded upper bound (BFS capped at
-    // MAX_ROOM_SIZE interior + boundary). Eliminates the reserve_rehash
-    // cascade that was 3.16% of program time in the flamegraph.
+/// Flood-fill from a position, collecting connected floor tiles AND the
+/// boundary (non-floor tiles adjacent to the interior) in a single pass.
+/// This replaces `flood_fill_floor` + `compute_boundary` — previously each
+/// visited the same graph separately.
+fn flood_fill_with_boundary(
+    start: TilePos,
+    tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
+) -> (Vec<TilePos>, Vec<TilePos>) {
     let cap = (MAX_ROOM_SIZE as usize) * 4 + 16;
     let mut visited: std::collections::HashSet<TilePos, ahash::RandomState> =
         std::collections::HashSet::with_capacity_and_hasher(
             cap, ahash::RandomState::default());
     let mut queue = std::collections::VecDeque::with_capacity(cap);
-    let mut result = Vec::with_capacity(MAX_ROOM_SIZE as usize);
+    let mut interior = Vec::with_capacity(MAX_ROOM_SIZE as usize);
+    let mut boundary = Vec::with_capacity(cap);
 
     if !tiles.get(&start).map(|t| t.tile_type.is_floor() || t.tile_type.is_furniture()).unwrap_or(false) {
-        return vec![start]; // seed is floor by convention even if not yet placed
+        return (vec![start], Vec::new()); // seed is floor by convention
     }
 
     queue.push_back(start);
     visited.insert(start);
 
     while let Some(pos) = queue.pop_front() {
-        result.push(pos);
-        if result.len() > MAX_ROOM_SIZE as usize { break; }
+        interior.push(pos);
+        if interior.len() > MAX_ROOM_SIZE as usize { break; }
 
         for neighbor in pos.neighbors4() {
-            if visited.contains(&neighbor) { continue; }
-            visited.insert(neighbor);
-            if let Some(tile) = tiles.get(&neighbor) {
-                if tile.tile_type.is_floor() || tile.tile_type.is_furniture()
-                    || matches!(tile.tile_type, TileType::Door)
+            if !visited.insert(neighbor) { continue; }
+            match tiles.get(&neighbor) {
+                Some(tile)
+                    if tile.tile_type.is_floor() || tile.tile_type.is_furniture()
+                        || matches!(tile.tile_type, TileType::Door) =>
                 {
                     queue.push_back(neighbor);
+                }
+                _ => {
+                    // Not-a-floor (or no tile at all) adjacent to an interior
+                    // tile — that's the boundary by definition.
+                    boundary.push(neighbor);
                 }
             }
         }
     }
-    result
+    (interior, boundary)
+}
+
+/// Back-compat wrapper for call sites that only need interior.
+fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Vec<TilePos> {
+    flood_fill_with_boundary(start, tiles).0
 }
 
 /// Compute boundary positions: tiles adjacent to interior that are not interior.
