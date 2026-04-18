@@ -152,10 +152,21 @@ pub fn pair_hash_f32(id_a: u32, id_b: u32, tick: u64, salt: u64) -> f32 {
 // ---------------------------------------------------------------------------
 
 /// Integer tile position. 2.0 world units per tile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TilePos {
     pub x: i32,
     pub y: i32,
+}
+
+/// Custom Hash: pack (x, y) into one u64 and call write_u64 once.
+/// ahash has a fast path for u64; avoids the two-write_i32 pipeline that
+/// derive(Hash) would generate. ~2× faster per hash.
+impl std::hash::Hash for TilePos {
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let packed = ((self.x as u32 as u64) << 32) | (self.y as u32 as u64);
+        state.write_u64(packed);
+    }
 }
 
 impl TilePos {
