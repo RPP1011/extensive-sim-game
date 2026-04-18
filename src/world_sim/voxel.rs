@@ -10,6 +10,12 @@
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
+/// Non-cryptographic hasher for ChunkPos lookups. SipHash is overkill for
+/// a 3×i32 key and was measured as >50% of program time in flamegraphs.
+/// `ahash` gives comparable hash quality for non-adversarial workloads at
+/// ~10× the speed.
+pub type ChunkMap = HashMap<ChunkPos, Chunk, ahash::RandomState>;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -436,7 +442,7 @@ impl std::fmt::Debug for Chunk {
 /// Sparse chunk storage — the physical world.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoxelWorld {
-    pub chunks: HashMap<ChunkPos, Chunk>,
+    pub chunks: ChunkMap,
     /// Global water level (z coordinate). Sea/lake surfaces.
     pub sea_level: i32,
     /// Optional region plan for biome-driven terrain generation.
@@ -447,7 +453,11 @@ pub struct VoxelWorld {
 
 impl Default for VoxelWorld {
     fn default() -> Self {
-        Self { chunks: HashMap::new(), sea_level: 28, region_plan: None }
+        Self {
+            chunks: ChunkMap::default(),
+            sea_level: 28,
+            region_plan: None,
+        }
     }
 }
 
@@ -469,18 +479,46 @@ impl VoxelWorld {
     }
 
     /// Get the surface height at (x, y) — highest solid voxel z.
-    /// Scans downward from max loaded height. Returns sea_level if no solid found.
+    ///
+    /// Fast path: when a `region_plan` is set, delegates to
+    /// `terrain::surface_height_at`, which is pure analytical math over FBM
+    /// noise — zero chunk lookups. The flamegraph showed the previous
+    /// chunk-walking version was 72% of total program time due to SipHash
+    /// over `ChunkPos`; the analytical path is orders of magnitude cheaper.
+    ///
+    /// Fallback path (no region plan): chunk-walk from the top, one HashMap
+    /// lookup per chunk-z-slice (not per voxel-z). Returns sea_level if no
+    /// solid found.
     pub fn surface_height(&self, vx: i32, vy: i32) -> i32 {
-        // Scan from MAX_SURFACE_Z down — previously only scanned z=0..64
-        // which was correct for the old CHUNK_SIZE=16/MAX_SURFACE_Z=400
-        // world but returns SEA_LEVEL every time after the 10cm/voxel
-        // rescaling (MAX_SURFACE_Z=2000, CHUNK_SIZE=64). Most callers should
-        // prefer `terrain::surface_height_at(plan, ...)` which is analytical
-        // and doesn't require loaded voxel data.
+        if let Some(plan) = self.region_plan.as_ref() {
+            return crate::world_sim::terrain::materialize::surface_height_at(
+                vx as f32, vy as f32, plan, plan.seed,
+            );
+        }
+        self.surface_height_from_chunks(vx, vy)
+    }
+
+    /// Chunk-walking surface_height. Used only when no region plan exists.
+    /// One HashMap lookup per chunk-z-slice (max_z / CHUNK_SIZE ≈ 32 lookups).
+    fn surface_height_from_chunks(&self, vx: i32, vy: i32) -> i32 {
         let max_z = crate::world_sim::constants::MAX_SURFACE_Z;
-        for vz in (0..max_z).rev() {
-            if self.get_voxel(vx, vy, vz).material.is_solid() {
-                return vz + 1;
+        let cs = CHUNK_SIZE as i32;
+        let cx = vx.div_euclid(cs);
+        let cy = vy.div_euclid(cs);
+        let lx = vx.rem_euclid(cs) as usize;
+        let ly = vy.rem_euclid(cs) as usize;
+
+        let max_cz = (max_z - 1).div_euclid(cs);
+        for cz in (0..=max_cz).rev() {
+            let cp = ChunkPos::new(cx, cy, cz);
+            let Some(chunk) = self.chunks.get(&cp) else { continue };
+            let chunk_base_z = cz * cs;
+            for lz in (0..CHUNK_SIZE).rev() {
+                let vz = chunk_base_z + lz as i32;
+                if vz >= max_z { continue; }
+                if chunk.voxels[local_index(lx, ly, lz)].material.is_solid() {
+                    return vz + 1;
+                }
             }
         }
         self.sea_level
