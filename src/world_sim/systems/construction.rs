@@ -146,7 +146,7 @@ fn compute_boundary(interior: &[TilePos], _tiles: &std::collections::HashMap<Til
 
 /// Check if all boundary positions are solid (walls, existing structures, or placed walls).
 fn is_enclosed(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> bool {
-    let interior_set: std::collections::HashSet<TilePos> = interior.iter().copied().collect();
+    let interior_set: std::collections::HashSet<TilePos, ahash::RandomState> = interior.iter().copied().collect();
 
     for &pos in interior {
         for neighbor in pos.neighbors4() {
@@ -163,7 +163,7 @@ fn is_enclosed(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, 
 
 /// Check if any boundary tile is a door.
 fn has_door(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> bool {
-    let interior_set: std::collections::HashSet<TilePos> = interior.iter().copied().collect();
+    let interior_set: std::collections::HashSet<TilePos, ahash::RandomState> = interior.iter().copied().collect();
     for &pos in interior {
         for neighbor in pos.neighbors4() {
             if interior_set.contains(&neighbor) { continue; }
@@ -178,7 +178,7 @@ fn has_door(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Til
 /// Find the best position for a door: boundary wall tile with fewest wall neighbors
 /// (corner of the room, facing outward).
 fn find_door_position(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Option<TilePos> {
-    let interior_set: std::collections::HashSet<TilePos> = interior.iter().copied().collect();
+    let interior_set: std::collections::HashSet<TilePos, ahash::RandomState> = interior.iter().copied().collect();
     let mut best: Option<(TilePos, usize)> = None;
 
     for &pos in interior {
