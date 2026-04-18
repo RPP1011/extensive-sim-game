@@ -92,12 +92,15 @@ fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Ti
 
 /// Flood-fill from a position, collecting connected floor tiles.
 fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Vec<TilePos> {
-    // ahash for the visited set — SipHash over a struct key was 2% of
-    // program time in the flamegraph.
+    // Pre-size visited + queue to bounded upper bound (BFS capped at
+    // MAX_ROOM_SIZE interior + boundary). Eliminates the reserve_rehash
+    // cascade that was 3.16% of program time in the flamegraph.
+    let cap = (MAX_ROOM_SIZE as usize) * 4 + 16;
     let mut visited: std::collections::HashSet<TilePos, ahash::RandomState> =
-        std::collections::HashSet::default();
-    let mut queue = std::collections::VecDeque::new();
-    let mut result = Vec::new();
+        std::collections::HashSet::with_capacity_and_hasher(
+            cap, ahash::RandomState::default());
+    let mut queue = std::collections::VecDeque::with_capacity(cap);
+    let mut result = Vec::with_capacity(MAX_ROOM_SIZE as usize);
 
     if !tiles.get(&start).map(|t| t.tile_type.is_floor() || t.tile_type.is_furniture()).unwrap_or(false) {
         return vec![start]; // seed is floor by convention even if not yet placed
