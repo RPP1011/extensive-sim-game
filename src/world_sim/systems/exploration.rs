@@ -259,8 +259,17 @@ fn scan_voxel_resources_cached(
     // loop, and pointer dereferences stay inside that scope.
     let chunks = &state.voxel_world.chunks;
 
+    // RESOURCE_CELL_SIZE=128 is exactly 2×CHUNK_SIZE=64, so cell_x
+    // is constant within a chunk column (all (vx) in [cx*64, cx*64+64)
+    // map to the same cell = cx/2). Precompute per-column to hoist two
+    // div_euclid calls out of the hot inner loop.
+    const CELL_DIV: i32 = RESOURCE_CELL_SIZE / (crate::world_sim::voxel::CHUNK_SIZE as i32);
+
     for cx in cx_min..=cx_max {
+        let cell_x = cx.div_euclid(CELL_DIV);
         for cy in cy_min..=cy_max {
+            let cell_y = cy.div_euclid(CELL_DIV);
+
             // Scratch buffer per chunk-xy column. Cleared between columns
             // so stale pointers from the previous (cx, cy) don't leak.
             let mut z_chunks: Vec<(i32, Option<*const crate::world_sim::voxel::Chunk>)> =
@@ -318,9 +327,6 @@ fn scan_voxel_resources_cached(
                             z_chunks.push((cz, ptr));
                         }
                     }
-
-                    let cell_x = vx.div_euclid(RESOURCE_CELL_SIZE);
-                    let cell_y = vy.div_euclid(RESOURCE_CELL_SIZE);
 
                     for (cz, ptr) in z_chunks.iter() {
                         let Some(ptr) = ptr else { continue };
