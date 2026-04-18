@@ -499,14 +499,16 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
         return;
     }
 
-    let npc_indices: Vec<usize> = state
-        .entities
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
-        .map(|(i, _)| i)
-        .collect();
+    // Pool npc_indices/npc_pos_voxel/visible_cells on state.sim_scratch.
+    let mut npc_indices = std::mem::take(&mut state.sim_scratch.npc_indices);
+    npc_indices.clear();
+    for (i, e) in state.entities.iter().enumerate() {
+        if e.alive && e.kind == EntityKind::Npc && e.npc.is_some() {
+            npc_indices.push(i);
+        }
+    }
     if npc_indices.is_empty() {
+        state.sim_scratch.npc_indices = npc_indices;
         return;
     }
 
@@ -514,11 +516,14 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
     let sight_sq = (sight as f32) * (sight as f32);
 
     // Step 1: collect the union of (cell_x, cell_y) cells visible across
-    // all NPCs. Each NPC sees a 3×3 grid of cells at most (sight=80,
-    // RESOURCE_CELL_SIZE=128). Dedup with a HashSet.
-    let mut visible_cells: std::collections::HashSet<(i32, i32), ahash::RandomState> =
-        std::collections::HashSet::default();
-    let mut npc_pos_voxel: Vec<(usize, i32, i32)> = Vec::with_capacity(npc_indices.len());
+    // all NPCs. Each NPC sees a 3×3 grid of cells at most.
+    let mut visible_cells = std::mem::take(&mut state.sim_scratch.visible_cells);
+    visible_cells.clear();
+    let mut npc_pos_voxel = std::mem::take(&mut state.sim_scratch.npc_pos_voxel);
+    npc_pos_voxel.clear();
+    if npc_pos_voxel.capacity() < npc_indices.len() {
+        npc_pos_voxel.reserve(npc_indices.len() - npc_pos_voxel.capacity());
+    }
 
     for &idx in &npc_indices {
         let entity = &state.entities[idx];
@@ -554,7 +559,7 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
     let tick = state.tick;
     let half_cell_world = RESOURCE_CELL_SIZE as f32 * VOXEL_SCALE * 0.5;
 
-    for (idx, cvx, cvy) in npc_pos_voxel {
+    for &(idx, cvx, cvy) in &npc_pos_voxel {
         let cell_vx_min = (cvx - sight).div_euclid(RESOURCE_CELL_SIZE);
         let cell_vx_max = (cvx + sight).div_euclid(RESOURCE_CELL_SIZE);
         let cell_vy_min = (cvy - sight).div_euclid(RESOURCE_CELL_SIZE);
@@ -612,6 +617,11 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
             }
         }
     }
+
+    // Restore pooled buffers.
+    state.sim_scratch.npc_indices = npc_indices;
+    state.sim_scratch.npc_pos_voxel = npc_pos_voxel;
+    state.sim_scratch.visible_cells = visible_cells;
 }
 
 #[cfg(test)]
