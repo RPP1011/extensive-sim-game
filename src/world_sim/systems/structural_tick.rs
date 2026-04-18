@@ -31,8 +31,21 @@ pub fn structural_tick(state: &mut WorldState) {
         .take(MAX_CHUNKS_PER_TICK)
         .collect();
 
+    if dirty_chunks.is_empty() {
+        return;
+    }
+
+    // Allocate the flat-bool BFS buffers ONCE per invocation and reuse
+    // across the up-to-4 dirty chunks. Each is CHUNK_SIZE³ bools = ~256KB,
+    // so avoiding the per-chunk realloc + memset is measurable.
+    const N: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
+    let mut buf = FindBuffers {
+        solid_local: vec![false; N],
+        visited_local: vec![false; N],
+    };
+
     for cp in dirty_chunks {
-        let unsupported = find_unsupported_voxels(state, cp);
+        let unsupported = find_unsupported_voxels(state, cp, &mut buf);
         if unsupported.is_empty() {
             continue;
         }
@@ -52,10 +65,31 @@ pub fn structural_tick(state: &mut WorldState) {
     }
 }
 
+/// Reusable scratch buffers for `find_unsupported_voxels`. Allocated once
+/// per `structural_tick` and reset between dirty chunks. Each Vec is
+/// CHUNK_SIZE³ bools (~256KB); one alloc per tick instead of one per
+/// chunk meaningfully reduces memset + allocator overhead.
+struct FindBuffers {
+    solid_local: Vec<bool>,
+    visited_local: Vec<bool>,
+}
+
+impl FindBuffers {
+    fn reset(&mut self) {
+        // fill is vectorizable; much cheaper than allocating a fresh Vec.
+        self.solid_local.fill(false);
+        self.visited_local.fill(false);
+    }
+}
+
 /// Find solid voxels in `cp` that are not connected to the ground via
 /// face-adjacent solid neighbors. Uses BFS from ground-anchored voxels;
 /// any solid voxel not reached is unsupported.
-fn find_unsupported_voxels(state: &WorldState, cp: ChunkPos) -> Vec<(i32, i32, i32)> {
+fn find_unsupported_voxels(
+    state: &WorldState,
+    cp: ChunkPos,
+    buf: &mut FindBuffers,
+) -> Vec<(i32, i32, i32)> {
     let chunk = match state.voxel_world.chunks.get(&cp) {
         Some(c) => c,
         None => return Vec::new(),
@@ -66,13 +100,11 @@ fn find_unsupported_voxels(state: &WorldState, cp: ChunkPos) -> Vec<(i32, i32, i
     let base_y = cp.y * cs;
     let base_z = cp.z * cs;
 
-    // Flat bool arrays for in-chunk membership. CHUNK_SIZE³ ≈ 262K bools
-    // = ~256KB per vec — one heap alloc per call, but O(1) lookup with
-    // zero hashing. Replaces two ahash HashSets that together consumed
-    // ~26% of program time in the flamegraph (insert + contains + rehash).
-    const N: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
-    let mut solid_local: Vec<bool> = vec![false; N];
-    let mut visited_local: Vec<bool> = vec![false; N];
+    // Reuse the caller's BFS buffers. Flat bool arrays for in-chunk
+    // membership — CHUNK_SIZE³ ≈ 262K bools each — with zero hashing.
+    buf.reset();
+    let solid_local = &mut buf.solid_local[..];
+    let visited_local = &mut buf.visited_local[..];
 
     // Cross-chunk BFS tracking. Preserves the original unlimited-depth
     // cross-chunk traversal so arches spanning multiple chunks still anchor
