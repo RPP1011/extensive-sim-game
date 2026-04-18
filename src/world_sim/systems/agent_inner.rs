@@ -804,12 +804,18 @@ fn decay_beliefs(memory: &mut Memory, tick: u64) {
 }
 
 fn drift_personality_from_memory(personality: &mut Personality, memory: &Memory) {
-    let attacks = memory.events.iter().rev().take(20)
-        .filter(|e| matches!(e.event_type, MemEventType::WasAttacked)).count();
-    let wins = memory.events.iter().rev().take(20)
-        .filter(|e| matches!(e.event_type, MemEventType::WonFight)).count();
-    let deaths = memory.events.iter().rev().take(20)
-        .filter(|e| matches!(e.event_type, MemEventType::FriendDied(_))).count();
+    // Single pass counting three event types (was three separate passes).
+    let mut attacks = 0u32;
+    let mut wins = 0u32;
+    let mut deaths = 0u32;
+    for e in memory.events.iter().rev().take(20) {
+        match e.event_type {
+            MemEventType::WasAttacked => attacks += 1,
+            MemEventType::WonFight => wins += 1,
+            MemEventType::FriendDied(_) => deaths += 1,
+            _ => {}
+        }
+    }
 
     if attacks > 3 {
         personality.risk_tolerance = (personality.risk_tolerance - 0.01).max(0.0);
