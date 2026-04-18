@@ -309,8 +309,16 @@ fn scan_voxel_resources_cached(
 
                     let z_min = surface - 5;
                     let z_max = surface + 15;
-                    let cz_min = z_min.div_euclid(cs);
-                    let cz_max = z_max.div_euclid(cs);
+                    // Rust's i32 `>>` is arithmetic shift (rounds toward
+                    // negative infinity), which matches div_euclid semantics
+                    // for power-of-2 divisors. CHUNK_SIZE is compile-time 64.
+                    // LLVM doesn't consistently reduce div_euclid to this
+                    // even at opt-level=3; the explicit shift measurably
+                    // cuts the 32% div_euclid cost in the hot loop.
+                    const CHUNK_SHIFT: i32 =
+                        (crate::world_sim::voxel::CHUNK_SIZE as i32).trailing_zeros() as i32;
+                    let cz_min = z_min >> CHUNK_SHIFT;
+                    let cz_max = z_max >> CHUNK_SHIFT;
 
                     // Materialize z_chunks for this column if not already
                     // cached for cz_min..=cz_max. With surface heights
