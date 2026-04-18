@@ -304,7 +304,18 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
     // Shared surface-height cache for this tick. NPCs close together scan
     // overlapping (vx, vy) disks — memoizing avoids recomputing the
     // analytical FBM surface noise (currently the tick's top cost).
-    let mut surface_cache = SurfaceCache::default();
+    //
+    // Pre-size: each NPC visits up to π × SIGHT_RANGE² ≈ 20K (vx, vy)
+    // positions. The union across NPCs is bounded but grows superlinearly
+    // only for well-spread NPCs; a tight cluster deduplicates heavily.
+    // Allocating the upper bound once eliminates the reserve_rehash
+    // cascade (was 11% of program time).
+    let per_npc_disk = (std::f32::consts::PI
+        * (SIGHT_RANGE_VOXELS as f32)
+        * (SIGHT_RANGE_VOXELS as f32)) as usize;
+    let cap = per_npc_disk.saturating_mul(npc_indices.len()).max(256);
+    let mut surface_cache = SurfaceCache::with_capacity_and_hasher(
+        cap, ahash::RandomState::default());
 
     for idx in npc_indices {
         scan_voxel_resources_cached(state, idx, SIGHT_RANGE_VOXELS, &mut surface_cache);
