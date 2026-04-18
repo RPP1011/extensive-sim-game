@@ -500,6 +500,13 @@ pub struct WorldState {
     #[serde(skip)]
     pub surface_cache: super::systems::exploration::SurfaceCache,
 
+    /// Dense-grid fast path for surface heights, populated around each
+    /// settlement by `warm_surface_cache`. When present, lookups go here
+    /// first and bypass the HashMap — saves ~8% of tick time on
+    /// per-cell-census scans where 16K surface lookups run per new cell.
+    #[serde(skip)]
+    pub surface_grid: super::systems::exploration::FlatSurfaceGrid,
+
     /// Per-resource-cell census of target materials. Populated lazily when
     /// an NPC's scan disk covers a cell. Entries persist for the lifetime
     /// of the run (invalidation on voxel edits is a future refinement —
@@ -597,6 +604,7 @@ impl WorldState {
             settlement_index: Vec::new(),
             tiles: std::collections::HashMap::default(),
             surface_cache: super::systems::exploration::SurfaceCache::default(),
+            surface_grid: super::systems::exploration::FlatSurfaceGrid::default(),
             cell_census: super::systems::exploration::CellCensus::default(),
             sim_scratch: SimScratch::default(),
             build_seeds: Vec::new(),

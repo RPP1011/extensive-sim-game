@@ -74,8 +74,10 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
         let warm_start = std::time::Instant::now();
         game::world_sim::systems::exploration::warm_surface_cache(sim.state_mut());
         let warm_elapsed = warm_start.elapsed();
-        eprintln!("[warm] surface_cache pre-populated in {:.2?} ({} entries)",
-                  warm_elapsed, sim.state().surface_cache.len());
+        let total_voxels: usize = sim.state().surface_grid.tiles.iter()
+            .map(|t| t.heights.len()).sum();
+        eprintln!("[warm] surface_grid pre-populated in {:.2?} ({} tiles, {} voxels)",
+                  warm_elapsed, sim.state().surface_grid.tiles.len(), total_voxels);
     }
 
     // Report voxel world stats.
