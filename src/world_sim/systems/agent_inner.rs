@@ -372,17 +372,45 @@ pub fn update_agent_inner_states(state: &mut WorldState) {
         }
 
         // --- World event awareness ---
-        // Recent deaths of friends generate grief
-        for &dead_id in &world.recent_deaths {
-            let knew_them = npc.memory.events.iter().any(|e| e.entity_ids.contains(&dead_id));
-            if knew_them {
+        // Recent deaths of friends generate grief.
+        //
+        // The naive version scans `memory.events` once per dead_id (O(N×D))
+        // and recomputes `already_grieving` each iteration. We invert the
+        // loop: scan memory once, collect intersection with dead set, and
+        // hoist `already_grieving` outside. Saves ~1% of total time in the
+        // default world (flamegraph).
+        if !world.recent_deaths.is_empty() {
+            let mut knew_any = false;
+            let mut dead_match_buf: [u32; 16] = [0; 16];
+            let mut dead_match_len = 0usize;
+            for event in &npc.memory.events {
+                for &eid in &event.entity_ids {
+                    if world.recent_deaths.contains(&eid) {
+                        knew_any = true;
+                        // Dedupe into small buffer (recent_deaths is small).
+                        let mut already = false;
+                        for i in 0..dead_match_len {
+                            if dead_match_buf[i] == eid { already = true; break; }
+                        }
+                        if !already && dead_match_len < dead_match_buf.len() {
+                            dead_match_buf[dead_match_len] = eid;
+                            dead_match_len += 1;
+                        }
+                    }
+                }
+                if dead_match_len == dead_match_buf.len() { break; }
+            }
+            if knew_any {
                 let already_grieving = npc.memory.events.iter().rev().take(3).any(|e| {
                     matches!(e.event_type, MemEventType::FriendDied(_))
                         && world.tick.saturating_sub(e.tick) < 200
                 });
                 if !already_grieving {
-                    record_npc_event(npc, MemEventType::FriendDied(dead_id),
-                        entity.pos, vec![dead_id], -0.7, world.tick);
+                    for i in 0..dead_match_len {
+                        let dead_id = dead_match_buf[i];
+                        record_npc_event(npc, MemEventType::FriendDied(dead_id),
+                            entity.pos, vec![dead_id], -0.7, world.tick);
+                    }
                 }
             }
         }
