@@ -829,7 +829,11 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
         if kind != EntityKind::Npc { continue; }
         let dead_pos = state.entity(*dead_id).map(|e| e.pos).unwrap_or((0.0, 0.0));
         let sid = match *home_sid { Some(s) => s, None => continue };
-        for entity in &mut state.entities {
+        // Only iterate NPCs in the same settlement (indexed slice) rather
+        // than scanning all entities. With 2000 entities and 10 settlements
+        // this cuts the inner loop by ~10× per dead NPC.
+        let range = state.group_index.settlement_entities(sid);
+        for entity in &mut state.entities[range] {
             if entity.id == *dead_id || !entity.alive || entity.kind != EntityKind::Npc { continue; }
             let npc = match &mut entity.npc { Some(n) => n, None => continue };
             if npc.home_settlement_id != Some(sid) { continue; }
