@@ -92,7 +92,10 @@ fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Ti
 
 /// Flood-fill from a position, collecting connected floor tiles.
 fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, Tile>) -> Vec<TilePos> {
-    let mut visited = std::collections::HashSet::new();
+    // ahash for the visited set — SipHash over a struct key was 2% of
+    // program time in the flamegraph.
+    let mut visited: std::collections::HashSet<TilePos, ahash::RandomState> =
+        std::collections::HashSet::default();
     let mut queue = std::collections::VecDeque::new();
     let mut result = Vec::new();
 
@@ -124,9 +127,12 @@ fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, T
 
 /// Compute boundary positions: tiles adjacent to interior that are not interior.
 fn compute_boundary(interior: &[TilePos], _tiles: &std::collections::HashMap<TilePos, Tile>) -> Vec<TilePos> {
-    let interior_set: std::collections::HashSet<TilePos> = interior.iter().copied().collect();
+    let mut interior_set: std::collections::HashSet<TilePos, ahash::RandomState> =
+        std::collections::HashSet::default();
+    interior_set.extend(interior.iter().copied());
     let mut boundary = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<TilePos, ahash::RandomState> =
+        std::collections::HashSet::default();
 
     for &pos in interior {
         for neighbor in pos.neighbors4() {
