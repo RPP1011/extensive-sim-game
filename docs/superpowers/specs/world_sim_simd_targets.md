@@ -1,76 +1,77 @@
-# World Sim SIMD Targets — 2026-04-18
+# World Sim Optimization Targets — 2026-04-18
 
-Initial diagnostic data captured. This document is meant to be refined as
-larger-scale runs land; the current entries are from the 300-tick small-world
-smoke run (10 NPCs + 1 settlement).
+Flamegraph-driven analysis. `scripts/perf_bench.sh <ticks> <world>` produces a
+`cargo flamegraph` SVG at full sim speed (no instrumentation overhead). The
+line-level hotspot view is what tells us where to put SIMD — or more often,
+where a non-SIMD fix is the bigger win.
 
-## Summary of diagnostic setup
+## Methodology
 
-- Instrumentation: `profile-systems` feature, 131 systems timed per tick
-- Output: `generated/baselines/smoke.json` (300 ticks, small-world preset)
-- Method: ranked by `total_ns` across all ticks; `ns/call` reveals per-invocation cost
+```bash
+sudo sysctl kernel.perf_event_paranoid=1   # one-time, reverts on reboot
+./scripts/perf_bench.sh 500 small          # ~1.5 min wall, produces SVG in generated/flamegraphs/
+python3 -m http.server --directory generated/flamegraphs 8765 &  # to view in Chrome
+```
 
-## Top systems (smoke run, small-world)
+Inspect in a browser — hover for exact %s, click to zoom into sub-trees.
 
-| rank | system | total_ms | calls | ns/call | % of wall |
-|---|---|---|---|---|---|
-| 1 | `scan_all_npc_resources` | 24022 | 300 | 80M | 91% |
-| 2 | `structural_tick` | 2430 | 30 | 81M | 9% |
-| 3 | `update_agent_inner_states` | 0.21 | 300 | 714 | 0% |
-| 4 | `evaluate_and_act` | 0.17 | 300 | 570 | 0% |
-| 5 | `advance_movement` | 0.11 | 300 | 372 | 0% |
+## Findings (2026-04-18, small world, 500 ticks)
 
-## Findings
+| % of total | Frame |
+|---|---|
+| **72%** | `scan_voxel_resources` (NPC resource discovery) |
+| 72% | ↳ `surface_height` |
+| 70% | ↳ `get_voxel` |
+| **67%** | ↳↳ `HashMap<ChunkPos, Chunk>::get` |
+| **54%** | ↳↳↳ **SipHash `finish` / `Sip13Rounds` on ChunkPos** |
+| 37% | ↳↳↳↳ `d_rounds` (SipHash mixing round) |
+| 18% | 2nd-level `scan_voxel_resources` (recursive / re-entry) |
 
-**The dominant cost is voxel/spatial work, not simulation math.** At small-world
-scale, `scan_all_npc_resources` (voxel resource discovery) and `structural_tick`
-(unsupported voxel collapse) together consume 100% of the wall time. Neither is
-a SIMD candidate:
+### What this tells us
 
-- `scan_all_npc_resources` — HashMap lookups + per-NPC voxel range queries
-- `structural_tick` — voxel graph traversal, branchy support analysis
+**The dominant cost is hashing, not simulation math.** Over half of total
+program time is `std::collections::HashMap<ChunkPos, Chunk>` using the default
+`RandomState` → `SipHash-1-3` to look up chunks by coordinate. `ChunkPos` is a
+3-tuple of `i32` — SipHash is cryptographic overkill for that key, and the same
+chunk gets looked up many times in a row during a voxel scan.
 
-**Simulation-side systems are fast at this scale.** `advance_movement` at 372ns/call
-and `evaluate_and_act` at 570ns/call don't register as SIMD candidates because
-they process ~10 NPCs. To find SIMD wins in the sim-side code, the bench must
-capture data from a larger population — at 10K-50K entities, the f32 arithmetic
-systems (movement, HP updates, economy) should dominate and the voxel work
-becomes proportionally smaller.
+### Recommended optimizations (ordered by expected win)
 
-## Runtime-cost finding (not SIMD, but plan-relevant)
+1. **Replace `HashMap<ChunkPos, Chunk>` with a non-cryptographic hasher or
+   flat store.** Immediate candidates:
+   - `ahash::AHashMap<ChunkPos, Chunk>` — drop-in, expected 4-10× on hash
+   - `rustc_hash::FxHashMap` — even faster for small integer keys
+   - If chunk coords are bounded (e.g., finite world), use a 3D `Vec<Vec<Vec<Chunk>>>` or `Vec<Option<Chunk>>` indexed by `x + y*w + z*w*h`
+   - Expected wall-time impact: 40-60% reduction
+2. **Cache the last-looked-up chunk in `get_voxel`.** A single-element LRU
+   (`{last_chunk_pos, last_chunk_ref}`) would catch the repeated-access pattern
+   the flamegraph implies.
+3. **Inline `surface_height`.** Its 72% self-attribution suggests it's not
+   being inlined across the `HashMap` boundary — mark `#[inline]` or
+   restructure to take the chunk as an arg rather than looking it up each
+   call.
 
-During baseline capture, the default-world (2010 entities, 10 settlements) ran
-at ~14 seconds per tick under `profile-systems`. Without the feature, prior
-measurements suggested ~400 ticks/sec. The feature's measured overhead
-dramatically exceeds the "≤1%" estimate in the original spec.
+### What about SIMD?
 
-Likely cause: ~580 per-settlement timer pairs per tick × 10 settlements + the
-HashMap insertion in `thread_record`. The overhead scales linearly with
-settlement count and dispatched-system count, and real-world settlement count
-is higher than the "~60 active systems" assumed in the spec.
+At small-world scale, no f32-array hot loops are visible — the HashMap
+bottleneck dominates everything else. Real sim-side SIMD candidates
+(movement, economy, HP updates) should surface in the flamegraph once the
+hash overhead is eliminated. Then rerun at 10K+ entity scale to see them.
 
-**Recommendation:** For multi-thousand-tick baselines, either:
-- Capture short (50-200 tick) baselines and extrapolate, or
-- Swap `thread_record`'s `HashMap` for a `Vec<(name, ns, calls)>` with linear
-  append + post-tick fold (amortized O(1) with no hashing during the hot path), or
-- Add a `--profile-sample-rate N` flag that records every Nth call, or
-- Run without `profile-systems` for aggregate timing + enable only for targeted runs
+**Anti-candidates confirmed disqualified:**
+- `delta::merge_deltas` (HashMap-heavy, already flagged in spec)
+- `scan_voxel_resources` itself — pointer-heavy voxel traversal
 
-## Next concrete steps (to add real SIMD targets here)
+## Why flamegraph > in-process per-system timing
 
-1. **Lower profile-systems overhead** — flip the thread-local from `HashMap` to
-   `Vec<(interned_name_idx, ns, calls)>`. Estimated 5-10× speedup at the
-   instrumented path.
-2. **Capture baselines at 10K + 50K** — once overhead is fixed, a 200-tick
-   baseline at 10K entities completes in minutes. The ~60-system postapply
-   block will produce ranking with enough samples to identify real candidates.
-3. **Check flamegraphs** — `scripts/perf_bench.sh` is ready; it wasn't
-   exercised in this session. Intra-system hot lines are the SIMD-target
-   signal that per-system timing can't see.
+Original plan built per-system nanosecond counters via `profile-systems`
+feature. During this session we discovered that approach has ~100× overhead
+at default-world scale (HashMap insertion in `thread_record` + 580 per-settlement
+timer pairs per tick). Flamegraph delivered the same targeting information in
+~1.5 minutes of profiling at full speed, plus *line-level* hotspots the
+per-system counters can never see.
 
-## Non-targets (already disqualified)
-
-- `scan_all_npc_resources` — pointer-heavy voxel traversal, not SIMD-able
-- `structural_tick` — graph traversal, not SIMD-able
-- `delta::merge_deltas` — HashMap-based merge, documented anti-candidate
-  in the original spec
+**Going forward:** prefer flamegraph for point-in-time target selection; use
+in-process timing only if CI regression tracking becomes a need (and if so,
+swap the HashMap for a `Vec<(interned_idx, ns, calls)>` to get overhead back
+to ~1%).
