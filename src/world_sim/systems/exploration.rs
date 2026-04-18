@@ -177,7 +177,22 @@ const TARGET_MATERIALS: &[VoxelMaterial] = &[
 /// Scan nearby voxels around an NPC and record harvestable deposits in its
 /// `known_voxel_resources`. This is called as a post-apply step in runtime.rs,
 /// not via the delta system, because it mutates NpcData directly.
+/// Cache of surface heights keyed by (vx, vy). Shared across all NPCs in
+/// a single `scan_all_npc_resources` pass so adjacent NPCs don't recompute
+/// the same FBM noise for overlapping disk positions.
+type SurfaceCache = std::collections::HashMap<(i32, i32), i32, ahash::RandomState>;
+
 pub fn scan_voxel_resources(state: &mut WorldState, entity_idx: usize, sight_range_voxels: i32) {
+    let mut cache = SurfaceCache::default();
+    scan_voxel_resources_cached(state, entity_idx, sight_range_voxels, &mut cache);
+}
+
+fn scan_voxel_resources_cached(
+    state: &mut WorldState,
+    entity_idx: usize,
+    sight_range_voxels: i32,
+    surface_cache: &mut SurfaceCache,
+) {
     let entity = &state.entities[entity_idx];
     if !entity.alive || entity.kind != EntityKind::Npc || entity.npc.is_none() {
         return;
@@ -201,7 +216,9 @@ pub fn scan_voxel_resources(state: &mut WorldState, entity_idx: usize, sight_ran
             let vx = cvx + dx;
             let vy = cvy + dy;
 
-            let surface = state.voxel_world.surface_height(vx, vy);
+            let surface = *surface_cache
+                .entry((vx, vy))
+                .or_insert_with(|| state.voxel_world.surface_height(vx, vy));
 
             // Scan 21 z values (surface-5 .. surface+15) batched by chunk-z:
             // a chunk is 64 tall, so a 21-voxel vertical scan almost always
@@ -284,8 +301,13 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
         .map(|(i, _)| i)
         .collect();
 
+    // Shared surface-height cache for this tick. NPCs close together scan
+    // overlapping (vx, vy) disks — memoizing avoids recomputing the
+    // analytical FBM surface noise (currently the tick's top cost).
+    let mut surface_cache = SurfaceCache::default();
+
     for idx in npc_indices {
-        scan_voxel_resources(state, idx, SIGHT_RANGE_VOXELS);
+        scan_voxel_resources_cached(state, idx, SIGHT_RANGE_VOXELS, &mut surface_cache);
     }
 }
 
