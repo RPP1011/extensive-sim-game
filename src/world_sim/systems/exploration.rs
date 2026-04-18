@@ -203,16 +203,34 @@ pub fn scan_voxel_resources(state: &mut WorldState, entity_idx: usize, sight_ran
 
             let surface = state.voxel_world.surface_height(vx, vy);
 
-            // Scan from surface-5 (underground ore) to surface+15 (trees).
+            // Scan 21 z values (surface-5 .. surface+15) batched by chunk-z:
+            // a chunk is 64 tall, so a 21-voxel vertical scan almost always
+            // fits in 1 chunk (2 at most). Looking up the chunk once per
+            // z-slice eliminates 90-95% of the HashMap hits vs calling
+            // get_voxel per voxel.
             let z_min = surface - 5;
             let z_max = surface + 15;
-
-            for vz in z_min..=z_max {
-                let voxel = state.voxel_world.get_voxel(vx, vy, vz);
-                if TARGET_MATERIALS.contains(&voxel.material) {
-                    let cell_x = vx.div_euclid(RESOURCE_CELL_SIZE);
-                    let cell_y = vy.div_euclid(RESOURCE_CELL_SIZE);
-                    *counts.entry((cell_x, cell_y, voxel.material)).or_insert(0) += 1;
+            let cs = crate::world_sim::voxel::CHUNK_SIZE as i32;
+            let cx = vx.div_euclid(cs);
+            let cy = vy.div_euclid(cs);
+            let lx = vx.rem_euclid(cs) as usize;
+            let ly = vy.rem_euclid(cs) as usize;
+            let cz_min = z_min.div_euclid(cs);
+            let cz_max = z_max.div_euclid(cs);
+            let cell_x = vx.div_euclid(RESOURCE_CELL_SIZE);
+            let cell_y = vy.div_euclid(RESOURCE_CELL_SIZE);
+            for cz in cz_min..=cz_max {
+                let cp = crate::world_sim::voxel::ChunkPos::new(cx, cy, cz);
+                let Some(chunk) = state.voxel_world.chunks.get(&cp) else { continue };
+                let chunk_base_z = cz * cs;
+                // Clip the z range to this chunk's span.
+                let lz_start = (z_min - chunk_base_z).max(0) as usize;
+                let lz_end = (z_max - chunk_base_z).min(cs - 1) as usize;
+                for lz in lz_start..=lz_end {
+                    let voxel = chunk.voxels[crate::world_sim::voxel::local_index(lx, ly, lz)];
+                    if TARGET_MATERIALS.contains(&voxel.material) {
+                        *counts.entry((cell_x, cell_y, voxel.material)).or_insert(0) += 1;
+                    }
                 }
             }
         }
