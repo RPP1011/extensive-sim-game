@@ -301,25 +301,27 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
         .map(|(i, _)| i)
         .collect();
 
-    // Shared surface-height cache for this tick. NPCs close together scan
-    // overlapping (vx, vy) disks — memoizing avoids recomputing the
-    // analytical FBM surface noise (currently the tick's top cost).
-    //
-    // Pre-size: each NPC visits up to π × SIGHT_RANGE² ≈ 20K (vx, vy)
-    // positions. The union across NPCs is bounded but grows superlinearly
-    // only for well-spread NPCs; a tight cluster deduplicates heavily.
-    // Allocating the upper bound once eliminates the reserve_rehash
-    // cascade (was 11% of program time).
-    let per_npc_disk = (std::f32::consts::PI
-        * (SIGHT_RANGE_VOXELS as f32)
-        * (SIGHT_RANGE_VOXELS as f32)) as usize;
-    let cap = per_npc_disk.saturating_mul(npc_indices.len()).max(256);
-    let mut surface_cache = SurfaceCache::with_capacity_and_hasher(
-        cap, ahash::RandomState::default());
+    // Persistent surface-height cache (lives on state.surface_cache across
+    // ticks). surface_height_at is a pure function of (vx, vy, plan, seed)
+    // so cached values stay valid as long as the region_plan doesn't
+    // change. Take → use → restore to satisfy the borrow checker while
+    // state is also borrowed by scan_voxel_resources_cached.
+    let mut surface_cache = std::mem::take(&mut state.surface_cache);
+    if surface_cache.capacity() == 0 {
+        // First-time initialization: pre-size to upper bound to avoid
+        // the reserve_rehash cascade (was 11% of program time).
+        let per_npc_disk = (std::f32::consts::PI
+            * (SIGHT_RANGE_VOXELS as f32)
+            * (SIGHT_RANGE_VOXELS as f32)) as usize;
+        let cap = per_npc_disk.saturating_mul(npc_indices.len()).max(256);
+        surface_cache.reserve(cap);
+    }
 
     for idx in npc_indices {
         scan_voxel_resources_cached(state, idx, SIGHT_RANGE_VOXELS, &mut surface_cache);
     }
+
+    state.surface_cache = surface_cache;
 }
 
 #[cfg(test)]

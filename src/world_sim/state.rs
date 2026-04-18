@@ -425,6 +425,14 @@ pub struct WorldState {
     /// Key: integer tile position (2.0 world units per tile). Only modified tiles are stored.
     pub tiles: std::collections::HashMap<TilePos, Tile>,
 
+    /// Persistent cache of analytical surface_height results. Keyed by
+    /// (vx, vy) voxel coordinate. Pure function of (vx, vy, region_plan,
+    /// seed) so entries remain valid as long as the region_plan doesn't
+    /// change. Populated lazily by scan_all_npc_resources.
+    /// Not serialized — regenerated on demand.
+    #[serde(skip)]
+    pub surface_cache: std::collections::HashMap<(i32, i32), i32, ahash::RandomState>,
+
     /// Active build seeds waiting for room growth automaton to process.
     pub build_seeds: Vec<BuildSeed>,
 
@@ -505,6 +513,7 @@ impl WorldState {
             settlements: Vec::new(),
             settlement_index: Vec::new(),
             tiles: std::collections::HashMap::new(),
+            surface_cache: std::collections::HashMap::default(),
             build_seeds: Vec::new(),
             voxel_world: super::voxel::VoxelWorld::default(),
             nav_grids: Vec::new(),
