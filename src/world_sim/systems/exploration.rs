@@ -444,6 +444,37 @@ fn scan_voxel_resources_cached(
     }
 }
 
+/// Eagerly populate `state.surface_cache` for voxel positions around each
+/// settlement, so the first scan pass doesn't trigger 16K fbm calls per
+/// new cell inside the tick loop. Moves fbm cost from "lazy in-tick" to
+/// "eager at world load".
+pub fn warm_surface_cache(state: &mut WorldState) {
+    if state.voxel_world.region_plan.is_none() {
+        return; // analytical surface_height only works with a region plan
+    }
+
+    let margin = SIGHT_RANGE_VOXELS + RESOURCE_CELL_SIZE;
+    let mut surface_cache = std::mem::take(&mut state.surface_cache);
+    if surface_cache.capacity() < 524288 {
+        surface_cache.reserve(1 << 20);
+    }
+
+    for settlement in &state.settlements {
+        let (cvx, cvy, _) = world_to_voxel(settlement.pos.0, settlement.pos.1, 0.0);
+        for dy in -margin..=margin {
+            for dx in -margin..=margin {
+                let vx = cvx + dx;
+                let vy = cvy + dy;
+                let key = pack_xy(vx, vy);
+                if surface_cache.contains_key(&key) { continue; }
+                let h = state.voxel_world.surface_height(vx, vy);
+                surface_cache.insert(key, h);
+            }
+        }
+    }
+    state.surface_cache = surface_cache;
+}
+
 /// Compute a per-cell census: count of each target material in the cell's
 /// surface band (surface-5 .. surface+15). Called once per cell lazily —
 /// the result persists on WorldState.cell_census across ticks.

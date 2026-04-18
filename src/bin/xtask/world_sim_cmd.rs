@@ -67,6 +67,17 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
 
     let mut sim = WorldSim::new(state);
 
+    // Pre-warm surface_cache around each settlement, moving fbm cost out
+    // of the tick loop. The first few ticks previously ran 16K fbm calls
+    // per newly-visible cell; this hoists that work to startup.
+    {
+        let warm_start = std::time::Instant::now();
+        game::world_sim::systems::exploration::warm_surface_cache(sim.state_mut());
+        let warm_elapsed = warm_start.elapsed();
+        eprintln!("[warm] surface_cache pre-populated in {:.2?} ({} entries)",
+                  warm_elapsed, sim.state().surface_cache.len());
+    }
+
     // Report voxel world stats.
     {
         let st = sim.state();
