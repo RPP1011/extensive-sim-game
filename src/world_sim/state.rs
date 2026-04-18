@@ -359,9 +359,13 @@ pub struct SimScratch {
     pub visible_cells: std::collections::HashSet<(i32, i32), ahash::RandomState>,
 
     // --- construction::flood_fill_with_boundary ---
-    /// BFS visited as a flat bool grid, sized 128×128 (= 4× MAX_ROOM_SIZE)
-    /// centered on seed position. O(1) lookup, zero hashing.
-    pub flood_visited: Vec<bool>,
+    /// Generational visited tag, flat grid sized 128×128. Visited when
+    /// `flood_visited[i] == flood_current_gen`. O(1) lookup, zero
+    /// hashing, zero clear cost (just bump the gen).
+    pub flood_visited: Vec<u16>,
+    /// Current generation tag. Incremented each flood call; when it
+    /// overflows u16, visited is fully cleared.
+    pub flood_current_gen: u16,
     /// BFS queue; cleared + refilled each call.
     pub flood_queue: std::collections::VecDeque<TilePos>,
     /// BFS result interior; cleared + refilled each call.
