@@ -7,6 +7,10 @@
 
 use std::collections::{HashSet, VecDeque};
 
+/// HashSet<(i32,i32,i32)> with ahash. The default SipHash was measured at
+/// ~27% of total program time doing voxel-position lookups in this system.
+type VoxelSet = HashSet<(i32, i32, i32), ahash::RandomState>;
+
 use crate::world_sim::state::{CollapseCase, StructuralEvent, WorldState};
 use crate::world_sim::voxel::{ChunkPos, VoxelMaterial, Voxel, CHUNK_SIZE};
 
@@ -62,7 +66,7 @@ fn find_unsupported_voxels(state: &WorldState, cp: ChunkPos) -> Vec<(i32, i32, i
     let base_z = cp.z * CHUNK_SIZE as i32;
 
     // Collect all solid voxel world-positions in this chunk.
-    let mut solid_set: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut solid_set: VoxelSet = VoxelSet::default();
     for lz in 0..CHUNK_SIZE {
         for ly in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
@@ -79,7 +83,7 @@ fn find_unsupported_voxels(state: &WorldState, cp: ChunkPos) -> Vec<(i32, i32, i
     }
 
     // Seed BFS with anchored voxels — those at z<=0 or whose below-neighbor is solid.
-    let mut visited: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut visited: VoxelSet = VoxelSet::default();
     let mut queue: VecDeque<(i32, i32, i32)> = VecDeque::new();
 
     for &(vx, vy, vz) in &solid_set {
