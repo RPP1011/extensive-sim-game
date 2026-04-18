@@ -613,12 +613,12 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
     // Step 2: populate census for any newly-visible cells.
     let mut surface_cache = std::mem::take(&mut state.surface_cache);
     let mut cell_census = std::mem::take(&mut state.cell_census);
-    // Pre-size surface_cache to avoid the log(N) cascade of rehashes as it
-    // grows (was 3.11% of program time). A 128×128 cell has 16K positions;
-    // 16 cells × 16K = 256K entries upper bound for typical default world.
-    // 256K × 24 bytes/entry ≈ 6MB — modest.
-    if surface_cache.capacity() < 16384 {
-        surface_cache.reserve(262144);
+    // Pre-size surface_cache to avoid the log(N) cascade of rehashes as
+    // it grows across the run. Default-world NPC drift + census expansion
+    // can exceed 1M positions; over-allocate to stay head of the load-
+    // factor threshold. Costs ~30MB RAM up front — cheap.
+    if surface_cache.capacity() < 524288 {
+        surface_cache.reserve(1 << 20); // 1M entries
     }
     for &cell in &visible_cells {
         if cell_census.contains_key(&cell) {
