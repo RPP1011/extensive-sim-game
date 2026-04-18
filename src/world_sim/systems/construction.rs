@@ -27,10 +27,10 @@ pub fn advance_construction(state: &mut WorldState) {
         if state.build_seeds[i].complete { continue; }
 
         let seed = state.build_seeds[i].clone();
-        grow_room(&seed, &mut state.tiles, tick);
-
-        // Check completion.
-        let interior = flood_fill_floor(seed.pos, &state.tiles);
+        // grow_room returns the post-growth interior. Reusing it for the
+        // completion check eliminates the second flood_fill per seed per
+        // cycle (flood_fill was ~13% of program time).
+        let interior = grow_room(&seed, &mut state.tiles, tick);
         if interior.len() as u32 >= seed.minimum_interior && is_enclosed(&interior, &state.tiles) {
             // Room complete — place door if needed.
             if !has_door(&interior, &state.tiles) {
@@ -51,7 +51,13 @@ pub fn advance_construction(state: &mut WorldState) {
 }
 
 /// Grow a room by one step: expand if too small, close if at minimum.
-fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Tile, ahash::RandomState>, tick: u64) {
+/// Returns the post-growth interior — caller reuses it for the completion
+/// check instead of flood-filling again.
+fn grow_room(
+    seed: &BuildSeed,
+    tiles: &mut std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
+    tick: u64,
+) -> Vec<TilePos> {
     // Ensure seed position has a floor tile.
     tiles.entry(seed.pos).or_insert(Tile {
         tile_type: TileType::Floor(TileMaterial::Wood),
@@ -59,11 +65,14 @@ fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Ti
         placed_tick: tick,
     });
 
-    let interior = flood_fill_floor(seed.pos, tiles);
+    let mut interior = flood_fill_floor(seed.pos, tiles);
     let boundary = compute_boundary(&interior, tiles);
 
     if (interior.len() as u32) < seed.minimum_interior {
         // Below minimum: expand by placing floor tiles on empty boundary positions.
+        // Newly-placed floors are adjacent to an existing interior tile by
+        // definition of boundary, so they're trivially connected and can be
+        // added to the returned interior without re-flooding.
         let mut expanded = 0u32;
         for bpos in &boundary {
             if expanded >= 3 { break; } // grow at most 3 tiles per step
@@ -73,11 +82,13 @@ fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Ti
                     placed_by: Some(seed.placed_by),
                     placed_tick: tick,
                 });
+                interior.push(*bpos);
                 expanded += 1;
             }
         }
     } else if (interior.len() as u32) < MAX_ROOM_SIZE {
-        // At or above minimum: close open boundary with walls.
+        // At or above minimum: close open boundary with walls. Walls aren't
+        // interior, so `interior` is unchanged.
         for bpos in &boundary {
             if !tiles.contains_key(bpos) {
                 tiles.insert(*bpos, Tile {
@@ -88,6 +99,8 @@ fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Ti
             }
         }
     }
+
+    interior
 }
 
 /// Flood-fill from a position, collecting connected floor tiles.
