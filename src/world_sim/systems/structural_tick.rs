@@ -7,12 +7,12 @@
 
 use std::collections::{HashSet, VecDeque};
 
-/// HashSet<(i32,i32,i32)> with ahash. The default SipHash was measured at
-/// ~27% of total program time doing voxel-position lookups in this system.
+/// HashSet<(i32,i32,i32)> with ahash — used only for the rare cross-chunk
+/// BFS case. In-chunk lookups go through flat bool arrays (zero hashing).
 type VoxelSet = HashSet<(i32, i32, i32), ahash::RandomState>;
 
 use crate::world_sim::state::{CollapseCase, StructuralEvent, WorldState};
-use crate::world_sim::voxel::{ChunkPos, VoxelMaterial, Voxel, CHUNK_SIZE};
+use crate::world_sim::voxel::{local_index, ChunkPos, VoxelMaterial, Voxel, CHUNK_SIZE};
 
 /// Maximum number of dirty chunks to process per structural tick.
 const MAX_CHUNKS_PER_TICK: usize = 4;
@@ -61,57 +61,96 @@ fn find_unsupported_voxels(state: &WorldState, cp: ChunkPos) -> Vec<(i32, i32, i
         None => return Vec::new(),
     };
 
-    let base_x = cp.x * CHUNK_SIZE as i32;
-    let base_y = cp.y * CHUNK_SIZE as i32;
-    let base_z = cp.z * CHUNK_SIZE as i32;
+    let cs = CHUNK_SIZE as i32;
+    let base_x = cp.x * cs;
+    let base_y = cp.y * cs;
+    let base_z = cp.z * cs;
 
-    // Collect all solid voxel world-positions in this chunk. Pre-size to
-    // avoid the rehash cascade — flamegraph showed `reserve_rehash` at
-    // 19% of total program time when the sets grew from empty. A chunk
-    // holds at most CHUNK_SIZE³ voxels; allocating that upfront once is
-    // cheaper than the log₂(N) rehashes during incremental growth.
-    let chunk_cap = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
-    let mut solid_set: VoxelSet = VoxelSet::with_capacity_and_hasher(
-        chunk_cap, ahash::RandomState::default());
+    // Flat bool arrays for in-chunk membership. CHUNK_SIZE³ ≈ 262K bools
+    // = ~256KB per vec — one heap alloc per call, but O(1) lookup with
+    // zero hashing. Replaces two ahash HashSets that together consumed
+    // ~26% of program time in the flamegraph (insert + contains + rehash).
+    const N: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
+    let mut solid_local: Vec<bool> = vec![false; N];
+    let mut visited_local: Vec<bool> = vec![false; N];
+
+    // Cross-chunk BFS tracking. Preserves the original unlimited-depth
+    // cross-chunk traversal so arches spanning multiple chunks still anchor
+    // correctly. Typically very small (<64 entries) so ahash overhead is
+    // negligible here.
+    let mut visited_ext: VoxelSet =
+        VoxelSet::with_capacity_and_hasher(64, ahash::RandomState::default());
+
+    // Pass 1: scan chunk.voxels into solid_local and count solids.
+    let mut any_solid = false;
     for lz in 0..CHUNK_SIZE {
         for ly in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
-                let v = chunk.get(lx, ly, lz);
-                if v.material.is_solid() {
-                    solid_set.insert((base_x + lx as i32, base_y + ly as i32, base_z + lz as i32));
+                if chunk.get(lx, ly, lz).material.is_solid() {
+                    solid_local[local_index(lx, ly, lz)] = true;
+                    any_solid = true;
+                }
+            }
+        }
+    }
+    if !any_solid {
+        return Vec::new();
+    }
+
+    // Helper: world coord → Some(local_index) if in this chunk, else None.
+    let to_local_idx = |vx: i32, vy: i32, vz: i32| -> Option<usize> {
+        let lx = vx - base_x;
+        let ly = vy - base_y;
+        let lz = vz - base_z;
+        if lx >= 0 && lx < cs && ly >= 0 && ly < cs && lz >= 0 && lz < cs {
+            Some(local_index(lx as usize, ly as usize, lz as usize))
+        } else {
+            None
+        }
+    };
+
+    // Seed BFS with anchored voxels. Queue stores world coords so the
+    // BFS step can equally traverse in-chunk (fast path via
+    // solid_local/visited_local) and cross-chunk (fallback via
+    // visited_ext + world get_voxel).
+    let mut queue: VecDeque<(i32, i32, i32)> = VecDeque::new();
+    for lz in 0..CHUNK_SIZE {
+        for ly in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let idx = local_index(lx, ly, lz);
+                if !solid_local[idx] {
+                    continue;
+                }
+                let vx = base_x + lx as i32;
+                let vy = base_y + ly as i32;
+                let vz = base_z + lz as i32;
+                let anchored = if vz <= 0 {
+                    true
+                } else if chunk.get(lx, ly, lz).material == VoxelMaterial::Granite {
+                    true
+                } else if lz > 0 {
+                    // Below is in-chunk: flat-array lookup.
+                    solid_local[local_index(lx, ly, lz - 1)]
+                } else {
+                    // Below is cross-chunk: world get_voxel.
+                    state
+                        .voxel_world
+                        .get_voxel(vx, vy, vz - 1)
+                        .material
+                        .is_solid()
+                };
+
+                if anchored {
+                    visited_local[idx] = true;
+                    queue.push_back((vx, vy, vz));
                 }
             }
         }
     }
 
-    if solid_set.is_empty() {
-        return Vec::new();
-    }
-
-    // Seed BFS with anchored voxels — those at z<=0 or whose below-neighbor is solid.
-    let mut visited: VoxelSet = VoxelSet::with_capacity_and_hasher(
-        solid_set.len(), ahash::RandomState::default());
-    let mut queue: VecDeque<(i32, i32, i32)> = VecDeque::new();
-
-    for &(vx, vy, vz) in &solid_set {
-        let anchored = if vz <= 0 {
-            // Bottom of the world — always anchored.
-            true
-        } else if state.voxel_world.get_voxel(vx, vy, vz).material == VoxelMaterial::Granite {
-            // Bedrock is always anchored.
-            true
-        } else {
-            // Anchored if the voxel directly below is solid (cross-chunk safe).
-            state.voxel_world.get_voxel(vx, vy, vz - 1).material.is_solid()
-        };
-
-        if anchored {
-            visited.insert((vx, vy, vz));
-            queue.push_back((vx, vy, vz));
-        }
-    }
-
-    // BFS through 6-connected solid neighbors (cross-chunk via get_voxel).
+    // BFS through 6-connected solid neighbors. In-chunk neighbors use
+    // flat-array lookups (hot path); cross-chunk neighbors use the
+    // visited_ext HashSet + world get_voxel (rare).
     let offsets: [(i32, i32, i32); 6] = [
         (1, 0, 0), (-1, 0, 0),
         (0, 1, 0), (0, -1, 0),
@@ -119,35 +158,50 @@ fn find_unsupported_voxels(state: &WorldState, cp: ChunkPos) -> Vec<(i32, i32, i
     ];
 
     while let Some((vx, vy, vz)) = queue.pop_front() {
-        for (dx, dy, dz) in &offsets {
+        for &(dx, dy, dz) in &offsets {
             let nx = vx + dx;
             let ny = vy + dy;
             let nz = vz + dz;
-            let pos = (nx, ny, nz);
 
-            if visited.contains(&pos) {
-                continue;
-            }
-
-            // Only propagate through solid voxels. We check the world (cross-chunk)
-            // but only track voxels that belong to the chunk we're analyzing.
-            if solid_set.contains(&pos) {
-                visited.insert(pos);
-                queue.push_back(pos);
-            } else if state.voxel_world.get_voxel(nx, ny, nz).material.is_solid() {
-                // Solid neighbor in an adjacent chunk — follow BFS so it can
-                // reach back into our chunk from the other side.
-                visited.insert(pos);
-                queue.push_back(pos);
+            match to_local_idx(nx, ny, nz) {
+                Some(ni) => {
+                    if visited_local[ni] || !solid_local[ni] {
+                        continue;
+                    }
+                    visited_local[ni] = true;
+                    queue.push_back((nx, ny, nz));
+                }
+                None => {
+                    let pos = (nx, ny, nz);
+                    if visited_ext.contains(&pos) {
+                        continue;
+                    }
+                    if state.voxel_world.get_voxel(nx, ny, nz).material.is_solid() {
+                        visited_ext.insert(pos);
+                        queue.push_back(pos);
+                    }
+                }
             }
         }
     }
 
-    // Unsupported = solid voxels in this chunk not reached by BFS.
-    solid_set
-        .into_iter()
-        .filter(|pos| !visited.contains(pos))
-        .collect()
+    // Unsupported = in-chunk solid voxels not reached by BFS.
+    let mut result = Vec::new();
+    for lz in 0..CHUNK_SIZE {
+        for ly in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let idx = local_index(lx, ly, lz);
+                if solid_local[idx] && !visited_local[idx] {
+                    result.push((
+                        base_x + lx as i32,
+                        base_y + ly as i32,
+                        base_z + lz as i32,
+                    ));
+                }
+            }
+        }
+    }
+    result
 }
 
 #[cfg(test)]
