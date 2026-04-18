@@ -27,14 +27,14 @@ pub fn advance_construction(state: &mut WorldState) {
         if state.build_seeds[i].complete { continue; }
 
         let seed = state.build_seeds[i].clone();
-        // grow_room returns the post-growth interior. Reusing it for the
-        // completion check eliminates the second flood_fill per seed per
-        // cycle (flood_fill was ~13% of program time).
-        let interior = grow_room(&seed, &mut state.tiles, tick);
-        if interior.len() as u32 >= seed.minimum_interior && is_enclosed(&interior, &state.tiles) {
+        // grow_room returns the post-growth interior + boundary. Reusing
+        // them for completion checks eliminates three interior_set
+        // HashSet constructions (is_enclosed/has_door/find_door_position).
+        let (interior, boundary) = grow_room(&seed, &mut state.tiles, tick);
+        if interior.len() as u32 >= seed.minimum_interior && is_enclosed(&boundary, &state.tiles) {
             // Room complete — place door if needed.
-            if !has_door(&interior, &state.tiles) {
-                if let Some(door_pos) = find_door_position(&interior, &state.tiles) {
+            if !has_door(&boundary, &state.tiles) {
+                if let Some(door_pos) = find_door_position(&boundary, &state.tiles) {
                     state.tiles.insert(door_pos, Tile {
                         tile_type: TileType::Door,
                         placed_by: Some(seed.placed_by),
@@ -51,13 +51,13 @@ pub fn advance_construction(state: &mut WorldState) {
 }
 
 /// Grow a room by one step: expand if too small, close if at minimum.
-/// Returns the post-growth interior — caller reuses it for the completion
-/// check instead of flood-filling again.
+/// Returns the post-growth (interior, boundary) — caller reuses them for
+/// completion checks instead of re-flooding and rebuilding sets.
 fn grow_room(
     seed: &BuildSeed,
     tiles: &mut std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
     tick: u64,
-) -> Vec<TilePos> {
+) -> (Vec<TilePos>, Vec<TilePos>) {
     // Ensure seed position has a floor tile.
     tiles.entry(seed.pos).or_insert(Tile {
         tile_type: TileType::Floor(TileMaterial::Wood),
@@ -65,18 +65,15 @@ fn grow_room(
         placed_tick: tick,
     });
 
-    // Fused flood-fill + boundary computation: single BFS pass, one
-    // HashSet allocation instead of three. Previously 6.66% (flood_fill)
-    // + 3.71% (compute_boundary) = 10.37% of program time.
-    let (mut interior, boundary) = flood_fill_with_boundary(seed.pos, tiles);
+    // Fused flood-fill + boundary computation: single BFS pass.
+    let (mut interior, mut boundary) = flood_fill_with_boundary(seed.pos, tiles);
 
     if (interior.len() as u32) < seed.minimum_interior {
         // Below minimum: expand by placing floor tiles on empty boundary positions.
-        // Newly-placed floors are adjacent to an existing interior tile by
-        // definition of boundary, so they're trivially connected and can be
-        // added to the returned interior without re-flooding.
         let mut expanded = 0u32;
-        for bpos in &boundary {
+        // Snapshot boundary since we'll mutate tiles during iteration.
+        let boundary_snapshot: Vec<TilePos> = boundary.clone();
+        for bpos in &boundary_snapshot {
             if expanded >= 3 { break; } // grow at most 3 tiles per step
             if !tiles.contains_key(bpos) {
                 tiles.insert(*bpos, Tile {
@@ -84,13 +81,20 @@ fn grow_room(
                     placed_by: Some(seed.placed_by),
                     placed_tick: tick,
                 });
-                interior.push(*bpos);
                 expanded += 1;
             }
         }
+        // Re-flood to pick up fresh interior + boundary reflecting new floors.
+        // Skip only when nothing expanded.
+        if expanded > 0 {
+            let refreshed = flood_fill_with_boundary(seed.pos, tiles);
+            interior = refreshed.0;
+            boundary = refreshed.1;
+        }
     } else if (interior.len() as u32) < MAX_ROOM_SIZE {
-        // At or above minimum: close open boundary with walls. Walls aren't
-        // interior, so `interior` is unchanged.
+        // At or above minimum: close open boundary with walls. Walls are
+        // placed on boundary positions — they stay on the boundary set
+        // (just now solid), so we don't need to re-flood.
         for bpos in &boundary {
             if !tiles.contains_key(bpos) {
                 tiles.insert(*bpos, Tile {
@@ -102,7 +106,7 @@ fn grow_room(
         }
     }
 
-    interior
+    (interior, boundary)
 }
 
 /// Flood-fill from a position, collecting connected floor tiles AND the
@@ -177,73 +181,54 @@ fn compute_boundary(interior: &[TilePos], _tiles: &std::collections::HashMap<Til
 }
 
 /// Check if all boundary positions are solid (walls, existing structures, or placed walls).
-fn is_enclosed(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> bool {
-    let interior_set: std::collections::HashSet<TilePos, ahash::RandomState> = interior.iter().copied().collect();
-
-    for &pos in interior {
-        for neighbor in pos.neighbors4() {
-            if interior_set.contains(&neighbor) { continue; }
-            // This boundary tile must be solid (wall, door, or similar).
-            match tiles.get(&neighbor) {
-                Some(tile) if tile.tile_type.is_wall() || matches!(tile.tile_type, TileType::Door) => {}
-                _ => return false, // open boundary = not enclosed
-            }
+/// Takes the pre-computed boundary from flood_fill_with_boundary — no need
+/// to reconstruct an interior_set since the boundary already excludes
+/// interior tiles by construction.
+fn is_enclosed(boundary: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> bool {
+    for &pos in boundary {
+        match tiles.get(&pos) {
+            Some(tile) if tile.tile_type.is_wall() || matches!(tile.tile_type, TileType::Door) => {}
+            _ => return false, // open boundary = not enclosed
         }
     }
     true
 }
 
 /// Check if any boundary tile is a door.
-fn has_door(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> bool {
-    let interior_set: std::collections::HashSet<TilePos, ahash::RandomState> = interior.iter().copied().collect();
-    for &pos in interior {
-        for neighbor in pos.neighbors4() {
-            if interior_set.contains(&neighbor) { continue; }
-            if let Some(tile) = tiles.get(&neighbor) {
-                if matches!(tile.tile_type, TileType::Door) { return true; }
-            }
+fn has_door(boundary: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> bool {
+    for &pos in boundary {
+        if let Some(tile) = tiles.get(&pos) {
+            if matches!(tile.tile_type, TileType::Door) { return true; }
         }
     }
     false
 }
 
-/// Find the best position for a door: boundary wall tile with fewest wall neighbors
-/// (corner of the room, facing outward).
-fn find_door_position(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Option<TilePos> {
-    let interior_set: std::collections::HashSet<TilePos, ahash::RandomState> = interior.iter().copied().collect();
+/// Find the best position for a door: boundary wall tile with 2 wall neighbors
+/// (in a line, not a corner). Uses the pre-computed boundary directly.
+fn find_door_position(boundary: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Option<TilePos> {
     let mut best: Option<(TilePos, usize)> = None;
-
-    for &pos in interior {
-        for neighbor in pos.neighbors4() {
-            if interior_set.contains(&neighbor) { continue; }
-            if let Some(tile) = tiles.get(&neighbor) {
-                if !tile.tile_type.is_wall() { continue; }
-            } else {
-                continue;
-            }
-
-            // Count wall neighbors of this candidate door position.
-            let wall_count = neighbor.neighbors4().iter()
-                .filter(|n| {
-                    tiles.get(n).map(|t| t.tile_type.is_wall()).unwrap_or(false)
-                })
-                .count();
-
-            // Prefer positions with exactly 2 wall neighbors (in a line, not corner).
-            if wall_count == 2 {
-                match &best {
-                    None => { best = Some((neighbor, wall_count)); }
-                    Some((_, prev_count)) if wall_count < *prev_count => {
-                        best = Some((neighbor, wall_count));
-                    }
-                    _ => {}
+    for &pos in boundary {
+        match tiles.get(&pos) {
+            Some(tile) if tile.tile_type.is_wall() => {}
+            _ => continue,
+        }
+        let wall_count = pos.neighbors4().iter()
+            .filter(|n| tiles.get(n).map(|t| t.tile_type.is_wall()).unwrap_or(false))
+            .count();
+        if wall_count == 2 {
+            match &best {
+                None => { best = Some((pos, wall_count)); }
+                Some((_, prev_count)) if wall_count < *prev_count => {
+                    best = Some((pos, wall_count));
                 }
-            } else if best.is_none() {
-                best = Some((neighbor, wall_count));
+                _ => {}
             }
+        } else if best.is_none() {
+            best = Some((pos, wall_count));
         }
     }
-    best.map(|(pos, _)| pos)
+    best.map(|(p, _)| p)
 }
 
 /// Detect what function a room provides based on its furniture contents.
