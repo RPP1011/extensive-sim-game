@@ -7,6 +7,7 @@ use super::state::{
     WorldEvent, WorldState,
 };
 use super::naming::entity_display_name;
+use super::system::{Backend, Stage, System, SystemCtx};
 use super::NUM_COMMODITIES;
 
 /// Sub-phase timing for the apply phase.
@@ -43,7 +44,7 @@ pub fn apply_deltas_profiled(old: &WorldState, merged: &MergedDeltas) -> (WorldS
     p.hp_us = t.elapsed().as_micros() as u64;
 
     let t = Instant::now();
-    apply_movement(&mut next, merged);
+    ApplyMovementSystem::new(Backend::default_for_cpu()).apply_inplace(&mut next, merged);
     p.movement_us = t.elapsed().as_micros() as u64;
 
     let t = Instant::now();
@@ -89,7 +90,7 @@ pub fn apply_deltas_in_place(state: &mut WorldState, merged: &MergedDeltas) -> A
     p.hp_us = t.elapsed().as_micros() as u64;
 
     let t = Instant::now();
-    apply_movement(state, merged);
+    ApplyMovementSystem::new(Backend::default_for_cpu()).apply_inplace(state, merged);
     p.movement_us = t.elapsed().as_micros() as u64;
 
     let t = Instant::now();
@@ -182,6 +183,39 @@ fn apply_movement(state: &mut WorldState, merged: &MergedDeltas) {
             entity.pos.0 += dx;
             entity.pos.1 += dy;
         }
+    }
+}
+
+/// Movement application wrapped as a `System`. The actual logic lives in
+/// `apply_movement()`; this struct provides the trait-dispatched interface
+/// used by the benchmark harness and future registry-driven dispatch.
+///
+/// The `Backend` field is pattern for future SIMD work: scalar and SIMD
+/// implementations will branch on `self.backend`. Until a SIMD kernel lands,
+/// both arms call the same scalar code.
+pub struct ApplyMovementSystem { backend: Backend }
+
+impl ApplyMovementSystem {
+    pub fn new(backend: Backend) -> Self { Self { backend } }
+
+    /// Direct entry for the existing `apply_deltas_profiled` call path —
+    /// takes `&mut WorldState` + `&MergedDeltas` like the bare fn it wraps.
+    pub fn apply_inplace(&self, state: &mut WorldState, merged: &MergedDeltas) {
+        match self.backend {
+            Backend::Scalar | Backend::Simd => apply_movement(state, merged),
+        }
+    }
+}
+
+impl System for ApplyMovementSystem {
+    fn name(&self) -> &'static str { "apply_movement" }
+    fn stage(&self) -> Stage { Stage::ApplyMovement }
+    fn run(&self, _ctx: &mut SystemCtx) -> u32 {
+        // Registry-dispatched apply systems mutate state differently than
+        // compute systems — the apply phase owns &mut WorldState. For now
+        // `apply_inplace` is the real entry point; `run()` is a no-op placeholder
+        // until the registry flip in Task 0.9.
+        0
     }
 }
 
@@ -962,5 +996,39 @@ mod tests {
         let merged = merge_deltas(Vec::<WorldDelta>::new());
         let next = apply_deltas(&state, &merged);
         assert_eq!(next.tick, state.tick + 1);
+    }
+
+    #[test]
+    fn movement_system_metadata() {
+        let sys = ApplyMovementSystem::new(Backend::Scalar);
+        assert_eq!(sys.name(), "apply_movement");
+        assert_eq!(sys.stage(), Stage::ApplyMovement);
+    }
+
+    #[test]
+    fn movement_system_preserves_force_semantics() {
+        // Applying a force via the System wrapper must match the bare fn.
+        let mut state = test_state();
+        // Seed a force on entity 1.
+        let merged = merge_deltas(vec![
+            WorldDelta::Move { entity_id: 1, force: (1.0, 0.0) },
+        ]);
+        let start_pos = state.entity(1).unwrap().pos;
+        ApplyMovementSystem::new(Backend::Scalar).apply_inplace(&mut state, &merged);
+        let moved_pos = state.entity(1).unwrap().pos;
+        assert!(moved_pos.0 > start_pos.0, "entity should have moved +x");
+        assert_eq!(moved_pos.1, start_pos.1, "no y motion expected");
+    }
+
+    #[test]
+    fn movement_system_respects_setpos_teleport() {
+        let mut state = test_state();
+        let merged = merge_deltas(vec![
+            WorldDelta::SetPos { entity_id: 1, pos: (42.0, 17.0) },
+            // Force should be ignored when SetPos is present.
+            WorldDelta::Move { entity_id: 1, force: (99.0, 99.0) },
+        ]);
+        ApplyMovementSystem::new(Backend::Scalar).apply_inplace(&mut state, &merged);
+        assert_eq!(state.entity(1).unwrap().pos, (42.0, 17.0));
     }
 }
