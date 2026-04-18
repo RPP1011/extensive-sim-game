@@ -110,6 +110,9 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
 
     let mut last_profile = TickProfile::default();
     let mut total_ticks = 0u64;
+    // Per-system aggregation: (name) -> (total_ns, calls)
+    let mut per_system: std::collections::HashMap<&'static str, (u64, u64)> =
+        std::collections::HashMap::new();
 
     let wall_start = std::time::Instant::now();
     let deadline = args.duration_secs.map(|s| wall_start + std::time::Duration::from_secs(s));
@@ -327,6 +330,13 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
             next_report = now + std::time::Duration::from_secs(5);
         }
 
+        // Accumulate per-system timings (populated only under profile-systems feature)
+        for t in &profile.system_timings {
+            let entry = per_system.entry(t.name).or_insert((0, 0));
+            entry.0 += t.total_ns;
+            entry.1 += t.calls as u64;
+        }
+
         last_profile = profile;
     }
     let wall_elapsed = wall_start.elapsed();
@@ -345,6 +355,72 @@ pub fn run_world_sim(mut args: WorldSimArgs) -> ExitCode {
         last_profile.apply_us, last_profile.apply_hp_us, last_profile.apply_movement_us,
         last_profile.apply_economy_us);
     println!("  Post-apply: {}µs (30 systems)", last_profile.postapply_us);
+
+    // Per-system diagnostic table (populated under `profile-systems` feature).
+    if !per_system.is_empty() {
+        let total_ns: u64 = per_system.values().map(|(n, _)| *n).sum();
+        let mut rows: Vec<_> = per_system.iter().collect();
+        rows.sort_by_key(|(_, (ns, _))| std::cmp::Reverse(*ns));
+
+        println!("\n--- Per-system timings ({} systems, {} ticks) ---", rows.len(), total_ticks);
+        println!("{:<45} {:>12} {:>12} {:>10} {:>8}",
+                 "system", "total_ms", "calls", "ns/call", "% wall");
+        let wall_ns = wall_elapsed.as_nanos() as u64;
+        for (name, (ns, calls)) in &rows {
+            let total_ms = *ns as f64 / 1e6;
+            let ns_per_call = if *calls > 0 { *ns as f64 / *calls as f64 } else { 0.0 };
+            let pct = if wall_ns > 0 { *ns as f64 / wall_ns as f64 * 100.0 } else { 0.0 };
+            println!("{:<45} {:>12.2} {:>12} {:>10.0} {:>7.2}%",
+                     name, total_ms, calls, ns_per_call, pct);
+        }
+        println!("(profile-systems accounted: {:.1} ms / {:.1} ms wall = {:.1}%)",
+                 total_ns as f64 / 1e6, wall_ns as f64 / 1e6,
+                 if wall_ns > 0 { total_ns as f64 / wall_ns as f64 * 100.0 } else { 0.0 });
+
+        // JSON export
+        if let Some(json_out) = args.bench_json.as_ref() {
+            let scale_label = match args.entities {
+                n if n <= 2500 => "2k",
+                n if n <= 15000 => "10k",
+                _ => "50k",
+            };
+            let systems_json: Vec<serde_json::Value> = rows.iter().map(|(name, (ns, calls))| {
+                let ns_per_call = if *calls > 0 { *ns as f64 / *calls as f64 } else { 0.0 };
+                serde_json::json!({
+                    "name": name,
+                    "total_ns": ns,
+                    "calls": calls,
+                    "ns_per_call": ns_per_call,
+                })
+            }).collect();
+            let doc = serde_json::json!({
+                "meta": {
+                    "scale": scale_label,
+                    "entities_target": args.entities,
+                    "seed": args.seed,
+                    "ticks": total_ticks,
+                    "wall_secs": wall_elapsed.as_secs_f64(),
+                    "tick_per_sec": tps,
+                },
+                "tick_profile": {
+                    "avg_tick_us": sim.profile_acc.avg_tick_us(),
+                    "avg_compute_us": sim.profile_acc.avg_compute_us(),
+                    "avg_merge_us": sim.profile_acc.avg_merge_us(),
+                    "avg_apply_us": sim.profile_acc.avg_apply_us(),
+                    "min_tick_us": sim.profile_acc.min_tick_us,
+                    "max_tick_us": sim.profile_acc.max_tick_us,
+                },
+                "systems": systems_json,
+            });
+            if let Some(parent) = std::path::Path::new(json_out).parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match std::fs::write(json_out, serde_json::to_string_pretty(&doc).unwrap()) {
+                Ok(()) => println!("\nWrote bench JSON to {}", json_out),
+                Err(e) => eprintln!("failed to write {}: {}", json_out, e),
+            }
+        }
+    }
 
     // World summary
     let s = sim.state();

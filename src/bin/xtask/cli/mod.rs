@@ -120,6 +120,10 @@ pub struct WorldSimArgs {
     /// World preset: "small" = fixed 9x9x9 forest test scene (default: infinite)
     #[arg(long)]
     pub world: Option<String>,
+    /// Write per-system diagnostic bench JSON to this path.
+    /// Requires --features profile-systems for populated system_timings.
+    #[arg(long)]
+    pub bench_json: Option<String>,
 }
 
 #[derive(Debug, Parser)]
