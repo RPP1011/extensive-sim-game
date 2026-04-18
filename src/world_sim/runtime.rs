@@ -546,7 +546,8 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     // Movement: SetPos (teleport) first, then force-based movement.
     let t = Instant::now();
     // Apply teleports (SetPos). Collect IDs to skip force-based movement.
-    let mut teleported = std::collections::HashSet::new();
+    let mut teleported: std::collections::HashSet<u32, ahash::RandomState> =
+        std::collections::HashSet::default();
     for &(entity_id, pos) in &m.pos_sets {
         let i = entity_id as usize;
         if i < idx.len() {
