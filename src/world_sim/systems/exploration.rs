@@ -270,10 +270,20 @@ fn scan_voxel_resources_cached(
         for cy in cy_min..=cy_max {
             let cell_y = cy.div_euclid(CELL_DIV);
 
-            // Scratch buffer per chunk-xy column. Cleared between columns
-            // so stale pointers from the previous (cx, cy) don't leak.
-            let mut z_chunks: Vec<(i32, Option<*const crate::world_sim::voxel::Chunk>)> =
-                Vec::with_capacity(4);
+            // Two-slot scalar cache for Z chunks in this column. The vast
+            // majority of the time z_min..z_max fits in one chunk; second
+            // slot covers the occasional spill across a chunk boundary.
+            // Scalar tracking (cz_a_valid, etc.) is much cheaper than a
+            // Vec with .first()/.last() freshness checks (was 25% of the
+            // scan cost across next/find/is_empty).
+            type ChunkSlot = Option<*const crate::world_sim::voxel::Chunk>;
+            let mut cached_cz_min: i32 = i32::MIN;
+            let mut cached_cz_max: i32 = i32::MIN;
+            let mut slot_a_cz: i32 = 0;
+            let mut slot_a_ptr: ChunkSlot = None;
+            let mut slot_b_cz: i32 = 0;
+            let mut slot_b_ptr: ChunkSlot = None;
+            let mut slot_b_valid: bool = false;
 
             let chunk_base_x = cx * cs;
             let chunk_base_y = cy * cs;
@@ -320,30 +330,31 @@ fn scan_voxel_resources_cached(
                     let cz_min = z_min >> CHUNK_SHIFT;
                     let cz_max = z_max >> CHUNK_SHIFT;
 
-                    // Materialize z_chunks for this column if not already
-                    // cached for cz_min..=cz_max. With surface heights
-                    // varying slowly across XY, consecutive iterations
-                    // reuse the same Z chunks almost always.
-                    let need_refresh = z_chunks.is_empty()
-                        || z_chunks.first().map(|(z, _)| *z).unwrap_or(i32::MAX) != cz_min
-                        || z_chunks.last().map(|(z, _)| *z).unwrap_or(i32::MIN) != cz_max;
-                    if need_refresh {
-                        z_chunks.clear();
-                        for cz in cz_min..=cz_max {
-                            let cp = crate::world_sim::voxel::ChunkPos::new(cx, cy, cz);
-                            let ptr = chunks.get(&cp).map(|c| c as *const _);
-                            z_chunks.push((cz, ptr));
+                    // Refresh Z-chunk cache if (cz_min, cz_max) changed.
+                    // Scalar compare is cheaper than Vec.first()/last().
+                    if cz_min != cached_cz_min || cz_max != cached_cz_max {
+                        slot_a_cz = cz_min;
+                        let cp = crate::world_sim::voxel::ChunkPos::new(cx, cy, cz_min);
+                        slot_a_ptr = chunks.get(&cp).map(|c| c as *const _);
+                        if cz_max > cz_min {
+                            slot_b_cz = cz_max;
+                            let cp = crate::world_sim::voxel::ChunkPos::new(cx, cy, cz_max);
+                            slot_b_ptr = chunks.get(&cp).map(|c| c as *const _);
+                            slot_b_valid = true;
+                        } else {
+                            slot_b_valid = false;
                         }
+                        cached_cz_min = cz_min;
+                        cached_cz_max = cz_max;
                     }
 
-                    for (cz, ptr) in z_chunks.iter() {
-                        let Some(ptr) = ptr else { continue };
+                    // Scan slot A (always present).
+                    if let Some(ptr) = slot_a_ptr {
                         // SAFETY: `chunks` is borrowed immutably for the
                         // entire outer scope; no mutation happens between
-                        // lookup and deref. The pointer lives as long as
-                        // `chunks` does.
-                        let chunk = unsafe { &**ptr };
-                        let chunk_base_z = cz * cs;
+                        // lookup and deref.
+                        let chunk = unsafe { &*ptr };
+                        let chunk_base_z = slot_a_cz * cs;
                         let lz_start = (z_min - chunk_base_z).max(0) as usize;
                         let lz_end = (z_max - chunk_base_z).min(cs - 1) as usize;
                         for lz in lz_start..=lz_end {
@@ -352,6 +363,24 @@ fn scan_voxel_resources_cached(
                             ];
                             if TARGET_MATERIALS.contains(&voxel.material) {
                                 *counts.entry((cell_x, cell_y, voxel.material)).or_insert(0) += 1;
+                            }
+                        }
+                    }
+
+                    // Scan slot B (rare: scan spans a chunk boundary).
+                    if slot_b_valid {
+                        if let Some(ptr) = slot_b_ptr {
+                            let chunk = unsafe { &*ptr };
+                            let chunk_base_z = slot_b_cz * cs;
+                            let lz_start = (z_min - chunk_base_z).max(0) as usize;
+                            let lz_end = (z_max - chunk_base_z).min(cs - 1) as usize;
+                            for lz in lz_start..=lz_end {
+                                let voxel = chunk.voxels[
+                                    crate::world_sim::voxel::local_index(lx, ly, lz)
+                                ];
+                                if TARGET_MATERIALS.contains(&voxel.material) {
+                                    *counts.entry((cell_x, cell_y, voxel.material)).or_insert(0) += 1;
+                                }
                             }
                         }
                     }
