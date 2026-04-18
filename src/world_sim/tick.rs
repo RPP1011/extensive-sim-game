@@ -46,6 +46,10 @@ pub struct TickProfile {
     pub apply_price_reports_us: u64,
     /// Post-apply systems (agent_inner, goals, work, pathfinding, families, etc.)
     pub postapply_us: u64,
+
+    /// Per-system timings. Populated only under the `profile-systems` feature;
+    /// empty vec otherwise.
+    pub system_timings: Vec<crate::world_sim::system_profile::SystemTiming>,
 }
 
 impl std::fmt::Display for TickProfile {
@@ -176,6 +180,13 @@ pub fn tick_profiled(state: &WorldState, parallel: bool) -> (WorldState, TickPro
     profile.apply_price_reports_us = apply_profile.price_reports_us;
 
     profile.total_us = tick_start.elapsed().as_micros() as u64;
+
+    #[cfg(feature = "profile-systems")]
+    {
+        let acc = super::system_profile::thread_drain();
+        profile.system_timings = acc.into_timings();
+    }
+
     (next, profile)
 }
 

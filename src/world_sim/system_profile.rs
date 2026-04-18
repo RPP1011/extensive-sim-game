@@ -97,6 +97,38 @@ mod disabled {
     pub fn thread_drain() -> SystemProfileAccumulator { SystemProfileAccumulator }
 }
 
+/// Wraps a bare-fn call with per-system timing (under `profile-systems`).
+/// Expands to just the call itself when the feature is off.
+///
+/// Usage: `time_system!("name", some_system(&mut state));`
+#[macro_export]
+macro_rules! time_system {
+    ($name:literal, $call:expr) => {{
+        #[cfg(feature = "profile-systems")]
+        {
+            let __t = std::time::Instant::now();
+            let __out = $call;
+            let __ns = __t.elapsed().as_nanos() as u64;
+            $crate::world_sim::system_profile::thread_record($name, __ns, 0);
+            __out
+        }
+        #[cfg(not(feature = "profile-systems"))]
+        { $call }
+    }};
+    ($name:literal, touched=$touched:expr, $call:expr) => {{
+        #[cfg(feature = "profile-systems")]
+        {
+            let __t = std::time::Instant::now();
+            let __out = $call;
+            let __ns = __t.elapsed().as_nanos() as u64;
+            $crate::world_sim::system_profile::thread_record($name, __ns, $touched);
+            __out
+        }
+        #[cfg(not(feature = "profile-systems"))]
+        { $call }
+    }};
+}
+
 #[cfg(test)]
 #[cfg(feature = "profile-systems")]
 mod tests {
