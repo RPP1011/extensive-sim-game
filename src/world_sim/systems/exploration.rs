@@ -238,55 +238,108 @@ fn scan_voxel_resources_cached(
     let mut counts: std::collections::HashMap<(i32, i32, VoxelMaterial), u32> =
         std::collections::HashMap::new();
 
-    // Precomputed disk (sight_range_voxels must match SIGHT_RANGE_VOXELS).
     debug_assert_eq!(sight_range_voxels, SIGHT_RANGE_VOXELS);
-    let offsets = disk_offsets();
 
-    for &(dx, dy) in offsets {
-        {
-            let vx = cvx + dx;
-            let vy = cvy + dy;
+    // Chunk-major iteration. The old per-position loop called
+    // chunks.get(&cp) once per (vx, vy) ≈ 20K times per NPC. Iterating by
+    // overlapping chunk XY bbox (~9-16 chunks for a 80-radius disk at
+    // CHUNK_SIZE=64) then iterating positions within each chunk turns that
+    // into a handful of chunk lookups. Eliminates the 9% chunks.get cost
+    // and several div_euclid calls per position.
+    let cs = crate::world_sim::voxel::CHUNK_SIZE as i32;
+    let sight = SIGHT_RANGE_VOXELS;
+    let sight_sq = (sight as i64) * (sight as i64);
+    let cx_min = (cvx - sight).div_euclid(cs);
+    let cx_max = (cvx + sight).div_euclid(cs);
+    let cy_min = (cvy - sight).div_euclid(cs);
+    let cy_max = (cvy + sight).div_euclid(cs);
 
-            // Fast path: identity-hashed u64 lookup. Cheaper than ahash over
-            // the (i32,i32) tuple; avoids the make_hash/hash_one/write_i32
-            // pipeline visible in the flamegraph.
-            let key = pack_xy(vx, vy);
-            let surface = match surface_cache.get(&key) {
-                Some(&h) => h,
-                None => {
-                    let h = state.voxel_world.surface_height(vx, vy);
-                    surface_cache.insert(key, h);
-                    h
-                }
-            };
+    // Using raw pointers to dodge the borrow-checker: we hold the
+    // immutable borrow of state.voxel_world.chunks for the whole inner
+    // loop, and pointer dereferences stay inside that scope.
+    let chunks = &state.voxel_world.chunks;
 
-            // Scan 21 z values (surface-5 .. surface+15) batched by chunk-z:
-            // a chunk is 64 tall, so a 21-voxel vertical scan almost always
-            // fits in 1 chunk (2 at most). Looking up the chunk once per
-            // z-slice eliminates 90-95% of the HashMap hits vs calling
-            // get_voxel per voxel.
-            let z_min = surface - 5;
-            let z_max = surface + 15;
-            let cs = crate::world_sim::voxel::CHUNK_SIZE as i32;
-            let cx = vx.div_euclid(cs);
-            let cy = vy.div_euclid(cs);
-            let lx = vx.rem_euclid(cs) as usize;
-            let ly = vy.rem_euclid(cs) as usize;
-            let cz_min = z_min.div_euclid(cs);
-            let cz_max = z_max.div_euclid(cs);
-            let cell_x = vx.div_euclid(RESOURCE_CELL_SIZE);
-            let cell_y = vy.div_euclid(RESOURCE_CELL_SIZE);
-            for cz in cz_min..=cz_max {
-                let cp = crate::world_sim::voxel::ChunkPos::new(cx, cy, cz);
-                let Some(chunk) = state.voxel_world.chunks.get(&cp) else { continue };
-                let chunk_base_z = cz * cs;
-                // Clip the z range to this chunk's span.
-                let lz_start = (z_min - chunk_base_z).max(0) as usize;
-                let lz_end = (z_max - chunk_base_z).min(cs - 1) as usize;
-                for lz in lz_start..=lz_end {
-                    let voxel = chunk.voxels[crate::world_sim::voxel::local_index(lx, ly, lz)];
-                    if TARGET_MATERIALS.contains(&voxel.material) {
-                        *counts.entry((cell_x, cell_y, voxel.material)).or_insert(0) += 1;
+    for cx in cx_min..=cx_max {
+        for cy in cy_min..=cy_max {
+            // Scratch buffer per chunk-xy column. Cleared between columns
+            // so stale pointers from the previous (cx, cy) don't leak.
+            let mut z_chunks: Vec<(i32, Option<*const crate::world_sim::voxel::Chunk>)> =
+                Vec::with_capacity(4);
+
+            let chunk_base_x = cx * cs;
+            let chunk_base_y = cy * cs;
+            // Clip the inner local-coord range to positions that could be
+            // in the disk (conservative AABB vs circle test done inside).
+            let lx_start = (cvx - sight - chunk_base_x).max(0).min(cs) as usize;
+            let lx_end = (cvx + sight - chunk_base_x + 1).max(0).min(cs) as usize;
+            let ly_start = (cvy - sight - chunk_base_y).max(0).min(cs) as usize;
+            let ly_end = (cvy + sight - chunk_base_y + 1).max(0).min(cs) as usize;
+            if lx_start >= lx_end || ly_start >= ly_end { continue; }
+
+            for ly in ly_start..ly_end {
+                let vy = chunk_base_y + ly as i32;
+                let dy = vy - cvy;
+                let dy2 = (dy as i64) * (dy as i64);
+
+                for lx in lx_start..lx_end {
+                    let vx = chunk_base_x + lx as i32;
+                    let dx = vx - cvx;
+                    let d2 = dy2 + (dx as i64) * (dx as i64);
+                    if d2 > sight_sq { continue; }
+
+                    // Surface lookup (persistent cache).
+                    let key = pack_xy(vx, vy);
+                    let surface = match surface_cache.get(&key) {
+                        Some(&h) => h,
+                        None => {
+                            let h = state.voxel_world.surface_height(vx, vy);
+                            surface_cache.insert(key, h);
+                            h
+                        }
+                    };
+
+                    let z_min = surface - 5;
+                    let z_max = surface + 15;
+                    let cz_min = z_min.div_euclid(cs);
+                    let cz_max = z_max.div_euclid(cs);
+
+                    // Materialize z_chunks for this column if not already
+                    // cached for cz_min..=cz_max. With surface heights
+                    // varying slowly across XY, consecutive iterations
+                    // reuse the same Z chunks almost always.
+                    let need_refresh = z_chunks.is_empty()
+                        || z_chunks.first().map(|(z, _)| *z).unwrap_or(i32::MAX) != cz_min
+                        || z_chunks.last().map(|(z, _)| *z).unwrap_or(i32::MIN) != cz_max;
+                    if need_refresh {
+                        z_chunks.clear();
+                        for cz in cz_min..=cz_max {
+                            let cp = crate::world_sim::voxel::ChunkPos::new(cx, cy, cz);
+                            let ptr = chunks.get(&cp).map(|c| c as *const _);
+                            z_chunks.push((cz, ptr));
+                        }
+                    }
+
+                    let cell_x = vx.div_euclid(RESOURCE_CELL_SIZE);
+                    let cell_y = vy.div_euclid(RESOURCE_CELL_SIZE);
+
+                    for (cz, ptr) in z_chunks.iter() {
+                        let Some(ptr) = ptr else { continue };
+                        // SAFETY: `chunks` is borrowed immutably for the
+                        // entire outer scope; no mutation happens between
+                        // lookup and deref. The pointer lives as long as
+                        // `chunks` does.
+                        let chunk = unsafe { &**ptr };
+                        let chunk_base_z = cz * cs;
+                        let lz_start = (z_min - chunk_base_z).max(0) as usize;
+                        let lz_end = (z_max - chunk_base_z).min(cs - 1) as usize;
+                        for lz in lz_start..=lz_end {
+                            let voxel = chunk.voxels[
+                                crate::world_sim::voxel::local_index(lx, ly, lz)
+                            ];
+                            if TARGET_MATERIALS.contains(&voxel.material) {
+                                *counts.entry((cell_x, cell_y, voxel.material)).or_insert(0) += 1;
+                            }
+                        }
                     }
                 }
             }
