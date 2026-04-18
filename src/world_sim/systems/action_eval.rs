@@ -42,13 +42,20 @@ fn snap_cell(pos: (f32, f32)) -> (i32, i32) {
 
 fn build_snap_grid(snaps: &[EntitySnap]) -> SnapGrid {
     let mut grid: SnapGrid = std::collections::HashMap::default();
-    // Reserve rough upper bound: ~10 entities per cell typical.
     grid.reserve(snaps.len() / 8 + 16);
+    build_snap_grid_into(snaps, &mut grid);
+    grid
+}
+
+/// Pooled variant: reuses `grid`'s capacity. Caller should clear() before.
+fn build_snap_grid_into(snaps: &[EntitySnap], grid: &mut SnapGrid) {
+    if grid.capacity() < snaps.len() / 8 + 16 {
+        grid.reserve(snaps.len() / 8 + 16 - grid.capacity());
+    }
     for (i, snap) in snaps.iter().enumerate() {
         if !snap.alive { continue; }
         grid.entry(snap_cell(snap.pos)).or_default().push(i);
     }
-    grid
 }
 /// Aggro range for attack actions.
 const AGGRO_RANGE: f32 = 20.0;
@@ -60,8 +67,20 @@ const BUILD_PROGRESS_PER_TICK: f32 = 0.05;
 // Scored action candidates
 // ---------------------------------------------------------------------------
 
+/// Per-NPC decision record produced in evaluate_and_act's scoring pass and
+/// consumed in its execution pass. Pub so we can pool a Vec<DeferredAction>
+/// on WorldState.sim_scratch.
 #[derive(Debug, Clone)]
-enum CandidateAction {
+pub struct DeferredAction {
+    pub idx: usize,
+    pub action: CandidateAction,
+    pub npc_action: NpcAction,
+    pub utility: f32,
+    pub skip_execute: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum CandidateAction {
     Eat,
     Harvest { resource_idx: usize, resource_id: u32 },
     MoveToResource { resource_idx: usize, resource_id: u32, pos: (f32, f32) },
@@ -119,27 +138,28 @@ impl CandidateAction {
 // Lightweight entity snapshot for read-only spatial queries
 // ---------------------------------------------------------------------------
 
-struct EntitySnap {
-    idx: usize,
-    id: u32,
-    kind: EntityKind,
+#[derive(Debug, Clone)]
+pub struct EntitySnap {
+    pub idx: usize,
+    pub id: u32,
+    pub kind: EntityKind,
     #[allow(dead_code)]
-    team: WorldTeam,
-    pos: (f32, f32),
-    alive: bool,
+    pub team: WorldTeam,
+    pub pos: (f32, f32),
+    pub alive: bool,
     #[allow(dead_code)]
-    hp: f32,
+    pub hp: f32,
     #[allow(dead_code)]
-    max_hp: f32,
+    pub max_hp: f32,
     #[allow(dead_code)]
-    attack_damage: f32,
+    pub attack_damage: f32,
     // Resource node info (if kind == Resource)
-    resource_type: Option<ResourceType>,
-    resource_remaining: f32,
+    pub resource_type: Option<ResourceType>,
+    pub resource_remaining: f32,
     // Building info (if kind == Building)
-    construction_progress: f32,
+    pub construction_progress: f32,
     #[allow(dead_code)]
-    building_settlement_id: Option<u32>,
+    pub building_settlement_id: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -157,14 +177,19 @@ pub fn evaluate_and_act(state: &mut WorldState) {
     let debug_tick = false; // set to state.tick <= 20 for debug output
 
     // --- Phase 1: collect read-only snapshots for spatial queries. ---
-    let snaps: Vec<EntitySnap> = state.entities.iter().enumerate().map(|(idx, e)| {
+    // Pool snaps on state.sim_scratch — this Vec was ~100KB per call
+    // (2000 entities × ~50 bytes). Take + clear + refill + restore.
+    let mut snaps = std::mem::take(&mut state.sim_scratch.snaps);
+    snaps.clear();
+    snaps.reserve(state.entities.len().saturating_sub(snaps.capacity()));
+    for (idx, e) in state.entities.iter().enumerate() {
         let (rt, rem) = e.resource.as_ref()
             .map(|r| (Some(r.resource_type), r.remaining))
             .unwrap_or((None, 0.0));
         let (cp, bsid) = e.building.as_ref()
             .map(|b| (b.construction_progress, b.settlement_id))
             .unwrap_or((1.0, None));
-        EntitySnap {
+        snaps.push(EntitySnap {
             idx,
             id: e.id,
             kind: e.kind,
@@ -178,24 +203,24 @@ pub fn evaluate_and_act(state: &mut WorldState) {
             resource_remaining: rem,
             construction_progress: cp,
             building_settlement_id: bsid,
-        }
-    }).collect();
-
-    // Build spatial grid over snaps once — used by score_npc_actions to
-    // avoid scanning all N snaps per NPC (previously O(N²); now O(K*N)
-    // where K is entities in a 9-cell neighborhood).
-    let snap_grid = build_snap_grid(&snaps);
-
-    // --- Phase 2: for each NPC/monster, score and pick best action. ---
-    struct DeferredAction {
-        idx: usize,
-        action: CandidateAction,
-        npc_action: NpcAction,
-        utility: f32,
-        skip_execute: bool, // hysteresis: keep current action, only update intention ticks
+        });
     }
 
-    let mut deferred: Vec<DeferredAction> = Vec::with_capacity(entity_count / 2);
+    // Pool snap_grid as well. Take + clear + refill + restore.
+    let mut snap_grid = std::mem::take(&mut state.sim_scratch.snap_grid);
+    snap_grid.clear();
+    for bucket in snap_grid.values_mut() {
+        bucket.clear();
+    }
+    build_snap_grid_into(&snaps, &mut snap_grid);
+
+    // --- Phase 2: for each NPC/monster, score and pick best action. ---
+    // `deferred` is pooled on state.sim_scratch; take+clear+refill+restore.
+    let mut deferred = std::mem::take(&mut state.sim_scratch.deferred);
+    deferred.clear();
+    if deferred.capacity() < entity_count / 2 {
+        deferred.reserve(entity_count / 2 - deferred.capacity());
+    }
 
     for i in 0..entity_count {
         let e = &state.entities[i];
@@ -255,7 +280,7 @@ pub fn evaluate_and_act(state: &mut WorldState) {
 
     // --- Phase 3: execute deferred actions (mutable access to state). ---
     let tick = state.tick;
-    for da in deferred {
+    for da in deferred.drain(..) {
         // Record outcome of previous action before executing new one (Phase A).
         if let Some(npc) = &mut state.entities[da.idx].npc {
             if let Some((ref prev_action, _)) = npc.current_intention {
@@ -285,6 +310,11 @@ pub fn evaluate_and_act(state: &mut WorldState) {
             npc.action = da.npc_action;
         }
     }
+
+    // Restore pooled buffers (their allocations survive; contents empty).
+    state.sim_scratch.snaps = snaps;
+    state.sim_scratch.snap_grid = snap_grid;
+    state.sim_scratch.deferred = deferred;
 }
 
 // ---------------------------------------------------------------------------

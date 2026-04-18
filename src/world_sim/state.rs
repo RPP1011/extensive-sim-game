@@ -336,6 +336,47 @@ impl BuildingFunction {
     }
 }
 
+/// Pooled scratch buffers reused across tick. Each field is owned by a
+/// specific system — see comments in the respective module for the
+/// expected usage pattern. All buffers are cleared at the start of each
+/// use, so state across ticks doesn't leak.
+#[derive(Default)]
+pub struct SimScratch {
+    // --- action_eval::evaluate_and_act ---
+    /// Read-only entity snapshots for scoring; cleared + refilled each call.
+    pub snaps: Vec<super::systems::action_eval::EntitySnap>,
+    /// Snap indices grouped by spatial cell; cleared + refilled each call.
+    pub snap_grid: std::collections::HashMap<(i32, i32), Vec<usize>, ahash::RandomState>,
+    /// Deferred action decisions; cleared + refilled each call.
+    pub deferred: Vec<super::systems::action_eval::DeferredAction>,
+
+    // --- exploration::scan_all_npc_resources ---
+    /// NPC indices to scan; cleared + refilled each call.
+    pub npc_indices: Vec<usize>,
+    /// NPC voxel positions cached for step 3; cleared + refilled each call.
+    pub npc_pos_voxel: Vec<(usize, i32, i32)>,
+    /// Visible cell set; cleared + refilled each call.
+    pub visible_cells: std::collections::HashSet<(i32, i32), ahash::RandomState>,
+}
+
+impl std::fmt::Debug for SimScratch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimScratch")
+            .field("snaps_len", &self.snaps.len())
+            .field("snap_grid_len", &self.snap_grid.len())
+            .field("deferred_len", &self.deferred.len())
+            .field("npc_indices_len", &self.npc_indices.len())
+            .finish()
+    }
+}
+
+/// Clone returns Default. The scratch buffers are ephemeral — cloning a
+/// WorldState shouldn't duplicate the scratch allocations, and since the
+/// buffers are always cleared-then-filled before use, Default is correct.
+impl Clone for SimScratch {
+    fn clone(&self) -> Self { Self::default() }
+}
+
 /// A seed for room growth — placed by an NPC, grown by the automaton.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildSeed {
@@ -452,6 +493,14 @@ pub struct WorldState {
     #[serde(skip)]
     pub cell_census: super::systems::exploration::CellCensus,
 
+    /// Pooled scratch buffers reused across tick systems. Avoids per-tick
+    /// Vec/HashMap allocations that collectively produced ~55 page faults
+    /// per tick (measured 220KB/tick of new allocator pages).
+    /// Each buffer is owned by a specific system; callers clear + fill +
+    /// consume within one function call. Not serialized.
+    #[serde(skip)]
+    pub sim_scratch: SimScratch,
+
     /// Active build seeds waiting for room growth automaton to process.
     pub build_seeds: Vec<BuildSeed>,
 
@@ -534,6 +583,7 @@ impl WorldState {
             tiles: std::collections::HashMap::default(),
             surface_cache: super::systems::exploration::SurfaceCache::default(),
             cell_census: super::systems::exploration::CellCensus::default(),
+            sim_scratch: SimScratch::default(),
             build_seeds: Vec::new(),
             voxel_world: super::voxel::VoxelWorld::default(),
             nav_grids: Vec::new(),
