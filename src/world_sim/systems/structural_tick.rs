@@ -65,8 +65,14 @@ fn find_unsupported_voxels(state: &WorldState, cp: ChunkPos) -> Vec<(i32, i32, i
     let base_y = cp.y * CHUNK_SIZE as i32;
     let base_z = cp.z * CHUNK_SIZE as i32;
 
-    // Collect all solid voxel world-positions in this chunk.
-    let mut solid_set: VoxelSet = VoxelSet::default();
+    // Collect all solid voxel world-positions in this chunk. Pre-size to
+    // avoid the rehash cascade — flamegraph showed `reserve_rehash` at
+    // 19% of total program time when the sets grew from empty. A chunk
+    // holds at most CHUNK_SIZE³ voxels; allocating that upfront once is
+    // cheaper than the log₂(N) rehashes during incremental growth.
+    let chunk_cap = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
+    let mut solid_set: VoxelSet = VoxelSet::with_capacity_and_hasher(
+        chunk_cap, ahash::RandomState::default());
     for lz in 0..CHUNK_SIZE {
         for ly in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
@@ -83,7 +89,8 @@ fn find_unsupported_voxels(state: &WorldState, cp: ChunkPos) -> Vec<(i32, i32, i
     }
 
     // Seed BFS with anchored voxels — those at z<=0 or whose below-neighbor is solid.
-    let mut visited: VoxelSet = VoxelSet::default();
+    let mut visited: VoxelSet = VoxelSet::with_capacity_and_hasher(
+        solid_set.len(), ahash::RandomState::default());
     let mut queue: VecDeque<(i32, i32, i32)> = VecDeque::new();
 
     for &(vx, vy, vz) in &solid_set {
