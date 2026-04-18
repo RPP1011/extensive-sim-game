@@ -305,7 +305,7 @@ fn score_npc_actions(
     entity: &Entity,
     npc: &NpcData,
     snaps: &[EntitySnap],
-    tiles: &std::collections::HashMap<TilePos, Tile>,
+    tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
     current_tick: u64,
 ) -> (CandidateAction, NpcAction, f32) {
     let pos = entity.pos;

@@ -51,7 +51,7 @@ pub fn advance_construction(state: &mut WorldState) {
 }
 
 /// Grow a room by one step: expand if too small, close if at minimum.
-fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Tile>, tick: u64) {
+fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Tile, ahash::RandomState>, tick: u64) {
     // Ensure seed position has a floor tile.
     tiles.entry(seed.pos).or_insert(Tile {
         tile_type: TileType::Floor(TileMaterial::Wood),
@@ -91,7 +91,7 @@ fn grow_room(seed: &BuildSeed, tiles: &mut std::collections::HashMap<TilePos, Ti
 }
 
 /// Flood-fill from a position, collecting connected floor tiles.
-fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, Tile>) -> Vec<TilePos> {
+fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Vec<TilePos> {
     // ahash for the visited set — SipHash over a struct key was 2% of
     // program time in the flamegraph.
     let mut visited: std::collections::HashSet<TilePos, ahash::RandomState> =
@@ -126,7 +126,7 @@ fn flood_fill_floor(start: TilePos, tiles: &std::collections::HashMap<TilePos, T
 }
 
 /// Compute boundary positions: tiles adjacent to interior that are not interior.
-fn compute_boundary(interior: &[TilePos], _tiles: &std::collections::HashMap<TilePos, Tile>) -> Vec<TilePos> {
+fn compute_boundary(interior: &[TilePos], _tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Vec<TilePos> {
     let mut interior_set: std::collections::HashSet<TilePos, ahash::RandomState> =
         std::collections::HashSet::default();
     interior_set.extend(interior.iter().copied());
@@ -145,7 +145,7 @@ fn compute_boundary(interior: &[TilePos], _tiles: &std::collections::HashMap<Til
 }
 
 /// Check if all boundary positions are solid (walls, existing structures, or placed walls).
-fn is_enclosed(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile>) -> bool {
+fn is_enclosed(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> bool {
     let interior_set: std::collections::HashSet<TilePos> = interior.iter().copied().collect();
 
     for &pos in interior {
@@ -162,7 +162,7 @@ fn is_enclosed(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, 
 }
 
 /// Check if any boundary tile is a door.
-fn has_door(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile>) -> bool {
+fn has_door(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> bool {
     let interior_set: std::collections::HashSet<TilePos> = interior.iter().copied().collect();
     for &pos in interior {
         for neighbor in pos.neighbors4() {
@@ -177,7 +177,7 @@ fn has_door(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Til
 
 /// Find the best position for a door: boundary wall tile with fewest wall neighbors
 /// (corner of the room, facing outward).
-fn find_door_position(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile>) -> Option<TilePos> {
+fn find_door_position(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> Option<TilePos> {
     let interior_set: std::collections::HashSet<TilePos> = interior.iter().copied().collect();
     let mut best: Option<(TilePos, usize)> = None;
 
@@ -215,7 +215,7 @@ fn find_door_position(interior: &[TilePos], tiles: &std::collections::HashMap<Ti
 }
 
 /// Detect what function a room provides based on its furniture contents.
-pub fn detect_room_function(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile>) -> RoomFunction {
+pub fn detect_room_function(interior: &[TilePos], tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>) -> RoomFunction {
     let mut rf = RoomFunction::default();
     for &pos in interior {
         if let Some(tile) = tiles.get(&pos) {

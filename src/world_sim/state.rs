@@ -423,7 +423,7 @@ pub struct WorldState {
 
     /// Sparse tile map: world-space tile modifications (walls, floors, ditches, farmland, etc.).
     /// Key: integer tile position (2.0 world units per tile). Only modified tiles are stored.
-    pub tiles: std::collections::HashMap<TilePos, Tile>,
+    pub tiles: std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
 
     /// Persistent cache of analytical surface_height results. Keyed by
     /// packed (vx, vy) voxel coordinate. Pure function of (vx, vy,
@@ -520,7 +520,7 @@ impl WorldState {
             regions: Vec::new(),
             settlements: Vec::new(),
             settlement_index: Vec::new(),
-            tiles: std::collections::HashMap::new(),
+            tiles: std::collections::HashMap::default(),
             surface_cache: super::systems::exploration::SurfaceCache::default(),
             cell_census: super::systems::exploration::CellCensus::default(),
             build_seeds: Vec::new(),
