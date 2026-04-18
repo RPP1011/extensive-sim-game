@@ -433,6 +433,14 @@ pub struct WorldState {
     #[serde(skip)]
     pub surface_cache: super::systems::exploration::SurfaceCache,
 
+    /// Per-resource-cell census of target materials. Populated lazily when
+    /// an NPC's scan disk covers a cell. Entries persist for the lifetime
+    /// of the run (invalidation on voxel edits is a future refinement —
+    /// resources change slowly and NPCs can reconfirm on harvest). Not
+    /// serialized.
+    #[serde(skip)]
+    pub cell_census: super::systems::exploration::CellCensus,
+
     /// Active build seeds waiting for room growth automaton to process.
     pub build_seeds: Vec<BuildSeed>,
 
@@ -514,6 +522,7 @@ impl WorldState {
             settlement_index: Vec::new(),
             tiles: std::collections::HashMap::new(),
             surface_cache: super::systems::exploration::SurfaceCache::default(),
+            cell_census: super::systems::exploration::CellCensus::default(),
             build_seeds: Vec::new(),
             voxel_world: super::voxel::VoxelWorld::default(),
             nav_grids: Vec::new(),

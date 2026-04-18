@@ -176,6 +176,32 @@ const TARGET_MATERIALS: &[VoxelMaterial] = &[
     VoxelMaterial::Crystal,
 ];
 
+const NUM_TARGET_MATERIALS: usize = 6;
+
+/// Map a VoxelMaterial to its index in TARGET_MATERIALS, or None if not tracked.
+#[inline]
+fn target_material_idx(m: VoxelMaterial) -> Option<usize> {
+    match m {
+        VoxelMaterial::WoodLog => Some(0),
+        VoxelMaterial::IronOre => Some(1),
+        VoxelMaterial::CopperOre => Some(2),
+        VoxelMaterial::GoldOre => Some(3),
+        VoxelMaterial::Coal => Some(4),
+        VoxelMaterial::Crystal => Some(5),
+        _ => None,
+    }
+}
+
+/// Per-resource-cell count of target materials. Key: `(cell_x, cell_y)` where
+/// a cell spans `RESOURCE_CELL_SIZE` voxels. Values: count of each target
+/// material anywhere in the cell's surface band (surface-5..surface+15).
+///
+/// Persistent on WorldState; populated lazily when any NPC can see a cell.
+/// The old per-NPC scan did 420K voxel reads PER NPC to produce ~40 cell
+/// counts; the per-cell approach does ~344K voxel reads PER CELL ONCE and
+/// reuses across all NPCs (and across ticks — the world is mostly static).
+pub type CellCensus = std::collections::HashMap<(i32, i32), [u32; NUM_TARGET_MATERIALS], ahash::RandomState>;
+
 /// Scan nearby voxels around an NPC and record harvestable deposits in its
 /// `known_voxel_resources`. This is called as a post-apply step in runtime.rs,
 /// not via the delta system, because it mutates NpcData directly.
@@ -418,14 +444,57 @@ fn scan_voxel_resources_cached(
     }
 }
 
+/// Compute a per-cell census: count of each target material in the cell's
+/// surface band (surface-5 .. surface+15). Called once per cell lazily —
+/// the result persists on WorldState.cell_census across ticks.
+fn compute_cell_census(
+    voxel_world: &crate::world_sim::voxel::VoxelWorld,
+    cell: (i32, i32),
+    surface_cache: &mut SurfaceCache,
+) -> [u32; NUM_TARGET_MATERIALS] {
+    let mut census = [0u32; NUM_TARGET_MATERIALS];
+    let base_vx = cell.0 * RESOURCE_CELL_SIZE;
+    let base_vy = cell.1 * RESOURCE_CELL_SIZE;
+    for dy in 0..RESOURCE_CELL_SIZE {
+        for dx in 0..RESOURCE_CELL_SIZE {
+            let vx = base_vx + dx;
+            let vy = base_vy + dy;
+            let key = pack_xy(vx, vy);
+            let surface = match surface_cache.get(&key) {
+                Some(&h) => h,
+                None => {
+                    let h = voxel_world.surface_height(vx, vy);
+                    surface_cache.insert(key, h);
+                    h
+                }
+            };
+            let z_min = surface - 5;
+            let z_max = surface + 15;
+            for vz in z_min..=z_max {
+                let voxel = voxel_world.get_voxel(vx, vy, vz);
+                if let Some(idx) = target_material_idx(voxel.material) {
+                    census[idx] += 1;
+                }
+            }
+        }
+    }
+    census
+}
+
 /// Run voxel resource scanning for all alive NPCs. Called from runtime.rs
 /// every `RESOURCE_SCAN_INTERVAL` ticks.
+///
+/// Per-cell census architecture: instead of each NPC re-scanning 420K
+/// voxels in its sight disk to produce ~40 cell counts, we compute the
+/// census once per cell (across all NPCs, across ticks) and then each
+/// NPC just reads cached counts for cells in its disk. Semantic change:
+/// NPCs now discover resources at cell-level granularity rather than
+/// partial-visibility — a cell is either fully known or unknown.
 pub fn scan_all_npc_resources(state: &mut WorldState) {
     if state.tick % RESOURCE_SCAN_INTERVAL != 0 || state.tick == 0 {
         return;
     }
 
-    // Only scan if the voxel world has any chunks loaded.
     if state.voxel_world.chunks.is_empty() {
         return;
     }
@@ -437,28 +506,112 @@ pub fn scan_all_npc_resources(state: &mut WorldState) {
         .filter(|(_, e)| e.alive && e.kind == EntityKind::Npc && e.npc.is_some())
         .map(|(i, _)| i)
         .collect();
+    if npc_indices.is_empty() {
+        return;
+    }
 
-    // Persistent surface-height cache (lives on state.surface_cache across
-    // ticks). surface_height_at is a pure function of (vx, vy, plan, seed)
-    // so cached values stay valid as long as the region_plan doesn't
-    // change. Take → use → restore to satisfy the borrow checker while
-    // state is also borrowed by scan_voxel_resources_cached.
+    let sight = SIGHT_RANGE_VOXELS;
+    let sight_sq = (sight as f32) * (sight as f32);
+
+    // Step 1: collect the union of (cell_x, cell_y) cells visible across
+    // all NPCs. Each NPC sees a 3×3 grid of cells at most (sight=80,
+    // RESOURCE_CELL_SIZE=128). Dedup with a HashSet.
+    let mut visible_cells: std::collections::HashSet<(i32, i32), ahash::RandomState> =
+        std::collections::HashSet::default();
+    let mut npc_pos_voxel: Vec<(usize, i32, i32)> = Vec::with_capacity(npc_indices.len());
+
+    for &idx in &npc_indices {
+        let entity = &state.entities[idx];
+        let (cvx, cvy, _) = world_to_voxel(entity.pos.0, entity.pos.1, 0.0);
+        npc_pos_voxel.push((idx, cvx, cvy));
+
+        let cell_vx_min = (cvx - sight).div_euclid(RESOURCE_CELL_SIZE);
+        let cell_vx_max = (cvx + sight).div_euclid(RESOURCE_CELL_SIZE);
+        let cell_vy_min = (cvy - sight).div_euclid(RESOURCE_CELL_SIZE);
+        let cell_vy_max = (cvy + sight).div_euclid(RESOURCE_CELL_SIZE);
+
+        for cy in cell_vy_min..=cell_vy_max {
+            for cx in cell_vx_min..=cell_vx_max {
+                visible_cells.insert((cx, cy));
+            }
+        }
+    }
+
+    // Step 2: populate census for any newly-visible cells.
     let mut surface_cache = std::mem::take(&mut state.surface_cache);
-    if surface_cache.capacity() == 0 {
-        // First-time initialization: pre-size to upper bound to avoid
-        // the reserve_rehash cascade (was 11% of program time).
-        let per_npc_disk = (std::f32::consts::PI
-            * (SIGHT_RANGE_VOXELS as f32)
-            * (SIGHT_RANGE_VOXELS as f32)) as usize;
-        let cap = per_npc_disk.saturating_mul(npc_indices.len()).max(256);
-        surface_cache.reserve(cap);
+    let mut cell_census = std::mem::take(&mut state.cell_census);
+    for &cell in &visible_cells {
+        if cell_census.contains_key(&cell) {
+            continue;
+        }
+        let census = compute_cell_census(&state.voxel_world, cell, &mut surface_cache);
+        cell_census.insert(cell, census);
     }
-
-    for idx in npc_indices {
-        scan_voxel_resources_cached(state, idx, SIGHT_RANGE_VOXELS, &mut surface_cache);
-    }
-
     state.surface_cache = surface_cache;
+    state.cell_census = cell_census;
+
+    // Step 3: per-NPC, emit findings from the census for each visible cell.
+    let tick = state.tick;
+    let half_cell_world = RESOURCE_CELL_SIZE as f32 * VOXEL_SCALE * 0.5;
+
+    for (idx, cvx, cvy) in npc_pos_voxel {
+        let cell_vx_min = (cvx - sight).div_euclid(RESOURCE_CELL_SIZE);
+        let cell_vx_max = (cvx + sight).div_euclid(RESOURCE_CELL_SIZE);
+        let cell_vy_min = (cvy - sight).div_euclid(RESOURCE_CELL_SIZE);
+        let cell_vy_max = (cvy + sight).div_euclid(RESOURCE_CELL_SIZE);
+
+        let npc = match state.entities[idx].npc.as_mut() {
+            Some(n) => n,
+            None => continue,
+        };
+
+        for cy in cell_vy_min..=cell_vy_max {
+            for cx in cell_vx_min..=cell_vx_max {
+                // Skip cells whose nearest corner to the NPC is outside sight.
+                let cell_vx_base = cx * RESOURCE_CELL_SIZE;
+                let cell_vy_base = cy * RESOURCE_CELL_SIZE;
+                let nearest_vx = cvx.clamp(cell_vx_base, cell_vx_base + RESOURCE_CELL_SIZE - 1);
+                let nearest_vy = cvy.clamp(cell_vy_base, cell_vy_base + RESOURCE_CELL_SIZE - 1);
+                let dx = (nearest_vx - cvx) as f32;
+                let dy = (nearest_vy - cvy) as f32;
+                if dx * dx + dy * dy > sight_sq {
+                    continue;
+                }
+
+                let census = match state.cell_census.get(&(cx, cy)) {
+                    Some(c) => c,
+                    None => continue, // Should have been populated in step 2.
+                };
+
+                let center_x =
+                    cx as f32 * RESOURCE_CELL_SIZE as f32 * VOXEL_SCALE + half_cell_world;
+                let center_y =
+                    cy as f32 * RESOURCE_CELL_SIZE as f32 * VOXEL_SCALE + half_cell_world;
+
+                for (mi, &count) in census.iter().enumerate() {
+                    if count == 0 {
+                        continue;
+                    }
+                    let material = TARGET_MATERIALS[mi];
+                    if let Some(existing) = npc
+                        .known_voxel_resources
+                        .iter_mut()
+                        .find(|k| k.material == material && k.center == (center_x, center_y))
+                    {
+                        existing.estimated_count = count;
+                        existing.tick_observed = tick;
+                    } else {
+                        npc.known_voxel_resources.push(VoxelResourceKnowledge {
+                            center: (center_x, center_y),
+                            material,
+                            estimated_count: count,
+                            tick_observed: tick,
+                        });
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
