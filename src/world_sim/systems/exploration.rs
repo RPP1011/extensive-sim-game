@@ -452,28 +452,96 @@ fn compute_cell_census(
     cell: (i32, i32),
     surface_cache: &mut SurfaceCache,
 ) -> [u32; NUM_TARGET_MATERIALS] {
+    use crate::world_sim::voxel::{local_index, ChunkPos, CHUNK_SIZE};
     let mut census = [0u32; NUM_TARGET_MATERIALS];
+    let cs = CHUNK_SIZE as i32;
     let base_vx = cell.0 * RESOURCE_CELL_SIZE;
     let base_vy = cell.1 * RESOURCE_CELL_SIZE;
-    for dy in 0..RESOURCE_CELL_SIZE {
-        for dx in 0..RESOURCE_CELL_SIZE {
-            let vx = base_vx + dx;
-            let vy = base_vy + dy;
-            let key = pack_xy(vx, vy);
-            let surface = match surface_cache.get(&key) {
-                Some(&h) => h,
-                None => {
-                    let h = voxel_world.surface_height(vx, vy);
-                    surface_cache.insert(key, h);
-                    h
-                }
-            };
-            let z_min = surface - 5;
-            let z_max = surface + 15;
-            for vz in z_min..=z_max {
-                let voxel = voxel_world.get_voxel(vx, vy, vz);
-                if let Some(idx) = target_material_idx(voxel.material) {
-                    census[idx] += 1;
+
+    // Chunk-major iteration: the cell is 128×128 voxels, CHUNK_SIZE=64,
+    // so the XY extent spans exactly 2 chunks × 2 chunks = 4 chunk columns.
+    // Z range varies by (vx, vy) surface but is 1-2 chunks per column.
+    // Looking up the chunk once per (cx, cy, cz) slice instead of per voxel
+    // eliminates ~99% of chunks.get calls.
+    let cx_min = base_vx.div_euclid(cs);
+    let cx_max = (base_vx + RESOURCE_CELL_SIZE - 1).div_euclid(cs);
+    let cy_min = base_vy.div_euclid(cs);
+    let cy_max = (base_vy + RESOURCE_CELL_SIZE - 1).div_euclid(cs);
+    const CHUNK_SHIFT: i32 = (crate::world_sim::voxel::CHUNK_SIZE as i32).trailing_zeros() as i32;
+
+    for cx in cx_min..=cx_max {
+        for cy in cy_min..=cy_max {
+            let chunk_base_x = cx * cs;
+            let chunk_base_y = cy * cs;
+            // Overlap of chunk with this cell (clipped).
+            let lx_start = (base_vx - chunk_base_x).max(0) as usize;
+            let lx_end = ((base_vx + RESOURCE_CELL_SIZE - 1 - chunk_base_x).min(cs - 1)) as usize;
+            let ly_start = (base_vy - chunk_base_y).max(0) as usize;
+            let ly_end = ((base_vy + RESOURCE_CELL_SIZE - 1 - chunk_base_y).min(cs - 1)) as usize;
+
+            // Cache z-chunks for this column (2 slots cover the common case).
+            let mut cached_cz_min: i32 = i32::MIN;
+            let mut cached_cz_max: i32 = i32::MIN;
+            let mut slot_a_cz: i32 = 0;
+            let mut slot_a: Option<&crate::world_sim::voxel::Chunk> = None;
+            let mut slot_b_cz: i32 = 0;
+            let mut slot_b: Option<&crate::world_sim::voxel::Chunk> = None;
+            let mut slot_b_valid = false;
+
+            for ly in ly_start..=ly_end {
+                let vy = chunk_base_y + ly as i32;
+                for lx in lx_start..=lx_end {
+                    let vx = chunk_base_x + lx as i32;
+                    let key = pack_xy(vx, vy);
+                    let surface = match surface_cache.get(&key) {
+                        Some(&h) => h,
+                        None => {
+                            let h = voxel_world.surface_height(vx, vy);
+                            surface_cache.insert(key, h);
+                            h
+                        }
+                    };
+                    let z_min = surface - 5;
+                    let z_max = surface + 15;
+                    let cz_min = z_min >> CHUNK_SHIFT;
+                    let cz_max = z_max >> CHUNK_SHIFT;
+                    if cz_min != cached_cz_min || cz_max != cached_cz_max {
+                        slot_a_cz = cz_min;
+                        slot_a = voxel_world.chunks.get(&ChunkPos::new(cx, cy, cz_min));
+                        if cz_max > cz_min {
+                            slot_b_cz = cz_max;
+                            slot_b = voxel_world.chunks.get(&ChunkPos::new(cx, cy, cz_max));
+                            slot_b_valid = true;
+                        } else {
+                            slot_b_valid = false;
+                        }
+                        cached_cz_min = cz_min;
+                        cached_cz_max = cz_max;
+                    }
+                    if let Some(chunk) = slot_a {
+                        let chunk_base_z = slot_a_cz * cs;
+                        let lz_start = (z_min - chunk_base_z).max(0) as usize;
+                        let lz_end = (z_max - chunk_base_z).min(cs - 1) as usize;
+                        for lz in lz_start..=lz_end {
+                            let voxel = chunk.voxels[local_index(lx, ly, lz)];
+                            if let Some(idx) = target_material_idx(voxel.material) {
+                                census[idx] += 1;
+                            }
+                        }
+                    }
+                    if slot_b_valid {
+                        if let Some(chunk) = slot_b {
+                            let chunk_base_z = slot_b_cz * cs;
+                            let lz_start = (z_min - chunk_base_z).max(0) as usize;
+                            let lz_end = (z_max - chunk_base_z).min(cs - 1) as usize;
+                            for lz in lz_start..=lz_end {
+                                let voxel = chunk.voxels[local_index(lx, ly, lz)];
+                                if let Some(idx) = target_material_idx(voxel.material) {
+                                    census[idx] += 1;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
