@@ -23,6 +23,33 @@ const MEAL_HUNGER_RESTORE: f32 = 60.0;
 /// Scan radius for nearby entities.
 const SCAN_RADIUS: f32 = 50.0;
 const SCAN_RADIUS_SQ: f32 = SCAN_RADIUS * SCAN_RADIUS;
+/// Spatial grid cell size for snap bucketing. Set equal to SCAN_RADIUS so
+/// any entity within scan is in one of the 9 cells around the querier.
+const SNAP_GRID_CELL: f32 = SCAN_RADIUS;
+
+/// Spatial index over snap indices: `HashMap<(cell_x, cell_y), Vec<snap_idx>>`.
+/// Built once per evaluate_and_act; queried by each NPC's score_npc_actions
+/// to reduce the O(N²) scan loop to O(K) where K is entities in 9 nearby cells.
+type SnapGrid = std::collections::HashMap<(i32, i32), Vec<usize>, ahash::RandomState>;
+
+#[inline]
+fn snap_cell(pos: (f32, f32)) -> (i32, i32) {
+    (
+        (pos.0 / SNAP_GRID_CELL).floor() as i32,
+        (pos.1 / SNAP_GRID_CELL).floor() as i32,
+    )
+}
+
+fn build_snap_grid(snaps: &[EntitySnap]) -> SnapGrid {
+    let mut grid: SnapGrid = std::collections::HashMap::default();
+    // Reserve rough upper bound: ~10 entities per cell typical.
+    grid.reserve(snaps.len() / 8 + 16);
+    for (i, snap) in snaps.iter().enumerate() {
+        if !snap.alive { continue; }
+        grid.entry(snap_cell(snap.pos)).or_default().push(i);
+    }
+    grid
+}
 /// Aggro range for attack actions.
 const AGGRO_RANGE: f32 = 20.0;
 const AGGRO_RANGE_SQ: f32 = AGGRO_RANGE * AGGRO_RANGE;
@@ -154,6 +181,11 @@ pub fn evaluate_and_act(state: &mut WorldState) {
         }
     }).collect();
 
+    // Build spatial grid over snaps once — used by score_npc_actions to
+    // avoid scanning all N snaps per NPC (previously O(N²); now O(K*N)
+    // where K is entities in a 9-cell neighborhood).
+    let snap_grid = build_snap_grid(&snaps);
+
     // --- Phase 2: for each NPC/monster, score and pick best action. ---
     struct DeferredAction {
         idx: usize,
@@ -181,7 +213,7 @@ pub fn evaluate_and_act(state: &mut WorldState) {
                 // Skip NPCs in non-idle work states (let the work state machine finish).
                 if !matches!(npc.work_state, WorkState::Idle) { continue; }
 
-                let (action, npc_action, utility) = score_npc_actions(e, npc, &snaps, &state.tiles, state.tick);
+                let (action, npc_action, utility) = score_npc_actions(e, npc, &snaps, &snap_grid, &state.tiles, state.tick);
 
                 if debug_tick && e.id == 0 {
                     eprintln!("[action_eval t{} NPC#{}] scored {:?} utility={:.3}", state.tick, e.id, npc_action, utility);
@@ -305,6 +337,7 @@ fn score_npc_actions(
     entity: &Entity,
     npc: &NpcData,
     snaps: &[EntitySnap],
+    snap_grid: &SnapGrid,
     tiles: &std::collections::HashMap<TilePos, Tile, ahash::RandomState>,
     current_tick: u64,
 ) -> (CandidateAction, NpcAction, f32) {
@@ -375,8 +408,20 @@ fn score_npc_actions(
         }
     }
 
-    // --- Scan nearby entities ---
-    for snap in snaps {
+    // --- Scan nearby entities (spatial grid lookup — O(K) not O(N)) ---
+    let (ncx, ncy) = snap_cell(pos);
+    let mut nearby_snaps: [Option<&[usize]>; 9] = [None; 9];
+    let mut nb_i = 0;
+    for dcy in -1..=1i32 {
+        for dcx in -1..=1i32 {
+            if let Some(b) = snap_grid.get(&(ncx + dcx, ncy + dcy)) {
+                nearby_snaps[nb_i] = Some(b.as_slice());
+            }
+            nb_i += 1;
+        }
+    }
+    // Flatten the 9 buckets into a single iterator over snap indices.
+    for snap in nearby_snaps.iter().flatten().flat_map(|b| b.iter()).map(|&i| &snaps[i]) {
         if !snap.alive { continue; }
         if snap.id == entity.id { continue; } // don't target self
         let dx = snap.pos.0 - pos.0;
