@@ -28,6 +28,17 @@ pub fn advance_legends(state: &mut WorldState) {
     if tick % LEGEND_CHECK_INTERVAL == 0 && tick > 0 {
         let mut new_legends: Vec<(usize, String)> = Vec::new();
 
+        // Single chronicle pass: count mentions per entity_id (was O(E × C)
+        // — a filter over the full chronicle for every candidate NPC).
+        // Chronicle grows unbounded, so this is now O(C) instead of O(E × C).
+        let mut mentions_by_id: std::collections::HashMap<u32, u32, ahash::RandomState> =
+            std::collections::HashMap::default();
+        for e in &state.chronicle {
+            for &id in &e.entity_ids {
+                *mentions_by_id.entry(id).or_insert(0) += 1;
+            }
+        }
+
         for (i, entity) in state.entities.iter().enumerate() {
             if !entity.alive || entity.kind != EntityKind::Npc { continue; }
             let npc = match &entity.npc { Some(n) => n, None => continue };
@@ -35,11 +46,9 @@ pub fn advance_legends(state: &mut WorldState) {
             // Already a legend? (check for "the Legendary" in name)
             if npc.name.contains("the Legendary") { continue; }
 
-            // Chronicle mention count.
-            let mentions = state.chronicle.iter()
-                .filter(|e| e.entity_ids.contains(&entity.id))
-                .count();
-            if mentions < MIN_CHRONICLE_MENTIONS { continue; }
+            // Chronicle mention count via prebuilt index.
+            let mentions = *mentions_by_id.get(&entity.id).unwrap_or(&0);
+            if (mentions as usize) < MIN_CHRONICLE_MENTIONS { continue; }
 
             // Class count.
             if npc.classes.len() < MIN_CLASSES { continue; }
@@ -105,44 +114,63 @@ pub fn advance_legends(state: &mut WorldState) {
 
     // --- Phase 2: Legend effects (every 50 ticks) ---
     if tick % 50 == 0 {
-        // Find all living legends and their settlements.
-        let legend_settlements: Vec<(u32, u32)> = state.entities.iter()
-            .filter(|e| e.alive && e.kind == EntityKind::Npc)
-            .filter(|e| e.npc.as_ref().map(|n| n.name.contains("the Legendary")).unwrap_or(false))
-            .filter_map(|e| {
-                e.npc.as_ref()
-                    .and_then(|n| n.home_settlement_id)
-                    .map(|sid| (e.id, sid))
-            })
-            .collect();
-
-        // Boost morale at settlements with legends.
-        for entity in &mut state.entities {
+        // Find settlements with at least one living legend. HashSet lookup
+        // replaces the O(L) linear scan per NPC (was `iter().any()` inside
+        // the outer entity loop — O(E × L)).
+        let mut legend_settlements: std::collections::HashSet<u32, ahash::RandomState> =
+            std::collections::HashSet::default();
+        for entity in &state.entities {
             if !entity.alive || entity.kind != EntityKind::Npc { continue; }
-            let npc = match &mut entity.npc { Some(n) => n, None => continue };
-            let sid = match npc.home_settlement_id { Some(s) => s, None => continue };
+            if let Some(npc) = &entity.npc {
+                if npc.name.contains("the Legendary") {
+                    if let Some(sid) = npc.home_settlement_id {
+                        legend_settlements.insert(sid);
+                    }
+                }
+            }
+        }
 
-            if legend_settlements.iter().any(|&(_, ls)| ls == sid) {
-                npc.morale = (npc.morale + LEGEND_MORALE_BOOST * 0.02).min(100.0);
-                // Legends inspire purpose in others.
-                if npc.needs.purpose < 60.0 {
-                    npc.needs.purpose += 0.5;
+        if !legend_settlements.is_empty() {
+            // Boost morale at settlements with legends.
+            for entity in &mut state.entities {
+                if !entity.alive || entity.kind != EntityKind::Npc { continue; }
+                let npc = match &mut entity.npc { Some(n) => n, None => continue };
+                let sid = match npc.home_settlement_id { Some(s) => s, None => continue };
+
+                if legend_settlements.contains(&sid) {
+                    npc.morale = (npc.morale + LEGEND_MORALE_BOOST * 0.02).min(100.0);
+                    // Legends inspire purpose in others.
+                    if npc.needs.purpose < 60.0 {
+                        npc.needs.purpose += 0.5;
+                    }
                 }
             }
         }
     }
 
     // --- Phase 3: Legend death (only fire once per legend) ---
-    let dead_legend: Option<(u32, String)> = state.entities.iter()
-        .filter(|e| !e.alive && e.kind == EntityKind::Npc)
-        .filter(|e| e.npc.as_ref().map(|n| n.name.contains("the Legendary")).unwrap_or(false))
-        .filter(|e| state.world_events.iter().any(|ev|
-            matches!(ev, WorldEvent::EntityDied { entity_id, .. } if *entity_id == e.id)))
-        // Only if we haven't already chronicled this legend's death.
-        .filter(|e| !state.chronicle.iter().any(|c|
-            c.text.contains("world mourns") && c.entity_ids.contains(&e.id)))
-        .map(|e| (e.id, e.npc.as_ref().unwrap().name.clone()))
-        .next();
+    // Previously this ran every tick with nested scans over entities ×
+    // world_events × chronicle (chronicle grows unbounded — O(tick)).
+    // Restructure: iterate THIS tick's EntityDied world events only,
+    // check if any of them reference a legend. Only then do the
+    // chronicle "already mourned" check.
+    let mut dead_legend: Option<(u32, String)> = None;
+    for ev in &state.world_events {
+        if let WorldEvent::EntityDied { entity_id, .. } = ev {
+            let Some(entity) = state.entity(*entity_id) else { continue };
+            if entity.alive { continue; } // already revived
+            if entity.kind != EntityKind::Npc { continue; }
+            let Some(npc) = &entity.npc else { continue };
+            if !npc.name.contains("the Legendary") { continue; }
+            // "Already mourned" check — unavoidable chronicle scan but
+            // only runs if we've already confirmed a legend died this tick.
+            let already = state.chronicle.iter().any(|c|
+                c.text.contains("world mourns") && c.entity_ids.contains(entity_id));
+            if already { continue; }
+            dead_legend = Some((*entity_id, npc.name.clone()));
+            break;
+        }
+    }
 
     if let Some((legend_id, legend_name)) = dead_legend {
         for entity in &mut state.entities {
