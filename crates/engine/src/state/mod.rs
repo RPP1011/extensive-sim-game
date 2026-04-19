@@ -19,6 +19,9 @@ pub struct SimState {
     hot_max_hp:        Vec<f32>,
     hot_alive:         Vec<bool>,
     hot_movement_mode: Vec<MovementMode>,
+    hot_hunger:        Vec<f32>,
+    hot_thirst:        Vec<f32>,
+    hot_rest_timer:    Vec<f32>,
 
     // Cold SoA — read rarely (spawn, chronicle, debug).
     cold_creature_type: Vec<Option<CreatureType>>,
@@ -38,6 +41,9 @@ impl SimState {
             hot_max_hp:        vec![0.0; cap],
             hot_alive:         vec![false; cap],
             hot_movement_mode: vec![MovementMode::Walk; cap],
+            hot_hunger:        vec![1.0; cap],
+            hot_thirst:        vec![1.0; cap],
+            hot_rest_timer:    vec![1.0; cap],
             cold_creature_type: vec![None; cap],
             cold_channels:      (0..cap).map(|_| None).collect(),
             cold_spawn_tick:    vec![None; cap],
@@ -52,6 +58,9 @@ impl SimState {
         self.hot_max_hp[slot]        = spec.hp.max(1.0);
         self.hot_alive[slot]         = true;
         self.hot_movement_mode[slot] = MovementMode::Walk;
+        self.hot_hunger[slot]        = 1.0;
+        self.hot_thirst[slot]        = 1.0;
+        self.hot_rest_timer[slot]    = 1.0;
         let caps = Capabilities::for_creature(spec.creature_type);
         self.cold_creature_type[slot] = Some(spec.creature_type);
         self.cold_channels[slot]      = Some(caps.channels);
@@ -85,6 +94,15 @@ impl SimState {
     }
     pub fn agent_movement_mode(&self, id: AgentId) -> Option<MovementMode> {
         self.hot_movement_mode.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_hunger(&self, id: AgentId) -> Option<f32> {
+        self.hot_hunger.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_thirst(&self, id: AgentId) -> Option<f32> {
+        self.hot_thirst.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_rest_timer(&self, id: AgentId) -> Option<f32> {
+        self.hot_rest_timer.get(AgentSlotPool::slot_of_agent(id)).copied()
     }
     pub fn agent_creature_type(&self, id: AgentId) -> Option<CreatureType> {
         self.cold_creature_type
@@ -121,6 +139,21 @@ impl SimState {
             *m = mode;
         }
     }
+    pub fn set_agent_hunger(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_hunger.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_thirst(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_thirst.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_rest_timer(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_rest_timer.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
 
     pub fn agent_cap(&self) -> u32 {
         self.pool.alive.len() as u32
@@ -150,5 +183,14 @@ impl SimState {
     }
     pub fn hot_movement_mode(&self) -> &[MovementMode] {
         &self.hot_movement_mode
+    }
+    pub fn hot_hunger(&self) -> &[f32] {
+        &self.hot_hunger
+    }
+    pub fn hot_thirst(&self) -> &[f32] {
+        &self.hot_thirst
+    }
+    pub fn hot_rest_timer(&self) -> &[f32] {
+        &self.hot_rest_timer
     }
 }
