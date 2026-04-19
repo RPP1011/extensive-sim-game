@@ -20,7 +20,7 @@ fn utility_picks_hold_when_only_hold_allowed() {
     backend.evaluate(&state, &mask, &mut actions);
     assert_eq!(actions.len(), 3);
     for a in &actions {
-        assert_eq!(a.micro_kind, MicroKind::Hold, "utility chose Hold when only Hold allowed");
+        assert_eq!(a.micro_kind(), Some(MicroKind::Hold), "utility chose Hold when only Hold allowed");
     }
 }
 
@@ -43,5 +43,5 @@ fn utility_prefers_eat_when_hp_low_and_eat_allowed() {
     let mut actions = Vec::new();
     UtilityBackend.evaluate(&state, &mask, &mut actions);
     assert_eq!(actions.len(), 1);
-    assert_eq!(actions[0].micro_kind, MicroKind::Eat);
+    assert_eq!(actions[0].micro_kind(), Some(MicroKind::Eat));
 }

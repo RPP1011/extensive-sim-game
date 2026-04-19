@@ -2,7 +2,7 @@
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind};
-use crate::policy::{Action, PolicyBackend};
+use crate::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use crate::rng::per_agent_u32;
 use crate::state::SimState;
 
@@ -72,38 +72,33 @@ fn apply_actions(
     shuffle_order_into(order, actions.len(), state.seed, state.tick);
     for &idx in order.iter() {
         let action = &actions[idx as usize];
-        match action.micro_kind {
-            MicroKind::Hold => {}
-            MicroKind::MoveToward => {
-                if let Some(target) = nearest_other(state, action.agent) {
-                    let from = state.agent_pos(action.agent).unwrap();
-                    let target_pos = state.agent_pos(target).unwrap();
-                    let delta = target_pos - from;
-                    if delta.length_squared() > 0.0 {
-                        let to = from + delta.normalize() * MOVE_SPEED_MPS;
-                        state.set_agent_pos(action.agent, to);
-                        events.push(Event::AgentMoved {
-                            agent_id: action.agent, from, to, tick: state.tick,
-                        });
-                    }
+        match action.kind {
+            ActionKind::Micro { kind: MicroKind::Hold, .. } => {}
+            ActionKind::Micro {
+                kind:   MicroKind::MoveToward,
+                target: MicroTarget::Position(target_pos),
+            } => {
+                let from = state.agent_pos(action.agent).unwrap();
+                let delta = target_pos - from;
+                if delta.length_squared() > 0.0 {
+                    let to = from + delta.normalize() * MOVE_SPEED_MPS;
+                    state.set_agent_pos(action.agent, to);
+                    events.push(Event::AgentMoved {
+                        agent_id: action.agent, from, to, tick: state.tick,
+                    });
                 }
             }
-            MicroKind::Attack | MicroKind::Eat => {
+            ActionKind::Micro { kind: MicroKind::Attack, .. }
+            | ActionKind::Micro { kind: MicroKind::Eat, .. } => {
                 // Not implemented in MVP.
             }
-            // New variants from the full 18-kind set. Dispatch lands in Tasks 9–12.
-            _ => {}
+            ActionKind::Micro { .. } => {
+                // Other MicroKinds (Flee, UseItem, Ask, …) land in Tasks 9–12.
+            }
+            ActionKind::Macro(_) => {
+                // Macro dispatch lands in Tasks 13–15.
+            }
         }
     }
 }
 
-fn nearest_other(state: &SimState, self_id: AgentId) -> Option<AgentId> {
-    let self_pos = state.agent_pos(self_id)?;
-    state.agents_alive()
-        .filter(|id| *id != self_id)
-        .min_by(|a, b| {
-            let da = (state.agent_pos(*a).unwrap() - self_pos).length_squared();
-            let db = (state.agent_pos(*b).unwrap() - self_pos).length_squared();
-            da.total_cmp(&db)
-        })
-}

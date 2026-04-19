@@ -26,7 +26,10 @@ fn all_chosen_actions_pass_their_mask() {
         // scratch.mask holds the mask that was used to produce them.
         for action in &scratch.actions {
             let slot = (action.agent.raw() - 1) as usize;
-            let offset = slot * MicroKind::ALL.len() + action.micro_kind as usize;
+            let micro = action
+                .micro_kind()
+                .expect("UtilityBackend never emits Macro actions yet");
+            let offset = slot * MicroKind::ALL.len() + micro as usize;
             assert!(
                 scratch.mask.micro_kind[offset],
                 "tick={} action={:?} violated mask (slot={}, offset={})",
