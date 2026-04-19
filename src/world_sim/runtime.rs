@@ -1405,42 +1405,46 @@ impl WorldSim {
             buf.lock().unwrap().clear();
         }
 
-        let do_parallel = |settlements: &[super::state::SettlementState]| {
-            settlements.par_iter().for_each(|settlement| {
-                let range = state.group_index.settlement_entities(settlement.id);
-                let entities = &state.entities[range];
+        // Global-systems buffer is separate so it can run in parallel with
+        // the settlement par_iter via rayon::join.
+        let mut global_buf: Vec<WorldDelta> = Vec::with_capacity(4096);
 
-                // Get this thread's buffer. rayon assigns threads by index.
-                let thread_idx = rayon::current_thread_index().unwrap_or(0);
-                let buf_idx = thread_idx % thread_bufs.len().max(1);
-                let mut buf = thread_bufs[buf_idx].lock().unwrap();
-
-                run_settlement_systems(state, settlement.id, entities, &mut buf);
-            });
+        let mut do_both = || {
+            rayon::join(
+                // Task A: settlement systems (already internally parallel).
+                || {
+                    state.settlements.par_iter().for_each(|settlement| {
+                        let range = state.group_index.settlement_entities(settlement.id);
+                        let entities = &state.entities[range];
+                        let thread_idx = rayon::current_thread_index().unwrap_or(0);
+                        let buf_idx = thread_idx % thread_bufs.len().max(1);
+                        let mut buf = thread_bufs[buf_idx].lock().unwrap();
+                        run_settlement_systems(state, settlement.id, entities, &mut buf);
+                    });
+                },
+                // Task B: global systems run concurrently into their own buf.
+                || super::systems::compute_global_systems(state, &mut global_buf),
+            );
         };
 
         // Run on dedicated pool if available, else global pool.
         if let Some(pool) = &self.pool {
-            pool.install(|| do_parallel(&state.settlements));
+            pool.install(do_both);
         } else {
-            do_parallel(&state.settlements);
+            do_both();
         }
 
-        // Drain all thread buffers into main delta_buf.
-        // Pre-reserve total capacity to avoid repeated Vec growth as each
-        // bucket's extend pushes thousands of deltas. At 20K entities this
-        // phase was 7% of tick time — mostly Vec::grow copies.
+        // Drain all thread buffers + global_buf into main delta_buf.
+        // Pre-reserve total capacity to avoid repeated Vec growth.
         let total: usize = thread_bufs.iter()
             .map(|b| b.lock().unwrap().len())
-            .sum();
+            .sum::<usize>() + global_buf.len();
         self.delta_buf.reserve(total);
         for buf in thread_bufs.iter() {
             let mut b = buf.lock().unwrap();
             self.delta_buf.extend(b.drain(..));
         }
-
-        // Global systems (sequential).
-        super::systems::compute_global_systems(state, &mut self.delta_buf);
+        self.delta_buf.append(&mut global_buf);
     }
 }
 
