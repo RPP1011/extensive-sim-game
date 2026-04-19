@@ -2,6 +2,11 @@
 
 Working folder for the ECS DSL design effort. Six canonical docs after the 2026-04-19 consolidation pass. Status: settled on surface; implementation pending.
 
+Companion trees:
+
+- `docs/compiler/` — compiler contract (codegen, lowering, schema emission). Split out of `docs/dsl/` on 2026-04-19.
+- `docs/engine/` — runtime contract (pools, determinism, event ring, policy trait, tick pipeline). In progress; parallel extraction from `docs/dsl/spec.md`.
+
 ## Docs (reading order)
 
 1. **`spec.md`** (~2300 lines) — Canonical language specification. Authoritative. §§1–10 cover the core spec (language overview, top-level declarations, policy/observation/action grammar, schema versioning, type system, compilation targets, runtime semantics, worked example, settled decisions, non-goals). Appendix A reprints the universal-mechanisms treatise (PostQuest / AcceptQuest / Bid / Announce). Appendix B reprints the observation-budget worked example (~1975 floats per agent).
@@ -63,7 +68,7 @@ Action / quest mechanics, runtime / infrastructure, schema / memory, modding —
 4. **`Reward` / `Payment` / `PartyScope` / `StandingKind` enum finalization.** Concrete serialization + mask-predicate implications.
 5. **Cross-entity mask index implementation** — event-triggered rebuild paths for standing / quest eligibility / same-building.
 6. **Materialized-view serialization format** — safetensors layout + schema-hash guard + rebuild path.
-7. **GPU kernel emission details** — SPIR-V codegen from DSL (observation packing, mask evaluation, neural forward, mask-patched sampling). Currently sketched in `spec.md` §6.2.
+7. **GPU kernel emission details** — SPIR-V codegen from DSL (observation packing, mask evaluation, neural forward, mask-patched sampling). Currently sketched in `../compiler/spec.md` §1.2.
 8. **Grammar formalization.** Tokenizer + parser + error messages. Defer until prototype validates surface shape.
 
 ## Conventions

@@ -4,6 +4,8 @@ Canonical specification for the ECS DSL. Supersedes `spec.md`, `spec.md`, and `s
 
 Appendix A contains the detailed universal-mechanisms reference (PostQuest/AcceptQuest/Bid/Announce). Appendix B contains the observation-budget worked example with concrete per-slot feature counts.
 
+For compiler-layer concerns (codegen, lowering, schema emission), see `docs/compiler/spec.md`.
+
 ---
 
 ## 1. Language overview
@@ -800,34 +802,11 @@ The schema hash is a content-addressed fingerprint over:
 3. Event taxonomy — declared event names and field shapes.
 4. Reward declaration — components and weights.
 
-The compiler emits four sub-hashes and one combined hash:
-
-```
-schema.observation_hash = sha256(canonicalize(observation_schema))
-schema.action_hash      = sha256(canonicalize(action_vocabulary))
-schema.event_hash       = sha256(canonicalize(event_taxonomy))
-schema.reward_hash      = sha256(canonicalize(reward_block))
-schema.combined_hash    = sha256(observation_hash || action_hash || event_hash || reward_hash)
-```
-
-Loading a checkpoint whose `combined_hash` differs from the current DSL is a hard error. (`stories.md` §15, `stories.md` §23, `stories.md` §64.) The error prints a diff of the four sub-hashes, a textual diff of which fields/variants changed, and a git-remediation hint:
-
-```
-error: policy checkpoint schema mismatch
-  checkpoint: generated/npc_v3.bin (trained 2026-04-10, step 1_400_000)
-  checkpoint schema_hash: sha256:a1b2c3...7890
-  current DSL schema_hash: sha256:e4f5g6...2345
-  diff:
-    + appended observation: self.war_exhaustion (offset 1655, size 1, norm identity)
-    + appended action variant: macro_kind::InviteToGroup (slot 4)
-    + appended event: InvitePosted
-  action: retrain from current DSL, or git-checkout the commit whose
-          schema_hash matches the checkpoint.
-```
+Loading a checkpoint whose schema hash differs from the current DSL is a hard error (`stories.md` §15, `stories.md` §23, `stories.md` §64).
 
 There are no `@since` annotations. There are no padded-zero migration tables. There are no v1/v2/v3 schemas in the codebase — git holds history. Two branches with different schemas produce mutually incompatible checkpoints, which is correct.
 
-CI guard: a commit that modifies observation, action, event, or reward declarations computes the pre- and post-change hashes; non-append changes (remove, reorder, type change, norm change) block merge without an explicit checkpoint bump.
+For the emission mechanism (sub-hash layout, error-message format, CI guard) see `docs/compiler/spec.md` §2 Schema emission.
 
 This rewrites `spec.md` §4.
 
@@ -897,98 +876,9 @@ entity BadAgent : Agent { history: Vec<Event> }    // ERROR: unbounded collectio
 
 ---
 
-## 6. Compilation targets
+## 6. Compilation targets → moved to `docs/compiler/spec.md` §1
 
-### 6.1 Native Rust (CPU)
-
-- SoA buffers per entity kind, with `@hot` / `@cold` field partitioning (§6.3).
-- Rayon-parallel iteration on `[N, OBS_DIM]` observations, masks, and action application.
-- Per-agent kernels as `fn` with `#[inline(never)]` in profiling builds for flamegraph attribution (`stories.md` §40).
-- `SimScratch` pools carry all per-tick scratch — zero steady-state allocation. Agent slot pool sized at init; ring buffers fixed-cap; event buffers use `SmallVec<[T; N]>` with CI-enforced worst-case bounds (`stories.md` §30).
-- **Spatial index is 2D-grid + per-column sorted z-list + movement-mode sidecar** (§9 #25). Primary structure keys `(cx, cy) → SortedVec<(z, AgentId)>` with 16m cells matching voxel-chunk edges. Planar queries walk 9 columns (3×3) and take all. Volumetric queries walk 9 columns and binary-search the z-range. Agents with `movement_mode != Walk` (Fly / Swim / Climb / Fall) live in a separate `in_transit: Vec<AgentId>` that every spatial query scans linearly (expected |in_transit| ≪ N). Slope-walkers stay in the column index — the structure exploits floor-clustering, not flat-ground assumptions.
-- RNG: a single `rng_state: u64` per world, consumed in a fixed order (`stories.md` §29). Per-agent RNG streams seeded from `hash(world_seed, agent_id, tick, purpose)` for parallel sampling.
-
-### 6.2 GPU (`voxel_engine::compute::GpuHarness`)
-
-Target is voxel-engine's Vulkan/ash + gpu-allocator stack via `GpuHarness`, not wgpu and not raw CUDA. (`stories.md` §28.) Shader codegen emits SPIR-V via `shaderc` (already in voxel-engine's `build-dependencies`), loaded through `GpuHarness::load_kernel`. Precedents: `terrain_compute.rs` (1024-slot LRU chunk pool), `ai/spatial.rs` (spatial indexing).
-
-The DSL compiler emits a `PolicyRuntime`:
-
-```rust
-pub struct PolicyRuntime {
-    harness:       voxel_engine::compute::GpuHarness,
-    obs_field:     FieldHandle,      // [N, OBS_DIM] f32 / f16
-    mask_field:    FieldHandle,      // per-head boolean buffers
-    logits_field:  FieldHandle,      // [N, NUM_LOGITS] f32
-    action_field:  FieldHandle,      // [N] packed action rows
-    weights_field: FieldHandle,      // safetensors-style
-    event_ring:    FieldHandle,      // GPU-resident event buffer (replayable subset)
-}
-
-impl PolicyRuntime {
-    pub fn tick(&mut self, world: &WorldState) -> &[Action] {
-        upload_event_ring_delta(&mut self.harness, world);
-        self.harness.dispatch("pack_observations", &[...], [n_groups, 1, 1])?;
-        self.harness.dispatch("eval_mask_micro",    &[...], [n_groups, 1, 1])?;
-        cpu_patch_mask_for_cross_entity(&mut self.harness, world);
-        self.harness.dispatch("mlp_forward",        &[...], [n_groups, 1, 1])?;
-        self.harness.dispatch("sample_with_mask",   &[...], [n_groups, 1, 1])?;
-        self.harness.download(&ctx, &self.action_field)
-    }
-}
-```
-
-GPU-amenable kernels:
-
-- Observation packing (structural gather over SoA agent fields). Per-slot `relative_pos: vec3` + `z_separation_log` pack contiguously — no layout change beyond width.
-- Mask evaluation for intrinsic scalar predicates, including `distance` / `planar_distance` / `z_separation`.
-- Neural forward (hand-emitted fused GEMM + activation shaders specialised per network topology, matching existing Grokking transformer pattern).
-- Event-fold materialization for commutative scalar views (sort events by target before reduction to preserve determinism).
-- 3D spatial hash (voxel-chunk-keyed) for `query::nearby_agents` — reuses `voxel_engine::ai::spatial` infrastructure.
-
-CPU-only:
-
-- Cascade rules with cross-entity walks (`t in quest.eligible_acceptors`, `at_war(self, f)`).
-- LLM backend.
-- Chronicle prose rendering.
-- Quest-eligibility and auction-eligibility indices.
-- Mixed CPU/GPU mask patching: GPU writes initial mask, CPU patches cross-entity bits, GPU sampler reads final mask (one fence per tick).
-
-GPU determinism constraints (`stories.md` §29):
-
-- Reductions feeding policy decisions use integer fixed-point or sorted-key accumulation to avoid float-associativity drift.
-- Materialized views sort events by `target_id` before atomic accumulation.
-- Reduction shader workgroup size is pinned via specialization constants.
-- Policy sampling seeds from `hash(world_seed, agent_id, tick, "sample")` so parallel sampling is deterministic.
-
-### 6.3 Hot/cold storage split
-
-Mandatory at 200K scale (`stories.md` §31). Authors annotate Agent fields with `@hot` or `@cold`; the compiler emits two SoA layouts and a per-tick sync schedule.
-
-```
-entity Agent {
-  // Hot — resident, packed into observation buffer
-  @hot pos:              vec3,
-  @hot hp:               f32,
-  @hot max_hp:           f32,
-  @hot shield_hp:        f32,
-  @hot needs:            [f32; 6],
-  @hot emotions:         [f32; 6],
-  @hot personality:      [f32; 5],
-  @hot memberships:      SortedVec<Membership, 8>,
-
-  // Cold — paged, loaded on policy-tick for High fidelity only
-  @cold memory_events:   RingBuffer<MemoryEvent, 64>,
-  @cold behavior_profile: SortedVec<(TagId, f32), 16>,
-  @cold class_definitions: [ClassSlot; 4],
-  @cold creditor_ledger: [Creditor; 16],
-  @cold mentor_lineage:  [AgentId; 8],
-}
-```
-
-Fidelity gating: `@fidelity(>= Medium)` on a view or cascade skips evaluation for Background-fidelity agents. Background agents skip policy inference and cold-field access.
-
-Target: hot ≤ 4 KB/agent, 200K × 4 KB = 800 MB; cold paged to SSD with LRU. Cold fields for non-High agents are swapped out.
+Native Rust (CPU) + GPU (`voxel_engine::compute::GpuHarness`) + hot/cold storage split now live in `docs/compiler/spec.md` §1. Section numbering below is preserved; §7 onwards retains its original number.
 
 ---
 
@@ -1296,18 +1186,18 @@ All 29 open questions from the prior revision have been resolved through design 
 19. **Alliance obligation enforcement** — **C / C**: "alliance" is not a first-class concept; it is an emergent standing derived from `standing(group_a, group_b)`. `SetStanding(target, kind)` is the universal macro; "declare war" is `SetStanding(target, kind=Hostile)`; "alliance" is `standing ≥ Friendly` ∧ reciprocal. Default response to ally-under-attack is policy-governed, not mechanism-forced.
 20. **Group-level invites vs agent-level invites** — **Agent-level only**. All invitations are agent-to-agent. Group mergers / coalitions use `PostQuest{kind: Diplomacy, resolution: Coalition{min_parties: K}}`. Removes the edge case where party-to-party agreement would tear factions apart.
 30. **Communication channels (D30)** — `Capabilities.channels: SortedVec<CommunicationChannel, 4>` replaces `can_speak` / `can_hear` / `hearing_range` booleans. Enum variants: `Speech`, `PackSignal`, `Pheromone`, `Song`, `Telepathy`, `Testimony`. `channel: CommunicationChannel` is a parameter head on `PostQuest` / `Announce` / `InviteToGroup` / `Communicate` / `Converse` / `ShareStory`. Ranges, overhear eligibility, and recipient filtering are all per-channel. Cross-species communication requires a shared channel; wolves coordinate via `PackSignal` without language. Humans/dragons use `Speech`. Telepathic factions use unbounded-range `Telepathy`. Documents propagate via `Testimony` (item transfer, not spatial).
-31. **Materialized-view storage hint (D31)** — `@materialized(on_event=[...], storage=<hint>)` lets the author pick a storage layout: `pair_map` (dense small-N × small-N, e.g. `Group × Group` standings), `per_entity_topk(K, keyed_on=<arg>)` (bounded per-entity slots, e.g. per-agent-per-membership Claim eligibility), `lazy_cached` (compute-on-demand + per-tick cache, e.g. low-cardinality derivations). Compiler rejects infeasible combinations (e.g., `pair_map` on `(AgentId, AgentId)` at N=200K). §6.2 GPU/CPU routing follows from storage: intrinsic scalars + per-entity-slot materializations compile to GPU; lazy + unbounded-pair predicates stay CPU.
+31. **Materialized-view storage hint (D31)** — `@materialized(on_event=[...], storage=<hint>)` lets the author pick a storage layout: `pair_map` (dense small-N × small-N, e.g. `Group × Group` standings), `per_entity_topk(K, keyed_on=<arg>)` (bounded per-entity slots, e.g. per-agent-per-membership Claim eligibility), `lazy_cached` (compute-on-demand + per-tick cache, e.g. low-cardinality derivations). Compiler rejects infeasible combinations (e.g., `pair_map` on `(AgentId, AgentId)` at N=200K). GPU/CPU routing (see `docs/compiler/spec.md` §1.2) follows from storage: intrinsic scalars + per-entity-slot materializations compile to GPU; lazy + unbounded-pair predicates stay CPU.
 
 ### 9.2 Runtime / infrastructure
 
-11. **LlmBackend distillation pipeline** — **B, part of the DSL runtime**. `backend "llm" { ... }` is a first-class DSL backend; trajectories are an opt-in export for Python training. No ML-algorithm details in DSL.
+11. **LlmBackend distillation pipeline** — → see `docs/compiler/spec.md` §Decisions.
 12. **Per-agent RNG streams** — **C**: per-agent RNG seeded from `hash(world_seed, agent_id, tick, purpose)`. Enables fully-parallel sampling without save/load complexity (no extra stored state; seeds are derived).
 13. **Materialized-view restoration on load** — **A primary / C rollback**: views serialize with schema-hash guard; on mismatch, rebuild from event log if available, otherwise refuse load. Rollback (dev-only, per-save) enables time-travel debugging from snapshot boundaries.
 14. **Event log storage compression** — **(a) + (c) + (d) combined**: event-type filtering to replayable subset, fixed snapshot cadence **N=500 ticks**, zstd compression codec. ~2–5 GB per ~1000-tick bug report window.
 21. **Chronicle prose side-channel lifecycle** — **C / X / P**: eager template rendering at event emission; async LLM rewrite pass for flagged categories (`Legendary`, `Founding`, `Death`, `Prophecy`); saved prose is canonical across template changes (player-facing history doesn't retcon); replay artefacts bundle the template library for exact reproduction in bug reports.
 22. **Probe default episode count** — **Config-definable** per world + per-probe override via `seeds [42, 43, ...]` syntax. No hard-coded default.
 23. **Off-policy vs on-policy training dispatch** — **Out of DSL scope**. DSL emits a pytorch-compatible trajectory format (safetensors, flat tick-rows, `episode_end` flag, per-agent grouping). Training-script concerns (importance sampling, V-trace, Retrace, BC-vs-PPO dispatch) live in Python, not DSL.
-24. **Utility backend retirement milestone** — **A**: Utility backend never retires. Remains a regression-baseline + untrained-world bootstrap path. Maintenance cost is bounded (~1 KLoC); removal optimises a number that doesn't matter.
+24. **Utility backend retirement milestone** — → see `docs/compiler/spec.md` §Decisions.
 25. **3D spatial hash structure** — **D**: 2D grid (cell=16m, voxel-chunk edge) with per-column sorted z-list, plus a `movement_mode ≠ Walk` sidecar (`Climb`, `Fly`, `Swim`, `Fall`). Slopes are Walk (they don't violate column-clustering). `movement_mode` is a primary field updated by the cascade.
 26. **Overhear confidence decay** — **B + D hybrid**: category-based base + exponential distance decay. `base[SameFloor/DiffFloor/Outdoor] = {0.75, 0.55, 0.50}`; `confidence = base * exp(-planar_distance / OVERHEAR_RANGE)`. Walls are not raycast; wall structure is captured by category.
 28. **`believed_knowledge` decay rate** — **3-tier volatility model**: `KnowledgeDomain` enum carries `volatility: {Short=500, Medium=20_000, Long=1_000_000}` ticks half-life. Reinforcement via observation-of-use, Communicate, and negative-evidence clearing. `Relationship.believed_knowledge_refreshed: [u32; 32]` stores per-bit last-refresh tick (~1 GB at 200k agents, acceptable).
@@ -1319,7 +1209,7 @@ All 29 open questions from the prior revision have been resolved through design 
 
 ### 9.4 Modding
 
-16. **Mod event-handler conflict resolution** — **C (named lanes)**: handlers declare a lane `on_event(EventKind) in lane(Validation | Effect | Reaction | Audit)`. Lanes run in order; within a lane, handlers run in lexicographic mod-id (not install order). Multiple handlers per lane coexist (additive). Destructive overrides happen via forking the DSL source, not via a replace keyword.
+16. **Mod event-handler conflict resolution** — → see `docs/compiler/spec.md` §Decisions.
 
 ---
 
@@ -1337,7 +1227,7 @@ This DSL does not handle:
 - Networking / multiplayer synchronization — snapshot format exists but replication protocol is not specified.
 - Save-file format with asset references — snapshots carry simulation state only; asset binding is a separate layer.
 - Audio, particle effects, UI — display layers outside the sim loop.
-- Build-system integration beyond `shaderc` SPIR-V compilation — the DSL compiler is a cargo xtask, not a full build tool.
+- Build-system integration → see `docs/compiler/spec.md` §Non-goals.
 - Online learning / federated training — all training is offline over serialized replay buffers.
 - Human-in-the-loop labelling — probes are the authored-assertion surface; no runtime labelling.
 - Procedural content generation beyond `region_plan` (terrain) and cascade-driven naming — narrative generation, dungeon layout, quest chains procedurally derived from cascades are not DSL-authored.
