@@ -43,6 +43,28 @@ entity <Name> : Agent {
   predator_prey:        { prey_of: [CreatureType], preys_on: [CreatureType] },
 }
 
+struct Capabilities {
+  channels:       SortedVec<CommunicationChannel, 4>,   // §9 D30 — first-class communication modalities
+  languages:      SortedVec<LanguageId, 4>,             // vocabulary within Speech/Testimony channels
+  can_fly:        bool,
+  can_build:      bool,
+  can_trade:      bool,
+  can_climb:      bool,
+  can_tunnel:     bool,
+  can_marry:      bool,
+  max_spouses:    u8,                                   // §9 D17 polygamy cap
+  // Ability-scaled attributes live on the Agent, not here.
+}
+
+enum CommunicationChannel {                             // §9 D30
+  Speech,             // linguistic — humans, elves, dragons; range set by hearing
+  PackSignal,         // body + scent + short vocal — wolves, dogs, canids
+  Pheromone,          // chemical gradient — insects, some reptiles
+  Song,               // vocal non-linguistic long-range — birds, whales
+  Telepathy,          // fantasy — faction-wide, range-less
+  Testimony,          // written/symbolic — propagates via ItemKind::Document transfer
+}
+
 entity <Name> : Item {
   kind:           ItemKind,
   rarity:         Rarity,
@@ -582,6 +604,11 @@ action {
     Remember
   }
 
+  head categorical channel: enum CommunicationChannel
+                                 // §9 D30 — required for Communicate / Converse / ShareStory
+                                 // micro primitives and for PostQuest / Announce / InviteToGroup
+                                 // macro emissions. Ignored for non-communicating actions.
+
   head pointer target: select_from
     nearby_actors ∪ nearby_resources ∪ nearby_structures
     ∪ known_actors ∪ known_groups ∪ active_quests
@@ -1012,15 +1039,17 @@ Volumetric `creature_type`s (Dragon, Fish, Bat) have no matching rule; their `po
 
 ```
 physics announce_broadcast @phase(event) {
-  on AnnounceAction{speaker: s, audience: aud, fact_ref: f} {
+  on AnnounceAction{speaker: s, audience: aud, channel: ch, fact_ref: f} {
+    let range = view::channel_range(ch, s);            // §9 D30 — per-channel reach
+    let shares = |r| r.capabilities.channels.contains(ch);
     let recipients = match aud {
-      Group(g)    => members_of(g).filter(|r| hearing_eligible(s, r))
+      Group(g)    => members_of(g).filter(|r| shares(r) && hearing_eligible(s, r, ch))
                                    .take(MAX_ANNOUNCE_RECIPIENTS),
-      Area(c, r)  => query::nearby_agents_3d(c, r.min(MAX_ANNOUNCE_RADIUS))
-                                   .filter(|r| r != s && r.can_hear)
+      Area(c, r)  => query::nearby_agents_3d(c, r.min(range))
+                                   .filter(|r| r != s && shares(r))
                                    .take(MAX_ANNOUNCE_RECIPIENTS),
-      Anyone      => query::nearby_agents_3d(s.pos, MAX_ANNOUNCE_RADIUS)
-                                   .filter(|r| r != s && r.can_hear)
+      Anyone      => query::nearby_agents_3d(s.pos, range)
+                                   .filter(|r| r != s && shares(r))
                                    .take(MAX_ANNOUNCE_RECIPIENTS),
     };
     for r in recipients {
@@ -1028,12 +1057,16 @@ physics announce_broadcast @phase(event) {
                           source: match aud { Group(g) => Announced(g), _ => Overheard(s) },
                           confidence: 0.8 }
     }
-    // Overhear scan — bystanders not in the audience (§9 #26)
-    for b in query::nearby_agents_3d(s.pos, OVERHEAR_RANGE)
-                 .filter(|b| b != s && !in_audience(b, aud) && overhear_eligible(s, b)) {
-      let cat = overhear_category(s, b);  // SameFloor | DiffFloor | Outdoor
-      let base = match cat { SameFloor => 0.75, DiffFloor => 0.55, Outdoor => 0.50 };
-      let conf = base * exp(-planar_distance(s, b) / OVERHEAR_RANGE);
+    // Overhear scan — bystanders not in the audience (§9 #26, §9 D30 channel-filtered)
+    let overhear_range = view::channel_range(ch, s) * OVERHEAR_RANGE_FRACTION;
+    for b in query::nearby_agents_3d(s.pos, overhear_range)
+                 .filter(|b| b != s && !in_audience(b, aud)
+                          && b.capabilities.channels.contains(ch)
+                          && overhear_eligible(s, b, ch)) {
+      let cat = overhear_category(s, b, ch);  // per-channel; Speech uses building/floor,
+                                              // PackSignal uses scent propagation, etc.
+      let base = channel_overhear_base(ch, cat);
+      let conf = base * exp(-planar_distance(s, b) / overhear_range);
       emit RecordMemory { observer: b, payload: copy_fact(f),
                           source: Overheard(s), confidence: conf }
     }
@@ -1041,7 +1074,7 @@ physics announce_broadcast @phase(event) {
 }
 ```
 
-Runtime constants: `MAX_ANNOUNCE_RECIPIENTS` (default 64) bounds the per-emission cascade; `MAX_ANNOUNCE_RADIUS` (default 100m) caps `Anyone` / `Area` reach; `OVERHEAR_RANGE` (default 10m) drives bystander scan; `CONVERSE_RANGE` (default 5m) for `Communicate`. Overhear eligibility: `same_building(s, b)` (any floor) OR `planar_distance(s, b) < OVERHEAR_RANGE ∧ z_separation(s, b) < 3.0`.
+Runtime constants: `MAX_ANNOUNCE_RECIPIENTS` (default 64) bounds the per-emission cascade; `OVERHEAR_RANGE_FRACTION` (default 0.2) sets overhear reach relative to the channel's primary range. Per-channel defaults (`channel_range(ch, sender)`): `Speech` → `SPEECH_RANGE * sender.vocal_strength` (default 30m × modifier); `PackSignal` → `PACK_RANGE` (default 20m scent + short vocal); `Pheromone` → `PHEROMONE_RANGE * wind_factor()` (default 40m × wind); `Song` → `LONG_RANGE_VOCAL` (default 200m); `Telepathy` → `f32::INFINITY`; `Testimony` → `0.0` (propagates via item transfer, not space). Overhear eligibility per channel: `Speech` uses `same_building ∨ (planar_distance < range ∧ z_separation < 3.0)`; `PackSignal` uses `distance < range` (scent doesn't respect walls); `Pheromone` uses downwind-only gradient; `Telepathy` uses faction-membership instead of space.
 
 ### 7.2 Determinism contract
 
@@ -1262,6 +1295,8 @@ All 29 open questions from the prior revision have been resolved through design 
 18. **Mercenary / service payment direction** — **C**: `AuctionKind::Service` inverts roles via `AuctionParty::{Buyer=Patron, Seller=Labourer}` with `Payment` flowing Buyer→Seller on completion. Service commitments use `Payment::ServicePledge{duration_ticks, scope}` evaluated against `intrinsic_value` for comparison.
 19. **Alliance obligation enforcement** — **C / C**: "alliance" is not a first-class concept; it is an emergent standing derived from `standing(group_a, group_b)`. `SetStanding(target, kind)` is the universal macro; "declare war" is `SetStanding(target, kind=Hostile)`; "alliance" is `standing ≥ Friendly` ∧ reciprocal. Default response to ally-under-attack is policy-governed, not mechanism-forced.
 20. **Group-level invites vs agent-level invites** — **Agent-level only**. All invitations are agent-to-agent. Group mergers / coalitions use `PostQuest{kind: Diplomacy, resolution: Coalition{min_parties: K}}`. Removes the edge case where party-to-party agreement would tear factions apart.
+30. **Communication channels (D30)** — `Capabilities.channels: SortedVec<CommunicationChannel, 4>` replaces `can_speak` / `can_hear` / `hearing_range` booleans. Enum variants: `Speech`, `PackSignal`, `Pheromone`, `Song`, `Telepathy`, `Testimony`. `channel: CommunicationChannel` is a parameter head on `PostQuest` / `Announce` / `InviteToGroup` / `Communicate` / `Converse` / `ShareStory`. Ranges, overhear eligibility, and recipient filtering are all per-channel. Cross-species communication requires a shared channel; wolves coordinate via `PackSignal` without language. Humans/dragons use `Speech`. Telepathic factions use unbounded-range `Telepathy`. Documents propagate via `Testimony` (item transfer, not spatial).
+31. **Materialized-view storage hint (D31)** — `@materialized(on_event=[...], storage=<hint>)` lets the author pick a storage layout: `pair_map` (dense small-N × small-N, e.g. `Group × Group` standings), `per_entity_topk(K, keyed_on=<arg>)` (bounded per-entity slots, e.g. per-agent-per-membership Claim eligibility), `lazy_cached` (compute-on-demand + per-tick cache, e.g. low-cardinality derivations). Compiler rejects infeasible combinations (e.g., `pair_map` on `(AgentId, AgentId)` at N=200K). §6.2 GPU/CPU routing follows from storage: intrinsic scalars + per-entity-slot materializations compile to GPU; lazy + unbounded-pair predicates stay CPU.
 
 ### 9.2 Runtime / infrastructure
 
@@ -1403,7 +1438,8 @@ struct BidAction {
 ```rust
 struct AnnounceAction {
     audience:  AnnounceAudience,
-    fact_ref:  FactRef,            // local memory event_id the speaker wants to broadcast
+    channel:   CommunicationChannel,    // §9 D30 — modality of transmission
+    fact_ref:  FactRef,                 // local memory event_id the speaker wants to broadcast
 }
 
 enum AnnounceAudience {
