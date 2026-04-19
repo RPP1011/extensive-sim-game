@@ -1,6 +1,6 @@
 # World Sim DSL Compiler Specification
 
-Compiler contract. Companion to `dsl/spec.md` (language reference) and `engine/spec.md` (runtime contract, in progress). This doc specifies HOW DSL source text lowers to engine calls, not WHAT the language means.
+Compiler contract. Companion to `dsl/spec.md` (language reference) and `engine/spec.md` (runtime contract). This doc specifies HOW DSL source text lowers to engine calls, not WHAT the language means.
 
 Extracted from `dsl/spec.md` on 2026-04-19. Language grammar, type system, and runtime semantics remain in `dsl/spec.md`; pools/determinism/tick-pipeline contract will migrate to `engine/spec.md`.
 
@@ -168,6 +168,6 @@ Compiler-layer non-goals extracted from `dsl/spec.md` §10.
 ## References
 
 - `dsl/spec.md` — language reference (grammar, type system, runtime semantics, settled decisions, non-goals).
-- `engine/spec.md` — runtime contract (in progress; will cover pools, determinism, event ring, mask, policy trait, tick pipeline).
+- `engine/spec.md` — runtime contract (pools, determinism, event ring, mask, policy trait, tick pipeline, views, trajectory, save/load, invariants, probes, telemetry, schema hash, observation packer, debug & trace runtime).
 - `dsl/decisions.md` — per-decision rationale log.
 - `dsl/stories.md` — per-batch user-story investigations that drove many of the compiler/runtime design choices.

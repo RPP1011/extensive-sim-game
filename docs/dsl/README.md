@@ -5,7 +5,7 @@ Working folder for the ECS DSL design effort. Six canonical docs after the 2026-
 Companion trees:
 
 - `docs/compiler/` — compiler contract (codegen, lowering, schema emission). Split out of `docs/dsl/` on 2026-04-19.
-- `docs/engine/` — runtime contract (pools, determinism, event ring, policy trait, tick pipeline). In progress; parallel extraction from `docs/dsl/spec.md`.
+- `docs/engine/` — runtime contract (pools, determinism, event ring, policy trait, tick pipeline, debug & trace runtime). 23-section spec at `docs/engine/spec.md`, settled 2026-04-19.
 
 ## Docs (reading order)
 

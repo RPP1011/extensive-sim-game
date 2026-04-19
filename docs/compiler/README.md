@@ -11,7 +11,7 @@ Working folder for the DSL-compiler design effort. Extracted from `docs/dsl/` on
 
 - **In scope:** codegen targets, lowering passes, diagnostic emission, compile-time schema hashing, CI guards, compiler-specific decisions.
 - **Out of scope (belongs in `docs/dsl/`):** language grammar, type system, policy/observation/action grammar, runtime semantics, worked examples, language-level decisions, stories, state catalog, systems inventory.
-- **Out of scope (belongs in `docs/engine/`, in progress):** pools, determinism contract, event ring, mask representation, policy trait, tick pipeline at runtime.
+- **Out of scope (belongs in `docs/engine/spec.md`):** pools, determinism contract, event ring, mask representation, policy trait, tick pipeline at runtime.
 
 ## When to add new docs here
 
@@ -24,4 +24,4 @@ Until then, keep new material in `spec.md` and split out when it fights the one-
 
 - `spec.md §N` — section N of this compiler spec.
 - `dsl/spec.md §N` — section N of the language reference.
-- `engine/spec.md §N` — section N of the runtime contract (forthcoming).
+- `engine/spec.md §N` — section N of the runtime contract.
