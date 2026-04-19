@@ -6,6 +6,7 @@ pub mod creature;
 pub mod event;
 pub mod ids;
 pub mod rng;
+pub mod spatial;
 pub mod state;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
