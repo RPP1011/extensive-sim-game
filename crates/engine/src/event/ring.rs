@@ -159,6 +159,82 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(delta.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
+        Event::AgentCast { agent_id, ability_idx, tick } => {
+            h.update([7u8]);                                   // variant tag
+            h.update(agent_id.raw().to_le_bytes());
+            h.update([*ability_idx]);
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentUsedItem { agent_id, item_slot, tick } => {
+            h.update([8u8]);
+            h.update(agent_id.raw().to_le_bytes());
+            h.update([*item_slot]);
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentHarvested { agent_id, resource, tick } => {
+            h.update([9u8]);
+            h.update(agent_id.raw().to_le_bytes());
+            h.update(resource.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentPlacedTile { agent_id, where_pos, kind_tag, tick } => {
+            h.update([10u8]);
+            h.update(agent_id.raw().to_le_bytes());
+            for v in [where_pos.x, where_pos.y, where_pos.z] {
+                h.update(v.to_bits().to_le_bytes());
+            }
+            h.update(kind_tag.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentPlacedVoxel { agent_id, where_pos, mat_tag, tick } => {
+            h.update([11u8]);
+            h.update(agent_id.raw().to_le_bytes());
+            for v in [where_pos.x, where_pos.y, where_pos.z] {
+                h.update(v.to_bits().to_le_bytes());
+            }
+            h.update(mat_tag.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentHarvestedVoxel { agent_id, where_pos, tick } => {
+            h.update([12u8]);
+            h.update(agent_id.raw().to_le_bytes());
+            for v in [where_pos.x, where_pos.y, where_pos.z] {
+                h.update(v.to_bits().to_le_bytes());
+            }
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentConversed { agent_id, partner, tick } => {
+            h.update([13u8]);
+            h.update(agent_id.raw().to_le_bytes());
+            h.update(partner.raw().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentSharedStory { agent_id, topic, tick } => {
+            h.update([14u8]);
+            h.update(agent_id.raw().to_le_bytes());
+            h.update(topic.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentCommunicated { speaker, recipient, fact_ref, tick } => {
+            h.update([15u8]);
+            h.update(speaker.raw().to_le_bytes());
+            h.update(recipient.raw().to_le_bytes());
+            h.update(fact_ref.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::InformationRequested { asker, target, query, tick } => {
+            h.update([16u8]);
+            h.update(asker.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
+            h.update(query.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentRemembered { agent_id, subject, tick } => {
+            h.update([17u8]);
+            h.update(agent_id.raw().to_le_bytes());
+            h.update(subject.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
         Event::ChronicleEntry { .. } => {
             // Filtered at the call site; if we reach here, the filter is broken.
             debug_assert!(false, "ChronicleEntry reached replayable hash path");

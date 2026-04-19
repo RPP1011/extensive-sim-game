@@ -56,6 +56,7 @@ pub fn step<B: PolicyBackend>(
     scratch.mask.mark_flee_allowed_if_threat_exists(state);
     scratch.mask.mark_attack_allowed_if_target_in_range(state);
     scratch.mask.mark_needs_allowed(state);
+    scratch.mask.mark_domain_hook_micros_allowed(state);
     scratch.actions.clear();
     backend.evaluate(state, &scratch.mask, &mut scratch.actions);
 
@@ -184,8 +185,100 @@ fn apply_actions(
                     });
                 }
             }
+            // Event-only micros — engine emits the typed event; domain-specific
+            // effects land as compiler-registered cascade handlers in later plans.
+            ActionKind::Micro {
+                kind: MicroKind::Cast,
+                target: MicroTarget::AbilityIdx(idx),
+            } => {
+                events.push(Event::AgentCast {
+                    agent_id: action.agent, ability_idx: idx, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::UseItem,
+                target: MicroTarget::ItemSlot(slot),
+            } => {
+                events.push(Event::AgentUsedItem {
+                    agent_id: action.agent, item_slot: slot, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::Harvest,
+                target: MicroTarget::Opaque(r),
+            } => {
+                events.push(Event::AgentHarvested {
+                    agent_id: action.agent, resource: r, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::PlaceTile,
+                target: MicroTarget::Position(p),
+            } => {
+                events.push(Event::AgentPlacedTile {
+                    agent_id: action.agent, where_pos: p, kind_tag: 0, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::PlaceVoxel,
+                target: MicroTarget::Position(p),
+            } => {
+                events.push(Event::AgentPlacedVoxel {
+                    agent_id: action.agent, where_pos: p, mat_tag: 0, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::HarvestVoxel,
+                target: MicroTarget::Position(p),
+            } => {
+                events.push(Event::AgentHarvestedVoxel {
+                    agent_id: action.agent, where_pos: p, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::Converse,
+                target: MicroTarget::Agent(b),
+            } => {
+                events.push(Event::AgentConversed {
+                    agent_id: action.agent, partner: b, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::ShareStory,
+                target: MicroTarget::Opaque(topic),
+            } => {
+                events.push(Event::AgentSharedStory {
+                    agent_id: action.agent, topic, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::Communicate,
+                target: MicroTarget::Agent(r),
+            } => {
+                events.push(Event::AgentCommunicated {
+                    speaker: action.agent, recipient: r, fact_ref: 0, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::Ask,
+                target: MicroTarget::Agent(t),
+            } => {
+                events.push(Event::InformationRequested {
+                    asker: action.agent, target: t, query: 0, tick: state.tick,
+                });
+            }
+            ActionKind::Micro {
+                kind: MicroKind::Remember,
+                target: MicroTarget::Opaque(s),
+            } => {
+                events.push(Event::AgentRemembered {
+                    agent_id: action.agent, subject: s, tick: state.tick,
+                });
+            }
             ActionKind::Micro { .. } => {
-                // Other MicroKinds (UseItem, Ask, …) land in later tasks.
+                // Ill-formed actions (kind + target-type mismatch) are silently
+                // dropped. Mask predicates should prevent well-behaved backends
+                // from landing here.
             }
             ActionKind::Macro(_) => {
                 // Macro dispatch lands in Tasks 13–15.

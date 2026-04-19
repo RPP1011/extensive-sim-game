@@ -6,28 +6,50 @@ use crate::state::SimState;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum EventKindId {
-    AgentMoved      = 0,
-    AgentAttacked   = 1,
-    AgentDied       = 2,
-    AgentFled       = 3,
-    AgentAte        = 4,
-    AgentDrank      = 5,
-    AgentRested     = 6,
-    // Slots 7-127 reserved for replayable event variants added in later tasks.
-    ChronicleEntry  = 128,
+    AgentMoved           = 0,
+    AgentAttacked        = 1,
+    AgentDied            = 2,
+    AgentFled            = 3,
+    AgentAte             = 4,
+    AgentDrank           = 5,
+    AgentRested          = 6,
+    AgentCast            = 7,
+    AgentUsedItem        = 8,
+    AgentHarvested       = 9,
+    AgentPlacedTile      = 10,
+    AgentPlacedVoxel     = 11,
+    AgentHarvestedVoxel  = 12,
+    AgentConversed       = 13,
+    AgentSharedStory     = 14,
+    AgentCommunicated    = 15,
+    InformationRequested = 16,
+    AgentRemembered      = 17,
+    // Slots 18-127 reserved for replayable event variants added in later tasks.
+    ChronicleEntry       = 128,
 }
 
 impl EventKindId {
     pub fn from_event(e: &Event) -> EventKindId {
         match e {
-            Event::AgentMoved     { .. } => EventKindId::AgentMoved,
-            Event::AgentAttacked  { .. } => EventKindId::AgentAttacked,
-            Event::AgentDied      { .. } => EventKindId::AgentDied,
-            Event::AgentFled      { .. } => EventKindId::AgentFled,
-            Event::AgentAte       { .. } => EventKindId::AgentAte,
-            Event::AgentDrank     { .. } => EventKindId::AgentDrank,
-            Event::AgentRested    { .. } => EventKindId::AgentRested,
-            Event::ChronicleEntry { .. } => EventKindId::ChronicleEntry,
+            Event::AgentMoved           { .. } => EventKindId::AgentMoved,
+            Event::AgentAttacked        { .. } => EventKindId::AgentAttacked,
+            Event::AgentDied            { .. } => EventKindId::AgentDied,
+            Event::AgentFled            { .. } => EventKindId::AgentFled,
+            Event::AgentAte             { .. } => EventKindId::AgentAte,
+            Event::AgentDrank           { .. } => EventKindId::AgentDrank,
+            Event::AgentRested          { .. } => EventKindId::AgentRested,
+            Event::AgentCast            { .. } => EventKindId::AgentCast,
+            Event::AgentUsedItem        { .. } => EventKindId::AgentUsedItem,
+            Event::AgentHarvested       { .. } => EventKindId::AgentHarvested,
+            Event::AgentPlacedTile      { .. } => EventKindId::AgentPlacedTile,
+            Event::AgentPlacedVoxel     { .. } => EventKindId::AgentPlacedVoxel,
+            Event::AgentHarvestedVoxel  { .. } => EventKindId::AgentHarvestedVoxel,
+            Event::AgentConversed       { .. } => EventKindId::AgentConversed,
+            Event::AgentSharedStory     { .. } => EventKindId::AgentSharedStory,
+            Event::AgentCommunicated    { .. } => EventKindId::AgentCommunicated,
+            Event::InformationRequested { .. } => EventKindId::InformationRequested,
+            Event::AgentRemembered      { .. } => EventKindId::AgentRemembered,
+            Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }
 }

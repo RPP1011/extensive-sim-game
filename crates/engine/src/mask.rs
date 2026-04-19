@@ -142,4 +142,24 @@ impl MaskBuffer {
             }
         }
     }
+
+    /// MVP permissiveness: unconditionally allow all 11 domain-hook event-only
+    /// micros (Cast, UseItem, Harvest, PlaceTile/Voxel, HarvestVoxel, Converse,
+    /// ShareStory, Communicate, Ask, Remember). Real preconditions (cooldowns,
+    /// inventory, LOS, memory presence, …) land alongside each domain's
+    /// compiler-registered cascade handlers in later plans.
+    pub fn mark_domain_hook_micros_allowed(&mut self, state: &SimState) {
+        let n_kinds = MicroKind::ALL.len();
+        for id in state.agents_alive() {
+            let slot = (id.raw() - 1) as usize;
+            for k in [
+                MicroKind::Cast,         MicroKind::UseItem,      MicroKind::Harvest,
+                MicroKind::PlaceTile,    MicroKind::PlaceVoxel,   MicroKind::HarvestVoxel,
+                MicroKind::Converse,     MicroKind::ShareStory,
+                MicroKind::Communicate,  MicroKind::Ask,          MicroKind::Remember,
+            ] {
+                self.micro_kind[slot * n_kinds + k as usize] = true;
+            }
+        }
+    }
 }
