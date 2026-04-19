@@ -45,18 +45,18 @@ pub struct AppState {
     pub gpu_texture: Option<GpuVoxelTexture>,
 
     pub sim:       engine::state::SimState,
-    // Wired into `engine::step::step` in Task 3 — held on AppState now so
-    // the SimState/backend pair is plumbed through the scenario loader.
-    #[allow(dead_code)]
     pub scratch:   engine::step::SimScratch,
-    #[allow(dead_code)]
     pub events:    engine::event::EventRing,
-    #[allow(dead_code)]
     pub cascade:   engine::cascade::CascadeRegistry,
-    #[allow(dead_code)]
     pub backend:   engine::policy::UtilityBackend,
     #[allow(dead_code)]
     pub agent_ids: Vec<engine::ids::AgentId>,
+
+    pub tick_period:         f32,
+    pub sim_accum:           f32,
+    pub sim_speed:           f32,
+    pub paused:              bool,
+    pub max_ticks_per_frame: u32,
 
     pub last_frame:  Instant,
 }
@@ -113,8 +113,35 @@ impl AppState {
             mouse_captured: false, last_mouse: None,
             grid, gpu_texture: None,
             sim, scratch, events, cascade, backend, agent_ids,
+            tick_period: 0.1,
+            sim_accum:   0.0,
+            sim_speed:   1.0,
+            paused:      false,
+            max_ticks_per_frame: 8,
             last_frame: Instant::now(),
         })
+    }
+
+    /// Advance the sim as many ticks as accumulated `dt` allows. Caps at
+    /// `max_ticks_per_frame` so a long hitch doesn't spool up a burst.
+    /// Returns the number of ticks executed. Zero when paused.
+    pub fn tick_sim(&mut self, dt: f32) -> u32 {
+        if self.paused { return 0; }
+        let effective_period = self.tick_period / self.sim_speed.max(0.001);
+        self.sim_accum += dt;
+        let mut ticked = 0;
+        while self.sim_accum >= effective_period && ticked < self.max_ticks_per_frame {
+            engine::step::step(
+                &mut self.sim, &mut self.scratch, &mut self.events,
+                &self.backend, &self.cascade,
+            );
+            self.sim_accum -= effective_period;
+            ticked += 1;
+        }
+        if self.sim_accum > effective_period * (self.max_ticks_per_frame as f32) {
+            self.sim_accum = 0.0; // discard excess to prevent runaway
+        }
+        ticked
     }
 
     pub fn upload_grid(&mut self) -> Result<()> {
@@ -180,6 +207,7 @@ impl AppState {
         let dt  = (now - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
         self.update_camera(dt);
+        let _n_ticks = self.tick_sim(dt);
         if let Err(e) = self.render() {
             eprintln!("[viz] render error: {}", e);
         }
