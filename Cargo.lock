@@ -2280,6 +2280,7 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "contracts",
  "criterion",
  "dhat",
  "glam",
@@ -6680,6 +6681,19 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "viz"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "engine",
+ "glam",
+ "serde",
+ "toml 0.8.23",
+ "voxel_engine",
+ "winit",
+]
 
 [[package]]
 name = "void"

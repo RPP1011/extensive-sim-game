@@ -10,6 +10,7 @@ ahash = "0.8"
 safetensors = "0.4"
 rayon = "1.10"
 sha2 = "0.10"
+contracts = "0.6"
 
 [dev-dependencies]
 insta = { version = "1.41", features = ["yaml"] }
@@ -25,3 +26,8 @@ harness = false
 [features]
 default = []
 dhat-heap = []
+# Elide all contracts::{invariant, requires, ensures} attributes. Useful for
+# benchmarking when the debug-build contract overhead is under measurement.
+# When this feature is on, the engine behaves as if compiled in release mode
+# w.r.t. contract checks.
+no-contracts = ["contracts/disable_contracts"]

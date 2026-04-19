@@ -7,6 +7,8 @@
 //! The `T` tag parameter is phantom — it prevents accidentally passing a
 //! `PoolId<AgentTag>` where a `PoolId<ItemTag>` is expected.
 
+#[allow(unused_imports)]
+use contracts::{ensures, invariant, requires};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 
@@ -59,6 +61,16 @@ pub struct Pool<T> {
     _tag:      PhantomData<fn() -> T>,
 }
 
+#[invariant(self.freelist.iter().all(|r| {
+    let slot = (*r - 1) as usize;
+    slot < self.cap as usize && !self.alive[slot]
+}))]
+#[invariant({
+    let mut sorted = self.freelist.clone();
+    sorted.sort_unstable();
+    sorted.windows(2).all(|w| w[0] != w[1])
+})]
+#[invariant(self.next_raw <= self.cap + 1)]
 impl<T> Pool<T> {
     pub fn new(cap: u32) -> Self {
         Self {
@@ -69,6 +81,9 @@ impl<T> Pool<T> {
             _tag: PhantomData,
         }
     }
+
+    #[ensures(ret.is_some() -> self.alive[(ret.as_ref().unwrap().raw() - 1) as usize])]
+    #[ensures(ret.is_none() -> self.next_raw == old(self.next_raw) && self.freelist.is_empty())]
     pub fn alloc(&mut self) -> Option<PoolId<T>> {
         let raw = if let Some(r) = self.freelist.pop() {
             r
@@ -82,6 +97,9 @@ impl<T> Pool<T> {
         self.alive[(raw - 1) as usize] = true;
         PoolId::new(raw)
     }
+
+    #[requires((id.slot()) < self.cap as usize)]
+    #[ensures(!self.alive[id.slot()])]
     pub fn kill(&mut self, id: PoolId<T>) {
         let slot = id.slot();
         if slot < self.cap as usize && self.alive[slot] {
@@ -115,11 +133,20 @@ impl<T> Pool<T> {
     pub fn freelist_iter(&self) -> impl Iterator<Item = u32> + '_ {
         self.freelist.iter().copied()
     }
+}
 
+/// Contract-free impl block — the methods here must be callable on a
+/// deliberately-corrupted pool (fault-injection tests). The struct-level
+/// `#[invariant]` attributes on the primary impl above would otherwise fire
+/// on entry/exit of every method, short-circuiting the corruption-detection
+/// paths that tests in `invariant_pool_non_overlap.rs` depend on.
+impl<T> Pool<T> {
     /// Verify pool consistency: no slot appears as both alive AND in the
     /// freelist, and the freelist contains no duplicate slots. Returns
     /// `true` when consistent. This is the predicate that
-    /// `PoolNonOverlapInvariant` checks per-tick.
+    /// `PoolNonOverlapInvariant` checks per-tick. Deliberately NOT decorated
+    /// with `#[invariant]` so callers with a corrupted pool can observe the
+    /// false return instead of a pre-condition panic.
     pub fn is_non_overlapping(&self) -> bool {
         // (1) No duplicate entries in the freelist.
         let mut seen = vec![false; self.cap as usize];
@@ -149,5 +176,29 @@ impl<T> Pool<T> {
     #[doc(hidden)]
     pub fn force_push_freelist_for_test(&mut self, raw: u32) {
         self.freelist.push(raw);
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    struct AgentTag;
+
+    #[test]
+    fn alloc_post_is_alive() {
+        let mut p: Pool<AgentTag> = Pool::new(4);
+        let id = p.alloc().unwrap();
+        assert!(p.is_alive(id));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "Pre")]
+    fn kill_with_out_of_range_slot_panics_debug() {
+        let mut p: Pool<AgentTag> = Pool::new(2);
+        // id.slot() == 99 is out of range for cap=2.
+        let bad = PoolId::<AgentTag>::new(100).unwrap();
+        p.kill(bad); // contracts::requires triggers panic in debug.
     }
 }

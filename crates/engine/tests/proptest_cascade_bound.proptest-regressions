@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a2e85fe8d2e64310520f44cae19911127655bec2b54c8b06282f8938e4d20da9 # shrinks to handler_defs = [(AgentDied, Validation, 0, AgentMoved)], n_initial = 1, initial_kind = AgentMoved
