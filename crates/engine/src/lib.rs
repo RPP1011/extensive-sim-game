@@ -3,6 +3,7 @@
 
 pub mod channel;
 pub mod creature;
+pub mod event;
 pub mod ids;
 pub mod rng;
 pub mod state;
