@@ -37,9 +37,20 @@ pub struct AppState {
     pub renderer:  VoxelRenderer,
 
     pub camera:         FreeCamera,
+    /// Orbit / zoom target. FreeCamera only stores `target = position +
+    /// forward()`, which drifts every time the user looks around via
+    /// RMB — we need a stable point to orbit around and zoom toward.
+    /// Initialized to the scenario spawn centroid in `new`.
+    pub look_at:        Vec3,
+    pub camera_speed:   f32,
     pub keys_held:      HashSet<KeyCode>,
     pub mouse_captured: bool,
+    /// Middle-mouse drag for orbit. Separate from RMB look because the
+    /// two are distinct camera operations: look rotates the frustum
+    /// around the eye; orbit rotates the eye around `look_at`.
+    pub orbit_captured: bool,
     pub last_mouse:     Option<(f64, f64)>,
+    pub last_orbit:     Option<(f64, f64)>,
 
     pub grid:        VoxelGrid,
     pub gpu_texture: Option<GpuVoxelTexture>,
@@ -131,12 +142,16 @@ impl AppState {
         };
         let eye = centroid + Vec3::new(0.0, span * 1.5, span * 1.5);
         let mut camera = FreeCamera::new(eye, centroid);
-        camera.set_move_speed(20.0);
+        let camera_speed = 20.0_f32.max(span * 0.5);
+        camera.set_move_speed(camera_speed);
 
         Ok(Self {
             window, ctx, alloc, swapchain, renderer, camera,
+            look_at: centroid,
+            camera_speed,
             keys_held: HashSet::new(),
             mouse_captured: false, last_mouse: None,
+            orbit_captured: false, last_orbit: None,
             grid, gpu_texture: None,
             sim, scratch, events, cascade, backend, agent_ids,
             tick_period: 0.1,
@@ -367,28 +382,108 @@ impl AppState {
         let fps = (self.frames_since_hud as f32) / elapsed;
         let alive = self.sim.agents_alive().count();
         let state_str = if self.paused { "PAUSED" } else { "RUNNING" };
+        let eye = self.camera.eye_position();
+        let la  = self.look_at;
         eprintln!(
-            "[hud] {} tick={} alive={}/{} speed={:.2}x fps={:.0} overlays={}",
+            "[hud] {} tick={} alive={}/{} speed={:.2}x fps={:.0} overlays={} \
+             eye=({:.1},{:.1},{:.1}) lookAt=({:.1},{:.1},{:.1})",
             state_str, self.sim.tick, alive, self.agent_ids.len(),
             self.sim_speed, fps, self.overlays.len(),
+            eye[0], eye[1], eye[2], la.x, la.y, la.z,
         );
         self.hud_timer = Instant::now();
         self.frames_since_hud = 0;
     }
 
+    /// WASDQE pan at constant camera height. Unlike FreeCamera's built-in
+    /// WASD (which moves along the pitched forward vector — pressing W
+    /// when looking down would plough into the ground), we flatten the
+    /// forward vector into the XZ plane so W/S stays horizontal and only
+    /// Q/E affect altitude. The `look_at` orbit target is translated by
+    /// the same vector so zoom/orbit continue to frame what the user is
+    /// currently looking at.
     pub fn update_camera(&mut self, dt: f32) {
-        use voxel_engine::camera::{CameraController, InputState};
         if self.keys_held.is_empty() { return; }
-        let forward = if self.keys_held.contains(&KeyCode::KeyW) { 1.0 }
+        let forward_in = if self.keys_held.contains(&KeyCode::KeyW) { 1.0 }
             else if self.keys_held.contains(&KeyCode::KeyS) { -1.0 } else { 0.0 };
-        let right = if self.keys_held.contains(&KeyCode::KeyD) { 1.0 }
+        let right_in = if self.keys_held.contains(&KeyCode::KeyD) { 1.0 }
             else if self.keys_held.contains(&KeyCode::KeyA) { -1.0 } else { 0.0 };
-        let up = if self.keys_held.contains(&KeyCode::KeyE) { 1.0 }
+        let up_in = if self.keys_held.contains(&KeyCode::KeyE) { 1.0 }
             else if self.keys_held.contains(&KeyCode::KeyQ) { -1.0 } else { 0.0 };
-        self.camera.update(&InputState {
-            move_forward: forward, move_right: right, move_up: up,
-            mouse_dx: 0.0, mouse_dy: 0.0, scroll_delta: 0.0,
-        }, dt);
+        if forward_in == 0.0 && right_in == 0.0 && up_in == 0.0 { return; }
+
+        let eye = Vec3::from_array(self.camera.eye_position());
+        // Forward direction as seen by the camera, flattened to XZ. Fall
+        // back to +Z if the camera is pointing straight down (flat
+        // forward length 0).
+        let look_dir = self.camera.center() - eye;
+        let flat_forward = Vec3::new(look_dir.x, 0.0, look_dir.z);
+        let forward_xz = if flat_forward.length_squared() > 1e-6 {
+            flat_forward.normalize()
+        } else {
+            Vec3::Z
+        };
+        // Right = forward_xz rotated -90° around Y.
+        let right_xz = Vec3::new(forward_xz.z, 0.0, -forward_xz.x);
+
+        let step = self.camera_speed * dt;
+        let delta = forward_xz * (forward_in * step)
+            + right_xz * (right_in * step)
+            + Vec3::Y * (up_in * step);
+        let new_eye = eye + delta;
+        // Move the orbit target by the same delta so subsequent zooms
+        // stay consistent with the now-panned view.
+        self.look_at += delta;
+        self.camera.set_position(new_eye);
+    }
+
+    /// Rotate eye around `look_at` by mouse delta. Classic spherical-
+    /// coordinate orbit: yaw around world Y, pitch clamped to avoid
+    /// singularities at straight-up / straight-down.
+    pub fn orbit_camera(&mut self, mouse_dx: f32, mouse_dy: f32) {
+        const ORBIT_SENSITIVITY: f32 = 0.006;
+        let eye = Vec3::from_array(self.camera.eye_position());
+        let rel = eye - self.look_at;
+        let r = rel.length();
+        if r < 1e-3 { return; }
+        let mut yaw = rel.x.atan2(rel.z);
+        let mut pitch = (rel.y / r).asin();
+        yaw -= mouse_dx * ORBIT_SENSITIVITY;
+        pitch = (pitch + mouse_dy * ORBIT_SENSITIVITY).clamp(-1.4, 1.4);
+        let new_rel = Vec3::new(
+            r * yaw.sin() * pitch.cos(),
+            r * pitch.sin(),
+            r * yaw.cos() * pitch.cos(),
+        );
+        let new_eye = self.look_at + new_rel;
+        self.rebuild_camera_at(new_eye, self.look_at);
+    }
+
+    /// Move eye along the eye→look_at axis. Positive `scroll` zooms in
+    /// (toward look_at), negative zooms out. Clamped so the eye can
+    /// never cross the look_at point or drift farther than the grid.
+    pub fn zoom_camera(&mut self, scroll: f32) {
+        const ZOOM_STEP_FRAC: f32 = 0.12;  // per scroll notch
+        const MIN_DIST: f32 = 2.0;
+        const MAX_DIST: f32 = (GRID_SIDE as f32) * 2.0;
+        let eye = Vec3::from_array(self.camera.eye_position());
+        let to_target = self.look_at - eye;
+        let dist = to_target.length();
+        if dist < 1e-3 { return; }
+        let dir = to_target / dist;
+        let new_dist = (dist * (1.0 - scroll * ZOOM_STEP_FRAC)).clamp(MIN_DIST, MAX_DIST);
+        let new_eye = self.look_at - dir * new_dist;
+        self.rebuild_camera_at(new_eye, self.look_at);
+    }
+
+    /// Rebuild the FreeCamera so it points at `look_at` from `eye`.
+    /// FreeCamera has no public setter for its internal yaw/pitch, so
+    /// the only way to make it look at an arbitrary world point after
+    /// construction is to construct a fresh one. Preserves move speed.
+    fn rebuild_camera_at(&mut self, eye: Vec3, look_at: Vec3) {
+        let mut cam = FreeCamera::new(eye, look_at);
+        cam.set_move_speed(self.camera_speed);
+        self.camera = cam;
     }
 
     pub fn run_frame(&mut self) {

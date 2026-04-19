@@ -34,8 +34,11 @@ impl ApplicationHandler for VizApp {
         match AppState::new(window, scenario, scenario_path) {
             Ok(app) => {
                 eprintln!("[viz] Ready. Controls:");
-                eprintln!("       WASDQE      — move camera");
-                eprintln!("       RMB drag    — look");
+                eprintln!("       WASD        — pan camera horizontally");
+                eprintln!("       Q / E       — lower / raise camera");
+                eprintln!("       RMB drag    — look (rotate view around eye)");
+                eprintln!("       MMB drag    — orbit around scene center");
+                eprintln!("       Scroll      — zoom toward / away from scene center");
                 eprintln!("       Space       — pause/resume");
                 eprintln!("       .           — single step (paused only)");
                 eprintln!("       R           — reload scenario from disk");
@@ -61,9 +64,16 @@ impl ApplicationHandler for VizApp {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if button == MouseButton::Right {
-                    app.mouse_captured = state == ElementState::Pressed;
-                    if !app.mouse_captured { app.last_mouse = None; }
+                match button {
+                    MouseButton::Right => {
+                        app.mouse_captured = state == ElementState::Pressed;
+                        if !app.mouse_captured { app.last_mouse = None; }
+                    }
+                    MouseButton::Middle => {
+                        app.orbit_captured = state == ElementState::Pressed;
+                        if !app.orbit_captured { app.last_orbit = None; }
+                    }
+                    _ => {}
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -79,6 +89,22 @@ impl ApplicationHandler for VizApp {
                     }
                     app.last_mouse = Some((position.x, position.y));
                 }
+                if app.orbit_captured {
+                    if let Some((lx, ly)) = app.last_orbit {
+                        app.orbit_camera(
+                            (position.x - lx) as f32,
+                            (position.y - ly) as f32,
+                        );
+                    }
+                    app.last_orbit = Some((position.x, position.y));
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scroll = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => y,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => p.y as f32 * 0.1,
+                };
+                app.zoom_camera(scroll);
             }
             WindowEvent::RedrawRequested => {}
             _ => {}
