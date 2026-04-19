@@ -28,7 +28,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"StatusEffectKind:Stun=0,Slow=1,Root=2,Silence=3,Dot=4,Hot=5,Buff=6,Debuff=7");
     h.update(b"Membership{group=GroupId,role=u8,joined_tick=u32,standing_q8=i16}");
     h.update(b"GroupRole:Member=0,Officer=1,Leader=2,Founder=3,Apprentice=4,Outcast=5");
-    h.update(b"Inventory{gold=u32,commodities=[u16;8]}");
+    h.update(b"Inventory{gold=i64,commodities=[u16;8]}");
     h.update(b"MemoryEvent{source=AgentId,kind=u8,payload=u64,confidence_q8=u8,tick=u32}");
     h.update(b"Relationship{other=AgentId,valence_q8=i16,tenure_ticks=u32}");
     h.update(b"ClassSlot{class_tag=u32,level=u8}");

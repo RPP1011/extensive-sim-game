@@ -119,7 +119,7 @@ Experience-shaped behavioral profile. Range 0–1. Set at spawn, drifts via even
 | risk_tolerance | f32 | Willingness to engage danger | combat win +0.02, combat loss -0.02, near death -0.05 | action selection (riskier options higher), flee threshold variance |
 | social_drive | f32 | Preference for interaction | socializing event +0.01, isolation -0.01, trade completion +0.01 | goal selection bias (Socialize priority), relationship maintenance |
 | ambition | f32 | Drive for status/achievement | quest completion +0.02, goal failure -0.02, witnessing promotion +0.01 | goal selection (higher ambition → more Work/Build), competitive behavior |
-| compassion | f32 | Empathy, healing/helping bias | healing others +0.02, witnessing suffering +0.03, cruelty -0.05 | healing/rescue goal frequency, relationship trust modifier |
+| altruism | f32 | Empathy, healing/helping bias (was `compassion` in prior drafts; renamed to match engine `hot_altruism` 2026-04-19) | healing others +0.02, witnessing suffering +0.03, cruelty -0.05 | healing/rescue goal frequency, relationship trust modifier |
 | curiosity | f32 | Information-seeking, exploration | learning skill +0.02, discovery of new location +0.01, repetitive work -0.01 | exploration goal frequency, trade diversity preference |
 
 **Emergent?** Primary input (formed by events), but can derive behavior urgencies from it. Not reconstructible from others.
@@ -221,7 +221,7 @@ Directional relationship from one NPC toward another (asymmetric).
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| traits | [f32; 5] | Estimated [risk_tol, social, ambition, compassion, curiosity] | observe_action (action→trait signal, alpha learning) | compatibility calc with own personality, behavior prediction |
+| traits | [f32; 5] | Estimated [risk_tol, social, ambition, altruism, curiosity] | observe_action (action→trait signal, alpha learning) | compatibility calc with own personality, behavior prediction |
 | confidence | [f32; 5] | Per-trait confidence [0.0, 1.0] | observe_action (+=0.01×attention per action) | trait update alpha (lower confidence → higher alpha), gossip weight |
 | observation_count | u32 | Total action observations | observe_action (count++) | authority weight (more observations → less influence) |
 
@@ -275,7 +275,7 @@ Container for all agent-specific state — needs, emotions, personality, relatio
 #### Economic & Trade
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| gold | f32 | Liquid currency | trade (earn/spend), work (wages accumulate), looting | trade purchasing power, debt payment, bribe ability |
+| gold | i64 | Liquid currency (signed so debt is representable as negative — reconciled 2026-04-19 across state.md / engine Inventory / Ability Plan 1 TransferGold) | trade (earn/spend), work (wages accumulate), looting | trade purchasing power, debt payment, bribe ability |
 | debt | f32 | Gold owed to creditor | loans system, trade deficit | work motivation (debt priority), bankruptcy check |
 | creditor_id | Option<u32> | Entity ID of creditor | loans system (loan grant) | debt collection events, relationship penalty |
 | income_rate | f32 | EMA of gold earned per work cycle (alpha=0.1) | work completion (update_ema), production bonus | income belief for credit decision, wage negotiation |

@@ -64,12 +64,13 @@ pub struct Membership {
 
 // ---- Task H: Inventory ---------------------------------------------------
 
-/// Portable commodity storage, one per agent. Minimal MVP: `gold` as unsigned
-/// (matches state.md §AgentData type modulo a later debt plan) plus an
-/// 8-commodity fixed slot table. Real item entities are a later plan.
+/// Portable commodity storage, one per agent. `gold` is signed (`i64`) so debt
+/// is representable as a negative balance — reconciled 2026-04-19 with state.md
+/// §AgentData and Ability Plan 1's `TransferGold` effect op. 8-commodity fixed
+/// slot table. Real item entities are a later plan.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Inventory {
-    pub gold:        u32,
+    pub gold:        i64,
     pub commodities: [u16; 8],
 }
 
