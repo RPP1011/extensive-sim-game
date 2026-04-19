@@ -1,0 +1,11 @@
+[world]
+seed = 1
+agent_cap = 4
+
+[[agent]]
+creature_type = "Human"
+pos = [64.0, 4.0, 64.0]
+
+[[agent]]
+creature_type = "Wolf"
+pos = [67.0, 4.0, 64.0]

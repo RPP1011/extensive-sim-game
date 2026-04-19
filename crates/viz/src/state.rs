@@ -58,6 +58,8 @@ pub struct AppState {
     pub paused:              bool,
     pub max_ticks_per_frame: u32,
 
+    pub overlays: viz::overlays::OverlayTracker,
+
     pub last_frame:  Instant,
 }
 
@@ -118,6 +120,7 @@ impl AppState {
             sim_speed:   1.0,
             paused:      false,
             max_ticks_per_frame: 8,
+            overlays: viz::overlays::OverlayTracker::new(),
             last_frame: Instant::now(),
         })
     }
@@ -162,12 +165,18 @@ impl AppState {
     #[allow(clippy::type_complexity)]
     pub fn render(&mut self) -> Result<()> {
         clear_above_ground(&mut self.grid);
+
+        self.overlays.ingest_with_state(&self.events, &self.sim);
+        self.overlays.prune(self.sim.tick);
+
         for id in self.sim.agents_alive() {
             let pos = match self.sim.agent_pos(id) { Some(p) => p, None => continue };
             let ct  = self.sim.agent_creature_type(id).unwrap_or(engine::creature::CreatureType::Human);
             let idx = viz::palette::creature_palette_index(ct);
             viz::grid_paint::paint_agent(&mut self.grid, pos, idx);
         }
+        self.overlays.paint_into(&mut self.grid, self.sim.tick);
+
         self.upload_grid()?;
         let tex = self.gpu_texture.as_ref().expect("upload_grid always populates gpu_texture");
         let dims = [GRID_SIDE as f32; 3];

@@ -3,6 +3,6 @@
 //! lives here for test reach.
 
 pub mod grid_paint;
+pub mod overlays;
 pub mod palette;
 pub mod scenario;
-// overlays added in Task 4

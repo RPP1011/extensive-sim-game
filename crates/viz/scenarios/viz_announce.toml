@@ -1,0 +1,31 @@
+[world]
+seed = 7
+agent_cap = 8
+
+[[agent]]
+creature_type = "Human"
+pos = [64.0, 4.0, 64.0]
+
+[[agent]]
+creature_type = "Human"
+pos = [78.0, 4.0, 64.0]   # 14 m east — inside overhear (30 m)
+
+[[agent]]
+creature_type = "Human"
+pos = [50.0, 4.0, 64.0]   # 14 m west — inside overhear
+
+[[agent]]
+creature_type = "Human"
+pos = [64.0, 4.0, 94.0]   # 30 m north — at overhear boundary
+
+[[agent]]
+creature_type = "Human"
+pos = [64.0, 4.0, 34.0]   # 30 m south — at overhear boundary
+
+[[agent]]
+creature_type = "Human"
+pos = [104.0, 4.0, 64.0]  # 40 m east — outside overhear, inside audience
+
+[[agent]]
+creature_type = "Human"
+pos = [24.0, 4.0, 64.0]   # 40 m west — outside overhear, inside audience
