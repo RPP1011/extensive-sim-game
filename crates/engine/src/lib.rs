@@ -5,6 +5,7 @@ pub mod channel;
 pub mod creature;
 pub mod event;
 pub mod ids;
+pub mod mask;
 pub mod rng;
 pub mod spatial;
 pub mod state;
