@@ -64,38 +64,38 @@ pub fn compute_companions_for_settlement(
     // Bond milestone events at 25, 50, 70 would be emitted as separate deltas
     // or logged via an event system layered on top of deltas.
 
+    // Precompute friendly ally count per grid ONCE (was O(E × G.size)
+    // when recomputed per NPC inside the entity loop). Since we only need
+    // `min(count, 3)` later, cap the precompute at 4 to bound work.
+    let mut grid_friendly_count: std::collections::HashMap<u32, u32, ahash::RandomState> =
+        std::collections::HashMap::default();
+    for entity in entities {
+        if !entity.alive || entity.team != crate::world_sim::state::WorldTeam::Friendly {
+            continue;
+        }
+        if let Some(gid) = entity.grid_id {
+            let c = grid_friendly_count.entry(gid).or_insert(0);
+            if *c < 4 { *c += 1; }
+        }
+    }
+
     for entity in entities {
         if !entity.alive || entity.npc.is_none() {
             continue;
         }
-
-        // Companion presence morale boost.
-        // Until companion data exists on Entity, NPCs on active grids with
-        // allies nearby receive a small "companionship" morale boost,
-        // simulating the comfort of having companions in the field.
-        let on_grid = entity.grid_id.is_some();
-        if on_grid {
-            // Count friendly allies on the same grid as a proxy for companion effect.
-            let ally_count = entity.grid_id
-                .and_then(|gid| state.fidelity_zone(gid))
-                .map(|g| {
-                    g.entity_ids.iter().filter(|&&eid| {
-                        eid != entity.id && state.entity(eid)
-                            .map(|e| e.alive && e.team == crate::world_sim::state::WorldTeam::Friendly)
-                            .unwrap_or(false)
-                    }).count()
-                })
-                .unwrap_or(0);
-
-            if ally_count > 0 {
-                // Each companion adds a small morale boost (diminishing after 3).
-                let bonus = (ally_count.min(3) as f32) * 0.5;
-                out.push(WorldDelta::UpdateEntityField {
-                    entity_id: entity.id,
-                    field: EntityField::Morale,
-                    value: bonus,
-                });
-            }
+        let Some(gid) = entity.grid_id else { continue };
+        // Subtract self from the grid's friendly count.
+        let total = *grid_friendly_count.get(&gid).unwrap_or(&0);
+        let ally_count = if entity.team == crate::world_sim::state::WorldTeam::Friendly {
+            total.saturating_sub(1)
+        } else { total };
+        if ally_count > 0 {
+            let bonus = (ally_count.min(3) as f32) * 0.5;
+            out.push(WorldDelta::UpdateEntityField {
+                entity_id: entity.id,
+                field: EntityField::Morale,
+                value: bonus,
+            });
         }
     }
 }

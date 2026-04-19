@@ -42,6 +42,12 @@ pub fn compute_economy(state: &WorldState, out: &mut Vec<WorldDelta>) {
     }
 }
 
+/// Taxation cadence: every 10 ticks (= 1 second game time). Running every
+/// tick emits 20K+ TransferGold deltas per tick at scale — merge/apply
+/// plumbing dominated. The tax rate is proportionally scaled so the
+/// aggregate gold flow is unchanged.
+const TAX_INTERVAL: u64 = 10;
+
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_economy_for_settlement(
     state: &WorldState,
@@ -55,30 +61,31 @@ pub fn compute_economy_for_settlement(
     };
 
     // --- NPC taxation: NPCs with gold pay a small tax to settlement treasury ---
-    // This is the primary income source for settlements. No passive income.
-    // Progressive tax: rich settlements have diminishing returns to prevent
-    // runaway treasury accumulation (positive feedback loop).
-    let tax_efficiency = 1.0 / (1.0 + settlement.treasury / 10_000.0);
-    let mut tax_income = 0.0f32;
-    for entity in entities {
-        if !entity.alive { continue; }
-        if let Some(npc) = &entity.npc {
-            if npc.gold > 1.0 {
-                let tax = npc.gold * 0.001 * tax_efficiency; // 0.1% base, reduced by wealth
-                tax_income += tax;
-                out.push(WorldDelta::TransferGold {
-                    from_entity: entity.id,
-                    to_entity: settlement_id, // goes to treasury via convention
-                    amount: tax,
-                });
+    // Batched every TAX_INTERVAL ticks with the per-tick rate scaled up.
+    if state.tick % TAX_INTERVAL == 0 {
+        let tax_efficiency = 1.0 / (1.0 + settlement.treasury / 10_000.0);
+        let tax_rate = 0.001 * TAX_INTERVAL as f32 * tax_efficiency;
+        let mut tax_income = 0.0f32;
+        for entity in entities {
+            if !entity.alive { continue; }
+            if let Some(npc) = &entity.npc {
+                if npc.gold > 1.0 {
+                    let tax = npc.gold * tax_rate;
+                    tax_income += tax;
+                    out.push(WorldDelta::TransferGold {
+                        from_entity: entity.id,
+                        to_entity: settlement_id, // goes to treasury via convention
+                        amount: tax,
+                    });
+                }
             }
         }
-    }
-    if tax_income > 0.0 {
-        out.push(WorldDelta::UpdateTreasury {
-            settlement_id: settlement_id,
-            delta: tax_income,
-        });
+        if tax_income > 0.0 {
+            out.push(WorldDelta::UpdateTreasury {
+                settlement_id: settlement_id,
+                delta: tax_income,
+            });
+        }
     }
 
     // --- Administrative cost decay: wealthy settlements leak treasury ---
@@ -115,23 +122,23 @@ pub fn compute_economy_for_settlement(
 }
 
 /// Per-settlement variant for parallel dispatch (maintenance upkeep).
+/// Counts alive NPCs once and emits a single UpdateTreasury delta with the
+/// total. Previously emitted one per NPC (~20K deltas/tick at scale), which
+/// dominated the merge+apply phase.
 pub fn compute_economy_maintenance_for_settlement(
     _state: &WorldState,
     settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
-    for entity in entities {
-        if !entity.alive { continue; }
-        let _npc = match &entity.npc {
-            Some(n) => n,
-            None => continue,
-        };
-        out.push(WorldDelta::UpdateTreasury {
-            settlement_id: settlement_id,
-            delta: -MAINTENANCE_PER_NPC,
-        });
-    }
+    let count = entities.iter()
+        .filter(|e| e.alive && e.npc.is_some())
+        .count();
+    if count == 0 { return; }
+    out.push(WorldDelta::UpdateTreasury {
+        settlement_id,
+        delta: -MAINTENANCE_PER_NPC * count as f32,
+    });
 }
 
 /// How often (in ticks) to run debt repayment.
