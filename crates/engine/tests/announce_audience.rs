@@ -29,6 +29,11 @@ impl PolicyBackend for OneAnnounce {
 
 #[test]
 fn announce_area_emits_recordmemory_for_each_agent_within_radius() {
+    // Boundary-pinning test: recipients placed at 0.0 (center), 9.999 (just
+    // inside), and 10.0 (exactly on boundary — must be included if impl uses
+    // `<=`). Outliers at 10.001 (just outside) and 20.0 (far outside). Radius
+    // is 10. Expect exactly 3 recipients. Pins both `<=` vs `<` and the exact
+    // radius passed to the kernel.
     let mut state = SimState::new(32, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(2048);
@@ -42,19 +47,23 @@ fn announce_area_emits_recordmemory_for_each_agent_within_radius() {
             hp: 100.0,
         })
         .unwrap();
-    // 3 within radius 10:
-    for i in 0..3 {
+    // 3 within/on radius 10: distances [0.0, 9.999, 10.0].
+    // Distance 0.0 is co-located with the speaker (speaker-exclusion is
+    // by id, not position). 10.0 pins the `<=` side of the comparison —
+    // an impl using `<` would drop it and the test flips to 2.
+    let inside_distances = [0.0f32, 9.999, 10.0];
+    for &d in &inside_distances {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
-            pos: center + Vec3::new(5.0 + i as f32, 0.0, 0.0),
+            pos: center + Vec3::new(d, 0.0, 0.0),
             hp: 100.0,
         });
     }
-    // 2 outside radius 10:
-    for i in 0..2 {
+    // 2 outside radius 10: distances [10.001, 20.0].
+    for &d in &[10.001f32, 20.0] {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
-            pos: center + Vec3::new(50.0 + i as f32, 0.0, 0.0),
+            pos: center + Vec3::new(d, 0.0, 0.0),
             hp: 100.0,
         });
     }
@@ -67,11 +76,15 @@ fn announce_area_emits_recordmemory_for_each_agent_within_radius() {
         &cascade,
     );
 
-    let recipients: usize = events
+    // Primary recipients (confidence 0.8) are the audience-in-range set;
+    // the overhear scan (0.6 confidence) can pick up outliers within
+    // OVERHEAR_RANGE of the speaker, so we filter on the primary channel
+    // to isolate the Area-radius gate being tested here.
+    let primary: usize = events
         .iter()
-        .filter(|e| matches!(e, Event::RecordMemory { .. }))
+        .filter(|e| matches!(e, Event::RecordMemory { confidence, .. } if (*confidence - 0.8).abs() < 1e-6))
         .count();
-    assert_eq!(recipients, 3, "three agents within 10m");
+    assert_eq!(primary, 3, "exactly 3 primary recipients at distances [0.0, 9.999, 10.0] within/on 10m");
 
     assert!(events.iter().any(|e| matches!(e,
         Event::AnnounceEmitted { speaker: s, audience_tag, .. }
@@ -159,6 +172,10 @@ fn announce_bounded_by_max_recipients() {
 
 #[test]
 fn announce_anyone_uses_max_announce_radius_around_speaker() {
+    // Boundary-pinning test: MAX_ANNOUNCE_RADIUS = 80m. Agents placed at
+    // distances [50.0, 79.9, 80.1, 200.0]; expect 79.9 included and 80.1
+    // excluded. That pins the constant to 80m ± 0.2m and rules out a
+    // silent halving to 40 or doubling to 150.
     let mut state = SimState::new(16, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1024);
@@ -171,10 +188,22 @@ fn announce_anyone_uses_max_announce_radius_around_speaker() {
             hp: 100.0,
         })
         .unwrap();
-    // Close agent — within MAX_ANNOUNCE_RADIUS=80:
+    // Close agent — deep inside MAX_ANNOUNCE_RADIUS=80:
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(50.0, 0.0, 10.0),
+        hp: 100.0,
+    });
+    // Just inside (79.9m):
+    state.spawn_agent(AgentSpawn {
+        creature_type: CreatureType::Human,
+        pos: Vec3::new(79.9, 0.0, 10.0),
+        hp: 100.0,
+    });
+    // Just outside (80.1m):
+    state.spawn_agent(AgentSpawn {
+        creature_type: CreatureType::Human,
+        pos: Vec3::new(80.1, 0.0, 10.0),
         hp: 100.0,
     });
     // Far agent — beyond 80:
@@ -196,5 +225,8 @@ fn announce_anyone_uses_max_announce_radius_around_speaker() {
         .iter()
         .filter(|e| matches!(e, Event::RecordMemory { .. }))
         .count();
-    assert_eq!(recipients, 1, "only the agent within MAX_ANNOUNCE_RADIUS");
+    assert_eq!(
+        recipients, 2,
+        "agents at 50m and 79.9m are within MAX_ANNOUNCE_RADIUS=80; 80.1m and 200m excluded"
+    );
 }
