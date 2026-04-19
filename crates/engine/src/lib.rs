@@ -4,5 +4,6 @@
 pub mod ids;
 pub mod channel;
 pub mod creature;
+pub mod rng;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
