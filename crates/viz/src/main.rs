@@ -7,6 +7,7 @@ fn main() -> anyhow::Result<()> {
         eprintln!("usage: {} <scenario.toml>", args.first().map(String::as_str).unwrap_or("viz"));
         std::process::exit(2);
     }
-    let scenario = viz::scenario::load(&args[1])?;
-    app::run(scenario)
+    let path = std::path::PathBuf::from(&args[1]);
+    let scenario = viz::scenario::load(&path)?;
+    app::run(scenario, path)
 }

@@ -60,11 +60,15 @@ pub struct AppState {
 
     pub overlays: viz::overlays::OverlayTracker,
 
+    pub scenario_path:    std::path::PathBuf,
+    pub hud_timer:        Instant,
+    pub frames_since_hud: u32,
+
     pub last_frame:  Instant,
 }
 
 impl AppState {
-    pub fn new(window: Window, scenario: viz::scenario::Scenario) -> Result<Self> {
+    pub fn new(window: Window, scenario: viz::scenario::Scenario, scenario_path: std::path::PathBuf) -> Result<Self> {
         let ctx       = VulkanContext::new_with_surface_extensions(&window).context("Vulkan context")?;
         let alloc     = VulkanAllocator::new(&ctx).context("allocator")?;
         let mut swapchain = SwapchainContext::new(&ctx, &window).context("swapchain")?;
@@ -121,8 +125,46 @@ impl AppState {
             paused:      false,
             max_ticks_per_frame: 8,
             overlays: viz::overlays::OverlayTracker::new(),
+            scenario_path,
+            hud_timer: Instant::now(),
+            frames_since_hud: 0,
             last_frame: Instant::now(),
         })
+    }
+
+    /// Reset sim state from a fresh `Scenario`. Preserves Vulkan
+    /// resources + camera pose; resets sim_accum / sim_speed / paused
+    /// to their default values. Overlays are dropped.
+    pub fn reload_scenario(&mut self, scenario: viz::scenario::Scenario) -> Result<()> {
+        let needed = scenario.agent.len().max(1) as u32;
+        let cap = scenario.world.agent_cap.max(needed);
+        let mut sim = engine::state::SimState::new(cap, scenario.world.seed);
+        let scratch = engine::step::SimScratch::new(cap as usize);
+        let events  = engine::event::EventRing::with_cap(4096);
+        let cascade = engine::cascade::CascadeRegistry::new();
+        let backend = engine::policy::UtilityBackend;
+
+        let mut agent_ids = Vec::with_capacity(scenario.agent.len());
+        for spec in &scenario.agent {
+            let ct = spec.creature()?;
+            let spawn = engine::state::AgentSpawn { creature_type: ct, pos: spec.position(), hp: spec.hp };
+            match sim.spawn_agent(spawn) {
+                Some(id) => agent_ids.push(id),
+                None => anyhow::bail!("spawn_agent returned None — cap {} exhausted", cap),
+            }
+        }
+
+        self.sim = sim;
+        self.scratch = scratch;
+        self.events = events;
+        self.cascade = cascade;
+        self.backend = backend;
+        self.agent_ids = agent_ids;
+        self.overlays = viz::overlays::OverlayTracker::new();
+        self.sim_accum = 0.0;
+        self.sim_speed = 1.0;
+        self.paused = false;
+        Ok(())
     }
 
     /// Advance the sim as many ticks as accumulated `dt` allows. Caps at
@@ -194,6 +236,58 @@ impl AppState {
 
     pub fn handle_key(&mut self, key: KeyCode, pressed: bool) {
         if pressed { self.keys_held.insert(key); } else { self.keys_held.remove(&key); }
+        if !pressed { return; }
+        match key {
+            KeyCode::Space => {
+                self.paused = !self.paused;
+                eprintln!("[viz] {}", if self.paused { "PAUSED" } else { "RUNNING" });
+            }
+            KeyCode::Period => {
+                if self.paused {
+                    engine::step::step(
+                        &mut self.sim, &mut self.scratch, &mut self.events,
+                        &self.backend, &self.cascade,
+                    );
+                    eprintln!("[viz] step → tick {}", self.sim.tick);
+                } else {
+                    eprintln!("[viz] '.' only steps while paused");
+                }
+            }
+            KeyCode::KeyR => {
+                match viz::scenario::load(&self.scenario_path) {
+                    Ok(sc) => match self.reload_scenario(sc) {
+                        Ok(()) => eprintln!("[viz] reloaded {:?}", self.scenario_path),
+                        Err(e) => eprintln!("[viz] reload failed: {}", e),
+                    },
+                    Err(e) => eprintln!("[viz] reload read failed: {}", e),
+                }
+            }
+            KeyCode::BracketLeft  => {
+                self.sim_speed = (self.sim_speed * 0.5).max(0.0625);
+                eprintln!("[viz] speed {:.3}x", self.sim_speed);
+            }
+            KeyCode::BracketRight => {
+                self.sim_speed = (self.sim_speed * 2.0).min(32.0);
+                eprintln!("[viz] speed {:.3}x", self.sim_speed);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn maybe_emit_hud(&mut self) {
+        self.frames_since_hud += 1;
+        let elapsed = self.hud_timer.elapsed().as_secs_f32();
+        if elapsed < 1.0 { return; }
+        let fps = (self.frames_since_hud as f32) / elapsed;
+        let alive = self.sim.agents_alive().count();
+        let state_str = if self.paused { "PAUSED" } else { "RUNNING" };
+        eprintln!(
+            "[hud] {} tick={} alive={}/{} speed={:.2}x fps={:.0} overlays={}",
+            state_str, self.sim.tick, alive, self.agent_ids.len(),
+            self.sim_speed, fps, self.overlays.len(),
+        );
+        self.hud_timer = Instant::now();
+        self.frames_since_hud = 0;
     }
 
     pub fn update_camera(&mut self, dt: f32) {
@@ -216,9 +310,8 @@ impl AppState {
         let dt  = (now - self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
         self.update_camera(dt);
-        let _n_ticks = self.tick_sim(dt);
-        if let Err(e) = self.render() {
-            eprintln!("[viz] render error: {}", e);
-        }
+        let _n = self.tick_sim(dt);
+        if let Err(e) = self.render() { eprintln!("[viz] render error: {}", e); }
+        self.maybe_emit_hud();
     }
 }

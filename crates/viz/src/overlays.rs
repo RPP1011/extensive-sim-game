@@ -28,9 +28,12 @@ pub const DEFAULT_ANNOUNCE_RADIUS: f32 = 80.0;
 
 pub struct OverlayTracker {
     overlays: Vec<Overlay>,
-    /// Highest tick we've already converted to overlays; future events
-    /// must have `tick > last_scanned_tick` to be processed.
-    last_scanned_tick: u32,
+    /// Monotonic cursor: the next undiscovered push-index into the event
+    /// ring. Advancing this instead of a tick cursor lets us capture
+    /// multiple same-tick events (e.g. both the AgentAttacked that
+    /// brings HP to 0 AND the AgentDied that follows it) without the
+    /// off-by-one hazards of `tick <=/< last_scanned_tick`.
+    next_event_idx: usize,
 }
 
 impl Default for OverlayTracker {
@@ -39,23 +42,29 @@ impl Default for OverlayTracker {
 
 impl OverlayTracker {
     pub fn new() -> Self {
-        Self { overlays: Vec::with_capacity(64), last_scanned_tick: 0 }
+        Self { overlays: Vec::with_capacity(64), next_event_idx: 0 }
     }
 
-    /// Walk `events.iter()` (non-destructive — chronicle needs to re-read
-    /// them) and record overlays for AgentAttacked / AgentDied /
-    /// AnnounceEmitted. Pulls attacker/target/speaker positions from
-    /// `state` because events don't carry positions.
+    /// Walk `events` (non-destructive — chronicle needs to re-read them)
+    /// and record overlays for AgentAttacked / AgentDied / AnnounceEmitted.
+    /// Pulls attacker/target/speaker positions from `state` because events
+    /// don't carry positions.
     pub fn ingest_with_state(
         &mut self,
         events: &engine::event::EventRing,
         state:  &engine::state::SimState,
     ) {
         use engine::event::Event;
-        let current_tick = state.tick;
-        for e in events.iter() {
-            if e.tick() <= self.last_scanned_tick { continue; }
-            match *e {
+        let total = events.total_pushed();
+        while self.next_event_idx < total {
+            let Some(e) = events.get_pushed(self.next_event_idx) else {
+                // evicted before we could see it — skip ahead to the
+                // oldest still-resident entry.
+                let first_resident = total.saturating_sub(events.len());
+                self.next_event_idx = first_resident;
+                continue;
+            };
+            match e {
                 Event::AgentAttacked { attacker, target, tick, .. } => {
                     let from = state.agent_pos(attacker).unwrap_or(Vec3::ZERO);
                     let to   = state.agent_pos(target).unwrap_or(Vec3::ZERO);
@@ -86,8 +95,9 @@ impl OverlayTracker {
                 }
                 _ => {}
             }
+            self.next_event_idx += 1;
         }
-        self.last_scanned_tick = current_tick;
+        let _ = state; // current_tick is no longer used; state kept on signature for API stability.
     }
 
     pub fn prune(&mut self, current_tick: u32) {

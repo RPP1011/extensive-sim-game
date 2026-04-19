@@ -8,13 +8,14 @@ use winit::window::{Window, WindowId};
 use crate::state::{AppState, WINDOW_WIDTH, WINDOW_HEIGHT};
 
 pub struct VizApp {
-    pub scenario: Option<viz::scenario::Scenario>,
-    pub state:    Option<AppState>,
+    pub scenario:      Option<viz::scenario::Scenario>,
+    pub scenario_path: Option<std::path::PathBuf>,
+    pub state:         Option<AppState>,
 }
 
 impl VizApp {
-    pub fn new(scenario: viz::scenario::Scenario) -> Self {
-        Self { scenario: Some(scenario), state: None }
+    pub fn new(scenario: viz::scenario::Scenario, scenario_path: std::path::PathBuf) -> Self {
+        Self { scenario: Some(scenario), scenario_path: Some(scenario_path), state: None }
     }
 }
 
@@ -29,9 +30,20 @@ impl ApplicationHandler for VizApp {
             Err(e) => { eprintln!("[viz] create_window failed: {}", e); event_loop.exit(); return; }
         };
         let scenario = self.scenario.take().expect("scenario set before resumed");
-        match AppState::new(window, scenario) {
-            Ok(app) => { eprintln!("[viz] Ready."); self.state = Some(app); }
-            Err(e)  => { eprintln!("[viz] AppState::new failed: {}", e); event_loop.exit(); }
+        let scenario_path = self.scenario_path.take().expect("scenario_path set before resumed");
+        match AppState::new(window, scenario, scenario_path) {
+            Ok(app) => {
+                eprintln!("[viz] Ready. Controls:");
+                eprintln!("       WASDQE      — move camera");
+                eprintln!("       RMB drag    — look");
+                eprintln!("       Space       — pause/resume");
+                eprintln!("       .           — single step (paused only)");
+                eprintln!("       R           — reload scenario from disk");
+                eprintln!("       [ / ]       — halve/double sim speed");
+                eprintln!("       Esc         — quit");
+                self.state = Some(app);
+            }
+            Err(e) => { eprintln!("[viz] AppState::new failed: {}", e); event_loop.exit(); }
         }
     }
 
@@ -80,10 +92,10 @@ impl ApplicationHandler for VizApp {
     }
 }
 
-pub fn run(scenario: viz::scenario::Scenario) -> Result<()> {
+pub fn run(scenario: viz::scenario::Scenario, scenario_path: std::path::PathBuf) -> Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-    let mut app = VizApp::new(scenario);
+    let mut app = VizApp::new(scenario, scenario_path);
     event_loop.run_app(&mut app)?;
     Ok(())
 }

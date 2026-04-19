@@ -24,7 +24,7 @@ Plan 5+. The 2026-04-19 verification audit (HIGH + MEDIUM) is fully resolved; se
 | Plan 1 — action space & cascade | `docs/superpowers/plans/2026-04-19-engine-plan-1-action-space.md` | ✅ executed (Tasks 1–18) |
 | Plan 2 — pipeline + cross-cutting traits | `docs/superpowers/plans/2026-04-19-engine-plan-2-pipeline-traits.md` | ✅ executed |
 | Plan 3 — persistence + obs packer + probes | `docs/superpowers/plans/2026-04-19-engine-plan-3-persistence-obs-probes.md` | ⚠️ draft — awaiting execution |
-| Plan 3.0 viz harness | _(to be written)_ | ❌ awaiting draft |
+| Plan 3.0 viz harness | `docs/superpowers/plans/2026-04-19-engine-plan-3_0-viz-harness.md` | ✅ executed (Tasks 1–5) |
 | Plan 4 — debug & trace runtime | _(to be written)_ | ❌ not yet written |
 | Plan 5 — `ComputeBackend` trait extraction | _(to be written)_ | ❌ not yet written |
 | Plan 6 — `GpuBackend` foundation | _(to be written)_ | ❌ not yet written |
@@ -128,3 +128,26 @@ The items in priority order for the user to externalize (oracle-verify):
 - `docs/superpowers/plans/` — per-plan implementation intent
 - `crates/engine/src/` — Rust implementation (Serial only)
 - `crates/engine/tests/` — 157-test suite (+1 ignored LazyView integration canary)
+
+## Visual-check checklist
+
+Each item is a live acceptance criterion for the Plan 3.0 viz harness.
+Run `cargo run -p viz -- <scenario>` and eyeball the result.
+
+| # | Scenario | Expected visual | Catches regression in |
+|---|---|---|---|
+| V1 | `crates/viz/scenarios/viz_basic.toml` | Ground + 4 blue voxels in an 8 m square + 1 red voxel 20 m NE; the red voxel walks toward the blue cluster over ~2 s. | Move action (§9), nearest-enemy utility scoring. |
+| V2 | `viz_basic.toml`, after ~10 s | One or more blue voxels have disappeared; a black voxel persists where each died. | Attack damage + AgentDied emission. |
+| V3 | `viz_attack.toml` | Red voxel closes 3 m in ~3 ticks, then a short red line pulses between attacker and target every tick until the human dies. | ATTACK_RANGE = 2.0 m, attack-line overlay ingest. |
+| V4 | `viz_attack.toml` post-death | Single black voxel at the former human position; wolf idle (no more targets). | AgentDied cleanup, mask pruning of dead targets. |
+| V5 | `viz_announce.toml` + test backend that emits `MacroAction::Announce` (future plan) | White ring expands from speaker over 3 ticks, covering 80 m. Listeners inside 30 m get memories (check events log). | Announce audience enumeration + overhear scan (§10). |
+| V6 | Any scenario, paused, pressing `.` | Tick advances by 1 per press; HUD prints `tick={n+1}`. | Pause/step determinism, no accumulator leak. |
+| V7 | Any scenario, pressing `]` 4 times | HUD prints `speed=16.00x`; agents move visibly faster; fps ≥ 30. | Tick accumulator math, burst-cap behavior. |
+| V8 | Any scenario, pressing `R` | Agents snap back to spawn positions; HUD reports `tick=0`; overlays clear. | Reload path cleans sim + overlays. |
+
+Known gaps:
+- V5 requires a test backend that emits `Announce`; `UtilityBackend`
+  only emits the 7 implemented micros. Becomes live when a future plan
+  wires an announce-enabled policy.
+- No in-window HUD — HUD is stdout-only. A later plan can layer egui
+  or a text-shader overlay; deliberately out of scope for Plan 3.0.
