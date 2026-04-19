@@ -6,7 +6,9 @@ use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 pub use agent::{AgentSpawn, MovementMode};
-use agent_types::{Inventory, MemoryEvent, Membership, Relationship, StatusEffect};
+use agent_types::{
+    ClassSlot, Creditor, Inventory, MemoryEvent, Membership, Relationship, StatusEffect,
+};
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
 use smallvec::SmallVec;
@@ -87,6 +89,12 @@ pub struct SimState {
     // at 20; the stub uses 8 inline as a smaller default; eviction is a
     // later plan's concern).
     cold_relationships:  Vec<SmallVec<[Relationship; 8]>>,
+    // Class definitions (state.md §Skill & Class) — fixed 4 slots per agent.
+    cold_class_definitions: Vec<[ClassSlot; 4]>,
+    // Creditor ledger (state.md §Economic).
+    cold_creditor_ledger:   Vec<SmallVec<[Creditor; 16]>>,
+    // Mentor lineage (state.md §Relationships mentor_lineage) — 8-deep chain.
+    cold_mentor_lineage:    Vec<[Option<AgentId>; 8]>,
 }
 
 impl SimState {
@@ -135,6 +143,9 @@ impl SimState {
             cold_inventory:      vec![Inventory::default(); cap],
             cold_memory:         (0..cap).map(|_| SmallVec::new()).collect(),
             cold_relationships:  (0..cap).map(|_| SmallVec::new()).collect(),
+            cold_class_definitions: vec![[ClassSlot::default(); 4]; cap],
+            cold_creditor_ledger:   (0..cap).map(|_| SmallVec::new()).collect(),
+            cold_mentor_lineage:    vec![[None; 8]; cap],
         }
     }
 
@@ -187,6 +198,9 @@ impl SimState {
         self.cold_inventory[slot] = Inventory::default();
         self.cold_memory[slot].clear();
         self.cold_relationships[slot].clear();
+        self.cold_class_definitions[slot] = [ClassSlot::default(); 4];
+        self.cold_creditor_ledger[slot].clear();
+        self.cold_mentor_lineage[slot] = [None; 8];
         Some(id)
     }
 
@@ -468,6 +482,43 @@ impl SimState {
         }
     }
 
+    // Class definitions / creditor ledger / mentor lineage (Task K).
+    pub fn agent_classes(&self, id: AgentId) -> Option<&[ClassSlot; 4]> {
+        self.cold_class_definitions.get(AgentSlotPool::slot_of_agent(id))
+    }
+    pub fn set_agent_classes(&mut self, id: AgentId, slots: [ClassSlot; 4]) {
+        if let Some(s) = self
+            .cold_class_definitions
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = slots;
+        }
+    }
+    pub fn agent_creditors(&self, id: AgentId) -> Option<&[Creditor]> {
+        self.cold_creditor_ledger
+            .get(AgentSlotPool::slot_of_agent(id))
+            .map(|v| v.as_slice())
+    }
+    pub fn push_agent_creditor(&mut self, id: AgentId, c: Creditor) {
+        if let Some(v) = self
+            .cold_creditor_ledger
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            v.push(c);
+        }
+    }
+    pub fn agent_mentor_lineage(&self, id: AgentId) -> Option<&[Option<AgentId>; 8]> {
+        self.cold_mentor_lineage.get(AgentSlotPool::slot_of_agent(id))
+    }
+    pub fn set_agent_mentor_lineage(&mut self, id: AgentId, lineage: [Option<AgentId>; 8]) {
+        if let Some(s) = self
+            .cold_mentor_lineage
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = lineage;
+        }
+    }
+
     // Per-agent field mutators.
     pub fn set_agent_pos(&mut self, id: AgentId, pos: Vec3) {
         let slot = AgentSlotPool::slot_of_agent(id);
@@ -724,5 +775,16 @@ impl SimState {
     // Relationships bulk slice (Task J).
     pub fn cold_relationships(&self) -> &[SmallVec<[Relationship; 8]>] {
         &self.cold_relationships
+    }
+
+    // Task K bulk slices.
+    pub fn cold_class_definitions(&self) -> &[[ClassSlot; 4]] {
+        &self.cold_class_definitions
+    }
+    pub fn cold_creditor_ledger(&self) -> &[SmallVec<[Creditor; 16]>] {
+        &self.cold_creditor_ledger
+    }
+    pub fn cold_mentor_lineage(&self) -> &[[Option<AgentId>; 8]] {
+        &self.cold_mentor_lineage
     }
 }
