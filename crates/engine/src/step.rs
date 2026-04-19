@@ -8,6 +8,8 @@ use crate::rng::per_agent_u32;
 use crate::state::SimState;
 
 const MOVE_SPEED_MPS: f32 = 1.0;
+const ATTACK_DAMAGE:  f32 = 10.0;
+const ATTACK_RANGE:   f32 = 2.0;
 
 /// Per-tick scratch buffers hoisted out of `step` so a steady-state tick loop
 /// allocates zero bytes. Caller constructs once (capacity = `state.agent_cap()`),
@@ -39,6 +41,7 @@ pub fn step<B: PolicyBackend>(
     scratch.mask.mark_hold_allowed(state);
     scratch.mask.mark_move_allowed_if_others_exist(state);
     scratch.mask.mark_flee_allowed_if_threat_exists(state);
+    scratch.mask.mark_attack_allowed_if_target_in_range(state);
     scratch.actions.clear();
     backend.evaluate(state, &scratch.mask, &mut scratch.actions);
 
@@ -113,8 +116,34 @@ fn apply_actions(
                     }
                 }
             }
-            ActionKind::Micro { kind: MicroKind::Attack, .. }
-            | ActionKind::Micro { kind: MicroKind::Eat, .. } => {
+            ActionKind::Micro {
+                kind:   MicroKind::Attack,
+                target: MicroTarget::Agent(tgt),
+            } => {
+                if !state.agent_alive(tgt) { continue; }
+                if let (Some(sp), Some(tp)) =
+                    (state.agent_pos(action.agent), state.agent_pos(tgt))
+                {
+                    if sp.distance(tp) <= ATTACK_RANGE {
+                        let new_hp = (state.agent_hp(tgt).unwrap_or(0.0) - ATTACK_DAMAGE).max(0.0);
+                        state.set_agent_hp(tgt, new_hp);
+                        events.push(Event::AgentAttacked {
+                            attacker: action.agent,
+                            target:   tgt,
+                            damage:   ATTACK_DAMAGE,
+                            tick:     state.tick,
+                        });
+                        if new_hp <= 0.0 {
+                            events.push(Event::AgentDied {
+                                agent_id: tgt,
+                                tick:     state.tick,
+                            });
+                            state.kill_agent(tgt);
+                        }
+                    }
+                }
+            }
+            ActionKind::Micro { kind: MicroKind::Eat, .. } => {
                 // Not implemented in MVP.
             }
             ActionKind::Micro { .. } => {

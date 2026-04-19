@@ -6,6 +6,11 @@ pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 
 /// Radius within which another agent counts as a threat for flee-mask purposes.
 const AGGRO_RANGE: f32 = 50.0;
 
+/// Mirrors `ATTACK_RANGE` in `step.rs`. Both constants MUST move together —
+/// mask permissiveness vs resolution cutoff must agree or the policy will
+/// choose moves the kernel silently drops.
+const ATTACK_RANGE_FOR_MASK: f32 = 2.0;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum MicroKind {
@@ -97,6 +102,29 @@ impl MaskBuffer {
             });
             if has_threat {
                 let offset = slot * n_kinds + MicroKind::Flee as usize;
+                self.micro_kind[offset] = true;
+            }
+        }
+    }
+
+    /// Mark `Attack` as allowed for every alive agent that has at least one
+    /// other alive agent within `ATTACK_RANGE_FOR_MASK`. No target in range →
+    /// no attack.
+    pub fn mark_attack_allowed_if_target_in_range(&mut self, state: &SimState) {
+        let n_kinds = MicroKind::ALL.len();
+        for id in state.agents_alive() {
+            let slot = (id.raw() - 1) as usize;
+            let self_pos = match state.agent_pos(id) {
+                Some(p) => p,
+                None    => continue,
+            };
+            let has_target = state.agents_alive().any(|other| {
+                other != id && state.agent_pos(other)
+                    .map(|op| op.distance(self_pos) <= ATTACK_RANGE_FOR_MASK)
+                    .unwrap_or(false)
+            });
+            if has_target {
+                let offset = slot * n_kinds + MicroKind::Attack as usize;
                 self.micro_kind[offset] = true;
             }
         }
