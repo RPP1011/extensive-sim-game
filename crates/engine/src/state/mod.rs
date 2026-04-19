@@ -159,6 +159,21 @@ impl SimState {
         self.pool.alive.len() as u32
     }
 
+    /// Pool self-consistency predicate for `PoolNonOverlapInvariant`.
+    /// Returns `true` when no slot is both alive and in the freelist and the
+    /// freelist has no duplicates. See `Pool::is_non_overlapping`.
+    pub fn pool_is_consistent(&self) -> bool {
+        self.pool.is_non_overlapping()
+    }
+
+    /// Test-only: expose the underlying pool for fault injection (corrupting
+    /// the freelist to prove the invariant check actually runs). Production
+    /// code must never call this.
+    #[doc(hidden)]
+    pub fn pool_mut_for_test(&mut self) -> &mut entity_pool::AgentSlotPool {
+        &mut self.pool
+    }
+
     /// Iterator over alive AgentIds. Kernels that need multiple fields look them up by id.
     pub fn agents_alive(&self) -> impl Iterator<Item = AgentId> + '_ {
         self.hot_alive

@@ -52,9 +52,9 @@ impl Invariant for MaskValidityInvariant {
     fn check(&self, _s: &SimState, _e: &EventRing) -> Option<Violation> { None }
 }
 
-/// No agent slot can be both alive and in the freelist. Stub for now —
-/// current `Pool<T>` exposes no freelist; kept as a named invariant so
-/// future Pool changes have a place to register the check.
+/// No agent slot can be both alive and in the freelist, and the freelist
+/// must contain no duplicates. Delegates to `SimState::pool_is_consistent`
+/// which walks the `Pool<T>` alive vec + freelist.
 pub struct PoolNonOverlapInvariant;
 
 impl Invariant for PoolNonOverlapInvariant {
@@ -63,5 +63,16 @@ impl Invariant for PoolNonOverlapInvariant {
         #[cfg(debug_assertions)] { FailureMode::Panic }
         #[cfg(not(debug_assertions))] { FailureMode::Log }
     }
-    fn check(&self, _state: &SimState, _events: &EventRing) -> Option<Violation> { None }
+    fn check(&self, state: &SimState, _events: &EventRing) -> Option<Violation> {
+        if state.pool_is_consistent() {
+            None
+        } else {
+            Some(Violation {
+                invariant: "pool_non_overlap",
+                tick:      state.tick,
+                message:   "agent pool: alive/freelist overlap or freelist duplicate".into(),
+                payload:   None,
+            })
+        }
+    }
 }

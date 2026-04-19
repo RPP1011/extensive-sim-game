@@ -101,4 +101,39 @@ impl<T> Pool<T> {
     pub fn slot_of(id: PoolId<T>) -> usize {
         id.slot()
     }
+
+    /// Verify pool consistency: no slot appears as both alive AND in the
+    /// freelist, and the freelist contains no duplicate slots. Returns
+    /// `true` when consistent. This is the predicate that
+    /// `PoolNonOverlapInvariant` checks per-tick.
+    pub fn is_non_overlapping(&self) -> bool {
+        // (1) No duplicate entries in the freelist.
+        let mut seen = vec![false; self.cap as usize];
+        for &raw in &self.freelist {
+            let slot = (raw - 1) as usize;
+            if slot >= self.cap as usize {
+                return false;
+            }
+            if seen[slot] {
+                return false; // duplicate
+            }
+            seen[slot] = true;
+        }
+        // (2) Any slot marked alive must NOT also be in the freelist.
+        for (slot, &alive) in self.alive.iter().enumerate() {
+            if alive && seen[slot] {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Test-only fault injection: force a slot to appear in the freelist
+    /// without going through `kill`. Used to construct corrupted pool states
+    /// for the `PoolNonOverlapInvariant` tests — proves the invariant check
+    /// fires. Production code must never call this.
+    #[doc(hidden)]
+    pub fn force_push_freelist_for_test(&mut self, raw: u32) {
+        self.freelist.push(raw);
+    }
 }
