@@ -38,6 +38,7 @@ pub fn step<B: PolicyBackend>(
     scratch.mask.reset();
     scratch.mask.mark_hold_allowed(state);
     scratch.mask.mark_move_allowed_if_others_exist(state);
+    scratch.mask.mark_flee_allowed_if_threat_exists(state);
     scratch.actions.clear();
     backend.evaluate(state, &scratch.mask, &mut scratch.actions);
 
@@ -91,12 +92,33 @@ fn apply_actions(
                     });
                 }
             }
+            ActionKind::Micro {
+                kind:   MicroKind::Flee,
+                target: MicroTarget::Agent(threat),
+            } => {
+                if !state.agent_alive(threat) { continue; }
+                if let (Some(self_pos), Some(threat_pos)) =
+                    (state.agent_pos(action.agent), state.agent_pos(threat))
+                {
+                    let away = (self_pos - threat_pos).normalize_or_zero();
+                    if away.length_squared() > 0.0 {
+                        let new_pos = self_pos + away * MOVE_SPEED_MPS;
+                        state.set_agent_pos(action.agent, new_pos);
+                        events.push(Event::AgentFled {
+                            agent_id: action.agent,
+                            from:     self_pos,
+                            to:       new_pos,
+                            tick:     state.tick,
+                        });
+                    }
+                }
+            }
             ActionKind::Micro { kind: MicroKind::Attack, .. }
             | ActionKind::Micro { kind: MicroKind::Eat, .. } => {
                 // Not implemented in MVP.
             }
             ActionKind::Micro { .. } => {
-                // Other MicroKinds (Flee, UseItem, Ask, …) land in Tasks 9–12.
+                // Other MicroKinds (UseItem, Ask, …) land in Tasks 10–12.
             }
             ActionKind::Macro(_) => {
                 // Macro dispatch lands in Tasks 13–15.

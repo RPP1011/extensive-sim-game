@@ -3,6 +3,9 @@ use crate::state::SimState;
 
 pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 D5
 
+/// Radius within which another agent counts as a threat for flee-mask purposes.
+const AGGRO_RANGE: f32 = 50.0;
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum MicroKind {
@@ -74,6 +77,28 @@ impl MaskBuffer {
             let slot = (id.raw() - 1) as usize;
             let offset = slot * MicroKind::ALL.len() + MicroKind::MoveToward as usize;
             self.micro_kind[offset] = true;
+        }
+    }
+
+    /// Mark `Flee` as allowed for every alive agent that has at least one
+    /// other alive agent within `AGGRO_RANGE`. No threat → no flee.
+    pub fn mark_flee_allowed_if_threat_exists(&mut self, state: &SimState) {
+        let n_kinds = MicroKind::ALL.len();
+        for id in state.agents_alive() {
+            let slot = (id.raw() - 1) as usize;
+            let self_pos = match state.agent_pos(id) {
+                Some(p) => p,
+                None    => continue,
+            };
+            let has_threat = state.agents_alive().any(|other| {
+                other != id && state.agent_pos(other)
+                    .map(|op| op.distance(self_pos) <= AGGRO_RANGE)
+                    .unwrap_or(false)
+            });
+            if has_threat {
+                let offset = slot * n_kinds + MicroKind::Flee as usize;
+                self.micro_kind[offset] = true;
+            }
         }
     }
 }
