@@ -24,5 +24,8 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"Lane:Validation=0,Effect=1,Reaction=2,Audit=3");
     h.update(b"MAX_CASCADE_ITERATIONS=8");
     h.update(b"OVERHEAR_RANGE=30");
+    h.update(b"BuiltinMetrics:tick_ms,event_count,agent_alive,cascade_iterations,mask_true_frac");
+    h.update(b"BuiltinInvariants:mask_validity,pool_non_overlap");
+    h.update(b"FailureMode:Panic,Log,Rollback");
     h.finalize().into()
 }
