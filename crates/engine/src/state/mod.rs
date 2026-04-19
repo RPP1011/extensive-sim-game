@@ -1,12 +1,15 @@
 pub mod agent;
+pub mod agent_types;
 pub mod entity_pool;
 
 use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 pub use agent::{AgentSpawn, MovementMode};
+use agent_types::StatusEffect;
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
+use smallvec::SmallVec;
 
 /// Full SoA agent state — every field `docs/dsl/state.md` commits to, in one
 /// struct. Hot fields are `Vec<T>` indexed by slot and read every tick; cold
@@ -57,6 +60,8 @@ pub struct SimState {
     cold_grid_id:       Vec<Option<u32>>,
     cold_local_pos:     Vec<Option<Vec3>>,
     cold_move_target:   Vec<Option<Vec3>>,
+    // Status effects (state.md §StatusEffect) — per-agent stack.
+    cold_status_effects: Vec<SmallVec<[StatusEffect; 8]>>,
 }
 
 impl SimState {
@@ -90,6 +95,7 @@ impl SimState {
             cold_grid_id:        vec![None; cap],
             cold_local_pos:      vec![None; cap],
             cold_move_target:    vec![None; cap],
+            cold_status_effects: (0..cap).map(|_| SmallVec::new()).collect(),
         }
     }
 
@@ -127,6 +133,7 @@ impl SimState {
         self.cold_grid_id[slot]        = None;
         self.cold_local_pos[slot]      = None;
         self.cold_move_target[slot]    = None;
+        self.cold_status_effects[slot].clear();
         Some(id)
     }
 
@@ -224,6 +231,29 @@ impl SimState {
     }
     pub fn agent_max_mana(&self, id: AgentId) -> Option<f32> {
         self.hot_max_mana.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+
+    // Status effects (Task C).
+    pub fn agent_status_effects(&self, id: AgentId) -> Option<&[StatusEffect]> {
+        self.cold_status_effects
+            .get(AgentSlotPool::slot_of_agent(id))
+            .map(|v| v.as_slice())
+    }
+    pub fn push_agent_status_effect(&mut self, id: AgentId, fx: StatusEffect) {
+        if let Some(v) = self
+            .cold_status_effects
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            v.push(fx);
+        }
+    }
+    pub fn clear_agent_status_effects(&mut self, id: AgentId) {
+        if let Some(v) = self
+            .cold_status_effects
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            v.clear();
+        }
     }
 
     // Per-agent field mutators.
@@ -425,5 +455,8 @@ impl SimState {
     }
     pub fn hot_max_mana(&self) -> &[f32] {
         &self.hot_max_mana
+    }
+    pub fn cold_status_effects(&self) -> &[SmallVec<[StatusEffect; 8]>] {
+        &self.cold_status_effects
     }
 }
