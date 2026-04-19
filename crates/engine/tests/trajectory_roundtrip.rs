@@ -2,13 +2,14 @@ use engine::creature::CreatureType;
 use engine::event::EventRing;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
-use engine::step::step;
+use engine::step::{step, SimScratch};
 use engine::trajectory::{TrajectoryReader, TrajectoryWriter};
 use glam::Vec3;
 
 #[test]
 fn emit_and_reload_trajectory() {
     let mut state = SimState::new(20, 42);
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(10_000);
     for i in 0..5 {
         state.spawn_agent(AgentSpawn {
@@ -19,7 +20,7 @@ fn emit_and_reload_trajectory() {
     }
     let mut writer = TrajectoryWriter::new(5, 50);
     for _ in 0..50 {
-        step(&mut state, &mut events, &UtilityBackend);
+        step(&mut state, &mut scratch, &mut events, &UtilityBackend);
         writer.record_tick(&state);
     }
     let tmp = std::env::temp_dir().join("engine_traj_test.safetensors");
@@ -38,11 +39,12 @@ fn python_roundtrip_preserves_values() {
     use engine::event::EventRing;
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};
-    use engine::step::step;
+    use engine::step::{step, SimScratch};
     use engine::trajectory::TrajectoryWriter;
     use glam::Vec3;
 
     let mut state = SimState::new(10, 42);
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1000);
     for i in 0..3 {
         state.spawn_agent(AgentSpawn {
@@ -53,7 +55,7 @@ fn python_roundtrip_preserves_values() {
     }
     let mut writer = TrajectoryWriter::new(3, 20);
     for _ in 0..20 {
-        step(&mut state, &mut events, &UtilityBackend);
+        step(&mut state, &mut scratch, &mut events, &UtilityBackend);
         writer.record_tick(&state);
     }
     let path_a = std::env::temp_dir().join("engine_traj_python_a.safetensors");

@@ -8,23 +8,50 @@ use crate::state::SimState;
 
 const MOVE_SPEED_MPS: f32 = 1.0;
 
-pub fn step<B: PolicyBackend>(state: &mut SimState, events: &mut EventRing, backend: &B) {
-    let mut mask = MaskBuffer::new(state.agent_cap() as usize);
-    mask.mark_hold_allowed(state);
-    mask.mark_move_allowed_if_others_exist(state);
+/// Per-tick scratch buffers hoisted out of `step` so a steady-state tick loop
+/// allocates zero bytes. Caller constructs once (capacity = `state.agent_cap()`),
+/// reuses across ticks. Buffers are reset/cleared at the top of each `step`.
+pub struct SimScratch {
+    pub mask:        MaskBuffer,
+    pub actions:     Vec<Action>,
+    pub shuffle_idx: Vec<u32>,
+}
 
-    let mut actions: Vec<Action> = Vec::with_capacity(state.agent_cap() as usize);
-    backend.evaluate(state, &mask, &mut actions);
+impl SimScratch {
+    pub fn new(n_agents: usize) -> Self {
+        Self {
+            mask:        MaskBuffer::new(n_agents),
+            actions:     Vec::with_capacity(n_agents),
+            shuffle_idx: Vec::with_capacity(n_agents),
+        }
+    }
+}
 
-    apply_actions(state, &actions, events);
+pub fn step<B: PolicyBackend>(
+    state:   &mut SimState,
+    scratch: &mut SimScratch,
+    events:  &mut EventRing,
+    backend: &B,
+) {
+    scratch.mask.reset();
+    scratch.mask.mark_hold_allowed(state);
+    scratch.mask.mark_move_allowed_if_others_exist(state);
+    scratch.actions.clear();
+    backend.evaluate(state, &scratch.mask, &mut scratch.actions);
+
+    apply_actions(state, &scratch.actions, events, &mut scratch.shuffle_idx);
     state.tick += 1;
 }
 
 /// Fisher-Yates shuffle of action indices using a deterministic PRNG seeded by
 /// `(world_seed, tick)`. This makes action-application order depend on the world
 /// seed (spec §7.2 — determinism contract / first-mover-bias prevention).
-fn shuffled_order(n: usize, world_seed: u64, tick: u32) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..n).collect();
+///
+/// Writes into the caller-owned `order` buffer (cleared + extended in place) so
+/// the per-tick order vec does not re-allocate once `SimScratch` is warm.
+fn shuffle_order_into(order: &mut Vec<u32>, n: usize, world_seed: u64, tick: u32) {
+    order.clear();
+    order.extend(0..n as u32);
     let tick64 = tick as u64;
     // Sentinel agent id 1 is used as a fixed stream discriminator for the
     // per-tick shuffle — distinct from any per-agent decision stream.
@@ -34,13 +61,17 @@ fn shuffled_order(n: usize, world_seed: u64, tick: u32) -> Vec<usize> {
         let j = (r as usize) % (i + 1);
         order.swap(i, j);
     }
-    order
 }
 
-fn apply_actions(state: &mut SimState, actions: &[Action], events: &mut EventRing) {
-    let order = shuffled_order(actions.len(), state.seed, state.tick);
-    for &idx in &order {
-        let action = &actions[idx];
+fn apply_actions(
+    state:   &mut SimState,
+    actions: &[Action],
+    events:  &mut EventRing,
+    order:   &mut Vec<u32>,
+) {
+    shuffle_order_into(order, actions.len(), state.seed, state.tick);
+    for &idx in order.iter() {
+        let action = &actions[idx as usize];
         match action.micro_kind {
             MicroKind::Hold => {}
             MicroKind::MoveToward => {
