@@ -41,6 +41,11 @@ pub fn compute_equipment_durability_for_settlement(
     entities: &[Entity],
     _out: &mut Vec<WorldDelta>,
 ) {
+    // Cadence check — parallel path was missing this, running every tick
+    // instead of every DURABILITY_INTERVAL.
+    if state.tick % DURABILITY_INTERVAL != 0 || state.tick == 0 {
+        return;
+    }
     // Gate: skip degradation if settlement economy has collapsed.
     let treasury = state.settlement(settlement_id)
         .map(|s| s.treasury)

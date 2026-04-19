@@ -35,13 +35,21 @@ pub fn compute_addiction(state: &WorldState, out: &mut Vec<WorldDelta>) {
 
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_addiction_for_settlement(
-    _state: &WorldState,
+    state: &WorldState,
     _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
+    // Cadence check — was missing from the per-settlement variant; parallel
+    // dispatch was running this every tick instead of every 3.
+    if state.tick % ADDICTION_TICK_INTERVAL != 0 {
+        return;
+    }
+
     for entity in entities {
         if !entity.alive { continue; }
+        // Fast path: most entities have no status effects at all.
+        if entity.status_effects.is_empty() { continue; }
 
         // Check if entity has an existing debuff (proxy for addiction state)
         let has_debuff = entity.status_effects.iter().any(|s| {

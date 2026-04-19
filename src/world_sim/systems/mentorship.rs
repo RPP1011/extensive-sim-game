@@ -30,8 +30,11 @@ pub fn compute_mentorship_for_settlement(
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
-    // Jitter cadence is checked in the caller; the per-settlement variant
-    // assumes it has already been gated.
+    // Jittered cadence — the sequential path gates at the dispatcher, but
+    // the parallel path (run_settlement_systems) calls us directly, so we
+    // must check here too.
+    let jitter = _settlement_id as u64 % BASE_CADENCE;
+    if state.tick % BASE_CADENCE != jitter { return; }
 
     // Find Library/Workshop positions at this settlement for proximity check.
     let mut knowledge_buildings: [(f32, f32); 16] = [(0.0, 0.0); 16];

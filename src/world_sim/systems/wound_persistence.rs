@@ -34,11 +34,16 @@ pub fn compute_wound_persistence(state: &WorldState, out: &mut Vec<WorldDelta>) 
 
 /// Per-settlement variant for parallel dispatch.
 pub fn compute_wound_persistence_for_settlement(
-    _state: &WorldState,
+    state: &WorldState,
     _settlement_id: u32,
     entities: &[Entity],
     out: &mut Vec<WorldDelta>,
 ) {
+    // Cadence check — parallel path was missing this, running every tick
+    // instead of every WOUND_HEAL_INTERVAL.
+    if state.tick % WOUND_HEAL_INTERVAL != 0 {
+        return;
+    }
     for entity in entities {
         if !entity.alive || entity.kind != EntityKind::Npc {
             continue;
