@@ -284,17 +284,23 @@ pub fn compute_monster_ecology(state: &WorldState, out: &mut Vec<WorldDelta>) {
     // monster_density increases permanently — creating a "den" that attracts
     // more respawns. This makes some areas naturally more dangerous.
     if state.tick % (ECOLOGY_TICK_INTERVAL * 5) == 0 {
+        // Hoist alive-monster positions once — previously scanned all
+        // entities inside each region loop (O(R × E)). Now O(E + R·M).
+        let monster_positions: Vec<(f32, f32)> = state.entities.iter()
+            .filter(|e| e.alive && e.kind == EntityKind::Monster)
+            .map(|e| e.pos)
+            .collect();
+
         for region in &state.regions {
             // Count monsters loosely associated with this region (by position hash).
             let region_x = (region.id as f32 * 137.5).sin() * 150.0;
             let region_y = (region.id as f32 * 73.1).cos() * 150.0;
 
-            let nearby = state.entities.iter()
-                .filter(|e| e.alive && e.kind == EntityKind::Monster)
-                .filter(|e| {
-                    let dx = e.pos.0 - region_x;
-                    let dy = e.pos.1 - region_y;
-                    dx * dx + dy * dy < 10000.0 // 100 unit radius
+            let nearby = monster_positions.iter()
+                .filter(|&&(x, y)| {
+                    let dx = x - region_x;
+                    let dy = y - region_y;
+                    dx * dx + dy * dy < 10000.0
                 })
                 .count();
 

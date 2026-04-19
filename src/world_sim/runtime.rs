@@ -513,8 +513,10 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     let idx = &state.entity_index;
     let ents = &mut state.entities;
 
-    // HP changes
+    // HP changes — also collect newly-zero-HP IDs so the death phase below
+    // doesn't have to scan all entities.
     let t = Instant::now();
+    let mut newly_dead_ids: Vec<u32> = Vec::new();
     for &id in &m.entity_dirty {
         let i = id as usize;
         let damage = m.damage[i];
@@ -538,6 +540,9 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
                 e.shield_hp = e.shield_hp - shield_absorb + shield_add;
                 let remaining = damage - shield_absorb;
                 e.hp = (e.hp + heal - remaining).clamp(0.0, e.max_hp);
+                if e.hp <= 0.0 && e.kind != EntityKind::Building && e.kind != EntityKind::Item {
+                    newly_dead_ids.push(id);
+                }
             }
         }
     }
@@ -641,14 +646,44 @@ fn apply_flat(state: &mut WorldState, m: &FlatMergedDeltas) -> ApplyProfile {
     }
     p.economy_us = t.elapsed().as_micros() as u64;
 
-    // Deaths
+    // Deaths — iterate only candidates (delta-marked dead + HP-zeroed this tick)
+    // instead of scanning all entities. This turns an O(E) per-tick walk into
+    // O(newly_dead + |m.dead|).
     let t = Instant::now();
     {
         let mut death_records: Vec<(u32, String, Option<u32>, Option<u32>, u32, EntityKind)> = Vec::new();
         // Collect items to drop from dead NPCs: (item_id, death_pos, settlement_id).
         let mut item_drops: Vec<(u32, (f32, f32), Option<u32>)> = Vec::new();
-        for entity in &mut state.entities {
+
+        // Build candidate ID set: m.dead bitmap + entities we zeroed above.
+        // Dedupe via a small boolean check (entity_id range is dense).
+        let mut seen: Vec<bool> = Vec::new();
+        seen.resize(state.entity_index.len(), false);
+        let mut candidates: Vec<u32> = Vec::with_capacity(newly_dead_ids.len() + 16);
+        for &id in &newly_dead_ids {
+            let i = id as usize;
+            if i < seen.len() && !seen[i] {
+                seen[i] = true;
+                candidates.push(id);
+            }
+        }
+        for (i, &is_dead) in m.dead.iter().enumerate() {
+            if is_dead && i < seen.len() && !seen[i] {
+                seen[i] = true;
+                candidates.push(i as u32);
+            }
+        }
+
+        for cid in candidates {
+            let ei = match state.entity_index.get(cid as usize) {
+                Some(&e) if (e as usize) < state.entities.len() => e as usize,
+                _ => continue,
+            };
+            let entity = &mut state.entities[ei];
             if !entity.alive { continue; }
+            // Re-check the condition (delta may have said dead, but entity
+            // could have been healed above; HP-zeroed check above is
+            // authoritative because it ran AFTER all HP application).
             let is_dead = (entity.id as usize) < m.dead.len() && m.dead[entity.id as usize];
             if is_dead
                 || (entity.hp <= 0.0 && entity.kind != EntityKind::Building && entity.kind != EntityKind::Item)

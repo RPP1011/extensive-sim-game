@@ -39,6 +39,17 @@ pub fn compute_threat(state: &WorldState, out: &mut Vec<WorldDelta>) {
     let season = current_season(state.tick);
     let threat_mod = season_modifiers(season).threat;
 
+    // Hoist: the patrol count doesn't depend on region (the filter uses no
+    // region criteria), so counting it once saves O(regions × entities).
+    // Previously this was 7% of tick time in the default world.
+    let patrol_count = state
+        .entities
+        .iter()
+        .filter(|e| e.alive && e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly)
+        .count() as f32;
+    let regions_count = state.regions.len().max(1) as f32;
+    let patrol_reduction = (patrol_count / regions_count) * PATROL_THREAT_REDUCTION;
+
     for region in &state.regions {
         // --- Compute threat delta from monster density ---
         let density_pressure = if region.monster_density > DENSITY_THREAT_THRESHOLD {
@@ -46,19 +57,6 @@ pub fn compute_threat(state: &WorldState, out: &mut Vec<WorldDelta>) {
         } else {
             0.0
         };
-
-        // --- Count friendly NPC presence in region as patrol ---
-        // Without region_id on entities, we approximate by counting NPCs
-        // near any settlement. This is a simplification.
-        let patrol_count = state
-            .entities
-            .iter()
-            .filter(|e| e.alive && e.kind == EntityKind::Npc && e.team == WorldTeam::Friendly)
-            .count() as f32;
-
-        // Scale patrol effect by number of regions (so total patrol spread matters).
-        let regions_count = state.regions.len().max(1) as f32;
-        let patrol_reduction = (patrol_count / regions_count) * PATROL_THREAT_REDUCTION;
 
         // --- Natural decay ---
         let decay = THREAT_DECAY_RATE;
