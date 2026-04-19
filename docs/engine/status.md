@@ -116,6 +116,8 @@ Concrete ambiguities that code review can't resolve — audit one at a time.
 
 10. **Does `shuffle_actions_in_place` actually reorder?** Determinism tests only check hash equality across runs; they can't distinguish a no-op shuffle from a reordering shuffle that happens to match. Need a test that asserts the permutation of a 10-action vec is non-identity for at least one tick.
 
+11. **Engine has no collision detection.** Multiple agents can occupy the same `Vec3` position simultaneously. Visually worked around in viz via vertical voxel stacking (Plan 3.1). A real fix requires a collision pass in the tick pipeline (probably phase 3.5 between shuffle and apply, or phase 4 as part of apply_actions) that either soft-pushes overlapping agents apart or hard-rejects moves that would land on occupied cells. Scope: out-of-plan; raise in the ability plan's world-physics or as a dedicated Plan.
+
 ## What to look at first (verification order)
 
 The items in priority order for the user to externalize (oracle-verify):
