@@ -8,6 +8,7 @@ pub mod ids;
 pub mod mask;
 pub mod policy;
 pub mod rng;
+pub mod schema_hash;
 pub mod spatial;
 pub mod state;
 pub mod step;
