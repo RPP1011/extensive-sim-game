@@ -57,6 +57,13 @@ pub struct SimState {
     hot_social:         Vec<f32>,
     hot_purpose:        Vec<f32>,
     hot_esteem:         Vec<f32>,
+    // Personality (state.md §Personality; engine uses `altruism` for
+    // what state.md calls `compassion` — same helping/empathy trait).
+    hot_risk_tolerance: Vec<f32>,
+    hot_social_drive:   Vec<f32>,
+    hot_ambition:       Vec<f32>,
+    hot_altruism:       Vec<f32>,
+    hot_curiosity:      Vec<f32>,
 
     // --- Cold SoA — read rarely (spawn, chronicle, debug, narrative) ---
     cold_creature_type: Vec<Option<CreatureType>>,
@@ -100,6 +107,11 @@ impl SimState {
             hot_social:          vec![1.0; cap],
             hot_purpose:         vec![1.0; cap],
             hot_esteem:          vec![1.0; cap],
+            hot_risk_tolerance:  vec![0.5; cap],
+            hot_social_drive:    vec![0.5; cap],
+            hot_ambition:        vec![0.5; cap],
+            hot_altruism:        vec![0.5; cap],
+            hot_curiosity:       vec![0.5; cap],
             cold_creature_type:  vec![None; cap],
             cold_channels:       (0..cap).map(|_| None).collect(),
             cold_spawn_tick:     vec![None; cap],
@@ -142,6 +154,11 @@ impl SimState {
         self.hot_social[slot]          = 1.0;
         self.hot_purpose[slot]         = 1.0;
         self.hot_esteem[slot]          = 1.0;
+        self.hot_risk_tolerance[slot]  = 0.5;
+        self.hot_social_drive[slot]    = 0.5;
+        self.hot_ambition[slot]        = 0.5;
+        self.hot_altruism[slot]        = 0.5;
+        self.hot_curiosity[slot]       = 0.5;
         let caps = Capabilities::for_creature(spec.creature_type);
         self.cold_creature_type[slot]  = Some(spec.creature_type);
         self.cold_channels[slot]       = Some(caps.channels);
@@ -310,6 +327,48 @@ impl SimState {
     }
     pub fn set_agent_esteem(&mut self, id: AgentId, v: f32) {
         if let Some(s) = self.hot_esteem.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+
+    // Personality (Task E).
+    pub fn agent_risk_tolerance(&self, id: AgentId) -> Option<f32> {
+        self.hot_risk_tolerance.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_social_drive(&self, id: AgentId) -> Option<f32> {
+        self.hot_social_drive.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_ambition(&self, id: AgentId) -> Option<f32> {
+        self.hot_ambition.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_altruism(&self, id: AgentId) -> Option<f32> {
+        self.hot_altruism.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_curiosity(&self, id: AgentId) -> Option<f32> {
+        self.hot_curiosity.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn set_agent_risk_tolerance(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_risk_tolerance.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_social_drive(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_social_drive.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_ambition(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_ambition.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_altruism(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_altruism.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_curiosity(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_curiosity.get_mut(AgentSlotPool::slot_of_agent(id)) {
             *s = v;
         }
     }
@@ -533,5 +592,22 @@ impl SimState {
     }
     pub fn hot_esteem(&self) -> &[f32] {
         &self.hot_esteem
+    }
+
+    // Personality bulk slices (Task E).
+    pub fn hot_risk_tolerance(&self) -> &[f32] {
+        &self.hot_risk_tolerance
+    }
+    pub fn hot_social_drive(&self) -> &[f32] {
+        &self.hot_social_drive
+    }
+    pub fn hot_ambition(&self) -> &[f32] {
+        &self.hot_ambition
+    }
+    pub fn hot_altruism(&self) -> &[f32] {
+        &self.hot_altruism
+    }
+    pub fn hot_curiosity(&self) -> &[f32] {
+        &self.hot_curiosity
     }
 }
