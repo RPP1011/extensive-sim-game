@@ -27,7 +27,9 @@ pub enum EventKindId {
     QuestPosted          = 18,
     QuestAccepted        = 19,
     BidPlaced            = 20,
-    // Slots 21-127 reserved for replayable event variants added in later tasks.
+    AnnounceEmitted      = 21,
+    RecordMemory         = 22,
+    // Slots 23-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -55,6 +57,8 @@ impl EventKindId {
             Event::QuestPosted          { .. } => EventKindId::QuestPosted,
             Event::QuestAccepted        { .. } => EventKindId::QuestAccepted,
             Event::BidPlaced            { .. } => EventKindId::BidPlaced,
+            Event::AnnounceEmitted      { .. } => EventKindId::AnnounceEmitted,
+            Event::RecordMemory         { .. } => EventKindId::RecordMemory,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }

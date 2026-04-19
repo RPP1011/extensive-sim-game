@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 pub fn schema_hash() -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(b"SimState:SoA{hot_pos=vec3,hot_hp=f32,hot_max_hp=f32,hot_alive=bool,hot_movement_mode=u8};cold{creature_type=u8,channels=smallvec4,spawn_tick=u32}");
-    h.update(b"Event:AgentMoved,AgentAttacked,AgentDied,AgentFled,AgentAte,AgentDrank,AgentRested,AgentCast,AgentUsedItem,AgentHarvested,AgentPlacedTile,AgentPlacedVoxel,AgentHarvestedVoxel,AgentConversed,AgentSharedStory,AgentCommunicated,InformationRequested,AgentRemembered,QuestPosted,QuestAccepted,BidPlaced,ChronicleEntry");
+    h.update(b"Event:AgentMoved,AgentAttacked,AgentDied,AgentFled,AgentAte,AgentDrank,AgentRested,AgentCast,AgentUsedItem,AgentHarvested,AgentPlacedTile,AgentPlacedVoxel,AgentHarvestedVoxel,AgentConversed,AgentSharedStory,AgentCommunicated,InformationRequested,AgentRemembered,QuestPosted,QuestAccepted,BidPlaced,AnnounceEmitted,RecordMemory,ChronicleEntry");
     h.update(b"MicroKind:Hold,MoveToward,Flee,Attack,Cast,UseItem,Harvest,Eat,Drink,Rest,PlaceTile,PlaceVoxel,HarvestVoxel,Converse,ShareStory,Communicate,Ask,Remember");
     h.update(b"CommunicationChannel:Speech,PackSignal,Pheromone,Song,Telepathy,Testimony");
     h.update(b"CreatureType:Human,Wolf,Deer,Dragon");
@@ -19,8 +19,8 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"QuestCategory:Physical,Political,Personal,Economic,Narrative");
     h.update(b"QueryKind:AboutEntity,AboutKind,AboutAll");
     h.update(b"MemoryKind:Combat,Trade,Social,Political,Other");
-    h.update(b"EventKindId:AgentMoved=0,AgentAttacked=1,AgentDied=2,AgentFled=3,AgentAte=4,AgentDrank=5,AgentRested=6,AgentCast=7,AgentUsedItem=8,AgentHarvested=9,AgentPlacedTile=10,AgentPlacedVoxel=11,AgentHarvestedVoxel=12,AgentConversed=13,AgentSharedStory=14,AgentCommunicated=15,InformationRequested=16,AgentRemembered=17,QuestPosted=18,QuestAccepted=19,BidPlaced=20,ChronicleEntry=128");
-    h.update(b"EventPacking:QuestPosted:resolution_tag+min_parties_byte,BidPlaced:amount_f32bits");
+    h.update(b"EventKindId:AgentMoved=0,AgentAttacked=1,AgentDied=2,AgentFled=3,AgentAte=4,AgentDrank=5,AgentRested=6,AgentCast=7,AgentUsedItem=8,AgentHarvested=9,AgentPlacedTile=10,AgentPlacedVoxel=11,AgentHarvestedVoxel=12,AgentConversed=13,AgentSharedStory=14,AgentCommunicated=15,InformationRequested=16,AgentRemembered=17,QuestPosted=18,QuestAccepted=19,BidPlaced=20,AnnounceEmitted=21,RecordMemory=22,ChronicleEntry=128");
+    h.update(b"EventPacking:QuestPosted:resolution_tag+min_parties_byte,BidPlaced:amount_f32bits,AnnounceEmitted:audience_tag_u8+fact_payload_u64le,RecordMemory:confidence_f32bits");
     h.update(b"Lane:Validation=0,Effect=1,Reaction=2,Audit=3");
     h.update(b"MAX_CASCADE_ITERATIONS=8");
     h.finalize().into()

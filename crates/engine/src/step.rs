@@ -3,9 +3,10 @@ use crate::cascade::CascadeRegistry;
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind};
-use crate::policy::{Action, ActionKind, MacroAction, MicroTarget, PolicyBackend};
+use crate::policy::{Action, ActionKind, AnnounceAudience, MacroAction, MicroTarget, PolicyBackend};
 use crate::rng::per_agent_u32;
 use crate::state::SimState;
+use glam::Vec3;
 
 const MOVE_SPEED_MPS: f32 = 1.0;
 const ATTACK_DAMAGE:  f32 = 10.0;
@@ -13,6 +14,14 @@ const ATTACK_RANGE:   f32 = 2.0;
 const EAT_RESTORE:    f32 = 0.25;
 const DRINK_RESTORE:  f32 = 0.30;
 const REST_RESTORE:   f32 = 0.15;
+
+/// Maximum number of `RecordMemory` events a single `Announce` can emit.
+/// Bounds event-ring pressure even when the audience is very large.
+pub const MAX_ANNOUNCE_RECIPIENTS: usize = 32;
+/// Default hearing radius when `AnnounceAudience::Anyone` is used (and, for
+/// the MVP, the fallback for `AnnounceAudience::Group(_)` until Task 16 wires
+/// real group membership).
+pub const MAX_ANNOUNCE_RADIUS:     f32  = 80.0;
 
 /// Apply a need-restoration desired delta to `current`, clamping the resulting
 /// value at 1.0. Returns `(new_value, applied_delta)` where `applied_delta` is
@@ -305,8 +314,46 @@ fn apply_actions(
                     tick: state.tick,
                 });
             }
-            ActionKind::Macro(MacroAction::Announce { .. }) => {
-                // Task 14 fills this in.
+            ActionKind::Macro(MacroAction::Announce { speaker, audience, fact_payload }) => {
+                events.push(Event::AnnounceEmitted {
+                    speaker,
+                    audience_tag: audience.tag(),
+                    fact_payload,
+                    tick: state.tick,
+                });
+                let (center, radius) = match audience {
+                    AnnounceAudience::Area(c, r) => (c, r),
+                    AnnounceAudience::Anyone => {
+                        let sp = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
+                        (sp, MAX_ANNOUNCE_RADIUS)
+                    }
+                    AnnounceAudience::Group(_) => {
+                        // TODO(Task 16): use group membership. For MVP, fall back to Anyone.
+                        let sp = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
+                        (sp, MAX_ANNOUNCE_RADIUS)
+                    }
+                };
+                // Deterministic iteration: agents_alive() walks slots in order,
+                // so the first MAX_ANNOUNCE_RECIPIENTS within range is reproducible.
+                let mut count = 0usize;
+                for obs in state.agents_alive() {
+                    if count >= MAX_ANNOUNCE_RECIPIENTS { break; }
+                    if obs == speaker { continue; }
+                    let op = match state.agent_pos(obs) {
+                        Some(p) => p,
+                        None    => continue,
+                    };
+                    if op.distance(center) <= radius {
+                        events.push(Event::RecordMemory {
+                            observer:     obs,
+                            source:       speaker,
+                            fact_payload,
+                            confidence:   0.8,
+                            tick:         state.tick,
+                        });
+                        count += 1;
+                    }
+                }
             }
         }
     }

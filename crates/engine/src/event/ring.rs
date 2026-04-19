@@ -264,6 +264,21 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(amount.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
+        Event::AnnounceEmitted { speaker, audience_tag, fact_payload, tick } => {
+            h.update([21u8]);
+            h.update(speaker.raw().to_le_bytes());
+            h.update([*audience_tag]);
+            h.update(fact_payload.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::RecordMemory { observer, source, fact_payload, confidence, tick } => {
+            h.update([22u8]);
+            h.update(observer.raw().to_le_bytes());
+            h.update(source.raw().to_le_bytes());
+            h.update(fact_payload.to_le_bytes());
+            h.update(confidence.to_bits().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
         Event::ChronicleEntry { .. } => {
             // Filtered at the call site; if we reach here, the filter is broken.
             debug_assert!(false, "ChronicleEntry reached replayable hash path");

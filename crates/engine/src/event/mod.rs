@@ -34,6 +34,11 @@ pub enum Event {
     QuestPosted   { poster: AgentId, quest_id: QuestId, category: QuestCategory, resolution: Resolution, tick: u32 },
     QuestAccepted { acceptor: AgentId, quest_id: QuestId, tick: u32 },
     BidPlaced     { bidder: AgentId, auction_id: QuestId, amount: f32, tick: u32 },
+    // Announce fan-out. `AnnounceEmitted` is a single event emitted per speaker;
+    // `RecordMemory` is emitted once per recipient within the audience radius.
+    // `audience_tag` matches `AnnounceAudience::tag()`: 0=Group, 1=Area, 2=Anyone.
+    AnnounceEmitted { speaker: AgentId, audience_tag: u8, fact_payload: u64, tick: u32 },
+    RecordMemory    { observer: AgentId, source: AgentId, fact_payload: u64, confidence: f32, tick: u32 },
     // Non-replayable (chronicle / prose side-channel placeholder)
     ChronicleEntry { tick: u32, template_id: u32 },
 }
@@ -62,6 +67,8 @@ impl Event {
             Event::QuestPosted          { tick, .. } |
             Event::QuestAccepted        { tick, .. } |
             Event::BidPlaced            { tick, .. } |
+            Event::AnnounceEmitted      { tick, .. } |
+            Event::RecordMemory         { tick, .. } |
             Event::ChronicleEntry       { tick, .. } => *tick,
         }
     }
