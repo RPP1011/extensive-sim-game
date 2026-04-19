@@ -12,13 +12,18 @@ fn fresh_grid() -> VoxelGrid { VoxelGrid::new(GRID_SIDE, GRID_SIDE, GRID_SIDE) }
 fn ground_plane_fills_its_layer() {
     let mut g = fresh_grid();
     paint_ground_plane(&mut g);
+    // Top of the slab filled across the full XZ extent.
     for x in [0u32, 1, GRID_SIDE - 1] {
         for z in [0u32, 1, GRID_SIDE - 1] {
             assert_eq!(g.get(x, GROUND_Y, z), Some(PAL_GROUND));
         }
     }
+    // Slab is thick — y=0..=GROUND_Y all ground.
+    for y in 0..=GROUND_Y {
+        assert_eq!(g.get(5, y, 5), Some(PAL_GROUND));
+    }
+    // Above the slab: air.
     assert_eq!(g.get(5, GROUND_Y + 1, 5), Some(PAL_AIR));
-    assert_eq!(g.get(5, GROUND_Y - 1, 5), Some(PAL_AIR));
 }
 
 #[test]

@@ -9,11 +9,22 @@ use crate::palette::{PAL_AIR, PAL_GROUND};
 pub const GRID_SIDE: u32 = 128;
 pub const GROUND_Y:  u32 = 2;
 
+/// Paint a solid ground slab from y=0 up through `GROUND_Y` (inclusive),
+/// covering the full XZ extent of the grid. A single-voxel-thick plane
+/// was previously used but proved nearly invisible at oblique camera
+/// angles — it mip-faded to almost nothing at mip2/mip3. A three-voxel
+/// slab reads as solid ground from any viewpoint the camera can reach.
+///
+/// The slab's XZ extent is always the full grid (`GRID_SIDE`), which
+/// for a 128³ grid comfortably covers any scenario spawn AABB plus the
+/// planned 20 m padding (scenarios live near the grid center).
 pub fn paint_ground_plane(grid: &mut VoxelGrid) {
     let (w, _h, d) = grid.dimensions();
-    for z in 0..d {
-        for x in 0..w {
-            grid.set(x, GROUND_Y, z, PAL_GROUND);
+    for y in 0..=GROUND_Y {
+        for z in 0..d {
+            for x in 0..w {
+                grid.set(x, y, z, PAL_GROUND);
+            }
         }
     }
 }
