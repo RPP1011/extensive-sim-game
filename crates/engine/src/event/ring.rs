@@ -141,6 +141,24 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             }
             h.update(tick.to_le_bytes());
         }
+        Event::AgentAte { agent_id, delta, tick } => {
+            h.update([4u8]);                                   // variant tag
+            h.update(agent_id.raw().to_le_bytes());
+            h.update(delta.to_bits().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentDrank { agent_id, delta, tick } => {
+            h.update([5u8]);                                   // variant tag
+            h.update(agent_id.raw().to_le_bytes());
+            h.update(delta.to_bits().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::AgentRested { agent_id, delta, tick } => {
+            h.update([6u8]);                                   // variant tag
+            h.update(agent_id.raw().to_le_bytes());
+            h.update(delta.to_bits().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
         Event::ChronicleEntry { .. } => {
             // Filtered at the call site; if we reach here, the filter is broken.
             debug_assert!(false, "ChronicleEntry reached replayable hash path");

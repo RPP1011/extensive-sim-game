@@ -107,6 +107,19 @@ impl MaskBuffer {
         }
     }
 
+    /// Mark `Eat`, `Drink`, and `Rest` as always-allowed for every alive agent.
+    /// MVP: no world-state preconditions (e.g. food availability, rest site) —
+    /// those land when the inventory/site systems arrive.
+    pub fn mark_needs_allowed(&mut self, state: &SimState) {
+        let n_kinds = MicroKind::ALL.len();
+        for id in state.agents_alive() {
+            let slot = (id.raw() - 1) as usize;
+            self.micro_kind[slot * n_kinds + MicroKind::Eat   as usize] = true;
+            self.micro_kind[slot * n_kinds + MicroKind::Drink as usize] = true;
+            self.micro_kind[slot * n_kinds + MicroKind::Rest  as usize] = true;
+        }
+    }
+
     /// Mark `Attack` as allowed for every alive agent that has at least one
     /// other alive agent within `ATTACK_RANGE_FOR_MASK`. No target in range →
     /// no attack.

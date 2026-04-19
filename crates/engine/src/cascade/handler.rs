@@ -10,7 +10,10 @@ pub enum EventKindId {
     AgentAttacked   = 1,
     AgentDied       = 2,
     AgentFled       = 3,
-    // Slots 4-127 reserved for replayable event variants added in later tasks.
+    AgentAte        = 4,
+    AgentDrank      = 5,
+    AgentRested     = 6,
+    // Slots 7-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry  = 128,
 }
 
@@ -21,6 +24,9 @@ impl EventKindId {
             Event::AgentAttacked  { .. } => EventKindId::AgentAttacked,
             Event::AgentDied      { .. } => EventKindId::AgentDied,
             Event::AgentFled      { .. } => EventKindId::AgentFled,
+            Event::AgentAte       { .. } => EventKindId::AgentAte,
+            Event::AgentDrank     { .. } => EventKindId::AgentDrank,
+            Event::AgentRested    { .. } => EventKindId::AgentRested,
             Event::ChronicleEntry { .. } => EventKindId::ChronicleEntry,
         }
     }

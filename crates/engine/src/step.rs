@@ -10,6 +10,19 @@ use crate::state::SimState;
 const MOVE_SPEED_MPS: f32 = 1.0;
 const ATTACK_DAMAGE:  f32 = 10.0;
 const ATTACK_RANGE:   f32 = 2.0;
+const EAT_RESTORE:    f32 = 0.25;
+const DRINK_RESTORE:  f32 = 0.30;
+const REST_RESTORE:   f32 = 0.15;
+
+/// Apply a need-restoration desired delta to `current`, clamping the resulting
+/// value at 1.0. Returns `(new_value, applied_delta)` where `applied_delta` is
+/// the post-clamp change (≤ desired when saturated). Events carry the applied
+/// delta so replays observe post-clamp values.
+fn restore_need(current: f32, desired_delta: f32) -> (f32, f32) {
+    let new_val = (current + desired_delta).min(1.0);
+    let applied = new_val - current;
+    (new_val, applied)
+}
 
 /// Per-tick scratch buffers hoisted out of `step` so a steady-state tick loop
 /// allocates zero bytes. Caller constructs once (capacity = `state.agent_cap()`),
@@ -42,6 +55,7 @@ pub fn step<B: PolicyBackend>(
     scratch.mask.mark_move_allowed_if_others_exist(state);
     scratch.mask.mark_flee_allowed_if_threat_exists(state);
     scratch.mask.mark_attack_allowed_if_target_in_range(state);
+    scratch.mask.mark_needs_allowed(state);
     scratch.actions.clear();
     backend.evaluate(state, &scratch.mask, &mut scratch.actions);
 
@@ -144,10 +158,34 @@ fn apply_actions(
                 }
             }
             ActionKind::Micro { kind: MicroKind::Eat, .. } => {
-                // Not implemented in MVP.
+                if let Some(cur) = state.agent_hunger(action.agent) {
+                    let (new_val, applied) = restore_need(cur, EAT_RESTORE);
+                    state.set_agent_hunger(action.agent, new_val);
+                    events.push(Event::AgentAte {
+                        agent_id: action.agent, delta: applied, tick: state.tick,
+                    });
+                }
+            }
+            ActionKind::Micro { kind: MicroKind::Drink, .. } => {
+                if let Some(cur) = state.agent_thirst(action.agent) {
+                    let (new_val, applied) = restore_need(cur, DRINK_RESTORE);
+                    state.set_agent_thirst(action.agent, new_val);
+                    events.push(Event::AgentDrank {
+                        agent_id: action.agent, delta: applied, tick: state.tick,
+                    });
+                }
+            }
+            ActionKind::Micro { kind: MicroKind::Rest, .. } => {
+                if let Some(cur) = state.agent_rest_timer(action.agent) {
+                    let (new_val, applied) = restore_need(cur, REST_RESTORE);
+                    state.set_agent_rest_timer(action.agent, new_val);
+                    events.push(Event::AgentRested {
+                        agent_id: action.agent, delta: applied, tick: state.tick,
+                    });
+                }
             }
             ActionKind::Micro { .. } => {
-                // Other MicroKinds (UseItem, Ask, …) land in Tasks 10–12.
+                // Other MicroKinds (UseItem, Ask, …) land in later tasks.
             }
             ActionKind::Macro(_) => {
                 // Macro dispatch lands in Tasks 13–15.
