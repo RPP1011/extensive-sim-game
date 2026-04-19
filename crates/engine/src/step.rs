@@ -22,6 +22,11 @@ pub const MAX_ANNOUNCE_RECIPIENTS: usize = 32;
 /// the MVP, the fallback for `AnnounceAudience::Group(_)` until Task 16 wires
 /// real group membership).
 pub const MAX_ANNOUNCE_RADIUS:     f32  = 80.0;
+/// Radius around the speaker within which non-recipient bystanders overhear an
+/// `Announce` and record a lower-confidence memory (0.6 vs 0.8 for primary
+/// recipients). Separate from `MAX_ANNOUNCE_RADIUS` — overhear always scans
+/// around the speaker's position, regardless of the primary audience geometry.
+pub const OVERHEAR_RANGE:          f32  = 30.0;
 
 /// Apply a need-restoration desired delta to `current`, clamping the resulting
 /// value at 1.0. Returns `(new_value, applied_delta)` where `applied_delta` is
@@ -335,6 +340,11 @@ fn apply_actions(
                 };
                 // Deterministic iteration: agents_alive() walks slots in order,
                 // so the first MAX_ANNOUNCE_RECIPIENTS within range is reproducible.
+                // SmallVec keeps the overhear-dedup check allocation-free for
+                // steady-state ticks (dhat-heap test doesn't emit Announce, but
+                // keeping this hot-path-clean matches the rest of `step`).
+                let mut primary_observers: smallvec::SmallVec<[AgentId; 32]> =
+                    smallvec::SmallVec::new();
                 let mut count = 0usize;
                 for obs in state.agents_alive() {
                     if count >= MAX_ANNOUNCE_RECIPIENTS { break; }
@@ -351,7 +361,30 @@ fn apply_actions(
                             confidence:   0.8,
                             tick:         state.tick,
                         });
+                        primary_observers.push(obs);
                         count += 1;
+                    }
+                }
+
+                // Overhear scan: bystanders within OVERHEAR_RANGE of the
+                // SPEAKER (not the audience center) who were not primary
+                // recipients get a lower-confidence memory. Speaker excluded.
+                let speaker_pos = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
+                for obs in state.agents_alive() {
+                    if obs == speaker { continue; }
+                    if primary_observers.contains(&obs) { continue; }
+                    let op = match state.agent_pos(obs) {
+                        Some(p) => p,
+                        None    => continue,
+                    };
+                    if op.distance(speaker_pos) <= OVERHEAR_RANGE {
+                        events.push(Event::RecordMemory {
+                            observer:     obs,
+                            source:       speaker,
+                            fact_payload,
+                            confidence:   0.6,
+                            tick:         state.tick,
+                        });
                     }
                 }
             }

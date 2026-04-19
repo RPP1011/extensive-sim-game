@@ -23,5 +23,6 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"EventPacking:QuestPosted:resolution_tag+min_parties_byte,BidPlaced:amount_f32bits,AnnounceEmitted:audience_tag_u8+fact_payload_u64le,RecordMemory:confidence_f32bits");
     h.update(b"Lane:Validation=0,Effect=1,Reaction=2,Audit=3");
     h.update(b"MAX_CASCADE_ITERATIONS=8");
+    h.update(b"OVERHEAR_RANGE=30");
     h.finalize().into()
 }

@@ -122,7 +122,10 @@ fn announce_bounded_by_max_recipients() {
             hp: 100.0,
         })
         .unwrap();
-    // 64 agents, all within radius — should cap at MAX_ANNOUNCE_RECIPIENTS=32.
+    // 64 agents, all within radius — primary audience caps at
+    // MAX_ANNOUNCE_RECIPIENTS=32 (0.8 confidence). The remaining 32 are still
+    // within OVERHEAR_RANGE=30 of the speaker so they receive overhear memories
+    // at 0.6 confidence (Task 15).
     for i in 0..64 {
         let angle = (i as f32 / 64.0) * std::f32::consts::TAU;
         state.spawn_agent(AgentSpawn {
@@ -139,11 +142,19 @@ fn announce_bounded_by_max_recipients() {
         &cascade,
     );
 
-    let recipients: usize = events
-        .iter()
-        .filter(|e| matches!(e, Event::RecordMemory { .. }))
-        .count();
-    assert_eq!(recipients, 32, "bounded by MAX_ANNOUNCE_RECIPIENTS");
+    let mut primary = 0usize;
+    let mut overhear = 0usize;
+    for e in events.iter() {
+        if let Event::RecordMemory { confidence, .. } = e {
+            if (*confidence - 0.8).abs() < 1e-6 {
+                primary += 1;
+            } else if (*confidence - 0.6).abs() < 1e-6 {
+                overhear += 1;
+            }
+        }
+    }
+    assert_eq!(primary, 32, "primary bounded by MAX_ANNOUNCE_RECIPIENTS");
+    assert_eq!(overhear, 32, "remaining 32 bystanders overhear at 0.6");
 }
 
 #[test]
