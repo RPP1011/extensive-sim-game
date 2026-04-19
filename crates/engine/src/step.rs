@@ -3,6 +3,7 @@ use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind};
 use crate::policy::{Action, PolicyBackend};
+use crate::rng::per_agent_u32;
 use crate::state::SimState;
 
 const MOVE_SPEED_MPS: f32 = 1.0;
@@ -19,8 +20,27 @@ pub fn step<B: PolicyBackend>(state: &mut SimState, events: &mut EventRing, back
     state.tick += 1;
 }
 
+/// Fisher-Yates shuffle of action indices using a deterministic PRNG seeded by
+/// `(world_seed, tick)`. This makes action-application order depend on the world
+/// seed (spec §7.2 — determinism contract / first-mover-bias prevention).
+fn shuffled_order(n: usize, world_seed: u64, tick: u32) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..n).collect();
+    let tick64 = tick as u64;
+    // Sentinel agent id 1 is used as a fixed stream discriminator for the
+    // per-tick shuffle — distinct from any per-agent decision stream.
+    let sentinel = AgentId::new(1).unwrap();
+    for i in (1..n).rev() {
+        let r = per_agent_u32(world_seed, sentinel, tick64 * 65536 + i as u64, b"shuffle");
+        let j = (r as usize) % (i + 1);
+        order.swap(i, j);
+    }
+    order
+}
+
 fn apply_actions(state: &mut SimState, actions: &[Action], events: &mut EventRing) {
-    for action in actions {
+    let order = shuffled_order(actions.len(), state.seed, state.tick);
+    for &idx in &order {
+        let action = &actions[idx];
         match action.micro_kind {
             MicroKind::Hold => {}
             MicroKind::MoveToward => {
