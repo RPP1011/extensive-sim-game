@@ -1,10 +1,16 @@
 // crates/engine/src/policy/mod.rs
+pub mod macro_kind;
+pub mod query;
 pub mod utility;
 
 use crate::ids::AgentId;
 use crate::mask::MaskBuffer;
 use crate::mask::MicroKind;
 use crate::state::SimState;
+pub use macro_kind::{
+    AnnounceAudience, MacroAction, MacroKind, QuestCategory, Resolution,
+};
+pub use query::{EntityQueryRef, MemoryKind, QueryKind};
 pub use utility::UtilityBackend;
 
 #[derive(Copy, Clone, Debug, PartialEq)]

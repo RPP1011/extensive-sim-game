@@ -13,5 +13,11 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"CommunicationChannel:Speech,PackSignal,Pheromone,Song,Telepathy,Testimony");
     h.update(b"CreatureType:Human,Wolf,Deer,Dragon");
     h.update(b"MovementMode:Walk,Fly,Swim,Climb");
+    h.update(b"MacroKind:NoOp,PostQuest,AcceptQuest,Bid,Announce");
+    h.update(b"AnnounceAudience:Group,Area,Anyone");
+    h.update(b"Resolution:HighestBid,FirstAcceptable,MutualAgreement,Coalition,Majority");
+    h.update(b"QuestCategory:Physical,Political,Personal,Economic,Narrative");
+    h.update(b"QueryKind:AboutEntity,AboutKind,AboutAll");
+    h.update(b"MemoryKind:Combat,Trade,Social,Political,Other");
     h.finalize().into()
 }
