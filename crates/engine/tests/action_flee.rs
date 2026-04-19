@@ -32,8 +32,10 @@ fn flee_moves_in_opposite_direction_from_threat() {
     let mut events = EventRing::with_cap(1024);
     let cascade = CascadeRegistry::new();
 
+    // Same z-plane so the away-vector is purely +x.
     let _threat = state.spawn_agent(AgentSpawn {
-        creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        creature_type: CreatureType::Human,
+        pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
     }).unwrap();
     let prey = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
@@ -44,8 +46,14 @@ fn flee_moves_in_opposite_direction_from_threat() {
     step(&mut state, &mut scratch, &mut events, &FleeFromFirst, &cascade);
     let pos_after = state.agent_pos(prey).unwrap();
 
-    // prey was east of threat; flee → prey moves further east.
-    assert!(pos_after.x > pos_before.x, "prey should flee east: before={:?} after={:?}", pos_before, pos_after);
+    // prey was east of threat on same z; flee → prey moves further east by
+    // exactly one MOVE_SPEED_MPS (1.0m) along +x. Pins speed magnitude —
+    // an impl using 0.001 or 100 would fail here.
+    let dx = pos_after.x - pos_before.x;
+    assert!((dx - 1.0).abs() < 1e-5,
+        "flee should advance x by exactly MOVE_SPEED_MPS=1.0, got dx={}", dx);
+    assert!((pos_after.y - pos_before.y).abs() < 1e-6, "y drift {}", pos_after.y);
+    assert!((pos_after.z - pos_before.z).abs() < 1e-6, "z drift {}", pos_after.z);
 
     let found = events.iter().any(|e| match e {
         Event::AgentFled { agent_id, .. } => *agent_id == prey,

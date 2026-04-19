@@ -22,7 +22,13 @@ fn agent_moves_toward_nearest_other() {
     }).unwrap();
     step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     let pos_a = state.agent_pos(a).unwrap();
-    assert!(pos_a.x > 0.0, "a moved toward b (expected +x, got {:?})", pos_a);
+    // a moves from (0,0,10) toward b at (50,0,10) by exactly MOVE_SPEED_MPS=1.0.
+    // Direction is pure +x (y and z are equal), so pos_a must be (1.0, 0.0, 10.0).
+    // Pins MOVE_SPEED_MPS — an impl with speed 0.01 or 100 would fail here.
+    assert!((pos_a.x - 1.0).abs() < 1e-5,
+        "x should be exactly 1.0m after one tick at MOVE_SPEED_MPS=1.0, got {}", pos_a.x);
+    assert!((pos_a.y - 0.0).abs() < 1e-6, "y drift {}", pos_a.y);
+    assert!((pos_a.z - 10.0).abs() < 1e-6, "z drift {}", pos_a.z);
     assert!(events.iter().any(|e| matches!(e, Event::AgentMoved { agent_id, .. } if *agent_id == a)));
 }
 
