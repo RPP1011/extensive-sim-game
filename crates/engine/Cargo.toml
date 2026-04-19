@@ -1,0 +1,25 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glam = "0.29"
+smallvec = "1.13"
+ahash = "0.8"
+safetensors = "0.4"
+rayon = "1.10"
+
+[dev-dependencies]
+insta = { version = "1.41", features = ["yaml"] }
+proptest = "1.5"
+dhat = "0.3"
+criterion = "0.5"
+
+[[bench]]
+name = "tick_throughput"
+harness = false
+
+[features]
+default = []
+dhat-heap = []
