@@ -41,7 +41,7 @@ fn mvp_acceptance() {
     let elapsed = t0.elapsed();
 
     dmg.fold(&events);
-    let trace_hash = events.replayable_sha256();
+    let _trace_hash = events.replayable_sha256();
 
     // Acceptance criteria:
     assert_eq!(state.tick, ticks, "tick counter advanced correctly");
@@ -49,12 +49,19 @@ fn mvp_acceptance() {
         elapsed.as_secs_f64() <= 2.0,
         "elapsed {:?} exceeds 2s budget", elapsed
     );
-    // Sanity checks — primitives are exercised (not just defined).
-    assert_eq!(trace_hash.len(), 32, "sha256 hash is 32 bytes");
+    // Proof-of-work checks — the sim actually *did* something across 1000 ticks,
+    // not just advanced the tick counter. Assertions on emission and on the
+    // UtilityBackend's core responsibility (movement toward neighbors).
+    let total_events = events.iter().count();
+    assert!(total_events > 0, "sim produced zero events over 1000 ticks");
+    let moved_any = events.iter().any(|e| matches!(e, engine::event::Event::AgentMoved { .. }));
+    assert!(moved_any,
+        "UtilityBackend + 100 agents must produce at least one AgentMoved event");
+
     let _: f32 = dmg.value(engine::ids::AgentId::new(1).unwrap());
     let tmp = std::env::temp_dir().join("engine_acceptance_traj.safetensors");
     writer.write(&tmp).expect("trajectory writable");
     std::fs::remove_file(&tmp).ok();
 
-    println!("mvp_acceptance: elapsed = {:?}", elapsed);
+    println!("mvp_acceptance: elapsed = {:?}, events = {}", elapsed, total_events);
 }
