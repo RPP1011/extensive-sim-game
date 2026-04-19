@@ -6,7 +6,7 @@ use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 pub use agent::{AgentSpawn, MovementMode};
-use agent_types::{Inventory, Membership, StatusEffect};
+use agent_types::{Inventory, MemoryEvent, Membership, StatusEffect};
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
 use smallvec::SmallVec;
@@ -79,6 +79,10 @@ pub struct SimState {
     cold_memberships:    Vec<SmallVec<[Membership; 4]>>,
     // Inventory (state.md §Inventory) — one per agent.
     cold_inventory:      Vec<Inventory>,
+    // Memory (state.md §Memory) — per-agent event ring. state.md caps at
+    // 20; the stub uses 64-slot SmallVec inline to leave headroom and to
+    // stay Pod-friendly; real ring semantics land with the memory plan.
+    cold_memory:         Vec<SmallVec<[MemoryEvent; 64]>>,
 }
 
 impl SimState {
@@ -125,6 +129,7 @@ impl SimState {
             cold_status_effects: (0..cap).map(|_| SmallVec::new()).collect(),
             cold_memberships:    (0..cap).map(|_| SmallVec::new()).collect(),
             cold_inventory:      vec![Inventory::default(); cap],
+            cold_memory:         (0..cap).map(|_| SmallVec::new()).collect(),
         }
     }
 
@@ -175,6 +180,7 @@ impl SimState {
         self.cold_status_effects[slot].clear();
         self.cold_memberships[slot].clear();
         self.cold_inventory[slot] = Inventory::default();
+        self.cold_memory[slot].clear();
         Some(id)
     }
 
@@ -413,6 +419,23 @@ impl SimState {
     pub fn set_agent_inventory(&mut self, id: AgentId, inv: Inventory) {
         if let Some(s) = self.cold_inventory.get_mut(AgentSlotPool::slot_of_agent(id)) {
             *s = inv;
+        }
+    }
+
+    // Memory (Task I).
+    pub fn agent_memory(&self, id: AgentId) -> Option<&[MemoryEvent]> {
+        self.cold_memory
+            .get(AgentSlotPool::slot_of_agent(id))
+            .map(|v| v.as_slice())
+    }
+    pub fn push_agent_memory(&mut self, id: AgentId, ev: MemoryEvent) {
+        if let Some(v) = self.cold_memory.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            v.push(ev);
+        }
+    }
+    pub fn clear_agent_memory(&mut self, id: AgentId) {
+        if let Some(v) = self.cold_memory.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            v.clear();
         }
     }
 
@@ -662,5 +685,10 @@ impl SimState {
     // Inventory bulk slice (Task H).
     pub fn cold_inventory(&self) -> &[Inventory] {
         &self.cold_inventory
+    }
+
+    // Memory bulk slice (Task I).
+    pub fn cold_memory(&self) -> &[SmallVec<[MemoryEvent; 64]>] {
+        &self.cold_memory
     }
 }
