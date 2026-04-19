@@ -93,7 +93,6 @@ fn golden_hash_anchors_format() {
     // Pin the digest — changes here require a schema-hash bump.
     let actual = ring.replayable_sha256();
     let hex: String = actual.iter().map(|b| format!("{:02x}", b)).collect();
-    // First run: this will fail; copy the printed hex and substitute below.
     assert_eq!(hex, "a6e663e9d88b14d850e0aa121906cc19c5db4de7e8046789962a9ea2a9e20ffd",
                "hash drift detected — see comment");
 }

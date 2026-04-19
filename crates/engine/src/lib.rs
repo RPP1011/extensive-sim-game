@@ -10,5 +10,6 @@ pub mod policy;
 pub mod rng;
 pub mod spatial;
 pub mod state;
+pub mod step;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -3,8 +3,8 @@ use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 
 pub struct EventRing {
-    buf: VecDeque<Event>,
-    cap: usize,
+    buf:   VecDeque<Event>,
+    cap:   usize,
 }
 
 impl EventRing {

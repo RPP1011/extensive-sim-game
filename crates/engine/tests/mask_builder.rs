@@ -8,7 +8,7 @@ fn mask_buffer_allocates_per_agent_per_head() {
     let n_agents = 10;
     let mask = MaskBuffer::new(n_agents);
     assert_eq!(mask.micro_kind.len(), n_agents * MicroKind::ALL.len());
-    assert!(mask.micro_kind.iter().all(|&b| b == false), "initial all-false");
+    assert!(mask.micro_kind.iter().all(|&b| !b), "initial all-false");
 }
 
 #[test]
