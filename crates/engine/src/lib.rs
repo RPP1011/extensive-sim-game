@@ -7,6 +7,7 @@ pub mod channel;
 pub mod creature;
 pub mod event;
 pub mod ids;
+pub mod invariant;
 pub mod mask;
 pub mod policy;
 pub mod pool;
