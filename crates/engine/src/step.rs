@@ -1,4 +1,5 @@
 // crates/engine/src/step.rs
+use crate::cascade::CascadeRegistry;
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind};
@@ -32,6 +33,7 @@ pub fn step<B: PolicyBackend>(
     scratch: &mut SimScratch,
     events:  &mut EventRing,
     backend: &B,
+    cascade: &CascadeRegistry,
 ) {
     scratch.mask.reset();
     scratch.mask.mark_hold_allowed(state);
@@ -40,6 +42,7 @@ pub fn step<B: PolicyBackend>(
     backend.evaluate(state, &scratch.mask, &mut scratch.actions);
 
     apply_actions(state, &scratch.actions, events, &mut scratch.shuffle_idx);
+    cascade.run_fixed_point(state, events);
     state.tick += 1;
 }
 

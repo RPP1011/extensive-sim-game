@@ -7,6 +7,12 @@ use crate::state::SimState;
 /// `[lane as usize][kind as u8 as usize]`.
 const KIND_SLOTS: usize = 256;
 
+/// Maximum number of cascade dispatch passes per `run_fixed_point` call.
+/// If handlers keep pushing new events beyond this bound, the cascade is
+/// considered non-converging: dev builds panic, release builds log and
+/// truncate.
+pub const MAX_CASCADE_ITERATIONS: usize = 8;
+
 pub struct CascadeRegistry {
     table: Vec<Vec<Vec<Box<dyn CascadeHandler>>>>,
 }
@@ -33,6 +39,49 @@ impl CascadeRegistry {
                 handler.handle(event, state, events);
             }
         }
+    }
+
+    /// Dispatch any events pushed to `events` that haven't been dispatched yet,
+    /// iterating until no new events are emitted, bounded by
+    /// `MAX_CASCADE_ITERATIONS`. In dev builds non-convergence panics; in
+    /// release it logs and truncates.
+    ///
+    /// Uses the ring's persistent `dispatched` cursor so multiple calls (e.g.
+    /// one per tick) don't re-dispatch past events. Within a single call,
+    /// iteration continues as long as handlers push new events, up to the
+    /// iteration bound.
+    pub fn run_fixed_point(&self, state: &mut SimState, events: &mut EventRing) {
+        let mut processed = events.dispatched();
+        for iter in 0..MAX_CASCADE_ITERATIONS {
+            let snapshot = events.total_pushed();
+            if snapshot == processed {
+                events.set_dispatched(processed);
+                return;
+            }
+            for idx in processed..snapshot {
+                if let Some(e) = events.get_pushed(idx) {
+                    self.dispatch(&e, state, events);
+                }
+            }
+            processed = snapshot;
+            if iter == MAX_CASCADE_ITERATIONS - 1 {
+                // Check again — if handlers emitted MORE events in the last pass,
+                // we're about to truncate.
+                if events.total_pushed() > processed {
+                    #[cfg(debug_assertions)]
+                    panic!(
+                        "cascade did not converge within {} iterations (tick pushes: {} → {})",
+                        MAX_CASCADE_ITERATIONS, processed, events.total_pushed()
+                    );
+                    #[cfg(not(debug_assertions))]
+                    eprintln!(
+                        "cascade truncated at {} iterations",
+                        MAX_CASCADE_ITERATIONS,
+                    );
+                }
+            }
+        }
+        events.set_dispatched(events.total_pushed());
     }
 }
 

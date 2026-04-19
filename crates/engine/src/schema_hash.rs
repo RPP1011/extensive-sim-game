@@ -19,5 +19,8 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"QuestCategory:Physical,Political,Personal,Economic,Narrative");
     h.update(b"QueryKind:AboutEntity,AboutKind,AboutAll");
     h.update(b"MemoryKind:Combat,Trade,Social,Political,Other");
+    h.update(b"EventKindId:AgentMoved=0,AgentAttacked=1,AgentDied=2,ChronicleEntry=128");
+    h.update(b"Lane:Validation=0,Effect=1,Reaction=2,Audit=3");
+    h.update(b"MAX_CASCADE_ITERATIONS=8");
     h.finalize().into()
 }

@@ -5,6 +5,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 #[cfg(feature = "dhat-heap")]
 #[test]
 fn steady_state_zero_alloc_after_warmup() {
+    use engine::cascade::CascadeRegistry;
     use engine::creature::CreatureType;
     use engine::event::EventRing;
     use engine::policy::UtilityBackend;
@@ -15,6 +16,7 @@ fn steady_state_zero_alloc_after_warmup() {
     let mut state = SimState::new(100, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(100_000);
+    let cascade = CascadeRegistry::new();
     for i in 0..50 {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
@@ -24,12 +26,12 @@ fn steady_state_zero_alloc_after_warmup() {
     }
 
     for _ in 0..100 {
-        step(&mut state, &mut scratch, &mut events, &UtilityBackend);
+        step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     }
 
     let profiler = dhat::Profiler::builder().testing().build();
     for _ in 0..100 {
-        step(&mut state, &mut scratch, &mut events, &UtilityBackend);
+        step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     }
     let stats = dhat::HeapStats::get();
     drop(profiler);

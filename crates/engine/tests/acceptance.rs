@@ -1,6 +1,7 @@
 //! End-to-end acceptance — exercises every primitive named in the plan's
 //! acceptance criteria. If this passes, the MVP is done.
 
+use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
 use engine::event::EventRing;
 use engine::policy::UtilityBackend;
@@ -19,6 +20,7 @@ fn mvp_acceptance() {
     let mut state = SimState::new(n_agents + 10, seed);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1_000_000);
+    let cascade = CascadeRegistry::new();
     let mut dmg = DamageTaken::new(state.agent_cap() as usize);
     let mut writer = TrajectoryWriter::new(n_agents as usize, ticks as usize);
 
@@ -33,7 +35,7 @@ fn mvp_acceptance() {
 
     let t0 = std::time::Instant::now();
     for _ in 0..ticks {
-        step(&mut state, &mut scratch, &mut events, &UtilityBackend);
+        step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
         writer.record_tick(&state);
     }
     let elapsed = t0.elapsed();

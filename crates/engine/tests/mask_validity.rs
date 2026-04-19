@@ -1,3 +1,4 @@
+use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
 use engine::event::EventRing;
 use engine::mask::MicroKind;
@@ -11,6 +12,7 @@ fn all_chosen_actions_pass_their_mask() {
     let mut state = SimState::new(50, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(100_000);
+    let cascade = CascadeRegistry::new();
     for i in 0..20 {
         let angle = (i as f32 / 20.0) * std::f32::consts::TAU;
         state.spawn_agent(AgentSpawn {
@@ -21,7 +23,7 @@ fn all_chosen_actions_pass_their_mask() {
     }
 
     for _ in 0..500 {
-        step(&mut state, &mut scratch, &mut events, &UtilityBackend);
+        step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
         // After step, scratch.actions holds the tick's actions and
         // scratch.mask holds the mask that was used to produce them.
         for action in &scratch.actions {

@@ -1,3 +1,4 @@
+use engine::cascade::CascadeRegistry;
 use engine::event::EventRing;
 use engine::policy::UtilityBackend;
 use engine::state::{SimState, AgentSpawn};
@@ -9,6 +10,7 @@ fn run(seed: u64, n_agents: u32, ticks: u32) -> [u8; 32] {
     let mut state = SimState::new(n_agents + 10, seed);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1_000_000);
+    let cascade = CascadeRegistry::new();
     for i in 0..n_agents {
         let angle = (i as f32 / n_agents as f32) * std::f32::consts::TAU;
         state.spawn_agent(AgentSpawn {
@@ -17,7 +19,7 @@ fn run(seed: u64, n_agents: u32, ticks: u32) -> [u8; 32] {
             hp: 100.0,
         });
     }
-    for _ in 0..ticks { step(&mut state, &mut scratch, &mut events, &UtilityBackend); }
+    for _ in 0..ticks { step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade); }
     events.replayable_sha256()
 }
 

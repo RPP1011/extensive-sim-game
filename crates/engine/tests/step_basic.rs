@@ -1,3 +1,4 @@
+use engine::cascade::CascadeRegistry;
 use engine::event::EventRing;
 use engine::policy::UtilityBackend;
 use engine::state::{SimState, AgentSpawn};
@@ -10,11 +11,12 @@ fn step_advances_tick_and_emits_no_events_for_hold() {
     let mut state = SimState::new(5, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(100);
+    let cascade = CascadeRegistry::new();
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
     });
-    step(&mut state, &mut scratch, &mut events, &UtilityBackend);
+    step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     assert_eq!(state.tick, 1);
     assert_eq!(events.iter().count(), 0, "Hold produces no events");
 }
@@ -29,13 +31,14 @@ fn step_is_reproducible_for_same_seed() {
         let mut state = SimState::new(10, seed);
         let mut scratch = SimScratch::new(state.agent_cap() as usize);
         let mut events = EventRing::with_cap(1000);
+        let cascade = CascadeRegistry::new();
         for i in 0..5 {
             state.spawn_agent(AgentSpawn {
                 creature_type: CreatureType::Human,
                 pos: Vec3::new(i as f32, 0.0, 10.0), hp: 100.0,
             });
         }
-        for _ in 0..100 { step(&mut state, &mut scratch, &mut events, &UtilityBackend); }
+        for _ in 0..100 { step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade); }
         events.replayable_sha256()
     }
     assert_eq!(trace(42), trace(42), "same seed → same trace (Hold-only is trivially deterministic)");

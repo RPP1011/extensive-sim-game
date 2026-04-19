@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
 use engine::event::EventRing;
 use engine::policy::UtilityBackend;
@@ -15,6 +16,7 @@ fn bench_tick(c: &mut Criterion) {
                 let mut state = SimState::new((n as u32) + 10, 42);
                 let mut scratch = SimScratch::new(state.agent_cap() as usize);
                 let mut events = EventRing::with_cap(100_000);
+                let cascade = CascadeRegistry::new();
                 for i in 0..n {
                     let angle = (i as f32 / n as f32) * std::f32::consts::TAU;
                     state.spawn_agent(AgentSpawn {
@@ -24,7 +26,7 @@ fn bench_tick(c: &mut Criterion) {
                     });
                 }
                 for _ in 0..1000 {
-                    step(&mut state, &mut scratch, &mut events, &UtilityBackend);
+                    step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
                 }
                 black_box(&state);
             });

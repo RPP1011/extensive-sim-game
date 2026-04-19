@@ -16,6 +16,12 @@ pub struct EventRing {
     cap:          usize,
     current_tick: u32,
     next_seq:     u32,
+    total_pushed: usize,
+    /// Monotonic cursor: the index of the next event to dispatch. Updated by
+    /// `CascadeRegistry::run_fixed_point` via `set_dispatched(..)`. Survives
+    /// ring eviction because it's an index into `total_pushed`, not into
+    /// `entries`.
+    dispatched:   usize,
 }
 
 impl EventRing {
@@ -26,6 +32,8 @@ impl EventRing {
             cap,
             current_tick: 0,
             next_seq:     0,
+            total_pushed: 0,
+            dispatched:   0,
         }
     }
 
@@ -51,8 +59,30 @@ impl EventRing {
         }
         let id = EventId { tick, seq: self.next_seq };
         self.next_seq += 1;
+        self.total_pushed += 1;
         self.entries.push_back(Entry { event: e, id, cause });
         id
+    }
+
+    /// Total number of pushes ever — even those evicted from the ring.
+    pub fn total_pushed(&self) -> usize { self.total_pushed }
+
+    /// The index of the next undispatched event. Used by the cascade dispatcher
+    /// to resume scanning across multiple `run_fixed_point` calls.
+    pub fn dispatched(&self) -> usize { self.dispatched }
+
+    /// Advance the dispatched-cursor. Clamped to `total_pushed`.
+    pub fn set_dispatched(&mut self, idx: usize) {
+        self.dispatched = idx.min(self.total_pushed);
+    }
+
+    /// Look up an event by its monotonic push index. Returns None if the event
+    /// has been evicted or if the index is out of range.
+    pub fn get_pushed(&self, idx: usize) -> Option<Event> {
+        let first = self.total_pushed.saturating_sub(self.entries.len());
+        if idx < first { return None; }
+        let local = idx - first;
+        self.entries.get(local).map(|e| e.event)
     }
 
     /// Look up the parent event id for a given event id, if any.
