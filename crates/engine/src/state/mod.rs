@@ -36,6 +36,14 @@ pub struct SimState {
     hot_level:          Vec<u32>,
     hot_move_speed:     Vec<f32>,
     hot_move_speed_mult: Vec<f32>,
+    // Combat extras (state.md §Combat/Vitality)
+    hot_shield_hp:      Vec<f32>,
+    hot_armor:          Vec<f32>,
+    hot_magic_resist:   Vec<f32>,
+    hot_attack_damage:  Vec<f32>,
+    hot_attack_range:   Vec<f32>,
+    hot_mana:           Vec<f32>,
+    hot_max_mana:       Vec<f32>,
     // Physiological needs (engine MVP, used by Plan 1 Eat/Drink/Rest)
     hot_hunger:         Vec<f32>,
     hot_thirst:         Vec<f32>,
@@ -66,6 +74,13 @@ impl SimState {
             hot_level:           vec![1; cap],
             hot_move_speed:      vec![1.0; cap],
             hot_move_speed_mult: vec![1.0; cap],
+            hot_shield_hp:       vec![0.0; cap],
+            hot_armor:           vec![0.0; cap],
+            hot_magic_resist:    vec![0.0; cap],
+            hot_attack_damage:   vec![10.0; cap],
+            hot_attack_range:    vec![2.0; cap],
+            hot_mana:            vec![0.0; cap],
+            hot_max_mana:        vec![0.0; cap],
             hot_hunger:          vec![1.0; cap],
             hot_thirst:          vec![1.0; cap],
             hot_rest_timer:      vec![1.0; cap],
@@ -95,6 +110,13 @@ impl SimState {
         self.hot_level[slot]           = 1;
         self.hot_move_speed[slot]      = 1.0;
         self.hot_move_speed_mult[slot] = 1.0;
+        self.hot_shield_hp[slot]       = 0.0;
+        self.hot_armor[slot]           = 0.0;
+        self.hot_magic_resist[slot]    = 0.0;
+        self.hot_attack_damage[slot]   = 10.0;
+        self.hot_attack_range[slot]    = 2.0;
+        self.hot_mana[slot]            = 0.0;
+        self.hot_max_mana[slot]        = 0.0;
         self.hot_hunger[slot]          = 1.0;
         self.hot_thirst[slot]          = 1.0;
         self.hot_rest_timer[slot]      = 1.0;
@@ -181,6 +203,29 @@ impl SimState {
         self.cold_move_target.get(AgentSlotPool::slot_of_agent(id)).copied().flatten()
     }
 
+    // Combat extras (Task B).
+    pub fn agent_shield_hp(&self, id: AgentId) -> Option<f32> {
+        self.hot_shield_hp.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_armor(&self, id: AgentId) -> Option<f32> {
+        self.hot_armor.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_magic_resist(&self, id: AgentId) -> Option<f32> {
+        self.hot_magic_resist.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_attack_damage(&self, id: AgentId) -> Option<f32> {
+        self.hot_attack_damage.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_attack_range(&self, id: AgentId) -> Option<f32> {
+        self.hot_attack_range.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_mana(&self, id: AgentId) -> Option<f32> {
+        self.hot_mana.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_max_mana(&self, id: AgentId) -> Option<f32> {
+        self.hot_max_mana.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+
     // Per-agent field mutators.
     pub fn set_agent_pos(&mut self, id: AgentId, pos: Vec3) {
         let slot = AgentSlotPool::slot_of_agent(id);
@@ -244,6 +289,43 @@ impl SimState {
     }
     pub fn set_agent_move_target(&mut self, id: AgentId, v: Option<Vec3>) {
         if let Some(s) = self.cold_move_target.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+
+    // Combat-extras setters (Task B).
+    pub fn set_agent_shield_hp(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_shield_hp.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_armor(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_armor.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_magic_resist(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_magic_resist.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_attack_damage(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_attack_damage.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_attack_range(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_attack_range.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_mana(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_mana.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_max_mana(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_max_mana.get_mut(AgentSlotPool::slot_of_agent(id)) {
             *s = v;
         }
     }
@@ -320,5 +402,28 @@ impl SimState {
     }
     pub fn cold_move_target(&self) -> &[Option<Vec3>] {
         &self.cold_move_target
+    }
+
+    // Combat-extras bulk slices (Task B).
+    pub fn hot_shield_hp(&self) -> &[f32] {
+        &self.hot_shield_hp
+    }
+    pub fn hot_armor(&self) -> &[f32] {
+        &self.hot_armor
+    }
+    pub fn hot_magic_resist(&self) -> &[f32] {
+        &self.hot_magic_resist
+    }
+    pub fn hot_attack_damage(&self) -> &[f32] {
+        &self.hot_attack_damage
+    }
+    pub fn hot_attack_range(&self) -> &[f32] {
+        &self.hot_attack_range
+    }
+    pub fn hot_mana(&self) -> &[f32] {
+        &self.hot_mana
+    }
+    pub fn hot_max_mana(&self) -> &[f32] {
+        &self.hot_max_mana
     }
 }
