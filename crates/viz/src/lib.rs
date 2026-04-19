@@ -4,4 +4,5 @@
 
 pub mod grid_paint;
 pub mod palette;
-// `overlays` and `scenario` are added in Tasks 2 & 4 — leave out for now.
+pub mod scenario;
+// overlays added in Task 4

@@ -8,15 +8,14 @@ use winit::window::{Window, WindowId};
 use crate::state::{AppState, WINDOW_WIDTH, WINDOW_HEIGHT};
 
 pub struct VizApp {
-    pub state: Option<AppState>,
+    pub scenario: Option<viz::scenario::Scenario>,
+    pub state:    Option<AppState>,
 }
 
 impl VizApp {
-    pub fn new() -> Self { Self { state: None } }
-}
-
-impl Default for VizApp {
-    fn default() -> Self { Self::new() }
+    pub fn new(scenario: viz::scenario::Scenario) -> Self {
+        Self { scenario: Some(scenario), state: None }
+    }
 }
 
 impl ApplicationHandler for VizApp {
@@ -29,12 +28,10 @@ impl ApplicationHandler for VizApp {
             Ok(w) => w,
             Err(e) => { eprintln!("[viz] create_window failed: {}", e); event_loop.exit(); return; }
         };
-        match AppState::new(window) {
-            Ok(app) => {
-                eprintln!("[viz] Ready. WASDQE moves camera, RMB drag to look, Esc to quit.");
-                self.state = Some(app);
-            }
-            Err(e) => { eprintln!("[viz] AppState::new failed: {}", e); event_loop.exit(); }
+        let scenario = self.scenario.take().expect("scenario set before resumed");
+        match AppState::new(window, scenario) {
+            Ok(app) => { eprintln!("[viz] Ready."); self.state = Some(app); }
+            Err(e)  => { eprintln!("[viz] AppState::new failed: {}", e); event_loop.exit(); }
         }
     }
 
@@ -83,10 +80,10 @@ impl ApplicationHandler for VizApp {
     }
 }
 
-pub fn run() -> Result<()> {
+pub fn run(scenario: viz::scenario::Scenario) -> Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-    let mut app = VizApp::new();
+    let mut app = VizApp::new(scenario);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
