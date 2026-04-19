@@ -1,0 +1,52 @@
+name: Nightly Fuzz
+
+on:
+  schedule:
+    # Every night at 07:00 UTC (after typical CI runs).
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    # Manual trigger for smoke-checks from the Actions tab.
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [event_ring, apply_actions]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly + cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup default nightly
+          cargo install cargo-fuzz --locked
+
+      - name: Cache cargo/target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/engine/fuzz/target
+          key: ${{ runner.os }}-fuzz-${{ hashFiles('crates/engine/fuzz/Cargo.lock', 'crates/engine/Cargo.toml') }}
+
+      - name: Build fuzz target
+        working-directory: crates/engine/fuzz
+        run: cargo +nightly fuzz build ${{ matrix.target }}
+
+      - name: Run fuzz target (10 minutes)
+        working-directory: crates/engine/fuzz
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=600
+
+      - name: Upload crash artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: |
+            crates/engine/fuzz/artifacts/${{ matrix.target }}/
+            crates/engine/fuzz/corpus/${{ matrix.target }}/
+          if-no-files-found: ignore
+          retention-days: 30
