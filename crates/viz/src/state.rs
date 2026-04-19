@@ -2,7 +2,7 @@
 //! but far smaller: one GpuVoxelTexture, no chunk pool, no terrain
 //! compute, no mega-chunk bookkeeping.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -17,8 +17,8 @@ use voxel_engine::voxel::grid::VoxelGrid;
 use winit::keyboard::KeyCode;
 use winit::window::Window;
 
-use viz::grid_paint::{clear_above_ground, paint_ground_plane, GRID_SIDE};
-use viz::palette::build_palette_rgba;
+use viz::grid_paint::{clear_above_ground, grid_index_of, paint_ground_plane, GRID_SIDE};
+use viz::palette::{build_palette_rgba, PAL_DEATH};
 
 // Matches src/world_sim/constants.rs for visual consistency with legacy renderer.
 pub const RENDER_WIDTH:  u32 =  480;
@@ -231,13 +231,79 @@ impl AppState {
         self.overlays.ingest_with_state(&self.events, &self.sim);
         self.overlays.prune(self.sim.tick);
 
+        // -----------------------------------------------------------
+        // Vertical stacking workaround (Plan 3.1 Task 3).
+        //
+        // The engine has NO collision detection — multiple agents can
+        // (and frequently do) occupy the same Vec3 position. When we
+        // paint each agent into a single voxel cell they overwrite each
+        // other and the render visually collapses several agents into
+        // one cube, hiding casualties of that bug. We paper over this
+        // presentationally by bucketing agents by their (x, z) voxel
+        // index and stacking them on the Y axis — alive agents first
+        // at the base height, then death markers above — so every
+        // agent + death overlay is visible as a distinct cube even when
+        // the underlying positions overlap.
+        //
+        // This is PURELY VISUAL. SimState positions are unchanged. The
+        // real fix (a collision pass in the tick pipeline) is tracked
+        // separately; see `docs/engine/status.md`.
+        // -----------------------------------------------------------
+        // (x, z) → [(palette_idx, base_y)] for alive agents.
+        let mut alive_by_cell: HashMap<(u32, u32), Vec<(u8, u32)>> = HashMap::new();
         for id in self.sim.agents_alive() {
             let pos = match self.sim.agent_pos(id) { Some(p) => p, None => continue };
             let ct  = self.sim.agent_creature_type(id).unwrap_or(engine::creature::CreatureType::Human);
             let idx = viz::palette::creature_palette_index(ct);
-            viz::grid_paint::paint_agent(&mut self.grid, pos, idx);
+            let lifted = Vec3::new(
+                pos.x,
+                pos.y.max((viz::grid_paint::GROUND_Y + 1) as f32),
+                pos.z,
+            );
+            if let Some((x, y, z)) = grid_index_of(lifted, &self.grid) {
+                alive_by_cell.entry((x, z)).or_default().push((idx, y));
+            }
         }
-        self.overlays.paint_into(&mut self.grid, self.sim.tick);
+        // Bucket death markers by the same (x, z) grid so they can stack
+        // on top of any alive agents (or other deaths) sharing the cell.
+        let mut deaths_by_cell: HashMap<(u32, u32), Vec<u32>> = HashMap::new();
+        for at in self.overlays.death_positions() {
+            let lifted = Vec3::new(
+                at.x,
+                at.y.max((viz::grid_paint::GROUND_Y + 1) as f32),
+                at.z,
+            );
+            if let Some((x, y, z)) = grid_index_of(lifted, &self.grid) {
+                deaths_by_cell.entry((x, z)).or_default().push(y);
+            }
+        }
+        // Paint alive agents at base y, then death markers stacked above.
+        let grid_h = self.grid.dimensions().1;
+        for ((x, z), stack) in &alive_by_cell {
+            for (offset, (idx, base_y)) in stack.iter().enumerate() {
+                let y = (*base_y).saturating_add(offset as u32);
+                if y < grid_h {
+                    self.grid.set(*x, y, *z, *idx);
+                }
+            }
+        }
+        for ((x, z), deaths) in &deaths_by_cell {
+            let alive_count = alive_by_cell.get(&(*x, *z)).map_or(0, |v| v.len()) as u32;
+            // Use the lowest death marker's intended y as the base; this
+            // handles the rare case of a death at a cell with no alive
+            // tenants correctly.
+            let base_y = deaths.iter().copied().min().unwrap_or(0);
+            for (offset, _) in deaths.iter().enumerate() {
+                let y = base_y.saturating_add(alive_count).saturating_add(offset as u32);
+                if y < grid_h {
+                    self.grid.set(*x, y, *z, PAL_DEATH);
+                }
+            }
+        }
+
+        // Attack lines + announce rings. Death markers are handled
+        // above as part of the stacking pass.
+        self.overlays.paint_non_death(&mut self.grid, self.sim.tick);
 
         self.upload_grid()?;
         let tex = self.gpu_texture.as_ref().expect("upload_grid always populates gpu_texture");

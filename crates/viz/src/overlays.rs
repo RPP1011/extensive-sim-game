@@ -124,6 +124,39 @@ impl OverlayTracker {
         }
     }
 
+    /// Paint attack lines and announce rings, but NOT death markers. The
+    /// caller is responsible for painting death markers as part of the
+    /// agent-stacking pass so they get stacked with any alive agents at
+    /// the same (x, z) voxel cell. See `state::render` for the stacking
+    /// logic and `death_positions` for the companion iterator.
+    pub fn paint_non_death(&self, grid: &mut VoxelGrid, current_tick: u32) {
+        for o in &self.overlays {
+            match o.kind {
+                OverlayKind::AttackLine { from, to } => {
+                    paint_line(grid, from, to, PAL_ATTACK);
+                }
+                OverlayKind::DeathMarker { .. } => { /* handled by stacking pass */ }
+                OverlayKind::AnnounceRing { speaker, born_tick, max_radius } => {
+                    let ttl = ANNOUNCE_RING_TTL_TICKS.max(1) as f32;
+                    let age = current_tick.saturating_sub(born_tick) as f32;
+                    let frac = (age / ttl).clamp(0.0, 1.0);
+                    paint_ring(grid, speaker, max_radius * frac, PAL_ANNOUNCE);
+                }
+            }
+        }
+    }
+
+    /// Iterator over positions of all currently-live death marker overlays.
+    /// Used by the stacking pass so death markers end up above any alive
+    /// agents sharing their (x, z) cell rather than getting hidden under
+    /// them (and vice-versa).
+    pub fn death_positions(&self) -> impl Iterator<Item = Vec3> + '_ {
+        self.overlays.iter().filter_map(|o| match o.kind {
+            OverlayKind::DeathMarker { at } => Some(at),
+            _ => None,
+        })
+    }
+
     pub fn len(&self) -> usize { self.overlays.len() }
     pub fn is_empty(&self) -> bool { self.overlays.is_empty() }
 }

@@ -149,6 +149,7 @@ Run `cargo run -p viz -- <scenario>` and eyeball the result.
 | V6 | Any scenario, paused, pressing `.` | Tick advances by 1 per press; HUD prints `tick={n+1}`. | Pause/step determinism, no accumulator leak. |
 | V7 | Any scenario, pressing `]` 4 times | HUD prints `speed=16.00x`; agents move visibly faster; fps ≥ 30. | Tick accumulator math, burst-cap behavior. |
 | V8 | Any scenario, pressing `R` | Agents snap back to spawn positions; HUD reports `tick=0`; overlays clear. | Reload path cleans sim + overlays. |
+| V9 | `viz_basic.toml`, wait until wolf reaches the human cluster | When humans and wolf converge, you should see a vertical stack of cubes (different colors) where otherwise they'd visually collapse into one cube. | Viz stacking workaround for engine's missing collision detection (Plan 3.1 Task 3). |
 
 Known gaps:
 - V5 requires a test backend that emits `Announce`; `UtilityBackend`
