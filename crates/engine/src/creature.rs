@@ -21,8 +21,8 @@ pub enum CreatureType {
 pub struct LanguageId(NonZeroU16);
 
 impl LanguageId {
-    pub const COMMON:   LanguageId = LanguageId(unsafe { NonZeroU16::new_unchecked(1) });
-    pub const DRACONIC: LanguageId = LanguageId(unsafe { NonZeroU16::new_unchecked(2) });
+    pub const COMMON:   LanguageId = LanguageId(NonZeroU16::new(1).unwrap());
+    pub const DRACONIC: LanguageId = LanguageId(NonZeroU16::new(2).unwrap());
 
     #[inline]
     pub fn new(raw: u16) -> Option<Self> {
