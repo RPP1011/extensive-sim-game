@@ -51,6 +51,12 @@ pub struct SimState {
     hot_hunger:         Vec<f32>,
     hot_thirst:         Vec<f32>,
     hot_rest_timer:     Vec<f32>,
+    // Psychological needs (state.md §Needs — Maslow minus hunger)
+    hot_safety:         Vec<f32>,
+    hot_shelter:        Vec<f32>,
+    hot_social:         Vec<f32>,
+    hot_purpose:        Vec<f32>,
+    hot_esteem:         Vec<f32>,
 
     // --- Cold SoA — read rarely (spawn, chronicle, debug, narrative) ---
     cold_creature_type: Vec<Option<CreatureType>>,
@@ -89,6 +95,11 @@ impl SimState {
             hot_hunger:          vec![1.0; cap],
             hot_thirst:          vec![1.0; cap],
             hot_rest_timer:      vec![1.0; cap],
+            hot_safety:          vec![1.0; cap],
+            hot_shelter:         vec![1.0; cap],
+            hot_social:          vec![1.0; cap],
+            hot_purpose:         vec![1.0; cap],
+            hot_esteem:          vec![1.0; cap],
             cold_creature_type:  vec![None; cap],
             cold_channels:       (0..cap).map(|_| None).collect(),
             cold_spawn_tick:     vec![None; cap],
@@ -126,6 +137,11 @@ impl SimState {
         self.hot_hunger[slot]          = 1.0;
         self.hot_thirst[slot]          = 1.0;
         self.hot_rest_timer[slot]      = 1.0;
+        self.hot_safety[slot]          = 1.0;
+        self.hot_shelter[slot]         = 1.0;
+        self.hot_social[slot]          = 1.0;
+        self.hot_purpose[slot]         = 1.0;
+        self.hot_esteem[slot]          = 1.0;
         let caps = Capabilities::for_creature(spec.creature_type);
         self.cold_creature_type[slot]  = Some(spec.creature_type);
         self.cold_channels[slot]       = Some(caps.channels);
@@ -253,6 +269,48 @@ impl SimState {
             .get_mut(AgentSlotPool::slot_of_agent(id))
         {
             v.clear();
+        }
+    }
+
+    // Psychological needs (Task D).
+    pub fn agent_safety(&self, id: AgentId) -> Option<f32> {
+        self.hot_safety.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_shelter(&self, id: AgentId) -> Option<f32> {
+        self.hot_shelter.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_social(&self, id: AgentId) -> Option<f32> {
+        self.hot_social.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_purpose(&self, id: AgentId) -> Option<f32> {
+        self.hot_purpose.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_esteem(&self, id: AgentId) -> Option<f32> {
+        self.hot_esteem.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn set_agent_safety(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_safety.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_shelter(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_shelter.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_social(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_social.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_purpose(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_purpose.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_esteem(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_esteem.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
         }
     }
 
@@ -458,5 +516,22 @@ impl SimState {
     }
     pub fn cold_status_effects(&self) -> &[SmallVec<[StatusEffect; 8]>] {
         &self.cold_status_effects
+    }
+
+    // Psychological-needs bulk slices (Task D).
+    pub fn hot_safety(&self) -> &[f32] {
+        &self.hot_safety
+    }
+    pub fn hot_shelter(&self) -> &[f32] {
+        &self.hot_shelter
+    }
+    pub fn hot_social(&self) -> &[f32] {
+        &self.hot_social
+    }
+    pub fn hot_purpose(&self) -> &[f32] {
+        &self.hot_purpose
+    }
+    pub fn hot_esteem(&self) -> &[f32] {
+        &self.hot_esteem
     }
 }
