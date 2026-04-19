@@ -102,6 +102,20 @@ impl<T> Pool<T> {
         id.slot()
     }
 
+    /// Number of freed slots currently on the freelist. Exposed for property
+    /// tests that assert `count_alive + freelist_len = next_raw - 1`.
+    pub fn freelist_len(&self) -> usize { self.freelist.len() }
+
+    /// The next allocation counter. Equals 1 + (largest raw ever handed out).
+    /// Exposed for the `count_alive + freelist_len = next_raw - 1` identity.
+    pub fn next_raw(&self) -> u32 { self.next_raw }
+
+    /// Iterator over the freelist's raw values in insertion order. Exposed for
+    /// property tests that assert freelist uniqueness.
+    pub fn freelist_iter(&self) -> impl Iterator<Item = u32> + '_ {
+        self.freelist.iter().copied()
+    }
+
     /// Verify pool consistency: no slot appears as both alive AND in the
     /// freelist, and the freelist contains no duplicate slots. Returns
     /// `true` when consistent. This is the predicate that
