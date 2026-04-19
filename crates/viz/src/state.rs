@@ -101,16 +101,36 @@ impl AppState {
         }
         eprintln!("[viz] Spawned {} agents (cap {})", agent_ids.len(), cap);
 
-        // Camera aims at the spawn centroid; falls back to grid center if empty.
-        let center: Vec3 = if scenario.agent.is_empty() {
-            Vec3::new((GRID_SIDE as f32) * 0.5, 2.0, (GRID_SIDE as f32) * 0.5)
+        // Frame the whole spawn AABB at t=0. Previously we offset eye by a
+        // constant 30 m regardless of spawn radius, which put small
+        // scenarios on-camera but clipped large ones and vice-versa.
+        //
+        // Algorithm (Plan 3.1 Task 2):
+        //   centroid = (min + max) / 2
+        //   span     = |max - min|
+        //   eye      = centroid + (0, span*1.5, span*1.5)   // above + back
+        //   look_at  = centroid                              // straight at group
+        //
+        // `span * 1.5` keeps the whole AABB inside the frustum for FOV=π/4
+        // with comfortable margin. A minimum span (MIN_FRAMING_SPAN) prevents
+        // a single-agent or coincident-spawn scenario from collapsing the
+        // camera onto the subject.
+        const MIN_FRAMING_SPAN: f32 = 20.0;
+        let (centroid, span): (Vec3, f32) = if scenario.agent.is_empty() {
+            let c = Vec3::new((GRID_SIDE as f32) * 0.5, 2.0, (GRID_SIDE as f32) * 0.5);
+            (c, MIN_FRAMING_SPAN)
         } else {
-            let sum: Vec3 = scenario.agent.iter().map(|a| a.position()).sum();
-            sum / (scenario.agent.len() as f32)
+            let first = scenario.agent[0].position();
+            let (mn, mx) = scenario.agent.iter().fold((first, first), |(mn, mx), a| {
+                let p = a.position();
+                (mn.min(p), mx.max(p))
+            });
+            let c = (mn + mx) * 0.5;
+            let s = mn.distance(mx).max(MIN_FRAMING_SPAN);
+            (c, s)
         };
-        let eye = Vec3::new(center.x, center.y + 30.0, center.z - 30.0);
-        let target = Vec3::new(center.x, 2.0, center.z);
-        let mut camera = FreeCamera::new(eye, target);
+        let eye = centroid + Vec3::new(0.0, span * 1.5, span * 1.5);
+        let mut camera = FreeCamera::new(eye, centroid);
         camera.set_move_speed(20.0);
 
         Ok(Self {
