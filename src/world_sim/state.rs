@@ -347,6 +347,8 @@ pub struct SimScratch {
     pub snaps: Vec<super::systems::action_eval::EntitySnap>,
     /// Snap indices grouped by spatial cell; cleared + refilled each call.
     pub snap_grid: std::collections::HashMap<(i32, i32), Vec<usize>, ahash::RandomState>,
+    /// Kind-typed spatial grids (resources / buildings / combatants) — pooled.
+    pub snap_grids_typed: super::systems::action_eval::TypedSnapGrids,
     /// Deferred action decisions; cleared + refilled each call.
     pub deferred: Vec<super::systems::action_eval::DeferredAction>,
 
