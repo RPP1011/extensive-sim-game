@@ -91,6 +91,8 @@ fn apply_actions(
             MicroKind::Attack | MicroKind::Eat => {
                 // Not implemented in MVP.
             }
+            // New variants from the full 18-kind set. Dispatch lands in Tasks 9–12.
+            _ => {}
         }
     }
 }

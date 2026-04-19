@@ -29,5 +29,7 @@ fn utility_score(kind: MicroKind, hp: f32, max_hp: f32) -> f32 {
         MicroKind::MoveToward => 0.3,                      // Prefer moving when mask allows
         MicroKind::Attack     => if hp > max_hp * 0.5 { 0.5 } else { 0.0 },
         MicroKind::Eat        => if hp < max_hp * 0.3 { 0.8 } else { 0.0 },
+        // New variants (Tasks 9–12 will score them explicitly); neutral for MVP.
+        _ => 0.0,
     }
 }

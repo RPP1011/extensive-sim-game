@@ -3,18 +3,44 @@ use crate::state::SimState;
 
 pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 D5
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum MicroKind {
+    // Movement (3)
     Hold        = 0,
     MoveToward  = 1,
-    Attack      = 2,
-    Eat         = 3,
+    Flee        = 2,
+    // Combat (3)
+    Attack      = 3,
+    Cast        = 4,
+    UseItem     = 5,
+    // Resource (4)
+    Harvest     = 6,
+    Eat         = 7,
+    Drink       = 8,
+    Rest        = 9,
+    // Construction (3)
+    PlaceTile    = 10,
+    PlaceVoxel   = 11,
+    HarvestVoxel = 12,
+    // Social (2)
+    Converse     = 13,
+    ShareStory   = 14,
+    // Info push + pull (2)
+    Communicate  = 15,
+    Ask          = 16,
+    // Memory (1)
+    Remember     = 17,
 }
 
 impl MicroKind {
     pub const ALL: &'static [MicroKind] = &[
-        MicroKind::Hold, MicroKind::MoveToward, MicroKind::Attack, MicroKind::Eat,
+        MicroKind::Hold,         MicroKind::MoveToward,   MicroKind::Flee,
+        MicroKind::Attack,       MicroKind::Cast,         MicroKind::UseItem,
+        MicroKind::Harvest,      MicroKind::Eat,          MicroKind::Drink,
+        MicroKind::Rest,         MicroKind::PlaceTile,    MicroKind::PlaceVoxel,
+        MicroKind::HarvestVoxel, MicroKind::Converse,     MicroKind::ShareStory,
+        MicroKind::Communicate,  MicroKind::Ask,          MicroKind::Remember,
     ];
 }
 
