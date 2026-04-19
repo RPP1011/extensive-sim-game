@@ -155,19 +155,36 @@ fn announce_bounded_by_max_recipients() {
         &cascade,
     );
 
-    let mut primary = 0usize;
-    let mut overhear = 0usize;
+    // Collect per-observer sets to verify identity behavior, not just counts.
+    // Each of the 64 non-speaker agents must appear in exactly ONE of the two
+    // sets (primary 0.8 OR overhear 0.6), never both, never neither.
+    use std::collections::HashSet;
+    let mut primary_ids: HashSet<u32> = HashSet::new();
+    let mut overhear_ids: HashSet<u32> = HashSet::new();
     for e in events.iter() {
-        if let Event::RecordMemory { confidence, .. } = e {
+        if let Event::RecordMemory { observer, confidence, .. } = e {
             if (*confidence - 0.8).abs() < 1e-6 {
-                primary += 1;
+                primary_ids.insert(observer.raw());
             } else if (*confidence - 0.6).abs() < 1e-6 {
-                overhear += 1;
+                overhear_ids.insert(observer.raw());
             }
         }
     }
-    assert_eq!(primary, 32, "primary bounded by MAX_ANNOUNCE_RECIPIENTS");
-    assert_eq!(overhear, 32, "remaining 32 bystanders overhear at 0.6");
+    assert_eq!(primary_ids.len(), 32, "primary bounded by MAX_ANNOUNCE_RECIPIENTS");
+    assert_eq!(overhear_ids.len(), 32, "remaining 32 bystanders overhear at 0.6");
+
+    // Disjointness: no agent in both sets (dedup against primary-cap overflow).
+    let intersection: HashSet<_> = primary_ids.intersection(&overhear_ids).collect();
+    assert!(intersection.is_empty(),
+        "primary and overhear sets must be disjoint, overlap: {:?}", intersection);
+
+    // Union covers all 64 spawned non-speaker agents (speaker excluded from both).
+    let union: HashSet<u32> = primary_ids.union(&overhear_ids).copied().collect();
+    let expected_non_speaker: HashSet<u32> = (1u32..=65)
+        .filter(|raw| *raw != speaker.raw())
+        .collect();
+    assert_eq!(union, expected_non_speaker,
+        "primary ∪ overhear must equal all 64 non-speaker agents");
 }
 
 #[test]

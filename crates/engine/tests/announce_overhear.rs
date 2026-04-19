@@ -31,6 +31,9 @@ impl PolicyBackend for AnnouncerSmall {
 
 #[test]
 fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
+    // Boundary-pinning test: OVERHEAR_RANGE = 30m. Bystander at 29.9m must be
+    // included; bystander at 30.1m must be excluded. That pins the constant
+    // to 30m ± 0.2m and blocks silent halving (to 15) or doubling (to 60).
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1024);
@@ -43,10 +46,19 @@ fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
             hp: 100.0,
         })
         .unwrap();
-    let bystander = state
+    // Just inside OVERHEAR_RANGE=30, outside primary Area radius=2:
+    let bystander_in = state
         .spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
-            pos: Vec3::new(15.0, 0.0, 0.0), // within OVERHEAR_RANGE=30, outside primary=2
+            pos: Vec3::new(29.9, 0.0, 0.0),
+            hp: 100.0,
+        })
+        .unwrap();
+    // Just outside OVERHEAR_RANGE=30:
+    let _bystander_out = state
+        .spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Human,
+            pos: Vec3::new(30.1, 0.0, 0.0),
             hp: 100.0,
         })
         .unwrap();
@@ -59,7 +71,8 @@ fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
         &cascade,
     );
 
-    // Exactly one RecordMemory: the bystander, at 0.6 confidence.
+    // Exactly one RecordMemory: the 29.9m bystander, at 0.6 confidence.
+    // The 30.1m bystander must be excluded (pins upper bound).
     let recs: Vec<(AgentId, f32)> = events
         .iter()
         .filter_map(|e| match e {
@@ -71,8 +84,8 @@ fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
             _ => None,
         })
         .collect();
-    assert_eq!(recs.len(), 1);
-    assert_eq!(recs[0].0, bystander);
+    assert_eq!(recs.len(), 1, "exactly one overhear recipient at 29.9m (30.1m excluded)");
+    assert_eq!(recs[0].0, bystander_in);
     assert!((recs[0].1 - 0.6).abs() < 1e-6, "got {}", recs[0].1);
 }
 
