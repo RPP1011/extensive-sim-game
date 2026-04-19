@@ -125,6 +125,22 @@ fn process_births(state: &mut WorldState, tick: u64) {
     // Find married couples who've been married long enough and have room for children.
     let mut births: Vec<(usize, usize, u32)> = Vec::new(); // (parent_a_idx, parent_b_idx, settlement_id)
 
+    // Maturity gate: short-circuit before building the population index.
+    if tick < 1000 { return; }
+
+    // Single pass over entities to build settlement_id → population count.
+    // Previously this was recomputed per candidate parent (O(E²)).
+    let mut pop_by_settlement: std::collections::HashMap<u32, u32, ahash::RandomState> =
+        std::collections::HashMap::default();
+    for e in &state.entities {
+        if !e.alive || e.kind != EntityKind::Npc { continue; }
+        if let Some(npc) = &e.npc {
+            if let Some(sid) = npc.home_settlement_id {
+                *pop_by_settlement.entry(sid).or_insert(0) += 1;
+            }
+        }
+    }
+
     for i in 0..state.entities.len() {
         if births.len() >= 3 { break; } // max 3 births per tick
         let entity = &state.entities[i];
@@ -138,14 +154,8 @@ fn process_births(state: &mut WorldState, tick: u64) {
         // Only process one parent per couple (lower ID to avoid duplicates).
         if entity.id > spouse_id { continue; }
 
-        // Simple maturity gate: no births in the first 1000 ticks of the sim.
-        if tick < 1000 { continue; }
-
-        // Check population cap at settlement.
-        let pop = state.entities.iter()
-            .filter(|e| e.alive && e.kind == EntityKind::Npc
-                && e.npc.as_ref().map(|n| n.home_settlement_id == Some(sid)).unwrap_or(false))
-            .count();
+        // Check population cap at settlement via precomputed index.
+        let pop = *pop_by_settlement.get(&sid).unwrap_or(&0) as usize;
         if pop >= POP_CAP_PER_SETTLEMENT { continue; }
 
         // Find spouse index.

@@ -177,6 +177,11 @@ pub fn advance_contracts(state: &mut WorldState) {
             bidding_open.push((ci, skill_tag));
         }
 
+        // Restrict bidder scan to entities at THIS settlement using the
+        // group_index range. Previously we scanned all entities per open
+        // contract — O(Contracts × E). Now O(Contracts × E_at_settlement).
+        let settlement_range = state.group_index.settlement_entities(settlement_id);
+
         // For each open contract, eligible NPCs submit bids.
         for &(ci, skill_tag) in &bidding_open {
             let max_value = state.settlements[si].service_contracts[ci].max_payment.estimated_value();
@@ -185,7 +190,7 @@ pub fn advance_contracts(state: &mut WorldState) {
             // while iterating entities, so collect first, then push).
             let mut new_bids: Vec<ContractBid> = Vec::new();
 
-            for ei in 0..state.entities.len() {
+            for ei in settlement_range.clone() {
                 let entity = &state.entities[ei];
                 if !entity.alive || entity.kind != EntityKind::Npc {
                     continue;

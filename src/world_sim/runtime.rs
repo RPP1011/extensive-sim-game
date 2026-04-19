@@ -1347,19 +1347,20 @@ impl WorldSim {
         let max_entity_id = initial.entities.iter().map(|e| e.id).max().unwrap_or(0) as usize + 1;
         let max_settlement_id = initial.settlements.iter().map(|s| s.id).max().unwrap_or(0) as usize + 1;
 
-        // Create dedicated thread pool for large worlds.
+        // Create dedicated thread pool. Parallelization kicks in above a
+        // settlement-count threshold (see the tick loop). Cheap to build
+        // the pool unconditionally — we only pay the fork/join cost when
+        // compute_campaign_systems_par is actually called.
         let num_threads = rayon::current_num_threads();
-        let (pool, thread_bufs) = if initial.entities.len() > 10_000 {
+        let (pool, thread_bufs) = {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build()
                 .ok();
             let bufs: Vec<std::sync::Mutex<Vec<WorldDelta>>> = (0..num_threads)
-                .map(|_| std::sync::Mutex::new(Vec::with_capacity(initial.entities.len() * 4 / num_threads)))
+                .map(|_| std::sync::Mutex::new(Vec::with_capacity(initial.entities.len().max(1000) * 4 / num_threads)))
                 .collect();
             (pool, bufs)
-        } else {
-            (None, Vec::new())
         };
 
         let class_gen: Box<dyn super::class_gen::ClassGenerator> =
@@ -1566,8 +1567,11 @@ impl WorldSim {
             }
         }
 
-        // Campaign systems: parallel above 10K entities, sequential below.
-        if self.state.entities.len() > 10_000 {
+        // Campaign systems: parallel if we have multiple settlements AND
+        // enough entities that fork/join overhead is amortized. Threshold
+        // tuned empirically — at 1000 entities the par path wins over the
+        // sequential one by ~10% on the default world.
+        if self.state.settlements.len() >= 2 && self.state.entities.len() >= 1_000 {
             self.compute_campaign_systems_par();
         } else {
             super::systems::compute_all_systems(&self.state, &mut self.delta_buf);
