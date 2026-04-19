@@ -90,6 +90,12 @@ Temporary state modifier on an entity.
 
 Maslow-inspired primary drives. Range 0–100. Higher = more satisfied.
 
+> **Engine note.** The runtime engine (`crates/engine/src/state/`) carries
+> the Maslow-5 (`safety/shelter/social/purpose/esteem`) *plus* three
+> physiological needs (`hunger/thirst/rest_timer`) that Plan 1
+> Eat/Drink/Rest actions read — 8 needs total. `hunger` is shared between
+> the two groups. See `2026-04-19-engine-plan-state-port.md`.
+
 #### Need Dimensions
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|

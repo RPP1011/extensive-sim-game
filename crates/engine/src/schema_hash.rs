@@ -7,7 +7,34 @@ use sha2::{Digest, Sha256};
 
 pub fn schema_hash() -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"SimState:SoA{hot_pos=vec3,hot_hp=f32,hot_max_hp=f32,hot_alive=bool,hot_movement_mode=u8};cold{creature_type=u8,channels=smallvec4,spawn_tick=u32}");
+    // SimState SoA layout — expanded by the 2026-04-19 state-port plan to
+    // cover state.md's full agent catalogue. Hot fields are read every tick;
+    // cold fields land on spawn/chronicle/debug paths. See
+    // `docs/superpowers/plans/2026-04-19-engine-plan-state-port.md`.
+    h.update(b"SimState:SoA{");
+    h.update(b"hot_pos=vec3,hot_hp=f32,hot_max_hp=f32,hot_alive=bool,hot_movement_mode=u8,");
+    h.update(b"hot_level=u32,hot_move_speed=f32,hot_move_speed_mult=f32,");
+    h.update(b"hot_shield_hp=f32,hot_armor=f32,hot_magic_resist=f32,hot_attack_damage=f32,hot_attack_range=f32,hot_mana=f32,hot_max_mana=f32,");
+    h.update(b"hot_hunger=f32,hot_thirst=f32,hot_rest_timer=f32,");
+    h.update(b"hot_safety=f32,hot_shelter=f32,hot_social=f32,hot_purpose=f32,hot_esteem=f32,");
+    h.update(b"hot_risk_tolerance=f32,hot_social_drive=f32,hot_ambition=f32,hot_altruism=f32,hot_curiosity=f32");
+    h.update(b"};cold{");
+    h.update(b"creature_type=u8,channels=smallvec4,spawn_tick=u32,");
+    h.update(b"grid_id=Option<u32>,local_pos=Option<vec3>,move_target=Option<vec3>,");
+    h.update(b"status_effects=smallvec8<StatusEffect>,memberships=smallvec4<Membership>,inventory=Inventory,memory=smallvec64<MemoryEvent>,relationships=smallvec8<Relationship>,");
+    h.update(b"class_definitions=[ClassSlot;4],creditor_ledger=smallvec16<Creditor>,mentor_lineage=[Option<AgentId>;8]");
+    h.update(b"}");
+    h.update(b"StatusEffect{kind=u8,source=AgentId,remaining_ticks=u32,payload_q8=i16}");
+    h.update(b"StatusEffectKind:Stun=0,Slow=1,Root=2,Silence=3,Dot=4,Hot=5,Buff=6,Debuff=7");
+    h.update(b"Membership{group=GroupId,role=u8,joined_tick=u32,standing_q8=i16}");
+    h.update(b"GroupRole:Member=0,Officer=1,Leader=2,Founder=3,Apprentice=4,Outcast=5");
+    h.update(b"Inventory{gold=u32,commodities=[u16;8]}");
+    h.update(b"MemoryEvent{source=AgentId,kind=u8,payload=u64,confidence_q8=u8,tick=u32}");
+    h.update(b"Relationship{other=AgentId,valence_q8=i16,tenure_ticks=u32}");
+    h.update(b"ClassSlot{class_tag=u32,level=u8}");
+    h.update(b"Creditor{creditor=AgentId,amount=u32}");
+    h.update(b"MentorLink{mentor=AgentId,discipline=u8}");
+    h.update(b"LanguageId=NonZeroU16;Capabilities{channels,languages=smallvec4<LanguageId>,can_fly,can_build,can_trade,can_climb,can_tunnel,can_marry,max_spouses=u8}");
     h.update(b"Event:AgentMoved,AgentAttacked,AgentDied,AgentFled,AgentAte,AgentDrank,AgentRested,AgentCast,AgentUsedItem,AgentHarvested,AgentPlacedTile,AgentPlacedVoxel,AgentHarvestedVoxel,AgentConversed,AgentSharedStory,AgentCommunicated,InformationRequested,AgentRemembered,QuestPosted,QuestAccepted,BidPlaced,AnnounceEmitted,RecordMemory,ChronicleEntry");
     h.update(b"MicroKind:Hold,MoveToward,Flee,Attack,Cast,UseItem,Harvest,Eat,Drink,Rest,PlaceTile,PlaceVoxel,HarvestVoxel,Converse,ShareStory,Communicate,Ask,Remember");
     h.update(b"CommunicationChannel:Speech,PackSignal,Pheromone,Song,Telepathy,Testimony");
