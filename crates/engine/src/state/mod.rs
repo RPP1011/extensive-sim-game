@@ -5,7 +5,7 @@ use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 pub use agent::{AgentSpawn, MovementMode};
-use entity_pool::AgentSlotPool;
+use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
 
 pub struct SimState {
@@ -45,8 +45,8 @@ impl SimState {
     }
 
     pub fn spawn_agent(&mut self, spec: AgentSpawn) -> Option<AgentId> {
-        let id = self.pool.alloc()?;
-        let slot = AgentSlotPool::slot_of(id);
+        let id = self.pool.alloc_agent()?;
+        let slot = AgentSlotPool::slot_of_agent(id);
         self.hot_pos[slot]           = spec.pos;
         self.hot_hp[slot]            = spec.hp;
         self.hot_max_hp[slot]        = spec.hp.max(1.0);
@@ -60,63 +60,63 @@ impl SimState {
     }
 
     pub fn kill_agent(&mut self, id: AgentId) {
-        let slot = AgentSlotPool::slot_of(id);
+        let slot = AgentSlotPool::slot_of_agent(id);
         if let Some(a) = self.hot_alive.get_mut(slot) {
             *a = false;
         }
-        self.pool.kill(id);
+        self.pool.kill_agent(id);
     }
 
     // Per-agent field accessors (convenience for non-kernel code).
     pub fn agent_pos(&self, id: AgentId) -> Option<Vec3> {
-        self.hot_pos.get(AgentSlotPool::slot_of(id)).copied()
+        self.hot_pos.get(AgentSlotPool::slot_of_agent(id)).copied()
     }
     pub fn agent_hp(&self, id: AgentId) -> Option<f32> {
-        self.hot_hp.get(AgentSlotPool::slot_of(id)).copied()
+        self.hot_hp.get(AgentSlotPool::slot_of_agent(id)).copied()
     }
     pub fn agent_max_hp(&self, id: AgentId) -> Option<f32> {
-        self.hot_max_hp.get(AgentSlotPool::slot_of(id)).copied()
+        self.hot_max_hp.get(AgentSlotPool::slot_of_agent(id)).copied()
     }
     pub fn agent_alive(&self, id: AgentId) -> bool {
         self.hot_alive
-            .get(AgentSlotPool::slot_of(id))
+            .get(AgentSlotPool::slot_of_agent(id))
             .copied()
             .unwrap_or(false)
     }
     pub fn agent_movement_mode(&self, id: AgentId) -> Option<MovementMode> {
-        self.hot_movement_mode.get(AgentSlotPool::slot_of(id)).copied()
+        self.hot_movement_mode.get(AgentSlotPool::slot_of_agent(id)).copied()
     }
     pub fn agent_creature_type(&self, id: AgentId) -> Option<CreatureType> {
         self.cold_creature_type
-            .get(AgentSlotPool::slot_of(id))
+            .get(AgentSlotPool::slot_of_agent(id))
             .copied()
             .flatten()
     }
     pub fn agent_channels(&self, id: AgentId) -> Option<&ChannelSet> {
-        self.cold_channels.get(AgentSlotPool::slot_of(id))?.as_ref()
+        self.cold_channels.get(AgentSlotPool::slot_of_agent(id))?.as_ref()
     }
     pub fn agent_spawn_tick(&self, id: AgentId) -> Option<u32> {
         self.cold_spawn_tick
-            .get(AgentSlotPool::slot_of(id))
+            .get(AgentSlotPool::slot_of_agent(id))
             .copied()
             .flatten()
     }
 
     // Per-agent field mutators.
     pub fn set_agent_pos(&mut self, id: AgentId, pos: Vec3) {
-        let slot = AgentSlotPool::slot_of(id);
+        let slot = AgentSlotPool::slot_of_agent(id);
         if let Some(p) = self.hot_pos.get_mut(slot) {
             *p = pos;
         }
     }
     pub fn set_agent_hp(&mut self, id: AgentId, hp: f32) {
-        let slot = AgentSlotPool::slot_of(id);
+        let slot = AgentSlotPool::slot_of_agent(id);
         if let Some(h) = self.hot_hp.get_mut(slot) {
             *h = hp;
         }
     }
     pub fn set_agent_movement_mode(&mut self, id: AgentId, mode: MovementMode) {
-        let slot = AgentSlotPool::slot_of(id);
+        let slot = AgentSlotPool::slot_of_agent(id);
         if let Some(m) = self.hot_movement_mode.get_mut(slot) {
             *m = mode;
         }

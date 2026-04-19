@@ -1,28 +1,34 @@
-use crate::ids::AgentId;
+//! Historical location of `AgentSlotPool`. Now a type alias over `Pool<AgentTag>`.
+//! The `alloc_agent` / `kill_agent` / `slot_of_agent` shims preserve the
+//! existing call-site shape (`AgentSlotPool::alloc() -> Option<AgentId>`).
 
-pub struct AgentSlotPool {
-    cap:      u32,
-    next:     u32,
-    pub alive: Vec<bool>,
+use crate::ids::AgentId;
+use crate::pool::{Pool, PoolId};
+
+pub struct AgentTag;
+pub type AgentSlotPool = Pool<AgentTag>;
+
+pub trait AgentPoolOps {
+    fn alloc_agent(&mut self) -> Option<AgentId>;
+    fn kill_agent(&mut self, id: AgentId);
 }
 
-impl AgentSlotPool {
-    pub fn new(cap: u32) -> Self {
-        Self { cap, next: 1, alive: vec![false; cap as usize] }
+impl AgentPoolOps for AgentSlotPool {
+    fn alloc_agent(&mut self) -> Option<AgentId> {
+        let pid: PoolId<AgentTag> = self.alloc()?;
+        AgentId::new(pid.raw())
     }
-    pub fn alloc(&mut self) -> Option<AgentId> {
-        if self.next > self.cap { return None; }
-        let id = AgentId::new(self.next)?;
-        let slot = (self.next - 1) as usize;
-        self.alive[slot] = true;
-        self.next += 1;
-        Some(id)
-    }
-    pub fn kill(&mut self, id: AgentId) {
-        let slot = (id.raw() - 1) as usize;
-        if slot < self.cap as usize {
-            self.alive[slot] = false;
+    fn kill_agent(&mut self, id: AgentId) {
+        if let Some(p) = PoolId::<AgentTag>::new(id.raw()) {
+            self.kill(p);
         }
     }
-    #[inline] pub fn slot_of(id: AgentId) -> usize { (id.raw() - 1) as usize }
+}
+
+// Inherent impl so existing call sites `AgentSlotPool::slot_of_agent(id)` compile.
+impl AgentSlotPool {
+    #[inline]
+    pub fn slot_of_agent(id: AgentId) -> usize {
+        (id.raw() - 1) as usize
+    }
 }

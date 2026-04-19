@@ -33,7 +33,10 @@ fn kill_frees_slot() {
     let _b = state.spawn_agent(AgentSpawn::default()).unwrap();
     state.kill_agent(a);
     assert!(!state.agent_alive(a));
-    // Slot not reclaimed (kill just flips alive); spawn still fails.
+    // Freelist pops the killed slot — next spawn reuses it.
+    let c = state.spawn_agent(AgentSpawn::default()).expect("freelist reuse");
+    assert_eq!(c.raw(), a.raw(), "reused the freed slot");
+    // Now at cap again — next spawn fails.
     assert!(state.spawn_agent(AgentSpawn::default()).is_none());
 }
 

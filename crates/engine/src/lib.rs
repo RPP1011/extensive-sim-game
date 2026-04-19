@@ -7,6 +7,7 @@ pub mod event;
 pub mod ids;
 pub mod mask;
 pub mod policy;
+pub mod pool;
 pub mod rng;
 pub mod schema_hash;
 pub mod spatial;
