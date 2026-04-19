@@ -6,7 +6,7 @@ use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 pub use agent::{AgentSpawn, MovementMode};
-use agent_types::StatusEffect;
+use agent_types::{Membership, StatusEffect};
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
 use smallvec::SmallVec;
@@ -75,6 +75,8 @@ pub struct SimState {
     cold_move_target:   Vec<Option<Vec3>>,
     // Status effects (state.md §StatusEffect) — per-agent stack.
     cold_status_effects: Vec<SmallVec<[StatusEffect; 8]>>,
+    // Memberships (state.md §Membership) — per-agent group list.
+    cold_memberships:    Vec<SmallVec<[Membership; 4]>>,
 }
 
 impl SimState {
@@ -119,6 +121,7 @@ impl SimState {
             cold_local_pos:      vec![None; cap],
             cold_move_target:    vec![None; cap],
             cold_status_effects: (0..cap).map(|_| SmallVec::new()).collect(),
+            cold_memberships:    (0..cap).map(|_| SmallVec::new()).collect(),
         }
     }
 
@@ -167,6 +170,7 @@ impl SimState {
         self.cold_local_pos[slot]      = None;
         self.cold_move_target[slot]    = None;
         self.cold_status_effects[slot].clear();
+        self.cold_memberships[slot].clear();
         Some(id)
     }
 
@@ -370,6 +374,29 @@ impl SimState {
     pub fn set_agent_curiosity(&mut self, id: AgentId, v: f32) {
         if let Some(s) = self.hot_curiosity.get_mut(AgentSlotPool::slot_of_agent(id)) {
             *s = v;
+        }
+    }
+
+    // Memberships (Task G).
+    pub fn agent_memberships(&self, id: AgentId) -> Option<&[Membership]> {
+        self.cold_memberships
+            .get(AgentSlotPool::slot_of_agent(id))
+            .map(|v| v.as_slice())
+    }
+    pub fn push_agent_membership(&mut self, id: AgentId, m: Membership) {
+        if let Some(v) = self
+            .cold_memberships
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            v.push(m);
+        }
+    }
+    pub fn clear_agent_memberships(&mut self, id: AgentId) {
+        if let Some(v) = self
+            .cold_memberships
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            v.clear();
         }
     }
 
@@ -609,5 +636,10 @@ impl SimState {
     }
     pub fn hot_curiosity(&self) -> &[f32] {
         &self.hot_curiosity
+    }
+
+    // Memberships bulk slice (Task G).
+    pub fn cold_memberships(&self) -> &[SmallVec<[Membership; 4]>] {
+        &self.cold_memberships
     }
 }
