@@ -6,7 +6,7 @@ use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 pub use agent::{AgentSpawn, MovementMode};
-use agent_types::{Inventory, MemoryEvent, Membership, StatusEffect};
+use agent_types::{Inventory, MemoryEvent, Membership, Relationship, StatusEffect};
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
 use smallvec::SmallVec;
@@ -83,6 +83,10 @@ pub struct SimState {
     // 20; the stub uses 64-slot SmallVec inline to leave headroom and to
     // stay Pod-friendly; real ring semantics land with the memory plan.
     cold_memory:         Vec<SmallVec<[MemoryEvent; 64]>>,
+    // Relationships (state.md §Relationship) — capped at 8 (state.md caps
+    // at 20; the stub uses 8 inline as a smaller default; eviction is a
+    // later plan's concern).
+    cold_relationships:  Vec<SmallVec<[Relationship; 8]>>,
 }
 
 impl SimState {
@@ -130,6 +134,7 @@ impl SimState {
             cold_memberships:    (0..cap).map(|_| SmallVec::new()).collect(),
             cold_inventory:      vec![Inventory::default(); cap],
             cold_memory:         (0..cap).map(|_| SmallVec::new()).collect(),
+            cold_relationships:  (0..cap).map(|_| SmallVec::new()).collect(),
         }
     }
 
@@ -181,6 +186,7 @@ impl SimState {
         self.cold_memberships[slot].clear();
         self.cold_inventory[slot] = Inventory::default();
         self.cold_memory[slot].clear();
+        self.cold_relationships[slot].clear();
         Some(id)
     }
 
@@ -439,6 +445,29 @@ impl SimState {
         }
     }
 
+    // Relationships (Task J).
+    pub fn agent_relationships(&self, id: AgentId) -> Option<&[Relationship]> {
+        self.cold_relationships
+            .get(AgentSlotPool::slot_of_agent(id))
+            .map(|v| v.as_slice())
+    }
+    pub fn push_agent_relationship(&mut self, id: AgentId, r: Relationship) {
+        if let Some(v) = self
+            .cold_relationships
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            v.push(r);
+        }
+    }
+    pub fn clear_agent_relationships(&mut self, id: AgentId) {
+        if let Some(v) = self
+            .cold_relationships
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            v.clear();
+        }
+    }
+
     // Per-agent field mutators.
     pub fn set_agent_pos(&mut self, id: AgentId, pos: Vec3) {
         let slot = AgentSlotPool::slot_of_agent(id);
@@ -690,5 +719,10 @@ impl SimState {
     // Memory bulk slice (Task I).
     pub fn cold_memory(&self) -> &[SmallVec<[MemoryEvent; 64]>] {
         &self.cold_memory
+    }
+
+    // Relationships bulk slice (Task J).
+    pub fn cold_relationships(&self) -> &[SmallVec<[Relationship; 8]>] {
+        &self.cold_relationships
     }
 }
