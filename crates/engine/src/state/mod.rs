@@ -50,6 +50,12 @@ impl SimState {
         }
     }
 
+    #[contracts::debug_ensures(
+        ret.is_some() -> self.agents_alive().count() == old(self.agents_alive().count()) + 1
+    )]
+    #[contracts::debug_ensures(
+        ret.is_none() -> self.agents_alive().count() == old(self.agents_alive().count())
+    )]
     pub fn spawn_agent(&mut self, spec: AgentSpawn) -> Option<AgentId> {
         let id = self.pool.alloc_agent()?;
         let slot = AgentSlotPool::slot_of_agent(id);
@@ -68,6 +74,7 @@ impl SimState {
         Some(id)
     }
 
+    #[contracts::debug_ensures(!self.agent_alive(id))]
     pub fn kill_agent(&mut self, id: AgentId) {
         let slot = AgentSlotPool::slot_of_agent(id);
         if let Some(a) = self.hot_alive.get_mut(slot) {

@@ -100,6 +100,10 @@ pub fn step<B: PolicyBackend>(
 // (state, scratch, events, backend, cascade, views, invariants, telemetry).
 // Bundling would hide the phase seams from callers and tests.
 #[allow(clippy::too_many_arguments)]
+#[contracts::debug_requires(
+    scratch.mask.micro_kind.len() == state.agent_cap() as usize * crate::mask::MicroKind::ALL.len()
+)]
+#[contracts::debug_ensures(state.tick == old(state.tick) + 1)]
 pub fn step_full<B: PolicyBackend>(
     state:      &mut SimState,
     scratch:    &mut SimScratch,

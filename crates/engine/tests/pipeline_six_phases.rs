@@ -76,3 +76,37 @@ fn six_phase_pipeline_runs_clean() {
             "mask_true_frac[{}] = {} outside [0, 1]", i, r.value);
     }
 }
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "Pre")]
+fn step_full_panics_when_scratch_undersized() {
+    use engine::cascade::CascadeRegistry;
+    use engine::creature::CreatureType;
+    use engine::event::EventRing;
+    use engine::invariant::InvariantRegistry;
+    use engine::policy::UtilityBackend;
+    use engine::state::{AgentSpawn, SimState};
+    use engine::step::{step_full, SimScratch};
+    use engine::telemetry::NullSink;
+    use glam::Vec3;
+
+    let mut state = SimState::new(8, 42);
+    // Deliberately mis-sized: 2 instead of 8.
+    let mut scratch = SimScratch::new(2);
+    let mut events = EventRing::with_cap(1024);
+    let cascade = CascadeRegistry::new();
+    let invariants = InvariantRegistry::new();
+
+    state.spawn_agent(AgentSpawn {
+        creature_type: CreatureType::Human,
+        pos: Vec3::ZERO, hp: 100.0,
+    });
+
+    // `step_full` debug_requires scratch capacity == state.agent_cap() * 18.
+    // Undersized scratch violates the pre-condition — panic in debug.
+    step_full(
+        &mut state, &mut scratch, &mut events,
+        &UtilityBackend, &cascade, &mut [], &invariants, &NullSink,
+    );
+}
