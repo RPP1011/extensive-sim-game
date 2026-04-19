@@ -2,10 +2,13 @@
 use crate::cascade::CascadeRegistry;
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
+use crate::invariant::{FailureMode, InvariantRegistry};
 use crate::mask::{MaskBuffer, MicroKind};
 use crate::policy::{Action, ActionKind, AnnounceAudience, MacroAction, MicroTarget, PolicyBackend};
 use crate::rng::per_agent_u32;
 use crate::state::SimState;
+use crate::telemetry::{metrics, NullSink, TelemetrySink};
+use crate::view::MaterializedView;
 use glam::Vec3;
 
 const MOVE_SPEED_MPS: f32 = 1.0;
@@ -57,6 +60,11 @@ impl SimScratch {
     }
 }
 
+/// Back-compat wrapper around [`step_full`]. Runs the canonical 6-phase pipeline
+/// with an empty view list, an empty invariant registry, and a [`NullSink`] —
+/// i.e. exactly the old Task 10 behavior (mask → evaluate → shuffle → apply →
+/// cascade → tick++), with no view folds, no invariant checks, and no telemetry
+/// emitted.
 pub fn step<B: PolicyBackend>(
     state:   &mut SimState,
     scratch: &mut SimScratch,
@@ -64,6 +72,47 @@ pub fn step<B: PolicyBackend>(
     backend: &B,
     cascade: &CascadeRegistry,
 ) {
+    let empty_invariants = InvariantRegistry::new();
+    step_full(
+        state,
+        scratch,
+        events,
+        backend,
+        cascade,
+        &mut [],
+        &empty_invariants,
+        &NullSink,
+    );
+}
+
+/// Full 6-phase tick pipeline (see `docs/engine/spec.md` §12):
+///
+/// 1. Mask build
+/// 2. Policy evaluate
+/// 3. Action shuffle (deterministic per-tick Fisher-Yates)
+/// 4. Apply actions + cascade fixed-point
+/// 5. Materialized-view fold
+/// 6. Invariants + built-in telemetry metrics
+///
+/// After phase 6, `state.tick` is incremented.
+// The 8-param shape is load-bearing: it mirrors the Plan-2 canonical pipeline
+// signature and the six observable phases each call out a distinct collaborator
+// (state, scratch, events, backend, cascade, views, invariants, telemetry).
+// Bundling would hide the phase seams from callers and tests.
+#[allow(clippy::too_many_arguments)]
+pub fn step_full<B: PolicyBackend>(
+    state:      &mut SimState,
+    scratch:    &mut SimScratch,
+    events:     &mut EventRing,
+    backend:    &B,
+    cascade:    &CascadeRegistry,
+    views:      &mut [&mut dyn MaterializedView],
+    invariants: &InvariantRegistry,
+    telemetry:  &dyn TelemetrySink,
+) {
+    let t_start = std::time::Instant::now();
+
+    // Phase 1 — mask build.
     scratch.mask.reset();
     scratch.mask.mark_hold_allowed(state);
     scratch.mask.mark_move_allowed_if_others_exist(state);
@@ -71,12 +120,78 @@ pub fn step<B: PolicyBackend>(
     scratch.mask.mark_attack_allowed_if_target_in_range(state);
     scratch.mask.mark_needs_allowed(state);
     scratch.mask.mark_domain_hook_micros_allowed(state);
+
+    // Phase 2 — policy evaluate.
     scratch.actions.clear();
     backend.evaluate(state, &scratch.mask, &mut scratch.actions);
 
-    apply_actions(state, &scratch.actions, events, &mut scratch.shuffle_idx);
+    // Phase 3 — deterministic per-tick action shuffle. Populates
+    // `scratch.shuffle_idx` with a permutation over `scratch.actions` keyed by
+    // `(state.seed, state.tick)`. `scratch.actions` itself is left untouched;
+    // the apply kernel walks it via `shuffle_idx`.
+    shuffle_actions_in_place(
+        state.seed,
+        state.tick,
+        &scratch.actions,
+        &mut scratch.shuffle_idx,
+    );
+
+    // Phase 4 — apply actions + run cascade fixed-point. Record events emitted
+    // so phase 6 can report an accurate per-tick counter.
+    let events_before = events.total_pushed();
+    apply_actions(state, scratch, events);
     cascade.run_fixed_point(state, events);
+    let events_emitted = events.total_pushed().saturating_sub(events_before);
+
+    // Phase 5 — view fold. Each view walks the (retained subset of the) event
+    // ring and accumulates its own derived storage.
+    for v in views.iter_mut() {
+        v.fold(events);
+    }
+
+    // Phase 6 — invariants + built-in telemetry metrics.
+    let violations = invariants.check_all(state, events);
+    for report in &violations {
+        let mode_str = match report.failure_mode {
+            FailureMode::Panic       => "panic",
+            FailureMode::Log         => "log",
+            FailureMode::Rollback { .. } => "rollback",
+        };
+        telemetry.emit(
+            "engine.invariant_violated",
+            1.0,
+            &[("invariant", report.violation.invariant), ("mode", mode_str)],
+        );
+    }
+
+    let tick_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+    telemetry.emit_histogram(metrics::TICK_MS, tick_ms);
+    telemetry.emit_counter(metrics::EVENT_COUNT, events_emitted as i64);
+    let n_alive = state.agents_alive().count();
+    telemetry.emit(metrics::AGENT_ALIVE, n_alive as f64, &[]);
+    let mask_true_frac = fraction_true(&scratch.mask.micro_kind);
+    telemetry.emit(metrics::MASK_TRUE_FRAC, mask_true_frac, &[]);
+
     state.tick += 1;
+}
+
+fn fraction_true(bits: &[bool]) -> f64 {
+    if bits.is_empty() { return 0.0; }
+    let t = bits.iter().filter(|b| **b).count();
+    t as f64 / bits.len() as f64
+}
+
+/// Phase-3 helper. Populates `shuffle_idx` with a Fisher-Yates permutation of
+/// `0..actions.len()`, keyed by `(world_seed, tick)` via [`per_agent_u32`]
+/// using the sentinel `AgentId(1)` as the shuffle stream discriminator.
+/// Deterministic: same `(seed, tick, actions.len())` → same permutation.
+fn shuffle_actions_in_place(
+    world_seed:  u64,
+    tick:        u32,
+    actions:     &[Action],
+    shuffle_idx: &mut Vec<u32>,
+) {
+    shuffle_order_into(shuffle_idx, actions.len(), world_seed, tick);
 }
 
 /// Fisher-Yates shuffle of action indices using a deterministic PRNG seeded by
@@ -101,13 +216,15 @@ fn shuffle_order_into(order: &mut Vec<u32>, n: usize, world_seed: u64, tick: u32
 
 fn apply_actions(
     state:   &mut SimState,
-    actions: &[Action],
+    scratch: &SimScratch,
     events:  &mut EventRing,
-    order:   &mut Vec<u32>,
 ) {
-    shuffle_order_into(order, actions.len(), state.seed, state.tick);
-    for &idx in order.iter() {
-        let action = &actions[idx as usize];
+    // `scratch.shuffle_idx` must have been populated by `shuffle_actions_in_place`
+    // immediately before this call. We walk the already-computed permutation
+    // rather than re-shuffling here, so the shuffle is a first-class phase of
+    // `step_full` visible to telemetry / tests.
+    for &idx in scratch.shuffle_idx.iter() {
+        let action = &scratch.actions[idx as usize];
         match action.kind {
             ActionKind::Micro { kind: MicroKind::Hold, .. } => {}
             ActionKind::Micro {
