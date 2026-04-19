@@ -1,880 +1,734 @@
 # World Sim Engine Specification
 
-Runtime contract for implementers. Companion to `../dsl/spec.md` (language reference) and `../compiler/spec.md` (text-to-engine lowering). An implementation in any language is correct if and only if it satisfies §§2–23.
+Runtime contract for the engine the compiler targets. Companion to `../dsl/spec.md` (language reference) and `../compiler/spec.md` (text-to-engine lowering).
 
-The engine owns determinism-load-bearing, cross-cutting infrastructure: entity pools, event ring, spatial index, mask tensor, tick scheduler, policy trait, trajectory emit, save/load, invariant runtime, probe harness, telemetry sink, schema hash, observation packer, and the debug & trace runtime. It does **not** parse DSL, generate code, hard-code domain-specific types, or render chronicle prose.
+The engine is the **unified runtime for all compiler output**. The compiler has one target; whatever it emits — scalar Rust, kernel dispatch code, SPIR-V shader source — lands in the engine. The engine ships **two first-class backends** that implement the same interface:
+
+- **`SerialBackend`** — host-resident state, scalar Rust execution. The **reference implementation**. Determinism oracle for every test, for every parity check against the GPU backend, for every verified-correct port.
+- **`GpuBackend`** — GPU-resident state via `voxel_engine::GpuHarness`, compiled SPIR-V kernels for gather + apply phases. Performance path for large N.
+
+An implementation is correct if and only if it satisfies §§2–26 AND **produces byte-identical `replayable_sha256()` across both backends on the same seed**. Cross-backend parity is a first-class correctness invariant, not an aspiration.
 
 ---
 
 ## 1. Scope
 
-The engine is a Rust library crate (`crates/engine/`) that provides runtime primitives the DSL compiler targets. Primitives are generic over agent/event/action kind so that different DSL programs — a medieval town sim, a wolf-pack ecology, a sci-fi colony — reuse the same engine without code changes.
+The engine is a Rust library crate (`crates/engine/`) that provides runtime primitives the compiler targets, PLUS two concrete backends that execute those primitives.
 
 **Owned by the engine:**
 
 - Generic `Pool<T>` with `NonZeroU32` IDs, freelist, slot reuse.
 - Event ring with byte-stable SHA-256 over the replayable subset.
-- 3D spatial index (2D columns + per-column z-sort + movement-mode sidecar).
-- Per-world PCG RNG + per-agent keyed sub-streams.
-- Universal `MicroKind` enum (18 variants) and `MacroKind` enum (4 variants) with built-in step semantics for primitives that don't require domain types.
-- `MaskBuffer` with per-head validity layout.
-- `PolicyBackend` trait + zero-alloc tick loop contract.
-- `MaterializedView` trait with three storage modes.
-- `TrajectoryWriter` + `TrajectoryReader` over safetensors.
-- State snapshot + load with schema-hash versioning.
-- `Invariant`, `Probe`, `TelemetrySink` traits.
-- Debug & trace runtime (trace_mask, causal_tree, tick_stepper, tick_profile, agent_history, snapshot).
+- 3D spatial index with voxel-chunk-keyed dispatch (CPU BTreeMap + z-sort for Serial; GPU hash for Vulkan).
+- Per-world RNG with shader-derivable per-agent keyed sub-streams; constants pinned across CPU/GPU.
+- Universal `MicroKind` (18 variants) and `MacroKind` (4 variants) with built-in execution for both backends.
+- `MaskBuffer` layout + per-predicate dispatch (backend selects how to execute).
+- `PolicyBackend` trait — abstracts over both host-scalar and GPU-kernel implementations.
+- `MaterializedView` / `LazyView` / `TopKView` traits with backend-local storage implementations.
+- `TrajectoryWriter` + `TrajectoryReader` over safetensors; input comes from whichever backend is active.
+- State snapshot + load with schema-hash versioning; covers both backends' state formats.
+- `Invariant`, `Probe`, `TelemetrySink` traits — backend-agnostic where state access is abstracted; CPU-side for dispatch/sink mechanics.
+- Debug & trace runtime (trace_mask, causal_tree, tick_stepper, tick_profile, agent_history, snapshot) — downloads from GPU as needed; serial-backend access is direct.
+- SPIR-V bytecode for engine-universal kernels (embedded via `include_bytes!`).
+- `ComputeBackend` trait + `SerialBackend` + `GpuBackend` concrete impls; runtime backend selection.
 
 **Not owned by the engine** (deferred to compiler / domain):
 
 - DSL parser and codegen.
 - Verb desugaring, `Read → Ask(doc, AboutAll)` lowering.
 - Domain types (which items exist, which abilities exist, which group kinds exist).
-- Cascade *rules* (registered at init; engine provides the dispatch runtime).
+- Cascade *rules* (registered at init; engine provides the dispatch runtime for both backends — compiler emits CPU closures for `SerialBackend` and SPIR-V kernels for `GpuBackend`).
 - Chronicle prose templates.
-- Curriculum pipelines (engine provides the per-scenario runner; scheduling is external).
-- GPU compute kernels (voxel-engine's `GpuHarness` is a downstream consumer).
+- Curriculum pipelines.
 
 ---
 
 ## 2. Determinism contract
 
-The engine promises: same seed + same compile-time `schema_hash` + same agent spawn order + same action sequence ⇒ bit-exact SHA-256 hash over the replayable-subset event log, on every supported platform.
+The engine promises: **same seed + same compile-time `schema_hash` + same agent spawn order + same action sequence ⇒ bit-exact SHA-256 over the replayable-subset event log**, on every supported platform, **and identical across both backends**.
+
+Parity test (mandatory in CI):
+
+```rust
+let seed = 42;
+let hash_cpu = run_n_ticks(SerialBackend::new(), seed, 1000);
+let hash_gpu = run_n_ticks(GpuBackend::new()?, seed, 1000);
+assert_eq!(hash_cpu, hash_gpu, "cross-backend parity broken");
+```
 
 Implementation obligations:
 
-- All randomness derives from `WorldRng` (PCG-XSH-RR). Calling `rand::thread_rng` or any external RNG from inside the engine is a determinism bug.
-- Iteration order over `HashMap` / `HashSet` is forbidden in hot paths. Use `BTreeMap` / `BTreeSet` or index Vecs.
-- Float reductions that feed decisions must sort by a stable key (agent id, event id) before accumulation. Associativity violations break determinism across thread counts.
-- Per-tick agent action ordering is shuffled via Fisher-Yates keyed on `per_agent_u32(seed, AgentId(1), tick << 16 + i, b"shuffle")`. No first-mover bias.
-- Event byte-packing uses `f32::to_bits().to_le_bytes()` plus explicit variant tags — `Debug` formatting is NOT stable and is forbidden in hash input.
-- The `replayable_sha256()` result is the canonical determinism witness; CI runs a 100-agent × 1000-tick acceptance test and pins its hash.
+- All randomness derives from `WorldRng` (PCG-XSH-RR) with fixed-keyed sub-streams. **The shader implementation uses byte-identical constants** — golden tests assert `per_agent_u32` returns the same value when run in host Rust and in a compute shader.
+- `HashMap` iteration is forbidden in hot paths on both backends. Use `BTreeMap` (serial) or sorted indices (GPU).
+- Float reductions are either integer-fixed-point OR sorted-key to avoid associativity drift. This applies to both backends; GPU must sort events by `target_id` before atomic accumulation into view buffers.
+- Per-tick agent action ordering is shuffled via deterministic Fisher-Yates keyed on `per_agent_u32(seed, AgentId(1), tick << 16, b"shuffle")`. Both backends apply the SAME shuffle sequence.
+- Event byte-packing uses `f32::to_bits().to_le_bytes()` plus explicit variant tags. Debug formatting is forbidden in hash input.
+- The `replayable_sha256()` result is computed from events downloaded to host regardless of backend — GPU backend drains its GPU-resident event buffer to host once per tick; the hash is computed on the host copy.
+- GPU atomic ops in kernels are commutative-and-associative by construction OR must sort before reduction.
 
-Two same-seed runs that disagree on `replayable_sha256()` are a blocker. The first step is always `git bisect` over the engine crate — domain code cannot violate determinism if the engine's contract holds.
-
-See `../dsl/spec.md` §7.2 for the language-level framing; this section pins the byte-level mechanics. Implementation: `crates/engine/src/event/ring.rs`, `crates/engine/src/rng.rs`, `crates/engine/tests/determinism.rs`.
+See `crates/engine/tests/parity_backends.rs` for the mandatory cross-backend determinism test.
 
 ---
 
-## 3. State model
+## 3. Runtime architecture
 
-Agents live in `Pool<Agent>` where `AgentId` is `NonZeroU32` (giving `Option<AgentId>` a free niche). The pool has three layers:
+The engine has a **backend-agnostic tick pipeline** + **two backend implementations**.
 
-1. **Slot index.** `AgentSlotPool` tracks which `u32` slots are alive via a boolean Vec and a freelist; `alloc()` pops the freelist, `kill()` pushes. Slot numbers can be reused after death; generational counters are out of scope for MVP — callers hold live references only through the tick they were alive.
-2. **Hot fields.** One `Vec` per hot field: `hot_pos: Vec<Vec3>`, `hot_hp: Vec<f32>`, `hot_max_hp: Vec<f32>`, `hot_alive: Vec<bool>`, `hot_movement_mode: Vec<MovementMode>`. Layout is true Structure-of-Arrays. A field is hot if it's read or written every tick.
-3. **Cold fields.** One `Vec<Option<T>>` per cold field: creature type, channel set, spawn tick. Read rarely (spawn, chronicle, debug).
+```
+┌─────────────────────────────────────────────────────────────┐
+│              Tick Pipeline (backend-agnostic)               │
+│                                                             │
+│  phase1: mask_build(backend, state, mask)                  │
+│  phase2: policy_eval(backend, state, mask, actions)        │
+│  phase3: shuffle_actions(actions, seed, tick)              │
+│  phase4: apply_actions+cascade(backend, actions, state,    │
+│                                 events, cascade_registry)  │
+│  phase5: view_fold(backend, events, views)                 │
+│  phase6: invariants + telemetry (host)                     │
+└─────────────────────────────────────────────────────────────┘
+         │                              │
+         ▼                              ▼
+┌──────────────────┐           ┌──────────────────┐
+│  SerialBackend   │           │    GpuBackend    │
+│                  │           │                  │
+│  state: Vec<T>   │           │  state:          │
+│  events: Vec     │           │    FieldHandle   │
+│  mask: Vec<bool> │           │  events: GPU ring│
+│                  │           │  mask: FieldH    │
+│  exec: scalar    │           │  exec: SPIR-V    │
+│   Rust loops     │           │   compute kernels│
+└──────────────────┘           └──────────────────┘
+```
 
-Bulk-slice accessors (`hot_pos()`, `hot_hp()`, …) are the kernel-friendly read path. Per-id accessors (`agent_pos(id)`, `set_agent_hp(id, v)`) are the scalar path for domain code that walks one agent at a time.
+**Both backends implement the same public API** — `agent_pos(id)`, `event_ring()`, `mask_buffer()` — so test code is backend-agnostic. Internally they are profoundly different.
+
+**Host orchestrator responsibilities** (same for both backends):
+- Own the scheduler (`step()`, `step_full()`)
+- Own user-facing API and debug runtime
+- Pump telemetry (sinks are always host-side)
+- Drive save/load serialization
+- Run invariants (which may trigger a GPU→host sync for state access)
+
+**Backend-local responsibilities:**
+- State storage (where and how)
+- Kernel dispatch (what compute runs where)
+- Event emission (how writes happen)
+- Cascade execution (CPU closures vs SPIR-V kernels)
+
+---
+
+## 4. State residency
+
+Both backends expose the **same public SimState API**: `agent_pos(id) -> Option<Vec3>`, `set_agent_hp(id, hp)`, `agents_alive() -> impl Iterator<AgentId>`, etc. Callers don't know or care where the data lives.
+
+### SerialBackend residency
+
+- All state lives in host-resident `Vec<T>` per SoA hot field.
+- Per-agent scalar access is direct indexing.
+- No sync semantics — every read and write is immediate.
+
+### GpuBackend residency
+
+- **Hot fields are GPU-authoritative**, stored in `FieldHandle` per field (`pos`, `hp`, `max_hp`, `alive`, `movement_mode`).
+- **Host maintains per-field dirty-tracked mirror**. Mirrors are always present but may be stale.
+- Read path: `agent_pos(id)` syncs the `hot_pos` field from GPU if marked stale, then reads from mirror.
+- Write path: `set_agent_pos(id, p)` writes to mirror AND marks the field dirty for upload at next tick boundary (or immediately if in an apply phase that needs the update visible to subsequent kernels within the same tick).
+- Cold fields (`creature_type`, `channels`, `spawn_tick`) are host-only — GPU kernels don't need them during gather phases.
+
+### Sync semantics
+
+A **sync point** is any place where host and GPU ownership must align. The engine defines fixed sync points per tick:
+
+| Phase | Sync | What happens |
+|---|---|---|
+| Before phase 1 | `upload_dirty` | Host→GPU push of any fields marked dirty since last tick |
+| After phase 4 (apply) | `download_events` | GPU→host drain of events pushed during apply |
+| After phase 4 (apply) | `download_state_if_needed` | Optional — only if invariants / trajectory / debug require host-readable state |
+| After phase 5 (views) | `download_view_results` | GPU→host pull of view buffers that invariants or telemetry read |
+
+Between sync points, **GPU is authoritative for hot fields**, mirror is stale. Callers that query state outside a sync point (debug tools, invariants) trigger an on-demand sync.
+
+### Snapshot semantics
+
+For save/load (§18) and trajectory emission (§17), the engine **forces a full sync** — all dirty fields uploaded, all GPU-authoritative state downloaded, mirror becomes clean. Snapshots always capture the host mirror post-sync.
+
+Implementation: `crates/engine/src/state/` holds the backend-agnostic API; `crates/engine/src/backend/serial.rs` and `crates/engine/src/backend/gpu.rs` provide the residency layers.
+
+---
+
+## 5. Event log
+
+The `EventRing` abstraction is backend-local in storage but identical in contract.
+
+### Serial
+
+`VecDeque<Entry>` with fixed capacity. `push(event) -> EventId` monotonic. `replayable_sha256()` iterates host entries and hashes.
+
+### GPU
+
+GPU-resident ring buffer + atomic append counter. Events emitted by kernels (mask predicate violations, cascade handlers, apply actions) use `atomicAdd` on the counter to claim a slot, then write the event record.
+
+At phase 4 end, the host drains the GPU ring to its host mirror via `GpuHarness::download`. The **replayable-hash is always computed on the host mirror** — this ensures byte-identity with the `SerialBackend` hash, because:
+
+1. Both backends emit the same events in the same logical order per tick (modulo GPU atomic-append race, which is resolved by sorting events by their stable per-tick sequence number before hashing — see §2).
+2. Both backends emit the same byte-packed representation (byte-level format is spec'd, not backend-specific).
+
+Cascade events carry `cause: Option<EventId>`. In GPU mode, the cause is written into the event record by the kernel that emitted the cascade. Host reconstruction of the causal tree works identically.
+
+Capacity rules:
+
+- Serial: `with_cap(n)` — ring drops oldest on overflow.
+- GPU: pre-allocated FieldHandle sized for worst-case events-per-tick × ticks-retained; overflow is an error (logged; subsequent pushes in the overflowing tick are dropped; determinism is preserved because drop decisions are deterministic).
+
+See `../dsl/spec.md` §2.2 / §7.3. Implementation: `crates/engine/src/event/`, `crates/engine/src/backend/*/event.rs`.
+
+---
+
+## 6. Spatial index
+
+Two backends; same query API: `within_radius(center, r)`, `nearest_k(center, k)`, `in_column_z_range(col, z_range)`.
+
+### Serial
+
+2D-column BTreeMap + per-column sorted z-list + `movement_mode` sidecar. As previously specified. Deterministic by BTreeMap ordered iteration.
+
+### GPU
+
+Voxel-chunk-keyed spatial hash residing in FieldHandles. Cell-size matches voxel chunks (16 m) per compiler spec §1.2. Queries are compute-kernel dispatches:
+
+- `within_radius_kernel` — fills a GPU result buffer with matching agent IDs
+- `nearest_k_kernel` — parallel top-K reduction
+
+For host-side queries via the public `SpatialIndex` API (debug tools, cascade handlers that happen to run CPU), GPU backend falls back to a synced CPU-side copy. Cost: one dispatch + download per query. Acceptable for low-frequency use; not for hot-loop callers.
+
+Insert/remove: both backends rebuild on `spawn_agent` / `kill_agent` / `set_agent_pos`. GPU rebuild is a batched kernel per tick.
+
+See `../dsl/spec.md` §9 D25. Implementation: `crates/engine/src/spatial/`.
+
+---
+
+## 7. RNG streams
+
+Identical PCG-XSH-RR algorithm on host and in shaders. The four keyed-hash constants (`K1..K4`) are `pub const`s in `rng.rs` AND are embedded in shader source via specialization constants or preprocessor defines.
 
 ```rust
-pub struct SimState {
-    pub tick: u32,
-    pub seed: u64,
-    pool: AgentSlotPool,
-    hot_pos:           Vec<Vec3>,
-    hot_hp:            Vec<f32>,
-    hot_max_hp:        Vec<f32>,
-    hot_alive:         Vec<bool>,
-    hot_movement_mode: Vec<MovementMode>,
-    cold_creature_type: Vec<Option<CreatureType>>,
-    cold_channels:      Vec<Option<ChannelSet>>,
-    cold_spawn_tick:    Vec<Option<u32>>,
+// crates/engine/src/rng.rs
+pub const RNG_KEY_1: u64 = 0xA5A5_A5A5_A5A5_A5A5;
+pub const RNG_KEY_2: u64 = 0x5A5A_5A5A_5A5A_5A5A;
+pub const RNG_KEY_3: u64 = 0xDEAD_BEEF_CAFE_F00D;
+pub const RNG_KEY_4: u64 = 0x0123_4567_89AB_CDEF;
+```
+
+Every shader that calls `per_agent_u32` reads the same constants. Shader GLSL:
+
+```glsl
+#define RNG_KEY_1 0xA5A5A5A5A5A5A5A5ul
+#define RNG_KEY_2 0x5A5A5A5A5A5A5A5Aul
+#define RNG_KEY_3 0xDEADBEEFCAFEF00Dul
+#define RNG_KEY_4 0x0123456789ABCDEFul
+```
+
+**Cross-backend golden test** asserts `per_agent_u32(42, AgentId(1), 100, b"action")` returns the same value when computed on host Rust AND when computed inside a test shader that returns the value via a result buffer.
+
+See `../dsl/spec.md` §9 D12. Implementation: `crates/engine/src/rng.rs`, `crates/engine/shaders/rng.glsl` (header), `crates/engine/tests/rng_cross_backend.rs`.
+
+---
+
+## 8. GPU runtime integration
+
+The engine depends on `voxel_engine = { path = "/home/ricky/Projects/voxel_engine" }` to provide `VulkanContext` + `GpuHarness`.
+
+### Initialization
+
+```rust
+pub struct GpuBackend {
+    ctx:      VulkanContext,
+    harness:  GpuHarness,
+    kernels:  KernelCatalog,
+    state:    GpuState,
+    events:   GpuEventRing,
+    // ... per-phase FieldHandles ...
+}
+
+impl GpuBackend {
+    pub fn new() -> Result<Self, GpuInitError>;
 }
 ```
 
-Aggregate (non-spatial) entities — parties, charters, treaties, quests — live in a parallel `AggregatePool<T>` (§14).
+`GpuInitError` covers no-device, no-compute-queue, out-of-memory-at-init. Callers must handle — backend selection (§25) uses `Result::ok()` to fall back to `SerialBackend`.
 
-See `../compiler/spec.md` §1.3 for the hot/cold split heuristic; the engine implements the mechanism and the compiler decides which DSL fields land in which bucket. Implementation: `crates/engine/src/state/`.
+### Kernel catalog
 
----
-
-## 4. Event log
-
-`EventRing` is a VecDeque with a fixed capacity, seeded by `with_cap(n)`. `push(event)` appends; if full, the oldest event is dropped. `iter()` yields events in push order.
-
-Events partition into two classes:
-
-- **Replayable** — contribute to the deterministic hash. Engine-owned variants: `AgentMoved`, `AgentAttacked`, `AgentDied`. Compiler-emitted variants are registered via the `Event` enum's `#[non_exhaustive]` extension point (open sum type in the compiler's codegen).
-- **Chronicle** — prose side-channel. `Event::ChronicleEntry { text: String, tick: u32 }` holds template-rendered text for dev-facing UIs. Excluded from the replayable hash. Templates can reference state nondeterministically (locale, prose variations) without breaking determinism.
-
-The byte-packing format for hash input:
-
-| Offset | Bytes | Content |
-|--------|-------|---------|
-| 0      | 1     | Variant tag (0 = AgentMoved, 1 = AgentAttacked, 2 = AgentDied, 128+ = compiler-extended) |
-| 1..    | var   | Packed fields: u32 → LE bytes, f32 → `to_bits().to_le_bytes()` |
-
-`replayable_sha256()` hashes the concatenation of all packed replayable events in push order. The tick number is included in every event struct so the hash is sensitive to ordering.
-
-Cascade events (events emitted by physics handlers in response to other events, §9) carry `cause: Option<EventId>` where `EventId = (tick: u32, seq: u32)`. This enables `causal_tree()` queries (§22) without affecting the hash — the `cause` field is NOT included in the byte-packed hash input; only the event's own fields are.
-
-Adding a new replayable variant bumps the schema hash (§20). Adding a new chronicle variant does not.
-
-See `../dsl/spec.md` §2.2 (language grammar) and §7.3 (replay scope). Implementation: `crates/engine/src/event/`.
-
----
-
-## 5. Spatial index
-
-The spatial index is a 2D-column BTreeMap + per-column z-sort + movement-mode sidecar.
+The engine ships SPIR-V bytecode for universal kernels, embedded via `include_bytes!`:
 
 ```rust
-pub struct SpatialIndex {
-    columns:  BTreeMap<(i32, i32), SortedVec<(f32, AgentId)>>,
-    sidecar:  Vec<AgentId>,   // fliers / swimmers / climbers
-    cell_size: f32,           // 16.0 m, aligned to voxel-chunk edges
+pub struct KernelCatalog {
+    pub mask_hold:                  Kernel,
+    pub mask_move_allowed:          Kernel,
+    pub mask_flee_allowed:          Kernel,
+    pub mask_attack_allowed:        Kernel,
+    pub mask_needs_allowed:         Kernel,
+    pub mask_domain_hook_allowed:   Kernel,
+    pub policy_utility_argmax:      Kernel,
+    pub apply_move_toward:          Kernel,
+    pub apply_flee:                 Kernel,
+    pub apply_attack:               Kernel,
+    pub apply_needs_restore:        Kernel,
+    pub view_damage_taken_reduce:   Kernel,
+    pub spatial_insert:             Kernel,
+    pub spatial_within_radius:      Kernel,
+    // ... etc.
 }
 ```
 
-Agents with `MovementMode::Walk` live in the column map, keyed on `(floor(pos.x / cell_size), floor(pos.y / cell_size))` with their `z` position as the sort key within the column. Agents with any other movement mode (Fly / Swim / Climb / Fall) live in the sidecar and are scanned linearly on every query; the expected population of the sidecar is much smaller than the total alive count.
+Bytecode lives at `crates/engine/shaders/*.spv` — pre-compiled from GLSL source in `crates/engine/shaders/src/*.glsl` via a one-time `cargo xtask compile-shaders` command. Source and bytecode are both committed. Rebuilding requires `shaderc` (dev-time tool; not a runtime dep).
 
-Query API (all return owned `Vec<AgentId>` in the MVP; §17 zero-alloc variants via scratch):
+### SPIR-V versioning
 
-- `within_radius(center: Vec3, r: f32) -> Vec<AgentId>` — 3D Euclidean distance.
-- `nearest_k(center: Vec3, k: usize) -> Vec<(f32, AgentId)>` — k nearest in 3D.
-- `in_column_z_range(col: (i32, i32), z_range: Range<f32>) -> Vec<AgentId>`.
+Each shipped kernel has a content-hash recorded in `KernelCatalog::kernel_hashes`. The schema hash (§22) includes this set; a kernel recompile that changes bytecode bumps the engine's schema hash.
 
-All distance checks use 3D Euclidean (the XY-only "planar" variant is a separate API clearly named — confusing the two has been a historical regression, see spec §9 D25).
+### Compiler-emitted kernels
 
-Updates on `spawn_agent`, `kill_agent`, and `set_agent_pos` (which also updates the column key when the agent crosses a cell boundary).
+In addition to universal kernels, the **compiler emits domain-specific kernels** (per-DSL-program mask predicates, cascade handlers, view reductions). These are loaded into the `GpuBackend` at init via `load_kernel_from_spirv(bytes)`. The compiler's output includes both Rust code (calling engine APIs) and SPIR-V files (loaded at runtime).
 
-The BTreeMap ordered iteration guarantees determinism. The `SortedVec` insertion preserves the z-order.
-
-See `../dsl/spec.md` §9 D25 for the decision rationale; this section pins the API. Implementation: `crates/engine/src/spatial.rs`.
+Implementation: `crates/engine/src/backend/gpu/`, `crates/engine/shaders/`.
 
 ---
 
-## 6. RNG streams
+## 9. Action space — MicroKind
 
-`WorldRng` is PCG-XSH-RR with a single 64-bit state + 64-bit stream id, constructed by `from_seed_with_stream(seed: u64, stream_id: u64)`. The standalone `next_u32()` and `next_u64()` methods mutate state.
-
-For operations that need independent streams (per-agent sampling, per-event noise, shuffle keys), the engine exposes keyed hash functions that do NOT mutate the global state:
-
-```rust
-pub fn per_agent_u32(
-    world_seed: u64,
-    agent_id: AgentId,
-    tick_or_nonce: u32,
-    purpose: &[u8],
-) -> u32;
-
-pub fn per_agent_u64(
-    world_seed: u64,
-    agent_id: AgentId,
-    tick_or_nonce: u32,
-    purpose: &[u8],
-) -> u64;
-```
-
-Implementation: a fixed-keyed `ahash::RandomState::with_seeds(K1, K2, K3, K4)` where K1..K4 are hard-coded constants baked into the engine (`0xA5A5_A5A5_A5A5_A5A5`, `0x5A5A_5A5A_5A5A_5A5A`, `0xDEAD_BEEF_CAFE_F00D`, `0x0123_4567_89AB_CDEF`). The `runtime-rng` feature of `ahash` is explicitly disabled — that feature would reseed the hasher from system entropy per process and break determinism. Pinning these constants is how the engine guarantees `per_agent_u32(...)` returns the same value across runs, compilers, and architectures.
-
-Golden tests (`crates/engine/tests/rng.rs`) pin specific input→output pairs for both functions. Any change to K1..K4 or to the ahash algorithm bumps the schema hash (§20).
-
-See `../dsl/spec.md` §9 D12. Implementation: `crates/engine/src/rng.rs`.
-
----
-
-## 7. Action space — MicroKind
-
-The engine carries a closed set of 18 `MicroKind` variants covering the universal primitives from `../dsl/spec.md` Appendix A. These are the *runtime* primitives — after the compiler has lowered `Read(doc)` into `Ask(doc, QueryKind::AboutAll)`.
+Same 18-variant closed enum as before:
 
 ```rust
 #[repr(u8)]
 pub enum MicroKind {
-    // Movement (3)
-    Hold, MoveToward, Flee,
-    // Combat (3)
+    Hold = 0, MoveToward, Flee,
     Attack, Cast, UseItem,
-    // Resource (4)
     Harvest, Eat, Drink, Rest,
-    // Construction (3)
     PlaceTile, PlaceVoxel, HarvestVoxel,
-    // Social (2)
     Converse, ShareStory,
-    // Info — push + pull (2)
     Communicate, Ask,
-    // Memory (1)
     Remember,
 }
-
-impl MicroKind {
-    pub const ALL: &'static [MicroKind] = &[/* 18 variants */];
-}
 ```
 
-Step semantics break into three tiers:
+### Execution per backend
 
-1. **Fully implemented in the engine** — `Hold`, `MoveToward`, `Flee`, `Attack`, `Eat`, `Drink`, `Rest`. These need only `SimState` fields (pos, hp, hunger, thirst, rest_timer) and can apply without a domain-specific cascade.
-2. **Needs compiler-registered cascade** — `Cast`, `UseItem`, `Harvest`, `PlaceTile`, `PlaceVoxel`, `HarvestVoxel`, `Converse`, `ShareStory`, `Communicate`, `Ask`, `Remember`. The engine emits the corresponding event (`AgentCast`, `AgentHarvested`, `InformationRequested`, etc.) and delegates the effect to a handler registered via `CascadeRegistry::register` (§9).
-3. **Stubbed** — none in MVP; every variant has either built-in step semantics or a registered cascade.
+| MicroKind | Serial execution | GPU execution |
+|---|---|---|
+| Hold | No-op | No-op |
+| MoveToward | CPU scalar pos update | `apply_move_toward` kernel |
+| Flee | CPU scalar pos update | `apply_flee` kernel |
+| Attack | CPU scalar HP deduction + conditional kill | `apply_attack` kernel w/ atomic write to alive buffer on kill |
+| Eat/Drink/Rest | CPU scalar need-restoration | `apply_needs_restore` kernel |
+| Cast/UseItem/etc. | Emit event only (no state mutation in engine) | Same; compiler-registered cascade handles the effect |
 
-Every `Action` that flows through the tick loop carries a `MicroKind` plus a typed target slot:
+The apply kernel's job is: read `scratch.actions` FieldHandle, filter by MicroKind, write mutations to state fields + emit events into the GPU event ring via atomic append. Each MicroKind gets its own parallel dispatch; actions of other kinds in the same batch are no-ops for that kernel.
 
-```rust
-pub struct Action {
-    pub agent: AgentId,
-    pub micro_kind: MicroKind,
-    pub target: ActionTarget,
-}
-
-pub enum ActionTarget {
-    None,
-    Agent(AgentId),
-    Position(Vec3),
-    ItemSlot(u8),
-    AbilityIdx(u8),
-    Resource(ResourceRef),
-    Voxel(IVec3),
-    FactRef(EventId),
-    Document(ItemId),
-    Query(QueryKind),
-}
-```
-
-Extending the action vocabulary to add a new universal primitive (e.g. if we discover the spec is missing one) means: add a variant to `MicroKind`, add step semantics OR a cascade hook, bump the schema hash baseline. Domain-specific verbs are handled by compiler desugaring on top of existing primitives, not by extending `MicroKind`.
-
-See `../dsl/spec.md` §3.3 and Appendix A. Implementation: `crates/engine/src/policy/action.rs` (MVP has a subset; full 18 lands in Phase 2 of engine build-out).
+See `../dsl/spec.md` §3.3 and Appendix A.
 
 ---
 
-## 8. Macro mechanisms
+## 10. Macro mechanisms
 
-The engine carries 4 `MacroKind` variants — the universal action mechanisms that exist in every world:
+Same 4 variants (`PostQuest`, `AcceptQuest`, `Bid`, `Announce`) + `NoOp`.
 
-```rust
-#[repr(u8)]
-pub enum MacroKind {
-    PostQuest,            // auction / contract posting
-    AcceptQuest,          // aliased with JoinParty for group-joining semantics
-    Bid,                  // place a bid on an open auction
-    Announce,             // broadcast information to group / area / anyone
-}
-```
+Announce cascade (the only universal macro that mutates state) runs as:
 
-Each macro has a complex parameter head set (quest_type, party_scope, quest_target, reward_kind, payment_kind, group_kind, announce_audience, standing_kind, resolution) enumerated in `../dsl/spec.md` §3.2. The engine holds those enums as data types; semantics (which quest kinds exist in a given world, how a specific `Resolution` breaks ties) come from compiler-registered handlers.
+- Serial: `for obs in state.agents_alive() { ... }` loop with distance check, emits RecordMemory per recipient.
+- GPU: `apply_announce` kernel — parallel distance check per agent, atomic-append to event ring for each match, bounded by `MAX_ANNOUNCE_RECIPIENTS` via an atomic counter early-exit.
 
-The 4 macros + 18 micros = 22 runtime action kinds in the `MicroKind` ∪ `MacroKind` space. When a policy emits an action with `macro_kind != NoOp`, the micro parameter heads are ignored and vice versa (spec §3.2 line 642).
-
-Built-in cascade on emission:
-
-- **`PostQuest`** → emit `QuestPosted { quest_id, poster, … }`; compiler-registered quest bookkeeping handler.
-- **`AcceptQuest`** → emit `QuestAccepted { quest_id, acceptor, role }`; compiler handler resolves role-in-party.
-- **`Bid`** → emit `BidPlaced { auction_id, bidder, payment }`; compiler handler implements resolution policy.
-- **`Announce`** → cascade enumerates recipients (group members, area radius, or `MAX_ANNOUNCE_RADIUS` sphere), emits `RecordMemory` per recipient; overhear scan adds bystanders with reduced confidence. Bounded by `MAX_ANNOUNCE_RECIPIENTS`. This cascade IS implemented in the engine, not delegated, because it's fully specified by the spatial index + the recipient enumeration — no domain-specific logic.
-
-Implementation: `crates/engine/src/policy/macro.rs` (MVP has NoOp + AnnounceAction; full 4 lands in Phase 2).
+Both backends produce the same events in the same logical order (per-tick seq-sorted).
 
 ---
 
-## 9. Physics cascade runtime
+## 11. Physics cascade runtime
 
-After an action applies and emits its primary event, registered cascade handlers run. A cascade handler is:
+Cascade is **GPU-dispatchable** (full GPU-resident target), with Serial as the reference.
 
-```rust
-pub trait CascadeHandler: Send + Sync {
-    fn trigger(&self) -> EventKindId;
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing);
-}
+### Serial
 
-pub struct CascadeRegistry {
-    handlers: FxHashMap<EventKindId, SmallVec<[Box<dyn CascadeHandler>; 4]>>,
-}
+`CascadeRegistry` holds `Box<dyn CascadeHandler>`. `run_fixed_point(state, events)` walks new events, dispatches handlers in lane order, bounded by `MAX_CASCADE_ITERATIONS = 8`.
 
-impl CascadeRegistry {
-    pub fn register<H: CascadeHandler + 'static>(&mut self, h: H);
-    pub fn dispatch(&self, event: &Event, state: &mut SimState, events: &mut EventRing) -> usize;
+### GPU
+
+`CascadeRegistry` holds a catalog of **SPIR-V kernels** (one per `(EventKindId, Lane)` pair). Compiler emits these kernels when lowering DSL `physics` rules. `run_fixed_point` on GPU is a host-orchestrated loop:
+
+```
+for iter in 0..MAX_CASCADE_ITERATIONS:
+    total_before = gpu_events.counter()
+    dispatch all handlers whose trigger event-kind was pushed this iteration
+    total_after = gpu_events.counter()
+    if total_after == total_before: break  # fixed point reached
+```
+
+Each iteration re-dispatches handler kernels over new events. **No state download between iterations** — cascade mutates GPU-resident state directly.
+
+### Compiler-emitted cascade handlers
+
+DSL rule:
+
+```
+physics damage_on_attack @phase(event) {
+  on AgentAttacked { attacker: _, target: t, damage: d } {
+    state.hp[t] -= d
+    if state.hp[t] <= 0 {
+      emit AgentDied { agent_id: t }
+    }
+  }
 }
 ```
 
-Dispatch runs every handler whose `trigger()` matches the event kind. Handlers MAY emit new events into `events`; those events are themselves dispatched in the same tick. This creates a fixed-point loop.
+Compiles to a SPIR-V kernel that:
+1. Reads the `AgentAttacked` event buffer
+2. For each event, reads `state.hp[t]`, subtracts damage, writes back
+3. If new hp ≤ 0, atomic-appends `AgentDied` to the event buffer
 
-**Bounded iteration.** The loop terminates after `MAX_CASCADE_ITERATIONS = 8` passes. In dev builds (debug assertions on), exceeding the bound panics with the cascade trail. In release, the engine logs a warning and truncates — the overflowing events are emitted but their downstream cascades are not dispatched this tick. They may still fire next tick if the triggering event re-occurs.
+The same DSL rule also compiles to a Rust closure for `SerialBackend`. Both have bit-identical observable behavior; determinism tests verify.
 
-**Handler ordering.** Within a single event dispatch, handlers run in registration order. The DSL-compiler resolves mod-level conflicts via lane discipline (`../compiler/spec.md` §Decisions D16 — Validation / Effect / Reaction / Audit lanes with lexicographic sort); the engine preserves lane order via a per-lane registry structure. Non-modded engine tests see only one lane.
+### Cross-entity walks
 
-**Handler purity.** Handlers must not hold external references or block. They see `&mut SimState` and `&mut EventRing` exclusively. Sleeping, IO, or RNG-outside-the-keyed-streams is forbidden — violations break determinism.
+`for t in quest.eligible_acceptors` becomes a kernel that reads a GPU-resident `AggregatePool<Quest>` entry, iterates its embedded `[AgentId; N]` array, dispatches inner work per agent. Bounded by the pool's fixed-size array capacity.
 
-See `../dsl/spec.md` §2.4 (language grammar) for how DSL `physics` rules become registered handlers. Implementation: `crates/engine/src/cascade/` (not yet built; lives in the engine build-out plan).
+Implementation: `crates/engine/src/cascade/`, with `backend/serial/cascade.rs` and `backend/gpu/cascade.rs`.
 
 ---
 
-## 10. Mask buffer
+## 12. Mask buffer
 
-The `MaskBuffer` is the per-head validity tensor consumed by the policy backend. Two heads are built-in:
+Same layout; backend-local storage.
 
-- `micro_kind`: `Vec<bool>` of size `n_agents × MicroKind::ALL.len()`.
-- `target`: `Vec<bool>` of size `n_agents × TARGET_SLOTS` where `TARGET_SLOTS = 12`.
+### Serial
 
-The layout is `bit[slot * n_kinds + kind_idx]` for `micro_kind`, `bit[slot * TARGET_SLOTS + target_idx]` for `target`.
+`Vec<bool>` per head. Predicates mutate via `impl MaskBuffer { fn mark_hold_allowed(&mut self, state: &SimState) }`.
+
+### GPU
+
+FieldHandle per head (each bit stored as u32, one thread per bit). Predicates are SPIR-V kernels that write per-slot bits based on state queries.
+
+Universal predicates (hold, move-allowed, flee-if-threat, attack-in-range, needs, domain-hook) have engine-shipped GPU kernels. Domain-specific predicates come from the compiler.
+
+### Dispatch
 
 ```rust
-pub struct MaskBuffer {
-    pub micro_kind: Vec<bool>,
-    pub target:     Vec<bool>,
-    pub n_agents:   usize,
-}
-
-impl MaskBuffer {
-    pub fn new(n_agents: usize) -> Self;
-    pub fn reset(&mut self);
-    pub fn mark_hold_allowed(&mut self, state: &SimState);
-    pub fn mark_move_allowed_if_others_exist(&mut self, state: &SimState);
-    // Domain predicates registered via MaskBuilder below.
+pub trait Mask {
+    fn reset(&mut self, backend: &mut dyn ComputeBackend);
+    fn mark_hold_allowed(&mut self, backend: &mut dyn ComputeBackend, state: &SimState);
+    fn mark_move_allowed_if_others_exist(&mut self, backend: &mut dyn ComputeBackend, state: &SimState);
+    // ... etc.
 }
 ```
 
-Additional heads (macro_kind, channel, quest_type, announce_audience, …) are added via:
+Backend chooses scalar vs kernel dispatch internally.
 
-```rust
-pub trait MaskBuilder {
-    fn add_head(&mut self, name: &str, n_bits_per_agent: usize) -> HeadId;
-    fn set(&mut self, head: HeadId, agent_slot: usize, bit: usize, allowed: bool);
-}
-```
-
-Universal predicates (target-in-range, cooldown-ready, is-alive, has-free-inventory-slot) are built into the engine. Domain predicates (quest-eligibility, standing-at-war, member-of-group) are registered by compiler-generated code.
-
-**Mask validity invariant:** every `Action` returned by a policy must correspond to a `true` bit in the mask that was passed to its `evaluate` call. The engine enforces this in a regression test (§21 §7); a violating backend is a bug.
-
-See `../dsl/spec.md` §2.5 (grammar) and Appendix B.2 (concrete predicates). Implementation: `crates/engine/src/mask.rs`.
+**Mask validity invariant** (§20) checks every chosen action's bit. GPU backend downloads the relevant mask slice before invariant check.
 
 ---
 
-## 11. Policy backend
+## 13. Policy backend
 
-The policy backend is a trait invoked once per tick per agent-batch. Zero-alloc is a hard requirement on the hot path.
+`PolicyBackend` trait abstracts over execution mode:
 
 ```rust
 pub trait PolicyBackend: Send + Sync {
     fn evaluate(
         &self,
-        state: &SimState,
-        mask:  &MaskBuffer,
-        out:   &mut Vec<Action>,
+        backend: &mut dyn ComputeBackend,
+        state:   &SimState,
+        mask:    &MaskBuffer,
+        actions: &mut ActionBuffer,
     );
 }
 ```
 
-The engine ships two implementations in-tree:
+`ActionBuffer` is backend-local: host `Vec<Action>` for Serial, FieldHandle for GPU.
 
-- **`UtilityBackend`** — hand-scored argmax over masked candidates. Score table is a `&'static [(MicroKind, f32)]` + HP-aware bonuses (low HP → Eat > Attack; high HP → Attack > Rest). Tie-break rule: lowest `MicroKind::ALL` index wins. Used for bootstrapping and as the regression baseline. Scoring rules live in the compiler-generated `utility_rules.rs` when the DSL has `backend "utility"`; the in-tree default is for smoke tests.
-- **`NeuralBackend`** — STUB in MVP. Trait-only: loads safetensors weights and runs inference. Full implementation deferred; see Phase 2 engine plan.
+- **`UtilityBackend`** — has both variants. Serial: scalar argmax over masked score table. GPU: parallel argmax kernel per agent. Both produce the same argmax (integer tie-break on MicroKind ordinal).
+- **`NeuralBackend`** — GPU-only in the MVP. Runs compiler-emitted matmul kernels for forward pass. Serial impl is a `todo!()` stub for now (lands when compiler emits Rust matmul code paths).
 
-Additional backends (`LlmBackend`, `GoapBackend`) are implemented by the compiler or by downstream crates. The engine doesn't take a dependency on any ML framework; `NeuralBackend` impls live outside the engine crate.
+Cross-backend parity: for every policy + seed + state, `SerialBackend::evaluate` and `GpuBackend::evaluate` produce byte-identical `ActionBuffer` contents (after download).
 
-**Argmax rule.** When two actions tie on score, the one with the lower `MicroKind` ordinal index wins. This is deterministic and reproducible across runs. Stochastic sampling (softmax + temperature) is a compiler-generated feature; the engine exposes hooks but doesn't implement it in `UtilityBackend`.
-
-See `../dsl/spec.md` §2.7 (grammar) and §3.5 (backend semantics). Implementation: `crates/engine/src/policy/`.
+Implementation: `crates/engine/src/policy/`, with backend-local variants in `crates/engine/src/backend/*/policy.rs`.
 
 ---
 
-## 12. Tick pipeline
+## 14. Tick pipeline
 
-One tick is six ordered phases:
+Six phases; each dispatched through the current `ComputeBackend`.
 
-1. **Mask build.** Reset `MaskBuffer`, mark universal predicates, dispatch registered domain predicates. Reads `SimState`, writes `MaskBuffer`.
-2. **Policy evaluate.** `backend.evaluate(state, mask, &mut actions)`. Reads both, writes `actions`.
-3. **Action shuffle.** Per-tick Fisher-Yates over `0..actions.len()` using `per_agent_u32(seed, AgentId(1), tick << 16 + i, b"shuffle")`. Determinism-load-bearing — prevents first-mover bias.
-4. **Apply actions + emit events.** For each action in shuffled order: mutate state (pos, hp, cooldown), push primary event, run cascade (§9).
-5. **View fold.** Registered materialized views see all events emitted this tick. Views are incremental: `view.fold(events_since_last_tick)`.
-6. **Invariant + telemetry.** Registered invariants (§17) check post-state; violations dispatch per their failure mode. Telemetry sink (§19) emits built-in metrics (tick_ms, event_count, agent_count) and any registered domain counters.
+| Phase | Host-side vs backend-dispatched | Both backends |
+|---|---|---|
+| 1. Mask build | Backend-dispatched | Serial: scalar predicates; GPU: kernel dispatch |
+| 2. Policy eval | Backend-dispatched | Serial: PolicyBackend scalar; GPU: PolicyBackend kernel |
+| 3. Action shuffle | **Host-side** | Shuffle operates on the ActionBuffer after download (GPU) or in-place (Serial); seed-deterministic |
+| 4. Apply + cascade | Backend-dispatched | Serial: Rust closures; GPU: SPIR-V kernels |
+| 5. View fold | Backend-dispatched | Serial: scalar fold; GPU: sorted-key reduction |
+| 6. Invariant + telemetry | **Host-side** | Backends download state snapshot as needed; invariants read mirror |
 
-After phase 6, `state.tick += 1`. `SimScratch` holds all per-tick buffers (`mask`, `actions`, `shuffle_idx`) to achieve zero steady-state allocation.
+Phase 3 (shuffle) is host-side because Fisher-Yates is inherently sequential and the cost of downloading-to-shuffle-then-uploading is negligible relative to one shuffle per tick. The ActionBuffer is sync'd at the phase-2 boundary.
+
+Phase 6 is host-side because invariants + telemetry are inherently small, low-frequency, and pragmatic to run on the host.
+
+Full signature:
 
 ```rust
-pub fn step<B: PolicyBackend>(
-    state:   &mut SimState,
-    scratch: &mut SimScratch,
-    events:  &mut EventRing,
-    backend: &B,
-    cascade: &CascadeRegistry,
-    views:   &mut [&mut dyn MaterializedView],
-    invariants: &[&dyn Invariant],
+pub fn step_full<B: PolicyBackend>(
+    backend:    &mut dyn ComputeBackend,
+    state:      &mut SimState,
+    scratch:    &mut SimScratch,
+    events:     &mut EventRing,
+    policy:     &B,
+    cascade:    &CascadeRegistry,
+    views:      &mut [&mut dyn MaterializedView],
+    invariants: &InvariantRegistry,
     telemetry:  &dyn TelemetrySink,
 );
 ```
 
-The MVP `step()` signature is simpler (no cascade / views / invariants / telemetry); they plug in as the build-out progresses. See the engine-build-out plan in `../superpowers/plans/`.
-
-See `../dsl/spec.md` §7.1. Implementation: `crates/engine/src/step.rs`.
+`ComputeBackend` abstracts the storage + kernel dispatch surface. `step_full` doesn't know whether it's talking to CPU or GPU.
 
 ---
 
-## 13. Views
+## 15. Views
 
-Views are derived state computed from events. The engine supports three storage modes:
+Three storage modes × two backends.
 
-- **`materialized`** — a full per-entity Vec, folded every tick. `DamageTaken: Vec<f32>` indexed by agent slot is the canonical example.
-- **`lazy_cached`** — computed on demand, cached with a staleness marker. Invalidated when any triggering event is pushed. Good for expensive queries that most ticks don't need.
-- **`per_entity_topk(K, keyed_on)`** — fixed-size top-K per entity, e.g. "the 8 agents with highest reputation toward me". Bounded memory regardless of N.
+| Mode | Serial impl | GPU impl |
+|---|---|---|
+| `MaterializedView` | Scalar fold over event iterator | Sorted-by-target-id + parallel reduction kernel |
+| `LazyView` | Compute on demand with staleness flag | Same shape; compute dispatched as kernel, cached in FieldHandle |
+| `TopKView` | Per-target Vec with sort | Per-target small-array with parallel merge-and-truncate |
 
-```rust
-pub trait MaterializedView: Send + Sync {
-    fn fold(&mut self, events: &EventRing);
-}
-
-pub trait LazyView: Send + Sync {
-    fn invalidated_by(&self) -> &[EventKindId];
-    fn compute(&mut self, state: &SimState);
-    fn is_stale(&self) -> bool;
-}
-
-pub trait TopKView: Send + Sync {
-    const K: usize;
-    fn update(&mut self, event: &Event);
-    fn topk(&self, agent: AgentId) -> &[(AgentId, f32); Self::K];
-}
-```
-
-Storage mode is chosen by the compiler from DSL `@materialized(storage=<hint>)` annotations; the engine exposes the three traits without making routing decisions. GPU eligibility follows from storage hint and is a compiler-side concern (`../compiler/spec.md` §1.2).
-
-**Determinism.** For `materialized` views over commutative scalar operations (sum, max), events must be sorted by target id before reduction to avoid float-associativity drift (§2). The engine's reference `DamageTaken::fold` uses in-order iteration which is deterministic by construction; GPU implementations need the explicit sort.
-
-See `../dsl/spec.md` §2.3. Implementation: `crates/engine/src/view/`.
+Determinism for materialized views under GPU requires **sorting events by their stable per-tick sequence number before reduction** — otherwise float associativity breaks parity. Commutative integer reductions (counts) don't need sorting.
 
 ---
 
-## 14. Aggregates
+## 16. Aggregates
 
-Aggregates are entity-shaped things that don't have a spatial position: parties, charters, treaties, quests, groups. They live in a parallel pool.
+`AggregatePool<T>` for non-spatial entities. Two variants:
 
-```rust
-pub struct AggregatePool<T> {
-    slots:     Vec<Option<T>>,
-    freelist:  Vec<u32>,
-    alive:     Vec<bool>,
-}
+- **Host-only aggregates** (default): T has no `Pod` constraint; works only with `SerialBackend` OR requires explicit download for GPU access. Good for quest metadata that rarely needs GPU access.
+- **GPU-eligible aggregates**: `T: Pod`; storage is `FieldHandle` when `GpuBackend` is active. Required when cascade handlers running on GPU need to read aggregate fields.
 
-impl<T> AggregatePool<T> {
-    pub fn alloc(&mut self, t: T) -> AggregateId;
-    pub fn kill(&mut self, id: AggregateId);
-    pub fn get(&self, id: AggregateId) -> Option<&T>;
-    pub fn get_mut(&mut self, id: AggregateId) -> Option<&mut T>;
-}
-```
-
-`AggregateId` is `NonZeroU32` like `AgentId` — same niche optimization, same slot-reuse semantics. The engine instantiates `AggregatePool<Quest>`, `AggregatePool<Group>`, etc. based on compiler-generated type definitions.
-
-Cross-references (aggregate → member agents, agent → memberships) are materialized views (§13) maintained by cascade handlers on the relevant events (`MemberJoined`, `MemberLeft`, `GroupDissolved`).
-
-**Dissolution semantics.** When a `Group` is killed, cascade handlers cascade-mark all `Membership` records invalid; the `memberships` materialized view rebuilds from the event log within one tick. Dangling `GroupId` references in agent state become `Option::None` on the next `memberships::fold` pass.
-
-See `../dsl/spec.md` §5 type system. Implementation: `crates/engine/src/pool.rs` (generic over T; agent and aggregate pools both use it).
+For MVP, `Quest` and `Group` use the GPU-eligible shape — their fields are Pod (Option<AgentId> = u32, fixed-size arrays via `[AgentId; N]` instead of `SmallVec`).
 
 ---
 
-## 15. Trajectory emission
+## 17. Trajectory emission
 
-Trajectories are per-tick state snapshots serialized to safetensors for downstream ML training. The writer registers named tensors; each `record_tick` call appends one row.
+Same safetensors output across backends. GPU backend downloads per-tick snapshot to the host-side `TrajectoryWriter` buffer; Serial backend writes directly.
 
-Built-in tensors (produced on `TrajectoryWriter::new(n_agents, n_ticks)`):
-
-| Name        | Shape       | Dtype | Semantics                              |
-|-------------|-------------|-------|----------------------------------------|
-| `positions` | `[t, n, 3]` | f32   | Per-agent 3D position at each tick     |
-| `hp`        | `[t, n]`    | f32   | Per-agent HP at each tick              |
-| `tick`      | `[t]`       | u32   | Absolute tick number                   |
-
-Extension API:
-
-```rust
-impl TrajectoryWriter {
-    pub fn register_tensor<F>(&mut self, name: &'static str, shape: &[usize],
-                              dtype: Dtype, getter: F)
-    where F: Fn(&SimState, &mut [u8]) + Send + Sync + 'static;
-}
-```
-
-Custom tensors (observations, actions, rewards, attention maps) register via `register_tensor` with a getter that writes the per-tick row. The writer's `write(path)` emits the combined safetensors file.
-
-**File format.** `safetensors` — canonical because it has Python round-trip support, a stable header format, and no pickle security surface. The writer guarantees that two `cargo test` runs with the same seed produce byte-identical tensor values (but NOT byte-identical files — safetensors metadata ordering is not guaranteed; `TrajectoryReader::load` is the value-equality oracle).
-
-See `../dsl/spec.md` §6. Implementation: `crates/engine/src/trajectory.rs`; Python round-trip: `scripts/engine_roundtrip.py`.
+Register-extensible tensor schema unchanged from current engine. Cross-backend test: both backends produce byte-identical safetensors on the same seed.
 
 ---
 
-## 16. Save / load
+## 18. Save / load
 
-State snapshots capture: SoA field Vecs, freelist, tick, seed, event-ring tail (last N events for replay-from-snapshot), schema hash.
+Backend-agnostic snapshot format. On save, the current backend forces a full sync, downloads state to host mirror, and serializes the mirror. On load, the file is deserialized into host mirror; the backend's `upload_from_mirror()` restores GPU-resident state.
 
-```rust
-pub fn save_snapshot(state: &SimState, events: &EventRing, path: &Path) -> Result<(), Error>;
-pub fn load_snapshot(path: &Path) -> Result<(SimState, EventRing), Error>;
-```
+Format:
 
-File layout:
+| Block | Content |
+|---|---|
+| Header (64 B) | Magic, engine schema_hash, kernel catalog hash, tick, seed |
+| SoA hot field mirrors | One block per field, little-endian |
+| SoA cold field mirrors | Option<T> encoded with present-bit |
+| Pool freelist | alive Vec<bool> + freelist Vec<u32> (mirror — GPU reconstructs) |
+| Event ring tail | Host-mirror snapshot of replay-continuity events |
 
-| Block                | Size              | Content                                   |
-|----------------------|-------------------|-------------------------------------------|
-| Header               | 64 B              | Magic (`WSIMSV01`), schema_hash (32 B), tick, seed |
-| SoA hot field Vecs   | `n_fields × n × 4`| Little-endian field bytes                 |
-| SoA cold field Vecs  | varies            | Option<T> encoded with present bit + body |
-| Slot pool state      | `n + freelist_len × 4` | alive Vec<bool> + freelist Vec<u32>   |
-| Event ring tail      | varies            | Serialized events for replay continuity   |
-
-Loading rejects a snapshot whose header `schema_hash` differs from the current binary's `schema_hash` with a hard error. To migrate, the caller registers a migration function:
-
-```rust
-pub fn register_migration(from_hash: [u8; 32], to_hash: [u8; 32],
-                          migrate: impl Fn(&[u8]) -> Result<Vec<u8>, Error>);
-```
-
-Migrations are chain-composable — a save at hash `A` can be loaded at hash `C` if migrations `A→B` and `B→C` are both registered.
-
-**Non-goals:** partial snapshots (one region, one faction) are a Phase 3 optimization. MVP is whole-world only.
-
-See `../dsl/spec.md` §7.4. Implementation: `crates/engine/src/snapshot.rs` (not yet built).
+Loading rejects a snapshot whose kernel catalog hash differs from the current engine's (beyond the standard schema hash check). This prevents "sim loaded with different kernel semantics than it was saved with" bugs.
 
 ---
 
-## 17. Invariant runtime
+## 19. Invariant runtime
 
-Invariants are assertion-shaped functions that run in phase 6 of the tick loop. Failure modes are compile-time configurable.
+Invariants run on the host, against the **host mirror post-sync**. The step pipeline forces a sync at phase-6 entry for any invariant that declares `requires_state: true` (a method on the Invariant trait).
 
-```rust
-pub trait Invariant: Send + Sync {
-    fn name(&self) -> &'static str;
-    fn check(&self, state: &SimState, events: &EventRing) -> Option<Violation>;
-    fn failure_mode(&self) -> FailureMode;
-}
+Built-ins:
 
-pub enum FailureMode {
-    Panic,         // dev builds — abort the process with the violation message
-    Log,           // prod builds — emit telemetry event, continue
-    Rollback(u32), // replay from tick - N using event log; useful for soft invariants
-}
+- `mask_validity` — checks post-apply actions/mask pair; ActionBuffer already downloaded at phase 3; no additional sync cost.
+- `pool_non_overlap` — reads host Pool freelist/alive vec; GPU backend must have uploaded the Pool post-apply.
+- `event_hash_stable` (dev-only) — re-hash replayable events; host-resident already.
 
-pub struct Violation {
-    pub invariant: &'static str,
-    pub tick:      u32,
-    pub message:   String,
-    pub payload:   Option<serde_json::Value>,
-}
-```
-
-Built-in invariants:
-
-- `mask_validity` — every action in last tick had its mask bit set.
-- `pool_non_overlap` — no agent slot is both alive and in the freelist.
-- `event_hash_stable` (dev only) — re-hashing the replayable subset gives the same result.
-
-Domain invariants (e.g. "no agent has negative hp", "every active quest has at least one party member") are registered by compiler-generated code.
-
-See `../dsl/spec.md` §2.8. Implementation: `crates/engine/src/invariant.rs` (not yet built).
+Invariants may be GPU-expressible in theory but the engine runs them host-side for MVP — the check frequency (once per tick) makes the sync cost negligible.
 
 ---
 
-## 18. Probe harness
+## 20. Probe harness
 
-Probes are scripted smoke tests — spawn a fixed set of agents, step N ticks, assert expected event sequence or view value. The harness runs them as ordinary `cargo test` cases.
-
-```rust
-pub struct Probe {
-    pub name:    &'static str,
-    pub seed:    u64,
-    pub spawn:   fn(&mut SimState),
-    pub ticks:   u32,
-    pub assert:  fn(&SimState, &EventRing) -> Result<(), String>,
-}
-
-pub fn run_probe(p: &Probe) -> Result<(), String>;
-```
-
-The DSL `probe` declaration is compiled to a `Probe` struct + a `#[probe]` proc-macro (the proc-macro lives in the compiler crate; the engine only defines the runner). When a DSL file adds a probe, the compiler emits a `#[test] fn probe_<name>()` that calls `run_probe`.
-
-Probes are deterministic by construction: same seed + same spawn + same tick count → same outcome. A flaky probe is a determinism bug.
-
-See `../dsl/spec.md` §2.9. Implementation: `crates/engine/src/probe.rs` (not yet built).
+Backend-agnostic. A `Probe` spawns a fixed initial state, runs N ticks through `step_full`, asserts on events / views / state. Probes run on whichever backend is active. A probe CAN be marked `#[probe(backend = "serial")]` to pin the backend, but the default is to run on both backends and assert parity.
 
 ---
 
-## 19. Telemetry sink
+## 21. Telemetry sink
 
-Telemetry is a single `TelemetrySink` trait implementation plugged into the tick loop:
+Host-side only. Both backends emit metrics via the same sink API. GPU-specific metrics (kernel wall-time via timestamps, upload/download ms) go through the same sink under the `engine.gpu.*` prefix.
 
-```rust
-pub trait TelemetrySink: Send + Sync {
-    fn emit(&self, metric: &'static str, value: f64, tags: &[(&'static str, &'static str)]);
-    fn emit_histogram(&self, metric: &'static str, value: f64);
-    fn emit_counter(&self, metric: &'static str, delta: i64);
-}
-```
+Built-in metrics (engine-emitted):
 
-Built-in metrics (emitted every tick by the engine):
-
-| Metric                | Type      | Meaning                                  |
-|-----------------------|-----------|------------------------------------------|
-| `engine.tick_ms`      | histogram | Wall-clock time for the tick             |
-| `engine.event_count`  | counter   | Events pushed this tick                  |
-| `engine.agent_alive`  | gauge     | Alive agents                             |
-| `engine.cascade_iterations` | histogram | Cascade-loop iterations until fixed point |
-| `engine.mask_true_frac` | gauge  | Fraction of mask bits set                |
-
-Domain metrics (emitted by compiler-generated code) flow through the same sink; naming convention is `domain.<declaration>` (e.g. `domain.view_mood_us`).
-
-In-tree implementations: `NullSink` (discards), `VecSink` (collects in memory for tests), `FileSink` (appends JSON lines to a file). Production sinks (Prometheus, StatsD) live in downstream crates.
-
-See `../dsl/spec.md` §2.11. Implementation: `crates/engine/src/telemetry.rs` (not yet built).
+| Metric | Serial | GPU |
+|---|---|---|
+| `engine.tick_ms` | wall-clock | wall-clock |
+| `engine.event_count` | host-side | after-sync count |
+| `engine.agent_alive` | direct | after-sync |
+| `engine.cascade_iterations` | counted | counted |
+| `engine.mask_true_frac` | computed | downloaded mask slice |
+| `engine.gpu.upload_ms` | `0.0` | per-tick sum |
+| `engine.gpu.download_ms` | `0.0` | per-tick sum |
+| `engine.gpu.kernel_ms` | `0.0` | per-kernel histogram |
 
 ---
 
-## 20. Schema hash
+## 22. Schema hash
 
-The engine computes a SHA-256 hash over a canonical string listing layout-relevant types and variants. The hash is baselined in `crates/engine/.schema_hash` and checked by a CI guard.
+SHA-256 covers the **engine schema** + **kernel catalog hashes** + **RNG constants** + **all layout-relevant types**:
 
-Coverage:
+```rust
+h.update(b"SoA-layout: <field names + types>");
+h.update(b"MicroKind: <variants>");
+h.update(b"MacroKind: <variants>");
+h.update(b"EventKindId: <variants + ordinals>");
+h.update(b"Lane: Validation,Effect,Reaction,Audit");
+h.update(b"MAX_CASCADE_ITERATIONS=8");
+h.update(b"RNG_KEY_1=..., RNG_KEY_2=..., ...");
+for k in &catalog.kernel_hashes {
+    h.update(k);
+}
+```
 
-- SoA hot/cold field layout (name, type, order)
-- `Event` variants and field signatures
-- `MicroKind` variants (ordered)
-- `MacroKind` variants (ordered)
-- `MovementMode` variants
-- `CreatureType` variants (engine's universal subset; compiler extends via stable ordinal)
-- `CommunicationChannel` variants
-- `TARGET_SLOTS` constant
-- Trajectory tensor keys and shapes
-- Invariant names and failure modes (whose presence affects determinism via rollback)
-
-Bump triggers: adding, removing, or reordering any variant above; changing any SoA field type; changing `TARGET_SLOTS`; changing `MAX_CASCADE_ITERATIONS`; changing RNG hard-coded keys. Adding a new chronicle event variant is NOT a bump (chronicle doesn't affect the replayable hash).
-
-The CI test compares the computed hash against the baseline. Mismatch is a hard failure with a message listing the schema string so the author can re-baseline deliberately.
-
-See the existing implementation at `crates/engine/src/schema_hash.rs`; baseline at `crates/engine/.schema_hash`.
+A kernel recompile that changes bytecode bumps the engine schema hash automatically. Checkpoint load (§18) rejects on mismatch.
 
 ---
 
-## 21. Observation packing
+## 23. Observation packing
 
-The observation packer builds a feature tensor from `SimState` for policy input. Layout is `[n_agents × feature_dim]` f32.
+`ObsPacker` builds `[n × feature_dim]` f32 for policy input.
 
-```rust
-pub struct ObsPacker {
-    feature_sources: Vec<Box<dyn FeatureSource>>,
-    feature_dim: usize,
-}
+- Serial: iterates agents in host Rust.
+- GPU: parallel kernel writes directly to a GPU-resident `obs_field`.
 
-pub trait FeatureSource: Send + Sync {
-    fn dim(&self) -> usize;
-    fn pack(&self, state: &SimState, agent: AgentId, out: &mut [f32]);
-}
-
-impl ObsPacker {
-    pub fn pack_batch(&self, state: &SimState, out: &mut [f32]);  // [n × feature_dim] row-major
-}
-```
-
-Built-in feature sources:
-
-- `VitalsSource` — hp_frac, hunger_frac, rest_frac (dim 3)
-- `PositionSource` — `pos.x`, `pos.y`, `pos.z`, `movement_mode_one_hot` (dim 7)
-- `NeighborSource<K>` — top-K nearest agents, each contributing relative position + hp + group_rel (dim `K × 8`)
-- `CooldownSource<N>` — per-ability cooldown remaining (dim N)
-
-Domain features (emotion, needs, personality, cumulative stats) register via compiler-generated `FeatureSource` impls.
-
-**Determinism.** `pack_batch` writes in agent-id order; parallel implementations chunk by agent slot and join in order. No sorting-by-value is allowed (that would couple output to float associativity).
-
-See `../dsl/spec.md` §3.1 (grammar) and Appendix B.1 (budget). Implementation: `crates/engine/src/obs.rs` (not yet built).
+Feature source traits are backend-aware; each source registers its pack fn (Rust closure) AND its SPIR-V pack kernel (for GPU).
 
 ---
 
-## 22. Debug & trace runtime
+## 24. Debug & trace runtime
 
-Six components make the simulation introspectable. All are on-demand — none run in the hot path of a production tick.
+Six components: `trace_mask`, `causal_tree`, `tick_stepper`, `tick_profile`, `agent_history`, `snapshot`. All host-side.
 
-### 22.1 `trace_mask(agent, action_idx, tick)`
+When state is GPU-resident, debug tools trigger downloads on demand:
 
-Explains why a mask bit is set or unset. The compiler emits two artefacts per mask predicate:
+- `trace_mask` — syncs observation snapshot + mask for the target tick
+- `causal_tree` — events are already synced to host each tick
+- `tick_stepper` — stops between phases; can request phase-specific downloads
+- `tick_profile` — adds kernel-scoped timing for GPU backend
 
-1. A fast boolean kernel (used in production to fill `MaskBuffer`).
-2. An explanation kernel — same AST, but each sub-clause captures its inputs and result.
-
-At debug time, `trace_mask` re-runs the explanation kernel against a captured observation snapshot for `(agent, tick)` and returns:
-
-```rust
-pub struct MaskTrace {
-    pub agent: AgentId,
-    pub tick: u32,
-    pub action_idx: usize,
-    pub ast: Vec<AstNode>,
-}
-
-pub struct AstNode {
-    pub node_id: u32,
-    pub expr: &'static str,
-    pub inputs: Vec<(&'static str, serde_json::Value)>,
-    pub result: bool,
-}
-```
-
-The first `result=false` node in a conjunction is the failing clause; its inputs show why (e.g. `distance(self, t) = 84 > AGGRO_RANGE = 50`).
-
-Observation snapshots are captured when the caller enables `ObsSnapshotRing` on `SimScratch` — an N-tick rolling buffer of the packed observation tensor, per agent. At 200K agents × ~1.6KB × 1000 ticks = 320 GB, this is debug-build only; prod builds do not capture unless explicitly enabled.
-
-### 22.2 `causal_tree(root_event_id, tick)`
-
-Every event carries `cause: Option<EventId>` with `EventId = (tick: u32, seq: u32)`. Root events (raw agent actions, scheduled physics) have `cause = None`. `causal_tree` walks the DAG edge-set from a root and returns its transitive closure: an event tree showing the cascade fan-out.
-
-```rust
-pub fn causal_tree(events: &EventRing, root: EventId) -> CausalTree;
-
-pub struct CausalTree {
-    pub root: EventId,
-    pub children: FxHashMap<EventId, Vec<EventId>>,
-}
-```
-
-Chronicle entries (`Event::ChronicleEntry`) sit at leaves in the tree — they're emitted by cascade rules but don't trigger further cascades.
-
-**Retention caveat.** If the `cause` event has been evicted from the ring buffer, the chain is truncated. Tools render "truncated — root was at tick T, outside retention" and the partial tree.
-
-### 22.3 `tick_stepper`
-
-A debug driver that halts the tick between phases (§12) and exposes each phase's input/output via a `TickDebugHandle`:
-
-```rust
-pub fn tick_stepper<B: PolicyBackend>(
-    state:   &mut SimState,
-    scratch: &mut SimScratch,
-    events:  &mut EventRing,
-    backend: &B,
-    until:   StepStage,
-) -> TickDebugHandle;
-
-pub enum StepStage {
-    AfterMask, AfterPolicy, AfterShuffle, AfterApply, AfterViews, AfterInvariants
-}
-
-pub struct TickDebugHandle<'a> {
-    pub obs:        &'a [f32],       // [n × feat_dim]
-    pub mask:       &'a MaskBuffer,
-    pub actions:    &'a [Action],
-    pub emitted:    &'a [Event],
-    pub view_deltas: Vec<(&'a str, serde_json::Value)>,
-}
-```
-
-A phase is pure-functionally re-runnable — its output is a deterministic function of its input. Re-running the backend with a different temperature, for example, is a supported debug primitive.
-
-**RNG stream alignment.** The sampler RNG is seeded from `per_agent_u32(seed, agent, tick, b"sample")` — stage-boundary-addressable. Re-running a phase does NOT advance any global RNG state; re-sampling with the same seed gives the same action.
-
-### 22.4 `tick_profile`
-
-Flamegraph-style scope tracing. The engine wraps each named kernel with `scope_begin(sym) / scope_end(sym)`; each call appends a `(sym, start_ns, dur_ns, tick)` tuple to a flat trace buffer.
-
-```rust
-pub struct TickProfile {
-    pub samples: Vec<ScopeSample>,
-}
-
-pub struct ScopeSample {
-    pub sym:   &'static str,
-    pub start_ns: u64,
-    pub dur_ns: u64,
-    pub tick: u32,
-}
-
-pub fn with_profile<T>(f: impl FnOnce() -> T) -> (T, TickProfile);
-```
-
-Built-in scopes: `engine::mask_build`, `engine::policy_eval`, `engine::shuffle`, `engine::apply`, `engine::cascade::<event_kind>`, `engine::view_fold::<view_name>`, `engine::invariant::<name>`. Compiler-emitted code adds `domain::<declaration>::eval`.
-
-Profiling builds compile declarations with `#[inline(never)]` to preserve scope boundaries. Release builds strip scope instrumentation via `#[cfg(feature = "profile")]`.
-
-### 22.5 `agent_history(id, t_from..t_to)`
-
-Rolling per-agent decision ring. Each agent's last N decisions are buffered: `(tick, action, chosen_score, margin_over_second)`. Query primitives:
-
-```rust
-pub fn agent_history(id: AgentId, range: Range<u32>) -> Vec<DecisionRecord>;
-pub fn actions_by_kind(id: AgentId, kind: MicroKind) -> Vec<DecisionRecord>;
-pub fn never_chose(id: AgentId, kind: MicroKind) -> bool;
-pub fn pattern_search(id: AgentId, pat: &[MicroKind]) -> Vec<u32>;  // tick offsets
-```
-
-Buffer size per agent is compile-time configurable (`AGENT_HISTORY_TICKS = 500` by default). At 200K agents × 500 × 64 B = 6.4 GB — prod builds opt in via feature flag; default is a small "focus list" (e.g. 50 agents).
-
-### 22.6 `snapshot(tick) → ReproBundle`
-
-Captures everything needed to reproduce a single tick offline:
-
-```rust
-pub struct ReproBundle {
-    pub schema_hash:  [u8; 32],
-    pub state_before: Vec<u8>,        // SimState serialized (§16)
-    pub events:       Vec<Event>,     // events emitted during this tick
-    pub decisions:    Vec<Action>,    // actions chosen this tick
-    pub seed:         u64,
-    pub tick:         u32,
-}
-
-pub fn snapshot(state: &SimState, events: &EventRing, tick: u32) -> ReproBundle;
-```
-
-A repro bundle is a self-contained test case. `reproduce(bundle)` loads it, runs one tick, and checks that the re-emitted events match `bundle.events` byte-for-byte. Schema-hash mismatch is a hard error — the bundle is tied to the DSL version that produced it.
+GPU stepping: each phase exposes a `debug_readback` toggle that forces additional syncs for inspection, at the cost of performance.
 
 ---
 
-Implementation status: the trace runtime is fully designed in `../dsl/stories.md` §§34–40 but not yet implemented. It lands after the engine MVP primitives; see the engine build-out plan for sequencing.
+## 25. Backend selection + fallback policy
 
-See `../dsl/stories.md` §34 (trace_mask), §35 (causal_tree), §37 (tick_stepper), §40 (tick_profile), §39 (agent_history), §38 (snapshot).
+The engine exposes a single `new_backend()` entry point:
+
+```rust
+pub enum BackendKind { Serial, Gpu }
+
+pub fn new_backend(preferred: BackendKind) -> Box<dyn ComputeBackend>;
+
+// Default: prefer GPU, fall back to Serial:
+pub fn new_backend_auto() -> Box<dyn ComputeBackend>;
+```
+
+Fallback sequence for `new_backend_auto()`:
+
+1. Try `GpuBackend::new()`. Success → use it.
+2. On `GpuInitError`, log via `tracing::warn!`, fall back to `SerialBackend::new()`.
+3. SerialBackend never fails — `new()` returns `Box<dyn ComputeBackend>` directly (no `Result`).
+
+Runtime fallback is deterministic per process: backend selection happens once at init; no mid-run swaps.
+
+**CI strategy:** CI has a Vulkan-capable container (Mesa lavapipe for software Vulkan when no device). Parity tests run both backends and compare. Non-Vulkan CI (unlikely) falls back to Serial-only, with a warning.
+
+**Feature flags:**
+
+- `default-backends = ["serial", "gpu"]` — both compiled in.
+- `["serial"]` — Serial-only build (for embedded or CI without GPU).
+- `["gpu"]` — GPU-only build (for shipped game runtime on known-GPU targets).
+
+Engine crate's Cargo.toml:
+
+```toml
+[features]
+default = ["serial", "gpu"]
+serial = []
+gpu = ["dep:voxel_engine"]
+
+[dependencies]
+voxel_engine = { path = "/home/ricky/Projects/voxel_engine", optional = true }
+```
 
 ---
 
-## 23. Non-goals
+## 26. What's NOT in the engine
 
-The engine does not:
+- **DSL parser and codegen.** Compiler concern.
+- **Verb desugaring / Read → Ask lowering.** Compiler concern.
+- **Domain types** (item catalog, ability list, group kinds). Compiler-generated.
+- **Cascade RULES** (the DSL rules themselves). Compiler emits the kernel bytecode + Rust closures; engine provides the dispatch runtime for both.
+- **Chronicle prose templates.** Host-side text generation; not in engine.
+- **Curriculum pipelines.** External.
+- **LLM backend implementation.** Separate downstream crate.
 
-- **Parse DSL source text.** That's the compiler (`../compiler/spec.md` §1).
-- **Generate Rust / SPIR-V code.** That's the compiler.
-- **Desugar verbs.** `verb` declarations lower to mask + cascade + reward at compile time.
-- **Know which items exist in a world, which abilities exist, which group kinds exist.** Compiler-generated code registers these on engine primitives.
-- **Render chronicle prose.** `Event::ChronicleEntry.text` is template-rendered by compiler-generated code before being pushed; the engine treats the text as an opaque string.
-- **Schedule curricula.** A curriculum is an external pipeline that decides which scenarios run in what order; the engine provides the per-scenario runner.
-- **Implement GPU compute kernels.** `voxel_engine::compute::GpuHarness` lives downstream; the engine exposes traits that downstream crates implement for GPU execution.
-- **Implement the neural policy forward pass.** `NeuralBackend` is trait-only in the engine. The weights loader + forward pass + autograd belong in a separate crate (`crates/nn`) that the compiler may target.
-- **Handle save-game migrations across domain-type evolution.** Migration function composition is supported (§16); writing the migration logic is a domain concern.
-- **Enforce real-time budgets.** The engine aims for ≤ 2 s / 100-agent × 1000-tick in release, but the compiler and domain code can violate this with hot-path allocations. The `dhat-heap` test enforces steady-state zero-alloc at the engine layer only.
+The engine provides **both runtimes** (Serial + GPU). Neither is "downstream"; neither is "a future plan." Both are first-class as of the 2026-04-19 spec rewrite.
 
 ---
 
 ## Implementation map
 
-The engine spec above names all the primitives. Implementation status as of 2026-04-19:
+Status as of 2026-04-19 (rewrite day).
 
-| Section                         | Module                               | MVP? | Notes |
-|---------------------------------|--------------------------------------|------|-------|
-| §3 State model                  | `state/`                             | ✅   | Agents only; aggregates Phase 2 |
-| §4 Event log                    | `event/`                             | ✅   | 4 variants; compiler extends |
-| §5 Spatial index                | `spatial.rs`                         | ✅   | |
-| §6 RNG streams                  | `rng.rs`                             | ✅   | Keyed constants baked |
-| §7 MicroKind                    | `mask.rs`, `policy/`                 | ⚠️   | 4 of 18 variants; full set Phase 2 |
-| §8 MacroKind                    | —                                    | ❌   | Phase 2 |
-| §9 Cascade runtime              | —                                    | ❌   | Phase 2 |
-| §10 Mask buffer                 | `mask.rs`                            | ✅   | 2 heads built in; extensible API Phase 2 |
-| §11 Policy backend              | `policy/`                            | ✅   | `UtilityBackend` in-tree; Neural is trait-stub |
-| §12 Tick pipeline               | `step.rs`                            | ✅   | 3 of 6 phases (mask / policy / apply); full Phase 2 |
-| §13 Views                       | `view/`                              | ⚠️   | MaterializedView only; Lazy + TopK Phase 2 |
-| §14 Aggregates                  | —                                    | ❌   | Phase 2 |
-| §15 Trajectory                  | `trajectory.rs`                      | ✅   | Built-in tensors; register_tensor Phase 2 |
-| §16 Save/load                   | —                                    | ❌   | Phase 2 |
-| §17 Invariants                  | —                                    | ❌   | Phase 2 |
-| §18 Probes                      | —                                    | ❌   | Phase 2 |
-| §19 Telemetry                   | —                                    | ❌   | Phase 2 |
-| §20 Schema hash                 | `schema_hash.rs`                     | ✅   | |
-| §21 Observation packing         | —                                    | ❌   | Phase 2 |
-| §22 Debug & trace               | —                                    | ❌   | Phase 3 (depends on invariant + probe) |
+| Section | Serial | GPU | Notes |
+|---|---|---|---|
+| §3 State model | ✅ | ❌ | FieldHandle residency not yet built |
+| §4 Event log | ✅ | ❌ | GPU ring w/ atomic append TBD |
+| §5 Spatial index | ✅ | ❌ | Voxel-chunk-keyed TBD |
+| §6 RNG streams | ✅ | ❌ | Shader RNG TBD; CPU-side done |
+| §7 MicroKind | ✅ | ❌ | Apply kernels TBD |
+| §8 MacroKind | ✅ | ❌ | Apply kernels TBD |
+| §9 Cascade runtime | ✅ | ❌ | SPIR-V handler dispatch TBD |
+| §10 Mask buffer | ✅ | ❌ | Kernel predicates TBD |
+| §11 Policy backend | ✅ | ❌ | GPU argmax kernel TBD |
+| §12 Tick pipeline | ✅ 6-phase | ❌ | Backend trait not yet extracted |
+| §13 Views | ✅ | ❌ | Parallel reductions TBD |
+| §14 Aggregates | ✅ | ⚠️ | Need T: Pod discipline |
+| §15 Trajectory | ✅ | ❌ | GPU download path TBD |
+| §16 Save/load | ❌ | ❌ | Both TBD |
+| §17 Invariants | ✅ | ⚠️ | Post-sync invariants TBD |
+| §18 Probes | ❌ | ❌ | Both TBD |
+| §19 Telemetry | ✅ | ⚠️ | GPU metrics TBD |
+| §20 Schema hash | ✅ | ⚠️ | Kernel-hash inclusion TBD |
+| §21 Obs packing | ❌ | ❌ | Both TBD |
+| §22 Debug & trace | ❌ | ❌ | Both TBD |
+| §25 Backend selection | ❌ | ❌ | Trait + selection TBD |
 
-The engine build-out plan (`../superpowers/plans/`) sequences the ❌ and ⚠️ entries into a fresh TDD-driven plan that brings every section to ✅.
+The **Serial column is the ground truth**. GPU implementations land one section at a time, each verified bit-for-bit against Serial on fixed seeds. The existing 150-test suite is the determinism oracle; adding GPU implementations adds new tests but never changes the expected outputs.
+
+**Implementation plan sequencing:**
+
+- **Plan 3** — persistence + obs packer + probes (Serial first, per existing plan). Adds §16, §18, §21, §22 Serial ✅.
+- **Plan 4** — debug & trace runtime (Serial first). Completes Serial backend fully.
+- **Plan 5** — `ComputeBackend` trait extraction + SerialBackend refactor. Existing code moves behind the trait with no semantic change. New parity test infrastructure.
+- **Plan 6** — GpuBackend foundation: VulkanContext init, state residency, first kernel (mask_hold). Cross-backend parity verified.
+- **Plan 7+** — GPU kernel porting, one section at a time. Mask predicates → policy argmax → apply kernels → cascade handler SPIR-V → view reductions → obs packing. Each kernel ships with a cross-backend parity test.
 
 ---
 
 ## References
 
 - `../dsl/spec.md` — language reference (grammar, type system, worked example, settled decisions)
-- `../compiler/spec.md` — compiler contract (compilation targets, schema emission, lowering passes, decisions)
-- `../dsl/stories.md` — per-batch user-story investigations (the trace runtime design lives here)
+- `../compiler/spec.md` — compiler contract (emission modes — CPU code vs GPU kernel dispatch — for the unified engine target)
+- `../dsl/stories.md` — per-batch user-story investigations
 - `../dsl/decisions.md` — per-decision rationale log
-- `crates/engine/src/` — Rust implementation
-- `crates/engine/tests/` — acceptance + regression + determinism tests
-- `crates/engine/benches/` — throughput baselines
+- `crates/engine/src/` — Rust implementation (Serial complete through Plan 2; GPU starting Plan 6)
+- `crates/engine/shaders/` — SPIR-V bytecode + GLSL source (landing with Plan 6+)
+- `crates/engine/tests/parity_backends.rs` — mandatory cross-backend determinism test (landing with Plan 5)

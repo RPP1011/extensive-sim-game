@@ -2,26 +2,39 @@
 
 Compiler contract. Companion to `dsl/spec.md` (language reference) and `engine/spec.md` (runtime contract). This doc specifies HOW DSL source text lowers to engine calls, not WHAT the language means.
 
-Extracted from `dsl/spec.md` on 2026-04-19. Language grammar, type system, and runtime semantics remain in `dsl/spec.md`; pools/determinism/tick-pipeline contract will migrate to `engine/spec.md`.
+**The compiler has one target: the engine.** The engine ships two backends — `SerialBackend` (reference implementation) and `GpuBackend` — and the compiler emits code that lands in the engine, ultimately running on whichever backend the engine has active. There is no "CPU vs GPU target" split at the compiler level; only **emission modes** that produce different artefacts (scalar Rust code, GPU dispatch code, SPIR-V shader source) — all of which the engine consumes.
+
+Extracted from `dsl/spec.md` on 2026-04-19; reframed 2026-04-19 (same day) after the engine spec rewrite clarified that CPU + GPU are both first-class engine backends rather than parallel compilation targets.
 
 ---
 
-## 1. Compilation targets
+## 1. Emission modes
 
-### 1.1 Native Rust (CPU)
+The compiler emits **three artefact classes per DSL program**, all consumed by the unified engine:
+
+| Emission | What gets emitted | Consumed by engine backend |
+|---|---|---|
+| **Scalar Rust** (§1.1) | Rust `fn` bodies + cascade closures for registering with `SerialBackend` | `SerialBackend` |
+| **GPU dispatch code** (§1.2) | Rust code that calls into engine kernel-dispatch API with the right FieldHandles + SPIR-V kernel names | `GpuBackend` |
+| **SPIR-V kernels** (§1.2) | Compiled shader bytecode for DSL-specific mask predicates / cascade handlers / view reductions | `GpuBackend` (loaded via `GpuHarness::load_kernel`) |
+
+For a complete DSL program, all three artefacts are produced. The engine selects at init which backend to use (§25 of engine spec); the compiler doesn't choose. Every DSL mask predicate / cascade handler / view gets both a scalar Rust implementation (registered with `SerialBackend`) AND a SPIR-V kernel (registered with `GpuBackend`) — enabling cross-backend parity tests.
+
+### 1.1 Scalar Rust emission
 
 - SoA buffers per entity kind, with `@hot` / `@cold` field partitioning (§1.3).
-- Rayon-parallel iteration on `[N, OBS_DIM]` observations, masks, and action application.
 - Per-agent kernels as `fn` with `#[inline(never)]` in profiling builds for flamegraph attribution (`stories.md` §40).
 - `SimScratch` pools carry all per-tick scratch — zero steady-state allocation. Agent slot pool sized at init; ring buffers fixed-cap; event buffers use `SmallVec<[T; N]>` with CI-enforced worst-case bounds (`stories.md` §30).
-- **Spatial index is 2D-grid + per-column sorted z-list + movement-mode sidecar** (§9 #25). Primary structure keys `(cx, cy) → SortedVec<(z, AgentId)>` with 16m cells matching voxel-chunk edges. Planar queries walk 9 columns (3×3) and take all. Volumetric queries walk 9 columns and binary-search the z-range. Agents with `movement_mode != Walk` (Fly / Swim / Climb / Fall) live in a separate `in_transit: Vec<AgentId>` that every spatial query scans linearly (expected |in_transit| ≪ N). Slope-walkers stay in the column index — the structure exploits floor-clustering, not flat-ground assumptions.
+- **Spatial index is 2D-grid + per-column sorted z-list + movement-mode sidecar** (`dsl/spec.md` §9 #25). Primary structure keys `(cx, cy) → SortedVec<(z, AgentId)>` with 16m cells matching voxel-chunk edges. Planar queries walk 9 columns (3×3) and take all. Volumetric queries walk 9 columns and binary-search the z-range. Agents with `movement_mode != Walk` (Fly / Swim / Climb / Fall) live in a separate `in_transit: Vec<AgentId>` that every spatial query scans linearly (expected |in_transit| ≪ N). Slope-walkers stay in the column index — the structure exploits floor-clustering, not flat-ground assumptions.
 - RNG: a single `rng_state: u64` per world, consumed in a fixed order (`stories.md` §29). Per-agent RNG streams seeded from `hash(world_seed, agent_id, tick, purpose)` for parallel sampling.
 
-### 1.2 GPU (`voxel_engine::compute::GpuHarness`)
+This is the reference implementation. The `SerialBackend` runs entirely on the host; its output is the ground truth for cross-backend determinism tests.
 
-Target is voxel-engine's Vulkan/ash + gpu-allocator stack via `GpuHarness`, not wgpu and not raw CUDA. (`stories.md` §28.) Shader codegen emits SPIR-V via `shaderc` (already in voxel-engine's `build-dependencies`), loaded through `GpuHarness::load_kernel`. Precedents: `terrain_compute.rs` (1024-slot LRU chunk pool), `ai/spatial.rs` (spatial indexing).
+### 1.2 GPU dispatch + SPIR-V kernel emission
 
-The DSL compiler emits a `PolicyRuntime`:
+For `GpuBackend`, the compiler emits SPIR-V kernels (via `shaderc` at compile time) AND Rust dispatch code that invokes them through `voxel_engine::compute::GpuHarness`. Target is voxel-engine's Vulkan/ash + gpu-allocator stack, not wgpu and not raw CUDA. (`stories.md` §28.) Precedents: `terrain_compute.rs` (1024-slot LRU chunk pool), `ai/spatial.rs` (spatial indexing).
+
+The compiler emits dispatch code that uses engine-shipped kernel handles:
 
 ```rust
 pub struct PolicyRuntime {
@@ -55,13 +68,16 @@ GPU-amenable kernels:
 - Event-fold materialization for commutative scalar views (sort events by target before reduction to preserve determinism).
 - 3D spatial hash (voxel-chunk-keyed) for `query::nearby_agents` — reuses `voxel_engine::ai::spatial` infrastructure.
 
-CPU-only:
+Always host-side (regardless of engine backend):
 
-- Cascade rules with cross-entity walks (`t in quest.eligible_acceptors`, `at_war(self, f)`).
-- LLM backend.
-- Chronicle prose rendering.
-- Quest-eligibility and auction-eligibility indices.
-- Mixed CPU/GPU mask patching: GPU writes initial mask, CPU patches cross-entity bits, GPU sampler reads final mask (one fence per tick).
+- LLM backend (trait stubs on both backends; real implementation is always out-of-process).
+- Chronicle prose rendering (pure template expansion; no sim state mutation).
+- Telemetry sink dispatch.
+- Save/load serialization.
+
+**Cascade rules with cross-entity walks** (`t in quest.eligible_acceptors`, `at_war(self, f)`): the **GpuBackend** handles these via GPU-resident `AggregatePool<T>` (with `T: Pod` discipline — see engine spec §16) and kernel-side iteration of fixed-size inline arrays. The **SerialBackend** uses `Box<dyn CascadeHandler>` closures with direct pool access. Per-tick determinism is verified by cross-backend parity. Cross-entity walks are no longer a CPU-only concern in the new framing — the compiler emits SPIR-V for them, targeting the `AggregatePool<T>` layout.
+
+Quest-eligibility and auction-eligibility indices are cross-entity materialized views (engine spec §15) — GPU-dispatched on `GpuBackend` via sorted-key reductions; scalar on `SerialBackend`. Both backends expose the same view query API.
 
 GPU determinism constraints (`stories.md` §29):
 
