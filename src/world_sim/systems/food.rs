@@ -105,6 +105,14 @@ pub fn compute_food_for_settlement(
     let mut resident_count = 0u32;
     let mut resident_ids = [0u32; 512];
 
+    // Batch per-commodity totals so we push ONE Produce/Consume delta per
+    // settlement-commodity pair instead of one per NPC per commodity.
+    // At 20K NPCs this collapses ~100K deltas/tick into ~20.
+    const NUM_COMMODITIES: usize = 8; // FOOD..MEDICINE
+    let mut produce_totals = [0.0f32; NUM_COMMODITIES];
+    let mut consume_totals = [0.0f32; NUM_COMMODITIES];
+    let mut total_earnings_paid = 0.0f32;
+
     for entity in entities {
         if !entity.alive { continue; }
         let npc = match &entity.npc { Some(n) => n, None => continue };
@@ -127,11 +135,7 @@ pub fn compute_food_for_settlement(
         // Fallback: NPCs with no production assignments forage for food.
         if npc.behavior_production.is_empty() {
             let forage = 0.02 * level_mult;
-            out.push(WorldDelta::ProduceCommodity {
-                settlement_id: settlement_id,
-                commodity: COMMODITY_FOOD,
-                amount: forage,
-            });
+            produce_totals[COMMODITY_FOOD] += forage;
             produced_anything = true;
         }
 
@@ -170,49 +174,44 @@ pub fn compute_food_for_settlement(
 
             let actual_amount = amount * scale;
 
-            // Consume inputs.
+            // Consume inputs (batch into per-commodity total).
             for i in 0..recipe_count {
                 let (input_c, per_unit) = recipe[i];
                 let consume = actual_amount * per_unit;
                 if consume > 0.0 {
-                    out.push(WorldDelta::ConsumeCommodity {
-                        settlement_id: settlement_id,
-                        commodity: input_c,
-                        amount: consume,
-                    });
+                    consume_totals[input_c] += consume;
                 }
             }
 
             if actual_amount > 0.0 {
-                out.push(WorldDelta::ProduceCommodity {
-                    settlement_id: settlement_id,
-                    commodity,
-                    amount: actual_amount,
-                });
+                produce_totals[commodity] += actual_amount;
                 produced_anything = true;
             }
         }
 
         // NPC sells produced goods to settlement at local price.
-        // Gold flows: settlement pays NPC for their production.
+        // The aggregate treasury drain is batched; per-NPC gold updates
+        // remain because they target individual entities.
         if produced_anything {
             let mut earnings = 0.0f32;
             for &(commodity, rate) in &npc.behavior_production {
                 if rate > 0.0 {
-                    let actual = rate * level_mult; // same as production amount
+                    let actual = rate * level_mult;
                     earnings += actual * settlement.prices[commodity];
                 }
             }
             if earnings > 0.01 && settlement.treasury > 0.0 {
-                // Settlement pays NPC from treasury.
-                out.push(WorldDelta::UpdateTreasury {
-                    settlement_id: settlement_id,
-                    delta: -earnings.min(settlement.treasury),
-                });
+                // NOTE: individual gold update still per-NPC; aggregate
+                // treasury drain is pushed once after the loop. Earnings
+                // are capped against a per-NPC treasury share (approx),
+                // using settlement.treasury since we can't see the running
+                // total inside the parallel variant.
+                let pay = earnings.min(settlement.treasury);
+                total_earnings_paid += pay;
                 out.push(WorldDelta::UpdateEntityField {
                     entity_id: entity.id,
                     field: crate::world_sim::state::EntityField::Gold,
-                    value: earnings.min(settlement.treasury),
+                    value: pay,
                 });
             }
         }
@@ -244,6 +243,30 @@ pub fn compute_food_for_settlement(
                 out.push(WorldDelta::AddBehaviorTags { entity_id: entity.id, tags: action.tags, count: action.count });
             }
         }
+    }
+
+    // Flush per-commodity aggregates as single deltas per settlement.
+    for i in 0..NUM_COMMODITIES {
+        if produce_totals[i] > 0.0 {
+            out.push(WorldDelta::ProduceCommodity {
+                settlement_id,
+                commodity: i,
+                amount: produce_totals[i],
+            });
+        }
+        if consume_totals[i] > 0.0 {
+            out.push(WorldDelta::ConsumeCommodity {
+                settlement_id,
+                commodity: i,
+                amount: consume_totals[i],
+            });
+        }
+    }
+    if total_earnings_paid > 0.0 {
+        out.push(WorldDelta::UpdateTreasury {
+            settlement_id,
+            delta: -total_earnings_paid,
+        });
     }
 
     if resident_count == 0 {

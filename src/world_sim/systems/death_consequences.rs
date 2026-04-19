@@ -41,12 +41,14 @@ pub fn advance_death_consequences(state: &mut WorldState) {
 
     if recent_deaths.is_empty() { return; }
 
-    // Deduplicate: only process each death ONCE by checking if we already
-    // have a funeral chronicle entry for this entity.
-    let already_processed: Vec<u32> = state.chronicle.iter()
-        .filter(|e| e.category == ChronicleCategory::Death && !e.entity_ids.is_empty())
-        .map(|e| e.entity_ids[0])
-        .collect();
+    // Deduplicate: only process each death ONCE. Build a HashSet of
+    // already-processed IDs from the chronicle — the prior Vec.contains()
+    // lookup was O(C × deaths) in a chronicle that grows unbounded.
+    let already_processed: std::collections::HashSet<u32, ahash::RandomState> =
+        state.chronicle.iter()
+            .filter(|e| e.category == ChronicleCategory::Death && !e.entity_ids.is_empty())
+            .map(|e| e.entity_ids[0])
+            .collect();
 
     let recent_deaths: Vec<u32> = recent_deaths.into_iter()
         .filter(|id| !already_processed.contains(id))
@@ -58,8 +60,9 @@ pub fn advance_death_consequences(state: &mut WorldState) {
     let deaths_to_process = recent_deaths.len().min(5);
 
     for &dead_id in &recent_deaths[..deaths_to_process] {
-        let dead_info = state.entities.iter()
-            .find(|e| e.id == dead_id && !e.alive)
+        // O(1) lookup via entity_index (was linear iter+find).
+        let dead_info = state.entity(dead_id)
+            .filter(|e| !e.alive)
             .map(|e| {
                 let name = e.npc.as_ref().map(|n| n.name.clone()).unwrap_or_default();
                 let level = e.level;
@@ -83,15 +86,21 @@ pub fn advance_death_consequences(state: &mut WorldState) {
             let mut inherited = false;
             let inherit_amount = gold * INHERITANCE_FRACTION;
 
-            // Try to give to home building co-residents.
+            // Try to give to home building co-residents. Scope the scan
+            // to this settlement's entity range (was full entity scan).
             if let Some(hbid) = home_bid {
-                let co_residents: Vec<usize> = state.entities.iter().enumerate()
-                    .filter(|(_, e)| {
-                        e.alive && e.kind == EntityKind::Npc && e.id != dead_id
-                            && e.npc.as_ref().map(|n| n.home_building_id == Some(hbid)).unwrap_or(false)
-                    })
-                    .map(|(i, _)| i)
-                    .collect();
+                let scan_range = match home_sid {
+                    Some(sid) => state.group_index.settlement_entities(sid),
+                    None => 0..state.entities.len(),
+                };
+                let mut co_residents: Vec<usize> = Vec::new();
+                for (offset, e) in state.entities[scan_range.clone()].iter().enumerate() {
+                    if e.alive && e.kind == EntityKind::Npc && e.id != dead_id
+                        && e.npc.as_ref().map(|n| n.home_building_id == Some(hbid)).unwrap_or(false)
+                    {
+                        co_residents.push(scan_range.start + offset);
+                    }
+                }
 
                 if !co_residents.is_empty() {
                     let share = inherit_amount / co_residents.len() as f32;
@@ -146,25 +155,27 @@ pub fn advance_death_consequences(state: &mut WorldState) {
 
             // --- 2b. Apprentice Lineage: closest friend inherits 30% of behavior tags ---
             {
-                // Get the dead NPC's behavior profile.
-                let dead_profile: Vec<(u32, f32)> = state.entities.iter()
-                    .find(|e| e.id == dead_id)
+                // Get the dead NPC's behavior profile via O(1) lookup.
+                let dead_profile: Vec<(u32, f32)> = state.entity(dead_id)
                     .and_then(|e| e.npc.as_ref())
                     .map(|n| n.behavior_profile.clone())
                     .unwrap_or_default();
 
-                let dead_lineage: Vec<u32> = state.entities.iter()
-                    .find(|e| e.id == dead_id)
+                let dead_lineage: Vec<u32> = state.entity(dead_id)
                     .and_then(|e| e.npc.as_ref())
                     .map(|n| n.mentor_lineage.clone())
                     .unwrap_or_default();
 
                 if !dead_profile.is_empty() {
-                    // Find closest friend at same settlement (best apprentice candidate).
+                    // Find closest friend at same settlement (best apprentice
+                    // candidate). Scope to the settlement's entity range —
+                    // was a full O(E) scan before.
                     let mut best_friend: Option<usize> = None;
                     let mut best_friend_score = 0.0f32;
 
-                    for (ei, entity) in state.entities.iter().enumerate() {
+                    let scan_range = state.group_index.settlement_entities(sid);
+                    let base = scan_range.start;
+                    for (offset, entity) in state.entities[scan_range].iter().enumerate() {
                         if !entity.alive || entity.kind != EntityKind::Npc || entity.id == dead_id { continue; }
                         let npc = match &entity.npc { Some(n) => n, None => continue };
                         if npc.home_settlement_id != Some(sid) { continue; }
@@ -178,7 +189,7 @@ pub fn advance_death_consequences(state: &mut WorldState) {
                             let score = friend_events * level_bonus;
                             if score > best_friend_score {
                                 best_friend_score = score;
-                                best_friend = Some(ei);
+                                best_friend = Some(base + offset);
                             }
                         }
                     }
