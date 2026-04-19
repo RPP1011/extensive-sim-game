@@ -41,4 +41,13 @@ impl MaskBuffer {
             self.micro_kind[offset] = true;
         }
     }
+    pub fn mark_move_allowed_if_others_exist(&mut self, state: &SimState) {
+        let n_alive = state.agents_alive().count();
+        if n_alive < 2 { return; }
+        for id in state.agents_alive() {
+            let slot = (id.raw() - 1) as usize;
+            let offset = slot * MicroKind::ALL.len() + MicroKind::MoveToward as usize;
+            self.micro_kind[offset] = true;
+        }
+    }
 }

@@ -1,4 +1,4 @@
-use engine::channel::{CommunicationChannel, channel_range};
+use engine::channel::{channel_range, CommunicationChannel};
 use engine::creature::{Capabilities, CreatureType};
 
 #[test]
@@ -11,7 +11,10 @@ fn wolves_share_packsignal_not_speech() {
     assert!(!human.channels.contains(&CommunicationChannel::PackSignal));
 
     let shared = wolf.channels.iter().any(|c| human.channels.contains(c));
-    assert!(!shared, "wolves and humans must not share a channel by default");
+    assert!(
+        !shared,
+        "wolves and humans must not share a channel by default"
+    );
 }
 
 #[test]

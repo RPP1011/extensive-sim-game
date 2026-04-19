@@ -26,7 +26,7 @@ impl PolicyBackend for UtilityBackend {
 fn utility_score(kind: MicroKind, hp: f32, max_hp: f32) -> f32 {
     match kind {
         MicroKind::Hold       => 0.1,
-        MicroKind::MoveToward => 0.0,
+        MicroKind::MoveToward => 0.3,                      // Prefer moving when mask allows
         MicroKind::Attack     => if hp > max_hp * 0.5 { 0.5 } else { 0.0 },
         MicroKind::Eat        => if hp < max_hp * 0.3 { 0.8 } else { 0.0 },
     }

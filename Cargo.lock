@@ -2287,6 +2287,7 @@ dependencies = [
  "proptest",
  "rayon",
  "safetensors 0.4.5",
+ "sha2",
  "smallvec",
 ]
 
