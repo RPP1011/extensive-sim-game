@@ -24,7 +24,10 @@ pub enum EventKindId {
     AgentCommunicated    = 15,
     InformationRequested = 16,
     AgentRemembered      = 17,
-    // Slots 18-127 reserved for replayable event variants added in later tasks.
+    QuestPosted          = 18,
+    QuestAccepted        = 19,
+    BidPlaced            = 20,
+    // Slots 21-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -49,6 +52,9 @@ impl EventKindId {
             Event::AgentCommunicated    { .. } => EventKindId::AgentCommunicated,
             Event::InformationRequested { .. } => EventKindId::InformationRequested,
             Event::AgentRemembered      { .. } => EventKindId::AgentRemembered,
+            Event::QuestPosted          { .. } => EventKindId::QuestPosted,
+            Event::QuestAccepted        { .. } => EventKindId::QuestAccepted,
+            Event::BidPlaced            { .. } => EventKindId::BidPlaced,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }

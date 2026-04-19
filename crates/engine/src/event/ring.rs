@@ -235,6 +235,35 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(subject.to_le_bytes());
             h.update(tick.to_le_bytes());
         }
+        Event::QuestPosted { poster, quest_id, category, resolution, tick } => {
+            h.update([18u8]);
+            h.update(poster.raw().to_le_bytes());
+            h.update(quest_id.raw().to_le_bytes());
+            h.update([*category as u8]);
+            // Resolution encoding: variant tag u8 + (min_parties u8 for Coalition, else 0).
+            let (res_tag, min_parties) = match resolution {
+                crate::policy::Resolution::HighestBid        => (0u8, 0u8),
+                crate::policy::Resolution::FirstAcceptable   => (1u8, 0u8),
+                crate::policy::Resolution::MutualAgreement   => (2u8, 0u8),
+                crate::policy::Resolution::Coalition { min_parties } => (3u8, *min_parties),
+                crate::policy::Resolution::Majority          => (4u8, 0u8),
+            };
+            h.update([res_tag, min_parties]);
+            h.update(tick.to_le_bytes());
+        }
+        Event::QuestAccepted { acceptor, quest_id, tick } => {
+            h.update([19u8]);
+            h.update(acceptor.raw().to_le_bytes());
+            h.update(quest_id.raw().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::BidPlaced { bidder, auction_id, amount, tick } => {
+            h.update([20u8]);
+            h.update(bidder.raw().to_le_bytes());
+            h.update(auction_id.raw().to_le_bytes());
+            h.update(amount.to_bits().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
         Event::ChronicleEntry { .. } => {
             // Filtered at the call site; if we reach here, the filter is broken.
             debug_assert!(false, "ChronicleEntry reached replayable hash path");

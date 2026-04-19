@@ -2,7 +2,8 @@ pub mod ring;
 pub use crate::ids::EventId;
 pub use ring::EventRing;
 
-use crate::ids::AgentId;
+use crate::ids::{AgentId, QuestId};
+use crate::policy::macro_kind::{QuestCategory, Resolution};
 use glam::Vec3;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -28,6 +29,11 @@ pub enum Event {
     AgentCommunicated   { speaker: AgentId, recipient: AgentId, fact_ref: u64, tick: u32 },
     InformationRequested{ asker: AgentId, target: AgentId, query: u64, tick: u32 },
     AgentRemembered     { agent_id: AgentId, subject: u64, tick: u32 },
+    // Event-only macros — emitted when a policy emits the corresponding
+    // `MacroAction`. Domain handlers (registered later) do the actual effect.
+    QuestPosted   { poster: AgentId, quest_id: QuestId, category: QuestCategory, resolution: Resolution, tick: u32 },
+    QuestAccepted { acceptor: AgentId, quest_id: QuestId, tick: u32 },
+    BidPlaced     { bidder: AgentId, auction_id: QuestId, amount: f32, tick: u32 },
     // Non-replayable (chronicle / prose side-channel placeholder)
     ChronicleEntry { tick: u32, template_id: u32 },
 }
@@ -53,6 +59,9 @@ impl Event {
             Event::AgentCommunicated    { tick, .. } |
             Event::InformationRequested { tick, .. } |
             Event::AgentRemembered      { tick, .. } |
+            Event::QuestPosted          { tick, .. } |
+            Event::QuestAccepted        { tick, .. } |
+            Event::BidPlaced            { tick, .. } |
             Event::ChronicleEntry       { tick, .. } => *tick,
         }
     }

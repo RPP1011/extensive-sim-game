@@ -3,7 +3,7 @@ use crate::cascade::CascadeRegistry;
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind};
-use crate::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
+use crate::policy::{Action, ActionKind, MacroAction, MicroTarget, PolicyBackend};
 use crate::rng::per_agent_u32;
 use crate::state::SimState;
 
@@ -280,8 +280,33 @@ fn apply_actions(
                 // dropped. Mask predicates should prevent well-behaved backends
                 // from landing here.
             }
-            ActionKind::Macro(_) => {
-                // Macro dispatch lands in Tasks 13–15.
+            ActionKind::Macro(MacroAction::NoOp) => { /* nothing */ }
+            ActionKind::Macro(MacroAction::PostQuest { quest_id, category, resolution }) => {
+                events.push(Event::QuestPosted {
+                    poster: action.agent,
+                    quest_id,
+                    category,
+                    resolution,
+                    tick: state.tick,
+                });
+            }
+            ActionKind::Macro(MacroAction::AcceptQuest { quest_id, acceptor }) => {
+                events.push(Event::QuestAccepted {
+                    acceptor,
+                    quest_id,
+                    tick: state.tick,
+                });
+            }
+            ActionKind::Macro(MacroAction::Bid { auction_id, bidder, amount }) => {
+                events.push(Event::BidPlaced {
+                    bidder,
+                    auction_id,
+                    amount,
+                    tick: state.tick,
+                });
+            }
+            ActionKind::Macro(MacroAction::Announce { .. }) => {
+                // Task 14 fills this in.
             }
         }
     }
