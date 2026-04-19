@@ -139,6 +139,7 @@ CI guard: a commit that modifies observation, action, event, or reward declarati
 TBD — populate as compiler is implemented. Anticipated passes (all currently sketched only):
 
 - **Verb desugaring.** `verb` declarations bundle mask + cascade + reward into a named gameplay action. The compiler lowers `verb` decls into the underlying mask predicate, cascade rule, and reward-block entries without extending the categorical action vocabulary.
+- **Read → Ask lowering.** `Read(doc)` is language-surface sugar for `Ask(doc, QueryKind::AboutAll)`. The compiler rewrites every `Read(x)` expression and mask clause into the document-target branch of `Ask`; the runtime MicroKind enum carries `Ask` only. This keeps the runtime action vocabulary at 18 micros while preserving the readability of `Read` in source DSL. See `dsl/spec.md` §3.3 and Appendix A *Information as an action class*.
 - **View storage-hint selection.** `@materialized(on_event=[...], storage=<hint>)` authors pick `pair_map` / `per_entity_topk(K, keyed_on=<arg>)` / `lazy_cached`. Compiler rejects infeasible combinations (e.g. `pair_map` on `(AgentId, AgentId)` at N=200K). GPU/CPU routing follows from storage hint: intrinsic scalars + per-entity-slot materializations compile to GPU; lazy + unbounded-pair predicates stay CPU.
 - **Cascade dispatch codegen.** `physics` rules lower to phase-tagged handlers with compile-time cycle detection, race detection, and schema-drift guards. Target generated code: Rust `match` on event kind, dispatched through an ordered handler table per phase.
 

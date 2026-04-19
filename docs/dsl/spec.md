@@ -602,14 +602,15 @@ action {
     Harvest, Eat, Drink, Rest,
     PlaceTile, PlaceVoxel, HarvestVoxel,
     Converse, ShareStory,
-    Communicate, Read,
+    Communicate, Ask, Read,
     Remember
   }
 
   head categorical channel: enum CommunicationChannel
-                                 // §9 D30 — required for Communicate / Converse / ShareStory
-                                 // micro primitives and for PostQuest / Announce / InviteToGroup
-                                 // macro emissions. Ignored for non-communicating actions.
+                                 // §9 D30 — required for Communicate / Ask / Converse /
+                                 // ShareStory micro primitives and for PostQuest / Announce /
+                                 // InviteToGroup macro emissions. Ignored for non-communicating
+                                 // actions.
 
   head pointer target: select_from
     nearby_actors ∪ nearby_resources ∪ nearby_structures
@@ -648,7 +649,7 @@ Four macro mechanisms + thirteen micro primitives.
 | Head           | Variants                                                                                                                  |
 |----------------|---------------------------------------------------------------------------------------------------------------------------|
 | `macro_kind`   | `NoOp`, `PostQuest{...}`, `AcceptQuest{quest_id, role_in_party}`, `WithdrawQuest{quest_id}` (taker retracts), `Bid{auction_id, payment, conditions}`, `Announce{audience, fact_ref}`, `InviteToGroup{kind, target, terms}`, `AcceptInvite{invite_id}`, `SetStanding{target_group, kind}` (Hostile/Friendly/Vassal/Neutral/Suzerain — universal backbone for war/peace/alliance, §9 #19) |
-| `micro_kind`   | `Hold`, `MoveToward(pos)`, `Flee(from)`, `Attack(t)`, `Cast(ability, target)`, `UseItem(slot, target)`, `Harvest(node)`, `Eat(food)`, `Drink(water)`, `Rest(loc)`, `PlaceTile(pos, type)`, `PlaceVoxel(pos, mat)`, `HarvestVoxel(pos)`, `Converse(t)`, `ShareStory(audience, topic)`, `Communicate(recipient, fact_ref)`, `Read(doc)`, `Remember(entity, valence, kind)` |
+| `micro_kind`   | `Hold`, `MoveToward(pos)`, `Flee(from)`, `Attack(t)`, `Cast(ability, target)`, `UseItem(slot, target)`, `Harvest(node)`, `Eat(food)`, `Drink(water)`, `Rest(loc)`, `PlaceTile(pos, type)`, `PlaceVoxel(pos, mat)`, `HarvestVoxel(pos)`, `Converse(t)`, `ShareStory(audience, topic)`, `Communicate(recipient, fact_ref)`, `Ask(target, query)`, `Read(doc)` *(sugar for `Ask(doc, QueryKind::AboutAll)`)*, `Remember(entity, valence, kind)` |
 
 Enums carried as parameter heads:
 
@@ -1359,18 +1360,25 @@ These can't be reduced because they ARE the per-tick physical/social acts:
 - **Resource**: `Harvest(node)`, `Eat(food_source)`, `Drink(water_source)`, `Rest(loc)`
 - **Construction**: `PlaceTile(pos, type)`, `PlaceVoxel(pos, mat)`, `HarvestVoxel(pos)`
 - **Social atomic**: `Converse(target)`, `ShareStory(audience, topic)`
-- **Info atomic**: `Communicate(recipient, fact_ref)` — point-to-point sharing of one memory event; cascade validates `fact_ref ∈ self.memory`, inserts a `MemoryEvent` into `recipient.memory` with `source = TalkedWith(self)`, confidence `min(self.memory[fact_ref].confidence, 0.8)`. Mask: `r.can_hear ∧ planar_distance(self, r) < CONVERSE_RANGE`. `FactRef` is a bounded handle — a local event_id drawn from the speaker's memory ring.
-- **Info atomic**: `Read(doc_item)` — ingests each fact from `doc_item.facts` into `self.memory` with `source = Testimony(doc_item.id)`, confidence per `doc_item.trust_score`.
+- **Info atomic (push)**: `Communicate(recipient, fact_ref)` — point-to-point sharing of one memory event; cascade validates `fact_ref ∈ self.memory`, inserts a `MemoryEvent` into `recipient.memory` with `source = TalkedWith(self)`, confidence `min(self.memory[fact_ref].confidence, 0.8)`. Mask: `r.can_hear ∧ planar_distance(self, r) < CONVERSE_RANGE`. `FactRef` is a bounded handle — a local event_id drawn from the speaker's memory ring.
+- **Info atomic (pull)**: `Ask(target, query)` — request facts from an entity. The target type disambiguates the cascade:
+  - If `target` is an `Agent`: emits `InformationRequested { asker: self, target, query }`. The target's next-tick observation includes the request; the target's policy may reply with `Communicate(asker, fact_ref)` matching the query, or ignore. Mask: `target.can_hear ∧ planar_distance(self, target) < CONVERSE_RANGE`.
+  - If `target` is a `Document` item: cascade resolves immediately — extract `target.facts` matching `query`, insert into `self.memory` with `source = Testimony(target.id)`, confidence derived per §9 D27 from `(relationship_to_author, seal_validity, known_author_biases)`. Mask: `target ∈ self.inventory.documents`.
+- **Info atomic (sugar)**: `Read(doc)` — language-surface shorthand for `Ask(doc, QueryKind::AboutAll)`. The compiler lowers `Read` to the document-target branch of `Ask`; runtime vocabulary does not carry a separate `Read` micro. See `docs/compiler/spec.md` §3.
 - **Memory atomic**: `Remember(entity, valence, kind)` (typically internal, but expose as an action so policies can choose what to record)
 
 ### Total action vocabulary
 
 ```
-4 macro mechanisms:    PostQuest, AcceptQuest|JoinParty, Bid, Announce
-~15 micro primitives:  movement(3) + combat(3) + resource(4) + construction(3)
-                     + social(2) + info(2: Communicate, Read) + memory(1)
+4 macro mechanisms:     PostQuest, AcceptQuest|JoinParty, Bid, Announce
+19 micro (surface):     movement(3) + combat(3) + resource(4) + construction(3)
+                      + social(2) + info(3: Communicate push, Ask pull, Read)
+                      + memory(1)
+18 micro (runtime):     same, minus Read — which the compiler lowers to
+                        Ask(doc, QueryKind::AboutAll).
 ─────────────────────────
-~19 categorical actions
+23 categorical actions at the language surface;
+22 at the runtime (MicroKind enum) after Read → Ask lowering.
 ```
 
 The richness comes from the parameter heads — `QuestType`, `PartyScope`, `QuestTarget`, `Reward`, `BidConditions`, `Payment`, `AnnounceAudience`, `FactRef` enums each have many variants. The categorical action head is small (~19); the parameter heads carry the actual semantic complexity.
