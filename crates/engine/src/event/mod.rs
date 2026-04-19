@@ -1,4 +1,5 @@
 pub mod ring;
+pub use crate::ids::EventId;
 pub use ring::EventRing;
 
 use crate::ids::AgentId;

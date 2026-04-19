@@ -1,36 +1,81 @@
 use super::Event;
+use crate::ids::EventId;
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 
+/// An entry in the `EventRing`. The `event` is the replay payload; `id` and
+/// `cause` form the sidecar metadata (never folded into `replayable_sha256`).
+struct Entry {
+    event: Event,
+    id:    EventId,
+    cause: Option<EventId>,
+}
+
 pub struct EventRing {
-    buf:   VecDeque<Event>,
-    cap:   usize,
+    entries:      VecDeque<Entry>,
+    cap:          usize,
+    current_tick: u32,
+    next_seq:     u32,
 }
 
 impl EventRing {
     pub fn with_cap(cap: usize) -> Self {
         debug_assert!(cap > 0, "EventRing capacity must be nonzero");
-        Self { buf: VecDeque::with_capacity(cap), cap }
+        Self {
+            entries:      VecDeque::with_capacity(cap),
+            cap,
+            current_tick: 0,
+            next_seq:     0,
+        }
     }
 
-    pub fn push(&mut self, e: Event) {
-        if self.buf.len() == self.cap { self.buf.pop_front(); }
-        self.buf.push_back(e);
+    /// Push a root-cause event. Returns the assigned `EventId`.
+    pub fn push(&mut self, e: Event) -> EventId {
+        self.push_impl(e, None)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Event> { self.buf.iter() }
+    /// Push an event caused by an earlier event. The `cause` pointer lives in
+    /// the sidecar — it does NOT affect `replayable_sha256`.
+    pub fn push_caused_by(&mut self, e: Event, cause: EventId) -> EventId {
+        self.push_impl(e, Some(cause))
+    }
 
-    pub fn len(&self) -> usize { self.buf.len() }
-    pub fn is_empty(&self) -> bool { self.buf.is_empty() }
+    fn push_impl(&mut self, e: Event, cause: Option<EventId>) -> EventId {
+        let tick = e.tick();
+        if tick != self.current_tick {
+            self.current_tick = tick;
+            self.next_seq = 0;
+        }
+        if self.entries.len() == self.cap {
+            self.entries.pop_front();
+        }
+        let id = EventId { tick, seq: self.next_seq };
+        self.next_seq += 1;
+        self.entries.push_back(Entry { event: e, id, cause });
+        id
+    }
+
+    /// Look up the parent event id for a given event id, if any.
+    pub fn cause_of(&self, id: EventId) -> Option<EventId> {
+        self.entries.iter().find(|e| e.id == id).and_then(|e| e.cause)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Event> { self.entries.iter().map(|e| &e.event) }
+
+    pub fn len(&self) -> usize { self.entries.len() }
+    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
 
     /// Stable hash over the replayable subset. Uses explicit byte-packing
     /// (via `f32::to_bits`) so the digest is stable across Rust/glam versions
     /// and is insensitive to Debug format drift. Schema-hash-load-bearing:
     /// changing the pack format or variant-tag order requires a schema-hash bump.
+    ///
+    /// Sidecar fields (`id`, `cause`) are INTENTIONALLY excluded from the hash
+    /// so cascade fan-out annotations cannot alter replay equivalence.
     pub fn replayable_sha256(&self) -> [u8; 32] {
         let mut h = Sha256::new();
-        for e in self.buf.iter().filter(|e| e.is_replayable()) {
-            hash_event(&mut h, e);
+        for entry in self.entries.iter().filter(|e| e.event.is_replayable()) {
+            hash_event(&mut h, &entry.event);
         }
         h.finalize().into()
     }

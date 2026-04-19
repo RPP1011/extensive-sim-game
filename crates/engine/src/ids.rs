@@ -26,8 +26,17 @@ id_type!(ItemId);
 id_type!(QuestId);
 id_type!(AuctionId);
 id_type!(InviteId);
-id_type!(EventId);
 id_type!(SettlementId);
+
+/// Identifies an event within the `EventRing` by `(tick, seq)`. Assigned by
+/// `EventRing::push` / `push_caused_by`; used as a sidecar cause pointer so
+/// cascade fan-out can reconstruct causal trees without affecting the
+/// replayable hash (see `EventRing::replayable_sha256`).
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct EventId {
+    pub tick: u32,
+    pub seq:  u32,
+}
 
 #[cfg(test)]
 mod tests {
