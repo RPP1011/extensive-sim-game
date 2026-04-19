@@ -401,6 +401,16 @@ pub struct BuildSeed {
     pub placed_by: u32,
     pub tick: u64,
     pub complete: bool,
+    /// Number of `advance_construction` passes attempted. Used to detect
+    /// stalled seeds — rooms whose walls can't enclose (gap in boundary,
+    /// blocked by existing tiles). After MAX_SEED_ATTEMPTS we mark
+    /// complete=true so the seed gets pruned instead of re-flooded forever.
+    #[serde(default)]
+    pub attempts: u16,
+    /// Last interior size observed. If unchanged across attempts, the seed
+    /// is stalled. Paired with `attempts` for stall detection.
+    #[serde(default)]
+    pub last_interior_size: u16,
 }
 
 // ---------------------------------------------------------------------------

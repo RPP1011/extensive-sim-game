@@ -1148,6 +1148,8 @@ fn execute_action(state: &mut WorldState, entity_idx: usize, action: &CandidateA
                 placed_by: npc_id,
                 tick,
                 complete: false,
+                attempts: 0,
+                last_interior_size: 0,
             });
         }
 

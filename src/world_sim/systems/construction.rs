@@ -17,6 +17,11 @@ const GROWTH_INTERVAL: u64 = 10;
 const MAX_ROOM_SIZE: u32 = 64; // cap to prevent unbounded growth
 
 /// Advance all active build seeds. Called post-apply from runtime.
+/// Max attempts before marking a stalled seed complete (~300 ticks = 30
+/// growth cycles). Prevents 3000+ seeds whose rooms can't enclose from
+/// being re-flooded every 10 ticks forever.
+const MAX_SEED_ATTEMPTS: u16 = 30;
+
 pub fn advance_construction(state: &mut WorldState) {
     if state.tick % GROWTH_INTERVAL != 0 { return; }
 
@@ -33,12 +38,33 @@ pub fn advance_construction(state: &mut WorldState) {
     for i in 0..seed_count {
         if state.build_seeds[i].complete { continue; }
 
+        // Stall detection: if a seed has been attempted MAX_SEED_ATTEMPTS
+        // times without completing AND the interior hasn't grown on the
+        // last attempt, it's stuck (usually the boundary can't close
+        // because existing tiles block wall placement). Mark complete so
+        // it gets pruned — no point burning 500 more flood fills on it.
+        if state.build_seeds[i].attempts >= MAX_SEED_ATTEMPTS {
+            state.build_seeds[i].complete = true;
+            continue;
+        }
+
         let seed = state.build_seeds[i].clone();
         // grow_room fills `interior` and `boundary` in place via pooled buffers.
         grow_room(
             &seed, &mut state.tiles, tick,
             &mut visited, &mut gen, &mut queue, &mut interior, &mut boundary,
         );
+
+        let prev_size = state.build_seeds[i].last_interior_size;
+        let cur_size = interior.len().min(u16::MAX as usize) as u16;
+        state.build_seeds[i].last_interior_size = cur_size;
+        state.build_seeds[i].attempts = state.build_seeds[i].attempts.saturating_add(1);
+        // If this attempt made no progress AND we've tried for at least 10
+        // cycles (100 ticks), accelerate toward stall cap — double increment.
+        if cur_size == prev_size && state.build_seeds[i].attempts >= 10 {
+            state.build_seeds[i].attempts = state.build_seeds[i].attempts.saturating_add(3);
+        }
+
         if interior.len() as u32 >= seed.minimum_interior && is_enclosed(&boundary, &state.tiles) {
             if !has_door(&boundary, &state.tiles) {
                 if let Some(door_pos) = find_door_position(&boundary, &state.tiles) {
