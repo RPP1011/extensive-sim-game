@@ -685,41 +685,7 @@ The engine provides **both runtimes** (Serial + GPU). Neither is "downstream"; n
 
 ## Implementation map
 
-Status as of 2026-04-19 (rewrite day).
-
-| Section | Serial | GPU | Notes |
-|---|---|---|---|
-| §3 State model | ✅ | ❌ | FieldHandle residency not yet built |
-| §4 Event log | ✅ | ❌ | GPU ring w/ atomic append TBD |
-| §5 Spatial index | ✅ | ❌ | Voxel-chunk-keyed TBD |
-| §6 RNG streams | ✅ | ❌ | Shader RNG TBD; CPU-side done |
-| §7 MicroKind | ✅ | ❌ | Apply kernels TBD |
-| §8 MacroKind | ✅ | ❌ | Apply kernels TBD |
-| §9 Cascade runtime | ✅ | ❌ | SPIR-V handler dispatch TBD |
-| §10 Mask buffer | ✅ | ❌ | Kernel predicates TBD |
-| §11 Policy backend | ✅ | ❌ | GPU argmax kernel TBD |
-| §12 Tick pipeline | ✅ 6-phase | ❌ | Backend trait not yet extracted |
-| §13 Views | ✅ | ❌ | Parallel reductions TBD |
-| §14 Aggregates | ✅ | ⚠️ | Need T: Pod discipline |
-| §15 Trajectory | ✅ | ❌ | GPU download path TBD |
-| §16 Save/load | ❌ | ❌ | Both TBD |
-| §17 Invariants | ✅ | ⚠️ | Post-sync invariants TBD |
-| §18 Probes | ❌ | ❌ | Both TBD |
-| §19 Telemetry | ✅ | ⚠️ | GPU metrics TBD |
-| §20 Schema hash | ✅ | ⚠️ | Kernel-hash inclusion TBD |
-| §21 Obs packing | ❌ | ❌ | Both TBD |
-| §22 Debug & trace | ❌ | ❌ | Both TBD |
-| §25 Backend selection | ❌ | ❌ | Trait + selection TBD |
-
-The **Serial column is the ground truth**. GPU implementations land one section at a time, each verified bit-for-bit against Serial on fixed seeds. The existing 150-test suite is the determinism oracle; adding GPU implementations adds new tests but never changes the expected outputs.
-
-**Implementation plan sequencing:**
-
-- **Plan 3** — persistence + obs packer + probes (Serial first, per existing plan). Adds §16, §18, §21, §22 Serial ✅.
-- **Plan 4** — debug & trace runtime (Serial first). Completes Serial backend fully.
-- **Plan 5** — `ComputeBackend` trait extraction + SerialBackend refactor. Existing code moves behind the trait with no semantic change. New parity test infrastructure.
-- **Plan 6** — GpuBackend foundation: VulkanContext init, state residency, first kernel (mask_hold). Cross-backend parity verified.
-- **Plan 7+** — GPU kernel porting, one section at a time. Mask predicates → policy argmax → apply kernels → cascade handler SPIR-V → view reductions → obs packing. Each kernel ships with a cross-backend parity test.
+See **`status.md`** — per-subsystem state (Serial vs. GPU), associated plan, tests, weak-test risks, and visual-check criteria are tracked there. The **Serial column is the ground truth**; GPU lands one section at a time with cross-backend parity tests starting Plan 5+.
 
 ---
 

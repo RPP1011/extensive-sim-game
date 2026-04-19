@@ -6,7 +6,8 @@ This tree complements `../dsl/` (language reference) and `../compiler/` (DSL →
 
 ## What's in this tree
 
-1. **`spec.md`** — the runtime contract. 23 sections covering state, events, spatial index, RNG, actions, cascade, mask, policy, tick pipeline, views, aggregates, trajectory, save/load, invariants, probes, telemetry, schema hash, observation packer, debug & trace runtime, and non-goals. An implementation is correct iff it satisfies §§2–23.
+1. **`status.md`** — **start here.** Per-subsystem implementation state, which plan built it, which tests cover it, known weak-test risks, and visual-check criteria. The user-facing "is this trustworthy, and what would prove otherwise" jump-off. Updated after each plan.
+2. **`spec.md`** — the runtime contract. 26 sections covering state, events, spatial index, RNG, actions (micro + macro), cascade, mask, policy, tick pipeline, views, aggregates, trajectory, save/load, invariants, probes, telemetry, schema hash, observation packer, debug & trace runtime, backend selection, and non-goals. An implementation is correct iff it satisfies §§2–26 **and** produces byte-identical `replayable_sha256()` across Serial + GPU backends.
 
 ## When to add new docs here
 
