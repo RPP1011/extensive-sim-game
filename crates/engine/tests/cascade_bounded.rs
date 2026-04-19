@@ -39,9 +39,13 @@ fn release_dispatch_truncates_at_max_cascade_iterations() {
     reg.run_fixed_point(&mut state, &mut ring);
 
     let n = hits.load(Ordering::Relaxed);
-    // Primary + 8 cascade iterations = 9 fires.
-    assert!(n <= 9, "handler fired {} times — expected <= 9", n);
-    assert!(n >= 2, "cascade didn't amplify at all?");
+    // MAX_CASCADE_ITERATIONS=8: the primary dispatch happens inside the first
+    // iteration (the seeded event) and each iteration amplifies by one, so
+    // exactly 8 fires across 8 iterations. The dispatch loop is fully
+    // deterministic (no RNG, no parallelism on this path) so we pin the
+    // exact count — an impl that truncated at 3 iterations (n=3) or
+    // re-dispatched all handlers per iter (n>8) both fail here.
+    assert_eq!(n, 8, "handler should fire exactly MAX_CASCADE_ITERATIONS=8 times");
 }
 
 #[test]
