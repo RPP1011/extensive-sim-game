@@ -8,25 +8,47 @@ pub use agent::{AgentSpawn, MovementMode};
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
 
+/// Full SoA agent state — every field `docs/dsl/state.md` commits to, in one
+/// struct. Hot fields are `Vec<T>` indexed by slot and read every tick; cold
+/// fields are `Vec<Option<T>>` or per-agent collections touched only on
+/// spawn / chronicle / debug paths. Behaviour is NOT attached — storage only;
+/// subsequent plans wire masks, action_eval, and cascade handlers onto these.
+///
+/// **Needs split:** state.md commits to a 6-dim Maslow set
+/// (`hunger, safety, shelter, social, purpose, esteem`). The engine carries
+/// **8 needs: 3 physiological + 5 psychological**. Physiological
+/// (`hunger`, `thirst`, `rest_timer`) drive Plan 1 Eat/Drink/Rest actions;
+/// psychological (`safety`, `shelter`, `social`, `purpose`, `esteem`) are
+/// the Maslow five minus `hunger` (it's already physiological). Both groups
+/// are hot SoA `Vec<f32>` and initialise to 1.0 (fully satisfied).
 pub struct SimState {
     pub tick: u32,
     pub seed: u64,
     pool:     AgentSlotPool,
 
-    // Hot SoA — read/written every tick by observation / mask / step kernels.
-    hot_pos:           Vec<Vec3>,
-    hot_hp:            Vec<f32>,
-    hot_max_hp:        Vec<f32>,
-    hot_alive:         Vec<bool>,
-    hot_movement_mode: Vec<MovementMode>,
-    hot_hunger:        Vec<f32>,
-    hot_thirst:        Vec<f32>,
-    hot_rest_timer:    Vec<f32>,
+    // --- Hot SoA — read/written every tick by observation / mask / step ---
+    // Physical (state.md §Physical State + §Combat/Vitality, §Needs)
+    hot_pos:            Vec<Vec3>,
+    hot_hp:             Vec<f32>,
+    hot_max_hp:         Vec<f32>,
+    hot_alive:          Vec<bool>,
+    hot_movement_mode:  Vec<MovementMode>,
+    hot_level:          Vec<u32>,
+    hot_move_speed:     Vec<f32>,
+    hot_move_speed_mult: Vec<f32>,
+    // Physiological needs (engine MVP, used by Plan 1 Eat/Drink/Rest)
+    hot_hunger:         Vec<f32>,
+    hot_thirst:         Vec<f32>,
+    hot_rest_timer:     Vec<f32>,
 
-    // Cold SoA — read rarely (spawn, chronicle, debug).
+    // --- Cold SoA — read rarely (spawn, chronicle, debug, narrative) ---
     cold_creature_type: Vec<Option<CreatureType>>,
     cold_channels:      Vec<Option<ChannelSet>>,
     cold_spawn_tick:    Vec<Option<u32>>,
+    // Spatial extras (state.md §Physical State)
+    cold_grid_id:       Vec<Option<u32>>,
+    cold_local_pos:     Vec<Option<Vec3>>,
+    cold_move_target:   Vec<Option<Vec3>>,
 }
 
 impl SimState {
@@ -36,17 +58,23 @@ impl SimState {
             tick: 0,
             seed,
             pool: AgentSlotPool::new(agent_cap),
-            hot_pos:           vec![Vec3::ZERO; cap],
-            hot_hp:            vec![0.0; cap],
-            hot_max_hp:        vec![0.0; cap],
-            hot_alive:         vec![false; cap],
-            hot_movement_mode: vec![MovementMode::Walk; cap],
-            hot_hunger:        vec![1.0; cap],
-            hot_thirst:        vec![1.0; cap],
-            hot_rest_timer:    vec![1.0; cap],
-            cold_creature_type: vec![None; cap],
-            cold_channels:      (0..cap).map(|_| None).collect(),
-            cold_spawn_tick:    vec![None; cap],
+            hot_pos:             vec![Vec3::ZERO; cap],
+            hot_hp:              vec![0.0; cap],
+            hot_max_hp:          vec![0.0; cap],
+            hot_alive:           vec![false; cap],
+            hot_movement_mode:   vec![MovementMode::Walk; cap],
+            hot_level:           vec![1; cap],
+            hot_move_speed:      vec![1.0; cap],
+            hot_move_speed_mult: vec![1.0; cap],
+            hot_hunger:          vec![1.0; cap],
+            hot_thirst:          vec![1.0; cap],
+            hot_rest_timer:      vec![1.0; cap],
+            cold_creature_type:  vec![None; cap],
+            cold_channels:       (0..cap).map(|_| None).collect(),
+            cold_spawn_tick:     vec![None; cap],
+            cold_grid_id:        vec![None; cap],
+            cold_local_pos:      vec![None; cap],
+            cold_move_target:    vec![None; cap],
         }
     }
 
@@ -59,18 +87,24 @@ impl SimState {
     pub fn spawn_agent(&mut self, spec: AgentSpawn) -> Option<AgentId> {
         let id = self.pool.alloc_agent()?;
         let slot = AgentSlotPool::slot_of_agent(id);
-        self.hot_pos[slot]           = spec.pos;
-        self.hot_hp[slot]            = spec.hp;
-        self.hot_max_hp[slot]        = spec.hp.max(1.0);
-        self.hot_alive[slot]         = true;
-        self.hot_movement_mode[slot] = MovementMode::Walk;
-        self.hot_hunger[slot]        = 1.0;
-        self.hot_thirst[slot]        = 1.0;
-        self.hot_rest_timer[slot]    = 1.0;
+        self.hot_pos[slot]             = spec.pos;
+        self.hot_hp[slot]              = spec.hp;
+        self.hot_max_hp[slot]          = spec.hp.max(1.0);
+        self.hot_alive[slot]           = true;
+        self.hot_movement_mode[slot]   = MovementMode::Walk;
+        self.hot_level[slot]           = 1;
+        self.hot_move_speed[slot]      = 1.0;
+        self.hot_move_speed_mult[slot] = 1.0;
+        self.hot_hunger[slot]          = 1.0;
+        self.hot_thirst[slot]          = 1.0;
+        self.hot_rest_timer[slot]      = 1.0;
         let caps = Capabilities::for_creature(spec.creature_type);
-        self.cold_creature_type[slot] = Some(spec.creature_type);
-        self.cold_channels[slot]      = Some(caps.channels);
-        self.cold_spawn_tick[slot]    = Some(self.tick);
+        self.cold_creature_type[slot]  = Some(spec.creature_type);
+        self.cold_channels[slot]       = Some(caps.channels);
+        self.cold_spawn_tick[slot]     = Some(self.tick);
+        self.cold_grid_id[slot]        = None;
+        self.cold_local_pos[slot]      = None;
+        self.cold_move_target[slot]    = None;
         Some(id)
     }
 
@@ -127,6 +161,26 @@ impl SimState {
             .flatten()
     }
 
+    // Spatial extras (state.md §Physical State).
+    pub fn agent_level(&self, id: AgentId) -> Option<u32> {
+        self.hot_level.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_move_speed(&self, id: AgentId) -> Option<f32> {
+        self.hot_move_speed.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_move_speed_mult(&self, id: AgentId) -> Option<f32> {
+        self.hot_move_speed_mult.get(AgentSlotPool::slot_of_agent(id)).copied()
+    }
+    pub fn agent_grid_id(&self, id: AgentId) -> Option<u32> {
+        self.cold_grid_id.get(AgentSlotPool::slot_of_agent(id)).copied().flatten()
+    }
+    pub fn agent_local_pos(&self, id: AgentId) -> Option<Vec3> {
+        self.cold_local_pos.get(AgentSlotPool::slot_of_agent(id)).copied().flatten()
+    }
+    pub fn agent_move_target(&self, id: AgentId) -> Option<Vec3> {
+        self.cold_move_target.get(AgentSlotPool::slot_of_agent(id)).copied().flatten()
+    }
+
     // Per-agent field mutators.
     pub fn set_agent_pos(&mut self, id: AgentId, pos: Vec3) {
         let slot = AgentSlotPool::slot_of_agent(id);
@@ -158,6 +212,38 @@ impl SimState {
     }
     pub fn set_agent_rest_timer(&mut self, id: AgentId, v: f32) {
         if let Some(s) = self.hot_rest_timer.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+
+    // Spatial-extras setters.
+    pub fn set_agent_level(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self.hot_level.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_move_speed(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_move_speed.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_move_speed_mult(&mut self, id: AgentId, v: f32) {
+        if let Some(s) = self.hot_move_speed_mult.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_grid_id(&mut self, id: AgentId, v: Option<u32>) {
+        if let Some(s) = self.cold_grid_id.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_local_pos(&mut self, id: AgentId, v: Option<Vec3>) {
+        if let Some(s) = self.cold_local_pos.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = v;
+        }
+    }
+    pub fn set_agent_move_target(&mut self, id: AgentId, v: Option<Vec3>) {
+        if let Some(s) = self.cold_move_target.get_mut(AgentSlotPool::slot_of_agent(id)) {
             *s = v;
         }
     }
@@ -214,5 +300,25 @@ impl SimState {
     }
     pub fn hot_rest_timer(&self) -> &[f32] {
         &self.hot_rest_timer
+    }
+
+    // Spatial-extras bulk slices (Task A).
+    pub fn hot_level(&self) -> &[u32] {
+        &self.hot_level
+    }
+    pub fn hot_move_speed(&self) -> &[f32] {
+        &self.hot_move_speed
+    }
+    pub fn hot_move_speed_mult(&self) -> &[f32] {
+        &self.hot_move_speed_mult
+    }
+    pub fn cold_grid_id(&self) -> &[Option<u32>] {
+        &self.cold_grid_id
+    }
+    pub fn cold_local_pos(&self) -> &[Option<Vec3>] {
+        &self.cold_local_pos
+    }
+    pub fn cold_move_target(&self) -> &[Option<Vec3>] {
+        &self.cold_move_target
     }
 }
