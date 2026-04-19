@@ -6,7 +6,7 @@ use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 pub use agent::{AgentSpawn, MovementMode};
-use agent_types::{Membership, StatusEffect};
+use agent_types::{Inventory, Membership, StatusEffect};
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
 use smallvec::SmallVec;
@@ -77,6 +77,8 @@ pub struct SimState {
     cold_status_effects: Vec<SmallVec<[StatusEffect; 8]>>,
     // Memberships (state.md §Membership) — per-agent group list.
     cold_memberships:    Vec<SmallVec<[Membership; 4]>>,
+    // Inventory (state.md §Inventory) — one per agent.
+    cold_inventory:      Vec<Inventory>,
 }
 
 impl SimState {
@@ -122,6 +124,7 @@ impl SimState {
             cold_move_target:    vec![None; cap],
             cold_status_effects: (0..cap).map(|_| SmallVec::new()).collect(),
             cold_memberships:    (0..cap).map(|_| SmallVec::new()).collect(),
+            cold_inventory:      vec![Inventory::default(); cap],
         }
     }
 
@@ -171,6 +174,7 @@ impl SimState {
         self.cold_move_target[slot]    = None;
         self.cold_status_effects[slot].clear();
         self.cold_memberships[slot].clear();
+        self.cold_inventory[slot] = Inventory::default();
         Some(id)
     }
 
@@ -397,6 +401,18 @@ impl SimState {
             .get_mut(AgentSlotPool::slot_of_agent(id))
         {
             v.clear();
+        }
+    }
+
+    // Inventory (Task H).
+    pub fn agent_inventory(&self, id: AgentId) -> Option<Inventory> {
+        self.cold_inventory
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_inventory(&mut self, id: AgentId, inv: Inventory) {
+        if let Some(s) = self.cold_inventory.get_mut(AgentSlotPool::slot_of_agent(id)) {
+            *s = inv;
         }
     }
 
@@ -641,5 +657,10 @@ impl SimState {
     // Memberships bulk slice (Task G).
     pub fn cold_memberships(&self) -> &[SmallVec<[Membership; 4]>] {
         &self.cold_memberships
+    }
+
+    // Inventory bulk slice (Task H).
+    pub fn cold_inventory(&self) -> &[Inventory] {
+        &self.cold_inventory
     }
 }
