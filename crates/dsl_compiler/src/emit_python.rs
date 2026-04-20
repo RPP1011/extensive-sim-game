@@ -78,7 +78,14 @@ fn emit_header(out: &mut String, source_file: Option<&str>) {
 fn render_py_type(ty: &IrType) -> (String, Option<String>) {
     match ty {
         IrType::Bool => ("bool".into(), None),
-        IrType::I32 | IrType::I64 | IrType::U32 | IrType::U64 => ("int".into(), None),
+        IrType::I8
+        | IrType::U8
+        | IrType::I16
+        | IrType::U16
+        | IrType::I32
+        | IrType::I64
+        | IrType::U32
+        | IrType::U64 => ("int".into(), None),
         IrType::F32 | IrType::F64 => ("float".into(), None),
         IrType::String => ("str".into(), None),
         IrType::Vec3 => (

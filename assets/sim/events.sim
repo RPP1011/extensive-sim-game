@@ -16,6 +16,6 @@ event ShieldApplied { target: AgentId, amount: f32, tick: u64 } @replayable
 
 event StunApplied { target: AgentId, remaining_ticks: u32, tick: u64 } @replayable
 
-event SlowApplied { target: AgentId, factor_q8: i32, remaining_ticks: u32, tick: u64 } @replayable
+event SlowApplied { target: AgentId, factor_q8: u16, remaining_ticks: u32, tick: u64 } @replayable
 
 event SlowExpired { agent_id: AgentId, tick: u64 } @replayable

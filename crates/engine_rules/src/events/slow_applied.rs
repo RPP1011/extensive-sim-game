@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct SlowApplied {
     #[serde(with = "crate::id_serde::agent_id")]
     pub target: AgentId,
-    pub factor_q8: i32,
+    pub factor_q8: u16,
     pub remaining_ticks: u32,
     pub tick: u64,
 }

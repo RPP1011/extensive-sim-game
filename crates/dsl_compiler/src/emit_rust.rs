@@ -198,6 +198,10 @@ fn id_serde_module(ty: &IrType) -> Option<&'static str> {
 fn is_copy(ty: &IrType) -> bool {
     match ty {
         IrType::Bool
+        | IrType::I8
+        | IrType::U8
+        | IrType::I16
+        | IrType::U16
         | IrType::I32
         | IrType::U32
         | IrType::I64
@@ -221,6 +225,10 @@ fn is_copy(ty: &IrType) -> bool {
 fn render_type(ty: &IrType) -> String {
     match ty {
         IrType::Bool => "bool".into(),
+        IrType::I8 => "i8".into(),
+        IrType::U8 => "u8".into(),
+        IrType::I16 => "i16".into(),
+        IrType::U16 => "u16".into(),
         IrType::I32 => "i32".into(),
         IrType::U32 => "u32".into(),
         IrType::I64 => "i64".into(),

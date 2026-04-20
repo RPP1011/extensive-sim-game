@@ -24,6 +24,10 @@ mod stdlib {
     pub fn seed(symbols: &mut SymbolTable) {
         let prims = [
             ("bool", IrType::Bool),
+            ("i8",  IrType::I8),
+            ("u8",  IrType::U8),
+            ("i16", IrType::I16),
+            ("u16", IrType::U16),
             ("i32", IrType::I32),
             ("u32", IrType::U32),
             ("i64", IrType::I64),
