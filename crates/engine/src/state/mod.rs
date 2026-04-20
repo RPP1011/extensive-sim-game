@@ -72,6 +72,15 @@ pub struct SimState {
     // after `ability::expire::tick_start` runs (bidirectional invariant).
     // `None` means disengaged. Storage here; enforcement in Task 3.
     hot_engaged_with:   Vec<Option<AgentId>>,
+    // Combat Foundation Task 2: timed status fields decremented at tick start
+    // by `ability::expire::tick_start`. `stun_remaining == 0` means not
+    // stunned; same for slow. `slow_factor_q8` is a q8 fixed-point speed
+    // multiplier (e.g. 51 ≈ 0.2× speed, 204 ≈ 0.8× speed). Cooldown is an
+    // absolute tick (no decrement); mask compares against `state.tick`.
+    hot_stun_remaining_ticks:     Vec<u32>,
+    hot_slow_remaining_ticks:     Vec<u32>,
+    hot_slow_factor_q8:           Vec<i16>,
+    hot_cooldown_next_ready_tick: Vec<u32>,
 
     // --- Cold SoA — read rarely (spawn, chronicle, debug, narrative) ---
     cold_creature_type: Vec<Option<CreatureType>>,
@@ -142,6 +151,10 @@ impl SimState {
             hot_altruism:        vec![0.5; cap],
             hot_curiosity:       vec![0.5; cap],
             hot_engaged_with:    vec![None; cap],
+            hot_stun_remaining_ticks:     vec![0; cap],
+            hot_slow_remaining_ticks:     vec![0; cap],
+            hot_slow_factor_q8:           vec![0; cap],
+            hot_cooldown_next_ready_tick: vec![0; cap],
             cold_creature_type:  vec![None; cap],
             cold_channels:       (0..cap).map(|_| None).collect(),
             cold_spawn_tick:     vec![None; cap],
@@ -198,6 +211,10 @@ impl SimState {
         self.hot_altruism[slot]        = 0.5;
         self.hot_curiosity[slot]       = 0.5;
         self.hot_engaged_with[slot]    = None;
+        self.hot_stun_remaining_ticks[slot]     = 0;
+        self.hot_slow_remaining_ticks[slot]     = 0;
+        self.hot_slow_factor_q8[slot]           = 0;
+        self.hot_cooldown_next_ready_tick[slot] = 0;
         let caps = Capabilities::for_creature(spec.creature_type);
         self.cold_creature_type[slot]  = Some(spec.creature_type);
         self.cold_channels[slot]       = Some(caps.channels);
@@ -432,6 +449,60 @@ impl SimState {
             .get_mut(AgentSlotPool::slot_of_agent(id))
         {
             *s = other;
+        }
+    }
+
+    // Combat timing (Combat Foundation Task 2).
+    pub fn agent_stun_remaining(&self, id: AgentId) -> Option<u32> {
+        self.hot_stun_remaining_ticks
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_stun_remaining(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_stun_remaining_ticks
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_slow_remaining(&self, id: AgentId) -> Option<u32> {
+        self.hot_slow_remaining_ticks
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_slow_remaining(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_slow_remaining_ticks
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_slow_factor_q8(&self, id: AgentId) -> Option<i16> {
+        self.hot_slow_factor_q8
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_slow_factor_q8(&mut self, id: AgentId, v: i16) {
+        if let Some(s) = self
+            .hot_slow_factor_q8
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
+        }
+    }
+    pub fn agent_cooldown_next_ready(&self, id: AgentId) -> Option<u32> {
+        self.hot_cooldown_next_ready_tick
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+    }
+    pub fn set_agent_cooldown_next_ready(&mut self, id: AgentId, v: u32) {
+        if let Some(s) = self
+            .hot_cooldown_next_ready_tick
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = v;
         }
     }
 
@@ -830,6 +901,20 @@ impl SimState {
     // Engagement bulk slice (Combat Foundation Task 1).
     pub fn hot_engaged_with(&self) -> &[Option<AgentId>] {
         &self.hot_engaged_with
+    }
+
+    // Combat-timing bulk slices (Combat Foundation Task 2).
+    pub fn hot_stun_remaining_ticks(&self) -> &[u32] {
+        &self.hot_stun_remaining_ticks
+    }
+    pub fn hot_slow_remaining_ticks(&self) -> &[u32] {
+        &self.hot_slow_remaining_ticks
+    }
+    pub fn hot_slow_factor_q8(&self) -> &[i16] {
+        &self.hot_slow_factor_q8
+    }
+    pub fn hot_cooldown_next_ready_tick(&self) -> &[u32] {
+        &self.hot_cooldown_next_ready_tick
     }
 
     // Standing ledger (Combat Foundation Task 1).
