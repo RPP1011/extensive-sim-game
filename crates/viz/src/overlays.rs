@@ -23,7 +23,11 @@ pub struct Overlay {
 
 pub const ATTACK_LINE_TTL_TICKS:   u32 = 5;
 pub const ANNOUNCE_RING_TTL_TICKS: u32 = 3;
-/// Matches `engine::step::MAX_ANNOUNCE_RADIUS`.
+/// Fallback announce-ring radius when the viz layer has no live `SimState`
+/// to read `config.communication.max_announce_radius` from. Matches the
+/// DSL-shipped default in `assets/sim/config.sim`; TOML tuning overrides
+/// the sim-side radius while the viz keeps painting at this fixed fallback
+/// — intentionally viz-primitive (painting aid, not a balance knob).
 pub const DEFAULT_ANNOUNCE_RADIUS: f32 = 80.0;
 
 pub struct OverlayTracker {

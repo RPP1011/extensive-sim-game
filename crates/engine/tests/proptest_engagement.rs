@@ -1,12 +1,13 @@
 //! Combat Foundation Task 5 — engagement symmetry + range + determinism
 //! proptest. Covers acceptance criterion (5) in the plan header.
 
-use engine::ability::expire::{tick_start, ENGAGEMENT_RANGE};
+use engine::ability::expire::tick_start;
 use engine::creature::CreatureType;
 use engine::event::EventRing;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::SimScratch;
+use engine_rules::config::Config;
 use glam::Vec3;
 use proptest::prelude::*;
 
@@ -89,19 +90,20 @@ proptest! {
         }
     }
 
-    /// Property 3: no engagement at distance > ENGAGEMENT_RANGE.
+    /// Property 3: no engagement at distance > engagement_range.
     #[test]
     fn engagement_respects_range(pop in arb_population()) {
         let (mut state, ids) = build_state(&pop);
         run_tick_start(&mut state);
+        let engagement_range = Config::default().combat.engagement_range;
         for &a in &ids {
             if let Some(b) = state.agent_engaged_with(a) {
                 let pa = state.agent_pos(a).unwrap();
                 let pb = state.agent_pos(b).unwrap();
                 let d = pa.distance(pb);
-                prop_assert!(d <= ENGAGEMENT_RANGE,
-                    "engaged pair at distance {}m exceeds ENGAGEMENT_RANGE={}",
-                    d, ENGAGEMENT_RANGE);
+                prop_assert!(d <= engagement_range,
+                    "engaged pair at distance {}m exceeds engagement_range={}",
+                    d, engagement_range);
             }
         }
     }
@@ -135,16 +137,17 @@ proptest! {
         let victim = ids[idx];
 
         // If the victim is engaged, move it far enough that the pair exceeds
-        // ENGAGEMENT_RANGE. Otherwise, this test vacuously holds.
+        // engagement_range. Otherwise, this test vacuously holds.
         if let Some(other) = state.agent_engaged_with(victim) {
             let pv = state.agent_pos(victim).unwrap();
             let po = state.agent_pos(other).unwrap();
-            // Move victim to a position we KNOW is > ENGAGEMENT_RANGE from other.
+            // Move victim to a position we KNOW is > engagement_range from other.
             // Displacement from `other` along the x-axis at distance 3.0.
-            let new_pos = po + Vec3::new(ENGAGEMENT_RANGE + 1.0 + perturb.0.abs(), 0.0, 0.0);
+            let engagement_range = Config::default().combat.engagement_range;
+            let new_pos = po + Vec3::new(engagement_range + 1.0 + perturb.0.abs(), 0.0, 0.0);
             state.set_agent_pos(victim, new_pos);
             let new_d = state.agent_pos(victim).unwrap().distance(po);
-            prop_assert!(new_d > ENGAGEMENT_RANGE);
+            prop_assert!(new_d > engagement_range);
             run_tick_start(&mut state);
             // The previously-engaged pair should now be broken (at least on
             // victim's side). It may have re-engaged with a different closer

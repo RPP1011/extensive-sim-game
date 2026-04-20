@@ -9,11 +9,11 @@
 //! `recompute_all_engagements` shim (the entry point retained for
 //! fixtures that predate the event-driven pipeline).
 
-use engine::ability::expire::ENGAGEMENT_RANGE;
 use engine::creature::CreatureType;
 use engine::engagement::recompute_all_engagements;
 use engine::event::EventRing;
 use engine::state::{AgentSpawn, SimState};
+use engine_rules::config::Config;
 use glam::Vec3;
 
 fn run_tick_start(state: &mut SimState, events: &mut EventRing) {
@@ -51,9 +51,10 @@ fn agents_outside_engagement_range_do_not_engage() {
     let mut state = SimState::new(8, 42);
     let mut events = EventRing::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 0.0));
-    // Outside 2.0m engagement range.
+    // Outside engagement range (default 2.0m).
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
-    assert!(Vec3::new(0.0, 0.0, 0.0).distance(Vec3::new(3.0, 0.0, 0.0)) > ENGAGEMENT_RANGE);
+    let engagement_range = Config::default().combat.engagement_range;
+    assert!(Vec3::new(0.0, 0.0, 0.0).distance(Vec3::new(3.0, 0.0, 0.0)) > engagement_range);
     run_tick_start(&mut state, &mut events);
     assert_eq!(state.agent_engaged_with(a), None);
     assert_eq!(state.agent_engaged_with(b), None);

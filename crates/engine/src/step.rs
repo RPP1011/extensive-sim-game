@@ -22,26 +22,12 @@ use glam::Vec3;
 // is unchanged. Runtime TOML tuning (`Config::from_toml(...)`) is the only
 // new knob.
 //
-// Backward-compat `pub const` shims are kept for the pre-config test suite
-// (`cast_handler_slow.rs`, `action_flee.rs`, `action_attack_kill.rs`, …).
-// Their values match the DSL defaults exactly; new code should prefer
-// `state.config.*.*`.
-
-/// Default movement speed — matches `config.movement.move_speed_mps`.
-pub const MOVE_SPEED_MPS: f32 = 1.0;
-/// Default attack damage — matches `config.combat.attack_damage`.
-pub const ATTACK_DAMAGE: f32 = 10.0;
-/// Default attack range — matches `config.combat.attack_range`.
-pub const ATTACK_RANGE: f32 = 2.0;
-/// Default vocal strength — matches `config.communication.default_vocal_strength`.
-pub const DEFAULT_VOCAL_STRENGTH: f32 = 1.0;
-/// Default announce-recipient cap — matches
-/// `config.communication.max_announce_recipients`.
-pub const MAX_ANNOUNCE_RECIPIENTS: usize = 32;
-/// Default announce radius — matches `config.communication.max_announce_radius`.
-pub const MAX_ANNOUNCE_RADIUS: f32 = 80.0;
-/// Default overhear radius — matches `config.communication.overhear_range`.
-pub const OVERHEAR_RANGE: f32 = 30.0;
+// Task 142 retired the backward-compat `pub const` shims that used to
+// live here. The pre-config tests (`cast_handler_slow.rs`, `action_flee.rs`,
+// `action_attack_kill.rs`, `engagement_*`, `proptest_engagement`, …) now
+// all read the defaults off `engine_rules::config::Config::default()`.
+// No engine code (or test) should pin a balance knob as a `pub const`
+// ever again; extend `assets/sim/config.sim` and rebuild instead.
 
 /// Return `true` iff `speaker` and `observer` share at least one
 /// `CommunicationChannel`. When both sides have non-empty channel sets, at
@@ -85,7 +71,7 @@ fn speaker_anyone_radius(state: &SimState, speaker: AgentId) -> f32 {
     };
     let mut best: f32 = 0.0;
     for c in channels.iter() {
-        let r = channel_range(*c, vocal_strength);
+        let r = channel_range(*c, vocal_strength, &state.config.communication);
         if r.is_infinite() {
             return max_radius;
         }

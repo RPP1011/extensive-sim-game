@@ -4,14 +4,17 @@
 //! 1. The handler writes `hot_slow_remaining_ticks` + `hot_slow_factor_q8`
 //!    under a "longer OR stronger wins" rule.
 //! 2. With a slow active, `MoveToward` displacement shrinks by
-//!    `factor_q8 / 256` of the base `MOVE_SPEED_MPS`. After the unified
+//!    `factor_q8 / 256` of the base `move_speed_mps`. After the unified
 //!    tick-start pass decrements the counter to zero, `SlowExpired` fires
 //!    and the factor is zeroed.
-//! 3. Engagement-slow (Task 4 — `ENGAGEMENT_SLOW_FACTOR`) composes
+//! 3. Engagement-slow (Task 4 — `engagement_slow_factor`) composes
 //!    multiplicatively with effect-slow: both apply, neither replaces the
 //!    other.
+//!
+//! Balance knobs are read off `Config::default()`, not a `pub const`
+//! shim — task 142 retired the shim layer.
 
-use engine::ability::expire::{tick_start, ENGAGEMENT_SLOW_FACTOR};
+use engine::ability::expire::tick_start;
 use engine::generated::physics::dispatch_effect_slow_applied;
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
@@ -20,7 +23,8 @@ use engine::ids::AgentId;
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch, MOVE_SPEED_MPS};
+use engine::step::{step, SimScratch};
+use engine_rules::config::Config;
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
@@ -113,7 +117,7 @@ fn weaker_and_shorter_slow_does_not_override() {
 #[test]
 fn move_toward_is_slowed_by_effect_slow_factor() {
     // factor_q8 = 51 → 51/256 ≈ 0.199 multiplier. Over one MoveToward tick,
-    // displacement should be (51/256) * MOVE_SPEED_MPS.
+    // displacement should be (51/256) * move_speed_mps.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(64);
@@ -139,7 +143,8 @@ fn move_toward_is_slowed_by_effect_slow_factor() {
     let pos_after = state.agent_pos(mover).unwrap();
     let displacement = (pos_after - pos_before).length();
 
-    let expected = MOVE_SPEED_MPS * (51.0 / 256.0);
+    let cfg = Config::default();
+    let expected = cfg.movement.move_speed_mps * (51.0 / 256.0);
     assert!(
         (displacement - expected).abs() < 1e-4,
         "expected displacement ≈ {expected}, got {displacement}"
@@ -208,8 +213,9 @@ fn engagement_slow_and_effect_slow_compose_multiplicatively() {
     let pos_after = state.agent_pos(mover).unwrap();
     let displacement = (pos_after - pos_before).length();
 
-    // BOTH slows apply: engagement 0.3 × effect_slow (51/256) × MOVE_SPEED_MPS.
-    let expected = MOVE_SPEED_MPS * ENGAGEMENT_SLOW_FACTOR * (51.0 / 256.0);
+    // BOTH slows apply: engagement slow × effect_slow (51/256) × move_speed_mps.
+    let cfg = Config::default();
+    let expected = cfg.movement.move_speed_mps * cfg.combat.engagement_slow_factor * (51.0 / 256.0);
     assert!(
         (displacement - expected).abs() < 1e-4,
         "engagement × effect slow must compose multiplicatively; \

@@ -1,8 +1,21 @@
 # Wolves and humans — the first DSL-owned scenario
 
-This is the walkthrough anchor for the "wolves + humans on a plane" scenario. It walks the stack from the DSL sources through the compiler to the engine and out to the parity test. As compiler milestones land, the "still hand-written" list at the bottom shrinks; when that list empties, the scenario is fully DSL-owned.
+This is the walkthrough anchor for the "wolves + humans on a plane" scenario. It walks the stack from the DSL sources through the compiler to the engine and out to the parity test. As compiler milestones landed, the "still hand-written" list shrank; with task 142 it has now emptied for this scenario — wolves+humans is fully DSL-owned modulo a single dormant subsystem (CastHandler, formally deferred below).
 
-As of 2026-04-19 the scenario runs on compiler milestones 2-6 + physics parity. Event, physics (minus cast), the Attack mask, the four-row scoring table, and the Human/Wolf/Deer/Dragon entity taxonomy are all DSL-owned. Cast dispatch and a handful of balance constants are still hand-written; see the list at the bottom.
+## Milestone complete — task 142
+
+Wolves+humans DSL port complete. The sequence of commits that got us here:
+
+- **135** `feat(dsl): @decay sugar + gradient scoring modifiers + view fold-body UDF restriction` (`70252c3e`)
+- **136** `refactor(dsl): rename event actor fields to canonical "actor"; fill @harmful + @visible tag contracts; delete legacy handler shims` (`a8d89cf0`)
+- **137** `feat(dsl): mask + scoring coverage for all 18 micros; retire legacy mask.rs` (`5ce0a689`)
+- **138** `feat(dsl): @lazy + @materialized view emission — inline fns + event-fold registry` (`23719994`)
+- **139** `feat(compiler-first): target selection via scoring-argmax over masked candidates; retire nearest_other` (`794472a4`)
+- **140** `refactor(compiler-first): is_hostile + record_memory as DSL; retire engine::rules shim` (`c755d7d8`)
+- **141** `feat(compiler-first): engagement as event-driven physics; retire tick_start` (`011c5432`)
+- **142** (this commit) `chore(compiler-first): wolves+humans DSL port complete — balance audit, legacy shim cleanup, final docs`
+
+The parity anchor (`crates/engine/tests/wolves_and_humans_parity.rs`) stays byte-identical across the whole series — every handoff from hand-written to DSL-emitted preserves the event log exactly.
 
 ## Scenario setup
 
@@ -25,13 +38,16 @@ Five `.sim` files under `assets/sim/` drive the scenario end-to-end. Each one li
 
 | DSL source | Owns | Emits to |
 |---|---|---|
-| `assets/sim/events.sim` | 35 `event` declarations (every variant of `Event`) | `crates/engine_rules/src/events/*.rs` + `mod.rs` (re-exported by `engine::event`) |
-| `assets/sim/physics.sim` | 8 `physics` rules (`damage`, `heal`, `shield`, `stun`, `slow`, `transfer_gold`, `modify_standing`, `opportunity_attack`) | `crates/engine/src/generated/physics/*.rs` + `mod.rs` |
-| `assets/sim/masks.sim` | 1 `mask` declaration (`Attack`) | `crates/engine/src/generated/mask/attack.rs` + `mod.rs` |
-| `assets/sim/scoring.sim` | 1 `scoring` block with 4 rows (`Hold`, `MoveToward`, `Attack`, `Eat`) | `crates/engine_rules/src/scoring/scoring_000.rs` + `mod.rs` |
+| `assets/sim/events.sim` | 37 `event` declarations (every variant of `Event`, including `EngagementCommitted` / `EngagementBroken`) | `crates/engine_rules/src/events/*.rs` + `mod.rs` (re-exported by `engine::event`) |
+| `assets/sim/physics.sim` | 9 `physics` rules (`damage`, `heal`, `shield`, `stun`, `slow`, `transfer_gold`, `modify_standing`, `opportunity_attack`, `record_memory`) | `crates/engine/src/generated/physics/*.rs` + `mod.rs` |
+| `assets/sim/masks.sim` | 7 `mask` declarations (`Hold`, `MoveToward`, `Flee`, `Eat`, `Drink`, `Rest`, `Attack`) | `crates/engine/src/generated/mask/*.rs` + `mod.rs` |
+| `assets/sim/scoring.sim` | 1 `scoring` block with 18 rows (every `MicroKind`, though most still score `0.0`) | `crates/engine_rules/src/scoring/scoring_000.rs` + `mod.rs` |
 | `assets/sim/entities.sim` | 4 `entity` declarations (`Human`, `Wolf`, `Deer`, `Dragon`) with `Capabilities` and `PredatorPrey` | `crates/engine_rules/src/entities/*.rs` + `mod.rs` (re-exported by `engine::creature`) |
+| `assets/sim/views.sim` | `@lazy` + `@materialized` views (`is_hostile`, `engaged_with`, `threat_level`, `nearest_hostile`, …) | `crates/engine/src/generated/views/*.rs` |
+| `assets/sim/enums.sim` | shared enums (`CreatureType`, `CommunicationChannel`, …) | `crates/engine_rules/src/types.rs` |
+| `assets/sim/config.sim` | 4 `config` blocks (`combat`, `movement`, `needs`, `communication`) with 16 tunable fields | `crates/engine_rules/src/config/*.rs` + `assets/config/default.toml` |
 
-The `physics.sim` rule bodies compile to `impl CascadeHandler` unit structs. The `masks.sim` attack predicate compiles to a free `fn mask_attack(&SimState, AgentId, AgentId) -> bool`. The `scoring.sim` rows compile to a `pub static SCORING_TABLE: &[ScoringEntry]`. The `entities.sim` declarations compile to a `CreatureType` enum plus a `for_creature(CreatureType) -> Capabilities` fn and an `is_hostile_to` pairwise table.
+The `physics.sim` rule bodies compile to `impl CascadeHandler` unit structs. The `masks.sim` predicates compile to a mix of free predicate fns (`fn mask_<name>(&SimState, AgentId[, AgentId]) -> bool`) and target-enumerator fns (`fn mask_<name>_candidates(&SimState, AgentId, &mut TargetMask)`). The `scoring.sim` rows compile to a `pub static SCORING_TABLE: &[ScoringEntry]`. The `entities.sim` declarations compile to a `CreatureType` enum plus a `for_creature(CreatureType) -> Capabilities` fn and an `is_hostile_to` pairwise table. The `views.sim` declarations compile to `@lazy` inline fns and `@materialized` event-fold registries.
 
 ## Compilation
 
@@ -41,88 +57,69 @@ cargo run --bin xtask -- compile-dsl
 
 This walks every `.sim` file under `assets/sim/`, parses and resolves all declarations into one `Compilation`, and writes emitted Rust (rustfmt-normalised) + Python dataclasses + schema hashes into the targets listed above. CI runs `cargo run --bin xtask -- compile-dsl --check` to ensure the committed emission is byte-identical to a fresh run.
 
-## Engine consumption
+## This scenario runs on
 
-The engine plugs each emitted module in exactly one place.
+### DSL-owned (compiler emits, engine consumes)
 
-- **Event enum shim** — `crates/engine/src/event/mod.rs` re-exports `engine_rules::events::Event`. Every `use crate::event::Event` in the engine transparently reaches the compiler-emitted enum.
-- **Cascade registration** — `CascadeRegistry::with_engine_builtins()` in `crates/engine/src/cascade/dispatch.rs` calls `crate::generated::physics::register(self)`. That in turn boxes and registers one handler per emitted physics rule. The non-DSL `RecordMemoryHandler` is registered alongside.
-- **Mask build path** — `MaskBuffer::mark_attack_allowed_if_target_in_range` in `crates/engine/src/mask.rs` calls `crate::generated::mask::mask_attack(state, id, other)` per (agent, candidate) pair discovered via the spatial index.
-- **Utility backend** — `UtilityBackend::evaluate` in `crates/engine/src/policy/utility.rs` iterates `engine_rules::scoring::SCORING_TABLE`, evaluates each row's predicate against the current agent, and keeps the highest-scoring mask-allowed `MicroKind`.
-- **Entity taxonomy** — `crates/engine/src/creature.rs` re-exports `engine_rules::entities::{CreatureType, Capabilities}`. Spawn-time `AgentSpawn { creature_type, .. }` resolves to the DSL-defined variant; mask-time `is_hostile(state, a, b)` in `crates/engine/src/rules/mod.rs` dispatches through `CreatureType::is_hostile_to`.
+- **Events** — 37 variants in `events.sim`.
+- **Physics cascade handlers** — 9 rules in `physics.sim` (every stateless effect handler, including `RecordMemory` and `OpportunityAttack`).
+- **Masks** — all 7 self-only / target-bound mask predicates in `masks.sim` (Hold, MoveToward, Flee, Eat, Drink, Rest, Attack).
+- **Scoring** — full 18-row table in `scoring.sim`; the `UtilityBackend` iterates it, argmaxing over target-bound candidates from the compiler-emitted enumerators.
+- **Entities** — taxonomy, capabilities, and the symmetric-closure `is_hostile_to` in `entities.sim`.
+- **Views** — `@lazy` + `@materialized` in `views.sim`; the hostility view replaces the retired `engine::rules` shim (task 140), and `engaged_with` is event-folded (tasks 138–141).
+- **Engagement** — event-driven via `engagement_on_move` / `engagement_on_death` cascade handlers (task 141) plus the `@materialized view engaged_with` fold.
+- **Balance constants** — 16 tunable values in `config.sim`, TOML-editable via `assets/config/default.toml`.
+
+### Engine-primitive (hand-written, not game logic)
+
+The only hand-written files in `crates/engine/src/` are primitives that have no DSL counterpart by design:
+
+- **`lib.rs`** — module declarations + `VERSION`.
+- **`state/`** — `SimState`, `AgentSpawn`, the SoA hot/cold storage (engine primitive; not game rules).
+- **`spatial.rs`** — incremental uniform-grid spatial hash (`CELL_SIZE = 16m` is a cache-line tuning parameter, not a balance knob).
+- **`step.rs`** — the 6-phase tick pipeline (mask → policy → shuffle → apply → view-fold → invariants). Orchestration kernel, not game rules.
+- **`mask.rs`** — the `MicroKind` enum, `TargetMask` storage, and the thin `mark_*_allowed` wrappers that dispatch to the compiler-emitted predicates. Table-dispatching primitive.
+- **`policy/`** — `PolicyBackend` trait + `UtilityBackend` (argmax over the compiler-emitted `SCORING_TABLE`). Engine primitive, not game logic.
+- **`cascade/`** — cascade dispatcher + `MAX_CASCADE_ITERATIONS = 8` safety bound.
+- **`engagement.rs`** — event-driven engagement helpers (stateless handlers that the compiler-emitted view-fold consumes).
+- **`event/`**, **`view/`**, **`invariant/`**, **`aggregate/`**, **`telemetry/`** — primitive infrastructure (ring buffer, trait surface, dispatch tables).
+- **`ability/expire.rs`** — stateless stun/slow timer decrement. The timer model itself is a scheduling primitive; migration to a timestamp-based cooldown model is a follow-up milestone unrelated to the DSL port.
+- **`channel.rs`** — per-channel range formula (dispatch table keyed on an engine enum; the per-channel base distances moved into `config.communication.*` at task 142, only the dispatch logic stays).
+- **`ability/` (cast + gate + registry)** — see "Deferred" below.
+
+### Deferred — CastHandler (cast-based abilities)
+
+Cast-based actions (magic abilities, multi-effect spells) remain hand-written in `crates/engine/src/ability/cast.rs`. The wolves+humans scenario does not exercise magic; the four entities in `entities.sim` (Human, Wolf, Deer, Dragon) have no cast-capable capability flag and no `.ability` registration, so CastHandler is dormant throughout the 100-tick fixture.
+
+`CastHandler` is stateful: it carries an `Arc<AbilityRegistry>` so multiple cascade lanes can share one registry cheaply. The physics emitter produces stateless unit-struct handlers (`impl CascadeHandler` with no fields); adding a "handler state" concept to the emitter is ~500 LOC and outside the scope of the wolves+humans DSL-port claim.
+
+Runtime contract: wolves+humans has zero cast-capable creatures → CastHandler never fires → its implementation is irrelevant for parity. When a scenario with cast-capable creatures lands, it MUST formally register a cast handler via `CascadeRegistry::register_cast_handler(Arc<AbilityRegistry>)`; parity for that scenario is a separate milestone.
+
+Tracked as a follow-up tech-debt item, not a blocker. Related files:
+
+- `crates/engine/src/ability/cast.rs` — `CastHandler` (stateful, deferred).
+- `crates/engine/src/ability/gate.rs` — `evaluate_cast_gate` (the cast-time cooldown/stun/range/hostility/engagement-lock predicate; migrates when the Cast mask does).
+- `crates/engine/src/ability/registry.rs`, `program.rs`, `id.rs`, `mod.rs` — ability registry primitive + the `AbilityId` newtype.
 
 ## Fixture test
 
 `crates/engine/tests/wolves_and_humans_parity.rs` is the regression anchor. Three tests:
 
 1. `parity_log_is_byte_identical_to_baseline` — renders the 100-tick event log as one line per event and compares against the committed `tests/wolves_and_humans_baseline.txt`. Any DSL edit that changes the wolves+humans trace fails this test. To refresh the baseline (intentionally): `WOLVES_AND_HUMANS_REGEN=1 cargo test -p engine --test wolves_and_humans_parity`.
-2. `parity_log_has_expected_structure` — asserts event counts, tick monotonicity, and that the majority of `AgentAttacked` events cross species (validates that the `is_hostile` gate is in effect). Note: same-species attacks can leak through because `UtilityBackend` target-selection uses `nearest_other` without a hostility filter — this is current DSL-owned behaviour and will close when target-selection moves into the DSL (follow-up to milestone 6).
+2. `parity_log_has_expected_structure` — asserts event counts, tick monotonicity, and that the majority of `AgentAttacked` events cross species (validates that the `is_hostile` gate is in effect).
 3. `parity_log_is_deterministic_across_runs` — two fresh runs in the same process must produce byte-identical logs.
 
 Run the full suite with `cargo test -p engine --release`. CI runs it in both debug and release so the determinism path is exercised on both contract-check configurations.
 
-## Still hand-written
+## Adding another scenario
 
-Honest list of game-logic surfaces that remain hand-written after milestones 2-6 + physics parity. Each entry names the file and the migration prerequisite.
+The checklist is always the same:
 
-### Cast dispatch (stateful)
-
-- `crates/engine/src/ability/cast.rs` — `CastHandler`. Registered via `CascadeRegistry::register_cast_handler(Arc<AbilityRegistry>)`. The DSL's physics emitter currently produces stateless unit-struct handlers; `CastHandler` carries an `Arc<AbilityRegistry>` so a DSL cutover requires extending the emitter with a "handler state" concept. Tracked as a follow-up to the milestone-3 physics series; documented as deferred in the physics-parity commit.
-- `crates/engine/src/ability/gate.rs` — `evaluate_cast_gate`. The cast-time predicate (cooldown + stun + range + hostility + engagement-lock) that the Cast mask and `CastHandler` both consult. Migrates when the Cast mask moves.
-- `crates/engine/src/ability/record_memory.rs` — `RecordMemoryHandler`. Not a cast path but also stateless-but-engine-specific; consumes `Event::RecordMemory` and folds into per-agent cold memory. Tracked separately; low priority.
-
-### Hostility view
-
-- `crates/engine/src/rules/mod.rs` — `pub fn is_hostile(state, a, b) -> bool`. The compiler-emitted mask lowers the DSL call `is_hostile(self, target)` to `crate::rules::is_hostile(state, self, target)`. The fn body delegates to `CreatureType::is_hostile_to` (DSL-emitted), so this is a one-line shim. Retires when milestone 6 (`view` declarations on the compiler ladder) lands — the DSL will declare `view is_hostile(a, b)` directly.
-
-### Masks still hand-written
-
-Attack is the only mask the DSL owns. The five others live in `crates/engine/src/mask.rs`:
-
-- `MaskBuffer::mark_hold_allowed` (always-on for alive agents) — trivial.
-- `MaskBuffer::mark_move_allowed_if_others_exist` — any-other-alive gate.
-- `MaskBuffer::mark_flee_allowed_if_threat_exists` — any-other-within-`AGGRO_RANGE` gate (`AGGRO_RANGE = 50.0` at `mask.rs:10`).
-- `MaskBuffer::mark_needs_allowed` — unconditional for `Eat`/`Drink`/`Rest`.
-- `MaskBuffer::mark_domain_hook_micros_allowed` — the Cast branch gates through `evaluate_cast_gate`; the other ten micros (UseItem, Harvest, etc.) are permissive. Migration cost: each mask needs a `mask M(...)` declaration in `assets/sim/masks.sim` plus emitter support if the predicate references anything beyond `agents.*` + stdlib. Tracked as a follow-up milestone (part of the "masks" follow-up to milestone 4).
-
-### Scoring still hand-written
-
-The scoring table covers only four rows: `Hold`, `MoveToward`, `Attack`, `Eat`. The other 14 `MicroKind` variants (Flee, Cast, UseItem, Harvest, Drink, Rest, PlaceTile, PlaceVoxel, HarvestVoxel, Converse, ShareStory, Communicate, Ask, Remember) have no DSL scoring row, so `UtilityBackend` never picks them — they land in the policy only via tests that drive actions directly. Migration cost: add rows to `assets/sim/scoring.sim`. The emitter already supports the full `<lit> + (if <pred> { <lit> } else { 0.0 })` grammar.
-
-Target-selection logic (`nearest_other` + the `Action::move_toward` / `Action::attack` builders in `utility.rs`) stays hand-written and is not a scoring row — it's action construction. Migrating target-selection into DSL is a separate, larger milestone.
-
-### Hand-written scratch helpers in step.rs / mask.rs
-
-As of the config milestone the balance knobs below moved into `assets/sim/config.sim` and are now read off `SimState::config` at every call site. The per-block defaults live in `assets/config/default.toml`, rendered by the compiler from the DSL `= <default>` clauses; hand edits to the TOML file tune the sim without touching Rust. Retired constants and their new homes:
-
-| Legacy const (file:line pre-migration)                    | New DSL path                            |
-|-----------------------------------------------------------|-----------------------------------------|
-| `step.rs:71` `MOVE_SPEED_MPS = 1.0`                       | `config.movement.move_speed_mps`        |
-| `step.rs:72` `ATTACK_DAMAGE = 10.0`                       | `config.combat.attack_damage`           |
-| `step.rs:73` `ATTACK_RANGE = 2.0`                         | `config.combat.attack_range`            |
-| `step.rs:74` `EAT_RESTORE = 0.25`                         | `config.needs.eat_restore`              |
-| `step.rs:75` `DRINK_RESTORE = 0.30`                       | `config.needs.drink_restore`            |
-| `step.rs:76` `REST_RESTORE = 0.15`                        | `config.needs.rest_restore`             |
-| `step.rs:80` `MAX_ANNOUNCE_RECIPIENTS = 32`               | `config.communication.max_announce_recipients` |
-| `step.rs:84` `MAX_ANNOUNCE_RADIUS = 80.0`                 | `config.communication.max_announce_radius` |
-| `step.rs:89` `OVERHEAR_RANGE = 30.0`                      | `config.communication.overhear_range`   |
-| `step.rs:18` `DEFAULT_VOCAL_STRENGTH = 1.0`               | `config.communication.default_vocal_strength` |
-| `mask.rs:10` `AGGRO_RANGE = 50.0`                         | `config.combat.aggro_range`             |
-| `mask.rs:18` `ATTACK_SPATIAL_RADIUS = 2.0`                | `config.combat.attack_range` (same concept; folded) |
-| `ability/expire.rs:29` `ENGAGEMENT_RANGE = 2.0`           | `config.combat.engagement_range`        |
-| `ability/expire.rs:35` `ENGAGEMENT_SLOW_FACTOR = 0.3`     | `config.combat.engagement_slow_factor`  |
-
-Backward-compat `pub const` shims are kept at the old paths for the legacy test suite (`cast_handler_slow.rs`, `action_flee.rs`, etc. — they assert against "the default"). New code should read `state.config.*.*` directly. The `CONFIG_HASH` sub-hash covers block + field + type identity so any silent schema drift shows up in CI.
-
-## What retires next
-
-When you migrate one of the above, the checklist is always the same:
-
-1. Extend the DSL grammar if needed (e.g. a new declaration kind for balance constants).
+1. Extend the DSL grammar if needed (e.g. a new declaration kind for a new behaviour class).
 2. Add the declaration to the appropriate `.sim` file.
 3. `cargo run --bin xtask -- compile-dsl`.
 4. Delete the hand-written counterpart in the SAME commit.
-5. Run `cargo test -p engine --release` — the parity test in this walkthrough plus the 339 engine tests must all still pass.
-6. If the migration changes the wolves+humans event log (e.g. a new scoring row picks a different `MicroKind` at the same score), regen the baseline with `WOLVES_AND_HUMANS_REGEN=1` and include the diff in review.
+5. Run `cargo test -p engine --release` — every existing fixture plus the parity test must still pass bit-for-bit.
+6. If the migration changes the wolves+humans event log, regen the baseline with `WOLVES_AND_HUMANS_REGEN=1` and include the diff in review.
 
 The parity anchor fails loud, which is the point.

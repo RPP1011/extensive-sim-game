@@ -16,6 +16,10 @@ max_announce_recipients = 32
 max_announce_radius = 80.0
 overhear_range = 30.0
 default_vocal_strength = 1.0
+channel_speech_range = 30.0
+channel_pack_range = 20.0
+channel_pheromone_range = 40.0
+channel_long_range_vocal = 200.0
 
 [movement]
 move_speed_mps = 1.0

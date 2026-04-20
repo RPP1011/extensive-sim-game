@@ -5,22 +5,27 @@
 //! every `use engine::channel::{CommunicationChannel, ChannelSet}` call site
 //! compiling unchanged.
 //!
-//! `channel_range` stays here: it's a hand-written engine primitive (range
-//! per channel given vocal strength), not part of the compiled rule surface.
+//! `channel_range` is the per-channel effective-range formula. Task 142
+//! migrated the per-channel base distances (speech, pack, pheromone,
+//! long-range-vocal) into `assets/sim/config.sim` as
+//! `config.communication.channel_*_range`; the dispatch logic (which
+//! channel gets vocal-strength scaling, which is unbounded, which is
+//! silent) stays engine-primitive because it's a dispatch table keyed on
+//! an engine enum, not a balance knob.
 
+use engine_rules::config::CommunicationConfig;
 pub use engine_rules::types::{ChannelSet, CommunicationChannel};
 
-pub fn channel_range(channel: CommunicationChannel, vocal_strength: f32) -> f32 {
-    const SPEECH_RANGE: f32 = 30.0;
-    const PACK_RANGE: f32 = 20.0;
-    const PHEROMONE_RANGE: f32 = 40.0;
-    const LONG_RANGE_VOCAL: f32 = 200.0;
-
+pub fn channel_range(
+    channel: CommunicationChannel,
+    vocal_strength: f32,
+    cfg: &CommunicationConfig,
+) -> f32 {
     match channel {
-        CommunicationChannel::Speech => SPEECH_RANGE * vocal_strength,
-        CommunicationChannel::PackSignal => PACK_RANGE,
-        CommunicationChannel::Pheromone => PHEROMONE_RANGE,
-        CommunicationChannel::Song => LONG_RANGE_VOCAL,
+        CommunicationChannel::Speech => cfg.channel_speech_range * vocal_strength,
+        CommunicationChannel::PackSignal => cfg.channel_pack_range,
+        CommunicationChannel::Pheromone => cfg.channel_pheromone_range,
+        CommunicationChannel::Song => cfg.channel_long_range_vocal,
         CommunicationChannel::Telepathy => f32::INFINITY,
         CommunicationChannel::Testimony => 0.0,
     }

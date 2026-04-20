@@ -1,5 +1,6 @@
 use engine::channel::{channel_range, CommunicationChannel};
 use engine::creature::{Capabilities, CreatureType};
+use engine_rules::config::CommunicationConfig;
 
 #[test]
 fn wolves_share_packsignal_not_speech() {
@@ -19,13 +20,15 @@ fn wolves_share_packsignal_not_speech() {
 
 #[test]
 fn speech_range_is_vocal_strength_scaled() {
-    let base = channel_range(CommunicationChannel::Speech, 1.0);
-    let loud = channel_range(CommunicationChannel::Speech, 2.0);
+    let cfg = CommunicationConfig::default();
+    let base = channel_range(CommunicationChannel::Speech, 1.0, &cfg);
+    let loud = channel_range(CommunicationChannel::Speech, 2.0, &cfg);
     assert_eq!(loud, 2.0 * base);
 }
 
 #[test]
 fn telepathy_is_unbounded() {
-    let r = channel_range(CommunicationChannel::Telepathy, 1.0);
+    let cfg = CommunicationConfig::default();
+    let r = channel_range(CommunicationChannel::Telepathy, 1.0, &cfg);
     assert!(r.is_infinite());
 }

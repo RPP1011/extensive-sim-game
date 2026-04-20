@@ -216,7 +216,7 @@ are the milestone-3 accessor surface for compiler-emitted physics handlers.
 | `agents.hp(a)` | `(AgentId) -> f32` — current hp; `0.0` for slots without an hp field. |
 | `agents.max_hp(a)` | `(AgentId) -> f32` — authored max hp; `0.0` if absent. |
 | `agents.shield_hp(a)` | `(AgentId) -> f32` — current shield hp; `0.0` if absent. |
-| `agents.attack_damage(a)` | `(AgentId) -> f32` — per-agent melee damage; falls back to the engine's `step::ATTACK_DAMAGE` constant when the slot is absent. |
+| `agents.attack_damage(a)` | `(AgentId) -> f32` — per-agent melee damage; falls back to `config.combat.attack_damage` (DSL-owned balance knob, default 10.0) when the slot is absent. |
 | `agents.set_hp(a, v)` | `(AgentId, f32) -> ()` — overwrites the hp slot. |
 | `agents.set_shield_hp(a, v)` | `(AgentId, f32) -> ()` — overwrites the shield hp slot. |
 | `agents.kill(a)` | `(AgentId) -> ()` — flips the alive bit and tears the agent out of the spatial index. Idempotent. |

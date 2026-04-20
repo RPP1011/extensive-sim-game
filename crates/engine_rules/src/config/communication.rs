@@ -12,6 +12,10 @@ pub struct CommunicationConfig {
     pub max_announce_radius: f32,
     pub overhear_range: f32,
     pub default_vocal_strength: f32,
+    pub channel_speech_range: f32,
+    pub channel_pack_range: f32,
+    pub channel_pheromone_range: f32,
+    pub channel_long_range_vocal: f32,
 }
 
 impl Default for CommunicationConfig {
@@ -21,6 +25,10 @@ impl Default for CommunicationConfig {
             max_announce_radius: 80.0_f32,
             overhear_range: 30.0_f32,
             default_vocal_strength: 1.0_f32,
+            channel_speech_range: 30.0_f32,
+            channel_pack_range: 20.0_f32,
+            channel_pheromone_range: 40.0_f32,
+            channel_long_range_vocal: 200.0_f32,
         }
     }
 }

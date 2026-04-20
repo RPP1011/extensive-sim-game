@@ -34,4 +34,12 @@ config communication {
     max_announce_radius: f32 = 80.0,
     overhear_range: f32 = 30.0,
     default_vocal_strength: f32 = 1.0,
+    // Per-channel base range at vocal_strength = 1.0. Speech scales with
+    // vocal_strength at the call site; the others are channel-intrinsic.
+    // Telepathy is unbounded (see `channel_range` in engine), Testimony
+    // is zero (records-only, never airborne).
+    channel_speech_range: f32 = 30.0,
+    channel_pack_range: f32 = 20.0,
+    channel_pheromone_range: f32 = 40.0,
+    channel_long_range_vocal: f32 = 200.0,
 }

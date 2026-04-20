@@ -27,19 +27,10 @@ use crate::step::SimScratch;
 // the old `ENGAGEMENT_RANGE = 2.0` / `ENGAGEMENT_SLOW_FACTOR = 0.3` consts
 // exactly, so behaviour is unchanged; TOML tuning is additive.
 //
-// The `pub const` shims below exist solely so pre-config tests
-// (`engagement_tick_start.rs`, `cast_handler_slow.rs`, …) can keep
-// asserting against "the default value" without each one reaching into
-// `Config::default()`. New code should prefer `state.config.combat.*`.
-
-/// Default engagement range — matches `config.combat.engagement_range`'s
-/// DSL default. Prefer `state.config.combat.engagement_range` in new code.
-pub const ENGAGEMENT_RANGE: f32 = 2.0;
-
-/// Default engagement-slow factor — matches
-/// `config.combat.engagement_slow_factor`'s DSL default. Prefer
-/// `state.config.combat.engagement_slow_factor` in new code.
-pub const ENGAGEMENT_SLOW_FACTOR: f32 = 0.3;
+// Task 142 retired the backward-compat `pub const` shims that used to
+// live here — every consumer now reads
+// `engine_rules::config::Config::default()` (or `state.config.combat.*`)
+// instead. Keep this file stateless timer-tick code only.
 
 /// Back-compat re-export of the legacy tick-start entry point. The name
 /// predates task 139's split (engagement moved to

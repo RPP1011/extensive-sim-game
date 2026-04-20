@@ -6,14 +6,14 @@
 //! emitting a `MoveToward` / `Flee` action, and running the cascade with
 //! `CascadeRegistry::with_engine_builtins()` to get the OA damage cascade.
 
-use engine::ability::expire::ENGAGEMENT_SLOW_FACTOR;
 use engine::cascade::{CascadeRegistry, MAX_CASCADE_ITERATIONS};
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step_full, SimScratch, MOVE_SPEED_MPS};
+use engine::step::{step_full, SimScratch};
+use engine_rules::config::Config;
 use glam::Vec3;
 
 /// Policy backend that scripts a single predetermined action per tick.
@@ -79,10 +79,11 @@ fn engaged_move_away_from_engager_is_slowed() {
     );
     // After step_full, tick_start has re-run engagement update. Since A has
     // moved a slowed step toward -X, distance is 1 + 0.3 = 1.3m — still ≤
-    // ENGAGEMENT_RANGE (2.0), so still engaged.
+    // engagement_range (2.0), so still engaged.
     let after = state.agent_pos(a).unwrap();
     let delta = (after - before).length();
-    let expected = MOVE_SPEED_MPS * ENGAGEMENT_SLOW_FACTOR;
+    let cfg = Config::default();
+    let expected = cfg.movement.move_speed_mps * cfg.combat.engagement_slow_factor;
     assert!(
         (delta - expected).abs() < 1e-5,
         "engaged-away move expected {}m, got {}m", expected, delta,
@@ -120,9 +121,10 @@ fn engaged_move_toward_engager_is_full_speed() {
     );
     let after = state.agent_pos(a).unwrap();
     let delta = (after - before).length();
+    let mps = Config::default().movement.move_speed_mps;
     assert!(
-        (delta - MOVE_SPEED_MPS).abs() < 1e-5,
-        "engaged-toward move expected {}m, got {}m", MOVE_SPEED_MPS, delta,
+        (delta - mps).abs() < 1e-5,
+        "engaged-toward move expected {}m, got {}m", mps, delta,
     );
     // No OpportunityAttackTriggered should have been emitted.
     let oa_count = events.iter().filter(|e| matches!(e, Event::OpportunityAttackTriggered { .. })).count();
@@ -132,7 +134,7 @@ fn engaged_move_toward_engager_is_full_speed() {
 #[test]
 fn flee_while_engaged_triggers_opportunity_attack() {
     // Human A (hp 100) engaged with Wolf B. A flees -> OA fires -> A takes
-    // ATTACK_DAMAGE=10 damage.
+    // `config.combat.attack_damage` (default 10.0) damage.
     let mut state = SimState::new(4, 42);
     let a = spawn_human(&mut state, Vec3::ZERO, 100.0);
     let b = spawn_wolf(&mut state, Vec3::new(1.0, 0.0, 0.0), 100.0);
@@ -163,8 +165,9 @@ fn flee_while_engaged_triggers_opportunity_attack() {
         e, Event::AgentAttacked { target, .. } if *target == a
     )).count();
     assert_eq!(attacked_count, 1, "cascade should have emitted one AgentAttacked");
-    // A took 10 damage (ATTACK_DAMAGE).
-    assert_eq!(state.agent_hp(a), Some(90.0));
+    // A took `config.combat.attack_damage` damage (default 10.0).
+    let dmg = Config::default().combat.attack_damage;
+    assert_eq!(state.agent_hp(a), Some(100.0 - dmg));
     // Sanity: we haven't blown the cascade bound (OA handler doesn't re-emit).
     let _ = MAX_CASCADE_ITERATIONS;
 }
@@ -209,7 +212,7 @@ fn unengaged_move_away_is_full_speed_and_no_oa() {
     // triggers no OA. Pins the guard condition on the engagement check.
     let mut state = SimState::new(4, 42);
     let a = spawn_human(&mut state, Vec3::ZERO, 100.0);
-    // Place wolf out of ENGAGEMENT_RANGE so tick_start leaves A unengaged.
+    // Place wolf out of engagement_range so tick_start leaves A unengaged.
     let _b = spawn_wolf(&mut state, Vec3::new(5.0, 0.0, 0.0), 100.0);
 
     let dest = Vec3::new(-10.0, 0.0, 0.0);
@@ -233,8 +236,9 @@ fn unengaged_move_away_is_full_speed_and_no_oa() {
     );
     let after = state.agent_pos(a).unwrap();
     let delta = (after - before).length();
-    assert!((delta - MOVE_SPEED_MPS).abs() < 1e-5,
-        "unengaged move expected {}m, got {}m", MOVE_SPEED_MPS, delta);
+    let mps = Config::default().movement.move_speed_mps;
+    assert!((delta - mps).abs() < 1e-5,
+        "unengaged move expected {}m, got {}m", mps, delta);
     let oa_count = events.iter().filter(|e| matches!(e, Event::OpportunityAttackTriggered { .. })).count();
     assert_eq!(oa_count, 0);
     // The opportunity_attack dispatcher is registered by
