@@ -1,0 +1,24 @@
+// Mask predicates — compiler-emitted cast-time / action-time filters.
+//
+// At milestone 4 (compiler_progress.md row 4) this file owns the attack-mask
+// predicate. It replaces the hand-written hostility + range + alive-target
+// checks in `crates/engine/src/mask.rs::mark_attack_allowed_if_target_in_range`.
+//
+// The emitted predicate is a pure `fn(&SimState, AgentId, AgentId) -> bool`.
+// The engine's mask-build loop calls it per (agent, candidate-target) pair
+// and ORs the results into the per-agent Attack bit.
+//
+// Non-stdlib game views (e.g. `is_hostile`) are emitted as calls into
+// `crate::rules::<name>(state, args...)`. Those fns are hand-written in
+// `crates/engine/src/rules/` and shrink as later milestones let the DSL
+// declare views directly. See `docs/game/compiler_progress.md` for the
+// planned migration order.
+//
+// Cast-gate (cooldown + stun + engagement-lock) stays in
+// `crates/engine/src/ability/gate.rs` until a follow-up commit grows the
+// emitter to handle it.
+
+mask Attack(target)
+  when agents.alive(target)
+    && is_hostile(self, target)
+    && distance(agents.pos(self), agents.pos(target)) < 2.0

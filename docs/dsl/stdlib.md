@@ -212,14 +212,16 @@ are the milestone-3 accessor surface for compiler-emitted physics handlers.
 | Method | Signature |
 |---|---|
 | `agents.alive(a)` | `(AgentId) -> bool` — true if the slot is still live. |
+| `agents.pos(a)` | `(AgentId) -> Vec3` — world position; `Vec3::ZERO` for slots without a pos field. |
 | `agents.hp(a)` | `(AgentId) -> f32` — current hp; `0.0` for slots without an hp field. |
 | `agents.shield_hp(a)` | `(AgentId) -> f32` — current shield hp; `0.0` if absent. |
 | `agents.set_hp(a, v)` | `(AgentId, f32) -> ()` — overwrites the hp slot. |
 | `agents.set_shield_hp(a, v)` | `(AgentId, f32) -> ()` — overwrites the shield hp slot. |
 | `agents.kill(a)` | `(AgentId) -> ()` — flips the alive bit and tears the agent out of the spatial index. Idempotent. |
 
-These map one-to-one to `SimState::agent_alive`, `agent_hp`, `agent_shield_hp`,
-`set_agent_hp`, `set_agent_shield_hp`, and `kill_agent` on the engine side.
+These map one-to-one to `SimState::agent_alive`, `agent_pos`, `agent_hp`,
+`agent_shield_hp`, `set_agent_hp`, `set_agent_shield_hp`, and `kill_agent`
+on the engine side.
 The compiler emits the namespace calls as direct method invocations on the
 `&mut SimState` parameter passed to a cascade handler.
 

@@ -17,6 +17,10 @@ pub mod mask;
 pub mod policy;
 pub mod pool;
 pub mod rng;
+/// Hand-written game-view fns the DSL compiler emits calls to. Shrinks as
+/// later milestones let the DSL declare views directly; see
+/// `docs/game/compiler_progress.md`.
+pub mod rules;
 pub mod schema_hash;
 pub mod spatial;
 pub mod state;

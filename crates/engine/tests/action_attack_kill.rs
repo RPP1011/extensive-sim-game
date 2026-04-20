@@ -10,11 +10,10 @@ use glam::Vec3;
 
 #[test]
 fn mask_attack_bit_pins_attack_range_at_2m_boundary() {
-    // The mask-side `ATTACK_RANGE_FOR_MASK` constant in mask.rs is separate
-    // from the kernel-side `ATTACK_RANGE` in step.rs. They MUST agree — or
-    // the policy evaluates with a bit set for a distance the kernel will
-    // refuse to resolve (and vice versa). Pin both sides at 2.0m with a
-    // pair of 1.99m/2.01m fixtures.
+    // Pin both sides of the 2.0m attack range with a pair of 1.99m/2.01m
+    // fixtures. As of compiler milestone 4 the attack-mask predicate also
+    // gates on hostility (`assets/sim/masks.sim` calls `is_hostile`), so
+    // the fixtures use a hostile Human-vs-Wolf pair.
     fn bit_set_for(state: &SimState, attacker: AgentId) -> bool {
         let mut mask = MaskBuffer::new(state.agent_cap() as usize);
         mask.mark_attack_allowed_if_target_in_range(state);
@@ -29,7 +28,7 @@ fn mask_attack_bit_pins_attack_range_at_2m_boundary() {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
     }).unwrap();
     let attacker = state.spawn_agent(AgentSpawn {
-        creature_type: CreatureType::Human, pos: Vec3::new(1.99, 0.0, 0.0), hp: 100.0,
+        creature_type: CreatureType::Wolf, pos: Vec3::new(1.99, 0.0, 0.0), hp: 100.0,
     }).unwrap();
     assert!(bit_set_for(&state, attacker), "attack mask bit must be set at 1.99m");
 
@@ -39,9 +38,43 @@ fn mask_attack_bit_pins_attack_range_at_2m_boundary() {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
     }).unwrap();
     let attacker = state.spawn_agent(AgentSpawn {
-        creature_type: CreatureType::Human, pos: Vec3::new(2.01, 0.0, 0.0), hp: 100.0,
+        creature_type: CreatureType::Wolf, pos: Vec3::new(2.01, 0.0, 0.0), hp: 100.0,
     }).unwrap();
     assert!(!bit_set_for(&state, attacker), "attack mask bit must be clear at 2.01m");
+}
+
+#[test]
+fn mask_attack_bit_respects_hostility_gate() {
+    // Compiler milestone 4 folded hostility into the attack-mask predicate.
+    // Two Humans at melee range should no longer have the Attack bit set;
+    // Human + Wolf at the same range should.
+    fn bit_set_for(state: &SimState, attacker: AgentId) -> bool {
+        let mut mask = MaskBuffer::new(state.agent_cap() as usize);
+        mask.mark_attack_allowed_if_target_in_range(state);
+        let slot = (attacker.raw() - 1) as usize;
+        let offset = slot * MicroKind::ALL.len() + MicroKind::Attack as usize;
+        mask.micro_kind[offset]
+    }
+
+    // Two Humans at 1m — not hostile, bit must be clear.
+    let mut state = SimState::new(4, 42);
+    let _victim = state.spawn_agent(AgentSpawn {
+        creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+    }).unwrap();
+    let attacker = state.spawn_agent(AgentSpawn {
+        creature_type: CreatureType::Human, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+    }).unwrap();
+    assert!(!bit_set_for(&state, attacker), "same-species pair is not hostile");
+
+    // Human vs Wolf at 1m — hostile per `CreatureType::is_hostile_to`.
+    let mut state = SimState::new(4, 42);
+    let _victim = state.spawn_agent(AgentSpawn {
+        creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+    }).unwrap();
+    let attacker = state.spawn_agent(AgentSpawn {
+        creature_type: CreatureType::Wolf, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+    }).unwrap();
+    assert!(bit_set_for(&state, attacker), "Wolf-vs-Human pair is hostile");
 }
 
 struct AttackFixed(AgentId);

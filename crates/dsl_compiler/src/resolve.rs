@@ -155,6 +155,7 @@ mod stdlib {
             // tears the agent out of the spatial index. See
             // `docs/dsl/stdlib.md` for the canonical signatures.
             (NamespaceId::Agents, "alive") => Some((1, IrType::Bool)),
+            (NamespaceId::Agents, "pos") => Some((1, IrType::Vec3)),
             (NamespaceId::Agents, "hp") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "shield_hp") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "set_hp") => Some((2, IrType::Unknown)),

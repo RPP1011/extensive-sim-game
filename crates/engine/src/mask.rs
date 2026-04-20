@@ -1,5 +1,6 @@
 // crates/engine/src/mask.rs
 use crate::ability::{evaluate_cast_gate, AbilityRegistry};
+use crate::generated::mask::mask_attack;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -8,10 +9,13 @@ pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 
 /// Radius within which another agent counts as a threat for flee-mask purposes.
 const AGGRO_RANGE: f32 = 50.0;
 
-/// Mirrors `ATTACK_RANGE` in `step.rs`. Both constants MUST move together —
-/// mask permissiveness vs resolution cutoff must agree or the policy will
-/// choose moves the kernel silently drops.
-const ATTACK_RANGE_FOR_MASK: f32 = 2.0;
+/// Per-agent fallback attack range for `agents.agent_attack_range` lookup.
+/// The DSL-emitted `mask_attack` predicate caps at 2.0m; custom per-agent
+/// ranges (via `set_agent_attack_range`) are honoured only up to this
+/// value — the fold below uses `max(this, agent_attack_range)` as the
+/// spatial iterator radius so extended-range agents still see candidates,
+/// but the predicate still decides allow/deny per pair.
+const ATTACK_SPATIAL_RADIUS: f32 = 2.0;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(u8)]
@@ -126,11 +130,17 @@ impl MaskBuffer {
     }
 
     /// Mark `Attack` as allowed for every alive agent that has at least one
-    /// other alive agent within this agent's attack range. Uses the per-agent
-    /// `hot_attack_range` field (defaults to `ATTACK_RANGE_FOR_MASK`) so that
-    /// custom attack ranges set via `set_agent_attack_range` are respected.
+    /// valid target as decided by the compiler-emitted `mask_attack`
+    /// predicate (see `assets/sim/masks.sim`). The predicate checks:
+    /// target is alive, target is hostile to self (per
+    /// `crate::rules::is_hostile`), and the two agents are within 2.0m.
     ///
-    /// Uses `state.spatial()` so the target check is sub-linear.
+    /// The spatial iterator bounds the candidate set; the predicate
+    /// decides per-pair whether the bit should be set. Custom per-agent
+    /// attack ranges (`set_agent_attack_range`) are honoured by
+    /// broadening the spatial iterator — the predicate still enforces
+    /// the DSL-declared 2.0m cap, so custom-range setups only matter
+    /// once the attack mask grows per-agent range support in the DSL.
     pub fn mark_attack_allowed_if_target_in_range(&mut self, state: &SimState) {
         let n_kinds = MicroKind::ALL.len();
         let spatial = state.spatial();
@@ -140,11 +150,14 @@ impl MaskBuffer {
                 Some(p) => p,
                 None    => continue,
             };
-            let range = state.agent_attack_range(id).unwrap_or(ATTACK_RANGE_FOR_MASK);
+            let range = state
+                .agent_attack_range(id)
+                .unwrap_or(ATTACK_SPATIAL_RADIUS)
+                .max(ATTACK_SPATIAL_RADIUS);
             let has_target = spatial
                 .within_radius(state, self_pos, range)
                 .into_iter()
-                .any(|other| other != id);
+                .any(|other| other != id && mask_attack(state, id, other));
             if has_target {
                 let offset = slot * n_kinds + MicroKind::Attack as usize;
                 self.micro_kind[offset] = true;
