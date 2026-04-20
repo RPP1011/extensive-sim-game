@@ -52,6 +52,8 @@ impl CascadeRegistry {
         self.register(crate::ability::SlowHandler);
         // Combat Foundation Task 16 — world-side gold transfer handler.
         self.register(crate::ability::TransferGoldHandler);
+        // Combat Foundation Task 17 — pair-standing adjustment handler.
+        self.register(crate::ability::ModifyStandingHandler);
     }
 
     /// Register the Combat Foundation Task 9 `CastHandler` against an
