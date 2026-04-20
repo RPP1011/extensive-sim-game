@@ -268,11 +268,12 @@ physics cast @phase(event) {
 // ---------------------------------------------------------------------------
 // Chronicle — narrative side channel
 // ---------------------------------------------------------------------------
-// Five handlers emit `ChronicleEntry` events on significant state
+// Eight handlers emit `ChronicleEntry` events on significant state
 // transitions: a death (template 1), a strike (template 2), an
 // engagement commitment (template 3), a wound that leaves the target
-// below half hp (template 4), and an engagement break (template 5).
-// Template ids are stable `u32` constants owned by
+// below half hp (template 4), an engagement break (template 5), a kin-
+// death rout (template 6), a retreat (template 7), and a kin-wound
+// rally (template 8). Template ids are stable `u32` constants owned by
 // `crates/engine/src/chronicle.rs::templates`.
 //
 // `ChronicleEntry` is `@non_replayable`, so these emits never fold into
@@ -372,6 +373,20 @@ physics chronicle_rout @phase(post) {
 physics chronicle_flee @phase(post) {
   on AgentFled { agent_id: a } {
     emit ChronicleEntry { template_id: 7, agent: a, target: a }
+  }
+}
+
+// Template 8 (RALLY). Fires on every `RallyCall` — the positive symmetric
+// mirror of `FearSpread` (template 6 / ROUT). Payload: `agent` = the
+// observer who rallies, `target` = the wounded kin whose injury
+// triggered the reaction. One RALLY line per (observer, wounded_kin)
+// pair — if multiple packmates sit inside the 12 m radius each surfaces
+// its own line so the rally reads as a collective reaction (same
+// cardinality shape as ROUT).
+
+physics chronicle_rally @phase(post) {
+  on RallyCall { observer: o, wounded_kin: w } {
+    emit ChronicleEntry { template_id: 8, agent: o, target: w }
   }
 }
 

@@ -7,6 +7,7 @@ pub mod chronicle_break;
 pub mod chronicle_death;
 pub mod chronicle_engagement;
 pub mod chronicle_flee;
+pub mod chronicle_rally;
 pub mod chronicle_rout;
 pub mod chronicle_wound;
 pub mod damage;
@@ -249,6 +250,19 @@ pub fn dispatch_opportunity_attack_triggered(
 }
 
 #[allow(unused_variables)]
+pub fn dispatch_rally_call(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::RallyCall {
+        observer,
+        wounded_kin,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    chronicle_rally::chronicle_rally(observer, wounded_kin, state, events);
+}
+
+#[allow(unused_variables)]
 pub fn dispatch_record_memory(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::RecordMemory {
         observer,
@@ -310,5 +324,6 @@ pub fn register(registry: &mut CascadeRegistry) {
         EventKindId::OpportunityAttackTriggered,
         dispatch_opportunity_attack_triggered,
     );
+    registry.install_kind(EventKindId::RallyCall, dispatch_rally_call);
     registry.install_kind(EventKindId::RecordMemory, dispatch_record_memory);
 }

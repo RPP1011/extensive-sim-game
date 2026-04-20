@@ -10,7 +10,7 @@
 //!
 //! This module owns the template id catalogue and a deterministic prose
 //! renderer. The template ids are stable `u32` constants — the DSL
-//! emit-sites use the literal values (1..=7) and this module resolves
+//! emit-sites use the literal values (1..=8) and this module resolves
 //! them back to a formatted string via [`render_entry`].
 //!
 //! Output is stable: no timestamps, no randomness, no Debug formatting.
@@ -67,6 +67,14 @@ pub mod templates {
     /// retreats from the same agent each surface their own line —
     /// matches the single-subject pattern of `AGENT_DIED`.
     pub const FLEE: u32 = 7;
+    /// A kin's wound rallied a same-species neighbour within the rally
+    /// radius (see `rally_on_wound` in `assets/sim/physics.sim`).
+    /// Payload: `agent` = the rallying observer, `target` = the
+    /// wounded kin whose injury triggered the reaction. One line per
+    /// (observer, wounded_kin) pair — the positive mirror of `ROUT`:
+    /// if the radius catches multiple neighbours, each surfaces its
+    /// own line so the rally reads as a collective reaction.
+    pub const RALLY: u32 = 8;
 }
 
 /// Render a single `ChronicleEntry` event as a one-line human-readable
@@ -132,6 +140,13 @@ pub fn render_entry(state: &SimState, event: &Event) -> String {
         }
         templates::FLEE => {
             format!("Tick {tick}: {} retreated.", name_of(state, agent))
+        }
+        templates::RALLY => {
+            format!(
+                "Tick {tick}: {} rallied around {}.",
+                name_of(state, agent),
+                name_of(state, target),
+            )
         }
         _ => format!(
             "Tick {tick}: (unknown chronicle template {template_id} for agent {}, target {})",
@@ -294,6 +309,21 @@ mod tests {
             tick: 44,
         };
         assert_eq!(render_entry(&state, &ev), "Tick 44: Wolf #2 retreated.");
+    }
+
+    #[test]
+    fn renders_rally_line() {
+        let state = make_state();
+        let ev = Event::ChronicleEntry {
+            template_id: templates::RALLY,
+            agent: AgentId::new(1).unwrap(),
+            target: AgentId::new(2).unwrap(),
+            tick: 55,
+        };
+        assert_eq!(
+            render_entry(&state, &ev),
+            "Tick 55: Human #1 rallied around Wolf #2.",
+        );
     }
 
     #[test]

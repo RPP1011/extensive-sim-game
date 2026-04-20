@@ -522,6 +522,56 @@ fn chronicle_has_rout_and_flee_templates() {
     );
 }
 
+/// Structural assertion: the canonical wolves+humans run surfaces at
+/// least one `ChronicleEntry { template_id: 8 }` (RALLY). Mirror of
+/// `chronicle_has_rout_and_flee_templates` — the fixture guarantees a
+/// non-lethal wound (the middle human takes a hit on tick 0) with
+/// same-species kin within the 12 m rally radius, which fires
+/// `rally_on_wound` and the `chronicle_rally` @phase(post) prose rule.
+/// Checking the raw event ring keeps the assertion on the DSL emit-site
+/// behaviour — rename the prose and the test still passes; break the
+/// emit and the test fails.
+#[test]
+fn chronicle_has_rally_template() {
+    let mut state = spawn_fixture();
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    let mut invariants = InvariantRegistry::new();
+    invariants.register(Box::new(PoolNonOverlapInvariant));
+
+    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let telemetry = NullSink;
+
+    for _ in 0..TICKS {
+        step_full(
+            &mut state,
+            &mut scratch,
+            &mut events,
+            &UtilityBackend,
+            &cascade,
+            &mut views[..],
+            &invariants,
+            &telemetry,
+        );
+    }
+
+    let mut seen_rally = false;
+    for ev in events.iter() {
+        if let Event::ChronicleEntry { template_id, .. } = ev {
+            if *template_id == 8 {
+                seen_rally = true;
+                break;
+            }
+        }
+    }
+    assert!(
+        seen_rally,
+        "expected at least one ChronicleEntry{{ template_id: 8 }} (RALLY) in 100-tick wolves+humans run",
+    );
+}
+
 #[test]
 fn parity_log_is_deterministic_across_runs() {
     // Two fresh runs with the same seed must produce the exact same log.
