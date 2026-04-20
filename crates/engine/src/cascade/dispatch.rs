@@ -54,6 +54,8 @@ impl CascadeRegistry {
         self.register(crate::ability::TransferGoldHandler);
         // Combat Foundation Task 17 — pair-standing adjustment handler.
         self.register(crate::ability::ModifyStandingHandler);
+        // Audit fix HIGH #4 — Announce → RecordMemory → cold_memory writer.
+        self.register(crate::ability::RecordMemoryHandler);
     }
 
     /// Register the Combat Foundation Task 9 `CastHandler` against an
