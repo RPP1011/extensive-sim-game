@@ -1,0 +1,219 @@
+{
+  "events": [],
+  "entities": [],
+  "physics": [
+    {
+      "name": "stone_settle",
+      "handlers": [
+        {
+          "pattern": {
+            "name": "VoxelChanged",
+            "event": null,
+            "bindings": [
+              {
+                "field": "pos",
+                "value": {
+                  "Bind": {
+                    "name": "p",
+                    "local": 1
+                  }
+                },
+                "span": {
+                  "start": 142,
+                  "end": 148
+                }
+              }
+            ],
+            "span": {
+              "start": 129,
+              "end": 149
+            }
+          },
+          "where_clause": null,
+          "body": [
+            {
+              "For": {
+                "binder": 2,
+                "binder_name": "q",
+                "iter": {
+                  "kind": {
+                    "UnresolvedCall": [
+                      "voxel_neighbors_above",
+                      [
+                        {
+                          "name": null,
+                          "value": {
+                            "kind": {
+                              "Local": [
+                                1,
+                                "p"
+                              ]
+                            },
+                            "span": {
+                              "start": 187,
+                              "end": 188
+                            }
+                          },
+                          "span": {
+                            "start": 187,
+                            "end": 188
+                          }
+                        }
+                      ]
+                    ]
+                  },
+                  "span": {
+                    "start": 165,
+                    "end": 189
+                  }
+                },
+                "filter": {
+                  "kind": {
+                    "Binary": [
+                      "Eq",
+                      {
+                        "kind": {
+                          "Field": {
+                            "base": {
+                              "kind": {
+                                "Local": [
+                                  2,
+                                  "q"
+                                ]
+                              },
+                              "span": {
+                                "start": 196,
+                                "end": 197
+                              }
+                            },
+                            "field_name": "kind",
+                            "field": null
+                          }
+                        },
+                        "span": {
+                          "start": 196,
+                          "end": 202
+                        }
+                      },
+                      {
+                        "kind": {
+                          "EnumVariant": {
+                            "ty": "",
+                            "variant": "Stone"
+                          }
+                        },
+                        "span": {
+                          "start": 206,
+                          "end": 212
+                        }
+                      }
+                    ]
+                  },
+                  "span": {
+                    "start": 196,
+                    "end": 212
+                  }
+                },
+                "body": [
+                  {
+                    "Emit": {
+                      "event_name": "VoxelSettled",
+                      "event": null,
+                      "fields": [
+                        {
+                          "name": "pos",
+                          "value": {
+                            "kind": {
+                              "Local": [
+                                2,
+                                "q"
+                              ]
+                            },
+                            "span": {
+                              "start": 245,
+                              "end": 247
+                            }
+                          },
+                          "span": {
+                            "start": 240,
+                            "end": 247
+                          }
+                        }
+                      ],
+                      "span": {
+                        "start": 220,
+                        "end": 248
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "start": 156,
+                  "end": 254
+                }
+              }
+            }
+          ],
+          "span": {
+            "start": 126,
+            "end": 258
+          }
+        }
+      ],
+      "annotations": [
+        {
+          "name": "phase",
+          "args": [
+            {
+              "key": null,
+              "value": {
+                "Ident": "event"
+              },
+              "span": {
+                "start": 96,
+                "end": 101
+              }
+            }
+          ],
+          "span": {
+            "start": 89,
+            "end": 102
+          }
+        },
+        {
+          "name": "terminating_in",
+          "args": [
+            {
+              "key": null,
+              "value": {
+                "Int": 1
+              },
+              "span": {
+                "start": 119,
+                "end": 120
+              }
+            }
+          ],
+          "span": {
+            "start": 103,
+            "end": 121
+          }
+        }
+      ],
+      "span": {
+        "start": 68,
+        "end": 260
+      }
+    }
+  ],
+  "masks": [],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "spans": {
+    "entries": []
+  }
+}

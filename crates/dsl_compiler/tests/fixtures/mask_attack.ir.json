@@ -1,0 +1,209 @@
+{
+  "events": [],
+  "entities": [],
+  "physics": [],
+  "masks": [
+    {
+      "head": {
+        "name": "Attack",
+        "shape": {
+          "Positional": [
+            [
+              "t",
+              1
+            ]
+          ]
+        },
+        "span": {
+          "start": 65,
+          "end": 75
+        }
+      },
+      "predicate": {
+        "kind": {
+          "Binary": [
+            "And",
+            {
+              "kind": {
+                "Binary": [
+                  "And",
+                  {
+                    "kind": {
+                      "Field": {
+                        "base": {
+                          "kind": {
+                            "Local": [
+                              1,
+                              "t"
+                            ]
+                          },
+                          "span": {
+                            "start": 81,
+                            "end": 82
+                          }
+                        },
+                        "field_name": "alive",
+                        "field": null
+                      }
+                    },
+                    "span": {
+                      "start": 81,
+                      "end": 88
+                    }
+                  },
+                  {
+                    "kind": {
+                      "UnresolvedCall": [
+                        "is_hostile",
+                        [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": {
+                                "Local": [
+                                  0,
+                                  "self"
+                                ]
+                              },
+                              "span": {
+                                "start": 119,
+                                "end": 123
+                              }
+                            },
+                            "span": {
+                              "start": 119,
+                              "end": 123
+                            }
+                          },
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": {
+                                "Local": [
+                                  1,
+                                  "t"
+                                ]
+                              },
+                              "span": {
+                                "start": 125,
+                                "end": 126
+                              }
+                            },
+                            "span": {
+                              "start": 125,
+                              "end": 126
+                            }
+                          }
+                        ]
+                      ]
+                    },
+                    "span": {
+                      "start": 108,
+                      "end": 127
+                    }
+                  }
+                ]
+              },
+              "span": {
+                "start": 81,
+                "end": 127
+              }
+            },
+            {
+              "kind": {
+                "Binary": [
+                  "Lt",
+                  {
+                    "kind": {
+                      "BuiltinCall": [
+                        "Distance",
+                        [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": {
+                                "Local": [
+                                  0,
+                                  "self"
+                                ]
+                              },
+                              "span": {
+                                "start": 156,
+                                "end": 160
+                              }
+                            },
+                            "span": {
+                              "start": 156,
+                              "end": 160
+                            }
+                          },
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": {
+                                "Local": [
+                                  1,
+                                  "t"
+                                ]
+                              },
+                              "span": {
+                                "start": 162,
+                                "end": 163
+                              }
+                            },
+                            "span": {
+                              "start": 162,
+                              "end": 163
+                            }
+                          }
+                        ]
+                      ]
+                    },
+                    "span": {
+                      "start": 147,
+                      "end": 164
+                    }
+                  },
+                  {
+                    "kind": {
+                      "EnumVariant": {
+                        "ty": "",
+                        "variant": "AGGRO_RANGE"
+                      }
+                    },
+                    "span": {
+                      "start": 167,
+                      "end": 179
+                    }
+                  }
+                ]
+              },
+              "span": {
+                "start": 147,
+                "end": 179
+              }
+            }
+          ]
+        },
+        "span": {
+          "start": 81,
+          "end": 179
+        }
+      },
+      "annotations": [],
+      "span": {
+        "start": 61,
+        "end": 179
+      }
+    }
+  ],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "spans": {
+    "entries": []
+  }
+}

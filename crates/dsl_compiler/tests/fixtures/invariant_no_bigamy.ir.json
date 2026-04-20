@@ -1,0 +1,177 @@
+{
+  "events": [],
+  "entities": [],
+  "physics": [],
+  "masks": [],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [
+    {
+      "name": "no_bigamy",
+      "scope": [
+        {
+          "name": "a",
+          "local": 0,
+          "ty": {
+            "Named": "Agent"
+          },
+          "span": {
+            "start": 52,
+            "end": 60
+          }
+        }
+      ],
+      "mode": "Runtime",
+      "predicate": {
+        "kind": {
+          "Binary": [
+            "LtEq",
+            {
+              "kind": {
+                "Fold": {
+                  "kind": "Count",
+                  "binder": 1,
+                  "binder_name": "g",
+                  "iter": {
+                    "kind": {
+                      "Field": {
+                        "base": {
+                          "kind": {
+                            "Local": [
+                              0,
+                              "a"
+                            ]
+                          },
+                          "span": {
+                            "start": 86,
+                            "end": 87
+                          }
+                        },
+                        "field_name": "memberships",
+                        "field": null
+                      }
+                    },
+                    "span": {
+                      "start": 86,
+                      "end": 99
+                    }
+                  },
+                  "body": {
+                    "kind": {
+                      "Binary": [
+                        "And",
+                        {
+                          "kind": {
+                            "Binary": [
+                              "Eq",
+                              {
+                                "kind": {
+                                  "Field": {
+                                    "base": {
+                                      "kind": {
+                                        "Local": [
+                                          1,
+                                          "g"
+                                        ]
+                                      },
+                                      "span": {
+                                        "start": 106,
+                                        "end": 107
+                                      }
+                                    },
+                                    "field_name": "kind",
+                                    "field": null
+                                  }
+                                },
+                                "span": {
+                                  "start": 106,
+                                  "end": 112
+                                }
+                              },
+                              {
+                                "kind": {
+                                  "EnumVariant": {
+                                    "ty": "",
+                                    "variant": "Family"
+                                  }
+                                },
+                                "span": {
+                                  "start": 116,
+                                  "end": 123
+                                }
+                              }
+                            ]
+                          },
+                          "span": {
+                            "start": 106,
+                            "end": 123
+                          }
+                        },
+                        {
+                          "kind": {
+                            "Field": {
+                              "base": {
+                                "kind": {
+                                  "Local": [
+                                    1,
+                                    "g"
+                                  ]
+                                },
+                                "span": {
+                                  "start": 126,
+                                  "end": 127
+                                }
+                              },
+                              "field_name": "is_marriage",
+                              "field": null
+                            }
+                          },
+                          "span": {
+                            "start": 126,
+                            "end": 139
+                          }
+                        }
+                      ]
+                    },
+                    "span": {
+                      "start": 106,
+                      "end": 139
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 75,
+                "end": 140
+              }
+            },
+            {
+              "kind": {
+                "LitInt": 1
+              },
+              "span": {
+                "start": 144,
+                "end": 145
+              }
+            }
+          ]
+        },
+        "span": {
+          "start": 75,
+          "end": 145
+        }
+      },
+      "annotations": [],
+      "span": {
+        "start": 32,
+        "end": 147
+      }
+    }
+  ],
+  "probes": [],
+  "metrics": [],
+  "spans": {
+    "entries": []
+  }
+}

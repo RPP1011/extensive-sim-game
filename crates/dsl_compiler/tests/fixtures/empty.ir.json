@@ -1,0 +1,15 @@
+{
+  "events": [],
+  "entities": [],
+  "physics": [],
+  "masks": [],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "spans": {
+    "entries": []
+  }
+}

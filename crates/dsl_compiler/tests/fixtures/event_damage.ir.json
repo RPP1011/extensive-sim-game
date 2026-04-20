@@ -1,0 +1,75 @@
+{
+  "events": [
+    {
+      "name": "DamageReceived",
+      "fields": [
+        {
+          "name": "target",
+          "ty": "AgentId",
+          "span": {
+            "start": 85,
+            "end": 100
+          }
+        },
+        {
+          "name": "source",
+          "ty": "AgentId",
+          "span": {
+            "start": 104,
+            "end": 119
+          }
+        },
+        {
+          "name": "damage",
+          "ty": "F32",
+          "span": {
+            "start": 123,
+            "end": 134
+          }
+        },
+        {
+          "name": "tick",
+          "ty": "U64",
+          "span": {
+            "start": 138,
+            "end": 148
+          }
+        }
+      ],
+      "annotations": [
+        {
+          "name": "replayable",
+          "args": [],
+          "span": {
+            "start": 40,
+            "end": 52
+          }
+        },
+        {
+          "name": "traced",
+          "args": [],
+          "span": {
+            "start": 52,
+            "end": 60
+          }
+        }
+      ],
+      "span": {
+        "start": 60,
+        "end": 152
+      }
+    }
+  ],
+  "entities": [],
+  "physics": [],
+  "masks": [],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "spans": {
+    "entries": []
+  }
+}

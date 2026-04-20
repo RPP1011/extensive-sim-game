@@ -1,0 +1,209 @@
+{
+  "events": [],
+  "entities": [],
+  "physics": [],
+  "masks": [],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [
+    {
+      "name": "cascade_iters_per_tick",
+      "value": {
+        "kind": {
+          "UnresolvedCall": [
+            "histogram",
+            [
+              {
+                "name": null,
+                "value": {
+                  "kind": {
+                    "Field": {
+                      "base": {
+                        "kind": {
+                          "Namespace": "cascade"
+                        },
+                        "span": {
+                          "start": 114,
+                          "end": 121
+                        }
+                      },
+                      "field_name": "iterations",
+                      "field": null
+                    }
+                  },
+                  "span": {
+                    "start": 114,
+                    "end": 132
+                  }
+                },
+                "span": {
+                  "start": 114,
+                  "end": 132
+                }
+              }
+            ]
+          ]
+        },
+        "span": {
+          "start": 104,
+          "end": 133
+        }
+      },
+      "window": 1000,
+      "emit_every": 100,
+      "conditioned_on": null,
+      "alert_when": {
+        "kind": {
+          "Binary": [
+            "Gt",
+            {
+              "kind": {
+                "Local": [
+                  1,
+                  "max_bin"
+                ]
+              },
+              "span": {
+                "start": 184,
+                "end": 192
+              }
+            },
+            {
+              "kind": {
+                "LitFloat": 0.9
+              },
+              "span": {
+                "start": 194,
+                "end": 198
+              }
+            }
+          ]
+        },
+        "span": {
+          "start": 184,
+          "end": 198
+        }
+      },
+      "annotations": [],
+      "span": {
+        "start": 72,
+        "end": 202
+      }
+    },
+    {
+      "name": "alive_agents",
+      "value": {
+        "kind": {
+          "UnresolvedCall": [
+            "gauge",
+            [
+              {
+                "name": null,
+                "value": {
+                  "kind": {
+                    "Fold": {
+                      "kind": "Count",
+                      "binder": 0,
+                      "binder_name": "a",
+                      "iter": {
+                        "kind": {
+                          "Namespace": "agents"
+                        },
+                        "span": {
+                          "start": 241,
+                          "end": 248
+                        }
+                      },
+                      "body": {
+                        "kind": {
+                          "Field": {
+                            "base": {
+                              "kind": {
+                                "Local": [
+                                  0,
+                                  "a"
+                                ]
+                              },
+                              "span": {
+                                "start": 254,
+                                "end": 255
+                              }
+                            },
+                            "field_name": "alive",
+                            "field": null
+                          }
+                        },
+                        "span": {
+                          "start": 254,
+                          "end": 261
+                        }
+                      }
+                    }
+                  },
+                  "span": {
+                    "start": 230,
+                    "end": 262
+                  }
+                },
+                "span": {
+                  "start": 230,
+                  "end": 262
+                }
+              }
+            ]
+          ]
+        },
+        "span": {
+          "start": 224,
+          "end": 263
+        }
+      },
+      "window": null,
+      "emit_every": 10,
+      "conditioned_on": null,
+      "alert_when": {
+        "kind": {
+          "Binary": [
+            "Lt",
+            {
+              "kind": {
+                "Local": [
+                  0,
+                  "value"
+                ]
+              },
+              "span": {
+                "start": 297,
+                "end": 303
+              }
+            },
+            {
+              "kind": {
+                "LitInt": 1
+              },
+              "span": {
+                "start": 305,
+                "end": 306
+              }
+            }
+          ]
+        },
+        "span": {
+          "start": 297,
+          "end": 306
+        }
+      },
+      "annotations": [],
+      "span": {
+        "start": 202,
+        "end": 307
+      }
+    }
+  ],
+  "spans": {
+    "entries": []
+  }
+}
