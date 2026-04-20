@@ -289,6 +289,12 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(agent_id.raw().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
+        Event::OpportunityAttackTriggered { attacker, target, tick } => {
+            h.update([25u8]);
+            h.update(attacker.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
         Event::ChronicleEntry { .. } => {
             // Filtered at the call site; if we reach here, the filter is broken.
             debug_assert!(false, "ChronicleEntry reached replayable hash path");

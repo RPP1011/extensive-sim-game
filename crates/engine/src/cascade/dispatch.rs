@@ -26,6 +26,24 @@ impl CascadeRegistry {
         }
     }
 
+    /// Convenience constructor that pre-registers engine-defined baseline
+    /// handlers (e.g. the opportunity-attack cascade for engagement disengage
+    /// from Combat Foundation Task 4). Tests that need a fully empty registry
+    /// for isolation should use [`CascadeRegistry::new`].
+    pub fn with_engine_builtins() -> Self {
+        let mut reg = Self::new();
+        reg.register_engine_builtins();
+        reg
+    }
+
+    /// Register the engine's baseline cascade handlers on an existing registry.
+    /// Idempotent only in the sense that calling it twice registers the
+    /// handler twice — callers should invoke once, typically via
+    /// [`CascadeRegistry::with_engine_builtins`].
+    pub fn register_engine_builtins(&mut self) {
+        self.register(crate::ability::expire::OpportunityAttackHandler);
+    }
+
     pub fn register<H: CascadeHandler + 'static>(&mut self, h: H) {
         let lane = h.lane() as usize;
         let kind = h.trigger() as u8 as usize;

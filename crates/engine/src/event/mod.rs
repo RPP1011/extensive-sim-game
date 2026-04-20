@@ -43,6 +43,11 @@ pub enum Event {
     // `ability::expire::tick_start` on the tick a timer reaches zero.
     StunExpired { agent_id: AgentId, tick: u32 },
     SlowExpired { agent_id: AgentId, tick: u32 },
+    // Combat Foundation Task 4 — opportunity attack fired by the engager
+    // when an engaged agent tries to move away or flee. Applied via a
+    // cascade handler (registered by the engine defaults) that reuses
+    // ATTACK_DAMAGE and drops the target's hp accordingly.
+    OpportunityAttackTriggered { attacker: AgentId, target: AgentId, tick: u32 },
     // Non-replayable (chronicle / prose side-channel placeholder)
     ChronicleEntry { tick: u32, template_id: u32 },
 }
@@ -75,6 +80,7 @@ impl Event {
             Event::RecordMemory         { tick, .. } |
             Event::StunExpired          { tick, .. } |
             Event::SlowExpired          { tick, .. } |
+            Event::OpportunityAttackTriggered { tick, .. } |
             Event::ChronicleEntry       { tick, .. } => *tick,
         }
     }

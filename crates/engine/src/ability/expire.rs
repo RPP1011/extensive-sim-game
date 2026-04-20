@@ -11,9 +11,11 @@
 //! Called by `step_full` BEFORE `scratch.mask.reset()` so mask predicates
 //! see the post-decrement / post-engagement state.
 
+use crate::cascade::{CascadeHandler, EventKindId, Lane};
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
+use crate::step::ATTACK_DAMAGE;
 
 /// Engagement range in world-space meters. Matches `ATTACK_RANGE = 2.0` —
 /// an agent is "engaged" with a hostile exactly when the hostile is within
@@ -25,6 +27,35 @@ pub const ENGAGEMENT_RANGE: f32 = 2.0;
 /// alongside `ENGAGEMENT_RANGE` so the schema-hash fingerprint can cover
 /// both constants together.
 pub const ENGAGEMENT_SLOW_FACTOR: f32 = 0.3;
+
+/// Cascade handler for `OpportunityAttackTriggered`. Mirrors the normal
+/// `MicroKind::Attack` damage path: applies `ATTACK_DAMAGE` to the target
+/// and emits `AgentAttacked` + (on kill) `AgentDied` + `state.kill_agent`.
+///
+/// Registered by `CascadeRegistry::register_engine_builtins()` so it fires
+/// automatically in step pipelines that use `CascadeRegistry::with_engine_builtins`.
+/// Tests that want a pristine registry can opt out with `CascadeRegistry::new`.
+pub struct OpportunityAttackHandler;
+
+impl CascadeHandler for OpportunityAttackHandler {
+    fn trigger(&self) -> EventKindId { EventKindId::OpportunityAttackTriggered }
+    fn lane(&self) -> Lane { Lane::Effect }
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        if let Event::OpportunityAttackTriggered { attacker, target, tick } = *event {
+            if !state.agent_alive(target) { return; }
+            let cur_hp = state.agent_hp(target).unwrap_or(0.0);
+            let new_hp = (cur_hp - ATTACK_DAMAGE).max(0.0);
+            state.set_agent_hp(target, new_hp);
+            events.push(Event::AgentAttacked {
+                attacker, target, damage: ATTACK_DAMAGE, tick,
+            });
+            if new_hp <= 0.0 {
+                events.push(Event::AgentDied { agent_id: target, tick });
+                state.kill_agent(target);
+            }
+        }
+    }
+}
 
 /// The unified tick-start phase. See module docs for the three jobs.
 pub fn tick_start(state: &mut SimState, events: &mut EventRing) {

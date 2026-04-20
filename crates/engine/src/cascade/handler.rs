@@ -31,7 +31,8 @@ pub enum EventKindId {
     RecordMemory         = 22,
     StunExpired          = 23,
     SlowExpired          = 24,
-    // Slots 25-127 reserved for replayable event variants added in later tasks.
+    OpportunityAttackTriggered = 25,
+    // Slots 26-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -63,6 +64,7 @@ impl EventKindId {
             Event::RecordMemory         { .. } => EventKindId::RecordMemory,
             Event::StunExpired          { .. } => EventKindId::StunExpired,
             Event::SlowExpired          { .. } => EventKindId::SlowExpired,
+            Event::OpportunityAttackTriggered { .. } => EventKindId::OpportunityAttackTriggered,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }

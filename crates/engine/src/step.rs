@@ -11,9 +11,9 @@ use crate::telemetry::{metrics, NullSink, TelemetrySink};
 use crate::view::MaterializedView;
 use glam::Vec3;
 
-const MOVE_SPEED_MPS: f32 = 1.0;
-const ATTACK_DAMAGE:  f32 = 10.0;
-const ATTACK_RANGE:   f32 = 2.0;
+pub const MOVE_SPEED_MPS: f32 = 1.0;
+pub const ATTACK_DAMAGE:  f32 = 10.0;
+pub const ATTACK_RANGE:   f32 = 2.0;
 const EAT_RESTORE:    f32 = 0.25;
 const DRINK_RESTORE:  f32 = 0.30;
 const REST_RESTORE:   f32 = 0.15;
@@ -244,7 +244,25 @@ fn apply_actions(
                 let from = state.agent_pos(action.agent).unwrap();
                 let delta = target_pos - from;
                 if delta.length_squared() > 0.0 {
-                    let to = from + delta.normalize() * MOVE_SPEED_MPS;
+                    let dir = delta.normalize();
+                    // Combat Foundation Task 4 — engaged-aware movement.
+                    // Moving *toward* the engager is full speed (closing the
+                    // melee); moving anywhere else is slowed by
+                    // ENGAGEMENT_SLOW_FACTOR and fires an opportunity attack.
+                    let mut speed = MOVE_SPEED_MPS;
+                    if let Some(engager) = state.agent_engaged_with(action.agent) {
+                        let engager_pos = state.agent_pos(engager).unwrap_or(from);
+                        let toward_engager = (engager_pos - from).dot(dir) > 0.0;
+                        if !toward_engager {
+                            speed *= crate::ability::expire::ENGAGEMENT_SLOW_FACTOR;
+                            events.push(Event::OpportunityAttackTriggered {
+                                attacker: engager,
+                                target:   action.agent,
+                                tick:     state.tick,
+                            });
+                        }
+                    }
+                    let to = from + dir * speed;
                     state.set_agent_pos(action.agent, to);
                     events.push(Event::AgentMoved {
                         agent_id: action.agent, from, to, tick: state.tick,
@@ -261,6 +279,17 @@ fn apply_actions(
                 {
                     let away = (self_pos - threat_pos).normalize_or_zero();
                     if away.length_squared() > 0.0 {
+                        // Flee intentionally disengages at full speed but
+                        // always draws an opportunity attack from any active
+                        // engager (regardless of whether the engager is the
+                        // threat or someone else).
+                        if let Some(engager) = state.agent_engaged_with(action.agent) {
+                            events.push(Event::OpportunityAttackTriggered {
+                                attacker: engager,
+                                target:   action.agent,
+                                tick:     state.tick,
+                            });
+                        }
                         let new_pos = self_pos + away * MOVE_SPEED_MPS;
                         state.set_agent_pos(action.agent, new_pos);
                         events.push(Event::AgentFled {
