@@ -22,3 +22,4 @@
 
 pub mod mask;
 pub mod physics;
+pub mod views;

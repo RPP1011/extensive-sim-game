@@ -1,0 +1,47 @@
+// Compiler milestone — view declarations.
+//
+// See `docs/dsl/spec.md` §2.3 for the `view` surface and §9 D31 for the
+// materialized storage hints. `@lazy` views emit an inline `pub fn` that
+// mask / scoring / physics bodies can call directly; `@materialized`
+// views emit a struct with a `get(args...)` + `fold_event(event, tick)`
+// method pair, registered on `SimState.views`.
+//
+// The body lowering is mechanical — no type inference, no DSL
+// polymorphism. Unknown-to-the-compiler callees fall through to
+// `crate::rules::*`; unknown stdlib methods error out at emit time.
+
+// -----------------------------------------------------------------------
+// @lazy view is_hostile(a, b) → bool
+// -----------------------------------------------------------------------
+// Pairwise species-level hostility. Falls through to the hand-written
+// `crate::rules::is_hostile` fn until the hostility matrix can be
+// declared in the DSL directly. Keeping the signature stable means the
+// mask / scoring emitter gets the same symbol either way — only the
+// implementation surface changes.
+@lazy
+view is_hostile(a: Agent, b: Agent) -> bool {
+  is_hostile_pair(a, b)
+}
+
+// -----------------------------------------------------------------------
+// @materialized view threat_level(a, b) → f32 — anchor-pattern decay.
+// -----------------------------------------------------------------------
+// Per-pair accumulating threat. Each `AgentAttacked` or
+// `EffectDamageApplied` against `a` by `b` bumps `threat_level(a, b)`
+// by 1; the stored value decays at 0.98^tick between events. Clamped
+// to `[0.0, 1000.0]` so long-running simulations don't overflow.
+//
+// Storage: `pair_map<(AgentId, AgentId), f32>` — the default per spec
+// §9 D31 when the view is keyed on a small-N × small-N pair. At the
+// spec's N=200K scale `pair_map` is infeasible for `(AgentId, AgentId)`;
+// this view is intended for short-lived combat scenarios where the
+// populated pair count is bounded. The compiler will reject the
+// storage combination once the feasibility check lands (future task).
+@materialized(on_event = [AgentAttacked, EffectDamageApplied], storage = pair_map)
+@decay(rate = 0.98, per = tick)
+view threat_level(a: Agent, b: Agent) -> f32 {
+  initial: 0.0,
+  on AgentAttacked { actor: b, target: a } { self += 1.0 }
+  on EffectDamageApplied { actor: b, target: a } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}

@@ -42,3 +42,15 @@ pub fn is_hostile(state: &SimState, a: AgentId, b: AgentId) -> bool {
     };
     ca.is_hostile_to(cb)
 }
+
+/// Alias for [`is_hostile`] reachable by the DSL-declared
+/// `@lazy view is_hostile(a, b)` emitted fn body. The view itself is
+/// named `is_hostile`, so its body can't call a same-named helper
+/// (infinite recursion); the DSL source uses `is_hostile_pair(a, b)`
+/// and the emitter routes it through `crate::rules::is_hostile_pair`.
+/// Keeping a pointer-equivalent alias lets `view::is_hostile(a, b)` and
+/// the legacy `crate::rules::is_hostile(state, a, b)` path stay
+/// byte-identical while the DSL surface expands.
+pub fn is_hostile_pair(state: &SimState, a: AgentId, b: AgentId) -> bool {
+    is_hostile(state, a, b)
+}

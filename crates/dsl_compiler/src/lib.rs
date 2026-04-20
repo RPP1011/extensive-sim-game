@@ -117,6 +117,13 @@ pub struct EmittedArtifacts {
     pub rust_enum_modules: Vec<(String, String)>,
     /// Content of `crates/engine_rules/src/enums/mod.rs`.
     pub rust_enum_mod: String,
+    /// View modules. One file per `view` declaration; target
+    /// `crates/engine/src/generated/views/`. `@lazy` views become inline
+    /// `pub fn`s; `@materialized` views become fold-storage structs.
+    pub rust_view_modules: Vec<(String, String)>,
+    /// Content of `crates/engine/src/generated/views/mod.rs` — the
+    /// aggregator that exposes `pub struct ViewRegistry` + `fold_all`.
+    pub rust_view_mod: String,
     /// Python enum modules. One file per `enum`; target
     /// `generated/python/enums/<name>.py`.
     pub python_enum_modules: Vec<(String, String)>,
@@ -140,8 +147,12 @@ pub struct EmittedArtifacts {
     /// declaration (name + variants in source order). Variant order is
     /// part of the hash since variant ordinals are load-bearing.
     pub enums_hash: [u8; 32],
-    /// Combined hash per `docs/compiler/spec.md` §2 — `sha256(state_hash ||
-    /// event_hash || rules_hash || scoring_hash || config_hash || enums_hash)`.
+    /// Raw 32-byte schema hash covering every `view` declaration (name +
+    /// params + kind + storage hint + decay params + fold-body structure).
+    /// Spec §2.3.
+    pub views_hash: [u8; 32],
+    /// Combined hash per `docs/compiler/spec.md` §2 — rolls every
+    /// sub-hash together with a stable canonical ordering.
     pub combined_hash: [u8; 32],
     /// Content of `crates/engine_rules/src/schema.rs`.
     pub schema_rs: String,
@@ -167,6 +178,7 @@ pub fn emit_with_source(comp: &Compilation, source_file: Option<&str>) -> Emitte
             entities: source_file,
             configs: source_file,
             enums: source_file,
+            views: source_file,
         },
     )
 }
@@ -185,6 +197,7 @@ pub struct EmissionSources<'a> {
     pub entities: Option<&'a str>,
     pub configs: Option<&'a str>,
     pub enums: Option<&'a str>,
+    pub views: Option<&'a str>,
 }
 
 /// Like [`emit`], but stamp the appropriate source file into each kind's
@@ -233,10 +246,11 @@ pub fn emit_with_per_kind_sources(
     // The per-decl emitters panic via `Err` until their milestones land;
     // the aggregators produce valid empty output so the scaffold compiles
     // without any masks / scoring / entities in scope.
+    let mask_ctx = emit_mask::EmitContext { views: &comp.views };
     let mut rust_mask_modules: Vec<(String, String)> = Vec::with_capacity(comp.masks.len());
     for mask in &comp.masks {
         let stem = snake_case(&mask.head.name);
-        match emit_mask::emit_mask(mask, sources.masks) {
+        match emit_mask::emit_mask_with_ctx(mask, sources.masks, mask_ctx) {
             Ok(rs) => rust_mask_modules.push((format!("{stem}.rs"), rs)),
             Err(e) => panic!("mask emission failed for `{}`: {e}", mask.head.name),
         }
@@ -295,12 +309,27 @@ pub fn emit_with_per_kind_sources(
     let rust_enum_mod = emit_enum::emit_enum_mod(&comp.enums);
     let python_enum_init = emit_enum::emit_enum_init(&comp.enums);
 
+    // View emission — one module per view + an aggregator with
+    // `ViewRegistry`. Each `@lazy` view lowers to a fn, each
+    // `@materialized` view to a struct + `fold_event`.
+    let mut rust_view_modules: Vec<(String, String)> = Vec::with_capacity(comp.views.len());
+    for v in &comp.views {
+        let stem = snake_case(&v.name);
+        match emit_view::emit_view(v, sources.views) {
+            Ok(rs) => rust_view_modules.push((format!("{stem}.rs"), rs)),
+            Err(e) => panic!("view emission failed for `{}`: {e}", v.name),
+        }
+    }
+    rust_view_modules.sort_by(|a, b| a.0.cmp(&b.0));
+    let rust_view_mod = emit_view::emit_view_mod(&comp.views);
+
     let event_hash = schema_hash::event_hash(&comp.events);
     let rules_hash = schema_hash::rules_hash(&comp.physics, &comp.event_tags, &comp.events);
     let state_hash = schema_hash::state_hash(&comp.entities);
     let scoring_hash = schema_hash::scoring_hash(&comp.scoring);
     let config_hash = schema_hash::config_hash(&comp.configs);
     let enums_hash = schema_hash::enums_hash(&comp.enums);
+    let views_hash = schema_hash::views_hash(&comp.views);
     let combined_hash = schema_hash::combined_hash(
         &state_hash,
         &event_hash,
@@ -308,6 +337,7 @@ pub fn emit_with_per_kind_sources(
         &scoring_hash,
         &config_hash,
         &enums_hash,
+        &views_hash,
     );
     EmittedArtifacts {
         rust_events_mod: emit_rust::emit_events_mod(&comp.events),
@@ -325,6 +355,8 @@ pub fn emit_with_per_kind_sources(
         config_default_toml,
         rust_enum_modules,
         rust_enum_mod,
+        rust_view_modules,
+        rust_view_mod,
         python_enum_modules,
         python_enum_init,
         python_events_init: emit_python::emit_events_init(&comp.events),
@@ -333,6 +365,7 @@ pub fn emit_with_per_kind_sources(
         rules_hash,
         config_hash,
         enums_hash,
+        views_hash,
         combined_hash,
         schema_rs: schema_hash::emit_schema_rs(
             &state_hash,
@@ -341,6 +374,7 @@ pub fn emit_with_per_kind_sources(
             &scoring_hash,
             &config_hash,
             &enums_hash,
+            &views_hash,
         ),
     }
 }

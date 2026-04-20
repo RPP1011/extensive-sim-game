@@ -95,6 +95,12 @@ pub struct CompileDslArgs {
     /// files + aggregator `mod.rs`). Pure data, no engine dependency.
     #[arg(long, default_value = "crates/engine_rules/src/enums")]
     pub out_enum: PathBuf,
+    /// Destination root for emitted view modules (`@lazy` inline fns +
+    /// `@materialized` fold-storage structs + aggregator `ViewRegistry`).
+    /// Lives under the engine crate because materialized views hold
+    /// `HashMap<(AgentId, …), …>` storage that `SimState` owns.
+    #[arg(long, default_value = "crates/engine/src/generated/views")]
+    pub out_views: PathBuf,
     /// Destination root for Python output. Files are written under
     /// `<out-python>/events/`.
     #[arg(long, default_value = "generated/python")]

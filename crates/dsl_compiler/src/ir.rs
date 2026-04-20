@@ -676,6 +676,12 @@ pub enum NamespaceId {
     /// the resolver collapses it into a single `NamespaceField` whose
     /// `field` string is `"<block>.<field>"`.
     Config,
+    /// `view::<name>(...)` — disambiguation syntax for calling a declared
+    /// `view`. Equivalent to a bare `<name>(...)` when the callee resolves
+    /// to a `ViewRef`; the resolver rewrites `NamespaceCall { ns: View,
+    /// method, args }` into `IrExpr::ViewCall(ref, args)` as a convenience.
+    /// Spec §2.3 (view) + emission path in `emit_view.rs`.
+    View,
     // Legacy collection / accessor namespaces. Kept typed so the IR stays
     // closed; their fields are not yet declared.
     Agents,
@@ -698,6 +704,7 @@ impl NamespaceId {
             NamespaceId::Query => "query",
             NamespaceId::Voxel => "voxel",
             NamespaceId::Config => "config",
+            NamespaceId::View => "view",
             NamespaceId::Agents => "agents",
             NamespaceId::Items => "items",
             NamespaceId::Groups => "groups",

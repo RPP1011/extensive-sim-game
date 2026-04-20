@@ -132,6 +132,13 @@ pub struct SimState {
     // every mutation and was the cause of the post-audit hot-path
     // regression at N=500.
     spatial: SpatialHash,
+
+    /// Compiler-emitted view registry — one field per `@materialized`
+    /// view. Populated at the view-fold phase of `step_full` via
+    /// `state.views.fold_all(&tick_events, state.tick)`; masks / scoring
+    /// read values through `state.views.<name>.get(args...)`.
+    /// Spec §2.3 + §7.1.
+    pub views: crate::generated::views::ViewRegistry,
 }
 
 impl SimState {
@@ -218,6 +225,10 @@ impl SimState {
             // Incremental spatial hash — sized for `cap` agent slots.
             // Mutators push O(1) deltas; no per-mutation rebuild.
             spatial:                SpatialHash::new(agent_cap),
+            // Compiler-emitted `ViewRegistry` — default-constructs one
+            // (empty) storage field per `@materialized` view. Populated
+            // at the view-fold phase each tick.
+            views:                  crate::generated::views::ViewRegistry::new(),
         }
     }
 

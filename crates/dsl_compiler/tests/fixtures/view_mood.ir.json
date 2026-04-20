@@ -247,7 +247,9 @@
           }
         }
       ],
-      "kind": "Lazy",
+      "kind": {
+        "Materialized": "PairMap"
+      },
       "decay": null,
       "span": {
         "start": 109,

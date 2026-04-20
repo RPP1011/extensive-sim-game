@@ -37,8 +37,27 @@ use std::fmt::Write;
 
 use crate::ast::{BinOp, UnOp};
 use crate::ir::{
-    Builtin, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, MaskIR, NamespaceId,
+    Builtin, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, MaskIR, NamespaceId, ViewIR,
+    ViewKind, ViewRef,
 };
+
+/// Emission context shared across mask lowering. Carries the enclosing
+/// `views: &[ViewIR]` slice so `ViewCall(ViewRef, args)` can dispatch to
+/// the correct generated symbol (`crate::generated::views::<name>(...)`
+/// for `@lazy`, `state.views.<name>.get(...)` for `@materialized`).
+#[derive(Debug, Clone, Copy)]
+pub struct EmitContext<'a> {
+    pub views: &'a [ViewIR],
+}
+
+impl<'a> EmitContext<'a> {
+    pub const fn empty() -> Self {
+        Self { views: &[] }
+    }
+    fn view(&self, ViewRef(idx): ViewRef) -> Option<&ViewIR> {
+        self.views.get(idx as usize)
+    }
+}
 
 /// Errors raised during mask emission.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,14 +88,29 @@ impl std::error::Error for EmitError {}
 /// symmetric with `emit_scoring` / `emit_entity`. Internally we still use
 /// the typed `EmitError` for precise diagnostics.
 pub fn emit_mask(mask: &MaskIR, source_file: Option<&str>) -> Result<String, String> {
-    emit_mask_result(mask, source_file).map_err(|e| e.to_string())
+    emit_mask_with_ctx(mask, source_file, EmitContext::empty())
 }
 
-fn emit_mask_result(mask: &MaskIR, source_file: Option<&str>) -> Result<String, EmitError> {
+/// Like [`emit_mask`], but with a populated `EmitContext` carrying the
+/// view slice. Used by the compile-all path so mask predicates can call
+/// `view::<name>(...)` against the real view registry.
+pub fn emit_mask_with_ctx(
+    mask: &MaskIR,
+    source_file: Option<&str>,
+    ctx: EmitContext<'_>,
+) -> Result<String, String> {
+    emit_mask_result(mask, source_file, ctx).map_err(|e| e.to_string())
+}
+
+fn emit_mask_result(
+    mask: &MaskIR,
+    source_file: Option<&str>,
+    ctx: EmitContext<'_>,
+) -> Result<String, EmitError> {
     let mut out = String::new();
     emit_header(&mut out, source_file);
     emit_imports(&mut out);
-    emit_predicate_fn(&mut out, mask)?;
+    emit_predicate_fn(&mut out, mask, ctx)?;
     Ok(out)
 }
 
@@ -155,7 +189,11 @@ fn emit_imports(out: &mut String) {
 /// Indent depth for top-level statements inside the predicate body: 4 spaces.
 const BASE_INDENT: usize = 4;
 
-fn emit_predicate_fn(out: &mut String, mask: &MaskIR) -> Result<(), EmitError> {
+fn emit_predicate_fn(
+    out: &mut String,
+    mask: &MaskIR,
+    ctx: EmitContext<'_>,
+) -> Result<(), EmitError> {
     let fn_name = format!("mask_{}", snake_case(&mask.head.name));
 
     // Param list: `state: &SimState`, `self_id: AgentId` plus one
@@ -196,7 +234,7 @@ fn emit_predicate_fn(out: &mut String, mask: &MaskIR) -> Result<(), EmitError> {
     )
     .unwrap();
     writeln!(out, "pub fn {fn_name}({}) -> bool {{", params.join(", ")).unwrap();
-    emit_predicate_body(out, &mask.predicate)?;
+    emit_predicate_body(out, &mask.predicate, ctx)?;
     writeln!(out, "}}").unwrap();
     Ok(())
 }
@@ -213,7 +251,11 @@ fn emit_predicate_fn(out: &mut String, mask: &MaskIR) -> Result<(), EmitError> {
 /// per-guard lines short enough that rustfmt treats the emission as
 /// already-formatted — critical because the xtask's scaffolded-kinds
 /// write path doesn't run rustfmt on mask files.
-fn emit_predicate_body(out: &mut String, predicate: &IrExprNode) -> Result<(), EmitError> {
+fn emit_predicate_body(
+    out: &mut String,
+    predicate: &IrExprNode,
+    ctx: EmitContext<'_>,
+) -> Result<(), EmitError> {
     let mut clauses: Vec<&IrExprNode> = Vec::new();
     flatten_and(predicate, &mut clauses);
 
@@ -234,7 +276,7 @@ fn emit_predicate_body(out: &mut String, predicate: &IrExprNode) -> Result<(), E
         .unwrap();
     }
     for clause in &clauses {
-        let cond = lower_clause(clause, &hoisted)?;
+        let cond = lower_clause(clause, &hoisted, ctx)?;
         writeln!(out, "{pad}if !{cond} {{").unwrap();
         writeln!(out, "{inner_pad}return false;").unwrap();
         writeln!(out, "{pad}}}").unwrap();
@@ -276,7 +318,8 @@ fn collect_pos_hoists(node: &IrExprNode, out: &mut Vec<String>) {
         }
         IrExpr::NamespaceCall { args, .. }
         | IrExpr::BuiltinCall(_, args)
-        | IrExpr::UnresolvedCall(_, args) => {
+        | IrExpr::UnresolvedCall(_, args)
+        | IrExpr::ViewCall(_, args) => {
             for a in args {
                 collect_pos_hoists(&a.value, out);
             }
@@ -304,8 +347,12 @@ fn pos_binding_name(local: &str) -> String {
 /// Callers place the result inside `()` — we strip one layer of outer
 /// parens from the recursive lowering so the `!(...)` form doesn't
 /// produce a double-paren `!((...))` that rustfmt would collapse later.
-fn lower_clause(node: &IrExprNode, hoisted: &[String]) -> Result<String, EmitError> {
-    let raw = lower_expr_with_hoist(node, hoisted)?;
+fn lower_clause(
+    node: &IrExprNode,
+    hoisted: &[String],
+    ctx: EmitContext<'_>,
+) -> Result<String, EmitError> {
+    let raw = lower_expr_with_hoist(node, hoisted, ctx)?;
     let stripped = if raw.starts_with('(') && raw.ends_with(')') && balanced(&raw) {
         raw[1..raw.len() - 1].to_string()
     } else {
@@ -347,16 +394,24 @@ fn balanced(s: &str) -> bool {
 /// `lower_expr_with_hoist(node, &[])`.
 #[cfg(test)]
 fn lower_expr(node: &IrExprNode) -> Result<String, EmitError> {
-    lower_expr_with_hoist(node, &[])
+    lower_expr_with_hoist(node, &[], EmitContext::empty())
 }
 
 /// Lower an expression, substituting hoisted `agents.pos(<local>)` calls
 /// with their prelude bindings (`self_pos`, `target_pos`, …).
-fn lower_expr_with_hoist(node: &IrExprNode, hoisted: &[String]) -> Result<String, EmitError> {
-    lower_expr_kind(&node.kind, hoisted)
+fn lower_expr_with_hoist(
+    node: &IrExprNode,
+    hoisted: &[String],
+    ctx: EmitContext<'_>,
+) -> Result<String, EmitError> {
+    lower_expr_kind(&node.kind, hoisted, ctx)
 }
 
-fn lower_expr_kind(kind: &IrExpr, hoisted: &[String]) -> Result<String, EmitError> {
+fn lower_expr_kind(
+    kind: &IrExpr,
+    hoisted: &[String],
+    ctx: EmitContext<'_>,
+) -> Result<String, EmitError> {
     match kind {
         IrExpr::LitBool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         IrExpr::LitInt(v) => Ok(format!("{v}")),
@@ -379,22 +434,63 @@ fn lower_expr_kind(kind: &IrExpr, hoisted: &[String]) -> Result<String, EmitErro
                     }
                 }
             }
-            lower_namespace_call(*ns, method, args, hoisted)
+            lower_namespace_call(*ns, method, args, hoisted, ctx)
         }
-        IrExpr::BuiltinCall(b, args) => lower_builtin_call(*b, args, hoisted),
-        IrExpr::UnresolvedCall(name, args) => lower_unresolved_call(name, args, hoisted),
+        IrExpr::ViewCall(view_ref, args) => lower_view_call(*view_ref, args, hoisted, ctx),
+        IrExpr::BuiltinCall(b, args) => lower_builtin_call(*b, args, hoisted, ctx),
+        IrExpr::UnresolvedCall(name, args) => lower_unresolved_call(name, args, hoisted, ctx),
         IrExpr::Binary(op, lhs, rhs) => {
-            let l = lower_expr_with_hoist(lhs, hoisted)?;
-            let r = lower_expr_with_hoist(rhs, hoisted)?;
+            let l = lower_expr_with_hoist(lhs, hoisted, ctx)?;
+            let r = lower_expr_with_hoist(rhs, hoisted, ctx)?;
             Ok(format!("({l} {} {r})", binop_str(*op)))
         }
         IrExpr::Unary(op, rhs) => {
-            let r = lower_expr_with_hoist(rhs, hoisted)?;
+            let r = lower_expr_with_hoist(rhs, hoisted, ctx)?;
             Ok(format!("({}{r})", unop_str(*op)))
         }
         other => Err(EmitError::Unsupported(format!(
             "expression shape {other:?} not supported in milestone 4 mask emission"
         ))),
+    }
+}
+
+/// Lower a `ViewCall(ref, args)` — either a bare `<name>(...)` or
+/// `view::<name>(...)` disambiguation. `@lazy` views route through the
+/// generated fn; `@materialized` views call `state.views.<name>.get(...)`.
+fn lower_view_call(
+    view_ref: ViewRef,
+    args: &[IrCallArg],
+    hoisted: &[String],
+    ctx: EmitContext<'_>,
+) -> Result<String, EmitError> {
+    let view = ctx.view(view_ref).ok_or_else(|| {
+        EmitError::Unsupported(format!(
+            "view emission: ViewRef({}) has no matching ViewIR in the context",
+            view_ref.0
+        ))
+    })?;
+    let stem = snake_case(&view.name);
+    let lowered = lower_positional_args(args, &format!("view::{}", view.name), hoisted, ctx)?;
+    match view.kind {
+        ViewKind::Lazy => {
+            let mut argv = vec!["state".to_string()];
+            argv.extend(lowered);
+            Ok(format!(
+                "crate::generated::views::{stem}({})",
+                argv.join(", ")
+            ))
+        }
+        ViewKind::Materialized(_) => {
+            // `state.views.<name>.get(args..., tick)` — decay views pick
+            // up an extra tick arg. The emitter can't know which without
+            // consulting the decay hint; emit with `tick` only when the
+            // view has @decay set.
+            let mut argv = lowered;
+            if view.decay.is_some() {
+                argv.push("state.tick".to_string());
+            }
+            Ok(format!("state.views.{stem}.get({})", argv.join(", ")))
+        }
     }
 }
 
@@ -422,8 +518,9 @@ fn lower_namespace_call(
     method: &str,
     args: &[IrCallArg],
     hoisted: &[String],
+    ctx: EmitContext<'_>,
 ) -> Result<String, EmitError> {
-    let lowered = lower_positional_args(args, &format!("{}.{method}", ns.name()), hoisted)?;
+    let lowered = lower_positional_args(args, &format!("{}.{method}", ns.name()), hoisted, ctx)?;
     match (ns, method) {
         (NamespaceId::Agents, "alive") => {
             expect_arity(args, 1, "agents.alive")?;
@@ -478,8 +575,9 @@ fn lower_builtin_call(
     b: Builtin,
     args: &[IrCallArg],
     hoisted: &[String],
+    ctx: EmitContext<'_>,
 ) -> Result<String, EmitError> {
-    let lowered = lower_positional_args(args, b.name(), hoisted)?;
+    let lowered = lower_positional_args(args, b.name(), hoisted, ctx)?;
     match b {
         Builtin::Distance => {
             expect_arity(args, 2, "distance")?;
@@ -531,8 +629,9 @@ fn lower_unresolved_call(
     name: &str,
     args: &[IrCallArg],
     hoisted: &[String],
+    ctx: EmitContext<'_>,
 ) -> Result<String, EmitError> {
-    let lowered = lower_positional_args(args, name, hoisted)?;
+    let lowered = lower_positional_args(args, name, hoisted, ctx)?;
     let mut argv = vec!["state".to_string()];
     argv.extend(lowered);
     Ok(format!("crate::rules::{name}({})", argv.join(", ")))
@@ -542,6 +641,7 @@ fn lower_positional_args(
     args: &[IrCallArg],
     call_name: &str,
     hoisted: &[String],
+    ctx: EmitContext<'_>,
 ) -> Result<Vec<String>, EmitError> {
     args.iter()
         .map(|a| {
@@ -550,7 +650,7 @@ fn lower_positional_args(
                     "named argument on call `{call_name}` not supported in milestone 4"
                 )));
             }
-            lower_expr_with_hoist(&a.value, hoisted)
+            lower_expr_with_hoist(&a.value, hoisted, ctx)
         })
         .collect()
 }
@@ -804,6 +904,160 @@ mod tests {
         let out = emit_mask_mod(&[]);
         assert!(out.contains("pub fn register() {}"));
         assert!(!out.contains("pub mod"));
+    }
+
+    #[test]
+    fn view_call_to_lazy_view_emits_crate_generated_path() {
+        use crate::ir::{
+            DecayHint, IrParam, IrType, ViewBodyIR, ViewIR, ViewKind, ViewRef,
+        };
+        // Synthesise a mask that calls `view::is_hostile(self, target)` via
+        // a ViewCall node. With a @lazy view in ctx, the lowering should
+        // route through `crate::generated::views::is_hostile(...)`.
+        let lazy_view = ViewIR {
+            name: "is_hostile".into(),
+            params: vec![
+                IrParam {
+                    name: "a".into(),
+                    local: LocalRef(0),
+                    ty: IrType::Named("Agent".into()),
+                    span: span(),
+                },
+                IrParam {
+                    name: "b".into(),
+                    local: LocalRef(1),
+                    ty: IrType::Named("Agent".into()),
+                    span: span(),
+                },
+            ],
+            return_ty: IrType::Bool,
+            body: ViewBodyIR::Expr(IrExprNode {
+                kind: IrExpr::LitBool(true),
+                span: span(),
+            }),
+            annotations: vec![],
+            kind: ViewKind::Lazy,
+            decay: None,
+            span: span(),
+        };
+        let views = vec![lazy_view];
+        let ctx = EmitContext { views: &views };
+
+        let self_local = local("self", 0);
+        let target_local = local("target", 1);
+        let view_call = IrExprNode {
+            kind: IrExpr::ViewCall(
+                ViewRef(0),
+                vec![
+                    IrCallArg { name: None, value: self_local.clone(), span: span() },
+                    IrCallArg { name: None, value: target_local.clone(), span: span() },
+                ],
+            ),
+            span: span(),
+        };
+        let alive = ns_call(NamespaceId::Agents, "alive", vec![target_local.clone()]);
+        let predicate = binop(BinOp::And, alive, view_call);
+        let mask = MaskIR {
+            head: IrActionHead {
+                name: "Attack".into(),
+                shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
+                span: span(),
+            },
+            predicate,
+            annotations: vec![],
+            span: span(),
+        };
+        let out = emit_mask_with_ctx(&mask, None, ctx).unwrap();
+        assert!(
+            out.contains("crate::generated::views::is_hostile(state, self_id, target)"),
+            "missing lazy view call in:\n{out}"
+        );
+        let _ = DecayHint {
+            rate: 0.5,
+            per: crate::ir::DecayUnit::Tick,
+            span: span(),
+        };
+    }
+
+    #[test]
+    fn view_call_to_materialized_with_decay_emits_state_views_get_with_tick() {
+        use crate::ir::{
+            DecayHint, DecayUnit, FoldHandlerIR, IrEventPattern, IrParam, IrType, StorageHint,
+            ViewBodyIR, ViewIR, ViewKind, ViewRef,
+        };
+        let mat_view = ViewIR {
+            name: "threat_level".into(),
+            params: vec![
+                IrParam {
+                    name: "a".into(),
+                    local: LocalRef(0),
+                    ty: IrType::Named("Agent".into()),
+                    span: span(),
+                },
+                IrParam {
+                    name: "b".into(),
+                    local: LocalRef(1),
+                    ty: IrType::Named("Agent".into()),
+                    span: span(),
+                },
+            ],
+            return_ty: IrType::F32,
+            body: ViewBodyIR::Fold {
+                initial: IrExprNode { kind: IrExpr::LitFloat(0.0), span: span() },
+                handlers: vec![FoldHandlerIR {
+                    pattern: IrEventPattern {
+                        name: "AgentAttacked".into(),
+                        event: None,
+                        bindings: vec![],
+                        span: span(),
+                    },
+                    body: vec![],
+                    span: span(),
+                }],
+                clamp: None,
+            },
+            annotations: vec![],
+            kind: ViewKind::Materialized(StorageHint::PairMap),
+            decay: Some(DecayHint {
+                rate: 0.98,
+                per: DecayUnit::Tick,
+                span: span(),
+            }),
+            span: span(),
+        };
+        let views = vec![mat_view];
+        let ctx = EmitContext { views: &views };
+
+        // `view::threat_level(self, target) > 0.0` as the mask predicate.
+        let self_local = local("self", 0);
+        let target_local = local("target", 1);
+        let view_call = IrExprNode {
+            kind: IrExpr::ViewCall(
+                ViewRef(0),
+                vec![
+                    IrCallArg { name: None, value: self_local.clone(), span: span() },
+                    IrCallArg { name: None, value: target_local.clone(), span: span() },
+                ],
+            ),
+            span: span(),
+        };
+        let zero = lit_float(0.0);
+        let predicate = binop(BinOp::Gt, view_call, zero);
+        let mask = MaskIR {
+            head: IrActionHead {
+                name: "Attack".into(),
+                shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
+                span: span(),
+            },
+            predicate,
+            annotations: vec![],
+            span: span(),
+        };
+        let out = emit_mask_with_ctx(&mask, None, ctx).unwrap();
+        assert!(
+            out.contains("state.views.threat_level.get(self_id, target, state.tick)"),
+            "missing materialized view call with tick in:\n{out}"
+        );
     }
 
     #[test]

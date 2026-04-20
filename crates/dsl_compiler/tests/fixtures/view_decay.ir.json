@@ -260,7 +260,9 @@
           }
         }
       ],
-      "kind": "Lazy",
+      "kind": {
+        "Materialized": "PairMap"
+      },
       "decay": {
         "rate": 0.98,
         "per": "Tick",

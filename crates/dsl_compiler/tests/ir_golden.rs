@@ -232,12 +232,122 @@ fn decay_view_emits_anchor_pattern_skeleton() {
         .expect("emit_decay_view")
         .expect("decay view should emit a non-None skeleton");
     assert!(out.contains("pub struct ThreatLevel"));
-    assert!(out.contains("pub const RATE: f32 = 0.98_f32;"));
-    assert!(out.contains("pub fn get(&self, a: i64, b: i64, tick: u32) -> f32"));
-    assert!(out.contains("\"AgentAttacked\" =>"));
-    assert!(out.contains("\"EffectDamageApplied\" =>"));
+    assert!(out.contains("pub const RATE: f32 = 0.98"));
+    // Full-view emission uses the resolved param types — `Agent` → `AgentId`.
+    // The back-compat wrapper still routes through the same path; assert on
+    // the post-milestone-view signature.
+    assert!(
+        out.contains("pub fn get(&self, a: AgentId, b: AgentId, tick: u32) -> f32"),
+        "wrong get sig in:\n{out}"
+    );
+    assert!(out.contains("Event::AgentAttacked"));
+    assert!(out.contains("Event::EffectDamageApplied"));
     // Clamp is wired into both `get` and `fold_event`.
-    assert!(out.contains(".clamp(0.0_f32, 1000.0_f32)"));
+    assert!(out.contains("clamp(0.0, 1000.0)"));
+}
+
+#[test]
+fn lazy_annotation_resolves_to_lazy_view_kind() {
+    let src = r#"
+        @lazy
+        view is_hostile(a: Agent, b: Agent) -> bool {
+          is_hostile_pair(a, b)
+        }
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile should succeed");
+    let v = comp.views.iter().find(|v| v.name == "is_hostile").unwrap();
+    assert!(matches!(v.kind, dsl_compiler::ir::ViewKind::Lazy));
+    assert!(v.decay.is_none());
+}
+
+#[test]
+fn materialized_defaults_to_pair_map_storage_hint() {
+    let src = r#"
+        @materialized(on_event = [AgentAttacked])
+        view threat_level(a: Agent, b: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{target: a, actor: b} { self += 1.0 }
+        }
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile should succeed");
+    let v = comp.views.iter().find(|v| v.name == "threat_level").unwrap();
+    assert!(matches!(
+        v.kind,
+        dsl_compiler::ir::ViewKind::Materialized(dsl_compiler::ir::StorageHint::PairMap)
+    ));
+}
+
+#[test]
+fn materialized_storage_lazy_cached_is_accepted() {
+    let src = r#"
+        @materialized(on_event = [AgentAttacked], storage = lazy_cached)
+        view threat_level(a: Agent, b: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{target: a, actor: b} { self += 1.0 }
+        }
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile should succeed");
+    let v = comp.views.iter().find(|v| v.name == "threat_level").unwrap();
+    assert!(matches!(
+        v.kind,
+        dsl_compiler::ir::ViewKind::Materialized(dsl_compiler::ir::StorageHint::LazyCached)
+    ));
+}
+
+#[test]
+fn lazy_and_materialized_together_is_an_error() {
+    let src = r#"
+        @lazy
+        @materialized(on_event = [AgentAttacked])
+        view bad(a: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{target: a} { self += 1.0 }
+        }
+    "#;
+    let err = dsl_compiler::compile(src).expect_err("should fail");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("mutually exclusive"),
+        "expected mutual-exclusion diagnostic; got: {msg}"
+    );
+}
+
+#[test]
+fn materialized_with_expr_body_is_an_error() {
+    let src = r#"
+        @materialized(on_event = [AgentAttacked])
+        view bad(a: Agent) -> f32 { 0.0 }
+    "#;
+    let err = dsl_compiler::compile(src).expect_err("should fail");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("fold body"),
+        "expected fold-body diagnostic; got: {msg}"
+    );
+}
+
+#[test]
+fn view_namespace_call_resolves_to_view_call() {
+    // `view::is_hostile(a, b)` in a mask body should resolve through the
+    // View namespace and become a ViewCall(ref, args) pointing at the
+    // declared view.
+    let src = r#"
+        @lazy
+        view is_hostile(a: Agent, b: Agent) -> bool { is_hostile_pair(a, b) }
+
+        mask Attack(target) when
+          view::is_hostile(self, target)
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile should succeed");
+    let mask = &comp.masks[0];
+    // Predicate should be an `IrExpr::ViewCall(ViewRef(0), ...)`.
+    match &mask.predicate.kind {
+        dsl_compiler::ir::IrExpr::ViewCall(vr, args) => {
+            assert_eq!(vr.0, 0);
+            assert_eq!(args.len(), 2);
+        }
+        other => panic!("expected ViewCall; got: {other:?}"),
+    }
 }
 
 #[test]

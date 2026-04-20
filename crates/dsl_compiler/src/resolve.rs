@@ -86,6 +86,11 @@ mod stdlib {
             ("query", NamespaceId::Query),
             ("voxel", NamespaceId::Voxel),
             ("config", NamespaceId::Config),
+            // `view::<name>(...)` disambiguation namespace. The resolver
+            // rewrites calls of this shape into `IrExpr::ViewCall(ref,
+            // args)` once it resolves `<name>` against `symbols.views`.
+            // No declared fields — only method-call syntax is valid.
+            ("view", NamespaceId::View),
             // Legacy collection / accessor namespaces — kept for iteration
             // source use (`count(a in agents ...)`). No declared fields.
             ("agents", NamespaceId::Agents),
@@ -824,10 +829,14 @@ fn resolve_bodies(
                 }
                 // Parse and validate `@decay(rate=R, per=tick)` if present.
                 let decay = lower_decay_hint(&d.annotations, &d.body)?;
+                // Parse `@lazy` / `@materialized(on_event=[...],
+                // storage=<hint>)` to set the view kind. Spec §2.3 + §9 D31.
+                let kind = lower_view_kind(&d.name, &d.annotations, &d.body, d.span)?;
                 comp.views[view_idx].params = params;
                 comp.views[view_idx].return_ty = return_ty;
                 comp.views[view_idx].body = body;
                 comp.views[view_idx].decay = decay;
+                comp.views[view_idx].kind = kind;
                 view_idx += 1;
             }
             Decl::Verb(d) => {
@@ -1626,6 +1635,15 @@ fn resolve_call(
                         .iter()
                         .map(|a| resolve_call_arg(a, scope, symbols))
                         .collect::<Result<Vec<_>, _>>()?;
+                    // `view::<name>(...)` — rewrite to ViewCall when the
+                    // method resolves against the declared views. Unknown
+                    // method names stay NamespaceCall so 1b diagnostics can
+                    // surface them.
+                    if *ns == NamespaceId::View {
+                        if let Some(view_ref) = symbols.views.get(method) {
+                            return Ok(IrExpr::ViewCall(*view_ref, ir_args));
+                        }
+                    }
                     // Arity is informational here; 1a doesn't surface it as
                     // an error. 1b will compare `ir_args.len()` against
                     // `stdlib::method_sig(ns, method).0`.
@@ -1648,6 +1666,15 @@ fn resolve_call(
             .collect::<Result<Vec<_>, _>>()?;
         if let Some(b) = symbols.builtins.get(name) {
             return Ok(IrExpr::BuiltinCall(*b, ir_args));
+        }
+        // `view::<name>(...)` — the parser flattens `ns::method` into a
+        // single ident with `::` preserved. Recognise the `view::` prefix
+        // and route through ViewCall the same way the dotted-field path
+        // does. Keeps the two syntactic forms interchangeable.
+        if let Some(tail) = name.strip_prefix("view::") {
+            if let Some(view_ref) = symbols.views.get(tail) {
+                return Ok(IrExpr::ViewCall(*view_ref, ir_args));
+            }
         }
         if let Some(r) = symbols.views.get(name) {
             return Ok(IrExpr::ViewCall(*r, ir_args));
@@ -1913,6 +1940,180 @@ fn lower_decay_hint(
         per: per_unit,
         span: ann.span,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// @lazy / @materialized annotation lowering (spec §2.3, §9 D31)
+// ---------------------------------------------------------------------------
+
+/// Resolve `@lazy` and `@materialized(...)` annotations on a view declaration
+/// into a typed `ViewKind`. Spec §2.3 + §9 D31.
+///
+/// - `@lazy` (or no annotation) → `ViewKind::Lazy`.
+/// - `@materialized(storage = <hint>)` → `ViewKind::Materialized(<storage>)`.
+/// - `@materialized` with no `storage` defaults to `pair_map` (spec §9 D31).
+/// - `@lazy` and `@materialized` are mutually exclusive; both on the same view
+///   is a hard error.
+/// - `@materialized` requires a `Fold` body (the event-fold path needs event
+///   handlers).
+///
+/// Supported storage hints (spec §9 D31):
+/// - `pair_map` — dense `HashMap<(K1, K2), V>`.
+/// - `per_entity_topk(K, keyed_on = <param>)` — bounded per-entity slots.
+/// - `lazy_cached` — compute-on-demand + per-tick cache.
+fn lower_view_kind(
+    view_name: &str,
+    annotations: &[ast::Annotation],
+    body: &ast::ViewBody,
+    view_span: Span,
+) -> Result<ViewKind, ResolveError> {
+    let lazy_ann = annotations.iter().find(|a| a.name == "lazy");
+    let mat_ann = annotations.iter().find(|a| a.name == "materialized");
+
+    // Mutual-exclusion check.
+    if let (Some(la), Some(ma)) = (lazy_ann, mat_ann) {
+        let span = if la.span.start < ma.span.start { ma.span } else { la.span };
+        return Err(ResolveError::InvalidViewKind {
+            view_name: view_name.to_string(),
+            detail: "`@lazy` and `@materialized` are mutually exclusive on the same view".into(),
+            span,
+        });
+    }
+
+    // Default: no annotation → lazy.
+    if lazy_ann.is_some() || mat_ann.is_none() {
+        // `@lazy` on a fold body is nonsensical — fold handlers only fire
+        // for materialized views. Flag the mismatch.
+        if matches!(body, ast::ViewBody::Fold { .. }) {
+            let span = lazy_ann.map(|a| a.span).unwrap_or(view_span);
+            return Err(ResolveError::InvalidViewKind {
+                view_name: view_name.to_string(),
+                detail:
+                    "`@lazy` views must have an expression body; got a fold body (only `@materialized` views fold events)"
+                        .into(),
+                span,
+            });
+        }
+        return Ok(ViewKind::Lazy);
+    }
+
+    // `@materialized(...)` — requires a fold body.
+    let ma = mat_ann.unwrap();
+    if !matches!(body, ast::ViewBody::Fold { .. }) {
+        return Err(ResolveError::InvalidViewKind {
+            view_name: view_name.to_string(),
+            detail:
+                "`@materialized` views must have a fold body (`initial:` / `on <Event> { ... }` / `clamp:`)"
+                    .into(),
+            span: ma.span,
+        });
+    }
+
+    // Parse the annotation arguments. Known keys: `on_event`, `storage`.
+    // Unknown keys error out so typos are caught at resolve time.
+    let mut storage: Option<StorageHint> = None;
+    let mut storage_span = ma.span;
+    let mut saw_on_event = false;
+    for arg in &ma.args {
+        let key = match &arg.key {
+            Some(k) => k.as_str(),
+            None => {
+                return Err(ResolveError::InvalidViewKind {
+                    view_name: view_name.to_string(),
+                    detail:
+                        "`@materialized(...)` arguments must be `key = value` (got a positional arg)"
+                            .into(),
+                    span: arg.span,
+                });
+            }
+        };
+        match key {
+            "on_event" => {
+                // Validate shape: a list of Idents. Contents are cross-
+                // checked against declared events elsewhere; here we just
+                // require the list form so typos surface early.
+                match &arg.value {
+                    ast::AnnotationValue::List(items) => {
+                        for it in items {
+                            if !matches!(it, ast::AnnotationValue::Ident(_)) {
+                                return Err(ResolveError::InvalidViewKind {
+                                    view_name: view_name.to_string(),
+                                    detail: format!(
+                                        "`on_event` list entries must be event identifiers; got {it:?}"
+                                    ),
+                                    span: arg.span,
+                                });
+                            }
+                        }
+                    }
+                    other => {
+                        return Err(ResolveError::InvalidViewKind {
+                            view_name: view_name.to_string(),
+                            detail: format!(
+                                "`on_event` must be a list of event identifiers (e.g. `[AgentAttacked, EffectDamageApplied]`); got {other:?}"
+                            ),
+                            span: arg.span,
+                        });
+                    }
+                }
+                saw_on_event = true;
+            }
+            "storage" => {
+                storage = Some(parse_storage_hint(view_name, arg)?);
+                storage_span = arg.span;
+            }
+            other => {
+                return Err(ResolveError::InvalidViewKind {
+                    view_name: view_name.to_string(),
+                    detail: format!(
+                        "unknown `@materialized` argument `{other}`; expected `on_event` or `storage`"
+                    ),
+                    span: arg.span,
+                });
+            }
+        }
+    }
+    let _ = saw_on_event; // presence is advisory — handlers are in the body
+
+    // Default storage hint is `pair_map` per spec §9 D31.
+    let storage = storage.unwrap_or(StorageHint::PairMap);
+    let _ = storage_span;
+    Ok(ViewKind::Materialized(storage))
+}
+
+/// Parse a `storage = <hint>` annotation argument into a `StorageHint`.
+/// Accepts:
+/// - `pair_map`
+/// - `lazy_cached`
+/// - `per_entity_topk(K, keyed_on = <arg>)` — but our annotation grammar
+///   doesn't carry generic / call syntax, so in v1 we accept the bare
+///   identifier `per_entity_topk` with defaults `K=8, keyed_on=0` and
+///   allow authors to drop into the parameterised form in a later pass.
+fn parse_storage_hint(
+    view_name: &str,
+    arg: &ast::AnnotationArg,
+) -> Result<StorageHint, ResolveError> {
+    match &arg.value {
+        ast::AnnotationValue::Ident(name) => match name.as_str() {
+            "pair_map" => Ok(StorageHint::PairMap),
+            "lazy_cached" => Ok(StorageHint::LazyCached),
+            "per_entity_topk" => Ok(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
+            other => Err(ResolveError::InvalidViewKind {
+                view_name: view_name.to_string(),
+                detail: format!(
+                    "unsupported `storage` hint `{other}`; expected `pair_map`, `per_entity_topk`, or `lazy_cached`"
+                ),
+                span: arg.span,
+            }),
+        },
+        other => Err(ResolveError::InvalidViewKind {
+            view_name: view_name.to_string(),
+            detail: format!(
+                "`storage` must be an identifier (e.g. `pair_map`); got {other:?}"
+            ),
+            span: arg.span,
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------------

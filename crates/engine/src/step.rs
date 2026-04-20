@@ -257,6 +257,16 @@ pub fn step_full<B: PolicyBackend>(
     for v in views.iter_mut() {
         v.fold(events);
     }
+    // Phase 5b — compiler-emitted `@materialized` views. Spec §7.1
+    // places view folds *between* event emission and mask evaluation,
+    // so masks in the NEXT tick read post-fold values. We keep the
+    // legacy-trait fold above to preserve the `DamageTaken` test
+    // surface while the compiler-owned registry takes over.
+    //
+    // `fold_all` takes `&EventRing` and iterates internally — no extra
+    // allocation when the registry is empty, and the per-event
+    // dispatch is a direct method call chain when it isn't.
+    state.views.fold_all(events, state.tick);
 
     // Phase 6 — invariants + built-in telemetry metrics.
     let violations = invariants.check_all(state, events);

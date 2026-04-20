@@ -109,13 +109,13 @@ fn emit_from_seed_produces_expected_files() {
     );
 
     // The schema.rs must carry every sub-hash (state/event/rules/scoring/
-    // config/enums) plus the combined hash — seven 32-byte arrays = 224
-    // hex bytes total.
+    // config/enums/views) plus the combined hash — eight 32-byte arrays =
+    // 256 hex bytes total.
     let schema = &artefacts.schema_rs;
     let hex_count = schema.matches("0x").count();
     assert_eq!(
-        hex_count, 224,
-        "schema.rs should expose 7x32 hex bytes (state/event/rules/scoring/config/enums/combined)"
+        hex_count, 256,
+        "schema.rs should expose 8x32 hex bytes (state/event/rules/scoring/config/enums/views/combined)"
     );
     for c in [
         "STATE_HASH",
@@ -124,6 +124,7 @@ fn emit_from_seed_produces_expected_files() {
         "SCORING_HASH",
         "CONFIG_HASH",
         "ENUMS_HASH",
+        "VIEW_HASH",
         "COMBINED_HASH",
     ] {
         assert!(schema.contains(c), "schema.rs missing {c}");

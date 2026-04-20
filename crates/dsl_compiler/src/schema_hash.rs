@@ -18,8 +18,9 @@ use sha2::{Digest, Sha256};
 
 use crate::emit_entity;
 use crate::ir::{
-    ConfigIR, EntityIR, EnumIR, EventIR, EventTagIR, IrExpr, IrExprNode, IrPattern,
+    ConfigIR, DecayUnit, EntityIR, EnumIR, EventIR, EventTagIR, IrExpr, IrExprNode, IrPattern,
     IrPatternBinding, IrPhysicsPattern, IrStmt, IrType, PhysicsHandlerIR, PhysicsIR, ScoringIR,
+    StorageHint, ViewBodyIR, ViewIR, ViewKind,
 };
 
 pub fn event_hash(events: &[EventIR]) -> [u8; 32] {
@@ -180,6 +181,98 @@ pub fn config_hash(blocks: &[ConfigIR]) -> [u8; 32] {
             let bytes = type_canonical_bytes(&f.ty);
             h.update(&bytes);
             h.update([0u8]);
+        }
+        h.update([0xFFu8]);
+    }
+    h.finalize().into()
+}
+
+/// Hash every `view` declaration's schema-relevant surface: name, param
+/// names + types (in declaration order — pair-map key ordering depends
+/// on it), return type, view kind + storage hint, decay params (rate +
+/// per-unit), and the structural form of the fold body (handler event
+/// names, binding shape, statement structure). `@lazy` expression
+/// bodies hash through `hash_expr` for the same structural coverage the
+/// scoring hash uses.
+///
+/// Views are sorted by name for reorder stability; params + handlers
+/// keep their source order since both drive the emitted Rust's shape.
+pub fn views_hash(views: &[ViewIR]) -> [u8; 32] {
+    let mut sorted: Vec<&ViewIR> = views.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut h = Sha256::new();
+    for v in sorted {
+        h.update(v.name.as_bytes());
+        h.update([0u8]);
+        // Params.
+        h.update(&(v.params.len() as u32).to_le_bytes());
+        for p in &v.params {
+            h.update(p.name.as_bytes());
+            h.update([0u8]);
+            h.update(&type_canonical_bytes(&p.ty));
+            h.update([0u8]);
+        }
+        // Return type.
+        h.update(&type_canonical_bytes(&v.return_ty));
+        h.update([0u8]);
+        // Kind + storage hint.
+        match v.kind {
+            ViewKind::Lazy => h.update([0x01u8]),
+            ViewKind::Materialized(hint) => {
+                h.update([0x02u8]);
+                match hint {
+                    StorageHint::PairMap => h.update([0x10u8]),
+                    StorageHint::PerEntityTopK { k, keyed_on } => {
+                        h.update([0x11u8]);
+                        h.update(&k.to_le_bytes());
+                        h.update([keyed_on]);
+                    }
+                    StorageHint::LazyCached => h.update([0x12u8]),
+                }
+            }
+        }
+        // Decay hint.
+        match v.decay {
+            None => h.update([0x00u8]),
+            Some(d) => {
+                h.update([0x01u8]);
+                h.update(&d.rate.to_le_bytes());
+                match d.per {
+                    DecayUnit::Tick => h.update([0x01u8]),
+                }
+            }
+        }
+        // Body.
+        match &v.body {
+            ViewBodyIR::Expr(e) => {
+                h.update([0xAAu8]);
+                hash_expr(&mut h, e);
+            }
+            ViewBodyIR::Fold { initial, handlers, clamp } => {
+                h.update([0xBBu8]);
+                hash_expr(&mut h, initial);
+                h.update(&(handlers.len() as u32).to_le_bytes());
+                for fh in handlers {
+                    h.update(fh.pattern.name.as_bytes());
+                    h.update([0u8]);
+                    h.update(&(fh.pattern.bindings.len() as u32).to_le_bytes());
+                    for b in &fh.pattern.bindings {
+                        hash_pattern_binding(&mut h, b);
+                    }
+                    h.update(&(fh.body.len() as u32).to_le_bytes());
+                    for s in &fh.body {
+                        hash_stmt(&mut h, s);
+                    }
+                }
+                if let Some((lo, hi)) = clamp {
+                    h.update([0x01u8]);
+                    hash_expr(&mut h, lo);
+                    hash_expr(&mut h, hi);
+                } else {
+                    h.update([0x00u8]);
+                }
+            }
         }
         h.update([0xFFu8]);
     }
@@ -563,9 +656,9 @@ fn hash_expr_kind(h: &mut Sha256, kind: &IrExpr) {
     }
 }
 
-/// Combine the five sub-hashes into one, in the canonical order specified
-/// in `docs/compiler/spec.md` §2: `state || event || rules || scoring ||
-/// config`. Trace-format guards check this combined value.
+/// Combine the seven sub-hashes into one, in a stable canonical order:
+/// `state || event || rules || scoring || config || enums || views`.
+/// Trace-format guards check this combined value.
 pub fn combined_hash(
     state: &[u8; 32],
     event: &[u8; 32],
@@ -573,6 +666,7 @@ pub fn combined_hash(
     scoring: &[u8; 32],
     config: &[u8; 32],
     enums: &[u8; 32],
+    views: &[u8; 32],
 ) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(state);
@@ -581,6 +675,7 @@ pub fn combined_hash(
     h.update(scoring);
     h.update(config);
     h.update(enums);
+    h.update(views);
     h.finalize().into()
 }
 
@@ -595,9 +690,10 @@ pub fn emit_schema_rs(
     scoring: &[u8; 32],
     config: &[u8; 32],
     enums: &[u8; 32],
+    views: &[u8; 32],
 ) -> String {
     use std::fmt::Write;
-    let combined = combined_hash(state, event, rules, scoring, config, enums);
+    let combined = combined_hash(state, event, rules, scoring, config, enums, views);
 
     let mut out = String::new();
     writeln!(out, "// GENERATED by dsl_compiler. Do not edit by hand.").unwrap();
@@ -609,7 +705,7 @@ pub fn emit_schema_rs(
     writeln!(out).unwrap();
     writeln!(
         out,
-        "// `COMBINED_HASH` rolls the six sub-hashes together per `docs/compiler/spec.md` \u{00a7}2."
+        "// `COMBINED_HASH` rolls the seven sub-hashes together per `docs/compiler/spec.md` \u{00a7}2."
     )
     .unwrap();
     writeln!(
@@ -625,6 +721,7 @@ pub fn emit_schema_rs(
     write_hash_const(&mut out, "SCORING_HASH", scoring);
     write_hash_const(&mut out, "CONFIG_HASH", config);
     write_hash_const(&mut out, "ENUMS_HASH", enums);
+    write_hash_const(&mut out, "VIEW_HASH", views);
     write_hash_const(&mut out, "COMBINED_HASH", &combined);
     out
 }
@@ -816,8 +913,8 @@ mod tests {
     #[test]
     fn emit_schema_rs_shape() {
         let h = [0u8; 32];
-        let s = emit_schema_rs(&h, &h, &h, &h, &h, &h);
-        // All seven constants present.
+        let s = emit_schema_rs(&h, &h, &h, &h, &h, &h, &h);
+        // All eight constants present.
         for name in [
             "STATE_HASH",
             "EVENT_HASH",
@@ -825,6 +922,7 @@ mod tests {
             "SCORING_HASH",
             "CONFIG_HASH",
             "ENUMS_HASH",
+            "VIEW_HASH",
             "COMBINED_HASH",
         ] {
             assert!(s.contains(&format!("pub const {name}: [u8; 32] = [")), "missing {name}");
@@ -873,20 +971,26 @@ mod tests {
         let zero = [0u8; 32];
         let mut event = [0u8; 32];
         event[0] = 1;
-        let h_with_event = combined_hash(&zero, &event, &zero, &zero, &zero, &zero);
-        let h_all_zero = combined_hash(&zero, &zero, &zero, &zero, &zero, &zero);
+        let h_with_event = combined_hash(&zero, &event, &zero, &zero, &zero, &zero, &zero);
+        let h_all_zero = combined_hash(&zero, &zero, &zero, &zero, &zero, &zero, &zero);
         assert_ne!(h_with_event, h_all_zero, "event change must alter combined");
 
         // Config sub-hash is part of the mix too.
         let mut cfg = [0u8; 32];
         cfg[0] = 1;
-        let h_with_config = combined_hash(&zero, &zero, &zero, &zero, &cfg, &zero);
+        let h_with_config = combined_hash(&zero, &zero, &zero, &zero, &cfg, &zero, &zero);
         assert_ne!(h_with_config, h_all_zero, "config change must alter combined");
 
         let mut enums = [0u8; 32];
         enums[0] = 1;
-        let h_with_enums = combined_hash(&zero, &zero, &zero, &zero, &zero, &enums);
+        let h_with_enums = combined_hash(&zero, &zero, &zero, &zero, &zero, &enums, &zero);
         assert_ne!(h_with_enums, h_all_zero, "enums change must alter combined");
+
+        // Views sub-hash is also part of the mix.
+        let mut views = [0u8; 32];
+        views[0] = 1;
+        let h_with_views = combined_hash(&zero, &zero, &zero, &zero, &zero, &zero, &views);
+        assert_ne!(h_with_views, h_all_zero, "views change must alter combined");
     }
 
     #[test]

@@ -13,7 +13,7 @@ pub fn mask_attack(state: &SimState, self_id: AgentId, target: AgentId) -> bool 
     if !(state.agent_alive(target)) {
         return false;
     }
-    if !(crate::rules::is_hostile(state, self_id, target)) {
+    if !(crate::generated::views::is_hostile(state, self_id, target)) {
         return false;
     }
     if !(self_pos.distance(target_pos) < 2.0) {

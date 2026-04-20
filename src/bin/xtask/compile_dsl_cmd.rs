@@ -43,6 +43,7 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             entities: sources.entities.as_deref(),
             configs: sources.configs.as_deref(),
             enums: sources.enums.as_deref(),
+            views: sources.views.as_deref(),
         },
     );
 
@@ -58,6 +59,7 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
     let config_toml_dir = args.out_config_toml.clone();
     let config_toml_path = config_toml_dir.join("default.toml");
     let enum_dir = args.out_enum.clone();
+    let views_dir = args.out_views.clone();
 
     if args.check {
         let mut mismatches = Vec::new();
@@ -75,6 +77,7 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             &mut mismatches,
         );
         check_enums(&artefacts, &enum_dir, &py_enums_dir, &mut mismatches);
+        check_views(&artefacts, &views_dir, &mut mismatches);
 
         // Rust per-event files. Pre-format the in-memory emission so the
         // comparison ignores rustfmt-driven layout differences (committed
@@ -168,6 +171,10 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             eprintln!("compile-dsl: {e}");
             return ExitCode::FAILURE;
         }
+        if let Err(e) = write_views_output(&views_dir, &artefacts) {
+            eprintln!("compile-dsl: {e}");
+            return ExitCode::FAILURE;
+        }
 
         // Format emitted Rust so it matches the project's style. Best effort —
         // if rustfmt fails (missing toolchain, generated file has a bug we
@@ -199,6 +206,13 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
                 .map(|(n, _)| enum_dir.join(n)),
         );
         rustfmt_targets.push(enum_dir.join("mod.rs"));
+        rustfmt_targets.extend(
+            artefacts
+                .rust_view_modules
+                .iter()
+                .map(|(n, _)| views_dir.join(n)),
+        );
+        rustfmt_targets.push(views_dir.join("mod.rs"));
         if let Err(e) = rustfmt(&rustfmt_targets) {
             eprintln!("compile-dsl: rustfmt failed: {e}");
             return ExitCode::FAILURE;
@@ -261,6 +275,7 @@ struct PerKindSources {
     entities: Option<String>,
     configs: Option<String>,
     enums: Option<String>,
+    views: Option<String>,
 }
 
 /// Output of `compile_all`: the merged IR plus per-kind source attributions.
@@ -283,6 +298,7 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
     let mut entities_source: Option<String> = None;
     let mut configs_source: Option<String> = None;
     let mut enums_source: Option<String> = None;
+    let mut views_source: Option<String> = None;
     let mut events_multi = false;
     let mut physics_multi = false;
     let mut masks_multi = false;
@@ -290,6 +306,7 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
     let mut entities_multi = false;
     let mut configs_multi = false;
     let mut enums_multi = false;
+    let mut views_multi = false;
     let mut seen_events: HashSet<String> = HashSet::new();
     let mut seen_physics: HashSet<String> = HashSet::new();
 
@@ -336,7 +353,8 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
                 Decl::Entity(_) => update_kind_source(&mut entities_source, &mut entities_multi, &path),
                 Decl::Config(_) => update_kind_source(&mut configs_source, &mut configs_multi, &path),
                 Decl::Enum(_) => update_kind_source(&mut enums_source, &mut enums_multi, &path),
-                // Verb/View/Invariant/Probe/Metric/EventTag parsed but not yet emitted.
+                Decl::View(_) => update_kind_source(&mut views_source, &mut views_multi, &path),
+                // Verb/Invariant/Probe/Metric/EventTag parsed but not yet emitted.
                 _ => {}
             }
             merged.decls.push(decl);
@@ -359,6 +377,7 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
             entities: if entities_multi { None } else { entities_source },
             configs: if configs_multi { None } else { configs_source },
             enums: if enums_multi { None } else { enums_source },
+            views: if views_multi { None } else { views_source },
         },
     })
 }
@@ -639,6 +658,39 @@ fn write_enum_output(
     }
     fs::write(py_enums_dir.join("__init__.py"), &artefacts.python_enum_init)?;
     Ok(())
+}
+
+/// Write every per-view Rust module plus the aggregator `mod.rs` to the
+/// views output directory. Stale per-view files from a previous run are
+/// pruned so renames don't leave orphans behind.
+fn write_views_output(
+    views_dir: &Path,
+    artefacts: &dsl_compiler::EmittedArtifacts,
+) -> std::io::Result<()> {
+    fs::create_dir_all(views_dir)?;
+    prune_stale(views_dir, &artefacts.rust_view_modules, "rs", &["mod.rs"])?;
+    for (name, content) in &artefacts.rust_view_modules {
+        fs::write(views_dir.join(name), content)?;
+    }
+    fs::write(views_dir.join("mod.rs"), &artefacts.rust_view_mod)?;
+    Ok(())
+}
+
+/// `--check` counterpart to [`write_views_output`]. Verifies every per-view
+/// module + the aggregator match the committed emission post-rustfmt.
+fn check_views(
+    artefacts: &dsl_compiler::EmittedArtifacts,
+    views_dir: &Path,
+    mismatches: &mut Vec<String>,
+) {
+    for (name, content) in &artefacts.rust_view_modules {
+        let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
+        check_file(&views_dir.join(name), &f, mismatches);
+    }
+    let fmt = rustfmt_string(&artefacts.rust_view_mod)
+        .unwrap_or_else(|_| artefacts.rust_view_mod.clone());
+    check_file(&views_dir.join("mod.rs"), &fmt, mismatches);
+    check_stale(views_dir, &artefacts.rust_view_modules, "rs", mismatches);
 }
 
 /// `--check` counterpart to [`write_config_output`]. Verifies every per-block
