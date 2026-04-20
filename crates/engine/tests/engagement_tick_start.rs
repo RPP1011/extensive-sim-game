@@ -5,19 +5,32 @@
 //! `@materialized view engaged_with`. The legacy three-agent
 //! "tentative-commit drops A when B picks C" case is no longer
 //! enforced — the new pipeline commits unilaterally on the mover's
-//! side. These tests exercise the post-refactor surface via the
-//! `recompute_all_engagements` shim (the entry point retained for
-//! fixtures that predate the event-driven pipeline).
+//! side. These tests exercise the post-refactor surface by emitting
+//! a synthetic `AgentMoved` per alive agent and draining the cascade
+//! — the same steady-state the `step_full` movement phase would reach
+//! naturally, minus displacement.
 
+use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::engagement::recompute_all_engagements;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
+use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use engine_rules::config::Config;
 use glam::Vec3;
 
+/// Emit one synthetic `AgentMoved` per alive agent at its current
+/// position, then run the engine cascade to fixed point. This drives
+/// the `engagement_on_move` physics rule for every agent so pairings
+/// converge to their steady state without needing a real movement phase.
 fn run_tick_start(state: &mut SimState, events: &mut EventRing) {
-    recompute_all_engagements(state, events);
+    let registry = CascadeRegistry::with_engine_builtins();
+    let tick = state.tick;
+    let alive: Vec<AgentId> = state.agents_alive().collect();
+    for id in alive {
+        let pos = state.agent_pos(id).unwrap_or(Vec3::ZERO);
+        events.push(Event::AgentMoved { actor: id, from: pos, location: pos, tick });
+    }
+    registry.run_fixed_point(state, events);
 }
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> engine::ids::AgentId {
@@ -93,13 +106,13 @@ fn three_agent_unilateral_commit_pins_closest_pair() {
     // Some(A)") is softened — slot iteration order decides who
     // "wins" when three agents race.
     //
-    // `recompute_all_engagements` iterates `agents_alive()` in slot
+    // `run_tick_start` emits `AgentMoved` for `agents_alive()` in slot
     // order (A, B, D). A commits to B (bidirectional insert) first,
-    // giving `{A↔B}`. Then B recomputes and prefers D — the
-    // `recompute_engagement_for` path breaks `A↔B` (since B's
-    // partner changes) and commits `B↔D`, leaving A's slot cleared.
-    // D recomputes last and prefers B, which matches, so `{B↔D}`
-    // stands. End state: A unengaged, B↔D engaged.
+    // giving `{A↔B}`. Then B's `engagement_on_move` rule fires and
+    // prefers D — the rule breaks `A↔B` (since B's partner changes)
+    // and commits `B↔D`, leaving A's slot cleared. D fires last and
+    // prefers B, which matches, so `{B↔D}` stands. End state: A
+    // unengaged, B↔D engaged.
     let mut state = SimState::new(8, 42);
     let mut events = EventRing::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human,  Vec3::new(0.0, 0.0, 0.0));
