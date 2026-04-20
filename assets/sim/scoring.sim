@@ -1,0 +1,30 @@
+// Scoring rules — compiler-emitted POD table.
+//
+// Milestone 5: this file owns the four-row scoring body that used to live
+// hand-written in `crates/engine/src/policy/utility.rs`. The emitter
+// flattens each RHS into a `ScoringEntry` with a base score plus up to
+// MAX_MODIFIERS `(predicate, delta)` rows. Supported predicate shape at
+// this milestone: `self.<field> <op> <f32 literal>`. See
+// `docs/dsl/scoring_fields.md` for the field-id mapping; extending the
+// predicate taxonomy is a schema change.
+//
+// The RHS grammar the emitter recognises:
+//
+//   <rhs>     ::= <lit> | <lit> '+' <modifier> ( '+' <modifier> )*
+//   <modifier> ::= 'if' <pred> '{' <lit> '}' 'else' '{' '0.0' '}'
+//
+// Non-zero else branches are not allowed — put constant weight in the base
+// term instead. The else must exist; dropping it would leave the modifier
+// undefined when the predicate fails.
+
+scoring {
+  // Unconditional base scores — no modifiers.
+  Hold       = 0.1
+  MoveToward = 0.3
+
+  // Attack: fight when healthy (hp_pct >= 50%).
+  Attack(t) = 0.0 + (if self.hp_pct >= 0.5 { 0.5 } else { 0.0 })
+
+  // Eat: emergency heal when low (hp_pct < 30%).
+  Eat = 0.0 + (if self.hp_pct < 0.3 { 0.8 } else { 0.0 })
+}
