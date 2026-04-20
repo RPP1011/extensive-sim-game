@@ -46,22 +46,106 @@ mod stdlib {
         for (n, t) in prims {
             symbols.stdlib_types.insert(n.to_string(), t);
         }
+        // Aggregations + quantifiers (parsed as dedicated AST nodes, but we
+        // still reserve the names so they don't shadow).
         symbols.builtins.insert("count".into(), Builtin::Count);
         symbols.builtins.insert("sum".into(), Builtin::Sum);
-        symbols.builtins.insert("min".into(), Builtin::Min);
-        symbols.builtins.insert("max".into(), Builtin::Max);
+        symbols.builtins.insert("forall".into(), Builtin::Forall);
+        symbols.builtins.insert("exists".into(), Builtin::Exists);
+        // Spatial.
         symbols.builtins.insert("distance".into(), Builtin::Distance);
         symbols.builtins.insert("planar_distance".into(), Builtin::PlanarDistance);
         symbols.builtins.insert("z_separation".into(), Builtin::ZSeparation);
+        // ID dereference.
         symbols.builtins.insert("entity".into(), Builtin::Entity);
-        symbols.builtins.insert("forall".into(), Builtin::Forall);
-        symbols.builtins.insert("exists".into(), Builtin::Exists);
+        // Numeric.
+        symbols.builtins.insert("min".into(), Builtin::Min);
+        symbols.builtins.insert("max".into(), Builtin::Max);
+        symbols.builtins.insert("clamp".into(), Builtin::Clamp);
+        symbols.builtins.insert("abs".into(), Builtin::Abs);
+        symbols.builtins.insert("floor".into(), Builtin::Floor);
+        symbols.builtins.insert("ceil".into(), Builtin::Ceil);
+        symbols.builtins.insert("round".into(), Builtin::Round);
+        symbols.builtins.insert("ln".into(), Builtin::Ln);
+        symbols.builtins.insert("log2".into(), Builtin::Log2);
+        symbols.builtins.insert("log10".into(), Builtin::Log10);
+        symbols.builtins.insert("sqrt".into(), Builtin::Sqrt);
 
-        for ns in [
-            "cascade", "event", "agents", "items", "groups", "quests",
-            "auctions", "mask", "action", "world", "tick", "rng", "query",
+        // Typed namespaces. Each has its own field / method schema below.
+        for (name, id) in [
+            ("world", NamespaceId::World),
+            ("cascade", NamespaceId::Cascade),
+            ("event", NamespaceId::Event),
+            ("mask", NamespaceId::Mask),
+            ("action", NamespaceId::Action),
+            ("rng", NamespaceId::Rng),
+            ("query", NamespaceId::Query),
+            ("voxel", NamespaceId::Voxel),
+            // Legacy collection / accessor namespaces — kept for iteration
+            // source use (`count(a in agents ...)`). No declared fields.
+            ("agents", NamespaceId::Agents),
+            ("items", NamespaceId::Items),
+            ("groups", NamespaceId::Groups),
+            ("quests", NamespaceId::Quests),
+            ("auctions", NamespaceId::Auctions),
+            ("tick", NamespaceId::Tick),
         ] {
-            symbols.stdlib_namespaces.insert(ns.to_string());
+            symbols.stdlib_namespaces.insert(name.to_string(), id);
+        }
+    }
+
+    /// Field schema for typed stdlib namespaces.
+    ///
+    /// Returns `None` if the namespace doesn't declare this field — which
+    /// either means the field is unknown (a later pass may error) or the
+    /// namespace is a legacy collection without a declared field schema.
+    pub fn field_type(ns: NamespaceId, field: &str) -> Option<IrType> {
+        match (ns, field) {
+            (NamespaceId::World, "tick") => Some(IrType::U64),
+            (NamespaceId::World, "seed") => Some(IrType::U64),
+            (NamespaceId::World, "n_agents_alive") => Some(IrType::U32),
+            (NamespaceId::Cascade, "iterations") => Some(IrType::U32),
+            (NamespaceId::Cascade, "phase") => Some(IrType::Enum {
+                name: "CascadePhase".into(),
+                variants: vec!["Pre".into(), "Event".into(), "Post".into()],
+            }),
+            (NamespaceId::Event, "kind") => Some(IrType::Named("EventKindId".into())),
+            (NamespaceId::Event, "tick") => Some(IrType::U64),
+            (NamespaceId::Mask, "rejections") => Some(IrType::U64),
+            (NamespaceId::Action, "head") => Some(IrType::Named("ActionHeadKind".into())),
+            (NamespaceId::Action, "target") => {
+                Some(IrType::Optional(Box::new(IrType::Named("AnyId".into()))))
+            }
+            _ => None,
+        }
+    }
+
+    /// Method schema for typed stdlib namespaces: returns `(arity, return_ty)`
+    /// when the method is declared. Arg types are documented in `stdlib.md`
+    /// and enforced by a later type-checking pass — 1a only checks arity.
+    pub fn method_sig(ns: NamespaceId, method: &str) -> Option<(usize, IrType)> {
+        match (ns, method) {
+            (NamespaceId::Rng, "uniform") => Some((2, IrType::F32)),
+            (NamespaceId::Rng, "gauss") => Some((2, IrType::F32)),
+            (NamespaceId::Rng, "coin") => Some((0, IrType::Bool)),
+            (NamespaceId::Rng, "uniform_int") => Some((2, IrType::I32)),
+            (NamespaceId::Query, "nearby_agents") => {
+                Some((2, IrType::List(Box::new(IrType::AgentId))))
+            }
+            (NamespaceId::Query, "within_planar") => {
+                Some((2, IrType::List(Box::new(IrType::AgentId))))
+            }
+            (NamespaceId::Query, "nearby_items") => {
+                Some((2, IrType::List(Box::new(IrType::ItemId))))
+            }
+            (NamespaceId::Voxel, "neighbors_above") => {
+                Some((1, IrType::List(Box::new(IrType::Vec3))))
+            }
+            (NamespaceId::Voxel, "neighbors_below") => {
+                Some((1, IrType::List(Box::new(IrType::Vec3))))
+            }
+            (NamespaceId::Voxel, "surface_height") => Some((2, IrType::I32)),
+            _ => None,
         }
     }
 }
@@ -84,10 +168,13 @@ pub struct SymbolTable {
     pub metrics: HashMap<String, MetricRef>,
     pub builtins: HashMap<String, Builtin>,
     pub stdlib_types: HashMap<String, IrType>,
-    /// Sim-wide accessor namespaces: `cascade`, `event`, `agents`, `mask`,
-    /// `action`. They behave as opaque identifiers for 1a; 1b will type-check
-    /// the fields / calls hanging off them.
-    pub stdlib_namespaces: std::collections::HashSet<String>,
+    /// Sim-wide accessor namespaces: `world`, `cascade`, `event`, `mask`,
+    /// `action`, `rng`, `query`, `voxel`, plus the legacy collection
+    /// accessors (`agents`, `items`, `groups`, `quests`, `auctions`,
+    /// `tick`). Each maps to a typed `NamespaceId` the IR uses; per-field
+    /// and per-method schemas are declared in `stdlib::field_type` /
+    /// `stdlib::method_sig`.
+    pub stdlib_namespaces: HashMap<String, NamespaceId>,
     // Span of first declaration — for duplicate-decl diagnostics.
     pub first_span: HashMap<(&'static str, String), Span>,
 }
@@ -956,6 +1043,23 @@ fn resolve_expr(
         ExprKind::String(v) => IrExpr::LitString(v.clone()),
         ExprKind::Ident(name) => resolve_ident(name, span, scope, symbols)?,
         ExprKind::Field(base, name) => {
+            // Fast path: `<namespace>.<field>` where `<namespace>` is a bare
+            // identifier naming a typed stdlib namespace.
+            if let ExprKind::Ident(ns_name) = &base.kind {
+                if scope.lookup(ns_name).is_none() {
+                    if let Some(ns) = symbols.stdlib_namespaces.get(ns_name) {
+                        let ty = stdlib::field_type(*ns, name).unwrap_or(IrType::Unknown);
+                        return Ok(IrExprNode {
+                            kind: IrExpr::NamespaceField {
+                                ns: *ns,
+                                field: name.clone(),
+                                ty,
+                            },
+                            span,
+                        });
+                    }
+                }
+            }
             let base_ir = resolve_expr(base, scope, symbols)?;
             IrExpr::Field {
                 base: Box::new(base_ir),
@@ -1108,8 +1212,8 @@ fn resolve_ident(
     if let Some(r) = symbols.verbs.get(name) {
         return Ok(IrExpr::Verb(*r));
     }
-    if symbols.stdlib_namespaces.contains(name) {
-        return Ok(IrExpr::Namespace(name.to_string()));
+    if let Some(ns) = symbols.stdlib_namespaces.get(name) {
+        return Ok(IrExpr::Namespace(*ns));
     }
     if let Some(t) = symbols.stdlib_types.get(name) {
         // The identifier referred to a type name used as a value. In 1a we
@@ -1138,6 +1242,30 @@ fn resolve_call(
     scope: &mut LocalScope,
     symbols: &SymbolTable,
 ) -> Result<IrExpr, ResolveError> {
+    // `<namespace>.<method>(...)` — resolved against the stdlib method
+    // schema. An unknown method on a known namespace stays structured
+    // (ns+method kept), with `Unknown` return type; 1b flags it.
+    if let ExprKind::Field(base, method) = &callee.kind {
+        if let ExprKind::Ident(ns_name) = &base.kind {
+            if scope.lookup(ns_name).is_none() {
+                if let Some(ns) = symbols.stdlib_namespaces.get(ns_name) {
+                    let ir_args = args
+                        .iter()
+                        .map(|a| resolve_call_arg(a, scope, symbols))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    // Arity is informational here; 1a doesn't surface it as
+                    // an error. 1b will compare `ir_args.len()` against
+                    // `stdlib::method_sig(ns, method).0`.
+                    let _ = stdlib::method_sig(*ns, method);
+                    return Ok(IrExpr::NamespaceCall {
+                        ns: *ns,
+                        method: method.clone(),
+                        args: ir_args,
+                    });
+                }
+            }
+        }
+    }
     // Only resolve callees that are a bare Ident. Anything else (method
     // chain, field-call) falls through as UnresolvedCall or Raw.
     if let ExprKind::Ident(name) = &callee.kind {

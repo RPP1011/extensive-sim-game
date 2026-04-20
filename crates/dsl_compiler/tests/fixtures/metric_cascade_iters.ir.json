@@ -20,18 +20,10 @@
                 "name": null,
                 "value": {
                   "kind": {
-                    "Field": {
-                      "base": {
-                        "kind": {
-                          "Namespace": "cascade"
-                        },
-                        "span": {
-                          "start": 114,
-                          "end": 121
-                        }
-                      },
-                      "field_name": "iterations",
-                      "field": null
+                    "NamespaceField": {
+                      "ns": "Cascade",
+                      "field": "iterations",
+                      "ty": "U32"
                     }
                   },
                   "span": {
@@ -110,7 +102,7 @@
                       "binder_name": "a",
                       "iter": {
                         "kind": {
-                          "Namespace": "agents"
+                          "Namespace": "Agents"
                         },
                         "span": {
                           "start": 241,

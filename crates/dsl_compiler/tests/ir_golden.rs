@@ -21,6 +21,7 @@ const FIXTURES: &[&str] = &[
     "probe_low_hp_flees",
     "metric_cascade_iters",
     "for_filter",
+    "stdlib_usage",
 ];
 
 fn fixtures_dir() -> PathBuf {
@@ -133,5 +134,59 @@ fn unknown_lowercase_ident_errors() {
             assert_eq!(name, "notarealthing");
         }
         other => panic!("expected UnknownIdent, got {other:?}"),
+    }
+}
+
+#[test]
+fn game_view_call_stays_unresolved() {
+    // `is_hostile` is a game-level derivation, NOT part of the Rust-backed
+    // stdlib. Without a user `view is_hostile(...)` declaration it must stay
+    // UnresolvedCall (1a contract). A later validation pass (1b) turns this
+    // into a hard error.
+    let src = r#"
+        mask Attack(t) when t.alive && is_hostile(self, t)
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile");
+    let pred = &comp.masks[0].predicate.kind;
+    let mut found_is_hostile = false;
+    visit_unresolved(pred, &mut |name, _args| {
+        if name == "is_hostile" {
+            found_is_hostile = true;
+        }
+    });
+    assert!(
+        found_is_hostile,
+        "expected `is_hostile` to remain an UnresolvedCall in the mask predicate IR: {pred:?}"
+    );
+}
+
+fn visit_unresolved(
+    kind: &dsl_compiler::ir::IrExpr,
+    f: &mut dyn FnMut(&str, &[dsl_compiler::ir::IrCallArg]),
+) {
+    use dsl_compiler::ir::IrExpr::*;
+    match kind {
+        UnresolvedCall(name, args) => f(name, args),
+        Binary(_, l, r) => {
+            visit_unresolved(&l.kind, f);
+            visit_unresolved(&r.kind, f);
+        }
+        Unary(_, r) => visit_unresolved(&r.kind, f),
+        Field { base, .. } => visit_unresolved(&base.kind, f),
+        Index(a, b) => {
+            visit_unresolved(&a.kind, f);
+            visit_unresolved(&b.kind, f);
+        }
+        BuiltinCall(_, args) | ViewCall(_, args) | VerbCall(_, args) => {
+            for a in args {
+                visit_unresolved(&a.value.kind, f);
+            }
+        }
+        NamespaceCall { args, .. } => {
+            for a in args {
+                visit_unresolved(&a.value.kind, f);
+            }
+        }
+        _ => {}
     }
 }

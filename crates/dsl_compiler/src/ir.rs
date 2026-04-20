@@ -108,9 +108,26 @@ pub enum IrExpr {
     Entity(EntityRef),
     View(ViewRef),
     Verb(VerbRef),
-    /// Stdlib namespace / sim-wide accessor: `cascade`, `event`, `agents`,
-    /// `mask`, `action`. Meaning is resolved at a later pass.
-    Namespace(String),
+    /// Stdlib namespace / sim-wide accessor: `world`, `cascade`, `event`,
+    /// `mask`, `action`, `rng`, `query`, `voxel`, plus the legacy collection
+    /// accessors (`agents`, `items`, `groups`, `quests`, `auctions`, `tick`).
+    /// Fields and methods hanging off a typed namespace resolve to
+    /// `NamespaceField` / `NamespaceCall`; legacy collections stay loose.
+    Namespace(NamespaceId),
+    /// `world.tick`, `cascade.iterations`, etc. Resolved with a stdlib-typed
+    /// field signature.
+    NamespaceField {
+        ns: NamespaceId,
+        field: String,
+        ty: IrType,
+    },
+    /// `rng.uniform(0.0, 1.0)`, `query.nearby_agents(pos, 20.0)`, etc.
+    /// Resolved against a stdlib-declared method signature.
+    NamespaceCall {
+        ns: NamespaceId,
+        method: String,
+        args: Vec<IrCallArg>,
+    },
     // Enum variant (e.g. `Conquest`, `Family`, `true`, `false`).
     EnumVariant { ty: String, variant: String },
     // Field access. When we can resolve, `field` is `Some`. Otherwise we keep
@@ -492,21 +509,97 @@ pub struct MetricIR {
 }
 
 // ---------------------------------------------------------------------------
+// Stdlib namespaces
+// ---------------------------------------------------------------------------
+
+/// Identifier for a Rust-backed stdlib namespace. The typed namespaces
+/// (`World`, `Cascade`, `Event`, `Mask`, `Action`, `Rng`, `Query`, `Voxel`)
+/// carry declared field and method schemas; the legacy collection
+/// namespaces (`Agents`, `Items`, `Groups`, `Quests`, `Auctions`, `Tick`)
+/// are iterables / sim-wide accessors whose per-field schema is not yet
+/// spelled out in the compiler — they carry through unchanged for 1a.
+///
+/// See `docs/dsl/stdlib.md` for the canonical reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub enum NamespaceId {
+    World,
+    Cascade,
+    Event,
+    Mask,
+    Action,
+    Rng,
+    Query,
+    Voxel,
+    // Legacy collection / accessor namespaces. Kept typed so the IR stays
+    // closed; their fields are not yet declared.
+    Agents,
+    Items,
+    Groups,
+    Quests,
+    Auctions,
+    Tick,
+}
+
+impl NamespaceId {
+    pub fn name(&self) -> &'static str {
+        match self {
+            NamespaceId::World => "world",
+            NamespaceId::Cascade => "cascade",
+            NamespaceId::Event => "event",
+            NamespaceId::Mask => "mask",
+            NamespaceId::Action => "action",
+            NamespaceId::Rng => "rng",
+            NamespaceId::Query => "query",
+            NamespaceId::Voxel => "voxel",
+            NamespaceId::Agents => "agents",
+            NamespaceId::Items => "items",
+            NamespaceId::Groups => "groups",
+            NamespaceId::Quests => "quests",
+            NamespaceId::Auctions => "auctions",
+            NamespaceId::Tick => "tick",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Builtins
 // ---------------------------------------------------------------------------
 
+/// Rust-backed stdlib primitive functions. These are the engine-intrinsic
+/// callables the compiler recognises without requiring a DSL declaration.
+/// See `docs/dsl/stdlib.md` for the complete signature reference.
+///
+/// Note: the enum is intentionally flat (no separate `StdlibFn` sister
+/// enum). All stdlib primitives share the same emitter dispatch as the
+/// aggregation / spatial builtins that were here before this milestone, so
+/// keeping them in one enum avoids a second match in every consumer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Builtin {
+    // Aggregations / quantifiers (legacy).
     Count,
     Sum,
-    Min,
-    Max,
+    Forall,
+    Exists,
+    // Spatial.
     Distance,
     PlanarDistance,
     ZSeparation,
+    // ID dereference.
     Entity,
-    Forall,
-    Exists,
+    // Numeric. `Min`/`Max` double as fold aggregators in existing use; the
+    // runtime dispatches on arity (one arg over an iterable = aggregation,
+    // two args = pairwise min/max).
+    Min,
+    Max,
+    Clamp,
+    Abs,
+    Floor,
+    Ceil,
+    Round,
+    Ln,
+    Log2,
+    Log10,
+    Sqrt,
 }
 
 impl Builtin {
@@ -514,14 +607,45 @@ impl Builtin {
         match self {
             Builtin::Count => "count",
             Builtin::Sum => "sum",
-            Builtin::Min => "min",
-            Builtin::Max => "max",
+            Builtin::Forall => "forall",
+            Builtin::Exists => "exists",
             Builtin::Distance => "distance",
             Builtin::PlanarDistance => "planar_distance",
             Builtin::ZSeparation => "z_separation",
             Builtin::Entity => "entity",
-            Builtin::Forall => "forall",
-            Builtin::Exists => "exists",
+            Builtin::Min => "min",
+            Builtin::Max => "max",
+            Builtin::Clamp => "clamp",
+            Builtin::Abs => "abs",
+            Builtin::Floor => "floor",
+            Builtin::Ceil => "ceil",
+            Builtin::Round => "round",
+            Builtin::Ln => "ln",
+            Builtin::Log2 => "log2",
+            Builtin::Log10 => "log10",
+            Builtin::Sqrt => "sqrt",
+        }
+    }
+
+    /// Fixed arity for primitives whose call shape is pinned. `None` means
+    /// the call may vary (e.g. `min`/`max` can be pairwise or fold-over-iter).
+    pub fn fixed_arity(&self) -> Option<usize> {
+        match self {
+            Builtin::Distance | Builtin::PlanarDistance | Builtin::ZSeparation => Some(2),
+            Builtin::Entity => Some(1),
+            Builtin::Clamp => Some(3),
+            Builtin::Abs
+            | Builtin::Floor
+            | Builtin::Ceil
+            | Builtin::Round
+            | Builtin::Ln
+            | Builtin::Log2
+            | Builtin::Log10
+            | Builtin::Sqrt => Some(1),
+            // Quantifiers are parsed as a dedicated AST node, not a call; this
+            // entry is for completeness only.
+            Builtin::Forall | Builtin::Exists => None,
+            Builtin::Count | Builtin::Sum | Builtin::Min | Builtin::Max => None,
         }
     }
 }
