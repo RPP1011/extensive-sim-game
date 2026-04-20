@@ -16,7 +16,9 @@ fn mask_attack_bit_pins_attack_range_at_2m_boundary() {
     // the fixtures use a hostile Human-vs-Wolf pair.
     fn bit_set_for(state: &SimState, attacker: AgentId) -> bool {
         let mut mask = MaskBuffer::new(state.agent_cap() as usize);
-        mask.mark_attack_allowed_if_target_in_range(state);
+        let mut target_mask =
+            engine::mask::TargetMask::new(state.agent_cap() as usize);
+        mask.mark_attack_allowed_from_candidates(state, &mut target_mask);
         let slot = (attacker.raw() - 1) as usize;
         let offset = slot * MicroKind::ALL.len() + MicroKind::Attack as usize;
         mask.micro_kind[offset]
@@ -50,7 +52,9 @@ fn mask_attack_bit_respects_hostility_gate() {
     // Human + Wolf at the same range should.
     fn bit_set_for(state: &SimState, attacker: AgentId) -> bool {
         let mut mask = MaskBuffer::new(state.agent_cap() as usize);
-        mask.mark_attack_allowed_if_target_in_range(state);
+        let mut target_mask =
+            engine::mask::TargetMask::new(state.agent_cap() as usize);
+        mask.mark_attack_allowed_from_candidates(state, &mut target_mask);
         let slot = (attacker.raw() - 1) as usize;
         let offset = slot * MicroKind::ALL.len() + MicroKind::Attack as usize;
         mask.micro_kind[offset]
@@ -79,7 +83,7 @@ fn mask_attack_bit_respects_hostility_gate() {
 
 struct AttackFixed(AgentId);
 impl PolicyBackend for AttackFixed {
-    fn evaluate(&self, state: &SimState, _: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         for id in state.agents_alive() {
             if id == self.0 { out.push(Action::hold(id)); continue; }
             out.push(Action {

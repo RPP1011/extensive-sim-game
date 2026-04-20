@@ -3,6 +3,7 @@
 // Do not edit by hand.
 
 use crate::ids::AgentId;
+use crate::mask::TargetMask;
 use crate::state::SimState;
 
 /// Predicate: can `self_id` issue this mask's action head against the given target?
@@ -20,4 +21,22 @@ pub fn mask_attack(state: &SimState, self_id: AgentId, target: AgentId) -> bool 
         return false;
     }
     true
+}
+
+/// Candidate enumerator: walk `from query.nearby_agents(...)` and push every agent that
+/// satisfies the mask predicate into `out`. Task 138.
+pub fn mask_attack_candidates(state: &SimState, self_id: AgentId, out: &mut TargetMask) {
+    let self_pos = state.agent_pos(self_id).unwrap_or(glam::Vec3::ZERO);
+    let pos = self_pos;
+    let radius = state.config.combat.attack_range;
+    let spatial = state.spatial();
+    for target in spatial.within_radius(state, pos, radius) {
+        if target == self_id {
+            continue;
+        }
+        if !mask_attack(state, self_id, target) {
+            continue;
+        }
+        out.push(self_id, crate::mask::MicroKind::Attack, target);
+    }
 }

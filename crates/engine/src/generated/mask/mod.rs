@@ -10,11 +10,13 @@ pub mod move_toward;
 pub mod rest;
 
 pub use attack::mask_attack;
+pub use attack::mask_attack_candidates;
 pub use drink::mask_drink;
 pub use eat::mask_eat;
 pub use flee::mask_flee;
 pub use hold::mask_hold;
 pub use move_toward::mask_move_toward;
+pub use move_toward::mask_move_toward_candidates;
 pub use rest::mask_rest;
 
 /// Called from the engine's mask-build path. For milestone 4 this

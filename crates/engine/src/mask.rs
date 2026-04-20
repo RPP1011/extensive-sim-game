@@ -1,10 +1,12 @@
 // crates/engine/src/mask.rs
 use crate::ability::{evaluate_cast_gate, AbilityRegistry};
 use crate::generated::mask::{
-    mask_attack, mask_drink, mask_eat, mask_flee, mask_hold, mask_move_toward, mask_rest,
+    mask_attack_candidates, mask_drink, mask_eat, mask_flee, mask_hold, mask_move_toward_candidates,
+    mask_rest,
 };
 use crate::ids::AgentId;
 use crate::state::SimState;
+use smallvec::SmallVec;
 
 pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 D5
 
@@ -52,6 +54,88 @@ impl MicroKind {
         MicroKind::HarvestVoxel, MicroKind::Converse,     MicroKind::ShareStory,
         MicroKind::Communicate,  MicroKind::Ask,          MicroKind::Remember,
     ];
+
+    /// Target-bound kinds that consume a `TargetMask` candidate list (task
+    /// 138). Self-only kinds (Hold / Flee / Eat / Drink / Rest / … the
+    /// zero-arg domain hooks) read no candidates and are scored once per
+    /// agent. Attack and MoveToward are the only target-bound kinds at
+    /// v1 — `Cast`'s target is still inferred via `inferred_cast_target`
+    /// in mask-build, and the other targeted heads (Converse /
+    /// Communicate / Ask / …) stay permissive until their DSL mask
+    /// declarations land.
+    pub const TARGET_BOUND: &'static [MicroKind] = &[
+        MicroKind::Attack,
+        MicroKind::MoveToward,
+    ];
+
+    /// Dense 0-based index into `TARGET_BOUND` for this kind, or `None` for
+    /// self-only kinds. Used by `TargetMask` to address per-kind candidate
+    /// lists.
+    pub fn target_slot(self) -> Option<usize> {
+        match self {
+            MicroKind::Attack => Some(0),
+            MicroKind::MoveToward => Some(1),
+            _ => None,
+        }
+    }
+}
+
+/// Per-agent, per-target-bound-kind list of valid targets. Task 138 — the
+/// scorer argmaxes over these candidate lists for every targeted
+/// `MicroKind`, replacing the old `nearest_other` heuristic. Self-only
+/// kinds (Hold / Flee / Eat / …) read no candidates and are scored once
+/// per agent.
+///
+/// Storage shape: flat `Vec<SmallVec<...>>` indexed by
+/// `agent_slot * TARGET_BOUND.len() + kind.target_slot()`. Inline
+/// capacity is 8 per (agent, kind) pair — enough for a small melee mob
+/// without spilling to the heap in the common case.
+pub struct TargetMask {
+    pub candidates: Vec<SmallVec<[AgentId; 8]>>,
+}
+
+impl TargetMask {
+    pub fn new(n_agents: usize) -> Self {
+        let slots = n_agents * MicroKind::TARGET_BOUND.len();
+        let mut candidates = Vec::with_capacity(slots);
+        for _ in 0..slots {
+            candidates.push(SmallVec::new());
+        }
+        Self { candidates }
+    }
+
+    /// Clear every per-agent candidate list; called once per tick before
+    /// the target-mask-build phase re-populates them.
+    pub fn reset(&mut self) {
+        for c in self.candidates.iter_mut() {
+            c.clear();
+        }
+    }
+
+    fn slot(&self, agent: AgentId, kind: MicroKind) -> Option<usize> {
+        let agent_slot = (agent.raw() - 1) as usize;
+        let kind_slot = kind.target_slot()?;
+        Some(agent_slot * MicroKind::TARGET_BOUND.len() + kind_slot)
+    }
+
+    /// Push a candidate target into the list for `(agent, kind)`. Called
+    /// by the compiler-emitted `mask_<name>_candidates` fns.
+    pub fn push(&mut self, agent: AgentId, kind: MicroKind, target: AgentId) {
+        if let Some(i) = self.slot(agent, kind) {
+            if let Some(list) = self.candidates.get_mut(i) {
+                list.push(target);
+            }
+        }
+    }
+
+    /// Read the candidate list for `(agent, kind)`. Empty for self-only
+    /// kinds and for (agent, targeted-kind) pairs with no hits.
+    pub fn candidates_for(&self, agent: AgentId, kind: MicroKind) -> &[AgentId] {
+        match self.slot(agent, kind) {
+            Some(i) => self.candidates.get(i).map_or(&[], |v| v.as_slice()),
+            None => &[],
+        }
+    }
 }
 
 pub struct MaskBuffer {
@@ -98,26 +182,36 @@ impl MaskBuffer {
         self.mark_self_predicate(state, MicroKind::Hold, mask_hold);
     }
 
-    /// Mark `MoveToward` via the DSL-emitted `mask_move_toward` predicate.
-    ///
-    /// Name preserved from the legacy mask-build API (`*_if_others_exist`)
-    /// even though the DSL predicate is purely self-referential at task
-    /// 141 — the action builder in `UtilityBackend` still falls back to
-    /// Hold when `nearest_other` yields `None`, so the observable
-    /// behaviour matches the legacy "need at least one other agent"
-    /// gate end-to-end.
-    pub fn mark_move_allowed_if_others_exist(&mut self, state: &SimState) {
-        self.mark_self_predicate(state, MicroKind::MoveToward, mask_move_toward);
+    /// Mark `MoveToward` as allowed for every agent whose
+    /// `mask_move_toward_candidates` enumerator produces at least one
+    /// target. Task 138 — MoveToward is now a target-bound kind with a
+    /// `from` clause in DSL; this routine populates both the categorical
+    /// bit (at least one candidate exists) and the per-agent target
+    /// candidate list in `target_mask`.
+    pub fn mark_move_allowed_from_candidates(
+        &mut self,
+        state: &SimState,
+        target_mask: &mut TargetMask,
+    ) {
+        let n_kinds = MicroKind::ALL.len();
+        for id in state.agents_alive() {
+            mask_move_toward_candidates(state, id, target_mask);
+            let has_target = !target_mask.candidates_for(id, MicroKind::MoveToward).is_empty();
+            if has_target {
+                let slot = (id.raw() - 1) as usize;
+                let offset = slot * n_kinds + MicroKind::MoveToward as usize;
+                self.micro_kind[offset] = true;
+            }
+        }
     }
 
     /// Mark `Flee` via the DSL-emitted `mask_flee` predicate. The DSL
     /// predicate is permissive (allowed for any alive agent) — the real
-    /// gate (`hp_pct < 0.3`) lives in the `Flee` scoring row. The legacy
-    /// engine check also required a threat within aggro range (spatial
-    /// quantifier, not yet in the mask DSL surface); deferring the
-    /// threat check is safe because the scorer's `build_action` uses
-    /// `nearest_other` as the threat proxy and falls back to Hold when
-    /// no other agent exists.
+    /// gate (`hp_pct < 0.3`) lives in the `Flee` scoring row. Task 138
+    /// retired the engine-side "threat within aggro range" quantifier;
+    /// Flee stays self-only and `build_action` maps it to Hold when the
+    /// scorer picks it, until the DSL surface grows threat-pointer
+    /// semantics for the Flee head.
     pub fn mark_flee_allowed_if_threat_exists(&mut self, state: &SimState) {
         self.mark_self_predicate(state, MicroKind::Flee, mask_flee);
     }
@@ -131,37 +225,23 @@ impl MaskBuffer {
         self.mark_self_predicate(state, MicroKind::Rest, mask_rest);
     }
 
-    /// Mark `Attack` as allowed for every alive agent that has at least one
-    /// valid target as decided by the compiler-emitted `mask_attack`
-    /// predicate (see `assets/sim/masks.sim`). The predicate checks:
-    /// target is alive, target is hostile to self (per
-    /// `crate::rules::is_hostile`), and the two agents are within 2.0m.
-    ///
-    /// The spatial iterator bounds the candidate set; the predicate
-    /// decides per-pair whether the bit should be set. Custom per-agent
-    /// attack ranges (`set_agent_attack_range`) are honoured by
-    /// broadening the spatial iterator — the predicate still enforces
-    /// the DSL-declared 2.0m cap, so custom-range setups only matter
-    /// once the attack mask grows per-agent range support in the DSL.
-    pub fn mark_attack_allowed_if_target_in_range(&mut self, state: &SimState) {
+    /// Mark `Attack` via the compiler-emitted candidate enumerator
+    /// `mask_attack_candidates`. Task 138 — both the categorical bit
+    /// AND the per-agent target candidate list are populated from the
+    /// DSL-declared `from query.nearby_agents(...)` source + `when`
+    /// predicate. The scorer then argmaxes over the candidate list
+    /// rather than resolving a single target via `nearest_other`.
+    pub fn mark_attack_allowed_from_candidates(
+        &mut self,
+        state: &SimState,
+        target_mask: &mut TargetMask,
+    ) {
         let n_kinds = MicroKind::ALL.len();
-        let spatial = state.spatial();
         for id in state.agents_alive() {
-            let slot = (id.raw() - 1) as usize;
-            let self_pos = match state.agent_pos(id) {
-                Some(p) => p,
-                None    => continue,
-            };
-            let floor = state.config.combat.attack_range;
-            let range = state
-                .agent_attack_range(id)
-                .unwrap_or(floor)
-                .max(floor);
-            let has_target = spatial
-                .within_radius(state, self_pos, range)
-                .into_iter()
-                .any(|other| other != id && mask_attack(state, id, other));
+            mask_attack_candidates(state, id, target_mask);
+            let has_target = !target_mask.candidates_for(id, MicroKind::Attack).is_empty();
             if has_target {
+                let slot = (id.raw() - 1) as usize;
                 let offset = slot * n_kinds + MicroKind::Attack as usize;
                 self.micro_kind[offset] = true;
             }
@@ -233,8 +313,10 @@ fn first_registered_ability(reg: &AbilityRegistry) -> Option<crate::ability::Abi
 }
 
 /// Pick the nearest hostile within engagement range as the inferred cast
-/// target. Matches the `UtilityBackend` heuristic for Attack: locality +
-/// hostility. Returns `None` when no hostile is in range.
+/// target. Task 138 retired the matching Attack-target heuristic
+/// (`nearest_other`); Cast's target inference stays here until the Cast
+/// mask gains a `from` clause of its own. Returns `None` when no hostile
+/// is in range.
 fn inferred_cast_target(state: &SimState, caster: AgentId) -> Option<AgentId> {
     let pos = state.agent_pos(caster)?;
     let ct = state.agent_creature_type(caster)?;

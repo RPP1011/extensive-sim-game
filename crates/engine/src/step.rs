@@ -4,7 +4,7 @@ use crate::channel::channel_range;
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::invariant::{FailureMode, InvariantRegistry};
-use crate::mask::{MaskBuffer, MicroKind};
+use crate::mask::{MaskBuffer, MicroKind, TargetMask};
 use crate::policy::{Action, ActionKind, AnnounceAudience, MacroAction, MicroTarget, PolicyBackend};
 use crate::rng::per_agent_u32;
 use crate::state::SimState;
@@ -133,6 +133,10 @@ fn effect_slow_multiplier(state: &SimState, id: AgentId) -> f32 {
 /// that was ~500 K allocations per `mixed_actions/500` iteration.
 pub struct SimScratch {
     pub mask:        MaskBuffer,
+    /// Per-agent per-target-bound-kind candidate list. Task 138 —
+    /// populated by the compiler-emitted `mask_<name>_candidates`
+    /// enumerators during mask-build and consumed by the scorer.
+    pub target_mask: TargetMask,
     pub actions:     Vec<Action>,
     pub shuffle_idx: Vec<u32>,
     /// Snapshot of `state.agents_alive()` taken at the top of `tick_start`'s
@@ -148,6 +152,7 @@ impl SimScratch {
     pub fn new(n_agents: usize) -> Self {
         Self {
             mask:        MaskBuffer::new(n_agents),
+            target_mask: TargetMask::new(n_agents),
             actions:     Vec::with_capacity(n_agents),
             shuffle_idx: Vec::with_capacity(n_agents),
             engagement_alive_ids: Vec::with_capacity(n_agents),
@@ -218,12 +223,16 @@ pub fn step_full<B: PolicyBackend>(
     // hot_engaged_with via bidirectional tentative-commit.
     crate::ability::expire::tick_start(state, scratch, events);
 
-    // Phase 1 — mask build.
+    // Phase 1 — mask build. Task 138: target-bound kinds (Attack /
+    // MoveToward) also populate per-agent candidate lists in
+    // `target_mask`; the scorer argmaxes over those lists rather than
+    // using the retired `nearest_other` heuristic.
     scratch.mask.reset();
+    scratch.target_mask.reset();
     scratch.mask.mark_hold_allowed(state);
-    scratch.mask.mark_move_allowed_if_others_exist(state);
+    scratch.mask.mark_move_allowed_from_candidates(state, &mut scratch.target_mask);
     scratch.mask.mark_flee_allowed_if_threat_exists(state);
-    scratch.mask.mark_attack_allowed_if_target_in_range(state);
+    scratch.mask.mark_attack_allowed_from_candidates(state, &mut scratch.target_mask);
     scratch.mask.mark_needs_allowed(state);
     scratch.mask.mark_domain_hook_micros_allowed(
         state,
@@ -232,7 +241,7 @@ pub fn step_full<B: PolicyBackend>(
 
     // Phase 2 — policy evaluate.
     scratch.actions.clear();
-    backend.evaluate(state, &scratch.mask, &mut scratch.actions);
+    backend.evaluate(state, &scratch.mask, &scratch.target_mask, &mut scratch.actions);
 
     // Phase 3 — deterministic per-tick action shuffle. Populates
     // `scratch.shuffle_idx` with a permutation over `scratch.actions` keyed by

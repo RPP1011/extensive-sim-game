@@ -363,6 +363,13 @@ pub enum PatternValue {
 pub struct MaskDecl {
     pub annotations: Vec<Annotation>,
     pub head: ActionHead,
+    /// Optional `from <expression>` clause — the candidate source for
+    /// target-bound masks. When present, the emitted mask fn enumerates
+    /// candidates from this expression (typically a `query.nearby_agents`
+    /// call) and filters each through the `when` predicate. Task 138 —
+    /// retire `nearest_other` in favour of scoring-argmax over masked
+    /// candidates.
+    pub candidate_source: Option<Expr>,
     pub predicate: Expr,
     pub span: Span,
 }

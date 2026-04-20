@@ -15,6 +15,7 @@
             "end": 75
           }
         },
+        "candidate_source": null,
         "predicate": {
           "kind": {
             "Binary": {

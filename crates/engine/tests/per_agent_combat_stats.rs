@@ -19,7 +19,7 @@ struct ForceAttack {
     target:   AgentId,
 }
 impl PolicyBackend for ForceAttack {
-    fn evaluate(&self, state: &SimState, _: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         out.push(Action {
             agent: self.attacker,
             kind: ActionKind::Micro {

@@ -8,10 +8,11 @@
 // order; task 141 retired the 5 legacy hand-written masks in
 // `crates/engine/src/mask.rs` in favour of these DSL-owned predicates.
 //
-// Non-stdlib game views (e.g. `is_hostile`) are emitted as calls into
-// `crate::rules::<name>(state, args...)`. Those fns are hand-written in
-// `crates/engine/src/rules/` and shrink as later milestones let the DSL
-// declare views directly.
+// Game-level derivations are declared as `view` in
+// `assets/sim/views.sim` — the mask emitter routes their calls through
+// `crate::generated::views::<name>(...)`. The legacy `crate::rules::*`
+// shim module was retired in task 140 when the last shim (`is_hostile`)
+// became a DSL view.
 //
 // The `Cast` mask-gate (cooldown + stun + engagement-lock) stays in
 // `crates/engine/src/ability/gate.rs` until a follow-up task grows the
@@ -25,10 +26,14 @@
 // below its base.
 mask Hold when agents.alive(self)
 
-// MoveToward: always available for any alive agent. The action builder
-// resolves the target (nearest other agent) at emission time; when no
-// other agent exists the build falls back to Hold.
-mask MoveToward when agents.alive(self)
+// MoveToward: target-bound — enumerates every alive-agent candidate
+// within `config.combat.aggro_range` of `self`, excluding `self`.
+// Task 138 — the scorer argmaxes over the candidate list produced by
+// `mask_move_toward_candidates` rather than the retired `nearest_other`
+// heuristic.
+mask MoveToward(target)
+  from query.nearby_agents(agents.pos(self), config.combat.aggro_range)
+  when agents.alive(target) && target != self
 
 // Flee: permissive — every alive agent is allowed to flee. The legacy
 // engine predicate additionally required a threat within aggro range,
@@ -50,9 +55,12 @@ mask Eat   when agents.alive(self)
 mask Drink when agents.alive(self)
 mask Rest  when agents.alive(self)
 
-// Attack: hostile target within melee range. Kept last so the diff
-// against the previous revision stays small.
+// Attack: hostile target within melee range. Target-bound — enumerates
+// every candidate within `config.combat.attack_range` and filters each
+// through the predicate. Task 138 — scorer argmaxes over candidates,
+// no more `nearest_other` fallback.
 mask Attack(target)
+  from query.nearby_agents(agents.pos(self), config.combat.attack_range)
   when agents.alive(target)
     && is_hostile(self, target)
     && distance(agents.pos(self), agents.pos(target)) < 2.0

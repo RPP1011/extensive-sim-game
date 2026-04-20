@@ -14,6 +14,7 @@
           "end": 342
         }
       },
+      "candidate_source": null,
       "predicate": {
         "kind": {
           "NamespaceCall": {
@@ -62,6 +63,7 @@
           "end": 382
         }
       },
+      "candidate_source": null,
       "predicate": {
         "kind": {
           "NamespaceCall": {
@@ -110,6 +112,7 @@
           "end": 422
         }
       },
+      "candidate_source": null,
       "predicate": {
         "kind": {
           "NamespaceCall": {

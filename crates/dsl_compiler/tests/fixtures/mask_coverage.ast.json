@@ -11,6 +11,7 @@
             "end": 342
           }
         },
+        "candidate_source": null,
         "predicate": {
           "kind": {
             "Call": [
@@ -76,6 +77,7 @@
             "end": 382
           }
         },
+        "candidate_source": null,
         "predicate": {
           "kind": {
             "Call": [
@@ -141,6 +143,7 @@
             "end": 422
           }
         },
+        "candidate_source": null,
         "predicate": {
           "kind": {
             "Call": [

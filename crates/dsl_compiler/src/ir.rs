@@ -452,6 +452,12 @@ pub struct IrPatternBinding {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MaskIR {
     pub head: IrActionHead,
+    /// Optional `from <expression>` clause — the candidate source for
+    /// target-bound masks. When `Some`, the emitted mask enumerator
+    /// walks this expression (typically `query.nearby_agents(...)`)
+    /// and filters each candidate through `predicate`. When `None`, the
+    /// mask emits the legacy per-pair / self-predicate shape. Task 138.
+    pub candidate_source: Option<IrExprNode>,
     pub predicate: IrExprNode,
     pub annotations: Vec<Annotation>,
     pub span: Span,

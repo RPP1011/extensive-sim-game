@@ -24,7 +24,7 @@ use glam::Vec3;
 /// Lets the test drive a single deterministic `Attack` per tick.
 struct AttackFixed(AgentId);
 impl PolicyBackend for AttackFixed {
-    fn evaluate(&self, state: &SimState, _: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         for id in state.agents_alive() {
             if id == self.0 {
                 out.push(Action::hold(id));

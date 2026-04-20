@@ -11,7 +11,7 @@ use glam::Vec3;
 fn all_emit(kind: MicroKind) -> impl PolicyBackend {
     struct All(MicroKind);
     impl PolicyBackend for All {
-        fn evaluate(&self, state: &SimState, _: &MaskBuffer, out: &mut Vec<Action>) {
+        fn evaluate(&self, state: &SimState, _: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
             for id in state.agents_alive() {
                 out.push(Action {
                     agent: id,

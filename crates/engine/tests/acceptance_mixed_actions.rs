@@ -20,7 +20,7 @@ use glam::Vec3;
 struct MixedPolicy;
 
 impl PolicyBackend for MixedPolicy {
-    fn evaluate(&self, state: &SimState, _mask: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _mask: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         let tick = state.tick;
         for id in state.agents_alive() {
             let pick = id.raw() % 7;

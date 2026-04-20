@@ -1,5 +1,5 @@
-use engine::mask::{MaskBuffer, MicroKind};
-use engine::policy::{PolicyBackend, UtilityBackend};
+use engine::mask::{MaskBuffer, MicroKind, TargetMask};
+use engine::policy::{Action, PolicyBackend, UtilityBackend};
 use engine::state::{SimState, AgentSpawn};
 use engine::creature::CreatureType;
 use glam::Vec3;
@@ -15,9 +15,10 @@ fn utility_picks_hold_when_only_hold_allowed() {
     }
     let mut mask = MaskBuffer::new(state.agent_cap() as usize);
     mask.mark_hold_allowed(&state);
+    let target_mask = TargetMask::new(state.agent_cap() as usize);
     let backend = UtilityBackend;
-    let mut actions = Vec::with_capacity(state.agent_cap() as usize);
-    backend.evaluate(&state, &mask, &mut actions);
+    let mut actions: Vec<Action> = Vec::with_capacity(state.agent_cap() as usize);
+    backend.evaluate(&state, &mask, &target_mask, &mut actions);
     assert_eq!(actions.len(), 3);
     for a in &actions {
         assert_eq!(a.micro_kind(), Some(MicroKind::Hold), "utility chose Hold when only Hold allowed");
@@ -40,8 +41,9 @@ fn utility_prefers_eat_when_hp_low_and_eat_allowed() {
     mask.micro_kind[slot * nm + MicroKind::Hold as usize] = true;
     mask.micro_kind[slot * nm + MicroKind::Eat as usize]  = true;
 
-    let mut actions = Vec::new();
-    UtilityBackend.evaluate(&state, &mask, &mut actions);
+    let target_mask = TargetMask::new(state.agent_cap() as usize);
+    let mut actions: Vec<Action> = Vec::new();
+    UtilityBackend.evaluate(&state, &mask, &target_mask, &mut actions);
     assert_eq!(actions.len(), 1);
     assert_eq!(actions[0].micro_kind(), Some(MicroKind::Eat));
 }

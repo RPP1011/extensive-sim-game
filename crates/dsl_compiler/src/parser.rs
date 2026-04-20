@@ -940,10 +940,23 @@ fn mask_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRes
     expect_keyword(c, "mask").map_err(|e| e.with_context("parsing `mask` declaration"))?;
     let head = parse_action_head(c)?;
     c.skip_ws();
+    // Optional `from <candidate_source_expr>` clause. Task 138 —
+    // target-bound masks enumerate candidates from this source and
+    // filter each through the `when` predicate. Self-masks (Hold,
+    // Eat, …) omit `from` entirely.
+    let candidate_source = if starts_with_keyword(c, "from") {
+        expect_keyword(c, "from").map_err(|e| e.with_context("parsing mask `from`"))?;
+        c.skip_ws();
+        let expr = parse_expr(c)?;
+        c.skip_ws();
+        Some(expr)
+    } else {
+        None
+    };
     expect_keyword(c, "when").map_err(|e| e.with_context("parsing mask `when`"))?;
     c.skip_ws();
     let predicate = parse_expr(c)?;
-    Ok(MaskDecl { annotations, head, predicate, span: Span::new(start, c.pos) })
+    Ok(MaskDecl { annotations, head, candidate_source, predicate, span: Span::new(start, c.pos) })
 }
 
 fn parse_action_head(c: &mut Cursor) -> PResult<ActionHead> {

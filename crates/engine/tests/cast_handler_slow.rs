@@ -29,7 +29,7 @@ fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
 
 struct EmitOnce { agent: AgentId, kind: ActionKind }
 impl PolicyBackend for EmitOnce {
-    fn evaluate(&self, _state: &SimState, _m: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, _state: &SimState, _m: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         out.push(Action { agent: self.agent, kind: self.kind });
     }
 }

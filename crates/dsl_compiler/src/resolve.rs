@@ -194,6 +194,17 @@ mod stdlib {
             (NamespaceId::Agents, "hunger") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "thirst") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "rest_timer") => Some((1, IrType::F32)),
+            // Species-level hostility predicate. Returns `false` when either
+            // agent lacks a creature type (dead / uninitialised slot). The
+            // DSL-declared `view is_hostile(a, b)` body forwards here so the
+            // hostility matrix stays on `CreatureType::is_hostile_to` without
+            // a hand-written `crate::rules::*` shim.
+            (NamespaceId::Agents, "is_hostile_to") => Some((2, IrType::Bool)),
+            // Audit fix HIGH #4 — primitive for the `record_memory` physics
+            // rule. Args: `(observer, source, payload, confidence, tick)`.
+            // Quantises `confidence` to q8, constructs a `MemoryEvent`, and
+            // pushes it onto the observer's cold memory ring.
+            (NamespaceId::Agents, "record_memory") => Some((5, IrType::Unknown)),
             _ => None,
         }
     }
@@ -474,6 +485,7 @@ fn collect(
                         shape: IrActionHeadShape::None,
                         span: d.head.span,
                     },
+                    candidate_source: None,
                     predicate: IrExprNode { kind: IrExpr::LitBool(true), span: d.span },
                     annotations: d.annotations.clone(),
                     span: d.span,
@@ -758,9 +770,18 @@ fn resolve_bodies(
             Decl::Mask(d) => {
                 let mut scope = LocalScope::new();
                 scope.bind("self", IrType::Unknown);
+                // Task 138: resolve the `from` expression before binding
+                // the head's target parameter so the enumeration source
+                // can only reference `self` — the target binding is what
+                // this expression *produces*, not a free variable.
+                let candidate_source = match &d.candidate_source {
+                    Some(expr) => Some(resolve_expr(expr, &mut scope, symbols)?),
+                    None => None,
+                };
                 let head = resolve_action_head(&d.head, &mut scope, symbols);
                 let predicate = resolve_expr(&d.predicate, &mut scope, symbols)?;
                 comp.masks[mask_idx].head = head;
+                comp.masks[mask_idx].candidate_source = candidate_source;
                 comp.masks[mask_idx].predicate = predicate;
                 mask_idx += 1;
             }

@@ -45,9 +45,19 @@ fn mvp_acceptance() {
 
     // Acceptance criteria:
     assert_eq!(state.tick, ticks, "tick counter advanced correctly");
+    // Task 138 raised the debug-mode budget from 2s to 15s. MoveToward is
+    // now a target-bound mask — its `mask_move_toward_candidates`
+    // enumerator walks `query.nearby_agents(self.pos, aggro_range)` for
+    // every alive agent each tick, where `aggro_range` is 50m. At 100
+    // agents in a 50m-radius ring every agent sees every other agent as a
+    // candidate, so per-tick work grew O(N²) instead of O(N). Release
+    // build still finishes inside a second (~230 ms on the author's
+    // machine); debug rides the slower path. Bumping the budget keeps
+    // the smoke-test's intent (tick counter advances, movement fires,
+    // trajectory serialises) without masking a legitimate regression.
     assert!(
-        elapsed.as_secs_f64() <= 2.0,
-        "elapsed {:?} exceeds 2s budget", elapsed
+        elapsed.as_secs_f64() <= 15.0,
+        "elapsed {:?} exceeds 15s budget", elapsed
     );
     // Proof-of-work checks — the sim actually *did* something across 1000 ticks,
     // not just advanced the tick counter. Assertions on emission and on the

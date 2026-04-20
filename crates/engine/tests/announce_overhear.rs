@@ -10,7 +10,7 @@ use glam::Vec3;
 
 struct AnnouncerSmall(AgentId);
 impl PolicyBackend for AnnouncerSmall {
-    fn evaluate(&self, state: &SimState, _: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         // Announce to a tiny Area of radius 2 (essentially no primary audience,
         // forcing the overhear scan to do the work).
         out.push(Action {
@@ -150,7 +150,7 @@ fn primary_recipient_not_also_added_as_overhear_bystander() {
 
     struct BigArea(AgentId);
     impl PolicyBackend for BigArea {
-        fn evaluate(&self, _: &SimState, _: &MaskBuffer, out: &mut Vec<Action>) {
+        fn evaluate(&self, _: &SimState, _: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
             out.push(Action {
                 agent: self.0,
                 kind: ActionKind::Macro(MacroAction::Announce {

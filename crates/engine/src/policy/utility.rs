@@ -1,39 +1,50 @@
 //! Utility-function policy backend.
 //!
-//! Milestone 5 (compiler-first scoring): the per-kind `match` that used
-//! to live here — `utility_score(kind, hp, max_hp)` — is gone. Every
-//! score now lives as a row in `engine_rules::scoring::SCORING_TABLE`,
-//! emitted by `dsl_compiler` from `assets/sim/scoring.sim`. The scorer
-//! here is a hand-written interpreter for the POD row format: it
-//! iterates the table, evaluates each row's predicates against the
-//! current agent, accumulates `base + Σ active-modifier deltas`, and
-//! keeps the best score per action-head (filtered through the mask).
+//! Task 138 reshaped the target-resolution layer. Scoring rows rank
+//! action heads (base + Σ active-modifier deltas), and target-bound
+//! heads (Attack / MoveToward) argmax over the per-agent candidate
+//! lists produced by the compiler-emitted `mask_<name>_candidates`
+//! enumerators (`TargetMask`). The old `nearest_other` heuristic — which
+//! picked targets regardless of hostility or utility — is gone.
 //!
-//! Target-resolution logic (`nearest_other` + `Action::move_toward` /
-//! `Action::attack`) stays hand-written — it's action construction, not
-//! scoring. Adding a new scoring row touches only `scoring.sim`; adding
-//! a new action-head with a new target-selection rule touches both.
+//! Per-tick flow:
 //!
-//! Any field referenced from DSL as `self.<name>` must have a matching
-//! arm in `read_field` below. The mapping is documented in
-//! `docs/dsl/scoring_fields.md` — changing it is a schema bump.
+//! 1. For every alive agent, walk `SCORING_TABLE`:
+//!    - Self-only kinds (Hold / Flee / Eat / …) score once with
+//!      `score_entry(entry, state, agent, None)`.
+//!    - Target-bound kinds (Attack / MoveToward) score each candidate
+//!      in `target_mask.candidates_for(agent, kind)` with
+//!      `score_entry(entry, state, agent, Some(target))` and keep the
+//!      highest-scoring (kind, target) pair.
+//! 2. The winning (kind, agent, target) is turned into an `Action` via
+//!    `build_action`. Kinds without a dedicated constructor fall back
+//!    to `Action::hold`.
+//!
+//! Any field referenced from DSL as `self.<name>` or `target.<name>`
+//! must have a matching arm in `read_field` below. The mapping is
+//! documented in `docs/dsl/scoring_fields.md`; changing it is a schema
+//! bump.
 
 use super::{Action, PolicyBackend};
 use crate::ids::AgentId;
-use crate::mask::{MaskBuffer, MicroKind};
+use crate::mask::{MaskBuffer, MicroKind, TargetMask};
 use crate::state::SimState;
 use engine_rules::scoring::{PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE};
 
 pub struct UtilityBackend;
 
 impl PolicyBackend for UtilityBackend {
-    fn evaluate(&self, state: &SimState, mask: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(
+        &self,
+        state: &SimState,
+        mask: &MaskBuffer,
+        target_mask: &TargetMask,
+        out: &mut Vec<Action>,
+    ) {
         for id in state.agents_alive() {
             let slot = (id.raw() - 1) as usize;
             let row_start = slot * MicroKind::ALL.len();
-            let mut best_kind = MicroKind::Hold;
-            let mut best_score = f32::MIN;
-            let mut have_best = false;
+            let mut best: Option<(MicroKind, Option<AgentId>, f32)> = None;
 
             for entry in SCORING_TABLE {
                 // Skip rows whose action head isn't a known MicroKind. The
@@ -50,32 +61,61 @@ impl PolicyBackend for UtilityBackend {
                     continue;
                 }
 
-                let score = score_entry(entry, state, id);
-                if !have_best || score > best_score {
-                    best_score = score;
-                    best_kind = kind;
-                    have_best = true;
+                if kind.target_slot().is_some() {
+                    // Target-bound — argmax over candidate targets. Task 138
+                    // retired `nearest_other`; this is the sole target-
+                    // selection path for Attack / MoveToward. An empty
+                    // candidate list means the mask never set the bit, so
+                    // this branch no-ops per the mask check above.
+                    for &target in target_mask.candidates_for(id, kind) {
+                        let score = score_entry(entry, state, id, Some(target));
+                        match best {
+                            None => best = Some((kind, Some(target), score)),
+                            Some((_, _, bs)) if score > bs => {
+                                best = Some((kind, Some(target), score));
+                            }
+                            _ => {}
+                        }
+                    }
+                } else {
+                    // Self-only — score the row once with no target binding.
+                    let score = score_entry(entry, state, id, None);
+                    match best {
+                        None => best = Some((kind, None, score)),
+                        Some((_, _, bs)) if score > bs => {
+                            best = Some((kind, None, score));
+                        }
+                        _ => {}
+                    }
                 }
             }
 
             // No mask-allowed entry? Fall through to Hold — same failsafe as
             // the legacy code. The mask builder always sets Hold for alive
             // agents so this branch should be unreachable in practice.
-            if !have_best {
-                out.push(Action::hold(id));
-                continue;
+            match best {
+                Some((kind, target, _)) => out.push(build_action(kind, id, target, state)),
+                None => out.push(Action::hold(id)),
             }
-
-            out.push(build_action(best_kind, id, state));
         }
     }
 }
 
-/// Score one table row against the current agent. `base` always applies;
-/// each modifier's predicate is evaluated in turn and the delta added when
-/// the predicate passes. Modifiers beyond `modifier_count` are padding
-/// (`ModifierRow::EMPTY`) and are skipped by the count gate.
-fn score_entry(entry: &ScoringEntry, state: &SimState, agent: AgentId) -> f32 {
+/// Score one table row against the current agent / candidate target.
+/// `base` always applies; each modifier's predicate is evaluated in turn
+/// and the delta added when the predicate passes. Modifiers beyond
+/// `modifier_count` are padding (`ModifierRow::EMPTY`) and are skipped
+/// by the count gate.
+///
+/// `target` is `Some` for target-bound rows and `None` for self-only
+/// rows. Scoring predicates that reference `target.<field>` observe
+/// `Some(_)` here; self-only predicates ignore it.
+fn score_entry(
+    entry: &ScoringEntry,
+    state: &SimState,
+    agent: AgentId,
+    target: Option<AgentId>,
+) -> f32 {
     let mut score = entry.base;
     // Personality dot-product: not wired at milestone 5 (all weights are
     // zero in the emitted table). Kept explicit so the call shape matches
@@ -89,7 +129,7 @@ fn score_entry(entry: &ScoringEntry, state: &SimState, agent: AgentId) -> f32 {
     let max = count.min(MAX_MODIFIERS);
     for i in 0..max {
         let row = &entry.modifiers[i];
-        if eval_predicate(&row.predicate, state, agent) {
+        if eval_predicate(&row.predicate, state, agent, target) {
             score += row.delta;
         }
     }
@@ -100,7 +140,42 @@ fn score_entry(entry: &ScoringEntry, state: &SimState, agent: AgentId) -> f32 {
 /// owned by the compiler — see `docs/dsl/scoring_fields.md`. Any drift
 /// between the compiler's emission and this dispatch is a schema bug
 /// (catches at the `SCORING_HASH` gate in CI).
-fn read_field(state: &SimState, agent: AgentId, field_id: u16) -> f32 {
+///
+/// Target-side field ids live in the `0x4000..0x8000` reserved range
+/// (task 138). `target == None` on a target-side read surfaces as
+/// `f32::NAN`, matching the "fail closed" convention for unknown
+/// descriptors.
+fn read_field(
+    state: &SimState,
+    agent: AgentId,
+    target: Option<AgentId>,
+    field_id: u16,
+) -> f32 {
+    // Target-side field ids (task 138). `target == None` means the
+    // modifier referenced `target.<field>` on a self-only row — invalid;
+    // surface as NaN so comparisons fail.
+    if field_id >= 0x4000 && field_id < 0x8000 {
+        let target = match target {
+            Some(t) => t,
+            None => return f32::NAN,
+        };
+        return match field_id {
+            0x4000 => state.agent_hp(target).unwrap_or(0.0),
+            0x4001 => state.agent_max_hp(target).unwrap_or(1.0),
+            0x4002 => {
+                let hp = state.agent_hp(target).unwrap_or(0.0);
+                let max = state.agent_max_hp(target).unwrap_or(1.0);
+                if max > 0.0 {
+                    hp / max
+                } else {
+                    0.0
+                }
+            }
+            0x4003 => state.agent_shield_hp(target).unwrap_or(0.0),
+            _ => f32::NAN,
+        };
+    }
+
     match field_id {
         0 => state.agent_hp(agent).unwrap_or(0.0),
         1 => state.agent_max_hp(agent).unwrap_or(1.0),
@@ -146,11 +221,16 @@ fn read_personality(_state: &SimState, _agent: AgentId) -> [f32; 5] {
 /// Evaluate a predicate descriptor. Unknown kinds return `false` — the
 /// row contributes nothing, matching the "fail closed" convention for
 /// unrecognised predicate shapes.
-fn eval_predicate(pred: &PredicateDescriptor, state: &SimState, agent: AgentId) -> bool {
+fn eval_predicate(
+    pred: &PredicateDescriptor,
+    state: &SimState,
+    agent: AgentId,
+    target: Option<AgentId>,
+) -> bool {
     match pred.kind {
         PredicateDescriptor::KIND_ALWAYS => true,
         PredicateDescriptor::KIND_SCALAR_COMPARE => {
-            let lhs = read_field(state, agent, pred.field_id);
+            let lhs = read_field(state, agent, target, pred.field_id);
             let mut tb = [0u8; 4];
             tb.copy_from_slice(&pred.payload[0..4]);
             let rhs = f32::from_le_bytes(tb);
@@ -208,44 +288,29 @@ fn micro_kind_from_u16(v: u16) -> Option<MicroKind> {
     Some(k)
 }
 
-/// Turn the winning `(kind, agent)` pair into a concrete `Action`.
-/// Target-resolution lives here rather than in the scoring table — the
-/// table ranks kinds, the action builder chooses where to point them.
-fn build_action(kind: MicroKind, id: AgentId, state: &SimState) -> Action {
-    match kind {
-        MicroKind::Hold => Action::hold(id),
-        MicroKind::MoveToward => {
-            if let Some(target) = nearest_other(state, id) {
-                let pos = state.agent_pos(target).unwrap();
-                Action::move_toward(id, pos)
-            } else {
-                Action::hold(id)
-            }
-        }
-        MicroKind::Attack => {
-            if let Some(target) = nearest_other(state, id) {
-                Action::attack(id, target)
-            } else {
-                Action::hold(id)
-            }
-        }
-        MicroKind::Eat => Action::eat(id),
-        // Domain hooks without a dedicated constructor fall back to Hold —
-        // mask shouldn't have enabled them unless the scorer has a row
-        // ranking them above Hold, which doesn't happen until the DSL
-        // declares one.
+/// Turn a winning `(kind, agent, target)` tuple into a concrete `Action`.
+/// Target-bound kinds expect `target == Some(_)`; self-only kinds expect
+/// `None`. Kinds without a dedicated constructor fall back to Hold — the
+/// scorer never picks them unless the DSL declares a row ranking them
+/// above Hold, which doesn't happen until they land.
+fn build_action(
+    kind: MicroKind,
+    id: AgentId,
+    target: Option<AgentId>,
+    state: &SimState,
+) -> Action {
+    match (kind, target) {
+        (MicroKind::Hold, _) => Action::hold(id),
+        (MicroKind::MoveToward, Some(t)) => match state.agent_pos(t) {
+            Some(pos) => Action::move_toward(id, pos),
+            None => Action::hold(id),
+        },
+        (MicroKind::Attack, Some(t)) => Action::attack(id, t),
+        (MicroKind::Eat, _) => Action::eat(id),
+        // Target-bound kinds with no target, or domain-hook kinds without
+        // a dedicated constructor — fall back to Hold. Mask shouldn't
+        // have enabled them unless the scorer has a row ranking them
+        // above Hold, which doesn't happen until the DSL declares one.
         _ => Action::hold(id),
     }
-}
-
-fn nearest_other(state: &SimState, self_id: AgentId) -> Option<AgentId> {
-    let self_pos = state.agent_pos(self_id)?;
-    state
-        .agents_alive()
-        .filter(|id| *id != self_id)
-        .min_by(|a, b| {
-            let da = (state.agent_pos(*a).unwrap() - self_pos).length_squared();
-            let db = (state.agent_pos(*b).unwrap() - self_pos).length_squared();
-            da.total_cmp(&db)
-        })
 }

@@ -10,7 +10,7 @@ use glam::Vec3;
 
 struct FleeFromFirst;
 impl PolicyBackend for FleeFromFirst {
-    fn evaluate(&self, state: &SimState, _: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         let threat = AgentId::new(1).unwrap();
         for id in state.agents_alive() {
             if id == threat { out.push(Action::hold(id)); continue; }

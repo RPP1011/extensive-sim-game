@@ -272,16 +272,13 @@ fn parity_log_has_expected_structure() {
         last_tick = t;
     }
 
-    // Hostility directionality pin: *most* AgentAttacked events must cross
-    // species. The scoring table gates the Attack kind via the mask (which
-    // does check `is_hostile`), but `UtilityBackend::build_action` picks
-    // `nearest_other` regardless of hostility — so a same-species "stray"
-    // attack can land when the Attack bit is mask-allowed (because some
-    // hostile was in range) but the nearest neighbour is same-species.
-    //
-    // This is current DSL-owned behaviour as of compiler milestones 2-6.
-    // Migrating target-selection to DSL (a follow-up to milestone 6) will
-    // close the hole. For now we pin the ratio rather than assert zero.
+    // Hostility directionality pin: *every* AgentAttacked event must cross
+    // species. Task 138 retired the `nearest_other` fallback; target
+    // selection now argmaxes over the mask-produced candidate list, and
+    // the Attack mask's `from query.nearby_agents(...) when is_hostile`
+    // clause only enumerates hostile candidates. Same-species "stray"
+    // attacks can no longer appear in the log — if one shows up, the
+    // target-mask pipeline has regressed.
     let state = spawn_fixture();
     let mut cross_species = 0usize;
     let mut same_species = 0usize;

@@ -15,7 +15,7 @@ use glam::Vec3;
 
 struct OneAnnounce(AgentId, AnnounceAudience);
 impl PolicyBackend for OneAnnounce {
-    fn evaluate(&self, state: &SimState, _: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         out.push(Action {
             agent: self.0,
             kind: ActionKind::Macro(MacroAction::Announce {

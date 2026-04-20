@@ -5,7 +5,7 @@ pub mod utility;
 
 use crate::ability::AbilityId;
 use crate::ids::AgentId;
-use crate::mask::{MaskBuffer, MicroKind};
+use crate::mask::{MaskBuffer, MicroKind, TargetMask};
 use crate::state::SimState;
 use glam::Vec3;
 
@@ -124,5 +124,19 @@ impl Action {
 pub trait PolicyBackend {
     /// Evaluate policy for every alive agent; append to `out`.
     /// Caller resets `out` before calling (zero-alloc contract).
-    fn evaluate(&self, state: &SimState, mask: &MaskBuffer, out: &mut Vec<Action>);
+    ///
+    /// `target_mask` carries the per-agent per-target-bound-kind candidate
+    /// lists that the compiler-emitted `mask_<name>_candidates` enumerators
+    /// populated during mask-build (task 138). Backends that score
+    /// target-bound kinds (Attack / MoveToward / …) argmax over these
+    /// lists rather than reasoning about targets directly. Self-only
+    /// kinds (Hold / Flee / Eat / Drink / Rest / domain hooks) ignore
+    /// `target_mask` entirely.
+    fn evaluate(
+        &self,
+        state: &SimState,
+        mask: &MaskBuffer,
+        target_mask: &TargetMask,
+        out: &mut Vec<Action>,
+    );
 }

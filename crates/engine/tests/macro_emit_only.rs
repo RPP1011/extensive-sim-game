@@ -25,7 +25,7 @@ fn make() -> (SimState, SimScratch, EventRing, CascadeRegistry, AgentId) {
 
 struct EmitMacro(AgentId, MacroAction);
 impl PolicyBackend for EmitMacro {
-    fn evaluate(&self, _s: &SimState, _m: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, _s: &SimState, _m: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         out.push(Action {
             agent: self.0,
             kind: ActionKind::Macro(self.1),

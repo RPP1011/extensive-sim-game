@@ -26,6 +26,28 @@ Changing this table breaks the committed `SCORING_TABLE` constants and bumps
 |         11 | `self.personality.altruism`      | placeholder `0.0` (task 141) | |
 |         12 | `self.personality.curiosity`     | placeholder `0.0` (task 141) | |
 
+## Target-side fields (`target.*`)
+
+Reserved range `field_id ∈ [0x4000, 0x8000)`. Task 138 introduced these
+so scoring rows on target-bound heads (Attack / MoveToward) can rank
+candidate targets by target-side attributes — e.g. "prefer the wounded
+enemy". A `target.*` read on a self-only row (where
+`target == None`) surfaces as `f32::NAN`, same fail-closed convention as
+unknown `field_id`s.
+
+| `field_id` | DSL reference       | Engine accessor                                |
+|-----------:|---------------------|------------------------------------------------|
+|     0x4000 | `target.hp`         | `state.agent_hp(target).unwrap_or(0.0)`        |
+|     0x4001 | `target.max_hp`     | `state.agent_max_hp(target).unwrap_or(1.0)`    |
+|     0x4002 | `target.hp_pct`     | `target.hp / target.max_hp` (derived)          |
+|     0x4003 | `target.shield_hp`  | `state.agent_shield_hp(target).unwrap_or(0.0)` |
+
+The compiler-side field-id resolver (`emit_scoring.rs`'s
+`scoring_field_id`) does not yet emit target-side ids — the scoring DSL
+grammar needs `target.<field>` parsing first. Reserving the range + the
+engine-side dispatch means the compiler-side emitter can add support as
+a follow-up without a schema bump beyond `SCORING_HASH`.
+
 ## Pair fields (PairField predicates)
 
 Reserved range `field_id >= 0x8000`. Not emitted at milestone 5 — pair

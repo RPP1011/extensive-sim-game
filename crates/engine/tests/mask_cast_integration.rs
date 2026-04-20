@@ -30,7 +30,13 @@ fn cast_bit(mask: &MaskBuffer, slot: usize) -> bool {
 /// bit state.
 struct InertBackend;
 impl PolicyBackend for InertBackend {
-    fn evaluate(&self, _: &SimState, _: &MaskBuffer, _: &mut Vec<Action>) {}
+    fn evaluate(
+        &self,
+        _: &SimState,
+        _: &MaskBuffer,
+        _: &engine::mask::TargetMask,
+        _: &mut Vec<Action>,
+    ) {}
 }
 
 fn setup(registry_build: impl FnOnce(&mut AbilityRegistryBuilder)) -> (

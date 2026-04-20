@@ -24,7 +24,7 @@ impl ScriptedBackend {
     fn new(a: Action) -> Self { Self { action: std::sync::Mutex::new(Some(a)) } }
 }
 impl PolicyBackend for ScriptedBackend {
-    fn evaluate(&self, _state: &SimState, _mask: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, _state: &SimState, _mask: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         if let Some(a) = self.action.lock().unwrap().take() {
             out.push(a);
         }

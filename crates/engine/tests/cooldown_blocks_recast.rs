@@ -47,7 +47,7 @@ struct GatedCastBackend {
 }
 
 impl PolicyBackend for GatedCastBackend {
-    fn evaluate(&self, state: &SimState, _m: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _m: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
         if evaluate_cast_gate(state, &self.registry, self.caster, self.ability, self.target) {
             out.push(Action {
                 agent: self.caster,

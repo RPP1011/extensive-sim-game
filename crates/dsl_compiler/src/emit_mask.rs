@@ -17,10 +17,13 @@
 //! Body lowering surface (milestone 4): `&&`-chains of boolean clauses,
 //! `agents.*` accessor calls (with `agents.pos(x)` hoisted into a prelude
 //! `let x_pos = ...` binding so guard lines stay short), `distance`
-//! builtin, binary comparisons and arithmetic, `UnresolvedCall` routed to
-//! `crate::rules::<name>` for hand-written game views that haven't been
-//! DSL-declared yet (e.g. `is_hostile`). Any IR construct outside this
-//! surface raises `EmitError::Unsupported`.
+//! builtin, binary comparisons and arithmetic, and `ViewCall` routed to
+//! `crate::generated::views::<name>(state, args...)` for DSL-declared
+//! views. An `UnresolvedCall` falls through to `crate::rules::<name>(...)`
+//! — but the `rules` module was retired in task 140, so any new
+//! `UnresolvedCall` will fail the engine link. Prefer declaring a `view`
+//! in `assets/sim/views.sim` over reviving the shim. Any IR construct
+//! outside this surface raises `EmitError::Unsupported`.
 //!
 //! ## Rustfmt stability
 //!
@@ -109,8 +112,17 @@ fn emit_mask_result(
 ) -> Result<String, EmitError> {
     let mut out = String::new();
     emit_header(&mut out, source_file);
-    emit_imports(&mut out);
+    emit_imports(&mut out, mask);
     emit_predicate_fn(&mut out, mask, ctx)?;
+    // Task 138: when a target-bound mask carries a `from <source>`
+    // clause, emit an additional `mask_<name>_candidates` enumerator
+    // that walks the source and pushes every candidate passing the
+    // predicate into the target-mask buffer. Self-masks and target-
+    // bound masks without a `from` clause emit nothing extra.
+    if mask.candidate_source.is_some() {
+        writeln!(&mut out).unwrap();
+        emit_candidate_enumerator_fn(&mut out, mask, ctx)?;
+    }
     Ok(out)
 }
 
@@ -146,6 +158,12 @@ pub fn emit_mask_mod(masks: &[MaskIR]) -> String {
     for m in &sorted {
         let stem = snake_case(&m.head.name);
         writeln!(out, "pub use {stem}::mask_{stem};").unwrap();
+        // Task 138: target-bound masks with a `from` clause also
+        // expose a candidate-enumerator re-export so the engine's
+        // mask-build path can call it by name.
+        if m.candidate_source.is_some() {
+            writeln!(out, "pub use {stem}::mask_{stem}_candidates;").unwrap();
+        }
     }
     writeln!(out).unwrap();
 
@@ -176,9 +194,14 @@ fn emit_header(out: &mut String, source_file: Option<&str>) {
     writeln!(out).unwrap();
 }
 
-fn emit_imports(out: &mut String) {
+fn emit_imports(out: &mut String, mask: &MaskIR) {
     writeln!(out, "use crate::ids::AgentId;").unwrap();
     writeln!(out, "use crate::state::SimState;").unwrap();
+    // Candidate-enumerator fns push into `TargetMask`; pull the import
+    // in only when this mask actually emits one. Task 138.
+    if mask.candidate_source.is_some() {
+        writeln!(out, "use crate::mask::TargetMask;").unwrap();
+    }
     writeln!(out).unwrap();
 }
 
@@ -237,6 +260,133 @@ fn emit_predicate_fn(
     emit_predicate_body(out, &mask.predicate, ctx)?;
     writeln!(out, "}}").unwrap();
     Ok(())
+}
+
+/// Emit a candidate-enumerator fn. Task 138.
+///
+/// Signature: `pub fn mask_<name>_candidates(state, self_id, out: &mut TargetMask)`.
+/// Walks the `from` expression (a
+/// `query.nearby_agents(<pos>, <radius>)` call — the only recognised
+/// shape at v1), filters out `self_id`, runs the mask's predicate, and
+/// pushes each passing candidate into `out` keyed on the mask's
+/// action-head `MicroKind`.
+fn emit_candidate_enumerator_fn(
+    out: &mut String,
+    mask: &MaskIR,
+    ctx: EmitContext<'_>,
+) -> Result<(), EmitError> {
+    let source = mask.candidate_source.as_ref().expect(
+        "emit_candidate_enumerator_fn called with mask.candidate_source = None",
+    );
+    let target_binding = match &mask.head.shape {
+        IrActionHeadShape::Positional(binds) if binds.len() == 1 => &binds[0].0,
+        IrActionHeadShape::Positional(_) => {
+            return Err(EmitError::Unsupported(format!(
+                "mask `{}` has `from` clause but multiple target bindings; only single-target heads are supported at v1",
+                mask.head.name
+            )));
+        }
+        IrActionHeadShape::None => {
+            return Err(EmitError::Unsupported(format!(
+                "mask `{}` has `from` clause but no target binding",
+                mask.head.name
+            )));
+        }
+        IrActionHeadShape::Named(_) => {
+            return Err(EmitError::Unsupported(format!(
+                "mask `{}` has `from` clause and a named action head; only positional heads are supported at v1",
+                mask.head.name
+            )));
+        }
+    };
+
+    // v1: only `query.nearby_agents(<pos>, <radius>)` recognised.
+    let (pos_expr, radius_expr) = match &source.kind {
+        IrExpr::NamespaceCall { ns, method, args }
+            if *ns == NamespaceId::Query && method == "nearby_agents" && args.len() == 2 =>
+        {
+            (&args[0].value, &args[1].value)
+        }
+        _ => {
+            return Err(EmitError::Unsupported(format!(
+                "mask `{}` `from` clause: expected `query.nearby_agents(<pos>, <radius>)`",
+                mask.head.name
+            )));
+        }
+    };
+
+    let fn_name = format!("mask_{}_candidates", snake_case(&mask.head.name));
+    let predicate_fn = format!("mask_{}", snake_case(&mask.head.name));
+    let micro_variant = &mask.head.name;
+
+    let mut hoisted: Vec<String> = Vec::new();
+    collect_pos_hoists(pos_expr, &mut hoisted);
+    collect_pos_hoists(radius_expr, &mut hoisted);
+
+    let pad = " ".repeat(BASE_INDENT);
+    writeln!(
+        out,
+        "/// Candidate enumerator: walk `from {}` and push every agent that",
+        source_shape_summary(source)
+    )
+    .unwrap();
+    writeln!(out, "/// satisfies the mask predicate into `out`. Task 138.").unwrap();
+    writeln!(
+        out,
+        "pub fn {fn_name}(state: &SimState, self_id: AgentId, out: &mut TargetMask) {{"
+    )
+    .unwrap();
+    for local in &hoisted {
+        let arg = if local == "self" { "self_id".to_string() } else { local.clone() };
+        let binding = pos_binding_name(local);
+        writeln!(
+            out,
+            "{pad}let {binding} = state.agent_pos({arg}).unwrap_or(glam::Vec3::ZERO);"
+        )
+        .unwrap();
+    }
+    let pos_lowered = lower_expr_with_hoist(pos_expr, &hoisted, ctx)?;
+    let radius_lowered = lower_expr_with_hoist(radius_expr, &hoisted, ctx)?;
+    writeln!(out, "{pad}let pos = {pos_lowered};").unwrap();
+    writeln!(out, "{pad}let radius = {radius_lowered};").unwrap();
+    writeln!(out, "{pad}let spatial = state.spatial();").unwrap();
+    writeln!(
+        out,
+        "{pad}for {target_binding} in spatial.within_radius(state, pos, radius) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "{pad}    if {target_binding} == self_id {{ continue; }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "{pad}    if !{predicate_fn}(state, self_id, {target_binding}) {{ continue; }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "{pad}    out.push(self_id, crate::mask::MicroKind::{micro_variant}, {target_binding});"
+    )
+    .unwrap();
+    writeln!(out, "{pad}}}").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
+}
+
+/// Short human-readable summary of the `from` clause for the generated
+/// doc comment. Keeps the emission stable against rustfmt by avoiding
+/// embedded code fragments.
+fn source_shape_summary(expr: &IrExprNode) -> &'static str {
+    match &expr.kind {
+        IrExpr::NamespaceCall { ns, method, .. }
+            if *ns == NamespaceId::Query && method == "nearby_agents" =>
+        {
+            "query.nearby_agents(...)"
+        }
+        _ => "<unsupported>",
+    }
 }
 
 /// Lower the predicate expression as a chain of `if !(<clause>) { return
@@ -619,12 +769,11 @@ fn maybe_paren(s: &str) -> String {
 
 /// Lower a call whose callee couldn't be resolved by the compiler. These
 /// are game-view fns the DSL mentions that haven't been lifted into a
-/// `view` declaration yet (e.g. `is_hostile`). The convention:
-/// `UnresolvedCall("foo", args)` emits `crate::rules::foo(state, args...)`.
-/// The corresponding fn must exist hand-written in
-/// `crates/engine/src/rules/`. This module shrinks as later milestones
-/// let the DSL declare views directly; see `docs/game/compiler_progress.md`
-/// row 6.
+/// `view` declaration yet. The convention: `UnresolvedCall("foo", args)`
+/// emits `crate::rules::foo(state, args...)`. The `rules` module was
+/// retired in task 140 when the last shim (`is_hostile`) became a DSL
+/// view, so any new `UnresolvedCall` will fail `rustc`'s link. Prefer
+/// declaring a `view` in `assets/sim/views.sim` over reviving the shim.
 fn lower_unresolved_call(
     name: &str,
     args: &[IrCallArg],
@@ -822,6 +971,7 @@ mod tests {
                 shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
                 span: span(),
             },
+            candidate_source: None,
             predicate,
             annotations: vec![],
             span: span(),
@@ -963,6 +1113,7 @@ mod tests {
                 shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
                 span: span(),
             },
+            candidate_source: None,
             predicate,
             annotations: vec![],
             span: span(),
@@ -1049,6 +1200,7 @@ mod tests {
                 shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
                 span: span(),
             },
+            candidate_source: None,
             predicate,
             annotations: vec![],
             span: span(),
