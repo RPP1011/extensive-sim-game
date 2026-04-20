@@ -2108,8 +2108,9 @@ fn lower_view_kind(
 /// - `lazy_cached`
 /// - `per_entity_topk(K, keyed_on = <arg>)` — but our annotation grammar
 ///   doesn't carry generic / call syntax, so in v1 we accept the bare
-///   identifier `per_entity_topk` with defaults `K=8, keyed_on=0` and
-///   allow authors to drop into the parameterised form in a later pass.
+///   identifier `per_entity_topk` with defaults `K=1, keyed_on=0` (task 139)
+///   and allow authors to drop into the parameterised form in a later pass
+///   once the emitter supports `K>1`.
 fn parse_storage_hint(
     view_name: &str,
     arg: &ast::AnnotationArg,
@@ -2118,7 +2119,7 @@ fn parse_storage_hint(
         ast::AnnotationValue::Ident(name) => match name.as_str() {
             "pair_map" => Ok(StorageHint::PairMap),
             "lazy_cached" => Ok(StorageHint::LazyCached),
-            "per_entity_topk" => Ok(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
+            "per_entity_topk" => Ok(StorageHint::PerEntityTopK { k: 1, keyed_on: 0 }),
             other => Err(ResolveError::InvalidViewKind {
                 view_name: view_name.to_string(),
                 detail: format!(

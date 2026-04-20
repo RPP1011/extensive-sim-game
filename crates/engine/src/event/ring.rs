@@ -353,6 +353,19 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(ability.raw().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
+        Event::EngagementCommitted { actor, target, tick } => {
+            h.update([34u8]);
+            h.update(actor.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::EngagementBroken { actor, former_target, reason, tick } => {
+            h.update([35u8]);
+            h.update(actor.raw().to_le_bytes());
+            h.update(former_target.raw().to_le_bytes());
+            h.update([*reason]);
+            h.update(tick.to_le_bytes());
+        }
         Event::ChronicleEntry { .. } => {
             // Filtered at the call site; if we reach here, the filter is broken.
             debug_assert!(false, "ChronicleEntry reached replayable hash path");

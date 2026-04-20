@@ -84,6 +84,15 @@ event_tag Audit    { actor: AgentId }
 // when an engaged agent tries to move away or flee.
 @replayable @harmful event OpportunityAttackTriggered { actor: AgentId, target: AgentId }
 
+// Task 139 — engagement transitions. The legacy `ability::expire::tick_start`
+// tentative-commit loop was retired in favour of event-driven physics: the
+// engine's `AgentMoved` / `AgentDied` cascade handler emits these events,
+// and the `engaged_with` @materialized view folds them into its per-agent
+// slot map. `EngagementBroken` carries `former_target` so the fold can tear
+// down both sides of the pairing in a single event (no cascade required).
+@replayable event EngagementCommitted { actor: AgentId, target: AgentId }
+@replayable event EngagementBroken { actor: AgentId, former_target: AgentId, reason: u8 }
+
 // Combat Foundation Tasks 9–17 — effect fan-out emitted by `CastHandler`,
 // one per `EffectOp` carried by the cast's program. Per-effect cascade
 // handlers (Tasks 10–17) consume these to apply the concrete state mutation.

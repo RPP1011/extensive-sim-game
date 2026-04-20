@@ -1,25 +1,23 @@
-//! Unified tick-start phase. Three jobs in one pass over alive agents:
+//! Tick-start timer expiry — decrements `hot_stun_remaining_ticks` and
+//! `hot_slow_remaining_ticks` and emits `StunExpired` / `SlowExpired` on the
+//! tick each reaches zero. `hot_cooldown_next_ready_tick` is an absolute
+//! tick — no decrement, just compared against `state.tick` by the mask
+//! predicate.
 //!
-//! 1. Decrement `hot_stun_remaining_ticks` and `hot_slow_remaining_ticks`,
-//!    emitting `StunExpired` / `SlowExpired` on the tick each reaches zero.
-//! 2. Update `hot_engaged_with` via tentative-pick-then-commit so the
-//!    bidirectional invariant (`engaged_with[a] == Some(b) ⇔
-//!    engaged_with[b] == Some(a)`) holds after the phase runs.
-//! 3. `hot_cooldown_next_ready_tick` is an absolute tick — no decrement,
-//!    just compared against `state.tick` by the mask predicate.
-//!
-//! Called by `step_full` BEFORE `scratch.mask.reset()` so mask predicates
-//! see the post-decrement / post-engagement state.
+//! Task 139 retired this module's other responsibility — the engagement
+//! update pass. That logic moved to the event-driven
+//! `crate::engagement::*` cascade handlers keyed on `AgentMoved` /
+//! `AgentDied`, with the per-agent slot storage folded by the
+//! compiler-emitted `@materialized view engaged_with`. What remains here
+//! is engine-internal timer scheduling (not game rules) and stays
+//! hand-written until a timestamp-based cooldown migration lands.
 //!
 //! The `OpportunityAttackTriggered` cascade handler that used to live in
 //! this file was migrated to DSL and is emitted as
 //! `crate::generated::physics::opportunity_attack::OpportunityAttackHandler`.
-//! The tick-start machinery below is engine-internal scheduling (not game
-//! rules) and stays hand-written.
 
 use crate::event::Event;
 use crate::event::EventRing;
-use crate::ids::AgentId;
 use crate::state::SimState;
 use crate::step::SimScratch;
 
@@ -43,23 +41,25 @@ pub const ENGAGEMENT_RANGE: f32 = 2.0;
 /// `state.config.combat.engagement_slow_factor` in new code.
 pub const ENGAGEMENT_SLOW_FACTOR: f32 = 0.3;
 
-/// The unified tick-start phase. See module docs for the three jobs.
-///
-/// `scratch` is the per-tick buffer pool from `step_full`; the two engagement
-/// scratches (`engagement_alive_ids`, `engagement_tentative`) are reused
-/// across ticks instead of being heap-allocated each time.
+/// Back-compat re-export of the legacy tick-start entry point. The name
+/// predates task 139's split (engagement moved to
+/// `crate::engagement::recompute_engagement_for`); the call shape stays
+/// the same so fixture tests don't need churn. New code should call
+/// [`tick_start_timers`] directly.
 pub fn tick_start(state: &mut SimState, scratch: &mut SimScratch, events: &mut EventRing) {
-    decrement_and_expire(state, scratch, events);
-    update_engagements(state, scratch);
+    tick_start_timers(state, scratch, events);
 }
 
-fn decrement_and_expire(state: &mut SimState, scratch: &mut SimScratch, events: &mut EventRing) {
-    // Snapshot the tick before we touch anything so all emitted events agree
-    // on the "expired this tick" timestamp.
+/// Decrement `hot_stun_remaining_ticks` and `hot_slow_remaining_ticks`,
+/// emitting `StunExpired` / `SlowExpired` on the tick each reaches zero.
+/// Called from `step_full` BEFORE `scratch.mask.reset()` so mask
+/// predicates see the post-decrement state.
+pub fn tick_start_timers(state: &mut SimState, scratch: &mut SimScratch, events: &mut EventRing) {
     let tick = state.tick;
-    // Collect alive ids into the hoisted scratch so we don't risk borrow
-    // conflicts with the mutating calls on `state` below — and don't
-    // allocate a fresh Vec every tick.
+    // Reuse the hoisted scratch so the per-tick allocation stays at zero.
+    // `engagement_alive_ids` is no longer consumed by an engagement pass
+    // (task 139), but the buffer still serves the timer walk below — it's
+    // sized once in `SimScratch::new` and cleared here.
     scratch.engagement_alive_ids.clear();
     scratch.engagement_alive_ids.extend(state.agents_alive());
     for &id in &scratch.engagement_alive_ids {
@@ -85,76 +85,5 @@ fn decrement_and_expire(state: &mut SimState, scratch: &mut SimScratch, events: 
             }
         }
         // cooldown_next_ready_tick is absolute — no decrement needed.
-    }
-}
-
-fn update_engagements(state: &mut SimState, scratch: &mut SimScratch) {
-    // Two-phase tentative-pick-then-commit. Each alive agent first picks the
-    // nearest hostile within ENGAGEMENT_RANGE (ties broken by AgentId via
-    // natural iteration order — `agents_alive()` walks slots in ascending
-    // order). Then we commit only if the pick is mutual: i.e.
-    // tentative[a] == Some(b) AND tentative[b] == Some(a).
-    //
-    // This catches the 3-agent counterexample where A picks B but B's
-    // nearest hostile is C (not A) — without tentative-commit, a naive
-    // "set both sides" loop would give `A.engaged=B, B.engaged=A,
-    // C.engaged=B` and then overwrite with `B.engaged=C, C.engaged=B`,
-    // leaving A asymmetric.
-    //
-    // Audit fix CRITICAL #1: consume the spatial index so the per-agent
-    // hostile scan is `O(N·k)` instead of `O(N²)`.
-    let cap = state.hot_engaged_with().len();
-    // Hoisted tentative buffer — resized to cap and zeroed every tick.
-    scratch.engagement_tentative.clear();
-    scratch.engagement_tentative.resize(cap, None);
-    // `engagement_alive_ids` was populated by `decrement_and_expire`
-    // immediately above. Borrow it explicitly here so we can iterate
-    // without freezing all of `scratch`.
-    let alive = &scratch.engagement_alive_ids;
-    let tentative = &mut scratch.engagement_tentative;
-    let spatial = state.spatial();
-    for id in alive {
-        let pos = match state.agent_pos(*id) { Some(p) => p, None => continue };
-        let ct = match state.agent_creature_type(*id) { Some(c) => c, None => continue };
-        let mut best: Option<(AgentId, f32)> = None;
-        for other in spatial.within_radius(state, pos, state.config.combat.engagement_range) {
-            if other == *id { continue; }
-            let op = match state.agent_pos(other) { Some(p) => p, None => continue };
-            let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };
-            if !ct.is_hostile_to(oc) { continue; }
-            let d = pos.distance(op);
-            // Tie-break: lower raw id wins when distances match, matching the
-            // previous iteration-order-based behaviour.
-            match best {
-                None => best = Some((other, d)),
-                Some((_, bd)) if d < bd => best = Some((other, d)),
-                Some((b, bd)) if (d - bd).abs() < f32::EPSILON && other.raw() < b.raw() => {
-                    best = Some((other, d));
-                }
-                _ => {}
-            }
-        }
-        let slot = (id.raw() - 1) as usize;
-        if slot < tentative.len() {
-            tentative[slot] = best.map(|(a, _)| a);
-        }
-    }
-
-    // Commit mutual-only. Re-borrow scratch buffers as immutable so
-    // `state.set_agent_engaged_with` can mutate `state` simultaneously.
-    let alive = &scratch.engagement_alive_ids;
-    let tentative = &scratch.engagement_tentative;
-    for &id in alive {
-        let slot = (id.raw() - 1) as usize;
-        let candidate = tentative.get(slot).copied().unwrap_or(None);
-        let committed = match candidate {
-            Some(other) => {
-                let other_slot = (other.raw() - 1) as usize;
-                let them = tentative.get(other_slot).copied().unwrap_or(None);
-                if them == Some(id) { Some(other) } else { None }
-            }
-            None => None,
-        };
-        state.set_agent_engaged_with(id, committed);
     }
 }

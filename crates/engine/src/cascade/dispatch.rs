@@ -70,6 +70,20 @@ impl CascadeRegistry {
         // `Arc<AbilityRegistry>` state that the DSL emitter's stateless
         // unit-struct shape can't express.
         crate::generated::physics::register(self);
+        // Task 139 — event-driven engagement update. The old tick-start
+        // tentative-commit loop was retired in favour of two cascade
+        // dispatchers keyed on `AgentMoved` / `AgentDied`. The DSL physics
+        // emitter can't yet lower the spatial query the mover-scan needs
+        // (`query.nearby_agents(...)` is mask-only), so these stay
+        // hand-written for now.
+        self.install_kind(
+            super::EventKindId::AgentMoved,
+            crate::engagement::dispatch_agent_moved,
+        );
+        self.install_kind(
+            super::EventKindId::AgentDied,
+            crate::engagement::dispatch_agent_died,
+        );
     }
 
     /// Register the Combat Foundation Task 9 `CastHandler` against an

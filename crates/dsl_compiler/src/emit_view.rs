@@ -296,10 +296,25 @@ fn emit_materialized_struct(
         StorageHint::PairMap => {
             emit_pair_map_struct(out, view, initial, handlers, clamp, view.decay.as_ref())
         }
-        StorageHint::PerEntityTopK { .. } => Err(EmitError::Unsupported(format!(
-            "`per_entity_topk` storage hint on view `{}` is not implemented yet (spec §9 D31)",
-            view.name
-        ))),
+        StorageHint::PerEntityTopK { k, .. } => {
+            // v1 supports K=1 only: the "single-slot per entity" shape used
+            // by `engaged_with` (task 139). K>1 (e.g. top-N threats) needs a
+            // bounded sorted slot list and stays Unsupported until a view
+            // demands it.
+            if k != 1 {
+                return Err(EmitError::Unsupported(format!(
+                    "`per_entity_topk(K={k})` on view `{}` not implemented; only K=1 supported in v1 (task 139)",
+                    view.name
+                )));
+            }
+            if view.decay.is_some() {
+                return Err(EmitError::Unsupported(format!(
+                    "`per_entity_topk(1)` storage on view `{}` does not support `@decay` (task 139)",
+                    view.name
+                )));
+            }
+            emit_per_entity_topk1_struct(out, view, handlers)
+        }
         StorageHint::LazyCached => Err(EmitError::Unsupported(format!(
             "`lazy_cached` storage hint on view `{}` is not implemented yet (spec §9 D31)",
             view.name
@@ -470,6 +485,201 @@ fn emit_pair_map_struct(
     }
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
+    Ok(())
+}
+
+/// Emit the `per_entity_topk(K=1)` shape. Storage is a bare `HashMap<Key,
+/// Val>` — one slot per agent. Task 139 targets the `engaged_with` view
+/// where the key is the agent asking "who am I engaged with?" and the
+/// value is the partner. Writers follow a two-event convention:
+///
+/// - An event carrying an `actor` + `target` pair (e.g. `EngagementCommitted`)
+///   folds as `insert(actor, target); insert(target, actor)` so the pairing
+///   is bidirectional without a second event emission.
+/// - An event carrying `actor` + `former_target` (e.g. `EngagementBroken`)
+///   folds as `remove(actor); remove(former_target)` — the fold itself
+///   tears down both sides rather than requiring the emitter to spit a
+///   paired event.
+///
+/// The emitter recognises these conventions by scanning the handler
+/// pattern's bindings; other shapes raise `Unsupported` so mis-wired
+/// handlers surface at compile time rather than silently folding
+/// nothing.
+fn emit_per_entity_topk1_struct(
+    out: &mut String,
+    view: &ViewIR,
+    handlers: &[FoldHandlerIR],
+) -> Result<(), EmitError> {
+    if view.params.len() != 1 {
+        return Err(EmitError::Unsupported(format!(
+            "`per_entity_topk(1)` storage on view `{}` requires exactly 1 param; got {}",
+            view.name,
+            view.params.len()
+        )));
+    }
+    let key_ty = rust_type_for(&view.params[0].ty)?;
+    let val_ty = rust_type_for(&view.return_ty)?;
+    let key_name = view.params[0].name.as_str();
+    let ty_name = pascal_case(&view.name);
+
+    writeln!(
+        out,
+        "/// @materialized view `{}` — `storage = per_entity_topk(K=1)` over `HashMap<{key_ty}, {val_ty}>`.",
+        view.name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// Single-slot per key; insert/remove driven by paired `*Committed` / `*Broken`"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// events (task 139). See `dsl_compiler::emit_view::emit_per_entity_topk1_struct`"
+    )
+    .unwrap();
+    writeln!(out, "/// for the fold convention.").unwrap();
+    writeln!(out, "#[derive(Debug, Default)]").unwrap();
+    writeln!(out, "pub struct {ty_name} {{").unwrap();
+    writeln!(out, "    value: HashMap<{key_ty}, {val_ty}>,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "impl {ty_name} {{").unwrap();
+    writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    pub fn len(&self) -> usize {{ self.value.len() }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn is_empty(&self) -> bool {{ self.value.is_empty() }}"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // get() returns Option<Val> — a key may have no slot filled.
+    writeln!(
+        out,
+        "    /// Current slot for `{key_name}`, if any. `None` when the key has no partner."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn get(&self, {key_name}: {key_ty}) -> Option<{val_ty}> {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        self.value.get(&{key_name}).copied()"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // Escape hatch for the engine's legacy setter (`set_agent_engaged_with`) —
+    // tests and pre-event-driven code still seed slots directly.
+    writeln!(
+        out,
+        "    /// Direct slot setter. Used by the engine's back-compat `set_*`"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// wrappers; game logic should prefer emitting the paired commit /"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// break events and letting the fold place the slot."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn set(&mut self, {key_name}: {key_ty}, v: Option<{val_ty}>) {{"
+    )
+    .unwrap();
+    writeln!(out, "        match v {{").unwrap();
+    writeln!(out, "            Some(val) => {{ self.value.insert({key_name}, val); }}").unwrap();
+    writeln!(out, "            None => {{ self.value.remove(&{key_name}); }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(
+        out,
+        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
+    )
+    .unwrap();
+    if handlers.is_empty() {
+        writeln!(out, "        let _ = (event, tick);").unwrap();
+    } else {
+        writeln!(out, "        let _ = tick;").unwrap();
+        writeln!(out, "        match event {{").unwrap();
+        for h in handlers {
+            emit_per_entity_topk1_fold_arm(out, view, h)?;
+        }
+        writeln!(out, "            _ => {{}}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
+}
+
+/// Emit one match arm for a `per_entity_topk(1)` fold handler. We key off
+/// the pattern's field names (not the binding local name) so the emission
+/// is robust to authors picking whatever binding names read nicely:
+///
+/// - A pattern with a `former_target` field is treated as the "break" arm —
+///   remove the slots for both `actor` and `former_target`.
+/// - Anything else is treated as a "commit" arm — insert the pairing both
+///   ways (`actor → target`, `target → actor`).
+///
+/// Both shapes use `..` in the destructure so cosmetic additions to the
+/// event body don't break the match.
+fn emit_per_entity_topk1_fold_arm(
+    out: &mut String,
+    view: &ViewIR,
+    handler: &FoldHandlerIR,
+) -> Result<(), EmitError> {
+    let ev_name = handler.pattern.name.as_str();
+    let field_names: Vec<&str> = handler
+        .pattern
+        .bindings
+        .iter()
+        .map(|b| b.field.as_str())
+        .collect();
+    let has_former = field_names.iter().any(|f| *f == "former_target");
+
+    if has_former {
+        // Break arm — remove both sides. We rely on the event carrying
+        // `actor` + `former_target`; anything else is a mis-wired pattern
+        // the resolver should have rejected.
+        writeln!(
+            out,
+            "            Event::{ev_name} {{ actor, former_target, .. }} => {{"
+        )
+        .unwrap();
+        writeln!(out, "                self.value.remove(actor);").unwrap();
+        writeln!(out, "                self.value.remove(former_target);").unwrap();
+        writeln!(out, "            }}").unwrap();
+    } else {
+        // Commit arm — bidirectional insert. Both legs point to each
+        // other so `get(actor) == Some(target)` and vice versa.
+        writeln!(
+            out,
+            "            Event::{ev_name} {{ actor, target, .. }} => {{"
+        )
+        .unwrap();
+        writeln!(out, "                self.value.insert(*actor, *target);").unwrap();
+        writeln!(out, "                self.value.insert(*target, *actor);").unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
+    let _ = view;
     Ok(())
 }
 
@@ -1075,6 +1285,134 @@ mod tests {
         let out = emit_view_mod(&[]);
         assert!(out.contains("pub struct ViewRegistry"));
         assert!(out.contains("fold_all"));
+    }
+
+    fn engaged_with_view() -> ViewIR {
+        ViewIR {
+            name: "engaged_with".to_string(),
+            params: vec![IrParam {
+                name: "a".into(),
+                local: LocalRef(0),
+                ty: IrType::AgentId,
+                span: Span::dummy(),
+            }],
+            return_ty: IrType::AgentId,
+            body: ViewBodyIR::Fold {
+                initial: node(IrExpr::LitInt(0)),
+                handlers: vec![
+                    FoldHandlerIR {
+                        pattern: IrEventPattern {
+                            name: "EngagementCommitted".to_string(),
+                            event: None,
+                            bindings: vec![
+                                crate::ir::IrPatternBinding {
+                                    field: "actor".into(),
+                                    value: crate::ir::IrPattern::Bind {
+                                        name: "actor".into(),
+                                        local: LocalRef(1),
+                                    },
+                                    span: Span::dummy(),
+                                },
+                                crate::ir::IrPatternBinding {
+                                    field: "target".into(),
+                                    value: crate::ir::IrPattern::Bind {
+                                        name: "target".into(),
+                                        local: LocalRef(2),
+                                    },
+                                    span: Span::dummy(),
+                                },
+                            ],
+                            span: Span::dummy(),
+                        },
+                        body: vec![],
+                        span: Span::dummy(),
+                    },
+                    FoldHandlerIR {
+                        pattern: IrEventPattern {
+                            name: "EngagementBroken".to_string(),
+                            event: None,
+                            bindings: vec![
+                                crate::ir::IrPatternBinding {
+                                    field: "actor".into(),
+                                    value: crate::ir::IrPattern::Bind {
+                                        name: "actor".into(),
+                                        local: LocalRef(1),
+                                    },
+                                    span: Span::dummy(),
+                                },
+                                crate::ir::IrPatternBinding {
+                                    field: "former_target".into(),
+                                    value: crate::ir::IrPattern::Bind {
+                                        name: "former_target".into(),
+                                        local: LocalRef(2),
+                                    },
+                                    span: Span::dummy(),
+                                },
+                            ],
+                            span: Span::dummy(),
+                        },
+                        body: vec![],
+                        span: Span::dummy(),
+                    },
+                ],
+                clamp: None,
+            },
+            annotations: vec![],
+            kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 1, keyed_on: 0 }),
+            decay: None,
+            span: Span::dummy(),
+        }
+    }
+
+    #[test]
+    fn emits_per_entity_topk1_struct_with_paired_fold() {
+        let v = engaged_with_view();
+        let out = emit_view(&v, None).unwrap();
+        assert!(out.contains("pub struct EngagedWith"), "bad struct:\n{out}");
+        assert!(
+            out.contains("value: HashMap<AgentId, AgentId>"),
+            "expected single-slot HashMap:\n{out}",
+        );
+        assert!(
+            out.contains("pub fn get(&self, a: AgentId) -> Option<AgentId>"),
+            "bad get sig:\n{out}",
+        );
+        assert!(
+            out.contains("pub fn set(&mut self, a: AgentId, v: Option<AgentId>)"),
+            "missing direct setter:\n{out}",
+        );
+        assert!(
+            out.contains("Event::EngagementCommitted { actor, target, .. }"),
+            "commit arm missing:\n{out}",
+        );
+        assert!(
+            out.contains("self.value.insert(*actor, *target)"),
+            "bidirectional insert missing:\n{out}",
+        );
+        assert!(
+            out.contains("self.value.insert(*target, *actor)"),
+            "bidirectional insert missing:\n{out}",
+        );
+        assert!(
+            out.contains("Event::EngagementBroken { actor, former_target, .. }"),
+            "break arm missing:\n{out}",
+        );
+        assert!(
+            out.contains("self.value.remove(actor)"),
+            "break removal missing:\n{out}",
+        );
+        assert!(
+            out.contains("self.value.remove(former_target)"),
+            "break removal missing:\n{out}",
+        );
+    }
+
+    #[test]
+    fn per_entity_topk_k_greater_than_1_is_rejected() {
+        let mut v = engaged_with_view();
+        v.kind = ViewKind::Materialized(StorageHint::PerEntityTopK { k: 4, keyed_on: 0 });
+        let err = emit_view(&v, None).unwrap_err();
+        assert!(err.contains("K=4"), "expected K=4 diagnostic, got: {err}");
     }
 
     #[test]

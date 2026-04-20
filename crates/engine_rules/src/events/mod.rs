@@ -29,6 +29,8 @@ pub mod effect_shield_applied;
 pub mod effect_slow_applied;
 pub mod effect_standing_delta;
 pub mod effect_stun_applied;
+pub mod engagement_broken;
+pub mod engagement_committed;
 pub mod information_requested;
 pub mod opportunity_attack_triggered;
 pub mod quest_accepted;
@@ -65,6 +67,8 @@ pub use effect_shield_applied::EffectShieldApplied;
 pub use effect_slow_applied::EffectSlowApplied;
 pub use effect_standing_delta::EffectStandingDelta;
 pub use effect_stun_applied::EffectStunApplied;
+pub use engagement_broken::EngagementBroken;
+pub use engagement_committed::EngagementCommitted;
 pub use information_requested::InformationRequested;
 pub use opportunity_attack_triggered::OpportunityAttackTriggered;
 pub use quest_accepted::QuestAccepted;
@@ -236,6 +240,17 @@ pub enum Event {
         duration_ticks: u32,
         tick: u32,
     },
+    EngagementBroken {
+        actor: AgentId,
+        former_target: AgentId,
+        reason: u8,
+        tick: u32,
+    },
+    EngagementCommitted {
+        actor: AgentId,
+        target: AgentId,
+        tick: u32,
+    },
     InformationRequested {
         asker: AgentId,
         target: AgentId,
@@ -307,6 +322,8 @@ impl Event {
             Event::EffectSlowApplied { tick, .. } => *tick,
             Event::EffectStandingDelta { tick, .. } => *tick,
             Event::EffectStunApplied { tick, .. } => *tick,
+            Event::EngagementBroken { tick, .. } => *tick,
+            Event::EngagementCommitted { tick, .. } => *tick,
             Event::InformationRequested { tick, .. } => *tick,
             Event::OpportunityAttackTriggered { tick, .. } => *tick,
             Event::QuestAccepted { tick, .. } => *tick,
@@ -346,6 +363,8 @@ impl Event {
             Event::EffectSlowApplied { .. } => true,
             Event::EffectStandingDelta { .. } => true,
             Event::EffectStunApplied { .. } => true,
+            Event::EngagementBroken { .. } => true,
+            Event::EngagementCommitted { .. } => true,
             Event::InformationRequested { .. } => true,
             Event::OpportunityAttackTriggered { .. } => true,
             Event::QuestAccepted { .. } => true,

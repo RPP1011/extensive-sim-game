@@ -41,7 +41,11 @@ pub enum EventKindId {
     EffectGoldTransfer   = 31,
     EffectStandingDelta  = 32,
     CastDepthExceeded    = 33,
-    // Slots 34-127 reserved for replayable event variants added in later tasks.
+    // Task 139 — engagement transition events replacing the retired
+    // `tick_start` tentative-commit loop.
+    EngagementCommitted  = 34,
+    EngagementBroken     = 35,
+    // Slots 36-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -82,6 +86,8 @@ impl EventKindId {
             Event::EffectGoldTransfer   { .. } => EventKindId::EffectGoldTransfer,
             Event::EffectStandingDelta  { .. } => EventKindId::EffectStandingDelta,
             Event::CastDepthExceeded    { .. } => EventKindId::CastDepthExceeded,
+            Event::EngagementCommitted  { .. } => EventKindId::EngagementCommitted,
+            Event::EngagementBroken     { .. } => EventKindId::EngagementBroken,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }

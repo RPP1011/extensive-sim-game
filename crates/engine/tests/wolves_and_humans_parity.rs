@@ -108,6 +108,14 @@ fn fmt_event(e: &Event) -> String {
             "OpportunityAttackTriggered(tick={tick},attacker={},target={})",
             actor.raw(), target.raw(),
         ),
+        Event::EngagementCommitted { actor, target, tick } => format!(
+            "EngagementCommitted(tick={tick},actor={},target={})",
+            actor.raw(), target.raw(),
+        ),
+        Event::EngagementBroken { actor, former_target, reason, tick } => format!(
+            "EngagementBroken(tick={tick},actor={},former_target={},reason={})",
+            actor.raw(), former_target.raw(), reason,
+        ),
         // Any other variant we don't currently expect — serialise a
         // generic tag so the test still captures the surprise. If one of
         // these starts appearing for real, promote it to an explicit arm.

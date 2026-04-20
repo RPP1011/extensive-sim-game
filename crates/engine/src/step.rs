@@ -139,13 +139,14 @@ pub struct SimScratch {
     pub target_mask: TargetMask,
     pub actions:     Vec<Action>,
     pub shuffle_idx: Vec<u32>,
-    /// Snapshot of `state.agents_alive()` taken at the top of `tick_start`'s
-    /// `decrement_and_expire` pass and reused by the engagement update so
-    /// neither pass needs to re-walk the alive iterator. Cleared on entry.
+    /// Snapshot of `state.agents_alive()` taken at the top of
+    /// `tick_start_timers` and reused by the stun/slow expiry walk so
+    /// the pass doesn't re-walk the alive iterator. Cleared on entry.
+    /// Task 139 retired the companion `engagement_tentative` buffer —
+    /// the event-driven engagement update scans via the spatial index
+    /// on each `AgentMoved` and no longer needs a per-tick tentative
+    /// slate.
     pub engagement_alive_ids: Vec<AgentId>,
-    /// Per-slot tentative engagement target buffer for the bidirectional
-    /// commit step. Resized to `cap` and zeroed on entry.
-    pub engagement_tentative: Vec<Option<AgentId>>,
 }
 
 impl SimScratch {
@@ -156,7 +157,6 @@ impl SimScratch {
             actions:     Vec::with_capacity(n_agents),
             shuffle_idx: Vec::with_capacity(n_agents),
             engagement_alive_ids: Vec::with_capacity(n_agents),
-            engagement_tentative: Vec::with_capacity(n_agents),
         }
     }
 }
@@ -217,11 +217,15 @@ pub fn step_full<B: PolicyBackend>(
 ) {
     let t_start = std::time::Instant::now();
 
-    // Combat Foundation Task 3 — unified tick-start phase. Runs before the
-    // mask so mask predicates observe post-decrement, post-engagement state.
-    // Emits StunExpired / SlowExpired on timer transitions to zero; updates
-    // hot_engaged_with via bidirectional tentative-commit.
-    crate::ability::expire::tick_start(state, scratch, events);
+    // Combat Foundation Task 3 — tick-start timer expiry. Decrements
+    // `hot_stun_remaining_ticks` / `hot_slow_remaining_ticks` and emits
+    // `StunExpired` / `SlowExpired` on transitions to zero. Runs before
+    // the mask so mask predicates observe post-decrement state.
+    //
+    // Task 139 retired this phase's engagement responsibility; the
+    // event-driven `crate::engagement::*` cascade handlers now maintain
+    // the `engaged_with` view from `AgentMoved` / `AgentDied` events.
+    crate::ability::expire::tick_start_timers(state, scratch, events);
 
     // Phase 1 — mask build. Task 138: target-bound kinds (Attack /
     // MoveToward) also populate per-agent candidate lists in

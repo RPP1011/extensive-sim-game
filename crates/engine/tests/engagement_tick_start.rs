@@ -1,17 +1,23 @@
-//! Combat Foundation Task 3 — engagement update inside the unified
-//! tick-start phase. `ability::expire::tick_start` should commit mutual
-//! nearest-hostile pairings only.
+//! Combat Foundation Task 3 — engagement update.
+//!
+//! Task 139 retired the tick-start tentative-commit pass in favour of
+//! event-driven physics (`crate::engagement::*`) plus a
+//! `@materialized view engaged_with`. The legacy three-agent
+//! "tentative-commit drops A when B picks C" case is no longer
+//! enforced — the new pipeline commits unilaterally on the mover's
+//! side. These tests exercise the post-refactor surface via the
+//! `recompute_all_engagements` shim (the entry point retained for
+//! fixtures that predate the event-driven pipeline).
 
-use engine::ability::expire::{tick_start, ENGAGEMENT_RANGE};
+use engine::ability::expire::ENGAGEMENT_RANGE;
 use engine::creature::CreatureType;
+use engine::engagement::recompute_all_engagements;
 use engine::event::EventRing;
 use engine::state::{AgentSpawn, SimState};
-use engine::step::SimScratch;
 use glam::Vec3;
 
 fn run_tick_start(state: &mut SimState, events: &mut EventRing) {
-    let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    tick_start(state, &mut scratch, events);
+    recompute_all_engagements(state, events);
 }
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> engine::ids::AgentId {
@@ -71,28 +77,35 @@ fn engagement_clears_when_partners_separate() {
 }
 
 #[test]
-fn three_agent_tentative_commit_with_dragon_closer_to_wolf() {
-    // A (Human) at 0. B (Wolf) at 1.0. D (Dragon) at 1.4 (closer to B than A).
-    // Wolf is hostile to Human AND Dragon (dragons hostile to all).
-    // A is hostile to Wolf AND Dragon (dragons hostile to all).
-    // Dragon is hostile to all.
+fn three_agent_unilateral_commit_pins_closest_pair() {
+    // A (Human) at 0. B (Wolf) at 1.0. D (Dragon) at 1.4.
     //
     // Distances: |B-A|=1.0; |B-D|=0.4; |A-D|=1.4.
-    // Tentative picks (nearest hostile within 2.0m):
-    //   A → B (1.0m) vs D (1.4m) → B wins
-    //   B → A (1.0m) vs D (0.4m) → D wins
-    //   D → A (1.4m) vs B (0.4m) → B wins
-    // Mutual commit:
-    //   A.picked=B but B.picked=D → A committed None
-    //   B.picked=D and D.picked=B → mutual ⇒ both engage each other
-    //   D.picked=B and B.picked=D → same mutual pair
+    // Nearest-hostile pick per agent:
+    //   A → B (1.0m) vs D (1.4m) → B
+    //   B → A (1.0m) vs D (0.4m) → D
+    //   D → A (1.4m) vs B (0.4m) → B
+    //
+    // Task 139 simplification: each agent commits unilaterally to its
+    // nearest hostile. The mutual-commit invariant the retired
+    // `tick_start` enforced ("A.engaged == Some(B) ⇔ B.engaged ==
+    // Some(A)") is softened — slot iteration order decides who
+    // "wins" when three agents race.
+    //
+    // `recompute_all_engagements` iterates `agents_alive()` in slot
+    // order (A, B, D). A commits to B (bidirectional insert) first,
+    // giving `{A↔B}`. Then B recomputes and prefers D — the
+    // `recompute_engagement_for` path breaks `A↔B` (since B's
+    // partner changes) and commits `B↔D`, leaving A's slot cleared.
+    // D recomputes last and prefers B, which matches, so `{B↔D}`
+    // stands. End state: A unengaged, B↔D engaged.
     let mut state = SimState::new(8, 42);
     let mut events = EventRing::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human,  Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Wolf,   Vec3::new(1.0, 0.0, 0.0));
     let d = spawn(&mut state, CreatureType::Dragon, Vec3::new(1.4, 0.0, 0.0));
     run_tick_start(&mut state, &mut events);
-    assert_eq!(state.agent_engaged_with(a), None, "A picked B but B picked D → A committed None");
+    assert_eq!(state.agent_engaged_with(a), None, "A lost its B pairing when B picked D");
     assert_eq!(state.agent_engaged_with(b), Some(d));
     assert_eq!(state.agent_engaged_with(d), Some(b));
 }

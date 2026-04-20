@@ -47,3 +47,23 @@ view threat_level(a: Agent, b: Agent) -> f32 {
   on EffectDamageApplied { actor: b, target: a } { self += 1.0 }
   clamp: [0.0, 1000.0],
 }
+
+// -----------------------------------------------------------------------
+// @materialized view engaged_with(a) → Agent — per-entity single slot.
+// -----------------------------------------------------------------------
+// Single-slot per-agent engagement partner. Task 139 retired the
+// hand-written `ability::expire::tick_start` tentative-commit pass; the
+// engine's `AgentMoved` / `AgentDied` cascade handler now decides who is
+// engaged with whom and emits `EngagementCommitted` / `EngagementBroken`.
+// The fold inserts both sides of a pairing on commit and removes both on
+// break, so the map stays bidirectional without a cascade of paired
+// events.
+//
+// Storage: `per_entity_topk(K=1)` — a `HashMap<AgentId, AgentId>` with
+// one slot per key. K>1 (top-N threats etc.) is not supported yet.
+@materialized(on_event = [EngagementCommitted, EngagementBroken], storage = per_entity_topk)
+view engaged_with(a: Agent) -> Agent {
+  initial: 0,
+  on EngagementCommitted { actor: a, target: b } { self += 1 }
+  on EngagementBroken { actor: a, former_target: b } { self += 1 }
+}
