@@ -392,13 +392,19 @@ fn apply_actions(
                 if let (Some(sp), Some(tp)) =
                     (state.agent_pos(action.agent), state.agent_pos(tgt))
                 {
-                    if sp.distance(tp) <= ATTACK_RANGE {
-                        let new_hp = (state.agent_hp(tgt).unwrap_or(0.0) - ATTACK_DAMAGE).max(0.0);
+                    // Audit fix MEDIUM #10: honour per-agent attack stats.
+                    // Default falls back to the module constants so legacy
+                    // call sites that never touched the setters behave
+                    // identically to the pre-port kernel.
+                    let range = state.agent_attack_range(action.agent).unwrap_or(ATTACK_RANGE);
+                    let damage = state.agent_attack_damage(action.agent).unwrap_or(ATTACK_DAMAGE);
+                    if sp.distance(tp) <= range {
+                        let new_hp = (state.agent_hp(tgt).unwrap_or(0.0) - damage).max(0.0);
                         state.set_agent_hp(tgt, new_hp);
                         events.push(Event::AgentAttacked {
                             attacker: action.agent,
                             target:   tgt,
-                            damage:   ATTACK_DAMAGE,
+                            damage,
                             tick:     state.tick,
                         });
                         if new_hp <= 0.0 {

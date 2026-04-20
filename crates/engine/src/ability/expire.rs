@@ -43,11 +43,13 @@ impl CascadeHandler for OpportunityAttackHandler {
     fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
         if let Event::OpportunityAttackTriggered { attacker, target, tick } = *event {
             if !state.agent_alive(target) { return; }
+            // Audit fix MEDIUM #10: honour the attacker's per-agent damage.
+            let damage = state.agent_attack_damage(attacker).unwrap_or(ATTACK_DAMAGE);
             let cur_hp = state.agent_hp(target).unwrap_or(0.0);
-            let new_hp = (cur_hp - ATTACK_DAMAGE).max(0.0);
+            let new_hp = (cur_hp - damage).max(0.0);
             state.set_agent_hp(target, new_hp);
             events.push(Event::AgentAttacked {
-                attacker, target, damage: ATTACK_DAMAGE, tick,
+                attacker, target, damage, tick,
             });
             if new_hp <= 0.0 {
                 events.push(Event::AgentDied { agent_id: target, tick });
