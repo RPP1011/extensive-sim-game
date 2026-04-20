@@ -1,0 +1,27 @@
+[package]
+name = "engine_gpu"
+version = "0.1.0"
+edition = "2021"
+
+# Phase 0 of the GPU megakernel plan (task #159 / #181). The `GpuBackend` here
+# forwards to `engine::step::step` — no GPU dispatch yet. The crate exists so
+# later phases can add `wgpu` / `naga` deps and real compute shaders without
+# touching the engine surface or the xtask CLI. CPU-only builds (`cargo build`
+# from the workspace root) must not pull this crate in; the root package
+# registers it behind an optional `gpu` feature.
+
+[features]
+# Phase 0 is always-CPU-forwarding, so there's no wgpu/naga yet. `gpu` is
+# still wired as a feature on this crate so the parity harness in
+# `tests/parity_with_cpu.rs` can be gated behind it — Phase 1+ uses the
+# same flag to pull in the real wgpu/naga stack, and the test is meaningful
+# only when the GPU path is compiled in.
+default = []
+gpu = []
+
+[dependencies]
+engine = { path = "../engine" }
+
+[dev-dependencies]
+engine_rules = { path = "../engine_rules" }
+glam = "0.29"

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_rules", "crates/viz", "crates/dsl_compiler"]
+members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_rules", "crates/engine_gpu", "crates/viz", "crates/dsl_compiler"]
 exclude = ["crates/world_sim_bench"]
 
 
@@ -20,6 +20,12 @@ stream-monitor = []
 burn-gpu = ["dep:burn", "burn/tch", "burn/autodiff"]
 burn-cpu = ["dep:burn", "burn/ndarray"]
 profile-systems = []
+# GPU megakernel backend (task #159 / plan: docs/plans/gpu_megakernel_plan.md).
+# Pulls in the `engine_gpu` crate, which holds the (Phase 0: stub) GPU tick
+# driver. Default builds omit it entirely so `cargo build` stays dep-clean —
+# in Phase 1+ this feature gates the wgpu/naga dependency tree as well.
+# Enables the `--gpu` flag on `xtask chronicle`.
+gpu = ["dep:engine_gpu", "engine_gpu/gpu"]
 
 [dependencies]
 voxel_engine = { path = "/home/ricky/Projects/voxel_engine" }
@@ -29,6 +35,9 @@ winit = { version = "0.30", optional = true }
 tactical_sim = { path = "crates/tactical_sim" }
 dsl_compiler = { path = "crates/dsl_compiler" }
 engine = { path = "crates/engine" }
+# GPU backend — opt-in via the `gpu` feature. Stays completely out of the
+# default build graph; Phase 0 adds only this line + the feature flag.
+engine_gpu = { path = "crates/engine_gpu", optional = true }
 contracts = "0.6"
 winnow = "0.7"
 burn = { version = "0.20", default-features = false, features = ["std"], optional = true }

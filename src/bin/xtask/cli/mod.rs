@@ -114,6 +114,14 @@ pub struct ChronicleArgs {
     /// `--release` — debug builds are 10-50× slower.
     #[arg(long)]
     pub bench: bool,
+    /// Route the tick loop through `engine_gpu::GpuBackend` instead of the
+    /// default CPU backend. Phase 0 of the GPU megakernel plan (task
+    /// #159 / #181) — the GPU backend currently forwards to the CPU kernel,
+    /// so output is byte-identical. The flag only has an effect in builds
+    /// compiled with `--features gpu`; the CPU-only build prints a clear
+    /// error and exits rather than silently falling back.
+    #[arg(long)]
+    pub gpu: bool,
 }
 
 #[derive(Debug, Parser)]

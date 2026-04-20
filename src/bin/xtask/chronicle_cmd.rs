@@ -58,6 +58,19 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
         }
     };
 
+    // `--gpu` resolves to a `Backend` here so every run path below can be
+    // indifferent to whether the `gpu` feature was compiled in.
+    // Phase 0: GpuBackend forwards to the CPU kernel, so `--gpu` output is
+    // byte-identical to the default. The flag is gated on the `gpu` feature
+    // so CPU-only builds don't silently ignore it.
+    let backend = match resolve_backend(args.gpu) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("chronicle: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     // Bench mode is orthogonal to sweep/showcase: it iterates *all*
     // fixture shapes internally. Reject the combo with --sweep to avoid
     // ambiguity ("am I benching the sweep or a single run?") — the bench
@@ -71,6 +84,13 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
             eprintln!("chronicle: --bench does not produce CSV output");
             return ExitCode::FAILURE;
         }
+        // --gpu vs --bench: Phase 0's GpuBackend is a CPU-forwarding stub,
+        // so a `--bench --gpu` comparison would measure noise. Reject the
+        // combo until Phase 1+ lands real GPU dispatch.
+        if args.gpu {
+            eprintln!("chronicle: --gpu is not supported with --bench in Phase 0 (stub backend)");
+            return ExitCode::FAILURE;
+        }
         let mut stdout = std::io::stdout().lock();
         return run_bench(&mut stdout);
     }
@@ -80,6 +100,10 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
     // preset). `--sweep 0` is a no-op that we surface as an error so
     // users don't get silent empty output.
     if let Some(runs) = args.sweep {
+        if args.gpu {
+            eprintln!("chronicle: --gpu is not supported with --sweep in Phase 0 (stub backend)");
+            return ExitCode::FAILURE;
+        }
         return run_sweep_from_args(&args, runs, fixture);
     }
 
@@ -100,9 +124,41 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
     };
 
     if args.showcase {
-        run_showcase(fixture, seed, ticks)
+        run_showcase(fixture, seed, ticks, backend)
     } else {
-        run_canonical(seed, ticks)
+        run_canonical(seed, ticks, backend)
+    }
+}
+
+/// Which tick driver a chronicle run uses. Resolved once in
+/// `run_chronicle` from `--gpu` + whether the `gpu` feature was compiled in,
+/// then threaded down through the single-run paths so each call site does
+/// one match instead of re-checking the CLI flag.
+///
+/// Phase 0: both variants produce byte-identical chronicles — the Gpu arm
+/// dispatches through `engine_gpu::GpuBackend`, which forwards to the CPU
+/// kernel. Real GPU work lands in Phase 1+.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Backend {
+    Cpu,
+    #[cfg(feature = "gpu")]
+    Gpu,
+}
+
+/// Resolve the `--gpu` flag against the `gpu` feature. Returns
+/// `Backend::Gpu` only when both are set; returns an error when `--gpu` is
+/// passed to a CPU-only binary so the user doesn't get a silent fallback.
+fn resolve_backend(gpu_flag: bool) -> Result<Backend, String> {
+    if gpu_flag {
+        #[cfg(feature = "gpu")]
+        { Ok(Backend::Gpu) }
+        #[cfg(not(feature = "gpu"))]
+        { Err(String::from(
+            "--gpu requires a build with the `gpu` feature (rebuild with \
+             `cargo run --bin xtask --features gpu -- chronicle --gpu ...`)",
+        )) }
+    } else {
+        Ok(Backend::Cpu)
     }
 }
 
@@ -171,9 +227,9 @@ fn resolve_args(args: &ChronicleArgs) -> (String, u32) {
     (seed, ticks)
 }
 
-fn run_canonical(seed: u64, ticks: u32) -> ExitCode {
+fn run_canonical(seed: u64, ticks: u32, backend: Backend) -> ExitCode {
     let mut state = spawn_canonical_fixture(seed);
-    let events = simulate(&mut state, ticks);
+    let events = simulate_with(&mut state, ticks, backend);
 
     // Walk every pushed event (the ring only evicts when it overflows, and
     // the chosen cap is far above our per-run volume). Render one line per
@@ -192,9 +248,9 @@ fn run_canonical(seed: u64, ticks: u32) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_showcase(fixture: FixtureKind, seed: u64, ticks: u32) -> ExitCode {
+fn run_showcase(fixture: FixtureKind, seed: u64, ticks: u32, backend: Backend) -> ExitCode {
     let (mut state, counts) = spawn_fixture(fixture, seed);
-    let events = simulate(&mut state, ticks);
+    let events = simulate_with(&mut state, ticks, backend);
 
     let lines = chronicle::render_entries(&state, events.iter());
     let total_events = events.iter().count();
@@ -1073,6 +1129,48 @@ fn simulate(state: &mut SimState, ticks: u32) -> EventRing {
     events
 }
 
+/// Backend-aware variant of [`simulate`]. `Backend::Cpu` delegates to the
+/// canonical `simulate` function (6-phase `step_full` with
+/// `PoolNonOverlapInvariant`, empty views, `NullSink`). `Backend::Gpu`
+/// drives the `engine_gpu::GpuBackend` trait impl, which in Phase 0
+/// forwards to `engine::step::step` — observationally identical because
+/// `step::step` runs `step_full` internally with empty views, an empty
+/// invariant registry, and a `NullSink`. Invariant checks are non-mutating
+/// and every registered invariant so far (`PoolNonOverlapInvariant`) only
+/// emits telemetry on violation, so dropping them doesn't change the
+/// event log.
+fn simulate_with(state: &mut SimState, ticks: u32, backend: Backend) -> EventRing {
+    match backend {
+        Backend::Cpu => simulate(state, ticks),
+        #[cfg(feature = "gpu")]
+        Backend::Gpu => simulate_via_trait(state, ticks, engine_gpu::GpuBackend::new()),
+    }
+}
+
+/// Run `ticks` ticks through a [`engine::backend::SimBackend`] implementation.
+/// Kept separate from `simulate` so the trait call path is visible — the
+/// Phase 0 parity harness exercises this function indirectly via the `--gpu`
+/// flag. The body mirrors `step::step`'s internal setup (empty view list,
+/// no invariants, `NullSink`) rather than `simulate`'s (with
+/// `PoolNonOverlapInvariant` registered); the difference is unobservable in
+/// the event log because the invariant is non-mutating and the telemetry
+/// sink is null.
+#[cfg(feature = "gpu")]
+fn simulate_via_trait<B: engine::backend::SimBackend>(
+    state:       &mut SimState,
+    ticks:       u32,
+    mut backend: B,
+) -> EventRing {
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    for _ in 0..ticks {
+        backend.step(state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+    }
+    events
+}
+
 /// Spawn the canonical wolves+humans fixture. Kept in sync with
 /// `tests/wolves_and_humans_parity.rs::spawn_fixture` — the two fixtures
 /// share a seed-parity contract (same seed + same ticks ⇒ same chronicle).
@@ -1447,6 +1545,7 @@ mod tests {
             csv: None,
             fixture: "showcase".to_string(),
             bench: false,
+            gpu: false,
         }
     }
 
