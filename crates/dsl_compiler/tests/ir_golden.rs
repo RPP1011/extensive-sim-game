@@ -22,6 +22,7 @@ const FIXTURES: &[&str] = &[
     "metric_cascade_iters",
     "for_filter",
     "stdlib_usage",
+    "trailing_annotation",
 ];
 
 fn fixtures_dir() -> PathBuf {

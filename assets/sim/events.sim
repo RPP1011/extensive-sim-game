@@ -19,78 +19,73 @@
 // state transition. The replayable-subset hash (`EventRing::replayable_sha256`)
 // filters on this predicate; changing the annotation set bumps
 // `EVENT_HASH`.
-//
-// Annotation syntax note: we put `@replayable` BEFORE the `event`
-// keyword (the grammar's leading-annotation form). Trailing annotations
-// are ambiguous under the current parser's lookahead rule — see
-// `dsl_compiler::parser::event_decl` for the (conservative) semantics.
 
 // Replayable subset — needs satisfaction and spatial primitives.
-@replayable event AgentMoved { agent_id: AgentId, from: vec3, to: vec3, tick: u32 }
-@replayable event AgentAttacked { attacker: AgentId, target: AgentId, damage: f32, tick: u32 }
-@replayable event AgentDied { agent_id: AgentId, tick: u32 }
-@replayable event AgentFled { agent_id: AgentId, from: vec3, to: vec3, tick: u32 }
-@replayable event AgentAte { agent_id: AgentId, delta: f32, tick: u32 }
-@replayable event AgentDrank { agent_id: AgentId, delta: f32, tick: u32 }
-@replayable event AgentRested { agent_id: AgentId, delta: f32, tick: u32 }
+event AgentMoved { agent_id: AgentId, from: vec3, to: vec3, tick: u32 } @replayable
+event AgentAttacked { attacker: AgentId, target: AgentId, damage: f32, tick: u32 } @replayable
+event AgentDied { agent_id: AgentId, tick: u32 } @replayable
+event AgentFled { agent_id: AgentId, from: vec3, to: vec3, tick: u32 } @replayable
+event AgentAte { agent_id: AgentId, delta: f32, tick: u32 } @replayable
+event AgentDrank { agent_id: AgentId, delta: f32, tick: u32 } @replayable
+event AgentRested { agent_id: AgentId, delta: f32, tick: u32 } @replayable
 
 // Cast dispatch (Combat Foundation Task 9). `apply_actions` emits one of
 // these when an agent issues `MicroKind::Cast`; `CastHandler` picks it up
 // and fans out one `Effect*Applied` event per `EffectOp`. `depth` tracks
 // recursion depth through nested `EffectOp::CastAbility` emissions
 // (Task 18); root casts carry `depth = 0`.
-@replayable event AgentCast { caster: AgentId, ability: AbilityId, target: AgentId, depth: u8, tick: u32 }
+event AgentCast { caster: AgentId, ability: AbilityId, target: AgentId, depth: u8, tick: u32 } @replayable
 
 // Micro-action fan-out — one event per issued action that clears its mask gate.
-@replayable event AgentUsedItem { agent_id: AgentId, item_slot: u8, tick: u32 }
-@replayable event AgentHarvested { agent_id: AgentId, resource: u64, tick: u32 }
-@replayable event AgentPlacedTile { agent_id: AgentId, where_pos: vec3, kind_tag: u32, tick: u32 }
-@replayable event AgentPlacedVoxel { agent_id: AgentId, where_pos: vec3, mat_tag: u32, tick: u32 }
-@replayable event AgentHarvestedVoxel { agent_id: AgentId, where_pos: vec3, tick: u32 }
-@replayable event AgentConversed { agent_id: AgentId, partner: AgentId, tick: u32 }
-@replayable event AgentSharedStory { agent_id: AgentId, topic: u64, tick: u32 }
-@replayable event AgentCommunicated { speaker: AgentId, recipient: AgentId, fact_ref: u64, tick: u32 }
-@replayable event InformationRequested { asker: AgentId, target: AgentId, query: u64, tick: u32 }
-@replayable event AgentRemembered { agent_id: AgentId, subject: u64, tick: u32 }
+event AgentUsedItem { agent_id: AgentId, item_slot: u8, tick: u32 } @replayable
+event AgentHarvested { agent_id: AgentId, resource: u64, tick: u32 } @replayable
+event AgentPlacedTile { agent_id: AgentId, where_pos: vec3, kind_tag: u32, tick: u32 } @replayable
+event AgentPlacedVoxel { agent_id: AgentId, where_pos: vec3, mat_tag: u32, tick: u32 } @replayable
+event AgentHarvestedVoxel { agent_id: AgentId, where_pos: vec3, tick: u32 } @replayable
+event AgentConversed { agent_id: AgentId, partner: AgentId, tick: u32 } @replayable
+event AgentSharedStory { agent_id: AgentId, topic: u64, tick: u32 } @replayable
+event AgentCommunicated { speaker: AgentId, recipient: AgentId, fact_ref: u64, tick: u32 } @replayable
+event InformationRequested { asker: AgentId, target: AgentId, query: u64, tick: u32 } @replayable
+event AgentRemembered { agent_id: AgentId, subject: u64, tick: u32 } @replayable
 
 // Macro fan-out — emitted when a policy returns the matching `MacroAction`.
 // Domain handlers (registered later) do the actual effect.
-@replayable event QuestPosted { poster: AgentId, quest_id: QuestId, category: QuestCategory, resolution: Resolution, tick: u32 }
-@replayable event QuestAccepted { acceptor: AgentId, quest_id: QuestId, tick: u32 }
-@replayable event BidPlaced { bidder: AgentId, auction_id: QuestId, amount: f32, tick: u32 }
+event QuestPosted { poster: AgentId, quest_id: QuestId, category: QuestCategory, resolution: Resolution, tick: u32 } @replayable
+event QuestAccepted { acceptor: AgentId, quest_id: QuestId, tick: u32 } @replayable
+event BidPlaced { bidder: AgentId, auction_id: QuestId, amount: f32, tick: u32 } @replayable
 
 // Announce fan-out. `AnnounceEmitted` fires once per speaker; `RecordMemory`
 // fires once per recipient within the audience (or overhear) radius.
 // `audience_tag`: 0=Group, 1=Area, 2=Anyone (matches `AnnounceAudience::tag()`).
-@replayable event AnnounceEmitted { speaker: AgentId, audience_tag: u8, fact_payload: u64, tick: u32 }
-@replayable event RecordMemory { observer: AgentId, source: AgentId, fact_payload: u64, confidence: f32, tick: u32 }
+event AnnounceEmitted { speaker: AgentId, audience_tag: u8, fact_payload: u64, tick: u32 } @replayable
+event RecordMemory { observer: AgentId, source: AgentId, fact_payload: u64, confidence: f32, tick: u32 } @replayable
 
 // Combat Foundation Task 3 — stun/slow expiry. Emitted by
 // `ability::expire::tick_start` on the tick a timer reaches zero.
-@replayable event StunExpired { agent_id: AgentId, tick: u32 }
-@replayable event SlowExpired { agent_id: AgentId, tick: u32 }
+event StunExpired { agent_id: AgentId, tick: u32 } @replayable
+event SlowExpired { agent_id: AgentId, tick: u32 } @replayable
 
 // Combat Foundation Task 4 — opportunity attack fired by the engager
 // when an engaged agent tries to move away or flee. Applied via a
 // cascade handler (`OpportunityAttackHandler`) that reuses ATTACK_DAMAGE
 // and drops the target's hp accordingly.
-@replayable event OpportunityAttackTriggered { attacker: AgentId, target: AgentId, tick: u32 }
+event OpportunityAttackTriggered { attacker: AgentId, target: AgentId, tick: u32 } @replayable
 
 // Combat Foundation Tasks 9–17 — effect fan-out emitted by `CastHandler`,
 // one per `EffectOp` carried by the cast's program. Per-effect cascade
 // handlers (Tasks 10–17) consume these to apply the concrete state mutation.
-@replayable event EffectDamageApplied { caster: AgentId, target: AgentId, amount: f32, tick: u32 }
-@replayable event EffectHealApplied { caster: AgentId, target: AgentId, amount: f32, tick: u32 }
-@replayable event EffectShieldApplied { caster: AgentId, target: AgentId, amount: f32, tick: u32 }
-@replayable event EffectStunApplied { caster: AgentId, target: AgentId, duration_ticks: u32, tick: u32 }
-@replayable event EffectSlowApplied { caster: AgentId, target: AgentId, duration_ticks: u32, factor_q8: i16, tick: u32 }
-@replayable event EffectGoldTransfer { from: AgentId, to: AgentId, amount: i64, tick: u32 }
-@replayable event EffectStandingDelta { a: AgentId, b: AgentId, delta: i16, tick: u32 }
+event EffectDamageApplied { caster: AgentId, target: AgentId, amount: f32, tick: u32 } @replayable
+event EffectHealApplied { caster: AgentId, target: AgentId, amount: f32, tick: u32 } @replayable
+event EffectShieldApplied { caster: AgentId, target: AgentId, amount: f32, tick: u32 } @replayable
+event EffectStunApplied { caster: AgentId, target: AgentId, duration_ticks: u32, tick: u32 } @replayable
+event EffectSlowApplied { caster: AgentId, target: AgentId, duration_ticks: u32, factor_q8: i16, tick: u32 } @replayable
+event EffectGoldTransfer { from: AgentId, to: AgentId, amount: i64, tick: u32 } @replayable
+event EffectStandingDelta { a: AgentId, b: AgentId, delta: i16, tick: u32 } @replayable
 
 // Audit event emitted by `CastHandler` when a recursive `CastAbility`
 // effect would push beyond `MAX_CASCADE_ITERATIONS`. Task 18 pins the
 // budget at 8; the handler drops the overflow cast silently.
-@replayable event CastDepthExceeded { caster: AgentId, ability: AbilityId, tick: u32 }
+event CastDepthExceeded { caster: AgentId, ability: AbilityId, tick: u32 } @replayable
 
 // Non-replayable side channel — prose chronicle entries carrying a template
 // id the renderer pairs with a localised string. Intentionally omits

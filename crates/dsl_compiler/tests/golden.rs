@@ -19,6 +19,7 @@ const FIXTURES: &[&str] = &[
     "probe_low_hp_flees",
     "metric_cascade_iters",
     "for_filter",
+    "trailing_annotation",
 ];
 
 fn fixtures_dir() -> PathBuf {
@@ -150,6 +151,50 @@ fn error_rendering_includes_caret() {
     let err = dsl_compiler::parse(src).expect_err("should fail");
     assert!(err.rendered.contains("line 1"), "rendered: {}", err.rendered);
     assert!(err.rendered.contains("^"), "rendered: {}", err.rendered);
+}
+
+#[test]
+fn trailing_annotation_attaches_to_preceding_decl() {
+    use dsl_compiler::ast::Decl;
+    let src = "\
+event A { x: i32 } @replayable
+event B { y: f32 } @replayable @traced
+@replayable event C { z: u64 }
+@replayable event D { a: bool } @traced
+";
+    let program = dsl_compiler::parse(src).expect("parse failed");
+    let names: Vec<&str> = program
+        .decls
+        .iter()
+        .map(|d| match d {
+            Decl::Event(e) => e.name.as_str(),
+            _ => panic!("expected only events"),
+        })
+        .collect();
+    assert_eq!(names, vec!["A", "B", "C", "D"]);
+
+    let anns_for = |idx: usize| -> Vec<&str> {
+        match &program.decls[idx] {
+            Decl::Event(e) => e.annotations.iter().map(|a| a.name.as_str()).collect(),
+            _ => unreachable!(),
+        }
+    };
+    assert_eq!(anns_for(0), vec!["replayable"]);
+    assert_eq!(anns_for(1), vec!["replayable", "traced"]);
+    assert_eq!(anns_for(2), vec!["replayable"]);
+    // Mixed: leading first, then trailing.
+    assert_eq!(anns_for(3), vec!["replayable", "traced"]);
+}
+
+#[test]
+fn orphan_trailing_annotation_at_eof_errors() {
+    let src = "@replayable\n";
+    let err = dsl_compiler::parse(src).expect_err("should fail");
+    assert!(
+        err.message.contains("top-level declaration"),
+        "message: {}",
+        err.message
+    );
 }
 
 #[allow(dead_code)]

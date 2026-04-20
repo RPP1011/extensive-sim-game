@@ -43,7 +43,12 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
     let mut decls = Vec::new();
     while !c.eof() {
         match decl(&mut c) {
-            Ok(d) => decls.push(d),
+            Ok(mut d) => {
+                if let Err(e) = absorb_trailing_annotations(&mut c, &mut d) {
+                    return Err(ParseError::new(source, e.span, e.context, e.message));
+                }
+                decls.push(d);
+            }
             Err(e) => {
                 return Err(ParseError::new(source, e.span, e.context, e.message));
             }
@@ -51,6 +56,76 @@ pub fn parse_program(source: &str) -> Result<Program, ParseError> {
         c.skip_ws();
     }
     Ok(Program { decls })
+}
+
+/// Gather `@annotation`s that follow a just-parsed decl. Trailing annotations
+/// must sit on the same source line as the decl's closing token; an `@` that
+/// only appears after a newline is treated as the *next* decl's leading
+/// annotation. This matches `event Foo { ... } @replayable` (trailing) versus
+/// `event Foo { ... }\n@replayable\nevent Bar { ... }` (leading on `Bar`).
+fn absorb_trailing_annotations(c: &mut Cursor, d: &mut Decl) -> PResult<()> {
+    loop {
+        // Same-line check: skip only spaces/tabs (NOT newlines or comments).
+        let save = c.pos;
+        skip_inline_ws(c);
+        if !c.starts_with_char('@') {
+            c.pos = save;
+            return Ok(());
+        }
+        let ann = parse_annotation(c)?;
+        if let Some(anns) = decl_annotations_mut(d) {
+            anns.push(ann);
+            let span = decl_span_mut(d);
+            span.end = c.pos;
+        }
+    }
+}
+
+/// Skip spaces and tabs but NOT newlines — used by trailing-annotation
+/// disambiguation to keep the trailing run constrained to the source line.
+fn skip_inline_ws(c: &mut Cursor) {
+    while let Some(ch) = c.peek_char() {
+        if ch == ' ' || ch == '\t' {
+            c.bump(ch.len_utf8());
+        } else {
+            break;
+        }
+    }
+}
+
+fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
+    Some(match d {
+        Decl::Entity(x) => &mut x.annotations,
+        Decl::Event(x) => &mut x.annotations,
+        Decl::View(x) => &mut x.annotations,
+        Decl::Physics(x) => &mut x.annotations,
+        Decl::Mask(x) => &mut x.annotations,
+        Decl::Verb(x) => &mut x.annotations,
+        Decl::Scoring(x) => &mut x.annotations,
+        Decl::Invariant(x) => &mut x.annotations,
+        Decl::Probe(x) => &mut x.annotations,
+        Decl::Metric(x) => &mut x.annotations,
+        // `query` does not currently accept annotations on the decl; trailing
+        // `@`s after a `query` will fall through to the orphan-annotation
+        // error path on the next iteration.
+        Decl::Query(_) => return None,
+    })
+}
+
+fn decl_span_mut(d: &mut Decl) -> &mut Span {
+    match d {
+        Decl::Entity(x) => &mut x.span,
+        Decl::Event(x) => &mut x.span,
+        Decl::View(x) => &mut x.span,
+        Decl::Physics(x) => &mut x.span,
+        Decl::Mask(x) => &mut x.span,
+        Decl::Verb(x) => &mut x.span,
+        Decl::Scoring(x) => &mut x.span,
+        Decl::Invariant(x) => &mut x.span,
+        Decl::Probe(x) => &mut x.span,
+        Decl::Metric(x) => &mut x.span,
+        Decl::Query(x) => &mut x.span,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +181,7 @@ fn parse_annotation(c: &mut Cursor) -> PResult<Annotation> {
     expect_char(c, '@').map_err(|e| e.with_context("parsing annotation"))?;
     let name = ident(c).map_err(|e| e.with_context("parsing annotation name"))?;
     let mut args = Vec::new();
+    let after_name = c.pos;
     c.skip_ws();
     if c.starts_with_char('(') {
         c.bump(1);
@@ -135,6 +211,11 @@ fn parse_annotation(c: &mut Cursor) -> PResult<Annotation> {
             }
             return Err(ParseErr::at(here(c), "expected `,` or `)` in annotation args"));
         }
+    } else {
+        // No args — roll back the lookahead whitespace so the cursor sits
+        // exactly after the annotation name. Trailing-annotation gathering
+        // relies on this to detect end-of-line accurately.
+        c.pos = after_name;
     }
     let span = Span::new(start, c.pos);
     Ok(Annotation { name, args, span })
@@ -393,45 +474,7 @@ fn event_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRe
     let fields = parse_field_decls(c)?;
     c.skip_ws();
     expect_char(c, '}').map_err(|e| e.with_context("parsing event body (expected `}`)"))?;
-    // Trailing annotations may follow an event declaration in the spec form
-    // (`event X { ... }  @replayable`). Fold them into the declaration.
-    let mut ann = annotations;
-    loop {
-        c.skip_ws();
-        let save = c.pos;
-        if c.starts_with_char('@') {
-            // Lookahead: only grab the annotation if the *next* keyword after
-            // any trailing annotations is NOT another top-level declaration.
-            let mut la = c.clone();
-            let a = parse_annotation(&mut la)?;
-            // Heuristic: trailing event-annotations are the leaf-words known
-            // from spec §2.2. Accept any annotation if no top-level keyword
-            // follows within whitespace.
-            la.skip_ws();
-            if la.eof()
-                || !(la.starts_with("entity ")
-                    || la.starts_with("event ")
-                    || la.starts_with("view ")
-                    || la.starts_with("query ")
-                    || la.starts_with("physics ")
-                    || la.starts_with("mask ")
-                    || la.starts_with("verb ")
-                    || la.starts_with("scoring ")
-                    || la.starts_with("invariant ")
-                    || la.starts_with("probe ")
-                    || la.starts_with("metric "))
-            {
-                let _ = save;
-                ann.push(a);
-                c.pos = la.pos;
-                continue;
-            }
-            c.pos = save;
-            break;
-        }
-        break;
-    }
-    Ok(EventDecl { annotations: ann, name, fields, span: Span::new(start, c.pos) })
+    Ok(EventDecl { annotations, name, fields, span: Span::new(start, c.pos) })
 }
 
 fn parse_field_decls(c: &mut Cursor) -> PResult<Vec<FieldDecl>> {

@@ -1,0 +1,168 @@
+{
+  "decls": [
+    {
+      "Event": {
+        "annotations": [
+          {
+            "name": "replayable",
+            "args": [],
+            "span": {
+              "start": 133,
+              "end": 144
+            }
+          }
+        ],
+        "name": "A",
+        "fields": [
+          {
+            "name": "x",
+            "ty": {
+              "kind": {
+                "Named": "i32"
+              },
+              "span": {
+                "start": 127,
+                "end": 131
+              }
+            },
+            "span": {
+              "start": 124,
+              "end": 131
+            }
+          }
+        ],
+        "span": {
+          "start": 114,
+          "end": 144
+        }
+      }
+    },
+    {
+      "Event": {
+        "annotations": [
+          {
+            "name": "replayable",
+            "args": [],
+            "span": {
+              "start": 164,
+              "end": 175
+            }
+          },
+          {
+            "name": "traced",
+            "args": [],
+            "span": {
+              "start": 176,
+              "end": 183
+            }
+          }
+        ],
+        "name": "B",
+        "fields": [
+          {
+            "name": "y",
+            "ty": {
+              "kind": {
+                "Named": "f32"
+              },
+              "span": {
+                "start": 158,
+                "end": 162
+              }
+            },
+            "span": {
+              "start": 155,
+              "end": 162
+            }
+          }
+        ],
+        "span": {
+          "start": 145,
+          "end": 183
+        }
+      }
+    },
+    {
+      "Event": {
+        "annotations": [
+          {
+            "name": "replayable",
+            "args": [],
+            "span": {
+              "start": 184,
+              "end": 195
+            }
+          }
+        ],
+        "name": "C",
+        "fields": [
+          {
+            "name": "z",
+            "ty": {
+              "kind": {
+                "Named": "u64"
+              },
+              "span": {
+                "start": 209,
+                "end": 213
+              }
+            },
+            "span": {
+              "start": 206,
+              "end": 213
+            }
+          }
+        ],
+        "span": {
+          "start": 196,
+          "end": 214
+        }
+      }
+    },
+    {
+      "Event": {
+        "annotations": [
+          {
+            "name": "replayable",
+            "args": [],
+            "span": {
+              "start": 215,
+              "end": 226
+            }
+          },
+          {
+            "name": "traced",
+            "args": [],
+            "span": {
+              "start": 247,
+              "end": 254
+            }
+          }
+        ],
+        "name": "D",
+        "fields": [
+          {
+            "name": "a",
+            "ty": {
+              "kind": {
+                "Named": "bool"
+              },
+              "span": {
+                "start": 240,
+                "end": 245
+              }
+            },
+            "span": {
+              "start": 237,
+              "end": 245
+            }
+          }
+        ],
+        "span": {
+          "start": 227,
+          "end": 254
+        }
+      }
+    }
+  ]
+}
