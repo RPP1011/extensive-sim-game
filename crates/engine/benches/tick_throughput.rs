@@ -2,7 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
 use engine::event::EventRing;
-use engine::mask::{MaskBuffer, MicroKind};
+use engine::mask::{MaskBuffer, MicroKind, TargetMask};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend, UtilityBackend};
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
@@ -39,7 +39,7 @@ fn run<B: PolicyBackend>(n: usize, ticks: usize, backend: &B) {
 struct MixedPolicy;
 
 impl PolicyBackend for MixedPolicy {
-    fn evaluate(&self, state: &SimState, _mask: &MaskBuffer, out: &mut Vec<Action>) {
+    fn evaluate(&self, state: &SimState, _mask: &MaskBuffer, _target_mask: &TargetMask, out: &mut Vec<Action>) {
         let tick = state.tick;
         for id in state.agents_alive() {
             let pick = id.raw() % 5;

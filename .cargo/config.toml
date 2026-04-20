@@ -1,0 +1,12 @@
+[build]
+# Release + bench: -C target-cpu=native lets LLVM emit AVX2 / FMA / BMI on
+# this host. Auto-vectorizes tight loops in scoring argmax, spatial distance
+# prefilter, and glam Vec3 ops. Baseline x86-64 is SSE2-only; this removes
+# the 15-30% penalty on bench cells where the hot loop is 4-8-wide SIMD-
+# friendly but was compiling scalar.
+#
+# Caveat: binaries built with this config only run on THIS host (or a CPU
+# with the same feature set). For distribution pin to `x86-64-v3` (Haswell+
+# / Excavator+, 2013) or `x86-64-v4` (AVX-512, 2017+). Dev/bench uses
+# native because a home-built artefact never ships.
+rustflags = ["-C", "target-cpu=native"]
