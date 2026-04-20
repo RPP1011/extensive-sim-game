@@ -53,8 +53,8 @@ fn emit_from_seed_produces_expected_files() {
         "effect_heal_applied.rs",
         "effect_shield_applied.rs",
         "effect_slow_applied.rs",
-        "slow_expired.rs",
-        "stun_expired.rs",
+        // slow_expired.rs / stun_expired.rs retired in commit e5fc0d20
+        // (stun/slow moved from per-tick decrement to timestamp expiry).
         "chronicle_entry.rs",
     ];
     for e in expected {
