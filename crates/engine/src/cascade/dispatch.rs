@@ -46,6 +46,7 @@ impl CascadeRegistry {
         // with the `Effect*Applied` events the `CastHandler` emits (Task 9)
         // and are the actual state mutators for the combat EffectOps.
         self.register(crate::ability::DamageHandler);
+        self.register(crate::ability::HealHandler);
     }
 
     /// Register the Combat Foundation Task 9 `CastHandler` against an
