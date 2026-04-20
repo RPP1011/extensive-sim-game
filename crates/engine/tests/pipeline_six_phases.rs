@@ -52,10 +52,18 @@ fn six_phase_pipeline_runs_clean() {
     let event_rows:    Vec<_> = rows.iter().filter(|r| r.metric == metrics::EVENT_COUNT).collect();
     let alive_rows:    Vec<_> = rows.iter().filter(|r| r.metric == metrics::AGENT_ALIVE).collect();
     let mask_rows:     Vec<_> = rows.iter().filter(|r| r.metric == metrics::MASK_TRUE_FRAC).collect();
+    // Audit fix HIGH #5: CASCADE_ITERATIONS must be emitted once per tick.
+    let cascade_rows:  Vec<_> = rows.iter().filter(|r| r.metric == metrics::CASCADE_ITERATIONS).collect();
     assert_eq!(tick_ms_rows.len(), 50);
     assert_eq!(event_rows.len(),   50);
     assert_eq!(alive_rows.len(),   50);
     assert_eq!(mask_rows.len(),    50);
+    assert_eq!(cascade_rows.len(), 50, "cascade_iterations must emit once per tick");
+    // Iteration count is always within [0, MAX_CASCADE_ITERATIONS].
+    for (i, r) in cascade_rows.iter().enumerate() {
+        assert!(r.value >= 0.0 && r.value <= 8.0,
+            "cascade_iterations[{}] = {} outside [0, 8]", i, r.value);
+    }
 
     // Value inspection — not just counts. A broken impl that emitted
     // constant zeros or infinities would pass the count-only assertions.

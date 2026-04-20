@@ -168,7 +168,7 @@ pub fn step_full<B: PolicyBackend>(
     // so phase 6 can report an accurate per-tick counter.
     let events_before = events.total_pushed();
     apply_actions(state, scratch, events);
-    cascade.run_fixed_point(state, events);
+    cascade.run_fixed_point_tel(state, events, telemetry);
     let events_emitted = events.total_pushed().saturating_sub(events_before);
 
     // Phase 5 — view fold. Each view walks the (retained subset of the) event

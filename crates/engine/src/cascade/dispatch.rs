@@ -1,6 +1,7 @@
 use super::handler::{CascadeHandler, EventKindId, Lane};
 use crate::event::{Event, EventRing};
 use crate::state::SimState;
+use crate::telemetry::{metrics, TelemetrySink};
 
 /// Dense slot count covering all `EventKindId` ordinals — includes the 128+
 /// chronicle reservation. `Vec<Vec<Box<dyn CascadeHandler>>>` indexed by
@@ -119,14 +120,33 @@ impl CascadeRegistry {
     /// one per tick) don't re-dispatch past events. Within a single call,
     /// iteration continues as long as handlers push new events, up to the
     /// iteration bound.
+    ///
+    /// Back-compat wrapper over [`run_fixed_point_tel`] for call sites that
+    /// don't have a telemetry sink (typically tests).
     pub fn run_fixed_point(&self, state: &mut SimState, events: &mut EventRing) {
+        self.run_fixed_point_tel(state, events, &crate::telemetry::NullSink);
+    }
+
+    /// Like [`run_fixed_point`] but also emits the
+    /// `metrics::CASCADE_ITERATIONS` histogram metric once per call, counting
+    /// the number of dispatch passes taken (0 when the initial ring cursor is
+    /// already current — no events to drain). Audit fix HIGH #5.
+    pub fn run_fixed_point_tel(
+        &self,
+        state:     &mut SimState,
+        events:    &mut EventRing,
+        telemetry: &dyn TelemetrySink,
+    ) {
         let mut processed = events.dispatched();
+        let mut iterations: usize = 0;
         for iter in 0..MAX_CASCADE_ITERATIONS {
             let snapshot = events.total_pushed();
             if snapshot == processed {
                 events.set_dispatched(processed);
+                telemetry.emit_histogram(metrics::CASCADE_ITERATIONS, iterations as f64);
                 return;
             }
+            iterations = iter + 1;
             for idx in processed..snapshot {
                 if let Some(e) = events.get_pushed(idx) {
                     self.dispatch(&e, state, events);
@@ -151,6 +171,7 @@ impl CascadeRegistry {
             }
         }
         events.set_dispatched(events.total_pushed());
+        telemetry.emit_histogram(metrics::CASCADE_ITERATIONS, iterations as f64);
     }
 }
 
