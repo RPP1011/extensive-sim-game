@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass
 class AgentMoved:
-    agent_id: int  # AgentId
+    actor: int  # AgentId
     from: tuple[float, float, float]
-    to: tuple[float, float, float]
+    location: tuple[float, float, float]
     tick: int

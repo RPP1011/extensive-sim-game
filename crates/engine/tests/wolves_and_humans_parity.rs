@@ -78,14 +78,14 @@ fn spawn_fixture() -> SimState {
 /// glam / std Debug doesn't silently invalidate the baseline.
 fn fmt_event(e: &Event) -> String {
     match *e {
-        Event::AgentMoved { agent_id, from, to, tick } => format!(
+        Event::AgentMoved { actor, from, location, tick } => format!(
             "AgentMoved(tick={tick},id={},from=({:.6},{:.6},{:.6}),to=({:.6},{:.6},{:.6}))",
-            agent_id.raw(),
-            from.x, from.y, from.z, to.x, to.y, to.z,
+            actor.raw(),
+            from.x, from.y, from.z, location.x, location.y, location.z,
         ),
-        Event::AgentAttacked { attacker, target, damage, tick } => format!(
+        Event::AgentAttacked { actor, target, damage, tick } => format!(
             "AgentAttacked(tick={tick},attacker={},target={},damage={:.6})",
-            attacker.raw(), target.raw(), damage,
+            actor.raw(), target.raw(), damage,
         ),
         Event::AgentDied { agent_id, tick } => format!(
             "AgentDied(tick={tick},id={})", agent_id.raw(),
@@ -104,9 +104,9 @@ fn fmt_event(e: &Event) -> String {
         Event::AgentRested { agent_id, delta, tick } => format!(
             "AgentRested(tick={tick},id={},delta={:.6})", agent_id.raw(), delta,
         ),
-        Event::OpportunityAttackTriggered { attacker, target, tick } => format!(
+        Event::OpportunityAttackTriggered { actor, target, tick } => format!(
             "OpportunityAttackTriggered(tick={tick},attacker={},target={})",
-            attacker.raw(), target.raw(),
+            actor.raw(), target.raw(),
         ),
         // Any other variant we don't currently expect — serialise a
         // generic tag so the test still captures the surprise. If one of

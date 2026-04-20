@@ -15,7 +15,7 @@ fn one_attacker_populates_topk_for_victim() {
     let attacker = AgentId::new(1).unwrap();
     let victim   = AgentId::new(2).unwrap();
     view.update(&Event::AgentAttacked {
-        attacker, target: victim, damage: 20.0, tick: 0,
+        actor: attacker, target: victim, damage: 20.0, tick: 0,
     });
     let topk = view.topk(victim);
     assert_eq!(topk.len(), 1);
@@ -28,8 +28,8 @@ fn repeated_attacks_accumulate_hostility_score() {
     let mut view = MostHostileTopK::new(8);
     let attacker = AgentId::new(1).unwrap();
     let victim   = AgentId::new(2).unwrap();
-    view.update(&Event::AgentAttacked { attacker, target: victim, damage: 20.0, tick: 0 });
-    view.update(&Event::AgentAttacked { attacker, target: victim, damage: 30.0, tick: 1 });
+    view.update(&Event::AgentAttacked { actor: attacker, target: victim, damage: 20.0, tick: 0 });
+    view.update(&Event::AgentAttacked { actor: attacker, target: victim, damage: 30.0, tick: 1 });
     let topk = view.topk(victim);
     assert_eq!(topk.len(), 1);
     assert!((topk[0].1 - 50.0).abs() < 1e-6);
@@ -43,7 +43,7 @@ fn topk_bounded_keeps_highest_scoring_attackers() {
     for i in 0..6 {
         let attacker = AgentId::new(i + 2).unwrap();
         view.update(&Event::AgentAttacked {
-            attacker, target: victim,
+            actor: attacker, target: victim,
             damage: 10.0 * (i + 1) as f32, tick: 0,
         });
     }

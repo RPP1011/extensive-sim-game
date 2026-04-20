@@ -1,13 +1,16 @@
-//! Combat Foundation Task 10 — `DamageHandler` applies damage with shield-first
-//! absorption and emits `AgentDied` + `kill_agent` on lethal overflow.
+//! Combat Foundation Task 10 — damage applied with shield-first absorption
+//! and emits `AgentDied` + `kill_agent` on lethal overflow.
 //!
 //! Every test dispatches an `Event::EffectDamageApplied` directly and inspects
 //! the resulting state mutation + event tail. That's the layer the cascade
 //! exposes; wiring a full `AgentCast` through the pipeline is covered by
 //! `action_cast_emits_agentcast.rs` (Task 9) and the acceptance tests.
+//!
+//! The legacy `DamageHandler` unit-struct shim was removed in the 2026-04-19
+//! event-taxonomy rename (task 136). Tests now call the compiler-emitted
+//! per-event-kind dispatcher directly.
 
-use engine::generated::physics::damage::DamageHandler;
-use engine::cascade::CascadeHandler;
+use engine::generated::physics::dispatch_effect_damage_applied;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
@@ -26,8 +29,8 @@ fn shield_absorbs_before_hp_drops() {
     let target = spawn_hp(&mut state, CreatureType::Wolf,  100.0);
     state.set_agent_shield_hp(target, 10.0);
 
-    DamageHandler.handle(
-        &Event::EffectDamageApplied { caster, target, amount: 30.0, tick: 0 },
+    dispatch_effect_damage_applied(
+        &Event::EffectDamageApplied { actor: caster, target, amount: 30.0, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -48,8 +51,8 @@ fn damage_bleeds_through_zero_shield_entirely_to_hp() {
     let target = spawn_hp(&mut state, CreatureType::Wolf,  100.0);
     assert_eq!(state.agent_shield_hp(target), Some(0.0));
 
-    DamageHandler.handle(
-        &Event::EffectDamageApplied { caster, target, amount: 25.0, tick: 0 },
+    dispatch_effect_damage_applied(
+        &Event::EffectDamageApplied { actor: caster, target, amount: 25.0, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -69,8 +72,8 @@ fn lethal_damage_emits_agent_died_and_kills() {
     // incoming event's tick. Advance the world clock so the emitted
     // `AgentDied` carries the expected stamp.
     state.tick = 7;
-    DamageHandler.handle(
-        &Event::EffectDamageApplied { caster, target, amount: 100.0, tick: 7 },
+    dispatch_effect_damage_applied(
+        &Event::EffectDamageApplied { actor: caster, target, amount: 100.0, tick: 7 },
         &mut state,
         &mut events,
     );
@@ -93,8 +96,8 @@ fn damage_on_dead_target_is_a_noop() {
     let target = spawn_hp(&mut state, CreatureType::Wolf,  50.0);
     state.kill_agent(target);
 
-    DamageHandler.handle(
-        &Event::EffectDamageApplied { caster, target, amount: 999.0, tick: 0 },
+    dispatch_effect_damage_applied(
+        &Event::EffectDamageApplied { actor: caster, target, amount: 999.0, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -118,8 +121,8 @@ fn cast_damage_emits_agent_attacked_like_melee() {
     let target = spawn_hp(&mut state, CreatureType::Wolf,  100.0);
 
     state.tick = 3;
-    DamageHandler.handle(
-        &Event::EffectDamageApplied { caster, target, amount: 25.0, tick: 3 },
+    dispatch_effect_damage_applied(
+        &Event::EffectDamageApplied { actor: caster, target, amount: 25.0, tick: 3 },
         &mut state,
         &mut events,
     );
@@ -127,8 +130,8 @@ fn cast_damage_emits_agent_attacked_like_melee() {
     let attacked: Vec<(AgentId, AgentId, f32, u32)> = events
         .iter()
         .filter_map(|e| match e {
-            Event::AgentAttacked { attacker, target, damage, tick } =>
-                Some((*attacker, *target, *damage, *tick)),
+            Event::AgentAttacked { actor, target, damage, tick } =>
+                Some((*actor, *target, *damage, *tick)),
             _ => None,
         })
         .collect();
@@ -146,8 +149,8 @@ fn cast_lethal_damage_emits_attacked_then_died() {
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  50.0);
 
-    DamageHandler.handle(
-        &Event::EffectDamageApplied { caster, target, amount: 100.0, tick: 9 },
+    dispatch_effect_damage_applied(
+        &Event::EffectDamageApplied { actor: caster, target, amount: 100.0, tick: 9 },
         &mut state,
         &mut events,
     );

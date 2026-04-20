@@ -2,7 +2,7 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -16,23 +16,5 @@ pub fn modify_standing(
 ) {
     if (delta != 0) {
         state.adjust_standing(a, b, delta);
-    }
-}
-
-pub struct ModifyStandingHandler;
-
-impl crate::cascade::CascadeHandler for ModifyStandingHandler {
-    fn trigger(&self) -> crate::cascade::EventKindId {
-        crate::cascade::EventKindId::EffectStandingDelta
-    }
-    fn lane(&self) -> crate::cascade::Lane {
-        crate::cascade::Lane::Effect
-    }
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let Event::EffectStandingDelta { a, b, delta, tick } = *event else {
-            return;
-        };
-        modify_standing(a, b, delta, state, events);
     }
 }

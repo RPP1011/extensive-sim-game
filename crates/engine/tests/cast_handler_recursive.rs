@@ -68,7 +68,7 @@ fn three_link_chain_fires_three_damage_events_no_depth_exceeded() {
     // Seed a root cast of A at depth 0. CastHandler will fan it out through
     // B and C via nested AgentCast events.
     events.push(Event::AgentCast {
-        caster, ability: a_id, target, depth: 0, tick: 0,
+        actor: caster, ability: a_id, target, depth: 0, tick: 0,
     });
     cascade.run_fixed_point(&mut state, &mut events);
 
@@ -130,7 +130,7 @@ fn self_targeted_recursive_link_uses_caster_selector() {
     let mut events = EventRing::with_cap(256);
 
     events.push(Event::AgentCast {
-        caster, ability: a_id, target, depth: 0, tick: 0,
+        actor: caster, ability: a_id, target, depth: 0, tick: 0,
     });
     cascade.run_fixed_point(&mut state, &mut events);
 

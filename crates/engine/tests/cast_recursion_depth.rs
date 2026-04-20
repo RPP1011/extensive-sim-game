@@ -74,7 +74,7 @@ fn infinite_loop_caps_at_max_cascade_iterations() {
     let mut events = EventRing::with_cap(4096);
 
     events.push(Event::AgentCast {
-        caster, ability, target, depth: 0, tick: 0,
+        actor: caster, ability, target, depth: 0, tick: 0,
     });
     cascade.run_fixed_point(&mut state, &mut events);
 
@@ -107,7 +107,7 @@ fn infinite_loop_caps_at_max_cascade_iterations() {
 
     // The audit event points at the ability that hit the cap.
     let hit = events.iter().find_map(|e| match e {
-        Event::CastDepthExceeded { caster: c, ability: a, .. } => Some((*c, *a)),
+        Event::CastDepthExceeded { actor: c, ability: a, .. } => Some((*c, *a)),
         _ => None,
     }).unwrap();
     assert_eq!(hit.0, caster, "audit event records the caster");

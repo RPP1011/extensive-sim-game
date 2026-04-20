@@ -7,8 +7,7 @@
 //! - Clamp `[-1000, 1000]` is applied on the final value (silent saturation).
 //! - Zero delta short-circuits — no entry inserted, pair stays untracked.
 
-use engine::generated::physics::modify_standing::ModifyStandingHandler;
-use engine::cascade::CascadeHandler;
+use engine::generated::physics::dispatch_effect_standing_delta;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
@@ -26,7 +25,7 @@ fn positive_delta_adds_to_zero_baseline() {
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
 
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a, b, delta: 50, tick: 0 },
         &mut state,
         &mut events,
@@ -42,7 +41,7 @@ fn saturates_at_upper_clamp() {
     let b = spawn(&mut state, CreatureType::Human);
 
     // i16::MAX for delta would push past 1000 → clamped at 1000.
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a, b, delta: i16::MAX, tick: 0 },
         &mut state,
         &mut events,
@@ -57,7 +56,7 @@ fn saturates_at_lower_clamp() {
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
 
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a, b, delta: i16::MIN, tick: 0 },
         &mut state,
         &mut events,
@@ -74,12 +73,12 @@ fn standing_is_symmetric_across_directions() {
 
     // +100 on (A, B) followed by -100 on (B, A) must land on ZERO —
     // both events reference the same symmetric slot.
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a, b, delta: 100, tick: 0 },
         &mut state,
         &mut events,
     );
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a: b, b: a, delta: -100, tick: 1 },
         &mut state,
         &mut events,
@@ -97,19 +96,19 @@ fn accumulated_adjustments_are_stable_after_clamp() {
 
     // Take it up to the ceiling, then walk it back down — every step
     // observes the post-clamp value.
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a, b, delta: 1_500, tick: 0 },
         &mut state,
         &mut events,
     );
     assert_eq!(state.standing(a, b), 1000);
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a, b, delta: -50, tick: 1 },
         &mut state,
         &mut events,
     );
     assert_eq!(state.standing(a, b), 950);
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a, b, delta: -2000, tick: 2 },
         &mut state,
         &mut events,
@@ -126,7 +125,7 @@ fn zero_delta_is_noop() {
     let b = spawn(&mut state, CreatureType::Human);
     assert_eq!(state.standing(a, b), 0);
 
-    ModifyStandingHandler.handle(
+    dispatch_effect_standing_delta(
         &Event::EffectStandingDelta { a, b, delta: 0, tick: 0 },
         &mut state,
         &mut events,

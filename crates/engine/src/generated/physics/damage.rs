@@ -15,7 +15,7 @@ pub fn damage(c: AgentId, t: AgentId, a: f32, state: &mut SimState, events: &mut
             state.set_agent_shield_hp(t, (shield - absorbed));
             let residual = (a - absorbed);
             events.push(Event::AgentAttacked {
-                attacker: c,
+                actor: c,
                 target: t,
                 damage: a,
                 tick: state.tick,
@@ -33,29 +33,5 @@ pub fn damage(c: AgentId, t: AgentId, a: f32, state: &mut SimState, events: &mut
                 }
             }
         }
-    }
-}
-
-pub struct DamageHandler;
-
-impl crate::cascade::CascadeHandler for DamageHandler {
-    fn trigger(&self) -> crate::cascade::EventKindId {
-        crate::cascade::EventKindId::EffectDamageApplied
-    }
-    fn lane(&self) -> crate::cascade::Lane {
-        crate::cascade::Lane::Effect
-    }
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let Event::EffectDamageApplied {
-            caster,
-            target,
-            amount,
-            tick,
-        } = *event
-        else {
-            return;
-        };
-        damage(caster, target, amount, state, events);
     }
 }

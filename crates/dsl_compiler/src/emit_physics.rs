@@ -78,11 +78,10 @@ pub fn emit_physics(
     emit_header(&mut out, source_file);
     emit_imports(&mut out, physics, ctx)?;
     emit_handler_fn(&mut out, physics, ctx)?;
-    // Legacy unit-struct + CascadeHandler impl. Kept for test call sites
-    // that still dispatch through the old single-handler API
-    // (`DamageHandler.handle(&event, ...)`); the per-kind dispatcher in
-    // `physics/mod.rs` remains the production dispatch path.
-    emit_legacy_handler_struct(&mut out, physics, ctx)?;
+    // The legacy per-rule `<Name>Handler` unit-struct + CascadeHandler impl
+    // was deleted in the 2026-04-19 event-taxonomy rename (task 136). Test
+    // call sites now invoke the per-event-kind dispatcher in
+    // `physics/mod.rs` (`dispatch_effect_*`) directly.
     Ok(out)
 }
 
@@ -366,11 +365,22 @@ fn emit_imports(
         }
     }
 
-    // The legacy handler shim destructures the trigger event directly, so
-    // `Event` is always needed alongside `EventRing` for kind-matched rules.
-    // (Tag-matched rules don't emit the shim, but still surface bodies that
-    // may emit events.)
-    writeln!(out, "use crate::event::{{Event, EventRing}};").unwrap();
+    // Scan the handler bodies for `emit EventName { ... }` statements; only
+    // import `Event` when some body actually constructs one. (The legacy
+    // per-rule `<Name>Handler` shim that forced an `Event` import was
+    // deleted in the 2026-04-19 event-taxonomy rename — task 136.)
+    let mut emits_any_event = false;
+    for h in &physics.handlers {
+        if body_emits_event(&h.body) {
+            emits_any_event = true;
+            break;
+        }
+    }
+    if emits_any_event {
+        writeln!(out, "use crate::event::{{Event, EventRing}};").unwrap();
+    } else {
+        writeln!(out, "use crate::event::EventRing;").unwrap();
+    }
     writeln!(out, "use crate::state::SimState;").unwrap();
     if !niche_ids.is_empty() {
         let joined: Vec<&str> = niche_ids.iter().copied().collect();
@@ -442,6 +452,33 @@ fn collect_import(
     }
 }
 
+/// Returns `true` when the handler body contains at least one `emit` statement
+/// (directly or nested under `if` / `for` / `match`). Used by the emitter to
+/// skip the `Event` import in rules that only mutate via `agents.*` accessors.
+fn body_emits_event(stmts: &[IrStmt]) -> bool {
+    for s in stmts {
+        match s {
+            IrStmt::Emit(_) => return true,
+            IrStmt::If { then_body, else_body, .. } => {
+                if body_emits_event(then_body) { return true; }
+                if let Some(b) = else_body {
+                    if body_emits_event(b) { return true; }
+                }
+            }
+            IrStmt::For { body, .. } => {
+                if body_emits_event(body) { return true; }
+            }
+            IrStmt::Match { arms, .. } => {
+                for arm in arms {
+                    if body_emits_event(&arm.body) { return true; }
+                }
+            }
+            IrStmt::Let { .. } | IrStmt::Expr(_) | IrStmt::SelfUpdate { .. } => {}
+        }
+    }
+    false
+}
+
 fn scan_emits(stmts: &[IrStmt]) -> Result<(), EmitError> {
     for s in stmts {
         match s {
@@ -465,75 +502,6 @@ fn scan_emits(stmts: &[IrStmt]) -> Result<(), EmitError> {
             IrStmt::Let { .. } | IrStmt::Expr(_) | IrStmt::SelfUpdate { .. } => {}
         }
     }
-    Ok(())
-}
-
-/// Emit a unit-struct `<Name>Handler` with a `CascadeHandler` impl whose
-/// `handle` destructures the event and forwards to the free-function
-/// handler. Kept for legacy test call sites that still dispatch through
-/// the single-handler API. Only kind-matched rules produce a shim —
-/// tag-matched rules don't map to a single `EventKindId::trigger()`.
-fn emit_legacy_handler_struct(
-    out: &mut String,
-    physics: &PhysicsIR,
-    ctx: &EmitContext<'_>,
-) -> Result<(), EmitError> {
-    let handler = &physics.handlers[0];
-    let IrPhysicsPattern::Kind(pat) = &handler.pattern else {
-        // Tag-matched rules don't fit the CascadeHandler.trigger() shape.
-        return Ok(());
-    };
-    let Some(event_ref) = pat.event else { return Ok(()) };
-    let event = &ctx.events[event_ref.0 as usize];
-    let fields = fields_with_implicit_tick(event);
-    let struct_name = format!("{}Handler", pascal_case(&physics.name));
-    let fn_name = handler_fn_name(&physics.name);
-
-    writeln!(out).unwrap();
-    writeln!(out, "pub struct {struct_name};").unwrap();
-    writeln!(out).unwrap();
-    writeln!(out, "impl crate::cascade::CascadeHandler for {struct_name} {{").unwrap();
-    writeln!(
-        out,
-        "    fn trigger(&self) -> crate::cascade::EventKindId {{ crate::cascade::EventKindId::{} }}",
-        event.name
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn lane(&self) -> crate::cascade::Lane {{ crate::cascade::Lane::Effect }}"
-    )
-    .unwrap();
-    writeln!(out, "    #[allow(unused_variables)]").unwrap();
-    writeln!(
-        out,
-        "    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {{"
-    )
-    .unwrap();
-    // Destructure every field into a same-name local.
-    let binds: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-    writeln!(
-        out,
-        "        let Event::{} {{ {} }} = *event else {{ return; }};",
-        event.name,
-        binds.join(", ")
-    )
-    .unwrap();
-    // Forward to the free function using the handler's binding list.
-    let mut call_args: Vec<String> = Vec::new();
-    for b in &pat.bindings {
-        if let IrPattern::Bind { .. } = &b.value {
-            call_args.push(b.field.clone());
-        }
-    }
-    writeln!(
-        out,
-        "        {fn_name}({}, state, events);",
-        call_args.join(", ")
-    )
-    .unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
     Ok(())
 }
 
@@ -1085,6 +1053,7 @@ fn handler_fn_name(rule: &str) -> String {
     snake_case(rule)
 }
 
+#[allow(dead_code)]
 fn pascal_case(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut upper_next = true;

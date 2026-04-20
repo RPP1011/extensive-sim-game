@@ -70,6 +70,11 @@ impl PredicateDescriptor {
     pub const KIND_BIT_TEST: u8 = 3;
     pub const KIND_SET_MEMBERSHIP: u8 = 4;
     pub const KIND_PAIR_FIELD: u8 = 5;
+    /// Gradient modifier — `score += expr * delta` rather than
+    /// `score += (pred ? delta : 0)`. Opaque expression handle in
+    /// `field_id`; the engine-side decoder reads a compiled scalar expr
+    /// from a side-table keyed by `field_id`.
+    pub const KIND_GRADIENT: u8 = 6;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;

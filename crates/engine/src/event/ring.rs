@@ -113,17 +113,17 @@ impl EventRing {
 
 fn hash_event(h: &mut Sha256, e: &Event) {
     match e {
-        Event::AgentMoved { agent_id, from, to, tick } => {
+        Event::AgentMoved { actor, from, location, tick } => {
             h.update([0u8]);                                   // variant tag
-            h.update(agent_id.raw().to_le_bytes());
-            for v in [from.x, from.y, from.z, to.x, to.y, to.z] {
+            h.update(actor.raw().to_le_bytes());
+            for v in [from.x, from.y, from.z, location.x, location.y, location.z] {
                 h.update(v.to_bits().to_le_bytes());
             }
             h.update(tick.to_le_bytes());
         }
-        Event::AgentAttacked { attacker, target, damage, tick } => {
+        Event::AgentAttacked { actor, target, damage, tick } => {
             h.update([1u8]);
-            h.update(attacker.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
             h.update(damage.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
@@ -159,9 +159,9 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(delta.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::AgentCast { caster, ability, target, depth, tick } => {
+        Event::AgentCast { actor, ability, target, depth, tick } => {
             h.update([7u8]);                                   // variant tag
-            h.update(caster.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(ability.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
             h.update([*depth]);
@@ -179,28 +179,28 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(resource.to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::AgentPlacedTile { agent_id, where_pos, kind_tag, tick } => {
+        Event::AgentPlacedTile { actor, location, kind_tag, tick } => {
             h.update([10u8]);
-            h.update(agent_id.raw().to_le_bytes());
-            for v in [where_pos.x, where_pos.y, where_pos.z] {
+            h.update(actor.raw().to_le_bytes());
+            for v in [location.x, location.y, location.z] {
                 h.update(v.to_bits().to_le_bytes());
             }
             h.update(kind_tag.to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::AgentPlacedVoxel { agent_id, where_pos, mat_tag, tick } => {
+        Event::AgentPlacedVoxel { actor, location, mat_tag, tick } => {
             h.update([11u8]);
-            h.update(agent_id.raw().to_le_bytes());
-            for v in [where_pos.x, where_pos.y, where_pos.z] {
+            h.update(actor.raw().to_le_bytes());
+            for v in [location.x, location.y, location.z] {
                 h.update(v.to_bits().to_le_bytes());
             }
             h.update(mat_tag.to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::AgentHarvestedVoxel { agent_id, where_pos, tick } => {
+        Event::AgentHarvestedVoxel { actor, location, tick } => {
             h.update([12u8]);
-            h.update(agent_id.raw().to_le_bytes());
-            for v in [where_pos.x, where_pos.y, where_pos.z] {
+            h.update(actor.raw().to_le_bytes());
+            for v in [location.x, location.y, location.z] {
                 h.update(v.to_bits().to_le_bytes());
             }
             h.update(tick.to_le_bytes());
@@ -291,43 +291,43 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(agent_id.raw().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::OpportunityAttackTriggered { attacker, target, tick } => {
+        Event::OpportunityAttackTriggered { actor, target, tick } => {
             h.update([25u8]);
-            h.update(attacker.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::EffectDamageApplied { caster, target, amount, tick } => {
+        Event::EffectDamageApplied { actor, target, amount, tick } => {
             h.update([26u8]);
-            h.update(caster.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
             h.update(amount.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::EffectHealApplied { caster, target, amount, tick } => {
+        Event::EffectHealApplied { actor, target, amount, tick } => {
             h.update([27u8]);
-            h.update(caster.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
             h.update(amount.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::EffectShieldApplied { caster, target, amount, tick } => {
+        Event::EffectShieldApplied { actor, target, amount, tick } => {
             h.update([28u8]);
-            h.update(caster.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
             h.update(amount.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::EffectStunApplied { caster, target, duration_ticks, tick } => {
+        Event::EffectStunApplied { actor, target, duration_ticks, tick } => {
             h.update([29u8]);
-            h.update(caster.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
             h.update(duration_ticks.to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::EffectSlowApplied { caster, target, duration_ticks, factor_q8, tick } => {
+        Event::EffectSlowApplied { actor, target, duration_ticks, factor_q8, tick } => {
             h.update([30u8]);
-            h.update(caster.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
             h.update(duration_ticks.to_le_bytes());
             h.update(factor_q8.to_le_bytes());
@@ -347,9 +347,9 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(delta.to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::CastDepthExceeded { caster, ability, tick } => {
+        Event::CastDepthExceeded { actor, ability, tick } => {
             h.update([33u8]);
-            h.update(caster.raw().to_le_bytes());
+            h.update(actor.raw().to_le_bytes());
             h.update(ability.raw().to_le_bytes());
             h.update(tick.to_le_bytes());
         }

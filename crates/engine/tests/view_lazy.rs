@@ -72,9 +72,9 @@ fn invalidated_by_agent_moved() {
 
     let mut ring = EventRing::with_cap(8);
     ring.push(Event::AgentMoved {
-        agent_id: AgentId::new(1).unwrap(),
+        actor: AgentId::new(1).unwrap(),
         from: Vec3::ZERO,
-        to: Vec3::X,
+        location: Vec3::X,
         tick: 0,
     });
     view.invalidate_on_events(&ring);

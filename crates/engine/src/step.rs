@@ -355,9 +355,9 @@ fn apply_actions(
                         if !toward_engager {
                             speed *= state.config.combat.engagement_slow_factor;
                             events.push(Event::OpportunityAttackTriggered {
-                                attacker: engager,
-                                target:   action.agent,
-                                tick:     state.tick,
+                                actor:  engager,
+                                target: action.agent,
+                                tick:   state.tick,
                             });
                         }
                     }
@@ -370,7 +370,7 @@ fn apply_actions(
                     let to = from + dir * speed;
                     state.set_agent_pos(action.agent, to);
                     events.push(Event::AgentMoved {
-                        agent_id: action.agent, from, to, tick: state.tick,
+                        actor: action.agent, from, location: to, tick: state.tick,
                     });
                 }
             }
@@ -390,9 +390,9 @@ fn apply_actions(
                         // threat or someone else).
                         if let Some(engager) = state.agent_engaged_with(action.agent) {
                             events.push(Event::OpportunityAttackTriggered {
-                                attacker: engager,
-                                target:   action.agent,
-                                tick:     state.tick,
+                                actor:  engager,
+                                target: action.agent,
+                                tick:   state.tick,
                             });
                         }
                         // Effect-slow applies to Flee too (Task 14) —
@@ -433,10 +433,10 @@ fn apply_actions(
                         let new_hp = (state.agent_hp(tgt).unwrap_or(0.0) - damage).max(0.0);
                         state.set_agent_hp(tgt, new_hp);
                         events.push(Event::AgentAttacked {
-                            attacker: action.agent,
-                            target:   tgt,
+                            actor:  action.agent,
+                            target: tgt,
                             damage,
-                            tick:     state.tick,
+                            tick:   state.tick,
                         });
                         if new_hp <= 0.0 {
                             events.push(Event::AgentDied {
@@ -486,7 +486,7 @@ fn apply_actions(
                 target: MicroTarget::Ability { id, target },
             } => {
                 events.push(Event::AgentCast {
-                    caster:  action.agent,
+                    actor:   action.agent,
                     ability: id,
                     target,
                     depth:   0,
@@ -514,7 +514,7 @@ fn apply_actions(
                 target: MicroTarget::Position(p),
             } => {
                 events.push(Event::AgentPlacedTile {
-                    agent_id: action.agent, where_pos: p, kind_tag: 0, tick: state.tick,
+                    actor: action.agent, location: p, kind_tag: 0, tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -522,7 +522,7 @@ fn apply_actions(
                 target: MicroTarget::Position(p),
             } => {
                 events.push(Event::AgentPlacedVoxel {
-                    agent_id: action.agent, where_pos: p, mat_tag: 0, tick: state.tick,
+                    actor: action.agent, location: p, mat_tag: 0, tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -530,7 +530,7 @@ fn apply_actions(
                 target: MicroTarget::Position(p),
             } => {
                 events.push(Event::AgentHarvestedVoxel {
-                    agent_id: action.agent, where_pos: p, tick: state.tick,
+                    actor: action.agent, location: p, tick: state.tick,
                 });
             }
             ActionKind::Micro {

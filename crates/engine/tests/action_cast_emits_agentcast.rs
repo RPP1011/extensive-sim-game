@@ -66,8 +66,8 @@ fn cast_action_emits_agentcast_event() {
     step(&mut state, &mut scratch, &mut events, &backend, &cascade);
 
     let got = events.iter().any(|e| matches!(e,
-        Event::AgentCast { caster, ability: ab, target, .. }
-            if *caster == a && ab.raw() == ability.raw() && *target == b));
+        Event::AgentCast { actor, ability: ab, target, .. }
+            if *actor == a && ab.raw() == ability.raw() && *target == b));
     assert!(got, "AgentCast event expected after Cast action");
 
     // Without a CastHandler registered, no effect event fires.
@@ -100,8 +100,8 @@ fn cast_action_triggers_effect_damage_when_handler_registered() {
 
     // Handler should have fired an EffectDamageApplied at the target with amount=25.
     let found = events.iter().any(|e| matches!(e,
-        Event::EffectDamageApplied { caster, target, amount, .. }
-            if *caster == a && *target == b && (*amount - 25.0).abs() < 1e-5));
+        Event::EffectDamageApplied { actor, target, amount, .. }
+            if *actor == a && *target == b && (*amount - 25.0).abs() < 1e-5));
     assert!(found, "EffectDamageApplied expected after CastHandler dispatch");
 }
 

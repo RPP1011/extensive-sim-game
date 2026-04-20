@@ -69,7 +69,7 @@ fn set_agent_attack_damage_is_honoured_by_next_attack() {
     let dmg: f32 = events
         .iter()
         .find_map(|e| match e {
-            Event::AgentAttacked { attacker: a, target: t, damage, .. }
+            Event::AgentAttacked { actor: a, target: t, damage, .. }
                 if *a == attacker && *t == target => Some(*damage),
             _ => None,
         })
@@ -117,7 +117,7 @@ fn set_agent_attack_range_is_honoured_by_next_attack() {
 
     // The attack lands — look for AgentAttacked on the target.
     let attacked = events.iter().any(|e| matches!(e,
-        Event::AgentAttacked { attacker: a, target: t, .. }
+        Event::AgentAttacked { actor: a, target: t, .. }
             if *a == attacker && *t == target));
     assert!(attacked,
         "per-agent attack range 3m must let the 2.5m attack land");

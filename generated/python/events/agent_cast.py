@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass
 class AgentCast:
-    caster: int  # AgentId
+    actor: int  # AgentId
     ability: int  # AbilityId
     target: int  # AgentId
     depth: int

@@ -6,7 +6,7 @@ use crate::ids::AgentId;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct OpportunityAttackTriggered {
-    pub attacker: AgentId,
+    pub actor: AgentId,
     pub target: AgentId,
     pub tick: u32,
 }

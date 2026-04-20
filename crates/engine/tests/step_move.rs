@@ -29,7 +29,7 @@ fn agent_moves_toward_nearest_other() {
         "x should be exactly 1.0m after one tick at MOVE_SPEED_MPS=1.0, got {}", pos_a.x);
     assert!((pos_a.y - 0.0).abs() < 1e-6, "y drift {}", pos_a.y);
     assert!((pos_a.z - 10.0).abs() < 1e-6, "z drift {}", pos_a.z);
-    assert!(events.iter().any(|e| matches!(e, Event::AgentMoved { agent_id, .. } if *agent_id == a)));
+    assert!(events.iter().any(|e| matches!(e, Event::AgentMoved { actor, .. } if *actor == a)));
 }
 
 #[test]

@@ -55,8 +55,8 @@ impl CascadeHandler for CastHandler {
 
     fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
         let (caster, ability, target, depth, tick) = match *event {
-            Event::AgentCast { caster, ability, target, depth, tick } =>
-                (caster, ability, target, depth, tick),
+            Event::AgentCast { actor, ability, target, depth, tick } =>
+                (actor, ability, target, depth, tick),
             _ => return,
         };
         let prog = match self.registry.get(ability) {
@@ -104,20 +104,20 @@ fn emit_effect_event(
 ) {
     match op {
         EffectOp::Damage { amount } => {
-            events.push(Event::EffectDamageApplied { caster, target, amount, tick });
+            events.push(Event::EffectDamageApplied { actor: caster, target, amount, tick });
         }
         EffectOp::Heal { amount } => {
-            events.push(Event::EffectHealApplied { caster, target, amount, tick });
+            events.push(Event::EffectHealApplied { actor: caster, target, amount, tick });
         }
         EffectOp::Shield { amount } => {
-            events.push(Event::EffectShieldApplied { caster, target, amount, tick });
+            events.push(Event::EffectShieldApplied { actor: caster, target, amount, tick });
         }
         EffectOp::Stun { duration_ticks } => {
-            events.push(Event::EffectStunApplied { caster, target, duration_ticks, tick });
+            events.push(Event::EffectStunApplied { actor: caster, target, duration_ticks, tick });
         }
         EffectOp::Slow { duration_ticks, factor_q8 } => {
             events.push(Event::EffectSlowApplied {
-                caster, target, duration_ticks, factor_q8, tick,
+                actor: caster, target, duration_ticks, factor_q8, tick,
             });
         }
         EffectOp::TransferGold { amount } => {
@@ -141,12 +141,12 @@ fn emit_effect_event(
             let new_depth = parent_depth.saturating_add(1);
             if (new_depth as usize) >= MAX_CASCADE_ITERATIONS {
                 events.push(Event::CastDepthExceeded {
-                    caster, ability: parent_ability, tick,
+                    actor: caster, ability: parent_ability, tick,
                 });
                 return;
             }
             events.push(Event::AgentCast {
-                caster, ability, target: effective_target, depth: new_depth, tick,
+                actor: caster, ability, target: effective_target, depth: new_depth, tick,
             });
         }
     }

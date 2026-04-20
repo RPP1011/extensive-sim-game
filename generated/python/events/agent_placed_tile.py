@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass
 class AgentPlacedTile:
-    agent_id: int  # AgentId
-    where_pos: tuple[float, float, float]
+    actor: int  # AgentId
+    location: tuple[float, float, float]
     kind_tag: int
     tick: int

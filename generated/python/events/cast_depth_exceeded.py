@@ -7,6 +7,6 @@ from dataclasses import dataclass
 
 @dataclass
 class CastDepthExceeded:
-    caster: int  # AgentId
+    actor: int  # AgentId
     ability: int  # AbilityId
     tick: int

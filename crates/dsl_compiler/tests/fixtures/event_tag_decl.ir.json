@@ -4,27 +4,27 @@
       "name": "AgentAttacked",
       "fields": [
         {
-          "name": "attacker",
+          "name": "actor",
           "ty": "AgentId",
           "span": {
-            "start": 284,
-            "end": 301
+            "start": 300,
+            "end": 314
           }
         },
         {
           "name": "target",
           "ty": "AgentId",
           "span": {
-            "start": 305,
-            "end": 320
+            "start": 318,
+            "end": 333
           }
         },
         {
           "name": "damage",
           "ty": "F32",
           "span": {
-            "start": 324,
-            "end": 335
+            "start": 337,
+            "end": 348
           }
         }
       ],
@@ -36,14 +36,14 @@
           "name": "replayable",
           "args": [],
           "span": {
-            "start": 239,
-            "end": 250
+            "start": 255,
+            "end": 266
           }
         }
       ],
       "span": {
-        "start": 260,
-        "end": 338
+        "start": 276,
+        "end": 351
       }
     }
   ],
@@ -52,18 +52,26 @@
       "name": "Harmful",
       "fields": [
         {
-          "name": "target",
+          "name": "actor",
           "ty": "AgentId",
           "span": {
             "start": 220,
-            "end": 236
+            "end": 234
+          }
+        },
+        {
+          "name": "target",
+          "ty": "AgentId",
+          "span": {
+            "start": 236,
+            "end": 252
           }
         }
       ],
       "annotations": [],
       "span": {
         "start": 200,
-        "end": 237
+        "end": 253
       }
     }
   ],

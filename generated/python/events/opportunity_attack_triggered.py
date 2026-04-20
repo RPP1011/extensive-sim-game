@@ -7,6 +7,6 @@ from dataclasses import dataclass
 
 @dataclass
 class OpportunityAttackTriggered:
-    attacker: int  # AgentId
+    actor: int  # AgentId
     target: int  # AgentId
     tick: int

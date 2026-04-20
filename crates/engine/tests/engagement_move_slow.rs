@@ -7,7 +7,6 @@
 //! `CascadeRegistry::with_engine_builtins()` to get the OA damage cascade.
 
 use engine::ability::expire::ENGAGEMENT_SLOW_FACTOR;
-use engine::generated::physics::opportunity_attack::OpportunityAttackHandler;
 use engine::cascade::{CascadeRegistry, MAX_CASCADE_ITERATIONS};
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
@@ -238,6 +237,7 @@ fn unengaged_move_away_is_full_speed_and_no_oa() {
         "unengaged move expected {}m, got {}m", MOVE_SPEED_MPS, delta);
     let oa_count = events.iter().filter(|e| matches!(e, Event::OpportunityAttackTriggered { .. })).count();
     assert_eq!(oa_count, 0);
-    // OpportunityAttackHandler is registered even though it never fires.
-    let _ = OpportunityAttackHandler;
+    // The opportunity_attack dispatcher is registered by
+    // `CascadeRegistry::with_engine_builtins()` even though it never fires
+    // here — the mask path is separately covered by `per_agent_combat_stats.rs`.
 }

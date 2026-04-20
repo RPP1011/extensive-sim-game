@@ -53,8 +53,8 @@ fn cast_emits_agentcast_event_without_state_change() {
 
     assert_eq!(state.agent_hp(a), Some(hp_before));
     let got = events.iter().any(|e| matches!(e,
-        Event::AgentCast { caster, ability: ab, target, .. }
-            if *caster == a && ab.raw() == 3 && *target == a));
+        Event::AgentCast { actor, ability: ab, target, .. }
+            if *actor == a && ab.raw() == 3 && *target == a));
     assert!(got);
 }
 
@@ -101,8 +101,8 @@ fn placetile_emits_event_with_position() {
     );
     step(&mut state, &mut scratch, &mut events, &backend, &cascade);
     assert!(events.iter().any(|e| match e {
-        Event::AgentPlacedTile { where_pos, .. } =>
-            where_pos.x == 3.0 && where_pos.y == 4.0 && where_pos.z == 5.0,
+        Event::AgentPlacedTile { location, .. } =>
+            location.x == 3.0 && location.y == 4.0 && location.z == 5.0,
         _ => false,
     }));
 }

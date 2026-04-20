@@ -6,7 +6,7 @@ use crate::ids::AgentId;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct EffectStunApplied {
-    pub caster: AgentId,
+    pub actor: AgentId,
     pub target: AgentId,
     pub duration_ticks: u32,
     pub tick: u32,

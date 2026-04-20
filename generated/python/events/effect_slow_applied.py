@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass
 class EffectSlowApplied:
-    caster: int  # AgentId
+    actor: int  # AgentId
     target: int  # AgentId
     duration_ticks: int
     factor_q8: int

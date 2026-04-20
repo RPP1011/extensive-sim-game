@@ -27,7 +27,7 @@ fn registered_handler_fires_on_matching_event() {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
     }).unwrap();
     let mut ring = EventRing::with_cap(16);
-    let evt = Event::AgentAttacked { attacker: a, target: a, damage: 0.0, tick: 0 };
+    let evt = Event::AgentAttacked { actor: a, target: a, damage: 0.0, tick: 0 };
 
     reg.dispatch(&evt, &mut state, &mut ring);
     assert_eq!(hits.load(Ordering::Relaxed), 1);
@@ -61,7 +61,7 @@ fn multiple_handlers_same_kind_all_fire() {
     let a = AgentId::new(1).unwrap();
     let mut ring = EventRing::with_cap(16);
     reg.dispatch(
-        &Event::AgentAttacked { attacker: a, target: a, damage: 0.0, tick: 0 },
+        &Event::AgentAttacked { actor: a, target: a, damage: 0.0, tick: 0 },
         &mut state, &mut ring
     );
     assert_eq!(hits.load(Ordering::Relaxed), 3);

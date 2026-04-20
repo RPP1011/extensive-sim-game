@@ -6,7 +6,7 @@ use crate::ids::AgentId;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct EffectSlowApplied {
-    pub caster: AgentId,
+    pub actor: AgentId,
     pub target: AgentId,
     pub duration_ticks: u32,
     pub factor_q8: i16,

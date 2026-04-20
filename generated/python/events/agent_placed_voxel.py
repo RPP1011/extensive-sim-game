@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass
 class AgentPlacedVoxel:
-    agent_id: int  # AgentId
-    where_pos: tuple[float, float, float]
+    actor: int  # AgentId
+    location: tuple[float, float, float]
     mat_tag: int
     tick: int

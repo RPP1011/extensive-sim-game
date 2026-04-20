@@ -20,14 +20,14 @@
 // kill_agent. Pinned by `cast_handler_damage.rs`.
 
 physics damage @phase(event) {
-  on EffectDamageApplied { caster: c, target: t, amount: a } {
+  on EffectDamageApplied { actor: c, target: t, amount: a } {
     if agents.alive(t) {
       if a > 0.0 {
         let shield = agents.shield_hp(t)
         let absorbed = min(shield, a)
         agents.set_shield_hp(t, shield - absorbed)
         let residual = a - absorbed
-        emit AgentAttacked { attacker: c, target: t, damage: a }
+        emit AgentAttacked { actor: c, target: t, damage: a }
         if residual > 0.0 {
           let cur_hp = agents.hp(t)
           let new_hp = max(cur_hp - residual, 0.0)
@@ -50,7 +50,7 @@ physics damage @phase(event) {
 // `cast_handler_heal.rs`.
 
 physics heal @phase(event) {
-  on EffectHealApplied { caster: c, target: t, amount: a } {
+  on EffectHealApplied { actor: c, target: t, amount: a } {
     if agents.alive(t) {
       if a > 0.0 {
         let cur_hp = agents.hp(t)
@@ -69,7 +69,7 @@ physics heal @phase(event) {
 // a no-op. Pinned by `cast_handler_shield_absorb.rs`.
 
 physics shield @phase(event) {
-  on EffectShieldApplied { caster: c, target: t, amount: a } {
+  on EffectShieldApplied { actor: c, target: t, amount: a } {
     if agents.alive(t) {
       if a > 0.0 {
         let cur = agents.shield_hp(t)
@@ -86,7 +86,7 @@ physics shield @phase(event) {
 // targets are no-ops. Pinned by `cast_handler_stun.rs`.
 
 physics stun @phase(event) {
-  on EffectStunApplied { caster: c, target: t, duration_ticks: d } {
+  on EffectStunApplied { actor: c, target: t, duration_ticks: d } {
     if agents.alive(t) {
       if d > 0 {
         let cur = agents.stun_remaining_ticks(t)
@@ -102,7 +102,7 @@ physics stun @phase(event) {
 // "Longer-or-stronger wins" override. Pinned by `cast_handler_slow.rs`.
 
 physics slow @phase(event) {
-  on EffectSlowApplied { caster: c, target: t, duration_ticks: d, factor_q8: f } {
+  on EffectSlowApplied { actor: c, target: t, duration_ticks: d, factor_q8: f } {
     if agents.alive(t) {
       if d > 0 {
         if f > 0 {
@@ -155,13 +155,13 @@ physics modify_standing @phase(event) {
 // Pinned by `engagement_move_slow.rs` and `per_agent_combat_stats.rs`.
 
 physics opportunity_attack @phase(event) {
-  on OpportunityAttackTriggered { attacker: attacker, target: target } {
+  on OpportunityAttackTriggered { actor: attacker, target: target } {
     if agents.alive(target) {
       let damage = agents.attack_damage(attacker)
       let cur_hp = agents.hp(target)
       let new_hp = max(cur_hp - damage, 0.0)
       agents.set_hp(target, new_hp)
-      emit AgentAttacked { attacker: attacker, target: target, damage: damage }
+      emit AgentAttacked { actor: attacker, target: target, damage: damage }
       if new_hp <= 0.0 {
         emit AgentDied { agent_id: target }
         agents.kill(target)

@@ -6,7 +6,7 @@ use crate::ids::AgentId;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AgentAttacked {
-    pub attacker: AgentId,
+    pub actor: AgentId,
     pub target: AgentId,
     pub damage: f32,
     pub tick: u32,

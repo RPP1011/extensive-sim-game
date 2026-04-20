@@ -2,7 +2,7 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -13,29 +13,5 @@ pub fn stun(c: AgentId, t: AgentId, d: u32, state: &mut SimState, events: &mut E
             let cur = state.agent_stun_remaining(t).unwrap_or(0);
             state.set_agent_stun_remaining(t, (cur).max(d));
         }
-    }
-}
-
-pub struct StunHandler;
-
-impl crate::cascade::CascadeHandler for StunHandler {
-    fn trigger(&self) -> crate::cascade::EventKindId {
-        crate::cascade::EventKindId::EffectStunApplied
-    }
-    fn lane(&self) -> crate::cascade::Lane {
-        crate::cascade::Lane::Effect
-    }
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let Event::EffectStunApplied {
-            caster,
-            target,
-            duration_ticks,
-            tick,
-        } = *event
-        else {
-            return;
-        };
-        stun(caster, target, duration_ticks, state, events);
     }
 }

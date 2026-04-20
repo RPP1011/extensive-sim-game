@@ -65,8 +65,8 @@ impl OverlayTracker {
                 continue;
             };
             match e {
-                Event::AgentAttacked { attacker, target, tick, .. } => {
-                    let from = state.agent_pos(attacker).unwrap_or(Vec3::ZERO);
+                Event::AgentAttacked { actor, target, tick, .. } => {
+                    let from = state.agent_pos(actor).unwrap_or(Vec3::ZERO);
                     let to   = state.agent_pos(target).unwrap_or(Vec3::ZERO);
                     self.overlays.push(Overlay {
                         kind: OverlayKind::AttackLine { from, to },

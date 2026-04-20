@@ -7,8 +7,8 @@ use glam::Vec3;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AgentPlacedTile {
-    pub agent_id: AgentId,
-    pub where_pos: Vec3,
+    pub actor: AgentId,
+    pub location: Vec3,
     pub kind_tag: u32,
     pub tick: u32,
 }

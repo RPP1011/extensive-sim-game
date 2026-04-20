@@ -6,7 +6,7 @@ use crate::ids::{AbilityId, AgentId};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AgentCast {
-    pub caster: AgentId,
+    pub actor: AgentId,
     pub ability: AbilityId,
     pub target: AgentId,
     pub depth: u8,

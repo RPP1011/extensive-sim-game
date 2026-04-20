@@ -2,7 +2,7 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -21,30 +21,5 @@ pub fn slow(c: AgentId, t: AgentId, d: u32, f: i16, state: &mut SimState, events
                 }
             }
         }
-    }
-}
-
-pub struct SlowHandler;
-
-impl crate::cascade::CascadeHandler for SlowHandler {
-    fn trigger(&self) -> crate::cascade::EventKindId {
-        crate::cascade::EventKindId::EffectSlowApplied
-    }
-    fn lane(&self) -> crate::cascade::Lane {
-        crate::cascade::Lane::Effect
-    }
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let Event::EffectSlowApplied {
-            caster,
-            target,
-            duration_ticks,
-            factor_q8,
-            tick,
-        } = *event
-        else {
-            return;
-        };
-        slow(caster, target, duration_ticks, factor_q8, state, events);
     }
 }

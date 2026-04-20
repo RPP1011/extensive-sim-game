@@ -20,8 +20,8 @@ fn damage_taken_accumulates_from_agent_attacked_events() {
     }).unwrap();
 
     let mut dmg = DamageTaken::new(state.agent_cap() as usize);
-    events.push(Event::AgentAttacked { attacker: b, target: a, damage: 20.0, tick: 1 });
-    events.push(Event::AgentAttacked { attacker: b, target: a, damage: 15.0, tick: 2 });
+    events.push(Event::AgentAttacked { actor: b, target: a, damage: 20.0, tick: 1 });
+    events.push(Event::AgentAttacked { actor: b, target: a, damage: 15.0, tick: 2 });
     dmg.fold(&events);
     assert_eq!(dmg.value(a), 35.0);
     assert_eq!(dmg.value(b), 0.0);

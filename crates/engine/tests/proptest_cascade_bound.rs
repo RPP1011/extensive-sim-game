@@ -37,8 +37,8 @@ impl CascadeHandler for CountingHandler {
                 });
             } else {
                 events.push(Event::AgentMoved {
-                    agent_id: AgentId::new(1).unwrap(),
-                    from: glam::Vec3::ZERO, to: glam::Vec3::ZERO, tick: 0,
+                    actor: AgentId::new(1).unwrap(),
+                    from: glam::Vec3::ZERO, location: glam::Vec3::ZERO, tick: 0,
                 });
             }
         }
@@ -106,8 +106,8 @@ proptest! {
                 });
             } else {
                 events.push(Event::AgentMoved {
-                    agent_id: AgentId::new(1).unwrap(),
-                    from: glam::Vec3::ZERO, to: glam::Vec3::ZERO, tick: 0,
+                    actor: AgentId::new(1).unwrap(),
+                    from: glam::Vec3::ZERO, location: glam::Vec3::ZERO, tick: 0,
                 });
             }
         }

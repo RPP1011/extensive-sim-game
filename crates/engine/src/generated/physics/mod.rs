@@ -17,7 +17,7 @@ use crate::state::SimState;
 #[allow(unused_variables)]
 pub fn dispatch_effect_damage_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectDamageApplied {
-        caster,
+        actor,
         target,
         amount,
         tick,
@@ -25,7 +25,7 @@ pub fn dispatch_effect_damage_applied(event: &Event, state: &mut SimState, event
     else {
         return;
     };
-    damage::damage(caster, target, amount, state, events);
+    damage::damage(actor, target, amount, state, events);
 }
 
 #[allow(unused_variables)]
@@ -45,7 +45,7 @@ pub fn dispatch_effect_gold_transfer(event: &Event, state: &mut SimState, events
 #[allow(unused_variables)]
 pub fn dispatch_effect_heal_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectHealApplied {
-        caster,
+        actor,
         target,
         amount,
         tick,
@@ -53,13 +53,13 @@ pub fn dispatch_effect_heal_applied(event: &Event, state: &mut SimState, events:
     else {
         return;
     };
-    heal::heal(caster, target, amount, state, events);
+    heal::heal(actor, target, amount, state, events);
 }
 
 #[allow(unused_variables)]
 pub fn dispatch_effect_shield_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectShieldApplied {
-        caster,
+        actor,
         target,
         amount,
         tick,
@@ -67,13 +67,13 @@ pub fn dispatch_effect_shield_applied(event: &Event, state: &mut SimState, event
     else {
         return;
     };
-    shield::shield(caster, target, amount, state, events);
+    shield::shield(actor, target, amount, state, events);
 }
 
 #[allow(unused_variables)]
 pub fn dispatch_effect_slow_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectSlowApplied {
-        caster,
+        actor,
         target,
         duration_ticks,
         factor_q8,
@@ -82,7 +82,7 @@ pub fn dispatch_effect_slow_applied(event: &Event, state: &mut SimState, events:
     else {
         return;
     };
-    slow::slow(caster, target, duration_ticks, factor_q8, state, events);
+    slow::slow(actor, target, duration_ticks, factor_q8, state, events);
 }
 
 #[allow(unused_variables)]
@@ -96,7 +96,7 @@ pub fn dispatch_effect_standing_delta(event: &Event, state: &mut SimState, event
 #[allow(unused_variables)]
 pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectStunApplied {
-        caster,
+        actor,
         target,
         duration_ticks,
         tick,
@@ -104,7 +104,7 @@ pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, events:
     else {
         return;
     };
-    stun::stun(caster, target, duration_ticks, state, events);
+    stun::stun(actor, target, duration_ticks, state, events);
 }
 
 #[allow(unused_variables)]
@@ -114,14 +114,14 @@ pub fn dispatch_opportunity_attack_triggered(
     events: &mut EventRing,
 ) {
     let Event::OpportunityAttackTriggered {
-        attacker,
+        actor,
         target,
         tick,
     } = *event
     else {
         return;
     };
-    opportunity_attack::opportunity_attack(attacker, target, state, events);
+    opportunity_attack::opportunity_attack(actor, target, state, events);
 }
 
 /// Install every compiler-emitted physics dispatcher on `registry`.

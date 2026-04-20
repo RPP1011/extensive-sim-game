@@ -1,10 +1,14 @@
-//! Combat Foundation Task 13 — `StunHandler` writes `hot_stun_remaining_ticks`
-//! with a longer-stun-wins rule; the unified tick-start decrement then counts
-//! it down to zero and emits `StunExpired` exactly once.
+//! Combat Foundation Task 13 — stun writes `hot_stun_remaining_ticks` with
+//! a longer-stun-wins rule; the unified tick-start decrement then counts it
+//! down to zero and emits `StunExpired` exactly once.
 //!
 //! Cross-check: while `hot_stun_remaining_ticks > 0`, `evaluate_cast_gate`
 //! returns false (branch 1 of the gate conjunction). After `StunExpired`
 //! fires, the gate allows casting again.
+//!
+//! The legacy `StunHandler` unit-struct shim was removed in the 2026-04-19
+//! event-taxonomy rename (task 136). Tests now call the compiler-emitted
+//! per-event-kind dispatcher directly.
 
 use std::sync::Arc;
 
@@ -12,8 +16,7 @@ use engine::ability::{
     evaluate_cast_gate, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate,
 };
 use engine::ability::expire::tick_start;
-use engine::generated::physics::stun::StunHandler;
-use engine::cascade::CascadeHandler;
+use engine::generated::physics::dispatch_effect_stun_applied;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
@@ -32,8 +35,8 @@ fn stun_writes_duration_when_longer() {
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
-    StunHandler.handle(
-        &Event::EffectStunApplied { caster, target, duration_ticks: 10, tick: 0 },
+    dispatch_effect_stun_applied(
+        &Event::EffectStunApplied { actor: caster, target, duration_ticks: 10, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -48,8 +51,8 @@ fn longer_stun_overrides_shorter_existing() {
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
     state.set_agent_stun_remaining(target, 3);
-    StunHandler.handle(
-        &Event::EffectStunApplied { caster, target, duration_ticks: 10, tick: 0 },
+    dispatch_effect_stun_applied(
+        &Event::EffectStunApplied { actor: caster, target, duration_ticks: 10, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -64,8 +67,8 @@ fn shorter_stun_does_not_override_longer_existing() {
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
     state.set_agent_stun_remaining(target, 15);
-    StunHandler.handle(
-        &Event::EffectStunApplied { caster, target, duration_ticks: 5, tick: 0 },
+    dispatch_effect_stun_applied(
+        &Event::EffectStunApplied { actor: caster, target, duration_ticks: 5, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -80,8 +83,8 @@ fn stun_on_dead_target_is_noop() {
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
     state.kill_agent(target);
 
-    StunHandler.handle(
-        &Event::EffectStunApplied { caster, target, duration_ticks: 10, tick: 0 },
+    dispatch_effect_stun_applied(
+        &Event::EffectStunApplied { actor: caster, target, duration_ticks: 10, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -109,9 +112,10 @@ fn stun_gates_caster_for_exact_duration_then_expires() {
     // Baseline: gate passes.
     assert!(evaluate_cast_gate(&state, &registry, caster, ability, target));
 
-    // Apply 10-tick stun. StunHandler is dispatched directly on the caster.
-    StunHandler.handle(
-        &Event::EffectStunApplied { caster: target, target: caster, duration_ticks: 10, tick: 0 },
+    // Apply 10-tick stun via the dispatcher. The actor is `target` (it's
+    // the one stunning the caster); the stunned agent is `caster`.
+    dispatch_effect_stun_applied(
+        &Event::EffectStunApplied { actor: target, target: caster, duration_ticks: 10, tick: 0 },
         &mut state,
         &mut events,
     );

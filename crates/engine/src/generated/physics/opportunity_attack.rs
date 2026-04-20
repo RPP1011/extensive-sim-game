@@ -21,7 +21,7 @@ pub fn opportunity_attack(
         let new_hp = (cur_hp - damage).max(0.0);
         state.set_agent_hp(target, new_hp);
         events.push(Event::AgentAttacked {
-            attacker,
+            actor: attacker,
             target,
             damage,
             tick: state.tick,
@@ -33,28 +33,5 @@ pub fn opportunity_attack(
             });
             state.kill_agent(target);
         }
-    }
-}
-
-pub struct OpportunityAttackHandler;
-
-impl crate::cascade::CascadeHandler for OpportunityAttackHandler {
-    fn trigger(&self) -> crate::cascade::EventKindId {
-        crate::cascade::EventKindId::OpportunityAttackTriggered
-    }
-    fn lane(&self) -> crate::cascade::Lane {
-        crate::cascade::Lane::Effect
-    }
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let Event::OpportunityAttackTriggered {
-            attacker,
-            target,
-            tick,
-        } = *event
-        else {
-            return;
-        };
-        opportunity_attack(attacker, target, state, events);
     }
 }

@@ -37,15 +37,15 @@ impl FuzzEvent {
         let p = Vec3::new(self.f_a, self.f_b, self.f_a.mul_add(0.5, self.f_b));
         let tick = self.tick % 100_000;
         match self.tag % 23 {
-            0  => Event::AgentMoved { agent_id: a, from: p, to: p, tick },
-            1  => Event::AgentAttacked { attacker: a, target: b, damage: self.f_a, tick },
+            0  => Event::AgentMoved { actor: a, from: p, location: p, tick },
+            1  => Event::AgentAttacked { actor: a, target: b, damage: self.f_a, tick },
             2  => Event::AgentDied { agent_id: a, tick },
             3  => Event::AgentFled { agent_id: a, from: p, to: p, tick },
             4  => Event::AgentAte { agent_id: a, delta: self.f_a, tick },
             5  => Event::AgentDrank { agent_id: a, delta: self.f_a, tick },
             6  => Event::AgentRested { agent_id: a, delta: self.f_a, tick },
             7  => Event::AgentCast {
-                caster:  a,
+                actor:   a,
                 ability: AbilityId::new((self.ability as u32).saturating_add(1)).unwrap(),
                 target:  b,
                 depth:   self.item_slot,
@@ -53,9 +53,9 @@ impl FuzzEvent {
             },
             8  => Event::AgentUsedItem { agent_id: a, item_slot: self.item_slot, tick },
             9  => Event::AgentHarvested { agent_id: a, resource: self.u64_a, tick },
-            10 => Event::AgentPlacedTile { agent_id: a, where_pos: p, kind_tag: self.u_a, tick },
-            11 => Event::AgentPlacedVoxel { agent_id: a, where_pos: p, mat_tag: self.u_a, tick },
-            12 => Event::AgentHarvestedVoxel { agent_id: a, where_pos: p, tick },
+            10 => Event::AgentPlacedTile { actor: a, location: p, kind_tag: self.u_a, tick },
+            11 => Event::AgentPlacedVoxel { actor: a, location: p, mat_tag: self.u_a, tick },
+            12 => Event::AgentHarvestedVoxel { actor: a, location: p, tick },
             13 => Event::AgentConversed { agent_id: a, partner: b, tick },
             14 => Event::AgentSharedStory { agent_id: a, topic: self.u64_a, tick },
             15 => Event::AgentCommunicated { speaker: a, recipient: b, fact_ref: self.u64_a, tick },

@@ -7,6 +7,6 @@ from dataclasses import dataclass
 
 @dataclass
 class AgentHarvestedVoxel:
-    agent_id: int  # AgentId
-    where_pos: tuple[float, float, float]
+    actor: int  # AgentId
+    location: tuple[float, float, float]
     tick: int

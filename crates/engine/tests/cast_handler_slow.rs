@@ -12,8 +12,8 @@
 //!    other.
 
 use engine::ability::expire::{tick_start, ENGAGEMENT_SLOW_FACTOR};
-use engine::generated::physics::slow::SlowHandler;
-use engine::cascade::{CascadeHandler, CascadeRegistry};
+use engine::generated::physics::dispatch_effect_slow_applied;
+use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
@@ -41,8 +41,8 @@ fn slow_writes_duration_and_factor_from_zero() {
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
-    SlowHandler.handle(
-        &Event::EffectSlowApplied { caster, target, duration_ticks: 5, factor_q8: 51, tick: 0 },
+    dispatch_effect_slow_applied(
+        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 5, factor_q8: 51, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -62,8 +62,8 @@ fn longer_slow_overrides_when_duration_is_greater() {
 
     // New: longer duration (10 > 3), weaker factor (200 > 128). Longer wins →
     // BOTH replaced.
-    SlowHandler.handle(
-        &Event::EffectSlowApplied { caster, target, duration_ticks: 10, factor_q8: 200, tick: 0 },
+    dispatch_effect_slow_applied(
+        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 10, factor_q8: 200, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -82,8 +82,8 @@ fn stronger_slow_overrides_when_factor_is_smaller() {
     state.set_agent_slow_factor_q8(target, 200);
 
     // New: shorter duration (3 < 10), stronger factor (51 < 200). Stronger wins → replace.
-    SlowHandler.handle(
-        &Event::EffectSlowApplied { caster, target, duration_ticks: 3, factor_q8: 51, tick: 0 },
+    dispatch_effect_slow_applied(
+        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 3, factor_q8: 51, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -101,8 +101,8 @@ fn weaker_and_shorter_slow_does_not_override() {
     state.set_agent_slow_remaining(target, 10);
     state.set_agent_slow_factor_q8(target, 51);
 
-    SlowHandler.handle(
-        &Event::EffectSlowApplied { caster, target, duration_ticks: 3, factor_q8: 200, tick: 0 },
+    dispatch_effect_slow_applied(
+        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 3, factor_q8: 200, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -225,8 +225,8 @@ fn slow_on_dead_target_is_noop() {
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
     state.kill_agent(target);
 
-    SlowHandler.handle(
-        &Event::EffectSlowApplied { caster, target, duration_ticks: 5, factor_q8: 51, tick: 0 },
+    dispatch_effect_slow_applied(
+        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 5, factor_q8: 51, tick: 0 },
         &mut state,
         &mut events,
     );

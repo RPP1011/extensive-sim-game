@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass
 class EffectDamageApplied:
-    caster: int  # AgentId
+    actor: int  # AgentId
     target: int  # AgentId
     amount: float
     tick: int

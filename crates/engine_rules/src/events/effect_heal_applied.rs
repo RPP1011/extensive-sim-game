@@ -6,7 +6,7 @@ use crate::ids::AgentId;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct EffectHealApplied {
-    pub caster: AgentId,
+    pub actor: AgentId,
     pub target: AgentId,
     pub amount: f32,
     pub tick: u32,

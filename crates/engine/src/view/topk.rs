@@ -44,8 +44,8 @@ impl MostHostileTopK {
 impl TopKView for MostHostileTopK {
     fn k(&self) -> usize { self.k }
     fn update(&mut self, event: &Event) {
-        if let Event::AgentAttacked { attacker, target, damage, .. } = event {
-            self.accumulate(*attacker, *target, *damage);
+        if let Event::AgentAttacked { actor, target, damage, .. } = event {
+            self.accumulate(*actor, *target, *damage);
         }
     }
 }

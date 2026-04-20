@@ -2,7 +2,7 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -15,29 +15,5 @@ pub fn heal(c: AgentId, t: AgentId, a: f32, state: &mut SimState, events: &mut E
             let new_hp = (cur_hp + a).min(max_hp);
             state.set_agent_hp(t, new_hp);
         }
-    }
-}
-
-pub struct HealHandler;
-
-impl crate::cascade::CascadeHandler for HealHandler {
-    fn trigger(&self) -> crate::cascade::EventKindId {
-        crate::cascade::EventKindId::EffectHealApplied
-    }
-    fn lane(&self) -> crate::cascade::Lane {
-        crate::cascade::Lane::Effect
-    }
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let Event::EffectHealApplied {
-            caster,
-            target,
-            amount,
-            tick,
-        } = *event
-        else {
-            return;
-        };
-        heal(caster, target, amount, state, events);
     }
 }

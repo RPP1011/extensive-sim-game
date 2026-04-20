@@ -2,7 +2,7 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -25,29 +25,5 @@ pub fn transfer_gold(
                 state.set_agent_inventory(to, __inv);
             };
         }
-    }
-}
-
-pub struct TransferGoldHandler;
-
-impl crate::cascade::CascadeHandler for TransferGoldHandler {
-    fn trigger(&self) -> crate::cascade::EventKindId {
-        crate::cascade::EventKindId::EffectGoldTransfer
-    }
-    fn lane(&self) -> crate::cascade::Lane {
-        crate::cascade::Lane::Effect
-    }
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let Event::EffectGoldTransfer {
-            from,
-            to,
-            amount,
-            tick,
-        } = *event
-        else {
-            return;
-        };
-        transfer_gold(from, to, amount, state, events);
     }
 }

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass
 class AgentAttacked:
-    attacker: int  # AgentId
+    actor: int  # AgentId
     target: int  # AgentId
     damage: float
     tick: int

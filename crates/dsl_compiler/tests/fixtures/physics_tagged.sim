@@ -1,10 +1,10 @@
 // Physics rule that fires on every event claiming `@harmful`. The
 // dispatcher expands this handler into each applicable event's per-kind
 // dispatcher at compile time.
-event_tag Harmful { target: AgentId }
+event_tag Harmful { actor: AgentId, target: AgentId }
 
 @replayable @harmful event AgentAttacked {
-  attacker: AgentId,
+  actor: AgentId,
   target: AgentId,
   damage: f32,
 }

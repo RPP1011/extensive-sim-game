@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass
 class EffectStunApplied:
-    caster: int  # AgentId
+    actor: int  # AgentId
     target: int  # AgentId
     duration_ticks: int
     tick: int

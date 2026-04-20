@@ -9,8 +9,7 @@
 //! - Self-transfer (`from == to`) is a no-op — skipped early so the slot
 //!   isn't double-mutated.
 
-use engine::generated::physics::transfer_gold::TransferGoldHandler;
-use engine::cascade::CascadeHandler;
+use engine::generated::physics::dispatch_effect_gold_transfer;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
@@ -41,7 +40,7 @@ fn transfer_moves_positive_amount_from_caster_to_target() {
     set_gold(&mut state, alice, 100);
     set_gold(&mut state, bob,   0);
 
-    TransferGoldHandler.handle(
+    dispatch_effect_gold_transfer(
         &Event::EffectGoldTransfer { from: alice, to: bob, amount: 30, tick: 0 },
         &mut state,
         &mut events,
@@ -63,7 +62,7 @@ fn negative_amount_allows_debt_on_sender() {
     // Negative amount: pulls from `to` to `from`. Bob has 0 → Bob goes into
     // debt at -(-50) = -50... actually the math: from.gold -= amount = 100 - (-50) = 150.
     // to.gold += amount = 0 + (-50) = -50.
-    TransferGoldHandler.handle(
+    dispatch_effect_gold_transfer(
         &Event::EffectGoldTransfer { from: alice, to: bob, amount: -50, tick: 0 },
         &mut state,
         &mut events,
@@ -85,7 +84,7 @@ fn conservation_sum_is_invariant_under_arbitrary_transfers() {
     let initial_sum = gold_of(&state, alice) + gold_of(&state, bob);
 
     for amt in [17_i64, -123, 500, -7, 1, -1, 999_999, -1_000_000] {
-        TransferGoldHandler.handle(
+        dispatch_effect_gold_transfer(
             &Event::EffectGoldTransfer { from: alice, to: bob, amount: amt, tick: 0 },
             &mut state,
             &mut events,
@@ -107,7 +106,7 @@ fn zero_amount_is_a_noop() {
     set_gold(&mut state, alice, 100);
     set_gold(&mut state, bob,   50);
 
-    TransferGoldHandler.handle(
+    dispatch_effect_gold_transfer(
         &Event::EffectGoldTransfer { from: alice, to: bob, amount: 0, tick: 0 },
         &mut state,
         &mut events,
@@ -124,7 +123,7 @@ fn self_transfer_is_a_noop() {
     let alice = spawn(&mut state, CreatureType::Human);
     set_gold(&mut state, alice, 100);
 
-    TransferGoldHandler.handle(
+    dispatch_effect_gold_transfer(
         &Event::EffectGoldTransfer { from: alice, to: alice, amount: 40, tick: 0 },
         &mut state,
         &mut events,
@@ -167,7 +166,7 @@ fn transfer_preserves_commodity_slots() {
     state.set_agent_inventory(alice, inv_a);
     state.set_agent_inventory(bob,   inv_b);
 
-    TransferGoldHandler.handle(
+    dispatch_effect_gold_transfer(
         &Event::EffectGoldTransfer { from: alice, to: bob, amount: 40, tick: 0 },
         &mut state,
         &mut events,

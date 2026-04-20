@@ -1,7 +1,11 @@
-//! Combat Foundation Task 11 — `HealHandler` clamps at `max_hp`.
+//! Combat Foundation Task 11 — heal clamps at `max_hp`.
+//!
+//! The legacy `HealHandler` unit-struct shim was removed in the 2026-04-19
+//! event-taxonomy rename (task 136). Tests now call the compiler-emitted
+//! per-event-kind dispatcher directly — the same entry point the cascade
+//! registry installs in production.
 
-use engine::generated::physics::heal::HealHandler;
-use engine::cascade::CascadeHandler;
+use engine::generated::physics::dispatch_effect_heal_applied;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
@@ -21,8 +25,8 @@ fn heal_under_cap_applies_full_amount() {
     // Drop target to 40/100.
     state.set_agent_hp(target, 40.0);
 
-    HealHandler.handle(
-        &Event::EffectHealApplied { caster, target, amount: 20.0, tick: 0 },
+    dispatch_effect_heal_applied(
+        &Event::EffectHealApplied { actor: caster, target, amount: 20.0, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -38,8 +42,8 @@ fn heal_clamps_to_max_hp_when_saturated() {
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
     state.set_agent_hp(target, 95.0);  // 5 hp of headroom
 
-    HealHandler.handle(
-        &Event::EffectHealApplied { caster, target, amount: 20.0, tick: 0 },
+    dispatch_effect_heal_applied(
+        &Event::EffectHealApplied { actor: caster, target, amount: 20.0, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -58,8 +62,8 @@ fn heal_on_dead_target_is_noop() {
     state.set_agent_hp(target, 0.0);
     state.kill_agent(target);
 
-    HealHandler.handle(
-        &Event::EffectHealApplied { caster, target, amount: 50.0, tick: 0 },
+    dispatch_effect_heal_applied(
+        &Event::EffectHealApplied { actor: caster, target, amount: 50.0, tick: 0 },
         &mut state,
         &mut events,
     );
@@ -77,13 +81,13 @@ fn heal_non_positive_amount_is_noop() {
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
     state.set_agent_hp(target, 40.0);
 
-    HealHandler.handle(
-        &Event::EffectHealApplied { caster, target, amount: 0.0, tick: 0 },
+    dispatch_effect_heal_applied(
+        &Event::EffectHealApplied { actor: caster, target, amount: 0.0, tick: 0 },
         &mut state,
         &mut events,
     );
-    HealHandler.handle(
-        &Event::EffectHealApplied { caster, target, amount: -10.0, tick: 0 },
+    dispatch_effect_heal_applied(
+        &Event::EffectHealApplied { actor: caster, target, amount: -10.0, tick: 0 },
         &mut state,
         &mut events,
     );

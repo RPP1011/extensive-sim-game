@@ -253,8 +253,10 @@ fn explicit_tick_field_is_a_parse_error() {
 
 #[test]
 fn event_tag_contract_violation_errors() {
+    // `Broken` declares neither `actor` nor `target`, so claiming `@harmful`
+    // must fail the contract check.
     let src = r#"
-        event_tag Harmful { target: AgentId }
+        event_tag Harmful { actor: AgentId, target: AgentId }
         @harmful event Broken { caster: AgentId }
     "#;
     let err = dsl_compiler::compile(src).expect_err("should fail");

@@ -7,8 +7,8 @@ use glam::Vec3;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AgentMoved {
-    pub agent_id: AgentId,
+    pub actor: AgentId,
     pub from: Vec3,
-    pub to: Vec3,
+    pub location: Vec3,
     pub tick: u32,
 }
