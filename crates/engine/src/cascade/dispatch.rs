@@ -70,6 +70,29 @@ impl CascadeRegistry {
         self.register(crate::ability::CastHandler::new(ability_registry));
     }
 
+    /// Return the first-registered `CastHandler`'s `AbilityRegistry` handle,
+    /// if any. Used by mask-build (`mark_domain_hook_micros_allowed`) to
+    /// consult `evaluate_cast_gate` per agent. Returns `None` when no cast
+    /// handler is registered — in that case the mask falls back to the
+    /// permissive "always allowed" default.
+    ///
+    /// When multiple cast handlers are registered (allowed but unusual),
+    /// only the first is returned. Tests that need registry isolation
+    /// should keep to a single `register_cast_handler` call per registry.
+    pub fn cast_ability_registry(&self) -> Option<&std::sync::Arc<crate::ability::AbilityRegistry>> {
+        let kind = crate::cascade::EventKindId::AgentCast as u8 as usize;
+        for lane in Lane::ALL {
+            for handler in &self.table[*lane as usize][kind] {
+                if let Some(any) = handler.as_any() {
+                    if let Some(ch) = any.downcast_ref::<crate::ability::CastHandler>() {
+                        return Some(ch.registry());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub fn register<H: CascadeHandler + 'static>(&mut self, h: H) {
         let lane = h.lane() as usize;
         let kind = h.trigger() as u8 as usize;

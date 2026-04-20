@@ -51,6 +51,7 @@ impl CastHandler {
 impl CascadeHandler for CastHandler {
     fn trigger(&self) -> EventKindId { EventKindId::AgentCast }
     fn lane(&self) -> Lane { Lane::Effect }
+    fn as_any(&self) -> Option<&dyn std::any::Any> { Some(self) }
 
     fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
         let (caster, ability, target, depth, tick) = match *event {

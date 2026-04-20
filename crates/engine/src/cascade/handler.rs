@@ -108,4 +108,10 @@ pub trait CascadeHandler: Send + Sync {
     fn trigger(&self) -> EventKindId;
     fn lane(&self) -> Lane { Lane::Effect }
     fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing);
+
+    /// Downcast hook so registries can look up the concrete handler type
+    /// (e.g. `CastHandler`) to expose handler-specific state
+    /// (`AbilityRegistry`). Default impl returns `None`; concrete handlers
+    /// that want to be discoverable override with `Some(self)`.
+    fn as_any(&self) -> Option<&dyn std::any::Any> { None }
 }

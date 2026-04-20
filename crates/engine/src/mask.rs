@@ -1,4 +1,6 @@
 // crates/engine/src/mask.rs
+use crate::ability::{evaluate_cast_gate, AbilityRegistry};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
 pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 D5
@@ -153,12 +155,28 @@ impl MaskBuffer {
     /// ShareStory, Communicate, Ask, Remember). Real preconditions (cooldowns,
     /// inventory, LOS, memory presence, …) land alongside each domain's
     /// compiler-registered cascade handlers in later plans.
-    pub fn mark_domain_hook_micros_allowed(&mut self, state: &SimState) {
+    ///
+    /// `cast_registry`, when provided, overrides the permissive default for
+    /// `MicroKind::Cast` with the full `evaluate_cast_gate` predicate: the
+    /// first ability in the registry is treated as each agent's candidate
+    /// cast, with the nearest hostile within engagement range as the
+    /// inferred target (same heuristic `UtilityBackend` uses for Attack).
+    /// When the registry is empty or no cast handler is registered,
+    /// `MicroKind::Cast` falls back to permissive — matches the pre-gate
+    /// behaviour and the legacy `mark_domain_hook_micros_allowed` tests.
+    ///
+    /// Audit fix CRITICAL #2.
+    pub fn mark_domain_hook_micros_allowed(
+        &mut self,
+        state:         &SimState,
+        cast_registry: Option<&AbilityRegistry>,
+    ) {
         let n_kinds = MicroKind::ALL.len();
+        // Non-cast domain hooks remain permissive (no gate yet).
         for id in state.agents_alive() {
             let slot = (id.raw() - 1) as usize;
             for k in [
-                MicroKind::Cast,         MicroKind::UseItem,      MicroKind::Harvest,
+                MicroKind::UseItem,      MicroKind::Harvest,
                 MicroKind::PlaceTile,    MicroKind::PlaceVoxel,   MicroKind::HarvestVoxel,
                 MicroKind::Converse,     MicroKind::ShareStory,
                 MicroKind::Communicate,  MicroKind::Ask,          MicroKind::Remember,
@@ -166,5 +184,55 @@ impl MaskBuffer {
                 self.micro_kind[slot * n_kinds + k as usize] = true;
             }
         }
+
+        // Cast: pass through `evaluate_cast_gate` when a registry is bound,
+        // falling back to permissive when no registry is available.
+        let ability_id = cast_registry.and_then(first_registered_ability);
+        for id in state.agents_alive() {
+            let slot = (id.raw() - 1) as usize;
+            let cast_offset = slot * n_kinds + MicroKind::Cast as usize;
+            let allowed = match (cast_registry, ability_id) {
+                (Some(reg), Some(ability)) => {
+                    match inferred_cast_target(state, id) {
+                        Some(target) => evaluate_cast_gate(state, reg, id, ability, target),
+                        None         => false,
+                    }
+                }
+                // No ability registered / no registry bound → permissive.
+                _ => true,
+            };
+            self.micro_kind[cast_offset] = allowed;
+        }
     }
+}
+
+/// Return the first `AbilityId` (slot 0) in a non-empty registry.
+/// Mask-build treats it as each agent's representative cast for the
+/// per-agent gate check.
+fn first_registered_ability(reg: &AbilityRegistry) -> Option<crate::ability::AbilityId> {
+    if reg.is_empty() { return None; }
+    crate::ability::AbilityId::new(1)
+}
+
+/// Pick the nearest hostile within engagement range as the inferred cast
+/// target. Matches the `UtilityBackend` heuristic for Attack: locality +
+/// hostility. Returns `None` when no hostile is in range.
+fn inferred_cast_target(state: &SimState, caster: AgentId) -> Option<AgentId> {
+    let pos = state.agent_pos(caster)?;
+    let ct = state.agent_creature_type(caster)?;
+    let spatial = state.spatial();
+    let mut best: Option<(AgentId, f32)> = None;
+    for other in spatial.query_within_radius(state, pos, AGGRO_RANGE) {
+        if other == caster { continue; }
+        let op = match state.agent_pos(other) { Some(p) => p, None => continue };
+        let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };
+        if !ct.is_hostile_to(oc) { continue; }
+        let d = pos.distance(op);
+        match best {
+            None => best = Some((other, d)),
+            Some((_, bd)) if d < bd => best = Some((other, d)),
+            _ => {}
+        }
+    }
+    best.map(|(id, _)| id)
 }
