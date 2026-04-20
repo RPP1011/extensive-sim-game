@@ -123,3 +123,48 @@ pub struct MentorLink {
     pub mentor:     AgentId,
     pub discipline: u8,
 }
+
+// ---- Combat Foundation Task 1: SparseStandings --------------------------
+
+/// Per-pair standing ledger. Keyed by the ordered tuple `(min(a, b), max(a, b))`
+/// so lookups and updates are symmetric (standing is a mutual quantity). Value
+/// is an `i16` clamped to `[-1000, 1000]` by `adjust(..)`.
+///
+/// Cold storage: read only when a pair-wise interaction references it (e.g.
+/// `EffectOp::ModifyStanding`, gate predicates that defer to standing).
+#[derive(Clone, Debug, Default)]
+pub struct SparseStandings {
+    pairs: std::collections::BTreeMap<(AgentId, AgentId), i16>,
+}
+
+impl SparseStandings {
+    pub fn new() -> Self { Self { pairs: std::collections::BTreeMap::new() } }
+
+    #[inline]
+    fn key(a: AgentId, b: AgentId) -> (AgentId, AgentId) {
+        if a <= b { (a, b) } else { (b, a) }
+    }
+
+    /// Current standing for the pair. Returns 0 when no entry has been set.
+    pub fn get(&self, a: AgentId, b: AgentId) -> i16 {
+        self.pairs.get(&Self::key(a, b)).copied().unwrap_or(0)
+    }
+
+    /// Replace the standing for the pair.
+    pub fn set(&mut self, a: AgentId, b: AgentId, v: i16) {
+        self.pairs.insert(Self::key(a, b), v);
+    }
+
+    /// Adjust by `delta`, saturating at `[-1000, 1000]`. Returns the new
+    /// clamped value.
+    pub fn adjust(&mut self, a: AgentId, b: AgentId, delta: i16) -> i16 {
+        let k = Self::key(a, b);
+        let cur = self.pairs.get(&k).copied().unwrap_or(0) as i32;
+        let new = (cur + delta as i32).clamp(-1000, 1000) as i16;
+        self.pairs.insert(k, new);
+        new
+    }
+
+    pub fn is_empty(&self) -> bool { self.pairs.is_empty() }
+    pub fn len(&self) -> usize { self.pairs.len() }
+}

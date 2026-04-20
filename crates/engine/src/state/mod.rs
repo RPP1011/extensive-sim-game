@@ -7,7 +7,8 @@ use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 pub use agent::{AgentSpawn, MovementMode};
 use agent_types::{
-    ClassSlot, Creditor, Inventory, MemoryEvent, Membership, Relationship, StatusEffect,
+    ClassSlot, Creditor, Inventory, MemoryEvent, Membership, Relationship, SparseStandings,
+    StatusEffect,
 };
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
@@ -66,6 +67,11 @@ pub struct SimState {
     hot_ambition:       Vec<f32>,
     hot_altruism:       Vec<f32>,
     hot_curiosity:      Vec<f32>,
+    // Combat Foundation Task 1: who this agent is currently locked in melee
+    // with. `engaged_with[a] == Some(b)` iff `engaged_with[b] == Some(a)`
+    // after `ability::expire::tick_start` runs (bidirectional invariant).
+    // `None` means disengaged. Storage here; enforcement in Task 3.
+    hot_engaged_with:   Vec<Option<AgentId>>,
 
     // --- Cold SoA — read rarely (spawn, chronicle, debug, narrative) ---
     cold_creature_type: Vec<Option<CreatureType>>,
@@ -95,6 +101,9 @@ pub struct SimState {
     cold_creditor_ledger:   Vec<SmallVec<[Creditor; 16]>>,
     // Mentor lineage (state.md §Relationships mentor_lineage) — 8-deep chain.
     cold_mentor_lineage:    Vec<[Option<AgentId>; 8]>,
+    // Per-pair standing (Combat Foundation Task 1). Symmetric (keyed by
+    // ordered tuple), i16 clamped to [-1000, 1000] by `adjust_standing`.
+    cold_standing:          SparseStandings,
 }
 
 impl SimState {
@@ -132,6 +141,7 @@ impl SimState {
             hot_ambition:        vec![0.5; cap],
             hot_altruism:        vec![0.5; cap],
             hot_curiosity:       vec![0.5; cap],
+            hot_engaged_with:    vec![None; cap],
             cold_creature_type:  vec![None; cap],
             cold_channels:       (0..cap).map(|_| None).collect(),
             cold_spawn_tick:     vec![None; cap],
@@ -146,6 +156,7 @@ impl SimState {
             cold_class_definitions: vec![[ClassSlot::default(); 4]; cap],
             cold_creditor_ledger:   (0..cap).map(|_| SmallVec::new()).collect(),
             cold_mentor_lineage:    vec![[None; 8]; cap],
+            cold_standing:          SparseStandings::new(),
         }
     }
 
@@ -186,6 +197,7 @@ impl SimState {
         self.hot_ambition[slot]        = 0.5;
         self.hot_altruism[slot]        = 0.5;
         self.hot_curiosity[slot]       = 0.5;
+        self.hot_engaged_with[slot]    = None;
         let caps = Capabilities::for_creature(spec.creature_type);
         self.cold_creature_type[slot]  = Some(spec.creature_type);
         self.cold_channels[slot]       = Some(caps.channels);
@@ -405,6 +417,33 @@ impl SimState {
         if let Some(s) = self.hot_curiosity.get_mut(AgentSlotPool::slot_of_agent(id)) {
             *s = v;
         }
+    }
+
+    // Engagement (Combat Foundation Task 1).
+    pub fn agent_engaged_with(&self, id: AgentId) -> Option<AgentId> {
+        self.hot_engaged_with
+            .get(AgentSlotPool::slot_of_agent(id))
+            .copied()
+            .unwrap_or(None)
+    }
+    pub fn set_agent_engaged_with(&mut self, id: AgentId, other: Option<AgentId>) {
+        if let Some(s) = self
+            .hot_engaged_with
+            .get_mut(AgentSlotPool::slot_of_agent(id))
+        {
+            *s = other;
+        }
+    }
+
+    // Per-pair standing (Combat Foundation Task 1).
+    pub fn standing(&self, a: AgentId, b: AgentId) -> i16 {
+        self.cold_standing.get(a, b)
+    }
+    pub fn set_standing(&mut self, a: AgentId, b: AgentId, v: i16) {
+        self.cold_standing.set(a, b, v);
+    }
+    pub fn adjust_standing(&mut self, a: AgentId, b: AgentId, delta: i16) -> i16 {
+        self.cold_standing.adjust(a, b, delta)
     }
 
     // Memberships (Task G).
@@ -786,5 +825,15 @@ impl SimState {
     }
     pub fn cold_mentor_lineage(&self) -> &[[Option<AgentId>; 8]] {
         &self.cold_mentor_lineage
+    }
+
+    // Engagement bulk slice (Combat Foundation Task 1).
+    pub fn hot_engaged_with(&self) -> &[Option<AgentId>] {
+        &self.hot_engaged_with
+    }
+
+    // Standing ledger (Combat Foundation Task 1).
+    pub fn cold_standing(&self) -> &SparseStandings {
+        &self.cold_standing
     }
 }

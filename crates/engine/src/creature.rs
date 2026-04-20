@@ -54,6 +54,24 @@ pub struct Capabilities {
     pub max_spouses: u8,
 }
 
+impl CreatureType {
+    /// Pairwise hostility predicate used by engagement + mask gating.
+    ///
+    /// **Stub:** this is a species-level default table; it will be superseded
+    /// by per-pair `Relationship` standing when the Memory/Relationships plan
+    /// lands. Wolves hunt Humans and Deer; Dragons are universally hostile;
+    /// every other pairing defaults to non-hostile. Always symmetric.
+    pub fn is_hostile_to(self, other: CreatureType) -> bool {
+        use CreatureType::*;
+        match (self, other) {
+            (Wolf, Human) | (Human, Wolf) => true,
+            (Wolf, Deer)  | (Deer, Wolf)  => true,
+            (Dragon, _)   | (_, Dragon)   => true, // dragons hostile to all
+            _ => false,
+        }
+    }
+}
+
 impl Capabilities {
     pub fn for_creature(ct: CreatureType) -> Self {
         use CommunicationChannel as CC;
