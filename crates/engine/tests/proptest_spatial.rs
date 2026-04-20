@@ -85,6 +85,7 @@ proptest! {
                 SpatialOp::Spawn { pos, mode } => {
                     if let Some(id) = state.spawn_agent(AgentSpawn {
                         creature_type: CreatureType::Human, pos, hp: 100.0,
+                        ..Default::default()
                     }) {
                         state.set_agent_movement_mode(id, mode);
                     }

@@ -11,7 +11,7 @@
 // Entries contributed by this block:
 // - [0] head=`Hold` base=0.1 modifiers=0
 // - [1] head=`MoveToward` base=0.3 modifiers=0
-// - [2] head=`Flee` base=0.0 modifiers=1
+// - [2] head=`Flee` base=0.0 modifiers=2
 // - [3] head=`Attack` base=0.0 modifiers=3
 // - [4] head=`Cast` base=0.0 modifiers=0
 // - [5] head=`UseItem` base=0.0 modifiers=0

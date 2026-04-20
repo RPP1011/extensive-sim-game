@@ -103,6 +103,7 @@ fn run(seed: u64) -> [u8; 32] {
             creature_type: CreatureType::Human,
             pos: Vec3::new(50.0 * angle.cos(), 50.0 * angle.sin(), 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
     for _ in 0..1000 {

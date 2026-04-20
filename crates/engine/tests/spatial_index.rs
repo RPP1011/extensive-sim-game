@@ -17,6 +17,7 @@ fn state_spatial_is_fresh_after_spawn_move_and_kill() {
                 creature_type: CreatureType::Human,
                 pos: Vec3::new(i as f32, 0.0, 0.0),
                 hp: 100.0,
+                ..Default::default()
             })
             .unwrap();
         ids.push(id);
@@ -56,6 +57,7 @@ fn setup(positions: &[(Vec3, MovementMode)]) -> SimState {
             creature_type: CreatureType::Human,
             pos: *p,
             hp: 100.0,
+            ..Default::default()
         }).unwrap();
         if *mode != MovementMode::Walk {
             state.set_agent_movement_mode(id, *mode);
@@ -109,9 +111,11 @@ fn incremental_insert_two_agents_visible_without_rebuild() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(0.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let b = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Wolf, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let hits = state.spatial().within_radius(&state, Vec3::ZERO, 5.0);
     assert_eq!(hits, vec![a, b], "both spawned agents must be in the index");
@@ -124,6 +128,7 @@ fn incremental_update_crosses_cell_boundary() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(0.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     assert_eq!(state.spatial().cell_of_agent(a), Some((0, 0)));
     // Move within cell — same key.
@@ -146,6 +151,7 @@ fn in_cell_move_is_a_noop_for_index_membership() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         }).unwrap();
     }
     let pop_before = state.spatial().populated_cell_count();
@@ -167,9 +173,11 @@ fn incremental_remove_drops_agent_from_queries() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(0.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let b = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Wolf, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     assert_eq!(state.spatial().within_radius(&state, Vec3::ZERO, 5.0), vec![a, b]);
     state.kill_agent(a);
@@ -182,6 +190,7 @@ fn mode_transition_walk_to_fly_moves_agent_to_sidecar() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(0.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     // Walk: in a column.
     assert_eq!(state.spatial().cell_of_agent(a), Some((0, 0)));

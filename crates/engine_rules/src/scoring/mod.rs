@@ -151,13 +151,16 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
         action_head: 2,
         base: 0.0,
         personality_weights: [0.0, 0.0, 0.0, 0.0, 0.0],
-        modifier_count: 1,
+        modifier_count: 2,
         modifiers: [
             ModifierRow {
-                predicate: PredicateDescriptor::scalar_compare(2, PredicateDescriptor::OP_LT, 0.3),
+                predicate: PredicateDescriptor::scalar_compare(0, PredicateDescriptor::OP_LT, 30.0),
                 delta: 0.6,
             },
-            ModifierRow::EMPTY,
+            ModifierRow {
+                predicate: PredicateDescriptor::scalar_compare(0, PredicateDescriptor::OP_LT, 50.0),
+                delta: 0.4,
+            },
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,
@@ -178,11 +181,19 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
                 delta: 0.5,
             },
             ModifierRow {
-                predicate: PredicateDescriptor::scalar_compare(16384, PredicateDescriptor::OP_LT, 30.0),
+                predicate: PredicateDescriptor::scalar_compare(
+                    16386,
+                    PredicateDescriptor::OP_LT,
+                    0.3,
+                ),
                 delta: 0.4,
             },
             ModifierRow {
-                predicate: PredicateDescriptor::scalar_compare(16384, PredicateDescriptor::OP_LT, 50.0),
+                predicate: PredicateDescriptor::scalar_compare(
+                    16386,
+                    PredicateDescriptor::OP_LT,
+                    0.5,
+                ),
                 delta: 0.2,
             },
             ModifierRow::EMPTY,

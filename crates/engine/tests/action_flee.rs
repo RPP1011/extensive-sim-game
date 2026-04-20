@@ -36,10 +36,12 @@ fn flee_moves_in_opposite_direction_from_threat() {
     let _threat = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let prey = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(1.0, 0.0, 10.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     let pos_before = state.agent_pos(prey).unwrap();
@@ -73,9 +75,11 @@ fn flee_with_threat_at_same_position_no_move_no_event() {
 
     let _threat = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let prey = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     let pos_before = state.agent_pos(prey).unwrap();

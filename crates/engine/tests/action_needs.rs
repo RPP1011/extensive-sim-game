@@ -33,6 +33,7 @@ fn make() -> (SimState, SimScratch, EventRing, CascadeRegistry, AgentId) {
     let cascade = CascadeRegistry::new();
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     (state, scratch, events, cascade, a)
 }

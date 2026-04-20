@@ -18,7 +18,7 @@ use engine::state::agent_types::Inventory;
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType) -> AgentId {
-    state.spawn_agent(AgentSpawn { creature_type: ct, pos: Vec3::ZERO, hp: 100.0 }).unwrap()
+    state.spawn_agent(AgentSpawn { creature_type: ct, pos: Vec3::ZERO, hp: 100.0, ..Default::default() }).unwrap()
 }
 
 fn set_gold(state: &mut SimState, id: AgentId, gold: i64) {

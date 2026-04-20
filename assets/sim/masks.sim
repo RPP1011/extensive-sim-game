@@ -35,8 +35,8 @@ mask Hold when agents.alive(self)
 // bounded movement-specific knob so candidate enumeration scales with
 // local density rather than the whole alive set. In the
 // `mvp_acceptance` fixture (100 agents on a 50 m ring) the previous
-// radius made every agent everybody's neighbour, producing N²
-// candidates per tick.
+// radius produced N² candidates per tick; `max_move_radius = 20` cuts
+// that to a near-linear local neighbourhood.
 mask MoveToward(target)
   from query.nearby_agents(agents.pos(self), config.movement.max_move_radius)
   when agents.alive(target) && target != self

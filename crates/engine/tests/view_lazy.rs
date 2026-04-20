@@ -26,6 +26,7 @@ fn spawn_two_away(state: &mut SimState) -> (AgentId, AgentId) {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let b = state
@@ -33,6 +34,7 @@ fn spawn_two_away(state: &mut SimState) -> (AgentId, AgentId) {
             creature_type: CreatureType::Human,
             pos: Vec3::new(5.0, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     (a, b)

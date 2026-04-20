@@ -18,6 +18,7 @@ fn make() -> (SimState, SimScratch, EventRing, CascadeRegistry, AgentId) {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     (state, scratch, events, cascade, a)

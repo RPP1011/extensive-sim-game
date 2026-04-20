@@ -31,7 +31,7 @@ use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3, hp: f32) -> AgentId {
-    state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp }).unwrap()
+    state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp, ..Default::default() }).unwrap()
 }
 
 /// Build a self-recursive ability: `[Damage(1.0), CastAbility(self, Target)]`.

@@ -17,10 +17,12 @@ fn step_advances_tick() {
     sim.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     sim.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Wolf,
         pos: Vec3::new(3.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     assert_eq!(sim.tick, 0);
@@ -41,10 +43,12 @@ fn wolf_moves_toward_human_across_20_ticks() {
     let human = sim.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let wolf = sim.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Wolf,
         pos: Vec3::new(20.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     let wolf_start = sim.agent_pos(wolf).unwrap();

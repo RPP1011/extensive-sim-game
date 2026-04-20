@@ -19,6 +19,7 @@ fn make() -> (SimState, SimScratch, EventRing, CascadeRegistry, AgentId) {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     (state, scratch, events, cascade, a)
@@ -147,6 +148,7 @@ fn converse_emits_partner() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(1.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let backend = EmitOnce(
@@ -184,6 +186,7 @@ fn communicate_emits_speaker_recipient_factref() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(1.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Communicate needs the fact_ref in the Opaque slot (or we could extend MicroTarget,
@@ -209,6 +212,7 @@ fn ask_agent_emits_informationrequested() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(1.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let backend = EmitOnce(

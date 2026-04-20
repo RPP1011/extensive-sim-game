@@ -25,6 +25,7 @@ fn registered_handler_fires_on_matching_event() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let mut ring = EventRing::with_cap(16);
     let evt = Event::AgentAttacked { actor: a, target: a, damage: 0.0, tick: 0 };
@@ -42,6 +43,7 @@ fn handler_not_fired_for_non_matching_kind() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let mut ring = EventRing::with_cap(16);
 

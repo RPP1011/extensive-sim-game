@@ -46,6 +46,7 @@ fn primary_recipient_cold_memory_contains_the_broadcast() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let listener = state
@@ -53,6 +54,7 @@ fn primary_recipient_cold_memory_contains_the_broadcast() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(5.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 
@@ -88,6 +90,7 @@ fn overhear_bystander_cold_memory_has_lower_confidence() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Outside primary (Area radius = 2) but inside OVERHEAR_RANGE=30.
@@ -96,6 +99,7 @@ fn overhear_bystander_cold_memory_has_lower_confidence() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(10.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 
@@ -126,6 +130,7 @@ fn speaker_receives_no_memory_of_their_own_announce() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     step(

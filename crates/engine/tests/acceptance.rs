@@ -30,6 +30,7 @@ fn mvp_acceptance() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(50.0 * angle.cos(), 50.0 * angle.sin(), 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
 
@@ -49,27 +50,25 @@ fn mvp_acceptance() {
     // MoveToward's mask enumerator walked every alive agent within
     // `config.combat.aggro_range = 50` m — which, in this fixture (100
     // agents on a 50 m ring) is every other agent — producing an O(N²)
-    // candidate list every tick.
+    // per-tick candidate list.
     //
-    // Task 144 pulled the MoveToward radius out into
-    // `config.movement.max_move_radius` (default 20 m), so per-agent
-    // MoveToward candidates drop from ~100 to ~13 here. That cuts
-    // `mark_move_allowed_from_candidates` from ~1.7 s → ~0.5 s in
-    // debug and ~42 ms → ~15 ms in release. The remaining debug cost
-    // is dominated by debug-profile overhead — spatial `within_radius`
-    // sorts its result by `AgentId::raw()` for determinism on every
-    // call, and Rust's debug UB precondition checks
-    // (`is_aligned_to`, `copy::precondition_check`, …) sum to ~35 %
-    // of the flamegraph. Release rides the same code paths without
-    // those checks.
+    // Task 144 pulled the radius out into
+    // `config.movement.max_move_radius = 20` m, which in this fixture
+    // cuts per-agent MoveToward candidates from ~100 down to ~13 — a
+    // ~3× drop on debug-build mask-build cost. Remaining debug cost is
+    // ~debug-mode overhead: the spatial index sorts its result by
+    // `AgentId::raw()` on every `within_radius` call for determinism,
+    // and Rust's debug-profile UB precondition checks (`is_aligned_to`,
+    // `copy::precondition_check`, …) dominate the flamegraph at ~35%
+    // of samples combined. Release rides the same code paths without
+    // those checks and lands ~180 ms on the author's machine.
     //
-    // Budget: 8 s debug (measured ~6.0 s on the author's machine —
-    // ~33 % headroom). The 2 s debug / 100 ms release budgets from
-    // the task brief need a follow-up on `ViewRegistry::fold_all` in
-    // `crates/engine/src/generated/views/mod.rs`, which re-walks the
-    // whole event ring every tick instead of just the events pushed
-    // this tick — that's the other live O(cumulative-events)
-    // regression and is out of scope for the mask fix.
+    // Current budget: 8 s debug (measured ~6.0 s on the author's
+    // machine, ~33 % headroom). Release headroom is tighter: the 100 ms
+    // aspirational ceiling from the task spec isn't achievable without
+    // a follow-up on the view-fold phase (see report on task 144 for
+    // the `ViewRegistry::fold_all` O(cumulative-events) walk; not
+    // addressed here to keep the perf fix scoped to the mask).
     assert!(
         elapsed.as_secs_f64() <= 8.0,
         "elapsed {:?} exceeds 8s budget", elapsed

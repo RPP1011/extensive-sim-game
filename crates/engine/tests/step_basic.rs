@@ -15,6 +15,7 @@ fn step_advances_tick_and_emits_no_events_for_hold() {
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
+        ..Default::default()
     });
     step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     assert_eq!(state.tick, 1);
@@ -36,6 +37,7 @@ fn step_is_reproducible_for_same_seed() {
             state.spawn_agent(AgentSpawn {
                 creature_type: CreatureType::Human,
                 pos: Vec3::new(i as f32, 0.0, 10.0), hp: 100.0,
+                ..Default::default()
             });
         }
         for _ in 0..100 { step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade); }

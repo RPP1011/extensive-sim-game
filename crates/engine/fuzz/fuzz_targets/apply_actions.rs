@@ -96,6 +96,7 @@ fuzz_target!(|data: &[u8]| {
         let hp  = (s.hp as f32).max(1.0);
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human, pos, hp,
+            ..Default::default()
         });
     }
 

@@ -26,6 +26,7 @@ fn setup(n_agents: u32) -> (SimState, SimScratch) {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32 * 3.0, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
     let scratch = SimScratch::new(state.agent_cap() as usize);

@@ -18,6 +18,7 @@ fn mask_validity_never_flags_a_clean_utility_run() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
     let inv = MaskValidityInvariant::new();
@@ -37,6 +38,7 @@ fn mask_validity_detects_forged_action() {
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     scratch.mask.reset();

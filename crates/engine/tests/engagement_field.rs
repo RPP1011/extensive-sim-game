@@ -15,6 +15,7 @@ fn spawn_defaults_engaged_with_none() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(state.agent_engaged_with(a), None);

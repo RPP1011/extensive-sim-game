@@ -24,11 +24,11 @@ config movement {
     // Candidate radius for the MoveToward mask's `from` clause.
     // Keeps per-agent MoveToward candidate enumeration O(local-density)
     // rather than O(all-alive). At 20 m the spatial-hash query touches
-    // a ~3-cell reach (5×5 cells at CELL_SIZE=16 m) — small enough that
-    // `mvp_acceptance` (100 agents on a 50 m ring) finishes in ~6 s
-    // debug / ~180 ms release. Bumping this back toward
-    // `combat.aggro_range` (50 m) reintroduces the N² candidate walk
-    // the task-144 fix was written to avoid. Task 144.
+    // a 3-cell reach (~5×5 cells at CELL_SIZE=16 m) — small enough that
+    // mvp_acceptance (100 agents on a 50 m ring) finishes inside a
+    // couple of seconds in debug and well under 100 ms in release.
+    // Bumping this back toward `combat.aggro_range` reintroduces the
+    // N² scaling the task-144 fix was written to avoid.
     max_move_radius: f32 = 20.0,
 }
 

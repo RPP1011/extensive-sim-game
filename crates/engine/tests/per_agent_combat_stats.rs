@@ -45,6 +45,7 @@ fn set_agent_attack_damage_is_honoured_by_next_attack() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let target = state
@@ -52,6 +53,7 @@ fn set_agent_attack_damage_is_honoured_by_next_attack() {
             creature_type: CreatureType::Wolf,
             pos: Vec3::new(1.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 
@@ -93,6 +95,7 @@ fn set_agent_attack_range_is_honoured_by_next_attack() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let target = state
@@ -100,6 +103,7 @@ fn set_agent_attack_range_is_honoured_by_next_attack() {
             creature_type: CreatureType::Wolf,
             pos: Vec3::new(2.5, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 

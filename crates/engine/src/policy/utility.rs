@@ -25,7 +25,7 @@
 //! documented in `docs/dsl/scoring_fields.md`; changing it is a schema
 //! bump.
 
-use super::{Action, PolicyBackend};
+use super::{Action, ActionKind, MicroTarget, PolicyBackend};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind, TargetMask};
 use crate::state::SimState;
@@ -307,10 +307,60 @@ fn build_action(
         },
         (MicroKind::Attack, Some(t)) => Action::attack(id, t),
         (MicroKind::Eat, _) => Action::eat(id),
+        // Flee is self-only on the scorer's side (no candidate list —
+        // the scoring row just ranks "should I run?"). The actual
+        // threat that the engine's `step_full` Flee arm moves the agent
+        // away from is resolved here: nearest hostile within
+        // `config.combat.aggro_range`. Task 148. Without a hostile in
+        // range we fall back to Hold — `step_full`'s Flee arm needs
+        // `MicroTarget::Agent(threat)` to compute the away-vector, so
+        // emitting Flee with no target would be a silent no-op anyway.
+        (MicroKind::Flee, _) => match nearest_hostile(state, id) {
+            Some(threat) => Action {
+                agent: id,
+                kind: ActionKind::Micro {
+                    kind:   MicroKind::Flee,
+                    target: MicroTarget::Agent(threat),
+                },
+            },
+            None => Action::hold(id),
+        },
         // Target-bound kinds with no target, or domain-hook kinds without
         // a dedicated constructor — fall back to Hold. Mask shouldn't
         // have enabled them unless the scorer has a row ranking them
         // above Hold, which doesn't happen until the DSL declares one.
         _ => Action::hold(id),
     }
+}
+
+/// Pick the nearest hostile agent within `config.combat.aggro_range`.
+/// Mirrors `mask::inferred_cast_target` — same "nearest hostile" shape,
+/// just used by the Flee action builder instead of the Cast gate. Runs
+/// once per Flee-picking agent per tick; cheap on small populations.
+///
+/// Task 148 — this is the runtime primitive that turns the scorer's
+/// self-only Flee choice into an actual away-from-threat movement.
+/// Lives as a hand-written helper rather than a scoring-row argmax
+/// because Flee's scoring row (base + hp modifiers) doesn't enumerate
+/// candidate threats — making Flee target-bound would require adding
+/// it to `MicroKind::TARGET_BOUND` and growing a `mask_flee_candidates`
+/// enumerator, which is tracked as a follow-up.
+fn nearest_hostile(state: &SimState, self_id: AgentId) -> Option<AgentId> {
+    let pos = state.agent_pos(self_id)?;
+    let ct = state.agent_creature_type(self_id)?;
+    let spatial = state.spatial();
+    let mut best: Option<(AgentId, f32)> = None;
+    for other in spatial.within_radius(state, pos, state.config.combat.aggro_range) {
+        if other == self_id { continue; }
+        let op = match state.agent_pos(other) { Some(p) => p, None => continue };
+        let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };
+        if !ct.is_hostile_to(oc) { continue; }
+        let d = pos.distance(op);
+        match best {
+            None => best = Some((other, d)),
+            Some((_, bd)) if d < bd => best = Some((other, d)),
+            _ => {}
+        }
+    }
+    best.map(|(id, _)| id)
 }

@@ -11,6 +11,7 @@ fn utility_picks_hold_when_only_hold_allowed() {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32, 0.0, 10.0), hp: 50.0,
+            ..Default::default()
         });
     }
     let mut mask = MaskBuffer::new(state.agent_cap() as usize);
@@ -31,6 +32,7 @@ fn utility_prefers_eat_when_hp_low_and_eat_allowed() {
     let id = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     // Now lower current hp to 20 (below 30% of max_hp=100 → triggers Eat).
     state.set_agent_hp(id, 20.0);

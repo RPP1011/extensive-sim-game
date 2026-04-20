@@ -49,6 +49,7 @@ fn spawn_hostile_pair(state: &mut SimState) -> AgentId {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let _attacker = state
@@ -56,6 +57,7 @@ fn spawn_hostile_pair(state: &mut SimState) -> AgentId {
             creature_type: CreatureType::Wolf,
             pos: Vec3::new(1.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     victim

@@ -32,7 +32,7 @@ use engine::step::{step, SimScratch};
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
-    state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp: 100.0 }).unwrap()
+    state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp: 100.0, ..Default::default() }).unwrap()
 }
 
 /// Backend that consults `evaluate_cast_gate` every tick and only emits a

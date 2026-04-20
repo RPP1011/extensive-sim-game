@@ -104,7 +104,7 @@ impl AppState {
         let mut agent_ids = Vec::with_capacity(scenario.agent.len());
         for spec in &scenario.agent {
             let ct = spec.creature()?;
-            let spawn = engine::state::AgentSpawn { creature_type: ct, pos: spec.position(), hp: spec.hp };
+            let spawn = engine::state::AgentSpawn { creature_type: ct, pos: spec.position(), hp: spec.hp, ..Default::default() };
             match sim.spawn_agent(spawn) {
                 Some(id) => agent_ids.push(id),
                 None => anyhow::bail!("spawn_agent returned None — agent_cap {} exhausted", cap),
@@ -182,7 +182,7 @@ impl AppState {
         let mut agent_ids = Vec::with_capacity(scenario.agent.len());
         for spec in &scenario.agent {
             let ct = spec.creature()?;
-            let spawn = engine::state::AgentSpawn { creature_type: ct, pos: spec.position(), hp: spec.hp };
+            let spawn = engine::state::AgentSpawn { creature_type: ct, pos: spec.position(), hp: spec.hp, ..Default::default() };
             match sim.spawn_agent(spawn) {
                 Some(id) => agent_ids.push(id),
                 None => anyhow::bail!("spawn_agent returned None — cap {} exhausted", cap),

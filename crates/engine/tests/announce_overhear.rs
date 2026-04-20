@@ -44,6 +44,7 @@ fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Just inside OVERHEAR_RANGE=30, outside primary Area radius=2:
@@ -52,6 +53,7 @@ fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(29.9, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Just outside OVERHEAR_RANGE=30:
@@ -60,6 +62,7 @@ fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(30.1, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 
@@ -101,6 +104,7 @@ fn agent_beyond_overhear_range_gets_nothing() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let _distant = state
@@ -108,6 +112,7 @@ fn agent_beyond_overhear_range_gets_nothing() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(100.0, 0.0, 0.0), // way beyond 30
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     step(
@@ -138,6 +143,7 @@ fn primary_recipient_not_also_added_as_overhear_bystander() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let primary = state
@@ -145,6 +151,7 @@ fn primary_recipient_not_also_added_as_overhear_bystander() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(5.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 

@@ -83,6 +83,7 @@ fn cast_bit_false_when_no_hostile_in_range() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     run_one_tick(&mut state, &mut scratch, &mut events, &cascade, &invariants);
@@ -107,6 +108,7 @@ fn cast_bit_true_when_hostile_in_range_and_all_gates_pass() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let _wolf = state
@@ -114,6 +116,7 @@ fn cast_bit_true_when_hostile_in_range_and_all_gates_pass() {
             creature_type: CreatureType::Wolf,
             pos: Vec3::new(3.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     run_one_tick(&mut state, &mut scratch, &mut events, &cascade, &invariants);
@@ -137,6 +140,7 @@ fn cast_bit_false_when_caster_stunned() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let _wolf = state
@@ -144,6 +148,7 @@ fn cast_bit_false_when_caster_stunned() {
             creature_type: CreatureType::Wolf,
             pos: Vec3::new(3.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Task 143 — set an absolute expiry of state.tick+5. Mask read
@@ -171,6 +176,7 @@ fn cast_bit_permissive_when_no_cast_handler_registered() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     run_one_tick(&mut state, &mut scratch, &mut events, &cascade, &invariants);

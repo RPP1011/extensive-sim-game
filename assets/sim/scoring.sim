@@ -34,10 +34,32 @@ scoring {
   // nothing else is interesting.
   MoveToward = 0.3
 
-  // Retreat from danger. Only becomes attractive once hp is critical;
-  // the mask also gates on hp_pct < 0.3 so this is the scorer's tie-
-  // breaker between Flee and other low-hp actions (Eat).
-  Flee = 0.0 + (if self.hp_pct < 0.3 { 0.6 } else { 0.0 })
+  // Retreat from danger. Task 148 made Flee threat-aware for healthy
+  // agents: the lightly-wounded gate (`self.hp < 50`) fires at +0.4,
+  // which beats MoveToward's base 0.3, so a prey animal with a predator
+  // in MoveToward-radius picks Flee instead of closing on the threat.
+  // The heavily-wounded gate (`self.hp < 30`) stacks an extra +0.6 so
+  // panicked agents prefer Flee over any target-modifier-boosted Attack.
+  //
+  // Raw hp (not hp_pct) on purpose: Flee's design goal here is "prey
+  // species like deer / wolves flee by default", which is an absolute-
+  // size distinction (deer topple at hp=40, dragons shrug off hp=40).
+  // Task 150 made `AgentSpawn.max_hp` an independent cap so `hp_pct`
+  // works for target-selection on the Attack row, but the "prey flees
+  // on sight" intent here still reads more naturally on absolute hp
+  // than on a pct. If that ever flips the Flee row can move to
+  // `self.hp_pct` without any engine change.
+  // `engine_rules::scoring::read_field` looks up self.hp at field_id 0.
+  //
+  // The corresponding movement comes from `UtilityBackend::build_action`,
+  // which resolves `MicroKind::Flee` by picking the nearest hostile
+  // within `config.combat.aggro_range` (task 148) and emitting
+  // `Micro { Flee, target: Agent(threat) }` so step.rs's Flee arm
+  // moves the agent AWAY from that threat. When no hostile is in range
+  // the action falls back to Hold — agents don't flee from nothing.
+  Flee = 0.0
+    + (if self.hp < 30.0 { 0.6 } else { 0.0 })
+    + (if self.hp < 50.0 { 0.4 } else { 0.0 })
 
   // ===== Combat =====
 
@@ -51,35 +73,32 @@ scoring {
   // the engine's `read_field` dispatches on (see
   // `docs/dsl/scoring_fields.md`).
   //
-  // Absolute-hp thresholds (not `hp_pct`) because the spawn path sets
-  // `max_hp := spec.hp.max(1.0)` — a fixture-seeded "wounded" human
-  // with hp=10 reports `hp_pct = 1.0`, same as a full-hp human with
-  // hp=100. Raw hp discriminates them cleanly (10 < 30, 100 >= 50).
-  // `docs/dsl/scoring_fields.md` reserves `target.hp → 0x4000` and
-  // `target.hp_pct → 0x4002`; the emitter looks the names up in the
-  // shared `scoring_field_id` table and OR-s the `TARGET_FIELD_BASE`
-  // bit on for target references.
+  // Task 150 restored `target.hp_pct`-based thresholds now that
+  // `AgentSpawn.max_hp` is carried independently of initial hp (so a
+  // wounded fixture at `hp=10, max_hp=100` reports `hp_pct = 0.1`
+  // instead of the pre-150 `hp_pct = 1.0` that made hp_pct scoring
+  // useless). Absolute-hp thresholds don't generalise across creature
+  // types — a Wolf at 80 HP and a Dragon at 500 HP both benefit from
+  // a shared `hp_pct < 0.3` "finish them" rule.
   //
   // Stacked modifiers:
-  //   self fresh (hp_pct >= 80%) ...... +0.50  "commit when still healthy"
-  //   target nearly dead (hp < 30) .... +0.40  "finish weak enemies"
-  //   target wounded (hp < 50) ........ +0.20  "prefer wounded"
+  //   self fresh (hp_pct >= 80%) .......... +0.50  "commit when still healthy"
+  //   target nearly dead (hp_pct < 30%) ... +0.40  "finish weak enemies"
+  //   target wounded (hp_pct < 50%) ....... +0.20  "prefer wounded"
   //
   // Base 0.0 + the fresh-self gate keeps Attack above MoveToward
-  // (base 0.3) while the wolf is fresh, so the primary wolves+humans
-  // scenario (all agents at full hp) still produces real attacks; once
-  // the wolf has taken enough damage to drop below 80% hp the row
-  // falls behind MoveToward, which is the scorer's signal to break off
-  // and reposition (engagement / Flee handle the actual retreat). The
-  // wounded / nearly-dead deltas stack: a target at hp=15 pulls +0.40
-  // + +0.20 = +0.60, so a wolf facing a one-hit kill and a full-hp
-  // bystander picks the one-hit kill first. Mask still gates range /
-  // hostility; the row only ranks the (kind, target) pair once the
-  // mask passes.
+  // (base 0.3) while the wolf is fresh; once the wolf drops below
+  // 80% hp the row falls behind MoveToward, which is the scorer's
+  // signal to break off and reposition (engagement / Flee handle the
+  // actual retreat). The wounded / nearly-dead deltas stack: a
+  // target at 15% hp pulls +0.40 + +0.20 = +0.60, so a wolf facing a
+  // one-hit kill and a full-hp bystander picks the one-hit kill
+  // first. Mask still gates range / hostility; the row only ranks
+  // the (kind, target) pair once the mask passes.
   Attack(target) = 0.0
     + (if self.hp_pct >= 0.8 { 0.5 } else { 0.0 })
-    + (if target.hp < 30.0 { 0.4 } else { 0.0 })
-    + (if target.hp < 50.0 { 0.2 } else { 0.0 })
+    + (if target.hp_pct < 0.3 { 0.4 } else { 0.0 })
+    + (if target.hp_pct < 0.5 { 0.2 } else { 0.0 })
 
   // Cast / UseItem: "domain hook" kinds without a dedicated
   // `Action::*` constructor in `UtilityBackend::build_action`. Until

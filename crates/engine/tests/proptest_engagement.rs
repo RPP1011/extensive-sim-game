@@ -38,6 +38,7 @@ fn build_state(pop: &[(CreatureType, (f32, f32, f32))]) -> (SimState, Vec<AgentI
             creature_type: *ct,
             pos: Vec3::new(*x, *y, *z),
             hp: 100.0,
+            ..Default::default()
         }).unwrap();
         ids.push(id);
     }

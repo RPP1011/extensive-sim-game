@@ -253,9 +253,28 @@ impl SimState {
     pub fn spawn_agent(&mut self, spec: AgentSpawn) -> Option<AgentId> {
         let id = self.pool.alloc_agent()?;
         let slot = AgentSlotPool::slot_of_agent(id);
+        // Task 150: `max_hp` is an independent cap carried on `AgentSpawn`.
+        // Callers that want a wounded spawn pass `hp: 30.0, max_hp: 100.0`
+        // — the cap stays at 100 and `hp_pct = 0.3` so target-selection
+        // scoring can see the agent is wounded. Previously `max_hp` was
+        // written as `spec.hp.max(1.0)` which made every freshly-spawned
+        // agent report `hp_pct = 1.0` and silently broke pct-based rows.
+        //
+        // `max_hp` must be ≥ 1 so downstream `hp / max_hp` never divides
+        // by zero. If a caller accidentally passes `max_hp < hp` we clamp
+        // hp down to the cap (debug-asserts so tests catch the bug).
+        let max_hp = spec.max_hp.max(1.0);
+        debug_assert!(
+            spec.hp <= spec.max_hp,
+            "AgentSpawn: hp ({}) > max_hp ({}) — clamping hp to max_hp. \
+             Callers should pass `max_hp >= hp` or leave `max_hp` at the \
+             Default (100.0) when spawning a fully-healthy agent.",
+            spec.hp, spec.max_hp,
+        );
+        let hp = spec.hp.min(max_hp);
         self.hot_pos[slot]             = spec.pos;
-        self.hot_hp[slot]              = spec.hp;
-        self.hot_max_hp[slot]          = spec.hp.max(1.0);
+        self.hot_hp[slot]              = hp;
+        self.hot_max_hp[slot]          = max_hp;
         self.hot_alive[slot]           = true;
         self.hot_movement_mode[slot]   = MovementMode::Walk;
         self.hot_level[slot]           = 1;

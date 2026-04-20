@@ -207,11 +207,13 @@ impl MaskBuffer {
 
     /// Mark `Flee` via the DSL-emitted `mask_flee` predicate. The DSL
     /// predicate is permissive (allowed for any alive agent) — the real
-    /// gate (`hp_pct < 0.3`) lives in the `Flee` scoring row. Task 138
-    /// retired the engine-side "threat within aggro range" quantifier;
-    /// Flee stays self-only and `build_action` maps it to Hold when the
-    /// scorer picks it, until the DSL surface grows threat-pointer
-    /// semantics for the Flee head.
+    /// gate (absolute-hp thresholds `self.hp < 30/50`) lives in the
+    /// `Flee` scoring row. Task 138 retired the engine-side "threat
+    /// within aggro range" quantifier; Flee stays self-only on the
+    /// mask/scoring side and `UtilityBackend::build_action` resolves
+    /// the threat (nearest hostile within `config.combat.aggro_range`)
+    /// when assembling the `Micro { Flee, Agent(threat) }` action, which
+    /// `step_full`'s Flee arm uses to move the agent AWAY from. Task 148.
     pub fn mark_flee_allowed_if_threat_exists(&mut self, state: &SimState) {
         self.mark_self_predicate(state, MicroKind::Flee, mask_flee);
     }

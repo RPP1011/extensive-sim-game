@@ -22,6 +22,7 @@ fn steady_state_zero_alloc_after_warmup() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
 

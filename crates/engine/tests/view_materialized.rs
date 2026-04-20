@@ -12,11 +12,13 @@ fn damage_taken_accumulates_from_agent_attacked_events() {
         creature_type: CreatureType::Human,
         pos: Vec3::ZERO,
         hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let b = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::X,
         hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     let mut dmg = DamageTaken::new(state.agent_cap() as usize);

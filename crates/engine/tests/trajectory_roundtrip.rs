@@ -18,6 +18,7 @@ fn emit_and_reload_trajectory() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
     let mut writer = TrajectoryWriter::new(5, 50);
@@ -55,6 +56,7 @@ fn python_roundtrip_preserves_values() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
     let mut writer = TrajectoryWriter::new(3, 20);

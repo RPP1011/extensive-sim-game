@@ -28,9 +28,11 @@ fn mask_attack_bit_pins_attack_range_at_2m_boundary() {
     let mut state = SimState::new(4, 42);
     let _victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let attacker = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Wolf, pos: Vec3::new(1.99, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     assert!(bit_set_for(&state, attacker), "attack mask bit must be set at 1.99m");
 
@@ -38,9 +40,11 @@ fn mask_attack_bit_pins_attack_range_at_2m_boundary() {
     let mut state = SimState::new(4, 42);
     let _victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let attacker = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Wolf, pos: Vec3::new(2.01, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     assert!(!bit_set_for(&state, attacker), "attack mask bit must be clear at 2.01m");
 }
@@ -64,9 +68,11 @@ fn mask_attack_bit_respects_hostility_gate() {
     let mut state = SimState::new(4, 42);
     let _victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let attacker = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     assert!(!bit_set_for(&state, attacker), "same-species pair is not hostile");
 
@@ -74,9 +80,11 @@ fn mask_attack_bit_respects_hostility_gate() {
     let mut state = SimState::new(4, 42);
     let _victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let attacker = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Wolf, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     assert!(bit_set_for(&state, attacker), "Wolf-vs-Human pair is hostile");
 }
@@ -106,10 +114,12 @@ fn attack_reduces_hp_within_range() {
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let _attacker = state.spawn_agent(AgentSpawn {
         // 1m away — within 2m ATTACK_RANGE
         creature_type: CreatureType::Human, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     step(&mut state, &mut scratch, &mut events, &AttackFixed(victim), &cascade);
@@ -134,9 +144,11 @@ fn attack_at_1_99m_hits_pinning_attack_range_upper_bound() {
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let _attacker = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(1.99, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     step(&mut state, &mut scratch, &mut events, &AttackFixed(victim), &cascade);
@@ -160,9 +172,11 @@ fn attack_at_2_01m_misses_pinning_attack_range_upper_bound() {
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let _attacker = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(2.01, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     step(&mut state, &mut scratch, &mut events, &AttackFixed(victim), &cascade);
@@ -179,10 +193,12 @@ fn attack_beyond_range_is_a_no_op() {
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let _attacker = state.spawn_agent(AgentSpawn {
         // 10m away — beyond 2m ATTACK_RANGE
         creature_type: CreatureType::Human, pos: Vec3::new(10.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     step(&mut state, &mut scratch, &mut events, &AttackFixed(victim), &cascade);
@@ -198,10 +214,12 @@ fn hp_hits_zero_kills_agent_and_emits_died_event() {
     let cascade = CascadeRegistry::new();
 
     let victim = state.spawn_agent(AgentSpawn {
-        creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 10.0,  // one-shot
+        creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 10.0,  // one-shot,
+        ..Default::default()
     }).unwrap();
     let _attacker = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     step(&mut state, &mut scratch, &mut events, &AttackFixed(victim), &cascade);
@@ -226,9 +244,11 @@ fn attack_dead_target_is_no_op() {
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 5.0,
+        ..Default::default()
     }).unwrap();
     let _attacker = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::new(1.0, 0.0, 0.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
 
     // First tick kills the victim.

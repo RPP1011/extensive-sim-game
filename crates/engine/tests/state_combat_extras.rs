@@ -16,6 +16,7 @@ fn spawn_defaults_combat_extras() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Absorb layer starts at zero — no free damage shield on spawn.

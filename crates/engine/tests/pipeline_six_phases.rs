@@ -28,6 +28,7 @@ fn six_phase_pipeline_runs_clean() {
             creature_type: CreatureType::Human,
             pos: Vec3::new((i as f32) * 200.0, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
 
@@ -109,6 +110,7 @@ fn step_full_panics_when_scratch_undersized() {
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     });
 
     // `step_full` debug_requires scratch capacity == state.agent_cap() * 18.

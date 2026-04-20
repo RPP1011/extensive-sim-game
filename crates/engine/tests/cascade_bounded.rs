@@ -32,6 +32,7 @@ fn release_dispatch_truncates_at_max_cascade_iterations() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let mut ring = EventRing::with_cap(1024);
 
@@ -58,6 +59,7 @@ fn debug_dispatch_panics_on_non_convergence() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let mut ring = EventRing::with_cap(1024);
     ring.push(Event::AgentAttacked { actor: a, target: a, damage: 1.0, tick: 0 });

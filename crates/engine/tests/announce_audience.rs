@@ -45,6 +45,7 @@ fn announce_area_emits_recordmemory_for_each_agent_within_radius() {
             creature_type: CreatureType::Human,
             pos: center,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // 3 within/on radius 10: distances [0.0, 9.999, 10.0].
@@ -57,6 +58,7 @@ fn announce_area_emits_recordmemory_for_each_agent_within_radius() {
             creature_type: CreatureType::Human,
             pos: center + Vec3::new(d, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
     // 2 outside radius 10: distances [10.001, 20.0].
@@ -65,6 +67,7 @@ fn announce_area_emits_recordmemory_for_each_agent_within_radius() {
             creature_type: CreatureType::Human,
             pos: center + Vec3::new(d, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
 
@@ -103,6 +106,7 @@ fn speaker_excluded_from_recipients() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     step(
@@ -133,6 +137,7 @@ fn announce_bounded_by_max_recipients() {
             creature_type: CreatureType::Human,
             pos: center,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // 64 agents, all within radius — primary audience caps at
@@ -145,6 +150,7 @@ fn announce_bounded_by_max_recipients() {
             creature_type: CreatureType::Human,
             pos: center + Vec3::new(5.0 * angle.cos(), 5.0 * angle.sin(), 0.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
     step(
@@ -209,6 +215,7 @@ fn announce_anyone_uses_max_announce_radius_around_speaker() {
             creature_type: CreatureType::Dragon,
             pos: Vec3::new(0.0, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Close agent — deep inside MAX_ANNOUNCE_RADIUS=80:
@@ -216,24 +223,28 @@ fn announce_anyone_uses_max_announce_radius_around_speaker() {
         creature_type: CreatureType::Dragon,
         pos: Vec3::new(50.0, 0.0, 10.0),
         hp: 100.0,
+        ..Default::default()
     });
     // Just inside (79.9m):
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Dragon,
         pos: Vec3::new(79.9, 0.0, 10.0),
         hp: 100.0,
+        ..Default::default()
     });
     // Just outside (80.1m):
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Dragon,
         pos: Vec3::new(80.1, 0.0, 10.0),
         hp: 100.0,
+        ..Default::default()
     });
     // Far agent — beyond 80:
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Dragon,
         pos: Vec3::new(200.0, 0.0, 10.0),
         hp: 100.0,
+        ..Default::default()
     });
 
     step(

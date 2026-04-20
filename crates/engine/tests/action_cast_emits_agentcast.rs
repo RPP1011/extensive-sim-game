@@ -31,7 +31,7 @@ impl PolicyBackend for EmitOnce {
 }
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
-    state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp: 100.0 }).unwrap()
+    state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp: 100.0, ..Default::default() }).unwrap()
 }
 
 fn build_one_damage_ability() -> (Arc<AbilityRegistry>, engine::ability::AbilityId) {

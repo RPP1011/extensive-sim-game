@@ -44,6 +44,7 @@ fn human_speaker_wolf_listener_do_not_share_channel() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let _wolf = state
@@ -51,6 +52,7 @@ fn human_speaker_wolf_listener_do_not_share_channel() {
             creature_type: CreatureType::Wolf,
             pos: Vec3::new(3.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 
@@ -82,6 +84,7 @@ fn human_speaker_human_listener_share_channel() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     let _human = state
@@ -89,6 +92,7 @@ fn human_speaker_human_listener_share_channel() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(3.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 
@@ -123,6 +127,7 @@ fn human_anyone_radius_is_speech_range_clamped() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Close (25m): in range of Speech (30m)
@@ -131,6 +136,7 @@ fn human_anyone_radius_is_speech_range_clamped() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(25.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Far (35m): outside Speech (30m)
@@ -139,6 +145,7 @@ fn human_anyone_radius_is_speech_range_clamped() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(35.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Very far (50m): outside
@@ -147,6 +154,7 @@ fn human_anyone_radius_is_speech_range_clamped() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(50.0, 0.0, 0.0),
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
 

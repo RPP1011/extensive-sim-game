@@ -19,6 +19,7 @@ fn all_chosen_actions_pass_their_mask() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(30.0 * angle.cos(), 30.0 * angle.sin(), 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
 

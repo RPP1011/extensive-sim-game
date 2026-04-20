@@ -34,11 +34,13 @@ impl PolicyBackend for ScriptedBackend {
 fn spawn_human(state: &mut SimState, pos: Vec3, hp: f32) -> engine::ids::AgentId {
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos, hp,
+        ..Default::default()
     }).unwrap()
 }
 fn spawn_wolf(state: &mut SimState, pos: Vec3, hp: f32) -> engine::ids::AgentId {
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Wolf, pos, hp,
+        ..Default::default()
     }).unwrap()
 }
 

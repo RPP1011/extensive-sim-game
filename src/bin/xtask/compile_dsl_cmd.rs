@@ -213,6 +213,33 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
                 .map(|(n, _)| views_dir.join(n)),
         );
         rustfmt_targets.push(views_dir.join("mod.rs"));
+        // Mask / scoring / entity modules were omitted from the rustfmt
+        // pass prior to task 150, which left `--check` comparing raw
+        // emitter output against formatted expected strings. `--check`
+        // re-formats expected via `rustfmt_string`, so the write path
+        // has to format on disk or the byte-comparison in `check_file`
+        // always mismatches. Include them now so the two paths agree.
+        rustfmt_targets.extend(
+            artefacts
+                .rust_mask_modules
+                .iter()
+                .map(|(n, _)| mask_dir.join(n)),
+        );
+        rustfmt_targets.push(mask_dir.join("mod.rs"));
+        rustfmt_targets.extend(
+            artefacts
+                .rust_scoring_modules
+                .iter()
+                .map(|(n, _)| scoring_dir.join(n)),
+        );
+        rustfmt_targets.push(scoring_dir.join("mod.rs"));
+        rustfmt_targets.extend(
+            artefacts
+                .rust_entity_modules
+                .iter()
+                .map(|(n, _)| entity_dir.join(n)),
+        );
+        rustfmt_targets.push(entity_dir.join("mod.rs"));
         if let Err(e) = rustfmt(&rustfmt_targets) {
             eprintln!("compile-dsl: rustfmt failed: {e}");
             return ExitCode::FAILURE;

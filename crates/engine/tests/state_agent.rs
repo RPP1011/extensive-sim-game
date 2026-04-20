@@ -10,6 +10,7 @@ fn spawn_and_read_agent() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(0.0, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         })
         .expect("spawn");
     assert_eq!(state.agent_pos(id), Some(Vec3::new(0.0, 0.0, 10.0)));
@@ -48,6 +49,7 @@ fn hot_slices_are_independent_vecs() {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32, 0.0, 10.0),
             hp: 100.0,
+            ..Default::default()
         });
     }
     // The point of SoA — can iterate only pos without touching hp.

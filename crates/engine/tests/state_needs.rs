@@ -9,6 +9,7 @@ fn spawn_initializes_needs_to_full() {
         creature_type: CreatureType::Human,
         pos: Vec3::ZERO,
         hp: 100.0,
+        ..Default::default()
     }).unwrap();
     assert_eq!(state.agent_hunger(a), Some(1.0));
     assert_eq!(state.agent_thirst(a), Some(1.0));
@@ -22,6 +23,7 @@ fn set_and_read_needs() {
         creature_type: CreatureType::Human,
         pos: Vec3::ZERO,
         hp: 100.0,
+        ..Default::default()
     }).unwrap();
     state.set_agent_hunger(a, 0.3);
     state.set_agent_thirst(a, 0.5);

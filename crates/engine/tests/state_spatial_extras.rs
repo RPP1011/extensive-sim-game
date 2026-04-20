@@ -17,6 +17,7 @@ fn spawn_defaults_spatial_extras() {
             creature_type: CreatureType::Human,
             pos: Vec3::ZERO,
             hp: 100.0,
+            ..Default::default()
         })
         .unwrap();
     // Power tier starts at 1 so downstream scaling is non-zero by default.

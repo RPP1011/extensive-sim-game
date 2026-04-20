@@ -29,6 +29,7 @@ fn mark_hold_sets_only_hold_bit_per_alive_agent() {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
             pos: Vec3::new(i as f32, 0.0, 10.0), hp: 100.0,
+            ..Default::default()
         });
     }
     let mut mask = MaskBuffer::new(state.agent_cap() as usize);

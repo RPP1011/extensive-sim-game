@@ -15,10 +15,12 @@ fn agent_moves_toward_nearest_other() {
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let _b = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(10.0, 0.0, 10.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     let pos_a = state.agent_pos(a).unwrap();
@@ -45,6 +47,7 @@ fn no_move_when_alone() {
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     let pos_a = state.agent_pos(a).unwrap();
@@ -61,10 +64,12 @@ fn colocated_agents_do_not_emit_agentmoved() {
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(5.0, 5.0, 10.0), hp: 100.0,
+        ..Default::default()
     }).unwrap();
     let _b = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
-        pos: Vec3::new(5.0, 5.0, 10.0), hp: 100.0,  // identical pos
+        pos: Vec3::new(5.0, 5.0, 10.0), hp: 100.0,  // identical pos,
+        ..Default::default()
     }).unwrap();
     step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     assert_eq!(state.agent_pos(a).unwrap(), Vec3::new(5.0, 5.0, 10.0), "position unchanged");

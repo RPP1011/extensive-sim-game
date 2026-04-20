@@ -13,7 +13,7 @@ use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;
 
 fn spawn_hp(state: &mut SimState, ct: CreatureType, hp: f32) -> AgentId {
-    state.spawn_agent(AgentSpawn { creature_type: ct, pos: Vec3::ZERO, hp }).unwrap()
+    state.spawn_agent(AgentSpawn { creature_type: ct, pos: Vec3::ZERO, hp, ..Default::default() }).unwrap()
 }
 
 #[test]
