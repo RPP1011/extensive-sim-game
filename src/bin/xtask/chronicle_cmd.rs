@@ -1567,24 +1567,28 @@ mod tests {
         // Using base seed 0xDEADBEEF (same as the sweep default) keeps
         // this reproducible from the CLI — a regression here is easy to
         // explore interactively.
+        // 30 seeds — at the ~24% human win rate task 176 tuned for,
+        // P(zero human wins in 30 independent draws) ≈ 0.76^30 ≈ 0.04%,
+        // so this test is effectively non-flaky. A 10-seed sweep had
+        // ~6% false-fail rate and broke CI once.
         let mut sink = Vec::new();
         let summary = run_sweep(
             FixtureKind::Balanced,
             0xDEADBEEF,
-            10,
+            30,
             500,
             false,
             &mut sink,
         );
         assert!(
             summary.wolves_wins > 0,
-            "balanced fixture should see wolves win at least once in 10 seeds; \
+            "balanced fixture should see wolves win at least once in 30 seeds; \
              got H{}/W{}/D{}/S{}",
             summary.humans_wins, summary.wolves_wins, summary.deer_wins, summary.stalemates,
         );
         assert!(
             summary.humans_wins > 0,
-            "balanced fixture should see humans win at least once in 10 seeds; \
+            "balanced fixture should see humans win at least once in 30 seeds; \
              got H{}/W{}/D{}/S{}",
             summary.humans_wins, summary.wolves_wins, summary.deer_wins, summary.stalemates,
         );
