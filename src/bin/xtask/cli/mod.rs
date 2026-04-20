@@ -88,6 +88,15 @@ pub struct ChronicleArgs {
     /// `--sweep 500` doesn't drown the aggregate report.
     #[arg(long)]
     pub verbose: bool,
+    /// Write per-run sweep stats to a CSV file for external plotting and
+    /// analysis. Only valid with `--sweep`; passing it without `--sweep`
+    /// is rejected. The aggregate stdout report is still printed; this
+    /// adds a side-channel CSV dump (header + one row per run). Columns:
+    /// seed, alive_humans, alive_wolves, alive_deer, winner, total_events,
+    /// chronicle_entries, rout_count, first_death_tick (empty when no
+    /// death occurred).
+    #[arg(long)]
+    pub csv: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser)]

@@ -15,6 +15,8 @@
 //! Both paths walk the event ring and hand every `ChronicleEntry` to
 //! `engine::chronicle::render_entry`, printing one line per event.
 
+use std::io::Write;
+use std::path::Path;
 use std::process::ExitCode;
 
 use engine::cascade::CascadeRegistry;
@@ -46,6 +48,13 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
     // that we surface as an error so users don't get silent empty output.
     if let Some(runs) = args.sweep {
         return run_sweep_from_args(&args, runs);
+    }
+
+    // `--csv` is a sweep-only side-channel; without `--sweep` there are no
+    // per-run rows to write, so we reject rather than silently no-op.
+    if args.csv.is_some() {
+        eprintln!("chronicle: --csv requires --sweep");
+        return ExitCode::FAILURE;
     }
 
     let (seed_raw, ticks) = resolve_args(&args);
@@ -86,6 +95,23 @@ fn run_sweep_from_args(args: &ChronicleArgs, runs: u32) -> ExitCode {
     let summary = run_sweep(base_seed, runs, ticks, args.verbose, &mut std::io::stderr());
     let mut stdout = std::io::stdout().lock();
     render_sweep_summary(&summary, &mut stdout).ok();
+
+    // CSV side-channel: aggregates already went to stdout above; the CSV
+    // carries the per-run detail for plotting without polluting the report.
+    if let Some(ref path) = args.csv {
+        if let Err(e) = write_sweep_csv(&summary, path) {
+            eprintln!("chronicle: failed to write CSV to {}: {e}", path.display());
+            return ExitCode::FAILURE;
+        }
+        // Note to stdout (not stderr) — it's a successful side-effect of
+        // the sweep, not a warning. Matches the aggregate report tone.
+        let _ = writeln!(
+            stdout,
+            "CSV written to {} ({} rows)",
+            path.display(),
+            summary.per_run.len(),
+        );
+    }
     ExitCode::SUCCESS
 }
 
@@ -281,9 +307,9 @@ struct SweepSummary {
     runs:        u32,
     ticks:       u32,
     base_seed:   u64,
-    /// Retained for introspection tests + future JSON export. Not read by
-    /// the text renderer (which only needs the pre-computed aggregates).
-    #[allow(dead_code)]
+    /// Retained for introspection tests and CSV export (`--csv` flag).
+    /// Not read by the text renderer (which only needs the pre-computed
+    /// aggregates).
     per_run:     Vec<RunStats>,
     // Pre-computed aggregates
     humans_wins: u32,
@@ -556,6 +582,77 @@ fn render_sweep_summary<W: std::io::Write>(
     Ok(())
 }
 
+/// CSV header for the sweep export. Kept as a const so the test can
+/// assert it without reimplementing the column list.
+const SWEEP_CSV_HEADER: &str =
+    "seed,alive_humans,alive_wolves,alive_deer,winner,total_events,chronicle_entries,rout_count,first_death_tick";
+
+/// Textual winner name, matching the order documented in the `--csv`
+/// flag help. Keeping this as a free fn (not `Display`) keeps the CSV
+/// serialization independent from any future pretty-print formatting.
+fn winner_csv(w: Winner) -> &'static str {
+    match w {
+        Winner::Humans => "humans",
+        Winner::Wolves => "wolves",
+        Winner::Deer => "deer",
+        Winner::Stalemate => "stalemate",
+    }
+}
+
+/// Serialize one sweep run as a CSV row. All fields are numeric or from a
+/// closed vocabulary (winner), so no quoting or escaping is needed; the
+/// seed is hex-prefixed to match the aggregate report, and
+/// `first_death_tick` is blank when the run saw no deaths (matches pandas'
+/// NaN-on-read default — `pd.read_csv` turns the empty field into NaN).
+fn write_sweep_csv_row<W: Write>(out: &mut W, r: &RunStats) -> std::io::Result<()> {
+    let first_death = match r.first_death_tick {
+        Some(t) => t.to_string(),
+        None => String::new(),
+    };
+    writeln!(
+        out,
+        "{:#018x},{},{},{},{},{},{},{},{}",
+        r.seed,
+        r.humans_alive,
+        r.wolves_alive,
+        r.deer_alive,
+        winner_csv(r.winner),
+        r.total_events,
+        r.chronicle_count,
+        r.rout_count,
+        first_death,
+    )
+}
+
+/// Write the full sweep (header + one row per run) to `path`. We create
+/// the file outright (overwriting any existing one) — the user passed a
+/// path, they own it. Parent-directory existence is checked explicitly so
+/// a typo like `--csv typo/out.csv` fails fast instead of creating a
+/// confusing "No such file or directory" chain deep in `File::create`.
+fn write_sweep_csv(summary: &SweepSummary, path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        // An empty parent component ("") means "current dir" — always
+        // exists; skip the check. Non-empty parents must exist.
+        if !parent.as_os_str().is_empty() && !parent.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "parent directory does not exist: {}",
+                    parent.display()
+                ),
+            ));
+        }
+    }
+    let file = std::fs::File::create(path)?;
+    let mut buf = std::io::BufWriter::new(file);
+    writeln!(buf, "{}", SWEEP_CSV_HEADER)?;
+    for r in &summary.per_run {
+        write_sweep_csv_row(&mut buf, r)?;
+    }
+    buf.flush()?;
+    Ok(())
+}
+
 fn simulate(state: &mut SimState, ticks: u32) -> EventRing {
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(EVENT_RING_CAP);
@@ -825,6 +922,7 @@ mod tests {
             sweep: None,
             base_seed: None,
             verbose: false,
+            csv: None,
         }
     }
 
@@ -1067,6 +1165,151 @@ mod tests {
             assert!(line.starts_with(&format!("Run {:>4}", k)),
                 "expected run-index prefix, got {line:?}");
         }
+    }
+
+    // --- csv export tests ---
+
+    /// Build a unique scratch path inside the OS temp dir. Avoids the
+    /// `tempfile` crate (not a dep here) while still giving per-test
+    /// isolation — each call yields a fresh filename via `thread_id + nanos`.
+    fn scratch_csv_path(tag: &str) -> std::path::PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tid = format!("{:?}", std::thread::current().id());
+        let tid_clean: String = tid.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        let mut p = std::env::temp_dir();
+        p.push(format!("chronicle_csv_{tag}_{tid_clean}_{nanos}.csv"));
+        p
+    }
+
+    #[test]
+    fn csv_export_writes_expected_rows() {
+        // Drive a 3-seed sweep, round-trip through the CSV writer, and
+        // assert the file matches the spec: 1 header + 3 data rows, hex
+        // seeds, and the documented column layout.
+        let mut sink = Vec::new();
+        let summary = run_sweep(0xDEADBEEF, 3, 60, false, &mut sink);
+        let path = scratch_csv_path("expected_rows");
+        write_sweep_csv(&summary, &path).expect("write csv");
+
+        let text = std::fs::read_to_string(&path).expect("read csv");
+        // Best-effort cleanup — don't fail the test if the OS already
+        // reaped the file.
+        let _ = std::fs::remove_file(&path);
+
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 4, "expected header + 3 rows, got {lines:?}");
+        assert_eq!(lines[0], SWEEP_CSV_HEADER);
+        // Header columns must match the spec exactly, in order.
+        assert_eq!(
+            lines[0],
+            "seed,alive_humans,alive_wolves,alive_deer,winner,total_events,chronicle_entries,rout_count,first_death_tick"
+        );
+        for (i, row) in lines.iter().skip(1).enumerate() {
+            assert!(
+                row.starts_with("0x"),
+                "row {i} seed must be 0x-prefixed hex, got {row:?}",
+            );
+            let cols: Vec<&str> = row.split(',').collect();
+            assert_eq!(cols.len(), 9, "row {i} should have 9 columns, got {row:?}");
+            // Seed column is 18 chars: "0x" + 16 hex digits.
+            assert_eq!(
+                cols[0].len(),
+                18,
+                "seed should be zero-padded to 16 hex digits, got {:?}",
+                cols[0],
+            );
+            // Winner column must be one of the 4 tokens.
+            assert!(
+                matches!(cols[4], "humans" | "wolves" | "deer" | "stalemate"),
+                "row {i} winner token invalid: {:?}",
+                cols[4],
+            );
+        }
+    }
+
+    #[test]
+    fn csv_export_empty_first_death_when_no_deaths() {
+        // The showcase fixture reliably sees deaths within a few ticks, so
+        // we can't produce a no-death run via the real sweep. Instead
+        // synthesise a 2-row sweep summary with one `first_death_tick:
+        // None` and one `Some(...)`, then round-trip through the writer.
+        let per_run = vec![
+            RunStats {
+                seed:             0xCAFEBABE_u64,
+                humans_alive:     8,
+                wolves_alive:     8,
+                deer_alive:       4,
+                total_events:     0,
+                chronicle_count:  0,
+                rout_count:       0,
+                first_death_tick: None,
+                winner:           Winner::Stalemate,
+            },
+            RunStats {
+                seed:             0xDEADBEEF_u64,
+                humans_alive:     3,
+                wolves_alive:     0,
+                deer_alive:       1,
+                total_events:     42,
+                chronicle_count:  7,
+                rout_count:       1,
+                first_death_tick: Some(17),
+                winner:           Winner::Humans,
+            },
+        ];
+        let summary = summarize(per_run, 2, 500, 0xCAFEBABE);
+        let path = scratch_csv_path("empty_first_death");
+        write_sweep_csv(&summary, &path).expect("write csv");
+
+        let text = std::fs::read_to_string(&path).expect("read csv");
+        let _ = std::fs::remove_file(&path);
+
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3, "header + 2 rows: {lines:?}");
+        // Row 0: no death -> trailing column is empty (ends with ",").
+        assert!(
+            lines[1].ends_with(','),
+            "no-death row must end with empty first_death_tick: {:?}",
+            lines[1],
+        );
+        // Split preserves the empty trailing field.
+        let cols0: Vec<&str> = lines[1].split(',').collect();
+        assert_eq!(cols0.len(), 9);
+        assert_eq!(cols0[8], "", "first_death_tick must be blank for no-death run");
+        // Row 1: death -> trailing column is "17".
+        let cols1: Vec<&str> = lines[2].split(',').collect();
+        assert_eq!(cols1[8], "17");
+        assert_eq!(cols1[4], "humans");
+    }
+
+    #[test]
+    fn csv_rejects_without_sweep() {
+        // `run_chronicle` returns ExitCode::FAILURE when `--csv` is
+        // passed without `--sweep`; this guards against the misuse silently
+        // running a single-fixture chronicle and discarding the requested
+        // CSV path.
+        let args = ChronicleArgs {
+            csv: Some(std::path::PathBuf::from("/tmp/should-never-be-written.csv")),
+            ..default_args()
+        };
+        assert_eq!(run_chronicle(args), ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn csv_rejects_missing_parent_directory() {
+        // Typo-prevention: writing to a non-existent directory fails fast
+        // with a clear error instead of File::create's raw ENOENT.
+        let mut sink = Vec::new();
+        let summary = run_sweep(0xDEADBEEF, 2, 20, false, &mut sink);
+        let path = std::path::PathBuf::from(
+            "/tmp/chronicle_csv_nonexistent_xyz123_parent/out.csv",
+        );
+        let err = write_sweep_csv(&summary, &path).expect_err("should fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[test]
