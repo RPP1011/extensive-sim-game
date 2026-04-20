@@ -1,0 +1,347 @@
+{
+  "decls": [
+    {
+      "Scoring": {
+        "annotations": [],
+        "entries": [
+          {
+            "head": {
+              "name": "PostQuest",
+              "shape": {
+                "Named": [
+                  {
+                    "field": "type",
+                    "value": {
+                      "Bind": "Conquest"
+                    },
+                    "span": {
+                      "start": 165,
+                      "end": 179
+                    }
+                  },
+                  {
+                    "field": "target",
+                    "value": {
+                      "Ctor": {
+                        "name": "Group",
+                        "inner": [
+                          {
+                            "Bind": "g"
+                          }
+                        ]
+                      }
+                    },
+                    "span": {
+                      "start": 181,
+                      "end": 197
+                    }
+                  }
+                ]
+              },
+              "span": {
+                "start": 155,
+                "end": 198
+              }
+            },
+            "expr": {
+              "kind": {
+                "Binary": {
+                  "op": "Sub",
+                  "lhs": {
+                    "kind": {
+                      "Binary": {
+                        "op": "Add",
+                        "lhs": {
+                          "kind": {
+                            "Float": 0.8
+                          },
+                          "span": {
+                            "start": 201,
+                            "end": 204
+                          }
+                        },
+                        "rhs": {
+                          "kind": {
+                            "Binary": {
+                              "op": "Mul",
+                              "lhs": {
+                                "kind": {
+                                  "Float": 0.5
+                                },
+                                "span": {
+                                  "start": 253,
+                                  "end": 256
+                                }
+                              },
+                              "rhs": {
+                                "kind": {
+                                  "Field": [
+                                    {
+                                      "kind": {
+                                        "Field": [
+                                          {
+                                            "kind": {
+                                              "Ident": "self"
+                                            },
+                                            "span": {
+                                              "start": 259,
+                                              "end": 263
+                                            }
+                                          },
+                                          "personality"
+                                        ]
+                                      },
+                                      "span": {
+                                        "start": 259,
+                                        "end": 275
+                                      }
+                                    },
+                                    "ambition"
+                                  ]
+                                },
+                                "span": {
+                                  "start": 259,
+                                  "end": 284
+                                }
+                              }
+                            }
+                          },
+                          "span": {
+                            "start": 253,
+                            "end": 284
+                          }
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 201,
+                      "end": 284
+                    }
+                  },
+                  "rhs": {
+                    "kind": {
+                      "Binary": {
+                        "op": "Mul",
+                        "lhs": {
+                          "kind": {
+                            "Float": 0.4
+                          },
+                          "span": {
+                            "start": 333,
+                            "end": 336
+                          }
+                        },
+                        "rhs": {
+                          "kind": {
+                            "Binary": {
+                              "op": "Gt",
+                              "lhs": {
+                                "kind": {
+                                  "Field": [
+                                    {
+                                      "kind": {
+                                        "Ident": "g"
+                                      },
+                                      "span": {
+                                        "start": 340,
+                                        "end": 341
+                                      }
+                                    },
+                                    "military_strength"
+                                  ]
+                                },
+                                "span": {
+                                  "start": 340,
+                                  "end": 359
+                                }
+                              },
+                              "rhs": {
+                                "kind": {
+                                  "Field": [
+                                    {
+                                      "kind": {
+                                        "Field": [
+                                          {
+                                            "kind": {
+                                              "Ident": "self"
+                                            },
+                                            "span": {
+                                              "start": 362,
+                                              "end": 366
+                                            }
+                                          },
+                                          "group"
+                                        ]
+                                      },
+                                      "span": {
+                                        "start": 362,
+                                        "end": 372
+                                      }
+                                    },
+                                    "military_strength"
+                                  ]
+                                },
+                                "span": {
+                                  "start": 362,
+                                  "end": 390
+                                }
+                              }
+                            }
+                          },
+                          "span": {
+                            "start": 340,
+                            "end": 390
+                          }
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 333,
+                      "end": 390
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 201,
+                "end": 390
+              }
+            },
+            "span": {
+              "start": 155,
+              "end": 394
+            }
+          },
+          {
+            "head": {
+              "name": "PostQuest",
+              "shape": {
+                "Named": [
+                  {
+                    "field": "type",
+                    "value": {
+                      "Bind": "Hunt"
+                    },
+                    "span": {
+                      "start": 404,
+                      "end": 414
+                    }
+                  },
+                  {
+                    "field": "target",
+                    "value": {
+                      "Ctor": {
+                        "name": "Agent",
+                        "inner": [
+                          {
+                            "Bind": "prey"
+                          }
+                        ]
+                      }
+                    },
+                    "span": {
+                      "start": 416,
+                      "end": 435
+                    }
+                  }
+                ]
+              },
+              "span": {
+                "start": 394,
+                "end": 436
+              }
+            },
+            "expr": {
+              "kind": {
+                "Binary": {
+                  "op": "Add",
+                  "lhs": {
+                    "kind": {
+                      "Float": 0.3
+                    },
+                    "span": {
+                      "start": 440,
+                      "end": 443
+                    }
+                  },
+                  "rhs": {
+                    "kind": {
+                      "Binary": {
+                        "op": "Mul",
+                        "lhs": {
+                          "kind": {
+                            "Float": 0.4
+                          },
+                          "span": {
+                            "start": 492,
+                            "end": 495
+                          }
+                        },
+                        "rhs": {
+                          "kind": {
+                            "Binary": {
+                              "op": "Lt",
+                              "lhs": {
+                                "kind": {
+                                  "Field": [
+                                    {
+                                      "kind": {
+                                        "Ident": "prey"
+                                      },
+                                      "span": {
+                                        "start": 499,
+                                        "end": 503
+                                      }
+                                    },
+                                    "hp_pct"
+                                  ]
+                                },
+                                "span": {
+                                  "start": 499,
+                                  "end": 510
+                                }
+                              },
+                              "rhs": {
+                                "kind": {
+                                  "Float": 0.3
+                                },
+                                "span": {
+                                  "start": 513,
+                                  "end": 516
+                                }
+                              }
+                            }
+                          },
+                          "span": {
+                            "start": 499,
+                            "end": 516
+                          }
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 492,
+                      "end": 516
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 440,
+                "end": 516
+              }
+            },
+            "span": {
+              "start": 394,
+              "end": 518
+            }
+          }
+        ],
+        "span": {
+          "start": 143,
+          "end": 519
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,193 @@
+{
+  "decls": [
+    {
+      "Mask": {
+        "annotations": [],
+        "head": {
+          "name": "Attack",
+          "shape": {
+            "Positional": [
+              "t"
+            ]
+          },
+          "span": {
+            "start": 65,
+            "end": 75
+          }
+        },
+        "predicate": {
+          "kind": {
+            "Binary": {
+              "op": "And",
+              "lhs": {
+                "kind": {
+                  "Binary": {
+                    "op": "And",
+                    "lhs": {
+                      "kind": {
+                        "Field": [
+                          {
+                            "kind": {
+                              "Ident": "t"
+                            },
+                            "span": {
+                              "start": 81,
+                              "end": 82
+                            }
+                          },
+                          "alive"
+                        ]
+                      },
+                      "span": {
+                        "start": 81,
+                        "end": 88
+                      }
+                    },
+                    "rhs": {
+                      "kind": {
+                        "Call": [
+                          {
+                            "kind": {
+                              "Ident": "is_hostile"
+                            },
+                            "span": {
+                              "start": 108,
+                              "end": 118
+                            }
+                          },
+                          [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": {
+                                  "Ident": "self"
+                                },
+                                "span": {
+                                  "start": 119,
+                                  "end": 123
+                                }
+                              },
+                              "span": {
+                                "start": 119,
+                                "end": 123
+                              }
+                            },
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": {
+                                  "Ident": "t"
+                                },
+                                "span": {
+                                  "start": 125,
+                                  "end": 126
+                                }
+                              },
+                              "span": {
+                                "start": 125,
+                                "end": 126
+                              }
+                            }
+                          ]
+                        ]
+                      },
+                      "span": {
+                        "start": 108,
+                        "end": 127
+                      }
+                    }
+                  }
+                },
+                "span": {
+                  "start": 81,
+                  "end": 127
+                }
+              },
+              "rhs": {
+                "kind": {
+                  "Binary": {
+                    "op": "Lt",
+                    "lhs": {
+                      "kind": {
+                        "Call": [
+                          {
+                            "kind": {
+                              "Ident": "distance"
+                            },
+                            "span": {
+                              "start": 147,
+                              "end": 155
+                            }
+                          },
+                          [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": {
+                                  "Ident": "self"
+                                },
+                                "span": {
+                                  "start": 156,
+                                  "end": 160
+                                }
+                              },
+                              "span": {
+                                "start": 156,
+                                "end": 160
+                              }
+                            },
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": {
+                                  "Ident": "t"
+                                },
+                                "span": {
+                                  "start": 162,
+                                  "end": 163
+                                }
+                              },
+                              "span": {
+                                "start": 162,
+                                "end": 163
+                              }
+                            }
+                          ]
+                        ]
+                      },
+                      "span": {
+                        "start": 147,
+                        "end": 164
+                      }
+                    },
+                    "rhs": {
+                      "kind": {
+                        "Ident": "AGGRO_RANGE"
+                      },
+                      "span": {
+                        "start": 167,
+                        "end": 179
+                      }
+                    }
+                  }
+                },
+                "span": {
+                  "start": 147,
+                  "end": 179
+                }
+              }
+            }
+          },
+          "span": {
+            "start": 81,
+            "end": 179
+          }
+        },
+        "span": {
+          "start": 61,
+          "end": 179
+        }
+      }
+    }
+  ]
+}

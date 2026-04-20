@@ -1,0 +1,9 @@
+// Damage event — replayable, traced.
+@replayable
+@traced
+event DamageReceived {
+  target: AgentId,
+  source: AgentId,
+  damage: f32,
+  tick: Tick,
+}

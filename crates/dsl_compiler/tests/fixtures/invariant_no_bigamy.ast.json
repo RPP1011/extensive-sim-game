@@ -1,0 +1,156 @@
+{
+  "decls": [
+    {
+      "Invariant": {
+        "annotations": [],
+        "name": "no_bigamy",
+        "scope": [
+          {
+            "name": "a",
+            "ty": {
+              "kind": {
+                "Named": "Agent"
+              },
+              "span": {
+                "start": 55,
+                "end": 60
+              }
+            },
+            "span": {
+              "start": 52,
+              "end": 60
+            }
+          }
+        ],
+        "mode": "Runtime",
+        "predicate": {
+          "kind": {
+            "Binary": {
+              "op": "LtEq",
+              "lhs": {
+                "kind": {
+                  "Fold": {
+                    "kind": "Count",
+                    "binder": "g",
+                    "iter": {
+                      "kind": {
+                        "Field": [
+                          {
+                            "kind": {
+                              "Ident": "a"
+                            },
+                            "span": {
+                              "start": 86,
+                              "end": 87
+                            }
+                          },
+                          "memberships"
+                        ]
+                      },
+                      "span": {
+                        "start": 86,
+                        "end": 99
+                      }
+                    },
+                    "body": {
+                      "kind": {
+                        "Binary": {
+                          "op": "And",
+                          "lhs": {
+                            "kind": {
+                              "Binary": {
+                                "op": "Eq",
+                                "lhs": {
+                                  "kind": {
+                                    "Field": [
+                                      {
+                                        "kind": {
+                                          "Ident": "g"
+                                        },
+                                        "span": {
+                                          "start": 106,
+                                          "end": 107
+                                        }
+                                      },
+                                      "kind"
+                                    ]
+                                  },
+                                  "span": {
+                                    "start": 106,
+                                    "end": 112
+                                  }
+                                },
+                                "rhs": {
+                                  "kind": {
+                                    "Ident": "Family"
+                                  },
+                                  "span": {
+                                    "start": 116,
+                                    "end": 123
+                                  }
+                                }
+                              }
+                            },
+                            "span": {
+                              "start": 106,
+                              "end": 123
+                            }
+                          },
+                          "rhs": {
+                            "kind": {
+                              "Field": [
+                                {
+                                  "kind": {
+                                    "Ident": "g"
+                                  },
+                                  "span": {
+                                    "start": 126,
+                                    "end": 127
+                                  }
+                                },
+                                "is_marriage"
+                              ]
+                            },
+                            "span": {
+                              "start": 126,
+                              "end": 139
+                            }
+                          }
+                        }
+                      },
+                      "span": {
+                        "start": 106,
+                        "end": 139
+                      }
+                    }
+                  }
+                },
+                "span": {
+                  "start": 75,
+                  "end": 140
+                }
+              },
+              "rhs": {
+                "kind": {
+                  "Int": 1
+                },
+                "span": {
+                  "start": 144,
+                  "end": 145
+                }
+              }
+            }
+          },
+          "span": {
+            "start": 75,
+            "end": 145
+          }
+        },
+        "span": {
+          "start": 32,
+          "end": 147
+        }
+      }
+    }
+  ]
+}

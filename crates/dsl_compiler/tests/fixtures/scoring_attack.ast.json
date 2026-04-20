@@ -1,0 +1,456 @@
+{
+  "decls": [
+    {
+      "Scoring": {
+        "annotations": [],
+        "entries": [
+          {
+            "head": {
+              "name": "Attack",
+              "shape": {
+                "Positional": [
+                  "t"
+                ]
+              },
+              "span": {
+                "start": 50,
+                "end": 59
+              }
+            },
+            "expr": {
+              "kind": {
+                "Binary": {
+                  "op": "Add",
+                  "lhs": {
+                    "kind": {
+                      "Binary": {
+                        "op": "Add",
+                        "lhs": {
+                          "kind": {
+                            "Binary": {
+                              "op": "Mul",
+                              "lhs": {
+                                "kind": {
+                                  "Float": 0.6
+                                },
+                                "span": {
+                                  "start": 62,
+                                  "end": 65
+                                }
+                              },
+                              "rhs": {
+                                "kind": {
+                                  "Field": [
+                                    {
+                                      "kind": {
+                                        "Field": [
+                                          {
+                                            "kind": {
+                                              "Ident": "self"
+                                            },
+                                            "span": {
+                                              "start": 68,
+                                              "end": 72
+                                            }
+                                          },
+                                          "personality"
+                                        ]
+                                      },
+                                      "span": {
+                                        "start": 68,
+                                        "end": 84
+                                      }
+                                    },
+                                    "aggression"
+                                  ]
+                                },
+                                "span": {
+                                  "start": 68,
+                                  "end": 95
+                                }
+                              }
+                            }
+                          },
+                          "span": {
+                            "start": 62,
+                            "end": 95
+                          }
+                        },
+                        "rhs": {
+                          "kind": {
+                            "Binary": {
+                              "op": "Mul",
+                              "lhs": {
+                                "kind": {
+                                  "Float": 0.2
+                                },
+                                "span": {
+                                  "start": 110,
+                                  "end": 113
+                                }
+                              },
+                              "rhs": {
+                                "kind": {
+                                  "Binary": {
+                                    "op": "Sub",
+                                    "lhs": {
+                                      "kind": {
+                                        "Float": 1.0
+                                      },
+                                      "span": {
+                                        "start": 117,
+                                        "end": 120
+                                      }
+                                    },
+                                    "rhs": {
+                                      "kind": {
+                                        "Field": [
+                                          {
+                                            "kind": {
+                                              "Ident": "self"
+                                            },
+                                            "span": {
+                                              "start": 123,
+                                              "end": 127
+                                            }
+                                          },
+                                          "hp_frac"
+                                        ]
+                                      },
+                                      "span": {
+                                        "start": 123,
+                                        "end": 135
+                                      }
+                                    }
+                                  }
+                                },
+                                "span": {
+                                  "start": 117,
+                                  "end": 135
+                                }
+                              }
+                            }
+                          },
+                          "span": {
+                            "start": 110,
+                            "end": 135
+                          }
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 62,
+                      "end": 135
+                    }
+                  },
+                  "rhs": {
+                    "kind": {
+                      "Binary": {
+                        "op": "Mul",
+                        "lhs": {
+                          "kind": {
+                            "Float": 0.2
+                          },
+                          "span": {
+                            "start": 151,
+                            "end": 154
+                          }
+                        },
+                        "rhs": {
+                          "kind": {
+                            "Call": [
+                              {
+                                "kind": {
+                                  "Ident": "is_hostile"
+                                },
+                                "span": {
+                                  "start": 157,
+                                  "end": 167
+                                }
+                              },
+                              [
+                                {
+                                  "name": null,
+                                  "value": {
+                                    "kind": {
+                                      "Ident": "self"
+                                    },
+                                    "span": {
+                                      "start": 168,
+                                      "end": 172
+                                    }
+                                  },
+                                  "span": {
+                                    "start": 168,
+                                    "end": 172
+                                  }
+                                },
+                                {
+                                  "name": null,
+                                  "value": {
+                                    "kind": {
+                                      "Ident": "t"
+                                    },
+                                    "span": {
+                                      "start": 174,
+                                      "end": 175
+                                    }
+                                  },
+                                  "span": {
+                                    "start": 174,
+                                    "end": 175
+                                  }
+                                }
+                              ]
+                            ]
+                          },
+                          "span": {
+                            "start": 157,
+                            "end": 176
+                          }
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 151,
+                      "end": 176
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 62,
+                "end": 176
+              }
+            },
+            "span": {
+              "start": 50,
+              "end": 179
+            }
+          },
+          {
+            "head": {
+              "name": "Flee",
+              "shape": {
+                "Positional": [
+                  "from"
+                ]
+              },
+              "span": {
+                "start": 179,
+                "end": 189
+              }
+            },
+            "expr": {
+              "kind": {
+                "Binary": {
+                  "op": "Add",
+                  "lhs": {
+                    "kind": {
+                      "Binary": {
+                        "op": "Mul",
+                        "lhs": {
+                          "kind": {
+                            "Float": 0.8
+                          },
+                          "span": {
+                            "start": 192,
+                            "end": 195
+                          }
+                        },
+                        "rhs": {
+                          "kind": {
+                            "Binary": {
+                              "op": "Sub",
+                              "lhs": {
+                                "kind": {
+                                  "Float": 1.0
+                                },
+                                "span": {
+                                  "start": 199,
+                                  "end": 202
+                                }
+                              },
+                              "rhs": {
+                                "kind": {
+                                  "Field": [
+                                    {
+                                      "kind": {
+                                        "Ident": "self"
+                                      },
+                                      "span": {
+                                        "start": 205,
+                                        "end": 209
+                                      }
+                                    },
+                                    "hp_frac"
+                                  ]
+                                },
+                                "span": {
+                                  "start": 205,
+                                  "end": 217
+                                }
+                              }
+                            }
+                          },
+                          "span": {
+                            "start": 199,
+                            "end": 217
+                          }
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 192,
+                      "end": 217
+                    }
+                  },
+                  "rhs": {
+                    "kind": {
+                      "Binary": {
+                        "op": "Mul",
+                        "lhs": {
+                          "kind": {
+                            "Float": 0.2
+                          },
+                          "span": {
+                            "start": 234,
+                            "end": 237
+                          }
+                        },
+                        "rhs": {
+                          "kind": {
+                            "Call": [
+                              {
+                                "kind": {
+                                  "Ident": "threat_level"
+                                },
+                                "span": {
+                                  "start": 240,
+                                  "end": 252
+                                }
+                              },
+                              [
+                                {
+                                  "name": null,
+                                  "value": {
+                                    "kind": {
+                                      "Ident": "from"
+                                    },
+                                    "span": {
+                                      "start": 253,
+                                      "end": 257
+                                    }
+                                  },
+                                  "span": {
+                                    "start": 253,
+                                    "end": 257
+                                  }
+                                }
+                              ]
+                            ]
+                          },
+                          "span": {
+                            "start": 240,
+                            "end": 258
+                          }
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 234,
+                      "end": 258
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 192,
+                "end": 258
+              }
+            },
+            "span": {
+              "start": 179,
+              "end": 261
+            }
+          },
+          {
+            "head": {
+              "name": "Eat",
+              "shape": "None",
+              "span": {
+                "start": 261,
+                "end": 265
+              }
+            },
+            "expr": {
+              "kind": {
+                "Binary": {
+                  "op": "Mul",
+                  "lhs": {
+                    "kind": {
+                      "Float": 0.7
+                    },
+                    "span": {
+                      "start": 267,
+                      "end": 270
+                    }
+                  },
+                  "rhs": {
+                    "kind": {
+                      "Call": [
+                        {
+                          "kind": {
+                            "Ident": "hunger_pressure"
+                          },
+                          "span": {
+                            "start": 273,
+                            "end": 288
+                          }
+                        },
+                        [
+                          {
+                            "name": null,
+                            "value": {
+                              "kind": {
+                                "Ident": "self"
+                              },
+                              "span": {
+                                "start": 289,
+                                "end": 293
+                              }
+                            },
+                            "span": {
+                              "start": 289,
+                              "end": 293
+                            }
+                          }
+                        ]
+                      ]
+                    },
+                    "span": {
+                      "start": 273,
+                      "end": 294
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 267,
+                "end": 294
+              }
+            },
+            "span": {
+              "start": 261,
+              "end": 295
+            }
+          }
+        ],
+        "span": {
+          "start": 38,
+          "end": 296
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+// Event-folded mood view with clamp.
+@materialized(on_event = [DamageReceived, FriendDied, NeedsSatisfied])
+view mood(a: Agent) -> f32 {
+  initial: 0.0,
+  on DamageReceived{target: a} { self -= 0.1 }
+  on FriendDied{observer: a} { self -= 0.3 }
+  on NeedsSatisfied{agent: a} { self += 0.05 }
+  clamp: [-1.0, 1.0],
+}
+
+// Lazy pure view.
+@lazy
+view is_hostile(a: Agent, b: Agent) -> bool {
+  relationship(a, b).valence < HOSTILE_THRESH
+}

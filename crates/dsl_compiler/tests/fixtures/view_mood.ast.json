@@ -1,0 +1,400 @@
+{
+  "decls": [
+    {
+      "View": {
+        "annotations": [
+          {
+            "name": "materialized",
+            "args": [
+              {
+                "key": "on_event",
+                "value": {
+                  "List": [
+                    {
+                      "Ident": "DamageReceived"
+                    },
+                    {
+                      "Ident": "FriendDied"
+                    },
+                    {
+                      "Ident": "NeedsSatisfied"
+                    }
+                  ]
+                },
+                "span": {
+                  "start": 52,
+                  "end": 107
+                }
+              }
+            ],
+            "span": {
+              "start": 38,
+              "end": 108
+            }
+          }
+        ],
+        "name": "mood",
+        "params": [
+          {
+            "name": "a",
+            "ty": {
+              "kind": {
+                "Named": "Agent"
+              },
+              "span": {
+                "start": 122,
+                "end": 127
+              }
+            },
+            "span": {
+              "start": 119,
+              "end": 127
+            }
+          }
+        ],
+        "return_ty": {
+          "kind": {
+            "Named": "f32"
+          },
+          "span": {
+            "start": 132,
+            "end": 136
+          }
+        },
+        "body": {
+          "Fold": {
+            "initial": {
+              "kind": {
+                "Float": 0.0
+              },
+              "span": {
+                "start": 149,
+                "end": 152
+              }
+            },
+            "handlers": [
+              {
+                "pattern": {
+                  "name": "DamageReceived",
+                  "bindings": [
+                    {
+                      "field": "target",
+                      "value": {
+                        "Bind": "a"
+                      },
+                      "span": {
+                        "start": 174,
+                        "end": 183
+                      }
+                    }
+                  ],
+                  "span": {
+                    "start": 159,
+                    "end": 184
+                  }
+                },
+                "body": [
+                  {
+                    "SelfUpdate": {
+                      "op": "-=",
+                      "value": {
+                        "kind": {
+                          "Float": 0.1
+                        },
+                        "span": {
+                          "start": 195,
+                          "end": 198
+                        }
+                      },
+                      "span": {
+                        "start": 187,
+                        "end": 199
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "start": 156,
+                  "end": 200
+                }
+              },
+              {
+                "pattern": {
+                  "name": "FriendDied",
+                  "bindings": [
+                    {
+                      "field": "observer",
+                      "value": {
+                        "Bind": "a"
+                      },
+                      "span": {
+                        "start": 217,
+                        "end": 228
+                      }
+                    }
+                  ],
+                  "span": {
+                    "start": 206,
+                    "end": 229
+                  }
+                },
+                "body": [
+                  {
+                    "SelfUpdate": {
+                      "op": "-=",
+                      "value": {
+                        "kind": {
+                          "Float": 0.3
+                        },
+                        "span": {
+                          "start": 240,
+                          "end": 243
+                        }
+                      },
+                      "span": {
+                        "start": 232,
+                        "end": 244
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "start": 203,
+                  "end": 245
+                }
+              },
+              {
+                "pattern": {
+                  "name": "NeedsSatisfied",
+                  "bindings": [
+                    {
+                      "field": "agent",
+                      "value": {
+                        "Bind": "a"
+                      },
+                      "span": {
+                        "start": 266,
+                        "end": 274
+                      }
+                    }
+                  ],
+                  "span": {
+                    "start": 251,
+                    "end": 275
+                  }
+                },
+                "body": [
+                  {
+                    "SelfUpdate": {
+                      "op": "+=",
+                      "value": {
+                        "kind": {
+                          "Float": 0.05
+                        },
+                        "span": {
+                          "start": 286,
+                          "end": 290
+                        }
+                      },
+                      "span": {
+                        "start": 278,
+                        "end": 291
+                      }
+                    }
+                  }
+                ],
+                "span": {
+                  "start": 248,
+                  "end": 292
+                }
+              }
+            ],
+            "clamp": [
+              {
+                "kind": {
+                  "Unary": {
+                    "op": "Neg",
+                    "rhs": {
+                      "kind": {
+                        "Float": 1.0
+                      },
+                      "span": {
+                        "start": 304,
+                        "end": 307
+                      }
+                    }
+                  }
+                },
+                "span": {
+                  "start": 303,
+                  "end": 307
+                }
+              },
+              {
+                "kind": {
+                  "Float": 1.0
+                },
+                "span": {
+                  "start": 309,
+                  "end": 312
+                }
+              }
+            ]
+          }
+        },
+        "span": {
+          "start": 109,
+          "end": 316
+        }
+      }
+    },
+    {
+      "View": {
+        "annotations": [
+          {
+            "name": "lazy",
+            "args": [],
+            "span": {
+              "start": 337,
+              "end": 343
+            }
+          }
+        ],
+        "name": "is_hostile",
+        "params": [
+          {
+            "name": "a",
+            "ty": {
+              "kind": {
+                "Named": "Agent"
+              },
+              "span": {
+                "start": 362,
+                "end": 367
+              }
+            },
+            "span": {
+              "start": 359,
+              "end": 367
+            }
+          },
+          {
+            "name": "b",
+            "ty": {
+              "kind": {
+                "Named": "Agent"
+              },
+              "span": {
+                "start": 372,
+                "end": 377
+              }
+            },
+            "span": {
+              "start": 369,
+              "end": 377
+            }
+          }
+        ],
+        "return_ty": {
+          "kind": {
+            "Named": "bool"
+          },
+          "span": {
+            "start": 382,
+            "end": 387
+          }
+        },
+        "body": {
+          "Expr": {
+            "kind": {
+              "Binary": {
+                "op": "Lt",
+                "lhs": {
+                  "kind": {
+                    "Field": [
+                      {
+                        "kind": {
+                          "Call": [
+                            {
+                              "kind": {
+                                "Ident": "relationship"
+                              },
+                              "span": {
+                                "start": 391,
+                                "end": 403
+                              }
+                            },
+                            [
+                              {
+                                "name": null,
+                                "value": {
+                                  "kind": {
+                                    "Ident": "a"
+                                  },
+                                  "span": {
+                                    "start": 404,
+                                    "end": 405
+                                  }
+                                },
+                                "span": {
+                                  "start": 404,
+                                  "end": 405
+                                }
+                              },
+                              {
+                                "name": null,
+                                "value": {
+                                  "kind": {
+                                    "Ident": "b"
+                                  },
+                                  "span": {
+                                    "start": 407,
+                                    "end": 408
+                                  }
+                                },
+                                "span": {
+                                  "start": 407,
+                                  "end": 408
+                                }
+                              }
+                            ]
+                          ]
+                        },
+                        "span": {
+                          "start": 391,
+                          "end": 409
+                        }
+                      },
+                      "valence"
+                    ]
+                  },
+                  "span": {
+                    "start": 391,
+                    "end": 417
+                  }
+                },
+                "rhs": {
+                  "kind": {
+                    "Ident": "HOSTILE_THRESH"
+                  },
+                  "span": {
+                    "start": 420,
+                    "end": 435
+                  }
+                }
+              }
+            },
+            "span": {
+              "start": 391,
+              "end": 435
+            }
+          }
+        },
+        "span": {
+          "start": 343,
+          "end": 436
+        }
+      }
+    }
+  ]
+}

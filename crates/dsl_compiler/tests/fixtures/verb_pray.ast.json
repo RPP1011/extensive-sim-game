@@ -1,0 +1,317 @@
+{
+  "decls": [
+    {
+      "Verb": {
+        "annotations": [],
+        "name": "Pray",
+        "params": [
+          {
+            "name": "self",
+            "ty": {
+              "kind": {
+                "Named": "Agent"
+              },
+              "span": {
+                "start": 83,
+                "end": 88
+              }
+            },
+            "span": {
+              "start": 77,
+              "end": 88
+            }
+          },
+          {
+            "name": "shrine",
+            "ty": {
+              "kind": {
+                "Named": "Structure"
+              },
+              "span": {
+                "start": 98,
+                "end": 107
+              }
+            },
+            "span": {
+              "start": 90,
+              "end": 107
+            }
+          }
+        ],
+        "action": {
+          "name": "Converse",
+          "args": [
+            {
+              "name": "target",
+              "value": {
+                "kind": {
+                  "Field": [
+                    {
+                      "kind": {
+                        "Ident": "shrine"
+                      },
+                      "span": {
+                        "start": 137,
+                        "end": 143
+                      }
+                    },
+                    "patron_agent_id"
+                  ]
+                },
+                "span": {
+                  "start": 137,
+                  "end": 159
+                }
+              },
+              "span": {
+                "start": 129,
+                "end": 159
+              }
+            }
+          ],
+          "span": {
+            "start": 119,
+            "end": 160
+          }
+        },
+        "when": {
+          "kind": {
+            "Binary": {
+              "op": "And",
+              "lhs": {
+                "kind": {
+                  "Contains": {
+                    "set": {
+                      "kind": {
+                        "Field": [
+                          {
+                            "kind": {
+                              "Ident": "self"
+                            },
+                            "span": {
+                              "start": 168,
+                              "end": 172
+                            }
+                          },
+                          "memberships"
+                        ]
+                      },
+                      "span": {
+                        "start": 168,
+                        "end": 184
+                      }
+                    },
+                    "item": {
+                      "kind": {
+                        "Ident": "Religion"
+                      },
+                      "span": {
+                        "start": 194,
+                        "end": 208
+                      }
+                    }
+                  }
+                },
+                "span": {
+                  "start": 168,
+                  "end": 208
+                }
+              },
+              "rhs": {
+                "kind": {
+                  "Binary": {
+                    "op": "Lt",
+                    "lhs": {
+                      "kind": {
+                        "Call": [
+                          {
+                            "kind": {
+                              "Ident": "distance"
+                            },
+                            "span": {
+                              "start": 211,
+                              "end": 219
+                            }
+                          },
+                          [
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": {
+                                  "Ident": "self"
+                                },
+                                "span": {
+                                  "start": 220,
+                                  "end": 224
+                                }
+                              },
+                              "span": {
+                                "start": 220,
+                                "end": 224
+                              }
+                            },
+                            {
+                              "name": null,
+                              "value": {
+                                "kind": {
+                                  "Ident": "shrine"
+                                },
+                                "span": {
+                                  "start": 226,
+                                  "end": 232
+                                }
+                              },
+                              "span": {
+                                "start": 226,
+                                "end": 232
+                              }
+                            }
+                          ]
+                        ]
+                      },
+                      "span": {
+                        "start": 211,
+                        "end": 233
+                      }
+                    },
+                    "rhs": {
+                      "kind": {
+                        "Ident": "REACH"
+                      },
+                      "span": {
+                        "start": 236,
+                        "end": 244
+                      }
+                    }
+                  }
+                },
+                "span": {
+                  "start": 211,
+                  "end": 244
+                }
+              }
+            }
+          },
+          "span": {
+            "start": 168,
+            "end": 244
+          }
+        },
+        "emits": [
+          {
+            "event_name": "PrayCompleted",
+            "fields": [
+              {
+                "name": "prayer",
+                "value": {
+                  "kind": {
+                    "Ident": "self"
+                  },
+                  "span": {
+                    "start": 273,
+                    "end": 277
+                  }
+                },
+                "span": {
+                  "start": 265,
+                  "end": 277
+                }
+              },
+              {
+                "name": "shrine",
+                "value": {
+                  "kind": {
+                    "Ident": "shrine"
+                  },
+                  "span": {
+                    "start": 287,
+                    "end": 293
+                  }
+                },
+                "span": {
+                  "start": 279,
+                  "end": 293
+                }
+              },
+              {
+                "name": "faith_delta",
+                "value": {
+                  "kind": {
+                    "Float": 1.0
+                  },
+                  "span": {
+                    "start": 308,
+                    "end": 311
+                  }
+                },
+                "span": {
+                  "start": 295,
+                  "end": 312
+                }
+              }
+            ],
+            "span": {
+              "start": 244,
+              "end": 313
+            }
+          }
+        ],
+        "scoring": {
+          "kind": {
+            "Binary": {
+              "op": "Mul",
+              "lhs": {
+                "kind": {
+                  "Float": 0.5
+                },
+                "span": {
+                  "start": 324,
+                  "end": 327
+                }
+              },
+              "rhs": {
+                "kind": {
+                  "Field": [
+                    {
+                      "kind": {
+                        "Field": [
+                          {
+                            "kind": {
+                              "Ident": "self"
+                            },
+                            "span": {
+                              "start": 330,
+                              "end": 334
+                            }
+                          },
+                          "personality"
+                        ]
+                      },
+                      "span": {
+                        "start": 330,
+                        "end": 346
+                      }
+                    },
+                    "piety"
+                  ]
+                },
+                "span": {
+                  "start": 330,
+                  "end": 352
+                }
+              }
+            }
+          },
+          "span": {
+            "start": 324,
+            "end": 352
+          }
+        },
+        "span": {
+          "start": 67,
+          "end": 353
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "decls": [
+    {
+      "Physics": {
+        "annotations": [
+          {
+            "name": "phase",
+            "args": [
+              {
+                "key": null,
+                "value": {
+                  "Ident": "event"
+                },
+                "span": {
+                  "start": 102,
+                  "end": 107
+                }
+              }
+            ],
+            "span": {
+              "start": 95,
+              "end": 108
+            }
+          },
+          {
+            "name": "terminating_in",
+            "args": [
+              {
+                "key": null,
+                "value": {
+                  "Int": 4
+                },
+                "span": {
+                  "start": 125,
+                  "end": 126
+                }
+              }
+            ],
+            "span": {
+              "start": 109,
+              "end": 127
+            }
+          }
+        ],
+        "name": "damage_apply",
+        "handlers": [
+          {
+            "pattern": {
+              "name": "DamageReceived",
+              "bindings": [
+                {
+                  "field": "target",
+                  "value": {
+                    "Bind": "a"
+                  },
+                  "span": {
+                    "start": 150,
+                    "end": 159
+                  }
+                },
+                {
+                  "field": "damage",
+                  "value": {
+                    "Bind": "d"
+                  },
+                  "span": {
+                    "start": 161,
+                    "end": 170
+                  }
+                }
+              ],
+              "span": {
+                "start": 135,
+                "end": 171
+              }
+            },
+            "where_clause": {
+              "kind": {
+                "Binary": {
+                  "op": "Gt",
+                  "lhs": {
+                    "kind": {
+                      "Ident": "d"
+                    },
+                    "span": {
+                      "start": 178,
+                      "end": 180
+                    }
+                  },
+                  "rhs": {
+                    "kind": {
+                      "Float": 0.0
+                    },
+                    "span": {
+                      "start": 182,
+                      "end": 185
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 178,
+                "end": 185
+              }
+            },
+            "body": [
+              {
+                "Emit": {
+                  "event_name": "HpChanged",
+                  "fields": [
+                    {
+                      "name": "agent",
+                      "value": {
+                        "kind": {
+                          "Ident": "a"
+                        },
+                        "span": {
+                          "start": 216,
+                          "end": 217
+                        }
+                      },
+                      "span": {
+                        "start": 209,
+                        "end": 217
+                      }
+                    },
+                    {
+                      "name": "delta",
+                      "value": {
+                        "kind": {
+                          "Unary": {
+                            "op": "Neg",
+                            "rhs": {
+                              "kind": {
+                                "Ident": "d"
+                              },
+                              "span": {
+                                "start": 227,
+                                "end": 229
+                              }
+                            }
+                          }
+                        },
+                        "span": {
+                          "start": 226,
+                          "end": 229
+                        }
+                      },
+                      "span": {
+                        "start": 219,
+                        "end": 229
+                      }
+                    }
+                  ],
+                  "span": {
+                    "start": 192,
+                    "end": 230
+                  }
+                }
+              }
+            ],
+            "span": {
+              "start": 132,
+              "end": 234
+            }
+          }
+        ],
+        "span": {
+          "start": 74,
+          "end": 236
+        }
+      }
+    }
+  ]
+}

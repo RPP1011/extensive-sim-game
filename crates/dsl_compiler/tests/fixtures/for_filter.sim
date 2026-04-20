@@ -1,0 +1,8 @@
+// For-loop with a `where` filter clause over a neighbour iterator.
+physics stone_settle @phase(event) @terminating_in(1) {
+  on VoxelChanged{pos: p} {
+    for q in voxel_neighbors_above(p) where q.kind == Stone {
+      emit VoxelSettled { pos: q }
+    }
+  }
+}

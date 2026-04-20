@@ -1,0 +1,10 @@
+// Regression probe: low-HP agents should overwhelmingly flee.
+probe LowHpFlees {
+  scenario "probes/low_hp_1v1.toml"
+  seed 42
+  ticks 200
+  tolerance 0.02
+  assert {
+    pr[ action.micro_kind in FleeSet | self.hp_pct < 0.3 ] >= 0.80
+  }
+}

@@ -1,0 +1,20 @@
+// Wolf entity — Agent with pack-signaling, predator/prey behavior.
+@spatial
+entity Wolf : Agent {
+  creature_type: Wolf,
+  capabilities: Capabilities {
+    channels: PackSignal,
+    can_fly: false,
+    can_build: false,
+    can_climb: true,
+    can_tunnel: false,
+    can_marry: true,
+    max_spouses: 1,
+  },
+  default_personality: Personality,
+  default_needs: Needs,
+  predator_prey: PredatorPrey {
+    prey_of: [Human],
+    preys_on: [Deer, Rabbit],
+  },
+}

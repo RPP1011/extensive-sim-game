@@ -1,0 +1,4 @@
+// Attack mask — hostile target within aggro range, alive.
+mask Attack(t) when t.alive
+                && is_hostile(self, t)
+                && distance(self, t) < AGGRO_RANGE

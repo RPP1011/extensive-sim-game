@@ -1,0 +1,7 @@
+// Pray verb — sugar over Converse with a shrine's patron agent.
+verb Pray(self: Agent, shrine: Structure) =
+  action Converse(target: shrine.patron_agent_id)
+  when self.memberships contains Religion
+     && distance(self, shrine) < REACH
+  emit PrayCompleted { prayer: self, shrine: shrine, faith_delta: 1.0 }
+  scoring 0.5 * self.personality.piety

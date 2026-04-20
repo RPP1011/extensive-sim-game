@@ -1,0 +1,210 @@
+{
+  "decls": [
+    {
+      "Metric": {
+        "annotations": [],
+        "metrics": [
+          {
+            "name": "cascade_iters_per_tick",
+            "value": {
+              "kind": {
+                "Call": [
+                  {
+                    "kind": {
+                      "Ident": "histogram"
+                    },
+                    "span": {
+                      "start": 104,
+                      "end": 113
+                    }
+                  },
+                  [
+                    {
+                      "name": null,
+                      "value": {
+                        "kind": {
+                          "Field": [
+                            {
+                              "kind": {
+                                "Ident": "cascade"
+                              },
+                              "span": {
+                                "start": 114,
+                                "end": 121
+                              }
+                            },
+                            "iterations"
+                          ]
+                        },
+                        "span": {
+                          "start": 114,
+                          "end": 132
+                        }
+                      },
+                      "span": {
+                        "start": 114,
+                        "end": 132
+                      }
+                    }
+                  ]
+                ]
+              },
+              "span": {
+                "start": 104,
+                "end": 133
+              }
+            },
+            "window": 1000,
+            "emit_every": 100,
+            "conditioned_on": null,
+            "alert_when": {
+              "kind": {
+                "Binary": {
+                  "op": "Gt",
+                  "lhs": {
+                    "kind": {
+                      "Ident": "max_bin"
+                    },
+                    "span": {
+                      "start": 184,
+                      "end": 192
+                    }
+                  },
+                  "rhs": {
+                    "kind": {
+                      "Float": 0.9
+                    },
+                    "span": {
+                      "start": 194,
+                      "end": 198
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 184,
+                "end": 198
+              }
+            },
+            "span": {
+              "start": 72,
+              "end": 202
+            }
+          },
+          {
+            "name": "alive_agents",
+            "value": {
+              "kind": {
+                "Call": [
+                  {
+                    "kind": {
+                      "Ident": "gauge"
+                    },
+                    "span": {
+                      "start": 224,
+                      "end": 229
+                    }
+                  },
+                  [
+                    {
+                      "name": null,
+                      "value": {
+                        "kind": {
+                          "Fold": {
+                            "kind": "Count",
+                            "binder": "a",
+                            "iter": {
+                              "kind": {
+                                "Ident": "agents"
+                              },
+                              "span": {
+                                "start": 241,
+                                "end": 248
+                              }
+                            },
+                            "body": {
+                              "kind": {
+                                "Field": [
+                                  {
+                                    "kind": {
+                                      "Ident": "a"
+                                    },
+                                    "span": {
+                                      "start": 254,
+                                      "end": 255
+                                    }
+                                  },
+                                  "alive"
+                                ]
+                              },
+                              "span": {
+                                "start": 254,
+                                "end": 261
+                              }
+                            }
+                          }
+                        },
+                        "span": {
+                          "start": 230,
+                          "end": 262
+                        }
+                      },
+                      "span": {
+                        "start": 230,
+                        "end": 262
+                      }
+                    }
+                  ]
+                ]
+              },
+              "span": {
+                "start": 224,
+                "end": 263
+              }
+            },
+            "window": null,
+            "emit_every": 10,
+            "conditioned_on": null,
+            "alert_when": {
+              "kind": {
+                "Binary": {
+                  "op": "Lt",
+                  "lhs": {
+                    "kind": {
+                      "Ident": "value"
+                    },
+                    "span": {
+                      "start": 297,
+                      "end": 303
+                    }
+                  },
+                  "rhs": {
+                    "kind": {
+                      "Int": 1
+                    },
+                    "span": {
+                      "start": 305,
+                      "end": 306
+                    }
+                  }
+                }
+              },
+              "span": {
+                "start": 297,
+                "end": 306
+              }
+            },
+            "span": {
+              "start": 202,
+              "end": 307
+            }
+          }
+        ],
+        "span": {
+          "start": 61,
+          "end": 308
+        }
+      }
+    }
+  ]
+}

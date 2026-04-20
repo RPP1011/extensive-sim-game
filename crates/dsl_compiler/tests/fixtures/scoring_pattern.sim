@@ -1,0 +1,9 @@
+// Scoring entries with pattern-matched heads — the pattern narrows the
+// match and binds inner variables the RHS expression can reference.
+scoring {
+  PostQuest{type: Conquest, target: Group(g)} = 0.8
+                                              + 0.5 * self.personality.ambition
+                                              - 0.4 * (g.military_strength > self.group.military_strength)
+  PostQuest{type: Hunt, target: Agent(prey)}  = 0.3
+                                              + 0.4 * (prey.hp_pct < 0.3)
+}

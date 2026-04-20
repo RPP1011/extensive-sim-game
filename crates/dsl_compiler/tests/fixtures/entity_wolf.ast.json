@@ -1,0 +1,313 @@
+{
+  "decls": [
+    {
+      "Entity": {
+        "annotations": [
+          {
+            "name": "spatial",
+            "args": [],
+            "span": {
+              "start": 70,
+              "end": 79
+            }
+          }
+        ],
+        "name": "Wolf",
+        "root": "Agent",
+        "fields": [
+          {
+            "annotations": [],
+            "name": "creature_type",
+            "value": {
+              "Type": {
+                "kind": {
+                  "Named": "Wolf"
+                },
+                "span": {
+                  "start": 118,
+                  "end": 122
+                }
+              }
+            },
+            "span": {
+              "start": 103,
+              "end": 122
+            }
+          },
+          {
+            "annotations": [],
+            "name": "capabilities",
+            "value": {
+              "StructLiteral": {
+                "ty": {
+                  "kind": {
+                    "Named": "Capabilities"
+                  },
+                  "span": {
+                    "start": 140,
+                    "end": 153
+                  }
+                },
+                "fields": [
+                  {
+                    "annotations": [],
+                    "name": "channels",
+                    "value": {
+                      "Type": {
+                        "kind": {
+                          "Named": "PackSignal"
+                        },
+                        "span": {
+                          "start": 169,
+                          "end": 179
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 159,
+                      "end": 179
+                    }
+                  },
+                  {
+                    "annotations": [],
+                    "name": "can_fly",
+                    "value": {
+                      "Type": {
+                        "kind": {
+                          "Named": "false"
+                        },
+                        "span": {
+                          "start": 194,
+                          "end": 199
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 185,
+                      "end": 199
+                    }
+                  },
+                  {
+                    "annotations": [],
+                    "name": "can_build",
+                    "value": {
+                      "Type": {
+                        "kind": {
+                          "Named": "false"
+                        },
+                        "span": {
+                          "start": 216,
+                          "end": 221
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 205,
+                      "end": 221
+                    }
+                  },
+                  {
+                    "annotations": [],
+                    "name": "can_climb",
+                    "value": {
+                      "Type": {
+                        "kind": {
+                          "Named": "true"
+                        },
+                        "span": {
+                          "start": 238,
+                          "end": 242
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 227,
+                      "end": 242
+                    }
+                  },
+                  {
+                    "annotations": [],
+                    "name": "can_tunnel",
+                    "value": {
+                      "Type": {
+                        "kind": {
+                          "Named": "false"
+                        },
+                        "span": {
+                          "start": 260,
+                          "end": 265
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 248,
+                      "end": 265
+                    }
+                  },
+                  {
+                    "annotations": [],
+                    "name": "can_marry",
+                    "value": {
+                      "Type": {
+                        "kind": {
+                          "Named": "true"
+                        },
+                        "span": {
+                          "start": 282,
+                          "end": 286
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 271,
+                      "end": 286
+                    }
+                  },
+                  {
+                    "annotations": [],
+                    "name": "max_spouses",
+                    "value": {
+                      "Expr": {
+                        "kind": {
+                          "Int": 1
+                        },
+                        "span": {
+                          "start": 305,
+                          "end": 306
+                        }
+                      }
+                    },
+                    "span": {
+                      "start": 292,
+                      "end": 306
+                    }
+                  }
+                ]
+              }
+            },
+            "span": {
+              "start": 126,
+              "end": 311
+            }
+          },
+          {
+            "annotations": [],
+            "name": "default_personality",
+            "value": {
+              "Type": {
+                "kind": {
+                  "Named": "Personality"
+                },
+                "span": {
+                  "start": 336,
+                  "end": 347
+                }
+              }
+            },
+            "span": {
+              "start": 315,
+              "end": 347
+            }
+          },
+          {
+            "annotations": [],
+            "name": "default_needs",
+            "value": {
+              "Type": {
+                "kind": {
+                  "Named": "Needs"
+                },
+                "span": {
+                  "start": 366,
+                  "end": 371
+                }
+              }
+            },
+            "span": {
+              "start": 351,
+              "end": 371
+            }
+          },
+          {
+            "annotations": [],
+            "name": "predator_prey",
+            "value": {
+              "StructLiteral": {
+                "ty": {
+                  "kind": {
+                    "Named": "PredatorPrey"
+                  },
+                  "span": {
+                    "start": 390,
+                    "end": 403
+                  }
+                },
+                "fields": [
+                  {
+                    "annotations": [],
+                    "name": "prey_of",
+                    "value": {
+                      "List": [
+                        {
+                          "kind": {
+                            "Ident": "Human"
+                          },
+                          "span": {
+                            "start": 419,
+                            "end": 424
+                          }
+                        }
+                      ]
+                    },
+                    "span": {
+                      "start": 409,
+                      "end": 425
+                    }
+                  },
+                  {
+                    "annotations": [],
+                    "name": "preys_on",
+                    "value": {
+                      "List": [
+                        {
+                          "kind": {
+                            "Ident": "Deer"
+                          },
+                          "span": {
+                            "start": 442,
+                            "end": 446
+                          }
+                        },
+                        {
+                          "kind": {
+                            "Ident": "Rabbit"
+                          },
+                          "span": {
+                            "start": 448,
+                            "end": 454
+                          }
+                        }
+                      ]
+                    },
+                    "span": {
+                      "start": 431,
+                      "end": 455
+                    }
+                  }
+                ]
+              }
+            },
+            "span": {
+              "start": 375,
+              "end": 460
+            }
+          }
+        ],
+        "span": {
+          "start": 79,
+          "end": 463
+        }
+      }
+    }
+  ]
+}
