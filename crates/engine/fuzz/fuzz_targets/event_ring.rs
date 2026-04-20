@@ -48,6 +48,7 @@ impl FuzzEvent {
                 caster:  a,
                 ability: AbilityId::new((self.ability as u32).saturating_add(1)).unwrap(),
                 target:  b,
+                depth:   self.item_slot,
                 tick,
             },
             8  => Event::AgentUsedItem { agent_id: a, item_slot: self.item_slot, tick },

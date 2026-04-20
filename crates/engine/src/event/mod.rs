@@ -21,7 +21,14 @@ pub enum Event {
     // when an agent issues `MicroKind::Cast` with `MicroTarget::Ability`.
     // `CastHandler` picks it up via cascade dispatch, looks the program up
     // in its `AbilityRegistry`, and emits one `Effect*Applied` per op.
-    AgentCast           { caster: AgentId, ability: AbilityId, target: AgentId, tick: u32 },
+    //
+    // `depth` (Combat Foundation Task 18) tracks recursion depth through
+    // nested `EffectOp::CastAbility` emissions. Root casts from action
+    // dispatch carry `depth = 0`; each recursive hop increments. When
+    // `CastHandler` sees a cast whose next hop would reach
+    // `MAX_CASCADE_ITERATIONS`, it emits `CastDepthExceeded` instead of
+    // pushing the nested event.
+    AgentCast           { caster: AgentId, ability: AbilityId, target: AgentId, depth: u8, tick: u32 },
     AgentUsedItem       { agent_id: AgentId, item_slot: u8, tick: u32 },
     AgentHarvested      { agent_id: AgentId, resource: u64, tick: u32 },
     AgentPlacedTile     { agent_id: AgentId, where_pos: Vec3, kind_tag: u32, tick: u32 },

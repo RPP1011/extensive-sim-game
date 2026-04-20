@@ -159,11 +159,12 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(delta.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::AgentCast { caster, ability, target, tick } => {
+        Event::AgentCast { caster, ability, target, depth, tick } => {
             h.update([7u8]);                                   // variant tag
             h.update(caster.raw().to_le_bytes());
             h.update(ability.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
+            h.update([*depth]);
             h.update(tick.to_le_bytes());
         }
         Event::AgentUsedItem { agent_id, item_slot, tick } => {

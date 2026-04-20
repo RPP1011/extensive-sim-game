@@ -14,20 +14,24 @@
 //!    `gate.cooldown_ticks == 0` means "always ready" — cooldown never blocks.
 //!
 //! Recursive casts (`EffectOp::CastAbility`) are emitted as nested
-//! `AgentCast` events on the same ring. The cascade dispatch loop bounds
-//! the chain at `MAX_CASCADE_ITERATIONS = 8`; Task 18's depth test pins
-//! the budget. When an iterated cast would push beyond the bound, the
-//! cascade truncates (in release) or panics (in debug) — the handler here
-//! does not itself audit depth, that's the dispatcher's job.
+//! `AgentCast` events on the same ring. Depth is tracked per event on
+//! `Event::AgentCast.depth` (Task 18): root casts from action dispatch
+//! carry `depth = 0`, each recursive hop increments by one. When the
+//! handler is about to push a nested cast whose depth would reach
+//! `MAX_CASCADE_ITERATIONS`, it emits `Event::CastDepthExceeded` instead
+//! and skips the push. This keeps CastHandler self-bounded — the cascade
+//! framework's 8-iteration ceiling never fires for cast recursion, so the
+//! dev-build `cascade did not converge` panic is reserved for OTHER
+//! handlers (see `cascade_bounded.rs`).
 
 use std::sync::Arc;
 
-use crate::cascade::{CascadeHandler, EventKindId, Lane};
+use crate::cascade::{CascadeHandler, EventKindId, Lane, MAX_CASCADE_ITERATIONS};
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
 
-use super::{AbilityRegistry, EffectOp, TargetSelector};
+use super::{AbilityId, AbilityRegistry, EffectOp, TargetSelector};
 
 pub struct CastHandler {
     registry: Arc<AbilityRegistry>,
@@ -49,8 +53,9 @@ impl CascadeHandler for CastHandler {
     fn lane(&self) -> Lane { Lane::Effect }
 
     fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (caster, ability, target, tick) = match *event {
-            Event::AgentCast { caster, ability, target, tick } => (caster, ability, target, tick),
+        let (caster, ability, target, depth, tick) = match *event {
+            Event::AgentCast { caster, ability, target, depth, tick } =>
+                (caster, ability, target, depth, tick),
             _ => return,
         };
         let prog = match self.registry.get(ability) {
@@ -66,7 +71,7 @@ impl CascadeHandler for CastHandler {
             prog.effects.iter().copied().collect();
 
         for op in effects {
-            emit_effect_event(op, caster, target, events, tick);
+            emit_effect_event(op, caster, target, ability, depth, events, tick);
         }
 
         // Cooldown: next_ready tick is absolute. `0` cooldown leaves
@@ -82,12 +87,19 @@ impl CascadeHandler for CastHandler {
 /// the event into SoA. Keeping dispatch and effect-apply in separate handlers
 /// keeps recursion bounded (the dispatch loop sees each nested cast as a
 /// distinct event, so `MAX_CASCADE_ITERATIONS` works as designed).
+///
+/// `parent_ability` / `parent_depth` / `tick` are used only when `op` is
+/// `EffectOp::CastAbility` — they let us emit a `CastDepthExceeded` audit
+/// event carrying the PARENT's ability id on overflow, so the audit trail
+/// points at the ability that attempted the too-deep recursion.
 fn emit_effect_event(
-    op:     EffectOp,
-    caster: AgentId,
-    target: AgentId,
-    events: &mut EventRing,
-    tick:   u32,
+    op:             EffectOp,
+    caster:         AgentId,
+    target:         AgentId,
+    parent_ability: AbilityId,
+    parent_depth:   u8,
+    events:         &mut EventRing,
+    tick:           u32,
 ) {
     match op {
         EffectOp::Damage { amount } => {
@@ -118,11 +130,22 @@ fn emit_effect_event(
                 TargetSelector::Target => target,
                 TargetSelector::Caster => caster,
             };
-            // Recursion: a nested AgentCast. The cascade dispatcher sees it on
-            // the next fixed-point iteration and CastHandler runs again. Depth
-            // is bounded by MAX_CASCADE_ITERATIONS; Task 18 pins the budget.
+            // Depth cap (Combat Foundation Task 18). Each nested cast is one
+            // deeper than its parent. When the NEW depth would reach or
+            // exceed the cascade framework's iteration bound we emit a
+            // `CastDepthExceeded` audit event instead of pushing the nested
+            // cast. This keeps the recursion self-bounded below the
+            // framework's own iteration ceiling, so dev-build panics never
+            // fire for cast chains.
+            let new_depth = parent_depth.saturating_add(1);
+            if (new_depth as usize) >= MAX_CASCADE_ITERATIONS {
+                events.push(Event::CastDepthExceeded {
+                    caster, ability: parent_ability, tick,
+                });
+                return;
+            }
             events.push(Event::AgentCast {
-                caster, ability, target: effective_target, tick,
+                caster, ability, target: effective_target, depth: new_depth, tick,
             });
         }
     }

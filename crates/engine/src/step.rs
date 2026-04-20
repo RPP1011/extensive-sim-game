@@ -382,6 +382,9 @@ fn apply_actions(
             // Combat Foundation Task 9 — Cast dispatch. Push one `AgentCast`
             // event; the `CastHandler` cascade looks the program up in its
             // `AbilityRegistry` and emits one `Effect*Applied` per op.
+            //
+            // Root casts start at `depth = 0`; the CastHandler increments
+            // for each nested `EffectOp::CastAbility` emission (Task 18).
             ActionKind::Micro {
                 kind: MicroKind::Cast,
                 target: MicroTarget::Ability { id, target },
@@ -390,6 +393,7 @@ fn apply_actions(
                     caster:  action.agent,
                     ability: id,
                     target,
+                    depth:   0,
                     tick:    state.tick,
                 });
             }

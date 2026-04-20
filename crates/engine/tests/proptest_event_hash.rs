@@ -33,6 +33,7 @@ fn arb_event() -> impl Strategy<Value = Event> {
                     caster: a,
                     ability: AbilityId::new(u_a.max(1)).unwrap(),
                     target: b,
+                    depth: (u_a as u8),
                     tick,
                 },
                 8  => Event::AgentUsedItem { agent_id: a, item_slot: (u_a as u8), tick },
