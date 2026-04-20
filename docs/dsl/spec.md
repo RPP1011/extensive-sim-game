@@ -186,6 +186,53 @@ The compiler emits:
 
 Queries are first-class and carry their output cap. `query::nearby_agents(self, r)` returns at most K records; `query::known_actors(self)` returns the union `{spouse, mentor, apprentice, group_leaders(self), top_grudges, top_friendships}` deduped (`spec.md` §2.1.5).
 
+#### Fold body operator set
+
+`@materialized` fold handler bodies are restricted to a closed operator set so the event-fold path compiles to commutative, GPU-friendly updates. This mirrors §2.5's mask-predicate restriction. The compiler rejects anything outside the list below with `ResolveError::UdfInViewFoldBody` pointing at the offending construct.
+
+Allowed:
+
+- Compound self-assignment: `self +=`, `self -=`, `self *=`, `self /=`.
+- Plain self-assignment: `self = <closed expr>`.
+- Conditional: `if <closed expr> { <closed stmts> } else { <closed stmts> }`.
+- Arithmetic: `+`, `-`, `*`, `/`, `%` on primitives.
+- Comparison: `<`, `<=`, `==`, `>=`, `>`, `!=`.
+- Logical: `&&`, `||`, `!`.
+- Bounded folds: `count`, `sum`, `min`, `max` over `SortedVec`/`SmallVec`.
+- Built-in math: `abs`, `floor`, `ceil`, `pow`, `ln`, `sqrt`, `clamp`.
+- Stdlib 1-hop accessors: `agents.hp(a)`, `distance(p1, p2)`, etc.
+- `let x = <closed expr>` intermediates.
+
+Forbidden:
+
+- Recursion.
+- Loops (`while`, unbounded `for`).
+- User-declared helper functions called inside the fold body.
+- Calls to other views — including views that reference other views (no cross-view composition in fold bodies).
+
+#### `@decay(rate = R, per = tick)`
+
+Sugar layered on `@materialized` views. Lowers to the anchor pattern: the stored value is `(base_at_anchor, anchor_tick)` and the observable at tick `t` is `base * rate^(t - anchor)`, clamped. Event handlers fold the event's delta into a new base and advance the anchor to the current tick.
+
+```
+@materialized(on_event = [AgentAttacked, EffectDamageApplied],
+              storage = pair_map)
+@decay(rate = 0.98, per = tick)
+view threat_level(a: Agent, b: Agent) -> f32 {
+  initial: 0.0,
+  on AgentAttacked { actor: b, target: a } { self += 1.0 }
+  on EffectDamageApplied { actor: b, target: a } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+```
+
+Constraints (enforced by the resolver):
+
+- Requires a sibling `@materialized(...)` annotation; a bare `@decay` on a `@lazy` or plain view is a hard error.
+- The host view body must be a `Fold` (the anchor pattern needs a base value + event handlers).
+- `rate` is a compile-time float literal in the open interval `(0.0, 1.0)`. Variable decay rates are not supported in v1.
+- `per` is the identifier `tick`. Other time bases are reserved for later milestones.
+
 ### 2.4 `physics` cascade rule
 
 Cascade rules respond to events and emit further events. They never mutate state directly — all writes go through `emit`. Phase-tagged ordering prevents races.
@@ -536,6 +583,25 @@ Compiler emits:
 - A per-tick scoring kernel that evaluates each masked candidate's utility expression and writes the result into `utility_field[N × NUM_ACTIONS]` for the utility backend to argmax over.
 - Trace-emission hooks: `(tick, agent_id, action, score)` rows streamed into the trace ring buffer so external Python training can consume per-action scores as reward-shaping inputs.
 - Validation: scoring expressions must reference declared views, entity fields, or personality traits.
+
+#### Gradient scoring modifiers
+
+In addition to the expression-sum grammar above, a scoring entry's right-hand side may include **gradient modifier** terms of the form `<expr> per_unit <delta>`. Semantically, this contributes `expr * delta` to the final score; the compiler lifts each such term into a dedicated `KIND_GRADIENT` modifier row so the engine-side decoder can evaluate the expression once per tick and multiply by the baked-in delta.
+
+```
+scoring {
+  Attack(t) = 0.5                                         // base
+            + (if self.hp_pct < 0.3 { 0.4 } else { 0.0 }) // boolean modifier
+            + threat_level(self, t) per_unit 0.02          // gradient modifier
+            + (1.0 - t.hp_pct) per_unit 0.6                // arithmetic-expr gradient
+}
+```
+
+Constraints:
+
+- `<delta>` must be a float literal at v1. Variable deltas are a later milestone.
+- `<expr>` must evaluate to `f32`. Type-checking is deferred to milestone 1b.
+- `per_unit` binds between `+`/`-` and `*`/`/`, so `foo * k per_unit d` parses as `(foo * k) per_unit d` — the gradient expression can include a scalar multiplier. `a per_unit b per_unit c` is a grammar error.
 
 Adding a `scoring` entry does not bump the schema hash's state / event / rules components — only the `scoring_hash` sub-hash (§4). External training code that depends on a specific scoring shape is responsible for recomputing from the current DSL.
 

@@ -196,6 +196,13 @@ pub enum IrExpr {
         then_expr: Box<IrExprNode>,
         else_expr: Option<Box<IrExprNode>>,
     },
+    /// Gradient modifier: `<expr> per_unit <delta>`. See `ast::ExprKind::PerUnit`.
+    /// Lowered as a distinct modifier row by the scoring emitter; outside
+    /// scoring contexts it is semantically `expr * delta`.
+    PerUnit {
+        expr: Box<IrExprNode>,
+        delta: Box<IrExprNode>,
+    },
     /// Retained original AST shape for anything we can't lower meaningfully.
     Raw(Box<ast::Expr>),
 }
@@ -485,7 +492,28 @@ pub struct ViewIR {
     pub return_ty: IrType,
     pub body: ViewBodyIR,
     pub annotations: Vec<Annotation>,
+    /// Parsed, validated form of `@decay(rate=R, per=tick)` if present.
+    /// `None` when the view has no decay annotation. Only valid on
+    /// `@materialized` views with a `Fold` body — enforced in resolve.
+    pub decay: Option<DecayHint>,
     pub span: Span,
+}
+
+/// Parsed `@decay(rate=R, per=tick)` annotation. The anchor-pattern
+/// emitter reads `rate` to generate `base * rate.powi(tick - anchor)`.
+/// Rate is a compile-time constant in `(0.0, 1.0)`. Variable decay
+/// rates are not supported in v1.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct DecayHint {
+    pub rate: f32,
+    pub per: DecayUnit,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum DecayUnit {
+    /// `per = tick` — the only supported unit in v1.
+    Tick,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -1,0 +1,296 @@
+{
+  "events": [],
+  "event_tags": [],
+  "enums": [],
+  "entities": [],
+  "physics": [],
+  "masks": [],
+  "scoring": [
+    {
+      "entries": [
+        {
+          "head": {
+            "name": "Attack",
+            "shape": {
+              "Positional": [
+                [
+                  "t",
+                  1
+                ]
+              ]
+            },
+            "span": {
+              "start": 333,
+              "end": 342
+            }
+          },
+          "expr": {
+            "kind": {
+              "PerUnit": {
+                "expr": {
+                  "kind": {
+                    "Binary": [
+                      "Add",
+                      {
+                        "kind": {
+                          "PerUnit": {
+                            "expr": {
+                              "kind": {
+                                "Binary": [
+                                  "Add",
+                                  {
+                                    "kind": {
+                                      "Binary": [
+                                        "Add",
+                                        {
+                                          "kind": {
+                                            "LitFloat": 0.5
+                                          },
+                                          "span": {
+                                            "start": 345,
+                                            "end": 348
+                                          }
+                                        },
+                                        {
+                                          "kind": {
+                                            "If": {
+                                              "cond": {
+                                                "kind": {
+                                                  "Binary": [
+                                                    "Lt",
+                                                    {
+                                                      "kind": {
+                                                        "Field": {
+                                                          "base": {
+                                                            "kind": {
+                                                              "Local": [
+                                                                0,
+                                                                "self"
+                                                              ]
+                                                            },
+                                                            "span": {
+                                                              "start": 367,
+                                                              "end": 371
+                                                            }
+                                                          },
+                                                          "field_name": "hp_pct",
+                                                          "field": null
+                                                        }
+                                                      },
+                                                      "span": {
+                                                        "start": 367,
+                                                        "end": 378
+                                                      }
+                                                    },
+                                                    {
+                                                      "kind": {
+                                                        "LitFloat": 0.3
+                                                      },
+                                                      "span": {
+                                                        "start": 381,
+                                                        "end": 384
+                                                      }
+                                                    }
+                                                  ]
+                                                },
+                                                "span": {
+                                                  "start": 367,
+                                                  "end": 384
+                                                }
+                                              },
+                                              "then_expr": {
+                                                "kind": {
+                                                  "LitFloat": 0.4
+                                                },
+                                                "span": {
+                                                  "start": 387,
+                                                  "end": 390
+                                                }
+                                              },
+                                              "else_expr": {
+                                                "kind": {
+                                                  "LitFloat": 0.0
+                                                },
+                                                "span": {
+                                                  "start": 400,
+                                                  "end": 403
+                                                }
+                                              }
+                                            }
+                                          },
+                                          "span": {
+                                            "start": 364,
+                                            "end": 405
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    "span": {
+                                      "start": 345,
+                                      "end": 405
+                                    }
+                                  },
+                                  {
+                                    "kind": {
+                                      "UnresolvedCall": [
+                                        "threat_level",
+                                        [
+                                          {
+                                            "name": null,
+                                            "value": {
+                                              "kind": {
+                                                "Local": [
+                                                  0,
+                                                  "self"
+                                                ]
+                                              },
+                                              "span": {
+                                                "start": 434,
+                                                "end": 438
+                                              }
+                                            },
+                                            "span": {
+                                              "start": 434,
+                                              "end": 438
+                                            }
+                                          },
+                                          {
+                                            "name": null,
+                                            "value": {
+                                              "kind": {
+                                                "Local": [
+                                                  1,
+                                                  "t"
+                                                ]
+                                              },
+                                              "span": {
+                                                "start": 440,
+                                                "end": 441
+                                              }
+                                            },
+                                            "span": {
+                                              "start": 440,
+                                              "end": 441
+                                            }
+                                          }
+                                        ]
+                                      ]
+                                    },
+                                    "span": {
+                                      "start": 421,
+                                      "end": 442
+                                    }
+                                  }
+                                ]
+                              },
+                              "span": {
+                                "start": 345,
+                                "end": 442
+                              }
+                            },
+                            "delta": {
+                              "kind": {
+                                "LitFloat": 0.02
+                              },
+                              "span": {
+                                "start": 452,
+                                "end": 456
+                              }
+                            }
+                          }
+                        },
+                        "span": {
+                          "start": 345,
+                          "end": 456
+                        }
+                      },
+                      {
+                        "kind": {
+                          "Binary": [
+                            "Sub",
+                            {
+                              "kind": {
+                                "LitFloat": 1.0
+                              },
+                              "span": {
+                                "start": 472,
+                                "end": 475
+                              }
+                            },
+                            {
+                              "kind": {
+                                "Field": {
+                                  "base": {
+                                    "kind": {
+                                      "Local": [
+                                        1,
+                                        "t"
+                                      ]
+                                    },
+                                    "span": {
+                                      "start": 478,
+                                      "end": 479
+                                    }
+                                  },
+                                  "field_name": "hp_pct",
+                                  "field": null
+                                }
+                              },
+                              "span": {
+                                "start": 478,
+                                "end": 486
+                              }
+                            }
+                          ]
+                        },
+                        "span": {
+                          "start": 472,
+                          "end": 486
+                        }
+                      }
+                    ]
+                  },
+                  "span": {
+                    "start": 345,
+                    "end": 486
+                  }
+                },
+                "delta": {
+                  "kind": {
+                    "LitFloat": 0.6
+                  },
+                  "span": {
+                    "start": 497,
+                    "end": 500
+                  }
+                }
+              }
+            },
+            "span": {
+              "start": 345,
+              "end": 500
+            }
+          },
+          "span": {
+            "start": 333,
+            "end": 501
+          }
+        }
+      ],
+      "annotations": [],
+      "span": {
+        "start": 321,
+        "end": 502
+      }
+    }
+  ],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "configs": [],
+  "spans": {
+    "entries": []
+  }
+}

@@ -111,6 +111,12 @@ const PERSONALITY_DIMS: usize = 5;
 // PredicateDescriptor kind discriminants.
 const KIND_ALWAYS: u8 = 0;
 const KIND_SCALAR_COMPARE: u8 = 1;
+/// Gradient modifier: `score += expr * delta`. Emitted for the DSL form
+/// `<expr> per_unit <delta>` (spec §3.4). The engine-side decoder
+/// evaluates the gradient expression (compiled into a side-table
+/// keyed by `field_id`), multiplies by `delta`, and adds the result to
+/// the score.
+const KIND_GRADIENT: u8 = 6;
 
 // ScalarCompare operator discriminants. Keep aligned with
 // `PredicateDescriptor::OP_*` in engine_rules.
@@ -319,6 +325,11 @@ impl PredicateDescriptor {
     pub const KIND_BIT_TEST: u8 = 3;
     pub const KIND_SET_MEMBERSHIP: u8 = 4;
     pub const KIND_PAIR_FIELD: u8 = 5;
+    /// Gradient modifier — `score += expr * delta` rather than
+    /// `score += (pred ? delta : 0)`. Opaque expression handle in
+    /// `field_id`; the engine-side decoder reads a compiled scalar expr
+    /// from a side-table keyed by `field_id`.
+    pub const KIND_GRADIENT: u8 = 6;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;
@@ -404,19 +415,37 @@ pub(crate) struct LoweredModifier {
 
 fn lower_entry(entry: &ScoringEntryIR) -> Result<LoweredEntry, EmitError> {
     let action_head = action_head_discriminant(&entry.head)?;
-    let (base, conds) = flatten_sum(&entry.expr)?;
+    let (base, terms) = flatten_sum(&entry.expr)?;
 
-    if conds.len() > MAX_MODIFIERS {
+    if terms.len() > MAX_MODIFIERS {
         return Err(EmitError::TooManyModifiers {
             head: entry.head.name.clone(),
-            count: conds.len(),
+            count: terms.len(),
             max: MAX_MODIFIERS,
         });
     }
 
-    let mut modifiers = Vec::with_capacity(conds.len());
-    for (cond, delta) in conds {
-        modifiers.push(lower_modifier(cond, delta)?);
+    let mut modifiers = Vec::with_capacity(terms.len());
+    for term in terms {
+        match term {
+            SumTerm::BoolIf { cond, delta } => {
+                modifiers.push(lower_modifier(cond, delta)?);
+            }
+            SumTerm::Gradient { expr: _, delta } => {
+                // v1 gradient lowering: the engine-side reads the
+                // compiled gradient expression from a side-table (not
+                // yet wired through). The emitted row carries the
+                // gradient kind + delta; `field_id` is a placeholder
+                // until the side-table emitter lands.
+                modifiers.push(LoweredModifier {
+                    kind: KIND_GRADIENT,
+                    op: 0,
+                    field_id: 0,
+                    payload: [0u8; 12],
+                    delta,
+                });
+            }
+        }
     }
 
     let modifier_count = modifiers.len() as u8;
@@ -467,28 +496,44 @@ fn action_head_discriminant(head: &IrActionHead) -> Result<u16, EmitError> {
 // Expression-shape recognition
 // ---------------------------------------------------------------------------
 
-/// Flatten a top-level `+` tree into a base literal plus a list of
-/// `(cond, then_value)` conditionals. Any leaf that isn't a literal or an
-/// `if <cond> { lit } else { 0.0 }` is unsupported.
-fn flatten_sum<'a>(expr: &'a IrExprNode) -> Result<(f32, Vec<(&'a IrExprNode, f32)>), EmitError> {
+/// One term of a flattened scoring expression sum. `Attack(t) =
+/// 0.5 + (if ... { ... } else { 0.0 }) + (expr per_unit 0.3)` decomposes
+/// into a base literal and a list of these.
+enum SumTerm<'a> {
+    /// `if <pred> { <lit> } else { 0.0 }` — boolean modifier (existing shape).
+    BoolIf { cond: &'a IrExprNode, delta: f32 },
+    /// `<expr> per_unit <delta>` — gradient modifier (spec §3.4). `expr`
+    /// is an opaque handle at v1; the engine-side reads the compiled
+    /// scalar from a future side-table keyed by the entry's row index.
+    Gradient {
+        #[allow(dead_code)]
+        expr: &'a IrExprNode,
+        delta: f32,
+    },
+}
+
+/// Flatten a top-level `+` tree into a base literal plus a list of sum
+/// terms. Any leaf that isn't a literal, an `if <cond> { lit } else { 0.0 }`,
+/// or an `<expr> per_unit <delta>` is unsupported.
+fn flatten_sum<'a>(expr: &'a IrExprNode) -> Result<(f32, Vec<SumTerm<'a>>), EmitError> {
     let mut base: f32 = 0.0;
-    let mut conds: Vec<(&'a IrExprNode, f32)> = Vec::new();
+    let mut terms: Vec<SumTerm<'a>> = Vec::new();
     let mut seen_base = false;
 
-    collect_sum(expr, &mut base, &mut seen_base, &mut conds)?;
-    Ok((base, conds))
+    collect_sum(expr, &mut base, &mut seen_base, &mut terms)?;
+    Ok((base, terms))
 }
 
 fn collect_sum<'a>(
     expr: &'a IrExprNode,
     base: &mut f32,
     seen_base: &mut bool,
-    conds: &mut Vec<(&'a IrExprNode, f32)>,
+    terms: &mut Vec<SumTerm<'a>>,
 ) -> Result<(), EmitError> {
     match &expr.kind {
         IrExpr::Binary(BinOp::Add, lhs, rhs) => {
-            collect_sum(lhs, base, seen_base, conds)?;
-            collect_sum(rhs, base, seen_base, conds)?;
+            collect_sum(lhs, base, seen_base, terms)?;
+            collect_sum(rhs, base, seen_base, terms)?;
             Ok(())
         }
         IrExpr::If { cond, then_expr, else_expr } => {
@@ -517,7 +562,18 @@ fn collect_sum<'a>(
                     ));
                 }
             }
-            conds.push((cond, then_v));
+            terms.push(SumTerm::BoolIf { cond, delta: then_v });
+            Ok(())
+        }
+        IrExpr::PerUnit { expr: gradient_expr, delta } => {
+            // Gradient modifier: `<expr> per_unit <delta>`. Delta must be
+            // a float literal at v1 — variable deltas are a later milestone.
+            let d = lit_float(delta).ok_or_else(|| {
+                EmitError::UnsupportedModifierBody(
+                    "`per_unit <delta>` requires a float literal delta".into(),
+                )
+            })?;
+            terms.push(SumTerm::Gradient { expr: gradient_expr, delta: d });
             Ok(())
         }
         IrExpr::LitFloat(v) => {
@@ -533,7 +589,7 @@ fn collect_sum<'a>(
             Ok(())
         }
         other => Err(EmitError::UnsupportedExprShape(format!(
-            "expected literal or `if <pred> {{ <lit> }} else {{ 0.0 }}` (or `+` of those); got {other:?}"
+            "expected literal, `if <pred> {{ <lit> }} else {{ 0.0 }}`, or `<expr> per_unit <delta>` (or `+` of those); got {other:?}"
         ))),
     }
 }
@@ -721,6 +777,27 @@ fn emit_modifier_literal(out: &mut String, m: &LoweredModifier) {
             m.field_id,
             op_const_name(m.op),
             format_float(threshold as f64),
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                delta: {},",
+            format_float(m.delta as f64)
+        )
+        .unwrap();
+        writeln!(out, "            }},").unwrap();
+        return;
+    }
+    if m.kind == KIND_GRADIENT {
+        // Gradient modifier row. The `field_id` is a future side-table
+        // index; v1 emits a placeholder `0` descriptor so the engine-side
+        // `KIND_GRADIENT` dispatcher can load the compiled gradient expr
+        // via `field_id` once the side-table lands.
+        writeln!(out, "            ModifierRow {{").unwrap();
+        writeln!(
+            out,
+            "                predicate: PredicateDescriptor {{ kind: PredicateDescriptor::KIND_GRADIENT, op: 0, field_id: {}, payload: [0; 12] }},",
+            m.field_id
         )
         .unwrap();
         writeln!(

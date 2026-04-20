@@ -1,0 +1,12 @@
+// `@decay` sugar on `@materialized` views. Compiles to the anchor-pattern
+// storage: `HashMap<Key, (base_at_anchor, anchor_tick)>`. The current value
+// at tick `t` is `base * rate.powi(t - anchor)`, clamped.
+@materialized(on_event = [AgentAttacked, EffectDamageApplied],
+              storage = pair_map)
+@decay(rate = 0.98, per = tick)
+view threat_level(a: Agent, b: Agent) -> f32 {
+  initial: 0.0,
+  on AgentAttacked{actor: b, target: a} { self += 1.0 }
+  on EffectDamageApplied{actor: b, target: a} { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}

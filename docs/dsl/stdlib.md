@@ -294,6 +294,34 @@ Until such a declaration exists, references to these names stay
 
 ---
 
+## Restriction surfaces
+
+Two closed operator sets govern what the compiler accepts in specific
+surfaces. Both are intentionally small so the corresponding emitters can
+compile to GPU-friendly kernels without escape hatches.
+
+### Fold body operator set (`@materialized` views)
+
+See `spec.md` §2.3 "Fold body operator set". User-defined helper calls,
+cross-view composition, unbounded loops, and recursion are forbidden
+inside fold bodies. The compiler raises
+`ResolveError::UdfInViewFoldBody` pointing at the offending construct.
+
+### Mask predicate operator set
+
+See `spec.md` §2.5. Supports set membership, quantifiers, bounded
+folds, arithmetic comparison, and view calls. No user-defined
+functions inside masks.
+
+### Scoring modifier operator set
+
+See `spec.md` §3.4. Scoring entries are expression-sums where each
+term is one of: a base literal, a boolean `if <pred> { <lit> } else { 0.0 }`
+modifier, or a gradient `<expr> per_unit <delta>` modifier. Anything
+else is `EmitError::UnsupportedExprShape`.
+
+---
+
 ## Adding to stdlib
 
 The stdlib is not a frequent-change surface. Adding a primitive or a

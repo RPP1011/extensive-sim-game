@@ -14,8 +14,10 @@ const FIXTURES: &[&str] = &[
     "physics_damage",
     "mask_attack",
     "scoring_attack",
+    "scoring_gradient",
     "scoring_pattern",
     "view_mood",
+    "view_decay",
     "verb_pray",
     "invariant_no_bigamy",
     "probe_low_hp_flees",
@@ -68,6 +70,172 @@ fn all_fixtures_compile_to_ir() {
     if !failures.is_empty() {
         panic!("{}", failures.join("\n"));
     }
+}
+
+#[test]
+fn decay_without_materialized_errors() {
+    // `@decay` is only valid on `@materialized` fold views.
+    let src = r#"
+        @decay(rate = 0.98, per = tick)
+        view mood(a: Agent) -> f32 { 0.0 }
+    "#;
+    let err = dsl_compiler::compile(src).expect_err("should fail");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("@decay") && msg.contains("@materialized"),
+        "message: {msg}",
+    );
+}
+
+#[test]
+fn decay_with_out_of_range_rate_errors() {
+    let src = r#"
+        @materialized(on_event = [AgentAttacked])
+        @decay(rate = 1.5, per = tick)
+        view threat_level(a: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{target: a} { self += 1.0 }
+        }
+    "#;
+    let err = dsl_compiler::compile(src).expect_err("should fail");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("(0.0, 1.0)"),
+        "expected rate-range diagnostic; got: {msg}",
+    );
+}
+
+#[test]
+fn decay_with_unsupported_per_unit_errors() {
+    let src = r#"
+        @materialized(on_event = [AgentAttacked])
+        @decay(rate = 0.98, per = hour)
+        view threat_level(a: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{target: a} { self += 1.0 }
+        }
+    "#;
+    let err = dsl_compiler::compile(src).expect_err("should fail");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("hour") && msg.contains("tick"),
+        "expected `per` diagnostic; got: {msg}",
+    );
+}
+
+#[test]
+fn udf_in_fold_body_rejected_with_diagnostic() {
+    // `another_view(...)` inside a fold body is a cross-view call — forbidden
+    // by the fold-body operator-set restriction (spec §2.3).
+    let src = r#"
+        @materialized(on_event = [AgentAttacked])
+        view threat_level(a: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{target: a} { self += my_helper(a) }
+        }
+    "#;
+    let err = dsl_compiler::compile(src).expect_err("should fail");
+    match err {
+        dsl_compiler::CompileError::Resolve(ResolveError::UdfInViewFoldBody {
+            view_name,
+            offending_construct,
+            ..
+        }) => {
+            assert_eq!(view_name, "threat_level");
+            assert!(
+                offending_construct.contains("my_helper"),
+                "offending construct should mention the helper name; got: {offending_construct}",
+            );
+        }
+        other => panic!("expected UdfInViewFoldBody; got: {other:?}"),
+    }
+}
+
+#[test]
+fn fold_body_for_loop_rejected() {
+    // Unbounded `for` inside a fold body is forbidden by spec §2.3.
+    let src = r#"
+        @materialized(on_event = [AgentAttacked])
+        view mood(a: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{target: a} {
+                for x in agents { self += 0.1 }
+            }
+        }
+    "#;
+    let err = dsl_compiler::compile(src).expect_err("should fail");
+    let msg = format!("{err}");
+    assert!(msg.contains("for") && msg.contains("mood"), "message: {msg}");
+}
+
+#[test]
+fn gradient_scoring_modifier_compiles() {
+    let src = r#"
+        scoring {
+          Attack(t) = 0.5
+                    + threat_level(self, t) per_unit 0.02
+                    + (1.0 - t.hp_pct) per_unit 0.6
+        }
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile failed");
+    assert_eq!(comp.scoring.len(), 1);
+    assert_eq!(comp.scoring[0].entries.len(), 1);
+    // The entry's expression now contains PerUnit nodes as sibling sum
+    // terms. The scoring emitter lifts them into KIND_GRADIENT rows —
+    // exercise via the public emit() surface.
+    let artefacts = dsl_compiler::emit(&comp);
+    // The generated scoring table body references the gradient row.
+    assert!(
+        artefacts.rust_scoring_mod.contains("KIND_GRADIENT"),
+        "emitted scoring_mod should reference KIND_GRADIENT",
+    );
+}
+
+#[test]
+fn decay_hint_lowers_to_decayhint_struct() {
+    let src = r#"
+        @materialized(on_event = [AgentAttacked])
+        @decay(rate = 0.98, per = tick)
+        view threat_level(a: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{target: a} { self += 1.0 }
+        }
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile failed");
+    let view = comp.views.iter().find(|v| v.name == "threat_level").unwrap();
+    let hint = view.decay.expect("decay hint should be populated");
+    assert!((hint.rate - 0.98).abs() < 1e-6);
+    assert_eq!(hint.per, dsl_compiler::ir::DecayUnit::Tick);
+}
+
+#[test]
+fn decay_view_emits_anchor_pattern_skeleton() {
+    // End-to-end: parse + resolve + emit the anchor-pattern Rust for a
+    // `@decay` view. The emitted skeleton defines a struct with
+    // `get(a, b, tick)` + `fold_event(...)` and bakes the rate in as
+    // a `const`.
+    let src = r#"
+        @materialized(on_event = [AgentAttacked, EffectDamageApplied])
+        @decay(rate = 0.98, per = tick)
+        view threat_level(a: Agent, b: Agent) -> f32 {
+            initial: 0.0,
+            on AgentAttacked{actor: b, target: a} { self += 1.0 }
+            on EffectDamageApplied{actor: b, target: a} { self += 1.0 }
+            clamp: [0.0, 1000.0],
+        }
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile failed");
+    let view = comp.views.iter().find(|v| v.name == "threat_level").unwrap();
+    let out = dsl_compiler::emit_view::emit_decay_view(view)
+        .expect("emit_decay_view")
+        .expect("decay view should emit a non-None skeleton");
+    assert!(out.contains("pub struct ThreatLevel"));
+    assert!(out.contains("pub const RATE: f32 = 0.98_f32;"));
+    assert!(out.contains("pub fn get(&self, a: i64, b: i64, tick: u32) -> f32"));
+    assert!(out.contains("\"AgentAttacked\" =>"));
+    assert!(out.contains("\"EffectDamageApplied\" =>"));
+    // Clamp is wired into both `get` and `fold_event`.
+    assert!(out.contains(".clamp(0.0_f32, 1000.0_f32)"));
 }
 
 #[test]

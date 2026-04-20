@@ -622,6 +622,12 @@ pub enum ExprKind {
     Match { scrutinee: Box<Expr>, arms: Vec<MatchExprArm> },
     /// `if <c> { e1 } else { e2 }` used as an expression.
     If { cond: Box<Expr>, then_expr: Box<Expr>, else_expr: Option<Box<Expr>> },
+    /// Gradient modifier: `<expr> per_unit <delta>`. Usable as a top-level
+    /// term inside a `scoring` entry's sum; the scoring emitter recognises
+    /// it as a gradient modifier row rather than a plain multiplication.
+    /// Semantically identical to `expr * delta` if the scoring lowering
+    /// didn't promote it to a dedicated modifier kind. See spec §3.4.
+    PerUnit { expr: Box<Expr>, delta: Box<Expr> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

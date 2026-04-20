@@ -1863,6 +1863,30 @@ fn parse_binary(c: &mut Cursor, min_prec: u8, stop: &dyn Fn(&Cursor) -> bool) ->
             lhs = Expr { kind: ExprKind::Contains { set: Box::new(lhs), item: Box::new(rhs) }, span };
             continue;
         }
+        // `per_unit` — gradient modifier marker. Binds tighter than `+`/`-`
+        // so `foo per_unit 0.4 + bar per_unit 0.2` parses as two sibling
+        // modifier terms in the scoring sum. Right-associative to reject
+        // the ambiguous `a per_unit b per_unit c` rather than silently
+        // picking one side (the resolver rejects `per_unit` in the delta
+        // slot, but we also avoid a surprising grammar parse here).
+        if starts_with_keyword(c, "per_unit") {
+            // Precedence between `+` (5) and `*` (6) — `expr * k per_unit d`
+            // reads as `(expr * k) per_unit d`, which is the natural shape.
+            const PER_UNIT_PREC: u8 = 5;
+            if PER_UNIT_PREC < min_prec { break; }
+            c.bump("per_unit".len());
+            c.skip_ws();
+            // Right-bind at PER_UNIT_PREC+1 so a nested `per_unit` on the
+            // right-hand side is a grammar error rather than an accidental
+            // chain.
+            let rhs = parse_binary(c, PER_UNIT_PREC + 1, stop)?;
+            let span = Span::new(lhs.span.start, rhs.span.end);
+            lhs = Expr {
+                kind: ExprKind::PerUnit { expr: Box::new(lhs), delta: Box::new(rhs) },
+                span,
+            };
+            continue;
+        }
         break;
     }
     Ok(lhs)

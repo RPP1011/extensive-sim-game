@@ -495,6 +495,7 @@ fn collect(
                     return_ty: IrType::Unknown,
                     body: ViewBodyIR::Expr(IrExprNode { kind: IrExpr::LitBool(true), span: d.span }),
                     annotations: d.annotations.clone(),
+                    decay: None,
                     span: d.span,
                 });
             }
@@ -808,9 +809,21 @@ fn resolve_bodies(
                         ViewBodyIR::Fold { initial, handlers: handlers_ir, clamp }
                     }
                 };
+                // Fold-body operator-set validation (spec §2.3). Only
+                // `@materialized` fold views are checked — lazy views are
+                // plain expressions and already restricted by the
+                // stdlib-call surface.
+                if let ViewBodyIR::Fold { handlers, .. } = &body {
+                    for h in handlers {
+                        validate_fold_body(&d.name, &h.body)?;
+                    }
+                }
+                // Parse and validate `@decay(rate=R, per=tick)` if present.
+                let decay = lower_decay_hint(&d.annotations, &d.body)?;
                 comp.views[view_idx].params = params;
                 comp.views[view_idx].return_ty = return_ty;
                 comp.views[view_idx].body = body;
+                comp.views[view_idx].decay = decay;
                 view_idx += 1;
             }
             Decl::Verb(d) => {
@@ -1504,6 +1517,10 @@ fn resolve_expr(
                 None => None,
             },
         },
+        ExprKind::PerUnit { expr, delta } => IrExpr::PerUnit {
+            expr: Box::new(resolve_expr(expr, scope, symbols)?),
+            delta: Box::new(resolve_expr(delta, scope, symbols)?),
+        },
     };
     Ok(IrExprNode { kind, span })
 }
@@ -1761,4 +1778,333 @@ fn edit_distance(a: &str, b: &str) -> usize {
         std::mem::swap(&mut prev, &mut curr);
     }
     prev[n]
+}
+
+// ---------------------------------------------------------------------------
+// @decay annotation lowering (spec §2.3, §9 D31)
+// ---------------------------------------------------------------------------
+
+/// Walk the view's annotations; if a `@decay(rate=R, per=tick)` annotation
+/// exists, validate it and return a typed `DecayHint`. Validates:
+///
+/// - Paired with `@materialized` (errors otherwise — v1 only supports
+///   anchor-pattern decay on event-folded views).
+/// - Host body is a `Fold` (lazy views have no persistent state to decay).
+/// - `rate` argument is a float literal in the open interval `(0.0, 1.0)`.
+/// - `per` argument is the identifier `tick`. Other time bases are parsed
+///   but rejected here.
+/// - No extra unknown keys.
+fn lower_decay_hint(
+    annotations: &[ast::Annotation],
+    body: &ast::ViewBody,
+) -> Result<Option<DecayHint>, ResolveError> {
+    let ann = match annotations.iter().find(|a| a.name == "decay") {
+        Some(a) => a,
+        None => return Ok(None),
+    };
+
+    // Must coexist with `@materialized`.
+    let has_materialized = annotations.iter().any(|a| a.name == "materialized");
+    if !has_materialized {
+        return Err(ResolveError::InvalidDecayHint {
+            detail:
+                "`@decay` requires a sibling `@materialized(...)` annotation on the same view"
+                    .into(),
+            span: ann.span,
+        });
+    }
+
+    // Must be a fold body.
+    if !matches!(body, ast::ViewBody::Fold { .. }) {
+        return Err(ResolveError::InvalidDecayHint {
+            detail: "`@decay` only applies to `@materialized` fold views (the anchor pattern needs a base value + event handlers)".into(),
+            span: ann.span,
+        });
+    }
+
+    let mut rate: Option<f64> = None;
+    let mut per: Option<String> = None;
+    for arg in &ann.args {
+        let key = match &arg.key {
+            Some(k) => k.as_str(),
+            None => {
+                return Err(ResolveError::InvalidDecayHint {
+                    detail:
+                        "`@decay` arguments must be `key = value` (got a positional arg)".into(),
+                    span: arg.span,
+                });
+            }
+        };
+        match key {
+            "rate" => {
+                let r = match &arg.value {
+                    ast::AnnotationValue::Float(f) => *f,
+                    ast::AnnotationValue::Int(i) => *i as f64,
+                    other => {
+                        return Err(ResolveError::InvalidDecayHint {
+                            detail: format!("`rate` must be a float literal; got {other:?}"),
+                            span: arg.span,
+                        });
+                    }
+                };
+                rate = Some(r);
+            }
+            "per" => {
+                let p = match &arg.value {
+                    ast::AnnotationValue::Ident(s) => s.clone(),
+                    other => {
+                        return Err(ResolveError::InvalidDecayHint {
+                            detail: format!(
+                                "`per` must be an identifier (e.g. `tick`); got {other:?}"
+                            ),
+                            span: arg.span,
+                        });
+                    }
+                };
+                per = Some(p);
+            }
+            other => {
+                return Err(ResolveError::InvalidDecayHint {
+                    detail: format!(
+                        "unknown `@decay` argument `{other}`; expected `rate` and `per`"
+                    ),
+                    span: arg.span,
+                });
+            }
+        }
+    }
+
+    let rate = rate.ok_or_else(|| ResolveError::InvalidDecayHint {
+        detail: "missing required argument `rate`".into(),
+        span: ann.span,
+    })?;
+    let per = per.ok_or_else(|| ResolveError::InvalidDecayHint {
+        detail: "missing required argument `per`".into(),
+        span: ann.span,
+    })?;
+
+    if !(rate > 0.0 && rate < 1.0) || !rate.is_finite() {
+        return Err(ResolveError::InvalidDecayHint {
+            detail: format!(
+                "`rate` must be a finite float in the open interval (0.0, 1.0); got {rate}"
+            ),
+            span: ann.span,
+        });
+    }
+
+    let per_unit = match per.as_str() {
+        "tick" => DecayUnit::Tick,
+        other => {
+            return Err(ResolveError::InvalidDecayHint {
+                detail: format!(
+                    "unsupported `per` unit `{other}`; only `tick` is supported in v1"
+                ),
+                span: ann.span,
+            });
+        }
+    };
+
+    Ok(Some(DecayHint {
+        rate: rate as f32,
+        per: per_unit,
+        span: ann.span,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// View fold-body operator-set validator (spec §2.3)
+// ---------------------------------------------------------------------------
+//
+// Fold bodies are restricted to the closed operator set documented in
+// spec §2.3 so the event-fold path compiles to commutative, GPU-friendly
+// updates. User-defined helper calls, recursion, unbounded loops, and
+// cross-view composition are rejected here. Stdlib 1-hop accessors and
+// built-in math are allowed.
+
+fn validate_fold_body(view_name: &str, body: &[IrStmt]) -> Result<(), ResolveError> {
+    for s in body {
+        validate_fold_stmt(view_name, s)?;
+    }
+    Ok(())
+}
+
+fn validate_fold_stmt(view_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
+    match s {
+        IrStmt::Let { value, .. } => validate_fold_expr(view_name, value),
+        IrStmt::SelfUpdate { op, value, span } => {
+            if !matches!(op.as_str(), "=" | "+=" | "-=" | "*=" | "/=") {
+                return Err(ResolveError::UdfInViewFoldBody {
+                    view_name: view_name.to_string(),
+                    offending_construct: format!("self-update operator `{op}`"),
+                    span: *span,
+                });
+            }
+            validate_fold_expr(view_name, value)
+        }
+        IrStmt::If { cond, then_body, else_body, .. } => {
+            validate_fold_expr(view_name, cond)?;
+            for ts in then_body {
+                validate_fold_stmt(view_name, ts)?;
+            }
+            if let Some(eb) = else_body {
+                for es in eb {
+                    validate_fold_stmt(view_name, es)?;
+                }
+            }
+            Ok(())
+        }
+        IrStmt::Match { scrutinee, arms, .. } => {
+            validate_fold_expr(view_name, scrutinee)?;
+            for arm in arms {
+                for stmt in &arm.body {
+                    validate_fold_stmt(view_name, stmt)?;
+                }
+            }
+            Ok(())
+        }
+        IrStmt::Expr(e) => validate_fold_expr(view_name, e),
+        IrStmt::For { span, .. } => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: "unbounded `for` loop".into(),
+            span: *span,
+        }),
+        IrStmt::Emit(IrEmit { span, .. }) => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: "`emit` inside fold body (only physics cascades emit events)"
+                .into(),
+            span: *span,
+        }),
+    }
+}
+
+fn validate_fold_expr(view_name: &str, e: &IrExprNode) -> Result<(), ResolveError> {
+    match &e.kind {
+        // Literals, locals, and resolved name references — trivially allowed.
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Local(_, _)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. } => Ok(()),
+
+        // Stdlib 1-hop method calls (e.g. `rng.uniform(0, 1)`, `query.*`)
+        // are allowed. These are the only "call" shape permitted.
+        IrExpr::NamespaceCall { args, .. } => {
+            for a in args {
+                validate_fold_expr(view_name, &a.value)?;
+            }
+            Ok(())
+        }
+
+        // Built-in math / aggregation primitives are allowed.
+        IrExpr::BuiltinCall(_, args) => {
+            for a in args {
+                validate_fold_expr(view_name, &a.value)?;
+            }
+            Ok(())
+        }
+
+        // Cross-view composition rejected — views-calling-views inside a
+        // fold body would break the one-pass commutative-update contract.
+        IrExpr::ViewCall(_, _) | IrExpr::View(_) => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct:
+                "call to another view (cross-view composition forbidden in fold bodies)"
+                    .into(),
+            span: e.span,
+        }),
+
+        // Verb calls are not fold-body primitives.
+        IrExpr::VerbCall(_, _) | IrExpr::Verb(_) => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: "verb call".into(),
+            span: e.span,
+        }),
+
+        IrExpr::UnresolvedCall(name, _) => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: format!(
+                "unresolved call `{name}` (user-defined helpers are forbidden in fold bodies)"
+            ),
+            span: e.span,
+        }),
+
+        // Field / index / tuple / list are pure projections.
+        IrExpr::Field { base, .. } => validate_fold_expr(view_name, base),
+        IrExpr::Index(a, b) => {
+            validate_fold_expr(view_name, a)?;
+            validate_fold_expr(view_name, b)
+        }
+        IrExpr::Tuple(xs) | IrExpr::List(xs) => {
+            for x in xs {
+                validate_fold_expr(view_name, x)?;
+            }
+            Ok(())
+        }
+
+        // Arithmetic / comparison / logical operators.
+        IrExpr::Binary(_, lhs, rhs) | IrExpr::In(lhs, rhs) | IrExpr::Contains(lhs, rhs) => {
+            validate_fold_expr(view_name, lhs)?;
+            validate_fold_expr(view_name, rhs)
+        }
+        IrExpr::Unary(_, rhs) => validate_fold_expr(view_name, rhs),
+
+        // Bounded folds are allowed; quantifiers too (spec §2.3's closed
+        // set already includes `forall`/`exists` via the logical surface).
+        IrExpr::Fold { iter, body, .. } => {
+            if let Some(i) = iter {
+                validate_fold_expr(view_name, i)?;
+            }
+            validate_fold_expr(view_name, body)
+        }
+        IrExpr::Quantifier { iter, body, .. } => {
+            validate_fold_expr(view_name, iter)?;
+            validate_fold_expr(view_name, body)
+        }
+
+        // Struct literals / ctors are data shapes, not calls.
+        IrExpr::StructLit { fields, .. } => {
+            for f in fields {
+                validate_fold_expr(view_name, &f.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::Ctor { args, .. } => {
+            for a in args {
+                validate_fold_expr(view_name, a)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::Match { scrutinee, arms } => {
+            validate_fold_expr(view_name, scrutinee)?;
+            for arm in arms {
+                validate_fold_expr(view_name, &arm.body)?;
+            }
+            Ok(())
+        }
+        IrExpr::If { cond, then_expr, else_expr } => {
+            validate_fold_expr(view_name, cond)?;
+            validate_fold_expr(view_name, then_expr)?;
+            if let Some(eb) = else_expr {
+                validate_fold_expr(view_name, eb)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::PerUnit { expr, delta } => {
+            validate_fold_expr(view_name, expr)?;
+            validate_fold_expr(view_name, delta)
+        }
+
+        IrExpr::Raw(_) => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: "unrecognised expression shape".into(),
+            span: e.span,
+        }),
+    }
 }

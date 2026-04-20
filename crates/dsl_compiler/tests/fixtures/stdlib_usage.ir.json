@@ -411,6 +411,7 @@
           }
         }
       ],
+      "decay": null,
       "span": {
         "start": 289,
         "end": 515

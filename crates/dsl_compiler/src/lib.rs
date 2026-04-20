@@ -17,6 +17,7 @@ pub mod emit_physics;
 pub mod emit_python;
 pub mod emit_rust;
 pub mod emit_scoring;
+pub mod emit_view;
 pub mod error;
 pub mod ir;
 pub mod parser;

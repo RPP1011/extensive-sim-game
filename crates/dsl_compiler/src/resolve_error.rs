@@ -54,6 +54,23 @@ pub enum ResolveError {
         field: String,
         span: Span,
     },
+    /// A `@decay(rate=R, per=tick)` annotation is malformed. `detail` carries
+    /// the specific constraint violated (missing args, invalid rate range,
+    /// unsupported `per` unit, attached to a non-`@materialized` or
+    /// non-fold view, etc.).
+    InvalidDecayHint {
+        detail: String,
+        span: Span,
+    },
+    /// A view's `@materialized` fold body uses a construct outside the
+    /// closed operator set documented in spec §2.3. `offending_construct`
+    /// is a short human-readable label (e.g. "unresolved call `helper`",
+    /// "while loop", "unbounded `for`").
+    UdfInViewFoldBody {
+        view_name: String,
+        offending_construct: String,
+        span: Span,
+    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -112,6 +129,22 @@ impl std::fmt::Display for ResolveError {
             ResolveError::TagBindingUnknown { tag, field, span } => write!(
                 f,
                 "tag `@{tag}` does not declare field `{field}` at bytes {}..{}",
+                span.start, span.end
+            ),
+            ResolveError::InvalidDecayHint { detail, span } => write!(
+                f,
+                "invalid `@decay` annotation at bytes {}..{}: {detail}",
+                span.start, span.end
+            ),
+            ResolveError::UdfInViewFoldBody { view_name, offending_construct, span } => write!(
+                f,
+                "view `{view_name}` fold body uses `{offending_construct}` at bytes {}..{} \
+                 (fold bodies are restricted to the closed operator set: \
+                 self += / -= / *= / /=, self = <expr>, if/else, arithmetic, \
+                 comparison, logical, count/sum/min/max over bounded collections, \
+                 abs/floor/ceil/pow/ln/sqrt/clamp, stdlib 1-hop accessors, \
+                 and `let` bindings — no user-defined helpers, no loops, no \
+                 cross-view composition; see spec §2.3)",
                 span.start, span.end
             ),
         }
