@@ -125,6 +125,10 @@ fn fmt_event(e: &Event) -> String {
             "FearSpread(tick={tick},observer={},dead_kin={})",
             observer.raw(), dead_kin.raw(),
         ),
+        Event::PackAssist { observer, target, tick } => format!(
+            "PackAssist(tick={tick},observer={},target={})",
+            observer.raw(), target.raw(),
+        ),
         // Any other variant we don't currently expect — serialise a
         // generic tag so the test still captures the surprise. If one of
         // these starts appearing for real, promote it to an explicit arm.

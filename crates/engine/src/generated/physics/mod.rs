@@ -16,6 +16,7 @@ pub mod fear_spread_on_death;
 pub mod heal;
 pub mod modify_standing;
 pub mod opportunity_attack;
+pub mod pack_focus_on_engagement;
 pub mod record_memory;
 pub mod shield;
 pub mod slow;
@@ -212,6 +213,7 @@ pub fn dispatch_engagement_committed(event: &Event, state: &mut SimState, events
         return;
     };
     chronicle_engagement::chronicle_engagement(actor, target, state, events);
+    pack_focus_on_engagement::pack_focus_on_engagement(actor, target, state, events);
 }
 
 #[allow(unused_variables)]

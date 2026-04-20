@@ -6,6 +6,7 @@ pub mod is_hostile;
 pub mod is_stunned;
 pub mod kin_fear;
 pub mod my_enemies;
+pub mod pack_focus;
 pub mod slow_factor;
 pub mod threat_level;
 
@@ -14,6 +15,7 @@ pub use is_hostile::is_hostile;
 pub use is_stunned::is_stunned;
 pub use kin_fear::KinFear;
 pub use my_enemies::MyEnemies;
+pub use pack_focus::PackFocus;
 pub use slow_factor::slow_factor;
 pub use threat_level::ThreatLevel;
 
@@ -25,6 +27,7 @@ pub struct ViewRegistry {
     pub engaged_with: engaged_with::EngagedWith,
     pub kin_fear: kin_fear::KinFear,
     pub my_enemies: my_enemies::MyEnemies,
+    pub pack_focus: pack_focus::PackFocus,
     pub threat_level: threat_level::ThreatLevel,
 }
 
@@ -45,6 +48,7 @@ impl ViewRegistry {
             self.engaged_with.fold_event(e, tick);
             self.kin_fear.fold_event(e, tick);
             self.my_enemies.fold_event(e, tick);
+            self.pack_focus.fold_event(e, tick);
             self.threat_level.fold_event(e, tick);
         }
     }

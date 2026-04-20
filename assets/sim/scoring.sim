@@ -171,6 +171,23 @@ scoring {
   //     the threat_level modifiers for decisive memory-driven
   //     targeting — a wolf that's been bitten picks that specific
   //     human over an equivalent fresh one.
+  //
+  // Task 169 — pack focus. `pack_focus(self, target)` rises by +1.0
+  // per PackAssist event (decayed 0.933^tick, ~10-tick half-life).
+  // One packmate's EngagementCommitted on `target` pushes each kin
+  // above the 0.5 gate; the +0.4 bump pulls the observer's Attack
+  // on that specific target above an equivalent fresh-target Attack
+  // (which has no pack_focus boost). Same delta magnitude as
+  // `my_enemies` — pack focus is effectively "my kin have engaged
+  // this one", borrowing the same calibrated dial. Keyed on
+  // (self, target) specifically (no wildcard) so the boost applies
+  // only to the engaged-with target, not every candidate — otherwise
+  // every row would tie on the pack_focus bump and the focusing
+  // signal would vanish.
+  //
+  //   view::pack_focus(self, target) > 0.5 : +0.4
+  //     the observer's packmates are already engaged with this target.
+  //     Stacks with threat_level / my_enemies for a decisive focus.
   Attack(target) = 0.0
     + (if self.hp_pct >= 0.8 { 0.5 } else { 0.0 })
     + (if target.hp_pct < 0.3 { 0.4 } else { 0.0 })
@@ -178,6 +195,7 @@ scoring {
     + (view::threat_level(self, target) per_unit 0.01)
     + (if view::threat_level(self, target) > 20.0 { 0.3 } else { 0.0 })
     + (if view::my_enemies(self, target) > 0.5 { 0.4 } else { 0.0 })
+    + (if view::pack_focus(self, target) > 0.5 { 0.4 } else { 0.0 })
 
   // Cast / UseItem: "domain hook" kinds without a dedicated
   // `Action::*` constructor in `UtilityBackend::build_action`. Until

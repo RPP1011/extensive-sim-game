@@ -486,3 +486,44 @@ physics fear_spread_on_death @phase(event) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Pack focus (task 169) — emergent pack-hunt coordination via EngagementCommitted.
+// ---------------------------------------------------------------------------
+//
+// When an agent commits an engagement, every alive same-species
+// neighbour within a 12 m radius gets a `PackAssist` event emitted at
+// them, keyed on the target of the engagement. The `pack_focus`
+// @materialized view folds those into a per-(observer, target) decayed
+// scalar; scoring's Attack row reads it through `view::pack_focus(self,
+// target) > 0.5 : +0.4` — so a wolf whose packmate is already engaging
+// a human picks that specific human over an equivalent fresh human of
+// same hp. Result: wolves converge, humans converge, pack hunting
+// falls out of local scoring decisions.
+//
+// Species scoping lives in `query.nearby_kin` (reused from task 167):
+// only agents whose `CreatureType` matches the engaging actor's are
+// returned, so the physics rule stays species-agnostic. The beacon is
+// keyed on the *target* of the engagement — not on the engaging actor
+// — so kin read "go fight the one my packmate is fighting" rather than
+// "go fight my packmate". Radius 12 m matches fear_spread for symmetry
+// (both represent local visual contact; `config.combat.aggro_range` is
+// also 12).
+//
+// GPU-emittability: same envelope as `fear_spread_on_death` — a
+// `query.nearby_kin` iteration source and a single emit per kin. No
+// recursion, no unbounded state mutation.
+//
+// Three-agent displacement note: the `engagement_on_move` rule can
+// fire multiple EngagementCommitted in the same cascade (when a new
+// commit displaces a prior pairing). Each commit is a separate beacon
+// event; the view's per-(observer, target) key means re-engaging the
+// same target just refreshes the anchor rather than creating a new
+// slot, so the fold is naturally self-deduping across target churn.
+physics pack_focus_on_engagement @phase(event) {
+  on EngagementCommitted { actor: actor, target: target } {
+    for kin in query.nearby_kin(actor, 12.0) {
+      emit PackAssist { observer: kin, target: target }
+    }
+  }
+}

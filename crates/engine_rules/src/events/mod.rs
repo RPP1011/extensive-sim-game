@@ -34,6 +34,7 @@ pub mod engagement_committed;
 pub mod fear_spread;
 pub mod information_requested;
 pub mod opportunity_attack_triggered;
+pub mod pack_assist;
 pub mod quest_accepted;
 pub mod quest_posted;
 pub mod record_memory;
@@ -71,6 +72,7 @@ pub use engagement_committed::EngagementCommitted;
 pub use fear_spread::FearSpread;
 pub use information_requested::InformationRequested;
 pub use opportunity_attack_triggered::OpportunityAttackTriggered;
+pub use pack_assist::PackAssist;
 pub use quest_accepted::QuestAccepted;
 pub use quest_posted::QuestPosted;
 pub use record_memory::RecordMemory;
@@ -267,6 +269,11 @@ pub enum Event {
         target: AgentId,
         tick: u32,
     },
+    PackAssist {
+        observer: AgentId,
+        target: AgentId,
+        tick: u32,
+    },
     QuestAccepted {
         acceptor: AgentId,
         quest_id: QuestId,
@@ -324,6 +331,7 @@ impl Event {
             Event::FearSpread { tick, .. } => *tick,
             Event::InformationRequested { tick, .. } => *tick,
             Event::OpportunityAttackTriggered { tick, .. } => *tick,
+            Event::PackAssist { tick, .. } => *tick,
             Event::QuestAccepted { tick, .. } => *tick,
             Event::QuestPosted { tick, .. } => *tick,
             Event::RecordMemory { tick, .. } => *tick,
@@ -364,6 +372,7 @@ impl Event {
             Event::FearSpread { .. } => true,
             Event::InformationRequested { .. } => true,
             Event::OpportunityAttackTriggered { .. } => true,
+            Event::PackAssist { .. } => true,
             Event::QuestAccepted { .. } => true,
             Event::QuestPosted { .. } => true,
             Event::RecordMemory { .. } => true,
