@@ -4,6 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-engine = { path = "../engine" }
 serde = { version = "1", features = ["derive"] }
 glam = "0.29"

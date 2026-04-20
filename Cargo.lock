@@ -2295,6 +2295,7 @@ dependencies = [
  "contracts",
  "criterion",
  "dhat",
+ "engine_rules",
  "glam",
  "hex",
  "insta",
@@ -2310,7 +2311,6 @@ dependencies = [
 name = "engine_rules"
 version = "0.1.0"
 dependencies = [
- "engine",
  "glam",
  "serde",
 ]

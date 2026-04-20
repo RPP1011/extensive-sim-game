@@ -1,10 +1,20 @@
 //! Rust emission for compiler milestone 2.
 //!
-//! `EventIR` → `struct` in a per-event file, plus an aggregate `events/mod.rs`
-//! that exposes the `Event` enum. The output is deliberately mechanical — no
-//! macros, no helper traits, just `writeln!` into a `String`. Reviewers should
-//! be able to skim the emitted output without tracing any abstractions back
-//! to the emitter.
+//! Every `event` declaration produces:
+//!
+//! 1. A standalone `struct` in `events/<snake_case>.rs` (kept for serde /
+//!    Python trace-row parity, and for external consumers that want to
+//!    construct a single event value without the enum tag).
+//! 2. A variant in the aggregate `Event` enum (in `events/mod.rs`) with
+//!    the SAME fields inlined — `Event::AgentDied { agent_id, tick }` — so
+//!    pattern-matching call sites inside `engine::*` read exactly like the
+//!    pre-milestone hand-written enum. The integration step at milestone 2
+//!    relies on this shape: `engine` deleted its own `Event` and now
+//!    consumes `engine_rules::events::Event` with zero call-site changes.
+//!
+//! The emitter is deliberately mechanical — no macros, no helper traits,
+//! just `writeln!` into a `String`. Reviewers should be able to skim the
+//! emitted output without tracing any abstractions back to the emitter.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -19,12 +29,13 @@ use crate::ir::{EventIR, IrType};
 pub fn emit_event(event: &EventIR, source_file: Option<&str>) -> String {
     let mut out = String::new();
     emit_header(&mut out, source_file);
-    emit_imports(&mut out, event);
+    emit_imports(&mut out, std::slice::from_ref(event));
     emit_struct(&mut out, event);
     out
 }
 
-/// Emit the aggregate `events/mod.rs`.
+/// Emit the aggregate `events/mod.rs` — contains the enum `Event` whose
+/// variants carry the same field shape as the per-struct modules, inlined.
 pub fn emit_events_mod(events: &[EventIR]) -> String {
     let mut sorted: Vec<&EventIR> = events.iter().collect();
     sorted.sort_by(|a, b| a.name.cmp(&b.name));
@@ -42,14 +53,51 @@ pub fn emit_events_mod(events: &[EventIR]) -> String {
         writeln!(out, "pub use {}::{};", snake_case(&e.name), e.name).unwrap();
     }
     writeln!(out).unwrap();
-    writeln!(out, "use serde::{{Deserialize, Serialize}};").unwrap();
-    writeln!(out).unwrap();
-    writeln!(out, "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]").unwrap();
+
+    // Imports for the inline-struct enum variants: the same niche IDs /
+    // Vec3 / etc. used by the per-event structs, plus any named types
+    // we know how to route (QuestCategory / Resolution).
+    let events_owned: Vec<EventIR> = sorted.iter().copied().cloned().collect();
+    emit_imports(&mut out, &events_owned);
+
+    // Copy on the enum requires Copy on every variant's every field. This
+    // matches the pre-milestone hand-written `engine::event::Event`, which
+    // was `#[derive(Copy, Clone, Debug, PartialEq)]`. The engine's ring
+    // buffer depends on `Event: Copy` (it returns owned copies via
+    // `EventRing::get_pushed`). If a future declaration adds a non-Copy
+    // field (e.g. `String`), this drops to `Clone` only and the ring
+    // buffer will fail to compile — flagging that call site so it can be
+    // migrated to `Clone`.
+    let all_variants_copy = events
+        .iter()
+        .all(|e| e.fields.iter().all(|f| is_copy(&f.ty)));
+    if all_variants_copy {
+        writeln!(out, "#[derive(Copy, Clone, Debug, PartialEq)]").unwrap();
+    } else {
+        writeln!(out, "#[derive(Clone, Debug, PartialEq)]").unwrap();
+    }
     writeln!(out, "pub enum Event {{").unwrap();
     for e in &sorted {
-        writeln!(out, "    {}({}),", e.name, e.name).unwrap();
+        if e.fields.is_empty() {
+            writeln!(out, "    {},", e.name).unwrap();
+            continue;
+        }
+        writeln!(out, "    {} {{", e.name).unwrap();
+        for f in &e.fields {
+            writeln!(out, "        {}: {},", f.name, render_type(&f.ty)).unwrap();
+        }
+        writeln!(out, "    }},").unwrap();
     }
     writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    // Associated helpers — two methods every replayable sim needs:
+    // `tick()` to bucket events into a frame, `is_replayable()` to
+    // partition replayable from side-channel ones. The latter honours the
+    // `@replayable` annotation: anything NOT marked is treated as a side
+    // channel (chronicle / telemetry) and excluded from replay hashes.
+    emit_event_impl(&mut out, &sorted);
+
     out
 }
 
@@ -76,33 +124,69 @@ fn emit_header(out: &mut String, source_file: Option<&str>) {
     writeln!(out).unwrap();
 }
 
-fn emit_imports(out: &mut String, event: &EventIR) {
+fn emit_imports(out: &mut String, events: &[EventIR]) {
     let mut niche_ids: BTreeSet<&'static str> = BTreeSet::new();
     let mut needs_vec3 = false;
     let mut needs_smallvec = false;
+    let mut named_engine_types: BTreeSet<&'static str> = BTreeSet::new();
 
-    for f in &event.fields {
-        collect_imports(&f.ty, &mut niche_ids, &mut needs_vec3, &mut needs_smallvec);
+    for e in events {
+        for f in &e.fields {
+            collect_imports(
+                &f.ty,
+                &mut niche_ids,
+                &mut needs_vec3,
+                &mut needs_smallvec,
+                &mut named_engine_types,
+            );
+        }
     }
 
     // Emit imports in alphabetical order so `rustfmt` is a no-op.
-    // Order: engine::ids, glam, serde, smallvec.
+    // Order: crate::ids, crate::types, glam, smallvec.
+    let mut wrote_anything = false;
     if !niche_ids.is_empty() {
         let joined: Vec<&str> = niche_ids.iter().copied().collect();
         if joined.len() == 1 {
-            writeln!(out, "use engine::ids::{};", joined[0]).unwrap();
+            writeln!(out, "use crate::ids::{};", joined[0]).unwrap();
         } else {
-            writeln!(out, "use engine::ids::{{{}}};", joined.join(", ")).unwrap();
+            writeln!(out, "use crate::ids::{{{}}};", joined.join(", ")).unwrap();
+        }
+        wrote_anything = true;
+    }
+    // Named types we route into `crate::types::*`.
+    for ty in &named_engine_types {
+        if let Some(import) = engine_named_import(ty) {
+            writeln!(out, "{}", import).unwrap();
+            wrote_anything = true;
         }
     }
     if needs_vec3 {
         writeln!(out, "use glam::Vec3;").unwrap();
+        wrote_anything = true;
     }
-    writeln!(out, "use serde::{{Deserialize, Serialize}};").unwrap();
     if needs_smallvec {
         writeln!(out, "use smallvec::SmallVec;").unwrap();
+        wrote_anything = true;
     }
-    writeln!(out).unwrap();
+    if wrote_anything {
+        writeln!(out).unwrap();
+    }
+}
+
+/// Canonical import for each named type that may appear in an event field.
+/// Returns `None` for types we don't recognise — those render by bare name
+/// and expect the caller to import them.
+///
+/// Routed types live in `engine_rules::types`; the emitter references them
+/// via `crate::types::...` because every emission target is inside the
+/// `engine_rules` crate root.
+fn engine_named_import(name: &str) -> Option<&'static str> {
+    match name {
+        "QuestCategory" => Some("use crate::types::QuestCategory;"),
+        "Resolution" => Some("use crate::types::Resolution;"),
+        _ => None,
+    }
 }
 
 fn collect_imports(
@@ -110,6 +194,7 @@ fn collect_imports(
     niche_ids: &mut BTreeSet<&'static str>,
     needs_vec3: &mut bool,
     needs_smallvec: &mut bool,
+    named_engine_types: &mut BTreeSet<&'static str>,
 ) {
     match ty {
         IrType::AgentId => {
@@ -136,6 +221,20 @@ fn collect_imports(
         IrType::Vec3 => {
             *needs_vec3 = true;
         }
+        IrType::Named(n) => {
+            // Interned matches on the engine-side named types we know how
+            // to route. Unknown names render bare and rely on caller-side
+            // imports — the compiler flags them with `Named(..)` in the IR.
+            match n.as_str() {
+                "QuestCategory" => {
+                    named_engine_types.insert("QuestCategory");
+                }
+                "Resolution" => {
+                    named_engine_types.insert("Resolution");
+                }
+                _ => {}
+            }
+        }
         IrType::SortedVec(inner, _)
         | IrType::RingBuffer(inner, _)
         | IrType::SmallVec(inner, _)
@@ -145,11 +244,11 @@ fn collect_imports(
             if matches!(ty, IrType::SmallVec(_, _)) {
                 *needs_smallvec = true;
             }
-            collect_imports(inner, niche_ids, needs_vec3, needs_smallvec);
+            collect_imports(inner, niche_ids, needs_vec3, needs_smallvec, named_engine_types);
         }
         IrType::Tuple(items) => {
             for t in items {
-                collect_imports(t, niche_ids, needs_vec3, needs_smallvec);
+                collect_imports(t, niche_ids, needs_vec3, needs_smallvec, named_engine_types);
             }
         }
         _ => {}
@@ -157,42 +256,86 @@ fn collect_imports(
 }
 
 fn emit_struct(out: &mut String, event: &EventIR) {
-    // TODO(milestone-3+): annotations (`@replayable`, `@high_volume`, `@traced`)
-    // will influence derives and trace emission. For now every event gets
-    // `Serialize + Deserialize` unconditionally.
     let all_copy = event.fields.iter().all(|f| is_copy(&f.ty));
+    // No serde derive for now — milestone 2's cutover dropped it so the
+    // emitted struct doesn't require `Vec3: Serialize` or a bridge for
+    // every niche ID. Trace emission (milestone 11's Python surface)
+    // brings serde back behind a feature flag.
     if all_copy {
-        writeln!(
-            out,
-            "#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]"
-        )
-        .unwrap();
+        writeln!(out, "#[derive(Copy, Clone, Debug, PartialEq)]").unwrap();
     } else {
-        writeln!(out, "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]").unwrap();
+        writeln!(out, "#[derive(Clone, Debug, PartialEq)]").unwrap();
     }
     writeln!(out, "pub struct {} {{", event.name).unwrap();
     for f in &event.fields {
-        // Niche IDs don't implement serde themselves; bridge via the
-        // hand-written `engine_rules::id_serde` module.
-        if let Some(helper) = id_serde_module(&f.ty) {
-            writeln!(out, "    #[serde(with = \"crate::id_serde::{}\")]", helper).unwrap();
-        }
         writeln!(out, "    pub {}: {},", f.name, render_type(&f.ty)).unwrap();
     }
     writeln!(out, "}}").unwrap();
 }
 
-fn id_serde_module(ty: &IrType) -> Option<&'static str> {
-    match ty {
-        IrType::AgentId => Some("agent_id"),
-        IrType::ItemId => Some("item_id"),
-        IrType::GroupId => Some("group_id"),
-        IrType::QuestId => Some("quest_id"),
-        IrType::AuctionId => Some("auction_id"),
-        IrType::AbilityId => Some("ability_id"),
-        IrType::EventId => Some("event_id"),
-        _ => None,
+/// Emit `impl Event { fn tick() .. fn is_replayable() .. }`. Both methods
+/// walk the variant list: `tick()` looks for a field named `tick` (the
+/// engine convention — every replayable variant carries one); any variant
+/// without a tick field returns `0`. `is_replayable()` checks the
+/// `@replayable` annotation on each source declaration.
+fn emit_event_impl(out: &mut String, events: &[&EventIR]) {
+    writeln!(out, "impl Event {{").unwrap();
+
+    // `tick()` — the pre-milestone engine::event shape returns `u32`. Some
+    // DSL events may declare `tick: u64` if the source author wrote it that
+    // way; we emit a `u32` signature here because every call site in the
+    // engine already expects u32. If a variant's `tick` field is a wider
+    // type, we narrow via `as u32`. When there's no `tick` field, the
+    // variant returns `0` — this only fires for events without replay
+    // semantics, which the caller filters out via `is_replayable()` first.
+    writeln!(out, "    pub fn tick(&self) -> u32 {{").unwrap();
+    writeln!(out, "        match self {{").unwrap();
+    for e in events {
+        let has_tick = e.fields.iter().any(|f| f.name == "tick");
+        if has_tick {
+            let tick_field = e.fields.iter().find(|f| f.name == "tick").unwrap();
+            let narrow = matches!(tick_field.ty, IrType::U64 | IrType::I64);
+            if narrow {
+                writeln!(
+                    out,
+                    "            Event::{} {{ tick, .. }} => *tick as u32,",
+                    e.name
+                )
+                .unwrap();
+            } else {
+                writeln!(out, "            Event::{} {{ tick, .. }} => *tick,", e.name).unwrap();
+            }
+        } else if e.fields.is_empty() {
+            writeln!(out, "            Event::{} => 0,", e.name).unwrap();
+        } else {
+            writeln!(out, "            Event::{} {{ .. }} => 0,", e.name).unwrap();
+        }
     }
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+
+    // `is_replayable()` — honour the `@replayable` annotation.
+    writeln!(out, "    pub fn is_replayable(&self) -> bool {{").unwrap();
+    writeln!(out, "        match self {{").unwrap();
+    for e in events {
+        let replayable = event_is_replayable(e);
+        let pat = if e.fields.is_empty() {
+            format!("Event::{}", e.name)
+        } else {
+            format!("Event::{} {{ .. }}", e.name)
+        };
+        writeln!(out, "            {} => {},", pat, replayable).unwrap();
+    }
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+
+    writeln!(out, "}}").unwrap();
+}
+
+fn event_is_replayable(e: &EventIR) -> bool {
+    e.annotations
+        .iter()
+        .any(|a| a.name == "replayable")
 }
 
 fn is_copy(ty: &IrType) -> bool {
@@ -218,6 +361,11 @@ fn is_copy(ty: &IrType) -> bool {
         | IrType::AbilityId => true,
         IrType::Array(inner, _) | IrType::Optional(inner) => is_copy(inner),
         IrType::Tuple(items) => items.iter().all(is_copy),
+        // Engine-side named types we route: assume Copy (QuestCategory,
+        // Resolution both derive Copy today). If a future addition breaks
+        // this assumption, the emitted per-struct file won't compile — at
+        // which point this heuristic needs to grow a lookup table.
+        IrType::Named(_) => true,
         _ => false,
     }
 }
@@ -306,6 +454,10 @@ mod tests {
         EventIR { name: name.into(), fields, annotations: ann, span: Span::dummy() }
     }
 
+    fn replayable_annotation() -> Annotation {
+        Annotation { name: "replayable".into(), args: vec![], span: Span::dummy() }
+    }
+
     #[test]
     fn simple_primitives() {
         let e = mk_event(
@@ -320,10 +472,11 @@ mod tests {
         assert!(out.contains("pub struct Heal"));
         assert!(out.contains("pub amount: f32"));
         assert!(out.contains("pub tick: u64"));
-        assert!(out.contains("Debug, Clone, Copy, PartialEq, Serialize, Deserialize"));
-        assert!(!out.contains("use engine::ids"));
-        // rustfmt-alphabetical: no niche ids means only serde.
-        assert!(out.contains("use serde::{Deserialize, Serialize};"));
+        // Milestone 2's cutover dropped Serialize/Deserialize — struct files
+        // carry only the derives the engine needs (Copy/Clone/Debug/PartialEq).
+        assert!(out.contains("#[derive(Copy, Clone, Debug, PartialEq)]"));
+        assert!(!out.contains("Serialize"));
+        assert!(!out.contains("use crate::ids"));
     }
 
     #[test]
@@ -337,13 +490,11 @@ mod tests {
             vec![],
         );
         let out = emit_event(&e, Some("assets/sim/events.sim"));
-        assert!(out.contains("use engine::ids::AgentId;"));
+        assert!(out.contains("use crate::ids::AgentId;"));
         assert!(out.contains("pub target: AgentId"));
         assert!(out.contains("// GENERATED by dsl_compiler from assets/sim/events.sim."));
-        // `engine::ids::*` comes before `serde::*` alphabetically (rustfmt order).
-        let eng = out.find("use engine::ids").unwrap();
-        let ser = out.find("use serde::").unwrap();
-        assert!(eng < ser, "engine::ids import must precede serde import");
+        // Serde has been dropped from per-struct files — no serde import.
+        assert!(!out.contains("use serde"));
     }
 
     #[test]
@@ -358,7 +509,7 @@ mod tests {
         );
         let out = emit_event(&e, None);
         assert!(out.contains("pub target: Option<AgentId>"));
-        assert!(out.contains("use engine::ids::AgentId;"));
+        assert!(out.contains("use crate::ids::AgentId;"));
     }
 
     #[test]
@@ -373,9 +524,9 @@ mod tests {
         );
         let out = emit_event(&e, None);
         assert!(out.contains("pub targets: [AgentId; 4]"));
-        assert!(out.contains("use engine::ids::AgentId;"));
+        assert!(out.contains("use crate::ids::AgentId;"));
         // Arrays of Copy are still Copy.
-        assert!(out.contains("Clone, Copy, PartialEq"));
+        assert!(out.contains("#[derive(Copy, Clone, Debug, PartialEq)]"));
     }
 
     #[test]
@@ -391,16 +542,59 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_mod_is_alphabetical() {
-        let e1 = mk_event("Zebra", vec![mk_field("t", IrType::U64)], vec![]);
-        let e2 = mk_event("Apple", vec![mk_field("t", IrType::U64)], vec![]);
+    fn aggregate_mod_is_alphabetical_with_struct_variants() {
+        let e1 = mk_event(
+            "Zebra",
+            vec![mk_field("t", IrType::U64), mk_field("tick", IrType::U32)],
+            vec![replayable_annotation()],
+        );
+        let e2 = mk_event(
+            "Apple",
+            vec![mk_field("tick", IrType::U32)],
+            vec![replayable_annotation()],
+        );
         let out = emit_events_mod(&[e1, e2]);
         let apple = out.find("pub mod apple;").unwrap();
         let zebra = out.find("pub mod zebra;").unwrap();
         assert!(apple < zebra);
         assert!(out.contains("pub enum Event {"));
-        assert!(out.contains("Apple(Apple),"));
-        assert!(out.contains("Zebra(Zebra),"));
+        // Struct-style variants with inline fields.
+        assert!(out.contains("Apple {"));
+        assert!(out.contains("Zebra {"));
+        assert!(out.contains("tick: u32"));
+        // Enum carries helper impls.
+        assert!(out.contains("pub fn tick(&self) -> u32"));
+        assert!(out.contains("pub fn is_replayable(&self) -> bool"));
+    }
+
+    #[test]
+    fn replayable_annotation_flips_is_replayable() {
+        let e1 = mk_event(
+            "Replayable",
+            vec![mk_field("tick", IrType::U32)],
+            vec![replayable_annotation()],
+        );
+        let e2 = mk_event(
+            "SideChannel",
+            vec![mk_field("tick", IrType::U32)],
+            vec![],
+        );
+        let out = emit_events_mod(&[e1, e2]);
+        // Replayable returns true; side-channel returns false.
+        assert!(out.contains("Event::Replayable { .. } => true"));
+        assert!(out.contains("Event::SideChannel { .. } => false"));
+    }
+
+    #[test]
+    fn u64_tick_narrows_to_u32_in_tick_method() {
+        let e = mk_event(
+            "WithU64Tick",
+            vec![mk_field("tick", IrType::U64)],
+            vec![replayable_annotation()],
+        );
+        let out = emit_events_mod(&[e]);
+        // Narrow cast so the returned type matches the engine's u32 tick API.
+        assert!(out.contains("*tick as u32"));
     }
 
     #[test]

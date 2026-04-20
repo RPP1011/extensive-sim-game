@@ -1,51 +1,12 @@
-use std::num::NonZeroU32;
+//! ID vocabulary — owned by `engine_rules` as of milestone 2's integration
+//! step. This module re-exports the compiler-output types so existing
+//! `use engine::ids::AgentId` (etc.) call sites keep compiling.
+//!
+//! See `crates/engine_rules/src/ids.rs` for the canonical definitions.
 
-macro_rules! id_type {
-    ($name:ident) => {
-        #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-        #[repr(transparent)]
-        pub struct $name(NonZeroU32);
-
-        impl $name {
-            #[inline]
-            pub fn new(raw: u32) -> Option<Self> {
-                NonZeroU32::new(raw).map(Self)
-            }
-
-            #[inline]
-            pub fn raw(self) -> u32 {
-                self.0.get()
-            }
-        }
-    };
-}
-
-id_type!(AgentId);
-id_type!(GroupId);
-// `ItemId` — reserved for the item-entity subsystem plan (roadmap §Items).
-id_type!(ItemId);
-id_type!(QuestId);
-// `AuctionId` — reserved for the auction/exchange plan (roadmap §Economy).
-id_type!(AuctionId);
-// `InviteId` — reserved for the invite/quest-coalition plan (roadmap §Social).
-id_type!(InviteId);
-// `SettlementId` — reserved for the settlement/region plan (roadmap §Regions).
-id_type!(SettlementId);
-
-// Re-export `AbilityId` so downstream code can reach every primitive id
-// type from `crate::ids::*`. The canonical definition lives alongside the
-// ability subsystem (see `crate::ability::id`).
-pub use crate::ability::AbilityId;
-
-/// Identifies an event within the `EventRing` by `(tick, seq)`. Assigned by
-/// `EventRing::push` / `push_caused_by`; used as a sidecar cause pointer so
-/// cascade fan-out can reconstruct causal trees without affecting the
-/// replayable hash (see `EventRing::replayable_sha256`).
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct EventId {
-    pub tick: u32,
-    pub seq:  u32,
-}
+pub use engine_rules::ids::{
+    AbilityId, AgentId, AuctionId, EventId, GroupId, InviteId, ItemId, QuestId, SettlementId,
+};
 
 #[cfg(test)]
 mod tests {

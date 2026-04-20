@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 
 @dataclass
-class ShieldApplied:
+class EffectHealApplied:
+    caster: int  # AgentId
     target: int  # AgentId
     amount: float
     tick: int

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 
 @dataclass
-class StunApplied:
-    target: int  # AgentId
-    remaining_ticks: int
+class StunExpired:
+    agent_id: int  # AgentId
     tick: int

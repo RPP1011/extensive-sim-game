@@ -2,6 +2,11 @@
 //! write to a tempdir, and assert the expected files appear with sane
 //! content. This does not assert against a byte-exact golden — that job
 //! belongs to the xtask `--check` mode running on the committed output.
+//!
+//! At milestone 2's integration step the seed DSL was expanded from 8 to
+//! the full legacy `engine::event::Event` taxonomy (35 variants) so the
+//! hand-written enum could be retired. The assertions below walk a
+//! representative subset of the expanded taxonomy.
 
 use std::fs;
 use std::path::PathBuf;
@@ -21,10 +26,12 @@ fn seed_path() -> PathBuf {
 fn emit_from_seed_produces_expected_files() {
     let src = fs::read_to_string(seed_path()).expect("seed fixture must exist");
     let comp = compile(&src).expect("seed must compile");
-    assert_eq!(
-        comp.events.len(),
-        8,
-        "seed DSL should declare 8 events; found {}",
+    // The seed now carries every variant the pre-milestone engine::event
+    // enum did. Keep this assertion loose on the high side so adding a
+    // new event doesn't churn this fixture on every commit.
+    assert!(
+        comp.events.len() >= 30,
+        "expanded seed DSL should declare >=30 events; found {}",
         comp.events.len()
     );
 
@@ -37,15 +44,18 @@ fn emit_from_seed_produces_expected_files() {
     sorted.sort();
     assert_eq!(rust_files, sorted, "rust files must be sorted");
 
+    // Representative subset — events that exist both pre- and post-cutover.
     let expected = [
         "agent_died.rs",
-        "damage.rs",
-        "heal.rs",
-        "shield_applied.rs",
-        "slow_applied.rs",
+        "agent_attacked.rs",
+        "agent_moved.rs",
+        "effect_damage_applied.rs",
+        "effect_heal_applied.rs",
+        "effect_shield_applied.rs",
+        "effect_slow_applied.rs",
         "slow_expired.rs",
-        "stun_applied.rs",
-        "transfer_gold.rs",
+        "stun_expired.rs",
+        "chronicle_entry.rs",
     ];
     for e in expected {
         assert!(
@@ -61,15 +71,42 @@ fn emit_from_seed_produces_expected_files() {
         );
     }
 
-    // The aggregate Rust mod should list every event in the enum.
-    for event_name in
-        ["AgentDied", "Damage", "Heal", "ShieldApplied", "SlowApplied", "SlowExpired", "StunApplied", "TransferGold"]
-    {
+    // The aggregate Rust mod should list every event as a struct-style
+    // variant — `Event::AgentDied { ... }` rather than `AgentDied(AgentDied)`.
+    // Engine pattern matches rely on this shape.
+    for event_name in [
+        "AgentDied",
+        "AgentAttacked",
+        "AgentMoved",
+        "EffectDamageApplied",
+        "ChronicleEntry",
+    ] {
         assert!(
-            artefacts.rust_events_mod.contains(&format!("{event_name}({event_name}),")),
-            "aggregate enum missing variant {event_name}"
+            artefacts.rust_events_mod.contains(&format!("{event_name} {{")),
+            "aggregate enum missing struct-style variant {event_name}"
         );
     }
+
+    // Helper impls exported alongside the enum.
+    assert!(
+        artefacts.rust_events_mod.contains("pub fn tick(&self) -> u32"),
+        "Event::tick() helper missing"
+    );
+    assert!(
+        artefacts
+            .rust_events_mod
+            .contains("pub fn is_replayable(&self) -> bool"),
+        "Event::is_replayable() helper missing"
+    );
+
+    // ChronicleEntry is the only non-replayable variant in the seed; it
+    // must return false.
+    assert!(
+        artefacts
+            .rust_events_mod
+            .contains("Event::ChronicleEntry { .. } => false"),
+        "ChronicleEntry should be flagged non-replayable"
+    );
 
     // The schema.rs must carry exactly 32 hex bytes.
     let schema = &artefacts.schema_rs;
@@ -86,16 +123,17 @@ fn emit_from_seed_produces_expected_files() {
     fs::write(events_dir.join("mod.rs"), &artefacts.rust_events_mod).unwrap();
     fs::write(tmp.path().join("schema.rs"), &artefacts.schema_rs).unwrap();
 
-    assert!(events_dir.join("damage.rs").exists());
+    assert!(events_dir.join("agent_died.rs").exists());
     assert!(events_dir.join("mod.rs").exists());
     assert!(tmp.path().join("schema.rs").exists());
 
-    // Content spot-check: the Damage event struct should reference AgentId.
-    let damage = fs::read_to_string(events_dir.join("damage.rs")).unwrap();
-    assert!(damage.contains("pub struct Damage"));
-    assert!(damage.contains("pub target: AgentId"));
-    assert!(damage.contains("pub amount: f32"));
-    assert!(damage.contains("use engine::ids::AgentId;"));
+    // Content spot-check: the AgentDied event struct should reference
+    // AgentId via the new `crate::ids::` import path (post-cutover; the
+    // old `engine::ids::` import went away when the dep cycle flipped).
+    let died = fs::read_to_string(events_dir.join("agent_died.rs")).unwrap();
+    assert!(died.contains("pub struct AgentDied"));
+    assert!(died.contains("pub agent_id: AgentId"));
+    assert!(died.contains("use crate::ids::AgentId;"));
 }
 
 #[test]

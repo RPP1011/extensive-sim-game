@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 
 @dataclass
-class Heal:
-    target: int  # AgentId
-    amount: float
+class AgentPlacedVoxel:
+    agent_id: int  # AgentId
+    where_pos: tuple[float, float, float]
+    mat_tag: int
     tick: int

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 
 @dataclass
-class TransferGold:
-    from: int  # AgentId
-    to: int  # AgentId
-    amount: int
+class EffectDamageApplied:
+    caster: int  # AgentId
+    target: int  # AgentId
+    amount: float
     tick: int

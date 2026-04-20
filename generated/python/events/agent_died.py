@@ -7,5 +7,5 @@ from dataclasses import dataclass
 
 @dataclass
 class AgentDied:
-    agent: int  # AgentId
+    agent_id: int  # AgentId
     tick: int

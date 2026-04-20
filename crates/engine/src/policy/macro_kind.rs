@@ -40,28 +40,12 @@ impl AnnounceAudience {
     }
 }
 
-/// Auction resolution policy. Matches `dsl/spec.md` §9 D1.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub enum Resolution {
-    HighestBid,
-    FirstAcceptable,
-    MutualAgreement,
-    Coalition { min_parties: u8 },
-    Majority,
-}
-
-/// Quest category — the universal coarse bucket. Domain-specific kinds
-/// (Hunt, Escort, Deliver, Charter, Marriage, …) register via the compiler's
-/// `QuestType` extension table; the engine only knows these five.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum QuestCategory {
-    Physical  = 0,
-    Political = 1,
-    Personal  = 2,
-    Economic  = 3,
-    Narrative = 4,
-}
+// `Resolution` and `QuestCategory` live in `engine_rules::types` as of
+// milestone 2's integration step — compiler-emitted `Event::QuestPosted`
+// references these as field types, and `engine_rules` can't depend on
+// `engine`. The re-exports below keep every `use engine::policy::QuestCategory`
+// (or `Resolution`) call site compiling unchanged.
+pub use engine_rules::types::{QuestCategory, Resolution};
 
 /// Parameterised macro action emitted by a policy.
 #[derive(Copy, Clone, Debug, PartialEq)]

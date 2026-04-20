@@ -2,12 +2,10 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use engine::ids::AgentId;
-use serde::{Deserialize, Serialize};
+use crate::ids::AgentId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AgentDied {
-    #[serde(with = "crate::id_serde::agent_id")]
-    pub agent: AgentId,
-    pub tick: u64,
+    pub agent_id: AgentId,
+    pub tick: u32,
 }

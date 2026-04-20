@@ -6,8 +6,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class SlowApplied:
-    target: int  # AgentId
-    factor_q8: int
-    remaining_ticks: int
+class AgentHarvestedVoxel:
+    agent_id: int  # AgentId
+    where_pos: tuple[float, float, float]
     tick: int
