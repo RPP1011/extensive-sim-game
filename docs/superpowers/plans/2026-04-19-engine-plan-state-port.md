@@ -219,11 +219,17 @@ on subsystems we don't have yet. They are tracked here for future plans.
    `new_unchecked`. Safer and keeps the niche optimisation.
 6. **Kill-then-respawn test for cold collections.** Slot reuse via the
    freelist meant every `SmallVec`-backed cold field needed an explicit
-   `.clear()` in both `spawn_agent` and `kill_agent` (well, in
-   `spawn_agent` because it overrides the slot). Tests under Task G, I
-   pin this — without the clear, a re-spawned agent would inherit the
-   previous tenant's memberships / memory / etc., a silent-correctness
-   landmine.
+   `.clear()` in `spawn_agent` on slot reuse — `kill_agent` leaves the
+   collections in place. Clearing spawn-side is cheaper and matches
+   existing tests (post-respawn slot empty). A dead slot's collections
+   remain readable between `kill_agent` and the next `spawn_agent` into
+   that slot; accessor methods are not mask-gated, so consumers must
+   check `agent_alive` before reading if they care. Tests under Task G,
+   I pin the spawn-side clear — without it, a re-spawned agent would
+   inherit the previous tenant's memberships / memory / etc., a
+   silent-correctness landmine. (Audit fix MEDIUM #11: earlier wording
+   claimed the clear happened on both sides; it does not, and this
+   note now reflects the actual design.)
 7. **Repetition burden for hot f32 accessors.** Each of 10+ hot f32
    groups has near-identical accessor / setter / slice plumbing. A
    macro would cut ~300 lines but obscure grep-ability; we chose the

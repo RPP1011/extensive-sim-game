@@ -22,10 +22,14 @@ macro_rules! id_type {
 
 id_type!(AgentId);
 id_type!(GroupId);
+// `ItemId` — reserved for the item-entity subsystem plan (roadmap §Items).
 id_type!(ItemId);
 id_type!(QuestId);
+// `AuctionId` — reserved for the auction/exchange plan (roadmap §Economy).
 id_type!(AuctionId);
+// `InviteId` — reserved for the invite/quest-coalition plan (roadmap §Social).
 id_type!(InviteId);
+// `SettlementId` — reserved for the settlement/region plan (roadmap §Regions).
 id_type!(SettlementId);
 
 // Re-export `AbilityId` so downstream code can reach every primitive id

@@ -194,6 +194,35 @@ Upgraded to MEDIUM (not LOW) because the defaults are silently consistent with t
 
 ---
 
+## Resolution (2026-04-19)
+
+All 17 findings resolved. Commit SHAs below reference local HEAD of
+branch `world-sim-bench` at the time of the audit-clearance pass.
+
+| # | Severity | Status | Commit(s) | Summary |
+|---|---|---|---|---|
+| 1 | CRITICAL | ✅ fixed | `20fc5a26` | `SpatialIndex` wired into `SimState`; rebuilt on spawn/kill/set_pos/set_movement_mode. `mask.rs` flee/attack scans, `expire.rs` engagement update, and `step.rs` Announce audience enumeration consume it. Added `state_spatial_is_fresh_after_spawn_move_and_kill` integration test. Fixed cell-neighbourhood sizing bug (3×3 only worked for radius ≤ 16m). |
+| 2 | CRITICAL | ✅ fixed | `711c0023` | Mask builder now calls `evaluate_cast_gate` per agent. `CascadeHandler::as_any` + `CascadeRegistry::cast_ability_registry` accessor exposes the bound `AbilityRegistry`. Mask falls back to permissive when no registry is bound. New `mask_cast_integration.rs` suite (4 tests) pins the mask integration. |
+| 3 | CRITICAL | ✅ fixed | `1fb0b1ae` | `DamageHandler` emits `Event::AgentAttacked { attacker: caster, target, damage: amount, tick }` alongside the state mutation. Two new parity tests (`cast_damage_emits_agent_attacked_like_melee`, `cast_lethal_damage_emits_attacked_then_died`). |
+| 4 | HIGH | ✅ fixed | `57cb4bc7` | New `RecordMemoryHandler` pushes `MemoryEvent` into `cold_memory[observer]` on every `RecordMemory` event. Registered in `register_engine_builtins`. `record_memory_handler.rs` pins primary 0.8→204, overhear 0.6→153, and speaker-self-exclusion. |
+| 5 | HIGH | ✅ fixed | `c6996271` | `CascadeRegistry::run_fixed_point_tel` added, emits `CASCADE_ITERATIONS` histogram. `step_full` wired. Legacy `run_fixed_point` is a `NullSink` wrapper for back-compat. `pipeline_six_phases.rs` asserts 50 emissions within `[0, 8]`. |
+| 6 | HIGH | ✅ fixed | (doc commit) | status.md §4 row updated to list the real id types: `AgentId, GroupId, QuestId, ItemId, AuctionId, InviteId, SettlementId, AbilityId, EventId`. `AggregateId` / `ResourceRef` phantoms removed. |
+| 7 | HIGH | ✅ fixed | (doc commit) | status.md §16 row now cites only `tests/aggregate_pool.rs` (the `aggregate_types.rs` phantom removed). |
+| 8 | HIGH | ✅ fixed | `e18b6635` | `FailureMode::Rollback` variant deleted. `step.rs` invariant dispatch now `Panic | Log`. Schema hash rebased to `7bf05a9f…`. Rollback test deleted (variant no longer exists). |
+| 9 | MEDIUM | ✅ fixed | `53fe6214` | `speaker_anyone_radius` consults `channel_range` for `Anyone`/`Group` audiences (Area keeps author radius). `speaker_and_observer_share_channel` filters both primary and overhear recipients. `announce_channel_gating.rs` covers Human+Wolf no-channel + Human+Human share + Human 25m-in/35m-out Speech range. |
+| 10 | MEDIUM | ✅ fixed | `642848d7` | `step.rs` Attack branch + `OpportunityAttackHandler` now read `agent_attack_damage` / `agent_attack_range`. Mask integration was already covered by CRITICAL #1. `per_agent_combat_stats.rs` pins `set_agent_attack_damage(25) → AgentAttacked.damage=25` and `set_agent_attack_range(3) → attack at 2.5m lands`. |
+| 11 | MEDIUM | ✅ fixed | (doc commit) | state-port plan §Design-friction #6 now describes the actual design (spawn-side clearing, dead-slot reads not mask-gated). |
+| 12 | LOW | documented | n/a | `LazyView` not wired; `lazy_view_wired_into_step_full` canary remains `#[ignore]`d; status.md §15 row + §Top-weak-test-risks #2 already cover. |
+| 13 | LOW | documented | (doc commit) | status.md §3 row updated to say "storage only; subsequent plans wire behaviour" explicitly. |
+| 14 | LOW | documented | n/a | `cold_class_definitions` / `cold_creditor_ledger` / `cold_mentor_lineage` are explicit state-port plan §"Cold fields added" deferrals. |
+| 15 | LOW | ✅ fixed | (doc commit) | Added comments in `ids.rs` flagging `ItemId` / `AuctionId` / `InviteId` / `SettlementId` as reserved for later plans. |
+| 16 | LOW | ✅ fixed | (doc commit) | status.md now cites `tests/proptest_baseline.rs` (the real file + test name). |
+| 17 | LOW | documented | n/a | `trajectory_roundtrip::python_roundtrip_preserves_values` weakness noted in status.md §17 row's weak-test-risk column. |
+
+Engine test count after the audit-clearance pass: **334 debug / 333
+release** (up from 322/321 pre-audit). Schema hash:
+`7bf05a9ff5aafa7d5cf6f2ba30a00ac0353a906a1660b1b4ff993ecf69af5006`.
+
 ## Non-findings
 
 Checked and concluded genuinely complete (or correctly documented-as-deferred):
