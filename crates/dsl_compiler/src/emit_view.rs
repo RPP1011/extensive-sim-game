@@ -673,6 +673,24 @@ fn lower_namespace_call(
             // `false` via the caller's equality check.
             Ok(format!("state.agent_creature_type({})", lowered[0]))
         }
+        (NamespaceId::Agents, "is_hostile_to") => {
+            // Pairwise species-level hostility — two-argument wrapper
+            // around `CreatureType::is_hostile_to` that shorts to `false`
+            // when either slot is dead / uninitialised. The dead-slot
+            // short-circuit has to live in the Rust wrapper rather than
+            // the view body because the DSL doesn't lower `Option::and_then`
+            // / `Option::map`. Emitted inline so the view stays a pure
+            // expression; the generated `match` is cheap and the only
+            // call site is the `is_hostile` view body.
+            Ok(format!(
+                "(match (state.agent_creature_type({a}), state.agent_creature_type({b})) {{ \
+                 (Some(__ca), Some(__cb)) => __ca.is_hostile_to(__cb), \
+                 _ => false \
+                 }})",
+                a = lowered[0],
+                b = lowered[1],
+            ))
+        }
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in view emission",
             ns.name()

@@ -8,5 +8,8 @@ use crate::state::SimState;
 /// @lazy view — lowered from `view is_hostile(...)` in the sim DSL.
 /// Pure expression body; re-evaluated on each call. Spec §2.3.
 pub fn is_hostile(state: &SimState, a: AgentId, b: AgentId) -> bool {
-    crate::rules::is_hostile_pair(state, a, b)
+    (match (state.agent_creature_type(a), state.agent_creature_type(b)) {
+        (Some(__ca), Some(__cb)) => __ca.is_hostile_to(__cb),
+        _ => false,
+    })
 }

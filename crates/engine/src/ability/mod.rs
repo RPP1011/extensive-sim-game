@@ -11,10 +11,11 @@
 //! - `expire`   — tick-start unified pass (decrement + expire + engagement)
 //!
 //! Per-effect cascade handlers (`damage`, `heal`, `shield`, `stun`, `slow`,
-//! `transfer_gold`, `modify_standing`, `opportunity_attack`) are compiler-
-//! emitted from `assets/sim/physics.sim`; the legacy hand-written files that
-//! used to live here (one per effect) were deleted as each effect migrated
-//! to DSL. Consumers reach them at `crate::generated::physics::<name>::*`.
+//! `transfer_gold`, `modify_standing`, `opportunity_attack`, `record_memory`)
+//! are compiler-emitted from `assets/sim/physics.sim`; the legacy hand-
+//! written files that used to live here (one per effect, plus
+//! `record_memory.rs`) were deleted as each effect migrated to DSL.
+//! Consumers reach them at `crate::generated::physics::<name>::*`.
 
 mod id;
 pub use id::AbilityId;
@@ -23,12 +24,10 @@ pub mod cast;
 pub mod expire;
 pub mod gate;
 pub mod program;
-pub mod record_memory;
 pub mod registry;
 
 pub use cast::CastHandler;
 pub use gate::evaluate_cast_gate;
-pub use record_memory::RecordMemoryHandler;
 pub use program::{Area, Delivery, EffectOp, Gate, TargetSelector, MAX_EFFECTS_PER_PROGRAM};
 pub use program::AbilityProgram;
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};

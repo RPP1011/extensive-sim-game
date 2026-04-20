@@ -63,16 +63,13 @@ impl CascadeRegistry {
     /// [`CascadeRegistry::with_engine_builtins`].
     pub fn register_engine_builtins(&mut self) {
         // Compiler-emitted physics handlers (DSL-owned). Covers damage, heal,
-        // shield, stun, slow, transfer_gold, modify_standing, and
-        // opportunity_attack. The matching hand-written legacy handlers were
-        // deleted in the same commit that landed their DSL equivalent.
-        // `CastHandler` + `RecordMemoryHandler` remain hand-written: the
-        // former needs `Arc<AbilityRegistry>` state (the DSL emitter only
-        // produces stateless unit structs), and the latter hasn't been
-        // migrated yet (tracked separately from this series).
+        // shield, stun, slow, transfer_gold, modify_standing,
+        // opportunity_attack, and record_memory. The matching hand-written
+        // legacy handlers were deleted in the same commit that landed their
+        // DSL equivalent. `CastHandler` remains hand-written: it needs
+        // `Arc<AbilityRegistry>` state that the DSL emitter's stateless
+        // unit-struct shape can't express.
         crate::generated::physics::register(self);
-        // Audit fix HIGH #4 — Announce → RecordMemory → cold_memory writer.
-        self.register(crate::ability::RecordMemoryHandler);
     }
 
     /// Register the Combat Foundation Task 9 `CastHandler` against an
@@ -126,9 +123,8 @@ impl CascadeRegistry {
         if let Some(dispatcher) = self.kind_dispatchers[kind] {
             dispatcher(event, state, events);
         }
-        // Legacy trait-object handlers (`RecordMemoryHandler`,
-        // `CastHandler`) still register via `register`; walk them in
-        // lane order after the flat dispatcher.
+        // Legacy trait-object handlers (`CastHandler`) still register via
+        // `register`; walk them in lane order after the flat dispatcher.
         for lane in Lane::ALL {
             for handler in &self.table[*lane as usize][kind] {
                 handler.handle(event, state, events);

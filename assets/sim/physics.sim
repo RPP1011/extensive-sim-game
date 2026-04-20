@@ -169,3 +169,18 @@ physics opportunity_attack @phase(event) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Record memory
+// ---------------------------------------------------------------------------
+// Audit fix HIGH #4 — `step.rs::Announce` emits one `RecordMemory` per
+// recipient (primary at 0.8 confidence, overhear at 0.6). This rule
+// pushes a `MemoryEvent` into the observer's cold_memory ring so GOAP
+// planners / chronicles / theory-of-mind can find what their agents heard.
+// Pinned by `record_memory_handler.rs`.
+
+physics record_memory @phase(event) {
+  on RecordMemory { observer: o, source: s, fact_payload: f, confidence: c, tick: t } {
+    agents.record_memory(o, s, f, c, t)
+  }
+}

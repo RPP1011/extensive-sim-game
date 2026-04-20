@@ -7,20 +7,22 @@
 // method pair, registered on `SimState.views`.
 //
 // The body lowering is mechanical — no type inference, no DSL
-// polymorphism. Unknown-to-the-compiler callees fall through to
-// `crate::rules::*`; unknown stdlib methods error out at emit time.
+// polymorphism. Unknown stdlib methods error out at emit time; the
+// legacy `crate::rules::*` fallback was retired in task 140 along with
+// the last shim (`is_hostile`).
 
 // -----------------------------------------------------------------------
 // @lazy view is_hostile(a, b) → bool
 // -----------------------------------------------------------------------
-// Pairwise species-level hostility. Falls through to the hand-written
-// `crate::rules::is_hostile` fn until the hostility matrix can be
-// declared in the DSL directly. Keeping the signature stable means the
-// mask / scoring emitter gets the same symbol either way — only the
-// implementation surface changes.
+// Pairwise species-level hostility. The body forwards to the
+// `agents.is_hostile_to` stdlib primitive which wraps
+// `CreatureType::is_hostile_to` (defined in the entities DSL) with a
+// dead-slot short-circuit. No hand-written `crate::rules::*` shim — the
+// mask / scoring / physics emitters all reach the matrix through this
+// view.
 @lazy
 view is_hostile(a: Agent, b: Agent) -> bool {
-  is_hostile_pair(a, b)
+  agents.is_hostile_to(a, b)
 }
 
 // -----------------------------------------------------------------------

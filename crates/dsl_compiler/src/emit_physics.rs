@@ -874,6 +874,30 @@ fn lower_namespace_call(
                 lowered[0], lowered[1], lowered[2]
             ))
         }
+        (NamespaceId::Agents, "record_memory") => {
+            // Audit fix HIGH #4 — primitive that the `record_memory` physics
+            // rule lowers to. Args: `(observer, source, payload, confidence,
+            // tick)`. Quantises `confidence` to q8, builds a `MemoryEvent`
+            // (kind=0 — payload taxonomy is tracked by `payload` alone in the
+            // MVP shell), and pushes it onto the observer's cold memory ring.
+            // Emitted inline so the physics fn stays free of ad-hoc helper
+            // modules; see `crates/engine/src/state/agent_types.rs::MemoryEvent`.
+            expect_arity(args, 5, "agents.record_memory")?;
+            Ok(format!(
+                "state.push_agent_memory({observer}, crate::state::agent_types::MemoryEvent {{ \
+                 source: {source}, \
+                 kind: 0, \
+                 payload: {payload}, \
+                 confidence_q8: (({confidence}).clamp(0.0, 1.0) * 255.0) as u8, \
+                 tick: {tick}, \
+                 }})",
+                observer   = lowered[0],
+                source     = lowered[1],
+                payload    = lowered[2],
+                confidence = lowered[3],
+                tick       = lowered[4],
+            ))
+        }
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics emission",
             ns.name()

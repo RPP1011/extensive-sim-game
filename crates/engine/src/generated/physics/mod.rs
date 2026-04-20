@@ -5,6 +5,7 @@ pub mod damage;
 pub mod heal;
 pub mod modify_standing;
 pub mod opportunity_attack;
+pub mod record_memory;
 pub mod shield;
 pub mod slow;
 pub mod stun;
@@ -124,6 +125,29 @@ pub fn dispatch_opportunity_attack_triggered(
     opportunity_attack::opportunity_attack(actor, target, state, events);
 }
 
+#[allow(unused_variables)]
+pub fn dispatch_record_memory(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::RecordMemory {
+        observer,
+        source,
+        fact_payload,
+        confidence,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    record_memory::record_memory(
+        observer,
+        source,
+        fact_payload,
+        confidence,
+        tick,
+        state,
+        events,
+    );
+}
+
 /// Install every compiler-emitted physics dispatcher on `registry`.
 /// Called from `CascadeRegistry::register_engine_builtins` so the
 /// engine's built-in handler set picks up DSL-owned rules without
@@ -152,4 +176,5 @@ pub fn register(registry: &mut CascadeRegistry) {
         EventKindId::OpportunityAttackTriggered,
         dispatch_opportunity_attack_triggered,
     );
+    registry.install_kind(EventKindId::RecordMemory, dispatch_record_memory);
 }
