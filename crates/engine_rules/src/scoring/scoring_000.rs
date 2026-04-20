@@ -12,7 +12,7 @@
 // - [0] head=`Hold` base=0.1 modifiers=0
 // - [1] head=`MoveToward` base=0.3 modifiers=0
 // - [2] head=`Flee` base=0.0 modifiers=4
-// - [3] head=`Attack` base=0.0 modifiers=5
+// - [3] head=`Attack` base=0.0 modifiers=6
 // - [4] head=`Cast` base=0.0 modifiers=0
 // - [5] head=`UseItem` base=0.0 modifiers=0
 // - [6] head=`Harvest` base=0.0 modifiers=0

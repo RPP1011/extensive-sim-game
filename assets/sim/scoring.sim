@@ -127,12 +127,25 @@ scoring {
   //   view::threat_level(self, target) > 20.0 : +0.3
   //     hard retaliation bump once a specific attacker has built a
   //     concentrated threat score — prioritise them.
+  //
+  // my_enemies retaliation bump — the view records whether a specific
+  // attacker has ever hit this observer. Separate from threat_level
+  // because it's a saturating indicator (grudge exists or doesn't)
+  // rather than a decayed cumulative total, and it gates a hard
+  // target-selection preference:
+  //
+  //   view::my_enemies(self, target) > 0.5 : +0.4
+  //     the observer remembers this specific attacker. Stacks with
+  //     the threat_level modifiers for decisive memory-driven
+  //     targeting — a wolf that's been bitten picks that specific
+  //     human over an equivalent fresh one.
   Attack(target) = 0.0
     + (if self.hp_pct >= 0.8 { 0.5 } else { 0.0 })
     + (if target.hp_pct < 0.3 { 0.4 } else { 0.0 })
     + (if target.hp_pct < 0.5 { 0.2 } else { 0.0 })
     + (view::threat_level(self, target) per_unit 0.01)
     + (if view::threat_level(self, target) > 20.0 { 0.3 } else { 0.0 })
+    + (if view::my_enemies(self, target) > 0.5 { 0.4 } else { 0.0 })
 
   // Cast / UseItem: "domain hook" kinds without a dedicated
   // `Action::*` constructor in `UtilityBackend::build_action`. Until

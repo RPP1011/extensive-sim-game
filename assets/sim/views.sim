@@ -96,3 +96,27 @@ view engaged_with(a: Agent) -> Agent {
   on EngagementCommitted { actor: a, target: b } { self += 1 }
   on EngagementBroken { actor: a, former_target: b } { self += 1 }
 }
+
+// -----------------------------------------------------------------------
+// @materialized view my_enemies(observer, attacker) → f32 — memory-driven scoring.
+// -----------------------------------------------------------------------
+// Per-pair "has this attacker drawn blood on this observer?" flag stored
+// as a saturating float. Each `AgentAttacked` event targeting `observer`
+// by `attacker` folds +1.0 into the slot; `clamp: [0.0, 1.0]` pins the
+// observable value at 1.0 once the first hit lands so repeated hits
+// don't keep climbing. No `@decay` — grudges are for-life within a
+// combat scenario (the runtime's HashMap is bounded by the populated
+// pair count, same as `threat_level`).
+//
+// Consumed by scoring's Attack row as a hard retaliation bump — a
+// wolf remembers who hurt it and prefers that specific human over
+// an equivalent fresh target.
+//
+// Storage: `pair_map<(AgentId, AgentId), f32>` — same default as
+// `threat_level`, per spec §9 D31.
+@materialized(on_event = [AgentAttacked], storage = pair_map)
+view my_enemies(observer: Agent, attacker: Agent) -> f32 {
+  initial: 0.0,
+  on AgentAttacked { actor: attacker, target: observer } { self += 1.0 }
+  clamp: [0.0, 1.0],
+}

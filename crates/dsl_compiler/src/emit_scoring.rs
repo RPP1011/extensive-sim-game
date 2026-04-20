@@ -153,6 +153,9 @@ const ARG_NONE: u8 = 0xFF;
 /// Runtime VIEW_ID mapping — must match the engine-side
 /// `eval_view_call` dispatch in `crates/engine/src/policy/utility.rs`.
 const VIEW_ID_THREAT_LEVEL: u16 = 0;
+/// Memory-driven scoring — per-pair "this attacker has hit this observer"
+/// grudge flag. See `assets/sim/views.sim::my_enemies`.
+const VIEW_ID_MY_ENEMIES: u16 = 1;
 
 // ScalarCompare operator discriminants. Keep aligned with
 // `PredicateDescriptor::OP_*` in engine_rules.
@@ -396,6 +399,9 @@ impl PredicateDescriptor {
     /// called inline at emit time and don't flow through the runtime
     /// dispatcher.
     pub const VIEW_ID_THREAT_LEVEL: u16 = 0;
+    /// Memory-driven scoring — per-pair "this attacker has hit this
+    /// observer" grudge flag. See `assets/sim/views.sim::my_enemies`.
+    pub const VIEW_ID_MY_ENEMIES: u16 = 1;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;
@@ -834,6 +840,7 @@ fn view_name(view_ref: ViewRef, views: &[ViewIR]) -> &str {
 fn view_id_for(name: &str) -> Result<u16, EmitError> {
     match name {
         "threat_level" => Ok(VIEW_ID_THREAT_LEVEL),
+        "my_enemies" => Ok(VIEW_ID_MY_ENEMIES),
         other => Err(EmitError::UnsupportedView(other.to_string())),
     }
 }

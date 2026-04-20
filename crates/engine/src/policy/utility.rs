@@ -308,6 +308,20 @@ fn eval_view_call(
                 }
             }
         }
+        PredicateDescriptor::VIEW_ID_MY_ENEMIES => {
+            // `my_enemies(observer, attacker)` — no `@decay`, so the
+            // generated `get(a, b)` takes no tick argument. Saturates
+            // to `1.0` once the first `AgentAttacked` lands on the pair.
+            let a = match resolve_slot(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            let b = match resolve_slot(slot1, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            state.views.my_enemies.get(a, b)
+        }
         _ => f32::NAN,
     }
 }
