@@ -39,15 +39,5 @@ fn violation_carries_tick_and_message() {
 fn failure_mode_variants() {
     let _ = FailureMode::Panic;
     let _ = FailureMode::Log;
-    let _ = FailureMode::Rollback { ticks: 1 };
-}
-
-#[test]
-fn rollback_carries_tick_count() {
-    let m = FailureMode::Rollback { ticks: 3 };
-    match m {
-        FailureMode::Rollback { ticks } => assert_eq!(ticks, 3),
-        _ => panic!(),
-    }
     let _ = EventKindId::AgentMoved;
 }

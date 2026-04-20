@@ -181,9 +181,8 @@ pub fn step_full<B: PolicyBackend>(
     let violations = invariants.check_all(state, events);
     for report in &violations {
         let mode_str = match report.failure_mode {
-            FailureMode::Panic       => "panic",
-            FailureMode::Log         => "log",
-            FailureMode::Rollback { .. } => "rollback",
+            FailureMode::Panic => "panic",
+            FailureMode::Log   => "log",
         };
         telemetry.emit(
             "engine.invariant_violated",

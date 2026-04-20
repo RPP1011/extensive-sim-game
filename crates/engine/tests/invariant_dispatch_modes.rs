@@ -50,16 +50,3 @@ fn violated_panic_mode_panics_immediately() {
     let _ = reg.check_all(&state, &events);
 }
 
-#[test]
-fn rollback_mode_is_reported_not_executed_by_registry() {
-    let mut reg = InvariantRegistry::new();
-    reg.register(Box::new(Report(Arc::new(Mutex::new(Vec::new())), "rb", FailureMode::Rollback { ticks: 2 }, true)));
-    let state = SimState::new(4, 42);
-    let events = EventRing::with_cap(8);
-    let violations = reg.check_all(&state, &events);
-    assert_eq!(violations.len(), 1);
-    match violations[0].failure_mode {
-        FailureMode::Rollback { ticks } => assert_eq!(ticks, 2),
-        _ => panic!(),
-    }
-}

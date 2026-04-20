@@ -11,7 +11,6 @@ pub trait Invariant: Send + Sync {
 pub enum FailureMode {
     Panic,
     Log,
-    Rollback { ticks: u32 },
 }
 
 #[derive(Clone, Debug)]
