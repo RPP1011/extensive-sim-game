@@ -13,7 +13,11 @@ test-results/
 
 /target/
 .env
-generated/
+# Ignore everything under generated/ except the compiler-emitted Python
+# dataclass mirror — that's checked in so downstream Python consumers can
+# import without running the compiler first.
+generated/*
+!generated/python/
 perf.data
 perf.data.old
 

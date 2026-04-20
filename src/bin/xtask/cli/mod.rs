@@ -44,6 +44,29 @@ pub enum TaskCommand {
     Visualize(VisualizeArgs),
     /// Building AI dataset generation and coverage analysis
     BuildingAi(BuildingAiCommand),
+    /// Compile DSL sources (`assets/sim/*.sim`) into Rust + Python artefacts.
+    CompileDsl(CompileDslArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Compile DSL sources to Rust + Python + schema hash")]
+pub struct CompileDslArgs {
+    /// Source directory holding `*.sim` files (recursively walked).
+    #[arg(long, default_value = "assets/sim")]
+    pub src: PathBuf,
+    /// Destination root for Rust output. Files are written under
+    /// `<out-rust>/events/` and `<out-rust>/schema.rs`.
+    #[arg(long, default_value = "crates/engine_rules/src")]
+    pub out_rust: PathBuf,
+    /// Destination root for Python output. Files are written under
+    /// `<out-python>/events/`.
+    #[arg(long, default_value = "generated/python")]
+    pub out_python: PathBuf,
+    /// Compare the emitted artefacts against the committed output. Exit 0 if
+    /// identical, exit 1 with a file-level diff otherwise. No files are
+    /// written when this is set.
+    #[arg(long)]
+    pub check: bool,
 }
 
 #[derive(Debug, Parser)]

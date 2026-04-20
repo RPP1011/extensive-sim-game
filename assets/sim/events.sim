@@ -1,0 +1,21 @@
+// Seed event taxonomy for compiler milestone 2. The names and fields mirror
+// the hand-written enum in `crates/engine/src/event/mod.rs` in shape, but this
+// .sim file is the new source of truth. Do not keep these aligned to the
+// legacy enum field-by-field — when later milestones land the handlers, the
+// legacy enum goes away.
+
+event Damage { target: AgentId, amount: f32, tick: u64 } @replayable
+
+event AgentDied { agent: AgentId, tick: u64 } @replayable
+
+event Heal { target: AgentId, amount: f32, tick: u64 } @replayable
+
+event TransferGold { from: AgentId, to: AgentId, amount: i64, tick: u64 } @replayable
+
+event ShieldApplied { target: AgentId, amount: f32, tick: u64 } @replayable
+
+event StunApplied { target: AgentId, remaining_ticks: u32, tick: u64 } @replayable
+
+event SlowApplied { target: AgentId, factor_q8: i32, remaining_ticks: u32, tick: u64 } @replayable
+
+event SlowExpired { agent_id: AgentId, tick: u64 } @replayable

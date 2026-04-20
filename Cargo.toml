@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/tactical_sim", "crates/engine", "crates/viz", "crates/dsl_compiler"]
+members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_rules", "crates/viz", "crates/dsl_compiler"]
 exclude = ["crates/world_sim_bench"]
 
 
@@ -27,6 +27,7 @@ anyhow = "1"
 glam = "0.29"
 winit = { version = "0.30", optional = true }
 tactical_sim = { path = "crates/tactical_sim" }
+dsl_compiler = { path = "crates/dsl_compiler" }
 contracts = "0.6"
 winnow = "0.7"
 burn = { version = "0.20", default-features = false, features = ["std"], optional = true }
