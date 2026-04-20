@@ -106,6 +106,14 @@ pub struct ChronicleArgs {
     /// (non-`--showcase`) mode.
     #[arg(long, default_value = "showcase")]
     pub fixture: String,
+    /// Performance benchmark mode — iterate over all three fixture shapes
+    /// (canonical, showcase, balanced), run 3 warmup + 5 timed samples of
+    /// 500 ticks each, and report median/p5/p95 ticks-per-second plus
+    /// events/tick. Mutually exclusive with `--sweep`: this is a throughput
+    /// probe, not a balance analysis. Intended to be run under
+    /// `--release` — debug builds are 10-50× slower.
+    #[arg(long)]
+    pub bench: bool,
 }
 
 #[derive(Debug, Parser)]
