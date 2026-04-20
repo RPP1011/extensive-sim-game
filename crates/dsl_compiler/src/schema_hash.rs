@@ -6,7 +6,7 @@
 //! - `event_hash` — event taxonomy (milestone 2; canonical).
 //! - `rules_hash` — physics cascades + masks + verbs (milestone 3 partial:
 //!   physics only; masks + verbs land at milestones 4 / 7).
-//! - `state_hash` — entity field layouts (milestone 5 — placeholder zeros).
+//! - `state_hash` — entity field layouts (milestone 6; canonical).
 //! - `scoring_hash` — scoring tables (milestone 4 — placeholder zeros).
 //! - `combined_hash` = `sha256(state || event || rules || scoring)`.
 //!
@@ -16,7 +16,11 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::ir::{EventIR, IrExpr, IrExprNode, IrPattern, IrPatternBinding, IrStmt, IrType, PhysicsHandlerIR, PhysicsIR};
+use crate::emit_entity;
+use crate::ir::{
+    EntityIR, EventIR, IrExpr, IrExprNode, IrPattern, IrPatternBinding, IrStmt, IrType,
+    PhysicsHandlerIR, PhysicsIR, ScoringIR,
+};
 
 pub fn event_hash(events: &[EventIR]) -> [u8; 32] {
     let mut sorted: Vec<&EventIR> = events.iter().collect();
@@ -58,6 +62,56 @@ pub fn rules_hash(physics: &[PhysicsIR]) -> [u8; 32] {
         h.update(&(p.handlers.len() as u32).to_le_bytes());
         for handler in &p.handlers {
             hash_handler(&mut h, handler);
+        }
+        h.update([0xFFu8]);
+    }
+    h.finalize().into()
+}
+
+/// Hash every `scoring` block's entries. Block order is preserved
+/// (blocks in the DSL are positional), but within a block entries are
+/// sorted by action-head name so a cosmetic reorder doesn't perturb the
+/// hash. The expression body folds through `hash_expr`, which already
+/// covers `Field`, `Binary`, `If`, and the literal cases the scoring
+/// emitter needs.
+/// Hash the entity state-layout surface. Entities are sorted by name for
+/// reorder stability; within an entity, fields keep their source order
+/// (field order drives struct layout). The tag-projection is delegated to
+/// `emit_entity::schema_hash_input` so the hasher stays agnostic of the
+/// exact IR shape — any future entity-IR extension only touches that
+/// projection.
+pub fn state_hash(entities: &[EntityIR]) -> [u8; 32] {
+    let rows = emit_entity::schema_hash_input(entities);
+    // Sort rows by entity name. Rows for the same entity stay contiguous in
+    // their emission (source-preserved) order — field order within an entity
+    // drives the emitted struct layout.
+    let mut sorted = rows;
+    sorted.sort_by(|a, b| a.entity.cmp(&b.entity));
+
+    let mut h = Sha256::new();
+    for r in &sorted {
+        h.update(r.entity.as_bytes());
+        h.update([0u8]);
+        h.update(r.root.as_bytes());
+        h.update([0u8]);
+        h.update(r.field.as_bytes());
+        h.update([0u8]);
+        h.update(r.tag.as_bytes());
+        h.update([0xFFu8]);
+    }
+    h.finalize().into()
+}
+
+pub fn scoring_hash(blocks: &[ScoringIR]) -> [u8; 32] {
+    let mut h = Sha256::new();
+    for block in blocks {
+        let mut sorted: Vec<&crate::ir::ScoringEntryIR> = block.entries.iter().collect();
+        sorted.sort_by(|a, b| a.head.name.cmp(&b.head.name));
+        h.update(&(sorted.len() as u32).to_le_bytes());
+        for e in sorted {
+            h.update(e.head.name.as_bytes());
+            h.update([0u8]);
+            hash_expr(&mut h, &e.expr);
         }
         h.update([0xFFu8]);
     }
@@ -423,8 +477,9 @@ pub fn combined_hash(
 }
 
 /// Emit the Rust source of `schema.rs` containing every sub-hash plus the
-/// combined hash. `state_hash` and `scoring_hash` are placeholders (all
-/// zero) until milestones 5 and 4 land their respective declarations.
+/// combined hash. All four sub-hashes are canonical as of milestone 6
+/// (2026-04-19); the aggregate still reflects zero bytes only when no
+/// declarations of the corresponding kind are in scope.
 pub fn emit_schema_rs(
     state: &[u8; 32],
     event: &[u8; 32],
@@ -444,17 +499,12 @@ pub fn emit_schema_rs(
     writeln!(out).unwrap();
     writeln!(
         out,
-        "// `STATE_HASH` and `SCORING_HASH` are placeholders (all-zero) until the"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "// entity (milestone 5) and scoring (milestone 4) emitters land. The"
-    )
-    .unwrap();
-    writeln!(
-        out,
         "// `COMBINED_HASH` rolls the four sub-hashes together per `docs/compiler/spec.md` \u{00a7}2."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// A sub-hash is only all-zero when no declarations of that kind are in scope."
     )
     .unwrap();
     writeln!(out).unwrap();

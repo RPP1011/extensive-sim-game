@@ -1,0 +1,95 @@
+// Creature taxonomy — authoritative source for `engine_rules::entities`.
+//
+// At milestone 6 (2026-04-19) the hand-written `engine::creature::{CreatureType,
+// Capabilities}` and the `is_hostile_to` / `for_creature` bodies moved here.
+// The engine's `crates/engine/src/creature.rs` is now a thin shim that re-
+// exports from `engine_rules::entities`, the same pattern established by the
+// milestone-2 Event cutover.
+//
+// The four variants (Human, Wolf, Deer, Dragon), their capability defaults,
+// and the predator/prey hostility rules mirror the pre-cutover Rust byte-for-
+// byte so every `use crate::creature::CreatureType` call site inside
+// `crates/engine/` compiles unchanged against the compiler output.
+//
+// Hostility is derived as the symmetric closure of each entity's
+// `predator_prey.preys_on` + `predator_prey.prey_of` lists. The emitter
+// produces a dense `matches!` block on `(CreatureType, CreatureType)` pairs.
+
+entity Human : Agent {
+  creature_type: Human,
+  capabilities: Capabilities {
+    channels:    [Speech, Testimony],
+    languages:   [Common],
+    can_fly:     false,
+    can_build:   true,
+    can_trade:   true,
+    can_climb:   true,
+    can_tunnel:  true,
+    can_marry:   true,
+    max_spouses: 1,
+  },
+  predator_prey: PredatorPrey {
+    // Humans are prey to wolves (hostility asymmetry point) + dragons (apex).
+    // Humans don't prey on anything in the legacy taxonomy — mirror that by
+    // leaving `preys_on` empty so `is_hostile_to(Human, Deer) == false`.
+    prey_of:  [Wolf, Dragon],
+    preys_on: [],
+  },
+}
+
+entity Wolf : Agent {
+  creature_type: Wolf,
+  capabilities: Capabilities {
+    channels:    [PackSignal],
+    languages:   [],
+    can_fly:     false,
+    can_build:   false,
+    can_trade:   false,
+    can_climb:   false,
+    can_tunnel:  true,
+    can_marry:   false,
+    max_spouses: 0,
+  },
+  predator_prey: PredatorPrey {
+    prey_of:  [Dragon],
+    preys_on: [Deer, Human],
+  },
+}
+
+entity Deer : Agent {
+  creature_type: Deer,
+  capabilities: Capabilities {
+    channels:    [PackSignal],
+    languages:   [],
+    can_fly:     false,
+    can_build:   false,
+    can_trade:   false,
+    can_climb:   false,
+    can_tunnel:  false,
+    can_marry:   false,
+    max_spouses: 0,
+  },
+  predator_prey: PredatorPrey {
+    prey_of:  [Wolf, Dragon],
+    preys_on: [],
+  },
+}
+
+entity Dragon : Agent {
+  creature_type: Dragon,
+  capabilities: Capabilities {
+    channels:    [Speech, Song],
+    languages:   [Draconic],
+    can_fly:     true,
+    can_build:   false,
+    can_trade:   false,
+    can_climb:   true,
+    can_tunnel:  false,
+    can_marry:   false,
+    max_spouses: 0,
+  },
+  predator_prey: PredatorPrey {
+    prey_of:  [],
+    preys_on: [Human, Wolf, Deer],
+  },
+}

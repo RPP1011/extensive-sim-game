@@ -1,17 +1,14 @@
-use smallvec::SmallVec;
+//! Communication channels. Type definitions moved to
+//! `engine_rules::types` at milestone 6 (2026-04-19) so the compiler-emitted
+//! `Capabilities` struct can reference them without inverting the
+//! `engine → engine_rules` dependency direction. The re-exports below keep
+//! every `use engine::channel::{CommunicationChannel, ChannelSet}` call site
+//! compiling unchanged.
+//!
+//! `channel_range` stays here: it's a hand-written engine primitive (range
+//! per channel given vocal strength), not part of the compiled rule surface.
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-#[repr(u8)]
-pub enum CommunicationChannel {
-    Speech = 0,
-    PackSignal = 1,
-    Pheromone = 2,
-    Song = 3,
-    Telepathy = 4,
-    Testimony = 5,
-}
-
-pub type ChannelSet = SmallVec<[CommunicationChannel; 4]>;
+pub use engine_rules::types::{ChannelSet, CommunicationChannel};
 
 pub fn channel_range(channel: CommunicationChannel, vocal_strength: f32) -> f32 {
     const SPEECH_RANGE: f32 = 30.0;

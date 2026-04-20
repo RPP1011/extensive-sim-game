@@ -233,8 +233,8 @@ pub fn emit_with_per_kind_sources(
 
     let event_hash = schema_hash::event_hash(&comp.events);
     let rules_hash = schema_hash::rules_hash(&comp.physics);
-    let state_hash = [0u8; 32];
-    let scoring_hash = [0u8; 32];
+    let state_hash = schema_hash::state_hash(&comp.entities);
+    let scoring_hash = schema_hash::scoring_hash(&comp.scoring);
     let combined_hash = schema_hash::combined_hash(&state_hash, &event_hash, &rules_hash, &scoring_hash);
     EmittedArtifacts {
         rust_events_mod: emit_rust::emit_events_mod(&comp.events),
