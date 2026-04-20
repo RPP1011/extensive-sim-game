@@ -57,9 +57,28 @@ scoring {
   // `Micro { Flee, target: Agent(threat) }` so step.rs's Flee arm
   // moves the agent AWAY from that threat. When no hostile is in range
   // the action falls back to Hold — agents don't flee from nothing.
+  // threat_level wiring — the wildcard slot `_` sums decayed threat
+  // accumulated against every attacker the view has recorded. Fuzzy
+  // and non-boolean, so Flee urgency responds smoothly to incoming
+  // aggression rather than only to current hp.
+  //
+  //   view::threat_level(self, _) per_unit 0.01
+  //     score += 0.01 × Σ threat(self, x)
+  //
+  // Scales are deliberately tiny vs the hp-driven constants: threat
+  // accumulates +1.0 per hit (decayed 0.98^tick), so ~20 cumulative
+  // incoming hits add +0.2 — a nudge, not a cliff.
+  //
+  //   view::threat_level(self, _) > 50.0 : +0.3
+  //     once cumulative threat crosses ~50 (50 full-value hits, or
+  //     equivalently more hits that are partly-decayed), stack an
+  //     extra +0.3 so even a full-hp agent under sustained fire
+  //     retreats.
   Flee = 0.0
     + (if self.hp < 30.0 { 0.6 } else { 0.0 })
     + (if self.hp < 50.0 { 0.4 } else { 0.0 })
+    + (view::threat_level(self, _) per_unit 0.01)
+    + (if view::threat_level(self, _) > 50.0 { 0.3 } else { 0.0 })
 
   // ===== Combat =====
 
@@ -95,10 +114,25 @@ scoring {
   // one-hit kill and a full-hp bystander picks the one-hit kill
   // first. Mask still gates range / hostility; the row only ranks
   // the (kind, target) pair once the mask passes.
+  //
+  // threat_level retaliation bias — the view records per-pair
+  // accumulated hits. Attack rankings now factor in "who has been
+  // attacking me the most" via gradient + scalar-compare:
+  //
+  //   view::threat_level(self, target) per_unit 0.01
+  //     smooth gradient: +0.01 × threat(self, target). A specific
+  //     target that has hit us repeatedly outranks an equivalent
+  //     fresh target.
+  //
+  //   view::threat_level(self, target) > 20.0 : +0.3
+  //     hard retaliation bump once a specific attacker has built a
+  //     concentrated threat score — prioritise them.
   Attack(target) = 0.0
     + (if self.hp_pct >= 0.8 { 0.5 } else { 0.0 })
     + (if target.hp_pct < 0.3 { 0.4 } else { 0.0 })
     + (if target.hp_pct < 0.5 { 0.2 } else { 0.0 })
+    + (view::threat_level(self, target) per_unit 0.01)
+    + (if view::threat_level(self, target) > 20.0 { 0.3 } else { 0.0 })
 
   // Cast / UseItem: "domain hook" kinds without a dedicated
   // `Action::*` constructor in `UtilityBackend::build_action`. Until

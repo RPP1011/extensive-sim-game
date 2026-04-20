@@ -1584,6 +1584,17 @@ fn resolve_ident(
         // didn't see it, this is SelfInTopLevel.
         return Err(ResolveError::SelfInTopLevel { span });
     }
+    if name == "_" {
+        // Wildcard placeholder for view-call argument slots. Used in
+        // scoring predicates on self-only rows (no target binding) to
+        // mean "sum over all values for this slot": e.g.
+        // `view::threat_level(self, _)` = Σ threat(self, x). The
+        // scoring emitter recognises this sentinel (Local with name
+        // `_`) as arg_slot = 0xFE (sum-wildcard). Outside a scoring
+        // view-call it is an error — but 1a leaves that diagnostic to
+        // the scoring lowering to keep the match local.
+        return Ok(IrExpr::Local(crate::ir::LocalRef(u16::MAX - 1), "_".to_string()));
+    }
     if let Some(r) = symbols.entities.get(name) {
         return Ok(IrExpr::Entity(*r));
     }

@@ -447,6 +447,54 @@ fn emit_pair_map_struct(
             writeln!(out, "        decayed").unwrap();
         }
         writeln!(out, "    }}").unwrap();
+        writeln!(out).unwrap();
+        // Wildcard-slot helper for scoring's view-call predicates. The
+        // `_` second-arg sentinel (ARG_WILDCARD) sums the decayed value
+        // over every recorded second-argument pair. Emitted for every
+        // decay+pair_map view so scoring can reference any of them with
+        // a wildcard slot; cost is one extra O(|pair_map|) method on
+        // the generated struct.
+        writeln!(
+            out,
+            "    /// Σ get({a_name}, x, tick) over every recorded second-argument `x`."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    /// Used by scoring's view-call wildcard slot (`_`). O(|pair_map|)."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pub fn sum_for_first(&self, {a_name}: {k1}, tick: u32) -> {val_ty} {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let mut total: {val_ty} = {initial_lit};"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        for (&(k_a, _k_b), &(base, anchor)) in self.value.iter() {{"
+        )
+        .unwrap();
+        writeln!(out, "            if k_a != {a_name} {{ continue; }}").unwrap();
+        writeln!(
+            out,
+            "            let decayed = base * Self::RATE.powi(tick.saturating_sub(anchor) as i32);"
+        )
+        .unwrap();
+        if let Some((lo, hi)) = clamp {
+            let lo_s = lower_scalar_literal(lo)?;
+            let hi_s = lower_scalar_literal(hi)?;
+            writeln!(out, "            total += decayed.clamp({lo_s}, {hi_s});").unwrap();
+        } else {
+            writeln!(out, "            total += decayed;").unwrap();
+        }
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        total").unwrap();
+        writeln!(out, "    }}").unwrap();
     } else {
         writeln!(out, "    /// Current value for the given pair.").unwrap();
         writeln!(

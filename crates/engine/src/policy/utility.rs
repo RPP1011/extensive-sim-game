@@ -129,8 +129,24 @@ fn score_entry(
     let max = count.min(MAX_MODIFIERS);
     for i in 0..max {
         let row = &entry.modifiers[i];
-        if eval_predicate(&row.predicate, state, agent, target) {
-            score += row.delta;
+        // Gradient rows evaluate to a scalar: `score += view_value * delta`.
+        // Everything else is boolean: `score += (pred ? delta : 0)`.
+        // `KIND_VIEW_GRADIENT` is the fuzzy-scoring path that lets
+        // decisions scale smoothly with an accumulated view value
+        // (threat_level, future aggression / relationship views, …)
+        // rather than flipping at a fixed threshold.
+        match row.predicate.kind {
+            PredicateDescriptor::KIND_VIEW_GRADIENT => {
+                let v = eval_view_call(state, agent, target, &row.predicate);
+                if v.is_finite() {
+                    score += v * row.delta;
+                }
+            }
+            _ => {
+                if eval_predicate(&row.predicate, state, agent, target) {
+                    score += row.delta;
+                }
+            }
         }
     }
     score
@@ -221,6 +237,9 @@ fn read_personality(_state: &SimState, _agent: AgentId) -> [f32; 5] {
 /// Evaluate a predicate descriptor. Unknown kinds return `false` — the
 /// row contributes nothing, matching the "fail closed" convention for
 /// unrecognised predicate shapes.
+///
+/// `KIND_VIEW_GRADIENT` is *not* a boolean predicate — `score_entry`
+/// handles that kind specifically before calling this function.
 fn eval_predicate(
     pred: &PredicateDescriptor,
     state: &SimState,
@@ -236,7 +255,71 @@ fn eval_predicate(
             let rhs = f32::from_le_bytes(tb);
             compare_scalar(pred.op, lhs, rhs)
         }
+        PredicateDescriptor::KIND_VIEW_SCALAR_COMPARE => {
+            let lhs = eval_view_call(state, agent, target, pred);
+            let mut tb = [0u8; 4];
+            tb.copy_from_slice(&pred.payload[0..4]);
+            let rhs = f32::from_le_bytes(tb);
+            compare_scalar(pred.op, lhs, rhs)
+        }
         _ => false,
+    }
+}
+
+/// Evaluate a `@materialized` view call referenced by a scoring
+/// predicate. `pred.field_id` carries the VIEW_ID (one of the
+/// compile-time `VIEW_ID_*` constants in `engine_rules::scoring`);
+/// `pred.payload[4]` / `[5]` are arg-slot codes:
+///
+/// - `ARG_SELF = 0` → the scorer's current agent.
+/// - `ARG_TARGET = 1` → the head's target binding (target-bound rows).
+/// - `ARG_WILDCARD = 0xFE` → sum across the slot (e.g. Σ threat from
+///   every recorded partner).
+/// - `ARG_NONE = 0xFF` → unused (single-arg view).
+///
+/// One match arm per `VIEW_ID_*`. Unknown VIEW_IDs return NaN so a
+/// forgotten arm fails closed (a scalar-compare against NaN is false;
+/// a gradient times NaN is discarded by the `is_finite` gate in
+/// `score_entry`).
+fn eval_view_call(
+    state: &SimState,
+    agent: AgentId,
+    target: Option<AgentId>,
+    pred: &PredicateDescriptor,
+) -> f32 {
+    let slot0 = pred.payload[4];
+    let slot1 = pred.payload[5];
+    match pred.field_id {
+        PredicateDescriptor::VIEW_ID_THREAT_LEVEL => {
+            let a = match resolve_slot(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            match slot1 {
+                PredicateDescriptor::ARG_WILDCARD => {
+                    state.views.threat_level.sum_for_first(a, state.tick)
+                }
+                _ => {
+                    let b = match resolve_slot(slot1, agent, target) {
+                        Some(id) => id,
+                        None => return f32::NAN,
+                    };
+                    state.views.threat_level.get(a, b, state.tick)
+                }
+            }
+        }
+        _ => f32::NAN,
+    }
+}
+
+/// Map an arg-slot code to the concrete `AgentId` the view call should
+/// receive. `None` for wildcard (handled specially by the caller) or
+/// a target slot with no target bound.
+fn resolve_slot(slot: u8, agent: AgentId, target: Option<AgentId>) -> Option<AgentId> {
+    match slot {
+        PredicateDescriptor::ARG_SELF => Some(agent),
+        PredicateDescriptor::ARG_TARGET => target,
+        _ => None,
     }
 }
 

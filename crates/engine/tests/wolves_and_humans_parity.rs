@@ -757,3 +757,376 @@ fn engaged_wolves_stay_committed() {
         wolf_a.raw(), a, wolf_b.raw(), b,
     );
 }
+
+// ---------------------------------------------------------------------------
+// threat_level wiring (task threat_level_wiring).
+//
+// `view::threat_level(self, _) per_unit 0.01` in Flee and
+// `view::threat_level(self, target) per_unit 0.01` in Attack make the
+// scorer respond to accumulated hits rather than only to current HP. The
+// tests below score the two rows directly (via the scoring-table export)
+// against hand-assembled SimStates with different threat_level values, to
+// concretely verify that:
+//
+// 1. Flee's score grows monotonically with accumulated threat.
+// 2. Attack's score ranks a target with high accumulated threat_level
+//    above a fresh target at the same HP.
+//
+// The tests don't step the engine — they build a SimState with a primed
+// ThreatLevel view and call the scoring entries' `Flee` / `Attack(target)`
+// rows through the UtilityBackend's `score_entry` indirectly by using
+// `evaluate` + a sparse mask setup. We use a small helper that computes
+// the score for one row against one (agent, target) pair by mimicking
+// `score_entry` — the engine's private `score_entry` is not exported, so
+// this helper reproduces its math against `SCORING_TABLE`.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod threat_level_scoring {
+    use super::*;
+    use engine::mask::MicroKind;
+    use engine::state::AgentSpawn;
+    use engine_rules::scoring::{
+        PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE,
+    };
+
+    /// Compute the scoring-table `Flee` / `Attack(target)` row's score
+    /// for a given (agent, target) pair. Reproduces the relevant parts
+    /// of `engine::policy::utility::score_entry` — needed because that
+    /// function is `pub(crate)` private.
+    ///
+    /// Only supports the predicate kinds we exercise: scalar compare
+    /// (field-read) and the two view-call kinds. Unknown kinds drop
+    /// the modifier silently — matches the "fail closed" contract.
+    fn score_row_for(
+        entry: &ScoringEntry,
+        state: &SimState,
+        agent: engine::ids::AgentId,
+        target: Option<engine::ids::AgentId>,
+    ) -> f32 {
+        let mut score = entry.base;
+        let count = entry.modifier_count as usize;
+        let max = count.min(MAX_MODIFIERS);
+        for i in 0..max {
+            let row = &entry.modifiers[i];
+            let pred = &row.predicate;
+            match pred.kind {
+                PredicateDescriptor::KIND_SCALAR_COMPARE => {
+                    let lhs = read_field_scalar(state, agent, target, pred.field_id);
+                    let mut tb = [0u8; 4];
+                    tb.copy_from_slice(&pred.payload[0..4]);
+                    let rhs = f32::from_le_bytes(tb);
+                    if compare(pred.op, lhs, rhs) {
+                        score += row.delta;
+                    }
+                }
+                PredicateDescriptor::KIND_VIEW_SCALAR_COMPARE => {
+                    let lhs = eval_view(state, agent, target, pred);
+                    let mut tb = [0u8; 4];
+                    tb.copy_from_slice(&pred.payload[0..4]);
+                    let rhs = f32::from_le_bytes(tb);
+                    if compare(pred.op, lhs, rhs) {
+                        score += row.delta;
+                    }
+                }
+                PredicateDescriptor::KIND_VIEW_GRADIENT => {
+                    let v = eval_view(state, agent, target, pred);
+                    if v.is_finite() {
+                        score += v * row.delta;
+                    }
+                }
+                _ => {}
+            }
+        }
+        score
+    }
+
+    /// Read a scoring field by id. Only covers the fields the test
+    /// actually exercises (hp, hp_pct, self-side + target-side).
+    fn read_field_scalar(
+        state: &SimState,
+        agent: engine::ids::AgentId,
+        target: Option<engine::ids::AgentId>,
+        field_id: u16,
+    ) -> f32 {
+        if field_id >= 0x4000 && field_id < 0x8000 {
+            let t = match target {
+                Some(x) => x,
+                None => return f32::NAN,
+            };
+            return match field_id {
+                0x4000 => state.agent_hp(t).unwrap_or(0.0),
+                0x4002 => {
+                    let hp = state.agent_hp(t).unwrap_or(0.0);
+                    let mx = state.agent_max_hp(t).unwrap_or(1.0);
+                    if mx > 0.0 { hp / mx } else { 0.0 }
+                }
+                _ => f32::NAN,
+            };
+        }
+        match field_id {
+            0 => state.agent_hp(agent).unwrap_or(0.0),
+            2 => {
+                let hp = state.agent_hp(agent).unwrap_or(0.0);
+                let mx = state.agent_max_hp(agent).unwrap_or(1.0);
+                if mx > 0.0 { hp / mx } else { 0.0 }
+            }
+            _ => f32::NAN,
+        }
+    }
+
+    /// Reproduce `eval_view_call` for the test harness. Matches the
+    /// engine-side implementation in `crates/engine/src/policy/utility.rs`.
+    fn eval_view(
+        state: &SimState,
+        agent: engine::ids::AgentId,
+        target: Option<engine::ids::AgentId>,
+        pred: &PredicateDescriptor,
+    ) -> f32 {
+        let slot0 = pred.payload[4];
+        let slot1 = pred.payload[5];
+        match pred.field_id {
+            PredicateDescriptor::VIEW_ID_THREAT_LEVEL => {
+                let a = match slot0 {
+                    PredicateDescriptor::ARG_SELF => agent,
+                    PredicateDescriptor::ARG_TARGET => match target {
+                        Some(t) => t,
+                        None => return f32::NAN,
+                    },
+                    _ => return f32::NAN,
+                };
+                match slot1 {
+                    PredicateDescriptor::ARG_WILDCARD => {
+                        state.views.threat_level.sum_for_first(a, state.tick)
+                    }
+                    _ => {
+                        let b = match slot1 {
+                            PredicateDescriptor::ARG_SELF => agent,
+                            PredicateDescriptor::ARG_TARGET => match target {
+                                Some(t) => t,
+                                None => return f32::NAN,
+                            },
+                            _ => return f32::NAN,
+                        };
+                        state.views.threat_level.get(a, b, state.tick)
+                    }
+                }
+            }
+            _ => f32::NAN,
+        }
+    }
+
+    fn compare(op: u8, lhs: f32, rhs: f32) -> bool {
+        if lhs.is_nan() || rhs.is_nan() {
+            return false;
+        }
+        match op {
+            PredicateDescriptor::OP_LT => lhs < rhs,
+            PredicateDescriptor::OP_LE => lhs <= rhs,
+            PredicateDescriptor::OP_EQ => lhs == rhs,
+            PredicateDescriptor::OP_GE => lhs >= rhs,
+            PredicateDescriptor::OP_GT => lhs > rhs,
+            PredicateDescriptor::OP_NE => lhs != rhs,
+            _ => false,
+        }
+    }
+
+    fn flee_entry() -> &'static ScoringEntry {
+        for e in SCORING_TABLE {
+            if e.action_head == MicroKind::Flee as u16 {
+                return e;
+            }
+        }
+        panic!("SCORING_TABLE missing Flee row");
+    }
+
+    fn attack_entry() -> &'static ScoringEntry {
+        for e in SCORING_TABLE {
+            if e.action_head == MicroKind::Attack as u16 {
+                return e;
+            }
+        }
+        panic!("SCORING_TABLE missing Attack row");
+    }
+
+    /// Feed `n` AgentAttacked events against `target` from `actor` into
+    /// the threat_level view. Fakes the event-fold phase directly so the
+    /// test doesn't need to step the whole pipeline; the view's
+    /// `fold_event` method is the same one the tick pipeline calls.
+    fn prime_threat(state: &mut SimState, actor: engine::ids::AgentId, target: engine::ids::AgentId, n: u32) {
+        for _ in 0..n {
+            let ev = Event::AgentAttacked {
+                actor,
+                target,
+                damage: 10.0,
+                tick: state.tick,
+            };
+            state.views.threat_level.fold_event(&ev, state.tick);
+        }
+    }
+
+    /// Spawn one deer (id 1) and one wolf (id 2) at close range. The
+    /// deer is the "self" agent we score Flee for; the wolf is the
+    /// threat whose cumulative damage the view records.
+    fn spawn_deer_and_wolf() -> (SimState, engine::ids::AgentId, engine::ids::AgentId) {
+        let mut state = SimState::new(4, 0xFEED);
+        let deer = state.spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Deer,
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            hp: 40.0,
+            max_hp: 40.0,
+            ..Default::default()
+        }).expect("deer spawn");
+        let wolf = state.spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Wolf,
+            pos: Vec3::new(2.0, 0.0, 0.0),
+            hp: 80.0,
+            max_hp: 80.0,
+            ..Default::default()
+        }).expect("wolf spawn");
+        (state, deer, wolf)
+    }
+
+    /// Fuzzy response — Flee's score strictly increases as the deer
+    /// accumulates threat from the wolf. The classic hp-only Flee row
+    /// would plateau at hp=40 (no hp gate fires because hp >= 30 and
+    /// hp >= 50), but the threat_level gradient pushes the score up
+    /// linearly, and the 50-threat scalar-compare gate adds a +0.3
+    /// step once cumulative threat crosses 50.
+    #[test]
+    fn wounded_deer_flees_proportionally() {
+        let (mut state, deer, wolf) = spawn_deer_and_wolf();
+        let entry = flee_entry();
+
+        // Baseline: 0 threat. Deer hp=40 — neither hp gate fires
+        // (`hp < 30` false, `hp < 50` TRUE at 40). Baseline score =
+        // 0.0 + 0.0 + 0.4 + 0.0 + 0.0 = 0.4.
+        let s0 = score_row_for(entry, &state, deer, None);
+        assert!((s0 - 0.4).abs() < 1e-4, "baseline Flee score = {s0}, expected ≈0.4");
+
+        // +10 small threat: gradient adds 10.0 * 0.01 = +0.1.
+        // Total ≈ 0.5.
+        prime_threat(&mut state, wolf, deer, 10);
+        let s1 = score_row_for(entry, &state, deer, None);
+        assert!(s1 > s0, "Flee score should rise with accumulated threat ({s0} → {s1})");
+        assert!((s1 - 0.5).abs() < 1e-3, "low-threat Flee score = {s1}, expected ≈0.5");
+
+        // +40 more threat (total 50): gradient ≈ 50 * 0.01 = +0.5.
+        // The `> 50.0` gate does NOT fire yet (50 is not > 50).
+        // Total ≈ 0.4 (hp gate) + 0.5 (gradient) = 0.9.
+        prime_threat(&mut state, wolf, deer, 40);
+        let s2 = score_row_for(entry, &state, deer, None);
+        assert!(s2 > s1, "Flee score should keep rising ({s1} → {s2})");
+        assert!((s2 - 0.9).abs() < 1e-3, "at-threshold Flee score = {s2}, expected ≈0.9");
+
+        // +1 more threat (total 51): gradient +0.51, plus the `>50`
+        // gate fires adding +0.3. Total = 0.4 + 0.51 + 0.3 = 1.21.
+        prime_threat(&mut state, wolf, deer, 1);
+        let s3 = score_row_for(entry, &state, deer, None);
+        assert!(
+            s3 > s2 + 0.25,
+            "crossing the 50-threat gate should add a hard +0.3 step ({s2} → {s3})",
+        );
+        assert!((s3 - 1.21).abs() < 1e-3, "over-threshold Flee score = {s3}, expected ≈1.21");
+
+        // Determinism: computing the score twice gives the same answer.
+        assert_eq!(s3, score_row_for(entry, &state, deer, None));
+    }
+
+    /// Retaliation bias — Attack's score ranks the specific attacker
+    /// who has drawn blood above a fresh threat at the same HP. This
+    /// is per-target: the view-gradient + scalar-compare modifiers
+    /// reference `view::threat_level(self, target)` with the TARGET
+    /// slot, so two different candidate targets score differently
+    /// even when their self-side context is identical.
+    #[test]
+    fn wolf_attacks_accumulated_threat() {
+        // Wolf (id 1) + two humans (ids 2, 3). Both humans at full HP.
+        let mut state = SimState::new(8, 0xCAFE);
+        let wolf = state.spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Wolf,
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            hp: 80.0,
+            max_hp: 80.0,
+            ..Default::default()
+        }).expect("wolf spawn");
+        let h1 = state.spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Human,
+            pos: Vec3::new(1.0, 0.0, 0.0),
+            hp: 100.0,
+            max_hp: 100.0,
+            ..Default::default()
+        }).expect("h1 spawn");
+        let h2 = state.spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Human,
+            pos: Vec3::new(-1.0, 0.0, 0.0),
+            hp: 100.0,
+            max_hp: 100.0,
+            ..Default::default()
+        }).expect("h2 spawn");
+
+        let entry = attack_entry();
+
+        // Baseline: zero threat on either side. Both humans at full
+        // hp (hp_pct = 1.0), wolf at full hp (hp_pct = 1.0 >= 0.8 so
+        // `self fresh` modifier fires +0.5). Neither target-side hp_pct
+        // gate fires. No view modifiers fire. Score = 0.5 for both.
+        let s_h1_0 = score_row_for(entry, &state, wolf, Some(h1));
+        let s_h2_0 = score_row_for(entry, &state, wolf, Some(h2));
+        assert!((s_h1_0 - s_h2_0).abs() < 1e-4, "symmetric baseline: {s_h1_0} vs {s_h2_0}");
+        assert!((s_h1_0 - 0.5).abs() < 1e-4, "baseline Attack score = {s_h1_0}, expected ≈0.5");
+
+        // Prime threat only against h1 — 25 cumulative hits.
+        // gradient(self=wolf, target=h1) = 25 * 0.01 = +0.25.
+        // Scalar `> 20.0` fires adding +0.3.
+        // Score for h1 = 0.5 + 0.25 + 0.3 = 1.05.
+        // Score for h2 unchanged at 0.5.
+        prime_threat(&mut state, h1, wolf, 25);
+        let s_h1_1 = score_row_for(entry, &state, wolf, Some(h1));
+        let s_h2_1 = score_row_for(entry, &state, wolf, Some(h2));
+        assert!(
+            s_h1_1 > s_h2_1 + 0.5,
+            "wolf should prefer attacking h1 (accumulated threat) over h2 (fresh); got h1={s_h1_1}, h2={s_h2_1}",
+        );
+        assert!((s_h2_1 - 0.5).abs() < 1e-4, "h2 unchanged at ≈0.5, got {s_h2_1}");
+        assert!((s_h1_1 - 1.05).abs() < 1e-3, "h1 with threat = {s_h1_1}, expected ≈1.05");
+
+        // Fuzzy: even below the 20-threat scalar gate, the gradient
+        // alone differentiates. Reset + prime just 5 threat against
+        // h2 (not 25 — the scalar gate does NOT fire).
+        let mut state2 = SimState::new(8, 0xCAFE);
+        let _ = state2.spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Wolf,
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            hp: 80.0, max_hp: 80.0,
+            ..Default::default()
+        }).unwrap();
+        let h1b = state2.spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Human,
+            pos: Vec3::new(1.0, 0.0, 0.0),
+            hp: 100.0, max_hp: 100.0,
+            ..Default::default()
+        }).unwrap();
+        let h2b = state2.spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Human,
+            pos: Vec3::new(-1.0, 0.0, 0.0),
+            hp: 100.0, max_hp: 100.0,
+            ..Default::default()
+        }).unwrap();
+        prime_threat(&mut state2, h2b, wolf, 5);
+        let s2_h1 = score_row_for(entry, &state2, wolf, Some(h1b));
+        let s2_h2 = score_row_for(entry, &state2, wolf, Some(h2b));
+        // Gradient alone: 5 * 0.01 = +0.05. Strictly greater than the
+        // fresh target, even though the scalar-compare gate hasn't
+        // fired yet. This is the "fuzzy" property the task calls for.
+        assert!(
+            s2_h2 > s2_h1,
+            "below the 20-threat scalar gate, the gradient alone still ranks h2 > h1; got h1={s2_h1}, h2={s2_h2}",
+        );
+        assert!(
+            (s2_h2 - s2_h1 - 0.05).abs() < 1e-4,
+            "gradient delta should be ~+0.05 (5 threat × 0.01); got {}",
+            s2_h2 - s2_h1,
+        );
+    }
+}

@@ -262,13 +262,13 @@ pub fn emit_with_per_kind_sources(
     for (i, scoring) in comp.scoring.iter().enumerate() {
         // Scoring decls are anonymous — index them for a stable filename.
         let stem = format!("scoring_{i:03}");
-        match emit_scoring::emit_scoring(scoring, sources.scoring) {
+        match emit_scoring::emit_scoring(scoring, &comp.views, sources.scoring) {
             Ok(rs) => rust_scoring_modules.push((format!("{stem}.rs"), rs)),
             Err(e) => panic!("scoring emission failed for entry {i}: {e}"),
         }
     }
     rust_scoring_modules.sort_by(|a, b| a.0.cmp(&b.0));
-    let rust_scoring_mod = emit_scoring::emit_scoring_mod(&comp.scoring);
+    let rust_scoring_mod = emit_scoring::emit_scoring_mod(&comp.scoring, &comp.views);
 
     let mut rust_entity_modules: Vec<(String, String)> = Vec::with_capacity(comp.entities.len());
     for entity in &comp.entities {

@@ -75,6 +75,32 @@ impl PredicateDescriptor {
     /// `field_id`; the engine-side decoder reads a compiled scalar expr
     /// from a side-table keyed by `field_id`.
     pub const KIND_GRADIENT: u8 = 6;
+    /// View-call scalar compare — `score += (view_call <op> threshold) ? delta : 0`.
+    /// `field_id` holds the runtime VIEW_ID; `payload[0..4]` is the
+    /// threshold (f32 LE), `payload[4]` / `[5]` are arg-slot codes
+    /// (`ARG_SELF=0`, `ARG_TARGET=1`, `ARG_WILDCARD=0xFE`,
+    /// `ARG_NONE=0xFF`), `payload[6]` is arg_count. Dispatched by
+    /// `eval_view_call` in the engine-side scorer.
+    pub const KIND_VIEW_SCALAR_COMPARE: u8 = 7;
+    /// View-call gradient — `score += view_call * delta`. Same arg-slot
+    /// layout as `KIND_VIEW_SCALAR_COMPARE`; `delta` is on the enclosing
+    /// `ModifierRow.delta`. `payload[0..4]` is reserved (zeros).
+    pub const KIND_VIEW_GRADIENT: u8 = 8;
+
+    /// View-call arg-slot codes. Mirrored on the compiler side so a
+    /// drift between the two lowerings is a rustc type error, not a
+    /// silent-semantics regression.
+    pub const ARG_SELF: u8 = 0;
+    pub const ARG_TARGET: u8 = 1;
+    pub const ARG_WILDCARD: u8 = 0xFE;
+    pub const ARG_NONE: u8 = 0xFF;
+
+    /// Runtime VIEW_IDs. Extend by adding a VIEW_ID_* constant + an
+    /// engine-side `eval_view_call` arm + a VIEW_NAME_* entry in the
+    /// compiler's emitter. @materialized views only; @lazy views are
+    /// called inline at emit time and don't flow through the runtime
+    /// dispatcher.
+    pub const VIEW_ID_THREAT_LEVEL: u16 = 0;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;
@@ -151,7 +177,7 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
         action_head: 2,
         base: 0.0,
         personality_weights: [0.0, 0.0, 0.0, 0.0, 0.0],
-        modifier_count: 2,
+        modifier_count: 4,
         modifiers: [
             ModifierRow {
                 predicate: PredicateDescriptor::scalar_compare(0, PredicateDescriptor::OP_LT, 30.0),
@@ -161,8 +187,24 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
                 predicate: PredicateDescriptor::scalar_compare(0, PredicateDescriptor::OP_LT, 50.0),
                 delta: 0.4,
             },
-            ModifierRow::EMPTY,
-            ModifierRow::EMPTY,
+            ModifierRow {
+                predicate: PredicateDescriptor {
+                    kind: PredicateDescriptor::KIND_VIEW_GRADIENT,
+                    op: 0,
+                    field_id: 0,
+                    payload: [0, 0, 0, 0, 0, 254, 2, 0, 0, 0, 0, 0],
+                },
+                delta: 0.01,
+            },
+            ModifierRow {
+                predicate: PredicateDescriptor {
+                    kind: PredicateDescriptor::KIND_VIEW_SCALAR_COMPARE,
+                    op: PredicateDescriptor::OP_GT,
+                    field_id: 0,
+                    payload: [0, 0, 72, 66, 0, 254, 2, 0, 0, 0, 0, 0],
+                },
+                delta: 0.3,
+            },
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,
@@ -174,7 +216,7 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
         action_head: 3,
         base: 0.0,
         personality_weights: [0.0, 0.0, 0.0, 0.0, 0.0],
-        modifier_count: 3,
+        modifier_count: 5,
         modifiers: [
             ModifierRow {
                 predicate: PredicateDescriptor::scalar_compare(2, PredicateDescriptor::OP_GE, 0.8),
@@ -196,8 +238,24 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
                 ),
                 delta: 0.2,
             },
-            ModifierRow::EMPTY,
-            ModifierRow::EMPTY,
+            ModifierRow {
+                predicate: PredicateDescriptor {
+                    kind: PredicateDescriptor::KIND_VIEW_GRADIENT,
+                    op: 0,
+                    field_id: 0,
+                    payload: [0, 0, 0, 0, 0, 1, 2, 0, 0, 0, 0, 0],
+                },
+                delta: 0.01,
+            },
+            ModifierRow {
+                predicate: PredicateDescriptor {
+                    kind: PredicateDescriptor::KIND_VIEW_SCALAR_COMPARE,
+                    op: PredicateDescriptor::OP_GT,
+                    field_id: 0,
+                    payload: [0, 0, 160, 65, 0, 1, 2, 0, 0, 0, 0, 0],
+                },
+                delta: 0.3,
+            },
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,

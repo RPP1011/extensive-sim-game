@@ -38,6 +38,20 @@ impl ThreatLevel {
         decayed.clamp(0.0, 1000.0)
     }
 
+    /// Σ get(a, x, tick) over every recorded second-argument `x`.
+    /// Used by scoring's view-call wildcard slot (`_`). O(|pair_map|).
+    pub fn sum_for_first(&self, a: AgentId, tick: u32) -> f32 {
+        let mut total: f32 = 0.0;
+        for (&(k_a, _k_b), &(base, anchor)) in self.value.iter() {
+            if k_a != a {
+                continue;
+            }
+            let decayed = base * Self::RATE.powi(tick.saturating_sub(anchor) as i32);
+            total += decayed.clamp(0.0, 1000.0);
+        }
+        total
+    }
+
     /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase.
     pub fn fold_event(&mut self, event: &Event, tick: u32) {
         match event {
