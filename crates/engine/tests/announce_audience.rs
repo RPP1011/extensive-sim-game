@@ -193,6 +193,12 @@ fn announce_anyone_uses_max_announce_radius_around_speaker() {
     // distances [50.0, 79.9, 80.1, 200.0]; expect 79.9 included and 80.1
     // excluded. That pins the constant to 80m ± 0.2m and rules out a
     // silent halving to 40 or doubling to 150.
+    //
+    // Uses Dragons both sides because Anyone radius is now channel-gated
+    // (MEDIUM #9): the effective radius is the speaker's longest-reach
+    // registered channel capped at MAX_ANNOUNCE_RADIUS. Dragon Song (200m)
+    // clamps to MAX_ANNOUNCE_RADIUS=80. Human Speech (30m) would not
+    // exercise the boundary at 79.9m.
     let mut state = SimState::new(16, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1024);
@@ -200,32 +206,32 @@ fn announce_anyone_uses_max_announce_radius_around_speaker() {
 
     let speaker = state
         .spawn_agent(AgentSpawn {
-            creature_type: CreatureType::Human,
+            creature_type: CreatureType::Dragon,
             pos: Vec3::new(0.0, 0.0, 10.0),
             hp: 100.0,
         })
         .unwrap();
     // Close agent — deep inside MAX_ANNOUNCE_RADIUS=80:
     state.spawn_agent(AgentSpawn {
-        creature_type: CreatureType::Human,
+        creature_type: CreatureType::Dragon,
         pos: Vec3::new(50.0, 0.0, 10.0),
         hp: 100.0,
     });
     // Just inside (79.9m):
     state.spawn_agent(AgentSpawn {
-        creature_type: CreatureType::Human,
+        creature_type: CreatureType::Dragon,
         pos: Vec3::new(79.9, 0.0, 10.0),
         hp: 100.0,
     });
     // Just outside (80.1m):
     state.spawn_agent(AgentSpawn {
-        creature_type: CreatureType::Human,
+        creature_type: CreatureType::Dragon,
         pos: Vec3::new(80.1, 0.0, 10.0),
         hp: 100.0,
     });
     // Far agent — beyond 80:
     state.spawn_agent(AgentSpawn {
-        creature_type: CreatureType::Human,
+        creature_type: CreatureType::Dragon,
         pos: Vec3::new(200.0, 0.0, 10.0),
         hp: 100.0,
     });

@@ -1,5 +1,6 @@
 // crates/engine/src/step.rs
 use crate::cascade::CascadeRegistry;
+use crate::channel::channel_range;
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::invariant::{FailureMode, InvariantRegistry};
@@ -10,6 +11,62 @@ use crate::state::SimState;
 use crate::telemetry::{metrics, NullSink, TelemetrySink};
 use crate::view::MaterializedView;
 use glam::Vec3;
+
+/// Default vocal-strength multiplier used by `channel_range` when computing
+/// speech-based announce radii. Real vocal-strength is a per-agent
+/// Capability; until that lands, everyone shouts at 1.0. Audit fix MEDIUM #9.
+pub const DEFAULT_VOCAL_STRENGTH: f32 = 1.0;
+
+/// Return `true` iff `speaker` and `observer` share at least one
+/// `CommunicationChannel`. When both sides have non-empty channel sets, at
+/// least one must overlap. When either side has no registered channels
+/// (e.g. cold-storage default, or a test state that never called
+/// `spawn_agent`), we fall back to permissive so pre-channel-gating
+/// fixtures don't silently go mute.
+fn speaker_and_observer_share_channel(
+    state: &SimState,
+    speaker: AgentId,
+    observer: AgentId,
+) -> bool {
+    let speaker_ch = state.agent_channels(speaker);
+    let observer_ch = state.agent_channels(observer);
+    match (speaker_ch, observer_ch) {
+        (Some(s), Some(o)) => {
+            if s.is_empty() || o.is_empty() { return true; }
+            for c in s.iter() {
+                if o.contains(c) { return true; }
+            }
+            false
+        }
+        _ => true,
+    }
+}
+
+/// Longest effective range the `speaker` can project over any of their
+/// registered channels, at `DEFAULT_VOCAL_STRENGTH`. Bounded above by
+/// `MAX_ANNOUNCE_RADIUS` so a Telepathy-capable speaker doesn't broadcast
+/// planet-wide. When the speaker has no registered channels, fall back to
+/// `MAX_ANNOUNCE_RADIUS` (pre-channel-gating behaviour).
+///
+/// Only consulted for `AnnounceAudience::Anyone` / `Group(_)`; `Area(c, r)`
+/// still uses the caller-supplied `r` (author intent).
+fn speaker_anyone_radius(state: &SimState, speaker: AgentId) -> f32 {
+    let channels = match state.agent_channels(speaker) {
+        Some(c) if !c.is_empty() => c,
+        _ => return MAX_ANNOUNCE_RADIUS,
+    };
+    let mut best: f32 = 0.0;
+    for c in channels.iter() {
+        let r = channel_range(*c, DEFAULT_VOCAL_STRENGTH);
+        if r.is_infinite() {
+            return MAX_ANNOUNCE_RADIUS;
+        }
+        if r.is_finite() && r > best {
+            best = r;
+        }
+    }
+    best.min(MAX_ANNOUNCE_RADIUS)
+}
 
 pub const MOVE_SPEED_MPS: f32 = 1.0;
 pub const ATTACK_DAMAGE:  f32 = 10.0;
@@ -516,16 +573,21 @@ fn apply_actions(
                     fact_payload,
                     tick: state.tick,
                 });
+                // Channel-gated radius for `Anyone` / `Group` audiences:
+                // speaker's longest-reach channel at default vocal strength,
+                // bounded by MAX_ANNOUNCE_RADIUS. `Area(c, r)` still uses the
+                // caller-supplied `r` (author intent). Audit fix MEDIUM #9.
+                let anyone_radius = speaker_anyone_radius(state, speaker);
                 let (center, radius) = match audience {
                     AnnounceAudience::Area(c, r) => (c, r),
                     AnnounceAudience::Anyone => {
                         let sp = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
-                        (sp, MAX_ANNOUNCE_RADIUS)
+                        (sp, anyone_radius)
                     }
                     AnnounceAudience::Group(_) => {
                         // TODO(Task 16): use group membership. For MVP, fall back to Anyone.
                         let sp = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
-                        (sp, MAX_ANNOUNCE_RADIUS)
+                        (sp, anyone_radius)
                     }
                 };
                 // Deterministic iteration: enumerate spatial-index hits in
@@ -546,6 +608,8 @@ fn apply_actions(
                     if count >= MAX_ANNOUNCE_RECIPIENTS { break; }
                     if obs == speaker { continue; }
                     if !candidates.contains(&obs) { continue; }
+                    // Audit fix MEDIUM #9: channel-eligibility filter.
+                    if !speaker_and_observer_share_channel(state, speaker, obs) { continue; }
                     events.push(Event::RecordMemory {
                         observer:     obs,
                         source:       speaker,
@@ -568,6 +632,7 @@ fn apply_actions(
                     if obs == speaker { continue; }
                     if primary_observers.contains(&obs) { continue; }
                     if !overhear_candidates.contains(&obs) { continue; }
+                    if !speaker_and_observer_share_channel(state, speaker, obs) { continue; }
                     events.push(Event::RecordMemory {
                         observer:     obs,
                         source:       speaker,
