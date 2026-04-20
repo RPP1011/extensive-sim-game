@@ -42,25 +42,15 @@ impl CascadeRegistry {
     /// handler twice — callers should invoke once, typically via
     /// [`CascadeRegistry::with_engine_builtins`].
     pub fn register_engine_builtins(&mut self) {
-        self.register(crate::ability::expire::OpportunityAttackHandler);
-        // Compiler-emitted physics handlers (DSL-owned). At milestone 3 this
-        // is just the damage handler — the legacy `crate::ability::DamageHandler`
-        // was deleted in the same commit. As more physics rules migrate
-        // (heal, shield, stun, slow, gold, standing) the matching
-        // `self.register(crate::ability::*)` lines below shrink.
+        // Compiler-emitted physics handlers (DSL-owned). Covers damage, heal,
+        // shield, stun, slow, transfer_gold, modify_standing, and
+        // opportunity_attack. The matching hand-written legacy handlers were
+        // deleted in the same commit that landed their DSL equivalent.
+        // `CastHandler` + `RecordMemoryHandler` remain hand-written: the
+        // former needs `Arc<AbilityRegistry>` state (the DSL emitter only
+        // produces stateless unit structs), and the latter hasn't been
+        // migrated yet (tracked separately from this series).
         crate::generated::physics::register(self);
-        // Combat Foundation Task 10 — remaining effect fold-ins not yet
-        // migrated to DSL. These handlers pair up with the `Effect*Applied`
-        // events the `CastHandler` emits (Task 9) and are the actual state
-        // mutators for the combat EffectOps.
-        self.register(crate::ability::HealHandler);
-        self.register(crate::ability::ShieldHandler);
-        self.register(crate::ability::StunHandler);
-        self.register(crate::ability::SlowHandler);
-        // Combat Foundation Task 16 — world-side gold transfer handler.
-        self.register(crate::ability::TransferGoldHandler);
-        // Combat Foundation Task 17 — pair-standing adjustment handler.
-        self.register(crate::ability::ModifyStandingHandler);
         // Audit fix HIGH #4 — Announce → RecordMemory → cold_memory writer.
         self.register(crate::ability::RecordMemoryHandler);
     }

@@ -15,7 +15,7 @@ The existing game logic inside `crates/engine/src/ability/*.rs`, `crates/engine/
 | 0 | Compiler scaffold | empty module + xtask wiring | — | ✅ |
 | 1 | `event` | Event enum variants; matching Python `@dataclass` | legacy event enum decls | ✅ |
 | 2 | (renumbered) `event` integration | events emitted into `engine_rules`, engine consumes via re-export | hand-written `engine::event::Event` | ✅ |
-| 3 | `physics` rule | `impl CascadeHandler` + registration call into `engine::cascade::CascadeRegistry` | `ability/*.rs` handlers (damage so far; heal, shield, stun, slow, gold, standing follow as separate commits) | 🚧 |
+| 3 | `physics` rule | `impl CascadeHandler` + registration call into `engine::cascade::CascadeRegistry` | `ability/*.rs` handlers (damage, heal, shield, stun, slow, gold, standing, opportunity_attack landed; cast stays hand-written — needs `Arc<AbilityRegistry>` state) | 🚧 |
 | 4 | `mask` | predicate fn + SPIR-V kernel stub | `ability/gate.rs`, mask-build call sites | ❌ |
 | 4 | `scoring` | per-action utility table | `policy/utility.rs` scoring body | ❌ |
 | 5 | `entity` | spawn template + CreatureType variant + capability struct | `creature.rs` enum + `is_hostile_to` + `for_creature` | ❌ |

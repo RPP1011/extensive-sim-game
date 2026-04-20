@@ -10,12 +10,18 @@
 //!
 //! Called by `step_full` BEFORE `scratch.mask.reset()` so mask predicates
 //! see the post-decrement / post-engagement state.
+//!
+//! The `OpportunityAttackTriggered` cascade handler that used to live in
+//! this file was migrated to DSL and is emitted as
+//! `crate::generated::physics::opportunity_attack::OpportunityAttackHandler`.
+//! The tick-start machinery below is engine-internal scheduling (not game
+//! rules) and stays hand-written.
 
-use crate::cascade::{CascadeHandler, EventKindId, Lane};
-use crate::event::{Event, EventRing};
+use crate::event::Event;
+use crate::event::EventRing;
 use crate::ids::AgentId;
 use crate::state::SimState;
-use crate::step::{SimScratch, ATTACK_DAMAGE};
+use crate::step::SimScratch;
 
 /// Engagement range in world-space meters. Matches `ATTACK_RANGE = 2.0` —
 /// an agent is "engaged" with a hostile exactly when the hostile is within
@@ -27,37 +33,6 @@ pub const ENGAGEMENT_RANGE: f32 = 2.0;
 /// alongside `ENGAGEMENT_RANGE` so the schema-hash fingerprint can cover
 /// both constants together.
 pub const ENGAGEMENT_SLOW_FACTOR: f32 = 0.3;
-
-/// Cascade handler for `OpportunityAttackTriggered`. Mirrors the normal
-/// `MicroKind::Attack` damage path: applies `ATTACK_DAMAGE` to the target
-/// and emits `AgentAttacked` + (on kill) `AgentDied` + `state.kill_agent`.
-///
-/// Registered by `CascadeRegistry::register_engine_builtins()` so it fires
-/// automatically in step pipelines that use `CascadeRegistry::with_engine_builtins`.
-/// Tests that want a pristine registry can opt out with `CascadeRegistry::new`.
-pub struct OpportunityAttackHandler;
-
-impl CascadeHandler for OpportunityAttackHandler {
-    fn trigger(&self) -> EventKindId { EventKindId::OpportunityAttackTriggered }
-    fn lane(&self) -> Lane { Lane::Effect }
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        if let Event::OpportunityAttackTriggered { attacker, target, tick } = *event {
-            if !state.agent_alive(target) { return; }
-            // Audit fix MEDIUM #10: honour the attacker's per-agent damage.
-            let damage = state.agent_attack_damage(attacker).unwrap_or(ATTACK_DAMAGE);
-            let cur_hp = state.agent_hp(target).unwrap_or(0.0);
-            let new_hp = (cur_hp - damage).max(0.0);
-            state.set_agent_hp(target, new_hp);
-            events.push(Event::AgentAttacked {
-                attacker, target, damage, tick,
-            });
-            if new_hp <= 0.0 {
-                events.push(Event::AgentDied { agent_id: target, tick });
-                state.kill_agent(target);
-            }
-        }
-    }
-}
 
 /// The unified tick-start phase. See module docs for the three jobs.
 ///

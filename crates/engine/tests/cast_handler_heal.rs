@@ -1,6 +1,6 @@
 //! Combat Foundation Task 11 — `HealHandler` clamps at `max_hp`.
 
-use engine::ability::HealHandler;
+use engine::generated::physics::heal::HealHandler;
 use engine::cascade::CascadeHandler;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};

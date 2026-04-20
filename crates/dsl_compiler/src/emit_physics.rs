@@ -223,6 +223,12 @@ fn emit_impl_block(out: &mut String, physics: &PhysicsIR) -> Result<(), EmitErro
     // `register_engine_builtins` registrations.
     writeln!(out, "    fn lane(&self) -> Lane {{ Lane::Effect }}").unwrap();
     writeln!(out).unwrap();
+    // `#[allow(unused_variables)]` covers the event-pattern bindings — some
+    // handlers (e.g. shield) don't reference `caster` or `tick` in their
+    // body. We could track which bindings are live by walking the body, but
+    // it's mechanical noise: the generated file is already machine-owned and
+    // the `-D warnings` CI guard is what forces the allow.
+    writeln!(out, "    #[allow(unused_variables)]").unwrap();
     writeln!(
         out,
         "    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {{"
@@ -511,6 +517,113 @@ fn lower_namespace_call(
         (NamespaceId::Agents, "kill") => {
             expect_arity(args, 1, "agents.kill")?;
             Ok(format!("state.kill_agent({})", lowered[0]))
+        }
+        // Heal clamp reads the target's authored max hp. Absent slots default
+        // the max to the current hp (legacy `unwrap_or(cur_hp)` semantics); we
+        // return 0.0 here and leave the DSL author to reference `max(cur_hp, ...)`
+        // if they want a non-zero fallback. The heal rule doesn't need it
+        // because it guards on `alive(t)` first — an alive slot always has a
+        // max_hp.
+        (NamespaceId::Agents, "max_hp") => {
+            expect_arity(args, 1, "agents.max_hp")?;
+            Ok(format!("state.agent_max_hp({}).unwrap_or(0.0)", lowered[0]))
+        }
+        (NamespaceId::Agents, "attack_damage") => {
+            expect_arity(args, 1, "agents.attack_damage")?;
+            // Legacy fallback was `ATTACK_DAMAGE` from step.rs — passed in so
+            // the opportunity-attack rule sees the kernel's default when the
+            // slot is empty. `crate::step::ATTACK_DAMAGE` is the engine
+            // constant.
+            Ok(format!(
+                "state.agent_attack_damage({}).unwrap_or(crate::step::ATTACK_DAMAGE)",
+                lowered[0]
+            ))
+        }
+        (NamespaceId::Agents, "stun_remaining_ticks") => {
+            expect_arity(args, 1, "agents.stun_remaining_ticks")?;
+            Ok(format!("state.agent_stun_remaining({}).unwrap_or(0)", lowered[0]))
+        }
+        (NamespaceId::Agents, "set_stun_remaining_ticks") => {
+            expect_arity(args, 2, "agents.set_stun_remaining_ticks")?;
+            Ok(format!(
+                "state.set_agent_stun_remaining({}, {})",
+                lowered[0], lowered[1]
+            ))
+        }
+        (NamespaceId::Agents, "slow_remaining_ticks") => {
+            expect_arity(args, 1, "agents.slow_remaining_ticks")?;
+            Ok(format!("state.agent_slow_remaining({}).unwrap_or(0)", lowered[0]))
+        }
+        (NamespaceId::Agents, "set_slow_remaining_ticks") => {
+            expect_arity(args, 2, "agents.set_slow_remaining_ticks")?;
+            Ok(format!(
+                "state.set_agent_slow_remaining({}, {})",
+                lowered[0], lowered[1]
+            ))
+        }
+        (NamespaceId::Agents, "slow_factor_q8") => {
+            expect_arity(args, 1, "agents.slow_factor_q8")?;
+            Ok(format!("state.agent_slow_factor_q8({}).unwrap_or(0)", lowered[0]))
+        }
+        (NamespaceId::Agents, "set_slow_factor_q8") => {
+            expect_arity(args, 2, "agents.set_slow_factor_q8")?;
+            Ok(format!(
+                "state.set_agent_slow_factor_q8({}, {})",
+                lowered[0], lowered[1]
+            ))
+        }
+        (NamespaceId::Agents, "gold") => {
+            expect_arity(args, 1, "agents.gold")?;
+            // Gold lives inside the per-agent `Inventory` struct on
+            // `SimState::cold_inventory`. Missing slots contribute 0.
+            Ok(format!(
+                "state.agent_inventory({}).map(|i| i.gold).unwrap_or(0)",
+                lowered[0]
+            ))
+        }
+        (NamespaceId::Agents, "set_gold") => {
+            expect_arity(args, 2, "agents.set_gold")?;
+            // Write preserves the other Inventory fields. If the slot is
+            // absent (dead / uninit), the write is silently dropped — same
+            // semantic as the legacy `set_agent_inventory` which short-circuits
+            // when the slot is missing.
+            Ok(format!(
+                "if let Some(mut __inv) = state.agent_inventory({a}) {{ __inv.gold = {v}; state.set_agent_inventory({a}, __inv); }}",
+                a = lowered[0],
+                v = lowered[1]
+            ))
+        }
+        (NamespaceId::Agents, "add_gold") => {
+            expect_arity(args, 2, "agents.add_gold")?;
+            // Wrapping add — preserves the exact legacy `TransferGoldHandler`
+            // semantics (i64 overflow wraps, doesn't panic). No-op if the slot
+            // is absent.
+            Ok(format!(
+                "if let Some(mut __inv) = state.agent_inventory({a}) {{ __inv.gold = __inv.gold.wrapping_add({v}); state.set_agent_inventory({a}, __inv); }}",
+                a = lowered[0],
+                v = lowered[1]
+            ))
+        }
+        (NamespaceId::Agents, "sub_gold") => {
+            expect_arity(args, 2, "agents.sub_gold")?;
+            // Wrapping sub — paired with `add_gold` for gold-transfer. No-op
+            // if the slot is absent.
+            Ok(format!(
+                "if let Some(mut __inv) = state.agent_inventory({a}) {{ __inv.gold = __inv.gold.wrapping_sub({v}); state.set_agent_inventory({a}, __inv); }}",
+                a = lowered[0],
+                v = lowered[1]
+            ))
+        }
+        (NamespaceId::Agents, "adjust_standing") => {
+            expect_arity(args, 3, "agents.adjust_standing")?;
+            // Delegates to `SimState::adjust_standing`, which clamps to
+            // `[-1000, 1000]` and keys the ordered tuple `(min(a,b), max(a,b))`.
+            // Return value (the post-clamp standing) is discarded when used
+            // as a statement.
+            Ok(format!(
+                "state.adjust_standing({}, {}, {})",
+                lowered[0], lowered[1], lowered[2]
+            ))
         }
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in milestone 3 physics emission",

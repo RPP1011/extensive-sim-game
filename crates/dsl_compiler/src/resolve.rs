@@ -157,10 +157,34 @@ mod stdlib {
             (NamespaceId::Agents, "alive") => Some((1, IrType::Bool)),
             (NamespaceId::Agents, "pos") => Some((1, IrType::Vec3)),
             (NamespaceId::Agents, "hp") => Some((1, IrType::F32)),
+            (NamespaceId::Agents, "max_hp") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "shield_hp") => Some((1, IrType::F32)),
+            (NamespaceId::Agents, "attack_damage") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "set_hp") => Some((2, IrType::Unknown)),
             (NamespaceId::Agents, "set_shield_hp") => Some((2, IrType::Unknown)),
             (NamespaceId::Agents, "kill") => Some((1, IrType::Unknown)),
+            // Status-effect accessors.
+            (NamespaceId::Agents, "stun_remaining_ticks") => Some((1, IrType::U32)),
+            (NamespaceId::Agents, "set_stun_remaining_ticks") => Some((2, IrType::Unknown)),
+            (NamespaceId::Agents, "slow_remaining_ticks") => Some((1, IrType::U32)),
+            (NamespaceId::Agents, "set_slow_remaining_ticks") => Some((2, IrType::Unknown)),
+            (NamespaceId::Agents, "slow_factor_q8") => Some((1, IrType::I16)),
+            (NamespaceId::Agents, "set_slow_factor_q8") => Some((2, IrType::Unknown)),
+            // Inventory / economy.
+            (NamespaceId::Agents, "gold") => Some((1, IrType::I64)),
+            (NamespaceId::Agents, "set_gold") => Some((2, IrType::Unknown)),
+            // Adds `delta` to the agent's gold using `i64::wrapping_add` —
+            // the legacy `TransferGoldHandler` uses wrapping arithmetic so
+            // i64 overflow doesn't panic in debug builds. No-op if the slot
+            // is absent.
+            (NamespaceId::Agents, "add_gold") => Some((2, IrType::Unknown)),
+            // Subtracts `delta` from the agent's gold using `i64::wrapping_sub`.
+            // Paired with `add_gold` for the gold-transfer handler so the
+            // two sides of a transfer each use the legacy wrapping op.
+            (NamespaceId::Agents, "sub_gold") => Some((2, IrType::Unknown)),
+            // Standing (symmetric pair storage, clamped [-1000, 1000] by
+            // `SparseStandings::adjust`).
+            (NamespaceId::Agents, "adjust_standing") => Some((3, IrType::Unknown)),
             _ => None,
         }
     }

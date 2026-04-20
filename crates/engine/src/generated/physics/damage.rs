@@ -16,6 +16,7 @@ impl CascadeHandler for DamageHandler {
         Lane::Effect
     }
 
+    #[allow(unused_variables)]
     fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
         let (c, t, a, tk) = match *event {
             Event::EffectDamageApplied {

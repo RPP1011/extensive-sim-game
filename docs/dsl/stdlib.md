@@ -214,16 +214,33 @@ are the milestone-3 accessor surface for compiler-emitted physics handlers.
 | `agents.alive(a)` | `(AgentId) -> bool` — true if the slot is still live. |
 | `agents.pos(a)` | `(AgentId) -> Vec3` — world position; `Vec3::ZERO` for slots without a pos field. |
 | `agents.hp(a)` | `(AgentId) -> f32` — current hp; `0.0` for slots without an hp field. |
+| `agents.max_hp(a)` | `(AgentId) -> f32` — authored max hp; `0.0` if absent. |
 | `agents.shield_hp(a)` | `(AgentId) -> f32` — current shield hp; `0.0` if absent. |
+| `agents.attack_damage(a)` | `(AgentId) -> f32` — per-agent melee damage; falls back to the engine's `step::ATTACK_DAMAGE` constant when the slot is absent. |
 | `agents.set_hp(a, v)` | `(AgentId, f32) -> ()` — overwrites the hp slot. |
 | `agents.set_shield_hp(a, v)` | `(AgentId, f32) -> ()` — overwrites the shield hp slot. |
 | `agents.kill(a)` | `(AgentId) -> ()` — flips the alive bit and tears the agent out of the spatial index. Idempotent. |
+| `agents.stun_remaining_ticks(a)` | `(AgentId) -> u32` — ticks of stun remaining; `0` if absent. |
+| `agents.set_stun_remaining_ticks(a, v)` | `(AgentId, u32) -> ()` — overwrites the stun-remaining slot. |
+| `agents.slow_remaining_ticks(a)` | `(AgentId) -> u32` — ticks of slow remaining; `0` if absent. |
+| `agents.set_slow_remaining_ticks(a, v)` | `(AgentId, u32) -> ()` — overwrites the slow-remaining slot. |
+| `agents.slow_factor_q8(a)` | `(AgentId) -> i16` — q8 fixed-point speed multiplier under slow; `0` if no slow active. |
+| `agents.set_slow_factor_q8(a, v)` | `(AgentId, i16) -> ()` — overwrites the slow-factor slot. |
+| `agents.gold(a)` | `(AgentId) -> i64` — current gold balance; `0` if the inventory slot is absent. Signed: debt is representable. |
+| `agents.set_gold(a, v)` | `(AgentId, i64) -> ()` — overwrites the gold slot. No-op if the inventory slot is absent. |
+| `agents.add_gold(a, delta)` | `(AgentId, i64) -> ()` — `gold += delta` via `i64::wrapping_add`. No-op if the slot is absent. |
+| `agents.sub_gold(a, delta)` | `(AgentId, i64) -> ()` — `gold -= delta` via `i64::wrapping_sub`. No-op if the slot is absent. |
+| `agents.adjust_standing(a, b, delta)` | `(AgentId, AgentId, i16) -> ()` — symmetric pair-standing adjust, clamped to `[-1000, 1000]`. Inserts the pair entry as a side effect. |
 
 These map one-to-one to `SimState::agent_alive`, `agent_pos`, `agent_hp`,
-`agent_shield_hp`, `set_agent_hp`, `set_agent_shield_hp`, and `kill_agent`
-on the engine side.
-The compiler emits the namespace calls as direct method invocations on the
-`&mut SimState` parameter passed to a cascade handler.
+`agent_max_hp`, `agent_shield_hp`, `agent_attack_damage`, `set_agent_hp`,
+`set_agent_shield_hp`, `kill_agent`, `agent_stun_remaining`,
+`set_agent_stun_remaining`, `agent_slow_remaining`,
+`set_agent_slow_remaining`, `agent_slow_factor_q8`,
+`set_agent_slow_factor_q8`, `agent_inventory` / `set_agent_inventory` (for
+the gold accessors), and `adjust_standing`. The compiler emits the namespace
+calls as direct method invocations on the `&mut SimState` parameter passed
+to a cascade handler.
 
 ---
 

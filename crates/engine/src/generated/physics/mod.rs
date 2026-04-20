@@ -2,6 +2,13 @@
 // Regenerate with `cargo run --bin xtask -- compile-dsl`.
 
 pub mod damage;
+pub mod heal;
+pub mod modify_standing;
+pub mod opportunity_attack;
+pub mod shield;
+pub mod slow;
+pub mod stun;
+pub mod transfer_gold;
 
 use crate::cascade::CascadeRegistry;
 
@@ -11,4 +18,11 @@ use crate::cascade::CascadeRegistry;
 /// the engine knowing about each handler by name.
 pub fn register(registry: &mut CascadeRegistry) {
     damage::register(registry);
+    heal::register(registry);
+    modify_standing::register(registry);
+    opportunity_attack::register(registry);
+    shield::register(registry);
+    slow::register(registry);
+    stun::register(registry);
+    transfer_gold::register(registry);
 }

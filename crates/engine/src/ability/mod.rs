@@ -9,37 +9,26 @@
 //! - `cast`     — `CastHandler` cascade dispatcher (one handler, branches on EffectOp)
 //! - `gate`     — `evaluate_cast_gate` mask predicate
 //! - `expire`   — tick-start unified pass (decrement + expire + engagement)
+//!
+//! Per-effect cascade handlers (`damage`, `heal`, `shield`, `stun`, `slow`,
+//! `transfer_gold`, `modify_standing`, `opportunity_attack`) are compiler-
+//! emitted from `assets/sim/physics.sim`; the legacy hand-written files that
+//! used to live here (one per effect) were deleted as each effect migrated
+//! to DSL. Consumers reach them at `crate::generated::physics::<name>::*`.
 
 mod id;
 pub use id::AbilityId;
 
 pub mod cast;
-// `damage` was deleted at milestone 3 — the DSL-emitted handler at
-// `crate::generated::physics::damage::DamageHandler` now carries the rule.
 pub mod expire;
 pub mod gate;
-pub mod gold;
-pub mod heal;
 pub mod program;
 pub mod record_memory;
 pub mod registry;
-pub mod shield;
-pub mod slow;
-pub mod standing;
-pub mod stun;
 
 pub use cast::CastHandler;
-// `DamageHandler` re-export removed at milestone 3 — consumers (engine
-// builtin registration + tests) reach the DSL-emitted handler at
-// `crate::generated::physics::damage::DamageHandler`.
 pub use gate::evaluate_cast_gate;
-pub use gold::TransferGoldHandler;
-pub use heal::HealHandler;
 pub use record_memory::RecordMemoryHandler;
-pub use shield::ShieldHandler;
-pub use slow::SlowHandler;
-pub use standing::ModifyStandingHandler;
-pub use stun::StunHandler;
 pub use program::{Area, Delivery, EffectOp, Gate, TargetSelector, MAX_EFFECTS_PER_PROGRAM};
 pub use program::AbilityProgram;
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};

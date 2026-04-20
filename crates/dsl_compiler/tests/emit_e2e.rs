@@ -180,8 +180,14 @@ fn emit_physics_damage_handler_from_seed() {
     merged.decls.extend(dsl_compiler::parse(&physics_src).unwrap().decls);
     let comp = dsl_compiler::compile_ast(merged).expect("merged sources resolve");
 
-    assert_eq!(comp.physics.len(), 1, "milestone 3 ships exactly one physics rule");
-    assert_eq!(comp.physics[0].name, "damage");
+    // Milestone 3 originally shipped one rule (damage); follow-on commits
+    // migrated the remaining combat handlers (heal, shield, stun, slow,
+    // transfer_gold, modify_standing, opportunity_attack) to DSL. The test
+    // pins the "damage is present" invariant without fixing the overall
+    // count — adding more rules to `physics.sim` should not break this
+    // assertion.
+    assert!(comp.physics.iter().any(|p| p.name == "damage"),
+        "damage rule must be present");
 
     let artefacts = dsl_compiler::emit_with_per_kind_sources(
         &comp,

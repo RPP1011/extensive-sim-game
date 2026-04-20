@@ -9,9 +9,10 @@
 use std::sync::Arc;
 
 use engine::ability::{
-    evaluate_cast_gate, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate, StunHandler,
+    evaluate_cast_gate, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate,
 };
 use engine::ability::expire::tick_start;
+use engine::generated::physics::stun::StunHandler;
 use engine::cascade::CascadeHandler;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};

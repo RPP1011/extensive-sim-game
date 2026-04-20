@@ -7,7 +7,7 @@
 //! - Clamp `[-1000, 1000]` is applied on the final value (silent saturation).
 //! - Zero delta short-circuits — no entry inserted, pair stays untracked.
 
-use engine::ability::ModifyStandingHandler;
+use engine::generated::physics::modify_standing::ModifyStandingHandler;
 use engine::cascade::CascadeHandler;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};

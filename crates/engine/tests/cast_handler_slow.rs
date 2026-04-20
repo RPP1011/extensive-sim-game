@@ -11,8 +11,8 @@
 //!    multiplicatively with effect-slow: both apply, neither replaces the
 //!    other.
 
-use engine::ability::SlowHandler;
 use engine::ability::expire::{tick_start, ENGAGEMENT_SLOW_FACTOR};
+use engine::generated::physics::slow::SlowHandler;
 use engine::cascade::{CascadeHandler, CascadeRegistry};
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};

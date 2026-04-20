@@ -6,7 +6,8 @@
 //! emitting a `MoveToward` / `Flee` action, and running the cascade with
 //! `CascadeRegistry::with_engine_builtins()` to get the OA damage cascade.
 
-use engine::ability::expire::{ENGAGEMENT_SLOW_FACTOR, OpportunityAttackHandler};
+use engine::ability::expire::ENGAGEMENT_SLOW_FACTOR;
+use engine::generated::physics::opportunity_attack::OpportunityAttackHandler;
 use engine::cascade::{CascadeRegistry, MAX_CASCADE_ITERATIONS};
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};

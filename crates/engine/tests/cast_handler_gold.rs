@@ -9,7 +9,7 @@
 //! - Self-transfer (`from == to`) is a no-op — skipped early so the slot
 //!   isn't double-mutated.
 
-use engine::ability::TransferGoldHandler;
+use engine::generated::physics::transfer_gold::TransferGoldHandler;
 use engine::cascade::CascadeHandler;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
