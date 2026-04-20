@@ -108,6 +108,10 @@ impl PredicateDescriptor {
     /// bump fed by `FearSpread` emitted when a same-species neighbour
     /// dies. See `assets/sim/views.sim::kin_fear`.
     pub const VIEW_ID_KIN_FEAR: u16 = 2;
+    /// Pack-hunt focus (task 169) — per-(observer, target) decayed
+    /// beacon fed by `PackAssist` emitted when a same-species neighbour
+    /// commits an engagement. See `assets/sim/views.sim::pack_focus`.
+    pub const VIEW_ID_PACK_FOCUS: u16 = 3;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;
@@ -234,7 +238,7 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
         action_head: 3,
         base: 0.0,
         personality_weights: [0.0, 0.0, 0.0, 0.0, 0.0],
-        modifier_count: 6,
+        modifier_count: 7,
         modifiers: [
             ModifierRow {
                 predicate: PredicateDescriptor::scalar_compare(2, PredicateDescriptor::OP_GE, 0.8),
@@ -283,7 +287,15 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
                 },
                 delta: 0.4,
             },
-            ModifierRow::EMPTY,
+            ModifierRow {
+                predicate: PredicateDescriptor {
+                    kind: PredicateDescriptor::KIND_VIEW_SCALAR_COMPARE,
+                    op: PredicateDescriptor::OP_GT,
+                    field_id: 3,
+                    payload: [0, 0, 0, 63, 0, 1, 2, 0, 0, 0, 0, 0],
+                },
+                delta: 0.4,
+            },
             ModifierRow::EMPTY,
         ],
     },

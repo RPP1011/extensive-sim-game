@@ -345,6 +345,32 @@ fn eval_view_call(
                 }
             }
         }
+        PredicateDescriptor::VIEW_ID_PACK_FOCUS => {
+            // `pack_focus(observer, target)` — `@decay(rate=0.933,
+            // per=tick)` on pair_map storage (~10-tick half-life). Same
+            // shape as kin_fear: `get(a, b, tick)` reads the decayed
+            // value, `sum_for_first(a, tick)` sums across every
+            // recorded target for this observer. Task 169 — pack-hunt
+            // focus. Scoring's Attack row uses the specific-slot form
+            // (no wildcard) so the boost applies only to the engaged
+            // target, not every candidate.
+            let a = match resolve_slot(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            match slot1 {
+                PredicateDescriptor::ARG_WILDCARD => {
+                    state.views.pack_focus.sum_for_first(a, state.tick)
+                }
+                _ => {
+                    let b = match resolve_slot(slot1, agent, target) {
+                        Some(id) => id,
+                        None => return f32::NAN,
+                    };
+                    state.views.pack_focus.get(a, b, state.tick)
+                }
+            }
+        }
         _ => f32::NAN,
     }
 }

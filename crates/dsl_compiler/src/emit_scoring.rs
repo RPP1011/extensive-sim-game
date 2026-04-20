@@ -160,6 +160,10 @@ const VIEW_ID_MY_ENEMIES: u16 = 1;
 /// fed by `FearSpread` emitted when a same-species neighbour dies. See
 /// `assets/sim/views.sim::kin_fear`.
 const VIEW_ID_KIN_FEAR: u16 = 2;
+/// Pack-hunt focus (task 169) — per-(observer, target) decayed beacon
+/// fed by `PackAssist` emitted when a same-species neighbour commits an
+/// engagement. See `assets/sim/views.sim::pack_focus`.
+const VIEW_ID_PACK_FOCUS: u16 = 3;
 
 // ScalarCompare operator discriminants. Keep aligned with
 // `PredicateDescriptor::OP_*` in engine_rules.
@@ -410,6 +414,10 @@ impl PredicateDescriptor {
     /// bump fed by `FearSpread` emitted when a same-species neighbour
     /// dies. See `assets/sim/views.sim::kin_fear`.
     pub const VIEW_ID_KIN_FEAR: u16 = 2;
+    /// Pack-hunt focus (task 169) — per-(observer, target) decayed
+    /// beacon fed by `PackAssist` emitted when a same-species neighbour
+    /// commits an engagement. See `assets/sim/views.sim::pack_focus`.
+    pub const VIEW_ID_PACK_FOCUS: u16 = 3;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;
@@ -850,6 +858,7 @@ fn view_id_for(name: &str) -> Result<u16, EmitError> {
         "threat_level" => Ok(VIEW_ID_THREAT_LEVEL),
         "my_enemies" => Ok(VIEW_ID_MY_ENEMIES),
         "kin_fear" => Ok(VIEW_ID_KIN_FEAR),
+        "pack_focus" => Ok(VIEW_ID_PACK_FOCUS),
         other => Err(EmitError::UnsupportedView(other.to_string())),
     }
 }

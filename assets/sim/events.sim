@@ -120,6 +120,16 @@ event_tag Audit    { actor: AgentId }
 // my_enemies).
 @replayable event FearSpread { observer: AgentId, dead_kin: AgentId }
 
+// Task 169 — pack-focus fan-out. Emitted by the
+// `pack_focus_on_engagement` physics rule once per nearby same-species
+// kin when an agent commits an engagement. The `pack_focus`
+// @materialized view folds these into a per-(observer, target) decayed
+// scalar; scoring's Attack row bumps the observer's score on `target`
+// so kin converge on whichever enemy the first packmate engaged.
+// @replayable for the same reason as `FearSpread` — the view's state
+// must reconstruct from the event log.
+@replayable event PackAssist { observer: AgentId, target: AgentId }
+
 // Non-replayable side channel — prose chronicle entries carrying a template
 // id the renderer pairs with a localised string. Intentionally omits
 // `@replayable` so `Event::is_replayable()` returns `false` and the hash

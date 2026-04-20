@@ -159,3 +159,44 @@ view kin_fear(observer: Agent, dead_kin: Agent) -> f32 {
   on FearSpread { observer: observer, dead_kin: dead_kin } { self += 1.0 }
   clamp: [0.0, 10.0],
 }
+
+// -----------------------------------------------------------------------
+// @materialized view pack_focus(observer, target) → f32 — pack-hunt beacon.
+// -----------------------------------------------------------------------
+// Per-(observer, target) focus scalar. When a `PackAssist` event fires
+// (emitted by the `pack_focus_on_engagement` physics rule once per
+// nearby same-species kin at the moment a packmate commits an
+// engagement), the observer's entry for that specific target is bumped
+// by +1.0 (the emitter hardcodes the fold amount; see `emit_fold_arm`).
+// The anchor-pattern decay pulls the value back toward 0 over time.
+//
+// `@decay(rate = 0.933, per = tick)` ≈ 10-tick half-life (0.933^10 ≈
+// 0.50). Shorter than kin_fear's 15-tick half-life because pack focus
+// is a coordination nudge — once kin converge, the actual hits landing
+// carry the grudge via threat_level / my_enemies. Longer decay would
+// keep kin chasing a target that's already been dogpiled / fled /
+// killed. At 100 ms ticks that's a ~1 s beacon window.
+//
+// Consumed by scoring's Attack row through the specific-slot form
+// `view::pack_focus(self, target) > 0.5 : +0.4`. Specific-slot (not
+// wildcard) is important — we want "observer's pack_focus on THIS
+// candidate", not "observer's total pack_focus"; the latter would
+// boost Attack against every target equally, defeating the focus.
+//
+// Species scoping: the physics rule filters via `query.nearby_kin`, so
+// every emitted `PackAssist` has matching-species (observer, actor) by
+// construction. The view itself is species-agnostic — "wolf sees wolf
+// engage human → pack focus on human" and "human sees human engage
+// wolf → pack focus on wolf" both flow through the same fold.
+//
+// Storage: `pair_map<(AgentId, AgentId), (f32, u32)>` (the @decay
+// variant stores (base, anchor_tick) per pair). Same bounded-population
+// assumption as kin_fear / threat_level / my_enemies — pair count stays
+// small in combat scenarios.
+@materialized(on_event = [PackAssist], storage = pair_map)
+@decay(rate = 0.933, per = tick)
+view pack_focus(observer: Agent, target: Agent) -> f32 {
+  initial: 0.0,
+  on PackAssist { observer: observer, target: target } { self += 1.0 }
+  clamp: [0.0, 10.0],
+}

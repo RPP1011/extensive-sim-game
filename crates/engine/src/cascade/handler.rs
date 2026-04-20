@@ -49,7 +49,11 @@ pub enum EventKindId {
     // Task 167 — fear-spread fan-out from `AgentDied`. One emit per
     // nearby same-species kin; folded by `kin_fear` materialized view.
     FearSpread           = 36,
-    // Slots 37-127 reserved for replayable event variants added in later tasks.
+    // Task 169 — pack-focus fan-out from `EngagementCommitted`. One
+    // emit per nearby same-species kin; folded by `pack_focus`
+    // materialized view.
+    PackAssist           = 37,
+    // Slots 38-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -91,6 +95,7 @@ impl EventKindId {
             Event::EngagementCommitted  { .. } => EventKindId::EngagementCommitted,
             Event::EngagementBroken     { .. } => EventKindId::EngagementBroken,
             Event::FearSpread           { .. } => EventKindId::FearSpread,
+            Event::PackAssist           { .. } => EventKindId::PackAssist,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }
