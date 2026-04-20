@@ -16,10 +16,12 @@
 //! the old `engine::ids` byte-for-byte. When the compiler grows entity
 //! emission in a later milestone, the IDs move into generated output too.
 
+pub mod entities;
 pub mod events;
 pub mod id_serde;
 pub mod ids;
 pub mod schema;
+pub mod scoring;
 pub mod types;
 
 pub use events::Event;

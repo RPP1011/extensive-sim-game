@@ -9,9 +9,12 @@
 //! `compile-dsl` subcommand.
 
 pub mod ast;
+pub mod emit_entity;
+pub mod emit_mask;
 pub mod emit_physics;
 pub mod emit_python;
 pub mod emit_rust;
+pub mod emit_scoring;
 pub mod error;
 pub mod ir;
 pub mod parser;
@@ -80,6 +83,24 @@ pub struct EmittedArtifacts {
     /// aggregator that exposes a single `pub fn register(registry)` for the
     /// engine's builtin registration to call.
     pub rust_physics_mod: String,
+    /// Mask-predicate modules (milestone 4). One file per `mask`
+    /// declaration; target `crates/engine/src/generated/mask/`. Empty Vec
+    /// when no masks are in scope; the aggregator still emits an empty
+    /// `register()` stub.
+    pub rust_mask_modules: Vec<(String, String)>,
+    /// Content of `crates/engine/src/generated/mask/mod.rs`.
+    pub rust_mask_mod: String,
+    /// Scoring-table modules (milestone 4). One file per `scoring`
+    /// declaration; target `crates/engine_rules/src/scoring/`. Scoring rows
+    /// are POD `#[repr(C)]` so CPU + GPU backends read the same layout.
+    pub rust_scoring_modules: Vec<(String, String)>,
+    /// Content of `crates/engine_rules/src/scoring/mod.rs`.
+    pub rust_scoring_mod: String,
+    /// Entity modules (milestone 5). One file per `entity` declaration;
+    /// target `crates/engine_rules/src/entities/`.
+    pub rust_entity_modules: Vec<(String, String)>,
+    /// Content of `crates/engine_rules/src/entities/mod.rs`.
+    pub rust_entity_mod: String,
     /// Content of `generated/python/events/__init__.py`.
     pub python_events_init: String,
     /// `(filename_without_dir, content)` pairs, one per event.
@@ -110,7 +131,13 @@ pub fn emit(comp: &Compilation) -> EmittedArtifacts {
 pub fn emit_with_source(comp: &Compilation, source_file: Option<&str>) -> EmittedArtifacts {
     emit_with_per_kind_sources(
         comp,
-        EmissionSources { events: source_file, physics: source_file },
+        EmissionSources {
+            events: source_file,
+            physics: source_file,
+            masks: source_file,
+            scoring: source_file,
+            entities: source_file,
+        },
     )
 }
 
@@ -123,6 +150,9 @@ pub fn emit_with_source(comp: &Compilation, source_file: Option<&str>) -> Emitte
 pub struct EmissionSources<'a> {
     pub events: Option<&'a str>,
     pub physics: Option<&'a str>,
+    pub masks: Option<&'a str>,
+    pub scoring: Option<&'a str>,
+    pub entities: Option<&'a str>,
 }
 
 /// Like [`emit`], but stamp the appropriate source file into each kind's
@@ -163,6 +193,44 @@ pub fn emit_with_per_kind_sources(
     rust_physics_modules.sort_by(|a, b| a.0.cmp(&b.0));
     let rust_physics_mod = emit_physics::emit_physics_mod(&comp.physics);
 
+    // Mask / scoring / entity emission — scaffolded at milestone-3-completion.
+    // The per-decl emitters panic via `Err` until their milestones land;
+    // the aggregators produce valid empty output so the scaffold compiles
+    // without any masks / scoring / entities in scope.
+    let mut rust_mask_modules: Vec<(String, String)> = Vec::with_capacity(comp.masks.len());
+    for mask in &comp.masks {
+        let stem = snake_case(&mask.head.name);
+        match emit_mask::emit_mask(mask, sources.masks) {
+            Ok(rs) => rust_mask_modules.push((format!("{stem}.rs"), rs)),
+            Err(e) => panic!("mask emission failed for `{}`: {e}", mask.head.name),
+        }
+    }
+    rust_mask_modules.sort_by(|a, b| a.0.cmp(&b.0));
+    let rust_mask_mod = emit_mask::emit_mask_mod(&comp.masks);
+
+    let mut rust_scoring_modules: Vec<(String, String)> = Vec::with_capacity(comp.scoring.len());
+    for (i, scoring) in comp.scoring.iter().enumerate() {
+        // Scoring decls are anonymous — index them for a stable filename.
+        let stem = format!("scoring_{i:03}");
+        match emit_scoring::emit_scoring(scoring, sources.scoring) {
+            Ok(rs) => rust_scoring_modules.push((format!("{stem}.rs"), rs)),
+            Err(e) => panic!("scoring emission failed for entry {i}: {e}"),
+        }
+    }
+    rust_scoring_modules.sort_by(|a, b| a.0.cmp(&b.0));
+    let rust_scoring_mod = emit_scoring::emit_scoring_mod(&comp.scoring);
+
+    let mut rust_entity_modules: Vec<(String, String)> = Vec::with_capacity(comp.entities.len());
+    for entity in &comp.entities {
+        let stem = snake_case(&entity.name);
+        match emit_entity::emit_entity(entity, sources.entities) {
+            Ok(rs) => rust_entity_modules.push((format!("{stem}.rs"), rs)),
+            Err(e) => panic!("entity emission failed for `{}`: {e}", entity.name),
+        }
+    }
+    rust_entity_modules.sort_by(|a, b| a.0.cmp(&b.0));
+    let rust_entity_mod = emit_entity::emit_entity_mod(&comp.entities);
+
     let event_hash = schema_hash::event_hash(&comp.events);
     let rules_hash = schema_hash::rules_hash(&comp.physics);
     let state_hash = [0u8; 32];
@@ -173,6 +241,12 @@ pub fn emit_with_per_kind_sources(
         rust_event_structs,
         rust_physics_modules,
         rust_physics_mod,
+        rust_mask_modules,
+        rust_mask_mod,
+        rust_scoring_modules,
+        rust_scoring_mod,
+        rust_entity_modules,
+        rust_entity_mod,
         python_events_init: emit_python::emit_events_init(&comp.events),
         python_event_modules,
         event_hash,

@@ -38,6 +38,9 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         dsl_compiler::EmissionSources {
             events: sources.events.as_deref(),
             physics: sources.physics.as_deref(),
+            masks: sources.masks.as_deref(),
+            scoring: sources.scoring.as_deref(),
+            entities: sources.entities.as_deref(),
         },
     );
 
@@ -45,9 +48,19 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
     let rust_schema = args.out_rust.join("schema.rs");
     let py_events_dir = args.out_python.join("events");
     let physics_dir = args.out_physics.clone();
+    let mask_dir = args.out_mask.clone();
+    let scoring_dir = args.out_scoring.clone();
+    let entity_dir = args.out_entity.clone();
 
     if args.check {
         let mut mismatches = Vec::new();
+        check_scaffolded_kinds(
+            &artefacts,
+            &mask_dir,
+            &scoring_dir,
+            &entity_dir,
+            &mut mismatches,
+        );
 
         // Rust per-event files. Pre-format the in-memory emission so the
         // comparison ignores rustfmt-driven layout differences (committed
@@ -114,6 +127,15 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             &rust_schema,
             &physics_dir,
             &py_events_dir,
+            &artefacts,
+        ) {
+            eprintln!("compile-dsl: {e}");
+            return ExitCode::FAILURE;
+        }
+        if let Err(e) = write_scaffolded_kinds(
+            &mask_dir,
+            &scoring_dir,
+            &entity_dir,
             &artefacts,
         ) {
             eprintln!("compile-dsl: {e}");
@@ -191,6 +213,9 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
 struct PerKindSources {
     events: Option<String>,
     physics: Option<String>,
+    masks: Option<String>,
+    scoring: Option<String>,
+    entities: Option<String>,
 }
 
 /// Output of `compile_all`: the merged IR plus per-kind source attributions.
@@ -208,8 +233,14 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
     let mut merged = Program { decls: Vec::new() };
     let mut events_source: Option<String> = None;
     let mut physics_source: Option<String> = None;
+    let mut masks_source: Option<String> = None;
+    let mut scoring_source: Option<String> = None;
+    let mut entities_source: Option<String> = None;
     let mut events_multi = false;
     let mut physics_multi = false;
+    let mut masks_multi = false;
+    let mut scoring_multi = false;
+    let mut entities_multi = false;
     let mut seen_events: HashSet<String> = HashSet::new();
     let mut seen_physics: HashSet<String> = HashSet::new();
 
@@ -251,7 +282,10 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
                     }
                     update_kind_source(&mut physics_source, &mut physics_multi, &path);
                 }
-                // Other kinds aren't emitted yet — milestones 4+ wire them up.
+                Decl::Mask(_) => update_kind_source(&mut masks_source, &mut masks_multi, &path),
+                Decl::Scoring(_) => update_kind_source(&mut scoring_source, &mut scoring_multi, &path),
+                Decl::Entity(_) => update_kind_source(&mut entities_source, &mut entities_multi, &path),
+                // Verb/View/Invariant/Probe/Metric are parsed but not yet emitted.
                 _ => {}
             }
             merged.decls.push(decl);
@@ -269,6 +303,9 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
         sources: PerKindSources {
             events: if events_multi { None } else { events_source },
             physics: if physics_multi { None } else { physics_source },
+            masks: if masks_multi { None } else { masks_source },
+            scoring: if scoring_multi { None } else { scoring_source },
+            entities: if entities_multi { None } else { entities_source },
         },
     })
 }
@@ -463,4 +500,72 @@ fn hex(bytes: &[u8]) -> String {
         s.push_str(&format!("{:02x}", b));
     }
     s
+}
+
+/// Write the mask / scoring / entity aggregator stubs (milestone-3
+/// scaffolding). When the corresponding milestone lands the per-decl
+/// emitters will populate real files; until then we just keep the mod.rs
+/// aggregators in sync.
+fn write_scaffolded_kinds(
+    mask_dir: &Path,
+    scoring_dir: &Path,
+    entity_dir: &Path,
+    artefacts: &dsl_compiler::EmittedArtifacts,
+) -> std::io::Result<()> {
+    fs::create_dir_all(mask_dir)?;
+    fs::create_dir_all(scoring_dir)?;
+    fs::create_dir_all(entity_dir)?;
+
+    // Per-decl files (empty until each kind's emitter lands).
+    prune_stale(mask_dir, &artefacts.rust_mask_modules, "rs", &["mod.rs"])?;
+    prune_stale(scoring_dir, &artefacts.rust_scoring_modules, "rs", &["mod.rs"])?;
+    prune_stale(entity_dir, &artefacts.rust_entity_modules, "rs", &["mod.rs"])?;
+
+    for (name, content) in &artefacts.rust_mask_modules {
+        fs::write(mask_dir.join(name), content)?;
+    }
+    for (name, content) in &artefacts.rust_scoring_modules {
+        fs::write(scoring_dir.join(name), content)?;
+    }
+    for (name, content) in &artefacts.rust_entity_modules {
+        fs::write(entity_dir.join(name), content)?;
+    }
+
+    fs::write(mask_dir.join("mod.rs"), &artefacts.rust_mask_mod)?;
+    fs::write(scoring_dir.join("mod.rs"), &artefacts.rust_scoring_mod)?;
+    fs::write(entity_dir.join("mod.rs"), &artefacts.rust_entity_mod)?;
+    Ok(())
+}
+
+fn check_scaffolded_kinds(
+    artefacts: &dsl_compiler::EmittedArtifacts,
+    mask_dir: &Path,
+    scoring_dir: &Path,
+    entity_dir: &Path,
+    mismatches: &mut Vec<String>,
+) {
+    for (name, content) in &artefacts.rust_mask_modules {
+        let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
+        check_file(&mask_dir.join(name), &f, mismatches);
+    }
+    let fmt = rustfmt_string(&artefacts.rust_mask_mod).unwrap_or_else(|_| artefacts.rust_mask_mod.clone());
+    check_file(&mask_dir.join("mod.rs"), &fmt, mismatches);
+
+    for (name, content) in &artefacts.rust_scoring_modules {
+        let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
+        check_file(&scoring_dir.join(name), &f, mismatches);
+    }
+    let fmt = rustfmt_string(&artefacts.rust_scoring_mod).unwrap_or_else(|_| artefacts.rust_scoring_mod.clone());
+    check_file(&scoring_dir.join("mod.rs"), &fmt, mismatches);
+
+    for (name, content) in &artefacts.rust_entity_modules {
+        let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
+        check_file(&entity_dir.join(name), &f, mismatches);
+    }
+    let fmt = rustfmt_string(&artefacts.rust_entity_mod).unwrap_or_else(|_| artefacts.rust_entity_mod.clone());
+    check_file(&entity_dir.join("mod.rs"), &fmt, mismatches);
+
+    check_stale(mask_dir, &artefacts.rust_mask_modules, "rs", mismatches);
+    check_stale(scoring_dir, &artefacts.rust_scoring_modules, "rs", mismatches);
+    check_stale(entity_dir, &artefacts.rust_entity_modules, "rs", mismatches);
 }

@@ -188,6 +188,7 @@ fn emit_physics_damage_handler_from_seed() {
         dsl_compiler::EmissionSources {
             events: Some("assets/sim/events.sim"),
             physics: Some("assets/sim/physics.sim"),
+            ..Default::default()
         },
     );
 

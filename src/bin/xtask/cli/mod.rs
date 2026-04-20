@@ -67,6 +67,20 @@ pub struct CompileDslArgs {
     /// Documented in `docs/game/feature_flow.md`.
     #[arg(long, default_value = "crates/engine/src/generated/physics")]
     pub out_physics: PathBuf,
+    /// Destination root for emitted mask predicates. Same dep rationale
+    /// as physics — masks reference `engine::state::SimState`.
+    #[arg(long, default_value = "crates/engine/src/generated/mask")]
+    pub out_mask: PathBuf,
+    /// Destination root for emitted scoring tables. Scoring rows are POD
+    /// data shared between CPU scorer and GPU kernel, so they live in
+    /// `engine_rules` with the other shared-data emissions.
+    #[arg(long, default_value = "crates/engine_rules/src/scoring")]
+    pub out_scoring: PathBuf,
+    /// Destination root for emitted entity data (CreatureType enum,
+    /// capability structs, hostility matrix). Pure data; lives in
+    /// `engine_rules` next to events.
+    #[arg(long, default_value = "crates/engine_rules/src/entities")]
+    pub out_entity: PathBuf,
     /// Destination root for Python output. Files are written under
     /// `<out-python>/events/`.
     #[arg(long, default_value = "generated/python")]

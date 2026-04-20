@@ -20,4 +20,5 @@
 
 #![allow(unused_parens)]
 
+pub mod mask;
 pub mod physics;
