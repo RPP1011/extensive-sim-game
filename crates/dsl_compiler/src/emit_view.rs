@@ -115,7 +115,7 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
         .unwrap();
         writeln!(
             out,
-            "    pub fn fold_all(&mut self, _events: &crate::event::EventRing, _tick: u32) {{}}"
+            "    pub fn fold_all(&mut self, _events: &crate::event::EventRing, _events_before: usize, _tick: u32) {{}}"
         )
         .unwrap();
         writeln!(out, "}}").unwrap();
@@ -172,11 +172,16 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
     writeln!(out).unwrap();
     writeln!(out, "    /// Fold every materialized view over the current tick's events.").unwrap();
     writeln!(out, "    /// Called from `step_full` at the view-fold phase.").unwrap();
-    writeln!(out, "    pub fn fold_all(&mut self, events: &crate::event::EventRing, tick: u32) {{").unwrap();
+    writeln!(out, "    ///").unwrap();
+    writeln!(out, "    /// `events_before` is the value of `events.push_count()` at the TOP of").unwrap();
+    writeln!(out, "    /// the current tick, snapshot *before* any events were pushed this tick.").unwrap();
+    writeln!(out, "    /// The fold iterates `events.iter_since(events_before)` so each view only").unwrap();
+    writeln!(out, "    /// sees events emitted this tick (not the whole retained ring).").unwrap();
+    writeln!(out, "    pub fn fold_all(&mut self, events: &crate::event::EventRing, events_before: usize, tick: u32) {{").unwrap();
     if materialized.is_empty() {
-        writeln!(out, "        let _ = (events, tick);").unwrap();
+        writeln!(out, "        let _ = (events, events_before, tick);").unwrap();
     } else {
-        writeln!(out, "        for e in events.iter() {{").unwrap();
+        writeln!(out, "        for e in events.iter_since(events_before) {{").unwrap();
         for v in &materialized {
             let field = snake_case(&v.name);
             writeln!(out, "            self.{field}.fold_event(e, tick);").unwrap();
@@ -1310,6 +1315,18 @@ mod tests {
         assert!(
             out.contains("self.threat_level.fold_event(e, tick);"),
             "missing fold_all arm:\n{out}"
+        );
+        // Perf contract: the fold must walk only this-tick events via
+        // `iter_since(events_before)`, not the whole retained ring. A
+        // regression to `events.iter()` turns fold_all into O(cumulative
+        // events × tick count) — the O(N²) cost task 144 called out.
+        assert!(
+            out.contains("events.iter_since(events_before)"),
+            "fold_all must use iter_since, not iter:\n{out}"
+        );
+        assert!(
+            out.contains("events_before: usize"),
+            "fold_all must accept events_before snapshot:\n{out}"
         );
     }
 

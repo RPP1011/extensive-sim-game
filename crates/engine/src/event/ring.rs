@@ -67,6 +67,28 @@ impl EventRing {
     /// Total number of pushes ever — even those evicted from the ring.
     pub fn total_pushed(&self) -> usize { self.total_pushed }
 
+    /// Alias for [`total_pushed`]: the monotonic push counter. Used by
+    /// per-tick view folds to snapshot "where was the ring at the start
+    /// of this tick" so `iter_since(start)` yields only events pushed
+    /// during the current tick. Naming mirrors spec §7.1 wording.
+    pub fn push_count(&self) -> usize { self.total_pushed }
+
+    /// Iterate events pushed with monotonic index `>= start_idx`. `start_idx`
+    /// is a value returned by [`push_count`] (or [`total_pushed`]) at an
+    /// earlier point; the returned iterator yields events in push order.
+    ///
+    /// Events evicted from the ring between the snapshot and this call are
+    /// silently skipped — the iterator always starts at the earliest
+    /// still-retained event whose push index is `>= start_idx`. In the
+    /// per-tick view-fold use case this never happens in practice: the
+    /// snapshot is taken at the top of the tick and the iterator is drained
+    /// before any further pushes, well before the retention cap matters.
+    pub fn iter_since(&self, start_idx: usize) -> impl Iterator<Item = &Event> {
+        let first = self.total_pushed.saturating_sub(self.entries.len());
+        let skip = start_idx.saturating_sub(first);
+        self.entries.iter().skip(skip).map(|e| &e.event)
+    }
+
     /// The index of the next undispatched event. Used by the cascade dispatcher
     /// to resume scanning across multiple `run_fixed_point` calls.
     pub fn dispatched(&self) -> usize { self.dispatched }

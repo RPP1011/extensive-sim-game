@@ -242,10 +242,16 @@ pub fn step_full<B: PolicyBackend>(
     cascade.run_fixed_point_tel(state, events, telemetry);
     let events_emitted = events.total_pushed().saturating_sub(events_before);
 
-    // Phase 5 — view fold. Each view walks the (retained subset of the) event
-    // ring and accumulates its own derived storage.
+    // Phase 5 — view fold. Each view walks **this tick's** events (not the
+    // whole retained ring) and accumulates its own derived storage. The
+    // `events_before` snapshot taken before phase 4 is the cut point: any
+    // event with `push_count >= events_before` was emitted this tick.
+    //
+    // Before task 144's follow-up the fold re-walked the entire retained
+    // ring every tick, which at 100 agents × 1000 ticks summed to ~50M
+    // redundant `fold_event` calls and dominated `mvp_acceptance` timing.
     for v in views.iter_mut() {
-        v.fold(events);
+        v.fold_since(events, events_before);
     }
     // Phase 5b — compiler-emitted `@materialized` views. Spec §7.1
     // places view folds *between* event emission and mask evaluation,
@@ -253,10 +259,10 @@ pub fn step_full<B: PolicyBackend>(
     // legacy-trait fold above to preserve the `DamageTaken` test
     // surface while the compiler-owned registry takes over.
     //
-    // `fold_all` takes `&EventRing` and iterates internally — no extra
-    // allocation when the registry is empty, and the per-event
-    // dispatch is a direct method call chain when it isn't.
-    state.views.fold_all(events, state.tick);
+    // `fold_all` takes `&EventRing` + `events_before` and iterates
+    // `iter_since(events_before)` internally — O(this-tick events)
+    // rather than O(cumulative retained).
+    state.views.fold_all(events, events_before, state.tick);
 
     // Phase 6 — invariants + built-in telemetry metrics.
     let violations = invariants.check_all(state, events);

@@ -81,6 +81,80 @@ fn chronicle_content_does_not_affect_hash() {
 }
 
 #[test]
+fn push_count_is_monotonic_across_eviction() {
+    let mut ring = EventRing::with_cap(2);
+    let a = AgentId::new(1).unwrap();
+    assert_eq!(ring.push_count(), 0);
+    for i in 0..5 {
+        ring.push(Event::AgentMoved {
+            actor: a, from: Vec3::ZERO, location: Vec3::new(i as f32, 0.0, 0.0), tick: i,
+        });
+    }
+    // Cap=2, pushed 5. push_count counts total pushes including evicted.
+    assert_eq!(ring.push_count(), 5);
+    assert_eq!(ring.len(), 2);
+    assert_eq!(ring.push_count(), ring.total_pushed(), "push_count is an alias");
+}
+
+#[test]
+fn iter_since_yields_only_events_after_snapshot() {
+    let mut ring = EventRing::with_cap(8);
+    let a = AgentId::new(1).unwrap();
+    ring.push(Event::AgentMoved {
+        actor: a, from: Vec3::ZERO, location: Vec3::new(0.0, 0.0, 0.0), tick: 0,
+    });
+    ring.push(Event::AgentMoved {
+        actor: a, from: Vec3::ZERO, location: Vec3::new(1.0, 0.0, 0.0), tick: 1,
+    });
+
+    // Simulate "top of a tick" snapshot.
+    let events_before = ring.push_count();
+    assert_eq!(events_before, 2);
+
+    ring.push(Event::AgentMoved {
+        actor: a, from: Vec3::ZERO, location: Vec3::new(2.0, 0.0, 0.0), tick: 2,
+    });
+    ring.push(Event::AgentMoved {
+        actor: a, from: Vec3::ZERO, location: Vec3::new(3.0, 0.0, 0.0), tick: 2,
+    });
+
+    let ticks: Vec<u32> = ring.iter_since(events_before).map(|e| e.tick()).collect();
+    assert_eq!(ticks, vec![2, 2], "iter_since yields only this-tick events");
+
+    // Snapshot at the current push_count → empty iterator.
+    let empty: Vec<_> = ring.iter_since(ring.push_count()).collect();
+    assert!(empty.is_empty());
+
+    // Snapshot of 0 → full ring.
+    let all: Vec<u32> = ring.iter_since(0).map(|e| e.tick()).collect();
+    assert_eq!(all, vec![0, 1, 2, 2]);
+}
+
+#[test]
+fn iter_since_tolerates_eviction_before_snapshot() {
+    // When events before the snapshot have been evicted, iter_since must
+    // still return events with index >= start_idx; it cannot resurrect
+    // evicted ones but it also must not panic or skip the wrong slice.
+    let mut ring = EventRing::with_cap(2);
+    let a = AgentId::new(1).unwrap();
+    ring.push(Event::AgentMoved { actor: a, from: Vec3::ZERO, location: Vec3::ZERO, tick: 0 });
+    ring.push(Event::AgentMoved { actor: a, from: Vec3::ZERO, location: Vec3::ZERO, tick: 1 });
+    let snap = ring.push_count(); // 2
+    ring.push(Event::AgentMoved { actor: a, from: Vec3::ZERO, location: Vec3::ZERO, tick: 2 });
+    ring.push(Event::AgentMoved { actor: a, from: Vec3::ZERO, location: Vec3::ZERO, tick: 3 });
+    // After cap-2 eviction, entries hold tick=2 and tick=3. Snapshot was at
+    // index 2, first retained index is 2, so we see both.
+    let ticks: Vec<u32> = ring.iter_since(snap).map(|e| e.tick()).collect();
+    assert_eq!(ticks, vec![2, 3]);
+
+    // A stale snapshot from before an eviction ceiling should clamp to the
+    // earliest retained event, not underflow.
+    let stale_snap = 0usize;
+    let ticks2: Vec<u32> = ring.iter_since(stale_snap).map(|e| e.tick()).collect();
+    assert_eq!(ticks2, vec![2, 3], "stale snapshot clamps to retained window");
+}
+
+#[test]
 fn golden_hash_anchors_format() {
     let a = AgentId::new(1).unwrap();
     let b = AgentId::new(2).unwrap();

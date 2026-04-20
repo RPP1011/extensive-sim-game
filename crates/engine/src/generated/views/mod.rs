@@ -29,8 +29,13 @@ impl ViewRegistry {
 
     /// Fold every materialized view over the current tick's events.
     /// Called from `step_full` at the view-fold phase.
-    pub fn fold_all(&mut self, events: &crate::event::EventRing, tick: u32) {
-        for e in events.iter() {
+    ///
+    /// `events_before` is the value of `events.push_count()` at the TOP of
+    /// the current tick, snapshot *before* any events were pushed this tick.
+    /// The fold iterates `events.iter_since(events_before)` so each view only
+    /// sees events emitted this tick (not the whole retained ring).
+    pub fn fold_all(&mut self, events: &crate::event::EventRing, events_before: usize, tick: u32) {
+        for e in events.iter_since(events_before) {
             self.engaged_with.fold_event(e, tick);
             self.threat_level.fold_event(e, tick);
         }
