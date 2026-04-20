@@ -298,6 +298,13 @@ const CANONICAL_CAPABILITY_ORDER: &[&str] = &[
     "can_tunnel",
     "can_marry",
     "max_spouses",
+    // Task 177 — deer-herding flee bias. Falls through the generic
+    // bool emitter arms in `capability_field_type` /
+    // `render_capability_value`, so no type/render edits are needed
+    // here; listing it in the canonical order lets the emitter keep
+    // producing the field when an entity omits it (pre-177 test
+    // fixtures that never set it take the `false` default).
+    "herds_when_fleeing",
 ];
 
 /// Pull the capability field order from the first entity that has a

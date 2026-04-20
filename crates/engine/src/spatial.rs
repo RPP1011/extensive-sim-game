@@ -384,6 +384,93 @@ pub fn nearby_kin(state: &SimState, center: AgentId, radius: f32) -> Vec<AgentId
     out
 }
 
+/// Flee-direction primitive with same-species kin attraction — the
+/// movement-bias helper behind the Deer-herding behaviour (task 177).
+///
+/// Returns a **unit vector** blended from:
+///   - `away = (self_pos - threat_pos).normalize_or_zero()` — the
+///     pre-177 pure-away flee direction, and
+///   - `toward_kin = (kin_centroid - self_pos).normalize_or_zero()` —
+///     the unit vector pointing from the fleeing agent to the centroid
+///     of same-species neighbours within `kin_radius` (filtered through
+///     `nearby_kin`).
+///
+/// Blend shape: `normalize(away + kin_weight * toward_kin)`. The
+/// normalization step means `kin_weight > 1.0` never fully overrides
+/// the threat term — `away` always contributes at magnitude 1, so the
+/// result is at most `acos(-kin_weight / √(1 + kin_weight²))` degrees
+/// away from pure-away (for kin_weight = 0.5 the max tilt is ~27°).
+/// The design memo's `deer_herding_with_threat_in_middle` corner case
+/// relies on this: a kin cluster on the far side of the threat tilts
+/// direction but cannot flip it "into the wolf".
+///
+/// Degenerate returns (match the pre-177 `(self_pos -
+/// threat_pos).normalize_or_zero()` semantics exactly):
+///   - `self_pos == threat_pos` → zero vector (caller's Flee arm
+///     no-ops, same as today).
+///   - No live kin within `kin_radius` → pure `away` (kin term is
+///     zero; blend normalizes to `away`).
+///   - Kin centroid collapses onto `self_pos` → `toward_kin` is zero;
+///     falls through to pure `away`.
+///   - `kin_weight <= 0.0` → pure `away` (caller asked for no bias).
+///
+/// Determinism: `nearby_kin` sorts its result by raw AgentId and
+/// iteration order over the returned slice is deterministic; the
+/// centroid is an associative f32 sum across that fixed order.
+/// No RNG. No cache-order dependence.
+///
+/// Species scoping happens inside `nearby_kin` — only agents whose
+/// `CreatureType` matches `agent`'s are counted, so "kin" is a
+/// species-level concept (a deer's kin are other deer; a wolf's kin
+/// are other wolves). The primitive itself is species-agnostic.
+pub fn flee_direction_with_kin_bias(
+    state: &SimState,
+    agent: AgentId,
+    threat_pos: Vec3,
+    kin_weight: f32,
+    kin_radius: f32,
+) -> Vec3 {
+    let self_pos = match state.agent_pos(agent) {
+        Some(p) => p,
+        None => return Vec3::ZERO,
+    };
+    let away = (self_pos - threat_pos).normalize_or_zero();
+    // Caller asked for no bias, or the threat is co-located with the
+    // agent (degenerate case the pre-177 step.rs already no-ops on).
+    if kin_weight <= 0.0 || away.length_squared() == 0.0 {
+        return away;
+    }
+    let kin = nearby_kin(state, agent, kin_radius);
+    if kin.is_empty() {
+        return away;
+    }
+    let mut sum = Vec3::ZERO;
+    let mut count = 0u32;
+    for k in &kin {
+        if let Some(p) = state.agent_pos(*k) {
+            sum += p;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return away;
+    }
+    let centroid = sum / (count as f32);
+    let toward_kin = (centroid - self_pos).normalize_or_zero();
+    // Blend + normalize. `away` contributes magnitude 1; kin contributes
+    // up to `kin_weight`. If both directions happened to cancel exactly
+    // (kin_weight=1 and kin centroid exactly on the threat-toward ray)
+    // the sum is zero — fall back to pure away, preserving the
+    // "always flees when a threat exists" invariant.
+    let blended = away + toward_kin * kin_weight;
+    let normalized = blended.normalize_or_zero();
+    if normalized.length_squared() == 0.0 {
+        away
+    } else {
+        normalized
+    }
+}
+
 /// Number of cell steps in each cardinal direction the query must scan
 /// to guarantee no in-range walker is missed. For `radius <= CELL_SIZE`
 /// this is 1 (the original 3×3 neighbourhood); grows linearly with

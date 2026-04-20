@@ -385,7 +385,32 @@ fn apply_actions(
                 if let (Some(self_pos), Some(threat_pos)) =
                     (state.agent_pos(action.agent), state.agent_pos(threat))
                 {
-                    let away = (self_pos - threat_pos).normalize_or_zero();
+                    // Task 177 — Deer herding. Capability-gated kin-bias blend:
+                    // herd-capable species (currently just Deer — see
+                    // `assets/sim/entities.sim` `herds_when_fleeing`) pick a
+                    // flee vector blended between "away from threat" and
+                    // "toward kin centroid" within `combat.kin_flee_radius`.
+                    // Non-herd species fall through to the pure-away path,
+                    // preserving the pre-177 behaviour byte-exact (so the
+                    // wolves+humans parity baseline stays stable). The
+                    // capability lookup is keyed on `CreatureType` via
+                    // `Capabilities::for_creature` — no per-agent storage,
+                    // no species switch in the engine.
+                    let herds = state
+                        .agent_creature_type(action.agent)
+                        .map(|ct| crate::creature::Capabilities::for_creature(ct).herds_when_fleeing)
+                        .unwrap_or(false);
+                    let away = if herds {
+                        crate::spatial::flee_direction_with_kin_bias(
+                            state,
+                            action.agent,
+                            threat_pos,
+                            state.config.combat.kin_flee_bias,
+                            state.config.combat.kin_flee_radius,
+                        )
+                    } else {
+                        (self_pos - threat_pos).normalize_or_zero()
+                    };
                     if away.length_squared() > 0.0 {
                         // Flee intentionally disengages at full speed but
                         // always draws an opportunity attack from any active
