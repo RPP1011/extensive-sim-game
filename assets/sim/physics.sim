@@ -300,3 +300,83 @@ physics chronicle_engagement @phase(post) {
     emit ChronicleEntry { template_id: 3, agent: a, target: t }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Engagement — event-driven pairing (task 163, replaces the hand-written
+// `crates/engine/src/engagement.rs` cascade dispatchers).
+// ---------------------------------------------------------------------------
+//
+// On every `AgentMoved` the mover's nearest hostile is recomputed via
+// the `query.nearest_hostile_to` stdlib primitive (a wrapper around
+// `SpatialHash::within_radius` + species-hostility filter). If the
+// winner differs from the mover's current partner, the old pairing is
+// torn down (both slots cleared eagerly + `EngagementBroken` event),
+// then the new pairing is committed (both slots written + three-agent
+// displacement break if the new partner was already paired with a
+// stranger, finally the `EngagementCommitted` event). The compiler-
+// emitted `@materialized view engaged_with` folds these events into its
+// `HashMap<AgentId, AgentId>` on the next view-fold phase.
+//
+// Sentinel discipline: `nearest_hostile_to_or(mover, r, mover)` and
+// `engaged_with_or(x, x)` both return the agent itself when nothing is
+// set. The rule sentinels on `!= mover` / `!= x` to distinguish
+// "nothing" from "something". This works around the absence of `if let
+// Some(...)` narrowing inside the GPU-emittable physics-body subset —
+// see `docs/dsl/engagement_migration.md`.
+//
+// Break reasons are u8 literals matching `crate::engagement::
+// break_reason::{SWITCH, OUT_OF_RANGE, PARTNER_DIED}`:
+//   - SWITCH         = 0 — mover switched to a different partner.
+//   - OUT_OF_RANGE   = 1 — mover left everyone's engagement radius.
+//   - PARTNER_DIED   = 2 — partner died; survivor's slot clears.
+//
+// Pinned by `engagement_move_slow.rs`, `engagement_field.rs`,
+// `proptest_engagement.rs`, `engagement_tick_start.rs`, and the
+// wolves+humans parity baseline at
+// `crates/engine/tests/wolves_and_humans_baseline.txt` (byte-exact).
+
+physics engagement_on_move @phase(event) {
+  on AgentMoved { actor: mover } {
+    if agents.alive(mover) {
+      let new = query.nearest_hostile_to_or(mover, config.combat.engagement_range, mover)
+      let old = agents.engaged_with_or(mover, mover)
+      if old != new {
+        // Break stale pairing first. Eager slot clear + audit event.
+        if old != mover {
+          agents.clear_engaged_with(mover)
+          agents.clear_engaged_with(old)
+          let reason = if new == mover { 1 } else { 0 }
+          emit EngagementBroken { actor: mover, former_target: old, reason: reason }
+        }
+        // Commit new pairing, if any. Three-agent displacement: if the
+        // incoming partner was already engaged with a third party, that
+        // prior pair breaks first so the bidirectional invariant
+        // (`engaged(a)=Some(b) ⇒ engaged(b)=Some(a)`) stays intact.
+        if new != mover {
+          let stranded = agents.engaged_with_or(new, new)
+          if stranded != new {
+            if stranded != mover {
+              agents.clear_engaged_with(new)
+              agents.clear_engaged_with(stranded)
+              emit EngagementBroken { actor: new, former_target: stranded, reason: 0 }
+            }
+          }
+          agents.set_engaged_with(mover, new)
+          agents.set_engaged_with(new, mover)
+          emit EngagementCommitted { actor: mover, target: new }
+        }
+      }
+    }
+  }
+}
+
+physics engagement_on_death @phase(event) {
+  on AgentDied { agent_id: dead } {
+    let partner = agents.engaged_with_or(dead, dead)
+    if partner != dead {
+      agents.clear_engaged_with(dead)
+      agents.clear_engaged_with(partner)
+      emit EngagementBroken { actor: partner, former_target: dead, reason: 2 }
+    }
+  }
+}

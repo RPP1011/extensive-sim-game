@@ -831,6 +831,22 @@ fn lower_expr_kind(kind: &IrExpr) -> Result<String, EmitError> {
         IrExpr::NamespaceField { ns, field, .. } => lower_namespace_field(*ns, field),
         IrExpr::NamespaceCall { ns, method, args } => lower_namespace_call(*ns, method, args),
         IrExpr::Binary(op, lhs, rhs) => {
+            // `<expr> == None` / `<expr> != None` → `.is_none()` /
+            // `.is_some()`. Copied from `emit_mask.rs` (task 157 landed it
+            // for the `mask Cast` engagement-lock clause); the engagement
+            // physics rules (task 163) need the same parity so
+            // `agents.engaged_with(x) != None` compiles. Only the RHS-
+            // `None` form is detected; a swapped source would need a
+            // parser normalisation pass, which is out of scope here.
+            if matches!(op, BinOp::Eq | BinOp::NotEq) {
+                if let IrExpr::EnumVariant { ty, variant } = &rhs.kind {
+                    if ty.is_empty() && variant == "None" {
+                        let l = lower_expr(lhs)?;
+                        let method = if matches!(op, BinOp::Eq) { "is_none" } else { "is_some" };
+                        return Ok(format!("({l}).{method}()"));
+                    }
+                }
+            }
             let l = lower_expr(lhs)?;
             let r = lower_expr(rhs)?;
             Ok(format!("({l} {} {r})", binop_str(*op)))
@@ -1039,6 +1055,61 @@ fn lower_namespace_call(
             Ok(format!(
                 "state.set_agent_cooldown_next_ready({}, {})",
                 lowered[0], lowered[1]
+            ))
+        }
+        // Engagement accessors (task 163). The DSL `engagement_on_move` /
+        // `engagement_on_death` physics rules call these to eagerly write
+        // the SoA `hot_engaged_with` slot. `clear_engaged_with` writes
+        // `None`; `set_engaged_with(a, b)` writes `Some(b)`. The split
+        // avoids needing an `Option` ctor in the DSL source.
+        (NamespaceId::Agents, "engaged_with") => {
+            expect_arity(args, 1, "agents.engaged_with")?;
+            Ok(format!("state.agent_engaged_with({})", lowered[0]))
+        }
+        (NamespaceId::Agents, "engaged_with_or") => {
+            // Unwrap-or-default for `state.agent_engaged_with(id)`. Lets
+            // the physics rule sentinel on the agent itself when no
+            // partner is set, avoiding an `if let Some(...)` narrowing
+            // that the GPU-emittable subset doesn't yet support.
+            expect_arity(args, 2, "agents.engaged_with_or")?;
+            Ok(format!(
+                "state.agent_engaged_with({}).unwrap_or({})",
+                lowered[0], lowered[1]
+            ))
+        }
+        (NamespaceId::Agents, "set_engaged_with") => {
+            expect_arity(args, 2, "agents.set_engaged_with")?;
+            Ok(format!(
+                "state.set_agent_engaged_with({}, Some({}))",
+                lowered[0], lowered[1]
+            ))
+        }
+        (NamespaceId::Agents, "clear_engaged_with") => {
+            expect_arity(args, 1, "agents.clear_engaged_with")?;
+            Ok(format!(
+                "state.set_agent_engaged_with({}, None)",
+                lowered[0]
+            ))
+        }
+        // Spatial queries — nearest hostile (task 163). Wraps
+        // `SpatialHash::within_radius` + the `CreatureType::is_hostile_to`
+        // predicate with an argmin loop; ties broken on raw `AgentId`.
+        // `nearest_hostile_to` returns `Option<AgentId>`; the `_or`
+        // sibling returns the supplied default when nothing matches so
+        // the rule body can stay in the scalar subset (no `if let`
+        // narrowing required).
+        (NamespaceId::Query, "nearest_hostile_to") => {
+            expect_arity(args, 2, "query.nearest_hostile_to")?;
+            Ok(format!(
+                "crate::spatial::nearest_hostile_to(state, {}, {})",
+                lowered[0], lowered[1]
+            ))
+        }
+        (NamespaceId::Query, "nearest_hostile_to_or") => {
+            expect_arity(args, 3, "query.nearest_hostile_to_or")?;
+            Ok(format!(
+                "crate::spatial::nearest_hostile_to(state, {}, {}).unwrap_or({})",
+                lowered[0], lowered[1], lowered[2]
             ))
         }
         // `abilities.*` — ability registry accessors. `is_known` gates the

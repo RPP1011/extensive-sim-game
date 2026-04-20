@@ -1,49 +1,56 @@
-//! Event-driven engagement update — task 139.
+//! Engagement back-compat shim — post task 163.
 //!
-//! Retired `ability::expire::tick_start`'s tentative-commit engagement
-//! pass in favour of two cascade handlers:
+//! The hand-written cascade dispatchers and the `recompute_engagement_for` /
+//! `break_engagement_on_death` bodies retired 2026-04-20 once the compiler
+//! grew the four primitives the engagement rules need:
 //!
-//! - `engagement_on_move` fires on `AgentMoved`. It recomputes the mover's
-//!   nearest-hostile pick and, if the pick changed, emits an
-//!   `EngagementBroken` (for the stale partner, if any) followed by an
-//!   `EngagementCommitted` (for the new pick, if any). The compiler-emitted
-//!   `@materialized view engaged_with` folds those events into its per-agent
-//!   slot map.
+//!   - `query.nearest_hostile_to` / `nearest_hostile_to_or` — spatial
+//!     argmin with species-hostility filter (wraps
+//!     `crate::spatial::nearest_hostile_to`).
+//!   - `agents.set_engaged_with` / `clear_engaged_with` — eager writes
+//!     to the `hot_engaged_with` slot so same-tick cascade handlers
+//!     read-their-own-writes before the view-fold phase.
+//!   - `agents.engaged_with_or` — unwrap-or-default sibling of the
+//!     existing `agents.engaged_with` accessor, sidesteps the lack of
+//!     `if let Some(...)` in the GPU-emittable physics subset.
 //!
-//! - `engagement_on_death` fires on `AgentDied`. If the dead agent had a
-//!   partner, it emits `EngagementBroken` for that pair so the view drops
-//!   both slots in one shot.
+//! The corresponding `physics engagement_on_move` / `engagement_on_death`
+//! rules live in `assets/sim/physics.sim`; the compiler emits them as
+//! `generated/physics/engagement_on_move.rs` +
+//! `generated/physics/engagement_on_death.rs` and wires them into the
+//! per-event-kind dispatcher in `generated/physics/mod.rs`. No
+//! hand-written `register_engine_builtins` entry needed.
 //!
-//! Simplification (picked with the task's blessing): the new pipeline only
-//! ever recomputes engagement on the mover's side. The old two-pass
-//! tentative-commit enforced "A.engaged=B ⇔ B.engaged=A" even when the
-//! third-party's nearest hostile was someone else (see
-//! `engagement_tick_start::three_agent_tentative_commit_with_dragon_closer_to_wolf`);
-//! the event-driven path drops that enforcement and lets slot iteration
-//! order decide who "wins" when three agents race. See
-//! `engagement_tick_start::three_agent_unilateral_commit_pins_closest_pair`
-//! for the pinned behaviour.
+//! What remains in this module:
 //!
-//! The bidirectional invariant (`engaged(a) = Some(b) ⇒ engaged(b) =
-//! Some(a)`) is preserved at all times by `recompute_engagement_for`:
-//! commit writes both sides in lockstep, and when the incoming mover
-//! displaces the new partner's prior pairing (three-agent case) that
-//! prior pairing is broken on both sides too. Pinned by
-//! `proptest_engagement::engagement_is_bidirectional`.
+//!   1. The `break_reason` u8 constants, which are how the DSL rule
+//!      communicates the "why did this pair end" code to replayers
+//!      without adding a new event kind. Engine + DSL both read these
+//!      constants, so they live here rather than on the event itself.
+//!   2. A thin `recompute_all_engagements` shim kept for the two
+//!      fixtures that predate the event-driven pipeline
+//!      (`tests/proptest_engagement.rs`,
+//!      `tests/engagement_tick_start.rs`). The shim walks alive agents
+//!      and emits one `AgentMoved` event each, then drains the cascade
+//!      — the engagement rule fires on each, producing the same
+//!      steady-state pairing the legacy hand-written loop produced,
+//!      without duplicating any of the logic.
 //!
-//! Both handlers write the view slot **eagerly** (via the direct `.set()`
-//! setter) in addition to emitting audit events. The eager write gives
-//! same-tick read-your-own-writes for later handlers in the cascade; the
-//! event emission drives the post-cascade fold so replays reconstruct the
-//! view state from the event log alone.
+//! New code should not use the shim; emit `AgentMoved` and let the
+//! cascade do the rest.
 
+use crate::cascade::CascadeRegistry;
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
+use glam::Vec3;
 
 /// Reason codes carried on `EngagementBroken` so replayers can tell why
 /// a pairing ended without re-running the physics. Kept as a `u8` on
-/// the event so the DSL schema stays trivially hashable.
+/// the event so the DSL schema stays trivially hashable. The
+/// `engagement_on_move` / `engagement_on_death` rules in
+/// `assets/sim/physics.sim` emit these numeric literals directly so
+/// the DSL doesn't need a typed enum here.
 pub mod break_reason {
     /// Mover switched to a new nearest hostile (the old partner is now
     /// stale).
@@ -55,200 +62,39 @@ pub mod break_reason {
     pub const PARTNER_DIED: u8 = 2;
 }
 
-/// Recompute engagement for `mover`. Called from the cascade handler on
-/// `AgentMoved`; also reused by `recompute_all_engagements` (the back-compat
-/// shim that the retired `tick_start` tests still lean on).
+/// Back-compat shim for tests that predate the event-driven pipeline.
 ///
-/// Scans hostiles within `config.combat.engagement_range` via the spatial
-/// index, picks the closest with ties broken on raw id, and emits
-/// `EngagementBroken` / `EngagementCommitted` as needed. Writes the view
-/// eagerly so same-tick readers observe the new pairing.
-pub fn recompute_engagement_for(
-    state: &mut SimState,
-    mover: AgentId,
-    events: &mut EventRing,
-) {
-    if !state.agent_alive(mover) {
-        // Dead mover — `AgentDied` handler owns the cleanup path. Skip.
-        return;
-    }
-    let pos = match state.agent_pos(mover) {
-        Some(p) => p,
-        None => return,
-    };
-    let ct = match state.agent_creature_type(mover) {
-        Some(c) => c,
-        None => return,
-    };
-    let radius = state.config.combat.engagement_range;
-    // Scan for nearest hostile. The spatial query returns candidates in
-    // slot order, so ties at identical distances resolve on raw id.
-    let spatial = state.spatial();
-    let mut best: Option<(AgentId, f32)> = None;
-    for other in spatial.within_radius(state, pos, radius) {
-        if other == mover {
-            continue;
-        }
-        let op = match state.agent_pos(other) {
-            Some(p) => p,
-            None => continue,
-        };
-        let oc = match state.agent_creature_type(other) {
-            Some(c) => c,
-            None => continue,
-        };
-        if !ct.is_hostile_to(oc) {
-            continue;
-        }
-        let d = pos.distance(op);
-        match best {
-            None => best = Some((other, d)),
-            Some((_, bd)) if d < bd => best = Some((other, d)),
-            Some((b, bd)) if (d - bd).abs() < f32::EPSILON && other.raw() < b.raw() => {
-                best = Some((other, d));
-            }
-            _ => {}
-        }
-    }
-    let new_partner = best.map(|(a, _)| a);
-    let old_partner = state.agent_engaged_with(mover);
-    if old_partner == new_partner {
-        return;
-    }
-    let tick = state.tick;
-    // Break first, commit second. The view's fold_event treats these as
-    // atomic state transitions; the two-step emit is for replay.
-    if let Some(former) = old_partner {
-        // Remove the mover's slot eagerly so the later commit's insert
-        // doesn't race with a stale partner read.
-        state.set_agent_engaged_with(mover, None);
-        state.set_agent_engaged_with(former, None);
-        let reason = if new_partner.is_some() {
-            break_reason::SWITCH
-        } else {
-            break_reason::OUT_OF_RANGE
-        };
-        events.push(Event::EngagementBroken {
-            actor: mover,
-            former_target: former,
-            reason,
-            tick,
-        });
-    }
-    if let Some(partner) = new_partner {
-        // Before overwriting `partner`'s slot, check if `partner` was
-        // previously paired with a third-party `stranded`. If so, break
-        // that pair properly — emit the `EngagementBroken` event and
-        // clear both sides — so `stranded`'s slot doesn't linger
-        // pointing at `partner` after we overwrite `partner`'s slot with
-        // `mover`. Without this step the bidirectional invariant
-        // (`engaged(a)=Some(b) ⇒ engaged(b)=Some(a)`) breaks in the
-        // three-agent case where A picks B but B was already paired
-        // with C: B's slot gets rewritten to A, but C's slot keeps
-        // pointing at B (stale). Pinned by `proptest_engagement::
-        // engagement_is_bidirectional`.
-        if let Some(stranded) = state.agent_engaged_with(partner) {
-            if stranded != mover {
-                state.set_agent_engaged_with(partner, None);
-                state.set_agent_engaged_with(stranded, None);
-                events.push(Event::EngagementBroken {
-                    actor: partner,
-                    former_target: stranded,
-                    reason: break_reason::SWITCH,
-                    tick,
-                });
-            }
-        }
-        // Eagerly commit the pairing. The view fold re-applies this on
-        // the next view-fold phase; the double-insert is idempotent.
-        state.set_agent_engaged_with(mover, Some(partner));
-        state.set_agent_engaged_with(partner, Some(mover));
-        events.push(Event::EngagementCommitted {
-            actor: mover,
-            target: partner,
-            tick,
-        });
-    }
-}
-
-/// Tear down the dead agent's engagement, if any. The survivor's slot
-/// clears too so their next move-triggered recompute starts fresh. Called
-/// from the cascade handler on `AgentDied`.
-pub fn break_engagement_on_death(
-    state: &mut SimState,
-    dead: AgentId,
-    events: &mut EventRing,
-) {
-    let partner = match state.agent_engaged_with(dead) {
-        Some(p) => p,
-        None => return,
-    };
-    // Eager write: clear both slots before the view fold catches up.
-    state.set_agent_engaged_with(dead, None);
-    state.set_agent_engaged_with(partner, None);
-    events.push(Event::EngagementBroken {
-        actor: partner,
-        former_target: dead,
-        reason: break_reason::PARTNER_DIED,
-        tick: state.tick,
-    });
-}
-
-/// Back-compat shim for the retired `tick_start` engagement pass. Walks
-/// every alive agent in slot order and runs `recompute_engagement_for`
-/// on each. Used by tests and fixtures that predated the event-driven
-/// pipeline — new code should let the cascade handler do the work.
+/// Walks every alive agent in slot order, emits a synthetic
+/// `AgentMoved` at the agent's current position for each, and runs the
+/// cascade to fixed point on the provided registry. The DSL
+/// `engagement_on_move` physics rule does the actual work — the shim
+/// just plays the moves that `step_full`'s movement phase would
+/// normally have emitted.
 ///
-/// Emits `EngagementCommitted` / `EngagementBroken` events for every
-/// change, same as the per-agent handler. Writes are eager (via the
-/// shared `recompute_engagement_for`), so callers that compare the
-/// `hot_engaged_with()` slice after this runs observe the committed
-/// state without needing to trigger the view-fold phase.
+/// Re-emits are safe: the rule compares the pre-existing pairing
+/// against the recomputed one and only emits `EngagementBroken` /
+/// `EngagementCommitted` on a change. A steady-state second pass
+/// produces no new events.
+///
+/// Legacy callers: `tests/proptest_engagement.rs`,
+/// `tests/engagement_tick_start.rs`. New code should emit `AgentMoved`
+/// directly from the movement phase and let the cascade converge — no
+/// need to reach into engagement by hand.
 pub fn recompute_all_engagements(state: &mut SimState, events: &mut EventRing) {
-    // Snapshot alive ids up front so we don't re-scan a list that's
-    // mutating underneath us (dead rows don't come back mid-pass here,
-    // but emitting into `events` is still a mutable borrow that races
-    // with `agents_alive()`).
+    let registry = CascadeRegistry::with_engine_builtins();
+    let tick = state.tick;
     let alive: Vec<AgentId> = state.agents_alive().collect();
     for id in alive {
-        recompute_engagement_for(state, id, events);
+        let pos = state.agent_pos(id).unwrap_or(Vec3::ZERO);
+        // `from` / `location` both at the current pos means "no displacement"
+        // — the rule only reads `actor`, so the other fields can match the
+        // pre-cascade state exactly.
+        events.push(Event::AgentMoved {
+            actor: id,
+            from: pos,
+            location: pos,
+            tick,
+        });
     }
-}
-
-// ---------------------------------------------------------------------------
-// Cascade dispatchers — installed on `CascadeRegistry` by
-// `register_engine_builtins`.
-// ---------------------------------------------------------------------------
-
-/// Dispatcher installed for `EventKindId::AgentMoved`. Destructures the
-/// event once and forwards `actor` to `recompute_engagement_for`. This
-/// dispatcher slot is the only one for `AgentMoved`; the compiler-emitted
-/// physics module currently installs no `AgentMoved` handler, so there is
-/// nothing to chain — if that changes, the DSL-side register() would be
-/// the first to run and get overwritten here, and this dispatcher would
-/// need to chain forward to the previous slot (same pattern as
-/// `dispatch_agent_died`).
-pub fn dispatch_agent_moved(event: &Event, state: &mut SimState, events: &mut EventRing) {
-    if let Event::AgentMoved { actor, .. } = *event {
-        recompute_engagement_for(state, actor, events);
-    }
-}
-
-/// Dispatcher installed for `EventKindId::AgentDied`. Destructures the
-/// event once and forwards to `break_engagement_on_death`.
-///
-/// The DSL-emitted `chronicle_death` physics rule also needs to fire on
-/// `AgentDied` (see `assets/sim/physics.sim`); because the registry's
-/// `install_kind` overwrites the slot, we invoke it explicitly here
-/// instead of relying on slot composition. The dispatcher shape is
-/// fixed (`fn(&Event, &mut SimState, &mut EventRing)`), so this is just
-/// a plain function call — no trait-object indirection.
-pub fn dispatch_agent_died(event: &Event, state: &mut SimState, events: &mut EventRing) {
-    // DSL-side chronicle emission runs before engagement teardown so the
-    // chronicle line lands in the ring at the tick's death event
-    // position rather than after the engagement_broken cascade.
-    crate::generated::physics::dispatch_agent_died(event, state, events);
-    if let Event::AgentDied { agent_id, .. } = *event {
-        break_engagement_on_death(state, agent_id, events);
-    }
+    registry.run_fixed_point(state, events);
 }

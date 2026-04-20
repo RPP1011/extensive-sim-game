@@ -277,6 +277,56 @@ impl SpatialHash {
     }
 }
 
+/// Nearest-hostile spatial query — used by the DSL `engagement_on_move`
+/// physics rule (task 163). Returns the `AgentId` of the closest hostile
+/// within `radius` of `mover`, or `None` if nothing matches. Hostility is
+/// species-level (`CreatureType::is_hostile_to`); a dead / unspawned /
+/// out-of-range `mover` returns `None`.
+///
+/// Ties on distance are broken on raw `AgentId` ascending — matches the
+/// legacy hand-written `engagement::recompute_engagement_for` discipline
+/// (Task 163 moves that function to a DSL rule; the wolves+humans
+/// baseline pins the exact tie-break outcome so this helper must preserve
+/// it bit-for-bit). The iteration order over `SpatialHash::within_radius`
+/// is the same — that helper already sorts by raw id before returning, so
+/// "first candidate with equal distance wins" collapses to "lowest raw
+/// id wins".
+pub fn nearest_hostile_to(state: &SimState, mover: AgentId, radius: f32) -> Option<AgentId> {
+    if !state.agent_alive(mover) {
+        return None;
+    }
+    let pos = state.agent_pos(mover)?;
+    let ct = state.agent_creature_type(mover)?;
+    let spatial = state.spatial();
+    let mut best: Option<(AgentId, f32)> = None;
+    for other in spatial.within_radius(state, pos, radius) {
+        if other == mover {
+            continue;
+        }
+        let op = match state.agent_pos(other) {
+            Some(p) => p,
+            None => continue,
+        };
+        let oc = match state.agent_creature_type(other) {
+            Some(c) => c,
+            None => continue,
+        };
+        if !ct.is_hostile_to(oc) {
+            continue;
+        }
+        let d = pos.distance(op);
+        match best {
+            None => best = Some((other, d)),
+            Some((_, bd)) if d < bd => best = Some((other, d)),
+            Some((b, bd)) if (d - bd).abs() < f32::EPSILON && other.raw() < b.raw() => {
+                best = Some((other, d));
+            }
+            _ => {}
+        }
+    }
+    best.map(|(a, _)| a)
+}
+
 /// Number of cell steps in each cardinal direction the query must scan
 /// to guarantee no in-range walker is missed. For `radius <= CELL_SIZE`
 /// this is 1 (the original 3×3 neighbourhood); grows linearly with

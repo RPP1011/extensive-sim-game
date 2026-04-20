@@ -64,30 +64,20 @@ impl CascadeRegistry {
     pub fn register_engine_builtins(&mut self) {
         // Compiler-emitted physics handlers (DSL-owned). Covers damage, heal,
         // shield, stun, slow, transfer_gold, modify_standing,
-        // opportunity_attack, record_memory, and cast. The matching hand-
-        // written legacy handlers were deleted in the same commit that
-        // landed their DSL equivalent. 2026-04-19: `CastHandler` migrated
-        // — the `emit_physics` compiler now lowers `for ... in
-        // abilities.effects(...)` loops and `match` over `EffectOp`
-        // variants, so the last hand-written cascade handler with game
-        // logic is retired. The ability registry continues to live on
-        // `SimState`; the DSL `physics cast` rule reaches it through the
-        // `abilities.*` stdlib namespace.
+        // opportunity_attack, record_memory, cast, and the three chronicle
+        // rules. 2026-04-19: `CastHandler` migrated — the `emit_physics`
+        // compiler now lowers `for ... in abilities.effects(...)` loops
+        // and `match` over `EffectOp` variants. 2026-04-20 (task 163):
+        // the last two hand-written dispatchers (`dispatch_agent_moved`
+        // / `dispatch_agent_died` for engagement) migrated too, powered
+        // by the `query.nearest_hostile_to` + `agents.{set,clear,
+        // engaged_with_or}` primitives added to the stdlib. The ability
+        // registry continues to live on `SimState`; the DSL `physics
+        // cast` rule reaches it through the `abilities.*` namespace.
+        //
+        // At this point the engine installs zero hand-written dispatchers
+        // — every one comes from `generated/physics/mod.rs`.
         crate::generated::physics::register(self);
-        // Task 139 — event-driven engagement update. The old tick-start
-        // tentative-commit loop was retired in favour of two cascade
-        // dispatchers keyed on `AgentMoved` / `AgentDied`. The DSL physics
-        // emitter can't yet lower the spatial query the mover-scan needs
-        // (`query.nearby_agents(...)` is mask-only), so these stay
-        // hand-written for now.
-        self.install_kind(
-            super::EventKindId::AgentMoved,
-            crate::engagement::dispatch_agent_moved,
-        );
-        self.install_kind(
-            super::EventKindId::AgentDied,
-            crate::engagement::dispatch_agent_died,
-        );
     }
 
     pub fn register<H: CascadeHandler + 'static>(&mut self, h: H) {

@@ -176,6 +176,14 @@ fn physics_seed_path() -> PathBuf {
     p
 }
 
+fn config_seed_path() -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.pop();
+    p.pop();
+    p.push("assets/sim/config.sim");
+    p
+}
+
 /// Milestone 3: parse `assets/sim/events.sim` + `assets/sim/physics.sim`,
 /// resolve as one program (so the physics handler's event refs resolve),
 /// emit physics modules + aggregate `mod.rs`, and assert the damage handler
@@ -186,9 +194,14 @@ fn emit_physics_damage_handler_from_seed() {
 
     let events_src = fs::read_to_string(seed_path()).expect("events seed");
     let physics_src = fs::read_to_string(physics_seed_path()).expect("physics seed");
+    // Task 163 — the `engagement_on_move` rule reads
+    // `config.combat.engagement_range`, so the config block must also
+    // be in the merged program for resolution.
+    let config_src = fs::read_to_string(config_seed_path()).expect("config seed");
 
     // Merge ASTs before resolving so cross-file refs work.
     let mut merged = Program { decls: Vec::new() };
+    merged.decls.extend(dsl_compiler::parse(&config_src).unwrap().decls);
     merged.decls.extend(dsl_compiler::parse(&events_src).unwrap().decls);
     merged.decls.extend(dsl_compiler::parse(&physics_src).unwrap().decls);
     let comp = dsl_compiler::compile_ast(merged).expect("merged sources resolve");

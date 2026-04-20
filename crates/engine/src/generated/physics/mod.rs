@@ -6,6 +6,8 @@ pub mod chronicle_attack;
 pub mod chronicle_death;
 pub mod chronicle_engagement;
 pub mod damage;
+pub mod engagement_on_death;
+pub mod engagement_on_move;
 pub mod heal;
 pub mod modify_standing;
 pub mod opportunity_attack;
@@ -54,6 +56,21 @@ pub fn dispatch_agent_died(event: &Event, state: &mut SimState, events: &mut Eve
         return;
     };
     chronicle_death::chronicle_death(agent_id, state, events);
+    engagement_on_death::engagement_on_death(agent_id, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_agent_moved(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::AgentMoved {
+        actor,
+        from,
+        location,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    engagement_on_move::engagement_on_move(actor, state, events);
 }
 
 #[allow(unused_variables)]
@@ -210,6 +227,7 @@ pub fn register(registry: &mut CascadeRegistry) {
     registry.install_kind(EventKindId::AgentAttacked, dispatch_agent_attacked);
     registry.install_kind(EventKindId::AgentCast, dispatch_agent_cast);
     registry.install_kind(EventKindId::AgentDied, dispatch_agent_died);
+    registry.install_kind(EventKindId::AgentMoved, dispatch_agent_moved);
     registry.install_kind(
         EventKindId::EffectDamageApplied,
         dispatch_effect_damage_applied,

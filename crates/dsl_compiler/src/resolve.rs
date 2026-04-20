@@ -313,6 +313,38 @@ mod stdlib {
             (NamespaceId::Agents, "engaged_with") => {
                 Some((1, IrType::Optional(Box::new(IrType::AgentId))))
             }
+            // Engagement accessors used by the `engagement_on_move` /
+            // `engagement_on_death` DSL physics rules (task 163).
+            //
+            // `set_engaged_with(agent, partner)` eagerly writes the SoA
+            // `hot_engaged_with` slot to `Some(partner)` so same-tick
+            // cascade handlers observe the new partner before the view-
+            // fold phase rebuilds `state.views.engaged_with`. Split from
+            // `clear_engaged_with(agent)` so the DSL surface doesn't
+            // need an `Option` ctor for the two-arg setter (the
+            // generated Rust still calls the single bounds-tolerant
+            // `state.set_agent_engaged_with` for both).
+            //
+            // `engaged_with_or` is the unwrap-or-default sibling of
+            // `engaged_with` — returns the partner if any, else
+            // `default`. Lets the rule body sentinel on the agent
+            // itself when no partner is set, avoiding an `if let Some`
+            // narrowing inside the physics body (which the GPU-
+            // emittable subset doesn't yet support).
+            (NamespaceId::Agents, "set_engaged_with") => Some((2, IrType::Unknown)),
+            (NamespaceId::Agents, "clear_engaged_with") => Some((1, IrType::Unknown)),
+            (NamespaceId::Agents, "engaged_with_or") => Some((2, IrType::AgentId)),
+            // Spatial lookup wrapping `SpatialHash::within_radius` with
+            // the species hostility predicate. Returns the nearest hostile
+            // (argmin on distance; ties broken on raw AgentId) within
+            // `radius`, or `None`. The `_or` sibling returns a caller-
+            // supplied sentinel when nothing matches so the physics rule
+            // can stay in the GPU-emittable subset (no `if let Some`
+            // narrowing required). Task 163.
+            (NamespaceId::Query, "nearest_hostile_to") => {
+                Some((2, IrType::Optional(Box::new(IrType::AgentId))))
+            }
+            (NamespaceId::Query, "nearest_hostile_to_or") => Some((3, IrType::AgentId)),
             _ => None,
         }
     }
