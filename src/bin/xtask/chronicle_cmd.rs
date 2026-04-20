@@ -1143,7 +1143,16 @@ fn simulate_with(state: &mut SimState, ticks: u32, backend: Backend) -> EventRin
     match backend {
         Backend::Cpu => simulate(state, ticks),
         #[cfg(feature = "gpu")]
-        Backend::Gpu => simulate_via_trait(state, ticks, engine_gpu::GpuBackend::new()),
+        // Phase 1: `GpuBackend::new()` now returns a `Result` because
+        // wgpu device creation can fail (no GPU adapter / driver).
+        // `expect` is fine here — the xtask chronicle CLI is a
+        // developer tool; surfacing the wgpu error message via panic
+        // beats silently degrading to CPU.
+        Backend::Gpu => simulate_via_trait(
+            state,
+            ticks,
+            engine_gpu::GpuBackend::new().expect("GpuBackend init"),
+        ),
     }
 }
 
