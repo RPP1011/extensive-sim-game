@@ -232,47 +232,45 @@ fn deer_cluster_when_fleeing_wolf() {
 }
 
 // ---------------------------------------------------------------------------
-// Test (2) — capability gate isolates species.
+// Test (2a) — task 178: wolves DO herd now (pack cohesion).
 // ---------------------------------------------------------------------------
 //
-// Three wolves fleeing a dragon. Wolves are low-hp (hp=16 against
-// max_hp 80, so hp_pct=0.2 triggers the `hp_pct < 0.3` Flee gate —
-// scoring.sim line 113). Wolves have `herds_when_fleeing = false`
-// so the step.rs Flee arm takes the pure-away branch, identical to
-// pre-177 behaviour. Expected: no clustering — wolves scatter
-// radially from the dragon.
+// Mirror of `deer_cluster_when_fleeing_wolf` but with wolves as the
+// fleeing party and a human as the threat. Two wolves at (-3, 0, 0)
+// and (3, 0, 0), human threat at (0, 0, -15). Wolves are lightly
+// wounded (hp=40 / max_hp=80 → hp_pct=0.5) so the `self.hp < 50`
+// Flee gate fires (+0.4 on the Flee row). A human at hp=100 is a
+// fresh target, but Flee with the wounded gate beats Attack on a
+// fresh target for the wounded wolf.
 //
-// The assertion is one-sided: "wolves do not cluster more than a
-// small tolerance". Exact pairwise-distance invariance would require
-// perfectly matched velocity vectors, which can drift slightly in
-// corner cases (opportunity attacks, etc.). The pre-177 behaviour
-// for wolves fleeing a single dragon was that pairwise distance
-// stays roughly constant (all wolves move at the same speed in
-// mostly-parallel but subtly different away-directions, so drift is
-// small and bounded). Post-177 for the `false` branch, output is
-// bit-identical to pre-177.
+// Task 178 flipped `herds_when_fleeing` from false → true on the
+// Wolf entity. With that flag on, the Flee arm blends the pure-
+// away vector with the toward-kin-centroid vector, producing the
+// same clustering behaviour deer get. Assertion: final pairwise
+// distance shrinks relative to initial.
 #[test]
-fn wolves_dont_herd() {
+fn wolves_cluster_when_fleeing() {
     let spawns = [
-        (CreatureType::Dragon, Vec3::new(0.0, 0.0, 0.0), 500.0),
-        (CreatureType::Wolf, Vec3::new(6.0, 0.0, 0.0), 16.0),
-        (CreatureType::Wolf, Vec3::new(0.0, 0.0, 6.0), 16.0),
-        (CreatureType::Wolf, Vec3::new(-6.0, 0.0, 0.0), 16.0),
+        (CreatureType::Human, Vec3::new(0.0, 0.0, -15.0), 100.0),
+        (CreatureType::Wolf, Vec3::new(-3.0, 0.0, 0.0), 40.0),
+        (CreatureType::Wolf, Vec3::new(3.0, 0.0, 0.0), 40.0),
     ];
     let initial_positions: Vec<Vec3> = spawns.iter().map(|s| s.1).collect();
-    let (state, ids, _log) = run_scenario(0xDEE2_0178, &spawns, 10);
-    let wolf_ids = &ids[1..];
+    let (state, ids, log) = run_scenario(0xDEE2_0178_BEEF, &spawns, 20);
+    let (_human, wolf_ids) = (ids[0], &ids[1..]);
 
-    // Build a temp state with just the wolves at initial positions to
-    // compute the initial pairwise baseline. (Can't use `state` pre-
-    // simulation since we only have the post-sim one here.)
-    let mut initial_state = SimState::new(8, 0xBEEF);
+    // Clustering invariant: final pairwise distance across the wolves
+    // should be strictly smaller than initial. Pre-178 wolves
+    // (herds_when_fleeing: false) would move in parallel away-
+    // vectors and keep their pairwise distance roughly constant; now
+    // the kin-bias blend tilts them inward.
+    let mut initial_state = SimState::new(4, 0xDEAD);
     for &p in &initial_positions[1..] {
         initial_state
             .spawn_agent(AgentSpawn {
                 creature_type: CreatureType::Wolf,
                 pos: p,
-                hp: 16.0,
+                hp: 40.0,
                 max_hp: 80.0,
                 ..Default::default()
             })
@@ -282,7 +280,81 @@ fn wolves_dont_herd() {
         mean_pairwise_distance(&initial_state, &initial_state.agents_alive().collect::<Vec<_>>());
     let final_pairwise = mean_pairwise_distance(&state, wolf_ids);
 
-    // The wolves should NOT cluster. A small epsilon tolerates the
+    let flee_count = log
+        .iter()
+        .filter(|e| matches!(e, Event::AgentFled { .. }))
+        .count();
+    assert!(
+        flee_count > 0,
+        "no AgentFled events emitted — wolves may have Attack or MoveToward \
+         scoring above Flee. Check Flee-row scoring gates and Flee mask for \
+         hp=40/max_hp=80.",
+    );
+
+    assert!(
+        final_pairwise < initial_pairwise,
+        "wolves should cluster while fleeing (task 178): initial mean pairwise = {:.3}, \
+         final mean pairwise = {:.3} (expected final < initial). If equal, \
+         kin-flee bias isn't firing — check the `herds_when_fleeing` capability \
+         on the Wolf entity in assets/sim/entities.sim.",
+        initial_pairwise,
+        final_pairwise,
+    );
+
+    println!(
+        "wolves_cluster_when_fleeing: initial_pairwise={:.3} final_pairwise={:.3} \
+         delta={:.3}",
+        initial_pairwise,
+        final_pairwise,
+        final_pairwise - initial_pairwise,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test (2b) — capability gate isolates species (humans still don't herd).
+// ---------------------------------------------------------------------------
+//
+// Task 178 flipped `herds_when_fleeing` on for wolves but left humans
+// alone. Humans (hp=16 / max_hp=100 → hp_pct=0.16 fires the `hp_pct <
+// 0.3` Flee gate) fleeing a dragon should NOT cluster — they take
+// the pre-177 pure-away branch, same as pre-178.
+//
+// The assertion is one-sided: "humans do not cluster more than a
+// small tolerance". Exact pairwise-distance invariance would require
+// perfectly matched velocity vectors, which can drift slightly in
+// corner cases (opportunity attacks, etc.).
+#[test]
+fn humans_dont_herd() {
+    let spawns = [
+        (CreatureType::Dragon, Vec3::new(0.0, 0.0, 0.0), 500.0),
+        (CreatureType::Human, Vec3::new(6.0, 0.0, 0.0), 16.0),
+        (CreatureType::Human, Vec3::new(0.0, 0.0, 6.0), 16.0),
+        (CreatureType::Human, Vec3::new(-6.0, 0.0, 0.0), 16.0),
+    ];
+    let initial_positions: Vec<Vec3> = spawns.iter().map(|s| s.1).collect();
+    let (state, ids, _log) = run_scenario(0xDEE2_0178, &spawns, 10);
+    let human_ids = &ids[1..];
+
+    // Build a temp state with just the humans at initial positions to
+    // compute the initial pairwise baseline. (Can't use `state` pre-
+    // simulation since we only have the post-sim one here.)
+    let mut initial_state = SimState::new(8, 0xBEEF);
+    for &p in &initial_positions[1..] {
+        initial_state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Human,
+                pos: p,
+                hp: 16.0,
+                max_hp: 100.0,
+                ..Default::default()
+            })
+            .unwrap();
+    }
+    let initial_pairwise =
+        mean_pairwise_distance(&initial_state, &initial_state.agents_alive().collect::<Vec<_>>());
+    let final_pairwise = mean_pairwise_distance(&state, human_ids);
+
+    // The humans should NOT cluster. A small epsilon tolerates the
     // tiny numerical drift from non-parallel away-vectors (6-m
     // triangle geometry + opportunity-attack micro-jitter). The
     // absolute claim is "final_pairwise should not be materially
@@ -291,16 +363,16 @@ fn wolves_dont_herd() {
     // well above the noise floor.
     assert!(
         final_pairwise > initial_pairwise - 0.5,
-        "wolves should not herd (capability gate broken?): \
+        "humans should not herd (capability gate broken?): \
          initial_pairwise={:.3}, final_pairwise={:.3}. \
-         Check that Wolf entity has `herds_when_fleeing: false` and \
+         Check that Human entity has `herds_when_fleeing: false` and \
          step.rs Flee arm dispatches on the capability, not CreatureType.",
         initial_pairwise,
         final_pairwise,
     );
 
     println!(
-        "wolves_dont_herd: initial_pairwise={:.3} final_pairwise={:.3}",
+        "humans_dont_herd: initial_pairwise={:.3} final_pairwise={:.3}",
         initial_pairwise, final_pairwise,
     );
 }

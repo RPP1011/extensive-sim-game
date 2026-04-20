@@ -100,7 +100,7 @@ impl Capabilities {
                 can_tunnel: true,
                 can_marry: false,
                 max_spouses: 0,
-                herds_when_fleeing: false,
+                herds_when_fleeing: true,
             },
             CreatureType::Deer => Self {
                 channels: smallvec![CommunicationChannel::PackSignal],

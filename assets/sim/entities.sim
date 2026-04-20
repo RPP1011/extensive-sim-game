@@ -53,10 +53,15 @@ entity Wolf : Agent {
     can_tunnel:  true,
     can_marry:   false,
     max_spouses: 0,
-    // Wolves are predators, not herd-flight prey. False preserves
-    // pre-177 straight-line flee behaviour (wolves flee when
-    // wounded — see `self.hp_pct < 0.3` gate in scoring.sim).
-    herds_when_fleeing: false,
+    // Task 178 — wolves also herd when fleeing (pack cohesion).
+    // Wolves already flee when wounded (`self.hp_pct < 0.3` gate in
+    // scoring.sim, task 165). With this flag true, their flee
+    // direction blends away-from-threat with toward-kin-centroid so
+    // a routed wolf runs back toward its pack rather than scattering
+    // alone — consistent with the pack_focus / kin_fear family of
+    // kin-mechanic signals. Deer already herd (task 177); this is
+    // the symmetric predator-side flag.
+    herds_when_fleeing: true,
   },
   predator_prey: PredatorPrey {
     prey_of:  [Dragon],
