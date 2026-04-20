@@ -5,6 +5,7 @@ pub mod ability;
 pub mod aggregate;
 pub mod cascade;
 pub mod channel;
+pub mod chronicle;
 pub mod creature;
 pub mod engagement;
 pub mod event;

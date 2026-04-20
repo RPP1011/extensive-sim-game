@@ -191,6 +191,8 @@ pub enum Event {
     },
     ChronicleEntry {
         template_id: u32,
+        agent: AgentId,
+        target: AgentId,
         tick: u32,
     },
     EffectDamageApplied {

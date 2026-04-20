@@ -12,6 +12,7 @@ mod champion_gen;
 mod world_sim_cmd;
 mod visualize_cmd;
 mod building_ai_cmd;
+mod chronicle_cmd;
 mod compile_dsl_cmd;
 
 use std::process::ExitCode;
@@ -50,5 +51,6 @@ fn main() -> ExitCode {
         TaskCommand::Visualize(args) => visualize_cmd::run_visualize(args),
         TaskCommand::BuildingAi(cmd) => building_ai_cmd::run_building_ai(cmd),
         TaskCommand::CompileDsl(args) => compile_dsl_cmd::run_compile_dsl(args),
+        TaskCommand::Chronicle(args) => chronicle_cmd::run_chronicle(args),
     }
 }

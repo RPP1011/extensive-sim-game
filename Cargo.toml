@@ -28,6 +28,7 @@ glam = "0.29"
 winit = { version = "0.30", optional = true }
 tactical_sim = { path = "crates/tactical_sim" }
 dsl_compiler = { path = "crates/dsl_compiler" }
+engine = { path = "crates/engine" }
 contracts = "0.6"
 winnow = "0.7"
 burn = { version = "0.20", default-features = false, features = ["std"], optional = true }

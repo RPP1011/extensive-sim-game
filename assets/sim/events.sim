@@ -115,4 +115,17 @@ event_tag Audit    { actor: AgentId }
 // id the renderer pairs with a localised string. Intentionally omits
 // `@replayable` so `Event::is_replayable()` returns `false` and the hash
 // walk skips it.
-event ChronicleEntry { template_id: u32 }
+//
+// Payload shape — a minimal MVP carrying the two agents most templates
+// reference (subject + object). For single-subject templates (e.g. a
+// death) the emit-site passes the subject in both slots. Because the
+// event is @non_replayable the schema evolution cost is near-zero: field
+// changes don't touch `replayable_sha256` or the DSL's `EVENT_HASH`
+// recomputes but the 100-tick parity baseline (which tracks only
+// replayable events) stays byte-identical.
+//
+// Template ids are stable `u32` constants owned by the Rust-side
+// renderer (`crates/engine/src/chronicle.rs::templates`). Keeping them
+// in Rust instead of the DSL avoids inventing a `chronicle` stdlib
+// namespace for what is essentially a three-entry lookup table.
+event ChronicleEntry { template_id: u32, agent: AgentId, target: AgentId }

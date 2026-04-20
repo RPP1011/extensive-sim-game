@@ -8,4 +8,6 @@ from dataclasses import dataclass
 @dataclass
 class ChronicleEntry:
     template_id: int
+    agent: int  # AgentId
+    target: int  # AgentId
     tick: int

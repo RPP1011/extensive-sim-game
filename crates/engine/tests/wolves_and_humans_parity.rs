@@ -163,7 +163,15 @@ fn run_scenario_log() -> String {
         events.total_pushed(),
     );
 
-    let mut out = String::with_capacity(events.len() * 64);
+    // Filter to replayable events only. `ChronicleEntry` (and any other
+    // future @non_replayable variant) lives in the ring as a prose
+    // side-channel; emitting one is allowed to change at any time
+    // without perturbing the parity baseline. `Event::is_replayable()`
+    // is the same partition the hash walk uses, so the baseline tracks
+    // exactly the subset that defines replay equivalence.
+    let replayable: Vec<&Event> = events.iter().filter(|e| e.is_replayable()).collect();
+
+    let mut out = String::with_capacity(replayable.len() * 64);
     // Header documents the fixture shape so a diff against the baseline
     // shows intent-level metadata, not just raw event lines.
     let _ = writeln!(
@@ -173,8 +181,8 @@ fn run_scenario_log() -> String {
         TICKS,
         state.agent_cap(),
     );
-    let _ = writeln!(out, "# total_events={}", events.total_pushed());
-    for ev in events.iter() {
+    let _ = writeln!(out, "# total_events={}", replayable.len());
+    for ev in &replayable {
         let _ = writeln!(out, "{}", fmt_event(ev));
     }
     out
@@ -323,6 +331,72 @@ fn parse_kv_u32(line: &str, key: &str) -> Option<u32> {
     let after = &line[start..];
     let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
     after[..end].parse().ok()
+}
+
+/// Chronicle renderer smoke test. Runs the same 100-tick wolves+humans
+/// fixture, walks the full event ring (including non-replayable
+/// `ChronicleEntry` events), and asserts the rendered prose looks like
+/// expected — readable, tick-stamped, references named creatures, and
+/// includes at least one of each of the three template kinds the
+/// chronicle-mvp physics rules emit (death, strike, engagement).
+#[test]
+fn chronicle_renders_readable_text() {
+    let mut state = spawn_fixture();
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    let mut invariants = InvariantRegistry::new();
+    invariants.register(Box::new(PoolNonOverlapInvariant));
+
+    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let telemetry = NullSink;
+
+    for _ in 0..TICKS {
+        step_full(
+            &mut state,
+            &mut scratch,
+            &mut events,
+            &UtilityBackend,
+            &cascade,
+            &mut views[..],
+            &invariants,
+            &telemetry,
+        );
+    }
+
+    // Render every ChronicleEntry in the ring.
+    let lines = engine::chronicle::render_entries(&state, events.iter());
+    assert!(
+        !lines.is_empty(),
+        "chronicle should emit at least one entry across 100 ticks of wolves+humans",
+    );
+
+    // Every line is of the form "Tick <u32>: ..." — tick-stamped.
+    for line in &lines {
+        assert!(
+            line.starts_with("Tick "),
+            "chronicle line missing tick prefix: {line:?}",
+        );
+    }
+
+    // Each of the three template kinds must surface at least once —
+    // death, strike, engagement. The wolves+humans fixture guarantees
+    // all three in a 100-tick window.
+    let has_strike = lines.iter().any(|l| l.contains(" struck "));
+    let has_engagement = lines.iter().any(|l| l.contains(" engaged "));
+    let has_death = lines.iter().any(|l| l.contains(" fell."));
+    assert!(has_strike, "chronicle missing a strike line; lines={lines:?}");
+    assert!(
+        has_engagement,
+        "chronicle missing an engagement line; lines={lines:?}"
+    );
+    assert!(has_death, "chronicle missing a death line; lines={lines:?}");
+
+    // Names include a creature type — wolves+humans only, no deer/dragon.
+    let any_human = lines.iter().any(|l| l.contains("Human #"));
+    let any_wolf = lines.iter().any(|l| l.contains("Wolf #"));
+    assert!(any_human && any_wolf, "expected both Human and Wolf references; lines={lines:?}");
 }
 
 #[test]

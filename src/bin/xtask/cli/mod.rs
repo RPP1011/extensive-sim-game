@@ -46,6 +46,24 @@ pub enum TaskCommand {
     BuildingAi(BuildingAiCommand),
     /// Compile DSL sources (`assets/sim/*.sim`) into Rust + Python artefacts.
     CompileDsl(CompileDslArgs),
+    /// Run the wolves+humans engine fixture and print the rendered chronicle.
+    /// Reads `ChronicleEntry` events from the event ring and formats them
+    /// with `engine::chronicle::render_entry`. Deterministic: same seed +
+    /// same tick count ⇒ byte-identical output.
+    Chronicle(ChronicleArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Run the engine's wolves+humans fixture and dump the chronicle")]
+pub struct ChronicleArgs {
+    /// Number of ticks to simulate.
+    #[arg(long, default_value_t = 100)]
+    pub ticks: u32,
+    /// 64-bit hex seed for `SimState::new`. Defaults to the same seed the
+    /// `wolves_and_humans_parity` test uses, so `ticks=100` reproduces the
+    /// chronicle the test renders (minus the assertion harness).
+    #[arg(long, default_value = "0xD00DFACE00420042")]
+    pub seed: String,
 }
 
 #[derive(Debug, Parser)]

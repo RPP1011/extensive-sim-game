@@ -91,9 +91,14 @@ fn does_not_invalidate_on_unrelated_event() {
     view.compute(&state);
 
     let mut ring = EventRing::with_cap(8);
+    // Use agent id 1 (spawned by spawn_two_away above). The agent/target
+    // payload is structurally required since task chronicle-mvp extended
+    // ChronicleEntry with (agent, target) for the prose renderer.
     ring.push(Event::ChronicleEntry {
         tick: 0,
         template_id: 0,
+        agent: engine::ids::AgentId::new(1).unwrap(),
+        target: engine::ids::AgentId::new(1).unwrap(),
     });
     view.invalidate_on_events(&ring);
     assert!(!view.is_stale(), "chronicle events don't affect positions");

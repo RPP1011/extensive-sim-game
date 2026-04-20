@@ -2681,6 +2681,7 @@ dependencies = [
  "crossbeam-channel",
  "crossterm",
  "dsl_compiler",
+ "engine",
  "glam",
  "image",
  "memmap2",

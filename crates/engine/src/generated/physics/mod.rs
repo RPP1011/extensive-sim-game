@@ -2,6 +2,9 @@
 // Regenerate with `cargo run --bin xtask -- compile-dsl`.
 
 pub mod cast;
+pub mod chronicle_attack;
+pub mod chronicle_death;
+pub mod chronicle_engagement;
 pub mod damage;
 pub mod heal;
 pub mod modify_standing;
@@ -17,6 +20,20 @@ use crate::event::{Event, EventRing};
 use crate::state::SimState;
 
 #[allow(unused_variables)]
+pub fn dispatch_agent_attacked(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::AgentAttacked {
+        actor,
+        target,
+        damage,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    chronicle_attack::chronicle_attack(actor, target, state, events);
+}
+
+#[allow(unused_variables)]
 pub fn dispatch_agent_cast(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::AgentCast {
         actor,
@@ -29,6 +46,14 @@ pub fn dispatch_agent_cast(event: &Event, state: &mut SimState, events: &mut Eve
         return;
     };
     cast::cast(actor, ability, target, depth, tick, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_agent_died(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::AgentDied { agent_id, tick } = *event else {
+        return;
+    };
+    chronicle_death::chronicle_death(agent_id, state, events);
 }
 
 #[allow(unused_variables)]
@@ -125,6 +150,19 @@ pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, events:
 }
 
 #[allow(unused_variables)]
+pub fn dispatch_engagement_committed(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EngagementCommitted {
+        actor,
+        target,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    chronicle_engagement::chronicle_engagement(actor, target, state, events);
+}
+
+#[allow(unused_variables)]
 pub fn dispatch_opportunity_attack_triggered(
     event: &Event,
     state: &mut SimState,
@@ -169,7 +207,9 @@ pub fn dispatch_record_memory(event: &Event, state: &mut SimState, events: &mut 
 /// engine's built-in handler set picks up DSL-owned rules without
 /// the engine knowing about each handler by name.
 pub fn register(registry: &mut CascadeRegistry) {
+    registry.install_kind(EventKindId::AgentAttacked, dispatch_agent_attacked);
     registry.install_kind(EventKindId::AgentCast, dispatch_agent_cast);
+    registry.install_kind(EventKindId::AgentDied, dispatch_agent_died);
     registry.install_kind(
         EventKindId::EffectDamageApplied,
         dispatch_effect_damage_applied,
@@ -189,6 +229,10 @@ pub fn register(registry: &mut CascadeRegistry) {
         dispatch_effect_standing_delta,
     );
     registry.install_kind(EventKindId::EffectStunApplied, dispatch_effect_stun_applied);
+    registry.install_kind(
+        EventKindId::EngagementCommitted,
+        dispatch_engagement_committed,
+    );
     registry.install_kind(
         EventKindId::OpportunityAttackTriggered,
         dispatch_opportunity_attack_triggered,

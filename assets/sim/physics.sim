@@ -264,3 +264,39 @@ physics cast @phase(event) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Chronicle — narrative side channel
+// ---------------------------------------------------------------------------
+// Three handlers emit `ChronicleEntry` events on significant state
+// transitions: a death (template 1), a strike (template 2), and an
+// engagement commitment (template 3). Template ids are stable `u32`
+// constants owned by `crates/engine/src/chronicle.rs::templates`.
+//
+// `ChronicleEntry` is `@non_replayable`, so these emits never fold into
+// `replayable_sha256` and cannot perturb the wolves+humans parity
+// baseline (the baseline writer also filters non-replayable events; see
+// `tests/wolves_and_humans_parity.rs`).
+//
+// For single-subject templates (e.g. a death) the emit passes the
+// subject in both `agent` and `target` slots — the renderer ignores the
+// redundant slot. That keeps the event shape fixed without needing an
+// Option<AgentId>.
+
+physics chronicle_death @phase(post) {
+  on AgentDied { agent_id: a } {
+    emit ChronicleEntry { template_id: 1, agent: a, target: a }
+  }
+}
+
+physics chronicle_attack @phase(post) {
+  on AgentAttacked { actor: a, target: t } {
+    emit ChronicleEntry { template_id: 2, agent: a, target: t }
+  }
+}
+
+physics chronicle_engagement @phase(post) {
+  on EngagementCommitted { actor: a, target: t } {
+    emit ChronicleEntry { template_id: 3, agent: a, target: t }
+  }
+}

@@ -23,7 +23,9 @@ fn replayable_subset_hashes_stably() {
     ring.push(Event::AgentMoved {
         actor: a, from: Vec3::ZERO, location: Vec3::X, tick: 10,
     });
-    ring.push(Event::ChronicleEntry { tick: 11, template_id: 7 }); // non-replayable
+    ring.push(Event::ChronicleEntry {
+        tick: 11, template_id: 7, agent: a, target: a,
+    }); // non-replayable
     ring.push(Event::AgentDied { agent_id: a, tick: 12 });
 
     let h1 = ring.replayable_sha256();
@@ -69,7 +71,9 @@ fn chronicle_content_does_not_affect_hash() {
         ring.push(Event::AgentMoved {
             actor: a, from: Vec3::ZERO, location: Vec3::X, tick: 1,
         });
-        ring.push(Event::ChronicleEntry { tick: 2, template_id: chron_tid });
+        ring.push(Event::ChronicleEntry {
+            tick: 2, template_id: chron_tid, agent: a, target: a,
+        });
         ring.push(Event::AgentDied { agent_id: a, tick: 3 });
         ring
     };

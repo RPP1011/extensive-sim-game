@@ -221,7 +221,13 @@ pub fn recompute_all_engagements(state: &mut SimState, events: &mut EventRing) {
 // ---------------------------------------------------------------------------
 
 /// Dispatcher installed for `EventKindId::AgentMoved`. Destructures the
-/// event once and forwards `actor` to `recompute_engagement_for`.
+/// event once and forwards `actor` to `recompute_engagement_for`. This
+/// dispatcher slot is the only one for `AgentMoved`; the compiler-emitted
+/// physics module currently installs no `AgentMoved` handler, so there is
+/// nothing to chain — if that changes, the DSL-side register() would be
+/// the first to run and get overwritten here, and this dispatcher would
+/// need to chain forward to the previous slot (same pattern as
+/// `dispatch_agent_died`).
 pub fn dispatch_agent_moved(event: &Event, state: &mut SimState, events: &mut EventRing) {
     if let Event::AgentMoved { actor, .. } = *event {
         recompute_engagement_for(state, actor, events);
@@ -230,7 +236,18 @@ pub fn dispatch_agent_moved(event: &Event, state: &mut SimState, events: &mut Ev
 
 /// Dispatcher installed for `EventKindId::AgentDied`. Destructures the
 /// event once and forwards to `break_engagement_on_death`.
+///
+/// The DSL-emitted `chronicle_death` physics rule also needs to fire on
+/// `AgentDied` (see `assets/sim/physics.sim`); because the registry's
+/// `install_kind` overwrites the slot, we invoke it explicitly here
+/// instead of relying on slot composition. The dispatcher shape is
+/// fixed (`fn(&Event, &mut SimState, &mut EventRing)`), so this is just
+/// a plain function call — no trait-object indirection.
 pub fn dispatch_agent_died(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    // DSL-side chronicle emission runs before engagement teardown so the
+    // chronicle line lands in the ring at the tick's death event
+    // position rather than after the engagement_broken cascade.
+    crate::generated::physics::dispatch_agent_died(event, state, events);
     if let Event::AgentDied { agent_id, .. } = *event {
         break_engagement_on_death(state, agent_id, events);
     }
