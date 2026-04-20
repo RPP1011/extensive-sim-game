@@ -41,6 +41,13 @@ const SHOWCASE_DEFAULT_SEED: &str = "0xDEADBEEF";
 const SHOWCASE_DEFAULT_TICKS: u32 = 500;
 
 pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
+    // Sweep mode short-circuits seed resolution: it has its own base-seed
+    // knob and always runs the showcase fixture. `--sweep 0` is a no-op
+    // that we surface as an error so users don't get silent empty output.
+    if let Some(runs) = args.sweep {
+        return run_sweep_from_args(&args, runs);
+    }
+
     let (seed_raw, ticks) = resolve_args(&args);
     let seed = match parse_seed(&seed_raw) {
         Ok(s) => s,
@@ -55,6 +62,31 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
     } else {
         run_canonical(seed, ticks)
     }
+}
+
+fn run_sweep_from_args(args: &ChronicleArgs, runs: u32) -> ExitCode {
+    if runs == 0 {
+        eprintln!("chronicle: --sweep requires a positive run count");
+        return ExitCode::FAILURE;
+    }
+    let base_seed_raw = args
+        .base_seed
+        .clone()
+        .or_else(|| args.seed.clone())
+        .unwrap_or_else(|| SHOWCASE_DEFAULT_SEED.to_string());
+    let base_seed = match parse_seed(&base_seed_raw) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("chronicle: invalid --base-seed: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let ticks = args.ticks.unwrap_or(SHOWCASE_DEFAULT_TICKS);
+
+    let summary = run_sweep(base_seed, runs, ticks, args.verbose, &mut std::io::stderr());
+    let mut stdout = std::io::stdout().lock();
+    render_sweep_summary(&summary, &mut stdout).ok();
+    ExitCode::SUCCESS
 }
 
 fn resolve_args(args: &ChronicleArgs) -> (String, u32) {
@@ -140,6 +172,388 @@ fn run_showcase(seed: u64, ticks: u32) -> ExitCode {
     println!("Duration: {} ticks", ticks);
 
     ExitCode::SUCCESS
+}
+
+// ---------------------------------------------------------------------------
+// Balance sweep
+// ---------------------------------------------------------------------------
+
+/// Per-run statistics captured by the sweep. Aggregates are computed on a
+/// `Vec<RunStats>` — keeping the raw per-run values around lets us compute
+/// median / min / max without a second pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RunStats {
+    seed:             u64,
+    humans_alive:     u32,
+    wolves_alive:     u32,
+    deer_alive:       u32,
+    total_events:     u32,
+    chronicle_count:  u32,
+    rout_count:       u32,
+    /// `None` if no agent died during the run.
+    first_death_tick: Option<u32>,
+    winner:           Winner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Winner {
+    Humans,
+    Wolves,
+    Deer,
+    Stalemate,
+}
+
+impl Winner {
+    /// Winner = the species with strictly the most alive agents at the end.
+    /// Ties are "stalemate" so "wolves won" in the report means wolves
+    /// outnumbered everyone alive — mere survival isn't a win.
+    fn from_counts(c: &SpawnCounts) -> Self {
+        let (h, w, d) = (c.humans, c.wolves, c.deer);
+        let max = h.max(w).max(d);
+        if max == 0 {
+            return Winner::Stalemate;
+        }
+        let tied = [h, w, d].iter().filter(|&&n| n == max).count();
+        if tied > 1 {
+            return Winner::Stalemate;
+        }
+        if h == max {
+            Winner::Humans
+        } else if w == max {
+            Winner::Wolves
+        } else {
+            Winner::Deer
+        }
+    }
+}
+
+/// Run the showcase fixture once and return aggregate stats. Does not
+/// print anything — the caller decides whether the run goes into a sweep
+/// report, a verbose one-liner, or both.
+fn run_showcase_stats(seed: u64, ticks: u32) -> RunStats {
+    let (mut state, _counts) = spawn_showcase_fixture(seed);
+    let events = simulate(&mut state, ticks);
+
+    let mut total_events: u32 = 0;
+    let mut chronicle_count: u32 = 0;
+    let mut rout_count: u32 = 0;
+    let mut first_death_tick: Option<u32> = None;
+
+    for ev in events.iter() {
+        total_events = total_events.saturating_add(1);
+        match ev {
+            engine::event::Event::ChronicleEntry { template_id, .. } => {
+                chronicle_count = chronicle_count.saturating_add(1);
+                if *template_id == chronicle::templates::ROUT {
+                    rout_count = rout_count.saturating_add(1);
+                }
+            }
+            engine::event::Event::AgentDied { tick, .. } => {
+                if first_death_tick.map_or(true, |t| *tick < t) {
+                    first_death_tick = Some(*tick);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let alive = alive_by_type(&state);
+    let winner = Winner::from_counts(&alive);
+
+    RunStats {
+        seed,
+        humans_alive: alive.humans,
+        wolves_alive: alive.wolves,
+        deer_alive: alive.deer,
+        total_events,
+        chronicle_count,
+        rout_count,
+        first_death_tick,
+        winner,
+    }
+}
+
+/// Aggregate summary rendered by the sweep command. Separating the
+/// computation from the rendering keeps the determinism test simple
+/// (construct an expected `SweepSummary`, compare by field).
+#[derive(Debug, Clone)]
+struct SweepSummary {
+    runs:        u32,
+    ticks:       u32,
+    base_seed:   u64,
+    /// Retained for introspection tests + future JSON export. Not read by
+    /// the text renderer (which only needs the pre-computed aggregates).
+    #[allow(dead_code)]
+    per_run:     Vec<RunStats>,
+    // Pre-computed aggregates
+    humans_wins: u32,
+    wolves_wins: u32,
+    deer_wins:   u32,
+    stalemates:  u32,
+    // Deer are the prey — "deer survived" (any alive at end) is more
+    // meaningful than "deer won", which almost never happens.
+    deer_survived_runs: u32,
+    // Rout cascade: number of runs that saw any ROUT entry, plus the mean
+    // ROUT count across those cascade runs (not the full sweep).
+    runs_with_rout:        u32,
+    cascade_mean_routs:    f64,
+    // Total events: mean + min/max range
+    total_events_mean: f64,
+    total_events_min:  u32,
+    total_events_max:  u32,
+    // Chronicle entries: mean + min/max range
+    chronicle_mean: f64,
+    chronicle_min:  u32,
+    chronicle_max:  u32,
+    // Rout events across all runs (not just cascade runs)
+    rout_mean: f64,
+    rout_min:  u32,
+    rout_max:  u32,
+    // First-death tick: mean / min / max across runs that had any death
+    first_death_mean: Option<f64>,
+    first_death_min:  Option<u32>,
+    first_death_max:  Option<u32>,
+    // Survivor stats by species (mean, median, stdev)
+    humans_mean:   f64,
+    humans_median: f64,
+    humans_stdev:  f64,
+    wolves_mean:   f64,
+    wolves_median: f64,
+    wolves_stdev:  f64,
+    deer_mean:     f64,
+    deer_median:   f64,
+    deer_stdev:    f64,
+}
+
+fn summarize(per_run: Vec<RunStats>, runs: u32, ticks: u32, base_seed: u64) -> SweepSummary {
+    let n = per_run.len() as f64;
+    let mut humans_wins = 0u32;
+    let mut wolves_wins = 0u32;
+    let mut deer_wins = 0u32;
+    let mut stalemates = 0u32;
+    let mut deer_survived_runs = 0u32;
+    let mut runs_with_rout = 0u32;
+    let mut cascade_rout_sum: u64 = 0;
+    for r in &per_run {
+        match r.winner {
+            Winner::Humans => humans_wins += 1,
+            Winner::Wolves => wolves_wins += 1,
+            Winner::Deer => deer_wins += 1,
+            Winner::Stalemate => stalemates += 1,
+        }
+        if r.deer_alive > 0 {
+            deer_survived_runs += 1;
+        }
+        if r.rout_count > 0 {
+            runs_with_rout += 1;
+            cascade_rout_sum += r.rout_count as u64;
+        }
+    }
+
+    let cascade_mean_routs = if runs_with_rout > 0 {
+        cascade_rout_sum as f64 / runs_with_rout as f64
+    } else {
+        0.0
+    };
+
+    let humans_vals: Vec<u32> = per_run.iter().map(|r| r.humans_alive).collect();
+    let wolves_vals: Vec<u32> = per_run.iter().map(|r| r.wolves_alive).collect();
+    let deer_vals: Vec<u32> = per_run.iter().map(|r| r.deer_alive).collect();
+    let events_vals: Vec<u32> = per_run.iter().map(|r| r.total_events).collect();
+    let chronicle_vals: Vec<u32> = per_run.iter().map(|r| r.chronicle_count).collect();
+    let rout_vals: Vec<u32> = per_run.iter().map(|r| r.rout_count).collect();
+    let first_death_vals: Vec<u32> =
+        per_run.iter().filter_map(|r| r.first_death_tick).collect();
+
+    let (humans_mean, humans_median, humans_stdev) = mean_median_stdev(&humans_vals);
+    let (wolves_mean, wolves_median, wolves_stdev) = mean_median_stdev(&wolves_vals);
+    let (deer_mean, deer_median, deer_stdev) = mean_median_stdev(&deer_vals);
+
+    let total_events_mean = events_vals.iter().map(|v| *v as f64).sum::<f64>() / n.max(1.0);
+    let total_events_min = *events_vals.iter().min().unwrap_or(&0);
+    let total_events_max = *events_vals.iter().max().unwrap_or(&0);
+
+    let chronicle_mean =
+        chronicle_vals.iter().map(|v| *v as f64).sum::<f64>() / n.max(1.0);
+    let chronicle_min = *chronicle_vals.iter().min().unwrap_or(&0);
+    let chronicle_max = *chronicle_vals.iter().max().unwrap_or(&0);
+
+    let rout_mean = rout_vals.iter().map(|v| *v as f64).sum::<f64>() / n.max(1.0);
+    let rout_min = *rout_vals.iter().min().unwrap_or(&0);
+    let rout_max = *rout_vals.iter().max().unwrap_or(&0);
+
+    let (first_death_mean, first_death_min, first_death_max) = if first_death_vals.is_empty() {
+        (None, None, None)
+    } else {
+        let sum: u64 = first_death_vals.iter().map(|v| *v as u64).sum();
+        let mean = sum as f64 / first_death_vals.len() as f64;
+        let min = *first_death_vals.iter().min().unwrap();
+        let max = *first_death_vals.iter().max().unwrap();
+        (Some(mean), Some(min), Some(max))
+    };
+
+    SweepSummary {
+        runs,
+        ticks,
+        base_seed,
+        per_run,
+        humans_wins,
+        wolves_wins,
+        deer_wins,
+        stalemates,
+        deer_survived_runs,
+        runs_with_rout,
+        cascade_mean_routs,
+        total_events_mean,
+        total_events_min,
+        total_events_max,
+        chronicle_mean,
+        chronicle_min,
+        chronicle_max,
+        rout_mean,
+        rout_min,
+        rout_max,
+        first_death_mean,
+        first_death_min,
+        first_death_max,
+        humans_mean,
+        humans_median,
+        humans_stdev,
+        wolves_mean,
+        wolves_median,
+        wolves_stdev,
+        deer_mean,
+        deer_median,
+        deer_stdev,
+    }
+}
+
+/// Mean, median, population stdev for a slice of u32s. Population (not
+/// sample) stdev — we have the full population of runs, not a sample.
+fn mean_median_stdev(vals: &[u32]) -> (f64, f64, f64) {
+    if vals.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let n = vals.len() as f64;
+    let sum: u64 = vals.iter().map(|v| *v as u64).sum();
+    let mean = sum as f64 / n;
+    let mut sorted: Vec<u32> = vals.to_vec();
+    sorted.sort_unstable();
+    let mid = sorted.len() / 2;
+    let median = if sorted.len() % 2 == 0 {
+        (sorted[mid - 1] as f64 + sorted[mid] as f64) / 2.0
+    } else {
+        sorted[mid] as f64
+    };
+    let var = vals.iter().map(|v| {
+        let d = *v as f64 - mean;
+        d * d
+    }).sum::<f64>() / n;
+    (mean, median, var.sqrt())
+}
+
+/// Drive N runs with `base_seed + k` for k = 0..N, emitting a progress dot
+/// per 10 runs to stderr and optionally a per-run one-liner when verbose.
+/// Returns the finished summary; rendering happens in the caller.
+fn run_sweep<W: std::io::Write>(
+    base_seed: u64,
+    runs: u32,
+    ticks: u32,
+    verbose: bool,
+    progress: &mut W,
+) -> SweepSummary {
+    let mut per_run = Vec::with_capacity(runs as usize);
+    for k in 0..runs {
+        // Stepping by 1 is intentional — SimState hashes the seed before use
+        // (see `SimState::new`), so neighbouring seeds produce independent
+        // rng streams. No need to jitter the base_seed by 2^32.
+        let seed = base_seed.wrapping_add(k as u64);
+        let stats = run_showcase_stats(seed, ticks);
+        if verbose {
+            let _ = writeln!(progress, "{}", format_run_line(k, &stats));
+        }
+        if !verbose && runs >= 10 && (k + 1) % 10 == 0 {
+            let _ = write!(progress, ".");
+            let _ = progress.flush();
+        }
+        per_run.push(stats);
+    }
+    if !verbose && runs >= 10 {
+        let _ = writeln!(progress);
+    }
+    summarize(per_run, runs, ticks, base_seed)
+}
+
+fn format_run_line(k: u32, s: &RunStats) -> String {
+    let winner_word = match s.winner {
+        Winner::Humans => "humans win",
+        Winner::Wolves => "wolves win",
+        Winner::Deer => "deer win",
+        Winner::Stalemate => "stalemate",
+    };
+    format!(
+        "Run {:>4} [seed {:#018x}]: {}, H{}/W{}/D{}, {} events, {} chronicle, {} routs",
+        k, s.seed, winner_word,
+        s.humans_alive, s.wolves_alive, s.deer_alive,
+        s.total_events, s.chronicle_count, s.rout_count,
+    )
+}
+
+fn render_sweep_summary<W: std::io::Write>(
+    s: &SweepSummary,
+    out: &mut W,
+) -> std::io::Result<()> {
+    let runs = s.runs as f64;
+    let pct = |n: u32| -> f64 {
+        if s.runs == 0 { 0.0 } else { 100.0 * n as f64 / runs }
+    };
+
+    writeln!(out, "=== Balance Sweep: {} seeds × {} ticks ===", s.runs, s.ticks)?;
+    writeln!(out, "Fixture: 8 humans + 8 wolves + 4 deer (showcase)")?;
+    writeln!(out, "Base seed: {:#018x} (stepped by 1 per run)", s.base_seed)?;
+    writeln!(out)?;
+
+    writeln!(out, "--- Outcomes ---")?;
+    writeln!(out, "Humans won:    {:>3}/{} ({:.0}%)", s.humans_wins, s.runs, pct(s.humans_wins))?;
+    writeln!(out, "Wolves won:    {:>3}/{} ({:.0}%)", s.wolves_wins, s.runs, pct(s.wolves_wins))?;
+    writeln!(out, "Deer won:      {:>3}/{} ({:.0}%)", s.deer_wins, s.runs, pct(s.deer_wins))?;
+    writeln!(out, "Stalemate:     {:>3}/{} ({:.0}%)", s.stalemates, s.runs, pct(s.stalemates))?;
+    writeln!(out, "Deer survived: {:>3}/{} ({:.0}% of runs had >= 1 deer alive)",
+        s.deer_survived_runs, s.runs, pct(s.deer_survived_runs))?;
+    writeln!(out)?;
+
+    writeln!(out, "--- Survivors (mean / median / stdev) ---")?;
+    writeln!(out, "Humans: {:>5.1} / {:>4.1} / {:>4.2}", s.humans_mean, s.humans_median, s.humans_stdev)?;
+    writeln!(out, "Wolves: {:>5.1} / {:>4.1} / {:>4.2}", s.wolves_mean, s.wolves_median, s.wolves_stdev)?;
+    writeln!(out, "Deer:   {:>5.1} / {:>4.1} / {:>4.2}", s.deer_mean, s.deer_median, s.deer_stdev)?;
+    writeln!(out)?;
+
+    writeln!(out, "--- Combat dynamics ---")?;
+    match (s.first_death_mean, s.first_death_min, s.first_death_max) {
+        (Some(mean), Some(min), Some(max)) => {
+            writeln!(out, "First death tick: mean {:.1}, min {}, max {}", mean, min, max)?;
+        }
+        _ => {
+            writeln!(out, "First death tick: (no deaths in any run)")?;
+        }
+    }
+    writeln!(out, "Chronicle entries: mean {:.1} (range: {} - {})",
+        s.chronicle_mean, s.chronicle_min, s.chronicle_max)?;
+    writeln!(out, "Rout events (fear cascade): mean {:.2} (range: {} - {})",
+        s.rout_mean, s.rout_min, s.rout_max)?;
+    writeln!(out, "Runs with any rout: {}/{} ({:.0}%)",
+        s.runs_with_rout, s.runs, pct(s.runs_with_rout))?;
+    if s.runs_with_rout > 0 {
+        writeln!(out, "Cascade depth (mean routs per cascade run): {:.2}", s.cascade_mean_routs)?;
+    }
+    writeln!(out)?;
+
+    writeln!(out, "--- Total events ---")?;
+    writeln!(out, "Mean {:.0} events per run (range: {} - {})",
+        s.total_events_mean, s.total_events_min, s.total_events_max)?;
+
+    // A trailing newline keeps the output tidy when piped into `| head`.
+    Ok(())
 }
 
 fn simulate(state: &mut SimState, ticks: u32) -> EventRing {
@@ -340,13 +754,20 @@ mod tests {
         assert!(parse_seed("not-a-seed").is_err());
     }
 
-    #[test]
-    fn resolve_args_defaults_canonical() {
-        let args = ChronicleArgs {
+    fn default_args() -> ChronicleArgs {
+        ChronicleArgs {
             ticks: None,
             seed: None,
             showcase: false,
-        };
+            sweep: None,
+            base_seed: None,
+            verbose: false,
+        }
+    }
+
+    #[test]
+    fn resolve_args_defaults_canonical() {
+        let args = default_args();
         let (seed, ticks) = resolve_args(&args);
         assert_eq!(seed, CANONICAL_DEFAULT_SEED);
         assert_eq!(ticks, CANONICAL_DEFAULT_TICKS);
@@ -355,9 +776,8 @@ mod tests {
     #[test]
     fn resolve_args_defaults_showcase() {
         let args = ChronicleArgs {
-            ticks: None,
-            seed: None,
             showcase: true,
+            ..default_args()
         };
         let (seed, ticks) = resolve_args(&args);
         assert_eq!(seed, SHOWCASE_DEFAULT_SEED);
@@ -370,6 +790,7 @@ mod tests {
             ticks: Some(42),
             seed: Some("0x1234".to_string()),
             showcase: true,
+            ..default_args()
         };
         let (seed, ticks) = resolve_args(&args);
         assert_eq!(seed, "0x1234");
@@ -398,5 +819,130 @@ mod tests {
         let la = chronicle::render_entries(&a, ea.iter());
         let lb = chronicle::render_entries(&b, eb.iter());
         assert_eq!(la, lb, "same seed + same ticks must produce identical chronicles");
+    }
+
+    // --- sweep tests ---
+
+    #[test]
+    fn winner_prefers_strict_max() {
+        // Strict majority → that species wins.
+        assert_eq!(
+            Winner::from_counts(&SpawnCounts { humans: 5, wolves: 2, deer: 1 }),
+            Winner::Humans
+        );
+        assert_eq!(
+            Winner::from_counts(&SpawnCounts { humans: 0, wolves: 4, deer: 0 }),
+            Winner::Wolves
+        );
+        // Tie at top (both >0) → stalemate.
+        assert_eq!(
+            Winner::from_counts(&SpawnCounts { humans: 3, wolves: 3, deer: 1 }),
+            Winner::Stalemate
+        );
+        // Total wipe → stalemate (no max to pick).
+        assert_eq!(
+            Winner::from_counts(&SpawnCounts { humans: 0, wolves: 0, deer: 0 }),
+            Winner::Stalemate
+        );
+        // All three tied → stalemate.
+        assert_eq!(
+            Winner::from_counts(&SpawnCounts { humans: 2, wolves: 2, deer: 2 }),
+            Winner::Stalemate
+        );
+    }
+
+    #[test]
+    fn mean_median_stdev_handles_empty_and_basic() {
+        assert_eq!(mean_median_stdev(&[]), (0.0, 0.0, 0.0));
+        let (mean, median, stdev) = mean_median_stdev(&[2, 4, 4, 4, 5, 5, 7, 9]);
+        assert!((mean - 5.0).abs() < 1e-9);
+        assert!((median - 4.5).abs() < 1e-9);
+        // Population stdev of the textbook sample = 2.0.
+        assert!((stdev - 2.0).abs() < 1e-9);
+        // Odd-length median = exact middle.
+        let (_, med2, _) = mean_median_stdev(&[1, 2, 3]);
+        assert!((med2 - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sweep_is_deterministic() {
+        // Same base seed + same N ⇒ identical per-run stats. 3 runs x 60
+        // ticks keeps the test fast while still exercising the aggregation.
+        let mut sink_a = Vec::new();
+        let mut sink_b = Vec::new();
+        let sum_a = run_sweep(0xDEADBEEF, 3, 60, false, &mut sink_a);
+        let sum_b = run_sweep(0xDEADBEEF, 3, 60, false, &mut sink_b);
+        assert_eq!(sum_a.per_run, sum_b.per_run);
+        assert_eq!(sum_a.humans_wins, sum_b.humans_wins);
+        assert_eq!(sum_a.wolves_wins, sum_b.wolves_wins);
+        assert_eq!(sum_a.total_events_mean.to_bits(), sum_b.total_events_mean.to_bits());
+        assert_eq!(sum_a.chronicle_mean.to_bits(), sum_b.chronicle_mean.to_bits());
+    }
+
+    #[test]
+    fn sweep_seeds_are_stepped_by_one() {
+        // Run 0 uses the base seed exactly; run k uses base + k.
+        let mut sink = Vec::new();
+        let summary = run_sweep(0xDEADBEEF, 3, 20, false, &mut sink);
+        assert_eq!(summary.per_run.len(), 3);
+        assert_eq!(summary.per_run[0].seed, 0xDEADBEEF);
+        assert_eq!(summary.per_run[1].seed, 0xDEADBEEF + 1);
+        assert_eq!(summary.per_run[2].seed, 0xDEADBEEF + 2);
+        assert_eq!(summary.runs, 3);
+        assert_eq!(summary.ticks, 20);
+        assert_eq!(summary.base_seed, 0xDEADBEEF);
+    }
+
+    #[test]
+    fn sweep_outcome_buckets_sum_to_runs() {
+        // Every run lands in exactly one outcome bucket.
+        let mut sink = Vec::new();
+        let s = run_sweep(0xDEADBEEF, 5, 80, false, &mut sink);
+        assert_eq!(
+            s.humans_wins + s.wolves_wins + s.deer_wins + s.stalemates,
+            s.runs
+        );
+    }
+
+    #[test]
+    fn verbose_sweep_emits_a_line_per_run() {
+        // Verbose mode writes one line per run to the progress sink.
+        let mut sink = Vec::new();
+        let _ = run_sweep(0xDEADBEEF, 3, 30, true, &mut sink);
+        let text = String::from_utf8(sink).expect("utf8 sink");
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(lines.len(), 3);
+        for (k, line) in lines.iter().enumerate() {
+            assert!(line.starts_with(&format!("Run {:>4}", k)),
+                "expected run-index prefix, got {line:?}");
+        }
+    }
+
+    #[test]
+    fn sweep_summary_render_has_expected_sections() {
+        let mut progress = Vec::new();
+        let summary = run_sweep(0xDEADBEEF, 2, 40, false, &mut progress);
+        let mut out = Vec::new();
+        render_sweep_summary(&summary, &mut out).unwrap();
+        let text = String::from_utf8(out).expect("utf8 render");
+        for section in [
+            "=== Balance Sweep: 2 seeds",
+            "Fixture: 8 humans + 8 wolves + 4 deer",
+            "Base seed:",
+            "--- Outcomes ---",
+            "Humans won:",
+            "Wolves won:",
+            "Stalemate:",
+            "--- Survivors",
+            "--- Combat dynamics ---",
+            "Chronicle entries:",
+            "Rout events",
+            "--- Total events ---",
+        ] {
+            assert!(
+                text.contains(section),
+                "sweep summary missing section {section:?}; got:\n{text}",
+            );
+        }
     }
 }

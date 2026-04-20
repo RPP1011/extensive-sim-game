@@ -63,7 +63,7 @@ pub struct ChronicleArgs {
     pub ticks: Option<u32>,
     /// 64-bit hex seed for `SimState::new`. Defaults to the same seed the
     /// `wolves_and_humans_parity` test uses for the canonical fixture, and
-    /// to `0xDEADBEEF` for `--showcase`.
+    /// to `0xDEADBEEF` for `--showcase` / `--sweep`.
     #[arg(long)]
     pub seed: Option<String>,
     /// Showcase mode — run the longer curated fixture (8 humans, 8 wolves,
@@ -72,6 +72,22 @@ pub struct ChronicleArgs {
     /// canonical fixture when omitted.
     #[arg(long)]
     pub showcase: bool,
+    /// Balance-sweep mode — run the showcase fixture N times (one seed per
+    /// run, stepped by 1 from `--base-seed`) and print aggregate outcome /
+    /// combat statistics. Mutually exclusive with `--showcase`: sweep always
+    /// uses the showcase fixture (it's the curated balance surface).
+    #[arg(long)]
+    pub sweep: Option<u32>,
+    /// Base seed for `--sweep`. Run `k` uses `base_seed + k` (0-indexed) as
+    /// the per-run seed. Same parser as `--seed` (hex or decimal). Defaults
+    /// to `0xDEADBEEF` — same seed the single-run showcase uses, so
+    /// `--sweep 1 --base-seed 0xDEADBEEF` reproduces that run's outcome.
+    #[arg(long)]
+    pub base_seed: Option<String>,
+    /// Emit a one-line summary per run during a sweep. Off by default so
+    /// `--sweep 500` doesn't drown the aggregate report.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 #[derive(Debug, Parser)]
