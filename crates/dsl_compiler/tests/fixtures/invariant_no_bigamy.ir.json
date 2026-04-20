@@ -171,6 +171,7 @@
   ],
   "probes": [],
   "metrics": [],
+  "configs": [],
   "spans": {
     "entries": []
   }

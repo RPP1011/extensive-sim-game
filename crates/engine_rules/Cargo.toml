@@ -7,3 +7,12 @@ edition = "2021"
 serde = { version = "1", features = ["derive"] }
 glam = "0.29"
 smallvec = "1.13"
+# `toml` drives the compiler-emitted `Config::from_toml` loader. Pulled in
+# here (not the engine crate) because the emitted `config/mod.rs` is part
+# of `engine_rules`; adding it closer to the consumer inverts the dep
+# direction back into engine, which we avoid. Version pinned to the same
+# major as the rest of the workspace uses.
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

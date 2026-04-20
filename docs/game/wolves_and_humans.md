@@ -93,24 +93,26 @@ Target-selection logic (`nearest_other` + the `Action::move_toward` / `Action::a
 
 ### Hand-written scratch helpers in step.rs / mask.rs
 
-These aren't "game rules" in the narrow sense but they do encode game-level knobs:
+As of the config milestone the balance knobs below moved into `assets/sim/config.sim` and are now read off `SimState::config` at every call site. The per-block defaults live in `assets/config/default.toml`, rendered by the compiler from the DSL `= <default>` clauses; hand edits to the TOML file tune the sim without touching Rust. Retired constants and their new homes:
 
-- `crates/engine/src/step.rs:71` — `pub const MOVE_SPEED_MPS: f32 = 1.0;` — movement kernel (MoveToward / Flee both multiply by it). Game knob.
-- `crates/engine/src/step.rs:72` — `pub const ATTACK_DAMAGE: f32 = 10.0;` — per-agent fallback used when `SimState::agent_attack_damage` returns `None`. Also referenced by `crates/engine/src/generated/physics/opportunity_attack.rs:33`.
-- `crates/engine/src/step.rs:73` — `pub const ATTACK_RANGE: f32 = 2.0;` — per-agent fallback for `SimState::agent_attack_range`. The DSL-emitted `mask_attack` predicate hardcodes the matching 2.0 m literal (`assets/sim/masks.sim:24`).
-- `crates/engine/src/step.rs:74` — `const EAT_RESTORE: f32 = 0.25;` — hunger-restore delta applied on `MicroKind::Eat`.
-- `crates/engine/src/step.rs:75` — `const DRINK_RESTORE: f32 = 0.30;` — thirst-restore delta applied on `MicroKind::Drink`.
-- `crates/engine/src/step.rs:76` — `const REST_RESTORE: f32 = 0.15;` — rest-timer delta applied on `MicroKind::Rest`.
-- `crates/engine/src/step.rs:80` — `pub const MAX_ANNOUNCE_RECIPIENTS: usize = 32;` — per-announce event-ring pressure cap.
-- `crates/engine/src/step.rs:84` — `pub const MAX_ANNOUNCE_RADIUS: f32 = 80.0;` — default hearing radius for `AnnounceAudience::Anyone`/`Group`.
-- `crates/engine/src/step.rs:89` — `pub const OVERHEAR_RANGE: f32 = 30.0;` — bystander overhear radius around the speaker.
-- `crates/engine/src/step.rs:18` — `pub const DEFAULT_VOCAL_STRENGTH: f32 = 1.0;` — fallback vocal strength for `channel_range` (per-agent vocal strength lands when the Capability SoA grows the field).
-- `crates/engine/src/mask.rs:10` — `const AGGRO_RANGE: f32 = 50.0;` — flee-mask threat-detection radius.
-- `crates/engine/src/mask.rs:18` — `const ATTACK_SPATIAL_RADIUS: f32 = 2.0;` — mask spatial-iterator radius; intentionally tied to the DSL literal 2.0 m above.
-- `crates/engine/src/ability/expire.rs:29` — `pub const ENGAGEMENT_RANGE: f32 = 2.0;` — engagement detection radius (tick-start bidirectional commit).
-- `crates/engine/src/ability/expire.rs:35` — `pub const ENGAGEMENT_SLOW_FACTOR: f32 = 0.3;` — speed multiplier when an engaged agent moves away from its engager.
+| Legacy const (file:line pre-migration)                    | New DSL path                            |
+|-----------------------------------------------------------|-----------------------------------------|
+| `step.rs:71` `MOVE_SPEED_MPS = 1.0`                       | `config.movement.move_speed_mps`        |
+| `step.rs:72` `ATTACK_DAMAGE = 10.0`                       | `config.combat.attack_damage`           |
+| `step.rs:73` `ATTACK_RANGE = 2.0`                         | `config.combat.attack_range`            |
+| `step.rs:74` `EAT_RESTORE = 0.25`                         | `config.needs.eat_restore`              |
+| `step.rs:75` `DRINK_RESTORE = 0.30`                       | `config.needs.drink_restore`            |
+| `step.rs:76` `REST_RESTORE = 0.15`                        | `config.needs.rest_restore`             |
+| `step.rs:80` `MAX_ANNOUNCE_RECIPIENTS = 32`               | `config.communication.max_announce_recipients` |
+| `step.rs:84` `MAX_ANNOUNCE_RADIUS = 80.0`                 | `config.communication.max_announce_radius` |
+| `step.rs:89` `OVERHEAR_RANGE = 30.0`                      | `config.communication.overhear_range`   |
+| `step.rs:18` `DEFAULT_VOCAL_STRENGTH = 1.0`               | `config.communication.default_vocal_strength` |
+| `mask.rs:10` `AGGRO_RANGE = 50.0`                         | `config.combat.aggro_range`             |
+| `mask.rs:18` `ATTACK_SPATIAL_RADIUS = 2.0`                | `config.combat.attack_range` (same concept; folded) |
+| `ability/expire.rs:29` `ENGAGEMENT_RANGE = 2.0`           | `config.combat.engagement_range`        |
+| `ability/expire.rs:35` `ENGAGEMENT_SLOW_FACTOR = 0.3`     | `config.combat.engagement_slow_factor`  |
 
-All of these are game knobs that deserve DSL declarations (`const ATTACK_DAMAGE = 10.0` or equivalent, ideally inside a scoped `balance` block). They land when the DSL grows a `const` or `balance` declaration kind. Each is also covered by `engine::schema_hash::schema_hash` so any silent drift shows up as a hash mismatch in CI.
+Backward-compat `pub const` shims are kept at the old paths for the legacy test suite (`cast_handler_slow.rs`, `action_flee.rs`, etc. — they assert against "the default"). New code should read `state.config.*.*` directly. The `CONFIG_HASH` sub-hash covers block + field + type identity so any silent schema drift shows up in CI.
 
 ## What retires next
 

@@ -105,6 +105,7 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::Invariant(x) => &mut x.annotations,
         Decl::Probe(x) => &mut x.annotations,
         Decl::Metric(x) => &mut x.annotations,
+        Decl::Config(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
         // error path on the next iteration.
@@ -124,6 +125,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::Invariant(x) => &mut x.span,
         Decl::Probe(x) => &mut x.span,
         Decl::Metric(x) => &mut x.span,
+        Decl::Config(x) => &mut x.span,
         Decl::Query(x) => &mut x.span,
     }
 }
@@ -150,10 +152,11 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("invariant") => invariant_decl(c, annotations, start).map(Decl::Invariant),
         Some("probe") => probe_decl(c, annotations, start).map(Decl::Probe),
         Some("metric") => metric_block(c, annotations, start).map(Decl::Metric),
+        Some("config") => config_decl(c, annotations, start).map(Decl::Config),
         _ => Err(ParseErr::at(
             here(c),
             format!(
-                "expected top-level declaration (entity, event, view, query, physics, mask, verb, scoring, invariant, probe, metric); got `{}`",
+                "expected top-level declaration (entity, event, view, query, physics, mask, verb, scoring, invariant, probe, metric, config); got `{}`",
                 peek_word_for_error(c)
             ),
         )),
@@ -1319,6 +1322,97 @@ fn parse_metric_decl(c: &mut Cursor) -> PResult<MetricDecl> {
         alert_when,
         span: Span::new(start, c.pos),
     })
+}
+
+// ---------------------------------------------------------------------------
+// 2.12 config (balance tunables)
+// ---------------------------------------------------------------------------
+
+fn config_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<ConfigDecl> {
+    expect_keyword(c, "config").map_err(|e| e.with_context("parsing `config` declaration"))?;
+    let name = ident(c).map_err(|e| e.with_context("parsing config block name"))?;
+    c.skip_ws();
+    expect_char(c, '{').map_err(|e| e.with_context("parsing config body `{`"))?;
+    let mut fields = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            break;
+        }
+        fields.push(parse_config_field(c)?);
+        c.skip_ws();
+        // Comma is optional between fields; newlines terminate by virtue of
+        // `skip_ws` on the next iteration matching the `}`.
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    expect_char(c, '}').map_err(|e| e.with_context("parsing config body `}`"))?;
+    Ok(ConfigDecl { annotations, name, fields, span: Span::new(start, c.pos) })
+}
+
+fn parse_config_field(c: &mut Cursor) -> PResult<ConfigField> {
+    let fstart = c.pos;
+    let name = ident(c).map_err(|e| e.with_context("parsing config field name"))?;
+    c.skip_ws();
+    expect_char(c, ':').map_err(|e| e.with_context("parsing config field `:`"))?;
+    c.skip_ws();
+    let ty = type_ref(c)?;
+    c.skip_ws();
+    expect_char(c, '=').map_err(|e| e.with_context("parsing config field `=` for default value"))?;
+    c.skip_ws();
+    let default = parse_config_default(c)?;
+    Ok(ConfigField { name, ty, default, span: Span::new(fstart, c.pos) })
+}
+
+/// Parse the RHS of `<field>: <type> = <literal>`. Accepts one of:
+///   - a decimal integer (possibly signed by a leading `-`)
+///   - a float (same lexer as the rest of the grammar)
+///   - `true` / `false`
+///   - a double-quoted string
+///
+/// The type tag returned here is informational; lowering reconciles it with
+/// the declared `<type>` so `u32 = 10` is accepted.
+fn parse_config_default(c: &mut Cursor) -> PResult<ConfigDefault> {
+    c.skip_ws();
+    // String literal.
+    if c.starts_with_char('"') {
+        let s = string_lit(c)?;
+        return Ok(ConfigDefault::String(s));
+    }
+    // Bool literal — look ahead for a bare `true` / `false` that isn't part
+    // of a longer identifier.
+    if starts_with_keyword(c, "true") {
+        c.bump("true".len());
+        return Ok(ConfigDefault::Bool(true));
+    }
+    if starts_with_keyword(c, "false") {
+        c.bump("false".len());
+        return Ok(ConfigDefault::Bool(false));
+    }
+    // Signed numeric.
+    let negative = if c.starts_with_char('-') {
+        c.bump(1);
+        c.skip_ws();
+        true
+    } else {
+        false
+    };
+    let (v, is_float) = number_literal(c)?;
+    let v = if negative { -v } else { v };
+    if is_float {
+        Ok(ConfigDefault::Float(v))
+    } else if negative {
+        // A negative integer literal must fit in i64.
+        Ok(ConfigDefault::Int(v as i64))
+    } else {
+        // Unsigned by default; the type declaration decides how it's emitted.
+        Ok(ConfigDefault::Uint(v as u64))
+    }
 }
 
 // ---------------------------------------------------------------------------

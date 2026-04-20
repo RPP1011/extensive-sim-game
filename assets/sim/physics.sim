@@ -174,6 +174,11 @@ physics modify_standing @phase(event) {
 physics opportunity_attack @phase(event) {
   on OpportunityAttackTriggered { attacker: attacker, target: target, tick: tk } {
     if agents.alive(target) {
+      // Per-agent attack_damage with config fallback when the slot is empty.
+      // The legacy handler hard-coded `crate::step::ATTACK_DAMAGE`; the DSL
+      // lowers `config.combat.attack_damage` to `state.config.combat.attack_damage`
+      // so the runtime reads whatever value TOML tuning (or test code) has
+      // installed on `SimState.config`.
       let damage = agents.attack_damage(attacker)
       let cur_hp = agents.hp(target)
       let new_hp = max(cur_hp - damage, 0.0)

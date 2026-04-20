@@ -1,0 +1,37 @@
+// Runtime-tunable balance constants. Every value here used to be a
+// hand-written `pub const` in `crates/engine/src/step.rs`, `mask.rs`, or
+// `ability/expire.rs`. The compiler lowers this file into:
+//
+//   - `crates/engine_rules/src/config/*.rs` — per-block Rust structs with
+//     `Default` impls baking in the `= <default>` clauses below.
+//   - `assets/config/default.toml` — hand-editable TOML for balance tuning
+//     at runtime (loaded via `engine_rules::config::Config::from_toml`).
+//
+// Schema changes (adding/renaming/retyping a field) bump `CONFIG_HASH`.
+// Changing a default value here does NOT bump the hash — those are purely
+// the shipped defaults and users are expected to override them in TOML.
+
+config combat {
+    attack_damage: f32 = 10.0,
+    attack_range: f32 = 2.0,
+    aggro_range: f32 = 50.0,
+    engagement_range: f32 = 2.0,
+    engagement_slow_factor: f32 = 0.3,
+}
+
+config movement {
+    move_speed_mps: f32 = 1.0,
+}
+
+config needs {
+    eat_restore: f32 = 0.25,
+    drink_restore: f32 = 0.30,
+    rest_restore: f32 = 0.15,
+}
+
+config communication {
+    max_announce_recipients: u32 = 32,
+    max_announce_radius: f32 = 80.0,
+    overhear_range: f32 = 30.0,
+    default_vocal_strength: f32 = 1.0,
+}

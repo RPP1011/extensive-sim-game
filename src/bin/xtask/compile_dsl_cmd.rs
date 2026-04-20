@@ -41,6 +41,7 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             masks: sources.masks.as_deref(),
             scoring: sources.scoring.as_deref(),
             entities: sources.entities.as_deref(),
+            configs: sources.configs.as_deref(),
         },
     );
 
@@ -51,6 +52,9 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
     let mask_dir = args.out_mask.clone();
     let scoring_dir = args.out_scoring.clone();
     let entity_dir = args.out_entity.clone();
+    let config_rust_dir = args.out_config_rust.clone();
+    let config_toml_dir = args.out_config_toml.clone();
+    let config_toml_path = config_toml_dir.join("default.toml");
 
     if args.check {
         let mut mismatches = Vec::new();
@@ -59,6 +63,12 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             &mask_dir,
             &scoring_dir,
             &entity_dir,
+            &mut mismatches,
+        );
+        check_config(
+            &artefacts,
+            &config_rust_dir,
+            &config_toml_path,
             &mut mismatches,
         );
 
@@ -107,9 +117,10 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
 
         if mismatches.is_empty() {
             println!(
-                "compile-dsl: check ok ({} events, {} physics)",
+                "compile-dsl: check ok ({} events, {} physics, {} configs)",
                 combined.events.len(),
-                combined.physics.len()
+                combined.physics.len(),
+                combined.configs.len()
             );
             ExitCode::SUCCESS
         } else {
@@ -141,6 +152,14 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             eprintln!("compile-dsl: {e}");
             return ExitCode::FAILURE;
         }
+        if let Err(e) = write_config_output(
+            &config_rust_dir,
+            &config_toml_path,
+            &artefacts,
+        ) {
+            eprintln!("compile-dsl: {e}");
+            return ExitCode::FAILURE;
+        }
 
         // Format emitted Rust so it matches the project's style. Best effort —
         // if rustfmt fails (missing toolchain, generated file has a bug we
@@ -158,17 +177,26 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
                 .map(|(n, _)| physics_dir.join(n)),
         );
         rustfmt_targets.push(physics_dir.join("mod.rs"));
+        rustfmt_targets.extend(
+            artefacts
+                .rust_config_modules
+                .iter()
+                .map(|(n, _)| config_rust_dir.join(n)),
+        );
+        rustfmt_targets.push(config_rust_dir.join("mod.rs"));
         if let Err(e) = rustfmt(&rustfmt_targets) {
             eprintln!("compile-dsl: rustfmt failed: {e}");
             return ExitCode::FAILURE;
         }
 
         println!(
-            "compile-dsl: wrote {} events (event_hash={}), {} physics rule(s) (rules_hash={}); combined_hash={}",
+            "compile-dsl: wrote {} events (event_hash={}), {} physics rule(s) (rules_hash={}), {} config block(s) (config_hash={}); combined_hash={}",
             combined.events.len(),
             hex(&artefacts.event_hash),
             combined.physics.len(),
             hex(&artefacts.rules_hash),
+            combined.configs.len(),
+            hex(&artefacts.config_hash),
             hex(&artefacts.combined_hash),
         );
         ExitCode::SUCCESS
@@ -216,6 +244,7 @@ struct PerKindSources {
     masks: Option<String>,
     scoring: Option<String>,
     entities: Option<String>,
+    configs: Option<String>,
 }
 
 /// Output of `compile_all`: the merged IR plus per-kind source attributions.
@@ -236,11 +265,13 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
     let mut masks_source: Option<String> = None;
     let mut scoring_source: Option<String> = None;
     let mut entities_source: Option<String> = None;
+    let mut configs_source: Option<String> = None;
     let mut events_multi = false;
     let mut physics_multi = false;
     let mut masks_multi = false;
     let mut scoring_multi = false;
     let mut entities_multi = false;
+    let mut configs_multi = false;
     let mut seen_events: HashSet<String> = HashSet::new();
     let mut seen_physics: HashSet<String> = HashSet::new();
 
@@ -285,6 +316,7 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
                 Decl::Mask(_) => update_kind_source(&mut masks_source, &mut masks_multi, &path),
                 Decl::Scoring(_) => update_kind_source(&mut scoring_source, &mut scoring_multi, &path),
                 Decl::Entity(_) => update_kind_source(&mut entities_source, &mut entities_multi, &path),
+                Decl::Config(_) => update_kind_source(&mut configs_source, &mut configs_multi, &path),
                 // Verb/View/Invariant/Probe/Metric are parsed but not yet emitted.
                 _ => {}
             }
@@ -306,6 +338,7 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
             masks: if masks_multi { None } else { masks_source },
             scoring: if scoring_multi { None } else { scoring_source },
             entities: if entities_multi { None } else { entities_source },
+            configs: if configs_multi { None } else { configs_source },
         },
     })
 }
@@ -535,6 +568,58 @@ fn write_scaffolded_kinds(
     fs::write(scoring_dir.join("mod.rs"), &artefacts.rust_scoring_mod)?;
     fs::write(entity_dir.join("mod.rs"), &artefacts.rust_entity_mod)?;
     Ok(())
+}
+
+/// Write the per-block config Rust + the aggregator `mod.rs` + the TOML
+/// defaults file. Runs in the same write-mode as every other emission kind.
+fn write_config_output(
+    config_rust_dir: &Path,
+    config_toml_path: &Path,
+    artefacts: &dsl_compiler::EmittedArtifacts,
+) -> std::io::Result<()> {
+    fs::create_dir_all(config_rust_dir)?;
+    if let Some(parent) = config_toml_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    prune_stale(
+        config_rust_dir,
+        &artefacts.rust_config_modules,
+        "rs",
+        &["mod.rs"],
+    )?;
+
+    for (name, content) in &artefacts.rust_config_modules {
+        fs::write(config_rust_dir.join(name), content)?;
+    }
+    fs::write(config_rust_dir.join("mod.rs"), &artefacts.rust_config_mod)?;
+    fs::write(config_toml_path, &artefacts.config_default_toml)?;
+    Ok(())
+}
+
+/// `--check` counterpart to [`write_config_output`]. Verifies every per-block
+/// file matches the committed emission (post-rustfmt) and that the TOML
+/// defaults file is byte-identical.
+fn check_config(
+    artefacts: &dsl_compiler::EmittedArtifacts,
+    config_rust_dir: &Path,
+    config_toml_path: &Path,
+    mismatches: &mut Vec<String>,
+) {
+    for (name, content) in &artefacts.rust_config_modules {
+        let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
+        check_file(&config_rust_dir.join(name), &f, mismatches);
+    }
+    let fmt = rustfmt_string(&artefacts.rust_config_mod)
+        .unwrap_or_else(|_| artefacts.rust_config_mod.clone());
+    check_file(&config_rust_dir.join("mod.rs"), &fmt, mismatches);
+    check_file(config_toml_path, &artefacts.config_default_toml, mismatches);
+    check_stale(
+        config_rust_dir,
+        &artefacts.rust_config_modules,
+        "rs",
+        mismatches,
+    );
 }
 
 fn check_scaffolded_kinds(

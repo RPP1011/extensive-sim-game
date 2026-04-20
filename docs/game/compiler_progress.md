@@ -26,6 +26,7 @@ The existing game logic inside `crates/engine/src/ability/*.rs`, `crates/engine/
 | 10 | `metric` | metric emission points + alert plumbing | engine's hardcoded trace counters | ❌ |
 | 11 | Python emission | dataclass module + pytorch Dataset | — (new capability) | ❌ |
 | 12 | SPIR-V emission | mask + cascade + view kernels | — (new capability, gated on GpuBackend) | ❌ |
+| 13 | `config` | per-block Rust structs + `Default` impls + `Config::from_toml`; `assets/config/default.toml`; new `CONFIG_HASH` sub-hash | 13 balance consts from `step.rs` / `mask.rs` / `ability/expire.rs` folded into `config.combat.*` / `config.movement.*` / `config.needs.*` / `config.communication.*`. Pre-config `pub const` shims retained for the legacy test suite. | ✅ |
 
 Status legend: ❌ not started, 🚧 in progress, ✅ landed (legacy deleted, DSL-owned).
 

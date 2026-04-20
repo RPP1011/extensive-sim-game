@@ -33,6 +33,7 @@ ref_newtype!(VerbRef);
 ref_newtype!(InvariantRef);
 ref_newtype!(ProbeRef);
 ref_newtype!(MetricRef);
+ref_newtype!(ConfigRef);
 ref_newtype!(LocalRef);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -500,6 +501,27 @@ pub enum IrAssertExpr {
     Mean { scalar: IrExprNode, filter: IrExprNode, op: String, value: IrExprNode, span: Span },
 }
 
+/// Lowered `config <Name> { <field>: <type> = <default>, ... }` block. Each
+/// field becomes one emitted Rust struct field + one TOML row; defaults
+/// bake into `Default::default()`. The default literal is carried verbatim
+/// from the AST so the TOML emitter can render it with the right shape for
+/// each scalar type.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConfigIR {
+    pub name: String,
+    pub fields: Vec<ConfigFieldIR>,
+    pub annotations: Vec<Annotation>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConfigFieldIR {
+    pub name: String,
+    pub ty: IrType,
+    pub default: ast::ConfigDefault,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MetricIR {
     pub name: String,
@@ -534,6 +556,11 @@ pub enum NamespaceId {
     Rng,
     Query,
     Voxel,
+    /// Runtime-tunable constants declared via `config <Name> { ... }` blocks.
+    /// `config.<block>.<field>` is a two-hop lookup against `ConfigIR`;
+    /// the resolver collapses it into a single `NamespaceField` whose
+    /// `field` string is `"<block>.<field>"`.
+    Config,
     // Legacy collection / accessor namespaces. Kept typed so the IR stays
     // closed; their fields are not yet declared.
     Agents,
@@ -555,6 +582,7 @@ impl NamespaceId {
             NamespaceId::Rng => "rng",
             NamespaceId::Query => "query",
             NamespaceId::Voxel => "voxel",
+            NamespaceId::Config => "config",
             NamespaceId::Agents => "agents",
             NamespaceId::Items => "items",
             NamespaceId::Groups => "groups",
@@ -681,5 +709,6 @@ pub struct Compilation {
     pub invariants: Vec<InvariantIR>,
     pub probes: Vec<ProbeIR>,
     pub metrics: Vec<MetricIR>,
+    pub configs: Vec<ConfigIR>,
     pub spans: SpanTable,
 }

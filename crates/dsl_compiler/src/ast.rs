@@ -54,6 +54,7 @@ pub enum Decl {
     Invariant(InvariantDecl),
     Probe(ProbeDecl),
     Metric(MetricBlock),
+    Config(ConfigDecl),
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +416,42 @@ pub struct MetricBlock {
     pub annotations: Vec<Annotation>,
     pub metrics: Vec<MetricDecl>,
     pub span: Span,
+}
+
+// ---------------------------------------------------------------------------
+// 2.12 config (tunable balance constants)
+// ---------------------------------------------------------------------------
+
+/// `config <Name> { <field>: <type> = <default>, ... }` — a named block of
+/// scalar tunables whose default values are baked into an emitted Rust struct
+/// and written out as `assets/config/default.toml` for runtime tuning.
+/// Block names must be unique per compilation.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConfigDecl {
+    pub annotations: Vec<Annotation>,
+    pub name: String,
+    pub fields: Vec<ConfigField>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConfigField {
+    pub name: String,
+    pub ty: TypeRef,
+    pub default: ConfigDefault,
+    pub span: Span,
+}
+
+/// Parsed default literal for a `config` field. The type tag is informational
+/// — lowering pairs this with the field's declared `ty` to pick a canonical
+/// emission form. String defaults carry the already-unescaped literal body.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum ConfigDefault {
+    Int(i64),
+    Uint(u64),
+    Float(f64),
+    Bool(bool),
+    String(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

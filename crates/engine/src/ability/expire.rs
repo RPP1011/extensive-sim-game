@@ -23,15 +23,24 @@ use crate::ids::AgentId;
 use crate::state::SimState;
 use crate::step::SimScratch;
 
-/// Engagement range in world-space meters. Matches `ATTACK_RANGE = 2.0` —
-/// an agent is "engaged" with a hostile exactly when the hostile is within
-/// melee strike distance.
+// Engagement range + engagement-slow factor moved into `assets/sim/config.sim`:
+// they read off `SimState.config.combat.engagement_range` and
+// `config.combat.engagement_slow_factor` respectively. Default values match
+// the old `ENGAGEMENT_RANGE = 2.0` / `ENGAGEMENT_SLOW_FACTOR = 0.3` consts
+// exactly, so behaviour is unchanged; TOML tuning is additive.
+//
+// The `pub const` shims below exist solely so pre-config tests
+// (`engagement_tick_start.rs`, `cast_handler_slow.rs`, …) can keep
+// asserting against "the default value" without each one reaching into
+// `Config::default()`. New code should prefer `state.config.combat.*`.
+
+/// Default engagement range — matches `config.combat.engagement_range`'s
+/// DSL default. Prefer `state.config.combat.engagement_range` in new code.
 pub const ENGAGEMENT_RANGE: f32 = 2.0;
 
-/// Multiplier applied to `MoveToward` speed when an engaged agent moves
-/// away from its engager (see Combat Foundation Task 4). Stored here
-/// alongside `ENGAGEMENT_RANGE` so the schema-hash fingerprint can cover
-/// both constants together.
+/// Default engagement-slow factor — matches
+/// `config.combat.engagement_slow_factor`'s DSL default. Prefer
+/// `state.config.combat.engagement_slow_factor` in new code.
 pub const ENGAGEMENT_SLOW_FACTOR: f32 = 0.3;
 
 /// The unified tick-start phase. See module docs for the three jobs.
@@ -108,7 +117,7 @@ fn update_engagements(state: &mut SimState, scratch: &mut SimScratch) {
         let pos = match state.agent_pos(*id) { Some(p) => p, None => continue };
         let ct = match state.agent_creature_type(*id) { Some(c) => c, None => continue };
         let mut best: Option<(AgentId, f32)> = None;
-        for other in spatial.within_radius(state, pos, ENGAGEMENT_RANGE) {
+        for other in spatial.within_radius(state, pos, state.config.combat.engagement_range) {
             if other == *id { continue; }
             let op = match state.agent_pos(other) { Some(p) => p, None => continue };
             let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };

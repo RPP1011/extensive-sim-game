@@ -30,7 +30,7 @@ impl CascadeHandler for OpportunityAttackHandler {
         if state.agent_alive(target) {
             let damage = state
                 .agent_attack_damage(attacker)
-                .unwrap_or(crate::step::ATTACK_DAMAGE);
+                .unwrap_or(state.config.combat.attack_damage);
             let cur_hp = state.agent_hp(target).unwrap_or(0.0);
             let new_hp = (cur_hp - damage).max(0.0);
             state.set_agent_hp(target, new_hp);

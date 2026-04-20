@@ -335,6 +335,7 @@
   "invariants": [],
   "probes": [],
   "metrics": [],
+  "configs": [],
   "spans": {
     "entries": []
   }

@@ -108,12 +108,23 @@ fn emit_from_seed_produces_expected_files() {
         "ChronicleEntry should be flagged non-replayable"
     );
 
-    // The schema.rs must carry every sub-hash (state/event/rules/scoring)
-    // plus the combined hash — five 32-byte arrays = 160 hex bytes total.
+    // The schema.rs must carry every sub-hash (state/event/rules/scoring/
+    // config) plus the combined hash — six 32-byte arrays = 192 hex bytes
+    // total.
     let schema = &artefacts.schema_rs;
     let hex_count = schema.matches("0x").count();
-    assert_eq!(hex_count, 160, "schema.rs should expose 5x32 hex bytes (state/event/rules/scoring/combined)");
-    for c in ["STATE_HASH", "EVENT_HASH", "RULES_HASH", "SCORING_HASH", "COMBINED_HASH"] {
+    assert_eq!(
+        hex_count, 192,
+        "schema.rs should expose 6x32 hex bytes (state/event/rules/scoring/config/combined)"
+    );
+    for c in [
+        "STATE_HASH",
+        "EVENT_HASH",
+        "RULES_HASH",
+        "SCORING_HASH",
+        "CONFIG_HASH",
+        "COMBINED_HASH",
+    ] {
         assert!(schema.contains(c), "schema.rs missing {c}");
     }
 

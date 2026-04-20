@@ -9,6 +9,7 @@
 //! `compile-dsl` subcommand.
 
 pub mod ast;
+pub mod emit_config;
 pub mod emit_entity;
 pub mod emit_mask;
 pub mod emit_physics;
@@ -101,6 +102,14 @@ pub struct EmittedArtifacts {
     pub rust_entity_modules: Vec<(String, String)>,
     /// Content of `crates/engine_rules/src/entities/mod.rs`.
     pub rust_entity_mod: String,
+    /// Config modules. One file per `config` declaration; target
+    /// `crates/engine_rules/src/config/`. Pure data, no engine dependency.
+    pub rust_config_modules: Vec<(String, String)>,
+    /// Content of `crates/engine_rules/src/config/mod.rs` — aggregate
+    /// `Config` struct, per-block re-exports, TOML loader.
+    pub rust_config_mod: String,
+    /// TOML-encoded defaults — written to `assets/config/default.toml`.
+    pub config_default_toml: String,
     /// Content of `generated/python/events/__init__.py`.
     pub python_events_init: String,
     /// `(filename_without_dir, content)` pairs, one per event.
@@ -111,9 +120,14 @@ pub struct EmittedArtifacts {
     /// taxonomy. Will grow to also cover masks (milestone 4) and verbs
     /// (milestone 7) without changing the API surface here.
     pub rules_hash: [u8; 32],
+    /// Raw 32-byte schema hash covering every `config` block's name + field
+    /// names + field types. Default *values* are intentionally excluded so
+    /// balance tuning via TOML doesn't perturb the schema fingerprint.
+    pub config_hash: [u8; 32],
     /// Combined hash per `docs/compiler/spec.md` §2 — `sha256(state_hash ||
-    /// event_hash || rules_hash || scoring_hash)`. State and scoring are
-    /// all-zero placeholders until their milestones land.
+    /// event_hash || rules_hash || scoring_hash || config_hash)`. Any
+    /// sub-hash is all-zero only when no declarations of the corresponding
+    /// kind are in scope.
     pub combined_hash: [u8; 32],
     /// Content of `crates/engine_rules/src/schema.rs`.
     pub schema_rs: String,
@@ -137,6 +151,7 @@ pub fn emit_with_source(comp: &Compilation, source_file: Option<&str>) -> Emitte
             masks: source_file,
             scoring: source_file,
             entities: source_file,
+            configs: source_file,
         },
     )
 }
@@ -153,6 +168,7 @@ pub struct EmissionSources<'a> {
     pub masks: Option<&'a str>,
     pub scoring: Option<&'a str>,
     pub entities: Option<&'a str>,
+    pub configs: Option<&'a str>,
 }
 
 /// Like [`emit`], but stamp the appropriate source file into each kind's
@@ -231,11 +247,27 @@ pub fn emit_with_per_kind_sources(
     rust_entity_modules.sort_by(|a, b| a.0.cmp(&b.0));
     let rust_entity_mod = emit_entity::emit_entity_mod(&comp.entities);
 
+    // Config emission — one Rust struct + one TOML table per `config` block.
+    let mut rust_config_modules: Vec<(String, String)> = Vec::with_capacity(comp.configs.len());
+    for block in &comp.configs {
+        let stem = config_snake_case(&block.name);
+        match emit_config::emit_config(block, sources.configs) {
+            Ok(rs) => rust_config_modules.push((format!("{stem}.rs"), rs)),
+            Err(e) => panic!("config emission failed for `{}`: {e}", block.name),
+        }
+    }
+    rust_config_modules.sort_by(|a, b| a.0.cmp(&b.0));
+    let rust_config_mod = emit_config::emit_config_mod(&comp.configs);
+    let config_default_toml = emit_config::emit_config_toml(&comp.configs)
+        .unwrap_or_else(|e| panic!("config TOML emission failed: {e}"));
+
     let event_hash = schema_hash::event_hash(&comp.events);
     let rules_hash = schema_hash::rules_hash(&comp.physics);
     let state_hash = schema_hash::state_hash(&comp.entities);
     let scoring_hash = schema_hash::scoring_hash(&comp.scoring);
-    let combined_hash = schema_hash::combined_hash(&state_hash, &event_hash, &rules_hash, &scoring_hash);
+    let config_hash = schema_hash::config_hash(&comp.configs);
+    let combined_hash =
+        schema_hash::combined_hash(&state_hash, &event_hash, &rules_hash, &scoring_hash, &config_hash);
     EmittedArtifacts {
         rust_events_mod: emit_rust::emit_events_mod(&comp.events),
         rust_event_structs,
@@ -247,13 +279,29 @@ pub fn emit_with_per_kind_sources(
         rust_scoring_mod,
         rust_entity_modules,
         rust_entity_mod,
+        rust_config_modules,
+        rust_config_mod,
+        config_default_toml,
         python_events_init: emit_python::emit_events_init(&comp.events),
         python_event_modules,
         event_hash,
         rules_hash,
+        config_hash,
         combined_hash,
-        schema_rs: schema_hash::emit_schema_rs(&state_hash, &event_hash, &rules_hash, &scoring_hash),
+        schema_rs: schema_hash::emit_schema_rs(
+            &state_hash,
+            &event_hash,
+            &rules_hash,
+            &scoring_hash,
+            &config_hash,
+        ),
     }
+}
+
+/// Config block names use DSL-author lowercase (`combat`, `movement`); keep
+/// the snake-case transform consistent with the rest of the emitter.
+fn config_snake_case(name: &str) -> String {
+    snake_case(name)
 }
 
 fn snake_case(name: &str) -> String {

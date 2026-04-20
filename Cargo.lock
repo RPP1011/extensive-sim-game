@@ -2314,6 +2314,8 @@ dependencies = [
  "glam",
  "serde",
  "smallvec",
+ "tempfile",
+ "toml 0.8.23",
 ]
 
 [[package]]

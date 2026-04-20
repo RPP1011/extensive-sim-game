@@ -81,6 +81,16 @@ pub struct CompileDslArgs {
     /// `engine_rules` next to events.
     #[arg(long, default_value = "crates/engine_rules/src/entities")]
     pub out_entity: PathBuf,
+    /// Destination root for emitted config structs (per-block Rust files
+    /// plus the aggregator `mod.rs`). Pure data with a TOML loader; lives
+    /// in `engine_rules` alongside the other shared-data emissions.
+    #[arg(long, default_value = "crates/engine_rules/src/config")]
+    pub out_config_rust: PathBuf,
+    /// Destination directory for the authored TOML default file. The
+    /// compiler writes `<out-config-toml>/default.toml`; runtime callers
+    /// load it via `engine_rules::config::Config::from_toml`.
+    #[arg(long, default_value = "assets/config")]
+    pub out_config_toml: PathBuf,
     /// Destination root for Python output. Files are written under
     /// `<out-python>/events/`.
     #[arg(long, default_value = "generated/python")]

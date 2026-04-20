@@ -6,16 +6,10 @@ use crate::state::SimState;
 
 pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 D5
 
-/// Radius within which another agent counts as a threat for flee-mask purposes.
-const AGGRO_RANGE: f32 = 50.0;
-
-/// Per-agent fallback attack range for `agents.agent_attack_range` lookup.
-/// The DSL-emitted `mask_attack` predicate caps at 2.0m; custom per-agent
-/// ranges (via `set_agent_attack_range`) are honoured only up to this
-/// value — the fold below uses `max(this, agent_attack_range)` as the
-/// spatial iterator radius so extended-range agents still see candidates,
-/// but the predicate still decides allow/deny per pair.
-const ATTACK_SPATIAL_RADIUS: f32 = 2.0;
+// `AGGRO_RANGE` (flee-threat radius) and the attack spatial iterator floor
+// now live in `assets/sim/config.sim` as `config.combat.aggro_range` and
+// `config.combat.attack_range` respectively. Callers below read them off
+// `state.config.combat.*`.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(u8)]
@@ -106,7 +100,7 @@ impl MaskBuffer {
                 None    => continue,
             };
             let has_threat = spatial
-                .within_radius(state, self_pos, AGGRO_RANGE)
+                .within_radius(state, self_pos, state.config.combat.aggro_range)
                 .into_iter()
                 .any(|other| other != id);
             if has_threat {
@@ -150,10 +144,11 @@ impl MaskBuffer {
                 Some(p) => p,
                 None    => continue,
             };
+            let floor = state.config.combat.attack_range;
             let range = state
                 .agent_attack_range(id)
-                .unwrap_or(ATTACK_SPATIAL_RADIUS)
-                .max(ATTACK_SPATIAL_RADIUS);
+                .unwrap_or(floor)
+                .max(floor);
             let has_target = spatial
                 .within_radius(state, self_pos, range)
                 .into_iter()
@@ -237,7 +232,7 @@ fn inferred_cast_target(state: &SimState, caster: AgentId) -> Option<AgentId> {
     let ct = state.agent_creature_type(caster)?;
     let spatial = state.spatial();
     let mut best: Option<(AgentId, f32)> = None;
-    for other in spatial.within_radius(state, pos, AGGRO_RANGE) {
+    for other in spatial.within_radius(state, pos, state.config.combat.aggro_range) {
         if other == caster { continue; }
         let op = match state.agent_pos(other) { Some(p) => p, None => continue };
         let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };

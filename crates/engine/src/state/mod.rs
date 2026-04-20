@@ -31,6 +31,15 @@ use smallvec::SmallVec;
 pub struct SimState {
     pub tick: u32,
     pub seed: u64,
+    /// Runtime balance tunables — the compiler-emitted aggregate of every
+    /// `config` block in `assets/sim/config.sim`. Loaded via
+    /// `Config::from_toml(...)` at startup, or defaulted via `Config::default()`
+    /// (which bakes in the DSL's `= <default>` clauses). Every balance
+    /// constant that used to be a hand-written `pub const` in
+    /// `crates/engine/src/step.rs` / `mask.rs` / `ability/expire.rs` is now
+    /// a field on this struct; see `docs/game/compiler_progress.md` for the
+    /// config-milestone row.
+    pub config: engine_rules::config::Config,
     pool:     AgentSlotPool,
 
     // --- Hot SoA — read/written every tick by observation / mask / step ---
@@ -126,11 +135,37 @@ pub struct SimState {
 }
 
 impl SimState {
+    /// Convenience constructor that defaults the runtime `Config`. Equivalent
+    /// to `SimState::new_with_config(agent_cap, seed, Config::default())`.
+    /// Preserves the pre-config constructor signature so every existing test
+    /// (there are many) keeps compiling without edits.
     pub fn new(agent_cap: u32, seed: u64) -> Self {
+        Self::new_with_config(agent_cap, seed, engine_rules::config::Config::default())
+    }
+
+    /// Build a `SimState` with a caller-supplied `Config`. This is the
+    /// main constructor — tests that want to override a balance constant
+    /// (e.g. double damage to assert TOML tuning is live) build a mutated
+    /// `Config` and pass it here. The engine never reads balance tunables
+    /// from anywhere other than `state.config`.
+    pub fn new_with_config(
+        agent_cap: u32,
+        seed: u64,
+        config: engine_rules::config::Config,
+    ) -> Self {
         let cap = agent_cap as usize;
+        // Per-slot attack stats inherit the config defaults so runtime
+        // TOML tuning flows through to every freshly-spawned agent.
+        // `spawn_agent` also resets these fields using the same config
+        // values; custom per-agent stats flow through `set_agent_*` after
+        // spawn as before.
+        let default_attack_damage = config.combat.attack_damage;
+        let default_attack_range = config.combat.attack_range;
+        let default_move_speed = config.movement.move_speed_mps;
         Self {
             tick: 0,
             seed,
+            config,
             pool: AgentSlotPool::new(agent_cap),
             hot_pos:             vec![Vec3::ZERO; cap],
             hot_hp:              vec![0.0; cap],
@@ -138,13 +173,13 @@ impl SimState {
             hot_alive:           vec![false; cap],
             hot_movement_mode:   vec![MovementMode::Walk; cap],
             hot_level:           vec![1; cap],
-            hot_move_speed:      vec![1.0; cap],
+            hot_move_speed:      vec![default_move_speed; cap],
             hot_move_speed_mult: vec![1.0; cap],
             hot_shield_hp:       vec![0.0; cap],
             hot_armor:           vec![0.0; cap],
             hot_magic_resist:    vec![0.0; cap],
-            hot_attack_damage:   vec![10.0; cap],
-            hot_attack_range:    vec![2.0; cap],
+            hot_attack_damage:   vec![default_attack_damage; cap],
+            hot_attack_range:    vec![default_attack_range; cap],
             hot_mana:            vec![0.0; cap],
             hot_max_mana:        vec![0.0; cap],
             hot_hunger:          vec![1.0; cap],
@@ -208,13 +243,13 @@ impl SimState {
         self.hot_alive[slot]           = true;
         self.hot_movement_mode[slot]   = MovementMode::Walk;
         self.hot_level[slot]           = 1;
-        self.hot_move_speed[slot]      = 1.0;
+        self.hot_move_speed[slot]      = self.config.movement.move_speed_mps;
         self.hot_move_speed_mult[slot] = 1.0;
         self.hot_shield_hp[slot]       = 0.0;
         self.hot_armor[slot]           = 0.0;
         self.hot_magic_resist[slot]    = 0.0;
-        self.hot_attack_damage[slot]   = 10.0;
-        self.hot_attack_range[slot]    = 2.0;
+        self.hot_attack_damage[slot]   = self.config.combat.attack_damage;
+        self.hot_attack_range[slot]    = self.config.combat.attack_range;
         self.hot_mana[slot]            = 0.0;
         self.hot_max_mana[slot]        = 0.0;
         self.hot_hunger[slot]          = 1.0;

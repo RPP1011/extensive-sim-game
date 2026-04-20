@@ -434,6 +434,7 @@ fn lower_expr_kind(kind: &IrExpr) -> Result<String, EmitError> {
         IrExpr::LitFloat(v) => Ok(render_float(*v)),
         IrExpr::LitString(s) => Ok(format!("{s:?}")),
         IrExpr::Local(_, name) => Ok(name.clone()),
+        IrExpr::NamespaceField { ns, field, .. } => lower_namespace_field(*ns, field),
         IrExpr::NamespaceCall { ns, method, args } => lower_namespace_call(*ns, method, args),
         IrExpr::Binary(op, lhs, rhs) => {
             let l = lower_expr(lhs)?;
@@ -469,6 +470,29 @@ fn lower_expr_kind(kind: &IrExpr) -> Result<String, EmitError> {
             "expression shape {other:?} not supported in milestone 3 physics emission"
         ))),
     }
+}
+
+/// Lower a `NamespaceField` — the only one we currently support at emit time
+/// is `config.<block>.<field>`, which maps directly onto `SimState.config`.
+/// Namespace accessors with an uncollapsed single-hop path (e.g. the
+/// intermediate `config.combat` before the outer field gets folded) would
+/// hit this arm with `ty = Unknown`; treat that as a compiler bug.
+fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitError> {
+    if ns == NamespaceId::Config {
+        // Resolver always emits `<block>.<field>` for resolvable config
+        // accesses. A bare `<block>` with no trailing field means a DSL
+        // author wrote `config.combat` as a value — not supported.
+        if field.contains('.') {
+            return Ok(format!("state.config.{field}"));
+        }
+        return Err(EmitError::Unsupported(format!(
+            "bare `config.{field}` is not a value; address a specific field (e.g. `config.{field}.<name>`)"
+        )));
+    }
+    Err(EmitError::Unsupported(format!(
+        "namespace-field `{}.{field}` not supported in milestone 3 physics emission",
+        ns.name()
+    )))
 }
 
 fn lower_namespace_call(
@@ -530,12 +554,13 @@ fn lower_namespace_call(
         }
         (NamespaceId::Agents, "attack_damage") => {
             expect_arity(args, 1, "agents.attack_damage")?;
-            // Legacy fallback was `ATTACK_DAMAGE` from step.rs — passed in so
-            // the opportunity-attack rule sees the kernel's default when the
-            // slot is empty. `crate::step::ATTACK_DAMAGE` is the engine
-            // constant.
+            // Per-agent `attack_damage` fallback reads from the engine's
+            // `Config` bundle on `SimState.config`, so TOML / per-test
+            // overrides flow through. The legacy fallback was the engine-
+            // level `crate::step::ATTACK_DAMAGE` const, which is now gone
+            // (the value lives under `config.combat.attack_damage`).
             Ok(format!(
-                "state.agent_attack_damage({}).unwrap_or(crate::step::ATTACK_DAMAGE)",
+                "state.agent_attack_damage({}).unwrap_or(state.config.combat.attack_damage)",
                 lowered[0]
             ))
         }

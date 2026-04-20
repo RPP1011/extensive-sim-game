@@ -85,6 +85,7 @@ mod stdlib {
             ("rng", NamespaceId::Rng),
             ("query", NamespaceId::Query),
             ("voxel", NamespaceId::Voxel),
+            ("config", NamespaceId::Config),
             // Legacy collection / accessor namespaces — kept for iteration
             // source use (`count(a in agents ...)`). No declared fields.
             ("agents", NamespaceId::Agents),
@@ -206,6 +207,10 @@ pub struct SymbolTable {
     pub invariants: HashMap<String, InvariantRef>,
     pub probes: HashMap<String, ProbeRef>,
     pub metrics: HashMap<String, MetricRef>,
+    /// `config` block name → `(ConfigRef, field-name → field-type)`. Populated
+    /// in pass 1 so pass-2 body lowering can resolve `config.<block>.<field>`
+    /// into a typed `NamespaceField { ns: Config, field: "<block>.<field>" }`.
+    pub configs: HashMap<String, (ConfigRef, HashMap<String, IrType>)>,
     pub builtins: HashMap<String, Builtin>,
     pub stdlib_types: HashMap<String, IrType>,
     /// Sim-wide accessor namespaces: `world`, `cascade`, `event`, `mask`,
@@ -482,6 +487,40 @@ fn collect(
                     });
                 }
             }
+            Decl::Config(d) => {
+                check_dup(symbols, "config", &d.name, d.span, |s| {
+                    s.configs.contains_key(&d.name)
+                })?;
+                let idx = push_idx(comp.configs.len(), "config")?;
+                let mut field_types: HashMap<String, IrType> = HashMap::new();
+                let mut fields_ir: Vec<ConfigFieldIR> = Vec::with_capacity(d.fields.len());
+                for f in &d.fields {
+                    let ty = resolve_type(&f.ty, symbols);
+                    if field_types.contains_key(&f.name) {
+                        return Err(ResolveError::DuplicateDecl {
+                            kind: "config_field",
+                            name: format!("{}.{}", d.name, f.name),
+                            first: d.span,
+                            second: f.span,
+                        });
+                    }
+                    field_types.insert(f.name.clone(), ty.clone());
+                    fields_ir.push(ConfigFieldIR {
+                        name: f.name.clone(),
+                        ty,
+                        default: f.default.clone(),
+                        span: f.span,
+                    });
+                }
+                symbols.configs.insert(d.name.clone(), (ConfigRef(idx), field_types));
+                symbols.record_first("config", &d.name, d.span);
+                comp.configs.push(ConfigIR {
+                    name: d.name.clone(),
+                    fields: fields_ir,
+                    annotations: d.annotations.clone(),
+                    span: d.span,
+                });
+            }
             Decl::Query(_) => {
                 // Queries are not a milestone-1a surface yet. Skip silently;
                 // 1b will handle.
@@ -740,6 +779,10 @@ fn resolve_bodies(
                     comp.metrics[slot].alert_when = alert;
                     metric_start_idx += 1;
                 }
+            }
+            Decl::Config(_) => {
+                // Pass 1 already materialised the full IR (fields + defaults).
+                // No body expressions to lower.
             }
             Decl::Query(_) => {}
         }
@@ -1088,7 +1131,27 @@ fn resolve_expr(
             if let ExprKind::Ident(ns_name) = &base.kind {
                 if scope.lookup(ns_name).is_none() {
                     if let Some(ns) = symbols.stdlib_namespaces.get(ns_name) {
-                        let ty = stdlib::field_type(*ns, name).unwrap_or(IrType::Unknown);
+                        // `config.<block>` — tag the block with Unknown type;
+                        // the outer `Field(_, "<field>")` wrap below promotes
+                        // it into a typed `config.<block>.<field>` lookup.
+                        let ty = if *ns == NamespaceId::Config {
+                            if symbols.configs.contains_key(name) {
+                                IrType::Unknown
+                            } else {
+                                return Err(ResolveError::UnknownIdent {
+                                    name: format!("config.{name}"),
+                                    span,
+                                    suggestions: symbols
+                                        .configs
+                                        .keys()
+                                        .take(3)
+                                        .cloned()
+                                        .collect(),
+                                });
+                            }
+                        } else {
+                            stdlib::field_type(*ns, name).unwrap_or(IrType::Unknown)
+                        };
                         return Ok(IrExprNode {
                             kind: IrExpr::NamespaceField {
                                 ns: *ns,
@@ -1097,6 +1160,50 @@ fn resolve_expr(
                             },
                             span,
                         });
+                    }
+                }
+            }
+            // Two-hop `config.<block>.<field>` — the inner `config.<block>`
+            // resolved above as `NamespaceField{ns:Config, field:<block>}`;
+            // fold this access into a single lookup carrying the full path
+            // and the declared field type.
+            if let ExprKind::Field(inner_base, inner_field) = &base.kind {
+                if let ExprKind::Ident(ns_name) = &inner_base.kind {
+                    if scope.lookup(ns_name).is_none() {
+                        if let Some(ns) = symbols.stdlib_namespaces.get(ns_name) {
+                            if *ns == NamespaceId::Config {
+                                let Some((_, field_types)) = symbols.configs.get(inner_field)
+                                else {
+                                    return Err(ResolveError::UnknownIdent {
+                                        name: format!("config.{inner_field}"),
+                                        span,
+                                        suggestions: symbols
+                                            .configs
+                                            .keys()
+                                            .take(3)
+                                            .cloned()
+                                            .collect(),
+                                    });
+                                };
+                                let Some(ty) = field_types.get(name) else {
+                                    let suggestions: Vec<String> =
+                                        field_types.keys().take(3).cloned().collect();
+                                    return Err(ResolveError::UnknownIdent {
+                                        name: format!("config.{inner_field}.{name}"),
+                                        span,
+                                        suggestions,
+                                    });
+                                };
+                                return Ok(IrExprNode {
+                                    kind: IrExpr::NamespaceField {
+                                        ns: NamespaceId::Config,
+                                        field: format!("{inner_field}.{name}"),
+                                        ty: ty.clone(),
+                                    },
+                                    span,
+                                });
+                            }
+                        }
                     }
                 }
             }

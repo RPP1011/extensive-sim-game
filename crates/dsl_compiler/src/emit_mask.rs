@@ -369,6 +369,7 @@ fn lower_expr_kind(kind: &IrExpr, hoisted: &[String]) -> Result<String, EmitErro
                 Ok(name.clone())
             }
         }
+        IrExpr::NamespaceField { ns, field, .. } => lower_namespace_field(*ns, field),
         IrExpr::NamespaceCall { ns, method, args } => {
             // Hoisted agents.pos(<local>) — use the prelude binding.
             if *ns == NamespaceId::Agents && method == "pos" && args.len() == 1 {
@@ -395,6 +396,25 @@ fn lower_expr_kind(kind: &IrExpr, hoisted: &[String]) -> Result<String, EmitErro
             "expression shape {other:?} not supported in milestone 4 mask emission"
         ))),
     }
+}
+
+/// Lower a `NamespaceField` access. Only `config.<block>.<field>` is wired
+/// today (it maps onto `SimState.config.<block>.<field>`). Other namespace
+/// fields — `world.tick`, `cascade.iterations`, etc. — aren't yet needed by
+/// any DSL-owned mask, so they stay `Unsupported` until a rule asks for them.
+fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitError> {
+    if ns == NamespaceId::Config {
+        if field.contains('.') {
+            return Ok(format!("state.config.{field}"));
+        }
+        return Err(EmitError::Unsupported(format!(
+            "bare `config.{field}` is not a value; address a specific field"
+        )));
+    }
+    Err(EmitError::Unsupported(format!(
+        "namespace-field `{}.{field}` not supported in milestone 4 mask emission",
+        ns.name()
+    )))
 }
 
 fn lower_namespace_call(

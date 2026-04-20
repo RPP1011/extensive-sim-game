@@ -12,10 +12,36 @@ use crate::telemetry::{metrics, NullSink, TelemetrySink};
 use crate::view::MaterializedView;
 use glam::Vec3;
 
-/// Default vocal-strength multiplier used by `channel_range` when computing
-/// speech-based announce radii. Real vocal-strength is a per-agent
-/// Capability; until that lands, everyone shouts at 1.0. Audit fix MEDIUM #9.
+// The balance constants that used to live here (DEFAULT_VOCAL_STRENGTH,
+// MOVE_SPEED_MPS, ATTACK_DAMAGE, ATTACK_RANGE, EAT_RESTORE, DRINK_RESTORE,
+// REST_RESTORE, MAX_ANNOUNCE_RECIPIENTS, MAX_ANNOUNCE_RADIUS, OVERHEAR_RANGE)
+// moved into `assets/sim/config.sim` as a compiler-owned `config` block.
+// Every call site now reads them off `SimState::config` — the values still
+// default to the exact numbers that used to be hardcoded here (see
+// `Config::default()` in `engine_rules::config`), so observable behaviour
+// is unchanged. Runtime TOML tuning (`Config::from_toml(...)`) is the only
+// new knob.
+//
+// Backward-compat `pub const` shims are kept for the pre-config test suite
+// (`cast_handler_slow.rs`, `action_flee.rs`, `action_attack_kill.rs`, …).
+// Their values match the DSL defaults exactly; new code should prefer
+// `state.config.*.*`.
+
+/// Default movement speed — matches `config.movement.move_speed_mps`.
+pub const MOVE_SPEED_MPS: f32 = 1.0;
+/// Default attack damage — matches `config.combat.attack_damage`.
+pub const ATTACK_DAMAGE: f32 = 10.0;
+/// Default attack range — matches `config.combat.attack_range`.
+pub const ATTACK_RANGE: f32 = 2.0;
+/// Default vocal strength — matches `config.communication.default_vocal_strength`.
 pub const DEFAULT_VOCAL_STRENGTH: f32 = 1.0;
+/// Default announce-recipient cap — matches
+/// `config.communication.max_announce_recipients`.
+pub const MAX_ANNOUNCE_RECIPIENTS: usize = 32;
+/// Default announce radius — matches `config.communication.max_announce_radius`.
+pub const MAX_ANNOUNCE_RADIUS: f32 = 80.0;
+/// Default overhear radius — matches `config.communication.overhear_range`.
+pub const OVERHEAR_RANGE: f32 = 30.0;
 
 /// Return `true` iff `speaker` and `observer` share at least one
 /// `CommunicationChannel`. When both sides have non-empty channel sets, at
@@ -51,42 +77,24 @@ fn speaker_and_observer_share_channel(
 /// Only consulted for `AnnounceAudience::Anyone` / `Group(_)`; `Area(c, r)`
 /// still uses the caller-supplied `r` (author intent).
 fn speaker_anyone_radius(state: &SimState, speaker: AgentId) -> f32 {
+    let max_radius = state.config.communication.max_announce_radius;
+    let vocal_strength = state.config.communication.default_vocal_strength;
     let channels = match state.agent_channels(speaker) {
         Some(c) if !c.is_empty() => c,
-        _ => return MAX_ANNOUNCE_RADIUS,
+        _ => return max_radius,
     };
     let mut best: f32 = 0.0;
     for c in channels.iter() {
-        let r = channel_range(*c, DEFAULT_VOCAL_STRENGTH);
+        let r = channel_range(*c, vocal_strength);
         if r.is_infinite() {
-            return MAX_ANNOUNCE_RADIUS;
+            return max_radius;
         }
         if r.is_finite() && r > best {
             best = r;
         }
     }
-    best.min(MAX_ANNOUNCE_RADIUS)
+    best.min(max_radius)
 }
-
-pub const MOVE_SPEED_MPS: f32 = 1.0;
-pub const ATTACK_DAMAGE:  f32 = 10.0;
-pub const ATTACK_RANGE:   f32 = 2.0;
-const EAT_RESTORE:    f32 = 0.25;
-const DRINK_RESTORE:  f32 = 0.30;
-const REST_RESTORE:   f32 = 0.15;
-
-/// Maximum number of `RecordMemory` events a single `Announce` can emit.
-/// Bounds event-ring pressure even when the audience is very large.
-pub const MAX_ANNOUNCE_RECIPIENTS: usize = 32;
-/// Default hearing radius when `AnnounceAudience::Anyone` is used (and, for
-/// the MVP, the fallback for `AnnounceAudience::Group(_)` until Task 16 wires
-/// real group membership).
-pub const MAX_ANNOUNCE_RADIUS:     f32  = 80.0;
-/// Radius around the speaker within which non-recipient bystanders overhear an
-/// `Announce` and record a lower-confidence memory (0.6 vs 0.8 for primary
-/// recipients). Separate from `MAX_ANNOUNCE_RADIUS` — overhear always scans
-/// around the speaker's position, regardless of the primary audience geometry.
-pub const OVERHEAR_RANGE:          f32  = 30.0;
 
 /// Apply a need-restoration desired delta to `current`, clamping the resulting
 /// value at 1.0. Returns `(new_value, applied_delta)` where `applied_delta` is
@@ -338,13 +346,14 @@ fn apply_actions(
                     // Combat Foundation Task 4 — engaged-aware movement.
                     // Moving *toward* the engager is full speed (closing the
                     // melee); moving anywhere else is slowed by
-                    // ENGAGEMENT_SLOW_FACTOR and fires an opportunity attack.
-                    let mut speed = MOVE_SPEED_MPS;
+                    // `config.combat.engagement_slow_factor` and fires an
+                    // opportunity attack.
+                    let mut speed = state.config.movement.move_speed_mps;
                     if let Some(engager) = state.agent_engaged_with(action.agent) {
                         let engager_pos = state.agent_pos(engager).unwrap_or(from);
                         let toward_engager = (engager_pos - from).dot(dir) > 0.0;
                         if !toward_engager {
-                            speed *= crate::ability::expire::ENGAGEMENT_SLOW_FACTOR;
+                            speed *= state.config.combat.engagement_slow_factor;
                             events.push(Event::OpportunityAttackTriggered {
                                 attacker: engager,
                                 target:   action.agent,
@@ -388,7 +397,8 @@ fn apply_actions(
                         }
                         // Effect-slow applies to Flee too (Task 14) —
                         // composed multiplicatively with the Flee base speed.
-                        let speed = MOVE_SPEED_MPS * effect_slow_multiplier(state, action.agent);
+                        let speed = state.config.movement.move_speed_mps
+                            * effect_slow_multiplier(state, action.agent);
                         let new_pos = self_pos + away * speed;
                         state.set_agent_pos(action.agent, new_pos);
                         events.push(Event::AgentFled {
@@ -409,11 +419,16 @@ fn apply_actions(
                     (state.agent_pos(action.agent), state.agent_pos(tgt))
                 {
                     // Audit fix MEDIUM #10: honour per-agent attack stats.
-                    // Default falls back to the module constants so legacy
+                    // Default falls back to `config.combat.*` so legacy
                     // call sites that never touched the setters behave
-                    // identically to the pre-port kernel.
-                    let range = state.agent_attack_range(action.agent).unwrap_or(ATTACK_RANGE);
-                    let damage = state.agent_attack_damage(action.agent).unwrap_or(ATTACK_DAMAGE);
+                    // identically to the pre-config kernel (whose defaults
+                    // now live under `SimState::config`).
+                    let range = state
+                        .agent_attack_range(action.agent)
+                        .unwrap_or(state.config.combat.attack_range);
+                    let damage = state
+                        .agent_attack_damage(action.agent)
+                        .unwrap_or(state.config.combat.attack_damage);
                     if sp.distance(tp) <= range {
                         let new_hp = (state.agent_hp(tgt).unwrap_or(0.0) - damage).max(0.0);
                         state.set_agent_hp(tgt, new_hp);
@@ -435,7 +450,7 @@ fn apply_actions(
             }
             ActionKind::Micro { kind: MicroKind::Eat, .. } => {
                 if let Some(cur) = state.agent_hunger(action.agent) {
-                    let (new_val, applied) = restore_need(cur, EAT_RESTORE);
+                    let (new_val, applied) = restore_need(cur, state.config.needs.eat_restore);
                     state.set_agent_hunger(action.agent, new_val);
                     events.push(Event::AgentAte {
                         agent_id: action.agent, delta: applied, tick: state.tick,
@@ -444,7 +459,7 @@ fn apply_actions(
             }
             ActionKind::Micro { kind: MicroKind::Drink, .. } => {
                 if let Some(cur) = state.agent_thirst(action.agent) {
-                    let (new_val, applied) = restore_need(cur, DRINK_RESTORE);
+                    let (new_val, applied) = restore_need(cur, state.config.needs.drink_restore);
                     state.set_agent_thirst(action.agent, new_val);
                     events.push(Event::AgentDrank {
                         agent_id: action.agent, delta: applied, tick: state.tick,
@@ -453,7 +468,7 @@ fn apply_actions(
             }
             ActionKind::Micro { kind: MicroKind::Rest, .. } => {
                 if let Some(cur) = state.agent_rest_timer(action.agent) {
-                    let (new_val, applied) = restore_need(cur, REST_RESTORE);
+                    let (new_val, applied) = restore_need(cur, state.config.needs.rest_restore);
                     state.set_agent_rest_timer(action.agent, new_val);
                     events.push(Event::AgentRested {
                         agent_id: action.agent, delta: applied, tick: state.tick,
@@ -627,8 +642,9 @@ fn apply_actions(
                 let mut primary_observers: smallvec::SmallVec<[AgentId; 32]> =
                     smallvec::SmallVec::new();
                 let mut count = 0usize;
+                let max_recipients = state.config.communication.max_announce_recipients as usize;
                 for obs in state.agents_alive() {
-                    if count >= MAX_ANNOUNCE_RECIPIENTS { break; }
+                    if count >= max_recipients { break; }
                     if obs == speaker { continue; }
                     if !candidates.contains(&obs) { continue; }
                     // Audit fix MEDIUM #9: channel-eligibility filter.
@@ -648,8 +664,9 @@ fn apply_actions(
                 // SPEAKER (not the audience center) who were not primary
                 // recipients get a lower-confidence memory. Speaker excluded.
                 let speaker_pos = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
+                let overhear_range = state.config.communication.overhear_range;
                 let overhear_candidates: smallvec::SmallVec<[AgentId; 64]> = spatial
-                    .within_radius(state, speaker_pos, OVERHEAR_RANGE)
+                    .within_radius(state, speaker_pos, overhear_range)
                     .into_iter()
                     .collect();
                 for obs in state.agents_alive() {

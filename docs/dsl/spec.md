@@ -1272,7 +1272,7 @@ enum AnnounceAudience {
 }
 ```
 
-Runtime constants bound the cascade: `MAX_ANNOUNCE_RECIPIENTS` caps recipient count per emission; `MAX_ANNOUNCE_RADIUS` caps the `Anyone` / `Area` radius. Overhear scans agents within `OVERHEAR_RANGE` of the speaker for both `Communicate` and `Announce`, admitting them as bystanders with `source = Overheard(speaker)` subject to the mask eligibility in §Overhear.
+Runtime constants bound the cascade: `config.communication.max_announce_recipients` caps recipient count per emission; `config.communication.max_announce_radius` caps the `Anyone` / `Area` radius. Overhear scans agents within `config.communication.overhear_range` of the speaker for both `Communicate` and `Announce`, admitting them as bystanders with `source = Overheard(speaker)` subject to the mask eligibility in §Overhear. These values live in `assets/sim/config.sim` and are tuneable at runtime through `assets/config/default.toml`; previous drafts of this spec referred to them as the `MAX_*` / `OVERHEAR_*` `pub const`s that have since been migrated into `config` blocks.
 
 #### Confidence propagation
 
