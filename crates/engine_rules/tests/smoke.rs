@@ -44,7 +44,12 @@ fn replayable_annotation_carries_through() {
 
     // ChronicleEntry is the one variant without @replayable — the side-
     // channel prose stream.
-    let chron = Event::ChronicleEntry { tick: 0, template_id: 0 };
+    let chron = Event::ChronicleEntry {
+        tick: 0,
+        template_id: 0,
+        agent: AgentId::new(1).unwrap(),
+        target: AgentId::new(1).unwrap(),
+    };
     assert!(!chron.is_replayable());
 }
 
