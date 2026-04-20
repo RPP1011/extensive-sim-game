@@ -96,21 +96,24 @@ scoring {
   // species-agnostic, and `query.nearby_kin` does the species filter in
   // the physics rule.
   //
-  // The +0.6 bump value matches the `self.hp_pct < 0.3` "near death"
-  // gate on the same row — that's the design intent: a packmate's
-  // death should hit as hard as being near death yourself. At full hp
-  // vs a full-hp enemy, the Attack row reads 0.5 (healthy-commit
-  // bonus), so +0.6 on Flee crosses cleanly above Attack and picks the
-  // retreat. Once kin_fear decays below 0.3 (~30 ticks post-death at
-  // the 15-tick half-life) the modifier drops and normal scoring
-  // resumes.
+  // The +0.4 bump value (task 173, down from +0.6) is deliberately
+  // smaller than the `self.hp_pct < 0.3` "near death" gate: being at
+  // 20% hp is a harder signal than "a packmate just died". Against an
+  // Attack row reading ~0.5 (healthy-commit bonus) + up to +0.6
+  // (pack_focus, task 173) an isolated rout bump alone shouldn't
+  // guarantee permanent flight — survivors regroup once kin re-engage.
+  // The 0.5 threshold (task 173, up from 0.3) also means a single
+  // death doesn't trip the gate instantly: at `@decay rate=0.891`
+  // (~6-tick half-life) a fresh FearSpread's +1.0 decays past 0.5 by
+  // tick 6, so the rout window is focused on the first few ticks
+  // after a death rather than lingering for ~30 ticks.
   Flee = 0.0
     + (if self.hp < 30.0 { 0.6 } else { 0.0 })
     + (if self.hp < 50.0 { 0.4 } else { 0.0 })
     + (if self.hp_pct < 0.3 { 0.6 } else { 0.0 })
     + (view::threat_level(self, _) per_unit 0.01)
     + (if view::threat_level(self, _) > 50.0 { 0.3 } else { 0.0 })
-    + (if view::kin_fear(self, _) > 0.3 { 0.6 } else { 0.0 })
+    + (if view::kin_fear(self, _) > 0.5 { 0.4 } else { 0.0 })
 
   // ===== Combat =====
 
@@ -184,6 +187,15 @@ scoring {
   // only to the engaged-with target, not every candidate — otherwise
   // every row would tie on the pack_focus bump and the focusing
   // signal would vanish.
+  //
+  // Task 173 tuning notes — raising this above +0.4 was tried in the
+  // rout-rebalance sweep but backfired: both humans and wolves run
+  // the same scoring table, and a fresh-target +0.6 made the human
+  // cluster (8 agents) dogpile any approaching wolf even harder, so
+  // the first wolf to close range was burst down in 1–2 ticks and
+  // triggered the kin_fear cascade. The +0.4 dial leaves the
+  // coordination signal in place without making the larger pack's
+  // convergence unstoppable.
   //
   //   view::pack_focus(self, target) > 0.5 : +0.4
   //     the observer's packmates are already engaged with this target.
