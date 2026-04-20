@@ -41,9 +41,45 @@ scoring {
 
   // ===== Combat =====
 
-  // Attack: fight when healthy (hp_pct >= 50%). Mask gates range /
-  // hostility; this just ranks the kind itself.
-  Attack(t) = 0.0 + (if self.hp_pct >= 0.5 { 0.5 } else { 0.0 })
+  // Attack: fight when healthy, finish the wounded. Task 147 adds
+  // target-side modifiers so the scorer's argmax over the mask-emitted
+  // candidate list picks the lower-hp enemy — otherwise the tie breaks
+  // on candidate-enumeration order and wolves end up sawing on a
+  // full-hp human while a one-hit kill stands next to them. The
+  // `target` binding comes from the action head; the compiler maps
+  // `target.<field>` to the reserved `[0x4000, 0x8000)` field-id range
+  // the engine's `read_field` dispatches on (see
+  // `docs/dsl/scoring_fields.md`).
+  //
+  // Absolute-hp thresholds (not `hp_pct`) because the spawn path sets
+  // `max_hp := spec.hp.max(1.0)` — a fixture-seeded "wounded" human
+  // with hp=10 reports `hp_pct = 1.0`, same as a full-hp human with
+  // hp=100. Raw hp discriminates them cleanly (10 < 30, 100 >= 50).
+  // `docs/dsl/scoring_fields.md` reserves `target.hp → 0x4000` and
+  // `target.hp_pct → 0x4002`; the emitter looks the names up in the
+  // shared `scoring_field_id` table and OR-s the `TARGET_FIELD_BASE`
+  // bit on for target references.
+  //
+  // Stacked modifiers:
+  //   self fresh (hp_pct >= 80%) ...... +0.50  "commit when still healthy"
+  //   target nearly dead (hp < 30) .... +0.40  "finish weak enemies"
+  //   target wounded (hp < 50) ........ +0.20  "prefer wounded"
+  //
+  // Base 0.0 + the fresh-self gate keeps Attack above MoveToward
+  // (base 0.3) while the wolf is fresh, so the primary wolves+humans
+  // scenario (all agents at full hp) still produces real attacks; once
+  // the wolf has taken enough damage to drop below 80% hp the row
+  // falls behind MoveToward, which is the scorer's signal to break off
+  // and reposition (engagement / Flee handle the actual retreat). The
+  // wounded / nearly-dead deltas stack: a target at hp=15 pulls +0.40
+  // + +0.20 = +0.60, so a wolf facing a one-hit kill and a full-hp
+  // bystander picks the one-hit kill first. Mask still gates range /
+  // hostility; the row only ranks the (kind, target) pair once the
+  // mask passes.
+  Attack(target) = 0.0
+    + (if self.hp_pct >= 0.8 { 0.5 } else { 0.0 })
+    + (if target.hp < 30.0 { 0.4 } else { 0.0 })
+    + (if target.hp < 50.0 { 0.2 } else { 0.0 })
 
   // Cast / UseItem: "domain hook" kinds without a dedicated
   // `Action::*` constructor in `UtilityBackend::build_action`. Until

@@ -40,7 +40,7 @@
 use std::fmt::Write;
 
 use crate::ast::BinOp;
-use crate::ir::{IrActionHead, IrExpr, IrExprNode, ScoringEntryIR, ScoringIR};
+use crate::ir::{IrActionHead, IrActionHeadShape, IrExpr, IrExprNode, ScoringEntryIR, ScoringIR};
 
 /// Errors the emitter can raise. Propagated up to xtask which stamps a
 /// diagnostic with the offending expression span.
@@ -415,6 +415,17 @@ pub(crate) struct LoweredModifier {
 
 fn lower_entry(entry: &ScoringEntryIR) -> Result<LoweredEntry, EmitError> {
     let action_head = action_head_discriminant(&entry.head)?;
+    // Target-bound heads (Attack / MoveToward) expose the candidate target as
+    // a positional local — `Attack(t)` binds `t`, `Attack(target)` binds
+    // `target`. The first positional name becomes the recognised
+    // target-reference prefix in modifier predicates (`<binding>.<field>`),
+    // emitted with the `0x4000 | self_field_id` target-side range.
+    let target_binding: Option<&str> = match &entry.head.shape {
+        IrActionHeadShape::Positional(binds) if !binds.is_empty() => {
+            Some(binds[0].0.as_str())
+        }
+        _ => None,
+    };
     let (base, terms) = flatten_sum(&entry.expr)?;
 
     if terms.len() > MAX_MODIFIERS {
@@ -429,7 +440,7 @@ fn lower_entry(entry: &ScoringEntryIR) -> Result<LoweredEntry, EmitError> {
     for term in terms {
         match term {
             SumTerm::BoolIf { cond, delta } => {
-                modifiers.push(lower_modifier(cond, delta)?);
+                modifiers.push(lower_modifier(cond, delta, target_binding)?);
             }
             SumTerm::Gradient { expr: _, delta } => {
                 // v1 gradient lowering: the engine-side reads the
@@ -606,8 +617,16 @@ fn lit_float(expr: &IrExprNode) -> Option<f32> {
 // Modifier lowering: predicate descriptor + delta
 // ---------------------------------------------------------------------------
 
-fn lower_modifier(cond: &IrExprNode, delta: f32) -> Result<LoweredModifier, EmitError> {
-    // Currently we only recognise `<self.<field>> <op> <lit>`.
+fn lower_modifier(
+    cond: &IrExprNode,
+    delta: f32,
+    target_binding: Option<&str>,
+) -> Result<LoweredModifier, EmitError> {
+    // Recognise `<self.<field>> <op> <lit>` and — on target-bound heads —
+    // `<target.<field>> <op> <lit>` where `target` is whatever name the
+    // head's first positional param carries (`Attack(t)` → `t`,
+    // `Attack(target)` → `target`). Target-side fields land in the
+    // reserved `[0x4000, 0x8000)` id range (docs/dsl/scoring_fields.md).
     let (op, field_id, threshold) = match &cond.kind {
         IrExpr::Binary(op, lhs, rhs) => {
             let op_tag = binop_scalar_compare(*op).ok_or_else(|| {
@@ -616,17 +635,17 @@ fn lower_modifier(cond: &IrExprNode, delta: f32) -> Result<LoweredModifier, Emit
                 ))
             })?;
 
-            // Either (lhs = self.field, rhs = lit) or the mirror. We normalise
+            // Either (lhs = <field>, rhs = lit) or the mirror. We normalise
             // to the canonical "field op lit" form, flipping the operator if
             // the DSL author wrote `0.5 <= self.hp_pct`.
-            if let Some(fid) = try_self_field(lhs) {
+            if let Some(fid) = try_field_ref(lhs, target_binding) {
                 let t = lit_float(rhs).ok_or_else(|| {
                     EmitError::UnsupportedPredicate(
                         "RHS of scalar compare must be a float literal".into(),
                     )
                 })?;
                 (op_tag, fid, t)
-            } else if let Some(fid) = try_self_field(rhs) {
+            } else if let Some(fid) = try_field_ref(rhs, target_binding) {
                 let t = lit_float(lhs).ok_or_else(|| {
                     EmitError::UnsupportedPredicate(
                         "one side of scalar compare must be a float literal".into(),
@@ -635,13 +654,13 @@ fn lower_modifier(cond: &IrExprNode, delta: f32) -> Result<LoweredModifier, Emit
                 (flip_op(op_tag), fid, t)
             } else {
                 return Err(EmitError::UnsupportedPredicate(
-                    "scalar compare must reference `self.<field>` on one side".into(),
+                    "scalar compare must reference `self.<field>` (or the head's target binding) on one side".into(),
                 ));
             }
         }
         _ => {
             return Err(EmitError::UnsupportedPredicate(format!(
-                "only `<self.<field>> <op> <lit>` shape is recognised at milestone 5; got {:?}",
+                "only `<field> <op> <lit>` shape is recognised; got {:?}",
                 cond.kind
             )))
         }
@@ -660,23 +679,45 @@ fn lower_modifier(cond: &IrExprNode, delta: f32) -> Result<LoweredModifier, Emit
     })
 }
 
-/// Return `Some(field_id)` when `expr` is the field access `self.<ident>`.
-fn try_self_field(expr: &IrExprNode) -> Option<u16> {
+/// Reserved `field_id` range for target-side fields. Mirrors the engine's
+/// `read_field` dispatch (`crates/engine/src/policy/utility.rs`) and the
+/// reservation spelled out in `docs/dsl/scoring_fields.md`. Self-side ids
+/// use the low range (0..8); OR-ing `TARGET_FIELD_BASE` promotes a
+/// self-side id to its target-side counterpart.
+const TARGET_FIELD_BASE: u16 = 0x4000;
+
+/// Return `Some(field_id)` when `expr` is a field access on either `self`
+/// or the action head's target binding. For self references we return the
+/// low self-side id (`scoring_field_id`); for target references we OR in
+/// `TARGET_FIELD_BASE` so the engine dispatches through the target-side
+/// `read_field` branch. `target_binding` is `None` on self-only heads
+/// (Hold, Flee, Eat, …) — any `<binding>.<field>` on those raises the
+/// standard "must reference self" error up the stack.
+fn try_field_ref(expr: &IrExprNode, target_binding: Option<&str>) -> Option<u16> {
     match &expr.kind {
         IrExpr::Field {
             base, field_name, ..
-        } => {
-            if !matches!(&base.kind, IrExpr::Local(_, name) if name == "self") {
-                return None;
-            }
-            scoring_field_id(field_name)
-        }
+        } => match &base.kind {
+            IrExpr::Local(_, name) if name == "self" => scoring_field_id(field_name),
+            IrExpr::Local(_, name) => match target_binding {
+                Some(tb) if name == tb => {
+                    scoring_field_id(field_name).map(|fid| fid | TARGET_FIELD_BASE)
+                }
+                _ => None,
+            },
+            _ => None,
+        },
         _ => None,
     }
 }
 
 /// DSL field name → numeric id. See `docs/dsl/scoring_fields.md` for the
-/// canonical table.
+/// canonical table. The mapping is shared between self-side (raw id) and
+/// target-side reads (id OR-ed with `TARGET_FIELD_BASE`). Only the fields
+/// the engine's target-side branch also dispatches on (hp, max_hp, hp_pct,
+/// shield_hp) should be used with a target reference today; the other ids
+/// (attack_range, hunger, thirst, fatigue) are self-only until the engine
+/// grows matching target-side accessors.
 fn scoring_field_id(name: &str) -> Option<u16> {
     match name {
         "hp" => Some(0),
@@ -912,6 +953,23 @@ mod tests {
         }
     }
 
+    /// Field access against a named head-local (e.g. `t.hp_pct` on
+    /// `Attack(t)`). LocalRef id is irrelevant to the emitter's shape
+    /// check — only the binding name matters.
+    fn local_field(local_name: &str, field_name: &str) -> IrExprNode {
+        IrExprNode {
+            kind: IrExpr::Field {
+                base: Box::new(IrExprNode {
+                    kind: IrExpr::Local(LocalRef(1), local_name.into()),
+                    span: span(),
+                }),
+                field_name: field_name.into(),
+                field: None,
+            },
+            span: span(),
+        }
+    }
+
     fn binop(op: BinOp, lhs: IrExprNode, rhs: IrExprNode) -> IrExprNode {
         IrExprNode {
             kind: IrExpr::Binary(op, Box::new(lhs), Box::new(rhs)),
@@ -998,6 +1056,68 @@ mod tests {
         };
         let row = lower_entry(&entry).unwrap();
         assert_eq!(row.modifiers[0].op, OP_GE);
+    }
+
+    #[test]
+    fn target_side_field_ref_uses_reserved_range() {
+        // Attack(t) = 0.0 + (if t.hp_pct < 0.3 { 0.4 } else { 0.0 })
+        // — `t` is the action head's target binding, so `t.hp_pct` emits
+        // `0x4000 | 2 = 0x4002` (the engine's target-side hp_pct id).
+        let cond = binop(BinOp::Lt, local_field("t", "hp_pct"), lit_float_node(0.3));
+        let expr = binop(BinOp::Add, lit_float_node(0.0), if_expr(cond, 0.4, 0.0));
+        let entry = ScoringEntryIR {
+            head: attack_head(),
+            expr,
+            span: span(),
+        };
+        let row = lower_entry(&entry).unwrap();
+        assert_eq!(row.modifier_count, 1);
+        let m = &row.modifiers[0];
+        assert_eq!(m.kind, KIND_SCALAR_COMPARE);
+        assert_eq!(m.op, OP_LT);
+        assert_eq!(
+            m.field_id, 0x4002,
+            "t.hp_pct on Attack(t) → 0x4002 (target-side hp_pct)"
+        );
+        assert!((m.delta - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn target_binding_rename_still_resolves() {
+        // Rename the head's positional param from `t` to `target`. The
+        // emitter recognises any first positional name as the
+        // target-binding prefix — Attack(target) with `target.hp_pct`
+        // lowers the same as Attack(t) with `t.hp_pct`.
+        let head = IrActionHead {
+            name: "Attack".into(),
+            shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
+            span: span(),
+        };
+        let cond = binop(
+            BinOp::Lt,
+            local_field("target", "hp_pct"),
+            lit_float_node(0.5),
+        );
+        let expr = binop(BinOp::Add, lit_float_node(0.0), if_expr(cond, 0.2, 0.0));
+        let entry = ScoringEntryIR { head, expr, span: span() };
+        let row = lower_entry(&entry).unwrap();
+        assert_eq!(row.modifiers[0].field_id, 0x4002);
+    }
+
+    #[test]
+    fn target_ref_on_self_only_head_is_an_error() {
+        // Hold has no positional binding — referencing `t.hp_pct`
+        // (or any non-self local) must raise UnsupportedPredicate rather
+        // than silently miscompile.
+        let cond = binop(BinOp::Lt, local_field("t", "hp_pct"), lit_float_node(0.3));
+        let expr = binop(BinOp::Add, lit_float_node(0.0), if_expr(cond, 0.4, 0.0));
+        let entry = ScoringEntryIR {
+            head: action_head("Hold"),
+            expr,
+            span: span(),
+        };
+        let err = lower_entry(&entry).unwrap_err();
+        assert!(matches!(err, EmitError::UnsupportedPredicate(_)));
     }
 
     #[test]

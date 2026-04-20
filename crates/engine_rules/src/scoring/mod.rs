@@ -171,14 +171,20 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
         action_head: 3,
         base: 0.0,
         personality_weights: [0.0, 0.0, 0.0, 0.0, 0.0],
-        modifier_count: 1,
+        modifier_count: 3,
         modifiers: [
             ModifierRow {
-                predicate: PredicateDescriptor::scalar_compare(2, PredicateDescriptor::OP_GE, 0.5),
+                predicate: PredicateDescriptor::scalar_compare(2, PredicateDescriptor::OP_GE, 0.8),
                 delta: 0.5,
             },
-            ModifierRow::EMPTY,
-            ModifierRow::EMPTY,
+            ModifierRow {
+                predicate: PredicateDescriptor::scalar_compare(16384, PredicateDescriptor::OP_LT, 30.0),
+                delta: 0.4,
+            },
+            ModifierRow {
+                predicate: PredicateDescriptor::scalar_compare(16384, PredicateDescriptor::OP_LT, 50.0),
+                delta: 0.2,
+            },
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,
