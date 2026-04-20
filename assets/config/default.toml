@@ -23,6 +23,7 @@ channel_long_range_vocal = 200.0
 
 [movement]
 move_speed_mps = 1.0
+max_move_radius = 20.0
 
 [needs]
 eat_restore = 0.25

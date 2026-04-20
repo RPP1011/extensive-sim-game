@@ -27,12 +27,18 @@
 mask Hold when agents.alive(self)
 
 // MoveToward: target-bound — enumerates every alive-agent candidate
-// within `config.combat.aggro_range` of `self`, excluding `self`.
-// Task 138 — the scorer argmaxes over the candidate list produced by
-// `mask_move_toward_candidates` rather than the retired `nearest_other`
-// heuristic.
+// within `config.movement.max_move_radius` of `self`, excluding
+// `self`. Task 138 — the scorer argmaxes over the candidate list
+// produced by `mask_move_toward_candidates` rather than the retired
+// `nearest_other` heuristic. Task 144 — tightened the radius from
+// `combat.aggro_range` (50 m, scoped for threat awareness) down to a
+// bounded movement-specific knob so candidate enumeration scales with
+// local density rather than the whole alive set. In the
+// `mvp_acceptance` fixture (100 agents on a 50 m ring) the previous
+// radius made every agent everybody's neighbour, producing N²
+// candidates per tick.
 mask MoveToward(target)
-  from query.nearby_agents(agents.pos(self), config.combat.aggro_range)
+  from query.nearby_agents(agents.pos(self), config.movement.max_move_radius)
   when agents.alive(target) && target != self
 
 // Flee: permissive — every alive agent is allowed to flee. The legacy

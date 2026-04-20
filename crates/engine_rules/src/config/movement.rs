@@ -9,12 +9,14 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct MovementConfig {
     pub move_speed_mps: f32,
+    pub max_move_radius: f32,
 }
 
 impl Default for MovementConfig {
     fn default() -> Self {
         Self {
             move_speed_mps: 1.0_f32,
+            max_move_radius: 20.0_f32,
         }
     }
 }

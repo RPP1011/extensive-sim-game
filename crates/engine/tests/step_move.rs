@@ -18,13 +18,17 @@ fn agent_moves_toward_nearest_other() {
     }).unwrap();
     let _b = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
-        pos: Vec3::new(50.0, 0.0, 10.0), hp: 100.0,
+        pos: Vec3::new(10.0, 0.0, 10.0), hp: 100.0,
     }).unwrap();
     step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     let pos_a = state.agent_pos(a).unwrap();
-    // a moves from (0,0,10) toward b at (50,0,10) by exactly MOVE_SPEED_MPS=1.0.
+    // a moves from (0,0,10) toward b at (10,0,10) by exactly MOVE_SPEED_MPS=1.0.
     // Direction is pure +x (y and z are equal), so pos_a must be (1.0, 0.0, 10.0).
     // Pins MOVE_SPEED_MPS — an impl with speed 0.01 or 100 would fail here.
+    // Task 144: b was at 50m pre-fix; max_move_radius is now 20m, so the
+    // MoveToward mask wouldn't have a candidate at 50m. 10m stays well
+    // inside the new radius while still exercising the direction-vector
+    // normalise path that the test is really pinning.
     assert!((pos_a.x - 1.0).abs() < 1e-5,
         "x should be exactly 1.0m after one tick at MOVE_SPEED_MPS=1.0, got {}", pos_a.x);
     assert!((pos_a.y - 0.0).abs() < 1e-6, "y drift {}", pos_a.y);

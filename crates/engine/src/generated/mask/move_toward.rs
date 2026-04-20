@@ -23,7 +23,7 @@ pub fn mask_move_toward(state: &SimState, self_id: AgentId, target: AgentId) -> 
 pub fn mask_move_toward_candidates(state: &SimState, self_id: AgentId, out: &mut TargetMask) {
     let self_pos = state.agent_pos(self_id).unwrap_or(glam::Vec3::ZERO);
     let pos = self_pos;
-    let radius = state.config.combat.aggro_range;
+    let radius = state.config.movement.max_move_radius;
     let spatial = state.spatial();
     for target in spatial.within_radius(state, pos, radius) {
         if target == self_id {
