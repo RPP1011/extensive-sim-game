@@ -27,6 +27,10 @@ entity Human : Agent {
     can_tunnel:  true,
     can_marry:   true,
     max_spouses: 1,
+    // Task 177 — flee-direction kin-bias. Humans don't herd: when
+    // a human flees, direction is pure away-from-threat (pre-177
+    // behaviour; keeps wolves+humans parity baseline byte-exact).
+    herds_when_fleeing: false,
   },
   predator_prey: PredatorPrey {
     // Humans are prey to wolves (hostility asymmetry point) + dragons (apex).
@@ -49,6 +53,10 @@ entity Wolf : Agent {
     can_tunnel:  true,
     can_marry:   false,
     max_spouses: 0,
+    // Wolves are predators, not herd-flight prey. False preserves
+    // pre-177 straight-line flee behaviour (wolves flee when
+    // wounded — see `self.hp_pct < 0.3` gate in scoring.sim).
+    herds_when_fleeing: false,
   },
   predator_prey: PredatorPrey {
     prey_of:  [Dragon],
@@ -68,6 +76,12 @@ entity Deer : Agent {
     can_tunnel:  false,
     can_marry:   false,
     max_spouses: 0,
+    // Task 177 — deer herd when fleeing. Flee direction blends
+    // away-from-threat with toward-kin-centroid (config:
+    // combat.kin_flee_bias, combat.kin_flee_radius) so prey cluster
+    // for safety rather than scatter. The kin filter is species-
+    // level via `spatial::nearby_kin`, so only deer attract deer.
+    herds_when_fleeing: true,
   },
   predator_prey: PredatorPrey {
     prey_of:  [Wolf, Dragon],
@@ -87,6 +101,10 @@ entity Dragon : Agent {
     can_tunnel:  false,
     can_marry:   false,
     max_spouses: 0,
+    // Dragons are apex predators; they don't flee (no prey_of
+    // entries) but keep the field set to false for completeness —
+    // same surface as every other entity.
+    herds_when_fleeing: false,
   },
   predator_prey: PredatorPrey {
     prey_of:  [],

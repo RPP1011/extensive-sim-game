@@ -68,6 +68,7 @@ pub struct Capabilities {
     pub can_tunnel: bool,
     pub can_marry: bool,
     pub max_spouses: u8,
+    pub herds_when_fleeing: bool,
 }
 
 impl Capabilities {
@@ -87,6 +88,7 @@ impl Capabilities {
                 can_tunnel: true,
                 can_marry: true,
                 max_spouses: 1,
+                herds_when_fleeing: false,
             },
             CreatureType::Wolf => Self {
                 channels: smallvec![CommunicationChannel::PackSignal],
@@ -98,6 +100,7 @@ impl Capabilities {
                 can_tunnel: true,
                 can_marry: false,
                 max_spouses: 0,
+                herds_when_fleeing: false,
             },
             CreatureType::Deer => Self {
                 channels: smallvec![CommunicationChannel::PackSignal],
@@ -109,6 +112,7 @@ impl Capabilities {
                 can_tunnel: false,
                 can_marry: false,
                 max_spouses: 0,
+                herds_when_fleeing: true,
             },
             CreatureType::Dragon => Self {
                 channels: smallvec![CommunicationChannel::Speech, CommunicationChannel::Song],
@@ -120,6 +124,7 @@ impl Capabilities {
                 can_tunnel: false,
                 can_marry: false,
                 max_spouses: 0,
+                herds_when_fleeing: false,
             },
         }
     }

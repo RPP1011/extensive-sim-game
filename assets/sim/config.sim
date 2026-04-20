@@ -17,6 +17,19 @@ config combat {
     aggro_range: f32 = 50.0,
     engagement_range: f32 = 2.0,
     engagement_slow_factor: f32 = 0.3,
+    // Task 177 — deer herding. Weight on "toward kin centroid"
+    // relative to "away from threat" when an agent with
+    // capabilities.herds_when_fleeing = true picks a flee vector.
+    // 0.0 reproduces pre-177 straight-line flee; 1.0 makes kin
+    // attraction equal to threat avoidance. The blended vector is
+    // normalized, so bias > 1 is tolerated but rarely useful —
+    // kin attraction can never completely override "away from
+    // threat" because the threat term always contributes.
+    kin_flee_bias: f32 = 0.5,
+    // Radius (m) for the same-species kin scan driving the flee
+    // bias. 12.0 matches fear_spread / pack_focus (task 167 / 169)
+    // "visual contact" figure.
+    kin_flee_radius: f32 = 12.0,
 }
 
 config movement {
