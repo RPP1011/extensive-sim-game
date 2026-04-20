@@ -56,14 +56,22 @@ pub enum TaskCommand {
 #[derive(Debug, Parser)]
 #[command(about = "Run the engine's wolves+humans fixture and dump the chronicle")]
 pub struct ChronicleArgs {
-    /// Number of ticks to simulate.
-    #[arg(long, default_value_t = 100)]
-    pub ticks: u32,
+    /// Number of ticks to simulate. Default (100) matches the small
+    /// canonical fixture; `--showcase` defaults this to 500 for a longer
+    /// curated narrative.
+    #[arg(long)]
+    pub ticks: Option<u32>,
     /// 64-bit hex seed for `SimState::new`. Defaults to the same seed the
-    /// `wolves_and_humans_parity` test uses, so `ticks=100` reproduces the
-    /// chronicle the test renders (minus the assertion harness).
-    #[arg(long, default_value = "0xD00DFACE00420042")]
-    pub seed: String,
+    /// `wolves_and_humans_parity` test uses for the canonical fixture, and
+    /// to `0xDEADBEEF` for `--showcase`.
+    #[arg(long)]
+    pub seed: Option<String>,
+    /// Showcase mode — run the longer curated fixture (8 humans, 8 wolves,
+    /// 4 deer scattered across a 40×40 area) with pretty-printed section
+    /// headers and an outcome summary. Additive: defaults to the small
+    /// canonical fixture when omitted.
+    #[arg(long)]
+    pub showcase: bool,
 }
 
 #[derive(Debug, Parser)]
