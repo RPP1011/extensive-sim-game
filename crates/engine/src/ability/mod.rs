@@ -2,8 +2,23 @@
 //! tick-start phase that decrements combat-timing fields and recomputes
 //! engagement bindings.
 //!
-//! Scope for this commit (Combat Foundation Task 3): only `expire` is
-//! populated. `id`, `program`, `registry`, `cast`, `gate` scaffolds land in
-//! Task 6+ when the AbilityProgram IR is introduced.
+//! Module layout (Combat Foundation Tasks 3 + 6–9):
+//! - `id`       — `AbilityId` newtype (NonZeroU32)
+//! - `program`  — `AbilityProgram` IR + `EffectOp` / `Area` / `Delivery` / `Gate`
+//! - `registry` — `AbilityRegistry` + append-only builder
+//! - `cast`     — `CastHandler` cascade dispatcher (one handler, branches on EffectOp)
+//! - `gate`     — `evaluate_cast_gate` mask predicate
+//! - `expire`   — tick-start unified pass (decrement + expire + engagement)
 
+mod id;
+pub use id::AbilityId;
+
+pub mod cast;
 pub mod expire;
+pub mod gate;
+pub mod program;
+pub mod registry;
+
+pub use program::{Area, Delivery, EffectOp, Gate, TargetSelector, MAX_EFFECTS_PER_PROGRAM};
+pub use program::AbilityProgram;
+pub use registry::{AbilityRegistry, AbilityRegistryBuilder};

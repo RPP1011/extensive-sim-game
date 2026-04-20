@@ -28,6 +28,11 @@ id_type!(AuctionId);
 id_type!(InviteId);
 id_type!(SettlementId);
 
+// Re-export `AbilityId` so downstream code can reach every primitive id
+// type from `crate::ids::*`. The canonical definition lives alongside the
+// ability subsystem (see `crate::ability::id`).
+pub use crate::ability::AbilityId;
+
 /// Identifies an event within the `EventRing` by `(tick, seq)`. Assigned by
 /// `EventRing::push` / `push_caused_by`; used as a sidecar cause pointer so
 /// cascade fan-out can reconstruct causal trees without affecting the
