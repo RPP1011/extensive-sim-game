@@ -42,6 +42,10 @@ impl CascadeRegistry {
     /// [`CascadeRegistry::with_engine_builtins`].
     pub fn register_engine_builtins(&mut self) {
         self.register(crate::ability::expire::OpportunityAttackHandler);
+        // Combat Foundation Task 10 — effect fold-ins. These handlers pair up
+        // with the `Effect*Applied` events the `CastHandler` emits (Task 9)
+        // and are the actual state mutators for the combat EffectOps.
+        self.register(crate::ability::DamageHandler);
     }
 
     /// Register the Combat Foundation Task 9 `CastHandler` against an
