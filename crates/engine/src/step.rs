@@ -215,10 +215,7 @@ pub fn step_full<B: PolicyBackend>(
     scratch.mask.mark_flee_allowed_if_threat_exists(state);
     scratch.mask.mark_attack_allowed_from_candidates(state, &mut scratch.target_mask);
     scratch.mask.mark_needs_allowed(state);
-    scratch.mask.mark_domain_hook_micros_allowed(
-        state,
-        cascade.cast_ability_registry().map(|arc| arc.as_ref()),
-    );
+    scratch.mask.mark_domain_hook_micros_allowed(state);
 
     // Phase 2 — policy evaluate.
     scratch.actions.clear();

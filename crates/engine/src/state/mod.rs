@@ -144,6 +144,17 @@ pub struct SimState {
     /// read values through `state.views.<name>.get(args...)`.
     /// Spec §2.3 + §7.1.
     pub views: crate::generated::views::ViewRegistry,
+
+    /// Ability program registry — append-only table of compiled ability
+    /// programs, looked up by `AbilityId` during cast dispatch and mask
+    /// evaluation. Moved out of the (retired) per-`CastHandler` `Arc` so
+    /// the cascade path reads it directly off `state`; also lets the mask
+    /// build read the same registry without threading an `Option<&Arc>`
+    /// through `step_full`.
+    ///
+    /// Defaults to empty. Populate via `state.ability_registry =
+    /// builder.build()` after spawning the state.
+    pub ability_registry: crate::ability::AbilityRegistry,
 }
 
 impl SimState {
@@ -234,6 +245,10 @@ impl SimState {
             // (empty) storage field per `@materialized` view. Populated
             // at the view-fold phase each tick.
             views:                  crate::generated::views::ViewRegistry::new(),
+            // Empty ability registry by default. Tests / production code
+            // that need specific abilities do `state.ability_registry =
+            // builder.build()` after construction.
+            ability_registry:       crate::ability::AbilityRegistry::new(),
         }
     }
 

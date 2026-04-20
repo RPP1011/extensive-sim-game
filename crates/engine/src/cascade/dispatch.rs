@@ -66,10 +66,14 @@ impl CascadeRegistry {
         // shield, stun, slow, transfer_gold, modify_standing,
         // opportunity_attack, and record_memory. The matching hand-written
         // legacy handlers were deleted in the same commit that landed their
-        // DSL equivalent. `CastHandler` remains hand-written: it needs
-        // `Arc<AbilityRegistry>` state that the DSL emitter's stateless
-        // unit-struct shape can't express.
+        // DSL equivalent. `CastHandler` is still hand-written (the
+        // `emit_physics` compiler does not yet lower `for ... in <program>`
+        // loops or `match` over `EffectOp` variants), but is stateless now
+        // that the `AbilityRegistry` lives on `SimState` — no more
+        // `Arc<AbilityRegistry>` plumbing, and it can be registered as a
+        // plain engine builtin alongside the DSL-emitted handlers.
         crate::generated::physics::register(self);
+        self.register(crate::ability::CastHandler::new());
         // Task 139 — event-driven engagement update. The old tick-start
         // tentative-commit loop was retired in favour of two cascade
         // dispatchers keyed on `AgentMoved` / `AgentDied`. The DSL physics
@@ -84,43 +88,6 @@ impl CascadeRegistry {
             super::EventKindId::AgentDied,
             crate::engagement::dispatch_agent_died,
         );
-    }
-
-    /// Register the Combat Foundation Task 9 `CastHandler` against an
-    /// `AbilityRegistry`. Kept off `register_engine_builtins` because it
-    /// requires a built registry — callers construct the registry, wrap
-    /// it in an `Arc`, and then register the cast handler once at startup.
-    /// Calling this twice registers two handlers that both dispatch
-    /// `AgentCast`; tests that need registry isolation should hand out
-    /// distinct `Arc`s to distinct `CascadeRegistry`s.
-    pub fn register_cast_handler(
-        &mut self,
-        ability_registry: std::sync::Arc<crate::ability::AbilityRegistry>,
-    ) {
-        self.register(crate::ability::CastHandler::new(ability_registry));
-    }
-
-    /// Return the first-registered `CastHandler`'s `AbilityRegistry` handle,
-    /// if any. Used by mask-build (`mark_domain_hook_micros_allowed`) to
-    /// consult `evaluate_cast_gate` per agent. Returns `None` when no cast
-    /// handler is registered — in that case the mask falls back to the
-    /// permissive "always allowed" default.
-    ///
-    /// When multiple cast handlers are registered (allowed but unusual),
-    /// only the first is returned. Tests that need registry isolation
-    /// should keep to a single `register_cast_handler` call per registry.
-    pub fn cast_ability_registry(&self) -> Option<&std::sync::Arc<crate::ability::AbilityRegistry>> {
-        let kind = crate::cascade::EventKindId::AgentCast as u8 as usize;
-        for lane in Lane::ALL {
-            for handler in &self.table[*lane as usize][kind] {
-                if let Some(any) = handler.as_any() {
-                    if let Some(ch) = any.downcast_ref::<crate::ability::CastHandler>() {
-                        return Some(ch.registry());
-                    }
-                }
-            }
-        }
-        None
     }
 
     pub fn register<H: CascadeHandler + 'static>(&mut self, h: H) {

@@ -12,8 +12,6 @@
 //! root and observe that the chain runs to completion without any
 //! `CastDepthExceeded` emission.
 
-use std::sync::Arc;
-
 use engine::ability::{
     AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate, TargetSelector,
 };
@@ -55,12 +53,14 @@ fn three_link_chain_fires_three_damage_events_no_depth_exceeded() {
             EffectOp::CastAbility { ability: b_id, selector: TargetSelector::Target },
         ],
     ));
-    let registry = Arc::new(b.build());
+    let registry = b.build();
 
-    let mut cascade = CascadeRegistry::with_engine_builtins();
-    cascade.register_cast_handler(registry);
+    // `with_engine_builtins()` already registers the stateless CastHandler;
+    // the ability registry rides on `state` now.
+    let cascade = CascadeRegistry::with_engine_builtins();
 
     let mut state = SimState::new(8, 42);
+    state.ability_registry = registry;
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf, Vec3::new(3.0, 0.0, 0.0));
     let mut events = EventRing::with_cap(1024);
@@ -119,12 +119,12 @@ fn self_targeted_recursive_link_uses_caster_selector() {
             EffectOp::CastAbility { ability: b_id, selector: TargetSelector::Caster },
         ],
     ));
-    let registry = Arc::new(b.build());
+    let registry = b.build();
 
-    let mut cascade = CascadeRegistry::with_engine_builtins();
-    cascade.register_cast_handler(registry);
+    let cascade = CascadeRegistry::with_engine_builtins();
 
     let mut state = SimState::new(4, 42);
+    state.ability_registry = registry;
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf, Vec3::new(3.0, 0.0, 0.0));
     let mut events = EventRing::with_cap(256);

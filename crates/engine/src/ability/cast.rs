@@ -1,8 +1,12 @@
 //! `CastHandler` — the single cascade handler keyed on `EventKindId::AgentCast`.
 //!
 //! Shape:
-//! 1. Handler is constructed around an `Arc<AbilityRegistry>` so multiple
-//!    cascade lanes / tests can share one registry cheaply.
+//! 1. Handler is a zero-sized unit struct — the ability program table lives
+//!    on `SimState::ability_registry`. The handler reads it there on every
+//!    cast. Moving the registry onto state retired the `Arc<AbilityRegistry>`
+//!    the handler used to carry and let us fold the registration into
+//!    `CascadeRegistry::register_engine_builtins` like every other effect
+//!    handler.
 //! 2. On each `AgentCast`, look the program up. If the ability is unknown
 //!    (the state may have been mutated mid-cascade such that the id no
 //!    longer resolves), silently drop — the invalidation event is a
@@ -23,29 +27,31 @@
 //! framework's 8-iteration ceiling never fires for cast recursion, so the
 //! dev-build `cascade did not converge` panic is reserved for OTHER
 //! handlers (see `cascade_bounded.rs`).
-
-use std::sync::Arc;
+//!
+//! Retiring this file in favour of a DSL `physics cast` rule is blocked on
+//! the `emit_physics` compiler growing `for ... in <collection>` loops
+//! and `match` over sum-type variants (`EffectOp::*`). See
+//! `docs/game/compiler_progress.md` for the tracking row. Until then the
+//! handler stays hand-written but stateless, which is the shape the DSL
+//! emitter already supports for every other effect.
 
 use crate::cascade::{CascadeHandler, EventKindId, Lane, MAX_CASCADE_ITERATIONS};
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
 
-use super::{AbilityId, AbilityRegistry, EffectOp, TargetSelector};
+use super::{AbilityId, EffectOp, TargetSelector};
 
-pub struct CastHandler {
-    registry: Arc<AbilityRegistry>,
-}
+/// Zero-sized handler — the ability program table the handler dispatches
+/// against lives on `SimState::ability_registry`. No per-handler state.
+pub struct CastHandler;
 
 impl CastHandler {
-    pub fn new(registry: Arc<AbilityRegistry>) -> Self {
-        Self { registry }
-    }
+    pub const fn new() -> Self { Self }
+}
 
-    /// Shared handle to the registry this handler dispatches against.
-    /// Useful for tests that want to assert the handler points at the
-    /// registry they built.
-    pub fn registry(&self) -> &Arc<AbilityRegistry> { &self.registry }
+impl Default for CastHandler {
+    fn default() -> Self { Self::new() }
 }
 
 impl CascadeHandler for CastHandler {
@@ -59,7 +65,7 @@ impl CascadeHandler for CastHandler {
                 (actor, ability, target, depth, tick),
             _ => return,
         };
-        let prog = match self.registry.get(ability) {
+        let prog = match state.ability_registry.get(ability) {
             Some(p) => p,
             None    => return,
         };

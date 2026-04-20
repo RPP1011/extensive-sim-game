@@ -3,12 +3,10 @@
 //! Verifies the full chain:
 //! 1. A `MicroKind::Cast + MicroTarget::Ability` action pushed into `step`
 //!    produces an `Event::AgentCast`.
-//! 2. If a `CastHandler` is registered on the cascade for that registry,
-//!    the handler fires and emits one `Effect*Applied` per `EffectOp`.
-//! 3. With no cast handler registered, the `AgentCast` is emitted but no
-//!    effects follow (regression guard against accidental default effects).
-
-use std::sync::Arc;
+//! 2. With `state.ability_registry` populated, the (engine-builtin) cast
+//!    handler fires and emits one `Effect*Applied` per `EffectOp`.
+//! 3. With an empty registry on state, the `AgentCast` is emitted but no
+//!    effects follow — the handler's `registry.get(id)` short-circuits.
 
 use engine::ability::{
     AbilityProgram, AbilityRegistry, AbilityRegistryBuilder, EffectOp, Gate,
@@ -34,14 +32,14 @@ fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
     state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp: 100.0, ..Default::default() }).unwrap()
 }
 
-fn build_one_damage_ability() -> (Arc<AbilityRegistry>, engine::ability::AbilityId) {
+fn build_one_damage_ability() -> (AbilityRegistry, engine::ability::AbilityId) {
     let mut b = AbilityRegistryBuilder::new();
     let id = b.register(AbilityProgram::new_single_target(
         6.0,
         Gate { cooldown_ticks: 10, hostile_only: true, line_of_sight: false },
         [EffectOp::Damage { amount: 25.0 }],
     ));
-    (Arc::new(b.build()), id)
+    (b.build(), id)
 }
 
 #[test]
@@ -49,12 +47,16 @@ fn cast_action_emits_agentcast_event() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();  // intentionally no CastHandler
+    // Plain `CascadeRegistry::new()` does NOT register the cast handler,
+    // so AgentCast fires with no effects even though the state's
+    // ability_registry has an entry.
+    let cascade = CascadeRegistry::new();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
 
-    let (_reg, ability) = build_one_damage_ability();
+    let (reg, ability) = build_one_damage_ability();
+    state.ability_registry = reg;
     let backend = EmitOnce {
         caster: a,
         kind:   ActionKind::Micro {
@@ -82,8 +84,10 @@ fn cast_action_triggers_effect_damage_when_handler_registered() {
     let mut events = EventRing::with_cap(1024);
 
     let (reg, ability) = build_one_damage_ability();
-    let mut cascade = CascadeRegistry::new();
-    cascade.register_cast_handler(reg.clone());
+    state.ability_registry = reg;
+    // `with_engine_builtins()` installs the stateless CastHandler; the
+    // registry on `state` drives program lookup.
+    let cascade = CascadeRegistry::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
@@ -112,8 +116,8 @@ fn cast_handler_starts_cooldown() {
     let mut events = EventRing::with_cap(1024);
 
     let (reg, ability) = build_one_damage_ability();
-    let mut cascade = CascadeRegistry::new();
-    cascade.register_cast_handler(reg);
+    state.ability_registry = reg;
+    let cascade = CascadeRegistry::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
@@ -140,10 +144,9 @@ fn cast_of_unknown_ability_id_is_a_no_op() {
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1024);
 
-    // Empty registry — every ability id is unknown.
-    let reg = Arc::new(AbilityRegistry::new());
-    let mut cascade = CascadeRegistry::new();
-    cascade.register_cast_handler(reg);
+    // Empty registry on state — every ability id is unknown.
+    state.ability_registry = AbilityRegistry::new();
+    let cascade = CascadeRegistry::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));

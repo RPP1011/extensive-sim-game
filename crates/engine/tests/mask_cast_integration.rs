@@ -1,10 +1,13 @@
 //! Audit fix CRITICAL #2 — `mark_domain_hook_micros_allowed` must now consult
-//! `evaluate_cast_gate` via the registered `CastHandler`'s `AbilityRegistry`.
+//! `evaluate_cast_gate` via `state.ability_registry`.
 //!
 //! Complements `mask_can_cast.rs` (which tests the gate predicate in
-//! isolation). Each test here drives `step_full`, registers a cast handler
-//! with a specific `AbilityRegistry`, and asserts the cast mask bit flips
-//! appropriately for alive agents under different gate conditions.
+//! isolation). Each test here drives `step_full`, installs the compiled
+//! `AbilityRegistry` onto `state`, and asserts the cast mask bit flips
+//! appropriately for alive agents under different gate conditions. The
+//! cast-handler migration (2026-04-19) retired the per-cascade
+//! `Arc<AbilityRegistry>` plumbing; the registry now rides on `SimState`
+//! and the stateless handler is registered by `with_engine_builtins`.
 
 use engine::ability::{
     AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate,
@@ -42,14 +45,16 @@ impl PolicyBackend for InertBackend {
 fn setup(registry_build: impl FnOnce(&mut AbilityRegistryBuilder)) -> (
     SimState, SimScratch, EventRing, CascadeRegistry, InvariantRegistry,
 ) {
-    let state = SimState::new(8, 42);
+    let mut state = SimState::new(8, 42);
     let scratch = SimScratch::new(state.agent_cap() as usize);
     let events = EventRing::with_cap(1024);
     let mut b = AbilityRegistryBuilder::new();
     registry_build(&mut b);
-    let reg = std::sync::Arc::new(b.build());
-    let mut cascade = CascadeRegistry::with_engine_builtins();
-    cascade.register_cast_handler(reg);
+    state.ability_registry = b.build();
+    // `with_engine_builtins()` registers the stateless CastHandler alongside
+    // the DSL-emitted effect handlers. The handler reads programs off
+    // `state.ability_registry`.
+    let cascade = CascadeRegistry::with_engine_builtins();
     let invariants = InvariantRegistry::new();
     (state, scratch, events, cascade, invariants)
 }
@@ -161,16 +166,18 @@ fn cast_bit_false_when_caster_stunned() {
 }
 
 #[test]
-fn cast_bit_permissive_when_no_cast_handler_registered() {
-    // No cast handler → mask falls back to permissive for Cast (legacy
-    // behaviour). Registering other engine builtins must not enable the
-    // gate path.
-    let state = SimState::new(8, 42);
+fn cast_bit_permissive_when_registry_is_empty() {
+    // Empty `state.ability_registry` → mask falls back to permissive for
+    // Cast (legacy behaviour pre-migration, when "no cast handler
+    // registered" was the trigger). `with_engine_builtins()` always
+    // installs the CastHandler now, but an empty registry means
+    // mask-build has no candidate ability to probe the gate with, so the
+    // bit stays permissive.
+    let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1024);
     let cascade = CascadeRegistry::with_engine_builtins();
     let invariants = InvariantRegistry::new();
-    let mut state = state;
     let caster = state
         .spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
@@ -182,5 +189,5 @@ fn cast_bit_permissive_when_no_cast_handler_registered() {
     run_one_tick(&mut state, &mut scratch, &mut events, &cascade, &invariants);
     let slot = (caster.raw() - 1) as usize;
     assert!(cast_bit(&scratch.mask, slot),
-        "no cast handler registered → Cast bit must fall back permissive");
+        "empty state.ability_registry → Cast bit must fall back permissive");
 }

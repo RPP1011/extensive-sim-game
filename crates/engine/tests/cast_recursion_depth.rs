@@ -18,8 +18,6 @@
 
 #![cfg(not(debug_assertions))]
 
-use std::sync::Arc;
-
 use engine::ability::{
     AbilityProgram, AbilityRegistry, AbilityRegistryBuilder, EffectOp, Gate, TargetSelector,
 };
@@ -35,7 +33,7 @@ fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3, hp: f32) -> AgentId 
 }
 
 /// Build a self-recursive ability: `[Damage(1.0), CastAbility(self, Target)]`.
-fn build_infinite_loop() -> (Arc<AbilityRegistry>, engine::ability::AbilityId) {
+fn build_infinite_loop() -> (AbilityRegistry, engine::ability::AbilityId) {
     // We need the ability to refer to itself. `AbilityRegistryBuilder::register`
     // returns the id for the JUST-registered program, so we use `next_id` to
     // reserve the slot, construct the program referencing that id, then
@@ -58,16 +56,18 @@ fn build_infinite_loop() -> (Arc<AbilityRegistry>, engine::ability::AbilityId) {
         ],
     ));
     assert_eq!(id, self_id, "builder must assign id 1 to the first register");
-    (Arc::new(b.build()), id)
+    (b.build(), id)
 }
 
 #[test]
 fn infinite_loop_caps_at_max_cascade_iterations() {
     let (registry, ability) = build_infinite_loop();
-    let mut cascade = CascadeRegistry::with_engine_builtins();
-    cascade.register_cast_handler(registry);
+    // Stateless CastHandler is installed by `with_engine_builtins()`; the
+    // registry rides on `state`.
+    let cascade = CascadeRegistry::with_engine_builtins();
 
     let mut state = SimState::new(4, 42);
+    state.ability_registry = registry;
     // Large HP so non-lethal damage doesn't emit AgentDied mid-cascade.
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO, 1_000_000.0);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0), 1_000_000.0);

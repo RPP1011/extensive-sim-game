@@ -1,5 +1,5 @@
 // crates/engine/src/mask.rs
-use crate::ability::{evaluate_cast_gate, AbilityRegistry};
+use crate::ability::evaluate_cast_gate;
 use crate::generated::mask::{
     mask_attack_candidates, mask_drink, mask_eat, mask_flee, mask_hold, mask_move_toward_candidates,
     mask_rest,
@@ -256,21 +256,17 @@ impl MaskBuffer {
     /// inventory, LOS, memory presence, …) land alongside each domain's
     /// compiler-registered cascade handlers in later plans.
     ///
-    /// `cast_registry`, when provided, overrides the permissive default for
-    /// `MicroKind::Cast` with the full `evaluate_cast_gate` predicate: the
-    /// first ability in the registry is treated as each agent's candidate
-    /// cast, with the nearest hostile within engagement range as the
-    /// inferred target (same heuristic `UtilityBackend` uses for Attack).
-    /// When the registry is empty or no cast handler is registered,
-    /// `MicroKind::Cast` falls back to permissive — matches the pre-gate
-    /// behaviour and the legacy `mark_domain_hook_micros_allowed` tests.
+    /// `state.ability_registry` drives the Cast gate: when non-empty, the
+    /// first registered ability is treated as each agent's candidate cast
+    /// and routed through `evaluate_cast_gate` with the nearest hostile
+    /// within engagement range as the inferred target (same heuristic
+    /// `UtilityBackend` uses for Attack). An empty registry falls back to
+    /// permissive — matches the pre-registry-move behaviour where no
+    /// `CastHandler` was registered.
     ///
-    /// Audit fix CRITICAL #2.
-    pub fn mark_domain_hook_micros_allowed(
-        &mut self,
-        state:         &SimState,
-        cast_registry: Option<&AbilityRegistry>,
-    ) {
+    /// Audit fix CRITICAL #2. Registry-on-state since the cast-handler
+    /// migration retired the `Arc<AbilityRegistry>` plumbing.
+    pub fn mark_domain_hook_micros_allowed(&mut self, state: &SimState) {
         let n_kinds = MicroKind::ALL.len();
         // Non-cast domain hooks remain permissive (no gate yet).
         for id in state.agents_alive() {
@@ -285,33 +281,32 @@ impl MaskBuffer {
             }
         }
 
-        // Cast: pass through `evaluate_cast_gate` when a registry is bound,
-        // falling back to permissive when no registry is available.
-        let ability_id = cast_registry.and_then(first_registered_ability);
+        // Cast: pass through `evaluate_cast_gate` when the state-borne
+        // registry has at least one ability, falling back to permissive
+        // for an empty registry.
+        let ability_id = if state.ability_registry.is_empty() {
+            None
+        } else {
+            crate::ability::AbilityId::new(1)
+        };
         for id in state.agents_alive() {
             let slot = (id.raw() - 1) as usize;
             let cast_offset = slot * n_kinds + MicroKind::Cast as usize;
-            let allowed = match (cast_registry, ability_id) {
-                (Some(reg), Some(ability)) => {
+            let allowed = match ability_id {
+                Some(ability) => {
                     match inferred_cast_target(state, id) {
-                        Some(target) => evaluate_cast_gate(state, reg, id, ability, target),
-                        None         => false,
+                        Some(target) => evaluate_cast_gate(
+                            state, &state.ability_registry, id, ability, target,
+                        ),
+                        None => false,
                     }
                 }
-                // No ability registered / no registry bound → permissive.
-                _ => true,
+                // Empty registry → permissive.
+                None => true,
             };
             self.micro_kind[cast_offset] = allowed;
         }
     }
-}
-
-/// Return the first `AbilityId` (slot 0) in a non-empty registry.
-/// Mask-build treats it as each agent's representative cast for the
-/// per-agent gate check.
-fn first_registered_ability(reg: &AbilityRegistry) -> Option<crate::ability::AbilityId> {
-    if reg.is_empty() { return None; }
-    crate::ability::AbilityId::new(1)
 }
 
 /// Pick the nearest hostile within engagement range as the inferred cast
