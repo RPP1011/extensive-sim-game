@@ -3,6 +3,7 @@
 
 pub mod ability;
 pub mod aggregate;
+pub mod backend;
 pub mod cascade;
 pub mod channel;
 pub mod chronicle;
@@ -26,5 +27,7 @@ pub mod step;
 pub mod telemetry;
 pub mod trajectory;
 pub mod view;
+
+pub use backend::{CpuBackend, SimBackend};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
