@@ -20,11 +20,13 @@ pub mod gate;
 pub mod heal;
 pub mod program;
 pub mod registry;
+pub mod shield;
 
 pub use cast::CastHandler;
 pub use damage::DamageHandler;
 pub use gate::evaluate_cast_gate;
 pub use heal::HealHandler;
+pub use shield::ShieldHandler;
 pub use program::{Area, Delivery, EffectOp, Gate, TargetSelector, MAX_EFFECTS_PER_PROGRAM};
 pub use program::AbilityProgram;
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
