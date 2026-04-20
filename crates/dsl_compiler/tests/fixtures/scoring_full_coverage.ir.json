@@ -1,0 +1,698 @@
+{
+  "events": [],
+  "event_tags": [],
+  "enums": [],
+  "entities": [],
+  "physics": [],
+  "masks": [],
+  "scoring": [
+    {
+      "entries": [
+        {
+          "head": {
+            "name": "Hold",
+            "shape": "None",
+            "span": {
+              "start": 461,
+              "end": 472
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.1
+            },
+            "span": {
+              "start": 474,
+              "end": 477
+            }
+          },
+          "span": {
+            "start": 461,
+            "end": 480
+          }
+        },
+        {
+          "head": {
+            "name": "MoveToward",
+            "shape": "None",
+            "span": {
+              "start": 480,
+              "end": 491
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.3
+            },
+            "span": {
+              "start": 493,
+              "end": 496
+            }
+          },
+          "span": {
+            "start": 480,
+            "end": 499
+          }
+        },
+        {
+          "head": {
+            "name": "Flee",
+            "shape": "None",
+            "span": {
+              "start": 499,
+              "end": 510
+            }
+          },
+          "expr": {
+            "kind": {
+              "Binary": [
+                "Add",
+                {
+                  "kind": {
+                    "LitFloat": 0.0
+                  },
+                  "span": {
+                    "start": 512,
+                    "end": 515
+                  }
+                },
+                {
+                  "kind": {
+                    "If": {
+                      "cond": {
+                        "kind": {
+                          "Binary": [
+                            "Lt",
+                            {
+                              "kind": {
+                                "Field": {
+                                  "base": {
+                                    "kind": {
+                                      "Local": [
+                                        0,
+                                        "self"
+                                      ]
+                                    },
+                                    "span": {
+                                      "start": 522,
+                                      "end": 526
+                                    }
+                                  },
+                                  "field_name": "hp_pct",
+                                  "field": null
+                                }
+                              },
+                              "span": {
+                                "start": 522,
+                                "end": 533
+                              }
+                            },
+                            {
+                              "kind": {
+                                "LitFloat": 0.3
+                              },
+                              "span": {
+                                "start": 536,
+                                "end": 539
+                              }
+                            }
+                          ]
+                        },
+                        "span": {
+                          "start": 522,
+                          "end": 539
+                        }
+                      },
+                      "then_expr": {
+                        "kind": {
+                          "LitFloat": 0.6
+                        },
+                        "span": {
+                          "start": 542,
+                          "end": 545
+                        }
+                      },
+                      "else_expr": {
+                        "kind": {
+                          "LitFloat": 0.0
+                        },
+                        "span": {
+                          "start": 555,
+                          "end": 558
+                        }
+                      }
+                    }
+                  },
+                  "span": {
+                    "start": 519,
+                    "end": 560
+                  }
+                }
+              ]
+            },
+            "span": {
+              "start": 512,
+              "end": 560
+            }
+          },
+          "span": {
+            "start": 499,
+            "end": 577
+          }
+        },
+        {
+          "head": {
+            "name": "Attack",
+            "shape": {
+              "Positional": [
+                [
+                  "t",
+                  1
+                ]
+              ]
+            },
+            "span": {
+              "start": 577,
+              "end": 586
+            }
+          },
+          "expr": {
+            "kind": {
+              "Binary": [
+                "Add",
+                {
+                  "kind": {
+                    "LitFloat": 0.0
+                  },
+                  "span": {
+                    "start": 590,
+                    "end": 593
+                  }
+                },
+                {
+                  "kind": {
+                    "If": {
+                      "cond": {
+                        "kind": {
+                          "Binary": [
+                            "GtEq",
+                            {
+                              "kind": {
+                                "Field": {
+                                  "base": {
+                                    "kind": {
+                                      "Local": [
+                                        0,
+                                        "self"
+                                      ]
+                                    },
+                                    "span": {
+                                      "start": 600,
+                                      "end": 604
+                                    }
+                                  },
+                                  "field_name": "hp_pct",
+                                  "field": null
+                                }
+                              },
+                              "span": {
+                                "start": 600,
+                                "end": 611
+                              }
+                            },
+                            {
+                              "kind": {
+                                "LitFloat": 0.5
+                              },
+                              "span": {
+                                "start": 615,
+                                "end": 618
+                              }
+                            }
+                          ]
+                        },
+                        "span": {
+                          "start": 600,
+                          "end": 618
+                        }
+                      },
+                      "then_expr": {
+                        "kind": {
+                          "LitFloat": 0.5
+                        },
+                        "span": {
+                          "start": 621,
+                          "end": 624
+                        }
+                      },
+                      "else_expr": {
+                        "kind": {
+                          "LitFloat": 0.0
+                        },
+                        "span": {
+                          "start": 634,
+                          "end": 637
+                        }
+                      }
+                    }
+                  },
+                  "span": {
+                    "start": 597,
+                    "end": 639
+                  }
+                }
+              ]
+            },
+            "span": {
+              "start": 590,
+              "end": 639
+            }
+          },
+          "span": {
+            "start": 577,
+            "end": 643
+          }
+        },
+        {
+          "head": {
+            "name": "Cast",
+            "shape": "None",
+            "span": {
+              "start": 643,
+              "end": 654
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 656,
+              "end": 659
+            }
+          },
+          "span": {
+            "start": 643,
+            "end": 662
+          }
+        },
+        {
+          "head": {
+            "name": "UseItem",
+            "shape": "None",
+            "span": {
+              "start": 662,
+              "end": 673
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 675,
+              "end": 678
+            }
+          },
+          "span": {
+            "start": 662,
+            "end": 696
+          }
+        },
+        {
+          "head": {
+            "name": "Harvest",
+            "shape": "None",
+            "span": {
+              "start": 696,
+              "end": 707
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 709,
+              "end": 712
+            }
+          },
+          "span": {
+            "start": 696,
+            "end": 715
+          }
+        },
+        {
+          "head": {
+            "name": "Eat",
+            "shape": "None",
+            "span": {
+              "start": 715,
+              "end": 726
+            }
+          },
+          "expr": {
+            "kind": {
+              "Binary": [
+                "Add",
+                {
+                  "kind": {
+                    "LitFloat": 0.0
+                  },
+                  "span": {
+                    "start": 728,
+                    "end": 731
+                  }
+                },
+                {
+                  "kind": {
+                    "If": {
+                      "cond": {
+                        "kind": {
+                          "Binary": [
+                            "Lt",
+                            {
+                              "kind": {
+                                "Field": {
+                                  "base": {
+                                    "kind": {
+                                      "Local": [
+                                        0,
+                                        "self"
+                                      ]
+                                    },
+                                    "span": {
+                                      "start": 738,
+                                      "end": 742
+                                    }
+                                  },
+                                  "field_name": "hp_pct",
+                                  "field": null
+                                }
+                              },
+                              "span": {
+                                "start": 738,
+                                "end": 749
+                              }
+                            },
+                            {
+                              "kind": {
+                                "LitFloat": 0.3
+                              },
+                              "span": {
+                                "start": 752,
+                                "end": 755
+                              }
+                            }
+                          ]
+                        },
+                        "span": {
+                          "start": 738,
+                          "end": 755
+                        }
+                      },
+                      "then_expr": {
+                        "kind": {
+                          "LitFloat": 0.8
+                        },
+                        "span": {
+                          "start": 758,
+                          "end": 761
+                        }
+                      },
+                      "else_expr": {
+                        "kind": {
+                          "LitFloat": 0.0
+                        },
+                        "span": {
+                          "start": 771,
+                          "end": 774
+                        }
+                      }
+                    }
+                  },
+                  "span": {
+                    "start": 735,
+                    "end": 776
+                  }
+                }
+              ]
+            },
+            "span": {
+              "start": 728,
+              "end": 776
+            }
+          },
+          "span": {
+            "start": 715,
+            "end": 780
+          }
+        },
+        {
+          "head": {
+            "name": "Drink",
+            "shape": "None",
+            "span": {
+              "start": 780,
+              "end": 791
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 793,
+              "end": 796
+            }
+          },
+          "span": {
+            "start": 780,
+            "end": 799
+          }
+        },
+        {
+          "head": {
+            "name": "Rest",
+            "shape": "None",
+            "span": {
+              "start": 799,
+              "end": 810
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 812,
+              "end": 815
+            }
+          },
+          "span": {
+            "start": 799,
+            "end": 837
+          }
+        },
+        {
+          "head": {
+            "name": "PlaceTile",
+            "shape": "None",
+            "span": {
+              "start": 837,
+              "end": 850
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 852,
+              "end": 855
+            }
+          },
+          "span": {
+            "start": 837,
+            "end": 858
+          }
+        },
+        {
+          "head": {
+            "name": "PlaceVoxel",
+            "shape": "None",
+            "span": {
+              "start": 858,
+              "end": 871
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 873,
+              "end": 876
+            }
+          },
+          "span": {
+            "start": 858,
+            "end": 879
+          }
+        },
+        {
+          "head": {
+            "name": "HarvestVoxel",
+            "shape": "None",
+            "span": {
+              "start": 879,
+              "end": 892
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 894,
+              "end": 897
+            }
+          },
+          "span": {
+            "start": 879,
+            "end": 913
+          }
+        },
+        {
+          "head": {
+            "name": "Converse",
+            "shape": "None",
+            "span": {
+              "start": 913,
+              "end": 924
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 926,
+              "end": 929
+            }
+          },
+          "span": {
+            "start": 913,
+            "end": 932
+          }
+        },
+        {
+          "head": {
+            "name": "ShareStory",
+            "shape": "None",
+            "span": {
+              "start": 932,
+              "end": 943
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 945,
+              "end": 948
+            }
+          },
+          "span": {
+            "start": 932,
+            "end": 974
+          }
+        },
+        {
+          "head": {
+            "name": "Communicate",
+            "shape": "None",
+            "span": {
+              "start": 974,
+              "end": 986
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 988,
+              "end": 991
+            }
+          },
+          "span": {
+            "start": 974,
+            "end": 994
+          }
+        },
+        {
+          "head": {
+            "name": "Ask",
+            "shape": "None",
+            "span": {
+              "start": 994,
+              "end": 1006
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 1008,
+              "end": 1011
+            }
+          },
+          "span": {
+            "start": 994,
+            "end": 1027
+          }
+        },
+        {
+          "head": {
+            "name": "Remember",
+            "shape": "None",
+            "span": {
+              "start": 1027,
+              "end": 1036
+            }
+          },
+          "expr": {
+            "kind": {
+              "LitFloat": 0.0
+            },
+            "span": {
+              "start": 1038,
+              "end": 1041
+            }
+          },
+          "span": {
+            "start": 1027,
+            "end": 1042
+          }
+        }
+      ],
+      "annotations": [],
+      "span": {
+        "start": 435,
+        "end": 1043
+      }
+    }
+  ],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "configs": [],
+  "spans": {
+    "entries": []
+  }
+}

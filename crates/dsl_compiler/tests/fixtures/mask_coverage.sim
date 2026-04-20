@@ -1,0 +1,8 @@
+// Mask-coverage fixture — exercises the self-only mask shape landed by
+// task 141. Hold / MoveToward / Flee are all permissive for alive
+// agents; real gates live in scoring. The task 141 commit deletes the
+// matching hand-written `mark_*_allowed` bodies in
+// `crates/engine/src/mask.rs` in favour of these predicates.
+mask Hold       when agents.alive(self)
+mask MoveToward when agents.alive(self)
+mask Flee       when agents.alive(self)

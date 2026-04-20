@@ -17,6 +17,14 @@ Changing this table breaks the committed `SCORING_TABLE` constants and bumps
 |          2 | `self.hp_pct`       | `hp / max_hp` (derived)                      | 0.0..=1.0 normalised |
 |          3 | `self.shield_hp`    | `state.agent_shield_hp(agent).unwrap_or(0.0)`| |
 |          4 | `self.attack_range` | `state.agent_attack_range(agent).unwrap_or(2.0)` | |
+|          5 | `self.hunger`       | `state.agent_hunger(agent).unwrap_or(0.0)`   | 0.0 sated … 1.0 starving |
+|          6 | `self.thirst`       | `state.agent_thirst(agent).unwrap_or(0.0)`   | 0.0 sated … 1.0 parched |
+|          7 | `self.fatigue`      | `state.agent_rest_timer(agent).unwrap_or(0.0)` | Engine slot is named `rest_timer`; DSL surface calls it `fatigue` because that matches the urge to Rest. 0.0 rested … 1.0 exhausted. |
+|          8 | `self.personality.aggression`    | placeholder `0.0` (task 141) | Personality SoA not yet wired; reads return `0.0`. Reserving the id lets scoring rows reference the field today and pick up live values without a schema bump. |
+|          9 | `self.personality.social_drive`  | placeholder `0.0` (task 141) | |
+|         10 | `self.personality.ambition`      | placeholder `0.0` (task 141) | |
+|         11 | `self.personality.altruism`      | placeholder `0.0` (task 141) | |
+|         12 | `self.personality.curiosity`     | placeholder `0.0` (task 141) | |
 
 ## Pair fields (PairField predicates)
 

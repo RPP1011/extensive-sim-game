@@ -447,9 +447,25 @@ fn lower_namespace_call(
             expect_arity(args, 1, "agents.hp")?;
             Ok(format!("state.agent_hp({}).unwrap_or(0.0)", lowered[0]))
         }
+        (NamespaceId::Agents, "max_hp") => {
+            expect_arity(args, 1, "agents.max_hp")?;
+            Ok(format!("state.agent_max_hp({}).unwrap_or(1.0)", lowered[0]))
+        }
         (NamespaceId::Agents, "shield_hp") => {
             expect_arity(args, 1, "agents.shield_hp")?;
             Ok(format!("state.agent_shield_hp({}).unwrap_or(0.0)", lowered[0]))
+        }
+        (NamespaceId::Agents, "hunger") => {
+            expect_arity(args, 1, "agents.hunger")?;
+            Ok(format!("state.agent_hunger({}).unwrap_or(0.0)", lowered[0]))
+        }
+        (NamespaceId::Agents, "thirst") => {
+            expect_arity(args, 1, "agents.thirst")?;
+            Ok(format!("state.agent_thirst({}).unwrap_or(0.0)", lowered[0]))
+        }
+        (NamespaceId::Agents, "rest_timer") => {
+            expect_arity(args, 1, "agents.rest_timer")?;
+            Ok(format!("state.agent_rest_timer({}).unwrap_or(0.0)", lowered[0]))
         }
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in milestone 4 mask emission",

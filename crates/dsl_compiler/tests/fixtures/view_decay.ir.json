@@ -260,6 +260,7 @@
           }
         }
       ],
+      "kind": "Lazy",
       "decay": {
         "rate": 0.98,
         "per": "Tick",

@@ -1,0 +1,163 @@
+{
+  "events": [],
+  "event_tags": [],
+  "enums": [],
+  "entities": [],
+  "physics": [],
+  "masks": [
+    {
+      "head": {
+        "name": "Hold",
+        "shape": "None",
+        "span": {
+          "start": 330,
+          "end": 342
+        }
+      },
+      "predicate": {
+        "kind": {
+          "NamespaceCall": {
+            "ns": "Agents",
+            "method": "alive",
+            "args": [
+              {
+                "name": null,
+                "value": {
+                  "kind": {
+                    "Local": [
+                      0,
+                      "self"
+                    ]
+                  },
+                  "span": {
+                    "start": 360,
+                    "end": 364
+                  }
+                },
+                "span": {
+                  "start": 360,
+                  "end": 364
+                }
+              }
+            ]
+          }
+        },
+        "span": {
+          "start": 347,
+          "end": 365
+        }
+      },
+      "annotations": [],
+      "span": {
+        "start": 326,
+        "end": 366
+      }
+    },
+    {
+      "head": {
+        "name": "MoveToward",
+        "shape": "None",
+        "span": {
+          "start": 370,
+          "end": 382
+        }
+      },
+      "predicate": {
+        "kind": {
+          "NamespaceCall": {
+            "ns": "Agents",
+            "method": "alive",
+            "args": [
+              {
+                "name": null,
+                "value": {
+                  "kind": {
+                    "Local": [
+                      0,
+                      "self"
+                    ]
+                  },
+                  "span": {
+                    "start": 400,
+                    "end": 404
+                  }
+                },
+                "span": {
+                  "start": 400,
+                  "end": 404
+                }
+              }
+            ]
+          }
+        },
+        "span": {
+          "start": 387,
+          "end": 405
+        }
+      },
+      "annotations": [],
+      "span": {
+        "start": 366,
+        "end": 406
+      }
+    },
+    {
+      "head": {
+        "name": "Flee",
+        "shape": "None",
+        "span": {
+          "start": 410,
+          "end": 422
+        }
+      },
+      "predicate": {
+        "kind": {
+          "NamespaceCall": {
+            "ns": "Agents",
+            "method": "alive",
+            "args": [
+              {
+                "name": null,
+                "value": {
+                  "kind": {
+                    "Local": [
+                      0,
+                      "self"
+                    ]
+                  },
+                  "span": {
+                    "start": 440,
+                    "end": 444
+                  }
+                },
+                "span": {
+                  "start": 440,
+                  "end": 444
+                }
+              }
+            ]
+          }
+        },
+        "span": {
+          "start": 427,
+          "end": 445
+        }
+      },
+      "annotations": [],
+      "span": {
+        "start": 406,
+        "end": 446
+      }
+    }
+  ],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "configs": [],
+  "spans": {
+    "entries": []
+  }
+}

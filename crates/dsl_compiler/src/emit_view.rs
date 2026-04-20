@@ -257,7 +257,7 @@ mod tests {
     use crate::ast::Span;
     use crate::ir::{
         DecayHint, DecayUnit, FoldHandlerIR, IrEventPattern, IrExpr, IrExprNode, IrType, ViewBodyIR,
-        ViewIR,
+        ViewIR, ViewKind,
     };
 
     fn node(kind: IrExpr) -> IrExprNode {
@@ -299,6 +299,7 @@ mod tests {
                 clamp: Some((node(IrExpr::LitFloat(0.0)), node(IrExpr::LitFloat(1000.0)))),
             },
             annotations: vec![],
+            kind: ViewKind::Lazy,
             decay: Some(DecayHint {
                 rate: 0.98,
                 per: DecayUnit::Tick,

@@ -1,30 +1,105 @@
 // Scoring rules — compiler-emitted POD table.
 //
-// Milestone 5: this file owns the four-row scoring body that used to live
-// hand-written in `crates/engine/src/policy/utility.rs`. The emitter
-// flattens each RHS into a `ScoringEntry` with a base score plus up to
-// MAX_MODIFIERS `(predicate, delta)` rows. Supported predicate shape at
-// this milestone: `self.<field> <op> <f32 literal>`. See
-// `docs/dsl/scoring_fields.md` for the field-id mapping; extending the
-// predicate taxonomy is a schema change.
+// Every MicroKind in `crates/engine/src/mask.rs::MicroKind::ALL` gets a
+// row here. The scorer (`engine::policy::utility::UtilityBackend`)
+// iterates the table, evaluates each row's predicates against the
+// current agent, accumulates `base + Σ active-modifier deltas`, and
+// picks the highest-scoring mask-allowed kind.
 //
 // The RHS grammar the emitter recognises:
 //
 //   <rhs>     ::= <lit> | <lit> '+' <modifier> ( '+' <modifier> )*
 //   <modifier> ::= 'if' <pred> '{' <lit> '}' 'else' '{' '0.0' '}'
 //
-// Non-zero else branches are not allowed — put constant weight in the base
-// term instead. The else must exist; dropping it would leave the modifier
-// undefined when the predicate fails.
+// Non-zero else branches are not allowed — put constant weight in the
+// base term instead. The else must exist; dropping it would leave the
+// modifier undefined when the predicate fails. See
+// `docs/dsl/scoring_fields.md` for the `self.<field>` → field-id
+// mapping; extending the predicate taxonomy is a schema change.
+//
+// Scoring philosophy at milestone 141: keep everything conservative.
+// The baseline makes agents DO each action when its precondition
+// obviously fires (wounded → Flee, hungry → Eat, ...) and avoid it
+// otherwise. Tuning for game balance belongs in the TOML config, not
+// this file.
 
 scoring {
-  // Unconditional base scores — no modifiers.
+  // ===== Movement =====
+
+  // Safe fallback. Hold always scores a small positive so the scorer
+  // never hands back a negative default.
   Hold       = 0.1
+
+  // Wander / approach. Beats Hold at rest — keeps agents moving when
+  // nothing else is interesting.
   MoveToward = 0.3
 
-  // Attack: fight when healthy (hp_pct >= 50%).
+  // Retreat from danger. Only becomes attractive once hp is critical;
+  // the mask also gates on hp_pct < 0.3 so this is the scorer's tie-
+  // breaker between Flee and other low-hp actions (Eat).
+  Flee = 0.0 + (if self.hp_pct < 0.3 { 0.6 } else { 0.0 })
+
+  // ===== Combat =====
+
+  // Attack: fight when healthy (hp_pct >= 50%). Mask gates range /
+  // hostility; this just ranks the kind itself.
   Attack(t) = 0.0 + (if self.hp_pct >= 0.5 { 0.5 } else { 0.0 })
 
-  // Eat: emergency heal when low (hp_pct < 30%).
+  // Cast / UseItem: "domain hook" kinds without a dedicated
+  // `Action::*` constructor in `UtilityBackend::build_action`. Until
+  // those constructors land, winning one of these rows would route to
+  // `Action::hold` — worse than choosing MoveToward or Attack through
+  // the regular path. Keep their bases below every regular-path row
+  // (< Hold at 0.1) so the scorer never picks a hook by accident.
+  // Once the ability system emits Cast actions end-to-end, bump the
+  // Cast base so healthy agents prefer casting over marching.
+  Cast    = 0.0
+  UseItem = 0.0
+
+  // ===== Resource =====
+
+  // Harvest: same "no constructor" rule as the construction / social
+  // hooks below. Raises past Hold once a Harvest action exists.
+  Harvest = 0.0
+
+  // Eat: emergency heal-via-hunger when low (hp_pct < 30%). Current
+  // MVP: hp-driven; once hunger is a DSL-observable scalar (gradient
+  // side-table), this upgrades to a `self.hunger per_unit X` row.
   Eat = 0.0 + (if self.hp_pct < 0.3 { 0.8 } else { 0.0 })
+
+  // Drink / Rest: no `Action::drink` / `Action::rest` constructor at
+  // task 141, so even though the engine's `step` handles the micro
+  // (decrementing thirst / rest_timer), `build_action` currently
+  // routes these to Hold. Keep both bases at 0.0 until the action
+  // builder gains dedicated constructors; baseline behaviour is then
+  // preserved through the Hold fallback.
+  Drink = 0.0
+  Rest  = 0.0
+
+  // ===== Construction =====
+
+  // PlaceTile / PlaceVoxel / HarvestVoxel: no driver at task 141.
+  // Zero base so they never fire until construction-pressure
+  // modifiers (blueprint queue, faction orders) and matching
+  // `Action::*` constructors land.
+  PlaceTile    = 0.0
+  PlaceVoxel   = 0.0
+  HarvestVoxel = 0.0
+
+  // ===== Social =====
+
+  // Converse / ShareStory: baseline zero until social drivers (party
+  // cohesion, personality.social_drive) come online alongside real
+  // Action constructors.
+  Converse   = 0.0
+  ShareStory = 0.0
+
+  // ===== Info push + pull =====
+
+  Communicate = 0.0
+  Ask         = 0.0
+
+  // ===== Memory =====
+
+  Remember = 0.0
 }

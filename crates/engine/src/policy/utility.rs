@@ -115,6 +115,23 @@ fn read_field(state: &SimState, agent: AgentId, field_id: u16) -> f32 {
         }
         3 => state.agent_shield_hp(agent).unwrap_or(0.0),
         4 => state.agent_attack_range(agent).unwrap_or(2.0),
+        // Psych-needs scalars (task 141). Absent-slot fallback is `0.0`
+        // so a fresh agent with no needs state scores identically to one
+        // whose needs read "fully sated".
+        5 => state.agent_hunger(agent).unwrap_or(0.0),
+        6 => state.agent_thirst(agent).unwrap_or(0.0),
+        7 => state.agent_rest_timer(agent).unwrap_or(0.0),
+        // Personality dims (aggression / social_drive / ambition /
+        // altruism / curiosity). The SoA isn't wired yet — every read
+        // is a constant `0.0` placeholder, matching `read_personality`.
+        // Reserving the ids means a scoring row can reference
+        // `self.personality.<dim>` today and pick up live values once
+        // the SoA lands without a schema bump.
+        8 => 0.0,  // self.personality.aggression
+        9 => 0.0,  // self.personality.social_drive
+        10 => 0.0, // self.personality.ambition
+        11 => 0.0, // self.personality.altruism
+        12 => 0.0, // self.personality.curiosity
         _ => f32::NAN,
     }
 }

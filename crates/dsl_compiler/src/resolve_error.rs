@@ -71,6 +71,14 @@ pub enum ResolveError {
         offending_construct: String,
         span: Span,
     },
+    /// A view's `@lazy` / `@materialized` annotation set or `storage = ...`
+    /// hint is malformed (missing args, infeasible combination, body shape
+    /// mismatch, etc.). See spec §2.3 + §9 D31.
+    InvalidViewKind {
+        view_name: String,
+        detail: String,
+        span: Span,
+    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -145,6 +153,11 @@ impl std::fmt::Display for ResolveError {
                  abs/floor/ceil/pow/ln/sqrt/clamp, stdlib 1-hop accessors, \
                  and `let` bindings — no user-defined helpers, no loops, no \
                  cross-view composition; see spec §2.3)",
+                span.start, span.end
+            ),
+            ResolveError::InvalidViewKind { view_name, detail, span } => write!(
+                f,
+                "invalid view `{view_name}` at bytes {}..{}: {detail}",
                 span.start, span.end
             ),
         }

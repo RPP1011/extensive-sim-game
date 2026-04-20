@@ -247,6 +247,7 @@
           }
         }
       ],
+      "kind": "Lazy",
       "decay": null,
       "span": {
         "start": 109,
@@ -378,6 +379,7 @@
           }
         }
       ],
+      "kind": "Lazy",
       "decay": null,
       "span": {
         "start": 343,

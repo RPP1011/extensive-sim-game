@@ -231,6 +231,9 @@ are the milestone-3 accessor surface for compiler-emitted physics handlers.
 | `agents.add_gold(a, delta)` | `(AgentId, i64) -> ()` — `gold += delta` via `i64::wrapping_add`. No-op if the slot is absent. |
 | `agents.sub_gold(a, delta)` | `(AgentId, i64) -> ()` — `gold -= delta` via `i64::wrapping_sub`. No-op if the slot is absent. |
 | `agents.adjust_standing(a, b, delta)` | `(AgentId, AgentId, i16) -> ()` — symmetric pair-standing adjust, clamped to `[-1000, 1000]`. Inserts the pair entry as a side effect. |
+| `agents.hunger(a)` | `(AgentId) -> f32` — current hunger (0.0 sated … 1.0 starving); `0.0` if the slot is absent. |
+| `agents.thirst(a)` | `(AgentId) -> f32` — current thirst (0.0 sated … 1.0 parched); `0.0` if the slot is absent. |
+| `agents.rest_timer(a)` | `(AgentId) -> f32` — current fatigue / rest-needed scalar (0.0 rested … 1.0 exhausted); `0.0` if the slot is absent. |
 
 These map one-to-one to `SimState::agent_alive`, `agent_pos`, `agent_hp`,
 `agent_max_hp`, `agent_shield_hp`, `agent_attack_damage`, `set_agent_hp`,

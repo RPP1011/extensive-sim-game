@@ -1,0 +1,199 @@
+{
+  "decls": [
+    {
+      "Mask": {
+        "annotations": [],
+        "head": {
+          "name": "Hold",
+          "shape": "None",
+          "span": {
+            "start": 330,
+            "end": 342
+          }
+        },
+        "predicate": {
+          "kind": {
+            "Call": [
+              {
+                "kind": {
+                  "Field": [
+                    {
+                      "kind": {
+                        "Ident": "agents"
+                      },
+                      "span": {
+                        "start": 347,
+                        "end": 353
+                      }
+                    },
+                    "alive"
+                  ]
+                },
+                "span": {
+                  "start": 347,
+                  "end": 359
+                }
+              },
+              [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": {
+                      "Ident": "self"
+                    },
+                    "span": {
+                      "start": 360,
+                      "end": 364
+                    }
+                  },
+                  "span": {
+                    "start": 360,
+                    "end": 364
+                  }
+                }
+              ]
+            ]
+          },
+          "span": {
+            "start": 347,
+            "end": 365
+          }
+        },
+        "span": {
+          "start": 326,
+          "end": 366
+        }
+      }
+    },
+    {
+      "Mask": {
+        "annotations": [],
+        "head": {
+          "name": "MoveToward",
+          "shape": "None",
+          "span": {
+            "start": 370,
+            "end": 382
+          }
+        },
+        "predicate": {
+          "kind": {
+            "Call": [
+              {
+                "kind": {
+                  "Field": [
+                    {
+                      "kind": {
+                        "Ident": "agents"
+                      },
+                      "span": {
+                        "start": 387,
+                        "end": 393
+                      }
+                    },
+                    "alive"
+                  ]
+                },
+                "span": {
+                  "start": 387,
+                  "end": 399
+                }
+              },
+              [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": {
+                      "Ident": "self"
+                    },
+                    "span": {
+                      "start": 400,
+                      "end": 404
+                    }
+                  },
+                  "span": {
+                    "start": 400,
+                    "end": 404
+                  }
+                }
+              ]
+            ]
+          },
+          "span": {
+            "start": 387,
+            "end": 405
+          }
+        },
+        "span": {
+          "start": 366,
+          "end": 406
+        }
+      }
+    },
+    {
+      "Mask": {
+        "annotations": [],
+        "head": {
+          "name": "Flee",
+          "shape": "None",
+          "span": {
+            "start": 410,
+            "end": 422
+          }
+        },
+        "predicate": {
+          "kind": {
+            "Call": [
+              {
+                "kind": {
+                  "Field": [
+                    {
+                      "kind": {
+                        "Ident": "agents"
+                      },
+                      "span": {
+                        "start": 427,
+                        "end": 433
+                      }
+                    },
+                    "alive"
+                  ]
+                },
+                "span": {
+                  "start": 427,
+                  "end": 439
+                }
+              },
+              [
+                {
+                  "name": null,
+                  "value": {
+                    "kind": {
+                      "Ident": "self"
+                    },
+                    "span": {
+                      "start": 440,
+                      "end": 444
+                    }
+                  },
+                  "span": {
+                    "start": 440,
+                    "end": 444
+                  }
+                }
+              ]
+            ]
+          },
+          "span": {
+            "start": 427,
+            "end": 445
+          }
+        },
+        "span": {
+          "start": 406,
+          "end": 446
+        }
+      }
+    }
+  ]
+}

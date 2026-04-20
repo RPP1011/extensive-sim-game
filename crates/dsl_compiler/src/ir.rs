@@ -492,11 +492,37 @@ pub struct ViewIR {
     pub return_ty: IrType,
     pub body: ViewBodyIR,
     pub annotations: Vec<Annotation>,
+    /// View kind resolved from `@lazy` / `@materialized` annotations. Spec §2.3.
+    pub kind: ViewKind,
     /// Parsed, validated form of `@decay(rate=R, per=tick)` if present.
     /// `None` when the view has no decay annotation. Only valid on
     /// `@materialized` views with a `Fold` body — enforced in resolve.
     pub decay: Option<DecayHint>,
     pub span: Span,
+}
+
+/// Top-level view kind — lazy (pure fn, evaluated at read) or materialized
+/// (event-fold with persistent storage). Spec §2.3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ViewKind {
+    Lazy,
+    Materialized(StorageHint),
+}
+
+/// Storage hint for `@materialized` views. Parsed from
+/// `@materialized(storage = <hint>)`. Spec §9 D31.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum StorageHint {
+    /// Dense pair-keyed map. Backed by `HashMap<(K1, K2), V>`. Default when
+    /// `storage` is omitted; compiler rejects `pair_map` over
+    /// `(AgentId, AgentId)` at N=200K as infeasible (spec §9 D31).
+    PairMap,
+    /// Bounded per-entity top-K. Backed by
+    /// `HashMap<KeyedOn, SortedVec<V, K>>`.
+    PerEntityTopK { k: u16, keyed_on: u8 },
+    /// Compute-on-demand with per-tick cache. Backed by
+    /// `RefCell<HashMap<Args, (V, tick)>>`.
+    LazyCached,
 }
 
 /// Parsed `@decay(rate=R, per=tick)` annotation. The anchor-pattern

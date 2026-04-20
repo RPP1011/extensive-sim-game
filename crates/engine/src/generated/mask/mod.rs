@@ -2,8 +2,20 @@
 // Regenerate with `cargo run --bin xtask -- compile-dsl`.
 
 pub mod attack;
+pub mod drink;
+pub mod eat;
+pub mod flee;
+pub mod hold;
+pub mod move_toward;
+pub mod rest;
 
 pub use attack::mask_attack;
+pub use drink::mask_drink;
+pub use eat::mask_eat;
+pub use flee::mask_flee;
+pub use hold::mask_hold;
+pub use move_toward::mask_move_toward;
+pub use rest::mask_rest;
 
 /// Called from the engine's mask-build path. For milestone 4 this
 /// is a no-op shim — the engine imports each per-mask fn directly

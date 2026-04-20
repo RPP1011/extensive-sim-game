@@ -1,6 +1,8 @@
 // crates/engine/src/mask.rs
 use crate::ability::{evaluate_cast_gate, AbilityRegistry};
-use crate::generated::mask::mask_attack;
+use crate::generated::mask::{
+    mask_attack, mask_drink, mask_eat, mask_flee, mask_hold, mask_move_toward, mask_rest,
+};
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -68,59 +70,65 @@ impl MaskBuffer {
         self.micro_kind.iter_mut().for_each(|b| *b = false);
         self.target.iter_mut().for_each(|b| *b = false);
     }
-    pub fn mark_hold_allowed(&mut self, state: &SimState) {
-        for id in state.agents_alive() {
-            let slot = (id.raw() - 1) as usize;
-            let offset = slot * MicroKind::ALL.len() + MicroKind::Hold as usize;
-            self.micro_kind[offset] = true;
-        }
-    }
-    pub fn mark_move_allowed_if_others_exist(&mut self, state: &SimState) {
-        let n_alive = state.agents_alive().count();
-        if n_alive < 2 { return; }
-        for id in state.agents_alive() {
-            let slot = (id.raw() - 1) as usize;
-            let offset = slot * MicroKind::ALL.len() + MicroKind::MoveToward as usize;
-            self.micro_kind[offset] = true;
-        }
-    }
-
-    /// Mark `Flee` as allowed for every alive agent that has at least one
-    /// other alive agent within `AGGRO_RANGE`. No threat → no flee.
+    /// Walk every alive agent and set the bit for `kind` to the value
+    /// returned by the DSL-emitted self-predicate `pred(state, self_id)`.
     ///
-    /// Uses `state.spatial()` so the threat check is `O(N·k)` (k = candidates
-    /// in the 3×3 cell neighbourhood) rather than `O(N²)`.
-    pub fn mark_flee_allowed_if_threat_exists(&mut self, state: &SimState) {
+    /// Task 141 retired the bespoke per-kind `mark_*` bodies (Hold /
+    /// MoveToward / Flee / Eat / Drink / Rest) in favour of compiler-
+    /// emitted predicates in `crates/engine/src/generated/mask/*.rs`.
+    /// Centralising the loop keeps `step::step_full` readable — one
+    /// `mark_self_predicate` call per kind — and makes adding a new
+    /// self-only mask a one-line engine change once the DSL row lands.
+    pub fn mark_self_predicate(
+        &mut self,
+        state: &SimState,
+        kind: MicroKind,
+        pred: fn(&SimState, AgentId) -> bool,
+    ) {
         let n_kinds = MicroKind::ALL.len();
-        let spatial = state.spatial();
         for id in state.agents_alive() {
             let slot = (id.raw() - 1) as usize;
-            let self_pos = match state.agent_pos(id) {
-                Some(p) => p,
-                None    => continue,
-            };
-            let has_threat = spatial
-                .within_radius(state, self_pos, state.config.combat.aggro_range)
-                .into_iter()
-                .any(|other| other != id);
-            if has_threat {
-                let offset = slot * n_kinds + MicroKind::Flee as usize;
-                self.micro_kind[offset] = true;
-            }
+            let offset = slot * n_kinds + kind as usize;
+            self.micro_kind[offset] = pred(state, id);
         }
     }
 
-    /// Mark `Eat`, `Drink`, and `Rest` as always-allowed for every alive agent.
-    /// MVP: no world-state preconditions (e.g. food availability, rest site) —
-    /// those land when the inventory/site systems arrive.
+    /// Mark `Hold` via the DSL-emitted `mask_hold` predicate.
+    pub fn mark_hold_allowed(&mut self, state: &SimState) {
+        self.mark_self_predicate(state, MicroKind::Hold, mask_hold);
+    }
+
+    /// Mark `MoveToward` via the DSL-emitted `mask_move_toward` predicate.
+    ///
+    /// Name preserved from the legacy mask-build API (`*_if_others_exist`)
+    /// even though the DSL predicate is purely self-referential at task
+    /// 141 — the action builder in `UtilityBackend` still falls back to
+    /// Hold when `nearest_other` yields `None`, so the observable
+    /// behaviour matches the legacy "need at least one other agent"
+    /// gate end-to-end.
+    pub fn mark_move_allowed_if_others_exist(&mut self, state: &SimState) {
+        self.mark_self_predicate(state, MicroKind::MoveToward, mask_move_toward);
+    }
+
+    /// Mark `Flee` via the DSL-emitted `mask_flee` predicate. The DSL
+    /// predicate is permissive (allowed for any alive agent) — the real
+    /// gate (`hp_pct < 0.3`) lives in the `Flee` scoring row. The legacy
+    /// engine check also required a threat within aggro range (spatial
+    /// quantifier, not yet in the mask DSL surface); deferring the
+    /// threat check is safe because the scorer's `build_action` uses
+    /// `nearest_other` as the threat proxy and falls back to Hold when
+    /// no other agent exists.
+    pub fn mark_flee_allowed_if_threat_exists(&mut self, state: &SimState) {
+        self.mark_self_predicate(state, MicroKind::Flee, mask_flee);
+    }
+
+    /// Mark `Eat`, `Drink`, and `Rest` via their DSL-emitted predicates.
+    /// Each is self-only and currently unconditional on alive agents,
+    /// matching the legacy `mark_needs_allowed` permissiveness.
     pub fn mark_needs_allowed(&mut self, state: &SimState) {
-        let n_kinds = MicroKind::ALL.len();
-        for id in state.agents_alive() {
-            let slot = (id.raw() - 1) as usize;
-            self.micro_kind[slot * n_kinds + MicroKind::Eat   as usize] = true;
-            self.micro_kind[slot * n_kinds + MicroKind::Drink as usize] = true;
-            self.micro_kind[slot * n_kinds + MicroKind::Rest  as usize] = true;
-        }
+        self.mark_self_predicate(state, MicroKind::Eat, mask_eat);
+        self.mark_self_predicate(state, MicroKind::Drink, mask_drink);
+        self.mark_self_predicate(state, MicroKind::Rest, mask_rest);
     }
 
     /// Mark `Attack` as allowed for every alive agent that has at least one

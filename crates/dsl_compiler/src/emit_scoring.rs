@@ -684,6 +684,9 @@ fn scoring_field_id(name: &str) -> Option<u16> {
         "hp_pct" => Some(2),
         "shield_hp" => Some(3),
         "attack_range" => Some(4),
+        "hunger" => Some(5),
+        "thirst" => Some(6),
+        "fatigue" => Some(7),
         _ => None,
     }
 }

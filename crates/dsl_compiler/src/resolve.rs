@@ -186,6 +186,9 @@ mod stdlib {
             // Standing (symmetric pair storage, clamped [-1000, 1000] by
             // `SparseStandings::adjust`).
             (NamespaceId::Agents, "adjust_standing") => Some((3, IrType::Unknown)),
+            (NamespaceId::Agents, "hunger") => Some((1, IrType::F32)),
+            (NamespaceId::Agents, "thirst") => Some((1, IrType::F32)),
+            (NamespaceId::Agents, "rest_timer") => Some((1, IrType::F32)),
             _ => None,
         }
     }
@@ -495,6 +498,7 @@ fn collect(
                     return_ty: IrType::Unknown,
                     body: ViewBodyIR::Expr(IrExprNode { kind: IrExpr::LitBool(true), span: d.span }),
                     annotations: d.annotations.clone(),
+                    kind: ViewKind::Lazy,
                     decay: None,
                     span: d.span,
                 });

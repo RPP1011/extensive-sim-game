@@ -1,23 +1,57 @@
 // Mask predicates — compiler-emitted cast-time / action-time filters.
 //
-// At milestone 4 (compiler_progress.md row 4) this file owns the attack-mask
-// predicate. It replaces the hand-written hostility + range + alive-target
-// checks in `crates/engine/src/mask.rs::mark_attack_allowed_if_target_in_range`.
-//
-// The emitted predicate is a pure `fn(&SimState, AgentId, AgentId) -> bool`.
-// The engine's mask-build loop calls it per (agent, candidate-target) pair
-// and ORs the results into the per-agent Attack bit.
+// Each `mask <Name>` declaration lowers to a pure Rust predicate
+// (`fn(&SimState, AgentId[, AgentId]) -> bool`). The engine's mask-build
+// loop calls the emitted fn per alive agent (or per (agent, target) pair
+// for parametric masks) and writes the result into the per-agent
+// MicroKind bit. See `docs/game/compiler_progress.md` for the migration
+// order; task 141 retired the 5 legacy hand-written masks in
+// `crates/engine/src/mask.rs` in favour of these DSL-owned predicates.
 //
 // Non-stdlib game views (e.g. `is_hostile`) are emitted as calls into
 // `crate::rules::<name>(state, args...)`. Those fns are hand-written in
 // `crates/engine/src/rules/` and shrink as later milestones let the DSL
-// declare views directly. See `docs/game/compiler_progress.md` for the
-// planned migration order.
+// declare views directly.
 //
-// Cast-gate (cooldown + stun + engagement-lock) stays in
-// `crates/engine/src/ability/gate.rs` until a follow-up commit grows the
-// emitter to handle it.
+// The `Cast` mask-gate (cooldown + stun + engagement-lock) stays in
+// `crates/engine/src/ability/gate.rs` until a follow-up task grows the
+// emitter to handle the cooldown / stun stdlib fns. Other domain-hook
+// micros (UseItem / Harvest / Place* / Converse / ShareStory /
+// Communicate / Ask / Remember) stay permissive until their real
+// preconditions land.
 
+// Hold: always available for any alive agent. Never masked off — the
+// scorer treats Hold as the safe fallback when every other kind ranks
+// below its base.
+mask Hold when agents.alive(self)
+
+// MoveToward: always available for any alive agent. The action builder
+// resolves the target (nearest other agent) at emission time; when no
+// other agent exists the build falls back to Hold.
+mask MoveToward when agents.alive(self)
+
+// Flee: permissive — every alive agent is allowed to flee. The legacy
+// engine predicate additionally required a threat within aggro range,
+// but the DSL mask surface doesn't yet express spatial quantifiers. The
+// hp-driven gate lives in scoring (`self.hp_pct < 0.3: +0.6`) so the
+// mask doesn't have to embed a ratio expression — the `hp_pct`-style
+// predicate is emitter-supported in scoring but not yet in masks.
+//
+// Observable behaviour is unchanged: the scorer only picks Flee when
+// its hp-gated row out-ranks Hold / MoveToward, which means hp_pct <
+// 0.3 just like before.
+mask Flee when agents.alive(self)
+
+// Eat / Drink / Rest: every alive agent is currently allowed to service
+// their own needs (no food-availability or rest-site gating). Matches
+// the legacy `mark_needs_allowed` permissiveness; real preconditions
+// land when the inventory / site systems arrive.
+mask Eat   when agents.alive(self)
+mask Drink when agents.alive(self)
+mask Rest  when agents.alive(self)
+
+// Attack: hostile target within melee range. Kept last so the diff
+// against the previous revision stays small.
 mask Attack(target)
   when agents.alive(target)
     && is_hostile(self, target)
