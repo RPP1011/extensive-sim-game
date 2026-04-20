@@ -15,11 +15,11 @@ The existing game logic inside `crates/engine/src/ability/*.rs`, `crates/engine/
 | 0 | Compiler scaffold | empty module + xtask wiring | — | ✅ |
 | 1 | `event` | Event enum variants; matching Python `@dataclass` | legacy event enum decls | ✅ |
 | 2 | (renumbered) `event` integration | events emitted into `engine_rules`, engine consumes via re-export | hand-written `engine::event::Event` | ✅ |
-| 3 | `physics` rule | `impl CascadeHandler` + registration call into `engine::cascade::CascadeRegistry` | `ability/*.rs` handlers (damage, heal, shield, stun, slow, gold, standing, opportunity_attack landed; cast stays hand-written — needs `Arc<AbilityRegistry>` state) | 🚧 |
-| 4 | `mask` | predicate fn + SPIR-V kernel stub | `ability/gate.rs`, mask-build call sites | ❌ |
-| 4 | `scoring` | per-action utility table | `policy/utility.rs` scoring body | ❌ |
-| 5 | `entity` | spawn template + CreatureType variant + capability struct | `creature.rs` enum + `is_hostile_to` + `for_creature` | ❌ |
-| 6 | `view` (`@lazy` first, `@materialized` later) | inline fn / event-fold update | view-like helpers scattered in engine | ❌ |
+| 3 | `physics` rule | `impl CascadeHandler` + registration call into `engine::cascade::CascadeRegistry` | `ability/*.rs` damage handler landed at milestone 3; heal/shield/stun/slow/gold/standing/opportunity_attack landed via physics parity; cast stays legacy (needs `Arc<AbilityRegistry>` state the stateless emitter can't produce yet) | ✅ |
+| 4 | `mask` | predicate fn + SPIR-V kernel stub | `ability/gate.rs` stays legacy (cast mask). Attack mask migrated; MoveToward / Flee / Needs / Cast / domain hooks still hand-written | ✅ (Attack only) |
+| 4 | `scoring` | per-action utility table | `policy/utility.rs` scoring body; four rows (Hold/MoveToward/Attack/Eat) migrated | ✅ |
+| 5 | `entity` | spawn template + CreatureType variant + capability struct | `creature.rs` enum + `is_hostile_to` + `for_creature` — all four creatures (Human/Wolf/Deer/Dragon) now DSL-owned | ✅ |
+| 6 | `view` (`@lazy` first, `@materialized` later) | inline fn / event-fold update | view-like helpers scattered in engine; `crate::rules::is_hostile` shim waits for this | ❌ |
 | 7 | `verb` | lowering to mask + cascade + scoring entries | — (verbs are new; no legacy) | ❌ |
 | 8 | `invariant` | runtime-check fn | engine's `PoolNonOverlapInvariant`-style checks stay (engine invariants), game invariants move | ❌ |
 | 9 | `probe` | fixture-test scaffolding | existing `tests/` that encode game behavior | ❌ |
@@ -57,6 +57,16 @@ The compiler-first approach defers all game-rule work until the compiler can emi
 
 Anywhere else, the rule is: if the DSL could have declared it, the DSL must declare it. If the DSL's grammar doesn't cover the case, extend the grammar.
 
-## Interim: wolves+humans runs on legacy
+## Interim: wolves+humans runs on DSL-owned rules
 
-The current visualization (`cargo run --bin xtask -- world-sim`) runs against the hand-written legacy handlers in `crates/engine/src/ability/*.rs`. This is expected and acceptable while milestones 1–4 land. Once milestone 4 (scoring) is complete, the equivalent scenario described in `docs/game/wolves_and_humans.md` should run entirely on compiler-emitted code, with the legacy handlers deleted. At that point wolves+humans is the first DSL-owned feature; everything after is incremental.
+As of 2026-04-19 (milestones 2-6 + physics parity), the wolves+humans scenario is driven end-to-end by compiler-emitted code:
+
+- Events: all 35 variants emitted from `assets/sim/events.sim`.
+- Physics: 8 cascade handlers (damage, heal, shield, stun, slow, gold, standing, opportunity_attack) emitted from `assets/sim/physics.sim`.
+- Attack mask: emitted from `assets/sim/masks.sim`.
+- Scoring: 4-row table (Hold, MoveToward, Attack, Eat) emitted from `assets/sim/scoring.sim`.
+- Entities: 4 creatures (Human, Wolf, Deer, Dragon) with capabilities + predator/prey hostility emitted from `assets/sim/entities.sim`.
+
+The regression anchor is `crates/engine/tests/wolves_and_humans_parity.rs` — 3 humans + 2 wolves, fixed seed, 100 ticks, byte-identical event-log comparison against a committed baseline. See `docs/game/wolves_and_humans.md` for the source-level walkthrough and the honest list of game-logic surfaces that remain hand-written (cast dispatch, 5 non-Attack masks, 14 non-ranked scoring rows, and ~15 balance constants in `step.rs` / `mask.rs` / `ability/expire.rs`).
+
+The `world-sim` visualization (`cargo run --bin xtask -- world-sim`) runs on the same engine and therefore also on the DSL-owned rules. Further milestones chip at the hand-written list; see the walkthrough doc for the migration queue.
