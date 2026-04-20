@@ -1,14 +1,19 @@
-//! Ability subsystem — programs, registry, cast dispatch, and the unified
-//! tick-start phase that decrements combat-timing fields and recomputes
-//! engagement bindings.
+//! Ability subsystem — programs, registry, cast dispatch, and the cast
+//! gate predicate.
 //!
-//! Module layout (Combat Foundation Tasks 3 + 6–9):
+//! Module layout (Combat Foundation Tasks 6–9):
 //! - `id`       — `AbilityId` newtype (NonZeroU32)
 //! - `program`  — `AbilityProgram` IR + `EffectOp` / `Area` / `Delivery` / `Gate`
 //! - `registry` — `AbilityRegistry` + append-only builder
 //! - `cast`     — `CastHandler` cascade dispatcher (one handler, branches on EffectOp)
 //! - `gate`     — `evaluate_cast_gate` mask predicate
-//! - `expire`   — tick-start unified pass (decrement + expire + engagement)
+//!
+//! Task 143 deleted the `expire` module — stun / slow are now stored as
+//! absolute expiry ticks (`stun_expires_at_tick` / `slow_expires_at_tick`)
+//! rather than per-tick-decremented counters, so the `tick_start_timers`
+//! pass this module used to own is gone. The last per-tick reducer is
+//! retired; every time-gated combat field is now a synthetic boundary
+//! read off `state.tick`.
 //!
 //! Per-effect cascade handlers (`damage`, `heal`, `shield`, `stun`, `slow`,
 //! `transfer_gold`, `modify_standing`, `opportunity_attack`, `record_memory`)
@@ -21,7 +26,6 @@ mod id;
 pub use id::AbilityId;
 
 pub mod cast;
-pub mod expire;
 pub mod gate;
 pub mod program;
 pub mod registry;

@@ -49,7 +49,9 @@ fn baseline_passes() {
 #[test]
 fn stunned_caster_cannot_cast() {
     let mut fx = fixture();
-    fx.state.set_agent_stun_remaining(fx.caster, 1);
+    // Task 143: setting the expiry tick to `state.tick + 1` makes the
+    // caster stunned at the current tick.
+    fx.state.set_agent_stun_expires_at(fx.caster, fx.state.tick + 1);
     assert!(!evaluate_cast_gate(&fx.state, &fx.registry, fx.caster, fx.ability, fx.target));
 }
 

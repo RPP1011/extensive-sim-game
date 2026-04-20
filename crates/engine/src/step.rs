@@ -93,30 +93,31 @@ fn restore_need(current: f32, desired_delta: f32) -> (f32, f32) {
 }
 
 /// Convert the active effect-slow factor (q8 fixed-point) into an f32
-/// multiplier. Returns 1.0 when no slow is active (`remaining == 0` OR
+/// multiplier. Returns 1.0 when no slow is active (expiry elapsed OR
 /// `factor_q8 <= 0`). The caller composes this multiplicatively with any
 /// other speed modifiers (e.g. engagement-slow in the MoveToward branch).
 ///
 /// q8 encoding: `factor_q8 = round(multiplier * 256)`. A factor of `51`
-/// corresponds to ≈0.2× (51 / 256 ≈ 0.199).
+/// corresponds to ≈0.2× (51 / 256 ≈ 0.199). Task 143 replaced the
+/// `slow_remaining_ticks > 0` read with `effective_slow_factor_q8`, which
+/// returns 0 once `state.tick >= slow_expires_at_tick` — the same
+/// inactive-slow check without a per-tick decrement pass.
 fn effect_slow_multiplier(state: &SimState, id: AgentId) -> f32 {
-    let remaining = state.agent_slow_remaining(id).unwrap_or(0);
-    if remaining == 0 { return 1.0; }
-    let factor_q8 = state.agent_slow_factor_q8(id).unwrap_or(0);
+    let factor_q8 = state.effective_slow_factor_q8(id);
     if factor_q8 <= 0 { return 1.0; }
     factor_q8 as f32 / 256.0
 }
 
 /// Per-tick scratch buffers hoisted out of `step` so a steady-state tick loop
 /// allocates zero bytes. Caller constructs once (capacity = `state.agent_cap()`),
-/// reuses across ticks. Buffers are reset/cleared at the top of each `step`
-/// and at entry to `ability::expire::tick_start`.
+/// reuses across ticks. Buffers are reset/cleared at the top of each `step`.
 ///
-/// The two `engagement_*` buffers are shared with
-/// `ability::expire::tick_start` (the unified tick-start phase). Hoisting them
-/// here moves the previous per-tick `Vec<AgentId>` + `Vec<Option<AgentId>>` of
-/// size `agent_cap` allocations out of the hot path — at N=500 × 1000 ticks
-/// that was ~500 K allocations per `mixed_actions/500` iteration.
+/// Task 143 retired the last per-tick reducer — `tick_start_timers` in
+/// `ability::expire` — by moving stun / slow onto absolute expiry ticks
+/// (read through `SimState::agent_stunned` / `effective_slow_factor_q8`).
+/// The `engagement_alive_ids` buffer it used to share is dropped; the
+/// engagement update is event-driven (task 139) and scans via the spatial
+/// index per `AgentMoved`, not via a hoisted slot snapshot.
 pub struct SimScratch {
     pub mask:        MaskBuffer,
     /// Per-agent per-target-bound-kind candidate list. Task 138 —
@@ -125,14 +126,6 @@ pub struct SimScratch {
     pub target_mask: TargetMask,
     pub actions:     Vec<Action>,
     pub shuffle_idx: Vec<u32>,
-    /// Snapshot of `state.agents_alive()` taken at the top of
-    /// `tick_start_timers` and reused by the stun/slow expiry walk so
-    /// the pass doesn't re-walk the alive iterator. Cleared on entry.
-    /// Task 139 retired the companion `engagement_tentative` buffer —
-    /// the event-driven engagement update scans via the spatial index
-    /// on each `AgentMoved` and no longer needs a per-tick tentative
-    /// slate.
-    pub engagement_alive_ids: Vec<AgentId>,
 }
 
 impl SimScratch {
@@ -142,7 +135,6 @@ impl SimScratch {
             target_mask: TargetMask::new(n_agents),
             actions:     Vec::with_capacity(n_agents),
             shuffle_idx: Vec::with_capacity(n_agents),
-            engagement_alive_ids: Vec::with_capacity(n_agents),
         }
     }
 }
@@ -203,15 +195,14 @@ pub fn step_full<B: PolicyBackend>(
 ) {
     let t_start = std::time::Instant::now();
 
-    // Combat Foundation Task 3 — tick-start timer expiry. Decrements
-    // `hot_stun_remaining_ticks` / `hot_slow_remaining_ticks` and emits
-    // `StunExpired` / `SlowExpired` on transitions to zero. Runs before
-    // the mask so mask predicates observe post-decrement state.
-    //
-    // Task 139 retired this phase's engagement responsibility; the
-    // event-driven `crate::engagement::*` cascade handlers now maintain
-    // the `engaged_with` view from `AgentMoved` / `AgentDied` events.
-    crate::ability::expire::tick_start_timers(state, scratch, events);
+    // Task 143 retired the tick-start timer decrement pass. Stun / slow
+    // expiry are now stored as absolute expiry ticks; mask predicates
+    // read `agent_stunned(id)` / `effective_slow_factor_q8(id)` which
+    // compare `state.tick` against the stored expiry without mutating
+    // anything. Task 139 had already moved the engagement update off
+    // this phase onto the event-driven `crate::engagement::*` handlers,
+    // so there is no longer any tick-start bookkeeping to run — step
+    // jumps straight to mask build.
 
     // Phase 1 — mask build. Task 138: target-bound kinds (Attack /
     // MoveToward) also populate per-agent candidate lists in

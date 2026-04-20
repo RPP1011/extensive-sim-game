@@ -169,11 +169,15 @@ mod stdlib {
             (NamespaceId::Agents, "set_hp") => Some((2, IrType::Unknown)),
             (NamespaceId::Agents, "set_shield_hp") => Some((2, IrType::Unknown)),
             (NamespaceId::Agents, "kill") => Some((1, IrType::Unknown)),
-            // Status-effect accessors.
-            (NamespaceId::Agents, "stun_remaining_ticks") => Some((1, IrType::U32)),
-            (NamespaceId::Agents, "set_stun_remaining_ticks") => Some((2, IrType::Unknown)),
-            (NamespaceId::Agents, "slow_remaining_ticks") => Some((1, IrType::U32)),
-            (NamespaceId::Agents, "set_slow_remaining_ticks") => Some((2, IrType::Unknown)),
+            // Status-effect accessors. Task 143 retired the per-tick
+            // decrement pass; stun/slow are now stored as absolute expiry
+            // ticks (`world.tick < expires_at_tick` means active). The
+            // `slow_factor_q8` accessor still reads the raw q8 slot; the
+            // `slow_factor` lazy view wraps that with the expiry check.
+            (NamespaceId::Agents, "stun_expires_at_tick") => Some((1, IrType::U32)),
+            (NamespaceId::Agents, "set_stun_expires_at_tick") => Some((2, IrType::Unknown)),
+            (NamespaceId::Agents, "slow_expires_at_tick") => Some((1, IrType::U32)),
+            (NamespaceId::Agents, "set_slow_expires_at_tick") => Some((2, IrType::Unknown)),
             (NamespaceId::Agents, "slow_factor_q8") => Some((1, IrType::I16)),
             (NamespaceId::Agents, "set_slow_factor_q8") => Some((2, IrType::Unknown)),
             // Inventory / economy.

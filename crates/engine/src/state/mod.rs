@@ -82,13 +82,18 @@ pub struct SimState {
     // after `ability::expire::tick_start` runs (bidirectional invariant).
     // `None` means disengaged. Storage here; enforcement in Task 3.
     hot_engaged_with:   Vec<Option<AgentId>>,
-    // Combat Foundation Task 2: timed status fields decremented at tick start
-    // by `ability::expire::tick_start`. `stun_remaining == 0` means not
-    // stunned; same for slow. `slow_factor_q8` is a q8 fixed-point speed
-    // multiplier (e.g. 51 ≈ 0.2× speed, 204 ≈ 0.8× speed). Cooldown is an
-    // absolute tick (no decrement); mask compares against `state.tick`.
-    hot_stun_remaining_ticks:     Vec<u32>,
-    hot_slow_remaining_ticks:     Vec<u32>,
+    // Combat Foundation Task 2 + Task 143: timed status fields stored as
+    // absolute expiry ticks. `stun_expires_at_tick == 0` means not stunned
+    // (a real expiry always sits at `state.tick + duration > 0`); same
+    // for slow. `slow_factor_q8` is a q8 fixed-point speed multiplier
+    // (e.g. 51 ≈ 0.2× speed, 204 ≈ 0.8× speed) read through the
+    // `slow_factor` lazy view which zeroes it once the expiry has
+    // elapsed. Cooldown is an absolute tick too; mask compares against
+    // `state.tick`. Task 143 retired the per-tick `tick_start_timers`
+    // decrement — expiry is now a synthetic boundary: `state.tick <
+    // expires_at_tick` means active.
+    hot_stun_expires_at_tick:     Vec<u32>,
+    hot_slow_expires_at_tick:     Vec<u32>,
     hot_slow_factor_q8:           Vec<i16>,
     hot_cooldown_next_ready_tick: Vec<u32>,
 
@@ -203,8 +208,8 @@ impl SimState {
             hot_altruism:        vec![0.5; cap],
             hot_curiosity:       vec![0.5; cap],
             hot_engaged_with:    vec![None; cap],
-            hot_stun_remaining_ticks:     vec![0; cap],
-            hot_slow_remaining_ticks:     vec![0; cap],
+            hot_stun_expires_at_tick:     vec![0; cap],
+            hot_slow_expires_at_tick:     vec![0; cap],
             hot_slow_factor_q8:           vec![0; cap],
             hot_cooldown_next_ready_tick: vec![0; cap],
             cold_creature_type:  vec![None; cap],
@@ -277,8 +282,8 @@ impl SimState {
         self.hot_altruism[slot]        = 0.5;
         self.hot_curiosity[slot]       = 0.5;
         self.hot_engaged_with[slot]    = None;
-        self.hot_stun_remaining_ticks[slot]     = 0;
-        self.hot_slow_remaining_ticks[slot]     = 0;
+        self.hot_stun_expires_at_tick[slot]     = 0;
+        self.hot_slow_expires_at_tick[slot]     = 0;
         self.hot_slow_factor_q8[slot]           = 0;
         self.hot_cooldown_next_ready_tick[slot] = 0;
         let caps = Capabilities::for_creature(spec.creature_type);
@@ -522,31 +527,55 @@ impl SimState {
         }
     }
 
-    // Combat timing (Combat Foundation Task 2).
-    pub fn agent_stun_remaining(&self, id: AgentId) -> Option<u32> {
-        self.hot_stun_remaining_ticks
+    // Combat timing (Combat Foundation Task 2 + Task 143). Fields store
+    // absolute expiry ticks; an agent is stunned while `state.tick <
+    // expires_at_tick`. The `agent_stunned` / `effective_slow_factor_q8`
+    // helpers below encapsulate that read and are what mask / scoring
+    // code should call.
+    pub fn agent_stun_expires_at(&self, id: AgentId) -> Option<u32> {
+        self.hot_stun_expires_at_tick
             .get(AgentSlotPool::slot_of_agent(id))
             .copied()
     }
-    pub fn set_agent_stun_remaining(&mut self, id: AgentId, v: u32) {
+    pub fn set_agent_stun_expires_at(&mut self, id: AgentId, v: u32) {
         if let Some(s) = self
-            .hot_stun_remaining_ticks
+            .hot_stun_expires_at_tick
             .get_mut(AgentSlotPool::slot_of_agent(id))
         {
             *s = v;
         }
     }
-    pub fn agent_slow_remaining(&self, id: AgentId) -> Option<u32> {
-        self.hot_slow_remaining_ticks
+    pub fn agent_slow_expires_at(&self, id: AgentId) -> Option<u32> {
+        self.hot_slow_expires_at_tick
             .get(AgentSlotPool::slot_of_agent(id))
             .copied()
     }
-    pub fn set_agent_slow_remaining(&mut self, id: AgentId, v: u32) {
+    pub fn set_agent_slow_expires_at(&mut self, id: AgentId, v: u32) {
         if let Some(s) = self
-            .hot_slow_remaining_ticks
+            .hot_slow_expires_at_tick
             .get_mut(AgentSlotPool::slot_of_agent(id))
         {
             *s = v;
+        }
+    }
+    /// Currently-active stun predicate: returns `true` while
+    /// `state.tick < agent_stun_expires_at(id)`. The zero sentinel means
+    /// "never stunned" (initial state and post-expiry are both 0 /
+    /// `state.tick >= 0`, so the comparison rejects both).
+    pub fn agent_stunned(&self, id: AgentId) -> bool {
+        let exp = self.agent_stun_expires_at(id).unwrap_or(0);
+        self.tick < exp
+    }
+    /// Effective slow factor: the stored `slow_factor_q8` while the slow
+    /// is still active, `0` once the expiry has elapsed. Callers that
+    /// just want a speed multiplier should prefer this over the raw
+    /// accessor pair so they don't need to re-check the expiry.
+    pub fn effective_slow_factor_q8(&self, id: AgentId) -> i16 {
+        let exp = self.agent_slow_expires_at(id).unwrap_or(0);
+        if self.tick < exp {
+            self.agent_slow_factor_q8(id).unwrap_or(0)
+        } else {
+            0
         }
     }
     pub fn agent_slow_factor_q8(&self, id: AgentId) -> Option<i16> {
@@ -990,12 +1019,12 @@ impl SimState {
         &self.hot_engaged_with
     }
 
-    // Combat-timing bulk slices (Combat Foundation Task 2).
-    pub fn hot_stun_remaining_ticks(&self) -> &[u32] {
-        &self.hot_stun_remaining_ticks
+    // Combat-timing bulk slices (Combat Foundation Task 2 + Task 143).
+    pub fn hot_stun_expires_at_tick(&self) -> &[u32] {
+        &self.hot_stun_expires_at_tick
     }
-    pub fn hot_slow_remaining_ticks(&self) -> &[u32] {
-        &self.hot_slow_remaining_ticks
+    pub fn hot_slow_expires_at_tick(&self) -> &[u32] {
+        &self.hot_slow_expires_at_tick
     }
     pub fn hot_slow_factor_q8(&self) -> &[i16] {
         &self.hot_slow_factor_q8

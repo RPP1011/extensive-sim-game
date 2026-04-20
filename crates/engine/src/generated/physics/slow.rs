@@ -7,18 +7,16 @@ use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn slow(c: AgentId, t: AgentId, d: u32, f: i16, state: &mut SimState, events: &mut EventRing) {
+pub fn slow(c: AgentId, t: AgentId, e: u32, f: i16, state: &mut SimState, events: &mut EventRing) {
     if state.agent_alive(t) {
-        if (d > 0) {
-            if (f > 0) {
-                let cur_dur = state.agent_slow_remaining(t).unwrap_or(0);
-                let cur_fac = state.agent_slow_factor_q8(t).unwrap_or(0);
-                let longer = (d > cur_dur);
-                let stronger = ((cur_fac == 0) || (f < cur_fac));
-                if (longer || stronger) {
-                    state.set_agent_slow_remaining(t, d);
-                    state.set_agent_slow_factor_q8(t, f);
-                }
+        if (f > 0) {
+            let cur_exp = state.agent_slow_expires_at(t).unwrap_or(0);
+            let cur_fac = state.agent_slow_factor_q8(t).unwrap_or(0);
+            let longer = (e > cur_exp);
+            let stronger = ((cur_fac == 0) || (f < cur_fac));
+            if (longer || stronger) {
+                state.set_agent_slow_expires_at(t, e);
+                state.set_agent_slow_factor_q8(t, f);
             }
         }
     }

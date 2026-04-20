@@ -803,25 +803,25 @@ fn lower_namespace_call(
                 lowered[0]
             ))
         }
-        (NamespaceId::Agents, "stun_remaining_ticks") => {
-            expect_arity(args, 1, "agents.stun_remaining_ticks")?;
-            Ok(format!("state.agent_stun_remaining({}).unwrap_or(0)", lowered[0]))
+        (NamespaceId::Agents, "stun_expires_at_tick") => {
+            expect_arity(args, 1, "agents.stun_expires_at_tick")?;
+            Ok(format!("state.agent_stun_expires_at({}).unwrap_or(0)", lowered[0]))
         }
-        (NamespaceId::Agents, "set_stun_remaining_ticks") => {
-            expect_arity(args, 2, "agents.set_stun_remaining_ticks")?;
+        (NamespaceId::Agents, "set_stun_expires_at_tick") => {
+            expect_arity(args, 2, "agents.set_stun_expires_at_tick")?;
             Ok(format!(
-                "state.set_agent_stun_remaining({}, {})",
+                "state.set_agent_stun_expires_at({}, {})",
                 lowered[0], lowered[1]
             ))
         }
-        (NamespaceId::Agents, "slow_remaining_ticks") => {
-            expect_arity(args, 1, "agents.slow_remaining_ticks")?;
-            Ok(format!("state.agent_slow_remaining({}).unwrap_or(0)", lowered[0]))
+        (NamespaceId::Agents, "slow_expires_at_tick") => {
+            expect_arity(args, 1, "agents.slow_expires_at_tick")?;
+            Ok(format!("state.agent_slow_expires_at({}).unwrap_or(0)", lowered[0]))
         }
-        (NamespaceId::Agents, "set_slow_remaining_ticks") => {
-            expect_arity(args, 2, "agents.set_slow_remaining_ticks")?;
+        (NamespaceId::Agents, "set_slow_expires_at_tick") => {
+            expect_arity(args, 2, "agents.set_slow_expires_at_tick")?;
             Ok(format!(
-                "state.set_agent_slow_remaining({}, {})",
+                "state.set_agent_slow_expires_at({}, {})",
                 lowered[0], lowered[1]
             ))
         }

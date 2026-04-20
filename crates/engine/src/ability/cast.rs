@@ -113,11 +113,18 @@ fn emit_effect_event(
             events.push(Event::EffectShieldApplied { actor: caster, target, amount, tick });
         }
         EffectOp::Stun { duration_ticks } => {
-            events.push(Event::EffectStunApplied { actor: caster, target, duration_ticks, tick });
+            // Task 143 — the event carries the absolute expiry tick. The
+            // DSL-authored `duration_ticks` on the `EffectOp` stays (so
+            // ability authors keep specifying the duration they want); we
+            // compose it with `tick` here so consumers can treat the event
+            // as a pure "set the expiry" directive.
+            let expires_at_tick = tick.saturating_add(duration_ticks);
+            events.push(Event::EffectStunApplied { actor: caster, target, expires_at_tick, tick });
         }
         EffectOp::Slow { duration_ticks, factor_q8 } => {
+            let expires_at_tick = tick.saturating_add(duration_ticks);
             events.push(Event::EffectSlowApplied {
-                actor: caster, target, duration_ticks, factor_q8, tick,
+                actor: caster, target, expires_at_tick, factor_q8, tick,
             });
         }
         EffectOp::TransferGold { amount } => {

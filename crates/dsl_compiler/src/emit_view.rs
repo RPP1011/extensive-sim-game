@@ -838,6 +838,19 @@ fn lower_expr_kind(kind: &IrExpr) -> Result<String, EmitError> {
             let r = lower_expr(rhs)?;
             Ok(format!("({}{r})", unop_str(*op)))
         }
+        IrExpr::If { cond, then_expr, else_expr } => {
+            let c = lower_expr(cond)?;
+            let t = lower_expr(then_expr)?;
+            let e = match else_expr {
+                Some(e) => lower_expr(e)?,
+                None => {
+                    return Err(EmitError::Unsupported(
+                        "`if` expression without else not supported in view emission".into(),
+                    ));
+                }
+            };
+            Ok(format!("(if {c} {{ {t} }} else {{ {e} }})"))
+        }
         other => Err(EmitError::Unsupported(format!(
             "expression shape {other:?} not supported in @lazy view lowering"
         ))),
@@ -852,6 +865,9 @@ fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitErr
         return Err(EmitError::Unsupported(format!(
             "bare `config.{field}` is not a value; address a specific field"
         )));
+    }
+    if ns == NamespaceId::World && field == "tick" {
+        return Ok("state.tick".into());
     }
     Err(EmitError::Unsupported(format!(
         "namespace-field `{}.{field}` not supported in view emission",
@@ -901,6 +917,23 @@ fn lower_namespace_call(
                 b = lowered[1],
             ))
         }
+        // Timestamp-based stun/slow accessors (task 143). The `*_expires_at_tick`
+        // slots store `state.tick`-relative absolute expiries; `0` means
+        // no effect active. Views expose these through `is_stunned` +
+        // `slow_factor` without duplicating the predicate at each call
+        // site.
+        (NamespaceId::Agents, "stun_expires_at_tick") => Ok(format!(
+            "state.agent_stun_expires_at({}).unwrap_or(0)",
+            lowered[0]
+        )),
+        (NamespaceId::Agents, "slow_expires_at_tick") => Ok(format!(
+            "state.agent_slow_expires_at({}).unwrap_or(0)",
+            lowered[0]
+        )),
+        (NamespaceId::Agents, "slow_factor_q8") => Ok(format!(
+            "state.agent_slow_factor_q8({}).unwrap_or(0)",
+            lowered[0]
+        )),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in view emission",
             ns.name()

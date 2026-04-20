@@ -8,7 +8,7 @@ use crate::ids::AgentId;
 pub struct EffectSlowApplied {
     pub actor: AgentId,
     pub target: AgentId,
-    pub duration_ticks: u32,
+    pub expires_at_tick: u32,
     pub factor_q8: i16,
     pub tick: u32,
 }

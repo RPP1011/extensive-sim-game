@@ -281,16 +281,6 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(confidence.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::StunExpired { agent_id, tick } => {
-            h.update([23u8]);
-            h.update(agent_id.raw().to_le_bytes());
-            h.update(tick.to_le_bytes());
-        }
-        Event::SlowExpired { agent_id, tick } => {
-            h.update([24u8]);
-            h.update(agent_id.raw().to_le_bytes());
-            h.update(tick.to_le_bytes());
-        }
         Event::OpportunityAttackTriggered { actor, target, tick } => {
             h.update([25u8]);
             h.update(actor.raw().to_le_bytes());
@@ -318,18 +308,18 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(amount.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::EffectStunApplied { actor, target, duration_ticks, tick } => {
+        Event::EffectStunApplied { actor, target, expires_at_tick, tick } => {
             h.update([29u8]);
             h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
-            h.update(duration_ticks.to_le_bytes());
+            h.update(expires_at_tick.to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::EffectSlowApplied { actor, target, duration_ticks, factor_q8, tick } => {
+        Event::EffectSlowApplied { actor, target, expires_at_tick, factor_q8, tick } => {
             h.update([30u8]);
             h.update(actor.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
-            h.update(duration_ticks.to_le_bytes());
+            h.update(expires_at_tick.to_le_bytes());
             h.update(factor_q8.to_le_bytes());
             h.update(tick.to_le_bytes());
         }

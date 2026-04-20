@@ -29,8 +29,9 @@ pub enum EventKindId {
     BidPlaced            = 20,
     AnnounceEmitted      = 21,
     RecordMemory         = 22,
-    StunExpired          = 23,
-    SlowExpired          = 24,
+    // Slots 23-24 retired in task 143 along with StunExpired / SlowExpired.
+    // Stun / slow expiry is now a synthetic boundary read off
+    // `stun_expires_at_tick` / `slow_expires_at_tick`, no event emitted.
     OpportunityAttackTriggered = 25,
     // Combat Foundation Task 9 — effect fan-out + recursion-audit events.
     EffectDamageApplied  = 26,
@@ -75,8 +76,6 @@ impl EventKindId {
             Event::BidPlaced            { .. } => EventKindId::BidPlaced,
             Event::AnnounceEmitted      { .. } => EventKindId::AnnounceEmitted,
             Event::RecordMemory         { .. } => EventKindId::RecordMemory,
-            Event::StunExpired          { .. } => EventKindId::StunExpired,
-            Event::SlowExpired          { .. } => EventKindId::SlowExpired,
             Event::OpportunityAttackTriggered { .. } => EventKindId::OpportunityAttackTriggered,
             Event::EffectDamageApplied  { .. } => EventKindId::EffectDamageApplied,
             Event::EffectHealApplied    { .. } => EventKindId::EffectHealApplied,

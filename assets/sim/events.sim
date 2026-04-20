@@ -76,10 +76,6 @@ event_tag Audit    { actor: AgentId }
 @replayable event AnnounceEmitted { speaker: AgentId, audience_tag: u8, fact_payload: u64 }
 @replayable event RecordMemory { observer: AgentId, source: AgentId, fact_payload: u64, confidence: f32 }
 
-// Combat Foundation Task 3 — stun/slow expiry.
-@replayable event StunExpired { agent_id: AgentId }
-@replayable event SlowExpired { agent_id: AgentId }
-
 // Combat Foundation Task 4 — opportunity attack fired by the engager
 // when an engaged agent tries to move away or flee.
 @replayable @harmful event OpportunityAttackTriggered { actor: AgentId, target: AgentId }
@@ -99,8 +95,15 @@ event_tag Audit    { actor: AgentId }
 @replayable @harmful event EffectDamageApplied { actor: AgentId, target: AgentId, amount: f32 }
 @replayable event EffectHealApplied { actor: AgentId, target: AgentId, amount: f32 }
 @replayable event EffectShieldApplied { actor: AgentId, target: AgentId, amount: f32 }
-@replayable @harmful event EffectStunApplied { actor: AgentId, target: AgentId, duration_ticks: u32 }
-@replayable @harmful event EffectSlowApplied { actor: AgentId, target: AgentId, duration_ticks: u32, factor_q8: i16 }
+// Task 143 — timestamp-based expiry. The cast emit-site computes
+// `expires_at_tick = state.tick + duration_ticks` and carries the
+// absolute tick on the event; physics compares that to `state.tick`
+// instead of decrementing a per-tick counter. No StunExpired /
+// SlowExpired companion events — expiry is a synthetic boundary read
+// off the stored tick through the `is_stunned` / `slow_factor` lazy
+// views.
+@replayable @harmful event EffectStunApplied { actor: AgentId, target: AgentId, expires_at_tick: u32 }
+@replayable @harmful event EffectSlowApplied { actor: AgentId, target: AgentId, expires_at_tick: u32, factor_q8: i16 }
 @replayable event EffectGoldTransfer { from: AgentId, to: AgentId, amount: i64 }
 @replayable event EffectStandingDelta { a: AgentId, b: AgentId, delta: i16 }
 

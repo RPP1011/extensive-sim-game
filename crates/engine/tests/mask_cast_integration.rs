@@ -146,9 +146,9 @@ fn cast_bit_false_when_caster_stunned() {
             hp: 100.0,
         })
         .unwrap();
-    // Stun for 5 ticks; tick_start decrements by 1 before the mask phase,
-    // so remaining 4 at mask-build time — still stunned, still blocked.
-    state.set_agent_stun_remaining(caster, 5);
+    // Task 143 — set an absolute expiry of state.tick+5. Mask read
+    // sees `state.tick < expires_at_tick` → stunned, Cast bit flipped off.
+    state.set_agent_stun_expires_at(caster, state.tick + 5);
     run_one_tick(&mut state, &mut scratch, &mut events, &cascade, &invariants);
     let slot = (caster.raw() - 1) as usize;
     assert!(!cast_bit(&scratch.mask, slot),

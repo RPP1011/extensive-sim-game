@@ -4,7 +4,8 @@
 //! Returns `true` exactly when *all* of the following hold:
 //!
 //! 1. **Caster alive + un-stunned.** `agent_alive(caster)` is true and
-//!    `agent_stun_remaining(caster) == 0`.
+//!    `agent_stunned(caster)` is false (task 143 — stun is a synthetic
+//!    boundary on `state.tick < stun_expires_at_tick`).
 //! 2. **Cooldown ready.** `state.tick >= agent_cooldown_next_ready(caster)`.
 //! 3. **Ability registered.** `registry.get(ability)` is `Some`.
 //! 4. **Target alive + in range.** `agent_alive(target)` is true and
@@ -34,9 +35,10 @@ pub fn evaluate_cast_gate(
     ability:  AbilityId,
     target:   AgentId,
 ) -> bool {
-    // 1. Caster alive + un-stunned.
+    // 1. Caster alive + un-stunned. Task 143: `agent_stunned` is the
+    // synthetic boundary read — `state.tick < stun_expires_at_tick`.
     if !state.agent_alive(caster) { return false; }
-    if state.agent_stun_remaining(caster).unwrap_or(0) > 0 { return false; }
+    if state.agent_stunned(caster) { return false; }
 
     // 2. Cooldown ready. `next_ready_tick` is absolute; we compare to the
     //    current tick directly.

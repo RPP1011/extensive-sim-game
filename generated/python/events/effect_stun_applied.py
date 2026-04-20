@@ -9,5 +9,5 @@ from dataclasses import dataclass
 class EffectStunApplied:
     actor: int  # AgentId
     target: int  # AgentId
-    duration_ticks: int
+    expires_at_tick: int
     tick: int

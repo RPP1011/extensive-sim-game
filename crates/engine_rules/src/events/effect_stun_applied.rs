@@ -8,6 +8,6 @@ use crate::ids::AgentId;
 pub struct EffectStunApplied {
     pub actor: AgentId,
     pub target: AgentId,
-    pub duration_ticks: u32,
+    pub expires_at_tick: u32,
     pub tick: u32,
 }

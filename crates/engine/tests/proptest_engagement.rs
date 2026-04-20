@@ -1,12 +1,11 @@
 //! Combat Foundation Task 5 — engagement symmetry + range + determinism
 //! proptest. Covers acceptance criterion (5) in the plan header.
 
-use engine::ability::expire::tick_start;
+use engine::engagement::recompute_all_engagements;
 use engine::creature::CreatureType;
 use engine::event::EventRing;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
-use engine::step::SimScratch;
 use engine_rules::config::Config;
 use glam::Vec3;
 use proptest::prelude::*;
@@ -46,9 +45,10 @@ fn build_state(pop: &[(CreatureType, (f32, f32, f32))]) -> (SimState, Vec<AgentI
 }
 
 fn run_tick_start(state: &mut SimState) {
+    // Task 139 + Task 143 — engagement recompute lives on the event-driven
+    // path; the legacy `ability::expire::tick_start` shim is gone.
     let mut ring = EventRing::with_cap(256);
-    let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    tick_start(state, &mut scratch, &mut ring);
+    recompute_all_engagements(state, &mut ring);
 }
 
 proptest! {

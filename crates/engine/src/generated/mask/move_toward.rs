@@ -3,8 +3,8 @@
 // Do not edit by hand.
 
 use crate::ids::AgentId;
-use crate::mask::TargetMask;
 use crate::state::SimState;
+use crate::mask::TargetMask;
 
 /// Predicate: can `self_id` issue this mask's action head against the given target?
 /// Lowered from `mask MoveToward` in `assets/sim/masks.sim`.
@@ -26,12 +26,8 @@ pub fn mask_move_toward_candidates(state: &SimState, self_id: AgentId, out: &mut
     let radius = state.config.movement.max_move_radius;
     let spatial = state.spatial();
     for target in spatial.within_radius(state, pos, radius) {
-        if target == self_id {
-            continue;
-        }
-        if !mask_move_toward(state, self_id, target) {
-            continue;
-        }
+        if target == self_id { continue; }
+        if !mask_move_toward(state, self_id, target) { continue; }
         out.push(self_id, crate::mask::MicroKind::MoveToward, target);
     }
 }

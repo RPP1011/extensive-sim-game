@@ -3,10 +3,14 @@
 
 pub mod engaged_with;
 pub mod is_hostile;
+pub mod is_stunned;
+pub mod slow_factor;
 pub mod threat_level;
 
 pub use engaged_with::EngagedWith;
 pub use is_hostile::is_hostile;
+pub use is_stunned::is_stunned;
+pub use slow_factor::slow_factor;
 pub use threat_level::ThreatLevel;
 
 /// Compiler-emitted view registry — one field per `@materialized` view.

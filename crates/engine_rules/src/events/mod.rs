@@ -36,8 +36,6 @@ pub mod opportunity_attack_triggered;
 pub mod quest_accepted;
 pub mod quest_posted;
 pub mod record_memory;
-pub mod slow_expired;
-pub mod stun_expired;
 
 pub use agent_ate::AgentAte;
 pub use agent_attacked::AgentAttacked;
@@ -74,8 +72,6 @@ pub use opportunity_attack_triggered::OpportunityAttackTriggered;
 pub use quest_accepted::QuestAccepted;
 pub use quest_posted::QuestPosted;
 pub use record_memory::RecordMemory;
-pub use slow_expired::SlowExpired;
-pub use stun_expired::StunExpired;
 
 use crate::ids::{AbilityId, AgentId, QuestId};
 use crate::types::QuestCategory;
@@ -224,7 +220,7 @@ pub enum Event {
     EffectSlowApplied {
         actor: AgentId,
         target: AgentId,
-        duration_ticks: u32,
+        expires_at_tick: u32,
         factor_q8: i16,
         tick: u32,
     },
@@ -237,7 +233,7 @@ pub enum Event {
     EffectStunApplied {
         actor: AgentId,
         target: AgentId,
-        duration_ticks: u32,
+        expires_at_tick: u32,
         tick: u32,
     },
     EngagementBroken {
@@ -281,14 +277,6 @@ pub enum Event {
         confidence: f32,
         tick: u32,
     },
-    SlowExpired {
-        agent_id: AgentId,
-        tick: u32,
-    },
-    StunExpired {
-        agent_id: AgentId,
-        tick: u32,
-    },
 }
 
 impl Event {
@@ -329,8 +317,6 @@ impl Event {
             Event::QuestAccepted { tick, .. } => *tick,
             Event::QuestPosted { tick, .. } => *tick,
             Event::RecordMemory { tick, .. } => *tick,
-            Event::SlowExpired { tick, .. } => *tick,
-            Event::StunExpired { tick, .. } => *tick,
         }
     }
     pub fn is_replayable(&self) -> bool {
@@ -370,8 +356,6 @@ impl Event {
             Event::QuestAccepted { .. } => true,
             Event::QuestPosted { .. } => true,
             Event::RecordMemory { .. } => true,
-            Event::SlowExpired { .. } => true,
-            Event::StunExpired { .. } => true,
         }
     }
 }

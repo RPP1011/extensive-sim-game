@@ -26,6 +26,35 @@ view is_hostile(a: Agent, b: Agent) -> bool {
 }
 
 // -----------------------------------------------------------------------
+// @lazy view is_stunned(a) -> bool
+// -----------------------------------------------------------------------
+// Timestamp-based stun predicate. Task 143 replaced the per-tick
+// `stun_remaining_ticks` decrement with a stored absolute expiry tick;
+// an agent is stunned while `world.tick < stun_expires_at_tick`. The
+// zero-sentinel initial value falls through the predicate correctly
+// because `world.tick >= 0` for every tick.
+@lazy
+view is_stunned(a: Agent) -> bool {
+  world.tick < agents.stun_expires_at_tick(a)
+}
+
+// -----------------------------------------------------------------------
+// @lazy view slow_factor(a) -> i16
+// -----------------------------------------------------------------------
+// Returns the active slow factor (q8 fixed-point) while the slow's
+// expiry tick is still in the future, 0 once it has elapsed. Callers
+// get a single read that already encodes the "is it still active?"
+// check — no need to inspect `slow_expires_at_tick` separately.
+@lazy
+view slow_factor(a: Agent) -> i16 {
+  if world.tick < agents.slow_expires_at_tick(a) {
+    agents.slow_factor_q8(a)
+  } else {
+    0
+  }
+}
+
+// -----------------------------------------------------------------------
 // @materialized view threat_level(a, b) → f32 — anchor-pattern decay.
 // -----------------------------------------------------------------------
 // Per-pair accumulating threat. Each `AgentAttacked` or

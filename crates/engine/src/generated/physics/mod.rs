@@ -76,14 +76,14 @@ pub fn dispatch_effect_slow_applied(event: &Event, state: &mut SimState, events:
     let Event::EffectSlowApplied {
         actor,
         target,
-        duration_ticks,
+        expires_at_tick,
         factor_q8,
         tick,
     } = *event
     else {
         return;
     };
-    slow::slow(actor, target, duration_ticks, factor_q8, state, events);
+    slow::slow(actor, target, expires_at_tick, factor_q8, state, events);
 }
 
 #[allow(unused_variables)]
@@ -99,13 +99,13 @@ pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, events:
     let Event::EffectStunApplied {
         actor,
         target,
-        duration_ticks,
+        expires_at_tick,
         tick,
     } = *event
     else {
         return;
     };
-    stun::stun(actor, target, duration_ticks, state, events);
+    stun::stun(actor, target, expires_at_tick, state, events);
 }
 
 #[allow(unused_variables)]

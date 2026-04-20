@@ -18,7 +18,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"hot_hunger=f32,hot_thirst=f32,hot_rest_timer=f32,");
     h.update(b"hot_safety=f32,hot_shelter=f32,hot_social=f32,hot_purpose=f32,hot_esteem=f32,");
     h.update(b"hot_risk_tolerance=f32,hot_social_drive=f32,hot_ambition=f32,hot_altruism=f32,hot_curiosity=f32,");
-    h.update(b"hot_engaged_with=OptionAgentId,hot_stun_remaining_ticks=u32,hot_slow_remaining_ticks=u32,hot_slow_factor_q8=i16,hot_cooldown_next_ready_tick=u32");
+    h.update(b"hot_engaged_with=OptionAgentId,hot_stun_expires_at_tick=u32,hot_slow_expires_at_tick=u32,hot_slow_factor_q8=i16,hot_cooldown_next_ready_tick=u32");
     h.update(b"};cold{");
     h.update(b"creature_type=u8,channels=smallvec4,spawn_tick=u32,");
     h.update(b"grid_id=Option<u32>,local_pos=Option<vec3>,move_target=Option<vec3>,");
@@ -37,7 +37,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"Creditor{creditor=AgentId,amount=u32}");
     h.update(b"MentorLink{mentor=AgentId,discipline=u8}");
     h.update(b"LanguageId=NonZeroU16;Capabilities{channels,languages=smallvec4<LanguageId>,can_fly,can_build,can_trade,can_climb,can_tunnel,can_marry,max_spouses=u8}");
-    h.update(b"Event:AgentMoved,AgentAttacked,AgentDied,AgentFled,AgentAte,AgentDrank,AgentRested,AgentCast{caster,ability,target,depth=u8,tick},AgentUsedItem,AgentHarvested,AgentPlacedTile,AgentPlacedVoxel,AgentHarvestedVoxel,AgentConversed,AgentSharedStory,AgentCommunicated,InformationRequested,AgentRemembered,QuestPosted,QuestAccepted,BidPlaced,AnnounceEmitted,RecordMemory,StunExpired,SlowExpired,OpportunityAttackTriggered,EffectDamageApplied,EffectHealApplied,EffectShieldApplied,EffectStunApplied,EffectSlowApplied,EffectGoldTransfer,EffectStandingDelta,CastDepthExceeded,ChronicleEntry");
+    h.update(b"Event:AgentMoved,AgentAttacked,AgentDied,AgentFled,AgentAte,AgentDrank,AgentRested,AgentCast{caster,ability,target,depth=u8,tick},AgentUsedItem,AgentHarvested,AgentPlacedTile,AgentPlacedVoxel,AgentHarvestedVoxel,AgentConversed,AgentSharedStory,AgentCommunicated,InformationRequested,AgentRemembered,QuestPosted,QuestAccepted,BidPlaced,AnnounceEmitted,RecordMemory,OpportunityAttackTriggered,EffectDamageApplied,EffectHealApplied,EffectShieldApplied,EffectStunApplied,EffectSlowApplied,EffectGoldTransfer,EffectStandingDelta,CastDepthExceeded,ChronicleEntry");
     h.update(b"MicroKind:Hold,MoveToward,Flee,Attack,Cast,UseItem,Harvest,Eat,Drink,Rest,PlaceTile,PlaceVoxel,HarvestVoxel,Converse,ShareStory,Communicate,Ask,Remember");
     h.update(b"CommunicationChannel:Speech,PackSignal,Pheromone,Song,Telepathy,Testimony");
     h.update(b"CreatureType:Human,Wolf,Deer,Dragon");
@@ -48,7 +48,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"QuestCategory:Physical,Political,Personal,Economic,Narrative");
     h.update(b"QueryKind:AboutEntity,AboutKind,AboutAll");
     h.update(b"MemoryKind:Combat,Trade,Social,Political,Other");
-    h.update(b"EventKindId:AgentMoved=0,AgentAttacked=1,AgentDied=2,AgentFled=3,AgentAte=4,AgentDrank=5,AgentRested=6,AgentCast=7,AgentUsedItem=8,AgentHarvested=9,AgentPlacedTile=10,AgentPlacedVoxel=11,AgentHarvestedVoxel=12,AgentConversed=13,AgentSharedStory=14,AgentCommunicated=15,InformationRequested=16,AgentRemembered=17,QuestPosted=18,QuestAccepted=19,BidPlaced=20,AnnounceEmitted=21,RecordMemory=22,StunExpired=23,SlowExpired=24,OpportunityAttackTriggered=25,EffectDamageApplied=26,EffectHealApplied=27,EffectShieldApplied=28,EffectStunApplied=29,EffectSlowApplied=30,EffectGoldTransfer=31,EffectStandingDelta=32,CastDepthExceeded=33,ChronicleEntry=128");
+    h.update(b"EventKindId:AgentMoved=0,AgentAttacked=1,AgentDied=2,AgentFled=3,AgentAte=4,AgentDrank=5,AgentRested=6,AgentCast=7,AgentUsedItem=8,AgentHarvested=9,AgentPlacedTile=10,AgentPlacedVoxel=11,AgentHarvestedVoxel=12,AgentConversed=13,AgentSharedStory=14,AgentCommunicated=15,InformationRequested=16,AgentRemembered=17,QuestPosted=18,QuestAccepted=19,BidPlaced=20,AnnounceEmitted=21,RecordMemory=22,OpportunityAttackTriggered=25,EffectDamageApplied=26,EffectHealApplied=27,EffectShieldApplied=28,EffectStunApplied=29,EffectSlowApplied=30,EffectGoldTransfer=31,EffectStandingDelta=32,CastDepthExceeded=33,ChronicleEntry=128");
     h.update(b"AbilityId=NonZeroU32;MAX_EFFECTS_PER_PROGRAM=4");
     h.update(b"Delivery:Instant=0;Area:SingleTarget{range=f32};Gate{cooldown_ticks=u32,hostile_only=bool,line_of_sight=bool};TargetSelector:Target=0,Caster=1");
     h.update(b"EffectOp:Damage=0{amount=f32},Heal=1{amount=f32},Shield=2{amount=f32},Stun=3{duration_ticks=u32},Slow=4{duration_ticks=u32,factor_q8=i16},TransferGold=5{amount=i64},ModifyStanding=6{delta=i16},CastAbility=7{ability=AbilityId,selector=TargetSelector}");

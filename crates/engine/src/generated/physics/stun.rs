@@ -7,11 +7,11 @@ use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn stun(c: AgentId, t: AgentId, d: u32, state: &mut SimState, events: &mut EventRing) {
+pub fn stun(c: AgentId, t: AgentId, e: u32, state: &mut SimState, events: &mut EventRing) {
     if state.agent_alive(t) {
-        if (d > 0) {
-            let cur = state.agent_stun_remaining(t).unwrap_or(0);
-            state.set_agent_stun_remaining(t, (cur).max(d));
+        let cur = state.agent_stun_expires_at(t).unwrap_or(0);
+        if (e > cur) {
+            state.set_agent_stun_expires_at(t, e);
         }
     }
 }

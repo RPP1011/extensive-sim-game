@@ -82,15 +82,19 @@ physics shield @phase(event) {
 // ---------------------------------------------------------------------------
 // Stun
 // ---------------------------------------------------------------------------
-// Longer-stun-wins: `max(existing, duration_ticks)`. Zero-duration and dead
-// targets are no-ops. Pinned by `cast_handler_stun.rs`.
+// Longer-stun-wins: the target's stored `stun_expires_at_tick` is bumped to
+// `max(existing, incoming_expires_at_tick)`. Task 143 retired the per-tick
+// decrement pass in `ability::expire::tick_start_timers` — expiry is now a
+// synthetic boundary read off this tick (`state.tick >= expires_at_tick`
+// means not stunned). Dead targets are no-ops. Pinned by
+// `cast_handler_stun.rs`.
 
 physics stun @phase(event) {
-  on EffectStunApplied { actor: c, target: t, duration_ticks: d } {
+  on EffectStunApplied { actor: c, target: t, expires_at_tick: e } {
     if agents.alive(t) {
-      if d > 0 {
-        let cur = agents.stun_remaining_ticks(t)
-        agents.set_stun_remaining_ticks(t, max(cur, d))
+      let cur = agents.stun_expires_at_tick(t)
+      if e > cur {
+        agents.set_stun_expires_at_tick(t, e)
       }
     }
   }
@@ -99,21 +103,22 @@ physics stun @phase(event) {
 // ---------------------------------------------------------------------------
 // Slow
 // ---------------------------------------------------------------------------
-// "Longer-or-stronger wins" override. Pinned by `cast_handler_slow.rs`.
+// "Longer-or-stronger wins" override. Task 143 — `expires_at_tick` is
+// absolute; factor is kept alongside. Both replaced together when the new
+// slow is either longer (later expiry) or stronger (smaller factor). Pinned
+// by `cast_handler_slow.rs`.
 
 physics slow @phase(event) {
-  on EffectSlowApplied { actor: c, target: t, duration_ticks: d, factor_q8: f } {
+  on EffectSlowApplied { actor: c, target: t, expires_at_tick: e, factor_q8: f } {
     if agents.alive(t) {
-      if d > 0 {
-        if f > 0 {
-          let cur_dur = agents.slow_remaining_ticks(t)
-          let cur_fac = agents.slow_factor_q8(t)
-          let longer = d > cur_dur
-          let stronger = cur_fac == 0 || f < cur_fac
-          if longer || stronger {
-            agents.set_slow_remaining_ticks(t, d)
-            agents.set_slow_factor_q8(t, f)
-          }
+      if f > 0 {
+        let cur_exp = agents.slow_expires_at_tick(t)
+        let cur_fac = agents.slow_factor_q8(t)
+        let longer = e > cur_exp
+        let stronger = cur_fac == 0 || f < cur_fac
+        if longer || stronger {
+          agents.set_slow_expires_at_tick(t, e)
+          agents.set_slow_factor_q8(t, f)
         }
       }
     }

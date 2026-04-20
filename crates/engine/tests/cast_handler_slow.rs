@@ -1,12 +1,14 @@
-//! Combat Foundation Task 14 — `SlowHandler` + MoveToward speed composition.
+//! Combat Foundation Task 14 + Task 143 — `SlowHandler` + MoveToward
+//! speed composition under timestamp-based expiry.
 //!
 //! Three axes verified:
-//! 1. The handler writes `hot_slow_remaining_ticks` + `hot_slow_factor_q8`
+//! 1. The handler writes `hot_slow_expires_at_tick` + `hot_slow_factor_q8`
 //!    under a "longer OR stronger wins" rule.
-//! 2. With a slow active, `MoveToward` displacement shrinks by
-//!    `factor_q8 / 256` of the base `move_speed_mps`. After the unified
-//!    tick-start pass decrements the counter to zero, `SlowExpired` fires
-//!    and the factor is zeroed.
+//! 2. With a slow active (`state.tick < slow_expires_at_tick`),
+//!    `MoveToward` displacement shrinks by `factor_q8 / 256` of the base
+//!    `move_speed_mps`. Once `state.tick` reaches the expiry the
+//!    `effective_slow_factor_q8` helper returns 0 and movement is full
+//!    speed again — no per-tick decrement pass, no `SlowExpired` event.
 //! 3. Engagement-slow (Task 4 — `engagement_slow_factor`) composes
 //!    multiplicatively with effect-slow: both apply, neither replaces the
 //!    other.
@@ -14,7 +16,6 @@
 //! Balance knobs are read off `Config::default()`, not a `pub const`
 //! shim — task 142 retired the shim layer.
 
-use engine::ability::expire::tick_start;
 use engine::generated::physics::dispatch_effect_slow_applied;
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
@@ -39,39 +40,39 @@ impl PolicyBackend for EmitOnce {
 }
 
 #[test]
-fn slow_writes_duration_and_factor_from_zero() {
+fn slow_writes_expiry_and_factor_from_zero() {
     let mut state = SimState::new(4, 42);
     let mut events = EventRing::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
     dispatch_effect_slow_applied(
-        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 5, factor_q8: 51, tick: 0 },
+        &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 5, factor_q8: 51, tick: 0 },
         &mut state,
         &mut events,
     );
-    assert_eq!(state.agent_slow_remaining(target),  Some(5));
+    assert_eq!(state.agent_slow_expires_at(target),  Some(5));
     assert_eq!(state.agent_slow_factor_q8(target), Some(51));
 }
 
 #[test]
-fn longer_slow_overrides_when_duration_is_greater() {
+fn longer_slow_overrides_when_expiry_is_later() {
     let mut state = SimState::new(4, 42);
     let mut events = EventRing::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
-    state.set_agent_slow_remaining(target, 3);
+    state.set_agent_slow_expires_at(target, 3);
     state.set_agent_slow_factor_q8(target, 128);
 
-    // New: longer duration (10 > 3), weaker factor (200 > 128). Longer wins →
+    // New: later expiry (10 > 3), weaker factor (200 > 128). Longer wins →
     // BOTH replaced.
     dispatch_effect_slow_applied(
-        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 10, factor_q8: 200, tick: 0 },
+        &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 10, factor_q8: 200, tick: 0 },
         &mut state,
         &mut events,
     );
-    assert_eq!(state.agent_slow_remaining(target),  Some(10));
+    assert_eq!(state.agent_slow_expires_at(target),  Some(10));
     assert_eq!(state.agent_slow_factor_q8(target), Some(200));
 }
 
@@ -82,16 +83,16 @@ fn stronger_slow_overrides_when_factor_is_smaller() {
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
-    state.set_agent_slow_remaining(target, 10);
+    state.set_agent_slow_expires_at(target, 10);
     state.set_agent_slow_factor_q8(target, 200);
 
-    // New: shorter duration (3 < 10), stronger factor (51 < 200). Stronger wins → replace.
+    // New: earlier expiry (3 < 10), stronger factor (51 < 200). Stronger wins → replace.
     dispatch_effect_slow_applied(
-        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 3, factor_q8: 51, tick: 0 },
+        &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 3, factor_q8: 51, tick: 0 },
         &mut state,
         &mut events,
     );
-    assert_eq!(state.agent_slow_remaining(target),  Some(3));
+    assert_eq!(state.agent_slow_expires_at(target),  Some(3));
     assert_eq!(state.agent_slow_factor_q8(target), Some(51));
 }
 
@@ -102,21 +103,22 @@ fn weaker_and_shorter_slow_does_not_override() {
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
-    state.set_agent_slow_remaining(target, 10);
+    state.set_agent_slow_expires_at(target, 10);
     state.set_agent_slow_factor_q8(target, 51);
 
     dispatch_effect_slow_applied(
-        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 3, factor_q8: 200, tick: 0 },
+        &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 3, factor_q8: 200, tick: 0 },
         &mut state,
         &mut events,
     );
-    assert_eq!(state.agent_slow_remaining(target),  Some(10));
+    assert_eq!(state.agent_slow_expires_at(target),  Some(10));
     assert_eq!(state.agent_slow_factor_q8(target), Some(51));
 }
 
 #[test]
 fn move_toward_is_slowed_by_effect_slow_factor() {
-    // factor_q8 = 51 → 51/256 ≈ 0.199 multiplier. Over one MoveToward tick,
+    // factor_q8 = 51 → 51/256 ≈ 0.199 multiplier. Over one MoveToward tick
+    // (state.tick = 0 at step entry, expires_at_tick = 5 so active),
     // displacement should be (51/256) * move_speed_mps.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
@@ -127,7 +129,7 @@ fn move_toward_is_slowed_by_effect_slow_factor() {
     // Second agent so the mask allows MoveToward.
     spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 10.0));
 
-    state.set_agent_slow_remaining(mover, 5);
+    state.set_agent_slow_expires_at(mover, 5);
     state.set_agent_slow_factor_q8(mover, 51);
 
     let backend = EmitOnce {
@@ -152,28 +154,28 @@ fn move_toward_is_slowed_by_effect_slow_factor() {
 }
 
 #[test]
-fn slow_decrements_and_expires_with_factor_zeroed() {
+fn slow_inactive_once_tick_reaches_expiry() {
+    // Task 143 — no decrement loop; once state.tick >= expires_at_tick
+    // the `effective_slow_factor_q8` helper reads 0 and the multiplier
+    // falls back to 1.0. The stored `slow_factor_q8` is never rewritten
+    // (it stays whatever it was at application time — the semantics are
+    // "use the factor only while the expiry is in the future").
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
     let a = state.spawn_agent(AgentSpawn::default()).unwrap();
-    state.set_agent_slow_remaining(a, 5);
+    state.set_agent_slow_expires_at(a, 5);
     state.set_agent_slow_factor_q8(a, 51);
 
-    // 5 tick_start decrements → the 5th emits SlowExpired and zeroes factor.
-    let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    for i in 0..5u32 {
-        tick_start(&mut state, &mut scratch, &mut events);
-        state.tick += 1;
-        let n_expired = events.iter().filter(|e| matches!(e, Event::SlowExpired { .. })).count();
-        if i < 4 {
-            assert_eq!(n_expired, 0, "SlowExpired must not fire before decrement hits 0 (iter {i})");
-            assert_eq!(state.agent_slow_factor_q8(a), Some(51));
-        } else {
-            assert_eq!(n_expired, 1);
-            assert_eq!(state.agent_slow_remaining(a),  Some(0));
-            assert_eq!(state.agent_slow_factor_q8(a), Some(0));
-        }
+    // At tick 0..4 the slow is active.
+    for t in 0..5u32 {
+        state.tick = t;
+        assert_eq!(state.effective_slow_factor_q8(a), 51, "active at tick {t}");
     }
+    // At tick 5 the expiry has been reached — helper returns 0.
+    state.tick = 5;
+    assert_eq!(state.effective_slow_factor_q8(a), 0);
+    // The raw slots are unchanged — the "expiry" is a read-side synthesis.
+    assert_eq!(state.agent_slow_expires_at(a), Some(5));
+    assert_eq!(state.agent_slow_factor_q8(a), Some(51));
 }
 
 #[test]
@@ -182,9 +184,9 @@ fn engagement_slow_and_effect_slow_compose_multiplicatively() {
     // (Task 14, factor_q8) should both apply when an engaged agent moves
     // away from its engager. The two factors must multiply.
     //
-    // Setup: engage Human(0) with Wolf(3.5,0,0) → within 2m no (distance 3.5);
-    // instead set up by manually flipping the engagement bits so the test
-    // doesn't depend on tick_start's auto-engagement heuristic.
+    // Setup: engage Human(0) with Wolf(-1,0,0); manually flip the
+    // engagement bits so the test doesn't depend on any auto-engagement
+    // heuristic.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(64);
@@ -196,7 +198,7 @@ fn engagement_slow_and_effect_slow_compose_multiplicatively() {
     state.set_agent_engaged_with(mover, Some(engager));
     state.set_agent_engaged_with(engager, Some(mover));
 
-    state.set_agent_slow_remaining(mover, 5);
+    state.set_agent_slow_expires_at(mover, 5);
     state.set_agent_slow_factor_q8(mover, 51);
 
     // MoveToward +X → AWAY from engager → engagement-slow engages.
@@ -232,10 +234,10 @@ fn slow_on_dead_target_is_noop() {
     state.kill_agent(target);
 
     dispatch_effect_slow_applied(
-        &Event::EffectSlowApplied { actor: caster, target, duration_ticks: 5, factor_q8: 51, tick: 0 },
+        &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 5, factor_q8: 51, tick: 0 },
         &mut state,
         &mut events,
     );
-    assert_eq!(state.agent_slow_remaining(target),  Some(0));
+    assert_eq!(state.agent_slow_expires_at(target),  Some(0));
     assert_eq!(state.agent_slow_factor_q8(target), Some(0));
 }
