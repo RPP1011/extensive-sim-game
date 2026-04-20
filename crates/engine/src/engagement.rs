@@ -19,10 +19,17 @@
 //! tentative-commit enforced "A.engaged=B ⇔ B.engaged=A" even when the
 //! third-party's nearest hostile was someone else (see
 //! `engagement_tick_start::three_agent_tentative_commit_with_dragon_closer_to_wolf`);
-//! that invariant is softened to "A commits unilaterally to its nearest
-//! hostile; asymmetry resolves when the other side moves or dies". The
-//! simplification sheds the second pass and the
-//! `SimScratch::engagement_tentative` buffer along with it.
+//! the event-driven path drops that enforcement and lets slot iteration
+//! order decide who "wins" when three agents race. See
+//! `engagement_tick_start::three_agent_unilateral_commit_pins_closest_pair`
+//! for the pinned behaviour.
+//!
+//! The bidirectional invariant (`engaged(a) = Some(b) ⇒ engaged(b) =
+//! Some(a)`) is preserved at all times by `recompute_engagement_for`:
+//! commit writes both sides in lockstep, and when the incoming mover
+//! displaces the new partner's prior pairing (three-agent case) that
+//! prior pairing is broken on both sides too. Pinned by
+//! `proptest_engagement::engagement_is_bidirectional`.
 //!
 //! Both handlers write the view slot **eagerly** (via the direct `.set()`
 //! setter) in addition to emitting audit events. The eager write gives
@@ -129,6 +136,29 @@ pub fn recompute_engagement_for(
         });
     }
     if let Some(partner) = new_partner {
+        // Before overwriting `partner`'s slot, check if `partner` was
+        // previously paired with a third-party `stranded`. If so, break
+        // that pair properly — emit the `EngagementBroken` event and
+        // clear both sides — so `stranded`'s slot doesn't linger
+        // pointing at `partner` after we overwrite `partner`'s slot with
+        // `mover`. Without this step the bidirectional invariant
+        // (`engaged(a)=Some(b) ⇒ engaged(b)=Some(a)`) breaks in the
+        // three-agent case where A picks B but B was already paired
+        // with C: B's slot gets rewritten to A, but C's slot keeps
+        // pointing at B (stale). Pinned by `proptest_engagement::
+        // engagement_is_bidirectional`.
+        if let Some(stranded) = state.agent_engaged_with(partner) {
+            if stranded != mover {
+                state.set_agent_engaged_with(partner, None);
+                state.set_agent_engaged_with(stranded, None);
+                events.push(Event::EngagementBroken {
+                    actor: partner,
+                    former_target: stranded,
+                    reason: break_reason::SWITCH,
+                    tick,
+                });
+            }
+        }
         // Eagerly commit the pairing. The view fold re-applies this on
         // the next view-fold phase; the double-insert is idempotent.
         state.set_agent_engaged_with(mover, Some(partner));
