@@ -5,7 +5,7 @@ pub mod entity_pool;
 use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
-use crate::spatial::SpatialIndex;
+use crate::spatial::SpatialHash;
 pub use agent::{AgentSpawn, MovementMode};
 use agent_types::{
     ClassSlot, Creditor, Inventory, MemoryEvent, Membership, Relationship, SparseStandings,
@@ -115,11 +115,14 @@ pub struct SimState {
     // ordered tuple), i16 clamped to [-1000, 1000] by `adjust_standing`.
     cold_standing:          SparseStandings,
 
-    // Spatial index — rebuilt eagerly on every `spawn_agent`, `kill_agent`,
-    // `set_agent_pos`, and `set_agent_movement_mode`. Callers that need
-    // sub-linear proximity queries read `state.spatial()` instead of
-    // running their own O(N²) scan. Audit finding CRITICAL #1.
-    spatial: SpatialIndex,
+    // Spatial index — incremental uniform-grid hash. Mutators
+    // (`spawn_agent`, `kill_agent`, `set_agent_pos`,
+    // `set_agent_movement_mode`) push O(1) deltas into it as they touch
+    // the SoA, so `state.spatial()` is always live without any per-tick
+    // rebuild. The previous BTreeMap implementation rebuilt eagerly on
+    // every mutation and was the cause of the post-audit hot-path
+    // regression at N=500.
+    spatial: SpatialHash,
 }
 
 impl SimState {
@@ -177,27 +180,18 @@ impl SimState {
             cold_creditor_ledger:   (0..cap).map(|_| SmallVec::new()).collect(),
             cold_mentor_lineage:    vec![[None; 8]; cap],
             cold_standing:          SparseStandings::new(),
-            // Empty index at construction; rebuilt lazily on every mutation.
-            spatial:                SpatialIndex::empty(),
+            // Incremental spatial hash — sized for `cap` agent slots.
+            // Mutators push O(1) deltas; no per-mutation rebuild.
+            spatial:                SpatialHash::new(agent_cap),
         }
     }
 
-    /// Rebuild the spatial index from the current hot SoA slices.
-    /// Called from `spawn_agent`, `kill_agent`, `set_agent_pos`, and
-    /// `set_agent_movement_mode` — anything that can shift an agent's
-    /// column-key or sidecar membership.
-    fn rebuild_spatial(&mut self) {
-        self.spatial = SpatialIndex::build_from_slices(
-            &self.hot_alive,
-            &self.hot_pos,
-            &self.hot_movement_mode,
-        );
-    }
-
-    /// Live spatial index. Always in sync with the current agent
-    /// positions and movement modes. Callers that need sub-linear
-    /// proximity queries should prefer this over scanning `agents_alive()`.
-    pub fn spatial(&self) -> &SpatialIndex { &self.spatial }
+    /// Live spatial index. Mutators (`spawn_agent`, `kill_agent`,
+    /// `set_agent_pos`, `set_agent_movement_mode`) keep the index in sync
+    /// incrementally on every call, so this is always consistent with the
+    /// current SoA. Callers that need sub-linear proximity queries should
+    /// prefer this over scanning `agents_alive()`.
+    pub fn spatial(&self) -> &SpatialHash { &self.spatial }
 
     #[contracts::debug_ensures(
         ret.is_some() -> self.agents_alive().count() == old(self.agents_alive().count()) + 1
@@ -256,7 +250,8 @@ impl SimState {
         self.cold_class_definitions[slot] = [ClassSlot::default(); 4];
         self.cold_creditor_ledger[slot].clear();
         self.cold_mentor_lineage[slot] = [None; 8];
-        self.rebuild_spatial();
+        // Incremental spatial-hash insert — O(1).
+        self.spatial.insert(id, spec.pos, MovementMode::Walk);
         Some(id)
     }
 
@@ -267,7 +262,8 @@ impl SimState {
             *a = false;
         }
         self.pool.kill_agent(id);
-        self.rebuild_spatial();
+        // Incremental spatial-hash remove — O(1) within the agent's bucket.
+        self.spatial.remove(id);
     }
 
     // Per-agent field accessors (convenience for non-kernel code).
@@ -666,7 +662,10 @@ impl SimState {
             moved = true;
         }
         if moved {
-            self.rebuild_spatial();
+            // Incremental spatial-hash update. Sub-cell moves early-out
+            // inside `update`; cell crossings are O(1) bucket swap.
+            let mode = self.hot_movement_mode[slot];
+            self.spatial.update(id, pos, mode);
         }
     }
     pub fn set_agent_hp(&mut self, id: AgentId, hp: f32) {
@@ -683,7 +682,11 @@ impl SimState {
             changed = true;
         }
         if changed {
-            self.rebuild_spatial();
+            // Pulls the agent across the walk↔non-walk boundary in the
+            // spatial hash when mode crosses it; otherwise a no-op for
+            // non-walk → non-walk transitions.
+            let pos = self.hot_pos[slot];
+            self.spatial.update(id, pos, mode);
         }
     }
     pub fn set_agent_hunger(&mut self, id: AgentId, v: f32) {

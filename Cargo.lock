@@ -2288,6 +2288,7 @@ dependencies = [
  "insta",
  "proptest",
  "rayon",
+ "rustc-hash 2.1.1",
  "safetensors 0.4.5",
  "sha2",
  "smallvec",

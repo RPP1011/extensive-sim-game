@@ -121,7 +121,7 @@ fn update_engagements(state: &mut SimState) {
         let pos = match state.agent_pos(*id) { Some(p) => p, None => continue };
         let ct = match state.agent_creature_type(*id) { Some(c) => c, None => continue };
         let mut best: Option<(AgentId, f32)> = None;
-        for other in spatial.query_within_radius(state, pos, ENGAGEMENT_RANGE) {
+        for other in spatial.within_radius(state, pos, ENGAGEMENT_RANGE) {
             if other == *id { continue; }
             let op = match state.agent_pos(other) { Some(p) => p, None => continue };
             let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };

@@ -1,16 +1,15 @@
-//! Property: `SpatialIndex::query_within_radius` matches a brute-force
-//! filter over `state.agents_alive()`. Complements `tests/spatial_index.rs`
-//! (3 hand-picked scenarios).
+//! Property: `SpatialHash::within_radius` matches a brute-force filter over
+//! `state.agents_alive()` AFTER EVERY mutation in a random op sequence.
+//! The incremental mutators (`insert`/`remove`/`update`) wired into
+//! `spawn_agent`/`kill_agent`/`set_agent_pos`/`set_agent_movement_mode` must
+//! never let the index lag behind the SoA.
 use engine::creature::CreatureType;
 use engine::ids::AgentId;
-use engine::spatial::SpatialIndex;
 use engine::state::{AgentSpawn, MovementMode, SimState};
 use glam::Vec3;
 use proptest::prelude::*;
 use std::collections::HashSet;
 
-/// An operation against the state-index pair. `Move` and `ChangeMode` force
-/// rebuilds and prod the sidecar path; `Kill` exercises dead-slot behavior.
 #[derive(Copy, Clone, Debug)]
 enum SpatialOp {
     Spawn { pos: Vec3, mode: MovementMode },
@@ -47,9 +46,7 @@ fn brute_force_within_radius(
 ) -> HashSet<u32> {
     state
         .agents_alive()
-        .filter_map(|id| {
-            state.agent_pos(id).map(|p| (id, p))
-        })
+        .filter_map(|id| state.agent_pos(id).map(|p| (id, p)))
         .filter(|(_, p)| p.distance(center) <= radius)
         .map(|(id, _)| id.raw())
         .collect()
@@ -58,8 +55,12 @@ fn brute_force_within_radius(
 fn index_within_radius(
     state: &SimState, center: Vec3, radius: f32,
 ) -> HashSet<u32> {
-    let idx = SpatialIndex::build(state);
-    idx.query_within_radius(state, center, radius).map(|id| id.raw()).collect()
+    state
+        .spatial()
+        .within_radius(state, center, radius)
+        .into_iter()
+        .map(|id| id.raw())
+        .collect()
 }
 
 proptest! {
@@ -69,8 +70,9 @@ proptest! {
         .. ProptestConfig::default()
     })]
 
-    /// For any random op sequence + query, the spatial index and a brute-force
-    /// filter agree on the set of agents within `radius` of `center`.
+    /// For any random op sequence + query, the live spatial hash and a
+    /// brute-force filter agree on the set of agents within `radius` of
+    /// `center` AFTER EACH op — the incremental mutators must never lag.
     #[test]
     fn spatial_index_matches_brute_force(
         ops in proptest::collection::vec(arb_op(), 1..40),

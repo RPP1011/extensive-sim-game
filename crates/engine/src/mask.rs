@@ -102,7 +102,8 @@ impl MaskBuffer {
                 None    => continue,
             };
             let has_threat = spatial
-                .query_within_radius(state, self_pos, AGGRO_RANGE)
+                .within_radius(state, self_pos, AGGRO_RANGE)
+                .into_iter()
                 .any(|other| other != id);
             if has_threat {
                 let offset = slot * n_kinds + MicroKind::Flee as usize;
@@ -141,7 +142,8 @@ impl MaskBuffer {
             };
             let range = state.agent_attack_range(id).unwrap_or(ATTACK_RANGE_FOR_MASK);
             let has_target = spatial
-                .query_within_radius(state, self_pos, range)
+                .within_radius(state, self_pos, range)
+                .into_iter()
                 .any(|other| other != id);
             if has_target {
                 let offset = slot * n_kinds + MicroKind::Attack as usize;
@@ -222,7 +224,7 @@ fn inferred_cast_target(state: &SimState, caster: AgentId) -> Option<AgentId> {
     let ct = state.agent_creature_type(caster)?;
     let spatial = state.spatial();
     let mut best: Option<(AgentId, f32)> = None;
-    for other in spatial.query_within_radius(state, pos, AGGRO_RANGE) {
+    for other in spatial.within_radius(state, pos, AGGRO_RANGE) {
         if other == caster { continue; }
         let op = match state.agent_pos(other) { Some(p) => p, None => continue };
         let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };

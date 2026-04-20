@@ -605,7 +605,8 @@ fn apply_actions(
                 // the deterministic first-MAX_ANNOUNCE_RECIPIENTS semantics.
                 let spatial = state.spatial();
                 let candidates: smallvec::SmallVec<[AgentId; 64]> = spatial
-                    .query_within_radius(state, center, radius)
+                    .within_radius(state, center, radius)
+                    .into_iter()
                     .collect();
                 let mut primary_observers: smallvec::SmallVec<[AgentId; 32]> =
                     smallvec::SmallVec::new();
@@ -632,7 +633,8 @@ fn apply_actions(
                 // recipients get a lower-confidence memory. Speaker excluded.
                 let speaker_pos = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
                 let overhear_candidates: smallvec::SmallVec<[AgentId; 64]> = spatial
-                    .query_within_radius(state, speaker_pos, OVERHEAR_RANGE)
+                    .within_radius(state, speaker_pos, OVERHEAR_RANGE)
+                    .into_iter()
                     .collect();
                 for obs in state.agents_alive() {
                     if obs == speaker { continue; }
