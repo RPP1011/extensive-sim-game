@@ -27,9 +27,10 @@ resist the "sentinel value hides bugs" failure mode the audit surfaced.
 | Plan 1 — action space & cascade | `docs/superpowers/plans/2026-04-19-engine-plan-1-action-space.md` | ✅ executed (Tasks 1–18) |
 | Plan 2 — pipeline + cross-cutting traits | `docs/superpowers/plans/2026-04-19-engine-plan-2-pipeline-traits.md` | ✅ executed |
 | Plan 3 — persistence + obs packer + probes | `docs/superpowers/plans/2026-04-19-engine-plan-3-persistence-obs-probes.md` | ⚠️ draft — awaiting execution |
-| Plan 3.0 viz harness | `docs/superpowers/plans/2026-04-19-engine-plan-3_0-viz-harness.md` | ✅ executed (Tasks 1–5) |
+| Plan 3.0 viz harness | `docs/superpowers/plans/2026-04-19-engine-plan-3_0-viz-harness.md` | ✅ executed (Tasks 1–5) + 3.1 fixups |
 | Plan 2.75 verification infra | `docs/superpowers/plans/2026-04-19-engine-plan-2_75-verification-infra.md` | ✅ executed (proptest + contracts + fuzz) |
-| Ability Plan 1 — combat + world effects | `docs/superpowers/plans/2026-04-19-ability-plan-1-foundation.md` | ⚠️ pulled — awaiting execution |
+| State port | `docs/superpowers/plans/2026-04-19-engine-plan-state-port.md` | ✅ executed (13 commits, +41 tests) |
+| Combat Foundation — abilities + engagement + world effects + recursion | `docs/superpowers/plans/2026-04-19-combat-foundation.md` | ⚠️ drafted — awaiting execution (24 tasks) |
 | Plan 4 — debug & trace runtime | _(to be written)_ | ❌ not yet written |
 | Plan 5 — `ComputeBackend` trait extraction | _(to be written)_ | ❌ not yet written |
 | Plan 6 — `GpuBackend` foundation | _(to be written)_ | ❌ not yet written |
