@@ -458,6 +458,62 @@ fn chronicle_has_wound_and_break_templates() {
     );
 }
 
+/// Task 168 — after the ROUT (template 6) and FLEE (template 7)
+/// physics rules landed, both must surface in the wolves+humans 100-tick
+/// fixture. The baseline already shows `AgentFled` events on ticks 3+
+/// (wounded wolves retreating, task 165) and `FearSpread` fires when a
+/// kin dies within 12 m (task 167) — the fixture has both a wolf death
+/// and wolves within the 12 m fear radius of each other. Checking the
+/// raw event ring keeps the assertion on the DSL emit-site behaviour —
+/// rename the prose and the test still passes; break the emit and the
+/// test fails.
+#[test]
+fn chronicle_has_rout_and_flee_templates() {
+    let mut state = spawn_fixture();
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    let mut invariants = InvariantRegistry::new();
+    invariants.register(Box::new(PoolNonOverlapInvariant));
+
+    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let telemetry = NullSink;
+
+    for _ in 0..TICKS {
+        step_full(
+            &mut state,
+            &mut scratch,
+            &mut events,
+            &UtilityBackend,
+            &cascade,
+            &mut views[..],
+            &invariants,
+            &telemetry,
+        );
+    }
+
+    let mut seen_rout = false;
+    let mut seen_flee = false;
+    for ev in events.iter() {
+        if let Event::ChronicleEntry { template_id, .. } = ev {
+            match *template_id {
+                6 => seen_rout = true,
+                7 => seen_flee = true,
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        seen_rout,
+        "expected at least one ChronicleEntry{{ template_id: 6 }} (ROUT) in 100-tick wolves+humans run",
+    );
+    assert!(
+        seen_flee,
+        "expected at least one ChronicleEntry{{ template_id: 7 }} (FLEE) in 100-tick wolves+humans run",
+    );
+}
+
 #[test]
 fn parity_log_is_deterministic_across_runs() {
     // Two fresh runs with the same seed must produce the exact same log.

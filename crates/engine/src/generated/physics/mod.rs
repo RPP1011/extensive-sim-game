@@ -6,6 +6,8 @@ pub mod chronicle_attack;
 pub mod chronicle_break;
 pub mod chronicle_death;
 pub mod chronicle_engagement;
+pub mod chronicle_flee;
+pub mod chronicle_rout;
 pub mod chronicle_wound;
 pub mod damage;
 pub mod engagement_on_death;
@@ -62,6 +64,20 @@ pub fn dispatch_agent_died(event: &Event, state: &mut SimState, events: &mut Eve
     chronicle_death::chronicle_death(agent_id, state, events);
     engagement_on_death::engagement_on_death(agent_id, state, events);
     fear_spread_on_death::fear_spread_on_death(agent_id, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_agent_fled(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::AgentFled {
+        agent_id,
+        from,
+        to,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    chronicle_flee::chronicle_flee(agent_id, state, events);
 }
 
 #[allow(unused_variables)]
@@ -199,6 +215,19 @@ pub fn dispatch_engagement_committed(event: &Event, state: &mut SimState, events
 }
 
 #[allow(unused_variables)]
+pub fn dispatch_fear_spread(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::FearSpread {
+        observer,
+        dead_kin,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    chronicle_rout::chronicle_rout(observer, dead_kin, state, events);
+}
+
+#[allow(unused_variables)]
 pub fn dispatch_opportunity_attack_triggered(
     event: &Event,
     state: &mut SimState,
@@ -246,6 +275,7 @@ pub fn register(registry: &mut CascadeRegistry) {
     registry.install_kind(EventKindId::AgentAttacked, dispatch_agent_attacked);
     registry.install_kind(EventKindId::AgentCast, dispatch_agent_cast);
     registry.install_kind(EventKindId::AgentDied, dispatch_agent_died);
+    registry.install_kind(EventKindId::AgentFled, dispatch_agent_fled);
     registry.install_kind(EventKindId::AgentMoved, dispatch_agent_moved);
     registry.install_kind(
         EventKindId::EffectDamageApplied,
@@ -271,6 +301,7 @@ pub fn register(registry: &mut CascadeRegistry) {
         EventKindId::EngagementCommitted,
         dispatch_engagement_committed,
     );
+    registry.install_kind(EventKindId::FearSpread, dispatch_fear_spread);
     registry.install_kind(
         EventKindId::OpportunityAttackTriggered,
         dispatch_opportunity_attack_triggered,

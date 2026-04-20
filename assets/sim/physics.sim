@@ -346,6 +346,35 @@ physics chronicle_break @phase(post) {
   }
 }
 
+// Template 6 (ROUT). Fires when a `FearSpread` event reaches an observer
+// after a same-species kin dies within the 12 m radius (see
+// `fear_spread_on_death`). Payload: `agent` = the shaken observer,
+// `target` = the dead kin. One ROUT line per (observer, dead_kin) pair.
+// If the shared-fear radius catches multiple neighbours on the same
+// death, each surfaces its own line — that's the intended behaviour:
+// rout dynamics should read as a collective reaction, not a single
+// summary line.
+
+physics chronicle_rout @phase(post) {
+  on FearSpread { observer: o, dead_kin: d } {
+    emit ChronicleEntry { template_id: 6, agent: o, target: d }
+  }
+}
+
+// Template 7 (FLEE). Fires on every `AgentFled` — a single-subject
+// event (the fleer's `agent_id` + movement delta, no explicit "from
+// whom" target on the payload). Payload: `agent` = `target` = the
+// fleer. The renderer uses a single-subject phrasing ("retreated")
+// to match the event shape; adding a "from" target would require
+// carrying extra state through the event that the current grammar
+// doesn't express.
+
+physics chronicle_flee @phase(post) {
+  on AgentFled { agent_id: a } {
+    emit ChronicleEntry { template_id: 7, agent: a, target: a }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Engagement — event-driven pairing (task 163, replaces the hand-written
 // `crates/engine/src/engagement.rs` cascade dispatchers).

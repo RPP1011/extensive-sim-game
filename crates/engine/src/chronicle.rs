@@ -10,7 +10,7 @@
 //!
 //! This module owns the template id catalogue and a deterministic prose
 //! renderer. The template ids are stable `u32` constants — the DSL
-//! emit-sites use the literal values (1..=5) and this module resolves
+//! emit-sites use the literal values (1..=7) and this module resolves
 //! them back to a formatted string via [`render_entry`].
 //!
 //! Output is stable: no timestamps, no randomness, no Debug formatting.
@@ -51,6 +51,22 @@ pub mod templates {
     /// with the same prose — `reason` is intentionally not carried on
     /// `ChronicleEntry` to keep the payload shape fixed.
     pub const BREAK: u32 = 5;
+    /// A kin's death spooked a same-species neighbour within the fear
+    /// radius (see `fear_spread_on_death` in `assets/sim/physics.sim`).
+    /// Payload: `agent` = the shaken observer, `target` = the dead
+    /// kin whose death triggered the reaction. One line per
+    /// (observer, dead_kin) pair — if the radius catches multiple
+    /// neighbours, each surfaces its own line so the rout reads as a
+    /// collective reaction.
+    pub const ROUT: u32 = 6;
+    /// An agent retreated (single-subject flee — `AgentFled` carries
+    /// `agent_id` + movement delta but no explicit "from whom"
+    /// target). Payload: the emit-site sets `agent` = `target` =
+    /// the fleer; the renderer uses the `agent` slot and ignores the
+    /// redundant `target`. Fires on every `AgentFled` so repeated
+    /// retreats from the same agent each surface their own line —
+    /// matches the single-subject pattern of `AGENT_DIED`.
+    pub const FLEE: u32 = 7;
 }
 
 /// Render a single `ChronicleEntry` event as a one-line human-readable
@@ -106,6 +122,16 @@ pub fn render_entry(state: &SimState, event: &Event) -> String {
                 name_of(state, agent),
                 name_of(state, target),
             )
+        }
+        templates::ROUT => {
+            format!(
+                "Tick {tick}: {} was shaken by {}'s death.",
+                name_of(state, agent),
+                name_of(state, target),
+            )
+        }
+        templates::FLEE => {
+            format!("Tick {tick}: {} retreated.", name_of(state, agent))
         }
         _ => format!(
             "Tick {tick}: (unknown chronicle template {template_id} for agent {}, target {})",
@@ -241,6 +267,33 @@ mod tests {
             render_entry(&state, &ev),
             "Tick 21: Wolf #2 disengaged from Human #1.",
         );
+    }
+
+    #[test]
+    fn renders_rout_line() {
+        let state = make_state();
+        let ev = Event::ChronicleEntry {
+            template_id: templates::ROUT,
+            agent: AgentId::new(2).unwrap(),
+            target: AgentId::new(1).unwrap(),
+            tick: 33,
+        };
+        assert_eq!(
+            render_entry(&state, &ev),
+            "Tick 33: Wolf #2 was shaken by Human #1's death.",
+        );
+    }
+
+    #[test]
+    fn renders_flee_line() {
+        let state = make_state();
+        let ev = Event::ChronicleEntry {
+            template_id: templates::FLEE,
+            agent: AgentId::new(2).unwrap(),
+            target: AgentId::new(2).unwrap(),
+            tick: 44,
+        };
+        assert_eq!(render_entry(&state, &ev), "Tick 44: Wolf #2 retreated.");
     }
 
     #[test]
