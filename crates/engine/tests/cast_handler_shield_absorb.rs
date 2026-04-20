@@ -5,7 +5,8 @@
 //! and `EffectDamageApplied` events directly and verifies both state fields
 //! after each hop.
 
-use engine::ability::{DamageHandler, ShieldHandler};
+use engine::ability::ShieldHandler;
+use engine::generated::physics::damage::DamageHandler;
 use engine::cascade::CascadeHandler;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};

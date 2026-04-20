@@ -58,6 +58,15 @@ pub struct CompileDslArgs {
     /// `<out-rust>/events/` and `<out-rust>/schema.rs`.
     #[arg(long, default_value = "crates/engine_rules/src")]
     pub out_rust: PathBuf,
+    /// Destination root for emitted physics handlers. Files are written
+    /// under `<out-physics>/` (per-rule modules + `mod.rs`). Defaults into
+    /// the engine crate because emitted handlers reference
+    /// `engine::cascade::*` and `engine::state::SimState`; emitting them
+    /// into `engine_rules` would invert the existing dep direction
+    /// (`engine` depends on `engine_rules`, not the other way around).
+    /// Documented in `docs/game/feature_flow.md`.
+    #[arg(long, default_value = "crates/engine/src/generated/physics")]
+    pub out_physics: PathBuf,
     /// Destination root for Python output. Files are written under
     /// `<out-python>/events/`.
     #[arg(long, default_value = "generated/python")]

@@ -6,7 +6,7 @@
 //! exposes; wiring a full `AgentCast` through the pipeline is covered by
 //! `action_cast_emits_agentcast.rs` (Task 9) and the acceptance tests.
 
-use engine::ability::DamageHandler;
+use engine::generated::physics::damage::DamageHandler;
 use engine::cascade::CascadeHandler;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};

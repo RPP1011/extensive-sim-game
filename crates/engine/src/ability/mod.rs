@@ -14,7 +14,8 @@ mod id;
 pub use id::AbilityId;
 
 pub mod cast;
-pub mod damage;
+// `damage` was deleted at milestone 3 — the DSL-emitted handler at
+// `crate::generated::physics::damage::DamageHandler` now carries the rule.
 pub mod expire;
 pub mod gate;
 pub mod gold;
@@ -28,7 +29,9 @@ pub mod standing;
 pub mod stun;
 
 pub use cast::CastHandler;
-pub use damage::DamageHandler;
+// `DamageHandler` re-export removed at milestone 3 — consumers (engine
+// builtin registration + tests) reach the DSL-emitted handler at
+// `crate::generated::physics::damage::DamageHandler`.
 pub use gate::evaluate_cast_gate;
 pub use gold::TransferGoldHandler;
 pub use heal::HealHandler;

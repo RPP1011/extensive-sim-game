@@ -43,10 +43,16 @@ impl CascadeRegistry {
     /// [`CascadeRegistry::with_engine_builtins`].
     pub fn register_engine_builtins(&mut self) {
         self.register(crate::ability::expire::OpportunityAttackHandler);
-        // Combat Foundation Task 10 — effect fold-ins. These handlers pair up
-        // with the `Effect*Applied` events the `CastHandler` emits (Task 9)
-        // and are the actual state mutators for the combat EffectOps.
-        self.register(crate::ability::DamageHandler);
+        // Compiler-emitted physics handlers (DSL-owned). At milestone 3 this
+        // is just the damage handler — the legacy `crate::ability::DamageHandler`
+        // was deleted in the same commit. As more physics rules migrate
+        // (heal, shield, stun, slow, gold, standing) the matching
+        // `self.register(crate::ability::*)` lines below shrink.
+        crate::generated::physics::register(self);
+        // Combat Foundation Task 10 — remaining effect fold-ins not yet
+        // migrated to DSL. These handlers pair up with the `Effect*Applied`
+        // events the `CastHandler` emits (Task 9) and are the actual state
+        // mutators for the combat EffectOps.
         self.register(crate::ability::HealHandler);
         self.register(crate::ability::ShieldHandler);
         self.register(crate::ability::StunHandler);

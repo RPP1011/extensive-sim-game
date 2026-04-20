@@ -1790,6 +1790,10 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
         ("min", FoldKind::Min),
     ] {
         if starts_with_keyword(c, kw) {
+            // Save the cursor BEFORE eating the keyword so we can fall back
+            // to a regular function call if this turns out to be a pairwise
+            // `min(a, b)` / `max(a, b)` call, not a fold expression.
+            let pre_kw = c.pos;
             c.bump(kw.len());
             c.skip_ws();
             if c.starts_with_char('(') {
@@ -1826,16 +1830,41 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
                     }
                 }
                 c.pos = save;
-                // Treat as single-expression fold argument.
-                let body = parse_expr_bounded(c, |ck| ck.starts_with_char(')'))?;
-                c.skip_ws();
-                expect_char(c, ')').map_err(|e| e.with_context("parsing fold `)`"))?;
-                let span = Span::new(start, c.pos);
-                return Ok(Expr {
-                    kind: ExprKind::Fold { kind: fk, binder: None, iter: None, body: Box::new(body) },
-                    span,
-                });
+                // Treat as single-expression fold argument. If parsing the
+                // single expression succeeds but we don't see `)` next — most
+                // commonly because we're really looking at a pairwise call
+                // `min(a, b)` whose `,` the bounded-expr parse stopped at —
+                // backtrack to before the keyword and let the generic
+                // primary-expression parse pick it up as a `Call`. The
+                // builtin name itself resolves to a `Min`/`Max`/`Count`/
+                // `Sum` Builtin during name resolution, so the call form
+                // ends up as `IrExpr::BuiltinCall(Builtin::Min, args)` and
+                // emission dispatches on arity (see `docs/dsl/stdlib.md`).
+                let mut probe = Cursor { src: c.src, pos: c.pos };
+                if parse_expr_bounded(&mut probe, |ck| ck.starts_with_char(')')).is_ok() {
+                    probe.skip_ws();
+                    if probe.starts_with_char(')') {
+                        // Real fold form: re-parse using the real cursor.
+                        let body = parse_expr_bounded(c, |ck| ck.starts_with_char(')'))?;
+                        c.skip_ws();
+                        expect_char(c, ')').map_err(|e| e.with_context("parsing fold `)`"))?;
+                        let span = Span::new(start, c.pos);
+                        return Ok(Expr {
+                            kind: ExprKind::Fold { kind: fk, binder: None, iter: None, body: Box::new(body) },
+                            span,
+                        });
+                    }
+                }
+                // Backtrack to before the keyword. Fall through to normal
+                // primary parsing — the keyword becomes an Ident and the
+                // following `(...)` becomes a `Call`.
+                c.pos = pre_kw;
+                break;
             }
+            // Keyword not followed by `(`: not a fold, fall through to the
+            // ident path. Backtrack to before the keyword.
+            c.pos = pre_kw;
+            break;
         }
     }
     if starts_with_keyword(c, "if") {

@@ -149,6 +149,17 @@ mod stdlib {
                 Some((1, IrType::List(Box::new(IrType::Vec3))))
             }
             (NamespaceId::Voxel, "surface_height") => Some((2, IrType::I32)),
+            // `agents` accessors used by physics rules. `hp`/`shield_hp` are
+            // getters; `set_hp`/`set_shield_hp` are mutators returning unit;
+            // `alive` predicates the slot; `kill` flips the alive bit and
+            // tears the agent out of the spatial index. See
+            // `docs/dsl/stdlib.md` for the canonical signatures.
+            (NamespaceId::Agents, "alive") => Some((1, IrType::Bool)),
+            (NamespaceId::Agents, "hp") => Some((1, IrType::F32)),
+            (NamespaceId::Agents, "shield_hp") => Some((1, IrType::F32)),
+            (NamespaceId::Agents, "set_hp") => Some((2, IrType::Unknown)),
+            (NamespaceId::Agents, "set_shield_hp") => Some((2, IrType::Unknown)),
+            (NamespaceId::Agents, "kill") => Some((1, IrType::Unknown)),
             _ => None,
         }
     }

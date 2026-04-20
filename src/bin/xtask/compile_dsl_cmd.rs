@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use dsl_compiler::ast::{Decl, Program};
 use dsl_compiler::ir::Compilation;
 
 use super::cli::CompileDslArgs;
@@ -28,29 +29,53 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let (combined, primary_source) = match compile_all(&sim_files) {
+    let CompileAll { combined, sources } = match compile_all(&sim_files) {
         Ok(c) => c,
         Err(code) => return code,
     };
-    let artefacts = dsl_compiler::emit_with_source(&combined, primary_source.as_deref());
+    let artefacts = dsl_compiler::emit_with_per_kind_sources(
+        &combined,
+        dsl_compiler::EmissionSources {
+            events: sources.events.as_deref(),
+            physics: sources.physics.as_deref(),
+        },
+    );
 
     let rust_events_dir = args.out_rust.join("events");
     let rust_schema = args.out_rust.join("schema.rs");
     let py_events_dir = args.out_python.join("events");
+    let physics_dir = args.out_physics.clone();
 
     if args.check {
         let mut mismatches = Vec::new();
 
-        // Rust per-event files.
+        // Rust per-event files. Pre-format the in-memory emission so the
+        // comparison ignores rustfmt-driven layout differences (committed
+        // files were rustfmt-formatted on the previous `compile-dsl` run).
         for (name, content) in &artefacts.rust_event_structs {
-            check_file(&rust_events_dir.join(name), content, &mut mismatches);
+            let formatted = rustfmt_string(content).unwrap_or_else(|_| content.clone());
+            check_file(&rust_events_dir.join(name), &formatted, &mut mismatches);
         }
+        let mod_fmt = rustfmt_string(&artefacts.rust_events_mod).unwrap_or_else(|_| artefacts.rust_events_mod.clone());
         check_file(
             &rust_events_dir.join("mod.rs"),
-            &artefacts.rust_events_mod,
+            &mod_fmt,
             &mut mismatches,
         );
-        check_file(&rust_schema, &artefacts.schema_rs, &mut mismatches);
+        let schema_fmt = rustfmt_string(&artefacts.schema_rs).unwrap_or_else(|_| artefacts.schema_rs.clone());
+        check_file(&rust_schema, &schema_fmt, &mut mismatches);
+
+        // Physics per-rule files + aggregator.
+        for (name, content) in &artefacts.rust_physics_modules {
+            let formatted = rustfmt_string(content).unwrap_or_else(|_| content.clone());
+            check_file(&physics_dir.join(name), &formatted, &mut mismatches);
+        }
+        let physics_mod_fmt = rustfmt_string(&artefacts.rust_physics_mod).unwrap_or_else(|_| artefacts.rust_physics_mod.clone());
+        check_file(
+            &physics_dir.join("mod.rs"),
+            &physics_mod_fmt,
+            &mut mismatches,
+        );
 
         // Python per-event files.
         for (name, content) in &artefacts.python_event_modules {
@@ -64,10 +89,15 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
 
         // Stale file detection: committed Rust files not in the new emission.
         check_stale(&rust_events_dir, &artefacts.rust_event_structs, "rs", &mut mismatches);
+        check_stale(&physics_dir, &artefacts.rust_physics_modules, "rs", &mut mismatches);
         check_stale(&py_events_dir, &artefacts.python_event_modules, "py", &mut mismatches);
 
         if mismatches.is_empty() {
-            println!("compile-dsl: check ok ({} events)", combined.events.len());
+            println!(
+                "compile-dsl: check ok ({} events, {} physics)",
+                combined.events.len(),
+                combined.physics.len()
+            );
             ExitCode::SUCCESS
         } else {
             eprintln!("compile-dsl: check FAILED ({} mismatch(es))", mismatches.len());
@@ -82,6 +112,7 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         if let Err(e) = write_artefacts(
             &rust_events_dir,
             &rust_schema,
+            &physics_dir,
             &py_events_dir,
             &artefacts,
         ) {
@@ -92,21 +123,31 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         // Format emitted Rust so it matches the project's style. Best effort —
         // if rustfmt fails (missing toolchain, generated file has a bug we
         // want to see), surface the error.
-        let rustfmt_targets: Vec<PathBuf> = artefacts
+        let mut rustfmt_targets: Vec<PathBuf> = artefacts
             .rust_event_structs
             .iter()
             .map(|(n, _)| rust_events_dir.join(n))
             .chain([rust_events_dir.join("mod.rs"), rust_schema.clone()])
             .collect();
+        rustfmt_targets.extend(
+            artefacts
+                .rust_physics_modules
+                .iter()
+                .map(|(n, _)| physics_dir.join(n)),
+        );
+        rustfmt_targets.push(physics_dir.join("mod.rs"));
         if let Err(e) = rustfmt(&rustfmt_targets) {
             eprintln!("compile-dsl: rustfmt failed: {e}");
             return ExitCode::FAILURE;
         }
 
         println!(
-            "compile-dsl: wrote {} events (hash={})",
+            "compile-dsl: wrote {} events (event_hash={}), {} physics rule(s) (rules_hash={}); combined_hash={}",
             combined.events.len(),
             hex(&artefacts.event_hash),
+            combined.physics.len(),
+            hex(&artefacts.rules_hash),
+            hex(&artefacts.combined_hash),
         );
         ExitCode::SUCCESS
     }
@@ -142,14 +183,35 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Parse every `.sim` file, merge events into one `Compilation`. Reject
-/// duplicate event names across files. Returns the merged compilation and,
-/// when every event came from a single file, the path of that file (used to
-/// stamp headers).
-fn compile_all(files: &[PathBuf]) -> Result<(Compilation, Option<String>), ExitCode> {
-    let mut combined = Compilation::default();
+/// Per-declaration-kind source paths used to stamp emitted-file headers.
+/// Each is `Some(path)` when every declaration of that kind came from a
+/// single `.sim` file; `None` when the kind is empty OR multiple files
+/// contribute (in which case we emit a generic header).
+#[derive(Debug, Default)]
+struct PerKindSources {
+    events: Option<String>,
+    physics: Option<String>,
+}
+
+/// Output of `compile_all`: the merged IR plus per-kind source attributions.
+struct CompileAll {
+    combined: Compilation,
+    sources: PerKindSources,
+}
+
+/// Parse every `.sim` file, merge their declarations into one `Program`,
+/// then resolve in a single pass so cross-file references work (e.g. a
+/// `physics` rule in `physics.sim` that matches an `event` declared in
+/// `events.sim`). Tracks which file produced each declaration kind so
+/// per-kind emission headers can stamp the right source path.
+fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
+    let mut merged = Program { decls: Vec::new() };
+    let mut events_source: Option<String> = None;
+    let mut physics_source: Option<String> = None;
+    let mut events_multi = false;
+    let mut physics_multi = false;
     let mut seen_events: HashSet<String> = HashSet::new();
-    let mut sources: HashSet<String> = HashSet::new();
+    let mut seen_physics: HashSet<String> = HashSet::new();
 
     for file in files {
         let src = match fs::read_to_string(file) {
@@ -159,32 +221,73 @@ fn compile_all(files: &[PathBuf]) -> Result<(Compilation, Option<String>), ExitC
                 return Err(ExitCode::FAILURE);
             }
         };
-        let comp = match dsl_compiler::compile(&src) {
-            Ok(c) => c,
+        let parsed = match dsl_compiler::parse(&src) {
+            Ok(p) => p,
             Err(e) => {
-                eprintln!("compile-dsl: compile {}: {e}", file.display());
+                eprintln!("compile-dsl: parse {}: {e}", file.display());
                 return Err(ExitCode::FAILURE);
             }
         };
-        for event in comp.events {
-            if !seen_events.insert(event.name.clone()) {
-                eprintln!(
-                    "compile-dsl: duplicate event `{}` (also appears in an earlier source)",
-                    event.name
-                );
-                return Err(ExitCode::FAILURE);
+        let path = relative_to_repo(file);
+        for decl in parsed.decls {
+            match &decl {
+                Decl::Event(d) => {
+                    if !seen_events.insert(d.name.clone()) {
+                        eprintln!(
+                            "compile-dsl: duplicate event `{}` (also appears in an earlier source)",
+                            d.name
+                        );
+                        return Err(ExitCode::FAILURE);
+                    }
+                    update_kind_source(&mut events_source, &mut events_multi, &path);
+                }
+                Decl::Physics(d) => {
+                    if !seen_physics.insert(d.name.clone()) {
+                        eprintln!(
+                            "compile-dsl: duplicate physics rule `{}` (also appears in an earlier source)",
+                            d.name
+                        );
+                        return Err(ExitCode::FAILURE);
+                    }
+                    update_kind_source(&mut physics_source, &mut physics_multi, &path);
+                }
+                // Other kinds aren't emitted yet — milestones 4+ wire them up.
+                _ => {}
             }
-            combined.events.push(event);
-            sources.insert(relative_to_repo(file));
+            merged.decls.push(decl);
         }
     }
-
-    let primary = if sources.len() == 1 {
-        sources.into_iter().next()
-    } else {
-        None
+    let combined = match dsl_compiler::compile_ast(merged) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("compile-dsl: resolve: {e}");
+            return Err(ExitCode::FAILURE);
+        }
     };
-    Ok((combined, primary))
+    Ok(CompileAll {
+        combined,
+        sources: PerKindSources {
+            events: if events_multi { None } else { events_source },
+            physics: if physics_multi { None } else { physics_source },
+        },
+    })
+}
+
+/// Track per-kind source attribution: when a declaration of this kind
+/// shows up in a new file, mark the kind as multi-source so emission
+/// falls back to the generic header.
+fn update_kind_source(slot: &mut Option<String>, multi: &mut bool, candidate: &str) {
+    if *multi {
+        return;
+    }
+    match slot {
+        None => *slot = Some(candidate.to_string()),
+        Some(existing) if existing == candidate => {}
+        Some(_) => {
+            *multi = true;
+            *slot = None;
+        }
+    }
 }
 
 fn relative_to_repo(path: &Path) -> String {
@@ -199,6 +302,7 @@ fn relative_to_repo(path: &Path) -> String {
 fn write_artefacts(
     rust_events_dir: &Path,
     rust_schema: &Path,
+    physics_dir: &Path,
     py_events_dir: &Path,
     artefacts: &dsl_compiler::EmittedArtifacts,
 ) -> std::io::Result<()> {
@@ -206,11 +310,13 @@ fn write_artefacts(
     if let Some(parent) = rust_schema.parent() {
         fs::create_dir_all(parent)?;
     }
+    fs::create_dir_all(physics_dir)?;
     fs::create_dir_all(py_events_dir)?;
 
-    // Clear out any stale per-event files not in the current emission; keep
+    // Clear out any stale per-decl files not in the current emission; keep
     // mod.rs / __init__.py / schema.rs (they'll be overwritten below).
     prune_stale(rust_events_dir, &artefacts.rust_event_structs, "rs", &["mod.rs"])?;
+    prune_stale(physics_dir, &artefacts.rust_physics_modules, "rs", &["mod.rs"])?;
     prune_stale(py_events_dir, &artefacts.python_event_modules, "py", &["__init__.py"])?;
 
     for (name, content) in &artefacts.rust_event_structs {
@@ -218,6 +324,11 @@ fn write_artefacts(
     }
     fs::write(rust_events_dir.join("mod.rs"), &artefacts.rust_events_mod)?;
     fs::write(rust_schema, &artefacts.schema_rs)?;
+
+    for (name, content) in &artefacts.rust_physics_modules {
+        fs::write(physics_dir.join(name), content)?;
+    }
+    fs::write(physics_dir.join("mod.rs"), &artefacts.rust_physics_mod)?;
 
     for (name, content) in &artefacts.python_event_modules {
         fs::write(py_events_dir.join(name), content)?;
@@ -313,6 +424,37 @@ fn rustfmt(files: &[PathBuf]) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Run rustfmt on an in-memory string and return the formatted output.
+/// Used by `--check` mode so the in-memory emission is compared against
+/// the rustfmt-stable disk content. If rustfmt isn't available or fails,
+/// we return the input unchanged and let the byte comparison decide.
+fn rustfmt_string(src: &str) -> Result<String, String> {
+    use std::io::Write;
+    let mut child = Command::new("rustfmt")
+        .arg("--edition=2021")
+        .arg("--emit=stdout")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn rustfmt: {e}"))?;
+    {
+        let stdin = child.stdin.as_mut().ok_or_else(|| "no stdin".to_string())?;
+        stdin
+            .write_all(src.as_bytes())
+            .map_err(|e| format!("write to rustfmt stdin: {e}"))?;
+    }
+    let output = child.wait_with_output().map_err(|e| format!("wait rustfmt: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "rustfmt exit {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    String::from_utf8(output.stdout).map_err(|e| format!("rustfmt stdout utf8: {e}"))
 }
 
 fn hex(bytes: &[u8]) -> String {

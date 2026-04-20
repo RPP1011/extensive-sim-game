@@ -12,10 +12,11 @@ The existing game logic inside `crates/engine/src/ability/*.rs`, `crates/engine/
 
 | # | Milestone | Compiler emits | Legacy retired | Status |
 |---|---|---|---|---|
-| 0 | Compiler scaffold | empty module + xtask wiring | — | ❌ |
-| 1 | `event` | Event enum variants; matching Python `@dataclass` | legacy event enum decls | ❌ |
-| 2 | `physics` rule | `impl CascadeHandler` + registration call | `ability/*.rs` handlers (damage, heal, shield, stun, slow, gold, standing, cast, opportunity_attack, engagement update) | ❌ |
-| 3 | `mask` | predicate fn + SPIR-V kernel stub | `ability/gate.rs`, mask-build call sites | ❌ |
+| 0 | Compiler scaffold | empty module + xtask wiring | — | ✅ |
+| 1 | `event` | Event enum variants; matching Python `@dataclass` | legacy event enum decls | ✅ |
+| 2 | (renumbered) `event` integration | events emitted into `engine_rules`, engine consumes via re-export | hand-written `engine::event::Event` | ✅ |
+| 3 | `physics` rule | `impl CascadeHandler` + registration call into `engine::cascade::CascadeRegistry` | `ability/*.rs` handlers (damage so far; heal, shield, stun, slow, gold, standing follow as separate commits) | 🚧 |
+| 4 | `mask` | predicate fn + SPIR-V kernel stub | `ability/gate.rs`, mask-build call sites | ❌ |
 | 4 | `scoring` | per-action utility table | `policy/utility.rs` scoring body | ❌ |
 | 5 | `entity` | spawn template + CreatureType variant + capability struct | `creature.rs` enum + `is_hostile_to` + `for_creature` | ❌ |
 | 6 | `view` (`@lazy` first, `@materialized` later) | inline fn / event-fold update | view-like helpers scattered in engine | ❌ |

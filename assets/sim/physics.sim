@@ -1,0 +1,37 @@
+// Physics rules — compiler-emitted cascade handlers.
+//
+// At milestone 3 (compiler_progress.md row 3) this file owns ONE rule:
+// the damage handler. It replaces the hand-written
+// `crates/engine/src/ability/damage.rs` deleted in the same commit.
+//
+// Adding more rules here requires extending the emitter and removing the
+// matching legacy handler from `crates/engine/src/ability/`. Each handler
+// migrates as its own commit so the regression surface stays small.
+//
+// Behaviour pinned by `crates/engine/tests/cast_handler_damage.rs`. The
+// emitted Rust must reproduce the legacy event trace bit-for-bit:
+// shield-first absorption, AgentAttacked emit, lethal-overflow AgentDied
+// + kill_agent.
+
+physics damage @phase(event) {
+  on EffectDamageApplied { caster: c, target: t, amount: a, tick: tk } {
+    if agents.alive(t) {
+      if a > 0.0 {
+        let shield = agents.shield_hp(t)
+        let absorbed = min(shield, a)
+        agents.set_shield_hp(t, shield - absorbed)
+        let residual = a - absorbed
+        emit AgentAttacked { attacker: c, target: t, damage: a, tick: tk }
+        if residual > 0.0 {
+          let cur_hp = agents.hp(t)
+          let new_hp = max(cur_hp - residual, 0.0)
+          agents.set_hp(t, new_hp)
+          if new_hp <= 0.0 {
+            emit AgentDied { agent_id: t, tick: tk }
+            agents.kill(t)
+          }
+        }
+      }
+    }
+  }
+}
