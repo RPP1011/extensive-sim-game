@@ -32,6 +32,28 @@ pub enum ResolveError {
     TooManyDecls {
         kind: &'static str,
     },
+    /// An `@tag_name` annotation on an event references a tag this
+    /// compilation doesn't declare. Suggestions are the closest declared
+    /// tag names.
+    UnknownEventTag {
+        name: String,
+        span: Span,
+        suggestions: Vec<String>,
+    },
+    /// An event claims `@tag_name` but is missing one of the tag's
+    /// required fields, or declares it with a mismatched type.
+    EventTagContractViolated {
+        event: String,
+        tag: String,
+        details: Vec<String>,
+        span: Span,
+    },
+    /// A physics `on @tag` handler binds a field the tag doesn't declare.
+    TagBindingUnknown {
+        tag: String,
+        field: String,
+        span: Span,
+    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -67,6 +89,30 @@ impl std::fmt::Display for ResolveError {
             ResolveError::TooManyDecls { kind } => write!(
                 f,
                 "too many `{kind}` declarations (16-bit limit exceeded)"
+            ),
+            ResolveError::UnknownEventTag { name, span, suggestions } => {
+                write!(
+                    f,
+                    "unknown event_tag `@{name}` at bytes {}..{}",
+                    span.start, span.end
+                )?;
+                if !suggestions.is_empty() {
+                    write!(f, " (did you mean: {}?)", suggestions.join(", "))?;
+                }
+                Ok(())
+            }
+            ResolveError::EventTagContractViolated { event, tag, details, span } => {
+                write!(
+                    f,
+                    "event `{event}` claims `@{tag}` but violates the tag contract at bytes {}..{}: ",
+                    span.start, span.end
+                )?;
+                write!(f, "{}", details.join("; "))
+            }
+            ResolveError::TagBindingUnknown { tag, field, span } => write!(
+                f,
+                "tag `@{tag}` does not declare field `{field}` at bytes {}..{}",
+                span.start, span.end
             ),
         }
     }

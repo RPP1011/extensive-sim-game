@@ -12,6 +12,7 @@
           }
         }
       ],
+      "tags": [],
       "annotations": [
         {
           "name": "replayable",
@@ -39,6 +40,7 @@
           }
         }
       ],
+      "tags": [],
       "annotations": [
         {
           "name": "replayable",
@@ -74,6 +76,7 @@
           }
         }
       ],
+      "tags": [],
       "annotations": [
         {
           "name": "replayable",
@@ -101,6 +104,7 @@
           }
         }
       ],
+      "tags": [],
       "annotations": [
         {
           "name": "replayable",
@@ -125,6 +129,8 @@
       }
     }
   ],
+  "event_tags": [],
+  "enums": [],
   "entities": [],
   "physics": [],
   "masks": [],

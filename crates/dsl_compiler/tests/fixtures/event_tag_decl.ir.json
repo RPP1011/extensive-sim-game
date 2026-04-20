@@ -1,0 +1,84 @@
+{
+  "events": [
+    {
+      "name": "AgentAttacked",
+      "fields": [
+        {
+          "name": "attacker",
+          "ty": "AgentId",
+          "span": {
+            "start": 284,
+            "end": 301
+          }
+        },
+        {
+          "name": "target",
+          "ty": "AgentId",
+          "span": {
+            "start": 305,
+            "end": 320
+          }
+        },
+        {
+          "name": "damage",
+          "ty": "F32",
+          "span": {
+            "start": 324,
+            "end": 335
+          }
+        }
+      ],
+      "tags": [
+        0
+      ],
+      "annotations": [
+        {
+          "name": "replayable",
+          "args": [],
+          "span": {
+            "start": 239,
+            "end": 250
+          }
+        }
+      ],
+      "span": {
+        "start": 260,
+        "end": 338
+      }
+    }
+  ],
+  "event_tags": [
+    {
+      "name": "Harmful",
+      "fields": [
+        {
+          "name": "target",
+          "ty": "AgentId",
+          "span": {
+            "start": 220,
+            "end": 236
+          }
+        }
+      ],
+      "annotations": [],
+      "span": {
+        "start": 200,
+        "end": 237
+      }
+    }
+  ],
+  "enums": [],
+  "entities": [],
+  "physics": [],
+  "masks": [],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "configs": [],
+  "spans": {
+    "entries": []
+  }
+}

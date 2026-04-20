@@ -1,5 +1,7 @@
 {
   "events": [],
+  "event_tags": [],
+  "enums": [],
   "entities": [],
   "physics": [
     {
@@ -7,39 +9,41 @@
       "handlers": [
         {
           "pattern": {
-            "name": "DamageReceived",
-            "event": null,
-            "bindings": [
-              {
-                "field": "target",
-                "value": {
-                  "Bind": {
-                    "name": "a",
-                    "local": 1
+            "Kind": {
+              "name": "DamageReceived",
+              "event": null,
+              "bindings": [
+                {
+                  "field": "target",
+                  "value": {
+                    "Bind": {
+                      "name": "a",
+                      "local": 1
+                    }
+                  },
+                  "span": {
+                    "start": 150,
+                    "end": 159
                   }
                 },
-                "span": {
-                  "start": 150,
-                  "end": 159
-                }
-              },
-              {
-                "field": "damage",
-                "value": {
-                  "Bind": {
-                    "name": "d",
-                    "local": 2
+                {
+                  "field": "damage",
+                  "value": {
+                    "Bind": {
+                      "name": "d",
+                      "local": 2
+                    }
+                  },
+                  "span": {
+                    "start": 161,
+                    "end": 170
                   }
-                },
-                "span": {
-                  "start": 161,
-                  "end": 170
                 }
+              ],
+              "span": {
+                "start": 135,
+                "end": 171
               }
-            ],
-            "span": {
-              "start": 135,
-              "end": 171
             }
           },
           "where_clause": {

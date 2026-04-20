@@ -2,55 +2,59 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
 use crate::event::{Event, EventRing};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub struct OpportunityAttackHandler;
-
-impl CascadeHandler for OpportunityAttackHandler {
-    fn trigger(&self) -> EventKindId {
-        EventKindId::OpportunityAttackTriggered
-    }
-    fn lane(&self) -> Lane {
-        Lane::Effect
-    }
-
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (attacker, target, tk) = match *event {
-            Event::OpportunityAttackTriggered {
-                attacker,
-                target,
-                tick: tk,
-                ..
-            } => (attacker, target, tk),
-            _ => return,
-        };
-        if state.agent_alive(target) {
-            let damage = state
-                .agent_attack_damage(attacker)
-                .unwrap_or(state.config.combat.attack_damage);
-            let cur_hp = state.agent_hp(target).unwrap_or(0.0);
-            let new_hp = (cur_hp - damage).max(0.0);
-            state.set_agent_hp(target, new_hp);
-            events.push(Event::AgentAttacked {
-                attacker,
-                target,
-                damage,
-                tick: tk,
+#[allow(unused_variables)]
+pub fn opportunity_attack(
+    attacker: AgentId,
+    target: AgentId,
+    state: &mut SimState,
+    events: &mut EventRing,
+) {
+    if state.agent_alive(target) {
+        let damage = state
+            .agent_attack_damage(attacker)
+            .unwrap_or(state.config.combat.attack_damage);
+        let cur_hp = state.agent_hp(target).unwrap_or(0.0);
+        let new_hp = (cur_hp - damage).max(0.0);
+        state.set_agent_hp(target, new_hp);
+        events.push(Event::AgentAttacked {
+            attacker,
+            target,
+            damage,
+            tick: state.tick,
+        });
+        if (new_hp <= 0.0) {
+            events.push(Event::AgentDied {
+                agent_id: target,
+                tick: state.tick,
             });
-            if (new_hp <= 0.0) {
-                events.push(Event::AgentDied {
-                    agent_id: target,
-                    tick: tk,
-                });
-                state.kill_agent(target);
-            }
+            state.kill_agent(target);
         }
     }
 }
 
-pub fn register(registry: &mut CascadeRegistry) {
-    registry.register(OpportunityAttackHandler);
+pub struct OpportunityAttackHandler;
+
+impl crate::cascade::CascadeHandler for OpportunityAttackHandler {
+    fn trigger(&self) -> crate::cascade::EventKindId {
+        crate::cascade::EventKindId::OpportunityAttackTriggered
+    }
+    fn lane(&self) -> crate::cascade::Lane {
+        crate::cascade::Lane::Effect
+    }
+    #[allow(unused_variables)]
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        let Event::OpportunityAttackTriggered {
+            attacker,
+            target,
+            tick,
+        } = *event
+        else {
+            return;
+        };
+        opportunity_attack(attacker, target, state, events);
+    }
 }

@@ -97,6 +97,8 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
     Some(match d {
         Decl::Entity(x) => &mut x.annotations,
         Decl::Event(x) => &mut x.annotations,
+        Decl::EventTag(x) => &mut x.annotations,
+        Decl::Enum(x) => &mut x.annotations,
         Decl::View(x) => &mut x.annotations,
         Decl::Physics(x) => &mut x.annotations,
         Decl::Mask(x) => &mut x.annotations,
@@ -117,6 +119,8 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
     match d {
         Decl::Entity(x) => &mut x.span,
         Decl::Event(x) => &mut x.span,
+        Decl::EventTag(x) => &mut x.span,
+        Decl::Enum(x) => &mut x.span,
         Decl::View(x) => &mut x.span,
         Decl::Physics(x) => &mut x.span,
         Decl::Mask(x) => &mut x.span,
@@ -142,7 +146,9 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
     let kw = peek_ident(c);
     match kw.as_deref() {
         Some("entity") => entity_decl(c, annotations, start).map(Decl::Entity),
+        Some("event_tag") => event_tag_decl(c, annotations, start).map(Decl::EventTag),
         Some("event") => event_decl(c, annotations, start).map(Decl::Event),
+        Some("enum") => enum_decl(c, annotations, start).map(Decl::Enum),
         Some("view") => view_decl(c, annotations, start).map(Decl::View),
         Some("query") => query_decl(c, annotations, start).map(Decl::Query),
         Some("physics") => physics_decl(c, annotations, start).map(Decl::Physics),
@@ -156,7 +162,7 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         _ => Err(ParseErr::at(
             here(c),
             format!(
-                "expected top-level declaration (entity, event, view, query, physics, mask, verb, scoring, invariant, probe, metric, config); got `{}`",
+                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config); got `{}`",
                 peek_word_for_error(c)
             ),
         )),
@@ -475,9 +481,77 @@ fn event_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRe
     c.skip_ws();
     expect_char(c, '{').map_err(|e| e.with_context("parsing event body (expected `{`)"))?;
     let fields = parse_field_decls(c)?;
+    // Implicit tick: authors must not declare a `tick` field. Every emitted
+    // Event variant receives `tick: u32` automatically (see emit_rust.rs).
+    if let Some(f) = fields.iter().find(|f| f.name == "tick") {
+        return Err(ParseErr::at(
+            f.span,
+            "tick is implicit on every event; remove this field.",
+        ));
+    }
     c.skip_ws();
     expect_char(c, '}').map_err(|e| e.with_context("parsing event body (expected `}`)"))?;
-    Ok(EventDecl { annotations, name, fields, span: Span::new(start, c.pos) })
+    Ok(EventDecl {
+        annotations,
+        name,
+        fields,
+        tags: Vec::new(),
+        span: Span::new(start, c.pos),
+    })
+}
+
+fn event_tag_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<EventTagDecl> {
+    expect_keyword(c, "event_tag")
+        .map_err(|e| e.with_context("parsing `event_tag` declaration"))?;
+    let name = ident(c).map_err(|e| e.with_context("parsing event_tag name"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing event_tag body (expected `{`)"))?;
+    let fields = parse_field_decls(c)?;
+    if let Some(f) = fields.iter().find(|f| f.name == "tick") {
+        return Err(ParseErr::at(
+            f.span,
+            "tick is implicit on every event; remove this field from the tag.",
+        ));
+    }
+    c.skip_ws();
+    expect_char(c, '}')
+        .map_err(|e| e.with_context("parsing event_tag body (expected `}`)"))?;
+    Ok(EventTagDecl { annotations, name, fields, span: Span::new(start, c.pos) })
+}
+
+fn enum_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PResult<EnumDecl> {
+    expect_keyword(c, "enum").map_err(|e| e.with_context("parsing `enum` declaration"))?;
+    let name = ident(c).map_err(|e| e.with_context("parsing enum name"))?;
+    c.skip_ws();
+    expect_char(c, '{')
+        .map_err(|e| e.with_context("parsing enum body (expected `{`)"))?;
+    let mut variants = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        let vstart = c.pos;
+        let vname = ident(c).map_err(|e| e.with_context("parsing enum variant name"))?;
+        variants.push(EnumVariant { name: vname, span: Span::new(vstart, c.pos) });
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+            continue;
+        }
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        return Err(ParseErr::at(here(c), "expected `,` or `}` in enum body"));
+    }
+    Ok(EnumDecl { annotations, name, variants, span: Span::new(start, c.pos) })
 }
 
 fn parse_field_decls(c: &mut Cursor) -> PResult<Vec<FieldDecl>> {
@@ -711,7 +785,37 @@ fn parse_physics_handler(c: &mut Cursor) -> PResult<PhysicsHandler> {
     let start = c.pos;
     expect_keyword(c, "on").map_err(|e| e.with_context("parsing physics handler `on`"))?;
     c.skip_ws();
-    let pattern = parse_event_pattern(c)?;
+    let pattern = if c.starts_with_char('@') {
+        let pstart = c.pos;
+        c.bump(1);
+        let name = ident(c).map_err(|e| e.with_context("parsing physics tag name"))?;
+        c.skip_ws();
+        let mut bindings = Vec::new();
+        if c.starts_with_char('{') {
+            c.bump(1);
+            loop {
+                c.skip_ws();
+                if c.starts_with_char('}') {
+                    c.bump(1);
+                    break;
+                }
+                bindings.push(parse_pattern_binding(c)?);
+                c.skip_ws();
+                if c.starts_with_char(',') {
+                    c.bump(1);
+                    continue;
+                }
+                if c.starts_with_char('}') {
+                    c.bump(1);
+                    break;
+                }
+                return Err(ParseErr::at(here(c), "expected `,` or `}` in tag pattern"));
+            }
+        }
+        PhysicsPattern::Tag { name, bindings, span: Span::new(pstart, c.pos) }
+    } else {
+        PhysicsPattern::Kind(parse_event_pattern(c)?)
+    };
     c.skip_ws();
     let mut where_clause = None;
     if c.starts_with("where") {

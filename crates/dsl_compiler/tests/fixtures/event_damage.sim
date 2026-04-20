@@ -1,9 +1,9 @@
-// Damage event — replayable, traced.
+// Damage event — replayable, traced. `tick` is implicit on every
+// event and appended by the emitter; declaring it here is a parse error.
 @replayable
 @traced
 event DamageReceived {
   target: AgentId,
   source: AgentId,
   damage: f32,
-  tick: Tick,
 }

@@ -1,5 +1,7 @@
 {
   "events": [],
+  "event_tags": [],
+  "enums": [],
   "entities": [],
   "physics": [
     {
@@ -7,26 +9,28 @@
       "handlers": [
         {
           "pattern": {
-            "name": "VoxelChanged",
-            "event": null,
-            "bindings": [
-              {
-                "field": "pos",
-                "value": {
-                  "Bind": {
-                    "name": "p",
-                    "local": 1
+            "Kind": {
+              "name": "VoxelChanged",
+              "event": null,
+              "bindings": [
+                {
+                  "field": "pos",
+                  "value": {
+                    "Bind": {
+                      "name": "p",
+                      "local": 1
+                    }
+                  },
+                  "span": {
+                    "start": 142,
+                    "end": 148
                   }
-                },
-                "span": {
-                  "start": 142,
-                  "end": 148
                 }
+              ],
+              "span": {
+                "start": 129,
+                "end": 149
               }
-            ],
-            "span": {
-              "start": 129,
-              "end": 149
             }
           },
           "where_clause": null,

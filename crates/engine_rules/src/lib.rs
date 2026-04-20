@@ -18,6 +18,7 @@
 
 pub mod config;
 pub mod entities;
+pub mod enums;
 pub mod events;
 pub mod id_serde;
 pub mod ids;

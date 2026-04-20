@@ -46,32 +46,34 @@
         "handlers": [
           {
             "pattern": {
-              "name": "DamageReceived",
-              "bindings": [
-                {
-                  "field": "target",
-                  "value": {
-                    "Bind": "a"
+              "Kind": {
+                "name": "DamageReceived",
+                "bindings": [
+                  {
+                    "field": "target",
+                    "value": {
+                      "Bind": "a"
+                    },
+                    "span": {
+                      "start": 150,
+                      "end": 159
+                    }
                   },
-                  "span": {
-                    "start": 150,
-                    "end": 159
+                  {
+                    "field": "damage",
+                    "value": {
+                      "Bind": "d"
+                    },
+                    "span": {
+                      "start": 161,
+                      "end": 170
+                    }
                   }
-                },
-                {
-                  "field": "damage",
-                  "value": {
-                    "Bind": "d"
-                  },
-                  "span": {
-                    "start": 161,
-                    "end": 170
-                  }
+                ],
+                "span": {
+                  "start": 135,
+                  "end": 171
                 }
-              ],
-              "span": {
-                "start": 135,
-                "end": 171
               }
             },
             "where_clause": {

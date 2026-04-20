@@ -7,5 +7,5 @@ from dataclasses import dataclass
 
 @dataclass
 class ChronicleEntry:
-    tick: int
     template_id: int
+    tick: int

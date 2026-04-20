@@ -1,0 +1,46 @@
+{
+  "events": [
+    {
+      "name": "TickFree",
+      "fields": [
+        {
+          "name": "agent_id",
+          "ty": "AgentId",
+          "span": {
+            "start": 181,
+            "end": 198
+          }
+        },
+        {
+          "name": "amount",
+          "ty": "F32",
+          "span": {
+            "start": 200,
+            "end": 212
+          }
+        }
+      ],
+      "tags": [],
+      "annotations": [],
+      "span": {
+        "start": 164,
+        "end": 213
+      }
+    }
+  ],
+  "event_tags": [],
+  "enums": [],
+  "entities": [],
+  "physics": [],
+  "masks": [],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "configs": [],
+  "spans": {
+    "entries": []
+  }
+}

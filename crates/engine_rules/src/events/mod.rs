@@ -190,8 +190,8 @@ pub enum Event {
         tick: u32,
     },
     ChronicleEntry {
-        tick: u32,
         template_id: u32,
+        tick: u32,
     },
     EffectDamageApplied {
         caster: AgentId,

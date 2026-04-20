@@ -2,61 +2,60 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
 use crate::event::{Event, EventRing};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub struct DamageHandler;
-
-impl CascadeHandler for DamageHandler {
-    fn trigger(&self) -> EventKindId {
-        EventKindId::EffectDamageApplied
-    }
-    fn lane(&self) -> Lane {
-        Lane::Effect
-    }
-
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (c, t, a, tk) = match *event {
-            Event::EffectDamageApplied {
-                caster: c,
+#[allow(unused_variables)]
+pub fn damage(c: AgentId, t: AgentId, a: f32, state: &mut SimState, events: &mut EventRing) {
+    if state.agent_alive(t) {
+        if (a > 0.0) {
+            let shield = state.agent_shield_hp(t).unwrap_or(0.0);
+            let absorbed = (shield).min(a);
+            state.set_agent_shield_hp(t, (shield - absorbed));
+            let residual = (a - absorbed);
+            events.push(Event::AgentAttacked {
+                attacker: c,
                 target: t,
-                amount: a,
-                tick: tk,
-                ..
-            } => (c, t, a, tk),
-            _ => return,
-        };
-        if state.agent_alive(t) {
-            if (a > 0.0) {
-                let shield = state.agent_shield_hp(t).unwrap_or(0.0);
-                let absorbed = (shield).min(a);
-                state.set_agent_shield_hp(t, (shield - absorbed));
-                let residual = (a - absorbed);
-                events.push(Event::AgentAttacked {
-                    attacker: c,
-                    target: t,
-                    damage: a,
-                    tick: tk,
-                });
-                if (residual > 0.0) {
-                    let cur_hp = state.agent_hp(t).unwrap_or(0.0);
-                    let new_hp = (cur_hp - residual).max(0.0);
-                    state.set_agent_hp(t, new_hp);
-                    if (new_hp <= 0.0) {
-                        events.push(Event::AgentDied {
-                            agent_id: t,
-                            tick: tk,
-                        });
-                        state.kill_agent(t);
-                    }
+                damage: a,
+                tick: state.tick,
+            });
+            if (residual > 0.0) {
+                let cur_hp = state.agent_hp(t).unwrap_or(0.0);
+                let new_hp = (cur_hp - residual).max(0.0);
+                state.set_agent_hp(t, new_hp);
+                if (new_hp <= 0.0) {
+                    events.push(Event::AgentDied {
+                        agent_id: t,
+                        tick: state.tick,
+                    });
+                    state.kill_agent(t);
                 }
             }
         }
     }
 }
 
-pub fn register(registry: &mut CascadeRegistry) {
-    registry.register(DamageHandler);
+pub struct DamageHandler;
+
+impl crate::cascade::CascadeHandler for DamageHandler {
+    fn trigger(&self) -> crate::cascade::EventKindId {
+        crate::cascade::EventKindId::EffectDamageApplied
+    }
+    fn lane(&self) -> crate::cascade::Lane {
+        crate::cascade::Lane::Effect
+    }
+    #[allow(unused_variables)]
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        let Event::EffectDamageApplied {
+            caster,
+            target,
+            amount,
+            tick,
+        } = *event
+        else {
+            return;
+        };
+        damage(caster, target, amount, state, events);
+    }
 }

@@ -1,0 +1,7 @@
+// Standalone `enum` declaration — emits `#[repr(u8)]` Rust + Python
+// `IntEnum`. Variant order drives the ordinal.
+enum CombustionReason {
+  CulturalTransgression,
+  FriendlyFire,
+  Paradox,
+}

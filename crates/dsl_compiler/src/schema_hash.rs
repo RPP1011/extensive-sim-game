@@ -18,8 +18,8 @@ use sha2::{Digest, Sha256};
 
 use crate::emit_entity;
 use crate::ir::{
-    ConfigIR, EntityIR, EventIR, IrExpr, IrExprNode, IrPattern, IrPatternBinding, IrStmt, IrType,
-    PhysicsHandlerIR, PhysicsIR, ScoringIR,
+    ConfigIR, EntityIR, EnumIR, EventIR, EventTagIR, IrExpr, IrExprNode, IrPattern,
+    IrPatternBinding, IrPhysicsPattern, IrStmt, IrType, PhysicsHandlerIR, PhysicsIR, ScoringIR,
 };
 
 pub fn event_hash(events: &[EventIR]) -> [u8; 32] {
@@ -42,6 +42,28 @@ pub fn event_hash(events: &[EventIR]) -> [u8; 32] {
     h.finalize().into()
 }
 
+/// Hash every declared enum. Variant order within an enum is load-bearing
+/// (the `#[repr(u8)]` ordinal is the variant's source-order index), so
+/// variants keep their declaration order; blocks themselves are sorted by
+/// name for reorder stability.
+pub fn enums_hash(enums: &[EnumIR]) -> [u8; 32] {
+    let mut sorted: Vec<&EnumIR> = enums.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut h = Sha256::new();
+    for e in sorted {
+        h.update(e.name.as_bytes());
+        h.update([0u8]);
+        h.update(&(e.variants.len() as u32).to_le_bytes());
+        for v in &e.variants {
+            h.update(v.as_bytes());
+            h.update([0u8]);
+        }
+        h.update([0xFFu8]);
+    }
+    h.finalize().into()
+}
+
 /// Hash the physics-rule subset of the rules taxonomy. Stable under rule
 /// reordering: rules are sorted by name. Handlers within a rule keep their
 /// source order (handler N's identity matters; reordering changes runtime
@@ -51,11 +73,16 @@ pub fn event_hash(events: &[EventIR]) -> [u8; 32] {
 /// + binding shape + body statement structure. We deliberately don't fold
 /// in source spans, identifier byte offsets, or comments — those are
 /// formatting noise the hash should be immune to.
-pub fn rules_hash(physics: &[PhysicsIR]) -> [u8; 32] {
+pub fn rules_hash(
+    physics: &[PhysicsIR],
+    event_tags: &[EventTagIR],
+    events: &[EventIR],
+) -> [u8; 32] {
     let mut sorted: Vec<&PhysicsIR> = physics.iter().collect();
     sorted.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut h = Sha256::new();
+    // Physics rules.
     for p in sorted {
         h.update(p.name.as_bytes());
         h.update([0u8]);
@@ -64,6 +91,36 @@ pub fn rules_hash(physics: &[PhysicsIR]) -> [u8; 32] {
             hash_handler(&mut h, handler);
         }
         h.update([0xFFu8]);
+    }
+    h.update([0xAAu8]);
+    // Event tag declarations.
+    let mut sorted_tags: Vec<&EventTagIR> = event_tags.iter().collect();
+    sorted_tags.sort_by(|a, b| a.name.cmp(&b.name));
+    for t in sorted_tags {
+        h.update(t.name.as_bytes());
+        h.update([0u8]);
+        h.update(&(t.fields.len() as u32).to_le_bytes());
+        for f in &t.fields {
+            h.update(f.name.as_bytes());
+            h.update([0u8]);
+            h.update(&type_canonical_bytes(&f.ty));
+            h.update([0u8]);
+        }
+        h.update([0xFFu8]);
+    }
+    h.update([0xBBu8]);
+    // Per-event tag membership (event name → sorted tag ref ordinals).
+    let mut sorted_events: Vec<&EventIR> = events.iter().collect();
+    sorted_events.sort_by(|a, b| a.name.cmp(&b.name));
+    for e in sorted_events {
+        h.update(e.name.as_bytes());
+        h.update([0u8]);
+        let mut refs: Vec<u16> = e.tags.iter().map(|r| r.0).collect();
+        refs.sort();
+        h.update(&(refs.len() as u32).to_le_bytes());
+        for r in refs {
+            h.update(&r.to_le_bytes());
+        }
     }
     h.finalize().into()
 }
@@ -146,11 +203,25 @@ pub fn scoring_hash(blocks: &[ScoringIR]) -> [u8; 32] {
 }
 
 fn hash_handler(h: &mut Sha256, handler: &PhysicsHandlerIR) {
-    h.update(handler.pattern.name.as_bytes());
-    h.update([0u8]);
-    h.update(&(handler.pattern.bindings.len() as u32).to_le_bytes());
-    for b in &handler.pattern.bindings {
-        hash_pattern_binding(h, b);
+    match &handler.pattern {
+        IrPhysicsPattern::Kind(p) => {
+            h.update([0x01u8]);
+            h.update(p.name.as_bytes());
+            h.update([0u8]);
+            h.update(&(p.bindings.len() as u32).to_le_bytes());
+            for b in &p.bindings {
+                hash_pattern_binding(h, b);
+            }
+        }
+        IrPhysicsPattern::Tag { name, bindings, .. } => {
+            h.update([0x02u8]);
+            h.update(name.as_bytes());
+            h.update([0u8]);
+            h.update(&(bindings.len() as u32).to_le_bytes());
+            for b in bindings {
+                hash_pattern_binding(h, b);
+            }
+        }
     }
     h.update(if handler.where_clause.is_some() { [0x01u8] } else { [0x00u8] });
     if let Some(w) = &handler.where_clause {
@@ -496,6 +567,7 @@ pub fn combined_hash(
     rules: &[u8; 32],
     scoring: &[u8; 32],
     config: &[u8; 32],
+    enums: &[u8; 32],
 ) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(state);
@@ -503,6 +575,7 @@ pub fn combined_hash(
     h.update(rules);
     h.update(scoring);
     h.update(config);
+    h.update(enums);
     h.finalize().into()
 }
 
@@ -516,9 +589,10 @@ pub fn emit_schema_rs(
     rules: &[u8; 32],
     scoring: &[u8; 32],
     config: &[u8; 32],
+    enums: &[u8; 32],
 ) -> String {
     use std::fmt::Write;
-    let combined = combined_hash(state, event, rules, scoring, config);
+    let combined = combined_hash(state, event, rules, scoring, config, enums);
 
     let mut out = String::new();
     writeln!(out, "// GENERATED by dsl_compiler. Do not edit by hand.").unwrap();
@@ -530,7 +604,7 @@ pub fn emit_schema_rs(
     writeln!(out).unwrap();
     writeln!(
         out,
-        "// `COMBINED_HASH` rolls the five sub-hashes together per `docs/compiler/spec.md` \u{00a7}2."
+        "// `COMBINED_HASH` rolls the six sub-hashes together per `docs/compiler/spec.md` \u{00a7}2."
     )
     .unwrap();
     writeln!(
@@ -545,6 +619,7 @@ pub fn emit_schema_rs(
     write_hash_const(&mut out, "RULES_HASH", rules);
     write_hash_const(&mut out, "SCORING_HASH", scoring);
     write_hash_const(&mut out, "CONFIG_HASH", config);
+    write_hash_const(&mut out, "ENUMS_HASH", enums);
     write_hash_const(&mut out, "COMBINED_HASH", &combined);
     out
 }
@@ -676,6 +751,7 @@ mod tests {
                 .into_iter()
                 .map(|(n, t)| EventField { name: n.into(), ty: t, span: Span::dummy() })
                 .collect(),
+            tags: vec![],
             annotations: vec![],
             span: Span::dummy(),
         }
@@ -735,14 +811,15 @@ mod tests {
     #[test]
     fn emit_schema_rs_shape() {
         let h = [0u8; 32];
-        let s = emit_schema_rs(&h, &h, &h, &h, &h);
-        // All six constants present.
+        let s = emit_schema_rs(&h, &h, &h, &h, &h, &h);
+        // All seven constants present.
         for name in [
             "STATE_HASH",
             "EVENT_HASH",
             "RULES_HASH",
             "SCORING_HASH",
             "CONFIG_HASH",
+            "ENUMS_HASH",
             "COMBINED_HASH",
         ] {
             assert!(s.contains(&format!("pub const {name}: [u8; 32] = [")), "missing {name}");
@@ -755,13 +832,13 @@ mod tests {
     #[test]
     fn rules_hash_deterministic_and_order_independent() {
         use crate::ir::{
-            EventRef, IrEventPattern, IrPattern, IrPatternBinding, IrStmt, LocalRef,
-            PhysicsHandlerIR, PhysicsIR,
+            EventRef, IrEventPattern, IrPattern, IrPatternBinding, IrPhysicsPattern, IrStmt,
+            LocalRef, PhysicsHandlerIR, PhysicsIR,
         };
         let mk = |name: &str| PhysicsIR {
             name: name.into(),
             handlers: vec![PhysicsHandlerIR {
-                pattern: IrEventPattern {
+                pattern: IrPhysicsPattern::Kind(IrEventPattern {
                     name: "EffectDamageApplied".into(),
                     event: Some(EventRef(0)),
                     bindings: vec![IrPatternBinding {
@@ -770,7 +847,7 @@ mod tests {
                         span: Span::dummy(),
                     }],
                     span: Span::dummy(),
-                },
+                }),
                 where_clause: None,
                 body: vec![IrStmt::Expr(crate::ir::IrExprNode {
                     kind: crate::ir::IrExpr::LitBool(true),
@@ -781,8 +858,8 @@ mod tests {
             annotations: vec![],
             span: Span::dummy(),
         };
-        let h1 = rules_hash(&[mk("a"), mk("b")]);
-        let h2 = rules_hash(&[mk("b"), mk("a")]);
+        let h1 = rules_hash(&[mk("a"), mk("b")], &[], &[]);
+        let h2 = rules_hash(&[mk("b"), mk("a")], &[], &[]);
         assert_eq!(h1, h2, "rules_hash must be sort-stable");
     }
 
@@ -791,15 +868,20 @@ mod tests {
         let zero = [0u8; 32];
         let mut event = [0u8; 32];
         event[0] = 1;
-        let h_with_event = combined_hash(&zero, &event, &zero, &zero, &zero);
-        let h_all_zero = combined_hash(&zero, &zero, &zero, &zero, &zero);
+        let h_with_event = combined_hash(&zero, &event, &zero, &zero, &zero, &zero);
+        let h_all_zero = combined_hash(&zero, &zero, &zero, &zero, &zero, &zero);
         assert_ne!(h_with_event, h_all_zero, "event change must alter combined");
 
         // Config sub-hash is part of the mix too.
         let mut cfg = [0u8; 32];
         cfg[0] = 1;
-        let h_with_config = combined_hash(&zero, &zero, &zero, &zero, &cfg);
+        let h_with_config = combined_hash(&zero, &zero, &zero, &zero, &cfg, &zero);
         assert_ne!(h_with_config, h_all_zero, "config change must alter combined");
+
+        let mut enums = [0u8; 32];
+        enums[0] = 1;
+        let h_with_enums = combined_hash(&zero, &zero, &zero, &zero, &zero, &enums);
+        assert_ne!(h_with_enums, h_all_zero, "enums change must alter combined");
     }
 
     #[test]

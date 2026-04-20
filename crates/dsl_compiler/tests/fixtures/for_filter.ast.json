@@ -46,22 +46,24 @@
         "handlers": [
           {
             "pattern": {
-              "name": "VoxelChanged",
-              "bindings": [
-                {
-                  "field": "pos",
-                  "value": {
-                    "Bind": "p"
-                  },
-                  "span": {
-                    "start": 142,
-                    "end": 148
+              "Kind": {
+                "name": "VoxelChanged",
+                "bindings": [
+                  {
+                    "field": "pos",
+                    "value": {
+                      "Bind": "p"
+                    },
+                    "span": {
+                      "start": 142,
+                      "end": 148
+                    }
                   }
+                ],
+                "span": {
+                  "start": 129,
+                  "end": 149
                 }
-              ],
-              "span": {
-                "start": 129,
-                "end": 149
               }
             },
             "where_clause": null,

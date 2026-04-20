@@ -2,50 +2,49 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
 use crate::event::{Event, EventRing};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub struct SlowHandler;
-
-impl CascadeHandler for SlowHandler {
-    fn trigger(&self) -> EventKindId {
-        EventKindId::EffectSlowApplied
-    }
-    fn lane(&self) -> Lane {
-        Lane::Effect
-    }
-
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (c, t, d, f, tk) = match *event {
-            Event::EffectSlowApplied {
-                caster: c,
-                target: t,
-                duration_ticks: d,
-                factor_q8: f,
-                tick: tk,
-                ..
-            } => (c, t, d, f, tk),
-            _ => return,
-        };
-        if state.agent_alive(t) {
-            if (d > 0) {
-                if (f > 0) {
-                    let cur_dur = state.agent_slow_remaining(t).unwrap_or(0);
-                    let cur_fac = state.agent_slow_factor_q8(t).unwrap_or(0);
-                    let longer = (d > cur_dur);
-                    let stronger = ((cur_fac == 0) || (f < cur_fac));
-                    if (longer || stronger) {
-                        state.set_agent_slow_remaining(t, d);
-                        state.set_agent_slow_factor_q8(t, f);
-                    }
+#[allow(unused_variables)]
+pub fn slow(c: AgentId, t: AgentId, d: u32, f: i16, state: &mut SimState, events: &mut EventRing) {
+    if state.agent_alive(t) {
+        if (d > 0) {
+            if (f > 0) {
+                let cur_dur = state.agent_slow_remaining(t).unwrap_or(0);
+                let cur_fac = state.agent_slow_factor_q8(t).unwrap_or(0);
+                let longer = (d > cur_dur);
+                let stronger = ((cur_fac == 0) || (f < cur_fac));
+                if (longer || stronger) {
+                    state.set_agent_slow_remaining(t, d);
+                    state.set_agent_slow_factor_q8(t, f);
                 }
             }
         }
     }
 }
 
-pub fn register(registry: &mut CascadeRegistry) {
-    registry.register(SlowHandler);
+pub struct SlowHandler;
+
+impl crate::cascade::CascadeHandler for SlowHandler {
+    fn trigger(&self) -> crate::cascade::EventKindId {
+        crate::cascade::EventKindId::EffectSlowApplied
+    }
+    fn lane(&self) -> crate::cascade::Lane {
+        crate::cascade::Lane::Effect
+    }
+    #[allow(unused_variables)]
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        let Event::EffectSlowApplied {
+            caster,
+            target,
+            duration_ticks,
+            factor_q8,
+            tick,
+        } = *event
+        else {
+            return;
+        };
+        slow(caster, target, duration_ticks, factor_q8, state, events);
+    }
 }

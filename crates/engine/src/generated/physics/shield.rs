@@ -2,41 +2,40 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
 use crate::event::{Event, EventRing};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub struct ShieldHandler;
-
-impl CascadeHandler for ShieldHandler {
-    fn trigger(&self) -> EventKindId {
-        EventKindId::EffectShieldApplied
-    }
-    fn lane(&self) -> Lane {
-        Lane::Effect
-    }
-
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (c, t, a, tk) = match *event {
-            Event::EffectShieldApplied {
-                caster: c,
-                target: t,
-                amount: a,
-                tick: tk,
-                ..
-            } => (c, t, a, tk),
-            _ => return,
-        };
-        if state.agent_alive(t) {
-            if (a > 0.0) {
-                let cur = state.agent_shield_hp(t).unwrap_or(0.0);
-                state.set_agent_shield_hp(t, (cur + a));
-            }
+#[allow(unused_variables)]
+pub fn shield(c: AgentId, t: AgentId, a: f32, state: &mut SimState, events: &mut EventRing) {
+    if state.agent_alive(t) {
+        if (a > 0.0) {
+            let cur = state.agent_shield_hp(t).unwrap_or(0.0);
+            state.set_agent_shield_hp(t, (cur + a));
         }
     }
 }
 
-pub fn register(registry: &mut CascadeRegistry) {
-    registry.register(ShieldHandler);
+pub struct ShieldHandler;
+
+impl crate::cascade::CascadeHandler for ShieldHandler {
+    fn trigger(&self) -> crate::cascade::EventKindId {
+        crate::cascade::EventKindId::EffectShieldApplied
+    }
+    fn lane(&self) -> crate::cascade::Lane {
+        crate::cascade::Lane::Effect
+    }
+    #[allow(unused_variables)]
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        let Event::EffectShieldApplied {
+            caster,
+            target,
+            amount,
+            tick,
+        } = *event
+        else {
+            return;
+        };
+        shield(caster, target, amount, state, events);
+    }
 }

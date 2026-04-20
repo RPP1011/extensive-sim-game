@@ -2,41 +2,40 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
 use crate::event::{Event, EventRing};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub struct StunHandler;
-
-impl CascadeHandler for StunHandler {
-    fn trigger(&self) -> EventKindId {
-        EventKindId::EffectStunApplied
-    }
-    fn lane(&self) -> Lane {
-        Lane::Effect
-    }
-
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (c, t, d, tk) = match *event {
-            Event::EffectStunApplied {
-                caster: c,
-                target: t,
-                duration_ticks: d,
-                tick: tk,
-                ..
-            } => (c, t, d, tk),
-            _ => return,
-        };
-        if state.agent_alive(t) {
-            if (d > 0) {
-                let cur = state.agent_stun_remaining(t).unwrap_or(0);
-                state.set_agent_stun_remaining(t, (cur).max(d));
-            }
+#[allow(unused_variables)]
+pub fn stun(c: AgentId, t: AgentId, d: u32, state: &mut SimState, events: &mut EventRing) {
+    if state.agent_alive(t) {
+        if (d > 0) {
+            let cur = state.agent_stun_remaining(t).unwrap_or(0);
+            state.set_agent_stun_remaining(t, (cur).max(d));
         }
     }
 }
 
-pub fn register(registry: &mut CascadeRegistry) {
-    registry.register(StunHandler);
+pub struct StunHandler;
+
+impl crate::cascade::CascadeHandler for StunHandler {
+    fn trigger(&self) -> crate::cascade::EventKindId {
+        crate::cascade::EventKindId::EffectStunApplied
+    }
+    fn lane(&self) -> crate::cascade::Lane {
+        crate::cascade::Lane::Effect
+    }
+    #[allow(unused_variables)]
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        let Event::EffectStunApplied {
+            caster,
+            target,
+            duration_ticks,
+            tick,
+        } = *event
+        else {
+            return;
+        };
+        stun(caster, target, duration_ticks, state, events);
+    }
 }

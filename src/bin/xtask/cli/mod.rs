@@ -91,6 +91,10 @@ pub struct CompileDslArgs {
     /// load it via `engine_rules::config::Config::from_toml`.
     #[arg(long, default_value = "assets/config")]
     pub out_config_toml: PathBuf,
+    /// Destination root for emitted enum declarations (per-enum Rust
+    /// files + aggregator `mod.rs`). Pure data, no engine dependency.
+    #[arg(long, default_value = "crates/engine_rules/src/enums")]
+    pub out_enum: PathBuf,
     /// Destination root for Python output. Files are written under
     /// `<out-python>/events/`.
     #[arg(long, default_value = "generated/python")]

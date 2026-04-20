@@ -19,7 +19,19 @@
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
-use crate::ir::{EventIR, IrType};
+use crate::ir::{EventField, EventIR, IrType};
+use crate::ast::Span;
+
+/// Returns a copy of `event.fields` with the synthetic `tick: u32` appended
+/// if not already present. `tick` is implicit on every event; this helper
+/// keeps both the per-struct emission and the aggregate enum consistent.
+fn fields_with_implicit_tick(event: &EventIR) -> Vec<EventField> {
+    let mut out = event.fields.clone();
+    if !out.iter().any(|f| f.name == "tick") {
+        out.push(EventField { name: "tick".into(), ty: IrType::U32, span: Span::dummy() });
+    }
+    out
+}
 
 /// Emit a single event file (`events/<snake_case>.rs`).
 ///
@@ -29,15 +41,28 @@ use crate::ir::{EventIR, IrType};
 pub fn emit_event(event: &EventIR, source_file: Option<&str>) -> String {
     let mut out = String::new();
     emit_header(&mut out, source_file);
-    emit_imports(&mut out, std::slice::from_ref(event));
-    emit_struct(&mut out, event);
+    // Synthesize the `tick: u32` field for imports + struct emission so the
+    // per-struct file stays in sync with the enum variant.
+    let mut e = event.clone();
+    e.fields = fields_with_implicit_tick(event);
+    emit_imports(&mut out, std::slice::from_ref(&e));
+    emit_struct(&mut out, &e);
     out
 }
 
 /// Emit the aggregate `events/mod.rs` — contains the enum `Event` whose
 /// variants carry the same field shape as the per-struct modules, inlined.
 pub fn emit_events_mod(events: &[EventIR]) -> String {
-    let mut sorted: Vec<&EventIR> = events.iter().collect();
+    // Synthesize implicit `tick: u32` on every event variant before emission.
+    let hydrated: Vec<EventIR> = events
+        .iter()
+        .map(|e| {
+            let mut c = e.clone();
+            c.fields = fields_with_implicit_tick(e);
+            c
+        })
+        .collect();
+    let mut sorted: Vec<&EventIR> = hydrated.iter().collect();
     sorted.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut out = String::new();
@@ -68,7 +93,7 @@ pub fn emit_events_mod(events: &[EventIR]) -> String {
     // field (e.g. `String`), this drops to `Clone` only and the ring
     // buffer will fail to compile — flagging that call site so it can be
     // migrated to `Clone`.
-    let all_variants_copy = events
+    let all_variants_copy = hydrated
         .iter()
         .all(|e| e.fields.iter().all(|f| is_copy(&f.ty)));
     if all_variants_copy {
@@ -451,7 +476,13 @@ mod tests {
     }
 
     fn mk_event(name: &str, fields: Vec<EventField>, ann: Vec<Annotation>) -> EventIR {
-        EventIR { name: name.into(), fields, annotations: ann, span: Span::dummy() }
+        EventIR {
+            name: name.into(),
+            fields,
+            tags: vec![],
+            annotations: ann,
+            span: Span::dummy(),
+        }
     }
 
     fn replayable_annotation() -> Annotation {
@@ -460,20 +491,12 @@ mod tests {
 
     #[test]
     fn simple_primitives() {
-        let e = mk_event(
-            "Heal",
-            vec![
-                mk_field("amount", IrType::F32),
-                mk_field("tick", IrType::U64),
-            ],
-            vec![],
-        );
+        let e = mk_event("Heal", vec![mk_field("amount", IrType::F32)], vec![]);
         let out = emit_event(&e, None);
         assert!(out.contains("pub struct Heal"));
         assert!(out.contains("pub amount: f32"));
-        assert!(out.contains("pub tick: u64"));
-        // Milestone 2's cutover dropped Serialize/Deserialize — struct files
-        // carry only the derives the engine needs (Copy/Clone/Debug/PartialEq).
+        // Implicit tick synthesized as u32.
+        assert!(out.contains("pub tick: u32"));
         assert!(out.contains("#[derive(Copy, Clone, Debug, PartialEq)]"));
         assert!(!out.contains("Serialize"));
         assert!(!out.contains("use crate::ids"));
@@ -516,26 +539,18 @@ mod tests {
     fn with_array() {
         let e = mk_event(
             "MultiHit",
-            vec![
-                mk_field("targets", IrType::Array(Box::new(IrType::AgentId), 4)),
-                mk_field("tick", IrType::U64),
-            ],
+            vec![mk_field("targets", IrType::Array(Box::new(IrType::AgentId), 4))],
             vec![],
         );
         let out = emit_event(&e, None);
         assert!(out.contains("pub targets: [AgentId; 4]"));
         assert!(out.contains("use crate::ids::AgentId;"));
-        // Arrays of Copy are still Copy.
         assert!(out.contains("#[derive(Copy, Clone, Debug, PartialEq)]"));
     }
 
     #[test]
     fn with_string_is_not_copy() {
-        let e = mk_event(
-            "Log",
-            vec![mk_field("msg", IrType::String), mk_field("tick", IrType::U64)],
-            vec![],
-        );
+        let e = mk_event("Log", vec![mk_field("msg", IrType::String)], vec![]);
         let out = emit_event(&e, None);
         assert!(out.contains("pub msg: String"));
         assert!(!out.contains("Clone, Copy"));
@@ -545,56 +560,30 @@ mod tests {
     fn aggregate_mod_is_alphabetical_with_struct_variants() {
         let e1 = mk_event(
             "Zebra",
-            vec![mk_field("t", IrType::U64), mk_field("tick", IrType::U32)],
+            vec![mk_field("t", IrType::U64)],
             vec![replayable_annotation()],
         );
-        let e2 = mk_event(
-            "Apple",
-            vec![mk_field("tick", IrType::U32)],
-            vec![replayable_annotation()],
-        );
+        let e2 = mk_event("Apple", vec![], vec![replayable_annotation()]);
         let out = emit_events_mod(&[e1, e2]);
         let apple = out.find("pub mod apple;").unwrap();
         let zebra = out.find("pub mod zebra;").unwrap();
         assert!(apple < zebra);
         assert!(out.contains("pub enum Event {"));
-        // Struct-style variants with inline fields.
         assert!(out.contains("Apple {"));
         assert!(out.contains("Zebra {"));
+        // Implicit tick appended.
         assert!(out.contains("tick: u32"));
-        // Enum carries helper impls.
         assert!(out.contains("pub fn tick(&self) -> u32"));
         assert!(out.contains("pub fn is_replayable(&self) -> bool"));
     }
 
     #[test]
     fn replayable_annotation_flips_is_replayable() {
-        let e1 = mk_event(
-            "Replayable",
-            vec![mk_field("tick", IrType::U32)],
-            vec![replayable_annotation()],
-        );
-        let e2 = mk_event(
-            "SideChannel",
-            vec![mk_field("tick", IrType::U32)],
-            vec![],
-        );
+        let e1 = mk_event("Replayable", vec![], vec![replayable_annotation()]);
+        let e2 = mk_event("SideChannel", vec![], vec![]);
         let out = emit_events_mod(&[e1, e2]);
-        // Replayable returns true; side-channel returns false.
         assert!(out.contains("Event::Replayable { .. } => true"));
         assert!(out.contains("Event::SideChannel { .. } => false"));
-    }
-
-    #[test]
-    fn u64_tick_narrows_to_u32_in_tick_method() {
-        let e = mk_event(
-            "WithU64Tick",
-            vec![mk_field("tick", IrType::U64)],
-            vec![replayable_annotation()],
-        );
-        let out = emit_events_mod(&[e]);
-        // Narrow cast so the returned type matches the engine's u32 tick API.
-        assert!(out.contains("*tick as u32"));
     }
 
     #[test]

@@ -2,38 +2,37 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
 use crate::event::{Event, EventRing};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub struct ModifyStandingHandler;
-
-impl CascadeHandler for ModifyStandingHandler {
-    fn trigger(&self) -> EventKindId {
-        EventKindId::EffectStandingDelta
-    }
-    fn lane(&self) -> Lane {
-        Lane::Effect
-    }
-
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (a, b, delta, tk) = match *event {
-            Event::EffectStandingDelta {
-                a,
-                b,
-                delta,
-                tick: tk,
-                ..
-            } => (a, b, delta, tk),
-            _ => return,
-        };
-        if (delta != 0) {
-            state.adjust_standing(a, b, delta);
-        }
+#[allow(unused_variables)]
+pub fn modify_standing(
+    a: AgentId,
+    b: AgentId,
+    delta: i16,
+    state: &mut SimState,
+    events: &mut EventRing,
+) {
+    if (delta != 0) {
+        state.adjust_standing(a, b, delta);
     }
 }
 
-pub fn register(registry: &mut CascadeRegistry) {
-    registry.register(ModifyStandingHandler);
+pub struct ModifyStandingHandler;
+
+impl crate::cascade::CascadeHandler for ModifyStandingHandler {
+    fn trigger(&self) -> crate::cascade::EventKindId {
+        crate::cascade::EventKindId::EffectStandingDelta
+    }
+    fn lane(&self) -> crate::cascade::Lane {
+        crate::cascade::Lane::Effect
+    }
+    #[allow(unused_variables)]
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        let Event::EffectStandingDelta { a, b, delta, tick } = *event else {
+            return;
+        };
+        modify_standing(a, b, delta, state, events);
+    }
 }

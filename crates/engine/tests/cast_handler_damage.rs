@@ -65,6 +65,10 @@ fn lethal_damage_emits_agent_died_and_kills() {
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  50.0);
 
+    // Implicit tick: emit sites read `state.tick` rather than the
+    // incoming event's tick. Advance the world clock so the emitted
+    // `AgentDied` carries the expected stamp.
+    state.tick = 7;
     DamageHandler.handle(
         &Event::EffectDamageApplied { caster, target, amount: 100.0, tick: 7 },
         &mut state,
@@ -113,6 +117,7 @@ fn cast_damage_emits_agent_attacked_like_melee() {
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  100.0);
 
+    state.tick = 3;
     DamageHandler.handle(
         &Event::EffectDamageApplied { caster, target, amount: 25.0, tick: 3 },
         &mut state,

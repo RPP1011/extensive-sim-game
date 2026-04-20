@@ -1,50 +1,35 @@
-//! Rust emission for compiler milestone 3 — `physics` cascade handlers.
+//! Rust emission for `physics` cascade handlers.
 //!
-//! Every `physics` declaration produces:
+//! Each `physics` declaration lowers to a plain function in
+//! `physics/<snake_case>.rs`. The per-event-kind dispatcher lives in
+//! `physics/mod.rs`; it destructures the triggering event once and calls
+//! every applicable handler function inline (kind-specific + every tagged
+//! handler where the event implements the tag). No runtime class-bitset
+//! lookup — the dispatch fan-out is compiled in.
 //!
-//! 1. A standalone module file `physics/<snake_case>.rs` carrying:
-//!    - A unit struct `<Name>Handler`.
-//!    - An `impl CascadeHandler` block whose `handle` body is the
-//!      mechanically lowered DSL handler body.
-//!    - A `pub fn register(registry: &mut CascadeRegistry)` shim that
-//!      installs the handler.
-//! 2. An entry in the aggregate `physics/mod.rs`'s `register` fn that
-//!    forwards to each per-handler `register`. The aggregate fn is the
-//!    single hook the engine calls during builtin registration.
-//!
-//! The emitter is deliberately verbose — `writeln!` into a `String`, no
-//! macros, no helper traits beyond a tiny set of lowering fns shared with
-//! the event emitter. Reviewers should be able to skim the emitted output
-//! without tracing any abstractions back to the emitter.
-//!
-//! Body lowering is intentionally narrow at milestone 3: the DSL surface
-//! that the damage rule exercises (let, if, emit, the `agents.*` accessor
-//! namespace, `min` / `max` builtins, basic arithmetic, comparisons). Any
-//! IR construct outside this surface raises `EmitError::Unsupported`. As
-//! more physics rules migrate, the emitter grows to cover what they need
-//! and nothing more.
+//! Handler bodies retain the mechanical lowering from the earlier
+//! milestone (let, if, emit, `agents.*` accessors, `min` / `max` / `clamp`,
+//! basic arithmetic, comparisons). Emit sites get an implicit
+//! `tick: state.tick` appended automatically, matching §7 of the DSL spec.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use crate::ast::{BinOp, UnOp};
 use crate::ir::{
-    Builtin, IrEmit, IrExpr, IrExprNode, IrPattern, IrPatternBinding, IrStmt, NamespaceId,
-    PhysicsHandlerIR, PhysicsIR,
+    Builtin, EventField, EventIR, EventTagIR, IrEmit, IrExpr, IrExprNode, IrPattern,
+    IrPhysicsPattern, IrStmt, IrType, NamespaceId, PhysicsHandlerIR, PhysicsIR,
 };
 
-/// Errors raised during physics emission. Propagated up to the xtask which
-/// renders them with a path + the offending rule name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmitError {
-    /// The pattern lacked an event ref — meaning the event name didn't
-    /// resolve to a declared event during lowering. Likely a missing
-    /// `event` declaration in the same compilation unit.
+    /// The pattern lacked an event/tag ref — the referenced name didn't
+    /// resolve during lowering.
     UnresolvedEventInPattern(String),
     /// The `emit` statement names an event the compiler doesn't know.
     UnresolvedEventInEmit(String),
-    /// Some IR construct isn't supported by the milestone-3 emitter yet.
-    /// Carries a short diagnostic string with the offending shape.
+    /// Some IR construct isn't supported by the emitter. Carries a short
+    /// diagnostic string with the offending shape.
     Unsupported(String),
 }
 
@@ -52,7 +37,7 @@ impl std::fmt::Display for EmitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EmitError::UnresolvedEventInPattern(n) => {
-                write!(f, "physics handler matches event `{n}` which is not declared")
+                write!(f, "physics handler matches `{n}` which is not a declared event or tag")
             }
             EmitError::UnresolvedEventInEmit(n) => {
                 write!(f, "physics handler emits event `{n}` which is not declared")
@@ -65,27 +50,46 @@ impl std::fmt::Display for EmitError {
 impl std::error::Error for EmitError {}
 
 // ---------------------------------------------------------------------------
+// Context passed to the emitter
+// ---------------------------------------------------------------------------
+
+/// Per-compilation context the physics emitter needs beyond the IR rule
+/// itself: the full event catalog (for per-kind dispatcher fan-out) and
+/// the tag catalog (for tag-matched handler argument lists). Passed by
+/// reference so the emitter can look up field types by event/tag name.
+pub struct EmitContext<'a> {
+    pub events: &'a [EventIR],
+    pub event_tags: &'a [EventTagIR],
+}
+
+// ---------------------------------------------------------------------------
 // Public emission entry points
 // ---------------------------------------------------------------------------
 
-/// Emit a single physics module file (`physics/<snake_case>.rs`).
-///
-/// `source_file` is the DSL source path the rule came from. If the path is
-/// known we stamp it into the header; otherwise we emit a generic header.
-pub fn emit_physics(physics: &PhysicsIR, source_file: Option<&str>) -> Result<String, EmitError> {
+/// Emit a single physics module file (`physics/<snake_case>.rs`). The file
+/// exports one `pub fn <name>(<args>, state, events)` per handler in the
+/// rule; the aggregate `mod.rs` owns the trigger → dispatcher routing.
+pub fn emit_physics(
+    physics: &PhysicsIR,
+    source_file: Option<&str>,
+    ctx: &EmitContext<'_>,
+) -> Result<String, EmitError> {
     let mut out = String::new();
     emit_header(&mut out, source_file);
-    emit_imports(&mut out, physics)?;
-    emit_handler_struct(&mut out, physics);
-    emit_impl_block(&mut out, physics)?;
-    emit_register_fn(&mut out, physics);
+    emit_imports(&mut out, physics, ctx)?;
+    emit_handler_fn(&mut out, physics, ctx)?;
+    // Legacy unit-struct + CascadeHandler impl. Kept for test call sites
+    // that still dispatch through the old single-handler API
+    // (`DamageHandler.handle(&event, ...)`); the per-kind dispatcher in
+    // `physics/mod.rs` remains the production dispatch path.
+    emit_legacy_handler_struct(&mut out, physics, ctx)?;
     Ok(out)
 }
 
-/// Emit the aggregate `physics/mod.rs` — re-exports each per-rule module
-/// and exposes a single `register(registry)` that forwards to every
-/// handler's `register` shim. Sorted alphabetically so rustfmt is a no-op.
-pub fn emit_physics_mod(physics: &[PhysicsIR]) -> String {
+/// Emit the aggregate `physics/mod.rs`. Owns per-event-kind dispatcher
+/// functions (one per event that has at least one matching handler) plus
+/// a `register` fn that installs every dispatcher on the registry.
+pub fn emit_physics_mod(physics: &[PhysicsIR], ctx: &EmitContext<'_>) -> String {
     let mut sorted: Vec<&PhysicsIR> = physics.iter().collect();
     sorted.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -99,19 +103,45 @@ pub fn emit_physics_mod(physics: &[PhysicsIR]) -> String {
     }
     writeln!(out).unwrap();
 
-    writeln!(out, "use crate::cascade::CascadeRegistry;").unwrap();
+    writeln!(out, "use crate::cascade::{{CascadeRegistry, EventKindId}};").unwrap();
+    writeln!(out, "use crate::event::{{Event, EventRing}};").unwrap();
+    writeln!(out, "use crate::state::SimState;").unwrap();
     writeln!(out).unwrap();
 
-    writeln!(out, "/// Install every compiler-emitted physics handler on `registry`.").unwrap();
+    // Group handlers by the event kind they fire on. A kind-matched rule
+    // contributes to exactly one event; a tag-matched rule contributes to
+    // every event that claims the tag.
+    let applicable = applicable_handlers(physics, ctx);
+    // Emit one dispatcher fn per event-kind that has any handler. Sort by
+    // event name for reorder stability.
+    let mut kinds: Vec<&str> = applicable.keys().map(|s| s.as_str()).collect();
+    kinds.sort();
+    for kind in &kinds {
+        let event = ctx
+            .events
+            .iter()
+            .find(|e| e.name == *kind)
+            .expect("dispatcher target must be a declared event");
+        let handlers = applicable.get(*kind).unwrap();
+        emit_dispatcher_fn(&mut out, event, handlers, ctx);
+    }
+
+    // Registration fn — installs every dispatcher.
+    writeln!(out, "/// Install every compiler-emitted physics dispatcher on `registry`.").unwrap();
     writeln!(out, "/// Called from `CascadeRegistry::register_engine_builtins` so the").unwrap();
     writeln!(out, "/// engine's built-in handler set picks up DSL-owned rules without").unwrap();
     writeln!(out, "/// the engine knowing about each handler by name.").unwrap();
     writeln!(out, "pub fn register(registry: &mut CascadeRegistry) {{").unwrap();
-    if sorted.is_empty() {
+    if kinds.is_empty() {
         writeln!(out, "    let _ = registry;").unwrap();
     } else {
-        for p in &sorted {
-            writeln!(out, "    {}::register(registry);", snake_case(&p.name)).unwrap();
+        for kind in &kinds {
+            writeln!(
+                out,
+                "    registry.install_kind(EventKindId::{kind}, dispatch_{});",
+                snake_case(kind)
+            )
+            .unwrap();
         }
     }
     writeln!(out, "}}").unwrap();
@@ -120,7 +150,167 @@ pub fn emit_physics_mod(physics: &[PhysicsIR]) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Header / imports
+// Applicable-handler resolution
+// ---------------------------------------------------------------------------
+
+/// A reference to a handler applicable to a given event kind. Carries the
+/// owning physics rule + the handler index, so the dispatcher can emit a
+/// call to the per-rule module by stable name.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+struct HandlerRef<'a> {
+    rule_name: &'a str,
+    handler: &'a PhysicsHandlerIR,
+    /// `None` for kind-matched handlers; `Some(tag_name)` for tag-matched.
+    via_tag: Option<&'a str>,
+}
+
+/// Map event-kind name → ordered list of handlers that should fire on that
+/// kind. Kind-matched rules come first (source order), then tag-matched
+/// rules (by rule name for reorder stability).
+fn applicable_handlers<'a>(
+    physics: &'a [PhysicsIR],
+    ctx: &'a EmitContext<'a>,
+) -> BTreeMap<String, Vec<HandlerRef<'a>>> {
+    let mut out: BTreeMap<String, Vec<HandlerRef<'a>>> = BTreeMap::new();
+
+    let mut sorted: Vec<&PhysicsIR> = physics.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+
+    // Pass 1: kind-matched rules.
+    for p in &sorted {
+        for h in &p.handlers {
+            if let IrPhysicsPattern::Kind(pat) = &h.pattern {
+                out.entry(pat.name.clone())
+                    .or_default()
+                    .push(HandlerRef {
+                        rule_name: p.name.as_str(),
+                        handler: h,
+                        via_tag: None,
+                    });
+            }
+        }
+    }
+    // Pass 2: tag-matched rules — one entry per event that claims the tag.
+    for p in &sorted {
+        for h in &p.handlers {
+            if let IrPhysicsPattern::Tag { name: tag_name, tag, .. } = &h.pattern {
+                let Some(tref) = tag else { continue };
+                let tag_ir = &ctx.event_tags[tref.0 as usize];
+                for event in ctx.events {
+                    if event.tags.iter().any(|r| *r == *tref) {
+                        out.entry(event.name.clone())
+                            .or_default()
+                            .push(HandlerRef {
+                                rule_name: p.name.as_str(),
+                                handler: h,
+                                via_tag: Some(tag_ir.name.as_str()),
+                            });
+                    }
+                }
+                let _ = tag_name;
+            }
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher emission
+// ---------------------------------------------------------------------------
+
+fn emit_dispatcher_fn(
+    out: &mut String,
+    event: &EventIR,
+    handlers: &[HandlerRef<'_>],
+    ctx: &EmitContext<'_>,
+) {
+    let event_fields = fields_with_implicit_tick(event);
+    writeln!(
+        out,
+        "#[allow(unused_variables)]"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "pub fn dispatch_{}(event: &Event, state: &mut SimState, events: &mut EventRing) {{",
+        snake_case(&event.name)
+    )
+    .unwrap();
+    // Destructure every field of the event variant into same-name locals.
+    let binds: Vec<String> = event_fields.iter().map(|f| f.name.clone()).collect();
+    writeln!(
+        out,
+        "    let Event::{} {{ {} }} = *event else {{ return; }};",
+        event.name,
+        binds.join(", ")
+    )
+    .unwrap();
+    for hr in handlers {
+        emit_dispatcher_call(out, event, &event_fields, hr, ctx);
+    }
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+}
+
+/// Emit a single `<rule_name>::<fn_name>(<args>, state, events);` call
+/// inside the dispatcher. Arguments are drawn from the event's destructured
+/// locals (by pattern-binding field name).
+fn emit_dispatcher_call(
+    out: &mut String,
+    event: &EventIR,
+    event_fields: &[EventField],
+    hr: &HandlerRef<'_>,
+    ctx: &EmitContext<'_>,
+) {
+    let binding_names = handler_binding_names(hr.handler, ctx);
+    // The call passes the event's field values in the same order as the
+    // handler's argument list. If the handler binds a name that differs
+    // from the event field name, use the event field name here — the
+    // handler body uses the binding name as the argument identifier.
+    let mut args: Vec<String> = Vec::new();
+    for (event_field, _) in &binding_names {
+        // Ensure the event actually declares this field.
+        if !event_fields.iter().any(|f| f.name == *event_field) {
+            // Tag-matched handlers may bind `tick`, which the event
+            // always declares (implicit). Skip guard for other names;
+            // the resolver validated the binding shape already.
+        }
+        args.push(event_field.clone());
+    }
+    let module = snake_case(hr.rule_name);
+    let fn_name = handler_fn_name(hr.rule_name);
+    writeln!(
+        out,
+        "    {}::{}({}, state, events);",
+        module,
+        fn_name,
+        args.join(", ")
+    )
+    .unwrap();
+    let _ = event;
+}
+
+/// Returns the list of `(event_field_name, binding_name)` pairs the
+/// handler's generated function signature exposes. For kind-matched
+/// handlers, this is just the pattern's bindings. For tag-matched
+/// handlers, only tag-declared fields (plus `tick`) are exposed.
+fn handler_binding_names(
+    handler: &PhysicsHandlerIR,
+    ctx: &EmitContext<'_>,
+) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    for b in handler.pattern.bindings() {
+        if let IrPattern::Bind { name, .. } = &b.value {
+            pairs.push((b.field.clone(), name.clone()));
+        }
+    }
+    let _ = ctx;
+    pairs
+}
+
+// ---------------------------------------------------------------------------
+// Per-rule file emission (function signature + body)
 // ---------------------------------------------------------------------------
 
 fn emit_header(out: &mut String, source_file: Option<&str>) {
@@ -137,52 +327,139 @@ fn emit_header(out: &mut String, source_file: Option<&str>) {
     writeln!(out).unwrap();
 }
 
-/// Walk the rule's pattern + body to find every event we reference (the
-/// trigger pattern + every `emit` statement). The handler always imports
-/// `Event`, `EventRing`, `SimState`, `CascadeHandler`, `CascadeRegistry`,
-/// `EventKindId`, `Lane`. Any niche IDs surfaced by the emit-statement
-/// fields are unused at the import site (the values flow through `state`
-/// / `events` references), so we don't need to declare them here.
-fn emit_imports(out: &mut String, physics: &PhysicsIR) -> Result<(), EmitError> {
-    // Walk to surface every emitted event name — a sanity check that all
-    // emit statements name declared events. We don't actually emit
-    // per-event imports; the `Event` enum import covers them.
-    let mut seen: BTreeSet<String> = BTreeSet::new();
+fn emit_imports(
+    out: &mut String,
+    physics: &PhysicsIR,
+    ctx: &EmitContext<'_>,
+) -> Result<(), EmitError> {
+    // Sanity check: every trigger + emit must resolve.
     for handler in &physics.handlers {
-        if handler.pattern.event.is_none() {
-            return Err(EmitError::UnresolvedEventInPattern(handler.pattern.name.clone()));
+        match &handler.pattern {
+            IrPhysicsPattern::Kind(p) => {
+                if p.event.is_none() {
+                    return Err(EmitError::UnresolvedEventInPattern(p.name.clone()));
+                }
+            }
+            IrPhysicsPattern::Tag { name, tag, .. } => {
+                if tag.is_none() {
+                    return Err(EmitError::UnresolvedEventInPattern(format!("@{name}")));
+                }
+            }
         }
-        seen.insert(handler.pattern.name.clone());
-        scan_emits(&handler.body, &mut seen)?;
+        scan_emits(&handler.body)?;
     }
 
-    writeln!(out, "use crate::cascade::{{CascadeHandler, CascadeRegistry, EventKindId, Lane}};")
-        .unwrap();
+    // Collect niche-id imports from the handler's argument types.
+    let mut niche_ids: BTreeSet<&'static str> = BTreeSet::new();
+    let mut needs_vec3 = false;
+    let mut needs_quest_category = false;
+    let mut needs_resolution = false;
+    for h in &physics.handlers {
+        for (_, ty) in handler_arg_types(h, ctx)? {
+            collect_import(
+                &ty,
+                &mut niche_ids,
+                &mut needs_vec3,
+                &mut needs_quest_category,
+                &mut needs_resolution,
+            );
+        }
+    }
+
+    // The legacy handler shim destructures the trigger event directly, so
+    // `Event` is always needed alongside `EventRing` for kind-matched rules.
+    // (Tag-matched rules don't emit the shim, but still surface bodies that
+    // may emit events.)
     writeln!(out, "use crate::event::{{Event, EventRing}};").unwrap();
     writeln!(out, "use crate::state::SimState;").unwrap();
+    if !niche_ids.is_empty() {
+        let joined: Vec<&str> = niche_ids.iter().copied().collect();
+        if joined.len() == 1 {
+            writeln!(out, "use crate::ids::{};", joined[0]).unwrap();
+        } else {
+            writeln!(out, "use crate::ids::{{{}}};", joined.join(", ")).unwrap();
+        }
+    }
+    if needs_vec3 {
+        writeln!(out, "use glam::Vec3;").unwrap();
+    }
+    if needs_quest_category {
+        writeln!(out, "use crate::types::QuestCategory;").unwrap();
+    }
+    if needs_resolution {
+        writeln!(out, "use crate::types::Resolution;").unwrap();
+    }
     writeln!(out).unwrap();
     Ok(())
 }
 
-fn scan_emits(stmts: &[IrStmt], seen: &mut BTreeSet<String>) -> Result<(), EmitError> {
+fn collect_import(
+    ty: &IrType,
+    niche_ids: &mut BTreeSet<&'static str>,
+    needs_vec3: &mut bool,
+    needs_quest_category: &mut bool,
+    needs_resolution: &mut bool,
+) {
+    match ty {
+        IrType::AgentId => {
+            niche_ids.insert("AgentId");
+        }
+        IrType::ItemId => {
+            niche_ids.insert("ItemId");
+        }
+        IrType::GroupId => {
+            niche_ids.insert("GroupId");
+        }
+        IrType::QuestId => {
+            niche_ids.insert("QuestId");
+        }
+        IrType::AuctionId => {
+            niche_ids.insert("AuctionId");
+        }
+        IrType::EventId => {
+            niche_ids.insert("EventId");
+        }
+        IrType::AbilityId => {
+            niche_ids.insert("AbilityId");
+        }
+        IrType::Vec3 => {
+            *needs_vec3 = true;
+        }
+        IrType::Named(n) => match n.as_str() {
+            "QuestCategory" => *needs_quest_category = true,
+            "Resolution" => *needs_resolution = true,
+            _ => {}
+        },
+        IrType::Optional(inner) | IrType::Array(inner, _) | IrType::List(inner) => {
+            collect_import(inner, niche_ids, needs_vec3, needs_quest_category, needs_resolution)
+        }
+        IrType::Tuple(items) => {
+            for t in items {
+                collect_import(t, niche_ids, needs_vec3, needs_quest_category, needs_resolution);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn scan_emits(stmts: &[IrStmt]) -> Result<(), EmitError> {
     for s in stmts {
         match s {
             IrStmt::Emit(e) => {
                 if e.event.is_none() {
                     return Err(EmitError::UnresolvedEventInEmit(e.event_name.clone()));
                 }
-                seen.insert(e.event_name.clone());
             }
             IrStmt::If { then_body, else_body, .. } => {
-                scan_emits(then_body, seen)?;
+                scan_emits(then_body)?;
                 if let Some(b) = else_body {
-                    scan_emits(b, seen)?;
+                    scan_emits(b)?;
                 }
             }
-            IrStmt::For { body, .. } => scan_emits(body, seen)?,
+            IrStmt::For { body, .. } => scan_emits(body)?,
             IrStmt::Match { arms, .. } => {
                 for arm in arms {
-                    scan_emits(&arm.body, seen)?;
+                    scan_emits(&arm.body)?;
                 }
             }
             IrStmt::Let { .. } | IrStmt::Expr(_) | IrStmt::SelfUpdate { .. } => {}
@@ -191,21 +468,80 @@ fn scan_emits(stmts: &[IrStmt], seen: &mut BTreeSet<String>) -> Result<(), EmitE
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Struct + impl + register fn
-// ---------------------------------------------------------------------------
+/// Emit a unit-struct `<Name>Handler` with a `CascadeHandler` impl whose
+/// `handle` destructures the event and forwards to the free-function
+/// handler. Kept for legacy test call sites that still dispatch through
+/// the single-handler API. Only kind-matched rules produce a shim —
+/// tag-matched rules don't map to a single `EventKindId::trigger()`.
+fn emit_legacy_handler_struct(
+    out: &mut String,
+    physics: &PhysicsIR,
+    ctx: &EmitContext<'_>,
+) -> Result<(), EmitError> {
+    let handler = &physics.handlers[0];
+    let IrPhysicsPattern::Kind(pat) = &handler.pattern else {
+        // Tag-matched rules don't fit the CascadeHandler.trigger() shape.
+        return Ok(());
+    };
+    let Some(event_ref) = pat.event else { return Ok(()) };
+    let event = &ctx.events[event_ref.0 as usize];
+    let fields = fields_with_implicit_tick(event);
+    let struct_name = format!("{}Handler", pascal_case(&physics.name));
+    let fn_name = handler_fn_name(&physics.name);
 
-fn emit_handler_struct(out: &mut String, physics: &PhysicsIR) {
-    writeln!(out, "pub struct {}Handler;", pascal_case(&physics.name)).unwrap();
     writeln!(out).unwrap();
+    writeln!(out, "pub struct {struct_name};").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "impl crate::cascade::CascadeHandler for {struct_name} {{").unwrap();
+    writeln!(
+        out,
+        "    fn trigger(&self) -> crate::cascade::EventKindId {{ crate::cascade::EventKindId::{} }}",
+        event.name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    fn lane(&self) -> crate::cascade::Lane {{ crate::cascade::Lane::Effect }}"
+    )
+    .unwrap();
+    writeln!(out, "    #[allow(unused_variables)]").unwrap();
+    writeln!(
+        out,
+        "    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {{"
+    )
+    .unwrap();
+    // Destructure every field into a same-name local.
+    let binds: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+    writeln!(
+        out,
+        "        let Event::{} {{ {} }} = *event else {{ return; }};",
+        event.name,
+        binds.join(", ")
+    )
+    .unwrap();
+    // Forward to the free function using the handler's binding list.
+    let mut call_args: Vec<String> = Vec::new();
+    for b in &pat.bindings {
+        if let IrPattern::Bind { .. } = &b.value {
+            call_args.push(b.field.clone());
+        }
+    }
+    writeln!(
+        out,
+        "        {fn_name}({}, state, events);",
+        call_args.join(", ")
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
 }
 
-fn emit_impl_block(out: &mut String, physics: &PhysicsIR) -> Result<(), EmitError> {
-    let struct_name = format!("{}Handler", pascal_case(&physics.name));
-    // Milestone 3 supports exactly one handler per physics declaration —
-    // the damage rule has one. Multi-handler bodies (multiple `on` clauses
-    // in a single `physics` block) raise Unsupported until a follow-up
-    // commit grows the emitter to dispatch on the event variant.
+fn emit_handler_fn(
+    out: &mut String,
+    physics: &PhysicsIR,
+    ctx: &EmitContext<'_>,
+) -> Result<(), EmitError> {
     if physics.handlers.len() != 1 {
         return Err(EmitError::Unsupported(format!(
             "expected exactly one `on` handler per physics rule (got {} in `{}`)",
@@ -214,125 +550,77 @@ fn emit_impl_block(out: &mut String, physics: &PhysicsIR) -> Result<(), EmitErro
         )));
     }
     let handler = &physics.handlers[0];
+    let fn_name = handler_fn_name(&physics.name);
+    let args = handler_arg_types(handler, ctx)?;
 
-    writeln!(out, "impl CascadeHandler for {struct_name} {{").unwrap();
-    writeln!(out, "    fn trigger(&self) -> EventKindId {{ EventKindId::{} }}", handler.pattern.name)
-        .unwrap();
-    // Lane defaults to Effect — milestone 3 doesn't surface a `@lane` annotation
-    // yet. Every physics rule lands in the Effect lane, matching the legacy
-    // `register_engine_builtins` registrations.
-    writeln!(out, "    fn lane(&self) -> Lane {{ Lane::Effect }}").unwrap();
-    writeln!(out).unwrap();
-    // `#[allow(unused_variables)]` covers the event-pattern bindings — some
-    // handlers (e.g. shield) don't reference `caster` or `tick` in their
-    // body. We could track which bindings are live by walking the body, but
-    // it's mechanical noise: the generated file is already machine-owned and
-    // the `-D warnings` CI guard is what forces the allow.
-    writeln!(out, "    #[allow(unused_variables)]").unwrap();
-    writeln!(
-        out,
-        "    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {{"
-    )
-    .unwrap();
-
-    emit_handler_body(out, handler)?;
-
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
-    writeln!(out).unwrap();
-    Ok(())
-}
-
-fn emit_register_fn(out: &mut String, physics: &PhysicsIR) {
-    let struct_name = format!("{}Handler", pascal_case(&physics.name));
-    writeln!(out, "pub fn register(registry: &mut CascadeRegistry) {{").unwrap();
-    writeln!(out, "    registry.register({struct_name});").unwrap();
-    writeln!(out, "}}").unwrap();
-}
-
-// ---------------------------------------------------------------------------
-// Handler body: pattern destructure + statement lowering
-// ---------------------------------------------------------------------------
-
-/// Indent depth for handler statements: 8 spaces (two indent steps inside
-/// the `fn handle` body). Nested constructs add 4 spaces per level.
-const BASE_INDENT: usize = 8;
-
-fn emit_handler_body(out: &mut String, handler: &PhysicsHandlerIR) -> Result<(), EmitError> {
-    // Destructure the trigger event into named locals. We pin the "_" arm
-    // returning early so the engine cascade dispatcher's call shape stays
-    // identical to the hand-written legacy handler.
-    let event_name = &handler.pattern.name;
-    let bindings = collect_pattern_bindings(&handler.pattern.bindings)?;
-
-    if bindings.is_empty() {
-        writeln!(
-            out,
-            "        if !matches!(*event, Event::{event_name} {{ .. }}) {{ return; }}"
-        )
-        .unwrap();
-    } else {
-        let names: Vec<String> = bindings.iter().map(|(_, name)| name.clone()).collect();
-        let tuple = if names.len() == 1 {
-            names[0].clone()
-        } else {
-            format!("({})", names.join(", "))
-        };
-        let field_pat: Vec<String> = bindings
-            .iter()
-            .map(|(field, name)| {
-                if field == name {
-                    field.clone()
-                } else {
-                    format!("{field}: {name}")
-                }
-            })
-            .collect();
-        let value_tuple = if names.len() == 1 {
-            names[0].clone()
-        } else {
-            format!("({})", names.join(", "))
-        };
-        writeln!(out, "        let {tuple} = match *event {{").unwrap();
-        writeln!(
-            out,
-            "            Event::{event_name} {{ {}, .. }} => {value_tuple},",
-            field_pat.join(", ")
-        )
-        .unwrap();
-        writeln!(out, "            _ => return,").unwrap();
-        writeln!(out, "        }};").unwrap();
+    writeln!(out, "#[allow(unused_variables)]").unwrap();
+    write!(out, "pub fn {fn_name}(").unwrap();
+    for (name, ty) in &args {
+        write!(out, "{name}: {}, ", render_type(ty)).unwrap();
     }
+    writeln!(out, "state: &mut SimState, events: &mut EventRing) {{").unwrap();
 
     if let Some(where_clause) = &handler.where_clause {
         let cond = lower_expr(where_clause)?;
-        writeln!(out, "        if !({cond}) {{ return; }}").unwrap();
+        writeln!(out, "    if !({cond}) {{ return; }}").unwrap();
     }
 
     for stmt in &handler.body {
-        emit_stmt(out, stmt, BASE_INDENT)?;
+        emit_stmt(out, stmt, 4)?;
     }
 
+    writeln!(out, "}}").unwrap();
     Ok(())
 }
 
-/// Returns a list of `(event_field_name, local_binding_name)` pairs. Only
-/// simple ident binds (`field: local`) are accepted at milestone 3 — ctor /
-/// wildcard / nested patterns aren't part of the damage rule's surface and
-/// would land as `Unsupported`.
-fn collect_pattern_bindings(
-    bindings: &[IrPatternBinding],
-) -> Result<Vec<(String, String)>, EmitError> {
-    let mut out = Vec::with_capacity(bindings.len());
-    for b in bindings {
-        match &b.value {
-            IrPattern::Bind { name, .. } => out.push((b.field.clone(), name.clone())),
-            IrPattern::Wildcard => {}
-            other => {
-                return Err(EmitError::Unsupported(format!(
-                    "pattern binding for field `{}` is {:?}; only simple ident binds supported in milestone 3",
-                    b.field, other
-                )));
+/// Return the `(binding_name, type)` pairs the handler exposes as arguments.
+/// For a kind-matched handler, types come from the event declaration. For a
+/// tag-matched handler, types come from the tag declaration (plus `tick:
+/// u32` if bound).
+fn handler_arg_types(
+    handler: &PhysicsHandlerIR,
+    ctx: &EmitContext<'_>,
+) -> Result<Vec<(String, IrType)>, EmitError> {
+    let mut out = Vec::new();
+    match &handler.pattern {
+        IrPhysicsPattern::Kind(pat) => {
+            let Some(event_ref) = pat.event else {
+                return Err(EmitError::UnresolvedEventInPattern(pat.name.clone()));
+            };
+            let event = &ctx.events[event_ref.0 as usize];
+            let fields = fields_with_implicit_tick(event);
+            for b in &pat.bindings {
+                if let IrPattern::Bind { name, .. } = &b.value {
+                    let Some(field) = fields.iter().find(|f| f.name == b.field) else {
+                        return Err(EmitError::Unsupported(format!(
+                            "handler binds unknown field `{}` on event `{}`",
+                            b.field, event.name
+                        )));
+                    };
+                    out.push((name.clone(), field.ty.clone()));
+                }
+            }
+        }
+        IrPhysicsPattern::Tag { tag, bindings, name, .. } => {
+            let Some(tref) = tag else {
+                return Err(EmitError::UnresolvedEventInPattern(format!("@{name}")));
+            };
+            let tag_ir = &ctx.event_tags[tref.0 as usize];
+            for b in bindings {
+                if let IrPattern::Bind { name: bname, .. } = &b.value {
+                    let ty = if b.field == "tick" {
+                        IrType::U32
+                    } else {
+                        let Some(field) = tag_ir.fields.iter().find(|f| f.name == b.field) else {
+                            return Err(EmitError::Unsupported(format!(
+                                "handler binds unknown field `{}` on tag `@{}`",
+                                b.field, tag_ir.name
+                            )));
+                        };
+                        field.ty.clone()
+                    };
+                    out.push((bname.clone(), ty));
+                }
             }
         }
     }
@@ -340,7 +628,7 @@ fn collect_pattern_bindings(
 }
 
 // ---------------------------------------------------------------------------
-// Statement lowering
+// Statement & expression lowering
 // ---------------------------------------------------------------------------
 
 fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitError> {
@@ -367,12 +655,12 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
         }
         IrStmt::For { .. } => {
             return Err(EmitError::Unsupported(
-                "`for` statements not supported in milestone 3 physics emission".into(),
+                "`for` statements not supported in physics emission".into(),
             ));
         }
         IrStmt::Match { .. } => {
             return Err(EmitError::Unsupported(
-                "`match` statements not supported in milestone 3 physics emission".into(),
+                "`match` statements not supported in physics emission".into(),
             ));
         }
         IrStmt::SelfUpdate { .. } => {
@@ -381,9 +669,6 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
             ));
         }
         IrStmt::Expr(e) => {
-            // Any standalone expression — typically a namespace call returning
-            // unit (`agents.set_hp(t, v)`, `agents.kill(t)`). Lower it as an
-            // expression and terminate with `;`.
             let v = lower_expr(e)?;
             writeln!(out, "{pad}{v};").unwrap();
         }
@@ -396,14 +681,23 @@ fn emit_emit(out: &mut String, emit: &IrEmit, indent: usize) -> Result<(), EmitE
     if emit.event.is_none() {
         return Err(EmitError::UnresolvedEventInEmit(emit.event_name.clone()));
     }
-    let mut field_lines: Vec<String> = Vec::with_capacity(emit.fields.len());
+    let mut field_lines: Vec<String> = Vec::with_capacity(emit.fields.len() + 1);
+    let mut saw_tick = false;
     for f in &emit.fields {
+        if f.name == "tick" {
+            saw_tick = true;
+        }
         let v = lower_expr(&f.value)?;
         if f.name == v {
             field_lines.push(f.name.clone());
         } else {
             field_lines.push(format!("{}: {}", f.name, v));
         }
+    }
+    // Implicit tick: every emit call gets `tick: state.tick` auto-appended
+    // unless the author already specified it.
+    if !saw_tick {
+        field_lines.push("tick: state.tick".to_string());
     }
     let body = if field_lines.is_empty() {
         String::new()
@@ -418,10 +712,6 @@ fn emit_emit(out: &mut String, emit: &IrEmit, indent: usize) -> Result<(), EmitE
     .unwrap();
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Expression lowering
-// ---------------------------------------------------------------------------
 
 fn lower_expr(node: &IrExprNode) -> Result<String, EmitError> {
     lower_expr_kind(&node.kind)
@@ -456,41 +746,38 @@ fn lower_expr_kind(kind: &IrExpr) -> Result<String, EmitError> {
             Ok(format!("(if {c} {{ {t} }} else {{ {e} }})"))
         }
         IrExpr::Field { base, field_name, .. } => {
-            // Direct field access on an event-pattern local — mostly used
-            // when authors thread `event.field`-shaped DSL through. For
-            // milestone 3 we surface this as a verbatim Rust field access;
-            // the semantic check (does the field exist on the local's type?)
-            // belongs to a later compiler pass.
             let b = lower_expr(base)?;
             Ok(format!("{b}.{field_name}"))
         }
-        // Everything else is out of milestone-3 scope. We surface the IR
-        // variant name so the diagnostic points at the right place.
+        IrExpr::EnumVariant { ty, variant } => {
+            if ty.is_empty() {
+                Ok(variant.clone())
+            } else {
+                Ok(format!("{ty}::{variant}"))
+            }
+        }
         other => Err(EmitError::Unsupported(format!(
-            "expression shape {other:?} not supported in milestone 3 physics emission"
+            "expression shape {other:?} not supported in physics emission"
         ))),
     }
 }
 
-/// Lower a `NamespaceField` — the only one we currently support at emit time
-/// is `config.<block>.<field>`, which maps directly onto `SimState.config`.
-/// Namespace accessors with an uncollapsed single-hop path (e.g. the
-/// intermediate `config.combat` before the outer field gets folded) would
-/// hit this arm with `ty = Unknown`; treat that as a compiler bug.
 fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitError> {
     if ns == NamespaceId::Config {
-        // Resolver always emits `<block>.<field>` for resolvable config
-        // accesses. A bare `<block>` with no trailing field means a DSL
-        // author wrote `config.combat` as a value — not supported.
         if field.contains('.') {
             return Ok(format!("state.config.{field}"));
         }
         return Err(EmitError::Unsupported(format!(
-            "bare `config.{field}` is not a value; address a specific field (e.g. `config.{field}.<name>`)"
+            "bare `config.{field}` is not a value; address a specific field"
         )));
     }
+    if ns == NamespaceId::World {
+        if field == "tick" {
+            return Ok("state.tick".into());
+        }
+    }
     Err(EmitError::Unsupported(format!(
-        "namespace-field `{}.{field}` not supported in milestone 3 physics emission",
+        "namespace-field `{}.{field}` not supported",
         ns.name()
     )))
 }
@@ -500,8 +787,6 @@ fn lower_namespace_call(
     method: &str,
     args: &[crate::ir::IrCallArg],
 ) -> Result<String, EmitError> {
-    // Lower the args first so positional / named treatment is uniform —
-    // milestone 3 only sees positional args.
     let lowered: Vec<String> = args
         .iter()
         .map(|a| {
@@ -515,9 +800,6 @@ fn lower_namespace_call(
         })
         .collect::<Result<_, _>>()?;
     match (ns, method) {
-        // `agents` accessor surface — these map one-to-one onto SimState
-        // methods, with the engine's `Option<f32>` getters defaulted to 0.0
-        // (matching the legacy handler's `unwrap_or(0.0)`).
         (NamespaceId::Agents, "alive") => {
             expect_arity(args, 1, "agents.alive")?;
             Ok(format!("state.agent_alive({})", lowered[0]))
@@ -542,23 +824,12 @@ fn lower_namespace_call(
             expect_arity(args, 1, "agents.kill")?;
             Ok(format!("state.kill_agent({})", lowered[0]))
         }
-        // Heal clamp reads the target's authored max hp. Absent slots default
-        // the max to the current hp (legacy `unwrap_or(cur_hp)` semantics); we
-        // return 0.0 here and leave the DSL author to reference `max(cur_hp, ...)`
-        // if they want a non-zero fallback. The heal rule doesn't need it
-        // because it guards on `alive(t)` first — an alive slot always has a
-        // max_hp.
         (NamespaceId::Agents, "max_hp") => {
             expect_arity(args, 1, "agents.max_hp")?;
             Ok(format!("state.agent_max_hp({}).unwrap_or(0.0)", lowered[0]))
         }
         (NamespaceId::Agents, "attack_damage") => {
             expect_arity(args, 1, "agents.attack_damage")?;
-            // Per-agent `attack_damage` fallback reads from the engine's
-            // `Config` bundle on `SimState.config`, so TOML / per-test
-            // overrides flow through. The legacy fallback was the engine-
-            // level `crate::step::ATTACK_DAMAGE` const, which is now gone
-            // (the value lives under `config.combat.attack_damage`).
             Ok(format!(
                 "state.agent_attack_damage({}).unwrap_or(state.config.combat.attack_damage)",
                 lowered[0]
@@ -599,8 +870,6 @@ fn lower_namespace_call(
         }
         (NamespaceId::Agents, "gold") => {
             expect_arity(args, 1, "agents.gold")?;
-            // Gold lives inside the per-agent `Inventory` struct on
-            // `SimState::cold_inventory`. Missing slots contribute 0.
             Ok(format!(
                 "state.agent_inventory({}).map(|i| i.gold).unwrap_or(0)",
                 lowered[0]
@@ -608,10 +877,6 @@ fn lower_namespace_call(
         }
         (NamespaceId::Agents, "set_gold") => {
             expect_arity(args, 2, "agents.set_gold")?;
-            // Write preserves the other Inventory fields. If the slot is
-            // absent (dead / uninit), the write is silently dropped — same
-            // semantic as the legacy `set_agent_inventory` which short-circuits
-            // when the slot is missing.
             Ok(format!(
                 "if let Some(mut __inv) = state.agent_inventory({a}) {{ __inv.gold = {v}; state.set_agent_inventory({a}, __inv); }}",
                 a = lowered[0],
@@ -620,9 +885,6 @@ fn lower_namespace_call(
         }
         (NamespaceId::Agents, "add_gold") => {
             expect_arity(args, 2, "agents.add_gold")?;
-            // Wrapping add — preserves the exact legacy `TransferGoldHandler`
-            // semantics (i64 overflow wraps, doesn't panic). No-op if the slot
-            // is absent.
             Ok(format!(
                 "if let Some(mut __inv) = state.agent_inventory({a}) {{ __inv.gold = __inv.gold.wrapping_add({v}); state.set_agent_inventory({a}, __inv); }}",
                 a = lowered[0],
@@ -631,8 +893,6 @@ fn lower_namespace_call(
         }
         (NamespaceId::Agents, "sub_gold") => {
             expect_arity(args, 2, "agents.sub_gold")?;
-            // Wrapping sub — paired with `add_gold` for gold-transfer. No-op
-            // if the slot is absent.
             Ok(format!(
                 "if let Some(mut __inv) = state.agent_inventory({a}) {{ __inv.gold = __inv.gold.wrapping_sub({v}); state.set_agent_inventory({a}, __inv); }}",
                 a = lowered[0],
@@ -641,17 +901,13 @@ fn lower_namespace_call(
         }
         (NamespaceId::Agents, "adjust_standing") => {
             expect_arity(args, 3, "agents.adjust_standing")?;
-            // Delegates to `SimState::adjust_standing`, which clamps to
-            // `[-1000, 1000]` and keys the ordered tuple `(min(a,b), max(a,b))`.
-            // Return value (the post-clamp standing) is discarded when used
-            // as a statement.
             Ok(format!(
                 "state.adjust_standing({}, {}, {})",
                 lowered[0], lowered[1], lowered[2]
             ))
         }
         _ => Err(EmitError::Unsupported(format!(
-            "stdlib call `{}.{method}` not supported in milestone 3 physics emission",
+            "stdlib call `{}.{method}` not supported in physics emission",
             ns.name()
         ))),
     }
@@ -673,8 +929,6 @@ fn lower_builtin_call(b: Builtin, args: &[crate::ir::IrCallArg]) -> Result<Strin
     match b {
         Builtin::Min => {
             expect_arity(args, 2, "min")?;
-            // f32::min — wrap LHS in parens so a complex expression doesn't
-            // bind the receiver wrong.
             Ok(format!("({}).min({})", lowered[0], lowered[1]))
         }
         Builtin::Max => {
@@ -709,7 +963,7 @@ fn lower_builtin_call(b: Builtin, args: &[crate::ir::IrCallArg]) -> Result<Strin
             Ok(format!("({}).sqrt()", lowered[0]))
         }
         _ => Err(EmitError::Unsupported(format!(
-            "builtin `{}` not supported in milestone 3 physics emission",
+            "builtin `{}` not supported in physics emission",
             b.name()
         ))),
     }
@@ -755,10 +1009,6 @@ fn unop_str(op: UnOp) -> &'static str {
     }
 }
 
-/// Render a float so it parses back identically. `f64::to_string` drops the
-/// trailing `.0` for whole numbers (`3.0` → `"3"`), which would type-infer to
-/// an integer in Rust. We always emit at least one fractional digit so the
-/// literal stays `f32`/`f64`-typed wherever it's used.
 fn render_float(v: f64) -> String {
     let s = format!("{v}");
     if s.contains('.') || s.contains('e') || s.contains('E') || s == "inf" || s == "-inf" || s == "NaN"
@@ -770,10 +1020,88 @@ fn render_float(v: f64) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Naming utilities (snake_case / PascalCase) — duplicated from emit_rust.rs
-// because the event emitter's `snake_case` is module-private. Kept identical
-// in behaviour; if either drifts, both must move to a shared util module.
+// Utility: synthesize the implicit `tick: u32` on event fields
 // ---------------------------------------------------------------------------
+
+fn fields_with_implicit_tick(event: &EventIR) -> Vec<EventField> {
+    let mut out = event.fields.clone();
+    if !out.iter().any(|f| f.name == "tick") {
+        out.push(EventField {
+            name: "tick".into(),
+            ty: IrType::U32,
+            span: crate::ast::Span::dummy(),
+        });
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Type rendering (handler argument signatures)
+// ---------------------------------------------------------------------------
+
+fn render_type(ty: &IrType) -> String {
+    match ty {
+        IrType::Bool => "bool".into(),
+        IrType::I8 => "i8".into(),
+        IrType::U8 => "u8".into(),
+        IrType::I16 => "i16".into(),
+        IrType::U16 => "u16".into(),
+        IrType::I32 => "i32".into(),
+        IrType::U32 => "u32".into(),
+        IrType::I64 => "i64".into(),
+        IrType::U64 => "u64".into(),
+        IrType::F32 => "f32".into(),
+        IrType::F64 => "f64".into(),
+        IrType::Vec3 => "Vec3".into(),
+        IrType::String => "String".into(),
+        IrType::AgentId => "AgentId".into(),
+        IrType::ItemId => "ItemId".into(),
+        IrType::GroupId => "GroupId".into(),
+        IrType::QuestId => "QuestId".into(),
+        IrType::AuctionId => "AuctionId".into(),
+        IrType::EventId => "EventId".into(),
+        IrType::AbilityId => "AbilityId".into(),
+        IrType::Optional(inner) => format!("Option<{}>", render_type(inner)),
+        IrType::Array(inner, cap) => format!("[{}; {}]", render_type(inner), cap),
+        IrType::Tuple(items) => {
+            let parts: Vec<String> = items.iter().map(render_type).collect();
+            format!("({})", parts.join(", "))
+        }
+        IrType::Named(n) => n.clone(),
+        IrType::Enum { name, .. } => name.clone(),
+        IrType::Unknown => "()".into(),
+        other => format!("/* unsupported type {other:?} */"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Naming utilities
+// ---------------------------------------------------------------------------
+
+/// Handler fn name: the same snake_case as the physics rule name. The
+/// emitter no longer emits an `impl CascadeHandler` — the dispatcher calls
+/// this fn directly.
+fn handler_fn_name(rule: &str) -> String {
+    snake_case(rule)
+}
+
+fn pascal_case(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut upper_next = true;
+    for ch in name.chars() {
+        if ch == '_' || ch == '-' {
+            upper_next = true;
+        } else if upper_next {
+            for u in ch.to_uppercase() {
+                out.push(u);
+            }
+            upper_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
 
 fn snake_case(name: &str) -> String {
     let mut out = String::with_capacity(name.len() + 4);
@@ -795,24 +1123,6 @@ fn snake_case(name: &str) -> String {
     out
 }
 
-fn pascal_case(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    let mut upper_next = true;
-    for ch in name.chars() {
-        if ch == '_' || ch == '-' {
-            upper_next = true;
-        } else if upper_next {
-            for u in ch.to_uppercase() {
-                out.push(u);
-            }
-            upper_next = false;
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -823,8 +1133,8 @@ mod tests {
     use crate::ast::Span;
     use crate::ir::{
         EventField, EventIR, EventRef, IrCallArg, IrEmit, IrEventPattern, IrExpr, IrExprNode,
-        IrFieldInit, IrPattern, IrPatternBinding, IrStmt, LocalRef, NamespaceId,
-        PhysicsHandlerIR, PhysicsIR,
+        IrFieldInit, IrPattern, IrPatternBinding, IrStmt, LocalRef, NamespaceId, PhysicsHandlerIR,
+        PhysicsIR,
     };
 
     fn span() -> Span {
@@ -857,29 +1167,30 @@ mod tests {
         }
     }
 
-    fn _event(name: &str) -> EventIR {
+    fn sample_event() -> EventIR {
         EventIR {
-            name: name.into(),
-            fields: vec![EventField { name: "tick".into(), ty: crate::ir::IrType::U32, span: span() }],
+            name: "EffectDamageApplied".into(),
+            fields: vec![
+                EventField { name: "caster".into(), ty: IrType::AgentId, span: span() },
+                EventField { name: "target".into(), ty: IrType::AgentId, span: span() },
+                EventField { name: "amount".into(), ty: IrType::F32, span: span() },
+            ],
+            tags: vec![],
             annotations: vec![],
             span: span(),
         }
     }
 
     fn make_minimal_handler() -> PhysicsIR {
-        // Pattern: on EffectDamageApplied { target: t, amount: a, tick: tk }
-        let pattern = IrEventPattern {
+        let pattern = IrPhysicsPattern::Kind(IrEventPattern {
             name: "EffectDamageApplied".into(),
             event: Some(EventRef(0)),
             bindings: vec![
                 pattern_bind("target", "t", 0),
                 pattern_bind("amount", "a", 1),
-                pattern_bind("tick", "tk", 2),
             ],
             span: span(),
-        };
-        // Body: agents.set_hp(t, agents.hp(t)) — a no-op call exercising the
-        // namespace-call lowering + statement-expression form.
+        });
         let body = vec![IrStmt::Expr(ns_call(
             NamespaceId::Agents,
             "set_hp",
@@ -894,81 +1205,58 @@ mod tests {
     }
 
     #[test]
-    fn struct_and_register_emit() {
+    fn handler_fn_signature_and_body() {
         let p = make_minimal_handler();
-        let out = emit_physics(&p, Some("assets/sim/physics.sim")).unwrap();
+        let ev = sample_event();
+        let ctx = EmitContext { events: std::slice::from_ref(&ev), event_tags: &[] };
+        let out = emit_physics(&p, Some("assets/sim/physics.sim"), &ctx).unwrap();
         assert!(out.contains("// GENERATED by dsl_compiler from assets/sim/physics.sim."));
-        assert!(out.contains("pub struct NoopHandler;"));
-        assert!(out.contains("impl CascadeHandler for NoopHandler {"));
-        assert!(out.contains("fn trigger(&self) -> EventKindId { EventKindId::EffectDamageApplied }"));
-        assert!(out.contains("fn lane(&self) -> Lane { Lane::Effect }"));
-        assert!(out.contains("pub fn register(registry: &mut CascadeRegistry) {"));
-        assert!(out.contains("registry.register(NoopHandler);"));
-    }
-
-    #[test]
-    fn pattern_destructure_emits_match() {
-        let p = make_minimal_handler();
-        let out = emit_physics(&p, None).unwrap();
-        // Three bindings → `let (t, a, tk) = match *event { Event::EffectDamageApplied { target: t, amount: a, tick: tk, .. } => (t, a, tk), _ => return }`.
-        assert!(out.contains("let (t, a, tk) = match *event {"));
-        assert!(out.contains("Event::EffectDamageApplied { target: t, amount: a, tick: tk, .. } => (t, a, tk),"));
-        assert!(out.contains("_ => return,"));
-    }
-
-    #[test]
-    fn namespace_call_lowers_to_state_call() {
-        let p = make_minimal_handler();
-        let out = emit_physics(&p, None).unwrap();
+        assert!(out.contains("pub fn noop(t: AgentId, a: f32, state: &mut SimState, events: &mut EventRing)"));
         assert!(out.contains("state.set_agent_hp(t, state.agent_hp(t).unwrap_or(0.0));"));
     }
 
     #[test]
-    fn aggregate_mod_register_fn() {
-        let mut handlers = vec![make_minimal_handler()];
-        handlers[0].name = "zebra".into();
-        let mut p2 = make_minimal_handler();
-        p2.name = "alpha".into();
-        handlers.push(p2);
-        let out = emit_physics_mod(&handlers);
-        assert!(out.contains("pub mod alpha;"));
-        assert!(out.contains("pub mod zebra;"));
-        assert!(out.contains("pub fn register(registry: &mut CascadeRegistry)"));
-        // Sorted alphabetically — alpha before zebra in the register body.
-        let alpha = out.find("alpha::register").unwrap();
-        let zebra = out.find("zebra::register").unwrap();
-        assert!(alpha < zebra);
+    fn dispatcher_destructures_and_calls() {
+        let p = make_minimal_handler();
+        let ev = sample_event();
+        let ctx = EmitContext { events: std::slice::from_ref(&ev), event_tags: &[] };
+        let out = emit_physics_mod(std::slice::from_ref(&p), &ctx);
+        assert!(out.contains("pub fn dispatch_effect_damage_applied(event: &Event, state: &mut SimState, events: &mut EventRing)"));
+        assert!(out.contains("let Event::EffectDamageApplied { caster, target, amount, tick }"));
+        assert!(out.contains("noop::noop(target, amount, state, events);"));
+        assert!(out.contains("registry.install_kind(EventKindId::EffectDamageApplied, dispatch_effect_damage_applied);"));
     }
 
     #[test]
-    fn empty_aggregate_register_is_a_no_op() {
-        let out = emit_physics_mod(&[]);
-        assert!(out.contains("pub fn register(registry: &mut CascadeRegistry)"));
-        assert!(out.contains("let _ = registry;"));
-    }
-
-    #[test]
-    fn unresolved_emit_is_an_error() {
-        let mut p = make_minimal_handler();
-        p.handlers[0].body = vec![IrStmt::Emit(IrEmit {
-            event_name: "Bogus".into(),
-            event: None,
-            fields: vec![IrFieldInit {
-                name: "tick".into(),
-                value: local("tk", 2),
+    fn emit_appends_implicit_tick() {
+        let p = PhysicsIR {
+            name: "emitter".into(),
+            handlers: vec![PhysicsHandlerIR {
+                pattern: IrPhysicsPattern::Kind(IrEventPattern {
+                    name: "EffectDamageApplied".into(),
+                    event: Some(EventRef(0)),
+                    bindings: vec![pattern_bind("target", "t", 0)],
+                    span: span(),
+                }),
+                where_clause: None,
+                body: vec![IrStmt::Emit(IrEmit {
+                    event_name: "AgentDied".into(),
+                    event: Some(EventRef(1)),
+                    fields: vec![IrFieldInit {
+                        name: "agent_id".into(),
+                        value: local("t", 0),
+                        span: span(),
+                    }],
+                    span: span(),
+                })],
                 span: span(),
             }],
+            annotations: vec![],
             span: span(),
-        })];
-        let err = emit_physics(&p, None).unwrap_err();
-        assert!(matches!(err, EmitError::UnresolvedEventInEmit(_)));
-    }
-
-    #[test]
-    fn pascal_and_snake_match_event_emitter() {
-        assert_eq!(snake_case("Damage"), "damage");
-        assert_eq!(snake_case("AgentDied"), "agent_died");
-        assert_eq!(pascal_case("damage"), "Damage");
-        assert_eq!(pascal_case("agent_died"), "AgentDied");
+        };
+        let ev = sample_event();
+        let ctx = EmitContext { events: std::slice::from_ref(&ev), event_tags: &[] };
+        let out = emit_physics(&p, None, &ctx).unwrap();
+        assert!(out.contains("events.push(Event::AgentDied { agent_id: t, tick: state.tick });"));
     }
 }

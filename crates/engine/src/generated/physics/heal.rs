@@ -2,43 +2,42 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
 use crate::event::{Event, EventRing};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub struct HealHandler;
-
-impl CascadeHandler for HealHandler {
-    fn trigger(&self) -> EventKindId {
-        EventKindId::EffectHealApplied
-    }
-    fn lane(&self) -> Lane {
-        Lane::Effect
-    }
-
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (c, t, a, tk) = match *event {
-            Event::EffectHealApplied {
-                caster: c,
-                target: t,
-                amount: a,
-                tick: tk,
-                ..
-            } => (c, t, a, tk),
-            _ => return,
-        };
-        if state.agent_alive(t) {
-            if (a > 0.0) {
-                let cur_hp = state.agent_hp(t).unwrap_or(0.0);
-                let max_hp = state.agent_max_hp(t).unwrap_or(0.0);
-                let new_hp = (cur_hp + a).min(max_hp);
-                state.set_agent_hp(t, new_hp);
-            }
+#[allow(unused_variables)]
+pub fn heal(c: AgentId, t: AgentId, a: f32, state: &mut SimState, events: &mut EventRing) {
+    if state.agent_alive(t) {
+        if (a > 0.0) {
+            let cur_hp = state.agent_hp(t).unwrap_or(0.0);
+            let max_hp = state.agent_max_hp(t).unwrap_or(0.0);
+            let new_hp = (cur_hp + a).min(max_hp);
+            state.set_agent_hp(t, new_hp);
         }
     }
 }
 
-pub fn register(registry: &mut CascadeRegistry) {
-    registry.register(HealHandler);
+pub struct HealHandler;
+
+impl crate::cascade::CascadeHandler for HealHandler {
+    fn trigger(&self) -> crate::cascade::EventKindId {
+        crate::cascade::EventKindId::EffectHealApplied
+    }
+    fn lane(&self) -> crate::cascade::Lane {
+        crate::cascade::Lane::Effect
+    }
+    #[allow(unused_variables)]
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        let Event::EffectHealApplied {
+            caster,
+            target,
+            amount,
+            tick,
+        } = *event
+        else {
+            return;
+        };
+        heal(caster, target, amount, state, events);
+    }
 }

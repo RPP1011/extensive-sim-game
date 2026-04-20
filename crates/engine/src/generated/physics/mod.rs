@@ -10,19 +10,146 @@ pub mod slow;
 pub mod stun;
 pub mod transfer_gold;
 
-use crate::cascade::CascadeRegistry;
+use crate::cascade::{CascadeRegistry, EventKindId};
+use crate::event::{Event, EventRing};
+use crate::state::SimState;
 
-/// Install every compiler-emitted physics handler on `registry`.
+#[allow(unused_variables)]
+pub fn dispatch_effect_damage_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EffectDamageApplied {
+        caster,
+        target,
+        amount,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    damage::damage(caster, target, amount, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_effect_gold_transfer(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EffectGoldTransfer {
+        from,
+        to,
+        amount,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    transfer_gold::transfer_gold(from, to, amount, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_effect_heal_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EffectHealApplied {
+        caster,
+        target,
+        amount,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    heal::heal(caster, target, amount, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_effect_shield_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EffectShieldApplied {
+        caster,
+        target,
+        amount,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    shield::shield(caster, target, amount, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_effect_slow_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EffectSlowApplied {
+        caster,
+        target,
+        duration_ticks,
+        factor_q8,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    slow::slow(caster, target, duration_ticks, factor_q8, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_effect_standing_delta(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EffectStandingDelta { a, b, delta, tick } = *event else {
+        return;
+    };
+    modify_standing::modify_standing(a, b, delta, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EffectStunApplied {
+        caster,
+        target,
+        duration_ticks,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    stun::stun(caster, target, duration_ticks, state, events);
+}
+
+#[allow(unused_variables)]
+pub fn dispatch_opportunity_attack_triggered(
+    event: &Event,
+    state: &mut SimState,
+    events: &mut EventRing,
+) {
+    let Event::OpportunityAttackTriggered {
+        attacker,
+        target,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    opportunity_attack::opportunity_attack(attacker, target, state, events);
+}
+
+/// Install every compiler-emitted physics dispatcher on `registry`.
 /// Called from `CascadeRegistry::register_engine_builtins` so the
 /// engine's built-in handler set picks up DSL-owned rules without
 /// the engine knowing about each handler by name.
 pub fn register(registry: &mut CascadeRegistry) {
-    damage::register(registry);
-    heal::register(registry);
-    modify_standing::register(registry);
-    opportunity_attack::register(registry);
-    shield::register(registry);
-    slow::register(registry);
-    stun::register(registry);
-    transfer_gold::register(registry);
+    registry.install_kind(
+        EventKindId::EffectDamageApplied,
+        dispatch_effect_damage_applied,
+    );
+    registry.install_kind(
+        EventKindId::EffectGoldTransfer,
+        dispatch_effect_gold_transfer,
+    );
+    registry.install_kind(EventKindId::EffectHealApplied, dispatch_effect_heal_applied);
+    registry.install_kind(
+        EventKindId::EffectShieldApplied,
+        dispatch_effect_shield_applied,
+    );
+    registry.install_kind(EventKindId::EffectSlowApplied, dispatch_effect_slow_applied);
+    registry.install_kind(
+        EventKindId::EffectStandingDelta,
+        dispatch_effect_standing_delta,
+    );
+    registry.install_kind(EventKindId::EffectStunApplied, dispatch_effect_stun_applied);
+    registry.install_kind(
+        EventKindId::OpportunityAttackTriggered,
+        dispatch_opportunity_attack_triggered,
+    );
 }

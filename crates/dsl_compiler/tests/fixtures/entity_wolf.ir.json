@@ -1,5 +1,7 @@
 {
   "events": [],
+  "event_tags": [],
+  "enums": [],
   "entities": [
     {
       "name": "Wolf",

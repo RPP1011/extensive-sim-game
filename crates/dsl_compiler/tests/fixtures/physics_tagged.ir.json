@@ -1,0 +1,231 @@
+{
+  "events": [
+    {
+      "name": "AgentAttacked",
+      "fields": [
+        {
+          "name": "attacker",
+          "ty": "AgentId",
+          "span": {
+            "start": 255,
+            "end": 272
+          }
+        },
+        {
+          "name": "target",
+          "ty": "AgentId",
+          "span": {
+            "start": 276,
+            "end": 291
+          }
+        },
+        {
+          "name": "damage",
+          "ty": "F32",
+          "span": {
+            "start": 295,
+            "end": 306
+          }
+        }
+      ],
+      "tags": [
+        0
+      ],
+      "annotations": [
+        {
+          "name": "replayable",
+          "args": [],
+          "span": {
+            "start": 210,
+            "end": 221
+          }
+        }
+      ],
+      "span": {
+        "start": 231,
+        "end": 309
+      }
+    }
+  ],
+  "event_tags": [
+    {
+      "name": "Harmful",
+      "fields": [
+        {
+          "name": "target",
+          "ty": "AgentId",
+          "span": {
+            "start": 191,
+            "end": 207
+          }
+        }
+      ],
+      "annotations": [],
+      "span": {
+        "start": 171,
+        "end": 208
+      }
+    }
+  ],
+  "enums": [],
+  "entities": [],
+  "physics": [
+    {
+      "name": "enforce_harm",
+      "handlers": [
+        {
+          "pattern": {
+            "Tag": {
+              "name": "harmful",
+              "tag": 0,
+              "bindings": [
+                {
+                  "field": "target",
+                  "value": {
+                    "Bind": {
+                      "name": "t",
+                      "local": 1
+                    }
+                  },
+                  "span": {
+                    "start": 364,
+                    "end": 373
+                  }
+                }
+              ],
+              "span": {
+                "start": 353,
+                "end": 375
+              }
+            }
+          },
+          "where_clause": {
+            "kind": {
+              "Binary": [
+                "NotEq",
+                {
+                  "kind": {
+                    "Local": [
+                      1,
+                      "t"
+                    ]
+                  },
+                  "span": {
+                    "start": 382,
+                    "end": 384
+                  }
+                },
+                {
+                  "kind": {
+                    "LitInt": 0
+                  },
+                  "span": {
+                    "start": 387,
+                    "end": 388
+                  }
+                }
+              ]
+            },
+            "span": {
+              "start": 382,
+              "end": 388
+            }
+          },
+          "body": [
+            {
+              "Expr": {
+                "kind": {
+                  "NamespaceCall": {
+                    "ns": "Agents",
+                    "method": "set_hp",
+                    "args": [
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": {
+                            "Local": [
+                              1,
+                              "t"
+                            ]
+                          },
+                          "span": {
+                            "start": 409,
+                            "end": 410
+                          }
+                        },
+                        "span": {
+                          "start": 409,
+                          "end": 410
+                        }
+                      },
+                      {
+                        "name": null,
+                        "value": {
+                          "kind": {
+                            "LitFloat": 0.0
+                          },
+                          "span": {
+                            "start": 412,
+                            "end": 415
+                          }
+                        },
+                        "span": {
+                          "start": 412,
+                          "end": 415
+                        }
+                      }
+                    ]
+                  }
+                },
+                "span": {
+                  "start": 395,
+                  "end": 416
+                }
+              }
+            }
+          ],
+          "span": {
+            "start": 350,
+            "end": 420
+          }
+        }
+      ],
+      "annotations": [
+        {
+          "name": "phase",
+          "args": [
+            {
+              "key": null,
+              "value": {
+                "Ident": "event"
+              },
+              "span": {
+                "start": 339,
+                "end": 344
+              }
+            }
+          ],
+          "span": {
+            "start": 332,
+            "end": 345
+          }
+        }
+      ],
+      "span": {
+        "start": 311,
+        "end": 422
+      }
+    }
+  ],
+  "masks": [],
+  "scoring": [],
+  "views": [],
+  "verbs": [],
+  "invariants": [],
+  "probes": [],
+  "metrics": [],
+  "configs": [],
+  "spans": {
+    "entries": []
+  }
+}

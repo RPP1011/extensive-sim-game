@@ -14,8 +14,18 @@ const KIND_SLOTS: usize = 256;
 /// truncate.
 pub const MAX_CASCADE_ITERATIONS: usize = 8;
 
+/// Type signature of a compiler-emitted per-event-kind dispatcher. The
+/// dispatcher destructures the triggering event once and fans the call
+/// out to every applicable handler (kind-specific + tag-matched).
+pub type KindDispatcher = fn(&Event, &mut SimState, &mut EventRing);
+
 pub struct CascadeRegistry {
     table: Vec<Vec<Vec<Box<dyn CascadeHandler>>>>,
+    /// Compiler-emitted per-event-kind dispatcher fns. Indexed by
+    /// `EventKindId as u8 as usize`; `None` means no dispatcher is
+    /// installed for that kind (falls back to per-handler trait-object
+    /// dispatch via `table`).
+    kind_dispatchers: Vec<Option<KindDispatcher>>,
 }
 
 impl CascadeRegistry {
@@ -24,7 +34,17 @@ impl CascadeRegistry {
             (0..KIND_SLOTS).map(|_| Vec::new()).collect();
         Self {
             table: (0..Lane::ALL.len()).map(|_| per_lane.iter().map(|_| Vec::new()).collect()).collect(),
+            kind_dispatchers: (0..KIND_SLOTS).map(|_| None).collect(),
         }
+    }
+
+    /// Install a compiler-emitted per-event-kind dispatcher. Overwrites
+    /// any previously installed dispatcher for the same kind — the DSL
+    /// emitter produces one dispatcher per event kind, so reinstallation
+    /// is idempotent within a single `register_engine_builtins` call.
+    pub fn install_kind(&mut self, kind: EventKindId, dispatcher: KindDispatcher) {
+        let idx = kind as u8 as usize;
+        self.kind_dispatchers[idx] = Some(dispatcher);
     }
 
     /// Convenience constructor that pre-registers engine-defined baseline
@@ -100,6 +120,15 @@ impl CascadeRegistry {
 
     pub fn dispatch(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
         let kind = EventKindId::from_event(event) as u8 as usize;
+        // Prefer the compiler-emitted per-kind dispatcher when installed.
+        // It fans out to every applicable handler (kind-specific +
+        // tag-matched) inline — no runtime handler-list walk.
+        if let Some(dispatcher) = self.kind_dispatchers[kind] {
+            dispatcher(event, state, events);
+        }
+        // Legacy trait-object handlers (`RecordMemoryHandler`,
+        // `CastHandler`) still register via `register`; walk them in
+        // lane order after the flat dispatcher.
         for lane in Lane::ALL {
             for handler in &self.table[*lane as usize][kind] {
                 handler.handle(event, state, events);

@@ -42,12 +42,14 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             scoring: sources.scoring.as_deref(),
             entities: sources.entities.as_deref(),
             configs: sources.configs.as_deref(),
+            enums: sources.enums.as_deref(),
         },
     );
 
     let rust_events_dir = args.out_rust.join("events");
     let rust_schema = args.out_rust.join("schema.rs");
     let py_events_dir = args.out_python.join("events");
+    let py_enums_dir = args.out_python.join("enums");
     let physics_dir = args.out_physics.clone();
     let mask_dir = args.out_mask.clone();
     let scoring_dir = args.out_scoring.clone();
@@ -55,6 +57,7 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
     let config_rust_dir = args.out_config_rust.clone();
     let config_toml_dir = args.out_config_toml.clone();
     let config_toml_path = config_toml_dir.join("default.toml");
+    let enum_dir = args.out_enum.clone();
 
     if args.check {
         let mut mismatches = Vec::new();
@@ -71,6 +74,7 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             &config_toml_path,
             &mut mismatches,
         );
+        check_enums(&artefacts, &enum_dir, &py_enums_dir, &mut mismatches);
 
         // Rust per-event files. Pre-format the in-memory emission so the
         // comparison ignores rustfmt-driven layout differences (committed
@@ -160,6 +164,10 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             eprintln!("compile-dsl: {e}");
             return ExitCode::FAILURE;
         }
+        if let Err(e) = write_enum_output(&enum_dir, &py_enums_dir, &artefacts) {
+            eprintln!("compile-dsl: {e}");
+            return ExitCode::FAILURE;
+        }
 
         // Format emitted Rust so it matches the project's style. Best effort —
         // if rustfmt fails (missing toolchain, generated file has a bug we
@@ -184,6 +192,13 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
                 .map(|(n, _)| config_rust_dir.join(n)),
         );
         rustfmt_targets.push(config_rust_dir.join("mod.rs"));
+        rustfmt_targets.extend(
+            artefacts
+                .rust_enum_modules
+                .iter()
+                .map(|(n, _)| enum_dir.join(n)),
+        );
+        rustfmt_targets.push(enum_dir.join("mod.rs"));
         if let Err(e) = rustfmt(&rustfmt_targets) {
             eprintln!("compile-dsl: rustfmt failed: {e}");
             return ExitCode::FAILURE;
@@ -245,6 +260,7 @@ struct PerKindSources {
     scoring: Option<String>,
     entities: Option<String>,
     configs: Option<String>,
+    enums: Option<String>,
 }
 
 /// Output of `compile_all`: the merged IR plus per-kind source attributions.
@@ -266,12 +282,14 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
     let mut scoring_source: Option<String> = None;
     let mut entities_source: Option<String> = None;
     let mut configs_source: Option<String> = None;
+    let mut enums_source: Option<String> = None;
     let mut events_multi = false;
     let mut physics_multi = false;
     let mut masks_multi = false;
     let mut scoring_multi = false;
     let mut entities_multi = false;
     let mut configs_multi = false;
+    let mut enums_multi = false;
     let mut seen_events: HashSet<String> = HashSet::new();
     let mut seen_physics: HashSet<String> = HashSet::new();
 
@@ -317,7 +335,8 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
                 Decl::Scoring(_) => update_kind_source(&mut scoring_source, &mut scoring_multi, &path),
                 Decl::Entity(_) => update_kind_source(&mut entities_source, &mut entities_multi, &path),
                 Decl::Config(_) => update_kind_source(&mut configs_source, &mut configs_multi, &path),
-                // Verb/View/Invariant/Probe/Metric are parsed but not yet emitted.
+                Decl::Enum(_) => update_kind_source(&mut enums_source, &mut enums_multi, &path),
+                // Verb/View/Invariant/Probe/Metric/EventTag parsed but not yet emitted.
                 _ => {}
             }
             merged.decls.push(decl);
@@ -339,6 +358,7 @@ fn compile_all(files: &[PathBuf]) -> Result<CompileAll, ExitCode> {
             scoring: if scoring_multi { None } else { scoring_source },
             entities: if entities_multi { None } else { entities_source },
             configs: if configs_multi { None } else { configs_source },
+            enums: if enums_multi { None } else { enums_source },
         },
     })
 }
@@ -597,6 +617,30 @@ fn write_config_output(
     Ok(())
 }
 
+/// Write per-enum Rust + Python files and their aggregator mod/init.
+fn write_enum_output(
+    enum_rust_dir: &Path,
+    py_enums_dir: &Path,
+    artefacts: &dsl_compiler::EmittedArtifacts,
+) -> std::io::Result<()> {
+    fs::create_dir_all(enum_rust_dir)?;
+    fs::create_dir_all(py_enums_dir)?;
+
+    prune_stale(enum_rust_dir, &artefacts.rust_enum_modules, "rs", &["mod.rs"])?;
+    prune_stale(py_enums_dir, &artefacts.python_enum_modules, "py", &["__init__.py"])?;
+
+    for (name, content) in &artefacts.rust_enum_modules {
+        fs::write(enum_rust_dir.join(name), content)?;
+    }
+    fs::write(enum_rust_dir.join("mod.rs"), &artefacts.rust_enum_mod)?;
+
+    for (name, content) in &artefacts.python_enum_modules {
+        fs::write(py_enums_dir.join(name), content)?;
+    }
+    fs::write(py_enums_dir.join("__init__.py"), &artefacts.python_enum_init)?;
+    Ok(())
+}
+
 /// `--check` counterpart to [`write_config_output`]. Verifies every per-block
 /// file matches the committed emission (post-rustfmt) and that the TOML
 /// defaults file is byte-identical.
@@ -620,6 +664,31 @@ fn check_config(
         "rs",
         mismatches,
     );
+}
+
+fn check_enums(
+    artefacts: &dsl_compiler::EmittedArtifacts,
+    enum_rust_dir: &Path,
+    py_enums_dir: &Path,
+    mismatches: &mut Vec<String>,
+) {
+    for (name, content) in &artefacts.rust_enum_modules {
+        let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
+        check_file(&enum_rust_dir.join(name), &f, mismatches);
+    }
+    let fmt = rustfmt_string(&artefacts.rust_enum_mod)
+        .unwrap_or_else(|_| artefacts.rust_enum_mod.clone());
+    check_file(&enum_rust_dir.join("mod.rs"), &fmt, mismatches);
+    for (name, content) in &artefacts.python_enum_modules {
+        check_file(&py_enums_dir.join(name), content, mismatches);
+    }
+    check_file(
+        &py_enums_dir.join("__init__.py"),
+        &artefacts.python_enum_init,
+        mismatches,
+    );
+    check_stale(enum_rust_dir, &artefacts.rust_enum_modules, "rs", mismatches);
+    check_stale(py_enums_dir, &artefacts.python_enum_modules, "py", mismatches);
 }
 
 fn check_scaffolded_kinds(

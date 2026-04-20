@@ -1,0 +1,110 @@
+{
+  "decls": [
+    {
+      "EventTag": {
+        "annotations": [],
+        "name": "Harmful",
+        "fields": [
+          {
+            "name": "target",
+            "ty": {
+              "kind": {
+                "Named": "AgentId"
+              },
+              "span": {
+                "start": 228,
+                "end": 236
+              }
+            },
+            "span": {
+              "start": 220,
+              "end": 236
+            }
+          }
+        ],
+        "span": {
+          "start": 200,
+          "end": 237
+        }
+      }
+    },
+    {
+      "Event": {
+        "annotations": [
+          {
+            "name": "replayable",
+            "args": [],
+            "span": {
+              "start": 239,
+              "end": 250
+            }
+          },
+          {
+            "name": "harmful",
+            "args": [],
+            "span": {
+              "start": 251,
+              "end": 259
+            }
+          }
+        ],
+        "name": "AgentAttacked",
+        "fields": [
+          {
+            "name": "attacker",
+            "ty": {
+              "kind": {
+                "Named": "AgentId"
+              },
+              "span": {
+                "start": 294,
+                "end": 301
+              }
+            },
+            "span": {
+              "start": 284,
+              "end": 301
+            }
+          },
+          {
+            "name": "target",
+            "ty": {
+              "kind": {
+                "Named": "AgentId"
+              },
+              "span": {
+                "start": 313,
+                "end": 320
+              }
+            },
+            "span": {
+              "start": 305,
+              "end": 320
+            }
+          },
+          {
+            "name": "damage",
+            "ty": {
+              "kind": {
+                "Named": "f32"
+              },
+              "span": {
+                "start": 332,
+                "end": 335
+              }
+            },
+            "span": {
+              "start": 324,
+              "end": 335
+            }
+          }
+        ],
+        "tags": [],
+        "span": {
+          "start": 260,
+          "end": 338
+        }
+      }
+    }
+  ]
+}

@@ -21,11 +21,20 @@ pub fn emit_event_dataclass(event: &EventIR, source_file: Option<&str>) -> Strin
     writeln!(out).unwrap();
     writeln!(out, "@dataclass").unwrap();
     writeln!(out, "class {}:", event.name).unwrap();
-    if event.fields.is_empty() {
+    // Synthesize implicit tick on the emitted fields list.
+    let mut fields = event.fields.clone();
+    if !fields.iter().any(|f| f.name == "tick") {
+        fields.push(crate::ir::EventField {
+            name: "tick".into(),
+            ty: IrType::U32,
+            span: crate::ast::Span::dummy(),
+        });
+    }
+    if fields.is_empty() {
         writeln!(out, "    pass").unwrap();
         return out;
     }
-    for f in &event.fields {
+    for f in &fields {
         let (ty, comment) = render_py_type(&f.ty);
         match comment {
             Some(c) => writeln!(out, "    {}: {}  # {}", f.name, ty, c).unwrap(),
@@ -206,19 +215,23 @@ mod tests {
     }
 
     fn mk_event(name: &str, fields: Vec<EventField>) -> EventIR {
-        EventIR { name: name.into(), fields, annotations: vec![], span: Span::dummy() }
+        EventIR {
+            name: name.into(),
+            fields,
+            tags: vec![],
+            annotations: vec![],
+            span: Span::dummy(),
+        }
     }
 
     #[test]
     fn simple_primitives() {
-        let e = mk_event(
-            "Heal",
-            vec![mk_field("amount", IrType::F32), mk_field("tick", IrType::U64)],
-        );
+        let e = mk_event("Heal", vec![mk_field("amount", IrType::F32)]);
         let out = emit_event_dataclass(&e, None);
         assert!(out.contains("@dataclass"));
         assert!(out.contains("class Heal:"));
         assert!(out.contains("amount: float"));
+        // Implicit tick.
         assert!(out.contains("tick: int"));
     }
 
@@ -258,8 +271,8 @@ mod tests {
 
     #[test]
     fn init_file_alphabetical() {
-        let e1 = mk_event("Zebra", vec![mk_field("t", IrType::U64)]);
-        let e2 = mk_event("Apple", vec![mk_field("t", IrType::U64)]);
+        let e1 = mk_event("Zebra", vec![mk_field("t", IrType::U32)]);
+        let e2 = mk_event("Apple", vec![mk_field("t", IrType::U32)]);
         let out = emit_events_init(&[e1, e2]);
         let a = out.find("from .apple import Apple").unwrap();
         let z = out.find("from .zebra import Zebra").unwrap();

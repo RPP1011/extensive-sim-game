@@ -1,14 +1,17 @@
 // Physics rules — compiler-emitted cascade handlers.
 //
-// Each `physics` declaration lowers to a unit-struct `CascadeHandler` impl
-// under `crates/engine/src/generated/physics/`. The handlers in this file
-// collectively replace the hand-written legacy handlers that used to live in
-// `crates/engine/src/ability/`. Legacy files were deleted in the same commit
-// that landed their DSL equivalent.
+// Each `physics` declaration lowers to a plain Rust function under
+// `crates/engine/src/generated/physics/`. The aggregate `mod.rs` owns a
+// per-event-kind dispatcher that destructures the triggering event once
+// and calls every applicable handler inline — no runtime handler-list
+// walk, no class-bitset lookup.
 //
 // Per-rule behaviour is pinned by the corresponding `crates/engine/tests/
-// cast_handler_*.rs` test — the emitted Rust must reproduce the legacy event
-// trace bit-for-bit.
+// cast_handler_*.rs` test — the emitted Rust must reproduce the legacy
+// event trace bit-for-bit. `tick` is implicit on every event; emit-sites
+// get `tick: state.tick` appended automatically, and an `on <Kind> { ... }`
+// pattern can bind `tick` to see the event's tick without listing it on
+// the kind's field set.
 
 // ---------------------------------------------------------------------------
 // Damage
@@ -17,20 +20,20 @@
 // kill_agent. Pinned by `cast_handler_damage.rs`.
 
 physics damage @phase(event) {
-  on EffectDamageApplied { caster: c, target: t, amount: a, tick: tk } {
+  on EffectDamageApplied { caster: c, target: t, amount: a } {
     if agents.alive(t) {
       if a > 0.0 {
         let shield = agents.shield_hp(t)
         let absorbed = min(shield, a)
         agents.set_shield_hp(t, shield - absorbed)
         let residual = a - absorbed
-        emit AgentAttacked { attacker: c, target: t, damage: a, tick: tk }
+        emit AgentAttacked { attacker: c, target: t, damage: a }
         if residual > 0.0 {
           let cur_hp = agents.hp(t)
           let new_hp = max(cur_hp - residual, 0.0)
           agents.set_hp(t, new_hp)
           if new_hp <= 0.0 {
-            emit AgentDied { agent_id: t, tick: tk }
+            emit AgentDied { agent_id: t }
             agents.kill(t)
           }
         }
@@ -47,7 +50,7 @@ physics damage @phase(event) {
 // `cast_handler_heal.rs`.
 
 physics heal @phase(event) {
-  on EffectHealApplied { caster: c, target: t, amount: a, tick: tk } {
+  on EffectHealApplied { caster: c, target: t, amount: a } {
     if agents.alive(t) {
       if a > 0.0 {
         let cur_hp = agents.hp(t)
@@ -66,7 +69,7 @@ physics heal @phase(event) {
 // a no-op. Pinned by `cast_handler_shield_absorb.rs`.
 
 physics shield @phase(event) {
-  on EffectShieldApplied { caster: c, target: t, amount: a, tick: tk } {
+  on EffectShieldApplied { caster: c, target: t, amount: a } {
     if agents.alive(t) {
       if a > 0.0 {
         let cur = agents.shield_hp(t)
@@ -80,12 +83,10 @@ physics shield @phase(event) {
 // Stun
 // ---------------------------------------------------------------------------
 // Longer-stun-wins: `max(existing, duration_ticks)`. Zero-duration and dead
-// targets are no-ops. Tick-start decrement + `StunExpired` emission live in
-// `ability::expire::tick_start` (not migrated — engine tick machinery).
-// Pinned by `cast_handler_stun.rs`.
+// targets are no-ops. Pinned by `cast_handler_stun.rs`.
 
 physics stun @phase(event) {
-  on EffectStunApplied { caster: c, target: t, duration_ticks: d, tick: tk } {
+  on EffectStunApplied { caster: c, target: t, duration_ticks: d } {
     if agents.alive(t) {
       if d > 0 {
         let cur = agents.stun_remaining_ticks(t)
@@ -98,15 +99,10 @@ physics stun @phase(event) {
 // ---------------------------------------------------------------------------
 // Slow
 // ---------------------------------------------------------------------------
-// "Longer-or-stronger wins" override. `factor_q8` is a q8 fixed-point speed
-// multiplier; a SMALLER factor_q8 means a STRONGER slow (closer to 0×).
-// Replace both duration and factor when incoming is LONGER (strictly greater
-// remaining) OR STRONGER (current factor is 0, i.e. no slow active, OR
-// incoming factor is strictly less than current).
-// Pinned by `cast_handler_slow.rs`.
+// "Longer-or-stronger wins" override. Pinned by `cast_handler_slow.rs`.
 
 physics slow @phase(event) {
-  on EffectSlowApplied { caster: c, target: t, duration_ticks: d, factor_q8: f, tick: tk } {
+  on EffectSlowApplied { caster: c, target: t, duration_ticks: d, factor_q8: f } {
     if agents.alive(t) {
       if d > 0 {
         if f > 0 {
@@ -127,15 +123,10 @@ physics slow @phase(event) {
 // ---------------------------------------------------------------------------
 // Gold transfer
 // ---------------------------------------------------------------------------
-// Signed `i64` transfer between two agents' `cold_inventory.gold` slots.
-// Conservation: `sum(from.gold, to.gold)` is invariant. Zero-amount and
-// self-transfer (from == to) short-circuit to preserve the "no double-touch"
-// invariant. Wraps on i64 overflow (`wrapping_add`), matching the legacy
-// handler; debt (negative gold) is representable. Pinned by
-// `cast_handler_gold.rs`.
+// Pinned by `cast_handler_gold.rs`.
 
 physics transfer_gold @phase(event) {
-  on EffectGoldTransfer { from: from, to: to, amount: a, tick: tk } {
+  on EffectGoldTransfer { from: from, to: to, amount: a } {
     if a != 0 {
       if from != to {
         agents.sub_gold(from, a)
@@ -148,14 +139,10 @@ physics transfer_gold @phase(event) {
 // ---------------------------------------------------------------------------
 // Modify standing
 // ---------------------------------------------------------------------------
-// Symmetric pair standing adjust. `SimState::adjust_standing` keys the ordered
-// tuple `(min(a,b), max(a,b))` and clamps the resulting value to
-// `[-1000, 1000]` silently. Zero delta short-circuits so the `cold_standing`
-// map stays un-polluted (the test pins `cold_standing.is_empty()` after a
-// zero-delta dispatch). Pinned by `cast_handler_standing.rs`.
+// Pinned by `cast_handler_standing.rs`.
 
 physics modify_standing @phase(event) {
-  on EffectStandingDelta { a: a, b: b, delta: delta, tick: tk } {
+  on EffectStandingDelta { a: a, b: b, delta: delta } {
     if delta != 0 {
       agents.adjust_standing(a, b, delta)
     }
@@ -165,27 +152,18 @@ physics modify_standing @phase(event) {
 // ---------------------------------------------------------------------------
 // Opportunity attack
 // ---------------------------------------------------------------------------
-// Mirrors the normal `MicroKind::Attack` damage path: applies the attacker's
-// per-agent `attack_damage` (fallback `step::ATTACK_DAMAGE`) to the target,
-// emits `AgentAttacked` and — on lethal — `AgentDied` + `kill_agent`. Dead
-// target is a no-op. Pinned by `engagement_move_slow.rs` and
-// `per_agent_combat_stats.rs`.
+// Pinned by `engagement_move_slow.rs` and `per_agent_combat_stats.rs`.
 
 physics opportunity_attack @phase(event) {
-  on OpportunityAttackTriggered { attacker: attacker, target: target, tick: tk } {
+  on OpportunityAttackTriggered { attacker: attacker, target: target } {
     if agents.alive(target) {
-      // Per-agent attack_damage with config fallback when the slot is empty.
-      // The legacy handler hard-coded `crate::step::ATTACK_DAMAGE`; the DSL
-      // lowers `config.combat.attack_damage` to `state.config.combat.attack_damage`
-      // so the runtime reads whatever value TOML tuning (or test code) has
-      // installed on `SimState.config`.
       let damage = agents.attack_damage(attacker)
       let cur_hp = agents.hp(target)
       let new_hp = max(cur_hp - damage, 0.0)
       agents.set_hp(target, new_hp)
-      emit AgentAttacked { attacker: attacker, target: target, damage: damage, tick: tk }
+      emit AgentAttacked { attacker: attacker, target: target, damage: damage }
       if new_hp <= 0.0 {
-        emit AgentDied { agent_id: target, tick: tk }
+        emit AgentDied { agent_id: target }
         agents.kill(target)
       }
     }

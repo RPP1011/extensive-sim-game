@@ -4,6 +4,6 @@
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ChronicleEntry {
-    pub tick: u32,
     pub template_id: u32,
+    pub tick: u32,
 }

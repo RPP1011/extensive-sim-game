@@ -23,6 +23,10 @@ const FIXTURES: &[&str] = &[
     "for_filter",
     "stdlib_usage",
     "trailing_annotation",
+    "enum_decl",
+    "event_tag_decl",
+    "physics_tagged",
+    "tick_implicit",
 ];
 
 fn fixtures_dir() -> PathBuf {
@@ -64,6 +68,50 @@ fn all_fixtures_compile_to_ir() {
     if !failures.is_empty() {
         panic!("{}", failures.join("\n"));
     }
+}
+
+#[test]
+fn explicit_tick_field_is_a_parse_error() {
+    let src = r#"
+        event Bad { target: AgentId, tick: u32 }
+    "#;
+    let err = dsl_compiler::parse(src).expect_err("should fail");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("tick is implicit"),
+        "expected implicit-tick diagnostic, got: {msg}"
+    );
+}
+
+#[test]
+fn event_tag_contract_violation_errors() {
+    let src = r#"
+        event_tag Harmful { target: AgentId }
+        @harmful event Broken { caster: AgentId }
+    "#;
+    let err = dsl_compiler::compile(src).expect_err("should fail");
+    match err {
+        dsl_compiler::CompileError::Resolve(ResolveError::EventTagContractViolated {
+            ref event,
+            ref tag,
+            ..
+        }) => {
+            assert_eq!(event, "Broken");
+            assert_eq!(tag, "Harmful");
+        }
+        other => panic!("expected EventTagContractViolated, got {other:?}"),
+    }
+}
+
+#[test]
+fn enum_variant_resolves_to_declared_enum() {
+    let src = r#"
+        enum Flavour { Salty, Sweet }
+        view pick() -> bool { Flavour::Salty == Flavour::Sweet }
+    "#;
+    let comp = dsl_compiler::compile(src).expect("compile");
+    assert_eq!(comp.enums.len(), 1);
+    assert_eq!(comp.enums[0].variants, vec!["Salty".to_string(), "Sweet".to_string()]);
 }
 
 #[test]

@@ -198,6 +198,17 @@ mod stdlib {
 #[derive(Debug, Default)]
 pub struct SymbolTable {
     pub events: HashMap<String, EventRef>,
+    /// `event_tag` declarations keyed by their *lowercased* name (matches the
+    /// `@tag_name` annotation form). Value carries the IR ref and the tag's
+    /// PascalCase source name.
+    pub event_tags: HashMap<String, (EventTagRef, String)>,
+    /// User-declared `enum` types keyed by PascalCase name. Value carries the
+    /// IR ref plus the full variant list for lookup during expression resolution.
+    pub enums: HashMap<String, (EnumRef, Vec<String>)>,
+    /// Reverse index: variant name → owning enum name. Populated only for
+    /// variants whose enum owns the variant exclusively (same variant in two
+    /// enums stays ambiguous and resolves by left context).
+    pub enum_variant_owner: HashMap<String, String>,
     pub entities: HashMap<String, EntityRef>,
     pub physics: HashMap<String, PhysicsRef>,
     pub masks: HashMap<String, MaskRef>,
@@ -331,6 +342,58 @@ fn collect(
 ) -> Result<(), ResolveError> {
     // We pre-allocate empty IR shells with the right names/spans so indices
     // are stable. Pass 2 will overwrite the bodies.
+    // Pass 1a: collect event_tags + enums first so that event decls can
+    // resolve their tag annotations in-place during pass 1b.
+    for decl in &program.decls {
+        match decl {
+            Decl::EventTag(d) => {
+                let key = lowercase_tag_name(&d.name);
+                check_dup(symbols, "event_tag", &d.name, d.span, |s| {
+                    s.event_tags.contains_key(&key)
+                })?;
+                let idx = push_idx(comp.event_tags.len(), "event_tag")?;
+                symbols.event_tags.insert(key, (EventTagRef(idx), d.name.clone()));
+                symbols.record_first("event_tag", &d.name, d.span);
+                let fields = d
+                    .fields
+                    .iter()
+                    .map(|f| EventField {
+                        name: f.name.clone(),
+                        ty: resolve_type(&f.ty, symbols),
+                        span: f.span,
+                    })
+                    .collect();
+                comp.event_tags.push(EventTagIR {
+                    name: d.name.clone(),
+                    fields,
+                    annotations: d.annotations.clone(),
+                    span: d.span,
+                });
+            }
+            Decl::Enum(d) => {
+                check_dup(symbols, "enum", &d.name, d.span, |s| s.enums.contains_key(&d.name))?;
+                let idx = push_idx(comp.enums.len(), "enum")?;
+                let variants: Vec<String> =
+                    d.variants.iter().map(|v| v.name.clone()).collect();
+                for v in &variants {
+                    symbols
+                        .enum_variant_owner
+                        .entry(v.clone())
+                        .or_insert_with(|| d.name.clone());
+                }
+                symbols.enums.insert(d.name.clone(), (EnumRef(idx), variants.clone()));
+                symbols.record_first("enum", &d.name, d.span);
+                comp.enums.push(EnumIR {
+                    name: d.name.clone(),
+                    variants,
+                    annotations: d.annotations.clone(),
+                    span: d.span,
+                });
+            }
+            _ => {}
+        }
+    }
+
     for decl in &program.decls {
         match decl {
             Decl::Event(d) => {
@@ -338,12 +401,33 @@ fn collect(
                 let idx = push_idx(comp.events.len(), "event")?;
                 symbols.events.insert(d.name.clone(), EventRef(idx));
                 symbols.record_first("event", &d.name, d.span);
+                // Partition annotations: `@tag_name` annotations whose name
+                // matches a declared event_tag become tag refs. Non-tag
+                // annotations (replayable, non_replayable, high_volume, ...)
+                // stay on the event.
+                let mut tag_refs: Vec<EventTagRef> = Vec::new();
+                let mut non_tag_anns: Vec<ast::Annotation> =
+                    Vec::with_capacity(d.annotations.len());
+                for ann in &d.annotations {
+                    if ann.args.is_empty()
+                        && symbols.event_tags.contains_key(&ann.name)
+                    {
+                        let (tref, _) = symbols.event_tags[&ann.name];
+                        tag_refs.push(tref);
+                    } else {
+                        non_tag_anns.push(ann.clone());
+                    }
+                }
                 comp.events.push(EventIR {
                     name: d.name.clone(),
                     fields: Vec::new(),
-                    annotations: d.annotations.clone(),
+                    tags: tag_refs,
+                    annotations: non_tag_anns,
                     span: d.span,
                 });
+            }
+            Decl::EventTag(_) | Decl::Enum(_) => {
+                // Already collected in the pre-pass above.
             }
             Decl::Entity(d) => {
                 check_dup(symbols, "entity", &d.name, d.span, |s| s.entities.contains_key(&d.name))?;
@@ -576,7 +660,7 @@ fn resolve_bodies(
     for decl in &program.decls {
         match decl {
             Decl::Event(d) => {
-                let fields = d
+                let fields: Vec<EventField> = d
                     .fields
                     .iter()
                     .map(|f| EventField {
@@ -585,8 +669,45 @@ fn resolve_bodies(
                         span: f.span,
                     })
                     .collect();
+                // Validate the tag contract: for each tag this event claims,
+                // every required tag field must appear on the event with a
+                // matching type.
+                let tag_refs = comp.events[event_idx].tags.clone();
+                for tref in &tag_refs {
+                    let tag_ir = &comp.event_tags[tref.0 as usize];
+                    let mut details: Vec<String> = Vec::new();
+                    for tf in &tag_ir.fields {
+                        match fields.iter().find(|f| f.name == tf.name) {
+                            None => details.push(format!("missing field `{}`", tf.name)),
+                            Some(ef) if ef.ty != tf.ty => details.push(format!(
+                                "field `{}` has type mismatch",
+                                tf.name
+                            )),
+                            _ => {}
+                        }
+                    }
+                    if !details.is_empty() {
+                        // Locate the annotation span for diagnostics.
+                        let tag_lower = lowercase_tag_name(&tag_ir.name);
+                        let ann_span = d
+                            .annotations
+                            .iter()
+                            .find(|a| a.name == tag_lower)
+                            .map(|a| a.span)
+                            .unwrap_or(d.span);
+                        return Err(ResolveError::EventTagContractViolated {
+                            event: d.name.clone(),
+                            tag: tag_ir.name.clone(),
+                            details,
+                            span: ann_span,
+                        });
+                    }
+                }
                 comp.events[event_idx].fields = fields;
                 event_idx += 1;
+            }
+            Decl::EventTag(_) | Decl::Enum(_) => {
+                // No body lowering beyond what pass 1 already did.
             }
             Decl::Entity(d) => {
                 let fields = d
@@ -606,7 +727,7 @@ fn resolve_bodies(
                         // self is implicit in physics handlers (the entity
                         // whose action/event is being handled).
                         scope.bind("self", IrType::Unknown);
-                        let pattern = resolve_event_pattern(&h.pattern, &mut scope, symbols);
+                        let pattern = resolve_physics_pattern(&h.pattern, &mut scope, symbols, comp)?;
                         let where_clause = h
                             .where_clause
                             .as_ref()
@@ -806,6 +927,9 @@ fn resolve_type(ty: &ast::TypeRef, symbols: &SymbolTable) -> IrType {
             if let Some(r) = symbols.events.get(n) {
                 return IrType::EventRef(*r);
             }
+            if let Some((_, variants)) = symbols.enums.get(n) {
+                return IrType::Enum { name: n.clone(), variants: variants.clone() };
+            }
             // Probably a user-defined enum / struct we don't have a decl kind
             // for in 1a — keep as Named.
             IrType::Named(n.clone())
@@ -945,6 +1069,64 @@ fn resolve_event_pattern(
         .map(|b| resolve_pattern_binding(b, scope, symbols))
         .collect();
     IrEventPattern { name: p.name.clone(), event, bindings, span: p.span }
+}
+
+/// Resolve a physics `on` pattern. A `PhysicsPattern::Tag` validates that
+/// the referenced `event_tag` exists and that every binding names a field
+/// declared on the tag. The kind variant wraps the standard event pattern.
+fn resolve_physics_pattern(
+    p: &ast::PhysicsPattern,
+    scope: &mut LocalScope,
+    symbols: &SymbolTable,
+    comp: &Compilation,
+) -> Result<IrPhysicsPattern, ResolveError> {
+    match p {
+        ast::PhysicsPattern::Kind(pat) => {
+            Ok(IrPhysicsPattern::Kind(resolve_event_pattern(pat, scope, symbols)))
+        }
+        ast::PhysicsPattern::Tag { name, bindings, span } => {
+            let Some((tref, _)) = symbols.event_tags.get(name) else {
+                let suggestions: Vec<String> = symbols
+                    .event_tags
+                    .keys()
+                    .take(3)
+                    .cloned()
+                    .collect();
+                return Err(ResolveError::UnknownEventTag {
+                    name: name.clone(),
+                    span: *span,
+                    suggestions,
+                });
+            };
+            let tag_ir = &comp.event_tags[tref.0 as usize];
+            let allowed: std::collections::HashSet<&str> =
+                tag_ir.fields.iter().map(|f| f.name.as_str()).collect();
+            for b in bindings {
+                // `tick` is always available on every event, not listed on
+                // the tag — permit it as a synthetic reference.
+                if b.field == "tick" {
+                    continue;
+                }
+                if !allowed.contains(b.field.as_str()) {
+                    return Err(ResolveError::TagBindingUnknown {
+                        tag: tag_ir.name.clone(),
+                        field: b.field.clone(),
+                        span: b.span,
+                    });
+                }
+            }
+            let resolved_bindings = bindings
+                .iter()
+                .map(|b| resolve_pattern_binding(b, scope, symbols))
+                .collect();
+            Ok(IrPhysicsPattern::Tag {
+                name: name.clone(),
+                tag: Some(*tref),
+                bindings: resolved_bindings,
+                span: *span,
+            })
+        }
+    }
 }
 
 fn resolve_pattern_binding(
@@ -1369,12 +1551,35 @@ fn resolve_ident(
         // CONSTANT", "Stone", etc — also handled below).
         let _ = t;
     }
+    // `EnumName::Variant` — recognise the two-segment form and validate
+    // against the declared enum.
+    if let Some((lhs, rhs)) = name.split_once("::") {
+        if let Some((_, variants)) = symbols.enums.get(lhs) {
+            if variants.iter().any(|v| v == rhs) {
+                return Ok(IrExpr::EnumVariant {
+                    ty: lhs.to_string(),
+                    variant: rhs.to_string(),
+                });
+            }
+            return Err(ResolveError::UnknownIdent {
+                name: name.to_string(),
+                span,
+                suggestions: variants.iter().take(3).cloned().collect(),
+            });
+        }
+    }
     // Identifiers that start uppercase are likely enum variants or constants
-    // (Conquest, Family, Religion, Stone, FleeSet, AGGRO_RANGE, ...). We
-    // don't know yet — keep the name on an EnumVariant with an empty type.
-    // 1b will either promote to a real enum ref or error.
+    // (Conquest, Family, Religion, Stone, FleeSet, AGGRO_RANGE, ...). Check
+    // user-declared enums first so `CulturalTransgression` resolves to its
+    // owning enum's variant; everything else stays typeless and waits for
+    // 1b type inference.
     if starts_upper(name) {
-        return Ok(IrExpr::EnumVariant { ty: String::new(), variant: name.to_string() });
+        let ty = symbols
+            .enum_variant_owner
+            .get(name)
+            .cloned()
+            .unwrap_or_default();
+        return Ok(IrExpr::EnumVariant { ty, variant: name.to_string() });
     }
     // Otherwise: bare lowercase ident with no match. This is an unknown
     // identifier — error out with suggestions.
@@ -1494,6 +1699,14 @@ fn resolve_assert(
 
 fn starts_upper(s: &str) -> bool {
     s.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+}
+
+/// Convert a tag declaration's PascalCase name (`Harmful`) to its
+/// annotation-form lowercase (`harmful`). Matches a lossless 1:1 map —
+/// variants like `XyzName` become `xyzname` which won't collide in
+/// practice since tags are author-chosen single-word PascalCase.
+pub(crate) fn lowercase_tag_name(name: &str) -> String {
+    name.to_ascii_lowercase()
 }
 
 fn suggest_idents(name: &str, scope: &LocalScope, symbols: &SymbolTable) -> Vec<String> {

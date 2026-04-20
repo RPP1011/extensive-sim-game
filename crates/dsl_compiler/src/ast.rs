@@ -45,6 +45,8 @@ pub struct Program {
 pub enum Decl {
     Entity(EntityDecl),
     Event(EventDecl),
+    EventTag(EventTagDecl),
+    Enum(EnumDecl),
     View(ViewDecl),
     Query(QueryDecl),
     Physics(PhysicsDecl),
@@ -173,6 +175,38 @@ pub struct EventDecl {
     pub annotations: Vec<Annotation>,
     pub name: String,
     pub fields: Vec<FieldDecl>,
+    /// Named tags attached to this event via `@tag_name` annotations. Stored
+    /// as lowercased tag-annotation names (the matching `event_tag
+    /// <PascalName>` declaration has its name lowercased for lookup).
+    pub tags: Vec<Spanned<String>>,
+    pub span: Span,
+}
+
+/// `event_tag <Name> { <field>: <type>, ... }` — a compile-time contract
+/// declaring a set of required fields an event claims via `@<name>`
+/// annotation. No runtime type is emitted; tags are enforced at emit time.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EventTagDecl {
+    pub annotations: Vec<Annotation>,
+    pub name: String,
+    pub fields: Vec<FieldDecl>,
+    pub span: Span,
+}
+
+/// `enum <Name> { <Variant>, ... }` — a named list of variants emitted as a
+/// `#[repr(u8)]` Rust enum and a Python `IntEnum`. Variants are assigned
+/// sequential ordinals starting at 0 in source order.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EnumDecl {
+    pub annotations: Vec<Annotation>,
+    pub name: String,
+    pub variants: Vec<EnumVariant>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EnumVariant {
+    pub name: String,
     pub span: Span,
 }
 
@@ -251,10 +285,45 @@ pub struct PhysicsDecl {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PhysicsHandler {
-    pub pattern: EventPattern,
+    pub pattern: PhysicsPattern,
     pub where_clause: Option<Expr>,
     pub body: Vec<Stmt>,
     pub span: Span,
+}
+
+/// Physics `on` pattern — either a concrete event kind (`on Foo { ... }`) or
+/// a tag (`on @harmful { ... }`). Tag-matched handlers run against every
+/// event that declares the tag via `@tag_name`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum PhysicsPattern {
+    Kind(EventPattern),
+    Tag {
+        /// Lowercased tag name (matches `event_tag` decl's lowercased name).
+        name: String,
+        bindings: Vec<PatternBinding>,
+        span: Span,
+    },
+}
+
+impl PhysicsPattern {
+    pub fn span(&self) -> Span {
+        match self {
+            PhysicsPattern::Kind(p) => p.span,
+            PhysicsPattern::Tag { span, .. } => *span,
+        }
+    }
+    pub fn bindings(&self) -> &[PatternBinding] {
+        match self {
+            PhysicsPattern::Kind(p) => &p.bindings,
+            PhysicsPattern::Tag { bindings, .. } => bindings,
+        }
+    }
+    pub fn display_name(&self) -> &str {
+        match self {
+            PhysicsPattern::Kind(p) => &p.name,
+            PhysicsPattern::Tag { name, .. } => name,
+        }
+    }
 }
 
 /// `<EventName>{f1: bind1, f2: bind2, ...}`, or the bare name.

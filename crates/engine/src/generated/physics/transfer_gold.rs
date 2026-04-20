@@ -2,47 +2,52 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
 use crate::event::{Event, EventRing};
+use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub struct TransferGoldHandler;
-
-impl CascadeHandler for TransferGoldHandler {
-    fn trigger(&self) -> EventKindId {
-        EventKindId::EffectGoldTransfer
-    }
-    fn lane(&self) -> Lane {
-        Lane::Effect
-    }
-
-    #[allow(unused_variables)]
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (from, to, a, tk) = match *event {
-            Event::EffectGoldTransfer {
-                from,
-                to,
-                amount: a,
-                tick: tk,
-                ..
-            } => (from, to, a, tk),
-            _ => return,
-        };
-        if (a != 0) {
-            if (from != to) {
-                if let Some(mut __inv) = state.agent_inventory(from) {
-                    __inv.gold = __inv.gold.wrapping_sub(a);
-                    state.set_agent_inventory(from, __inv);
-                };
-                if let Some(mut __inv) = state.agent_inventory(to) {
-                    __inv.gold = __inv.gold.wrapping_add(a);
-                    state.set_agent_inventory(to, __inv);
-                };
-            }
+#[allow(unused_variables)]
+pub fn transfer_gold(
+    from: AgentId,
+    to: AgentId,
+    a: i64,
+    state: &mut SimState,
+    events: &mut EventRing,
+) {
+    if (a != 0) {
+        if (from != to) {
+            if let Some(mut __inv) = state.agent_inventory(from) {
+                __inv.gold = __inv.gold.wrapping_sub(a);
+                state.set_agent_inventory(from, __inv);
+            };
+            if let Some(mut __inv) = state.agent_inventory(to) {
+                __inv.gold = __inv.gold.wrapping_add(a);
+                state.set_agent_inventory(to, __inv);
+            };
         }
     }
 }
 
-pub fn register(registry: &mut CascadeRegistry) {
-    registry.register(TransferGoldHandler);
+pub struct TransferGoldHandler;
+
+impl crate::cascade::CascadeHandler for TransferGoldHandler {
+    fn trigger(&self) -> crate::cascade::EventKindId {
+        crate::cascade::EventKindId::EffectGoldTransfer
+    }
+    fn lane(&self) -> crate::cascade::Lane {
+        crate::cascade::Lane::Effect
+    }
+    #[allow(unused_variables)]
+    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
+        let Event::EffectGoldTransfer {
+            from,
+            to,
+            amount,
+            tick,
+        } = *event
+        else {
+            return;
+        };
+        transfer_gold(from, to, amount, state, events);
+    }
 }

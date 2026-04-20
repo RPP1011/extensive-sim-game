@@ -1,0 +1,49 @@
+{
+  "decls": [
+    {
+      "Event": {
+        "annotations": [],
+        "name": "TickFree",
+        "fields": [
+          {
+            "name": "agent_id",
+            "ty": {
+              "kind": {
+                "Named": "AgentId"
+              },
+              "span": {
+                "start": 191,
+                "end": 198
+              }
+            },
+            "span": {
+              "start": 181,
+              "end": 198
+            }
+          },
+          {
+            "name": "amount",
+            "ty": {
+              "kind": {
+                "Named": "f32"
+              },
+              "span": {
+                "start": 208,
+                "end": 212
+              }
+            },
+            "span": {
+              "start": 200,
+              "end": 212
+            }
+          }
+        ],
+        "tags": [],
+        "span": {
+          "start": 164,
+          "end": 213
+        }
+      }
+    }
+  ]
+}

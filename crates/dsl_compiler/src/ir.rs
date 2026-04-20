@@ -24,6 +24,8 @@ macro_rules! ref_newtype {
 }
 
 ref_newtype!(EventRef);
+ref_newtype!(EventTagRef);
+ref_newtype!(EnumRef);
 ref_newtype!(EntityRef);
 ref_newtype!(PhysicsRef);
 ref_newtype!(MaskRef);
@@ -303,6 +305,31 @@ pub struct IrEmit {
 pub struct EventIR {
     pub name: String,
     pub fields: Vec<EventField>,
+    /// Tag references this event claims. Resolved from `@tag_name`
+    /// annotations in pass 1. A claimed tag implies the event declares
+    /// every field in the tag with matching name + type (validated in
+    /// pass 2).
+    pub tags: Vec<EventTagRef>,
+    pub annotations: Vec<Annotation>,
+    pub span: Span,
+}
+
+/// `event_tag <Name>` declaration. The listed fields are the contract every
+/// event claiming this tag must satisfy (same name + matching type).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EventTagIR {
+    pub name: String,
+    pub fields: Vec<EventField>,
+    pub annotations: Vec<Annotation>,
+    pub span: Span,
+}
+
+/// `enum <Name> { <Variant>, ... }` — user-declared enum surface. Emitted as
+/// `#[repr(u8)]` Rust + Python `IntEnum`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EnumIR {
+    pub name: String,
+    pub variants: Vec<String>,
     pub annotations: Vec<Annotation>,
     pub span: Span,
 }
@@ -360,10 +387,44 @@ pub struct PhysicsIR {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PhysicsHandlerIR {
-    pub pattern: IrEventPattern,
+    pub pattern: IrPhysicsPattern,
     pub where_clause: Option<IrExprNode>,
     pub body: Vec<IrStmt>,
     pub span: Span,
+}
+
+/// A physics `on` pattern at the IR layer — either a kind match or a tag
+/// match. Tag matches resolve against the compiler's `EventTagIR` catalog.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum IrPhysicsPattern {
+    Kind(IrEventPattern),
+    Tag {
+        name: String,
+        tag: Option<EventTagRef>,
+        bindings: Vec<IrPatternBinding>,
+        span: Span,
+    },
+}
+
+impl IrPhysicsPattern {
+    pub fn span(&self) -> Span {
+        match self {
+            IrPhysicsPattern::Kind(p) => p.span,
+            IrPhysicsPattern::Tag { span, .. } => *span,
+        }
+    }
+    pub fn bindings(&self) -> &[IrPatternBinding] {
+        match self {
+            IrPhysicsPattern::Kind(p) => &p.bindings,
+            IrPhysicsPattern::Tag { bindings, .. } => bindings,
+        }
+    }
+    pub fn display_name(&self) -> &str {
+        match self {
+            IrPhysicsPattern::Kind(p) => &p.name,
+            IrPhysicsPattern::Tag { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -700,6 +761,8 @@ pub struct SpanTable {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Compilation {
     pub events: Vec<EventIR>,
+    pub event_tags: Vec<EventTagIR>,
+    pub enums: Vec<EnumIR>,
     pub entities: Vec<EntityIR>,
     pub physics: Vec<PhysicsIR>,
     pub masks: Vec<MaskIR>,

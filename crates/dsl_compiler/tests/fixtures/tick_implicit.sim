@@ -1,0 +1,4 @@
+// Event bodies do not declare `tick`; every generated Event variant
+// receives `tick: u32` implicitly. Attempting to add a `tick` field here
+// is a parse error.
+event TickFree { agent_id: AgentId, amount: f32 }

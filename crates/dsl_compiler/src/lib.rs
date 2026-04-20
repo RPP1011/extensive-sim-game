@@ -11,6 +11,7 @@
 pub mod ast;
 pub mod emit_config;
 pub mod emit_entity;
+pub mod emit_enum;
 pub mod emit_mask;
 pub mod emit_physics;
 pub mod emit_python;
@@ -110,6 +111,16 @@ pub struct EmittedArtifacts {
     pub rust_config_mod: String,
     /// TOML-encoded defaults — written to `assets/config/default.toml`.
     pub config_default_toml: String,
+    /// Enum modules. One file per `enum` declaration; target
+    /// `crates/engine_rules/src/enums/`.
+    pub rust_enum_modules: Vec<(String, String)>,
+    /// Content of `crates/engine_rules/src/enums/mod.rs`.
+    pub rust_enum_mod: String,
+    /// Python enum modules. One file per `enum`; target
+    /// `generated/python/enums/<name>.py`.
+    pub python_enum_modules: Vec<(String, String)>,
+    /// Content of `generated/python/enums/__init__.py`.
+    pub python_enum_init: String,
     /// Content of `generated/python/events/__init__.py`.
     pub python_events_init: String,
     /// `(filename_without_dir, content)` pairs, one per event.
@@ -124,10 +135,12 @@ pub struct EmittedArtifacts {
     /// names + field types. Default *values* are intentionally excluded so
     /// balance tuning via TOML doesn't perturb the schema fingerprint.
     pub config_hash: [u8; 32],
+    /// Raw 32-byte schema hash covering every standalone `enum`
+    /// declaration (name + variants in source order). Variant order is
+    /// part of the hash since variant ordinals are load-bearing.
+    pub enums_hash: [u8; 32],
     /// Combined hash per `docs/compiler/spec.md` §2 — `sha256(state_hash ||
-    /// event_hash || rules_hash || scoring_hash || config_hash)`. Any
-    /// sub-hash is all-zero only when no declarations of the corresponding
-    /// kind are in scope.
+    /// event_hash || rules_hash || scoring_hash || config_hash || enums_hash)`.
     pub combined_hash: [u8; 32],
     /// Content of `crates/engine_rules/src/schema.rs`.
     pub schema_rs: String,
@@ -152,6 +165,7 @@ pub fn emit_with_source(comp: &Compilation, source_file: Option<&str>) -> Emitte
             scoring: source_file,
             entities: source_file,
             configs: source_file,
+            enums: source_file,
         },
     )
 }
@@ -169,6 +183,7 @@ pub struct EmissionSources<'a> {
     pub scoring: Option<&'a str>,
     pub entities: Option<&'a str>,
     pub configs: Option<&'a str>,
+    pub enums: Option<&'a str>,
 }
 
 /// Like [`emit`], but stamp the appropriate source file into each kind's
@@ -193,10 +208,14 @@ pub fn emit_with_per_kind_sources(
     // ref). On error we panic with a diagnostic — the xtask catches user
     // errors via `compile()` returning IR errors, so a resolved IR shape we
     // can't emit is a compiler bug.
+    let physics_ctx = emit_physics::EmitContext {
+        events: &comp.events,
+        event_tags: &comp.event_tags,
+    };
     let mut rust_physics_modules: Vec<(String, String)> = Vec::with_capacity(comp.physics.len());
     for physics in &comp.physics {
         let stem = snake_case(&physics.name);
-        match emit_physics::emit_physics(physics, sources.physics) {
+        match emit_physics::emit_physics(physics, sources.physics, &physics_ctx) {
             Ok(rs) => rust_physics_modules.push((format!("{stem}.rs"), rs)),
             Err(e) => {
                 panic!(
@@ -207,7 +226,7 @@ pub fn emit_with_per_kind_sources(
         }
     }
     rust_physics_modules.sort_by(|a, b| a.0.cmp(&b.0));
-    let rust_physics_mod = emit_physics::emit_physics_mod(&comp.physics);
+    let rust_physics_mod = emit_physics::emit_physics_mod(&comp.physics, &physics_ctx);
 
     // Mask / scoring / entity emission — scaffolded at milestone-3-completion.
     // The per-decl emitters panic via `Err` until their milestones land;
@@ -261,13 +280,34 @@ pub fn emit_with_per_kind_sources(
     let config_default_toml = emit_config::emit_config_toml(&comp.configs)
         .unwrap_or_else(|e| panic!("config TOML emission failed: {e}"));
 
+    // Enum emission — per-block Rust + Python files + aggregate mod/init.
+    let mut rust_enum_modules: Vec<(String, String)> = Vec::with_capacity(comp.enums.len());
+    let mut python_enum_modules: Vec<(String, String)> = Vec::with_capacity(comp.enums.len());
+    for e in &comp.enums {
+        let stem = snake_case(&e.name);
+        rust_enum_modules.push((format!("{stem}.rs"), emit_enum::emit_enum(e, sources.enums)));
+        python_enum_modules
+            .push((format!("{stem}.py"), emit_enum::emit_enum_py(e, sources.enums)));
+    }
+    rust_enum_modules.sort_by(|a, b| a.0.cmp(&b.0));
+    python_enum_modules.sort_by(|a, b| a.0.cmp(&b.0));
+    let rust_enum_mod = emit_enum::emit_enum_mod(&comp.enums);
+    let python_enum_init = emit_enum::emit_enum_init(&comp.enums);
+
     let event_hash = schema_hash::event_hash(&comp.events);
-    let rules_hash = schema_hash::rules_hash(&comp.physics);
+    let rules_hash = schema_hash::rules_hash(&comp.physics, &comp.event_tags, &comp.events);
     let state_hash = schema_hash::state_hash(&comp.entities);
     let scoring_hash = schema_hash::scoring_hash(&comp.scoring);
     let config_hash = schema_hash::config_hash(&comp.configs);
-    let combined_hash =
-        schema_hash::combined_hash(&state_hash, &event_hash, &rules_hash, &scoring_hash, &config_hash);
+    let enums_hash = schema_hash::enums_hash(&comp.enums);
+    let combined_hash = schema_hash::combined_hash(
+        &state_hash,
+        &event_hash,
+        &rules_hash,
+        &scoring_hash,
+        &config_hash,
+        &enums_hash,
+    );
     EmittedArtifacts {
         rust_events_mod: emit_rust::emit_events_mod(&comp.events),
         rust_event_structs,
@@ -282,11 +322,16 @@ pub fn emit_with_per_kind_sources(
         rust_config_modules,
         rust_config_mod,
         config_default_toml,
+        rust_enum_modules,
+        rust_enum_mod,
+        python_enum_modules,
+        python_enum_init,
         python_events_init: emit_python::emit_events_init(&comp.events),
         python_event_modules,
         event_hash,
         rules_hash,
         config_hash,
+        enums_hash,
         combined_hash,
         schema_rs: schema_hash::emit_schema_rs(
             &state_hash,
@@ -294,6 +339,7 @@ pub fn emit_with_per_kind_sources(
             &rules_hash,
             &scoring_hash,
             &config_hash,
+            &enums_hash,
         ),
     }
 }

@@ -20,6 +20,10 @@ const FIXTURES: &[&str] = &[
     "metric_cascade_iters",
     "for_filter",
     "trailing_annotation",
+    "enum_decl",
+    "event_tag_decl",
+    "physics_tagged",
+    "tick_implicit",
 ];
 
 fn fixtures_dir() -> PathBuf {
