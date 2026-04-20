@@ -108,23 +108,31 @@ fn update_engagements(state: &mut SimState) {
     // "set both sides" loop would give `A.engaged=B, B.engaged=A,
     // C.engaged=B` and then overwrite with `B.engaged=C, C.engaged=B`,
     // leaving A asymmetric.
+    //
+    // Audit fix CRITICAL #1: consume the spatial index so the per-agent
+    // hostile scan is `O(N·k)` instead of `O(N²)`.
     let cap = state.hot_engaged_with().len();
     let mut tentative: Vec<Option<AgentId>> = vec![None; cap];
     let alive: Vec<AgentId> = state.agents_alive().collect();
+    let spatial = state.spatial();
     for id in &alive {
         let pos = match state.agent_pos(*id) { Some(p) => p, None => continue };
         let ct = match state.agent_creature_type(*id) { Some(c) => c, None => continue };
         let mut best: Option<(AgentId, f32)> = None;
-        for other in &alive {
-            if other == id { continue; }
-            let op = match state.agent_pos(*other) { Some(p) => p, None => continue };
-            let oc = match state.agent_creature_type(*other) { Some(c) => c, None => continue };
+        for other in spatial.query_within_radius(state, pos, ENGAGEMENT_RANGE) {
+            if other == *id { continue; }
+            let op = match state.agent_pos(other) { Some(p) => p, None => continue };
+            let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };
             if !ct.is_hostile_to(oc) { continue; }
             let d = pos.distance(op);
-            if d > ENGAGEMENT_RANGE { continue; }
+            // Tie-break: lower raw id wins when distances match, matching the
+            // previous iteration-order-based behaviour.
             match best {
-                None => best = Some((*other, d)),
-                Some((_, bd)) if d < bd => best = Some((*other, d)),
+                None => best = Some((other, d)),
+                Some((_, bd)) if d < bd => best = Some((other, d)),
+                Some((b, bd)) if (d - bd).abs() < f32::EPSILON && other.raw() < b.raw() => {
+                    best = Some((other, d));
+                }
                 _ => {}
             }
         }

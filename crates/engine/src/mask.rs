@@ -87,19 +87,21 @@ impl MaskBuffer {
 
     /// Mark `Flee` as allowed for every alive agent that has at least one
     /// other alive agent within `AGGRO_RANGE`. No threat → no flee.
+    ///
+    /// Uses `state.spatial()` so the threat check is `O(N·k)` (k = candidates
+    /// in the 3×3 cell neighbourhood) rather than `O(N²)`.
     pub fn mark_flee_allowed_if_threat_exists(&mut self, state: &SimState) {
         let n_kinds = MicroKind::ALL.len();
+        let spatial = state.spatial();
         for id in state.agents_alive() {
             let slot = (id.raw() - 1) as usize;
             let self_pos = match state.agent_pos(id) {
                 Some(p) => p,
                 None    => continue,
             };
-            let has_threat = state.agents_alive().any(|other| {
-                other != id && state.agent_pos(other)
-                    .map(|op| op.distance(self_pos) <= AGGRO_RANGE)
-                    .unwrap_or(false)
-            });
+            let has_threat = spatial
+                .query_within_radius(state, self_pos, AGGRO_RANGE)
+                .any(|other| other != id);
             if has_threat {
                 let offset = slot * n_kinds + MicroKind::Flee as usize;
                 self.micro_kind[offset] = true;
@@ -121,21 +123,24 @@ impl MaskBuffer {
     }
 
     /// Mark `Attack` as allowed for every alive agent that has at least one
-    /// other alive agent within `ATTACK_RANGE_FOR_MASK`. No target in range →
-    /// no attack.
+    /// other alive agent within this agent's attack range. Uses the per-agent
+    /// `hot_attack_range` field (defaults to `ATTACK_RANGE_FOR_MASK`) so that
+    /// custom attack ranges set via `set_agent_attack_range` are respected.
+    ///
+    /// Uses `state.spatial()` so the target check is sub-linear.
     pub fn mark_attack_allowed_if_target_in_range(&mut self, state: &SimState) {
         let n_kinds = MicroKind::ALL.len();
+        let spatial = state.spatial();
         for id in state.agents_alive() {
             let slot = (id.raw() - 1) as usize;
             let self_pos = match state.agent_pos(id) {
                 Some(p) => p,
                 None    => continue,
             };
-            let has_target = state.agents_alive().any(|other| {
-                other != id && state.agent_pos(other)
-                    .map(|op| op.distance(self_pos) <= ATTACK_RANGE_FOR_MASK)
-                    .unwrap_or(false)
-            });
+            let range = state.agent_attack_range(id).unwrap_or(ATTACK_RANGE_FOR_MASK);
+            let has_target = spatial
+                .query_within_radius(state, self_pos, range)
+                .any(|other| other != id);
             if has_target {
                 let offset = slot * n_kinds + MicroKind::Attack as usize;
                 self.micro_kind[offset] = true;

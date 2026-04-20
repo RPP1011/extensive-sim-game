@@ -526,54 +526,53 @@ fn apply_actions(
                         (sp, MAX_ANNOUNCE_RADIUS)
                     }
                 };
-                // Deterministic iteration: agents_alive() walks slots in order,
-                // so the first MAX_ANNOUNCE_RECIPIENTS within range is reproducible.
-                // SmallVec keeps the overhear-dedup check allocation-free for
-                // steady-state ticks (dhat-heap test doesn't emit Announce, but
-                // keeping this hot-path-clean matches the rest of `step`).
+                // Deterministic iteration: enumerate spatial-index hits in
+                // slot order (agents_alive() is slot-order) so the first
+                // MAX_ANNOUNCE_RECIPIENTS within range is reproducible.
+                // Audit fix CRITICAL #1: consume the spatial index so audience
+                // enumeration is sub-linear; we walk `agents_alive()` in slot
+                // order and test membership in the candidate set to preserve
+                // the deterministic first-MAX_ANNOUNCE_RECIPIENTS semantics.
+                let spatial = state.spatial();
+                let candidates: smallvec::SmallVec<[AgentId; 64]> = spatial
+                    .query_within_radius(state, center, radius)
+                    .collect();
                 let mut primary_observers: smallvec::SmallVec<[AgentId; 32]> =
                     smallvec::SmallVec::new();
                 let mut count = 0usize;
                 for obs in state.agents_alive() {
                     if count >= MAX_ANNOUNCE_RECIPIENTS { break; }
                     if obs == speaker { continue; }
-                    let op = match state.agent_pos(obs) {
-                        Some(p) => p,
-                        None    => continue,
-                    };
-                    if op.distance(center) <= radius {
-                        events.push(Event::RecordMemory {
-                            observer:     obs,
-                            source:       speaker,
-                            fact_payload,
-                            confidence:   0.8,
-                            tick:         state.tick,
-                        });
-                        primary_observers.push(obs);
-                        count += 1;
-                    }
+                    if !candidates.contains(&obs) { continue; }
+                    events.push(Event::RecordMemory {
+                        observer:     obs,
+                        source:       speaker,
+                        fact_payload,
+                        confidence:   0.8,
+                        tick:         state.tick,
+                    });
+                    primary_observers.push(obs);
+                    count += 1;
                 }
 
                 // Overhear scan: bystanders within OVERHEAR_RANGE of the
                 // SPEAKER (not the audience center) who were not primary
                 // recipients get a lower-confidence memory. Speaker excluded.
                 let speaker_pos = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
+                let overhear_candidates: smallvec::SmallVec<[AgentId; 64]> = spatial
+                    .query_within_radius(state, speaker_pos, OVERHEAR_RANGE)
+                    .collect();
                 for obs in state.agents_alive() {
                     if obs == speaker { continue; }
                     if primary_observers.contains(&obs) { continue; }
-                    let op = match state.agent_pos(obs) {
-                        Some(p) => p,
-                        None    => continue,
-                    };
-                    if op.distance(speaker_pos) <= OVERHEAR_RANGE {
-                        events.push(Event::RecordMemory {
-                            observer:     obs,
-                            source:       speaker,
-                            fact_payload,
-                            confidence:   0.6,
-                            tick:         state.tick,
-                        });
-                    }
+                    if !overhear_candidates.contains(&obs) { continue; }
+                    events.push(Event::RecordMemory {
+                        observer:     obs,
+                        source:       speaker,
+                        fact_payload,
+                        confidence:   0.6,
+                        tick:         state.tick,
+                    });
                 }
             }
         }
