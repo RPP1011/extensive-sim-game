@@ -630,16 +630,70 @@ fn spawn_canonical_fixture(seed: u64) -> SimState {
     state
 }
 
+/// Constant mixed into the showcase seed before deriving spawn-jitter RNG.
+/// Keeps the spawn PRNG stream independent from the sim's rng (which hashes
+/// the raw seed) — same `seed` always yields the same spawn positions, but
+/// we don't borrow bits out of the sim's rng stream.
+const SPAWN_JITTER_SEED_XOR: u64 = 0x5FA57_000D_C0FFEE5;
+
+/// Maximum per-axis jitter applied to each showcase spawn, in world units.
+/// Clusters sit ~15 units apart so ±2.5 in x/z meaningfully reorders
+/// who-meets-whom first without letting clusters collide at spawn.
+const SPAWN_JITTER_AMPLITUDE: f32 = 2.5;
+
+/// xorshift64* — tiny deterministic PRNG used only for spawn-position
+/// jitter. We don't touch `SimState.rng_state` here: that stream drives
+/// the simulation proper, and sharing it would couple spawn layout to
+/// sim determinism in fragile ways.
+#[derive(Debug, Clone, Copy)]
+struct SpawnRng(u64);
+
+impl SpawnRng {
+    fn new(seed: u64) -> Self {
+        // xorshift64 degenerates at state=0; salt any zero seed to a
+        // non-zero constant so `seed ^ SPAWN_JITTER_SEED_XOR == 0` still
+        // produces a usable stream.
+        let mut s = seed ^ SPAWN_JITTER_SEED_XOR;
+        if s == 0 {
+            s = 0x9E37_79B9_7F4A_7C15;
+        }
+        Self(s)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+
+    /// Uniform f32 in [-amp, amp]. Uses the upper 24 bits of the state,
+    /// which is where xorshift64 has the best statistical properties.
+    fn jitter(&mut self, amp: f32) -> f32 {
+        let bits = (self.next_u64() >> 40) as u32; // 24 bits
+        let unit = (bits as f32) / ((1u32 << 24) as f32); // [0, 1)
+        (unit * 2.0 - 1.0) * amp
+    }
+}
+
 /// Spawn the showcase fixture: 8 humans (SE cluster), 8 wolves (NW cluster),
-/// 4 deer (center). Positions deterministic so a given seed always reproduces
-/// the same chronicle. Clusters are ~15 units apart so the two predator
-/// groups find each other within the first ~100 ticks and a mixed narrative
-/// emerges over 500 ticks rather than degenerating into an immediate rout.
+/// 4 deer (center). Cluster centres and agent counts are fixed so a sweep
+/// compares apples to apples, but per-agent x/z positions are perturbed by
+/// a seed-derived xorshift64 RNG (see `SpawnRng`). Same seed ⇒ same spawn;
+/// different seeds ⇒ meaningfully different initial conditions, which
+/// unsticks the "first-death at tick 12 every run" artifact seen in the
+/// task-171 sweep. z (vertical) stays at 0 — the simulation is 2D in the
+/// xz plane; the 3D engine just carries a dummy height.
 fn spawn_showcase_fixture(seed: u64) -> (SimState, SpawnCounts) {
     let mut state = SimState::new(SHOWCASE_AGENT_CAP, seed);
+    let mut rng = SpawnRng::new(seed);
 
-    // Humans: SE cluster at (+6, +6), spread ±3.
-    let humans = [
+    let amp = SPAWN_JITTER_AMPLITUDE;
+
+    // Humans: SE cluster at (+6, +6), spread ±3 plus per-agent jitter.
+    let human_bases = [
         Vec3::new(6.0, 0.0, 6.0),
         Vec3::new(9.0, 0.0, 6.0),
         Vec3::new(6.0, 0.0, 9.0),
@@ -649,19 +703,22 @@ fn spawn_showcase_fixture(seed: u64) -> (SimState, SpawnCounts) {
         Vec3::new(3.0, 0.0, 3.0),
         Vec3::new(8.0, 0.0, 4.0),
     ];
-    for (i, pos) in humans.iter().enumerate() {
+    for (i, base) in human_bases.iter().enumerate() {
+        let dx = rng.jitter(amp);
+        let dz = rng.jitter(amp);
+        let pos = Vec3::new(base.x + dx, base.y, base.z + dz);
         state
             .spawn_agent(AgentSpawn {
                 creature_type: CreatureType::Human,
-                pos: *pos,
+                pos,
                 hp: 100.0,
                 ..Default::default()
             })
             .unwrap_or_else(|| panic!("human {} spawn", i + 1));
     }
 
-    // Wolves: NW cluster at (-6, -6), spread ±3.
-    let wolves = [
+    // Wolves: NW cluster at (-6, -6), spread ±3 plus per-agent jitter.
+    let wolf_bases = [
         Vec3::new(-6.0, 0.0, -6.0),
         Vec3::new(-9.0, 0.0, -6.0),
         Vec3::new(-6.0, 0.0, -9.0),
@@ -671,29 +728,35 @@ fn spawn_showcase_fixture(seed: u64) -> (SimState, SpawnCounts) {
         Vec3::new(-3.0, 0.0, -3.0),
         Vec3::new(-8.0, 0.0, -4.0),
     ];
-    for (i, pos) in wolves.iter().enumerate() {
+    for (i, base) in wolf_bases.iter().enumerate() {
+        let dx = rng.jitter(amp);
+        let dz = rng.jitter(amp);
+        let pos = Vec3::new(base.x + dx, base.y, base.z + dz);
         state
             .spawn_agent(AgentSpawn {
                 creature_type: CreatureType::Wolf,
-                pos: *pos,
+                pos,
                 hp: 80.0,
                 ..Default::default()
             })
             .unwrap_or_else(|| panic!("wolf {} spawn", i + 1));
     }
 
-    // Deer: 4 in the center.
-    let deer = [
+    // Deer: 4 in the center plus per-agent jitter.
+    let deer_bases = [
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(2.0, 0.0, -2.0),
         Vec3::new(-2.0, 0.0, 2.0),
         Vec3::new(1.0, 0.0, 1.0),
     ];
-    for (i, pos) in deer.iter().enumerate() {
+    for (i, base) in deer_bases.iter().enumerate() {
+        let dx = rng.jitter(amp);
+        let dz = rng.jitter(amp);
+        let pos = Vec3::new(base.x + dx, base.y, base.z + dz);
         state
             .spawn_agent(AgentSpawn {
                 creature_type: CreatureType::Deer,
-                pos: *pos,
+                pos,
                 hp: 60.0,
                 ..Default::default()
             })
@@ -701,9 +764,9 @@ fn spawn_showcase_fixture(seed: u64) -> (SimState, SpawnCounts) {
     }
 
     let counts = SpawnCounts {
-        humans: humans.len() as u32,
-        wolves: wolves.len() as u32,
-        deer: deer.len() as u32,
+        humans: human_bases.len() as u32,
+        wolves: wolf_bases.len() as u32,
+        deer: deer_bases.len() as u32,
     };
     (state, counts)
 }
@@ -819,6 +882,94 @@ mod tests {
         let la = chronicle::render_entries(&a, ea.iter());
         let lb = chronicle::render_entries(&b, eb.iter());
         assert_eq!(la, lb, "same seed + same ticks must produce identical chronicles");
+    }
+
+    /// Collect every alive agent's (x, z) position. Spawns happen in a
+    /// fixed order (humans → wolves → deer), so the AgentId order is the
+    /// same across both calls and we can compare index-by-index.
+    fn alive_positions(state: &SimState) -> Vec<(f32, f32)> {
+        state
+            .agents_alive()
+            .filter_map(|id| state.agent_pos(id).map(|p| (p.x, p.z)))
+            .collect()
+    }
+
+    #[test]
+    fn different_seeds_produce_different_spawns() {
+        // Two different seeds must produce at least one distinct agent
+        // position. Without spawn jitter this test would fail — the
+        // fixture used to hardcode positions regardless of seed.
+        let (a, _) = spawn_showcase_fixture(0xDEADBEEF);
+        let (b, _) = spawn_showcase_fixture(0xCAFEBABE);
+        let pa = alive_positions(&a);
+        let pb = alive_positions(&b);
+        assert_eq!(pa.len(), pb.len(), "same fixture size for both seeds");
+        assert_ne!(
+            pa, pb,
+            "different seeds must produce different spawn positions (got identical)"
+        );
+    }
+
+    #[test]
+    fn same_seed_spawns_are_bit_identical() {
+        // Companion to the determinism chronicle test — assert at the
+        // position level so a regression in the spawn PRNG shows up even
+        // if the sim would paper over it.
+        let (a, _) = spawn_showcase_fixture(0xDEADBEEF);
+        let (b, _) = spawn_showcase_fixture(0xDEADBEEF);
+        assert_eq!(alive_positions(&a), alive_positions(&b));
+    }
+
+    #[test]
+    fn spawn_jitter_respects_cluster_identity() {
+        // Humans SE (+6,+6), wolves NW (-6,-6), deer centred. With a ±2.5
+        // amplitude the humans' x/z must stay positive-ish and the wolves'
+        // negative-ish — the sweep measures divergence within clusters,
+        // not across them.
+        let (state, _) = spawn_showcase_fixture(0xCAFEBABE);
+        let ids: Vec<_> = state.agents_alive().collect();
+        // Humans are spawned first (indices 0..8).
+        for &id in ids.iter().take(8) {
+            let pos = state.agent_pos(id).expect("human pos");
+            assert!(pos.x > 0.0, "human x should stay in SE cluster: {:?}", pos);
+            assert!(pos.z > 0.0, "human z should stay in SE cluster: {:?}", pos);
+        }
+        // Wolves next (indices 8..16).
+        for &id in ids.iter().skip(8).take(8) {
+            let pos = state.agent_pos(id).expect("wolf pos");
+            assert!(pos.x < 0.0, "wolf x should stay in NW cluster: {:?}", pos);
+            assert!(pos.z < 0.0, "wolf z should stay in NW cluster: {:?}", pos);
+        }
+    }
+
+    #[test]
+    fn sweep_with_varied_spawns_has_wider_dispersion() {
+        // Small sweep — just enough to observe that spawns now vary by
+        // seed. Before task 174 all first-death ticks were identical;
+        // after the jitter at least two distinct values should appear.
+        let mut sink = Vec::new();
+        let summary = run_sweep(0xDEADBEEF, 5, 500, false, &mut sink);
+        let death_ticks: std::collections::BTreeSet<u32> = summary
+            .per_run
+            .iter()
+            .filter_map(|r| r.first_death_tick)
+            .collect();
+        assert!(
+            death_ticks.len() >= 2,
+            "expected varied first-death ticks, got {:?}",
+            death_ticks
+        );
+    }
+
+    #[test]
+    fn spawn_rng_is_nonzero_for_zero_seed() {
+        // Salting against a zero state keeps xorshift64 live when
+        // `seed ^ SPAWN_JITTER_SEED_XOR == 0`. Without the guard, every
+        // `next_u64` would return 0 and every agent would sit on its
+        // base position — silently defeating the task.
+        let zero_seeded = SPAWN_JITTER_SEED_XOR;
+        let mut rng = SpawnRng::new(zero_seeded);
+        assert_ne!(rng.next_u64(), 0, "spawn rng must never stall at zero");
     }
 
     // --- sweep tests ---
