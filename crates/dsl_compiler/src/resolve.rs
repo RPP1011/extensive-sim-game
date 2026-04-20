@@ -431,6 +431,12 @@ pub fn resolve(program: Program) -> Result<Compilation, ResolveError> {
     // Pass 2: resolve bodies into the reserved slots.
     resolve_bodies(&program, &symbols, &mut comp)?;
 
+    // Pass 3: cross-rule validation that needs the whole `Compilation`
+    // in hand. Physics bodies must stay SPIR-V-emittable (compiler/spec.md
+    // §1.2); the validator checks cross-rule recursion + per-handler
+    // GPU-emittability.
+    validate_physics_bodies(&comp)?;
+
     Ok(comp)
 }
 
@@ -864,6 +870,14 @@ fn resolve_bodies(
                 };
                 let head = resolve_action_head(&d.head, &mut scope, symbols);
                 let predicate = resolve_expr(&d.predicate, &mut scope, symbols)?;
+                // Closed-operator-set validation (spec §2.5). Mask
+                // predicates compile to GPU boolean kernels; task 155
+                // (commit 9ba805c6) kept this restriction intentional
+                // even as physics bodies gained `for`/`match`.
+                validate_mask_body(&d.head.name, &predicate)?;
+                if let Some(cs) = &candidate_source {
+                    validate_mask_body(&d.head.name, cs)?;
+                }
                 comp.masks[mask_idx].head = head;
                 comp.masks[mask_idx].candidate_source = candidate_source;
                 comp.masks[mask_idx].predicate = predicate;
@@ -878,6 +892,11 @@ fn resolve_bodies(
                         scope.bind("self", IrType::Unknown);
                         let head = resolve_action_head(&e.head, &mut scope, symbols);
                         let expr = resolve_expr(&e.expr, &mut scope, symbols)?;
+                        // Closed-operator-set validation (spec §2.5).
+                        // Scoring rows share the mask kernel surface;
+                        // reject `match` at resolve time. Physics retains
+                        // the richer `for`/`match` surface per task 155.
+                        validate_scoring_body(&expr)?;
                         Ok::<_, ResolveError>(ScoringEntryIR { head, expr, span: e.span })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -2283,15 +2302,11 @@ fn validate_fold_stmt(view_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
             }
             Ok(())
         }
-        IrStmt::Match { scrutinee, arms, .. } => {
-            validate_fold_expr(view_name, scrutinee)?;
-            for arm in arms {
-                for stmt in &arm.body {
-                    validate_fold_stmt(view_name, stmt)?;
-                }
-            }
-            Ok(())
-        }
+        IrStmt::Match { span, .. } => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: "`match` statement (use if/else in fold bodies)".into(),
+            span: *span,
+        }),
         IrStmt::Expr(e) => validate_fold_expr(view_name, e),
         IrStmt::For { span, .. } => Err(ResolveError::UdfInViewFoldBody {
             view_name: view_name.to_string(),
@@ -2410,13 +2425,11 @@ fn validate_fold_expr(view_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
             Ok(())
         }
 
-        IrExpr::Match { scrutinee, arms } => {
-            validate_fold_expr(view_name, scrutinee)?;
-            for arm in arms {
-                validate_fold_expr(view_name, &arm.body)?;
-            }
-            Ok(())
-        }
+        IrExpr::Match { .. } => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: "`match` expression (use if/else in fold bodies)".into(),
+            span: e.span,
+        }),
         IrExpr::If { cond, then_expr, else_expr } => {
             validate_fold_expr(view_name, cond)?;
             validate_fold_expr(view_name, then_expr)?;
@@ -2436,5 +2449,907 @@ fn validate_fold_expr(view_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
             offending_construct: "unrecognised expression shape".into(),
             span: e.span,
         }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Physics body GPU-emittable validator (compiler/spec.md §1.2)
+// ---------------------------------------------------------------------------
+//
+// Task 155 gave physics bodies `for` + `match` — a richer surface than the
+// fold-body context carries. This validator locks that surface to the
+// GPU-emittable subset documented in `compiler/spec.md` §1.2:
+//
+//   - POD discipline (`T: Pod`, `AggregatePool<T>`), no heap collections.
+//   - Fixed-size inline-array / bounded spatial-query iteration sources —
+//     never a runtime-sized `Vec<T>` or `HashMap<K, V>`.
+//   - Self-emission recursion capped by `@terminating_in(N)` (spec §2.4)
+//     or by a body check against `cascade.max_iterations` (the cascade
+//     framework's global iteration ceiling). Arbitrary physics-rule
+//     recursion beyond that is forbidden.
+//   - No user-defined helpers / closures / trait objects.
+//   - No `String` bindings inside the body — chronicle prose lives on
+//     host-side template expansion, and replayable events already refuse
+//     `String` fields.
+//
+// The validator runs AFTER `resolve_bodies` on the resolved `Compilation`
+// so it has the full cross-rule picture for indirect-cycle detection.
+
+/// Enforce that every physics rule body is emittable to SPIR-V.
+pub(crate) fn validate_physics_bodies(comp: &Compilation) -> Result<(), ResolveError> {
+    // Cross-rule recursion bookkeeping: for every physics rule, collect
+    // the set of event names it handles and the set of event names it
+    // emits. A rule is "recursive" if any event it emits is handled by
+    // itself (direct) or by a rule that transitively emits back into it
+    // (indirect). Both are rejected unless the rule is annotated
+    // `@terminating_in(N)` or checks `cascade.max_iterations` (spec §2.4).
+    let mut handled: Vec<Vec<String>> = Vec::with_capacity(comp.physics.len());
+    let mut emitted: Vec<Vec<String>> = Vec::with_capacity(comp.physics.len());
+    for p in &comp.physics {
+        let mut h: Vec<String> = Vec::new();
+        let mut e: Vec<String> = Vec::new();
+        for handler in &p.handlers {
+            match &handler.pattern {
+                IrPhysicsPattern::Kind(kp) => {
+                    if !h.iter().any(|n| n == &kp.name) {
+                        h.push(kp.name.clone());
+                    }
+                }
+                IrPhysicsPattern::Tag { name, tag, .. } => {
+                    if let Some(tref) = tag {
+                        for ev in &comp.events {
+                            if ev.tags.contains(tref) && !h.iter().any(|n| n == &ev.name) {
+                                h.push(ev.name.clone());
+                            }
+                        }
+                    } else if !h.iter().any(|n| n == name) {
+                        h.push(name.clone());
+                    }
+                }
+            }
+            collect_emitted_events(&handler.body, &mut e);
+        }
+        handled.push(h);
+        emitted.push(e);
+    }
+
+    for (idx, p) in comp.physics.iter().enumerate() {
+        // Two escape hatches for self-emission bounded recursion:
+        //
+        //   1. `@terminating_in(N)` annotation — spec §2.4's explicit
+        //      bound-the-depth marker.
+        //   2. A body that guards the self-emission against
+        //      `cascade.max_iterations` — the cascade framework's global
+        //      iteration ceiling (currently `MAX_CASCADE_ITERATIONS = 8`).
+        //      The `physics cast` rule uses this shape: it checks
+        //      `new_depth >= cascade.max_iterations` and emits
+        //      `CastDepthExceeded` instead of the nested event once the
+        //      depth reaches the ceiling. That's a bounded SPIR-V-
+        //      emittable recursion; the cascade framework itself enforces
+        //      the cap.
+        let has_terminator = p.annotations.iter().any(|a| a.name == "terminating_in")
+            || handlers_guard_on_cascade_ceiling(&p.handlers);
+
+        if !has_terminator {
+            // Direct self-recursion: this rule emits an event it also handles.
+            for ev in &emitted[idx] {
+                if handled[idx].iter().any(|h| h == ev) {
+                    let span = find_emit_span(&p.handlers, ev).unwrap_or(p.span);
+                    return Err(ResolveError::NotGpuEmittable {
+                        physics_name: p.name.clone(),
+                        construct: format!("recursive self-emission of `{ev}`"),
+                        reason: format!(
+                            "rule `{}` emits `{ev}` which retriggers itself; \
+                             bound the recursion with `@terminating_in(N)` \
+                             (spec §2.4), or guard the self-emission against \
+                             `cascade.max_iterations` so the SPIR-V kernel \
+                             has a compile-time iteration ceiling",
+                            p.name
+                        ),
+                        span,
+                    });
+                }
+            }
+            // Indirect recursion: a cycle through other rules back to self.
+            if emits_cycle_back(idx, &handled, &emitted) {
+                return Err(ResolveError::NotGpuEmittable {
+                    physics_name: p.name.clone(),
+                    construct: "indirect recursion via emitted events".into(),
+                    reason: format!(
+                        "rule `{}` sits on an event-emission cycle that \
+                         returns to itself; break the cycle or annotate \
+                         every participating rule with `@terminating_in(N)` \
+                         (spec §2.4)",
+                        p.name
+                    ),
+                    span: p.span,
+                });
+            }
+        }
+
+        // Per-handler body walk: heap types, unbounded iter sources, UDF
+        // calls, `String` let-bindings.
+        for h in &p.handlers {
+            validate_physics_body(&p.name, &h.body)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Recursive walker on resolved physics-handler statements.
+pub(crate) fn validate_physics_body(
+    physics_name: &str,
+    body: &[IrStmt],
+) -> Result<(), ResolveError> {
+    for s in body {
+        validate_physics_stmt(physics_name, s)?;
+    }
+    Ok(())
+}
+
+fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
+    match s {
+        IrStmt::Let { name, value, span, .. } => {
+            // `String` bindings defeat the POD discipline — every hot /
+            // cold field that persists state has to be `Pod`, and the
+            // only `String` surface on events is `@non_replayable`
+            // metadata.
+            if expr_mentions_string_literal(value) {
+                return Err(ResolveError::NotGpuEmittable {
+                    physics_name: physics_name.to_string(),
+                    construct: format!("`String` let-binding `{name}`"),
+                    reason:
+                        "heap-backed `String` isn't `Pod` and can't round-trip \
+                         through an `AggregatePool<T>` or a SPIR-V storage \
+                         buffer"
+                            .into(),
+                    span: *span,
+                });
+            }
+            validate_physics_expr(physics_name, value)
+        }
+        IrStmt::Emit(IrEmit { fields, .. }) => {
+            for f in fields {
+                validate_physics_expr(physics_name, &f.value)?;
+            }
+            Ok(())
+        }
+        IrStmt::For { iter, filter, body, span, .. } => {
+            validate_physics_iter_source(physics_name, iter, *span)?;
+            validate_physics_expr(physics_name, iter)?;
+            if let Some(f) = filter {
+                validate_physics_expr(physics_name, f)?;
+            }
+            for bs in body {
+                validate_physics_stmt(physics_name, bs)?;
+            }
+            Ok(())
+        }
+        IrStmt::If { cond, then_body, else_body, .. } => {
+            validate_physics_expr(physics_name, cond)?;
+            for ts in then_body {
+                validate_physics_stmt(physics_name, ts)?;
+            }
+            if let Some(eb) = else_body {
+                for es in eb {
+                    validate_physics_stmt(physics_name, es)?;
+                }
+            }
+            Ok(())
+        }
+        IrStmt::Match { scrutinee, arms, .. } => {
+            validate_physics_expr(physics_name, scrutinee)?;
+            for arm in arms {
+                for stmt in &arm.body {
+                    validate_physics_stmt(physics_name, stmt)?;
+                }
+            }
+            Ok(())
+        }
+        IrStmt::SelfUpdate { value, .. } => validate_physics_expr(physics_name, value),
+        IrStmt::Expr(e) => validate_physics_expr(physics_name, e),
+    }
+}
+
+fn validate_physics_expr(physics_name: &str, e: &IrExprNode) -> Result<(), ResolveError> {
+    match &e.kind {
+        // Literals / bare name references / resolved namespaces — all OK.
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::Local(_, _)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. } => Ok(()),
+
+        // `String` literals are only legal on `@non_replayable` event
+        // field assignments (chronicle prose). Inside a physics body,
+        // they signal a heap allocation escaping into the POD layer.
+        IrExpr::LitString(_) => Err(ResolveError::NotGpuEmittable {
+            physics_name: physics_name.to_string(),
+            construct: "`String` literal in body".into(),
+            reason:
+                "heap-backed `String` values aren't `Pod`; chronicle prose \
+                 rendering is host-side only (compiler/spec.md §1.2), and \
+                 replayable events already reject `String` fields"
+                    .into(),
+            span: e.span,
+        }),
+
+        // Stdlib 1-hop / builtin calls: recurse into args only.
+        IrExpr::NamespaceCall { args, .. } | IrExpr::BuiltinCall(_, args) => {
+            for a in args {
+                validate_physics_expr(physics_name, &a.value)?;
+            }
+            Ok(())
+        }
+
+        // View calls are bounded by the view's storage hint; materialized
+        // views ship with a GPU-resident output buffer (§1.2).
+        IrExpr::ViewCall(_, args) => {
+            for a in args {
+                validate_physics_expr(physics_name, &a.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::View(_) | IrExpr::Verb(_) => Ok(()),
+
+        // Verb call args: recurse only — verbs lower to scoring-row lookups.
+        IrExpr::VerbCall(_, args) => {
+            for a in args {
+                validate_physics_expr(physics_name, &a.value)?;
+            }
+            Ok(())
+        }
+
+        // User-defined helper: physics bodies can only call stdlib + emit.
+        IrExpr::UnresolvedCall(name, _) => Err(ResolveError::NotGpuEmittable {
+            physics_name: physics_name.to_string(),
+            construct: format!("unresolved call `{name}`"),
+            reason: format!(
+                "`{name}` is neither a stdlib method nor a declared view / \
+                 verb; physics bodies can only call stdlib accessors \
+                 (`agents.*`, `abilities.*`, `query.*`, `view::*`, ...), \
+                 built-in math, or `emit <Event> {{ ... }}`"
+            ),
+            span: e.span,
+        }),
+
+        // Field / index projections and struct / ctor shapes are pure data.
+        IrExpr::Field { base, .. } => validate_physics_expr(physics_name, base),
+        IrExpr::Index(a, b) => {
+            validate_physics_expr(physics_name, a)?;
+            validate_physics_expr(physics_name, b)
+        }
+        IrExpr::Tuple(xs) | IrExpr::List(xs) => {
+            for x in xs {
+                validate_physics_expr(physics_name, x)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::Binary(_, lhs, rhs) | IrExpr::In(lhs, rhs) | IrExpr::Contains(lhs, rhs) => {
+            validate_physics_expr(physics_name, lhs)?;
+            validate_physics_expr(physics_name, rhs)
+        }
+        IrExpr::Unary(_, rhs) => validate_physics_expr(physics_name, rhs),
+
+        IrExpr::Fold { iter, body, .. } => {
+            if let Some(i) = iter {
+                validate_physics_expr(physics_name, i)?;
+            }
+            validate_physics_expr(physics_name, body)
+        }
+        IrExpr::Quantifier { iter, body, .. } => {
+            validate_physics_expr(physics_name, iter)?;
+            validate_physics_expr(physics_name, body)
+        }
+
+        IrExpr::StructLit { fields, .. } => {
+            for f in fields {
+                validate_physics_expr(physics_name, &f.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::Ctor { args, .. } => {
+            for a in args {
+                validate_physics_expr(physics_name, a)?;
+            }
+            Ok(())
+        }
+        IrExpr::Match { scrutinee, arms } => {
+            validate_physics_expr(physics_name, scrutinee)?;
+            for arm in arms {
+                validate_physics_expr(physics_name, &arm.body)?;
+            }
+            Ok(())
+        }
+        IrExpr::If { cond, then_expr, else_expr } => {
+            validate_physics_expr(physics_name, cond)?;
+            validate_physics_expr(physics_name, then_expr)?;
+            if let Some(eb) = else_expr {
+                validate_physics_expr(physics_name, eb)?;
+            }
+            Ok(())
+        }
+        IrExpr::PerUnit { expr, delta } => {
+            validate_physics_expr(physics_name, expr)?;
+            validate_physics_expr(physics_name, delta)
+        }
+
+        IrExpr::Raw(_) => Err(ResolveError::NotGpuEmittable {
+            physics_name: physics_name.to_string(),
+            construct: "unrecognised expression shape".into(),
+            reason:
+                "the compiler couldn't lower this construct to a typed IR \
+                 node; physics bodies compile to SPIR-V so every expression \
+                 must live in the closed surface (literals, locals, stdlib \
+                 calls, operators, bounded for / match, emit)"
+                    .into(),
+            span: e.span,
+        }),
+    }
+}
+
+/// Physics `for` iteration sources must have a compile-time cap. Accept:
+///
+/// - Stdlib namespace calls (`query.nearby_agents`, `abilities.effects`,
+///   `voxel.neighbors_above`, ...). Every stdlib method that yields a
+///   list returns a bounded `SmallVec` / fixed-size array (§1.2).
+/// - Field projections (`agent.memberships`, `agent.creditor_ledger`) —
+///   entity fields are declared as `SortedVec<T, N>` / `Array<T, N>` /
+///   `RingBuffer<T, N>` / `SmallVec<[T; N]>`, all capped at compile time.
+/// - Materialized view reads — the storage hint pins the shape.
+/// - `Local` binder — assumed bounded because a prior `let` / `for` /
+///   handler-binding vetted the upstream source.
+/// - `Index(...)` — a single element of a capped collection.
+/// - Literal `List` / `Tuple` — length is a compile-time constant.
+/// - `BuiltinCall` — stdlib math / aggregates.
+/// - Bare `Namespace` (e.g. `agents`) — legacy collection accessor,
+///   capped by the global agent slot pool.
+///
+/// Reject:
+///
+/// - `UnresolvedCall` — indistinguishable from a UDF helper.
+/// - `VerbCall` / bare `View` / `Verb` — not iterables.
+/// - `Raw` — unlowered expression; shape unknown.
+/// - Literals / operators — not iterables.
+fn validate_physics_iter_source(
+    physics_name: &str,
+    iter: &IrExprNode,
+    for_span: Span,
+) -> Result<(), ResolveError> {
+    match &iter.kind {
+        // Bounded iterable sources.
+        IrExpr::NamespaceCall { .. }
+        | IrExpr::Field { .. }
+        | IrExpr::ViewCall(_, _)
+        | IrExpr::Namespace(_)
+        | IrExpr::Local(_, _)
+        | IrExpr::Index(_, _)
+        | IrExpr::List(_)
+        | IrExpr::Tuple(_)
+        | IrExpr::BuiltinCall(_, _) => Ok(()),
+
+        IrExpr::UnresolvedCall(name, _) => Err(ResolveError::NotGpuEmittable {
+            physics_name: physics_name.to_string(),
+            construct: format!("for-loop over user-defined helper `{name}`"),
+            reason: format!(
+                "`{name}` is not a stdlib accessor; `for` iteration sources \
+                 must be bounded (a spatial query like `query.nearby_agents`, \
+                 an ability program via `abilities.effects`, a capped entity \
+                 field like `agent.memberships`, or a materialized view)"
+            ),
+            span: for_span,
+        }),
+
+        IrExpr::VerbCall(_, _) | IrExpr::Verb(_) | IrExpr::View(_) => {
+            Err(ResolveError::NotGpuEmittable {
+                physics_name: physics_name.to_string(),
+                construct: "for-loop over verb / bare view reference".into(),
+                reason:
+                    "verbs and bare view references aren't iterables; use a \
+                     bounded spatial query, a capped entity field, or call \
+                     the view (`view::<name>(...)`) instead"
+                        .into(),
+                span: for_span,
+            })
+        }
+
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Binary(_, _, _)
+        | IrExpr::Unary(_, _)
+        | IrExpr::In(_, _)
+        | IrExpr::Contains(_, _)
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::StructLit { .. }
+        | IrExpr::Ctor { .. }
+        | IrExpr::If { .. }
+        | IrExpr::Match { .. }
+        | IrExpr::Fold { .. }
+        | IrExpr::Quantifier { .. }
+        | IrExpr::PerUnit { .. } => Err(ResolveError::NotGpuEmittable {
+            physics_name: physics_name.to_string(),
+            construct: "for-loop over non-iterable / unbounded expression".into(),
+            reason:
+                "`for` iteration sources must be bounded collections (a \
+                 spatial query, a capped entity field, an ability program, \
+                 or a materialized view); literal / computed expressions \
+                 can't be proved bounded at compile time"
+                    .into(),
+            span: for_span,
+        }),
+
+        IrExpr::Raw(_) => Err(ResolveError::NotGpuEmittable {
+            physics_name: physics_name.to_string(),
+            construct: "for-loop over unrecognised expression".into(),
+            reason: "iteration source didn't lower to a typed IR node".into(),
+            span: for_span,
+        }),
+    }
+}
+
+/// Shallow check: does this resolved expression directly carry a `String`
+/// literal? Used to flag `let name = "foo"` in a physics body. Full
+/// `IrType` carrying would need pass 1b's type checker — until then,
+/// catch the overwhelmingly common case.
+fn expr_mentions_string_literal(e: &IrExprNode) -> bool {
+    matches!(&e.kind, IrExpr::LitString(_))
+}
+
+fn collect_emitted_events(body: &[IrStmt], out: &mut Vec<String>) {
+    for s in body {
+        match s {
+            IrStmt::Emit(IrEmit { event_name, .. }) => {
+                if !out.iter().any(|n| n == event_name) {
+                    out.push(event_name.clone());
+                }
+            }
+            IrStmt::For { body, .. } => collect_emitted_events(body, out),
+            IrStmt::If { then_body, else_body, .. } => {
+                collect_emitted_events(then_body, out);
+                if let Some(eb) = else_body {
+                    collect_emitted_events(eb, out);
+                }
+            }
+            IrStmt::Match { arms, .. } => {
+                for arm in arms {
+                    collect_emitted_events(&arm.body, out);
+                }
+            }
+            IrStmt::Let { .. } | IrStmt::SelfUpdate { .. } | IrStmt::Expr(_) => {}
+        }
+    }
+}
+
+fn find_emit_span(handlers: &[PhysicsHandlerIR], target: &str) -> Option<Span> {
+    for h in handlers {
+        if let Some(sp) = find_emit_span_in_stmts(&h.body, target) {
+            return Some(sp);
+        }
+    }
+    None
+}
+
+fn find_emit_span_in_stmts(body: &[IrStmt], target: &str) -> Option<Span> {
+    for s in body {
+        match s {
+            IrStmt::Emit(IrEmit { event_name, span, .. }) if event_name == target => {
+                return Some(*span);
+            }
+            IrStmt::For { body, .. } => {
+                if let Some(sp) = find_emit_span_in_stmts(body, target) {
+                    return Some(sp);
+                }
+            }
+            IrStmt::If { then_body, else_body, .. } => {
+                if let Some(sp) = find_emit_span_in_stmts(then_body, target) {
+                    return Some(sp);
+                }
+                if let Some(eb) = else_body {
+                    if let Some(sp) = find_emit_span_in_stmts(eb, target) {
+                        return Some(sp);
+                    }
+                }
+            }
+            IrStmt::Match { arms, .. } => {
+                for arm in arms {
+                    if let Some(sp) = find_emit_span_in_stmts(&arm.body, target) {
+                        return Some(sp);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Detect an indirect emission cycle. Seeds the search from every event
+/// `start` emits, walks every rule that handles that event, and reports
+/// a hit when the walk reaches a rule whose emissions land back on one
+/// of `start`'s handled events. Direct self-recursion (`start` -> `start`)
+/// is diagnosed separately by the caller so this path doesn't double-fire.
+fn emits_cycle_back(
+    start: usize,
+    handled: &[Vec<String>],
+    emitted: &[Vec<String>],
+) -> bool {
+    use std::collections::VecDeque;
+    let mut seen = vec![false; handled.len()];
+    let mut queue: VecDeque<usize> = VecDeque::new();
+    // Seed with every rule (other than `start`) that handles one of
+    // `start`'s emitted events — the first hops away from `start`.
+    for ev in &emitted[start] {
+        for (j, handled_j) in handled.iter().enumerate() {
+            if j == start || seen[j] {
+                continue;
+            }
+            if handled_j.iter().any(|h| h == ev) {
+                seen[j] = true;
+                queue.push_back(j);
+            }
+        }
+    }
+    while let Some(j) = queue.pop_front() {
+        for ev in &emitted[j] {
+            // Cycle back: someone we visit emits an event that `start` handles.
+            if handled[start].iter().any(|h| h == ev) {
+                return true;
+            }
+            for (k, handled_k) in handled.iter().enumerate() {
+                if k == start || seen[k] {
+                    continue;
+                }
+                if handled_k.iter().any(|h| h == ev) {
+                    seen[k] = true;
+                    queue.push_back(k);
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Does any handler in this rule reference `cascade.max_iterations`?
+/// This is the cascade framework's global iteration ceiling
+/// (`MAX_CASCADE_ITERATIONS`); a rule that checks against it has a
+/// compile-time bound on recursion even without `@terminating_in`.
+fn handlers_guard_on_cascade_ceiling(handlers: &[PhysicsHandlerIR]) -> bool {
+    for h in handlers {
+        if stmts_reference_cascade_ceiling(&h.body) {
+            return true;
+        }
+    }
+    false
+}
+
+fn stmts_reference_cascade_ceiling(body: &[IrStmt]) -> bool {
+    for s in body {
+        if stmt_references_cascade_ceiling(s) {
+            return true;
+        }
+    }
+    false
+}
+
+fn stmt_references_cascade_ceiling(s: &IrStmt) -> bool {
+    match s {
+        IrStmt::Let { value, .. } => expr_references_cascade_ceiling(value),
+        IrStmt::Emit(IrEmit { fields, .. }) => {
+            fields.iter().any(|f| expr_references_cascade_ceiling(&f.value))
+        }
+        IrStmt::For { iter, filter, body, .. } => {
+            expr_references_cascade_ceiling(iter)
+                || filter.as_ref().is_some_and(expr_references_cascade_ceiling)
+                || stmts_reference_cascade_ceiling(body)
+        }
+        IrStmt::If { cond, then_body, else_body, .. } => {
+            expr_references_cascade_ceiling(cond)
+                || stmts_reference_cascade_ceiling(then_body)
+                || else_body
+                    .as_ref()
+                    .is_some_and(|eb| stmts_reference_cascade_ceiling(eb))
+        }
+        IrStmt::Match { scrutinee, arms, .. } => {
+            expr_references_cascade_ceiling(scrutinee)
+                || arms.iter().any(|a| stmts_reference_cascade_ceiling(&a.body))
+        }
+        IrStmt::SelfUpdate { value, .. } => expr_references_cascade_ceiling(value),
+        IrStmt::Expr(e) => expr_references_cascade_ceiling(e),
+    }
+}
+
+fn expr_references_cascade_ceiling(e: &IrExprNode) -> bool {
+    match &e.kind {
+        IrExpr::NamespaceField { ns, field, .. } => {
+            *ns == NamespaceId::Cascade && field == "max_iterations"
+        }
+        IrExpr::Binary(_, a, b) | IrExpr::In(a, b) | IrExpr::Contains(a, b) => {
+            expr_references_cascade_ceiling(a) || expr_references_cascade_ceiling(b)
+        }
+        IrExpr::Unary(_, x) => expr_references_cascade_ceiling(x),
+        IrExpr::Field { base, .. } => expr_references_cascade_ceiling(base),
+        IrExpr::Index(a, b) => {
+            expr_references_cascade_ceiling(a) || expr_references_cascade_ceiling(b)
+        }
+        IrExpr::Tuple(xs) | IrExpr::List(xs) => xs.iter().any(expr_references_cascade_ceiling),
+        IrExpr::NamespaceCall { args, .. }
+        | IrExpr::BuiltinCall(_, args)
+        | IrExpr::ViewCall(_, args)
+        | IrExpr::VerbCall(_, args)
+        | IrExpr::UnresolvedCall(_, args) => {
+            args.iter().any(|a| expr_references_cascade_ceiling(&a.value))
+        }
+        IrExpr::Fold { iter, body, .. } => {
+            iter.as_ref().is_some_and(|i| expr_references_cascade_ceiling(i))
+                || expr_references_cascade_ceiling(body)
+        }
+        IrExpr::Quantifier { iter, body, .. } => {
+            expr_references_cascade_ceiling(iter) || expr_references_cascade_ceiling(body)
+        }
+        IrExpr::StructLit { fields, .. } => {
+            fields.iter().any(|f| expr_references_cascade_ceiling(&f.value))
+        }
+        IrExpr::Ctor { args, .. } => args.iter().any(expr_references_cascade_ceiling),
+        IrExpr::Match { scrutinee, arms } => {
+            expr_references_cascade_ceiling(scrutinee)
+                || arms.iter().any(|a| expr_references_cascade_ceiling(&a.body))
+        }
+        IrExpr::If { cond, then_expr, else_expr } => {
+            expr_references_cascade_ceiling(cond)
+                || expr_references_cascade_ceiling(then_expr)
+                || else_expr
+                    .as_ref()
+                    .is_some_and(|eb| expr_references_cascade_ceiling(eb))
+        }
+        IrExpr::PerUnit { expr, delta } => {
+            expr_references_cascade_ceiling(expr) || expr_references_cascade_ceiling(delta)
+        }
+        _ => false,
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Mask / scoring body operator-set validators (spec §2.5)
+// ---------------------------------------------------------------------------
+//
+// Mask predicates and scoring rows both lower into the same GPU-friendly
+// scalar surface (SPIR-V boolean / f32 kernels). The closed operator set
+// mirrors the fold-body restriction minus the `self +=` family: pure
+// expressions over stdlib accessors + bounded aggregates + quantifiers +
+// view calls, with `if/else` as the only control flow. Task 155
+// (commit 9ba805c6) expanded the *physics* surface to include `for` and
+// `match`, but mask/scoring contexts stayed restricted on purpose — they
+// compile to per-row GPU kernels where unbounded iteration and variant
+// dispatch aren't available. The validators are expression-only; `for`
+// statements can't reach these slots (the parser rejects `for` in
+// expression position), so the validators primarily catch `match`
+// expressions — the one forbidden shape that *does* parse as an expr.
+
+fn validate_mask_body(mask_name: &str, e: &IrExprNode) -> Result<(), ResolveError> {
+    match &e.kind {
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Local(_, _)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. } => Ok(()),
+
+        IrExpr::NamespaceCall { args, .. } | IrExpr::BuiltinCall(_, args) => {
+            for a in args {
+                validate_mask_body(mask_name, &a.value)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::Quantifier { iter, body, .. } => {
+            validate_mask_body(mask_name, iter)?;
+            validate_mask_body(mask_name, body)
+        }
+        IrExpr::Fold { iter, body, .. } => {
+            if let Some(i) = iter {
+                validate_mask_body(mask_name, i)?;
+            }
+            validate_mask_body(mask_name, body)
+        }
+
+        IrExpr::ViewCall(_, args) => {
+            for a in args {
+                validate_mask_body(mask_name, &a.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::View(_) => Ok(()),
+
+        IrExpr::VerbCall(_, args) => {
+            for a in args {
+                validate_mask_body(mask_name, &a.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::Verb(_) => Ok(()),
+
+        IrExpr::UnresolvedCall(_, args) => {
+            for a in args {
+                validate_mask_body(mask_name, &a.value)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::Field { base, .. } => validate_mask_body(mask_name, base),
+        IrExpr::Index(a, b) => {
+            validate_mask_body(mask_name, a)?;
+            validate_mask_body(mask_name, b)
+        }
+        IrExpr::Tuple(xs) | IrExpr::List(xs) => {
+            for x in xs {
+                validate_mask_body(mask_name, x)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::Binary(_, lhs, rhs) | IrExpr::In(lhs, rhs) | IrExpr::Contains(lhs, rhs) => {
+            validate_mask_body(mask_name, lhs)?;
+            validate_mask_body(mask_name, rhs)
+        }
+        IrExpr::Unary(_, rhs) => validate_mask_body(mask_name, rhs),
+
+        IrExpr::If { cond, then_expr, else_expr } => {
+            validate_mask_body(mask_name, cond)?;
+            validate_mask_body(mask_name, then_expr)?;
+            if let Some(eb) = else_expr {
+                validate_mask_body(mask_name, eb)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::StructLit { fields, .. } => {
+            for f in fields {
+                validate_mask_body(mask_name, &f.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::Ctor { args, .. } => {
+            for a in args {
+                validate_mask_body(mask_name, a)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::PerUnit { expr, delta } => {
+            validate_mask_body(mask_name, expr)?;
+            validate_mask_body(mask_name, delta)
+        }
+
+        IrExpr::Match { .. } => Err(ResolveError::UdfInMaskBody {
+            mask_name: mask_name.to_string(),
+            offending_construct: "`match` expression (use if/else or view dispatch)".into(),
+            span: e.span,
+        }),
+
+        IrExpr::Raw(_) => Ok(()),
+    }
+}
+
+fn validate_scoring_body(e: &IrExprNode) -> Result<(), ResolveError> {
+    match &e.kind {
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Local(_, _)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. } => Ok(()),
+
+        IrExpr::NamespaceCall { args, .. } | IrExpr::BuiltinCall(_, args) => {
+            for a in args {
+                validate_scoring_body(&a.value)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::Quantifier { iter, body, .. } => {
+            validate_scoring_body(iter)?;
+            validate_scoring_body(body)
+        }
+        IrExpr::Fold { iter, body, .. } => {
+            if let Some(i) = iter {
+                validate_scoring_body(i)?;
+            }
+            validate_scoring_body(body)
+        }
+
+        IrExpr::ViewCall(_, args) => {
+            for a in args {
+                validate_scoring_body(&a.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::View(_) => Ok(()),
+
+        IrExpr::VerbCall(_, args) => {
+            for a in args {
+                validate_scoring_body(&a.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::Verb(_) => Ok(()),
+
+        IrExpr::UnresolvedCall(_, args) => {
+            for a in args {
+                validate_scoring_body(&a.value)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::Field { base, .. } => validate_scoring_body(base),
+        IrExpr::Index(a, b) => {
+            validate_scoring_body(a)?;
+            validate_scoring_body(b)
+        }
+        IrExpr::Tuple(xs) | IrExpr::List(xs) => {
+            for x in xs {
+                validate_scoring_body(x)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::Binary(_, lhs, rhs) | IrExpr::In(lhs, rhs) | IrExpr::Contains(lhs, rhs) => {
+            validate_scoring_body(lhs)?;
+            validate_scoring_body(rhs)
+        }
+        IrExpr::Unary(_, rhs) => validate_scoring_body(rhs),
+
+        IrExpr::If { cond, then_expr, else_expr } => {
+            validate_scoring_body(cond)?;
+            validate_scoring_body(then_expr)?;
+            if let Some(eb) = else_expr {
+                validate_scoring_body(eb)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::StructLit { fields, .. } => {
+            for f in fields {
+                validate_scoring_body(&f.value)?;
+            }
+            Ok(())
+        }
+        IrExpr::Ctor { args, .. } => {
+            for a in args {
+                validate_scoring_body(a)?;
+            }
+            Ok(())
+        }
+
+        IrExpr::PerUnit { expr, delta } => {
+            validate_scoring_body(expr)?;
+            validate_scoring_body(delta)
+        }
+
+        IrExpr::Match { .. } => Err(ResolveError::UdfInScoringBody {
+            offending_construct: "`match` expression (use if/else or gradient terms)".into(),
+            span: e.span,
+        }),
+
+        IrExpr::Raw(_) => Ok(()),
     }
 }

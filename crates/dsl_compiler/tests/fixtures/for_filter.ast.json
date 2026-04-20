@@ -12,14 +12,14 @@
                   "Ident": "event"
                 },
                 "span": {
-                  "start": 96,
-                  "end": 101
+                  "start": 315,
+                  "end": 320
                 }
               }
             ],
             "span": {
-              "start": 89,
-              "end": 102
+              "start": 308,
+              "end": 321
             }
           },
           {
@@ -31,14 +31,14 @@
                   "Int": 1
                 },
                 "span": {
-                  "start": 119,
-                  "end": 120
+                  "start": 338,
+                  "end": 339
                 }
               }
             ],
             "span": {
-              "start": 103,
-              "end": 121
+              "start": 322,
+              "end": 340
             }
           }
         ],
@@ -55,14 +55,14 @@
                       "Bind": "p"
                     },
                     "span": {
-                      "start": 142,
-                      "end": 148
+                      "start": 361,
+                      "end": 367
                     }
                   }
                 ],
                 "span": {
-                  "start": 129,
-                  "end": 149
+                  "start": 348,
+                  "end": 368
                 }
               }
             },
@@ -76,11 +76,22 @@
                       "Call": [
                         {
                           "kind": {
-                            "Ident": "voxel_neighbors_above"
+                            "Field": [
+                              {
+                                "kind": {
+                                  "Ident": "voxel"
+                                },
+                                "span": {
+                                  "start": 384,
+                                  "end": 389
+                                }
+                              },
+                              "neighbors_above"
+                            ]
                           },
                           "span": {
-                            "start": 165,
-                            "end": 186
+                            "start": 384,
+                            "end": 405
                           }
                         },
                         [
@@ -91,21 +102,21 @@
                                 "Ident": "p"
                               },
                               "span": {
-                                "start": 187,
-                                "end": 188
+                                "start": 406,
+                                "end": 407
                               }
                             },
                             "span": {
-                              "start": 187,
-                              "end": 188
+                              "start": 406,
+                              "end": 407
                             }
                           }
                         ]
                       ]
                     },
                     "span": {
-                      "start": 165,
-                      "end": 189
+                      "start": 384,
+                      "end": 408
                     }
                   },
                   "filter": {
@@ -120,16 +131,16 @@
                                   "Ident": "q"
                                 },
                                 "span": {
-                                  "start": 196,
-                                  "end": 197
+                                  "start": 415,
+                                  "end": 416
                                 }
                               },
                               "kind"
                             ]
                           },
                           "span": {
-                            "start": 196,
-                            "end": 202
+                            "start": 415,
+                            "end": 421
                           }
                         },
                         "rhs": {
@@ -137,15 +148,15 @@
                             "Ident": "Stone"
                           },
                           "span": {
-                            "start": 206,
-                            "end": 212
+                            "start": 425,
+                            "end": 431
                           }
                         }
                       }
                     },
                     "span": {
-                      "start": 196,
-                      "end": 212
+                      "start": 415,
+                      "end": 431
                     }
                   },
                   "body": [
@@ -160,39 +171,39 @@
                                 "Ident": "q"
                               },
                               "span": {
-                                "start": 245,
-                                "end": 247
+                                "start": 464,
+                                "end": 466
                               }
                             },
                             "span": {
-                              "start": 240,
-                              "end": 247
+                              "start": 459,
+                              "end": 466
                             }
                           }
                         ],
                         "span": {
-                          "start": 220,
-                          "end": 248
+                          "start": 439,
+                          "end": 467
                         }
                       }
                     }
                   ],
                   "span": {
-                    "start": 156,
-                    "end": 254
+                    "start": 375,
+                    "end": 473
                   }
                 }
               }
             ],
             "span": {
-              "start": 126,
-              "end": 258
+              "start": 345,
+              "end": 477
             }
           }
         ],
         "span": {
-          "start": 68,
-          "end": 260
+          "start": 287,
+          "end": 479
         }
       }
     }
