@@ -51,6 +51,17 @@ scoring {
   // `self.hp_pct` without any engine change.
   // `engine_rules::scoring::read_field` looks up self.hp at field_id 0.
   //
+  // Task 165 — wolves flee when wounded. The `self.hp_pct < 0.3` gate
+  // stacks +0.6 so a creature at <30% hp retreats regardless of its
+  // absolute hp band. A wolf (max_hp=80) at hp=16 picks up both the
+  // raw-hp gates AND the hp_pct gate (belt-and-suspenders); a larger
+  // creature (say max_hp=200) at hp=55 would NOT fire the raw `hp<50`
+  // gate (55 > 50) but its hp_pct=0.275 < 0.3 DOES fire — this is the
+  // behavioural-parity case the task targets. Scoped globally (Option
+  // A) because the scoring grammar has no species predicate (see
+  // `docs/dsl/scoring_fields.md`); deer fixtures in existing tests
+  // stay at hp_pct=1.0 so the new gate never fires for them.
+  //
   // The corresponding movement comes from `UtilityBackend::build_action`,
   // which resolves `MicroKind::Flee` by picking the nearest hostile
   // within `config.combat.aggro_range` (task 148) and emitting
@@ -77,6 +88,7 @@ scoring {
   Flee = 0.0
     + (if self.hp < 30.0 { 0.6 } else { 0.0 })
     + (if self.hp < 50.0 { 0.4 } else { 0.0 })
+    + (if self.hp_pct < 0.3 { 0.6 } else { 0.0 })
     + (view::threat_level(self, _) per_unit 0.01)
     + (if view::threat_level(self, _) > 50.0 { 0.3 } else { 0.0 })
 

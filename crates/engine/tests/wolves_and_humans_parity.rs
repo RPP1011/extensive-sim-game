@@ -800,6 +800,207 @@ fn engaged_wolves_stay_committed() {
     );
 }
 
+/// (6) Wounded wolves flee from humans.
+///
+/// Setup: one wolf pre-wounded to ~20% hp (hp=16, max_hp=80) adjacent to
+/// a healthy human. The Flee row's task-165 `self.hp_pct < 0.3 : +0.6`
+/// modifier should dominate the Attack row's grudge / threat deltas so
+/// the wolf retreats even when the human has been drawing blood.
+///
+/// Two assertions:
+/// 1. Scoring level — compute Flee and Attack scores directly through the
+///    same `score_row_for` helper the threat_level / my_enemies tests use.
+///    Flee must score strictly higher than Attack at the wounded-hp state,
+///    with no priming required (threat / grudge views start empty).
+/// 2. Behavioural level — run 10 ticks via `step_full`; the wolf's
+///    distance to the human's initial position must increase (wolf is
+///    net-displaced AWAY from the threat).
+#[test]
+fn wounded_wolves_flee_from_humans() {
+    // --- Scoring-level check ------------------------------------------------
+    //
+    // Direct `SCORING_TABLE` lookup — builds a bare SimState, spawns the
+    // two agents, and computes the Flee + Attack rows without running the
+    // engine. Confirms the hp_pct<0.3 modifier actually wins the argmax
+    // regardless of engagement / mask gating. A local micro-scorer handles
+    // only the predicate kinds this test exercises (scalar-compare on
+    // self.hp / self.hp_pct / target.hp_pct) — threat_level / my_enemies
+    // views are never primed so their rows contribute zero.
+    {
+        use engine::mask::MicroKind;
+        use engine_rules::scoring::{
+            PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE,
+        };
+
+        let mut state = SimState::new(4, 0xBEEF_0006);
+        let wolf = state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Wolf,
+                pos: Vec3::new(0.0, 0.0, 0.0),
+                hp: 16.0,
+                max_hp: 80.0,
+                ..Default::default()
+            })
+            .expect("wounded wolf spawn");
+        let human = state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Human,
+                pos: Vec3::new(1.0, 0.0, 0.0),
+                hp: 100.0,
+                max_hp: 100.0,
+                ..Default::default()
+            })
+            .expect("human spawn");
+
+        fn find_entry(head: u16) -> &'static ScoringEntry {
+            for e in SCORING_TABLE {
+                if e.action_head == head {
+                    return e;
+                }
+            }
+            panic!("SCORING_TABLE missing head {head}");
+        }
+
+        // Read the scalar field_ids this test uses. Unknown ids return 0.0
+        // (not NaN) because none of the rows evaluated here reference
+        // them — the compare ops that DO read a scalar all match one of
+        // these three ids.
+        fn read_scalar(
+            state: &SimState,
+            agent: engine::ids::AgentId,
+            target: Option<engine::ids::AgentId>,
+            field_id: u16,
+        ) -> f32 {
+            if field_id == 0x4002 {
+                let t = target.expect("target.hp_pct needs a target");
+                let hp = state.agent_hp(t).unwrap_or(0.0);
+                let mx = state.agent_max_hp(t).unwrap_or(1.0);
+                return if mx > 0.0 { hp / mx } else { 0.0 };
+            }
+            match field_id {
+                0 => state.agent_hp(agent).unwrap_or(0.0),
+                2 => {
+                    let hp = state.agent_hp(agent).unwrap_or(0.0);
+                    let mx = state.agent_max_hp(agent).unwrap_or(1.0);
+                    if mx > 0.0 { hp / mx } else { 0.0 }
+                }
+                _ => f32::NAN,
+            }
+        }
+
+        // Mini-scorer — evaluates only `KIND_SCALAR_COMPARE` rows. View
+        // rows (gradient / view-scalar-compare) contribute 0 because this
+        // test never primes the threat_level or my_enemies views, so
+        // ignoring them is equivalent to evaluating them.
+        fn score_row(
+            entry: &ScoringEntry,
+            state: &SimState,
+            agent: engine::ids::AgentId,
+            target: Option<engine::ids::AgentId>,
+        ) -> f32 {
+            let mut s = entry.base;
+            let count = (entry.modifier_count as usize).min(MAX_MODIFIERS);
+            for i in 0..count {
+                let row = &entry.modifiers[i];
+                if row.predicate.kind == PredicateDescriptor::KIND_SCALAR_COMPARE {
+                    let lhs = read_scalar(state, agent, target, row.predicate.field_id);
+                    let mut tb = [0u8; 4];
+                    tb.copy_from_slice(&row.predicate.payload[0..4]);
+                    let rhs = f32::from_le_bytes(tb);
+                    if !lhs.is_nan() && !rhs.is_nan() {
+                        let fires = match row.predicate.op {
+                            PredicateDescriptor::OP_LT => lhs < rhs,
+                            PredicateDescriptor::OP_LE => lhs <= rhs,
+                            PredicateDescriptor::OP_EQ => lhs == rhs,
+                            PredicateDescriptor::OP_GE => lhs >= rhs,
+                            PredicateDescriptor::OP_GT => lhs > rhs,
+                            PredicateDescriptor::OP_NE => lhs != rhs,
+                            _ => false,
+                        };
+                        if fires {
+                            s += row.delta;
+                        }
+                    }
+                }
+            }
+            s
+        }
+
+        let flee_entry = find_entry(MicroKind::Flee as u16);
+        let attack_entry = find_entry(MicroKind::Attack as u16);
+
+        let flee_score = score_row(flee_entry, &state, wolf, None);
+        let attack_score = score_row(attack_entry, &state, wolf, Some(human));
+
+        // Wolf hp=16 → `hp<30` (+0.6) + `hp<50` (+0.4) + `hp_pct<0.3`
+        // (+0.6) = 1.6. No threat primed so gradient + scalar-gate = 0.
+        assert!(
+            (flee_score - 1.6).abs() < 1e-3,
+            "wounded-wolf Flee score = {flee_score}, expected ≈1.6 \
+             (hp<30 +0.6, hp<50 +0.4, hp_pct<0.3 +0.6)",
+        );
+        // Wolf hp_pct=0.2 — fresh-self (`>=0.8`) gate FALSE so Attack base
+        // stays at 0.0. Target (human) at hp_pct=1.0 — neither target gate
+        // fires. No threat, no grudge. Attack = 0.0.
+        assert!(
+            attack_score.abs() < 1e-3,
+            "wounded-wolf Attack score = {attack_score}, expected ≈0.0",
+        );
+        assert!(
+            flee_score > attack_score,
+            "task 165: Flee should beat Attack for a wounded wolf; \
+             flee={flee_score}, attack={attack_score}",
+        );
+    }
+
+    // --- Behavioural check --------------------------------------------------
+    //
+    // Short 10-tick run via the stock pipeline — confirms the scoring
+    // preference actually drives the engine's Flee action-builder (nearest
+    // hostile → move away). Wolf starts 1 m from the human; after 10 ticks
+    // the wolf should have net-displaced AWAY from the human's spawn pos.
+    let spawns = [
+        // Wolf pre-wounded — hp_pct = 16/80 = 0.2, below the <0.3 Flee gate.
+        CreatureSpawn {
+            creature_type: CreatureType::Wolf,
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            hp: 16.0,
+            max_hp: Some(80.0),
+        },
+        CreatureSpawn {
+            creature_type: CreatureType::Human,
+            pos: Vec3::new(1.0, 0.0, 0.0),
+            hp: 100.0,
+            max_hp: None,
+        },
+    ];
+    let initial_wolf_pos = spawns[0].pos;
+    let initial_human_pos = spawns[1].pos;
+    let initial_distance = initial_wolf_pos.distance(initial_human_pos);
+
+    let (state, _log, ids) = run_behavioural_scenario(0xBEEF_0006, &spawns, 10);
+    let (wolf, _human) = (ids[0], ids[1]);
+
+    // Wolf may have died mid-run — the human does 10 dmg/tick in melee and
+    // the wolf enters at hp=16 (two hits to kill). Even so, the last-alive
+    // position must be AWAY from the human's starting spot, which is the
+    // "Flee fired at least once" marker. If the wolf had picked Attack
+    // instead, its position would stay at ~1 m from the human (attack
+    // doesn't move) and the displacement check fails.
+    let final_wolf_pos = state.agent_pos(wolf).expect("wolf pos");
+    let wolf_displacement_from_human_origin = final_wolf_pos.distance(initial_human_pos);
+
+    assert!(
+        wolf_displacement_from_human_origin > initial_distance,
+        "wounded wolf should net-displace AWAY from human's initial position; \
+         initial_distance={:.3}, wolf_displacement_from_human_origin={:.3} \
+         (final wolf pos {:?}) — Flee row may not be firing on hp_pct<0.3",
+        initial_distance,
+        wolf_displacement_from_human_origin,
+        final_wolf_pos,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // threat_level wiring (task threat_level_wiring).
 //
