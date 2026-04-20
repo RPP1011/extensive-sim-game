@@ -97,6 +97,15 @@ pub struct ChronicleArgs {
     /// death occurred).
     #[arg(long)]
     pub csv: Option<PathBuf>,
+    /// Fixture preset for `--showcase` / `--sweep`. `showcase` (default) is
+    /// the curated 8 humans + 8 wolves + 4 deer layout used in demos; it
+    /// reliably resolves in favour of the humans (~98% win rate across 50
+    /// seeds) and exists as the canonical narrative sample. `balanced` is
+    /// a rebalanced composition tuned for mixed outcomes (~40-60% wolf
+    /// wins) so the sweep exercises both win paths. Ignored in canonical
+    /// (non-`--showcase`) mode.
+    #[arg(long, default_value = "showcase")]
+    pub fixture: String,
 }
 
 #[derive(Debug, Parser)]

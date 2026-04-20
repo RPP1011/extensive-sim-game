@@ -10,7 +10,12 @@
 //! * **Showcase** (`--showcase`): longer curated fixture — 8 humans,
 //!   8 wolves, 4 deer scattered across a 40×40 area, 500 ticks,
 //!   seed `0xDEADBEEF`. Emits pretty-printed section headers and an
-//!   outcome summary for demos and essays.
+//!   outcome summary for demos and essays. Selectable presets via
+//!   `--fixture`:
+//!     * `showcase` (default): balance-biased toward humans (~98% win);
+//!       the canonical demo narrative.
+//!     * `balanced`: wolf-favoured counts + HP tuned to produce mixed
+//!       outcomes so the balance sweep surfaces both win paths.
 //!
 //! Both paths walk the event ring and hand every `ChronicleEntry` to
 //! `engine::chronicle::render_entry`, printing one line per event.
@@ -43,11 +48,22 @@ const SHOWCASE_DEFAULT_SEED: &str = "0xDEADBEEF";
 const SHOWCASE_DEFAULT_TICKS: u32 = 500;
 
 pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
+    // Parse `--fixture` up front: it feeds both sweep and single-run
+    // paths, and a typo should fail fast regardless of mode.
+    let fixture = match FixtureKind::parse(&args.fixture) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("chronicle: invalid --fixture: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     // Sweep mode short-circuits seed resolution: it has its own base-seed
-    // knob and always runs the showcase fixture. `--sweep 0` is a no-op
-    // that we surface as an error so users don't get silent empty output.
+    // knob and always runs a showcase fixture (`--fixture` picks which
+    // preset). `--sweep 0` is a no-op that we surface as an error so
+    // users don't get silent empty output.
     if let Some(runs) = args.sweep {
-        return run_sweep_from_args(&args, runs);
+        return run_sweep_from_args(&args, runs, fixture);
     }
 
     // `--csv` is a sweep-only side-channel; without `--sweep` there are no
@@ -67,13 +83,13 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
     };
 
     if args.showcase {
-        run_showcase(seed, ticks)
+        run_showcase(fixture, seed, ticks)
     } else {
         run_canonical(seed, ticks)
     }
 }
 
-fn run_sweep_from_args(args: &ChronicleArgs, runs: u32) -> ExitCode {
+fn run_sweep_from_args(args: &ChronicleArgs, runs: u32, fixture: FixtureKind) -> ExitCode {
     if runs == 0 {
         eprintln!("chronicle: --sweep requires a positive run count");
         return ExitCode::FAILURE;
@@ -92,7 +108,14 @@ fn run_sweep_from_args(args: &ChronicleArgs, runs: u32) -> ExitCode {
     };
     let ticks = args.ticks.unwrap_or(SHOWCASE_DEFAULT_TICKS);
 
-    let summary = run_sweep(base_seed, runs, ticks, args.verbose, &mut std::io::stderr());
+    let summary = run_sweep(
+        fixture,
+        base_seed,
+        runs,
+        ticks,
+        args.verbose,
+        &mut std::io::stderr(),
+    );
     let mut stdout = std::io::stdout().lock();
     render_sweep_summary(&summary, &mut stdout).ok();
 
@@ -152,8 +175,8 @@ fn run_canonical(seed: u64, ticks: u32) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_showcase(seed: u64, ticks: u32) -> ExitCode {
-    let (mut state, counts) = spawn_showcase_fixture(seed);
+fn run_showcase(fixture: FixtureKind, seed: u64, ticks: u32) -> ExitCode {
+    let (mut state, counts) = spawn_fixture(fixture, seed);
     let events = simulate(&mut state, ticks);
 
     let lines = chronicle::render_entries(&state, events.iter());
@@ -256,8 +279,8 @@ impl Winner {
 /// Run the showcase fixture once and return aggregate stats. Does not
 /// print anything — the caller decides whether the run goes into a sweep
 /// report, a verbose one-liner, or both.
-fn run_showcase_stats(seed: u64, ticks: u32) -> RunStats {
-    let (mut state, _counts) = spawn_showcase_fixture(seed);
+fn run_showcase_stats(fixture: FixtureKind, seed: u64, ticks: u32) -> RunStats {
+    let (mut state, _counts) = spawn_fixture(fixture, seed);
     let events = simulate(&mut state, ticks);
 
     let mut total_events: u32 = 0;
@@ -307,6 +330,10 @@ struct SweepSummary {
     runs:        u32,
     ticks:       u32,
     base_seed:   u64,
+    /// Which fixture preset produced these runs. Threaded through so the
+    /// header can advertise it — the aggregate stats alone can't tell
+    /// showcase from balanced.
+    fixture:     FixtureKind,
     /// Retained for introspection tests and CSV export (`--csv` flag).
     /// Not read by the text renderer (which only needs the pre-computed
     /// aggregates).
@@ -351,7 +378,13 @@ struct SweepSummary {
     deer_stdev:    f64,
 }
 
-fn summarize(per_run: Vec<RunStats>, runs: u32, ticks: u32, base_seed: u64) -> SweepSummary {
+fn summarize(
+    per_run: Vec<RunStats>,
+    runs: u32,
+    ticks: u32,
+    base_seed: u64,
+    fixture: FixtureKind,
+) -> SweepSummary {
     let n = per_run.len() as f64;
     let mut humans_wins = 0u32;
     let mut wolves_wins = 0u32;
@@ -422,6 +455,7 @@ fn summarize(per_run: Vec<RunStats>, runs: u32, ticks: u32, base_seed: u64) -> S
         runs,
         ticks,
         base_seed,
+        fixture,
         per_run,
         humans_wins,
         wolves_wins,
@@ -482,6 +516,7 @@ fn mean_median_stdev(vals: &[u32]) -> (f64, f64, f64) {
 /// per 10 runs to stderr and optionally a per-run one-liner when verbose.
 /// Returns the finished summary; rendering happens in the caller.
 fn run_sweep<W: std::io::Write>(
+    fixture: FixtureKind,
     base_seed: u64,
     runs: u32,
     ticks: u32,
@@ -494,7 +529,7 @@ fn run_sweep<W: std::io::Write>(
         // (see `SimState::new`), so neighbouring seeds produce independent
         // rng streams. No need to jitter the base_seed by 2^32.
         let seed = base_seed.wrapping_add(k as u64);
-        let stats = run_showcase_stats(seed, ticks);
+        let stats = run_showcase_stats(fixture, seed, ticks);
         if verbose {
             let _ = writeln!(progress, "{}", format_run_line(k, &stats));
         }
@@ -507,7 +542,7 @@ fn run_sweep<W: std::io::Write>(
     if !verbose && runs >= 10 {
         let _ = writeln!(progress);
     }
-    summarize(per_run, runs, ticks, base_seed)
+    summarize(per_run, runs, ticks, base_seed, fixture)
 }
 
 fn format_run_line(k: u32, s: &RunStats) -> String {
@@ -535,7 +570,7 @@ fn render_sweep_summary<W: std::io::Write>(
     };
 
     writeln!(out, "=== Balance Sweep: {} seeds × {} ticks ===", s.runs, s.ticks)?;
-    writeln!(out, "Fixture: 8 humans + 8 wolves + 4 deer (showcase)")?;
+    writeln!(out, "Fixture: {}", s.fixture.description())?;
     writeln!(out, "Base seed: {:#018x} (stepped by 1 per run)", s.base_seed)?;
     writeln!(out)?;
 
@@ -775,96 +810,224 @@ impl SpawnRng {
     }
 }
 
-/// Spawn the showcase fixture: 8 humans (SE cluster), 8 wolves (NW cluster),
-/// 4 deer (center). Cluster centres and agent counts are fixed so a sweep
-/// compares apples to apples, but per-agent x/z positions are perturbed by
-/// a seed-derived xorshift64 RNG (see `SpawnRng`). Same seed ⇒ same spawn;
+/// Which curated fixture to instantiate. Separated from `ChronicleArgs` so
+/// tests can construct a `FixtureKind::Balanced` directly without building
+/// a full CLI arg struct, and so adding a third preset doesn't ripple
+/// through the spawn/sweep call sites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FixtureKind {
+    /// Default curated narrative: 8 humans @100HP vs 8 wolves @80HP + 4
+    /// deer. Strongly human-favoured (~98% humans win at 50 seeds). The
+    /// clustered layout and counts are frozen — every other fixture is a
+    /// perturbation of this baseline.
+    Showcase,
+    /// Wolf-favoured preset tuned for mixed 40-60% outcomes across seeds.
+    /// Iterated empirically on the sweep CSV (task 176). Flips the HP
+    /// asymmetry (wolves 100, humans 80) and gives the pack a count
+    /// advantage (10 vs 6) to counter the cluster-convergence that
+    /// otherwise always favours the humans — the single lever we're
+    /// allowed to pull per task spec.
+    Balanced,
+}
+
+impl FixtureKind {
+    /// Parse the CLI `--fixture <name>` flag. The parser lives here (not on
+    /// the `clap` arg) so the vocabulary stays next to the enum.
+    fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "showcase" => Ok(Self::Showcase),
+            "balanced" => Ok(Self::Balanced),
+            other => Err(format!(
+                "unknown fixture {other:?}: expected 'showcase' or 'balanced'"
+            )),
+        }
+    }
+
+    /// Human-readable label for the sweep header so the aggregate report
+    /// advertises which preset the numbers came from.
+    fn description(self) -> &'static str {
+        match self {
+            Self::Showcase => "8 humans + 8 wolves + 4 deer (showcase)",
+            Self::Balanced => "6 humans @85HP + 10 wolves @95HP + 4 deer (balanced)",
+        }
+    }
+}
+
+/// Declarative spec for a cluster of agents to spawn: shared creature type
+/// and HP, with per-agent base positions. Each base gets seed-derived
+/// x/z jitter applied at spawn time (see `SpawnRng`).
+///
+/// Modelling the fixture as data (rather than a hand-rolled function per
+/// preset) lets us add new presets by extending one table and keeps the
+/// spawn loop identical across variants — no behavioural drift.
+struct ClusterSpec {
+    creature: CreatureType,
+    hp:       f32,
+    bases:    &'static [Vec3],
+    /// Short label used in panic messages if the engine rejects a spawn.
+    /// Surfaces "human 3 spawn" instead of a generic index.
+    label:    &'static str,
+}
+
+/// Showcase cluster bases — frozen from the original task-171 showcase so
+/// `--showcase` (no `--fixture`) keeps its byte-for-byte behaviour. Humans
+/// SE (+6,+6), wolves NW (-6,-6), deer centred.
+const SHOWCASE_HUMAN_BASES: &[Vec3] = &[
+    Vec3::new(6.0, 0.0, 6.0),
+    Vec3::new(9.0, 0.0, 6.0),
+    Vec3::new(6.0, 0.0, 9.0),
+    Vec3::new(3.0, 0.0, 6.0),
+    Vec3::new(6.0, 0.0, 3.0),
+    Vec3::new(9.0, 0.0, 9.0),
+    Vec3::new(3.0, 0.0, 3.0),
+    Vec3::new(8.0, 0.0, 4.0),
+];
+const SHOWCASE_WOLF_BASES: &[Vec3] = &[
+    Vec3::new(-6.0, 0.0, -6.0),
+    Vec3::new(-9.0, 0.0, -6.0),
+    Vec3::new(-6.0, 0.0, -9.0),
+    Vec3::new(-3.0, 0.0, -6.0),
+    Vec3::new(-6.0, 0.0, -3.0),
+    Vec3::new(-9.0, 0.0, -9.0),
+    Vec3::new(-3.0, 0.0, -3.0),
+    Vec3::new(-8.0, 0.0, -4.0),
+];
+const SHOWCASE_DEER_BASES: &[Vec3] = &[
+    Vec3::new(0.0, 0.0, 0.0),
+    Vec3::new(2.0, 0.0, -2.0),
+    Vec3::new(-2.0, 0.0, 2.0),
+    Vec3::new(1.0, 0.0, 1.0),
+];
+
+/// Balanced cluster bases — 6 humans SE, 10 wolves NW, 4 deer centred.
+/// The count asymmetry plus flipped HP (wolves 100, humans 80) counters
+/// the pack_focus species-symmetry that makes the showcase human-favoured.
+/// Cluster shapes mirror the showcase so the jitter/convergence dynamics
+/// stay recognisable.
+const BALANCED_HUMAN_BASES: &[Vec3] = &[
+    Vec3::new(6.0, 0.0, 6.0),
+    Vec3::new(9.0, 0.0, 6.0),
+    Vec3::new(6.0, 0.0, 9.0),
+    Vec3::new(3.0, 0.0, 6.0),
+    Vec3::new(6.0, 0.0, 3.0),
+    Vec3::new(9.0, 0.0, 9.0),
+];
+const BALANCED_WOLF_BASES: &[Vec3] = &[
+    Vec3::new(-6.0, 0.0, -6.0),
+    Vec3::new(-9.0, 0.0, -6.0),
+    Vec3::new(-6.0, 0.0, -9.0),
+    Vec3::new(-3.0, 0.0, -6.0),
+    Vec3::new(-6.0, 0.0, -3.0),
+    Vec3::new(-9.0, 0.0, -9.0),
+    Vec3::new(-3.0, 0.0, -3.0),
+    Vec3::new(-8.0, 0.0, -4.0),
+    Vec3::new(-4.0, 0.0, -8.0),
+    Vec3::new(-10.0, 0.0, -10.0),
+];
+const BALANCED_DEER_BASES: &[Vec3] = &[
+    Vec3::new(0.0, 0.0, 0.0),
+    Vec3::new(2.0, 0.0, -2.0),
+    Vec3::new(-2.0, 0.0, 2.0),
+    Vec3::new(1.0, 0.0, 1.0),
+];
+
+/// Resolve the (ordered) cluster list for a fixture. Ordering matters:
+/// `spawn_agent` returns IDs in call order, and the tests rely on humans
+/// being IDs [0..H), wolves [H..H+W), etc. The canonical `Showcase` order
+/// (humans → wolves → deer) is preserved across both presets.
+fn fixture_clusters(kind: FixtureKind) -> [ClusterSpec; 3] {
+    match kind {
+        FixtureKind::Showcase => [
+            ClusterSpec {
+                creature: CreatureType::Human,
+                hp:       100.0,
+                bases:    SHOWCASE_HUMAN_BASES,
+                label:    "human",
+            },
+            ClusterSpec {
+                creature: CreatureType::Wolf,
+                hp:       80.0,
+                bases:    SHOWCASE_WOLF_BASES,
+                label:    "wolf",
+            },
+            ClusterSpec {
+                creature: CreatureType::Deer,
+                hp:       60.0,
+                bases:    SHOWCASE_DEER_BASES,
+                label:    "deer",
+            },
+        ],
+        FixtureKind::Balanced => [
+            ClusterSpec {
+                creature: CreatureType::Human,
+                hp:       85.0,
+                bases:    BALANCED_HUMAN_BASES,
+                label:    "human",
+            },
+            ClusterSpec {
+                creature: CreatureType::Wolf,
+                hp:       95.0,
+                bases:    BALANCED_WOLF_BASES,
+                label:    "wolf",
+            },
+            ClusterSpec {
+                creature: CreatureType::Deer,
+                hp:       60.0,
+                bases:    BALANCED_DEER_BASES,
+                label:    "deer",
+            },
+        ],
+    }
+}
+
+/// Spawn the showcase or balanced fixture, applying the task-174 seed-
+/// derived jitter to every agent in every cluster. Cluster centres and
+/// counts are fixed per preset so a sweep compares apples to apples, but
+/// per-agent x/z positions are perturbed by a seed-derived xorshift64 RNG
+/// (see `SpawnRng`). Same seed + same fixture ⇒ bit-identical spawn;
 /// different seeds ⇒ meaningfully different initial conditions, which
 /// unsticks the "first-death at tick 12 every run" artifact seen in the
 /// task-171 sweep. z (vertical) stays at 0 — the simulation is 2D in the
 /// xz plane; the 3D engine just carries a dummy height.
+#[cfg(test)]
 fn spawn_showcase_fixture(seed: u64) -> (SimState, SpawnCounts) {
+    spawn_fixture(FixtureKind::Showcase, seed)
+}
+
+fn spawn_fixture(kind: FixtureKind, seed: u64) -> (SimState, SpawnCounts) {
     let mut state = SimState::new(SHOWCASE_AGENT_CAP, seed);
     let mut rng = SpawnRng::new(seed);
-
     let amp = SPAWN_JITTER_AMPLITUDE;
 
-    // Humans: SE cluster at (+6, +6), spread ±3 plus per-agent jitter.
-    let human_bases = [
-        Vec3::new(6.0, 0.0, 6.0),
-        Vec3::new(9.0, 0.0, 6.0),
-        Vec3::new(6.0, 0.0, 9.0),
-        Vec3::new(3.0, 0.0, 6.0),
-        Vec3::new(6.0, 0.0, 3.0),
-        Vec3::new(9.0, 0.0, 9.0),
-        Vec3::new(3.0, 0.0, 3.0),
-        Vec3::new(8.0, 0.0, 4.0),
-    ];
-    for (i, base) in human_bases.iter().enumerate() {
-        let dx = rng.jitter(amp);
-        let dz = rng.jitter(amp);
-        let pos = Vec3::new(base.x + dx, base.y, base.z + dz);
-        state
-            .spawn_agent(AgentSpawn {
-                creature_type: CreatureType::Human,
-                pos,
-                hp: 100.0,
-                ..Default::default()
-            })
-            .unwrap_or_else(|| panic!("human {} spawn", i + 1));
+    let clusters = fixture_clusters(kind);
+    let mut counts = SpawnCounts::default();
+
+    for spec in &clusters {
+        for (i, base) in spec.bases.iter().enumerate() {
+            let dx = rng.jitter(amp);
+            let dz = rng.jitter(amp);
+            let pos = Vec3::new(base.x + dx, base.y, base.z + dz);
+            state
+                .spawn_agent(AgentSpawn {
+                    creature_type: spec.creature,
+                    pos,
+                    hp: spec.hp,
+                    ..Default::default()
+                })
+                .unwrap_or_else(|| panic!("{} {} spawn", spec.label, i + 1));
+        }
+        // Accumulate into the matching field. Pattern-matching on
+        // creature here (vs a tagged union of counts) keeps the surface
+        // area tiny — no new species has been added in years.
+        let n = spec.bases.len() as u32;
+        match spec.creature {
+            CreatureType::Human => counts.humans = n,
+            CreatureType::Wolf => counts.wolves = n,
+            CreatureType::Deer => counts.deer = n,
+            _ => {}
+        }
     }
 
-    // Wolves: NW cluster at (-6, -6), spread ±3 plus per-agent jitter.
-    let wolf_bases = [
-        Vec3::new(-6.0, 0.0, -6.0),
-        Vec3::new(-9.0, 0.0, -6.0),
-        Vec3::new(-6.0, 0.0, -9.0),
-        Vec3::new(-3.0, 0.0, -6.0),
-        Vec3::new(-6.0, 0.0, -3.0),
-        Vec3::new(-9.0, 0.0, -9.0),
-        Vec3::new(-3.0, 0.0, -3.0),
-        Vec3::new(-8.0, 0.0, -4.0),
-    ];
-    for (i, base) in wolf_bases.iter().enumerate() {
-        let dx = rng.jitter(amp);
-        let dz = rng.jitter(amp);
-        let pos = Vec3::new(base.x + dx, base.y, base.z + dz);
-        state
-            .spawn_agent(AgentSpawn {
-                creature_type: CreatureType::Wolf,
-                pos,
-                hp: 80.0,
-                ..Default::default()
-            })
-            .unwrap_or_else(|| panic!("wolf {} spawn", i + 1));
-    }
-
-    // Deer: 4 in the center plus per-agent jitter.
-    let deer_bases = [
-        Vec3::new(0.0, 0.0, 0.0),
-        Vec3::new(2.0, 0.0, -2.0),
-        Vec3::new(-2.0, 0.0, 2.0),
-        Vec3::new(1.0, 0.0, 1.0),
-    ];
-    for (i, base) in deer_bases.iter().enumerate() {
-        let dx = rng.jitter(amp);
-        let dz = rng.jitter(amp);
-        let pos = Vec3::new(base.x + dx, base.y, base.z + dz);
-        state
-            .spawn_agent(AgentSpawn {
-                creature_type: CreatureType::Deer,
-                pos,
-                hp: 60.0,
-                ..Default::default()
-            })
-            .unwrap_or_else(|| panic!("deer {} spawn", i + 1));
-    }
-
-    let counts = SpawnCounts {
-        humans: human_bases.len() as u32,
-        wolves: wolf_bases.len() as u32,
-        deer: deer_bases.len() as u32,
-    };
     (state, counts)
 }
 
@@ -923,6 +1086,7 @@ mod tests {
             base_seed: None,
             verbose: false,
             csv: None,
+            fixture: "showcase".to_string(),
         }
     }
 
@@ -969,6 +1133,120 @@ mod tests {
         assert_eq!(alive.humans, 8);
         assert_eq!(alive.wolves, 8);
         assert_eq!(alive.deer, 4);
+    }
+
+    #[test]
+    fn fixture_kind_parse_accepts_documented_names() {
+        assert_eq!(FixtureKind::parse("showcase").unwrap(), FixtureKind::Showcase);
+        assert_eq!(FixtureKind::parse("balanced").unwrap(), FixtureKind::Balanced);
+        // Case-insensitive — the CLI shouldn't punish "Balanced" vs "balanced".
+        assert_eq!(FixtureKind::parse("BALANCED").unwrap(), FixtureKind::Balanced);
+        // Surrounding whitespace is tolerated (matches `parse_seed`).
+        assert_eq!(FixtureKind::parse("  showcase ").unwrap(), FixtureKind::Showcase);
+        assert!(FixtureKind::parse("unknown").is_err());
+    }
+
+    #[test]
+    fn balanced_fixture_has_expected_counts() {
+        // 6 humans vs 10 wolves is the core balance lever — the HP
+        // asymmetry (humans 85, wolves 95) was iterated on a 50-seed
+        // sweep to land in the 40-60% wolf window. This test guards the
+        // shape; the sweep-based test below guards the outcome.
+        let (state, counts) = spawn_fixture(FixtureKind::Balanced, 0xDEADBEEF);
+        assert_eq!(counts.humans, 6);
+        assert_eq!(counts.wolves, 10);
+        assert_eq!(counts.deer, 4);
+        // All 20 agents are alive at spawn time.
+        let alive = alive_by_type(&state);
+        assert_eq!(alive.humans, 6);
+        assert_eq!(alive.wolves, 10);
+        assert_eq!(alive.deer, 4);
+    }
+
+    #[test]
+    fn balanced_run_is_deterministic() {
+        // Same seed + same fixture + same ticks ⇒ identical chronicle.
+        // Mirrors `showcase_run_is_deterministic` — the jitter PRNG is
+        // seeded identically across fixtures, so the balanced preset
+        // inherits the same determinism contract.
+        let (mut a, _) = spawn_fixture(FixtureKind::Balanced, 0xCAFEBABE);
+        let (mut b, _) = spawn_fixture(FixtureKind::Balanced, 0xCAFEBABE);
+        let ea = simulate(&mut a, 50);
+        let eb = simulate(&mut b, 50);
+        let la = chronicle::render_entries(&a, ea.iter());
+        let lb = chronicle::render_entries(&b, eb.iter());
+        assert_eq!(la, lb);
+    }
+
+    #[test]
+    fn balanced_fixture_respects_cluster_identity() {
+        // Humans SE, wolves NW — same cluster convention as showcase.
+        // Spawn order: 6 humans, then 10 wolves, then 4 deer.
+        let (state, _) = spawn_fixture(FixtureKind::Balanced, 0xCAFEBABE);
+        let ids: Vec<_> = state.agents_alive().collect();
+        assert_eq!(ids.len(), 20);
+        for &id in ids.iter().take(6) {
+            let pos = state.agent_pos(id).expect("human pos");
+            assert!(pos.x > 0.0, "human x should stay in SE cluster: {:?}", pos);
+            assert!(pos.z > 0.0, "human z should stay in SE cluster: {:?}", pos);
+        }
+        for &id in ids.iter().skip(6).take(10) {
+            let pos = state.agent_pos(id).expect("wolf pos");
+            assert!(pos.x < 0.0, "wolf x should stay in NW cluster: {:?}", pos);
+            assert!(pos.z < 0.0, "wolf z should stay in NW cluster: {:?}", pos);
+        }
+    }
+
+    #[test]
+    fn sweep_with_balanced_fixture_has_mixed_outcomes() {
+        // Small sweep — just enough to assert the preset isn't dominated
+        // by either side. The 50-seed validation run lives in the commit
+        // message; CI can't afford 50 × 500 ticks on every push, so a
+        // 10-seed probe here checks the "mixed outcomes" invariant.
+        //
+        // Using base seed 0xDEADBEEF (same as the sweep default) keeps
+        // this reproducible from the CLI — a regression here is easy to
+        // explore interactively.
+        let mut sink = Vec::new();
+        let summary = run_sweep(
+            FixtureKind::Balanced,
+            0xDEADBEEF,
+            10,
+            500,
+            false,
+            &mut sink,
+        );
+        assert!(
+            summary.wolves_wins > 0,
+            "balanced fixture should see wolves win at least once in 10 seeds; \
+             got H{}/W{}/D{}/S{}",
+            summary.humans_wins, summary.wolves_wins, summary.deer_wins, summary.stalemates,
+        );
+        assert!(
+            summary.humans_wins > 0,
+            "balanced fixture should see humans win at least once in 10 seeds; \
+             got H{}/W{}/D{}/S{}",
+            summary.humans_wins, summary.wolves_wins, summary.deer_wins, summary.stalemates,
+        );
+    }
+
+    #[test]
+    fn showcase_fixture_counts_unchanged_by_refactor() {
+        // Guard: task 176 refactored `spawn_showcase_fixture` to dispatch
+        // through `spawn_fixture(FixtureKind::Showcase, ...)`. The counts,
+        // HP tier, and cluster layout for the default preset must be
+        // preserved byte-for-byte — the showcase is our canonical demo
+        // narrative, and drift here would silently break existing runs.
+        let clusters = fixture_clusters(FixtureKind::Showcase);
+        assert_eq!(clusters[0].creature, CreatureType::Human);
+        assert_eq!(clusters[0].hp, 100.0);
+        assert_eq!(clusters[0].bases.len(), 8);
+        assert_eq!(clusters[1].creature, CreatureType::Wolf);
+        assert_eq!(clusters[1].hp, 80.0);
+        assert_eq!(clusters[1].bases.len(), 8);
+        assert_eq!(clusters[2].creature, CreatureType::Deer);
+        assert_eq!(clusters[2].hp, 60.0);
+        assert_eq!(clusters[2].bases.len(), 4);
     }
 
     #[test]
@@ -1046,7 +1324,7 @@ mod tests {
         // seed. Before task 174 all first-death ticks were identical;
         // after the jitter at least two distinct values should appear.
         let mut sink = Vec::new();
-        let summary = run_sweep(0xDEADBEEF, 5, 500, false, &mut sink);
+        let summary = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 5, 500, false, &mut sink);
         let death_ticks: std::collections::BTreeSet<u32> = summary
             .per_run
             .iter()
@@ -1119,8 +1397,8 @@ mod tests {
         // ticks keeps the test fast while still exercising the aggregation.
         let mut sink_a = Vec::new();
         let mut sink_b = Vec::new();
-        let sum_a = run_sweep(0xDEADBEEF, 3, 60, false, &mut sink_a);
-        let sum_b = run_sweep(0xDEADBEEF, 3, 60, false, &mut sink_b);
+        let sum_a = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 3, 60, false, &mut sink_a);
+        let sum_b = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 3, 60, false, &mut sink_b);
         assert_eq!(sum_a.per_run, sum_b.per_run);
         assert_eq!(sum_a.humans_wins, sum_b.humans_wins);
         assert_eq!(sum_a.wolves_wins, sum_b.wolves_wins);
@@ -1132,7 +1410,7 @@ mod tests {
     fn sweep_seeds_are_stepped_by_one() {
         // Run 0 uses the base seed exactly; run k uses base + k.
         let mut sink = Vec::new();
-        let summary = run_sweep(0xDEADBEEF, 3, 20, false, &mut sink);
+        let summary = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 3, 20, false, &mut sink);
         assert_eq!(summary.per_run.len(), 3);
         assert_eq!(summary.per_run[0].seed, 0xDEADBEEF);
         assert_eq!(summary.per_run[1].seed, 0xDEADBEEF + 1);
@@ -1146,7 +1424,7 @@ mod tests {
     fn sweep_outcome_buckets_sum_to_runs() {
         // Every run lands in exactly one outcome bucket.
         let mut sink = Vec::new();
-        let s = run_sweep(0xDEADBEEF, 5, 80, false, &mut sink);
+        let s = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 5, 80, false, &mut sink);
         assert_eq!(
             s.humans_wins + s.wolves_wins + s.deer_wins + s.stalemates,
             s.runs
@@ -1157,7 +1435,7 @@ mod tests {
     fn verbose_sweep_emits_a_line_per_run() {
         // Verbose mode writes one line per run to the progress sink.
         let mut sink = Vec::new();
-        let _ = run_sweep(0xDEADBEEF, 3, 30, true, &mut sink);
+        let _ = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 3, 30, true, &mut sink);
         let text = String::from_utf8(sink).expect("utf8 sink");
         let lines: Vec<_> = text.lines().collect();
         assert_eq!(lines.len(), 3);
@@ -1191,7 +1469,7 @@ mod tests {
         // assert the file matches the spec: 1 header + 3 data rows, hex
         // seeds, and the documented column layout.
         let mut sink = Vec::new();
-        let summary = run_sweep(0xDEADBEEF, 3, 60, false, &mut sink);
+        let summary = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 3, 60, false, &mut sink);
         let path = scratch_csv_path("expected_rows");
         write_sweep_csv(&summary, &path).expect("write csv");
 
@@ -1261,7 +1539,7 @@ mod tests {
                 winner:           Winner::Humans,
             },
         ];
-        let summary = summarize(per_run, 2, 500, 0xCAFEBABE);
+        let summary = summarize(per_run, 2, 500, 0xCAFEBABE, FixtureKind::Showcase);
         let path = scratch_csv_path("empty_first_death");
         write_sweep_csv(&summary, &path).expect("write csv");
 
@@ -1304,7 +1582,7 @@ mod tests {
         // Typo-prevention: writing to a non-existent directory fails fast
         // with a clear error instead of File::create's raw ENOENT.
         let mut sink = Vec::new();
-        let summary = run_sweep(0xDEADBEEF, 2, 20, false, &mut sink);
+        let summary = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 2, 20, false, &mut sink);
         let path = std::path::PathBuf::from(
             "/tmp/chronicle_csv_nonexistent_xyz123_parent/out.csv",
         );
@@ -1315,7 +1593,7 @@ mod tests {
     #[test]
     fn sweep_summary_render_has_expected_sections() {
         let mut progress = Vec::new();
-        let summary = run_sweep(0xDEADBEEF, 2, 40, false, &mut progress);
+        let summary = run_sweep(FixtureKind::Showcase, 0xDEADBEEF, 2, 40, false, &mut progress);
         let mut out = Vec::new();
         render_sweep_summary(&summary, &mut out).unwrap();
         let text = String::from_utf8(out).expect("utf8 render");
