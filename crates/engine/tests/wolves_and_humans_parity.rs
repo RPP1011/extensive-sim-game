@@ -399,6 +399,61 @@ fn chronicle_renders_readable_text() {
     assert!(any_human && any_wolf, "expected both Human and Wolf references; lines={lines:?}");
 }
 
+/// Task 166 — after the WOUND (template 4) and ENGAGEMENT_BROKEN (template 5)
+/// physics rules landed, both must surface in the wolves+humans 100-tick
+/// fixture. The fixture guarantees at least one human takes heavy damage
+/// (wolves DPS ≈ 10/tick, humans have 100 HP) and at least one engagement
+/// pair dissolves (humans die, wolves switch, survivors displace each
+/// other). Checking the raw event ring rather than rendered prose keeps
+/// the assertion on the DSL emit-site behaviour — rename the prose and
+/// the test still passes; break the emit and the test fails.
+#[test]
+fn chronicle_has_wound_and_break_templates() {
+    let mut state = spawn_fixture();
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    let mut invariants = InvariantRegistry::new();
+    invariants.register(Box::new(PoolNonOverlapInvariant));
+
+    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let telemetry = NullSink;
+
+    for _ in 0..TICKS {
+        step_full(
+            &mut state,
+            &mut scratch,
+            &mut events,
+            &UtilityBackend,
+            &cascade,
+            &mut views[..],
+            &invariants,
+            &telemetry,
+        );
+    }
+
+    let mut seen_wound = false;
+    let mut seen_break = false;
+    for ev in events.iter() {
+        if let Event::ChronicleEntry { template_id, .. } = ev {
+            match *template_id {
+                4 => seen_wound = true,
+                5 => seen_break = true,
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        seen_wound,
+        "expected at least one ChronicleEntry{{ template_id: 4 }} (WOUND) in 100-tick wolves+humans run",
+    );
+    assert!(
+        seen_break,
+        "expected at least one ChronicleEntry{{ template_id: 5 }} (ENGAGEMENT_BROKEN) in 100-tick wolves+humans run",
+    );
+}
+
 #[test]
 fn parity_log_is_deterministic_across_runs() {
     // Two fresh runs with the same seed must produce the exact same log.

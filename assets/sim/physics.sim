@@ -268,10 +268,12 @@ physics cast @phase(event) {
 // ---------------------------------------------------------------------------
 // Chronicle — narrative side channel
 // ---------------------------------------------------------------------------
-// Three handlers emit `ChronicleEntry` events on significant state
-// transitions: a death (template 1), a strike (template 2), and an
-// engagement commitment (template 3). Template ids are stable `u32`
-// constants owned by `crates/engine/src/chronicle.rs::templates`.
+// Five handlers emit `ChronicleEntry` events on significant state
+// transitions: a death (template 1), a strike (template 2), an
+// engagement commitment (template 3), a wound that leaves the target
+// below half hp (template 4), and an engagement break (template 5).
+// Template ids are stable `u32` constants owned by
+// `crates/engine/src/chronicle.rs::templates`.
 //
 // `ChronicleEntry` is `@non_replayable`, so these emits never fold into
 // `replayable_sha256` and cannot perturb the wolves+humans parity
@@ -298,6 +300,49 @@ physics chronicle_attack @phase(post) {
 physics chronicle_engagement @phase(post) {
   on EngagementCommitted { actor: a, target: t } {
     emit ChronicleEntry { template_id: 3, agent: a, target: t }
+  }
+}
+
+// Template 4 (WOUND). Fires on every `AgentAttacked` where the target is
+// still alive and has dropped into the bottom half of its HP bar. The
+// threshold-transition ("pre ≥ 0.5 → post < 0.5") isn't expressible in
+// the current physics-body grammar — `AgentAttacked` carries `damage`
+// (the requested amount) rather than the actual residual hp loss once
+// shields are subtracted, so reconstructing pre-damage hp from the event
+// would be wrong whenever any absorption occurred. The fallback is the
+// simpler "post hp_pct < 0.5" invariant: one extra WOUND line per tick
+// while a victim sits in the wounded band, accepted as chronicle noise
+// per the task spec. Killing-blow ordering handles itself: `damage`
+// emits `AgentAttacked` before calling `agents.kill`, and the cascade
+// dispatches pushed events after the handler returns — so by the time
+// `chronicle_wound` runs on a lethal hit the agent is already `!alive`
+// and the `agents.alive(t)` guard skips the wound line (the death line
+// fires from `chronicle_death` instead).
+
+physics chronicle_wound @phase(post) {
+  on AgentAttacked { actor: a, target: t } {
+    if agents.alive(t) {
+      let cur_hp = agents.hp(t)
+      let max_hp = agents.max_hp(t)
+      if max_hp > 0.0 {
+        let hp_pct = cur_hp / max_hp
+        if hp_pct < 0.5 {
+          emit ChronicleEntry { template_id: 4, agent: a, target: t }
+        }
+      }
+    }
+  }
+}
+
+// Template 5 (ENGAGEMENT_BROKEN). Fires on every `EngagementBroken`,
+// regardless of `reason` (SWITCH / OUT_OF_RANGE / PARTNER_DIED). The
+// `reason` u8 stays off the `ChronicleEntry` payload so the event shape
+// remains fixed at `(template_id, agent, target, tick)` — the renderer
+// uses a single "disengaged from" phrasing for all three reasons.
+
+physics chronicle_break @phase(post) {
+  on EngagementBroken { actor: a, former_target: t } {
+    emit ChronicleEntry { template_id: 5, agent: a, target: t }
   }
 }
 

@@ -3,13 +3,14 @@
 //! The DSL-owned physics rules in `assets/sim/physics.sim` push
 //! `Event::ChronicleEntry { template_id, agent, target, tick }` onto the
 //! event ring whenever a narrative-worthy transition fires (a death, a
-//! strike, an engagement). `ChronicleEntry` is `@non_replayable` — it
-//! never folds into `replayable_sha256`, so emitting it cannot perturb
-//! the wolves+humans parity baseline.
+//! strike, an engagement, a wound, or an engagement break).
+//! `ChronicleEntry` is `@non_replayable` — it never folds into
+//! `replayable_sha256`, so emitting it cannot perturb the wolves+humans
+//! parity baseline.
 //!
 //! This module owns the template id catalogue and a deterministic prose
 //! renderer. The template ids are stable `u32` constants — the DSL
-//! emit-sites use the literal values (1, 2, 3) and this module resolves
+//! emit-sites use the literal values (1..=5) and this module resolves
 //! them back to a formatted string via [`render_entry`].
 //!
 //! Output is stable: no timestamps, no randomness, no Debug formatting.
@@ -36,6 +37,20 @@ pub mod templates {
     /// agent whose engagement slot transitioned to the target, `target`
     /// = the new engagement partner.
     pub const ENGAGEMENT: u32 = 3;
+    /// A strike left the victim below half hp (hp_pct < 0.5) while still
+    /// alive. Emitted once per in-band `AgentAttacked` — the threshold-
+    /// transition variant ("pre ≥ 0.5 → post < 0.5") wasn't expressible
+    /// against the event's `damage` field alone (shields absorb part of
+    /// the requested damage), so the renderer is comfortable with multi-
+    /// wound chronicle noise. Payload: `agent` = attacker, `target` =
+    /// victim.
+    pub const WOUND: u32 = 4;
+    /// An existing engagement pair dissolved. Payload: `agent` = the
+    /// actor whose slot transitioned, `target` = the former partner.
+    /// Emitted for every reason (switch / out-of-range / partner-died)
+    /// with the same prose — `reason` is intentionally not carried on
+    /// `ChronicleEntry` to keep the payload shape fixed.
+    pub const BREAK: u32 = 5;
 }
 
 /// Render a single `ChronicleEntry` event as a one-line human-readable
@@ -74,6 +89,20 @@ pub fn render_entry(state: &SimState, event: &Event) -> String {
         templates::ENGAGEMENT => {
             format!(
                 "Tick {tick}: {} engaged {}.",
+                name_of(state, agent),
+                name_of(state, target),
+            )
+        }
+        templates::WOUND => {
+            format!(
+                "Tick {tick}: {} wounded {}.",
+                name_of(state, agent),
+                name_of(state, target),
+            )
+        }
+        templates::BREAK => {
+            format!(
+                "Tick {tick}: {} disengaged from {}.",
                 name_of(state, agent),
                 name_of(state, target),
             )
@@ -181,6 +210,36 @@ mod tests {
         assert_eq!(
             render_entry(&state, &ev),
             "Tick 0: Human #1 engaged Wolf #2.",
+        );
+    }
+
+    #[test]
+    fn renders_wound_line() {
+        let state = make_state();
+        let ev = Event::ChronicleEntry {
+            template_id: templates::WOUND,
+            agent: AgentId::new(1).unwrap(),
+            target: AgentId::new(2).unwrap(),
+            tick: 12,
+        };
+        assert_eq!(
+            render_entry(&state, &ev),
+            "Tick 12: Human #1 wounded Wolf #2.",
+        );
+    }
+
+    #[test]
+    fn renders_break_line() {
+        let state = make_state();
+        let ev = Event::ChronicleEntry {
+            template_id: templates::BREAK,
+            agent: AgentId::new(2).unwrap(),
+            target: AgentId::new(1).unwrap(),
+            tick: 21,
+        };
+        assert_eq!(
+            render_entry(&state, &ev),
+            "Tick 21: Wolf #2 disengaged from Human #1.",
         );
     }
 

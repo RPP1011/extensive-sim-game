@@ -3,8 +3,10 @@
 
 pub mod cast;
 pub mod chronicle_attack;
+pub mod chronicle_break;
 pub mod chronicle_death;
 pub mod chronicle_engagement;
+pub mod chronicle_wound;
 pub mod damage;
 pub mod engagement_on_death;
 pub mod engagement_on_move;
@@ -33,6 +35,7 @@ pub fn dispatch_agent_attacked(event: &Event, state: &mut SimState, events: &mut
         return;
     };
     chronicle_attack::chronicle_attack(actor, target, state, events);
+    chronicle_wound::chronicle_wound(actor, target, state, events);
 }
 
 #[allow(unused_variables)]
@@ -167,6 +170,20 @@ pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, events:
 }
 
 #[allow(unused_variables)]
+pub fn dispatch_engagement_broken(event: &Event, state: &mut SimState, events: &mut EventRing) {
+    let Event::EngagementBroken {
+        actor,
+        former_target,
+        reason,
+        tick,
+    } = *event
+    else {
+        return;
+    };
+    chronicle_break::chronicle_break(actor, former_target, state, events);
+}
+
+#[allow(unused_variables)]
 pub fn dispatch_engagement_committed(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EngagementCommitted {
         actor,
@@ -247,6 +264,7 @@ pub fn register(registry: &mut CascadeRegistry) {
         dispatch_effect_standing_delta,
     );
     registry.install_kind(EventKindId::EffectStunApplied, dispatch_effect_stun_applied);
+    registry.install_kind(EventKindId::EngagementBroken, dispatch_engagement_broken);
     registry.install_kind(
         EventKindId::EngagementCommitted,
         dispatch_engagement_committed,
