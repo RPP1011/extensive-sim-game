@@ -95,7 +95,67 @@ fn damage_on_dead_target_is_a_noop() {
         &mut events,
     );
 
-    // No state mutation, no second AgentDied.
+    // No state mutation, no second AgentDied, no AgentAttacked.
     let n_died = events.iter().filter(|e| matches!(e, Event::AgentDied { .. })).count();
     assert_eq!(n_died, 0);
+    let n_attacked = events.iter().filter(|e| matches!(e, Event::AgentAttacked { .. })).count();
+    assert_eq!(n_attacked, 0);
+}
+
+/// Audit fix CRITICAL #3: cast-delivered damage must emit `AgentAttacked`
+/// alongside the state mutation, mirroring the melee `MicroKind::Attack`
+/// event sequence so cross-backend replay hashes and hostility views stay
+/// identical across delivery paths.
+#[test]
+fn cast_damage_emits_agent_attacked_like_melee() {
+    let mut state = SimState::new(4, 42);
+    let mut events = EventRing::with_cap(64);
+    let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
+    let target = spawn_hp(&mut state, CreatureType::Wolf,  100.0);
+
+    DamageHandler.handle(
+        &Event::EffectDamageApplied { caster, target, amount: 25.0, tick: 3 },
+        &mut state,
+        &mut events,
+    );
+
+    let attacked: Vec<(AgentId, AgentId, f32, u32)> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::AgentAttacked { attacker, target, damage, tick } =>
+                Some((*attacker, *target, *damage, *tick)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attacked.len(), 1, "cast damage must emit exactly one AgentAttacked");
+    assert_eq!(attacked[0], (caster, target, 25.0, 3));
+}
+
+/// Cast-delivered kill emits the same [AgentAttacked, AgentDied] sequence
+/// the melee `MicroKind::Attack` branch emits (step.rs). Pins parity with
+/// `action_attack_kill.rs`.
+#[test]
+fn cast_lethal_damage_emits_attacked_then_died() {
+    let mut state = SimState::new(4, 42);
+    let mut events = EventRing::with_cap(64);
+    let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
+    let target = spawn_hp(&mut state, CreatureType::Wolf,  50.0);
+
+    DamageHandler.handle(
+        &Event::EffectDamageApplied { caster, target, amount: 100.0, tick: 9 },
+        &mut state,
+        &mut events,
+    );
+
+    let seq: Vec<&str> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::AgentAttacked { .. } => Some("attacked"),
+            Event::AgentDied     { .. } => Some("died"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(seq, vec!["attacked", "died"],
+        "cast lethal damage must emit AgentAttacked then AgentDied");
+    assert!(!state.agent_alive(target));
 }

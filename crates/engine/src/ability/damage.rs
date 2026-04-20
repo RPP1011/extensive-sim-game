@@ -24,8 +24,9 @@ impl CascadeHandler for DamageHandler {
     fn lane(&self) -> Lane { Lane::Effect }
 
     fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let (target, amount, tick) = match *event {
-            Event::EffectDamageApplied { target, amount, tick, .. } => (target, amount, tick),
+        let (caster, target, amount, tick) = match *event {
+            Event::EffectDamageApplied { caster, target, amount, tick, .. } =>
+                (caster, target, amount, tick),
             _ => return,
         };
         if !state.agent_alive(target) { return; }
@@ -39,6 +40,23 @@ impl CascadeHandler for DamageHandler {
             (0.0, amount - shield)
         };
         state.set_agent_shield_hp(target, new_shield);
+
+        // Mirror the melee `MicroKind::Attack` replay stream: cast-delivered
+        // damage must emit `AgentAttacked` alongside `AgentDied` so both
+        // hostility views (`MostHostileTopK::update`) and replayable-hash
+        // checks see identical sequences across backends.
+        //
+        // `damage` carried on the event is the pre-clamp pre-shield magnitude
+        // the effect intended to apply — matches the melee Attack branch
+        // which also reports `ATTACK_DAMAGE` irrespective of clamp-to-zero.
+        //
+        // Audit fix CRITICAL #3.
+        events.push(Event::AgentAttacked {
+            attacker: caster,
+            target,
+            damage: amount,
+            tick,
+        });
 
         if overflow > 0.0 {
             let cur_hp = state.agent_hp(target).unwrap_or(0.0);
