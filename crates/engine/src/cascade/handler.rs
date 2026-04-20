@@ -29,7 +29,9 @@ pub enum EventKindId {
     BidPlaced            = 20,
     AnnounceEmitted      = 21,
     RecordMemory         = 22,
-    // Slots 23-127 reserved for replayable event variants added in later tasks.
+    StunExpired          = 23,
+    SlowExpired          = 24,
+    // Slots 25-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -59,6 +61,8 @@ impl EventKindId {
             Event::BidPlaced            { .. } => EventKindId::BidPlaced,
             Event::AnnounceEmitted      { .. } => EventKindId::AnnounceEmitted,
             Event::RecordMemory         { .. } => EventKindId::RecordMemory,
+            Event::StunExpired          { .. } => EventKindId::StunExpired,
+            Event::SlowExpired          { .. } => EventKindId::SlowExpired,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }

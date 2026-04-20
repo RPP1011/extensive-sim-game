@@ -1,6 +1,7 @@
 //! World-sim engine — runtime primitives the DSL compiler targets.
 //! See `docs/dsl/spec.md` for the authoritative language reference.
 
+pub mod ability;
 pub mod aggregate;
 pub mod cascade;
 pub mod channel;

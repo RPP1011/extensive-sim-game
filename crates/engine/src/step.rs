@@ -116,6 +116,12 @@ pub fn step_full<B: PolicyBackend>(
 ) {
     let t_start = std::time::Instant::now();
 
+    // Combat Foundation Task 3 — unified tick-start phase. Runs before the
+    // mask so mask predicates observe post-decrement, post-engagement state.
+    // Emits StunExpired / SlowExpired on timer transitions to zero; updates
+    // hot_engaged_with via bidirectional tentative-commit.
+    crate::ability::expire::tick_start(state, events);
+
     // Phase 1 — mask build.
     scratch.mask.reset();
     scratch.mask.mark_hold_allowed(state);

@@ -39,6 +39,10 @@ pub enum Event {
     // `audience_tag` matches `AnnounceAudience::tag()`: 0=Group, 1=Area, 2=Anyone.
     AnnounceEmitted { speaker: AgentId, audience_tag: u8, fact_payload: u64, tick: u32 },
     RecordMemory    { observer: AgentId, source: AgentId, fact_payload: u64, confidence: f32, tick: u32 },
+    // Combat Foundation Task 3 — stun/slow expiry. Emitted by
+    // `ability::expire::tick_start` on the tick a timer reaches zero.
+    StunExpired { agent_id: AgentId, tick: u32 },
+    SlowExpired { agent_id: AgentId, tick: u32 },
     // Non-replayable (chronicle / prose side-channel placeholder)
     ChronicleEntry { tick: u32, template_id: u32 },
 }
@@ -69,6 +73,8 @@ impl Event {
             Event::BidPlaced            { tick, .. } |
             Event::AnnounceEmitted      { tick, .. } |
             Event::RecordMemory         { tick, .. } |
+            Event::StunExpired          { tick, .. } |
+            Event::SlowExpired          { tick, .. } |
             Event::ChronicleEntry       { tick, .. } => *tick,
         }
     }
