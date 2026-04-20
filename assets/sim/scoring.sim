@@ -200,6 +200,33 @@ scoring {
   //   view::pack_focus(self, target) > 0.5 : +0.4
   //     the observer's packmates are already engaged with this target.
   //     Stacks with threat_level / my_enemies for a decisive focus.
+  // Task 178 — rally on wounded kin. `rally_boost(self, _)` sums the
+  // decayed rally-call scalars this agent has accumulated across every
+  // recorded wounded-kin pair. The `rally_on_wound` physics rule emits
+  // one RallyCall per same-species kin when a packmate drops below
+  // half hp without dying; the @decay view pulls the value back
+  // toward zero at ~6-tick half-life (same as kin_fear). A crossing
+  // above 0.3 (reached whenever at least one recent wound is still
+  // decaying) stacks +0.3 onto Attack so the observer fights harder
+  // for the rally window.
+  //
+  // The +0.3 bump is deliberately smaller than pack_focus (+0.4) and
+  // my_enemies (+0.4) so rally is a meaningful nudge without
+  // dominating when all three modifiers fire together. Symmetric
+  // positive opposite of the `view::kin_fear(self, _) > 0.5 : +0.4`
+  // Flee modifier:
+  //   kin dies  → +0.4 Flee    (rout)
+  //   kin hurt  → +0.3 Attack  (rally)
+  // Fear is the stronger signal because death is a stronger event
+  // than a wound — but rally lets survivors press the attack for a
+  // few ticks when a packmate takes a hit, rather than only scattering
+  // on a kill.
+  //
+  //   view::rally_boost(self, _) > 0.3 : +0.3
+  //     any recent kin wound rallies the observer across every
+  //     candidate target. Row-level bump (wildcard `_`), not
+  //     target-bound — "my blood is up" is a row-wide signal, same
+  //     shape as the Flee kin_fear bump.
   Attack(target) = 0.0
     + (if self.hp_pct >= 0.8 { 0.5 } else { 0.0 })
     + (if target.hp_pct < 0.3 { 0.4 } else { 0.0 })
@@ -208,6 +235,7 @@ scoring {
     + (if view::threat_level(self, target) > 20.0 { 0.3 } else { 0.0 })
     + (if view::my_enemies(self, target) > 0.5 { 0.4 } else { 0.0 })
     + (if view::pack_focus(self, target) > 0.5 { 0.4 } else { 0.0 })
+    + (if view::rally_boost(self, _) > 0.3 { 0.3 } else { 0.0 })
 
   // Cast / UseItem: "domain hook" kinds without a dedicated
   // `Action::*` constructor in `UtilityBackend::build_action`. Until

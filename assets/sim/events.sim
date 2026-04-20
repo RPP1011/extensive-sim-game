@@ -130,6 +130,19 @@ event_tag Audit    { actor: AgentId }
 // must reconstruct from the event log.
 @replayable event PackAssist { observer: AgentId, target: AgentId }
 
+// Task 178 — rally fan-out. Emitted by the `rally_on_wound` physics
+// rule once per nearby same-species kin when a same-species kin is
+// wounded (damaged but not killed, victim drops below half hp). The
+// `rally_boost` @materialized view folds these into a per-observer
+// decayed scalar; scoring's Attack row bumps the observer's score
+// when the scalar crosses 0.3 — so kin fight harder when a packmate
+// goes down. Symmetric positive opposite of `FearSpread`:
+//   FearSpread : kin dies  → observer flees  (+Flee)
+//   RallyCall  : kin hurt  → observer fights (+Attack)
+// @replayable for the same reason as FearSpread / PackAssist — the
+// view's state must reconstruct from the event log.
+@replayable event RallyCall { observer: AgentId, wounded_kin: AgentId }
+
 // Non-replayable side channel — prose chronicle entries carrying a template
 // id the renderer pairs with a localised string. Intentionally omits
 // `@replayable` so `Event::is_replayable()` returns `false` and the hash

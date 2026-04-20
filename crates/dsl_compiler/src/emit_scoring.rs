@@ -164,6 +164,10 @@ const VIEW_ID_KIN_FEAR: u16 = 2;
 /// fed by `PackAssist` emitted when a same-species neighbour commits an
 /// engagement. See `assets/sim/views.sim::pack_focus`.
 const VIEW_ID_PACK_FOCUS: u16 = 3;
+/// Rally on kin wound (task 178) — per-(observer, wounded_kin) decayed
+/// rally scalar fed by `RallyCall` emitted when a same-species
+/// neighbour is wounded. See `assets/sim/views.sim::rally_boost`.
+const VIEW_ID_RALLY_BOOST: u16 = 4;
 
 // ScalarCompare operator discriminants. Keep aligned with
 // `PredicateDescriptor::OP_*` in engine_rules.
@@ -418,6 +422,11 @@ impl PredicateDescriptor {
     /// beacon fed by `PackAssist` emitted when a same-species neighbour
     /// commits an engagement. See `assets/sim/views.sim::pack_focus`.
     pub const VIEW_ID_PACK_FOCUS: u16 = 3;
+    /// Rally on kin wound (task 178) — per-(observer, wounded_kin)
+    /// decayed rally scalar fed by `RallyCall` emitted when a
+    /// same-species neighbour drops below half hp without dying. See
+    /// `assets/sim/views.sim::rally_boost`.
+    pub const VIEW_ID_RALLY_BOOST: u16 = 4;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;
@@ -859,6 +868,7 @@ fn view_id_for(name: &str) -> Result<u16, EmitError> {
         "my_enemies" => Ok(VIEW_ID_MY_ENEMIES),
         "kin_fear" => Ok(VIEW_ID_KIN_FEAR),
         "pack_focus" => Ok(VIEW_ID_PACK_FOCUS),
+        "rally_boost" => Ok(VIEW_ID_RALLY_BOOST),
         other => Err(EmitError::UnsupportedView(other.to_string())),
     }
 }

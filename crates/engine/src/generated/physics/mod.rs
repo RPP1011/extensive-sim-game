@@ -17,6 +17,7 @@ pub mod heal;
 pub mod modify_standing;
 pub mod opportunity_attack;
 pub mod pack_focus_on_engagement;
+pub mod rally_on_wound;
 pub mod record_memory;
 pub mod shield;
 pub mod slow;
@@ -40,6 +41,7 @@ pub fn dispatch_agent_attacked(event: &Event, state: &mut SimState, events: &mut
     };
     chronicle_attack::chronicle_attack(actor, target, state, events);
     chronicle_wound::chronicle_wound(actor, target, state, events);
+    rally_on_wound::rally_on_wound(actor, target, state, events);
 }
 
 #[allow(unused_variables)]

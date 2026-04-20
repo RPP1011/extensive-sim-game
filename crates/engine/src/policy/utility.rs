@@ -371,6 +371,33 @@ fn eval_view_call(
                 }
             }
         }
+        PredicateDescriptor::VIEW_ID_RALLY_BOOST => {
+            // `rally_boost(observer, wounded_kin)` — `@decay(rate=0.891,
+            // per=tick)` on pair_map storage (~6-tick half-life). Same
+            // shape as kin_fear: `get(a, b, tick)` reads the decayed
+            // value, `sum_for_first(a, tick)` sums across every
+            // recorded wounded-kin pair for this observer. Task 178 —
+            // rally mechanic. Scoring's Attack row uses the wildcard
+            // slot (sum across all recorded wounded kin) so any recent
+            // kin wound rallies the observer row-wide, symmetric to
+            // the kin_fear wildcard slot on Flee.
+            let a = match resolve_slot(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            match slot1 {
+                PredicateDescriptor::ARG_WILDCARD => {
+                    state.views.rally_boost.sum_for_first(a, state.tick)
+                }
+                _ => {
+                    let b = match resolve_slot(slot1, agent, target) {
+                        Some(id) => id,
+                        None => return f32::NAN,
+                    };
+                    state.views.rally_boost.get(a, b, state.tick)
+                }
+            }
+        }
         _ => f32::NAN,
     }
 }

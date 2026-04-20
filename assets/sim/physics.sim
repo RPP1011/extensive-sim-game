@@ -527,3 +527,59 @@ physics pack_focus_on_engagement @phase(event) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Rally on wound (task 178) — symmetric positive opposite of fear spread.
+// ---------------------------------------------------------------------------
+//
+// When an agent is wounded (damaged, still alive, hp_pct dropped below
+// 0.5), every alive same-species neighbour within a 12 m radius gets a
+// `RallyCall` event emitted at them. The `rally_boost` @materialized
+// view folds those into a per-(observer, wounded_kin) decayed scalar,
+// and scoring's Attack row reads the wildcard sum through
+// `view::rally_boost(self, _) > 0.3 : +0.3` — so a wolf whose
+// packmate just got bloodied picks Attack harder against fresh targets
+// for the next ~6 ticks.
+//
+// Symmetric mirror of `fear_spread_on_death`:
+//   fear_spread_on_death : kin dies  → FearSpread → +Flee (rout)
+//   rally_on_wound       : kin hurt  → RallyCall  → +Attack (rally)
+//
+// The wound threshold is `hp_pct < 0.5`, mirroring the
+// `chronicle_wound` rule (template 4). Re-using that reads off
+// `agents.hp(t) / agents.max_hp(t)` guarded by `agents.alive(t)` so a
+// lethal hit doesn't also emit a rally (death fires kin_fear via
+// fear_spread_on_death instead — the mirror fires its rout, not its
+// rally). The cascade ordering is: `damage` emits `AgentAttacked`
+// BEFORE `agents.kill(...)`, then cascade dispatches this @phase(event)
+// rule on the AgentAttacked before the @phase(post) chronicle_wound
+// and chronicle_death rules. On a lethal hit the `agents.alive(t)`
+// guard here is false (damage already called `agents.kill` and set
+// alive=false), so the rally is correctly suppressed and only the
+// death's FearSpread fires. On a non-lethal wounding hit alive is true
+// and the rally fires.
+//
+// Species scoping: `query.nearby_kin` (task 167 primitive) filters
+// same-species neighbours; the physics rule is species-agnostic.
+// Radius 12 m matches fear_spread / pack_focus for symmetry (all three
+// kin-mechanic features use the same local-visual-contact radius).
+//
+// GPU-emittability: same envelope as `fear_spread_on_death` and
+// `pack_focus_on_engagement` — one bounded `query.nearby_kin` loop and
+// one emit per kin. No recursion, no unbounded state mutation.
+physics rally_on_wound @phase(event) {
+  on AgentAttacked { actor: a, target: t } {
+    if agents.alive(t) {
+      let cur_hp = agents.hp(t)
+      let max_hp = agents.max_hp(t)
+      if max_hp > 0.0 {
+        let hp_pct = cur_hp / max_hp
+        if hp_pct < 0.5 {
+          for kin in query.nearby_kin(t, 12.0) {
+            emit RallyCall { observer: kin, wounded_kin: t }
+          }
+        }
+      }
+    }
+  }
+}

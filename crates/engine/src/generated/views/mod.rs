@@ -7,6 +7,7 @@ pub mod is_stunned;
 pub mod kin_fear;
 pub mod my_enemies;
 pub mod pack_focus;
+pub mod rally_boost;
 pub mod slow_factor;
 pub mod threat_level;
 
@@ -16,6 +17,7 @@ pub use is_stunned::is_stunned;
 pub use kin_fear::KinFear;
 pub use my_enemies::MyEnemies;
 pub use pack_focus::PackFocus;
+pub use rally_boost::RallyBoost;
 pub use slow_factor::slow_factor;
 pub use threat_level::ThreatLevel;
 
@@ -28,6 +30,7 @@ pub struct ViewRegistry {
     pub kin_fear: kin_fear::KinFear,
     pub my_enemies: my_enemies::MyEnemies,
     pub pack_focus: pack_focus::PackFocus,
+    pub rally_boost: rally_boost::RallyBoost,
     pub threat_level: threat_level::ThreatLevel,
 }
 
@@ -49,6 +52,7 @@ impl ViewRegistry {
             self.kin_fear.fold_event(e, tick);
             self.my_enemies.fold_event(e, tick);
             self.pack_focus.fold_event(e, tick);
+            self.rally_boost.fold_event(e, tick);
             self.threat_level.fold_event(e, tick);
         }
     }

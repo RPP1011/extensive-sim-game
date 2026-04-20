@@ -37,6 +37,7 @@ pub mod opportunity_attack_triggered;
 pub mod pack_assist;
 pub mod quest_accepted;
 pub mod quest_posted;
+pub mod rally_call;
 pub mod record_memory;
 
 pub use agent_ate::AgentAte;
@@ -75,6 +76,7 @@ pub use opportunity_attack_triggered::OpportunityAttackTriggered;
 pub use pack_assist::PackAssist;
 pub use quest_accepted::QuestAccepted;
 pub use quest_posted::QuestPosted;
+pub use rally_call::RallyCall;
 pub use record_memory::RecordMemory;
 
 use crate::ids::{AbilityId, AgentId, QuestId};
@@ -286,6 +288,11 @@ pub enum Event {
         resolution: Resolution,
         tick: u32,
     },
+    RallyCall {
+        observer: AgentId,
+        wounded_kin: AgentId,
+        tick: u32,
+    },
     RecordMemory {
         observer: AgentId,
         source: AgentId,
@@ -334,6 +341,7 @@ impl Event {
             Event::PackAssist { tick, .. } => *tick,
             Event::QuestAccepted { tick, .. } => *tick,
             Event::QuestPosted { tick, .. } => *tick,
+            Event::RallyCall { tick, .. } => *tick,
             Event::RecordMemory { tick, .. } => *tick,
         }
     }
@@ -375,6 +383,7 @@ impl Event {
             Event::PackAssist { .. } => true,
             Event::QuestAccepted { .. } => true,
             Event::QuestPosted { .. } => true,
+            Event::RallyCall { .. } => true,
             Event::RecordMemory { .. } => true,
         }
     }

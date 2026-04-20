@@ -53,7 +53,11 @@ pub enum EventKindId {
     // emit per nearby same-species kin; folded by `pack_focus`
     // materialized view.
     PackAssist           = 37,
-    // Slots 38-127 reserved for replayable event variants added in later tasks.
+    // Task 178 — rally fan-out from `AgentAttacked` on a wounded
+    // (alive + hp_pct < 0.5) victim. One emit per nearby same-species
+    // kin; folded by `rally_boost` materialized view.
+    RallyCall            = 38,
+    // Slots 39-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -96,6 +100,7 @@ impl EventKindId {
             Event::EngagementBroken     { .. } => EventKindId::EngagementBroken,
             Event::FearSpread           { .. } => EventKindId::FearSpread,
             Event::PackAssist           { .. } => EventKindId::PackAssist,
+            Event::RallyCall            { .. } => EventKindId::RallyCall,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }

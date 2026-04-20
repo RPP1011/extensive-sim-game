@@ -37,6 +37,7 @@ from .opportunity_attack_triggered import OpportunityAttackTriggered
 from .pack_assist import PackAssist
 from .quest_accepted import QuestAccepted
 from .quest_posted import QuestPosted
+from .rally_call import RallyCall
 from .record_memory import RecordMemory
 
-__all__ = ["AgentAte", "AgentAttacked", "AgentCast", "AgentCommunicated", "AgentConversed", "AgentDied", "AgentDrank", "AgentFled", "AgentHarvested", "AgentHarvestedVoxel", "AgentMoved", "AgentPlacedTile", "AgentPlacedVoxel", "AgentRemembered", "AgentRested", "AgentSharedStory", "AgentUsedItem", "AnnounceEmitted", "BidPlaced", "CastDepthExceeded", "ChronicleEntry", "EffectDamageApplied", "EffectGoldTransfer", "EffectHealApplied", "EffectShieldApplied", "EffectSlowApplied", "EffectStandingDelta", "EffectStunApplied", "EngagementBroken", "EngagementCommitted", "FearSpread", "InformationRequested", "OpportunityAttackTriggered", "PackAssist", "QuestAccepted", "QuestPosted", "RecordMemory"]
+__all__ = ["AgentAte", "AgentAttacked", "AgentCast", "AgentCommunicated", "AgentConversed", "AgentDied", "AgentDrank", "AgentFled", "AgentHarvested", "AgentHarvestedVoxel", "AgentMoved", "AgentPlacedTile", "AgentPlacedVoxel", "AgentRemembered", "AgentRested", "AgentSharedStory", "AgentUsedItem", "AnnounceEmitted", "BidPlaced", "CastDepthExceeded", "ChronicleEntry", "EffectDamageApplied", "EffectGoldTransfer", "EffectHealApplied", "EffectShieldApplied", "EffectSlowApplied", "EffectStandingDelta", "EffectStunApplied", "EngagementBroken", "EngagementCommitted", "FearSpread", "InformationRequested", "OpportunityAttackTriggered", "PackAssist", "QuestAccepted", "QuestPosted", "RallyCall", "RecordMemory"]

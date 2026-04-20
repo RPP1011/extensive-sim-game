@@ -204,3 +204,59 @@ view pack_focus(observer: Agent, target: Agent) -> f32 {
   on PackAssist { observer: observer, target: target } { self += 1.0 }
   clamp: [0.0, 10.0],
 }
+
+// -----------------------------------------------------------------------
+// @materialized view rally_boost(observer, wounded_kin) → f32 — kin-wound rally.
+// -----------------------------------------------------------------------
+// Per-(observer, wounded_kin) rally scalar. When a `RallyCall` event
+// fires (emitted by the `rally_on_wound` physics rule once per nearby
+// same-species kin at the moment a packmate is wounded — damaged and
+// dropped below half hp without dying), the observer's entry for that
+// specific wounded kin is bumped by +1.0 (the emitter hardcodes the
+// fold amount; see `emit_fold_arm` in dsl_compiler). The anchor-
+// pattern decay then pulls the value back toward 0.
+//
+// `@decay(rate = 0.891, per = tick)` ≈ 6-tick half-life (0.891^6 ≈
+// 0.50). Matches `kin_fear`'s post-task-173 retuned decay so a
+// "packmate hurt" signal fades on the same ~0.6 s timescale as
+// "packmate died" — both are short-lived morale ticks that nudge a
+// few ticks of behaviour without locking in permanent state.
+//
+// Symmetric to `kin_fear` in shape but inverted in effect:
+//   kin_fear   : observer saw kin die  → +Flee  (rout)
+//   rally_boost: observer saw kin hurt → +Attack (revenge / rally)
+//
+// Task constraint (per-pair keying instead of single-slot): the
+// project's @decay storage currently supports only `pair_map` over
+// 2-arg views; 1-arg @decay views are not a shape the compiler
+// emits (see `emit_view.rs::emit_per_entity_topk1_struct` —
+// `per_entity_topk(1)` storage does not support `@decay`). Keeping
+// the signature `(observer, wounded_kin)` matches the `kin_fear`
+// mirror exactly, and scoring uses the wildcard `_` slot to sum
+// across every recorded wounded-kin pair for the observer — so the
+// behavioural intent "any recent wound rallies me" is expressed at
+// the scoring site, not the view shape.
+//
+// Consumed by scoring's Attack row through the wildcard-slot helper
+// `sum_for_first(observer, tick)` — `view::rally_boost(self, _) > 0.3
+// : +0.3`. The +0.3 bump is deliberately smaller than pack_focus's
+// +0.4 and my_enemies' +0.4 so rally is meaningful without
+// dominating when all three modifiers fire together.
+//
+// Species scoping: the physics rule filters via `query.nearby_kin`,
+// so every emitted `RallyCall` has matching-species (observer,
+// wounded_kin). The view itself is species-agnostic — "wolf sees
+// wolf wounded → rally", "human sees human wounded → rally" both
+// flow through the same fold.
+//
+// Storage: `pair_map<(AgentId, AgentId), (f32, u32)>` (the @decay
+// variant stores (base, anchor_tick) per pair). Same bounded-
+// population assumption as kin_fear — pair count stays small in
+// combat scenarios.
+@materialized(on_event = [RallyCall], storage = pair_map)
+@decay(rate = 0.891, per = tick)
+view rally_boost(observer: Agent, wounded_kin: Agent) -> f32 {
+  initial: 0.0,
+  on RallyCall { observer: observer, wounded_kin: wounded_kin } { self += 1.0 }
+  clamp: [0.0, 10.0],
+}

@@ -129,6 +129,10 @@ fn fmt_event(e: &Event) -> String {
             "PackAssist(tick={tick},observer={},target={})",
             observer.raw(), target.raw(),
         ),
+        Event::RallyCall { observer, wounded_kin, tick } => format!(
+            "RallyCall(tick={tick},observer={},wounded_kin={})",
+            observer.raw(), wounded_kin.raw(),
+        ),
         // Any other variant we don't currently expect — serialise a
         // generic tag so the test still captures the surprise. If one of
         // these starts appearing for real, promote it to an explicit arm.
