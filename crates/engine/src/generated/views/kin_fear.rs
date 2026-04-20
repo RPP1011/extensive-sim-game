@@ -8,7 +8,7 @@ use crate::event::Event;
 use crate::ids::AgentId;
 
 /// @materialized view `kin_fear` — `storage = pair_map<(AgentId, AgentId), f32>`.
-/// @decay(rate = 0.955, per = tick) — anchor-pattern storage. Spec §2.3.
+/// @decay(rate = 0.891, per = tick) — anchor-pattern storage. Spec §2.3.
 #[derive(Debug, Default)]
 pub struct KinFear {
     /// `(base_at_anchor, anchor_tick)` per-pair. Observable value at `tick`
@@ -17,8 +17,8 @@ pub struct KinFear {
 }
 
 impl KinFear {
-    /// Decay rate per tick — compile-time constant from `@decay(rate = 0.955)`.
-    pub const RATE: f32 = 0.955_f32;
+    /// Decay rate per tick — compile-time constant from `@decay(rate = 0.891)`.
+    pub const RATE: f32 = 0.891_f32;
 
     pub fn new() -> Self {
         Self::default()

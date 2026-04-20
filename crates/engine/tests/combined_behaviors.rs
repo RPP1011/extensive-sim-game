@@ -373,7 +373,12 @@ fn grudge_dominates_pack_focus_on_different_targets() {
 ///     fired and was folded.
 ///  3. W2's scoring swings from "Attack > Flee" (engaged state, fresh hp)
 ///     to "Flee > Attack" — the rout cascades onto an agent that was
-///     mid-combat, not just a free bystander.
+///     mid-combat, not just a free bystander. Task 173 retuned kin_fear
+///     so a healthy wolf alone no longer flips; W2 is set to hp=45
+///     (below the hp<50 gate) so kin_fear adds the tipping +0.4 on top
+///     of the +0.4 wounded-body gate. The assertion is still "rout
+///     cascades onto mid-combat agent" — just calibrated against the
+///     new softer rout.
 #[test]
 fn engagement_death_triggers_rout_in_partner() {
     let mut state = SimState::new(16, 0xA5CADE_2);
@@ -392,16 +397,29 @@ fn engagement_death_triggers_rout_in_partner() {
     state.set_agent_engaged_with(w2, Some(h2));
     state.set_agent_engaged_with(h2, Some(w2));
 
-    // Pre-assert: before the death, W2 (full hp, mid-engagement) prefers
-    // Attack to Flee. Fresh-self gate fires (+0.5 Attack), no kin_fear
-    // yet, so Flee base = 0.
+    // Lightly wound W2 so the `hp < 50` Flee gate fires (+0.4). This
+    // is below the `hp_pct >= 0.8` fresh-self Attack gate (hp_pct =
+    // 45/80 = 0.5625), so Attack drops to 0.0 on a full-hp target and
+    // Flee's single-gate score already ties with Attack. The kin_fear
+    // +0.4 then pushes Flee decisively above. Without this mild wound,
+    // the retuned rout (task 173) intentionally does NOT flip a fresh
+    // engaged wolf — see Scenario C (`wounded_self_flees_despite_...`)
+    // which covers the heavily-wounded case explicitly.
+    state.set_agent_hp(w2, 45.0);
+
+    // Pre-assert: before the death, W2 (lightly wounded but engaged)
+    // prefers Attack(~0.0) — wait, actually Attack drops to 0 once
+    // hp_pct<0.8. So the informative pre-condition is that Flee already
+    // has +0.4 from hp<50, tying Attack at 0.4. kin_fear adds the
+    // deciding +0.4.
     let attack = attack_entry();
     let flee = flee_entry();
     let pre_attack = score_row_for(attack, &state, w2, Some(h2));
     let pre_flee = score_row_for(flee, &state, w2, None);
     assert!(
-        pre_attack > pre_flee,
-        "pre-death: W2 should prefer Attack(={pre_attack}) over Flee(={pre_flee})",
+        pre_flee >= pre_attack,
+        "pre-death: wounded W2 should have Flee(={pre_flee}) ≥ Attack(={pre_attack}) \
+         from the hp<50 gate alone; kin_fear hasn't fired yet",
     );
 
     // Drive the death through the full cascade. `kill_agent` flips the
@@ -436,8 +454,8 @@ fn engagement_death_triggers_rout_in_partner() {
     // Assertion 2: fear_spread reached W2.
     let kf = state.views.kin_fear.sum_for_first(w2, state.tick);
     assert!(
-        kf > 0.3,
-        "W2 kin_fear {kf} should exceed 0.3 gate after W1 died within 12m",
+        kf > 0.5,
+        "W2 kin_fear {kf} should exceed 0.5 gate after W1 died within 12m",
     );
 
     // Assertion 3: rout flipped the argmax. Flee should now beat Attack.
@@ -446,11 +464,11 @@ fn engagement_death_triggers_rout_in_partner() {
     assert!(
         post_flee > post_attack,
         "post-death: W2 should prefer Flee(={post_flee}) over Attack(={post_attack}) — \
-         kin_fear adds +0.6 to Flee via the >0.3 gate",
+         kin_fear adds +0.4 to Flee via the >0.5 gate",
     );
     assert!(
-        post_flee > pre_flee + 0.5,
-        "Flee should jump by ≥+0.5 (expected +0.6 from kin_fear gate); \
+        post_flee > pre_flee + 0.3,
+        "Flee should jump by ≥+0.3 (expected +0.4 from kin_fear gate); \
          pre={pre_flee} post={post_flee}",
     );
 
@@ -580,8 +598,8 @@ fn wounded_self_flees_despite_pack_focus_on_target() {
 /// 4-wolf pack, all within 12 m so fear-spread covers every pair. Kill W1
 /// via the full cascade (AgentDied event + `run_fixed_point`); each of
 /// W2/W3/W4 should receive one FearSpread (kin_fear sum ≈ +1.0 each, all
-/// above the 0.3 gate). Then kill W2 — W3 and W4 receive a second
-/// FearSpread (kin_fear stacks: fresh +1.0 landing on top of the
+/// above the 0.5 gate — task 173). Then kill W2 — W3 and W4 receive a
+/// second FearSpread (kin_fear stacks: fresh +1.0 landing on top of the
 /// already-partially-decayed first event), sharpening the rout.
 ///
 /// This pins the "chained rout" behavior the task brief calls for —
@@ -625,13 +643,13 @@ fn chained_deaths_stack_kin_fear_on_survivors() {
     assert!(fears_phase_1.contains(&w3));
     assert!(fears_phase_1.contains(&w4));
 
-    // All three survivors above the 0.3 kin_fear gate.
+    // All three survivors above the 0.5 kin_fear gate.
     let kf2_a = state.views.kin_fear.sum_for_first(w2, state.tick);
     let kf3_a = state.views.kin_fear.sum_for_first(w3, state.tick);
     let kf4_a = state.views.kin_fear.sum_for_first(w4, state.tick);
-    assert!(kf2_a > 0.3, "W2 kin_fear {kf2_a} below 0.3 after W1 death");
-    assert!(kf3_a > 0.3, "W3 kin_fear {kf3_a} below 0.3 after W1 death");
-    assert!(kf4_a > 0.3, "W4 kin_fear {kf4_a} below 0.3 after W1 death");
+    assert!(kf2_a > 0.5, "W2 kin_fear {kf2_a} below 0.5 after W1 death");
+    assert!(kf3_a > 0.5, "W3 kin_fear {kf3_a} below 0.5 after W1 death");
+    assert!(kf4_a > 0.5, "W4 kin_fear {kf4_a} below 0.5 after W1 death");
 
     // All three should be near the +1.0 emit amount (modulo same-tick
     // decay, which is 0 ticks of decay → exactly 1.0).
@@ -646,8 +664,9 @@ fn chained_deaths_stack_kin_fear_on_survivors() {
     // and `sum_for_first` adds them).
     //
     // Advance the tick by 1 so we can distinguish the two fear events
-    // cleanly (decay is measured in ticks from emit). One tick decay is
-    // 0.955, negligible — both events still count.
+    // cleanly (decay is measured in ticks from emit). One tick decay at
+    // the task-173 rate is 0.891 — still well above the 0.5 gate and
+    // both events still count.
     state.tick += 1;
     let events_before_2 = events.total_pushed();
     let tick_2 = state.tick;
@@ -672,8 +691,8 @@ fn chained_deaths_stack_kin_fear_on_survivors() {
     );
 
     // W3/W4 kin_fear should have GROWN — phase-2 fold lands on top of
-    // slightly-decayed phase-1 (0.955^1 ≈ 0.955 per first event, plus
-    // fresh +1.0 on the W2 slot). Sum ≈ 0.955 + 1.0 = 1.955.
+    // slightly-decayed phase-1 (0.891^1 ≈ 0.891 per first event, plus
+    // fresh +1.0 on the W2 slot). Sum ≈ 0.891 + 1.0 = 1.891.
     let kf3_b = state.views.kin_fear.sum_for_first(w3, state.tick);
     let kf4_b = state.views.kin_fear.sum_for_first(w4, state.tick);
     assert!(
@@ -685,26 +704,26 @@ fn chained_deaths_stack_kin_fear_on_survivors() {
         "W4 kin_fear should stack across two deaths: phase1={kf4_a}, phase2={kf4_b}",
     );
     // Second event adds close to another full +1.0 (one tick decay loses
-    // ~0.045 off the first event). Combined should be well above 1.5.
+    // ~0.109 off the first event at rate 0.891). Combined should be well
+    // above 1.5.
     assert!(
         kf3_b > 1.5,
         "W3 kin_fear after 2 packmate deaths = {kf3_b}, expected ≥1.5 \
-         (≈0.955 + 1.0 = 1.955)",
+         (≈0.891 + 1.0 = 1.891)",
     );
 
     // Behavioral check — rout cascade flipped both survivors to Flee.
-    // Flee score with kin_fear > 0.3 gets +0.6; Attack on a hostile (not
-    // applicable here — no humans in the fixture) wouldn't beat it
-    // anyway. Score Flee directly to pin the modifier.
+    // Flee score with kin_fear > 0.5 gets +0.4 (task 173, retuned from
+    // the original +0.6 gate). Score Flee directly to pin the modifier.
     let flee = flee_entry();
     let flee_w3 = score_row_for(flee, &state, w3, None);
     let flee_w4 = score_row_for(flee, &state, w4, None);
     assert!(
-        flee_w3 > 0.5,
-        "W3 Flee score {flee_w3} should include the +0.6 kin_fear bump",
+        flee_w3 > 0.3,
+        "W3 Flee score {flee_w3} should include the +0.4 kin_fear bump",
     );
     assert!(
-        flee_w4 > 0.5,
-        "W4 Flee score {flee_w4} should include the +0.6 kin_fear bump",
+        flee_w4 > 0.3,
+        "W4 Flee score {flee_w4} should include the +0.4 kin_fear bump",
     );
 }

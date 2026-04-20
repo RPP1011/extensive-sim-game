@@ -131,11 +131,15 @@ view my_enemies(observer: Agent, attacker: Agent) -> f32 {
 // fold amount; see `emit_fold_arm` in dsl_compiler). The anchor-pattern
 // decay then pulls the value back toward 0 over time.
 //
-// `@decay(rate = 0.955, per = tick)` ≈ 15-tick half-life (0.955^15 ≈
-// 0.50). At the engine's 100 ms tick that's a ~1.5 s rout window — long
-// enough to observably change Flee vs Attack scoring for a few ticks
-// after a packmate dies, short enough to wash out well before the next
-// engagement cycle.
+// `@decay(rate = 0.891, per = tick)` ≈ 6-tick half-life (0.891^6 ≈
+// 0.50). Task 173 shortened the half-life from ~15 ticks to ~6 ticks
+// after the task-171 sweep showed 100% human wins across 50 seeds —
+// with the 15-tick half-life, routs were permanent because kin_fear
+// decayed slower than wolves could recover scoring priority. At the
+// engine's 100 ms tick that's a ~0.6 s rout window — long enough to
+// observably change Flee vs Attack scoring for a few ticks after a
+// packmate dies, short enough that pack_focus (task 169, ~10-tick
+// half-life) can pull survivors back when kin re-converge.
 //
 // Consumed by scoring's Flee row through the wildcard-slot helper
 // `sum_for_first(observer, tick)` — every `@decay pair_map` view gets
@@ -153,7 +157,7 @@ view my_enemies(observer: Agent, attacker: Agent) -> f32 {
 // assumption as threat_level / my_enemies — pair count stays small in
 // combat scenarios.
 @materialized(on_event = [FearSpread], storage = pair_map)
-@decay(rate = 0.955, per = tick)
+@decay(rate = 0.891, per = tick)
 view kin_fear(observer: Agent, dead_kin: Agent) -> f32 {
   initial: 0.0,
   on FearSpread { observer: observer, dead_kin: dead_kin } { self += 1.0 }
