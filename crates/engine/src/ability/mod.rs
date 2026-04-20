@@ -19,6 +19,8 @@ pub mod gate;
 pub mod program;
 pub mod registry;
 
+pub use cast::CastHandler;
+pub use gate::evaluate_cast_gate;
 pub use program::{Area, Delivery, EffectOp, Gate, TargetSelector, MAX_EFFECTS_PER_PROGRAM};
 pub use program::AbilityProgram;
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};

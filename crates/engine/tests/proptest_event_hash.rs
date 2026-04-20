@@ -2,6 +2,7 @@
 //! `(cap, sequence_of_pushed_events)` — running twice gives the same bytes.
 //! Complements `tests/event_ring.rs::golden_hash_anchors_format` (single
 //! pinned sequence) by covering arbitrary random sequences.
+use engine::ability::AbilityId;
 use engine::event::{Event, EventRing};
 use engine::ids::{AgentId, QuestId};
 use engine::policy::{QuestCategory, Resolution};
@@ -28,7 +29,12 @@ fn arb_event() -> impl Strategy<Value = Event> {
                 4  => Event::AgentAte { agent_id: a, delta: f_a, tick },
                 5  => Event::AgentDrank { agent_id: a, delta: f_a, tick },
                 6  => Event::AgentRested { agent_id: a, delta: f_a, tick },
-                7  => Event::AgentCast { agent_id: a, ability_idx: (u_a as u8), tick },
+                7  => Event::AgentCast {
+                    caster: a,
+                    ability: AbilityId::new(u_a.max(1)).unwrap(),
+                    target: b,
+                    tick,
+                },
                 8  => Event::AgentUsedItem { agent_id: a, item_slot: (u_a as u8), tick },
                 9  => Event::AgentHarvested { agent_id: a, resource: u64_a, tick },
                 10 => Event::AgentPlacedTile { agent_id: a, where_pos: p, kind_tag: u_a, tick },

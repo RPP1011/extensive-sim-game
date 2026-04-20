@@ -355,14 +355,18 @@ fn apply_actions(
                     });
                 }
             }
-            // Event-only micros — engine emits the typed event; domain-specific
-            // effects land as compiler-registered cascade handlers in later plans.
+            // Combat Foundation Task 9 — Cast dispatch. Push one `AgentCast`
+            // event; the `CastHandler` cascade looks the program up in its
+            // `AbilityRegistry` and emits one `Effect*Applied` per op.
             ActionKind::Micro {
                 kind: MicroKind::Cast,
-                target: MicroTarget::AbilityIdx(idx),
+                target: MicroTarget::Ability { id, target },
             } => {
                 events.push(Event::AgentCast {
-                    agent_id: action.agent, ability_idx: idx, tick: state.tick,
+                    caster:  action.agent,
+                    ability: id,
+                    target,
+                    tick:    state.tick,
                 });
             }
             ActionKind::Micro {

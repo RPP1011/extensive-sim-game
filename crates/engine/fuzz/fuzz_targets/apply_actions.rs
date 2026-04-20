@@ -57,7 +57,18 @@ impl PolicyBackend for FuzzPolicy {
                     let tgt = AgentId::new(((slot as u32) % state.agent_cap()) + 1).unwrap();
                     MicroTarget::Agent(tgt)
                 }
-                MicroKind::Cast => MicroTarget::AbilityIdx(b),
+                MicroKind::Cast => {
+                    // Task 9: Cast now requires an AbilityId + target agent.
+                    // Without a registry, the handler silently drops unknown
+                    // ids — which is the intended fuzz behaviour.
+                    let tgt = engine::ids::AgentId::new(
+                        ((slot as u32) % state.agent_cap()) + 1,
+                    ).unwrap();
+                    let ability = engine::ability::AbilityId::new(
+                        (b as u32).saturating_add(1),
+                    ).unwrap();
+                    MicroTarget::Ability { id: ability, target: tgt }
+                }
                 MicroKind::UseItem => MicroTarget::ItemSlot(b),
                 _ => MicroTarget::None,
             };

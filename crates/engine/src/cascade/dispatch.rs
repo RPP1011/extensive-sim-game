@@ -44,6 +44,20 @@ impl CascadeRegistry {
         self.register(crate::ability::expire::OpportunityAttackHandler);
     }
 
+    /// Register the Combat Foundation Task 9 `CastHandler` against an
+    /// `AbilityRegistry`. Kept off `register_engine_builtins` because it
+    /// requires a built registry — callers construct the registry, wrap
+    /// it in an `Arc`, and then register the cast handler once at startup.
+    /// Calling this twice registers two handlers that both dispatch
+    /// `AgentCast`; tests that need registry isolation should hand out
+    /// distinct `Arc`s to distinct `CascadeRegistry`s.
+    pub fn register_cast_handler(
+        &mut self,
+        ability_registry: std::sync::Arc<crate::ability::AbilityRegistry>,
+    ) {
+        self.register(crate::ability::CastHandler::new(ability_registry));
+    }
+
     pub fn register<H: CascadeHandler + 'static>(&mut self, h: H) {
         let lane = h.lane() as usize;
         let kind = h.trigger() as u8 as usize;

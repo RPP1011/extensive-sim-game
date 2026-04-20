@@ -32,7 +32,16 @@ pub enum EventKindId {
     StunExpired          = 23,
     SlowExpired          = 24,
     OpportunityAttackTriggered = 25,
-    // Slots 26-127 reserved for replayable event variants added in later tasks.
+    // Combat Foundation Task 9 — effect fan-out + recursion-audit events.
+    EffectDamageApplied  = 26,
+    EffectHealApplied    = 27,
+    EffectShieldApplied  = 28,
+    EffectStunApplied    = 29,
+    EffectSlowApplied    = 30,
+    EffectGoldTransfer   = 31,
+    EffectStandingDelta  = 32,
+    CastDepthExceeded    = 33,
+    // Slots 34-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -65,6 +74,14 @@ impl EventKindId {
             Event::StunExpired          { .. } => EventKindId::StunExpired,
             Event::SlowExpired          { .. } => EventKindId::SlowExpired,
             Event::OpportunityAttackTriggered { .. } => EventKindId::OpportunityAttackTriggered,
+            Event::EffectDamageApplied  { .. } => EventKindId::EffectDamageApplied,
+            Event::EffectHealApplied    { .. } => EventKindId::EffectHealApplied,
+            Event::EffectShieldApplied  { .. } => EventKindId::EffectShieldApplied,
+            Event::EffectStunApplied    { .. } => EventKindId::EffectStunApplied,
+            Event::EffectSlowApplied    { .. } => EventKindId::EffectSlowApplied,
+            Event::EffectGoldTransfer   { .. } => EventKindId::EffectGoldTransfer,
+            Event::EffectStandingDelta  { .. } => EventKindId::EffectStandingDelta,
+            Event::CastDepthExceeded    { .. } => EventKindId::CastDepthExceeded,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }

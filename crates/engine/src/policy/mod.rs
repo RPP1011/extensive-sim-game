@@ -3,6 +3,7 @@ pub mod macro_kind;
 pub mod query;
 pub mod utility;
 
+use crate::ability::AbilityId;
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind};
 use crate::state::SimState;
@@ -40,6 +41,12 @@ pub enum MicroTarget {
     Position(Vec3),
     ItemSlot(u8),
     AbilityIdx(u8),
+    /// Cast target: a compiled ability (`AbilityId`) aimed at a specific
+    /// agent. Emitted alongside `MicroKind::Cast` by `UtilityBackend` (and
+    /// test policies); consumed by `apply_actions` which pushes an
+    /// `Event::AgentCast` for the `CastHandler` cascade to pick up.
+    /// Combat Foundation Task 9.
+    Ability { id: AbilityId, target: AgentId },
     Query(QueryKind),
     /// Extension hatch — UseItem/Harvest/PlaceVoxel/Document targets decode
     /// via compiler-registered tables keyed on an opaque u64 handle.
@@ -77,6 +84,19 @@ impl Action {
             kind: ActionKind::Micro {
                 kind:   MicroKind::Attack,
                 target: MicroTarget::Agent(target),
+            },
+        }
+    }
+
+    /// Cast an ability targeting a specific agent. `apply_actions` pushes a
+    /// single `Event::AgentCast` for the cascade's `CastHandler` to consume.
+    /// Combat Foundation Task 9.
+    pub fn cast(caster: AgentId, ability: AbilityId, target: AgentId) -> Self {
+        Self {
+            agent: caster,
+            kind: ActionKind::Micro {
+                kind:   MicroKind::Cast,
+                target: MicroTarget::Ability { id: ability, target },
             },
         }
     }

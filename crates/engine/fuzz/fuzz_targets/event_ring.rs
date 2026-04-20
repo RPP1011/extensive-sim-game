@@ -2,6 +2,7 @@
 #![no_main]
 
 use arbitrary::{Arbitrary, Unstructured};
+use engine::ability::AbilityId;
 use engine::event::{Event, EventRing};
 use engine::ids::{AgentId, QuestId};
 use engine::policy::{QuestCategory, Resolution};
@@ -43,7 +44,12 @@ impl FuzzEvent {
             4  => Event::AgentAte { agent_id: a, delta: self.f_a, tick },
             5  => Event::AgentDrank { agent_id: a, delta: self.f_a, tick },
             6  => Event::AgentRested { agent_id: a, delta: self.f_a, tick },
-            7  => Event::AgentCast { agent_id: a, ability_idx: self.ability, tick },
+            7  => Event::AgentCast {
+                caster:  a,
+                ability: AbilityId::new((self.ability as u32).saturating_add(1)).unwrap(),
+                target:  b,
+                tick,
+            },
             8  => Event::AgentUsedItem { agent_id: a, item_slot: self.item_slot, tick },
             9  => Event::AgentHarvested { agent_id: a, resource: self.u64_a, tick },
             10 => Event::AgentPlacedTile { agent_id: a, where_pos: p, kind_tag: self.u_a, tick },

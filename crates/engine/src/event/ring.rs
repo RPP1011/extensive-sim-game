@@ -159,10 +159,11 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update(delta.to_bits().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
-        Event::AgentCast { agent_id, ability_idx, tick } => {
+        Event::AgentCast { caster, ability, target, tick } => {
             h.update([7u8]);                                   // variant tag
-            h.update(agent_id.raw().to_le_bytes());
-            h.update([*ability_idx]);
+            h.update(caster.raw().to_le_bytes());
+            h.update(ability.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
         Event::AgentUsedItem { agent_id, item_slot, tick } => {
@@ -293,6 +294,62 @@ fn hash_event(h: &mut Sha256, e: &Event) {
             h.update([25u8]);
             h.update(attacker.raw().to_le_bytes());
             h.update(target.raw().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::EffectDamageApplied { caster, target, amount, tick } => {
+            h.update([26u8]);
+            h.update(caster.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
+            h.update(amount.to_bits().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::EffectHealApplied { caster, target, amount, tick } => {
+            h.update([27u8]);
+            h.update(caster.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
+            h.update(amount.to_bits().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::EffectShieldApplied { caster, target, amount, tick } => {
+            h.update([28u8]);
+            h.update(caster.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
+            h.update(amount.to_bits().to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::EffectStunApplied { caster, target, duration_ticks, tick } => {
+            h.update([29u8]);
+            h.update(caster.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
+            h.update(duration_ticks.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::EffectSlowApplied { caster, target, duration_ticks, factor_q8, tick } => {
+            h.update([30u8]);
+            h.update(caster.raw().to_le_bytes());
+            h.update(target.raw().to_le_bytes());
+            h.update(duration_ticks.to_le_bytes());
+            h.update(factor_q8.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::EffectGoldTransfer { from, to, amount, tick } => {
+            h.update([31u8]);
+            h.update(from.raw().to_le_bytes());
+            h.update(to.raw().to_le_bytes());
+            h.update(amount.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::EffectStandingDelta { a, b, delta, tick } => {
+            h.update([32u8]);
+            h.update(a.raw().to_le_bytes());
+            h.update(b.raw().to_le_bytes());
+            h.update(delta.to_le_bytes());
+            h.update(tick.to_le_bytes());
+        }
+        Event::CastDepthExceeded { caster, ability, tick } => {
+            h.update([33u8]);
+            h.update(caster.raw().to_le_bytes());
+            h.update(ability.raw().to_le_bytes());
             h.update(tick.to_le_bytes());
         }
         Event::ChronicleEntry { .. } => {

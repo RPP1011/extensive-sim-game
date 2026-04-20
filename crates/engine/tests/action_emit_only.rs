@@ -38,19 +38,23 @@ impl PolicyBackend for EmitOnce {
 fn cast_emits_agentcast_event_without_state_change() {
     let (mut state, mut scratch, mut events, cascade, a) = make();
     let hp_before = state.agent_hp(a).unwrap();
+    // Combat Foundation Task 9: Cast now targets a specific agent via an
+    // `AbilityId`. Without a CastHandler registered (empty cascade here),
+    // the AgentCast event is emitted but no effects fire.
+    let ability = engine::ability::AbilityId::new(3).unwrap();
     let backend = EmitOnce(
         a,
         ActionKind::Micro {
             kind: MicroKind::Cast,
-            target: MicroTarget::AbilityIdx(3),
+            target: MicroTarget::Ability { id: ability, target: a },
         },
     );
     step(&mut state, &mut scratch, &mut events, &backend, &cascade);
 
     assert_eq!(state.agent_hp(a), Some(hp_before));
     let got = events.iter().any(|e| matches!(e,
-        Event::AgentCast { agent_id, ability_idx, .. }
-            if *agent_id == a && *ability_idx == 3));
+        Event::AgentCast { caster, ability: ab, target, .. }
+            if *caster == a && ab.raw() == 3 && *target == a));
     assert!(got);
 }
 
