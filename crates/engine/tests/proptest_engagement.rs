@@ -6,6 +6,7 @@ use engine::creature::CreatureType;
 use engine::event::EventRing;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
+use engine::step::SimScratch;
 use glam::Vec3;
 use proptest::prelude::*;
 
@@ -45,7 +46,8 @@ fn build_state(pop: &[(CreatureType, (f32, f32, f32))]) -> (SimState, Vec<AgentI
 
 fn run_tick_start(state: &mut SimState) {
     let mut ring = EventRing::with_cap(256);
-    tick_start(state, &mut ring);
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    tick_start(state, &mut scratch, &mut ring);
 }
 
 proptest! {

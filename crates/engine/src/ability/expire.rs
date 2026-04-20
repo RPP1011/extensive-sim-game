@@ -15,7 +15,7 @@ use crate::cascade::{CascadeHandler, EventKindId, Lane};
 use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
-use crate::step::ATTACK_DAMAGE;
+use crate::step::{SimScratch, ATTACK_DAMAGE};
 
 /// Engagement range in world-space meters. Matches `ATTACK_RANGE = 2.0` —
 /// an agent is "engaged" with a hostile exactly when the hostile is within
@@ -60,19 +60,25 @@ impl CascadeHandler for OpportunityAttackHandler {
 }
 
 /// The unified tick-start phase. See module docs for the three jobs.
-pub fn tick_start(state: &mut SimState, events: &mut EventRing) {
-    decrement_and_expire(state, events);
-    update_engagements(state);
+///
+/// `scratch` is the per-tick buffer pool from `step_full`; the two engagement
+/// scratches (`engagement_alive_ids`, `engagement_tentative`) are reused
+/// across ticks instead of being heap-allocated each time.
+pub fn tick_start(state: &mut SimState, scratch: &mut SimScratch, events: &mut EventRing) {
+    decrement_and_expire(state, scratch, events);
+    update_engagements(state, scratch);
 }
 
-fn decrement_and_expire(state: &mut SimState, events: &mut EventRing) {
+fn decrement_and_expire(state: &mut SimState, scratch: &mut SimScratch, events: &mut EventRing) {
     // Snapshot the tick before we touch anything so all emitted events agree
     // on the "expired this tick" timestamp.
     let tick = state.tick;
-    // Collect alive ids up front so we don't risk borrow conflicts with the
-    // mutating calls on `state` below.
-    let alive: Vec<AgentId> = state.agents_alive().collect();
-    for id in alive {
+    // Collect alive ids into the hoisted scratch so we don't risk borrow
+    // conflicts with the mutating calls on `state` below — and don't
+    // allocate a fresh Vec every tick.
+    scratch.engagement_alive_ids.clear();
+    scratch.engagement_alive_ids.extend(state.agents_alive());
+    for &id in &scratch.engagement_alive_ids {
         let stun = state.agent_stun_remaining(id).unwrap_or(0);
         if stun > 0 {
             let new_stun = stun - 1;
@@ -98,7 +104,7 @@ fn decrement_and_expire(state: &mut SimState, events: &mut EventRing) {
     }
 }
 
-fn update_engagements(state: &mut SimState) {
+fn update_engagements(state: &mut SimState, scratch: &mut SimScratch) {
     // Two-phase tentative-pick-then-commit. Each alive agent first picks the
     // nearest hostile within ENGAGEMENT_RANGE (ties broken by AgentId via
     // natural iteration order — `agents_alive()` walks slots in ascending
@@ -114,10 +120,16 @@ fn update_engagements(state: &mut SimState) {
     // Audit fix CRITICAL #1: consume the spatial index so the per-agent
     // hostile scan is `O(N·k)` instead of `O(N²)`.
     let cap = state.hot_engaged_with().len();
-    let mut tentative: Vec<Option<AgentId>> = vec![None; cap];
-    let alive: Vec<AgentId> = state.agents_alive().collect();
+    // Hoisted tentative buffer — resized to cap and zeroed every tick.
+    scratch.engagement_tentative.clear();
+    scratch.engagement_tentative.resize(cap, None);
+    // `engagement_alive_ids` was populated by `decrement_and_expire`
+    // immediately above. Borrow it explicitly here so we can iterate
+    // without freezing all of `scratch`.
+    let alive = &scratch.engagement_alive_ids;
+    let tentative = &mut scratch.engagement_tentative;
     let spatial = state.spatial();
-    for id in &alive {
+    for id in alive {
         let pos = match state.agent_pos(*id) { Some(p) => p, None => continue };
         let ct = match state.agent_creature_type(*id) { Some(c) => c, None => continue };
         let mut best: Option<(AgentId, f32)> = None;
@@ -144,18 +156,21 @@ fn update_engagements(state: &mut SimState) {
         }
     }
 
-    // Commit mutual-only.
-    for id in &alive {
+    // Commit mutual-only. Re-borrow scratch buffers as immutable so
+    // `state.set_agent_engaged_with` can mutate `state` simultaneously.
+    let alive = &scratch.engagement_alive_ids;
+    let tentative = &scratch.engagement_tentative;
+    for &id in alive {
         let slot = (id.raw() - 1) as usize;
         let candidate = tentative.get(slot).copied().unwrap_or(None);
         let committed = match candidate {
             Some(other) => {
                 let other_slot = (other.raw() - 1) as usize;
                 let them = tentative.get(other_slot).copied().unwrap_or(None);
-                if them == Some(*id) { Some(other) } else { None }
+                if them == Some(id) { Some(other) } else { None }
             }
             None => None,
         };
-        state.set_agent_engaged_with(*id, committed);
+        state.set_agent_engaged_with(id, committed);
     }
 }

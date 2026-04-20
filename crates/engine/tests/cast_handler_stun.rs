@@ -17,6 +17,7 @@ use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
+use engine::step::SimScratch;
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
@@ -118,13 +119,14 @@ fn stun_gates_caster_for_exact_duration_then_expires() {
     // For 10 ticks the gate rejects. After each `tick_start`, the remaining
     // count decrements by 1; only the 10th call takes it to 0 and emits
     // `StunExpired`.
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
     for tick in 0..10u32 {
         assert!(
             !evaluate_cast_gate(&state, &registry, caster, ability, target),
             "gate must reject at tick {tick} (stun_remaining={:?})",
             state.agent_stun_remaining(caster)
         );
-        tick_start(&mut state, &mut events);
+        tick_start(&mut state, &mut scratch, &mut events);
         state.tick += 1;
     }
 

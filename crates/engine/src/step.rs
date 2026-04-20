@@ -115,11 +115,25 @@ fn effect_slow_multiplier(state: &SimState, id: AgentId) -> f32 {
 
 /// Per-tick scratch buffers hoisted out of `step` so a steady-state tick loop
 /// allocates zero bytes. Caller constructs once (capacity = `state.agent_cap()`),
-/// reuses across ticks. Buffers are reset/cleared at the top of each `step`.
+/// reuses across ticks. Buffers are reset/cleared at the top of each `step`
+/// and at entry to `ability::expire::tick_start`.
+///
+/// The two `engagement_*` buffers are shared with
+/// `ability::expire::tick_start` (the unified tick-start phase). Hoisting them
+/// here moves the previous per-tick `Vec<AgentId>` + `Vec<Option<AgentId>>` of
+/// size `agent_cap` allocations out of the hot path — at N=500 × 1000 ticks
+/// that was ~500 K allocations per `mixed_actions/500` iteration.
 pub struct SimScratch {
     pub mask:        MaskBuffer,
     pub actions:     Vec<Action>,
     pub shuffle_idx: Vec<u32>,
+    /// Snapshot of `state.agents_alive()` taken at the top of `tick_start`'s
+    /// `decrement_and_expire` pass and reused by the engagement update so
+    /// neither pass needs to re-walk the alive iterator. Cleared on entry.
+    pub engagement_alive_ids: Vec<AgentId>,
+    /// Per-slot tentative engagement target buffer for the bidirectional
+    /// commit step. Resized to `cap` and zeroed on entry.
+    pub engagement_tentative: Vec<Option<AgentId>>,
 }
 
 impl SimScratch {
@@ -128,6 +142,8 @@ impl SimScratch {
             mask:        MaskBuffer::new(n_agents),
             actions:     Vec::with_capacity(n_agents),
             shuffle_idx: Vec::with_capacity(n_agents),
+            engagement_alive_ids: Vec::with_capacity(n_agents),
+            engagement_tentative: Vec::with_capacity(n_agents),
         }
     }
 }
@@ -192,7 +208,7 @@ pub fn step_full<B: PolicyBackend>(
     // mask so mask predicates observe post-decrement, post-engagement state.
     // Emits StunExpired / SlowExpired on timer transitions to zero; updates
     // hot_engaged_with via bidirectional tentative-commit.
-    crate::ability::expire::tick_start(state, events);
+    crate::ability::expire::tick_start(state, scratch, events);
 
     // Phase 1 — mask build.
     scratch.mask.reset();

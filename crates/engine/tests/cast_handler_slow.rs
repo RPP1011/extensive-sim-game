@@ -155,8 +155,9 @@ fn slow_decrements_and_expires_with_factor_zeroed() {
     state.set_agent_slow_factor_q8(a, 51);
 
     // 5 tick_start decrements → the 5th emits SlowExpired and zeroes factor.
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
     for i in 0..5u32 {
-        tick_start(&mut state, &mut events);
+        tick_start(&mut state, &mut scratch, &mut events);
         state.tick += 1;
         let n_expired = events.iter().filter(|e| matches!(e, Event::SlowExpired { .. })).count();
         if i < 4 {

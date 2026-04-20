@@ -6,7 +6,13 @@ use engine::ability::expire::{tick_start, ENGAGEMENT_RANGE};
 use engine::creature::CreatureType;
 use engine::event::EventRing;
 use engine::state::{AgentSpawn, SimState};
+use engine::step::SimScratch;
 use glam::Vec3;
+
+fn run_tick_start(state: &mut SimState, events: &mut EventRing) {
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    tick_start(state, &mut scratch, events);
+}
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> engine::ids::AgentId {
     state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp: 100.0 }).unwrap()
@@ -18,7 +24,7 @@ fn two_hostile_agents_inside_range_engage_each_other() {
     let mut events = EventRing::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.5, 0.0, 0.0));
-    tick_start(&mut state, &mut events);
+    run_tick_start(&mut state, &mut events);
     assert_eq!(state.agent_engaged_with(a), Some(b));
     assert_eq!(state.agent_engaged_with(b), Some(a));
 }
@@ -29,7 +35,7 @@ fn same_species_agents_do_not_engage() {
     let mut events = EventRing::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Human, Vec3::new(1.0, 0.0, 0.0));
-    tick_start(&mut state, &mut events);
+    run_tick_start(&mut state, &mut events);
     assert_eq!(state.agent_engaged_with(a), None);
     assert_eq!(state.agent_engaged_with(b), None);
 }
@@ -42,7 +48,7 @@ fn agents_outside_engagement_range_do_not_engage() {
     // Outside 2.0m engagement range.
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
     assert!(Vec3::new(0.0, 0.0, 0.0).distance(Vec3::new(3.0, 0.0, 0.0)) > ENGAGEMENT_RANGE);
-    tick_start(&mut state, &mut events);
+    run_tick_start(&mut state, &mut events);
     assert_eq!(state.agent_engaged_with(a), None);
     assert_eq!(state.agent_engaged_with(b), None);
 }
@@ -53,13 +59,13 @@ fn engagement_clears_when_partners_separate() {
     let mut events = EventRing::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
-    tick_start(&mut state, &mut events);
+    run_tick_start(&mut state, &mut events);
     assert_eq!(state.agent_engaged_with(a), Some(b));
     assert_eq!(state.agent_engaged_with(b), Some(a));
 
     // Move B to 5m away.
     state.set_agent_pos(b, Vec3::new(5.0, 0.0, 0.0));
-    tick_start(&mut state, &mut events);
+    run_tick_start(&mut state, &mut events);
     assert_eq!(state.agent_engaged_with(a), None);
     assert_eq!(state.agent_engaged_with(b), None);
 }
@@ -85,7 +91,7 @@ fn three_agent_tentative_commit_with_dragon_closer_to_wolf() {
     let a = spawn(&mut state, CreatureType::Human,  Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Wolf,   Vec3::new(1.0, 0.0, 0.0));
     let d = spawn(&mut state, CreatureType::Dragon, Vec3::new(1.4, 0.0, 0.0));
-    tick_start(&mut state, &mut events);
+    run_tick_start(&mut state, &mut events);
     assert_eq!(state.agent_engaged_with(a), None, "A picked B but B picked D → A committed None");
     assert_eq!(state.agent_engaged_with(b), Some(d));
     assert_eq!(state.agent_engaged_with(d), Some(b));
