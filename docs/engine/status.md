@@ -36,6 +36,11 @@ resist the "sentinel value hides bugs" failure mode the audit surfaced.
 | Plan 6 — `GpuBackend` foundation | _(to be written)_ | ❌ not yet written |
 | Plan 7+ — per-kernel GPU porting | _(to be written)_ | ❌ not yet written |
 
+Post-Combat-Foundation-and-Plan-3 deferred subsystems (14 of them — memberships,
+memory, relationships, items, groups, factions, buildings, settlements, regions,
+quests, theory-of-mind, personality utility, terrain, interior nav) are
+indexed in `docs/superpowers/roadmap.md`. Individual plans drafted on-demand.
+
 ## Subsystem table
 
 Cross-reference: "Tests" column paths are relative to `crates/engine/`. Commits use the
