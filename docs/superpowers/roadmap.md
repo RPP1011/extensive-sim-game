@@ -1137,28 +1137,19 @@ drafted.)
    terrain state so `--no-default-features serial` still builds
    without the voxel crate?
 
-### Top-3 design questions the existing docs can't answer
+### Top-3 design questions — resolved 2026-04-19
 
-1. **Group-membership conflict resolution.** "An agent holds
-   memberships in Group A and Group B, and A declares war on B. What
-   happens?" State.md doesn't address this; DF assumes the agent
-   picks one (or is expelled from both); MMOs typically forbid the
-   prior state. This is design-question #1 under subsystem #1
-   (Memberships) and also affects #8 (Factions). **No existing doc
-   answers.**
-2. **Item-stack semantics.** State.md §Inventory uses `[u16; 8]`
-   bulk commodities — implicitly stack-style. State.md §BuildingData
-   `storage: [f32; NUM_COMMODITIES]` confirms commodity-bulk model.
-   But `ItemId` in `ids.rs` + spec.md §8 "compiler-emitted kernels"
-   imply per-instance items. **Shape collision between Inventory
-   commodities and per-instance items is unresolved.**
-3. **Memory-vs-standing split of responsibility.** Combat Foundation
-   stores per-pair standings as dense matrix; state.md §9 D18 says
-   memory events carry `confidence_q8` and a `Source` provenance.
-   **Is standing = aggregate of memory events (derive on demand) or
-   independent state (update via separate cascade)?** Both subsystems
-   (Memory #2 and Relationships #3) want to own this. Needs a
-   principle.
+1. **Group-membership conflict resolution — RESOLVED.** Behavior is faction-relation-score-mediated. When A declares war on B and an agent is in both, behavior toward each group is gated by `Membership.standing_q8`. At war-declaration, recompute each dual-member's effective loyalty per group; below a threshold, agent leaves one (emits `MemberLeft`); above threshold, agent remains in both and acts based on higher-scoring membership. Enables DF-style emergent loyalty-conflict gameplay.
+
+2. **Item-stack semantics — RESOLVED as two-pool split.** Items bifurcate:
+   - **Commodities** (fungible bulk — wheat, stone, arrows, gold): `Inventory { gold: i64, commodities: [u16; 8] }`, stackable, already present.
+   - **Items** (unique instances — weapons, armor, scrolls, legendaries): `AggregatePool<ItemInstance>` with **max stack = 1**. Each item is a separate instance with per-instance state (quality, history, legendary flag, owner path). Inventory references them via `cold_inventory_items: Vec<SmallVec<ItemId, 16>>` (separate from commodities).
+
+3. **Memory-vs-standing split — RESOLVED as Model B (all independent).** Memory, Relationship, and Standing are each primary state with their own cascade update rules. Events typically update multiple layers via separate handlers. Enables:
+   - "I know what you did but I've forgiven you" (memory has the record; standing doesn't reflect it).
+   - "I hate you without meeting you" (prejudice — direct standing set, no memory).
+   - "My faction is at war but I personally like you" (personal Relationship independent of group-pair standing).
+   Dev-build `contracts::invariant` catches drift where a cascade author forgot to update one layer. Combat Foundation's `cold_standing: SparseStandings` (symmetric agent-pair, primary, updated by `EffectOp::ModifyStanding`) is kept as-is. **Future:** add `cold_group_standing` as a separate primary layer for inter-faction diplomacy (state.md §Group). Rename candidate for disambiguation: `cold_standing` → `cold_agent_standing` when the group layer lands.
 
 ### Highest-leverage subsystem
 
