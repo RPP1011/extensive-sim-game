@@ -121,6 +121,10 @@ fn fmt_event(e: &Event) -> String {
             "EngagementBroken(tick={tick},actor={},former_target={},reason={})",
             actor.raw(), former_target.raw(), reason,
         ),
+        Event::FearSpread { observer, dead_kin, tick } => format!(
+            "FearSpread(tick={tick},observer={},dead_kin={})",
+            observer.raw(), dead_kin.raw(),
+        ),
         // Any other variant we don't currently expect — serialise a
         // generic tag so the test still captures the surprise. If one of
         // these starts appearing for real, promote it to an explicit arm.

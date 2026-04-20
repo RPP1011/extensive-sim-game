@@ -322,6 +322,29 @@ fn eval_view_call(
             };
             state.views.my_enemies.get(a, b)
         }
+        PredicateDescriptor::VIEW_ID_KIN_FEAR => {
+            // `kin_fear(observer, dead_kin)` — `@decay(rate=0.955,
+            // per=tick)` on pair_map storage, so the generated `get(a,
+            // b, tick)` returns the decayed value and `sum_for_first(a,
+            // tick)` sums across every recorded dead_kin for this
+            // observer. Task 167 — rout mechanic.
+            let a = match resolve_slot(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            match slot1 {
+                PredicateDescriptor::ARG_WILDCARD => {
+                    state.views.kin_fear.sum_for_first(a, state.tick)
+                }
+                _ => {
+                    let b = match resolve_slot(slot1, agent, target) {
+                        Some(id) => id,
+                        None => return f32::NAN,
+                    };
+                    state.views.kin_fear.get(a, b, state.tick)
+                }
+            }
+        }
         _ => f32::NAN,
     }
 }

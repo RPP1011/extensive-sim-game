@@ -327,6 +327,63 @@ pub fn nearest_hostile_to(state: &SimState, mover: AgentId, radius: f32) -> Opti
     best.map(|(a, _)| a)
 }
 
+/// Same-species spatial scan — used by the DSL `fear_spread_on_death`
+/// physics rule (task 167). Returns every alive agent within `radius` of
+/// `center` whose `CreatureType` matches `center`'s, excluding `center`
+/// itself. Unspawned `center` (no recorded position / creature type) yields
+/// an empty `Vec`. Result is sorted on raw `AgentId` ascending (inherited
+/// from `SpatialHash::within_radius`'s sort discipline) so callers observe
+/// a bit-identical iteration order regardless of bucket-internal state.
+///
+/// **Dead-center contract.** Unlike `nearest_hostile_to`, this helper
+/// does NOT short-circuit on a dead center slot. The primary caller —
+/// the `fear_spread_on_death` physics rule — runs on `AgentDied` which
+/// fires AFTER `damage`'s `agents.kill(t)` call, so by the time the
+/// rule executes the center is already `!alive`. The pre-death position
+/// + creature type are still readable (`kill_agent` clears only the
+/// `hot_alive` bit and evicts from the spatial index), so the scan can
+/// still locate kin by the center's final recorded location. Callers
+/// that need a live-center invariant should check `agent_alive` at
+/// their call site.
+///
+/// The returned `Vec<AgentId>` is the `for`-loop iterable shape the DSL
+/// physics emitter expects — same pattern as `abilities.effects` yielding
+/// a `SmallVec<EffectOp>` for the cast dispatcher. Bounded by the cell-
+/// reach cap inside `SpatialHash::within_radius`, so the iteration is
+/// GPU-emittable-safe (resolve.rs:2897 accepts `NamespaceCall` as a
+/// bounded iter source).
+pub fn nearby_kin(state: &SimState, center: AgentId, radius: f32) -> Vec<AgentId> {
+    let pos = match state.agent_pos(center) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let ct = match state.agent_creature_type(center) {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+    let spatial = state.spatial();
+    let mut out: Vec<AgentId> = Vec::new();
+    for other in spatial.within_radius(state, pos, radius) {
+        if other == center {
+            continue;
+        }
+        // `within_radius` can return dead / sidecar slots; skip dead
+        // neighbours so survivors don't get a phantom kin from a
+        // previously-killed agent whose position record still lives.
+        if !state.agent_alive(other) {
+            continue;
+        }
+        let oc = match state.agent_creature_type(other) {
+            Some(c) => c,
+            None => continue,
+        };
+        if oc == ct {
+            out.push(other);
+        }
+    }
+    out
+}
+
 /// Number of cell steps in each cardinal direction the query must scan
 /// to guarantee no in-range walker is missed. For `radius <= CELL_SIZE`
 /// this is 1 (the original 3×3 neighbourhood); grows linearly with

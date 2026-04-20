@@ -85,12 +85,32 @@ scoring {
   //     equivalently more hits that are partly-decayed), stack an
   //     extra +0.3 so even a full-hp agent under sustained fire
   //     retreats.
+  // Task 167 — rout mechanic. `kin_fear(self, _)` sums the decayed fear
+  // this agent has accumulated across every recorded dead-packmate pair.
+  // The `fear_spread_on_death` physics rule emits a +1.0 FearSpread per
+  // same-species kin at the moment of death; the @decay view pulls the
+  // value back toward zero at ~15-tick half-life. A crossing above 0.3
+  // (reached any time at least one recent death is still decaying)
+  // stacks +0.6 onto Flee so the observer picks retreat over attack for
+  // the rout window. Symmetric across species — the view itself is
+  // species-agnostic, and `query.nearby_kin` does the species filter in
+  // the physics rule.
+  //
+  // The +0.6 bump value matches the `self.hp_pct < 0.3` "near death"
+  // gate on the same row — that's the design intent: a packmate's
+  // death should hit as hard as being near death yourself. At full hp
+  // vs a full-hp enemy, the Attack row reads 0.5 (healthy-commit
+  // bonus), so +0.6 on Flee crosses cleanly above Attack and picks the
+  // retreat. Once kin_fear decays below 0.3 (~30 ticks post-death at
+  // the 15-tick half-life) the modifier drops and normal scoring
+  // resumes.
   Flee = 0.0
     + (if self.hp < 30.0 { 0.6 } else { 0.0 })
     + (if self.hp < 50.0 { 0.4 } else { 0.0 })
     + (if self.hp_pct < 0.3 { 0.6 } else { 0.0 })
     + (view::threat_level(self, _) per_unit 0.01)
     + (if view::threat_level(self, _) > 50.0 { 0.3 } else { 0.0 })
+    + (if view::kin_fear(self, _) > 0.3 { 0.6 } else { 0.0 })
 
   // ===== Combat =====
 

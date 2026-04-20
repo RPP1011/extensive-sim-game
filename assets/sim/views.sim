@@ -120,3 +120,42 @@ view my_enemies(observer: Agent, attacker: Agent) -> f32 {
   on AgentAttacked { actor: attacker, target: observer } { self += 1.0 }
   clamp: [0.0, 1.0],
 }
+
+// -----------------------------------------------------------------------
+// @materialized view kin_fear(observer, dead_kin) → f32 — rout mechanic.
+// -----------------------------------------------------------------------
+// Per-(observer, dead_kin) fear scalar. When a `FearSpread` event fires
+// (emitted by the `fear_spread_on_death` physics rule once per nearby
+// same-species kin at the moment of death), the observer's entry for
+// that specific dead kin is bumped by +1.0 (the emitter hardcodes the
+// fold amount; see `emit_fold_arm` in dsl_compiler). The anchor-pattern
+// decay then pulls the value back toward 0 over time.
+//
+// `@decay(rate = 0.955, per = tick)` ≈ 15-tick half-life (0.955^15 ≈
+// 0.50). At the engine's 100 ms tick that's a ~1.5 s rout window — long
+// enough to observably change Flee vs Attack scoring for a few ticks
+// after a packmate dies, short enough to wash out well before the next
+// engagement cycle.
+//
+// Consumed by scoring's Flee row through the wildcard-slot helper
+// `sum_for_first(observer, tick)` — every `@decay pair_map` view gets
+// that helper auto-emitted (emit_view.rs:457+), so `view::kin_fear(self,
+// _) > 0.3 : +0.5` on Flee sums decayed kin_fear across every recorded
+// packmate-death pair for the scoring agent.
+//
+// Species scoping: the physics rule filters via `query.nearby_kin`, so
+// every emitted `FearSpread` has matching-species (observer, dead_kin).
+// The view itself is species-agnostic — "wolf sees wolf die → fear",
+// "human sees human die → fear" both flow through the same fold.
+//
+// Storage: `pair_map<(AgentId, AgentId), (f32, u32)>` (the @decay
+// variant stores (base, anchor_tick) per pair). Same bounded-population
+// assumption as threat_level / my_enemies — pair count stays small in
+// combat scenarios.
+@materialized(on_event = [FearSpread], storage = pair_map)
+@decay(rate = 0.955, per = tick)
+view kin_fear(observer: Agent, dead_kin: Agent) -> f32 {
+  initial: 0.0,
+  on FearSpread { observer: observer, dead_kin: dead_kin } { self += 1.0 }
+  clamp: [0.0, 10.0],
+}

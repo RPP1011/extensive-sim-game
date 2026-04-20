@@ -111,6 +111,15 @@ event_tag Audit    { actor: AgentId }
 // effect would push beyond `MAX_CASCADE_ITERATIONS`.
 @replayable @audit event CastDepthExceeded { actor: AgentId, ability: AbilityId }
 
+// Task 167 — fear-spread fan-out. Emitted by the `fear_spread_on_death`
+// physics rule once per nearby same-species kin when an agent dies. The
+// `kin_fear` @materialized view folds these into a per-(observer,
+// dead_kin) decayed scalar; scoring's Flee row bumps when the observer's
+// total decayed fear crosses a threshold. @replayable so the view's state
+// reconstructs from the event log (same contract as threat_level /
+// my_enemies).
+@replayable event FearSpread { observer: AgentId, dead_kin: AgentId }
+
 // Non-replayable side channel — prose chronicle entries carrying a template
 // id the renderer pairs with a localised string. Intentionally omits
 // `@replayable` so `Event::is_replayable()` returns `false` and the hash

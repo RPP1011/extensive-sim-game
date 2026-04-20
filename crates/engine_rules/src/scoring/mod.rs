@@ -104,6 +104,10 @@ impl PredicateDescriptor {
     /// Memory-driven scoring — per-pair "this attacker has hit this
     /// observer" grudge flag. See `assets/sim/views.sim::my_enemies`.
     pub const VIEW_ID_MY_ENEMIES: u16 = 1;
+    /// Rout mechanic (task 167) — per-(observer, dead_kin) decayed fear
+    /// bump fed by `FearSpread` emitted when a same-species neighbour
+    /// dies. See `assets/sim/views.sim::kin_fear`.
+    pub const VIEW_ID_KIN_FEAR: u16 = 2;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;
@@ -180,7 +184,7 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
         action_head: 2,
         base: 0.0,
         personality_weights: [0.0, 0.0, 0.0, 0.0, 0.0],
-        modifier_count: 5,
+        modifier_count: 6,
         modifiers: [
             ModifierRow {
                 predicate: PredicateDescriptor::scalar_compare(0, PredicateDescriptor::OP_LT, 30.0),
@@ -212,7 +216,15 @@ pub const SCORING_TABLE: &[ScoringEntry] = &[
                 },
                 delta: 0.3,
             },
-            ModifierRow::EMPTY,
+            ModifierRow {
+                predicate: PredicateDescriptor {
+                    kind: PredicateDescriptor::KIND_VIEW_SCALAR_COMPARE,
+                    op: PredicateDescriptor::OP_GT,
+                    field_id: 2,
+                    payload: [154, 153, 153, 62, 0, 254, 2, 0, 0, 0, 0, 0],
+                },
+                delta: 0.6,
+            },
             ModifierRow::EMPTY,
             ModifierRow::EMPTY,
         ],

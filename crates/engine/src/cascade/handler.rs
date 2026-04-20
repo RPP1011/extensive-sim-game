@@ -46,7 +46,10 @@ pub enum EventKindId {
     // `tick_start` tentative-commit loop.
     EngagementCommitted  = 34,
     EngagementBroken     = 35,
-    // Slots 36-127 reserved for replayable event variants added in later tasks.
+    // Task 167 — fear-spread fan-out from `AgentDied`. One emit per
+    // nearby same-species kin; folded by `kin_fear` materialized view.
+    FearSpread           = 36,
+    // Slots 37-127 reserved for replayable event variants added in later tasks.
     ChronicleEntry       = 128,
 }
 
@@ -87,6 +90,7 @@ impl EventKindId {
             Event::CastDepthExceeded    { .. } => EventKindId::CastDepthExceeded,
             Event::EngagementCommitted  { .. } => EventKindId::EngagementCommitted,
             Event::EngagementBroken     { .. } => EventKindId::EngagementBroken,
+            Event::FearSpread           { .. } => EventKindId::FearSpread,
             Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
         }
     }

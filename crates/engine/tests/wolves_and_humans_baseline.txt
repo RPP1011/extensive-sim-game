@@ -1,5 +1,5 @@
 # wolves_and_humans parity baseline — seed=0xd00dface00420042 ticks=100 agents=8
-# total_events=79
+# total_events=80
 AgentAttacked(tick=0,attacker=3,target=5,damage=10.000000)
 AgentAttacked(tick=0,attacker=2,target=4,damage=10.000000)
 AgentAttacked(tick=0,attacker=4,target=2,damage=10.000000)
@@ -30,6 +30,7 @@ AgentFled(tick=4,id=4,from=(4.000000,0.000000,0.000000),to=(5.000000,0.000000,0.
 AgentAttacked(tick=4,attacker=1,target=4,damage=10.000000)
 AgentDied(tick=4,id=4)
 EngagementBroken(tick=4,actor=1,former_target=4,reason=2)
+FearSpread(tick=4,observer=5,dead_kin=4)
 AgentFled(tick=5,id=5,from=(-4.000000,0.000000,0.000000),to=(-5.000000,0.000000,0.000000))
 AgentMoved(tick=5,id=3,from=(-2.000000,0.000000,0.000000),to=(-1.000000,0.000000,0.000000))
 AgentMoved(tick=6,id=3,from=(-1.000000,0.000000,0.000000),to=(0.000000,0.000000,0.000000))

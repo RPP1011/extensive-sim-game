@@ -31,6 +31,7 @@ pub mod effect_standing_delta;
 pub mod effect_stun_applied;
 pub mod engagement_broken;
 pub mod engagement_committed;
+pub mod fear_spread;
 pub mod information_requested;
 pub mod opportunity_attack_triggered;
 pub mod quest_accepted;
@@ -67,6 +68,7 @@ pub use effect_standing_delta::EffectStandingDelta;
 pub use effect_stun_applied::EffectStunApplied;
 pub use engagement_broken::EngagementBroken;
 pub use engagement_committed::EngagementCommitted;
+pub use fear_spread::FearSpread;
 pub use information_requested::InformationRequested;
 pub use opportunity_attack_triggered::OpportunityAttackTriggered;
 pub use quest_accepted::QuestAccepted;
@@ -249,6 +251,11 @@ pub enum Event {
         target: AgentId,
         tick: u32,
     },
+    FearSpread {
+        observer: AgentId,
+        dead_kin: AgentId,
+        tick: u32,
+    },
     InformationRequested {
         asker: AgentId,
         target: AgentId,
@@ -314,6 +321,7 @@ impl Event {
             Event::EffectStunApplied { tick, .. } => *tick,
             Event::EngagementBroken { tick, .. } => *tick,
             Event::EngagementCommitted { tick, .. } => *tick,
+            Event::FearSpread { tick, .. } => *tick,
             Event::InformationRequested { tick, .. } => *tick,
             Event::OpportunityAttackTriggered { tick, .. } => *tick,
             Event::QuestAccepted { tick, .. } => *tick,
@@ -353,6 +361,7 @@ impl Event {
             Event::EffectStunApplied { .. } => true,
             Event::EngagementBroken { .. } => true,
             Event::EngagementCommitted { .. } => true,
+            Event::FearSpread { .. } => true,
             Event::InformationRequested { .. } => true,
             Event::OpportunityAttackTriggered { .. } => true,
             Event::QuestAccepted { .. } => true,

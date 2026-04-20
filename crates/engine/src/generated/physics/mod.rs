@@ -10,6 +10,7 @@ pub mod chronicle_wound;
 pub mod damage;
 pub mod engagement_on_death;
 pub mod engagement_on_move;
+pub mod fear_spread_on_death;
 pub mod heal;
 pub mod modify_standing;
 pub mod opportunity_attack;
@@ -60,6 +61,7 @@ pub fn dispatch_agent_died(event: &Event, state: &mut SimState, events: &mut Eve
     };
     chronicle_death::chronicle_death(agent_id, state, events);
     engagement_on_death::engagement_on_death(agent_id, state, events);
+    fear_spread_on_death::fear_spread_on_death(agent_id, state, events);
 }
 
 #[allow(unused_variables)]

@@ -425,3 +425,35 @@ physics engagement_on_death @phase(event) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fear spread (task 167) — a rout mechanic that falls out of the cascade.
+// ---------------------------------------------------------------------------
+//
+// When an agent dies, every alive same-species neighbour within a 12 m
+// radius gets a `FearSpread` event emitted at them. The `kin_fear`
+// @materialized view folds those into a per-(observer, dead_kin)
+// decayed scalar, and scoring's Flee row reads the wildcard sum through
+// `view::kin_fear(self, _) > 0.3 : +0.5` — so a wolf that just lost a
+// packmate nearby picks Flee over Attack for the next ~15 ticks.
+//
+// Species scoping lives in `query.nearby_kin`: the primitive returns
+// only agents whose `CreatureType` matches the dead center's, so the
+// physics rule can stay species-agnostic. Symmetric for any species —
+// humans rout when humans die, wolves rout when wolves die. The radius
+// (12 m) is an order-of-magnitude "visual contact" figure; it matches
+// the `aggro_range = 12` in the combat config and is large enough to
+// cover a small combat cluster but small enough that a kill on the
+// opposite side of the map doesn't panic unrelated herds.
+//
+// GPU-emittability: `query.nearby_kin` is a `NamespaceCall` which the
+// physics body validator accepts as a bounded iteration source
+// (resolve.rs:validate_physics_iter_source). The inner emit is a plain
+// one-event push — no recursion, no unbounded state mutation.
+physics fear_spread_on_death @phase(event) {
+  on AgentDied { agent_id: dead } {
+    for kin in query.nearby_kin(dead, 12.0) {
+      emit FearSpread { observer: kin, dead_kin: dead }
+    }
+  }
+}

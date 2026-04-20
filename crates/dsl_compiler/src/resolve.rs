@@ -345,6 +345,16 @@ mod stdlib {
                 Some((2, IrType::Optional(Box::new(IrType::AgentId))))
             }
             (NamespaceId::Query, "nearest_hostile_to_or") => Some((3, IrType::AgentId)),
+            // Same-species spatial scan — sibling of `nearest_hostile_to`.
+            // Task 167 — the `fear_spread_on_death` physics rule iterates
+            // every alive same-species neighbour within `radius` of a
+            // newly-dead agent and emits a `FearSpread` event per kin.
+            // Returns a `List<Agent>` (lowered as `Vec<AgentId>`) so the
+            // physics body can `for kin in query.nearby_kin(...)`.
+            // Bounded by the cell-reach cap in `SpatialHash::within_radius`.
+            (NamespaceId::Query, "nearby_kin") => {
+                Some((2, IrType::List(Box::new(IrType::AgentId))))
+            }
             _ => None,
         }
     }

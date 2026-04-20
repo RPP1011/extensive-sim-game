@@ -1112,6 +1112,16 @@ fn lower_namespace_call(
                 lowered[0], lowered[1], lowered[2]
             ))
         }
+        // Same-species scan — yields a `Vec<AgentId>` the physics body can
+        // `for`-iterate. Bounded by the cell-reach cap inside
+        // `SpatialHash::within_radius`. Task 167.
+        (NamespaceId::Query, "nearby_kin") => {
+            expect_arity(args, 2, "query.nearby_kin")?;
+            Ok(format!(
+                "crate::spatial::nearby_kin(state, {}, {})",
+                lowered[0], lowered[1]
+            ))
+        }
         // `abilities.*` — ability registry accessors. `is_known` gates the
         // cast handler on an unknown id; `cooldown_ticks` reads the
         // program's gate; `effects` yields the program's `EffectOp` smallvec

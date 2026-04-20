@@ -156,6 +156,10 @@ const VIEW_ID_THREAT_LEVEL: u16 = 0;
 /// Memory-driven scoring — per-pair "this attacker has hit this observer"
 /// grudge flag. See `assets/sim/views.sim::my_enemies`.
 const VIEW_ID_MY_ENEMIES: u16 = 1;
+/// Rout mechanic (task 167) — per-(observer, dead_kin) decayed fear bump
+/// fed by `FearSpread` emitted when a same-species neighbour dies. See
+/// `assets/sim/views.sim::kin_fear`.
+const VIEW_ID_KIN_FEAR: u16 = 2;
 
 // ScalarCompare operator discriminants. Keep aligned with
 // `PredicateDescriptor::OP_*` in engine_rules.
@@ -402,6 +406,10 @@ impl PredicateDescriptor {
     /// Memory-driven scoring — per-pair "this attacker has hit this
     /// observer" grudge flag. See `assets/sim/views.sim::my_enemies`.
     pub const VIEW_ID_MY_ENEMIES: u16 = 1;
+    /// Rout mechanic (task 167) — per-(observer, dead_kin) decayed fear
+    /// bump fed by `FearSpread` emitted when a same-species neighbour
+    /// dies. See `assets/sim/views.sim::kin_fear`.
+    pub const VIEW_ID_KIN_FEAR: u16 = 2;
 
     pub const OP_LT: u8 = 0;
     pub const OP_LE: u8 = 1;
@@ -841,6 +849,7 @@ fn view_id_for(name: &str) -> Result<u16, EmitError> {
     match name {
         "threat_level" => Ok(VIEW_ID_THREAT_LEVEL),
         "my_enemies" => Ok(VIEW_ID_MY_ENEMIES),
+        "kin_fear" => Ok(VIEW_ID_KIN_FEAR),
         other => Err(EmitError::UnsupportedView(other.to_string())),
     }
 }
