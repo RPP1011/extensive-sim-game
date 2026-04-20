@@ -884,7 +884,8 @@ fn parse_pattern_value(c: &mut Cursor) -> PResult<PatternValue> {
             return Ok(PatternValue::Wildcard);
         }
     }
-    // Try to parse: Ident, or Ident(...) (ctor), or a literal expression.
+    // Try to parse: Ident, or Ident(...) (ctor), or Ident { ... } (struct
+    // pattern over an enum variant), or a literal expression.
     let save = c.pos;
     if let Some(name) = peek_ident(c) {
         let after = c.pos + name.len();
@@ -915,6 +916,56 @@ fn parse_pattern_value(c: &mut Cursor) -> PResult<PatternValue> {
                 return Err(ParseErr::at(here(c), "expected `,` or `)` in pattern ctor"));
             }
             return Ok(PatternValue::Ctor { name, inner });
+        }
+        // Struct-shaped pattern: `Damage { amount }` or
+        // `Slow { duration_ticks, factor_q8: f }`. Only capitalized names
+        // trigger this shape (lowercase names followed by `{` would be a
+        // block/struct literal in an expression context, but in pattern
+        // position we only accept the PascalCase enum-variant form).
+        if look.starts_with_char('{')
+            && name.chars().next().map_or(false, |c0| c0.is_ascii_uppercase())
+        {
+            c.bump(name.len());
+            c.skip_ws();
+            c.bump(1); // `{`
+            let mut bindings = Vec::new();
+            loop {
+                c.skip_ws();
+                if c.starts_with_char('}') {
+                    c.bump(1);
+                    break;
+                }
+                let bstart = c.pos;
+                let field = ident(c).map_err(|e| e.with_context("parsing struct-pattern field name"))?;
+                c.skip_ws();
+                // Either `field` (shorthand bind) or `field: <inner-pattern>`.
+                let value = if c.starts_with_char(':') {
+                    c.bump(1);
+                    c.skip_ws();
+                    parse_pattern_value(c)?
+                } else {
+                    PatternValue::Bind(field.clone())
+                };
+                bindings.push(PatternBinding {
+                    field,
+                    value,
+                    span: Span::new(bstart, c.pos),
+                });
+                c.skip_ws();
+                if c.starts_with_char(',') {
+                    c.bump(1);
+                    continue;
+                }
+                if c.starts_with_char('}') {
+                    c.bump(1);
+                    break;
+                }
+                return Err(ParseErr::at(
+                    here(c),
+                    "expected `,` or `}` in struct-pattern",
+                ));
+            }
+            return Ok(PatternValue::Struct { name, bindings });
         }
         // Bare ident: decide "simple bind" vs "expression" by looking at
         // what follows. If `,`, `}`, or `)`, treat as a bind.

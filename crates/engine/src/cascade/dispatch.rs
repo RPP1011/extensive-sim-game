@@ -64,16 +64,16 @@ impl CascadeRegistry {
     pub fn register_engine_builtins(&mut self) {
         // Compiler-emitted physics handlers (DSL-owned). Covers damage, heal,
         // shield, stun, slow, transfer_gold, modify_standing,
-        // opportunity_attack, and record_memory. The matching hand-written
-        // legacy handlers were deleted in the same commit that landed their
-        // DSL equivalent. `CastHandler` is still hand-written (the
-        // `emit_physics` compiler does not yet lower `for ... in <program>`
-        // loops or `match` over `EffectOp` variants), but is stateless now
-        // that the `AbilityRegistry` lives on `SimState` — no more
-        // `Arc<AbilityRegistry>` plumbing, and it can be registered as a
-        // plain engine builtin alongside the DSL-emitted handlers.
+        // opportunity_attack, record_memory, and cast. The matching hand-
+        // written legacy handlers were deleted in the same commit that
+        // landed their DSL equivalent. 2026-04-19: `CastHandler` migrated
+        // — the `emit_physics` compiler now lowers `for ... in
+        // abilities.effects(...)` loops and `match` over `EffectOp`
+        // variants, so the last hand-written cascade handler with game
+        // logic is retired. The ability registry continues to live on
+        // `SimState`; the DSL `physics cast` rule reaches it through the
+        // `abilities.*` stdlib namespace.
         crate::generated::physics::register(self);
-        self.register(crate::ability::CastHandler::new());
         // Task 139 — event-driven engagement update. The old tick-start
         // tentative-commit loop was retired in favour of two cascade
         // dispatchers keyed on `AgentMoved` / `AgentDied`. The DSL physics

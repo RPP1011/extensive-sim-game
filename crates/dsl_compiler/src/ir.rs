@@ -244,6 +244,13 @@ pub enum IrPattern {
     Bind { name: String, local: LocalRef },
     /// Ctor-style: `Agent(x)`, `Some(y)`. `ctor` is set when resolvable.
     Ctor { name: String, ctor: Option<CtorRef>, inner: Vec<IrPattern> },
+    /// Struct-shaped variant pattern: `Damage { amount }` or
+    /// `Slow { duration_ticks, factor_q8: f }`. `ctor` is set when the
+    /// variant name resolves (e.g. to an `EffectOp` variant — currently a
+    /// stdlib-known sum type; the emitter hardcodes the enum prefix). Each
+    /// binding names a variant field and either introduces a shorthand bind
+    /// (same local name as the field) or a nested aliased pattern.
+    Struct { name: String, ctor: Option<CtorRef>, bindings: Vec<IrPatternBinding> },
     /// Literal / expression pattern.
     Expr(IrExprNode),
     Wildcard,
@@ -696,6 +703,13 @@ pub enum NamespaceId {
     Quests,
     Auctions,
     Tick,
+    /// `abilities.*` — sim-wide accessor for the `AbilityRegistry` living on
+    /// `SimState`. Methods: `abilities.is_known(id) -> bool`,
+    /// `abilities.cooldown_ticks(id) -> u32`, `abilities.effects(id)` yields
+    /// the program's `SmallVec<[EffectOp; N]>` as an iterable. Added so the
+    /// `cast` physics rule can iterate and dispatch a cast's effect list
+    /// without a hand-written cascade handler.
+    Abilities,
 }
 
 impl NamespaceId {
@@ -717,6 +731,7 @@ impl NamespaceId {
             NamespaceId::Quests => "quests",
             NamespaceId::Auctions => "auctions",
             NamespaceId::Tick => "tick",
+            NamespaceId::Abilities => "abilities",
         }
     }
 }
@@ -760,6 +775,12 @@ pub enum Builtin {
     Log2,
     Log10,
     Sqrt,
+    /// `saturating_add(a, b)` — saturating addition on integer scalars.
+    /// Clamps to the type's MAX on overflow instead of wrapping or
+    /// panicking. Used by the `cast` physics rule to compute absolute
+    /// expiry ticks (`tick + duration_ticks`) without reaching for a
+    /// method-call syntax the DSL doesn't otherwise expose.
+    SaturatingAdd,
 }
 
 impl Builtin {
@@ -784,6 +805,7 @@ impl Builtin {
             Builtin::Log2 => "log2",
             Builtin::Log10 => "log10",
             Builtin::Sqrt => "sqrt",
+            Builtin::SaturatingAdd => "saturating_add",
         }
     }
 
@@ -802,6 +824,7 @@ impl Builtin {
             | Builtin::Log2
             | Builtin::Log10
             | Builtin::Sqrt => Some(1),
+            Builtin::SaturatingAdd => Some(2),
             // Quantifiers are parsed as a dedicated AST node, not a call; this
             // entry is for completeness only.
             Builtin::Forall | Builtin::Exists => None,

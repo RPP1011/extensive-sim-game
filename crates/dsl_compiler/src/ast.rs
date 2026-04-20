@@ -349,6 +349,13 @@ pub enum PatternValue {
     Bind(String),
     /// `field: Agent(inner_bind)` or `field: Some(x)`.
     Ctor { name: String, inner: Vec<PatternValue> },
+    /// `Damage { amount }` or `Slow { duration_ticks, factor_q8: f }` —
+    /// struct-shaped variant pattern. Each binding names a variant field and
+    /// either introduces a shorthand bind with the same name (`amount`) or an
+    /// aliased nested pattern (`factor_q8: f`). Used to destructure enum
+    /// variants carrying named fields; the emitter lowers this to Rust's
+    /// `Name { field, field: inner }` pattern syntax.
+    Struct { name: String, bindings: Vec<PatternBinding> },
     /// `field: <literal>` or `field: <expr>` to match against.
     Expr(Expr),
     /// `field: _`.

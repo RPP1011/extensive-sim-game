@@ -479,10 +479,13 @@ fn apply_actions(
                 }
             }
             // Combat Foundation Task 9 — Cast dispatch. Push one `AgentCast`
-            // event; the `CastHandler` cascade looks the program up in its
-            // `AbilityRegistry` and emits one `Effect*Applied` per op.
+            // event; the compiler-emitted `cast` physics rule (formerly the
+            // `CastHandler` cascade handler, retired 2026-04-19 once the
+            // DSL grew `for`/`match` lowering) looks the program up on
+            // `state.ability_registry` and emits one `Effect*Applied` per
+            // op.
             //
-            // Root casts start at `depth = 0`; the CastHandler increments
+            // Root casts start at `depth = 0`; the cast rule increments
             // for each nested `EffectOp::CastAbility` emission (Task 18).
             ActionKind::Micro {
                 kind: MicroKind::Cast,

@@ -74,6 +74,7 @@ mod stdlib {
         symbols.builtins.insert("log2".into(), Builtin::Log2);
         symbols.builtins.insert("log10".into(), Builtin::Log10);
         symbols.builtins.insert("sqrt".into(), Builtin::Sqrt);
+        symbols.builtins.insert("saturating_add".into(), Builtin::SaturatingAdd);
 
         // Typed namespaces. Each has its own field / method schema below.
         for (name, id) in [
@@ -99,8 +100,66 @@ mod stdlib {
             ("quests", NamespaceId::Quests),
             ("auctions", NamespaceId::Auctions),
             ("tick", NamespaceId::Tick),
+            // Ability-registry accessor: `is_known(id)`, `cooldown_ticks(id)`,
+            // `effects(id)`. Used by the `cast` physics rule.
+            ("abilities", NamespaceId::Abilities),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
+        }
+
+        // Engine stdlib sum types visible to the DSL. These aren't declared
+        // by the `enum <Name> { ... }` surface (which only supports unit
+        // variants) — they're struct-shape enums owned by the engine
+        // (`EffectOp`, `TargetSelector` in `crates/engine/src/ability/
+        // program.rs`). We seed the symbol table with their names + variants
+        // so `match` patterns can reference them and `TargetSelector::Target`
+        // resolves to an `EnumVariant` expression. The emitter rewrites the
+        // path to `crate::ability::<Ty>::<Variant>` at emission time.
+        seed_stdlib_enum(
+            symbols,
+            "TargetSelector",
+            &["Target", "Caster"],
+        );
+        seed_stdlib_enum(
+            symbols,
+            "EffectOp",
+            &[
+                "Damage",
+                "Heal",
+                "Shield",
+                "Stun",
+                "Slow",
+                "TransferGold",
+                "ModifyStanding",
+                "CastAbility",
+            ],
+        );
+    }
+
+    /// Register a stdlib-owned enum (struct-shape or otherwise) under a
+    /// synthetic `EnumRef` so `resolve_ident` recognises `<Ty>::<Variant>`
+    /// and bare variant names starting uppercase. Emitter decides the
+    /// concrete Rust path; see `qualified_variant_name` in
+    /// `emit_physics.rs`.
+    fn seed_stdlib_enum(symbols: &mut SymbolTable, name: &str, variants: &[&str]) {
+        // Synthetic ref — not stored in any `Compilation::enums` slot, so
+        // the index is arbitrary. Using `u16::MAX - N` keeps stdlib refs
+        // out of the user-declared range.
+        let idx = (u16::MAX as usize)
+            .saturating_sub(symbols.enums.len() + 1) as u16;
+        let variants_vec: Vec<String> = variants.iter().map(|s| s.to_string()).collect();
+        symbols
+            .enums
+            .entry(name.to_string())
+            .or_insert((EnumRef(idx), variants_vec.clone()));
+        for v in variants {
+            // `or_insert_with` so a later user-declared enum that also owns
+            // a variant of this name wins (matches the variant-owner contract
+            // in `Decl::Enum` handling).
+            symbols
+                .enum_variant_owner
+                .entry(v.to_string())
+                .or_insert_with(|| name.to_string());
         }
     }
 
@@ -119,6 +178,13 @@ mod stdlib {
                 name: "CascadePhase".into(),
                 variants: vec!["Pre".into(), "Event".into(), "Post".into()],
             }),
+            // Compile-time constant — the cascade framework's per-tick
+            // iteration ceiling (`crate::cascade::MAX_CASCADE_ITERATIONS`,
+            // currently 8). Used by the `cast` physics rule to bound the
+            // recursion depth of nested `CastAbility` effects. Typed as
+            // `u8` so the emitter can compare it directly to
+            // `Event::AgentCast.depth: u8` without a widening cast.
+            (NamespaceId::Cascade, "max_iterations") => Some(IrType::U8),
             (NamespaceId::Event, "kind") => Some(IrType::Named("EventKindId".into())),
             (NamespaceId::Event, "tick") => Some(IrType::U64),
             (NamespaceId::Mask, "rejections") => Some(IrType::U64),
@@ -209,6 +275,20 @@ mod stdlib {
             // Quantises `confidence` to q8, constructs a `MemoryEvent`, and
             // pushes it onto the observer's cold memory ring.
             (NamespaceId::Agents, "record_memory") => Some((5, IrType::Unknown)),
+            // Cooldown accessor — used by the cast handler to set the
+            // caster's next-ready tick after all effects dispatch.
+            (NamespaceId::Agents, "cooldown_next_ready") => Some((1, IrType::U32)),
+            (NamespaceId::Agents, "set_cooldown_next_ready") => Some((2, IrType::Unknown)),
+            // Ability registry accessors. `is_known` tells the cast handler
+            // whether to bail out silently on an unregistered ability id;
+            // `cooldown_ticks` returns the program's `gate.cooldown_ticks`;
+            // `effects` yields the program's ordered `EffectOp` list for the
+            // dispatch for-loop to iterate.
+            (NamespaceId::Abilities, "is_known") => Some((1, IrType::Bool)),
+            (NamespaceId::Abilities, "cooldown_ticks") => Some((1, IrType::U32)),
+            (NamespaceId::Abilities, "effects") => {
+                Some((1, IrType::List(Box::new(IrType::Named("EffectOp".into())))))
+            }
             _ => None,
         }
     }
@@ -1206,6 +1286,14 @@ fn resolve_pattern_value(
                 .map(|p| resolve_pattern_value(p, scope, symbols))
                 .collect();
             IrPattern::Ctor { name: name.clone(), ctor, inner }
+        }
+        ast::PatternValue::Struct { name, bindings } => {
+            let ctor = ctor_ref(name, symbols);
+            let bindings = bindings
+                .iter()
+                .map(|b| resolve_pattern_binding(b, scope, symbols))
+                .collect();
+            IrPattern::Struct { name: name.clone(), ctor, bindings }
         }
         ast::PatternValue::Expr(e) => {
             // Best-effort: try to resolve the expression against the current

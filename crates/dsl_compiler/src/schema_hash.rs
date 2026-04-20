@@ -351,6 +351,15 @@ fn hash_pattern(h: &mut Sha256, p: &IrPattern) {
                 hash_pattern(h, i);
             }
         }
+        IrPattern::Struct { name, bindings, .. } => {
+            h.update([0x05u8]);
+            h.update(name.as_bytes());
+            h.update([0u8]);
+            h.update(&(bindings.len() as u32).to_le_bytes());
+            for b in bindings {
+                hash_pattern_binding(h, b);
+            }
+        }
         IrPattern::Expr(e) => {
             h.update([0x04u8]);
             hash_expr(h, e);

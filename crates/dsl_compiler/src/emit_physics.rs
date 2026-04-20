@@ -18,7 +18,8 @@ use std::fmt::Write;
 use crate::ast::{BinOp, UnOp};
 use crate::ir::{
     Builtin, EventField, EventIR, EventTagIR, IrEmit, IrExpr, IrExprNode, IrPattern,
-    IrPhysicsPattern, IrStmt, IrType, NamespaceId, PhysicsHandlerIR, PhysicsIR,
+    IrPatternBinding, IrPhysicsPattern, IrStmt, IrStmtMatchArm, IrType, NamespaceId,
+    PhysicsHandlerIR, PhysicsIR,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -621,15 +622,11 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
             }
             writeln!(out, "{pad}}}").unwrap();
         }
-        IrStmt::For { .. } => {
-            return Err(EmitError::Unsupported(
-                "`for` statements not supported in physics emission".into(),
-            ));
+        IrStmt::For { binder_name, iter, filter, body, .. } => {
+            emit_for_stmt(out, binder_name, iter, filter.as_ref(), body, indent)?;
         }
-        IrStmt::Match { .. } => {
-            return Err(EmitError::Unsupported(
-                "`match` statements not supported in physics emission".into(),
-            ));
+        IrStmt::Match { scrutinee, arms, .. } => {
+            emit_match_stmt(out, scrutinee, arms, indent)?;
         }
         IrStmt::SelfUpdate { .. } => {
             return Err(EmitError::Unsupported(
@@ -642,6 +639,145 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
         }
     }
     Ok(())
+}
+
+/// Lower `for <binder> in <iter> [where <filter>] { <body> }` into a Rust
+/// `for ... in ... { ... }` loop. The iter expression is rendered as an
+/// iterator-producing expression (e.g. the `abilities.effects(ab)` stdlib
+/// call returns `.iter().copied()` as its lowered form — see
+/// `lower_namespace_call`). The optional `where` filter becomes a nested
+/// `if` that wraps the body.
+fn emit_for_stmt(
+    out: &mut String,
+    binder: &str,
+    iter: &IrExprNode,
+    filter: Option<&IrExprNode>,
+    body: &[IrStmt],
+    indent: usize,
+) -> Result<(), EmitError> {
+    let pad = " ".repeat(indent);
+    let iter_expr = lower_expr(iter)?;
+    writeln!(out, "{pad}for {binder} in {iter_expr} {{").unwrap();
+    if let Some(f) = filter {
+        let cond = lower_expr(f)?;
+        let fpad = " ".repeat(indent + 4);
+        writeln!(out, "{fpad}if !({cond}) {{ continue; }}").unwrap();
+    }
+    for s in body {
+        emit_stmt(out, s, indent + 4)?;
+    }
+    writeln!(out, "{pad}}}").unwrap();
+    Ok(())
+}
+
+/// Lower `match <scrut> { <arm> => <body>, ... }` into a Rust `match`
+/// expression. Patterns supported: `Struct { field, field: inner }` (enum
+/// variant with named fields), `Ctor(inner)` (enum variant with positional
+/// fields — rare; mostly for ctor-style events), bare bind, wildcard.
+fn emit_match_stmt(
+    out: &mut String,
+    scrutinee: &IrExprNode,
+    arms: &[IrStmtMatchArm],
+    indent: usize,
+) -> Result<(), EmitError> {
+    let pad = " ".repeat(indent);
+    let scrut = lower_expr(scrutinee)?;
+    writeln!(out, "{pad}match {scrut} {{").unwrap();
+    for arm in arms {
+        let arm_pad = " ".repeat(indent + 4);
+        let pat = lower_pattern(&arm.pattern)?;
+        writeln!(out, "{arm_pad}{pat} => {{").unwrap();
+        for s in &arm.body {
+            emit_stmt(out, s, indent + 8)?;
+        }
+        writeln!(out, "{arm_pad}}}").unwrap();
+    }
+    writeln!(out, "{pad}}}").unwrap();
+    Ok(())
+}
+
+/// Lower an `IrPattern` to a Rust pattern string suitable for a `match`
+/// arm. Bare binds become identifiers; wildcards become `_`; struct
+/// patterns become `Name { field, field: inner }` (with the enum prefix
+/// added when `name` maps to a known stdlib sum type like `EffectOp`).
+fn lower_pattern(pat: &IrPattern) -> Result<String, EmitError> {
+    match pat {
+        IrPattern::Bind { name, .. } => Ok(name.clone()),
+        IrPattern::Wildcard => Ok("_".into()),
+        IrPattern::Struct { name, bindings, .. } => {
+            let qualified = qualified_variant_name(name);
+            let mut fields: Vec<String> = Vec::with_capacity(bindings.len());
+            for b in bindings {
+                fields.push(lower_pattern_binding(b)?);
+            }
+            if fields.is_empty() {
+                Ok(format!("{qualified} {{}}"))
+            } else {
+                Ok(format!("{qualified} {{ {} }}", fields.join(", ")))
+            }
+        }
+        IrPattern::Ctor { name, inner, .. } => {
+            let qualified = qualified_variant_name(name);
+            if inner.is_empty() {
+                Ok(qualified)
+            } else {
+                let parts: Vec<String> = inner
+                    .iter()
+                    .map(lower_pattern)
+                    .collect::<Result<_, _>>()?;
+                Ok(format!("{qualified}({})", parts.join(", ")))
+            }
+        }
+        IrPattern::Expr(e) => {
+            let rendered = lower_expr(e)?;
+            Ok(rendered)
+        }
+    }
+}
+
+/// Render one `field` or `field: <inner-pattern>` entry of a struct
+/// pattern. Shorthand binds (same local name as the field) collapse to
+/// just `field` in Rust, matching the hand-written cast handler shape.
+fn lower_pattern_binding(b: &IrPatternBinding) -> Result<String, EmitError> {
+    match &b.value {
+        IrPattern::Bind { name, .. } if name == &b.field => Ok(b.field.clone()),
+        IrPattern::Wildcard => Ok(format!("{}: _", b.field)),
+        other => {
+            let rendered = lower_pattern(other)?;
+            Ok(format!("{}: {}", b.field, rendered))
+        }
+    }
+}
+
+/// Resolve a pattern's source name to its fully-qualified Rust variant
+/// form. The DSL doesn't (yet) declare `EffectOp` as a first-class sum
+/// type, so the emitter hardcodes the known stdlib sum-type variant names
+/// here. Unknown names pass through unchanged; that lets future DSL
+/// enums (declared via `enum <Name> { ... }`) opt in by name.
+fn qualified_variant_name(name: &str) -> String {
+    // `EffectOp` variants used by the `cast` physics rule. Keep in sync
+    // with `crates/engine/src/ability/program.rs::EffectOp`.
+    const EFFECT_OP_VARIANTS: &[&str] = &[
+        "Damage",
+        "Heal",
+        "Shield",
+        "Stun",
+        "Slow",
+        "TransferGold",
+        "ModifyStanding",
+        "CastAbility",
+    ];
+    // `TargetSelector` variants (used in selector-based conditionals in the
+    // cast rule). See `program.rs::TargetSelector`.
+    const TARGET_SELECTOR_VARIANTS: &[&str] = &["Target", "Caster"];
+
+    if EFFECT_OP_VARIANTS.contains(&name) {
+        format!("crate::ability::EffectOp::{name}")
+    } else if TARGET_SELECTOR_VARIANTS.contains(&name) {
+        format!("crate::ability::TargetSelector::{name}")
+    } else {
+        name.to_string()
+    }
 }
 
 fn emit_emit(out: &mut String, emit: &IrEmit, indent: usize) -> Result<(), EmitError> {
@@ -718,8 +854,15 @@ fn lower_expr_kind(kind: &IrExpr) -> Result<String, EmitError> {
             Ok(format!("{b}.{field_name}"))
         }
         IrExpr::EnumVariant { ty, variant } => {
+            // Route engine stdlib sum types (`EffectOp`, `TargetSelector`)
+            // through `qualified_variant_name` so the emitted path carries
+            // the `crate::ability::...` prefix. Other enums keep their
+            // source-level `Ty::Variant` form (matches DSL-declared enums
+            // re-exported at the `engine_rules::enums` top level).
             if ty.is_empty() {
-                Ok(variant.clone())
+                Ok(qualified_variant_name(variant))
+            } else if ty == "TargetSelector" || ty == "EffectOp" {
+                Ok(qualified_variant_name(variant))
             } else {
                 Ok(format!("{ty}::{variant}"))
             }
@@ -743,6 +886,16 @@ fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitErr
         if field == "tick" {
             return Ok("state.tick".into());
         }
+    }
+    if ns == NamespaceId::Cascade && field == "max_iterations" {
+        // Compile-time constant — the cascade framework's per-tick
+        // iteration ceiling. Used by the `cast` rule to bound
+        // `CastAbility` recursion without a hand-written handler. Cast to
+        // `u8` so comparisons against the event's `depth: u8` don't need an
+        // explicit widening in DSL source (the literal `8` would default to
+        // `i32`, forcing a cast; the generated `as u8` keeps the arithmetic
+        // tidy).
+        return Ok("(crate::cascade::MAX_CASCADE_ITERATIONS as u8)".into());
     }
     Err(EmitError::Unsupported(format!(
         "namespace-field `{}.{field}` not supported",
@@ -874,6 +1027,53 @@ fn lower_namespace_call(
                 lowered[0], lowered[1], lowered[2]
             ))
         }
+        (NamespaceId::Agents, "cooldown_next_ready") => {
+            expect_arity(args, 1, "agents.cooldown_next_ready")?;
+            Ok(format!(
+                "state.agent_cooldown_next_ready({}).unwrap_or(0)",
+                lowered[0]
+            ))
+        }
+        (NamespaceId::Agents, "set_cooldown_next_ready") => {
+            expect_arity(args, 2, "agents.set_cooldown_next_ready")?;
+            Ok(format!(
+                "state.set_agent_cooldown_next_ready({}, {})",
+                lowered[0], lowered[1]
+            ))
+        }
+        // `abilities.*` — ability registry accessors. `is_known` gates the
+        // cast handler on an unknown id; `cooldown_ticks` reads the
+        // program's gate; `effects` yields the program's `EffectOp` smallvec
+        // as a `for`-loop iterable. The `cast` physics rule is the only
+        // caller in-tree; see `assets/sim/physics.sim`.
+        (NamespaceId::Abilities, "is_known") => {
+            expect_arity(args, 1, "abilities.is_known")?;
+            Ok(format!("state.ability_registry.get({}).is_some()", lowered[0]))
+        }
+        (NamespaceId::Abilities, "cooldown_ticks") => {
+            expect_arity(args, 1, "abilities.cooldown_ticks")?;
+            Ok(format!(
+                "state.ability_registry.get({}).map(|p| p.gate.cooldown_ticks).unwrap_or(0)",
+                lowered[0]
+            ))
+        }
+        (NamespaceId::Abilities, "effects") => {
+            expect_arity(args, 1, "abilities.effects")?;
+            // Yields owned `EffectOp` values so the `for`-loop body doesn't
+            // re-borrow `state.ability_registry` (every ability accessor on
+            // `SimState` is &self). `EffectOp: Copy`, so collecting into an
+            // owned `SmallVec` is cheap (fits on the stack at the fixed
+            // `MAX_EFFECTS_PER_PROGRAM` cap). Unknown ids produce an empty
+            // smallvec so the for-loop short-circuits cleanly.
+            Ok(format!(
+                "{{ \
+                 let __effects: smallvec::SmallVec<[crate::ability::EffectOp; crate::ability::MAX_EFFECTS_PER_PROGRAM]> = \
+                 state.ability_registry.get({}).map(|p| p.effects.iter().copied().collect()).unwrap_or_default(); \
+                 __effects \
+                 }}",
+                lowered[0]
+            ))
+        }
         (NamespaceId::Agents, "record_memory") => {
             // Audit fix HIGH #4 — primitive that the `record_memory` physics
             // rule lowers to. Args: `(observer, source, payload, confidence,
@@ -953,6 +1153,10 @@ fn lower_builtin_call(b: Builtin, args: &[crate::ir::IrCallArg]) -> Result<Strin
         Builtin::Sqrt => {
             expect_arity(args, 1, "sqrt")?;
             Ok(format!("({}).sqrt()", lowered[0]))
+        }
+        Builtin::SaturatingAdd => {
+            expect_arity(args, 2, "saturating_add")?;
+            Ok(format!("({}).saturating_add({})", lowered[0], lowered[1]))
         }
         _ => Err(EmitError::Unsupported(format!(
             "builtin `{}` not supported in physics emission",
@@ -1251,5 +1455,166 @@ mod tests {
         let ctx = EmitContext { events: std::slice::from_ref(&ev), event_tags: &[] };
         let out = emit_physics(&p, None, &ctx).unwrap();
         assert!(out.contains("events.push(Event::AgentDied { agent_id: t, tick: state.tick });"));
+    }
+
+    // ---------------------------------------------------------------------
+    // For / Match lowering — pinned by the `cast` physics rule. These
+    // exercises use hand-built IR (no parser) so the test focus stays on
+    // the emitter; the parser + resolver path is covered by the full
+    // `compile-dsl` integration test.
+    // ---------------------------------------------------------------------
+
+    use crate::ir::IrStmtMatchArm;
+
+    fn ns_call_args(ns: NamespaceId, method: &str, args: Vec<IrExprNode>) -> IrExprNode {
+        ns_call(ns, method, args)
+    }
+
+    #[test]
+    fn for_loop_over_abilities_effects_lowers_to_rust_for() {
+        // Minimal handler: `on AgentCast { actor: caster, ability: ab } {
+        //   for op in abilities.effects(ab) { emit AgentDied { agent_id: caster } }
+        // }`. The body has no semantic meaning — we just assert the for-loop
+        // renders with the right iter expression.
+        let ev = EventIR {
+            name: "AgentCast".into(),
+            fields: vec![
+                EventField { name: "actor".into(), ty: IrType::AgentId, span: span() },
+                EventField { name: "ability".into(), ty: IrType::AbilityId, span: span() },
+            ],
+            tags: vec![],
+            annotations: vec![],
+            span: span(),
+        };
+        let died_ev = EventIR {
+            name: "AgentDied".into(),
+            fields: vec![
+                EventField { name: "agent_id".into(), ty: IrType::AgentId, span: span() },
+            ],
+            tags: vec![],
+            annotations: vec![],
+            span: span(),
+        };
+        let pattern = IrPhysicsPattern::Kind(IrEventPattern {
+            name: "AgentCast".into(),
+            event: Some(EventRef(0)),
+            bindings: vec![
+                pattern_bind("actor", "caster", 0),
+                pattern_bind("ability", "ab", 1),
+            ],
+            span: span(),
+        });
+        let body = vec![IrStmt::For {
+            binder: LocalRef(2),
+            binder_name: "op".into(),
+            iter: ns_call_args(NamespaceId::Abilities, "effects", vec![local("ab", 1)]),
+            filter: None,
+            body: vec![IrStmt::Emit(IrEmit {
+                event_name: "AgentDied".into(),
+                event: Some(EventRef(1)),
+                fields: vec![IrFieldInit {
+                    name: "agent_id".into(),
+                    value: local("caster", 0),
+                    span: span(),
+                }],
+                span: span(),
+            })],
+            span: span(),
+        }];
+        let p = PhysicsIR {
+            name: "for_test".into(),
+            handlers: vec![PhysicsHandlerIR { pattern, where_clause: None, body, span: span() }],
+            annotations: vec![],
+            span: span(),
+        };
+        let ctx = EmitContext { events: &[ev, died_ev], event_tags: &[] };
+        let out = emit_physics(&p, None, &ctx).unwrap();
+        assert!(
+            out.contains("for op in"),
+            "expected `for op in ...` loop in emitted body, got:\n{out}"
+        );
+        assert!(
+            out.contains("state.ability_registry.get(ab)"),
+            "expected abilities.effects lowering to ability_registry.get, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn match_over_struct_variant_lowers_to_rust_match() {
+        // `match op { Damage { amount } => { emit AgentDied { agent_id: caster } } }`
+        let ev = EventIR {
+            name: "AgentCast".into(),
+            fields: vec![
+                EventField { name: "actor".into(), ty: IrType::AgentId, span: span() },
+            ],
+            tags: vec![],
+            annotations: vec![],
+            span: span(),
+        };
+        let died_ev = EventIR {
+            name: "AgentDied".into(),
+            fields: vec![
+                EventField { name: "agent_id".into(), ty: IrType::AgentId, span: span() },
+            ],
+            tags: vec![],
+            annotations: vec![],
+            span: span(),
+        };
+        let pattern = IrPhysicsPattern::Kind(IrEventPattern {
+            name: "AgentCast".into(),
+            event: Some(EventRef(0)),
+            bindings: vec![pattern_bind("actor", "caster", 0)],
+            span: span(),
+        });
+        let match_stmt = IrStmt::Match {
+            scrutinee: local("op", 1),
+            arms: vec![IrStmtMatchArm {
+                pattern: IrPattern::Struct {
+                    name: "Damage".into(),
+                    ctor: None,
+                    bindings: vec![IrPatternBinding {
+                        field: "amount".into(),
+                        value: IrPattern::Bind {
+                            name: "amount".into(),
+                            local: LocalRef(2),
+                        },
+                        span: span(),
+                    }],
+                },
+                body: vec![IrStmt::Emit(IrEmit {
+                    event_name: "AgentDied".into(),
+                    event: Some(EventRef(1)),
+                    fields: vec![IrFieldInit {
+                        name: "agent_id".into(),
+                        value: local("caster", 0),
+                        span: span(),
+                    }],
+                    span: span(),
+                })],
+                span: span(),
+            }],
+            span: span(),
+        };
+        let p = PhysicsIR {
+            name: "match_test".into(),
+            handlers: vec![PhysicsHandlerIR {
+                pattern,
+                where_clause: None,
+                body: vec![match_stmt],
+                span: span(),
+            }],
+            annotations: vec![],
+            span: span(),
+        };
+        let ctx = EmitContext { events: &[ev, died_ev], event_tags: &[] };
+        let out = emit_physics(&p, None, &ctx).unwrap();
+        assert!(
+            out.contains("match op"),
+            "expected `match op` in emitted body, got:\n{out}"
+        );
+        assert!(
+            out.contains("crate::ability::EffectOp::Damage { amount }"),
+            "expected qualified EffectOp::Damage struct pattern, got:\n{out}"
+        );
     }
 }

@@ -189,3 +189,78 @@ physics record_memory @phase(event) {
     agents.record_memory(o, s, f, c, t)
   }
 }
+
+// ---------------------------------------------------------------------------
+// Cast dispatch
+// ---------------------------------------------------------------------------
+// The last hand-written cascade handler with game logic. Retired
+// 2026-04-19 once the compiler grew `for ... in <collection>` loops and
+// `match` over sum-type variants — both documented in `docs/dsl/spec.md`
+// §2.4. Before this rule landed, `crates/engine/src/ability/cast.rs`
+// owned the same logic as a `CascadeHandler` trait impl; the DSL
+// `physics cast` rule replaces it with a plain emitted fn + per-kind
+// dispatcher, same shape as every other effect handler.
+//
+// Behaviour: on `AgentCast`, look up the ability program on the
+// `SimState`-resident registry. Unknown id is a silent drop (the id
+// may have been invalidated mid-cascade — the audit layer tracks that
+// separately, not this rule). Iterate the program's `EffectOp` list
+// and emit exactly one `Effect*Applied` event per op. Recursive
+// `CastAbility` effects emit a nested `AgentCast` with `depth =
+// parent_depth + 1`; when the new depth would reach
+// `cascade.max_iterations` (= `MAX_CASCADE_ITERATIONS = 8`) we emit
+// `CastDepthExceeded` instead and skip the nested push, keeping the
+// recursion self-bounded below the cascade framework's iteration
+// ceiling. Finally, set the caster's cooldown to `tick +
+// cooldown_ticks` (saturating, so overflow near `u32::MAX` clamps
+// rather than wrapping).
+//
+// Pinned by `cast_handler_{damage,heal,shield,stun,slow,gold,standing,
+// recursive}.rs`, `cast_recursion_depth.rs`, and
+// `cooldown_blocks_recast.rs`.
+
+physics cast @phase(event) {
+  on AgentCast { actor: caster, ability: ab, target: target, depth: depth, tick: t } {
+    if abilities.is_known(ab) {
+      let cooldown_ticks = abilities.cooldown_ticks(ab)
+      for op in abilities.effects(ab) {
+        match op {
+          Damage { amount } => {
+            emit EffectDamageApplied { actor: caster, target: target, amount: amount, tick: t }
+          }
+          Heal { amount } => {
+            emit EffectHealApplied { actor: caster, target: target, amount: amount, tick: t }
+          }
+          Shield { amount } => {
+            emit EffectShieldApplied { actor: caster, target: target, amount: amount, tick: t }
+          }
+          Stun { duration_ticks } => {
+            let stun_expires_at_tick = saturating_add(t, duration_ticks)
+            emit EffectStunApplied { actor: caster, target: target, expires_at_tick: stun_expires_at_tick, tick: t }
+          }
+          Slow { duration_ticks, factor_q8 } => {
+            let slow_expires_at_tick = saturating_add(t, duration_ticks)
+            emit EffectSlowApplied { actor: caster, target: target, expires_at_tick: slow_expires_at_tick, factor_q8: factor_q8, tick: t }
+          }
+          TransferGold { amount } => {
+            emit EffectGoldTransfer { from: caster, to: target, amount: amount, tick: t }
+          }
+          ModifyStanding { delta } => {
+            emit EffectStandingDelta { a: caster, b: target, delta: delta, tick: t }
+          }
+          CastAbility { ability: nested, selector: sel } => {
+            let new_depth = depth + 1
+            if new_depth >= cascade.max_iterations {
+              emit CastDepthExceeded { actor: caster, ability: ab, tick: t }
+            } else {
+              let effective_target = if sel == TargetSelector::Target { target } else { caster }
+              emit AgentCast { actor: caster, ability: nested, target: effective_target, depth: new_depth, tick: t }
+            }
+          }
+        }
+      }
+      let next_ready = saturating_add(t, cooldown_ticks)
+      agents.set_cooldown_next_ready(caster, next_ready)
+    }
+  }
+}
