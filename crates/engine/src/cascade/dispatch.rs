@@ -49,6 +49,7 @@ impl CascadeRegistry {
         self.register(crate::ability::HealHandler);
         self.register(crate::ability::ShieldHandler);
         self.register(crate::ability::StunHandler);
+        self.register(crate::ability::SlowHandler);
     }
 
     /// Register the Combat Foundation Task 9 `CastHandler` against an

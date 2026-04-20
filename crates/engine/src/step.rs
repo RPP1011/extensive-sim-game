@@ -41,6 +41,21 @@ fn restore_need(current: f32, desired_delta: f32) -> (f32, f32) {
     (new_val, applied)
 }
 
+/// Convert the active effect-slow factor (q8 fixed-point) into an f32
+/// multiplier. Returns 1.0 when no slow is active (`remaining == 0` OR
+/// `factor_q8 <= 0`). The caller composes this multiplicatively with any
+/// other speed modifiers (e.g. engagement-slow in the MoveToward branch).
+///
+/// q8 encoding: `factor_q8 = round(multiplier * 256)`. A factor of `51`
+/// corresponds to ≈0.2× (51 / 256 ≈ 0.199).
+fn effect_slow_multiplier(state: &SimState, id: AgentId) -> f32 {
+    let remaining = state.agent_slow_remaining(id).unwrap_or(0);
+    if remaining == 0 { return 1.0; }
+    let factor_q8 = state.agent_slow_factor_q8(id).unwrap_or(0);
+    if factor_q8 <= 0 { return 1.0; }
+    factor_q8 as f32 / 256.0
+}
+
 /// Per-tick scratch buffers hoisted out of `step` so a steady-state tick loop
 /// allocates zero bytes. Caller constructs once (capacity = `state.agent_cap()`),
 /// reuses across ticks. Buffers are reset/cleared at the top of each `step`.
@@ -262,6 +277,12 @@ fn apply_actions(
                             });
                         }
                     }
+                    // Combat Foundation Task 14 — effect-slow multiplier.
+                    // `hot_slow_factor_q8` is q8 fixed-point (256 = 1.0×). A
+                    // remaining-ticks > 0 means a slow debuff is active;
+                    // compose MULTIPLICATIVELY with engagement-slow so both
+                    // sources stack predictably.
+                    speed *= effect_slow_multiplier(state, action.agent);
                     let to = from + dir * speed;
                     state.set_agent_pos(action.agent, to);
                     events.push(Event::AgentMoved {
@@ -290,7 +311,10 @@ fn apply_actions(
                                 tick:     state.tick,
                             });
                         }
-                        let new_pos = self_pos + away * MOVE_SPEED_MPS;
+                        // Effect-slow applies to Flee too (Task 14) —
+                        // composed multiplicatively with the Flee base speed.
+                        let speed = MOVE_SPEED_MPS * effect_slow_multiplier(state, action.agent);
+                        let new_pos = self_pos + away * speed;
                         state.set_agent_pos(action.agent, new_pos);
                         events.push(Event::AgentFled {
                             agent_id: action.agent,
