@@ -391,8 +391,12 @@ pub struct ActionHead {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ActionHeadShape {
-    /// `Attack(t)` — positional params, each an identifier binding.
-    Positional(Vec<String>),
+    /// `Attack(t)` — positional params. Each entry is `(name,
+    /// optional type annotation)`. Untyped params (`Attack(t)`) preserve
+    /// the implicit-`AgentId` contract every v1 mask head relies on;
+    /// typed params (`Cast(ability: AbilityId)`) let a mask head carry
+    /// non-agent IDs (cast targets an ability slot). Task 157.
+    Positional(Vec<(String, Option<TypeRef>)>),
     /// `PostQuest{type: Conquest, party: Group(g)}` — named param patterns.
     Named(Vec<PatternBinding>),
     /// `Eat` — no params.

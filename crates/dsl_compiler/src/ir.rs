@@ -479,7 +479,13 @@ pub struct IrActionHead {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum IrActionHeadShape {
-    Positional(Vec<(String, LocalRef)>),
+    /// Positional params: `(name, local slot, resolved type)`. Untyped
+    /// params default to `IrType::AgentId` so every v1 target-bound
+    /// mask (`Attack(target)`, `MoveToward(target)`) preserves the
+    /// implicit-agent contract. Typed params (`Cast(ability:
+    /// AbilityId)`) surface non-agent heads without rewriting every
+    /// caller. Task 157.
+    Positional(Vec<(String, LocalRef, IrType)>),
     Named(Vec<IrPatternBinding>),
     None,
 }

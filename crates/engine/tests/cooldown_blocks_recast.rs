@@ -1,26 +1,26 @@
 //! Combat Foundation Task 15 — cooldown mask gate regression.
 //!
-//! `evaluate_cast_gate` (Task 9) treats `hot_cooldown_next_ready_tick` as an
-//! absolute tick. The `CastHandler` sets it to `current_tick + cooldown_ticks`
-//! after a cast resolves. This test pins the contract end-to-end:
+//! `mask Cast` (task 157) treats `hot_cooldown_next_ready_tick` as an
+//! absolute tick. The `CastHandler` sets it to `current_tick +
+//! cooldown_ticks` after a cast resolves. This test pins the contract
+//! end-to-end:
 //!
 //! 1. Tick 0: first cast fires → `next_ready_tick = 10`.
-//! 2. Ticks 1..=9: gate returns false (cooldown pending), `UtilityBackend`
-//!    -style flow never re-emits the cast.
-//! 3. Tick 10: gate flips true; a second cast fires and re-sets the cooldown.
+//! 2. Ticks 1..=9: mask returns false (cooldown pending),
+//!    `UtilityBackend`-style flow never re-emits the cast.
+//! 3. Tick 10: mask flips true; a second cast fires and re-sets the
+//!    cooldown.
 //!
-//! The test also drives a `step(...)` loop with a `PolicyBackend` that only
-//! emits a `Cast` when the gate allows it — so the "UtilityBackend skips"
-//! invariant is mirrored concretely: no cast action → no AgentCast event,
-//! regardless of mask permissiveness. This is the shape the real mask
-//! predicate will take once `mark_cast_valid` lands in Plan 2.
+//! The test also drives a `step(...)` loop with a `PolicyBackend` that
+//! only emits a `Cast` when the mask allows it — so the
+//! "UtilityBackend skips" invariant is mirrored concretely: no cast
+//! action → no AgentCast event, regardless of mask permissiveness.
 
-use engine::ability::{
-    evaluate_cast_gate, AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate,
-};
+use engine::ability::{AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
+use engine::generated::mask::mask_cast;
 use engine::ids::AgentId;
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
@@ -32,13 +32,13 @@ fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
     state.spawn_agent(AgentSpawn { creature_type: ct, pos, hp: 100.0, ..Default::default() }).unwrap()
 }
 
-/// Backend that consults `evaluate_cast_gate` every tick and only emits a
-/// `Cast` action when the gate allows it. Mirrors what the real
-/// `UtilityBackend` will do once Task-9's mask predicate is integrated: the
-/// policy is responsible for respecting the gate, so a false gate → no cast.
+/// Backend that consults the DSL-emitted `mask_cast` every tick and
+/// only emits a `Cast` action when the mask allows it. Mirrors the
+/// `UtilityBackend` contract: the policy is responsible for
+/// respecting the mask, so a false mask → no cast.
 ///
-/// Reads the ability registry directly off `state.ability_registry` —
-/// the cast-handler migration (2026-04-19) retired the per-backend
+/// Reads the ability registry off `state.ability_registry` — the
+/// cast-handler migration (2026-04-19) retired the per-backend
 /// `Arc<AbilityRegistry>` in favour of the state-borne registry.
 struct GatedCastBackend {
     caster:  AgentId,
@@ -48,7 +48,7 @@ struct GatedCastBackend {
 
 impl PolicyBackend for GatedCastBackend {
     fn evaluate(&self, state: &SimState, _m: &MaskBuffer, _target_mask: &engine::mask::TargetMask, out: &mut Vec<Action>) {
-        if evaluate_cast_gate(state, &state.ability_registry, self.caster, self.ability, self.target) {
+        if mask_cast(state, self.caster, self.ability) {
             out.push(Action {
                 agent: self.caster,
                 kind:  ActionKind::Micro {
@@ -77,8 +77,9 @@ fn cooldown_blocks_recast_until_next_ready_tick() {
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(2.0, 0.0, 0.0));
 
-    // Gate passes pre-cast.
-    assert!(evaluate_cast_gate(&state, &state.ability_registry, caster, ability, target));
+    // Mask passes pre-cast.
+    assert!(mask_cast(&state, caster, ability));
+    let _ = target;
 
     // Tick 0 cast.
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
@@ -96,14 +97,14 @@ fn cooldown_blocks_recast_until_next_ready_tick() {
     let n_casts_after_t0 = events.iter().filter(|e| matches!(e, Event::AgentCast { .. })).count();
     assert_eq!(n_casts_after_t0, 1);
 
-    // Ticks 1..=9: gate MUST be false, GatedCastBackend emits nothing, no
+    // Ticks 1..=9: mask MUST be false, GatedCastBackend emits nothing, no
     // new AgentCast events accumulate. The cooldown's absolute-tick design
     // means each of these iterations sees `state.tick < 10` → false.
     for expected_tick in 1..=9u32 {
         assert_eq!(state.tick, expected_tick);
         assert!(
-            !evaluate_cast_gate(&state, &state.ability_registry, caster, ability, target),
-            "gate must reject while state.tick={expected_tick} < 10"
+            !mask_cast(&state, caster, ability),
+            "mask must reject while state.tick={expected_tick} < 10"
         );
         step(&mut state, &mut scratch, &mut events, &backend, &cascade);
         let n_now = events.iter().filter(|e| matches!(e, Event::AgentCast { .. })).count();
@@ -113,9 +114,9 @@ fn cooldown_blocks_recast_until_next_ready_tick() {
         );
     }
 
-    // Tick 10: gate opens.
+    // Tick 10: mask opens.
     assert_eq!(state.tick, 10);
-    assert!(evaluate_cast_gate(&state, &state.ability_registry, caster, ability, target));
+    assert!(mask_cast(&state, caster, ability));
     step(&mut state, &mut scratch, &mut events, &backend, &cascade);
     let n_casts_after_t10 = events.iter().filter(|e| matches!(e, Event::AgentCast { .. })).count();
     assert_eq!(n_casts_after_t10, 2, "second cast must fire at tick 10");

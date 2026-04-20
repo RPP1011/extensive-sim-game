@@ -157,7 +157,10 @@
               "name": "Attack",
               "shape": {
                 "Positional": [
-                  "t"
+                  [
+                    "t",
+                    null
+                  ]
                 ]
               },
               "span": {

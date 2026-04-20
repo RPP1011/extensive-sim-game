@@ -2,6 +2,7 @@
 // Regenerate with `cargo run --bin xtask -- compile-dsl`.
 
 pub mod attack;
+pub mod cast;
 pub mod drink;
 pub mod eat;
 pub mod flee;
@@ -11,6 +12,7 @@ pub mod rest;
 
 pub use attack::mask_attack;
 pub use attack::mask_attack_candidates;
+pub use cast::mask_cast;
 pub use drink::mask_drink;
 pub use eat::mask_eat;
 pub use flee::mask_flee;

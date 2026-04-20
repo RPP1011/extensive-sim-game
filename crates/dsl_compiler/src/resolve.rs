@@ -289,6 +289,30 @@ mod stdlib {
             (NamespaceId::Abilities, "effects") => {
                 Some((1, IrType::List(Box::new(IrType::Named("EffectOp".into())))))
             }
+            // Mask-gate accessors for the `Cast` DSL mask (task 157).
+            // `known(agent, ability)` is the 2-arg mask-side sibling of
+            // the physics-side `is_known(ability)` — the emitter lowers
+            // it into a registry `get(...).is_some()`, ignoring the
+            // agent argument (mask-gate does not yet key on per-agent
+            // spellbooks). `cooldown_ready(agent, ability)` folds the
+            // "state.tick >= agent_cooldown_next_ready" read into a
+            // single boolean the mask predicate can `&&`-chain. The
+            // `hostile_only(ability)` / `range(ability)` pair exposes
+            // the program's `Gate.hostile_only` / `Area::SingleTarget
+            // .range` fields so the target-side filter can stay in the
+            // engine's `inferred_cast_target` helper (the mask DSL's
+            // `from`-clause only accepts an `AgentId` source).
+            (NamespaceId::Abilities, "known") => Some((2, IrType::Bool)),
+            (NamespaceId::Abilities, "cooldown_ready") => Some((2, IrType::Bool)),
+            (NamespaceId::Abilities, "hostile_only") => Some((1, IrType::Bool)),
+            (NamespaceId::Abilities, "range") => Some((1, IrType::F32)),
+            // Engagement accessor — wraps `state.agent_engaged_with(id)`,
+            // returning `Option<AgentId>` so the mask predicate can
+            // compare against `None` (the engagement-lock clause in
+            // `mask Cast`). Task 157.
+            (NamespaceId::Agents, "engaged_with") => {
+                Some((1, IrType::Optional(Box::new(IrType::AgentId))))
+            }
             _ => None,
         }
     }
@@ -1189,10 +1213,24 @@ fn resolve_action_head(
 ) -> IrActionHead {
     let shape = match &head.shape {
         ActionHeadShape::None => IrActionHeadShape::None,
-        ActionHeadShape::Positional(names) => {
-            let bound = names
+        ActionHeadShape::Positional(params) => {
+            // Task 157 — typed positional heads. Unannotated params
+            // default to `AgentId` to preserve the implicit-agent
+            // contract every existing target-bound mask relies on
+            // (`Attack(target)`, `MoveToward(target)`). Annotated
+            // params resolve their type via the shared `resolve_type`
+            // pass so `Cast(ability: AbilityId)` surfaces the
+            // non-agent head without touching other call sites.
+            let bound = params
                 .iter()
-                .map(|n| (n.clone(), scope.bind(n, IrType::Unknown)))
+                .map(|(n, ty)| {
+                    let resolved = match ty {
+                        Some(t) => resolve_type(t, symbols),
+                        None => IrType::AgentId,
+                    };
+                    let local = scope.bind(n, resolved.clone());
+                    (n.clone(), local, resolved)
+                })
                 .collect();
             IrActionHeadShape::Positional(bound)
         }

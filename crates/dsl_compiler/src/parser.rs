@@ -1016,7 +1016,7 @@ fn parse_action_head(c: &mut Cursor) -> PResult<ActionHead> {
     c.skip_ws();
     if c.starts_with_char('(') {
         c.bump(1);
-        let mut ids = Vec::new();
+        let mut ids: Vec<(String, Option<TypeRef>)> = Vec::new();
         loop {
             c.skip_ws();
             if c.starts_with_char(')') {
@@ -1028,7 +1028,7 @@ fn parse_action_head(c: &mut Cursor) -> PResult<ActionHead> {
                 let next = c.src[after..].chars().next();
                 if next.map_or(true, |ch| !is_ident_cont(ch)) {
                     c.bump(1);
-                    ids.push("_".to_string());
+                    ids.push(("_".to_string(), None));
                     c.skip_ws();
                     if c.starts_with_char(',') {
                         c.bump(1);
@@ -1041,7 +1041,20 @@ fn parse_action_head(c: &mut Cursor) -> PResult<ActionHead> {
                     return Err(ParseErr::at(here(c), "expected `,` or `)` in action head"));
                 }
             }
-            ids.push(ident(c)?);
+            let name = ident(c)?;
+            c.skip_ws();
+            // Optional `: Type` annotation. Task 157 — lets `mask
+            // Cast(ability: AbilityId)` type its head param without
+            // forcing every existing `Attack(target)` / `MoveToward(target)`
+            // to grow a `: AgentId` suffix.
+            let ty = if c.starts_with_char(':') {
+                c.bump(1);
+                c.skip_ws();
+                Some(type_ref(c).map_err(|e| e.with_context("parsing action head type annotation"))?)
+            } else {
+                None
+            };
+            ids.push((name, ty));
             c.skip_ws();
             if c.starts_with_char(',') {
                 c.bump(1);

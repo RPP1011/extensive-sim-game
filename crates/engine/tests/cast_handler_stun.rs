@@ -2,20 +2,18 @@
 //! `hot_stun_expires_at_tick` with a longer-stun-wins rule. Expiry is a
 //! synthetic boundary: `state.tick < expires_at_tick` means stunned.
 //!
-//! Cross-check: while `state.tick < stun_expires_at_tick`,
-//! `evaluate_cast_gate` returns false (branch 1 of the gate conjunction).
-//! Once `state.tick` reaches the expiry, the gate allows casting again —
-//! no per-tick decrement pass, no `StunExpired` event.
+//! Cross-check: while `state.tick < stun_expires_at_tick`, the DSL-
+//! emitted `mask_cast` (task 157) returns false via its
+//! `!view::is_stunned(self)` clause. Once `state.tick` reaches the
+//! expiry, the mask allows casting again — no per-tick decrement
+//! pass, no `StunExpired` event.
 //!
 //! The legacy `StunHandler` unit-struct shim was removed in the 2026-04-19
 //! event-taxonomy rename (task 136). Tests now call the compiler-emitted
 //! per-event-kind dispatcher directly.
 
-use std::sync::Arc;
-
-use engine::ability::{
-    evaluate_cast_gate, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate,
-};
+use engine::ability::{AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
+use engine::generated::mask::mask_cast;
 use engine::generated::physics::dispatch_effect_stun_applied;
 use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
@@ -92,10 +90,11 @@ fn stun_on_dead_target_is_noop() {
 
 #[test]
 fn stun_gates_caster_until_tick_reaches_expiry() {
-    // A stunned AGENT cannot cast — branch 1 of evaluate_cast_gate.
-    // Task 143: set `stun_expires_at_tick = 10` at tick 0; gate must
-    // reject for ticks 0..10 and accept at tick 10. No per-tick decrement;
-    // the gate just reads the absolute tick.
+    // A stunned AGENT cannot cast — the `!view::is_stunned(self)` clause
+    // in `mask Cast` (task 157). Task 143: set `stun_expires_at_tick = 10`
+    // at tick 0; the mask must reject for ticks 0..10 and accept at
+    // tick 10. No per-tick decrement; the view just reads the absolute
+    // tick.
     let mut state = SimState::new(4, 42);
     let mut events = EventRing::with_cap(128);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
@@ -107,10 +106,13 @@ fn stun_gates_caster_until_tick_reaches_expiry() {
         Gate { cooldown_ticks: 0, hostile_only: true, line_of_sight: false },
         [EffectOp::Damage { amount: 1.0 }],
     ));
-    let registry: Arc<_> = Arc::new(b.build());
+    state.ability_registry = b.build();
+    // `target` is unused by the caster-only mask gate — the target-
+    // side filters live in `inferred_cast_target` on the engine side.
+    let _ = target;
 
-    // Baseline: gate passes.
-    assert!(evaluate_cast_gate(&state, &registry, caster, ability, target));
+    // Baseline: mask passes.
+    assert!(mask_cast(&state, caster, ability));
 
     // Apply a stun that expires at tick 10. The actor is `target` (it's
     // the one stunning the caster); the stunned agent is `caster`.
@@ -122,12 +124,12 @@ fn stun_gates_caster_until_tick_reaches_expiry() {
     assert_eq!(state.agent_stun_expires_at(caster), Some(10));
     assert!(state.agent_stunned(caster));
 
-    // For ticks 0..10 the gate rejects (state.tick < 10 = stunned).
+    // For ticks 0..10 the mask rejects (state.tick < 10 = stunned).
     for tick in 0..10u32 {
         state.tick = tick;
         assert!(
-            !evaluate_cast_gate(&state, &registry, caster, ability, target),
-            "gate must reject at tick {tick} (expires_at={:?})",
+            !mask_cast(&state, caster, ability),
+            "mask must reject at tick {tick} (expires_at={:?})",
             state.agent_stun_expires_at(caster)
         );
         assert!(state.agent_stunned(caster), "agent must read stunned at tick {tick}");
@@ -136,7 +138,7 @@ fn stun_gates_caster_until_tick_reaches_expiry() {
     // At tick 10, state.tick >= expires_at_tick → no longer stunned.
     state.tick = 10;
     assert!(!state.agent_stunned(caster));
-    assert!(evaluate_cast_gate(&state, &registry, caster, ability, target));
+    assert!(mask_cast(&state, caster, ability));
     // The stored expiry is unchanged — the "expiry" is purely a read-side
     // synthesis, no `StunExpired` event was emitted (in fact the event
     // variant no longer exists in the enum).

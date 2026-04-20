@@ -14,12 +14,19 @@
 // shim module was retired in task 140 when the last shim (`is_hostile`)
 // became a DSL view.
 //
-// The `Cast` mask-gate (cooldown + stun + engagement-lock) stays in
-// `crates/engine/src/ability/gate.rs` until a follow-up task grows the
-// emitter to handle the cooldown / stun stdlib fns. Other domain-hook
-// micros (UseItem / Harvest / Place* / Converse / ShareStory /
-// Communicate / Ask / Remember) stay permissive until their real
-// preconditions land.
+// Task 157 retired `crates/engine/src/ability/gate.rs` — the cast-gate
+// caster-side predicate (alive + un-stunned + cooldown-ready + known +
+// not-engaged-elsewhere) is now a `mask Cast(ability: AbilityId)` below.
+// Target-bound filters (target alive, in-range, hostility matches
+// `gate.hostile_only`) stay on the engine side in
+// `crates/engine/src/mask.rs::inferred_cast_target`: the mask DSL's
+// `from`-clause only accepts an `AgentId` source, so a `(caster,
+// target, ability)` Cartesian would need a grammar extension the v1
+// surface doesn't expose.
+//
+// Other domain-hook micros (UseItem / Harvest / Place* / Converse /
+// ShareStory / Communicate / Ask / Remember) stay permissive until
+// their real preconditions land.
 
 // Hold: always available for any alive agent. Never masked off — the
 // scorer treats Hold as the safe fallback when every other kind ranks
@@ -70,3 +77,28 @@ mask Attack(target)
   when agents.alive(target)
     && is_hostile(self, target)
     && distance(agents.pos(self), agents.pos(target)) < 2.0
+
+// Cast: caster-side preconditions for issuing any registered ability.
+// Task 157 migration — the retired `evaluate_cast_gate` conjunction
+// had six branches; this mask carries the four that are caster-only:
+//
+//   1. Caster alive.
+//   2. Caster not stunned (timestamp view; `is_stunned(a)` in
+//      `views.sim` reads `world.tick < agents.stun_expires_at_tick(a)`).
+//   3. Ability registered (`abilities.known` — the 2-arg mask-side
+//      sibling of the physics-side `abilities.is_known`, kept for
+//      future per-agent-spellbook growth).
+//   4. Cooldown ready (`state.tick >= agent_cooldown_next_ready`).
+//   5. Not engaged elsewhere — the caster is locked in melee with
+//      their engager until that pairing breaks.
+//
+// The two remaining branches (target alive + in range, hostility
+// matches) are engine-side filters in `inferred_cast_target` because
+// the DSL `from`-clause only enumerates `AgentId` sources, and the
+// target / ability pairing needs both kinds of candidates.
+mask Cast(ability: AbilityId)
+  when agents.alive(self)
+    && !view::is_stunned(self)
+    && abilities.known(self, ability)
+    && abilities.cooldown_ready(self, ability)
+    && agents.engaged_with(self) == None

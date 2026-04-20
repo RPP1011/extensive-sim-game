@@ -1246,7 +1246,11 @@ mod tests {
     fn attack_head() -> IrActionHead {
         IrActionHead {
             name: "Attack".into(),
-            shape: IrActionHeadShape::Positional(vec![("t".into(), LocalRef(0))]),
+            shape: IrActionHeadShape::Positional(vec![(
+                "t".into(),
+                LocalRef(0),
+                crate::ir::IrType::AgentId,
+            )]),
             span: span(),
         }
     }
@@ -1337,7 +1341,11 @@ mod tests {
         // lowers the same as Attack(t) with `t.hp_pct`.
         let head = IrActionHead {
             name: "Attack".into(),
-            shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
+            shape: IrActionHeadShape::Positional(vec![(
+                "target".into(),
+                LocalRef(1),
+                crate::ir::IrType::AgentId,
+            )]),
             span: span(),
         };
         let cond = binop(

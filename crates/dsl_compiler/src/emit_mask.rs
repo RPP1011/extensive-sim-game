@@ -40,8 +40,8 @@ use std::fmt::Write;
 
 use crate::ast::{BinOp, UnOp};
 use crate::ir::{
-    Builtin, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, MaskIR, NamespaceId, ViewIR,
-    ViewKind, ViewRef,
+    Builtin, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, IrType, MaskIR, NamespaceId,
+    ViewIR, ViewKind, ViewRef,
 };
 
 /// Emission context shared across mask lowering. Carries the enclosing
@@ -227,14 +227,14 @@ fn emit_predicate_fn(
     match &mask.head.shape {
         IrActionHeadShape::None => {}
         IrActionHeadShape::Positional(binds) => {
-            for (name, _local) in binds {
+            for (name, _local, ty) in binds {
                 if name == "_" {
                     return Err(EmitError::Unsupported(format!(
                         "`_` placeholder arg in mask `{}` head; name the arg",
                         mask.head.name
                     )));
                 }
-                params.push(format!("{name}: AgentId"));
+                params.push(format!("{name}: {}", render_head_type(ty, &mask.head.name)?));
             }
         }
         IrActionHeadShape::Named(_) => {
@@ -590,6 +590,25 @@ fn lower_expr_kind(
         IrExpr::BuiltinCall(b, args) => lower_builtin_call(*b, args, hoisted, ctx),
         IrExpr::UnresolvedCall(name, args) => lower_unresolved_call(name, args, hoisted, ctx),
         IrExpr::Binary(op, lhs, rhs) => {
+            // `<expr> == None` / `<expr> != None` → `is_none()` /
+            // `is_some()`. Handy for Option-valued stdlib calls that
+            // the mask predicate wants to compare against a sentinel
+            // without importing `Option::None`. Task 157: the `mask
+            // Cast` engagement-lock clause is
+            // `agents.engaged_with(self) == None`. Only the right-
+            // hand-side `None` variant is detected; swapping sides is
+            // uncommon enough in practice that we leave it unsupported
+            // (the emitter errors out loudly if it appears, so the
+            // DSL file can be fixed upstream).
+            if matches!(op, BinOp::Eq | BinOp::NotEq) {
+                if let IrExpr::EnumVariant { ty, variant } = &rhs.kind {
+                    if ty.is_empty() && variant == "None" {
+                        let l = lower_expr_with_hoist(lhs, hoisted, ctx)?;
+                        let method = if matches!(op, BinOp::Eq) { "is_none" } else { "is_some" };
+                        return Ok(format!("{}.{method}()", maybe_paren(&l)));
+                    }
+                }
+            }
             let l = lower_expr_with_hoist(lhs, hoisted, ctx)?;
             let r = lower_expr_with_hoist(rhs, hoisted, ctx)?;
             Ok(format!("({l} {} {r})", binop_str(*op)))
@@ -713,6 +732,58 @@ fn lower_namespace_call(
         (NamespaceId::Agents, "rest_timer") => {
             expect_arity(args, 1, "agents.rest_timer")?;
             Ok(format!("state.agent_rest_timer({}).unwrap_or(0.0)", lowered[0]))
+        }
+        // `agents.engaged_with(id)` → `state.agent_engaged_with(id)`. The
+        // accessor returns `Option<AgentId>`; the `mask Cast` predicate
+        // compares against `None`, which the `== None` / `!= None`
+        // rewrite in `lower_expr_kind` routes through `is_none()` /
+        // `is_some()`. Task 157.
+        (NamespaceId::Agents, "engaged_with") => {
+            expect_arity(args, 1, "agents.engaged_with")?;
+            Ok(format!("state.agent_engaged_with({})", lowered[0]))
+        }
+        // `abilities.known(agent, ability)` — the mask-side sibling of
+        // the physics-side `abilities.is_known(ability)`. The first arg
+        // (agent) is ignored: the registry is sim-wide and the mask
+        // gate does not yet key on per-agent spellbooks. Task 157.
+        (NamespaceId::Abilities, "known") => {
+            expect_arity(args, 2, "abilities.known")?;
+            Ok(format!("state.ability_registry.get({}).is_some()", lowered[1]))
+        }
+        // `abilities.cooldown_ready(agent, ability)` — folds the
+        // `state.tick >= agent_cooldown_next_ready(agent)` read into
+        // one boolean. The ability arg is unused at v1 (cooldowns are
+        // per-agent, not per-ability); kept in the signature so the
+        // future per-ability-cooldown migration doesn't touch call
+        // sites. Task 157.
+        (NamespaceId::Abilities, "cooldown_ready") => {
+            expect_arity(args, 2, "abilities.cooldown_ready")?;
+            let _ = &lowered[1];
+            Ok(format!(
+                "((state.tick as u32) >= state.agent_cooldown_next_ready({}).unwrap_or(0))",
+                lowered[0]
+            ))
+        }
+        // `abilities.hostile_only(ability)` reads `AbilityProgram.gate
+        // .hostile_only`. Unknown ids fall back to `false` — same
+        // permissive behaviour as `abilities.is_known` in physics
+        // emission (an unregistered id can't constrain anything).
+        (NamespaceId::Abilities, "hostile_only") => {
+            expect_arity(args, 1, "abilities.hostile_only")?;
+            Ok(format!(
+                "state.ability_registry.get({}).map(|p| p.gate.hostile_only).unwrap_or(false)",
+                lowered[0]
+            ))
+        }
+        // `abilities.range(ability)` reads `AbilityProgram.area` (MVP
+        // ships `Area::SingleTarget { range }` only). Unknown ids
+        // yield `0.0` — the surrounding distance clause will reject.
+        (NamespaceId::Abilities, "range") => {
+            expect_arity(args, 1, "abilities.range")?;
+            Ok(format!(
+                "state.ability_registry.get({}).map(|p| match p.area {{ crate::ability::Area::SingleTarget {{ range }} => range }}).unwrap_or(0.0)",
+                lowered[0]
+            ))
         }
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in milestone 4 mask emission",
@@ -838,6 +909,33 @@ fn unop_str(op: UnOp) -> &'static str {
         UnOp::Not => "!",
         UnOp::Neg => "-",
     }
+}
+
+/// Map an `IrType` used as a mask-head positional param onto its emitted
+/// Rust type string. Only the handful of id / small-scalar types the
+/// mask surface accepts are supported; everything else errors out at
+/// emit time so an unsupported head type doesn't silently lower to a
+/// confusing signature. Task 157.
+fn render_head_type(ty: &IrType, mask_name: &str) -> Result<String, EmitError> {
+    let rendered = match ty {
+        IrType::AgentId => "AgentId",
+        // Fully-qualified engine paths — the mask file emits only
+        // `use crate::ids::AgentId;`, so the rarer id types path
+        // through their owning module to avoid bloating the import
+        // preamble for every mask file.
+        IrType::AbilityId => "crate::ability::AbilityId",
+        IrType::ItemId => "crate::ids::ItemId",
+        IrType::GroupId => "crate::ids::GroupId",
+        IrType::QuestId => "crate::ids::QuestId",
+        IrType::EventId => "crate::ids::EventId",
+        IrType::AuctionId => "crate::ids::AuctionId",
+        _ => {
+            return Err(EmitError::Unsupported(format!(
+                "mask `{mask_name}` head param type {ty:?} not supported"
+            )));
+        }
+    };
+    Ok(rendered.to_string())
 }
 
 /// Render a float so it parses back identically. `f64::to_string` drops the
@@ -968,7 +1066,11 @@ mod tests {
         MaskIR {
             head: IrActionHead {
                 name: "Attack".into(),
-                shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
+                shape: IrActionHeadShape::Positional(vec![(
+                    "target".into(),
+                    LocalRef(1),
+                    IrType::AgentId,
+                )]),
                 span: span(),
             },
             candidate_source: None,
@@ -1110,7 +1212,11 @@ mod tests {
         let mask = MaskIR {
             head: IrActionHead {
                 name: "Attack".into(),
-                shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
+                shape: IrActionHeadShape::Positional(vec![(
+                    "target".into(),
+                    LocalRef(1),
+                    IrType::AgentId,
+                )]),
                 span: span(),
             },
             candidate_source: None,
@@ -1197,7 +1303,11 @@ mod tests {
         let mask = MaskIR {
             head: IrActionHead {
                 name: "Attack".into(),
-                shape: IrActionHeadShape::Positional(vec![("target".into(), LocalRef(1))]),
+                shape: IrActionHeadShape::Positional(vec![(
+                    "target".into(),
+                    LocalRef(1),
+                    IrType::AgentId,
+                )]),
                 span: span(),
             },
             candidate_source: None,

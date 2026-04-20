@@ -1,8 +1,7 @@
 // crates/engine/src/mask.rs
-use crate::ability::evaluate_cast_gate;
 use crate::generated::mask::{
-    mask_attack_candidates, mask_drink, mask_eat, mask_flee, mask_hold, mask_move_toward_candidates,
-    mask_rest,
+    mask_attack_candidates, mask_cast, mask_drink, mask_eat, mask_flee, mask_hold,
+    mask_move_toward_candidates, mask_rest,
 };
 use crate::ids::AgentId;
 use crate::state::SimState;
@@ -258,11 +257,11 @@ impl MaskBuffer {
     ///
     /// `state.ability_registry` drives the Cast gate: when non-empty, the
     /// first registered ability is treated as each agent's candidate cast
-    /// and routed through `evaluate_cast_gate` with the nearest hostile
-    /// within engagement range as the inferred target (same heuristic
-    /// `UtilityBackend` uses for Attack). An empty registry falls back to
-    /// permissive — matches the pre-registry-move behaviour where no
-    /// `CastHandler` was registered.
+    /// and routed through the DSL-emitted `mask_cast` (task 157) +
+    /// engine-side `inferred_cast_target` (target alive, in-range,
+    /// hostility matches `gate.hostile_only`). An empty registry falls
+    /// back to permissive — matches the pre-registry-move behaviour
+    /// where no `CastHandler` was registered.
     ///
     /// Audit fix CRITICAL #2. Registry-on-state since the cast-handler
     /// migration retired the `Arc<AbilityRegistry>` plumbing.
@@ -281,9 +280,14 @@ impl MaskBuffer {
             }
         }
 
-        // Cast: pass through `evaluate_cast_gate` when the state-borne
-        // registry has at least one ability, falling back to permissive
-        // for an empty registry.
+        // Cast: the DSL-emitted `mask_cast` carries the caster-only
+        // predicates (alive + un-stunned + known + cooldown-ready +
+        // not-engaged-elsewhere). The target-side filters (target
+        // alive, in-range, hostility matches) still live in
+        // `inferred_cast_target` on the engine side — the mask DSL's
+        // `from`-clause only accepts an `AgentId` source, so the
+        // (caster, target, ability) Cartesian stays here. Empty
+        // registry falls back to permissive.
         let ability_id = if state.ability_registry.is_empty() {
             None
         } else {
@@ -294,12 +298,8 @@ impl MaskBuffer {
             let cast_offset = slot * n_kinds + MicroKind::Cast as usize;
             let allowed = match ability_id {
                 Some(ability) => {
-                    match inferred_cast_target(state, id) {
-                        Some(target) => evaluate_cast_gate(
-                            state, &state.ability_registry, id, ability, target,
-                        ),
-                        None => false,
-                    }
+                    mask_cast(state, id, ability)
+                        && inferred_cast_target(state, id, ability).is_some()
                 }
                 // Empty registry → permissive.
                 None => true,
@@ -309,22 +309,47 @@ impl MaskBuffer {
     }
 }
 
-/// Pick the nearest hostile within engagement range as the inferred cast
-/// target. Task 138 retired the matching Attack-target heuristic
-/// (`nearest_other`); Cast's target inference stays here until the Cast
-/// mask gains a `from` clause of its own. Returns `None` when no hostile
-/// is in range.
-fn inferred_cast_target(state: &SimState, caster: AgentId) -> Option<AgentId> {
+/// Pick the nearest valid cast target for `caster` firing `ability`.
+///
+/// Task 157 folded the former `evaluate_cast_gate` target-side branches
+/// into this helper:
+///   * target alive,
+///   * within the program's `Area::SingleTarget.range` (no longer the
+///     coarser `aggro_range`; the ability's own range is the authoritative
+///     bound),
+///   * hostility matches the program's `gate.hostile_only`.
+///
+/// The caster-only half of the old gate (alive + un-stunned + cooldown-
+/// ready + known + not-engaged-elsewhere) lives in the DSL-emitted
+/// `mask_cast`; mask-build calls both and ands the results. Returns
+/// `None` when no candidate passes every filter.
+fn inferred_cast_target(
+    state:   &SimState,
+    caster:  AgentId,
+    ability: crate::ability::AbilityId,
+) -> Option<AgentId> {
     let pos = state.agent_pos(caster)?;
-    let ct = state.agent_creature_type(caster)?;
+    let prog = state.ability_registry.get(ability)?;
+    let range = match prog.area { crate::ability::Area::SingleTarget { range } => range };
+    let hostile_only = prog.gate.hostile_only;
+    let caster_ct = state.agent_creature_type(caster);
     let spatial = state.spatial();
     let mut best: Option<(AgentId, f32)> = None;
     for other in spatial.within_radius(state, pos, state.config.combat.aggro_range) {
         if other == caster { continue; }
+        // Target alive.
+        if !state.agent_alive(other) { continue; }
+        // Target in range of the *ability*, not just aggro range.
         let op = match state.agent_pos(other) { Some(p) => p, None => continue };
-        let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };
-        if !ct.is_hostile_to(oc) { continue; }
         let d = pos.distance(op);
+        if d > range { continue; }
+        // Hostile-only gate: require the symmetric `is_hostile_to` to
+        // allow when the program's `gate.hostile_only` is set.
+        if hostile_only {
+            let ct = match caster_ct { Some(c) => c, None => continue };
+            let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };
+            if !ct.is_hostile_to(oc) { continue; }
+        }
         match best {
             None => best = Some((other, d)),
             Some((_, bd)) if d < bd => best = Some((other, d)),
