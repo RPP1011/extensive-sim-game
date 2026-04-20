@@ -2,7 +2,7 @@
 
 Canonical specification for the ECS DSL. Supersedes `spec.md`, `spec.md`, and `spec.md` (all folded into this doc). §9 lists the 29 settled design decisions; per-decision rationale is extracted into `decisions.md`.
 
-Appendix A contains the detailed universal-mechanisms reference (PostQuest/AcceptQuest/Bid/Announce). Appendix B contains the observation-budget worked example with concrete per-slot feature counts.
+Appendix A contains the detailed universal-mechanisms reference (PostQuest/AcceptQuest/Bid/Announce).
 
 For compiler-layer concerns (codegen, lowering, schema emission), see `docs/compiler/spec.md`.
 
@@ -10,21 +10,22 @@ For compiler-layer concerns (codegen, lowering, schema emission), see `docs/comp
 
 ## 1. Language overview
 
-The DSL declares a closed-world simulation: typed state, typed events, declarative derivations, cascade rules, action masks, policies, and trainer plumbing. Eleven top-level declaration kinds compose into a single compiled artefact (Rust runtime + SPIR-V kernels + JSON schema + packed checkpoints).
+The DSL declares a closed-world simulation: typed state, typed events, declarative derivations, cascade rules, action masks, scoring weights, invariants, and regression probes. Ten top-level declaration kinds compose into a single compiled artefact (Rust runtime + SPIR-V kernels + Python dataclass mirrors + trace-format schema).
+
+Machine learning — policy architecture, training algorithm, curriculum, reward shaping, observation packing — is **not** in the DSL. The compiler emits Python dataclasses + a pytorch `Dataset` over the trace format so that external training scripts consume a typed API. The in-engine NPC backend is a utility backend (ships permanently as bootstrap + regression baseline); `scoring` declarations drive utility scoring and are also written into traces so Python training jobs can reshape them into rewards externally.
 
 - **`entity`** — parameterization of one of the three predefined root kinds (Agent, Item, Group). Authors cannot introduce new root kinds; they declare `creature_type`, `ItemKind`, or `GroupKind` variants with default stats, capabilities, eligibility, and starting memberships. (`stories.md` §1, §10, §11)
-- **`event`** — typed, append-only records. The universal state-mutation channel. Annotations mark replayability, high-volume classification, observation visibility. (`stories.md` §2; `stories.md` §15; `stories.md` §60)
+- **`event`** — typed, append-only records. The universal state-mutation channel. Annotations mark replayability, high-volume classification, trace visibility. (`stories.md` §2; `stories.md` §15; `stories.md` §60)
 - **`view`** — pure or event-folded derivations. Eager (`@materialized`) or lazy; first-class spatial and non-spatial queries. (`stories.md` §3, §5; `stories.md` §26)
 - **`physics`** cascade rule — phase-tagged transforms from events to events with compile-time cycle detection, race detection, and schema-drift guards. (`stories.md` §4; `stories.md` §27)
-- **`mask`** — per-action predicates forming the role gate and the legality contract. Compiles to per-head boolean tensors. (`stories.md` §8; `spec.md` §2.3)
-- **`verb`** — composition sugar that bundles mask + cascade + reward into a named gameplay action without extending the categorical action vocabulary. (`stories.md` §7)
-- **`policy`** — observation block, action heads, reward, value, advantage, training, backend, curriculum, and telemetry sub-blocks. One forward pass per tick for all alive agents. (`spec.md` §2; `stories.md` §20, §22, §24)
+- **`mask`** — per-action validity predicates. Emits both a Rust predicate fn and a SPIR-V kernel so the legality contract is identical on both backends. (`stories.md` §8)
+- **`verb`** — composition sugar that bundles mask + cascade + scoring into a named gameplay action without extending the categorical action vocabulary. (`stories.md` §7)
+- **`scoring`** — per-action personality-weighted utility table consumed by the utility backend. Also written to traces so external ML training scripts can reshape them into rewards.
 - **`invariant`** — static, runtime, or debug-only predicates over state, checked at the phase boundary they describe. (`stories.md` §6)
-- **`probe`** — named scenario + behavioral assertion, evaluated on a checkpoint against seeded trajectories. CI regression surface. (`stories.md` §18)
-- **`curriculum`** — staged training with mask overrides, reward overrides, and transition criteria. (`stories.md` §22)
-- **`telemetry`** — per-metric emission and alert declarations driving both dashboards and curriculum gating. (`stories.md` §24)
+- **`probe`** — named scenario + behavioral assertion, evaluated against seeded trajectories. CI regression surface.
+- **`metric`** — runtime observability declaration: per-tick counters, histograms, gauges with optional alert thresholds. No coupling to training.
 
-At runtime the tick pipeline is fixed: pre-phase rules → event emission → materialized-view updates → policy inference (observation pack + mask + forward + sample) → action application → cascade fixed-point → post-phase rules → telemetry emission. Determinism flows through a single per-world RNG; text generation sits outside the deterministic fold. (`stories.md` §27, §29; `stories.md` §60)
+At runtime the tick pipeline is fixed: pre-phase rules → event emission → materialized-view updates → mask build → utility-backend scoring → action selection → action application → cascade fixed-point → post-phase rules → metric emission. Determinism flows through a single per-world RNG; text generation sits outside the deterministic fold. (`stories.md` §27, §29; `stories.md` §60)
 
 ---
 
@@ -111,7 +112,8 @@ event <Name> {
 @replayable                  // default; event replays deterministically
 @non_replayable              // text-gen events, LLM prose, side-channel
 @high_volume                 // routes to a separate ring-buffer storage class
-@observation_visible         // participates in observation slot arrays
+@traced                      // emitted to the trace ring buffer for external consumption
+                             // (Python Dataset, probe evaluation, debug scrubbing)
 @gpu_amenable                // scalar fields only; triggers GPU event-fold codegen
 ```
 
@@ -128,21 +130,21 @@ enum Source {
 }
 ```
 
-`Source` is a standard type used both inside `MemoryEvent` payloads and projected into observations as `info_source_one_hot[5]` (see §3.1).
+`Source` is a standard type carried inside `MemoryEvent` payloads.
 
 The compiler emits:
 
 - A variant on the runtime event enum for that kind-bucket (`WorldEvent` / `MemoryEvent` / `StructuralEvent` — the bucket is chosen by the compiler from the event's payload references, not by the author).
 - A fixed-capacity ring buffer, sized by `@high_volume` (larger) or the default.
 - Serialisation hooks for replay (if `@replayable`).
-- An entry in the observation event-vocabulary table (if `@observation_visible`).
-- A pattern-match kernel for use in cascade, reward, and probe blocks.
+- An entry in the trace-format event-vocabulary table (if `@traced`), plus an emitted Python `@dataclass` mirroring the event's fields.
+- A pattern-match kernel for use in cascade, scoring, and probe blocks.
 
 String payloads are permitted only on `@non_replayable` events; the compiler rejects `String` fields on replayable events (`stories.md` §60). All load-bearing references are `AgentId`, `GroupId`, `ItemId`, `QuestId`, or `AuctionId` — no text. This forces `class_tags: Vec<String>` and `archetype: String` on legacy agent fields to migrate to `TagId` / `ArchetypeId` (`stories.md` §60 cross-cutting).
 
 ### 2.3 `view` declaration
 
-Views are pure over their inputs. The compiler chooses between lazy evaluation at observation-pack time and eager event-fold materialization per declaration.
+Views are pure over their inputs. The compiler chooses between lazy evaluation at read time and eager event-fold materialization per declaration.
 
 ```
 view <name>(<args>) -> <type> {
@@ -178,7 +180,7 @@ sort_by distance(self, _) limit K { ... }
 The compiler emits:
 
 - For `@materialized`: a field on the corresponding entity + an event-dispatch table mapping each `on_event` to the update body. GPU-amenable materializations sort events by target before commutative reduction to preserve determinism (`stories.md` §29 GPU-determinism traps).
-- For `@lazy`: an inline function referenced from observation packing and mask predicates.
+- For `@lazy`: an inline function referenced from mask predicates, scoring expressions, and cascade bodies.
 - For `@spatial`: routing to the appropriate spatial index — `voxel_engine::ai::spatial` on GPU, or a CPU uniform-grid fallback.
 - For `@top_k`: a fixed-cap partial-sort that writes into a `SimScratch` buffer.
 
@@ -263,13 +265,13 @@ Supported operators: set membership (`contains`, `in`), quantifiers (`forall`, `
 
 Compilation:
 
-- Per-head boolean tensors `categorical_mask[N × NUM_KINDS]`, `target_mask[N × NUM_SLOTS]`, etc.
-- Mask predicates that reference only intrinsic scalar fields compile to SPIR-V compute shaders; cross-entity predicates (`t in quest.eligible_acceptors`, `at_war(self.faction, f)`) are CPU-patched into the same boolean buffer before sampling.
-- Every predicate node has a stable AST ID; an explanation kernel reruns the predicate against a captured observation snapshot for `trace_mask(agent, action, tick)` (`stories.md` §34).
+- Per-action validity buffers `categorical_mask[N × NUM_KINDS]`, `target_mask[N × NUM_SLOTS]`, etc., consumed by the utility backend when filtering scoring candidates.
+- Mask predicates that reference only intrinsic scalar fields compile to SPIR-V compute shaders; cross-entity predicates (`t in quest.eligible_acceptors`, `at_war(self.faction, f)`) are CPU-patched into the same boolean buffer before scoring evaluation.
+- Every predicate node has a stable AST ID; an explanation kernel reruns the predicate against a captured state snapshot for `trace_mask(agent, action, tick)` (`stories.md` §34).
 
 ### 2.6 `verb` (composition sugar)
 
-`verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and reward hooks. It does NOT add to the closed categorical action vocabulary. (`stories.md` §7)
+`verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and scoring entries. It does NOT add to the closed categorical action vocabulary. (`stories.md` §7)
 
 ```
 verb Pray(self, shrine: Structure) =
@@ -277,35 +279,18 @@ verb Pray(self, shrine: Structure) =
   when  self.memberships contains Group{kind: Religion}
       ∧ distance(self, shrine) < REACH
   emit  PrayCompleted { prayer: self, shrine: shrine, faith_delta: 1.0 }
-  reward +0.5
+  score 0.5 * self.personality.piety
 ```
 
 The compiler expands a `verb` into:
 
 1. A mask entry narrowing an existing `Converse` / `Attack` / other micro primitive.
 2. A cascade handler that emits the declared event on successful action application.
-3. A reward hook added to the policy's reward block.
+3. A scoring entry appended to the scoring table (§3.4).
 
 Adding a `verb` does not bump the schema hash. Adding a new micro primitive does (see §4).
 
-### 2.7 `policy` declaration
-
-```
-policy <Name> {
-  observation { ... }        // §3.1
-  action { ... }             // §3.2
-  mask { ... }               // §2.5
-  reward { ... }             // §3.4
-  value { ... }              // §3.4 — actor-critic head
-  advantage { ... }          // §3.4
-  training { ... }           // §3.4
-  curriculum { ... }         // §2.10
-  telemetry { ... }          // §2.11
-  backend <Kind> { ... }     // §3.5
-}
-```
-
-Exactly one `policy` block covers all agents. Role differentiation is entirely through mask and observation features — not per-role backends (`spec.md` §1). (§2.4 remains the singular `PolicyBackend::evaluate_batch` call point.)
+### 2.7 `policy` declaration — REMOVED: ML out of DSL scope, see compiler trace-emission
 
 ### 2.8 `invariant` declaration
 
@@ -320,9 +305,9 @@ invariant no_bigamy(a: Agent) @runtime {
   count(g in a.memberships where g.kind == Family && g.is_marriage) <= 1
 }
 
-invariant append_only_observation() @static {
+invariant append_only_trace_schema() @static {
   forall (old_offset, new_offset) in schema_diff:
-    new_offset >= old_offset || is_slot_internal_append(old_offset, new_offset)
+    new_offset >= old_offset || is_field_internal_append(old_offset, new_offset)
 }
 
 invariant party_member_agents_alive(q: Quest) @debug_only {
@@ -332,18 +317,17 @@ invariant party_member_agents_alive(q: Quest) @debug_only {
 
 Cascades that write a field in the invariant's support must annotate `@must_preserve(<invariant>)`; the compiler rejects cascades that do not declare it.
 
-Schema invariants are separate from state invariants: the append-only-observation invariant is checked by the compiler at CI time, not at runtime.
+Schema invariants are separate from state invariants: the append-only-trace-schema invariant is checked by the compiler at CI time, not at runtime.
 
 ### 2.9 `probe` declaration
 
-Named behavioral tests evaluated against a checkpoint's trajectories. Probes live in `probes/` alongside their seed scenarios. (`stories.md` §18)
+Named CI regression assertions: fixture scenario → seeded event trajectory → behavioural check against the utility backend. Probes live in `probes/` alongside their seed scenarios. (`stories.md` §18)
 
 ```
 probe <Name> {
   scenario   "probes/<name>.toml"
   seed       <u64>
   ticks      <u32>
-  backend    neural:<path> | utility | llm
   tolerance  <f32>
 
   assert {
@@ -358,6 +342,8 @@ prob_expr   := "pr"    "[" <action_filter> "|" <obs_filter> "]" <comparator> <pr
 mean_expr   := "mean"  "[" <scalar_expr> "|" <filter> "]" <comparator> <scalar>
 ```
 
+Probes always run against the utility backend (the production NPC backend). They are behavioural regression assertions, not ML evaluation harnesses; external ML evaluation consumes the trace format separately.
+
 Example:
 
 ```
@@ -365,7 +351,6 @@ probe LowHpFlees {
   scenario "probes/low_hp_1v1.toml"
   seed 42
   ticks 200
-  backend neural:generated/npc_v3.bin
   tolerance 0.02
 
   assert {
@@ -383,67 +368,14 @@ probe NoSpouseAttacks {
 }
 ```
 
-Probes compile to trajectory queries over the replay buffer format in §3.5.4. Schema-hash mismatch between a probe's reference fields and the current DSL is a hard error (fail-loud, §4).
+Probes compile to trajectory queries over the trace ring-buffer format. Schema-hash mismatch between a probe's reference fields and the current DSL is a hard error (fail-loud, §4).
 
-### 2.10 `curriculum` declaration
+### 2.10 `curriculum` declaration — REMOVED: ML out of DSL scope, see compiler trace-emission
 
-```
-curriculum {
-  stage <Name> {
-    inherits <PreviousStage>        // optional
-    mask_override { ... }
-    training_weights { ... }
-    reward_override { ... }
-    transition_when {
-      metric <name> <comparator> <value>
-      min_steps <u64>
-    }
-  }
-}
-
-curriculum {
-  stage Foraging {
-    mask_override {
-      micro_kind allow [Hunt, Eat, Drink, Rest, MoveToward, Hold]
-      macro_kind allow [NoOp]
-    }
-    training_weights { micro_kind { Hunt: 5.0, Eat: 3.0 } }
-    transition_when {
-      metric action_entropy(micro_kind) >= 1.2
-      metric mean_episode_reward        >= 2.0
-      min_steps 50_000
-    }
-  }
-  stage Combat {
-    inherits Foraging
-    mask_override { micro_kind allow_additional [Attack, Cast, Flee] }
-    transition_when { metric win_rate_vs_baseline >= 0.4; min_steps 100_000 }
-  }
-  stage Macro {
-    inherits Combat
-    mask_override {
-      macro_kind allow_additional [PostQuest, AcceptQuest, Bid]
-      quest_type allow [Hunt, Escort]
-    }
-  }
-  stage Full {
-    inherits Macro
-    mask_override { macro_kind allow_all; micro_kind allow_all; quest_type allow_all }
-  }
-}
-```
-
-Mechanics:
-
-- `stage_mask[i]` is composed with the runtime mask via bitwise AND: `final_mask = runtime_mask & stage_mask_i`. Runtime rules ("can't attack a non-hostile") still hold; the stage further restricts.
-- `transition_when` criteria AND together. Once advanced, stages do not regress.
-- `reward_override` replaces the base reward block during the stage. Critic weights are re-warmed after each transition by freezing the policy for M steps.
-- Stage pointer lives in the checkpoint metadata alongside weights and schema hash (§3.5.5).
-
-### 2.11 `telemetry` declaration
+### 2.11 `metric` declaration
 
 ```
-telemetry {
+metric {
   metric <name> = <expr>
     [ window <ticks> ]
     [ emit_every <ticks> ]
@@ -451,137 +383,28 @@ telemetry {
     [ alert when <value_comparator> ]
 }
 
-telemetry {
-  metric entropy_macro_kind = entropy_of(action.macro_kind)
-    window 1000 emit_every 100 alert when value < 0.3
+metric {
+  metric cascade_iters_per_tick = histogram(cascade.iterations)
+    window 1000 emit_every 100 alert when max_bin > 0.90
 
-  metric entropy_quest_type = entropy_of(action.quest_type)
-    conditioned_on action.macro_kind == PostQuest
-    window 10000 alert when value < 0.8
+  metric events_emitted_per_kind = histogram(event.kind)
+    window 1000
 
-  metric freq_micro = histogram(action.micro_kind)
-    window 1000 alert when max_bin > 0.85
+  metric alive_agents = gauge(count(agent where agent.alive))
+    emit_every 10 alert when value < 1
 
-  metric value_error = mse(value.v_pred, montecarlo_return)
-    window 1000 alert when value > 10.0
+  metric masks_gate_rejections = counter(mask.rejection)
+    window 1000 alert when value > 10_000
 }
 ```
 
-Alerts emit structured log records and participate in curriculum `transition_when` clauses. Alert suppression for N ticks after a stage transition prevents spurious entropy-low alerts when the mask widens.
+Alerts emit structured log records to the engine telemetry sink. Metrics are sim-observability only — no coupling to training.
 
 ---
 
-## 3. Policy / observation / action grammar
+## 3. Action vocabulary
 
-### 3.1 Observation declaration
-
-```
-observation {
-  // Atom — single normalized scalar
-  self.hp_pct = self.hp / self.max_hp
-  self.mood   = view::mood(self)
-
-  // Information self-summary (see spec.md)
-  bitset self.knowledge_domain_bits[32] = view::knowledge_domains(self)
-    // Combat / Trade / Family / Politics / Religion / Craft / ... —
-    // bit set if any memory event of that category exists
-  self.memory_fill_pct = self.memory.events.len() / self.memory.events.cap()
-
-  // Block — named reusable group
-  block self.psychological {
-    from self.needs       as vec(6)
-    from self.emotions    as vec(6)
-    from self.personality as vec(5)
-    from view::mood(self) as f32
-  }
-
-  // Spatial slot array
-  slots nearby_actors[K=12] from query::nearby_agents(self, radius=50)
-                            sort_by distance(self, _) {
-    atom relative_pos: vec3   = (other.pos - self.pos) / 50
-    atom z_separation_log     = log1p(abs(other.pos.z - self.pos.z))
-    block other_features = view::agent_features_for_observation(other, viewer=self)
-    atom relationship_valence  = view::relationship(self, other).valence
-    atom n_shared_groups_log   = log1p(view::shared_group_count(self, other))
-    atom is_in_known_actors    = exists_in(known_actors, other.id)
-    atom is_trespasser         = view::is_trespasser(self, other)
-    atom other_reputation_visible = view::reputation_visible(self, other)
-    atom info_source_one_hot: [f32; 5] = one_hot(view::last_memory_source(self, other), 5)
-                                          // Witnessed / TalkedWith / Overheard /
-                                          // Rumor / NeverMet
-  }
-
-  // Non-spatial slot array
-  slots known_actors[K=10] from query::known_actors(self)
-                           sort_by relevance(self, _) { ... }
-
-  slots known_groups[K=6] from query::known_groups(self)
-                          sort_by relevance(self, _) {
-    atom group_kind_one_hot       = one_hot(other.kind, 9)
-    atom my_membership_one_hot    = one_hot(view::my_role(self, other), 4)
-    atom group_size_log           = log1p(other.members_count)
-    atom group_strength_log       = log1p(other.military_strength.unwrap_or(0.0))
-    atom standing_with_me_one_hot = one_hot(view::standing(self.primary_group, other), 5)
-    atom military_strength_ratio  = log1p(other.military_strength) - log1p(self.primary_group.military_strength)
-    atom is_adjacent_territory    = view::is_adjacent(self.home_region, other.territory)
-    atom controls_scarce_resource = view::controls_scarce_of(self.home_settlement, other)
-    atom is_at_war_with_my_enemies = view::shared_enemies_count(self.primary_group, other) > 0
-  }
-
-  slots memberships[K=8] from self.memberships
-                         sort_by (rank_in_group * group_activity) {
-    atom group_kind_one_hot        = one_hot(m.group.kind, 9)
-    atom my_role_in_group_one_hot  = one_hot(m.role, 6)
-    atom group_leader_vacant       = m.group.leader_id.is_none()
-    atom my_tenure_log             = log1p(now - m.joined_tick)
-    atom my_standing_in_group      = m.standing
-    atom group_activity_log        = log1p(m.group.recent_activity.len())
-    atom group_intel_velocity      = view::group_intel_velocity(m.group)
-                                     // EWMA of Announce/Communicate events
-                                     // propagating through this group —
-                                     // derived observation metric
-    atom is_active_party           = m.group.active_quests.len() > 0
-    atom my_tenure_relative_to_other_seniors = view::relative_tenure(self, m.group)
-  }
-
-  // Invite inbox — story 63 extension
-  slots incoming_invites[K=4] from view::pending_invites(self) {
-    atom invite_id          = i.invite_id as u32
-    atom kind_one_hot       = one_hot(i.kind, 9)
-    atom inviter_id         = i.inviter
-    atom time_remaining_log = log1p(i.expires_tick - now)
-    atom inviter_relationship_summary = view::relationship(self, i.inviter).valence
-  }
-
-  // Active quests / auctions
-  slots active_quests[K=4]   from view::active_quests(self) { ... }
-  slots active_auctions[K=4] from view::observable_auctions(self) {
-    atom auction_id   = a.id as u32
-    atom kind_one_hot = one_hot(a.kind, 7)
-    atom seller_id    = a.seller.agent_or_group_id()
-    atom best_bid_log = log1p(a.best_bid_value())
-    atom deadline_log = log1p(a.deadline_tick - now)
-  }
-
-  // Known resources, memberships summaries, context blocks — same pattern
-  summary recent_chronicle[NUM_CHRONICLE_CATEGORIES] {
-    from world.chronicle filter |e| now - e.tick < 200
-    group_by e.category
-    output count_log
-  }
-
-  bitset settlement_culture[14] = self.home_settlement.context_tags
-
-  // Atom for reputation
-  self.reputation_log = log1p(view::reputation(self))
-  self.war_exhaustion = view::war_exhaustion(self.primary_group)
-  self.n_conflicting_group_pairs = view::group_standing_conflicts(self)
-}
-```
-
-Every field has a declared `norm` kind: `identity`, `log1p`, `scale(d)`, `clamp(lo, hi)`, `one_hot(K)`, `bitset(N)`. The normalization taxonomy is fixed; new kinds require DSL changes (`stories.md` §13).
-
-The compiler emits a packed struct with named field offsets, per-block contiguous regions, and a JSON schema dump consumed by ML tooling (§4). Slot-internal appends (a new field inside `nearby_actors[]`) grow every slot by `new_bytes`; total footprint grows by `K × new_bytes`.
+### 3.1 Observation declaration — REMOVED: ML out of DSL scope, see compiler trace-emission
 
 ### 3.2 Action heads
 
@@ -679,118 +502,44 @@ Invite and auction coverage (`stories.md` §63, `stories.md` §54):
 
 Gameplay verbs like Pray, DefendDen, Raid-by-opportunity are `verb` declarations over these primitives.
 
-### 3.4 Reward, value, advantage, training
+### 3.4 `scoring`
 
-Reward is per-tick scalar. The value, advantage, and training sub-blocks select the algorithm variant without touching reward semantics. (`stories.md` §20)
+Per-action personality-weighted utility values consumed by the utility backend. A `scoring` table maps each categorical action (micro or macro head variant) to a scalar utility expression; the utility backend argmaxes over masked candidates each tick. Scoring values are also written to traces so external pytorch training scripts can reshape them into rewards without reading engine internals.
 
 ```
-reward {
-  delta(self.needs.satisfaction_avg)               × 0.1
-  delta(self.hp_frac)                              × 5
-  +1.0 on event(EntityDied{killer: self, target.team != self.team})
-  -1.0 on event(EntityDied{target in self.close_friends})
-  +0.05 per behavior_tag accumulated this tick
-  +2.0 on event(QuestCompleted{quest.party_member_ids contains self})
-  -1.0 on event(QuestExpired{quest.party_member_ids contains self})
-  +0.02 × delta(self.reputation_log)
-  -0.5  on event(self.role transition: Leader -> Outlaw)
-  -0.5  on event(LeaveGroup{agent: self, role_in_group: Leader})
-}
+scoring {
+  // Micro utilities — expressions reference self fields, views, and per-tick deltas.
+  Attack(t)       = 0.6 * self.personality.aggression
+                    + 0.2 * (1.0 - self.hp_frac)
+                    + 0.2 * is_hostile(self, t)
+  Flee(from)      = 0.8 * (1.0 - self.hp_frac)
+                    + 0.2 * threat_level(from)
+  Eat             = 0.7 * hunger_pressure(self)
+  Converse(t)     = 0.3 * self.personality.social
+                    + 0.2 * relationship(self, t).valence
 
-value {
-  head scalar v_pred
-  trunk    shared                    // shared | separate
-  loss     mse                       // mse | huber
-  clip_range 10.0
-}
-
-advantage {
-  kind       gae                     // gae | nstep | montecarlo
-  gamma      0.99
-  lambda     0.95
-  normalize  per_batch               // per_batch | per_agent | none
-
-  // Per-head gamma overrides for macro credit assignment (stories.md §D.20 gaps)
-  macro      { gamma: 0.999 }
-  micro      { gamma: 0.99  }
-}
-
-training {
-  algorithm ppo {
-    clip_epsilon   0.2
-    vf_coef        0.5
-    entropy_coef   0.01
-    n_epochs       4
-    minibatch_size 4096
-    target_kl      0.02
-  }
-  // or:
-  // algorithm reinforce { baseline: v_pred }
-  // algorithm bc        { loss: cross_entropy }
-
-  optimizer adamw  { lr: 3e-4, beta2: 0.98, weight_decay: 1.0 }
-  grokfast  ema    { alpha: 0.98, lamb: 2.0 }
-}
-
-action {
-  head categorical macro_kind: enum {
-    NoOp                              @training_weight(1.0),
-    PostQuest                         @training_weight(50.0) @rare,
-    AcceptQuest                       @training_weight(20.0),
-    Bid                               @training_weight(10.0),
-    InviteToGroup                     @training_weight(20.0),
-    AcceptInvite                      @training_weight(15.0)
-  }
-  head categorical quest_type: enum QuestType {
-    Hunt, Escort, ...                    // defaults to 1.0
-    Conquest      @training_weight(100.0),
-    Marriage      @training_weight(50.0),
-    Found         @training_weight(100.0),
-    Claim         @training_weight(80.0)
-  }
+  // Macro utilities — personality-weighted so utility backend can fire rare actions.
+  PostQuest{type=Conquest, target=Group(g)}
+                  = 0.9 * self.personality.ambition
+                    * (strength(self.leader_groups[0]) / strength(g))
+  PostQuest{type=Marriage, target=Agent(t)}
+                  = 0.7 * self.personality.compassion
+                    * relationship(self, t).valence
+  InviteToGroup{kind=Family, target=Agent(t)}
+                  = PostQuest{type=Marriage, target=Agent(t)}
+  AcceptInvite(i) = 0.5 + 0.5 * invite(i).source_standing
 }
 ```
 
-Per-action `@training_weight` drives both prioritised replay sampling and per-head loss scaling. Weights can be overridden per curriculum stage (§2.10).
+Compiler emits:
 
-### 3.5 Backend
+- A per-tick scoring kernel that evaluates each masked candidate's utility expression and writes the result into `utility_field[N × NUM_ACTIONS]` for the utility backend to argmax over.
+- Trace-emission hooks: `(tick, agent_id, action, score)` rows streamed into the trace ring buffer so external Python training can consume per-action scores as reward-shaping inputs.
+- Validation: scoring expressions must reference declared views, entity fields, or personality traits.
 
-A single trait. Three implementations (`spec.md` §2.4).
+Adding a `scoring` entry does not bump the schema hash's state / event / rules components — only the `scoring_hash` sub-hash (§4). External training code that depends on a specific scoring shape is responsible for recomputing from the current DSL.
 
-```
-trait PolicyBackend {
-    fn evaluate_batch(
-        &self,
-        observations: &PackedObservationBatch,   // [N, OBS_DIM]
-        masks:        &PackedMaskBatch,
-    ) -> ActionBatch;                             // [N] typed Action
-}
-```
-
-- **`backend Neural`** — production. Loads weights from `path`, runs one GPU or CPU forward pass per tick, samples per-head with mask.
-- **`backend Utility`** — bootstrap and regression baseline. Declarative scoring rules, argmax over masked candidates, softmax-with-temperature for calibrated log-probs when emitting trajectories for BC (`stories.md` §19).
-- **`backend Llm`** — research. Serialises observation to JSON, sends to an external model, parses the action. Off the per-tick path; used to seed BC datasets.
-
-Backend assignment is per-policy. Assigning backends per-role is allowed but discouraged — role differentiation lives in mask and observation, not backends.
-
-Checkpoint layout (`stories.md` §23):
-
-```
-<policy>.bin
-├── header (128 bytes):
-│   ├── magic "NPCPOL\0\0"          (8)
-│   ├── format_version  u32          (4)
-│   ├── schema_hash     [u8; 32]     (32)  // SHA256 over obs + action + event taxonomy + reward
-│   ├── policy_name     [u8; 32]     (32)
-│   ├── training_step   u64          (8)
-│   ├── stage_name      [u8; 16]     (16)
-│   ├── reserved        [u8; 20]     (20)
-│   ├── weights_offset  u64          (8)
-├── weights section (named tensor blobs, safetensors-style)
-└── footer: CRC32 over weights
-```
-
-Hot-swap semantics: file watcher triggers reload at the next tick boundary, schema-hash check fails loud on mismatch, atomic pointer swap on success (`stories.md` §23).
+### 3.5 Backend — REMOVED: ML out of DSL scope, see compiler trace-emission. The NPC backend is the utility backend (permanent); see `docs/compiler/spec.md` §Decisions #24.
 
 ---
 
@@ -798,14 +547,14 @@ Hot-swap semantics: file watcher triggers reload at the next tick boundary, sche
 
 The schema hash is a content-addressed fingerprint over:
 
-1. Observation layout — field order, offsets, types, normalization constants, one-hot vocabularies.
-2. Action vocabulary — head enums, variant lists, parameter-head combinations.
-3. Event taxonomy — declared event names and field shapes.
-4. Reward declaration — components and weights.
+1. **`state_hash`** — entity field layouts (field order, offsets, types, bounded-collection capacities).
+2. **`event_hash`** — declared event names and field shapes.
+3. **`rules_hash`** — physics cascades, mask predicates, and verb declarations.
+4. **`scoring_hash`** — scoring-table expressions and their input dependencies.
 
-Loading a checkpoint whose schema hash differs from the current DSL is a hard error (`stories.md` §15, `stories.md` §23, `stories.md` §64).
+The combined schema hash is `sha256(state_hash || event_hash || rules_hash || scoring_hash)`. Loading a trace whose combined hash differs from the current DSL is a hard error (`stories.md` §15, `stories.md` §23, `stories.md` §64). Traces emitted under a different schema must be consumed by an engine version that matches, or re-emitted from the current DSL.
 
-There are no `@since` annotations. There are no padded-zero migration tables. There are no v1/v2/v3 schemas in the codebase — git holds history. Two branches with different schemas produce mutually incompatible checkpoints, which is correct.
+There are no `@since` annotations. There are no padded-zero migration tables. There are no v1/v2/v3 schemas in the codebase — git holds history. Two branches with different schemas produce mutually incompatible traces, which is correct.
 
 For the emission mechanism (sub-hash layout, error-message format, CI guard) see `docs/compiler/spec.md` §2 Schema emission.
 
@@ -890,24 +639,22 @@ Native Rust (CPU) + GPU (`voxel_engine::compute::GpuHarness`) + hot/cold storage
 ```
 pre phase    (@phase(pre) rules; read-only state access)
        ↓
-event emission (policy actions + world events emitted this tick)
+event emission (agent actions + world events emitted this tick)
        ↓
 materialized-view updates (event-fold per @materialized view, sorted-key reduction)
        ↓
-observation pack (GPU dispatch; one row per alive agent)
-       ↓
 mask evaluation (GPU + CPU patch for cross-entity)
        ↓
-policy forward + sample (one evaluate_batch call)
+scoring evaluation (per-action utility expression per masked candidate)
        ↓
-action application (shuffled-but-seeded order via rng_state)
+action selection (utility backend argmax; shuffled-but-seeded order via rng_state)
        ↓
 cascade fixed-point (@phase(event) rules; up to terminating_in(N) hops)
        ↓
 post phase   (@phase(post) rules; ground-snap, overhear scan,
-              chronicle / telemetry emission)
+              chronicle / metric emission, @traced event flush)
        ↓
-telemetry metrics updated; alerts emitted
+metric sinks updated; alerts emitted
 ```
 
 **Ground-snap phase** — a post-MovementApplied cascade rule for ground-locked `creature_type`s:
@@ -980,7 +727,7 @@ Runtime constants: `MAX_ANNOUNCE_RECIPIENTS` (default 64) bounds the per-emissio
 Tests in `src/ai/core/tests/determinism.rs` (runtime) and the compiler's invariant checker verify that:
 
 - `sim(seed).step(N).save() + load() + step(M) ≡ sim(seed).step(N + M)` for all primary state.
-- Any policy code reading `event.text` fields is rejected at compile time.
+- Any rule, scoring, or mask code reading `event.text` fields is rejected at compile time.
 
 ### 7.3 Replay scope
 
@@ -993,7 +740,7 @@ Replay artefacts per recorded segment:
 1. Initial snapshot (zstd-compressed safetensors).
 2. Event log with `{ tick, kind: u16, params: [u32; 4], source_agent: u32 }` — numeric IDs only, zstd-framed per 500-tick segment.
 3. Tick-boundary RNG checkpoints every 100 ticks.
-4. Policy checkpoint hash (forces weight-compatible replay).
+4. Schema combined-hash (forces trace-format-compatible replay; see §4).
 5. (Bug-report artefacts only, §9 #21) Chronicle template library snapshot for prose-exact reproduction.
 
 Non-replayable text is regenerated from templates on playback.
@@ -1011,7 +758,6 @@ Snapshot contents:
 - Materialized views (serialized) with schema-hash guard. Mismatch forces rebuild from baseline.
 - Event log ring (fixed-cap).
 - GPU-resident buffers downloaded and serialized; re-uploaded on load.
-- Policy weight hash.
 
 Snapshot format: safetensors-compatible, length-prefixed, deserialize-in-place. Zero-malloc load uses pre-allocated agent slot pool.
 
@@ -1038,7 +784,7 @@ Agent C { id=3, pos=vec3(12, 6, 42.0), creature_type=Human,
 view relationship(1, 2) = { valence=0.72, familiarity=0.60, last_interaction=tick-5 }
 ```
 
-**Tick T — A acts.** Observation packing runs; A's policy sees B in `known_actors[0]` and emits:
+**Tick T — A acts.** Scoring evaluates over A's masked candidates; the `InviteToGroup{kind=Family, target=B}` candidate wins the utility argmax because B sits in A's `known_actors` view with high valence. A emits:
 
 ```
 action {
@@ -1074,7 +820,7 @@ physics invite_posted @phase(event) {
                       kind: Family, expires_tick: T+500 }
 ```
 
-**Tick T+1 — B observes the invite.** B's `incoming_invites[0]` surfaces invite 42. B's policy reads the inviter's relationship summary (valence=0.72), the kind (Family), and emits:
+**Tick T+1 — B sees the invite.** B's `incoming_invites[0]` surfaces invite 42. B's scoring evaluates the `AcceptInvite` candidate against relationship valence (0.72) and invite kind (Family); the utility argmax picks it. B emits:
 
 ```
 action {
@@ -1135,9 +881,9 @@ physics witness_cascade @phase(post) {
 }
 ```
 
-**Agent C (nearby, same altitude) witnesses.** Cascade emits a `Witnessed` event; C's `memory_events` ring ingests it with `source=Witnessed, confidence=1.0`; C's `joy` view bumps next observation.
+**Agent C (nearby, same altitude) witnesses.** Cascade emits a `Witnessed` event; C's `memory_events` ring ingests it with `source=Witnessed, confidence=1.0`; C's `joy` view bumps on the next read.
 
-**Tick T+2 — A announces to the settlement.** A's policy, observing the just-completed marriage as a fresh memory event, emits:
+**Tick T+2 — A announces to the settlement.** A's scoring elevates the `Announce` candidate because the just-completed marriage sits at the top of A's memory ring as a fresh, high-valence event. A emits:
 
 ```
 action {
@@ -1161,7 +907,7 @@ view mood(A) += 0.05 (from NeedsSatisfied via social_drive fulfillment)
 view relationship(C, A).familiarity += 0.02
 ```
 
-The entire cascade is 4 events (`InvitePosted`, `AcceptInvite` trigger, `MarriageFormed`, `FoundGroup` + memory + witness), one mask per action, two policy decisions (A's emit + B's emit), and one post-phase spatial query for witness cascade. No special "marriage system" exists; the outcome falls out of `verb` declarations, cascade rules, and views.
+The entire cascade is 4 events (`InvitePosted`, `AcceptInvite` trigger, `MarriageFormed`, `FoundGroup` + memory + witness), one mask per action, two scoring-driven action selections (A's emit + B's emit), and one post-phase spatial query for witness cascade. No special "marriage system" exists; the outcome falls out of `verb` declarations, cascade rules, and views.
 
 ---
 
@@ -1172,33 +918,33 @@ All 29 open questions from the prior revision have been resolved through design 
 ### 9.1 Action / quest mechanics
 
 1. **Auction state machine** — `Resolution` enum = `{HighestBid, FirstAcceptable, MutualAgreement, Coalition{min_parties: u8}, Majority}`. `Coalition` for multi-party diplomatic pacts (stories_H §54); `Majority` for contested succession (story 46). `PostAuction` is an alias of `PostQuest{kind: Diplomacy|Charter|Service}` — no separate macro head. Cadence is per-world config, not compiled-in.
-2. **Macro head firing rate** — Macro head runs **every tick**. Most emissions are `NoOp`; the network budgets cost via small macro sub-network + large micro pipeline. Avoids stale-context issues from gated macro inference.
-3. **Macro credit assignment** — **GAE(γ=0.99, λ=0.95)** per head with per-head γ override (`γ_macro = 0.999` for 2000+-tick Conquest). Reward deltas mark credit windows; no hand-scheduled per-scenario γ.
+2. **Macro head firing rate** — Macro head runs **every tick**. Most emissions are `NoOp`; scoring evaluates both heads each tick so the utility backend can act on fresh state. Avoids stale-context issues from gated macro inference.
+3. **Macro credit assignment** — Out of DSL scope. Credit-assignment algorithms for long-horizon macro decisions (Conquest, Marriage, Found) live in external pytorch training scripts that consume the trace format; the DSL only emits per-tick scoring values and the event stream that training code can reshape.
 4. **Quest discovery push/pull hybrid** — **Hybrid**: posting emits `Announce(fact_ref=quest_id, audience)` cascade → recipients get the quest into their `known_quests` slot. Physical proximity + `GatherInformation` intent produces pull-style discovery for quests outside the announce radius. No always-on public broadcast; quest visibility is behaviour-driven.
 5. **Slot K tuning** — **K=12 across the board** for spatial slots; K for non-spatial slots scales with role (leaders get larger `known_actors`, `known_groups`). Emergent behaviour and reputation dynamics are option-A ("agent must actively seek information") — no auto-populated global views.
 6. **Cross-entity mask index design** — **Hybrid**: eager index materialization for `standing(group_a, group_b)`, `quest.eligible_acceptors`, `same_building`; lazy scan for low-cardinality predicates. Indices rebuild on the owning event (`GroupStandingChanged`, `QuestPosted`, `ChunkEnteredBuilding`).
-7. **Concurrent quest membership** — **Multi-quest list** (up to K=4 active). Information primitives support multi-step plans (scout → report → assault chain). Mutual exclusion is policy-level against internal state, not schema-enforced; the policy can choose to decline a second quest that conflicts.
+7. **Concurrent quest membership** — **Multi-quest list** (up to K=4 active). Information primitives support multi-step plans (scout → report → assault chain). Mutual exclusion is scoring-level against internal state, not schema-enforced; the utility backend can rank a conflicting second quest below acceptance.
 8. **Reward delivery on long quests** — **Compute at completion from current state**. No escrow. Poster reliability becomes emergent reputation: `QuestDefault` event fires if poster can't pay; accepters price the risk via `believed_intrinsic_value(poster_reputation, reward)`. Behavior-driven quest economics.
 9. **Cancellation / amendment** — **`WithdrawQuest` macro head for taker only** (accepter changes mind, pays reputation cost). Poster amendment is forbidden; a poster who wants different terms must post a new quest. Simpler semantics; forces honest initial terms.
 10. **Bid currency parity** — **`Payment::Combination{material, immaterial}` with per-agent valuation**. `intrinsic_value(observer, payment)` view computes subjective worth; `believed_intrinsic_value(self, other, payment)` gives theory-of-mind for bid crafting. Material and immaterial contributions are both required; ratio is per-buyer preference.
 15. **Nested quest cancellation** — **C with B as acceleration structure**: parent Quest has `child_quest_ids: SortedVec<QuestId, 8>` materialised by the `QuestPosted{parent_id: Some(...)}` cascade. Parent cancel emits a cascade that cancels children; reward cascades traverse child_quest_ids for spoils distribution. Child tracking is the acceleration index; cancellation is first-class.
 17. **Polygamous / cross-species / multi-parent family** — **C for all three**: `Agent.spouse_ids: SortedVec<AgentId, 4>` (polygamy), `can_marry(a, b) → bool` view folds in `creature_type` compatibility (cross-species at designer opt-in), `ChildBorn{parents: [AgentId; 4], inheritance_blend}` supports multi-parent lineages.
 18. **Mercenary / service payment direction** — **C**: `AuctionKind::Service` inverts roles via `AuctionParty::{Buyer=Patron, Seller=Labourer}` with `Payment` flowing Buyer→Seller on completion. Service commitments use `Payment::ServicePledge{duration_ticks, scope}` evaluated against `intrinsic_value` for comparison.
-19. **Alliance obligation enforcement** — **C / C**: "alliance" is not a first-class concept; it is an emergent standing derived from `standing(group_a, group_b)`. `SetStanding(target, kind)` is the universal macro; "declare war" is `SetStanding(target, kind=Hostile)`; "alliance" is `standing ≥ Friendly` ∧ reciprocal. Default response to ally-under-attack is policy-governed, not mechanism-forced.
+19. **Alliance obligation enforcement** — **C / C**: "alliance" is not a first-class concept; it is an emergent standing derived from `standing(group_a, group_b)`. `SetStanding(target, kind)` is the universal macro; "declare war" is `SetStanding(target, kind=Hostile)`; "alliance" is `standing ≥ Friendly` ∧ reciprocal. Default response to ally-under-attack is scoring-governed, not mechanism-forced.
 20. **Group-level invites vs agent-level invites** — **Agent-level only**. All invitations are agent-to-agent. Group mergers / coalitions use `PostQuest{kind: Diplomacy, resolution: Coalition{min_parties: K}}`. Removes the edge case where party-to-party agreement would tear factions apart.
 30. **Communication channels (D30)** — `Capabilities.channels: SortedVec<CommunicationChannel, 4>` replaces `can_speak` / `can_hear` / `hearing_range` booleans. Enum variants: `Speech`, `PackSignal`, `Pheromone`, `Song`, `Telepathy`, `Testimony`. `channel: CommunicationChannel` is a parameter head on `PostQuest` / `Announce` / `InviteToGroup` / `Communicate` / `Converse` / `ShareStory`. Ranges, overhear eligibility, and recipient filtering are all per-channel. Cross-species communication requires a shared channel; wolves coordinate via `PackSignal` without language. Humans/dragons use `Speech`. Telepathic factions use unbounded-range `Telepathy`. Documents propagate via `Testimony` (item transfer, not spatial).
 31. **Materialized-view storage hint (D31)** — `@materialized(on_event=[...], storage=<hint>)` lets the author pick a storage layout: `pair_map` (dense small-N × small-N, e.g. `Group × Group` standings), `per_entity_topk(K, keyed_on=<arg>)` (bounded per-entity slots, e.g. per-agent-per-membership Claim eligibility), `lazy_cached` (compute-on-demand + per-tick cache, e.g. low-cardinality derivations). Compiler rejects infeasible combinations (e.g., `pair_map` on `(AgentId, AgentId)` at N=200K). GPU/CPU routing (see `docs/compiler/spec.md` §1.2) follows from storage: intrinsic scalars + per-entity-slot materializations compile to GPU; lazy + unbounded-pair predicates stay CPU.
 
 ### 9.2 Runtime / infrastructure
 
-11. **LlmBackend distillation pipeline** — → see `docs/compiler/spec.md` §Decisions.
+11. *(retired — LlmBackend is no longer a DSL concept; ML is out of DSL scope.)*
 12. **Per-agent RNG streams** — **C**: per-agent RNG seeded from `hash(world_seed, agent_id, tick, purpose)`. Enables fully-parallel sampling without save/load complexity (no extra stored state; seeds are derived).
 13. **Materialized-view restoration on load** — **A primary / C rollback**: views serialize with schema-hash guard; on mismatch, rebuild from event log if available, otherwise refuse load. Rollback (dev-only, per-save) enables time-travel debugging from snapshot boundaries.
 14. **Event log storage compression** — **(a) + (c) + (d) combined**: event-type filtering to replayable subset, fixed snapshot cadence **N=500 ticks**, zstd compression codec. ~2–5 GB per ~1000-tick bug report window.
 21. **Chronicle prose side-channel lifecycle** — **C / X / P**: eager template rendering at event emission; async LLM rewrite pass for flagged categories (`Legendary`, `Founding`, `Death`, `Prophecy`); saved prose is canonical across template changes (player-facing history doesn't retcon); replay artefacts bundle the template library for exact reproduction in bug reports.
 22. **Probe default episode count** — **Config-definable** per world + per-probe override via `seeds [42, 43, ...]` syntax. No hard-coded default.
-23. **Off-policy vs on-policy training dispatch** — **Out of DSL scope**. DSL emits a pytorch-compatible trajectory format (safetensors, flat tick-rows, `episode_end` flag, per-agent grouping). Training-script concerns (importance sampling, V-trace, Retrace, BC-vs-PPO dispatch) live in Python, not DSL.
-24. **Utility backend retirement milestone** — → see `docs/compiler/spec.md` §Decisions.
+23. **Training is out of DSL scope** — DSL emits Python dataclasses mirroring entities/events/`@traced` views plus a pytorch `Dataset` over the trace ring-buffer format. All training-script concerns (algorithm dispatch, importance sampling, curriculum, reward shaping, observation packing) live in external pytorch code, not DSL.
+24. **Utility backend is the production NPC backend** — the utility backend is permanent. ML training is external to the DSL; scoring tables feed utility scoring and are written to traces for external reward reshaping. See `docs/compiler/spec.md` §Decisions.
 25. **3D spatial hash structure** — **D**: 2D grid (cell=16m, voxel-chunk edge) with per-column sorted z-list, plus a `movement_mode ≠ Walk` sidecar (`Climb`, `Fly`, `Swim`, `Fall`). Slopes are Walk (they don't violate column-clustering). `movement_mode` is a primary field updated by the cascade.
 26. **Overhear confidence decay** — **B + D hybrid**: category-based base + exponential distance decay. `base[SameFloor/DiffFloor/Outdoor] = {0.75, 0.55, 0.50}`; `confidence = base * exp(-planar_distance / OVERHEAR_RANGE)`. Walls are not raycast; wall structure is captured by category.
 28. **`believed_knowledge` decay rate** — **3-tier volatility model**: `KnowledgeDomain` enum carries `volatility: {Short=500, Medium=20_000, Long=1_000_000}` ticks half-life. Reinforcement via observation-of-use, Communicate, and negative-evidence clearing. `Relationship.believed_knowledge_refreshed: [u32; 32]` stores per-bit last-refresh tick (~1 GB at 200k agents, acceptable).
@@ -1222,6 +968,7 @@ A standing decision log (`docs/dsl/decisions.md`) carries rationale and reversal
 
 This DSL does not handle:
 
+- **Machine learning**: policy architecture, training algorithms, curriculum, reward shaping, observation packing. Compiler emits Python dataclasses + a pytorch `Dataset` over the trace format; training code lives in external pytorch scripts.
 - Text generation, LLM prose, dialogue authoring — `@non_replayable` side channel; out of deterministic sim.
 - Asset pipeline — mesh, texture, shader assets for the voxel renderer live elsewhere.
 - Rendering — voxel meshing, marching-cubes, SDF rendering are voxel-engine concerns.
@@ -1241,7 +988,7 @@ Detailed treatment of the four macro mechanisms — `PostQuest`, `AcceptQuest`, 
 
 The v2 system reframings produced ~110 distinct action verbs (DeclareWar, ProposeAlliance, Vassalize, ProposeMarriage, FoundSettlement, PostBounty, Court, SwearOath, ...). The attacker correctly noted this list is fictional — it was generated by treating each gameplay outcome as a separate verb. In fact those outcomes collapse to **four universal mechanisms** plus a small set of micro primitives.
 
-This doc specifies the universal mechanisms. The downstream policy schema (`spec.md`) consumes this vocabulary.
+This doc specifies the universal mechanisms. The downstream action-vocabulary chapter (`spec.md` §3) consumes it.
 
 ### The four universal mechanisms
 
@@ -1362,7 +1109,7 @@ These can't be reduced because they ARE the per-tick physical/social acts:
 - **Social atomic**: `Converse(target)`, `ShareStory(audience, topic)`
 - **Info atomic (push)**: `Communicate(recipient, fact_ref)` — point-to-point sharing of one memory event; cascade validates `fact_ref ∈ self.memory`, inserts a `MemoryEvent` into `recipient.memory` with `source = TalkedWith(self)`, confidence `min(self.memory[fact_ref].confidence, 0.8)`. Mask: `r.can_hear ∧ planar_distance(self, r) < CONVERSE_RANGE`. `FactRef` is a bounded handle — a local event_id drawn from the speaker's memory ring.
 - **Info atomic (pull)**: `Ask(target, query)` — request facts from an entity. The target type disambiguates the cascade:
-  - If `target` is an `Agent`: emits `InformationRequested { asker: self, target, query }`. The target's next-tick observation includes the request; the target's policy may reply with `Communicate(asker, fact_ref)` matching the query, or ignore. Mask: `target.can_hear ∧ planar_distance(self, target) < CONVERSE_RANGE`.
+  - If `target` is an `Agent`: emits `InformationRequested { asker: self, target, query }`. The target's next-tick scoring sees the pending request in its `incoming_requests` view; the utility backend may pick `Communicate(asker, fact_ref)` matching the query, or leave it unanswered. Mask: `target.can_hear ∧ planar_distance(self, target) < CONVERSE_RANGE`.
   - If `target` is a `Document` item: cascade resolves immediately — extract `target.facts` matching `query`, insert into `self.memory` with `source = Testimony(target.id)`, confidence derived per §9 D27 from `(relationship_to_author, seal_validity, known_author_biases)`. Mask: `target ∈ self.inventory.documents`.
 - **Info atomic (sugar)**: `Read(doc)` — language-surface shorthand for `Ask(doc, QueryKind::AboutAll)`. The compiler lowers `Read` to the document-target branch of `Ask`; runtime vocabulary does not carry a separate `Read` micro. See `docs/compiler/spec.md` §3.
 - **Memory atomic**: `Remember(entity, valence, kind)` (typically internal, but expose as an action so policies can choose what to record)
@@ -1635,11 +1382,11 @@ The auction system becomes the universal mediator for any "who gets this contest
 
 Concrete walkthrough:
 
-1. **A leader of group G_self observes** — observation includes `G_self.military_strength`, `known_groups[K]` with their strength + standings, recent grievance events, settlement values.
-2. **Leader's policy chooses** `PostQuest{type=Conquest, party_scope=Group(G_self), target=Group(G_rival), reward=Spoils(rival_settlements), deadline=tick+5000}`.
+1. **A leader of group G_self reads** `G_self.military_strength`, `known_groups[K]` with their strength + standings, recent grievance events, settlement values — all via declared views.
+2. **Leader's scoring picks** `PostQuest{type=Conquest, party_scope=Group(G_self), target=Group(G_rival), reward=Spoils(rival_settlements), deadline=tick+5000}`.
 3. **Cascade emits** `QuestPosted` event with party_member_ids = current G_self members at that tick. The leader's next decision is `Announce{audience=Group(G_self), fact_ref=<QuestPosted memory event>}`, broadcasting the quest to faction members. Each member receives a `MemoryEvent{source=Announced(G_self), confidence=0.8}` referencing the new quest.
-4. **G_self members observe** the quest in their `active_quests` slot AND in `recent_memory_events` with `info_source_one_hot = Announced`. Their next-tick observation now includes "I'm in a Conquest quest against G_rival" — closing the information path rather than relying on magic faction-wide awareness.
-5. **Each member's policy decides** how to act on the war: emits per-tick micro primitives (`MoveToward(rival_settlement)`, `Attack(rival_agent)`, etc.) gated by the quest context.
+4. **G_self members see** the quest in their `active_quests` view AND in `recent_memory_events` with `source=Announced`. Their next-tick scoring now treats "I'm in a Conquest quest against G_rival" as an active context — closing the information path rather than relying on magic faction-wide awareness.
+5. **Each member's scoring decides** how to act on the war: the utility backend picks per-tick micro primitives (`MoveToward(rival_settlement)`, `Attack(rival_agent)`, etc.) gated by the quest context.
 6. **Quest progress tracked** as a derived view: `progress(quest) = f(G_rival.military_strength, G_rival.settlements_remaining, casualties)`.
 7. **Quest completes** when G_rival is conquered → `QuestCompleted{quest_id, winners=party}` event → cascade emits `SettlementConquered`, `Spoils` distribution, reputation/legend updates.
 8. **Quest fails** if deadline reached without victory or military_strength reduced to zero → `QuestExpired` → war-exhaustion effects on participants, possible defection cascade.
@@ -1651,9 +1398,9 @@ War is a long-duration group-scoped Conquest quest. The runtime needs:
 
 ### How "marriage is a quest" plays out
 
-1. Agent A's policy emits `PostQuest{type=Marriage, party_scope=Individual(A), target=Agent(B), reward=Union, terms=ExclusiveAcceptance}`.
+1. Agent A's scoring selects `PostQuest{type=Marriage, party_scope=Individual(A), target=Agent(B), reward=Union, terms=ExclusiveAcceptance}`.
 2. Cascade emits `QuestPosted` with `party_member_ids = [B]` (target as sole eligible acceptor).
-3. Agent B observes the quest in `active_quests`. B's policy decides accept/reject based on `relationship(B, A).trust`, `perceived_personality`, own marital state.
+3. Agent B sees the quest in `active_quests`. B's scoring evaluates accept/reject based on `relationship(B, A).trust`, personality traits, own marital state.
 4. If B emits `AcceptQuest(quest_id)` → cascade emits `QuestCompleted` → `MarriageFormed(A, B)` event → both A and B's `memberships` get a `Group{kind=Family}` entry via event handler.
 5. If quest deadline passes without acceptance → `QuestExpired` → A's emotion.grief bump (rejection); no marriage.
 
@@ -1667,7 +1414,7 @@ War is a long-duration group-scoped Conquest quest. The runtime needs:
 
 4. **Quest visibility / discovery.** How do NPCs learn about quests they should accept? Two models:
    - Push: `QuestPosted` event triggers re-scoring for nearby/eligible NPCs (cheap if parties are spatially clustered)
-   - Pull: NPCs query `available_quests_for(self)` as part of observation (always works but more expensive)
+   - Pull: NPCs query `available_quests_for(self)` as part of scoring evaluation (always works but more expensive)
    Probably hybrid: faction-scoped quests pushed to members, public bounties pulled.
 
 5. **Concurrent quest membership.** Can an NPC be in multiple quests at once (in a faction war AND on a personal pilgrimage AND running a caravan)? Current `party_id: Option<u32>` is single-slot. Need to extend or split: `party_id: Option<u32>` for adventuring + `active_quests: Vec<u32>` for everything else.
@@ -1684,7 +1431,7 @@ War is a long-duration group-scoped Conquest quest. The runtime needs:
 2. Add `PartyScope`, `QuestTarget`, `Reward`, `Payment` enums
 3. Implement minimal Auction state machine (HighestBid resolution only)
 4. Add cascade rules for new QuestType completions (Conquest → Spoils, Marriage → MarriageFormed, etc.)
-5. Add quest-eligibility view for observation construction
+5. Add quest-eligibility view for mask and scoring construction
 6. Migrate existing quest-like systems (warfare, family, settlement_founding, vassalage, alliance_blocs) to emit PostQuest instead of direct mutations
 7. Migrate existing trade/contract systems to use Auction
 8. Delete the now-redundant systems
@@ -1695,8 +1442,8 @@ This is several weeks of work but collapses ~30 systems into ~5 mechanisms. Wort
 
 - **Quest abstraction may be too uniform.** A 5-tick marriage proposal and a 5000-tick faction war are different beasts; treating them with one machinery may force compromises in either direction.
 - **Auction overhead for small trades.** A trivial commodity buy might end up as auction post → bid → resolve over 1+ ticks when current direct-trade is one tick. May need fast-path for "simple immediate trade."
-- **NPC policy complexity grows.** "Should I PostQuest? Of what type? With what party_scope and target and reward?" is a much richer decision than "should I attack?" The model has to learn structured action emission.
-- **Quest discovery mechanism affects gameplay.** Push-based means NPCs only see quests they're notified about; pull-based means observation cost balloons. Wrong choice creates gameplay artifacts.
+- **NPC scoring complexity grows.** "Should I PostQuest? Of what type? With what party_scope and target and reward?" is a much richer decision than "should I attack?" Utility-backend scoring tables have to cover the full structured-action space.
+- **Quest discovery mechanism affects gameplay.** Push-based means NPCs only see quests they're notified about; pull-based means per-tick view evaluation cost balloons. Wrong choice creates gameplay artifacts.
 
 ### What's settled vs what's open
 
@@ -1705,538 +1452,3 @@ This is several weeks of work but collapses ~30 systems into ~5 mechanisms. Wort
 **Open:** auction implementation details, quest semantics for long-duration faction quests, reward computation timing, cancellation/amendment, multi-quest membership, currency cross-compatibility in bids.
 
 This doc captures the design intent. The DSL surface (`spec.md`) and the synthesis pass (`synthesis.md` — pending) consume this vocabulary.
-
----
-
-## Appendix B. Observation Budget (worked example)
-
-Concrete per-slot feature counts used to size the ~1975-float-per-agent observation tensor. Referenced by §3.1 of the main spec. Kept verbatim from the earlier policy-schema proposal for implementer reference.
-
-### B.1 Observation — budget detail
-
-Per-agent packed feature tensor. Total budget: ~1700 floats per agent.
-
-#### 2.1.1 Self atomic features (~60)
-
-Vitals (12): hp_pct, max_hp_log, shield_pct, armor, magic_resist, attack_damage, attack_range, move_speed, weapon_durability, armor_durability, weapon_attack_bonus, armor_def_bonus
-
-Creature/role (14): creature_type_one_hot(~8), creature_height, can_speak, can_hear, hearing_range, can_fly, has_inventory, can_build, can_trade, is_leader_anywhere, is_outlaw, wanted_level (speak/hear/hearing_range/fly/creature_height derived from creature_type; others state)
-
-Needs (6): hunger, safety, shelter, social, purpose, esteem
-
-Emotions (6): joy, anger, fear, grief, pride, anxiety
-
-Personality (5): risk, social, ambition, compassion, curiosity
-
-Derived (3): mood (view), morale_pct, focus (view)
-
-Body/equipment summary (~10): inventory commodity counts (8), n_equipped_items, equipment_quality_avg
-
-#### 2.1.2 Self contextual (~155)
-
-Aspiration: need_vector(6), intensity, has_crystal, crystal_progress
-Classes: total_level, num_classes, class_tag_bits(16), top_3_classes ((id_one_hot(16), level_norm) per slot)
-Behavior profile top-K=8: (tag_id_one_hot(16), weight_log, exists)
-Current state: economic_intent_one_hot(4), work_state_one_hot(~6), current_goal_kind_one_hot(~10), boolean flags (has_active_party, is_adventuring, is_at_home, is_at_work_structure), intention_ticks_log
-Memory beliefs summary: counts of LocationDangerous, LocationSafe, EntityTrustworthy, EntityDangerous, friend_deaths, starvations_witnessed, recent_witness_count_5tick, recent_witness_count_50tick
-
-Information self-summary: `knowledge_domain_bits[32]` (bitset over coarse topic categories: Combat, Trade, Family, Politics, Religion, Craft, ...; bit set if any memory event of that category exists), `memory_fill_pct` (fraction of the memory ring currently populated)
-Economic: gold_log, debt_log, credit_history, income_rate_log, n_active_contracts
-Learned biases: action_outcome_EMA per ActionKind (~16 in collapsed vocabulary), price_beliefs (8), cultural_bias per major action_tag (~14)
-Social ties (per-agent): has_spouse, n_children, has_mentor, has_apprentice, mentor_lineage_depth, n_close_friends, spouse_alive, reputation_summary, fame_log
-
-#### 2.1.3 Group memberships (~130)
-
-Each agent can belong to multiple groups (faction, family, guild, religion, party, hunting pack, criminal cabal). Multi-membership produces emergent loyalty conflicts.
-
-```
-memberships[K=8]             groups self belongs to, sorted by relevance
-                             (rank in group × group activity)
-  group_kind_one_hot(8)      Faction, Family, Guild, Religion, Party,
-                             Pack, Settlement, Other
-  my_role_in_group_one_hot(6) Member, Officer, Leader, Founder,
-                             Apprentice, Outcast
-  group_size_log
-  my_tenure_log              ticks since I joined
-  my_standing_in_group       (-1, 1) reputation within the group
-  group_activity_log         recent events involving the group
-  group_intel_velocity       EWMA of Announce/Communicate events
-                             propagating through this group — a derived
-                             observation metric, NOT stored state
-  is_active_party            (this group is currently in a quest party)
-  exists
-                                                                           ~13 × 8 = 104
-```
-
-Plus self summary atoms (~24): n_total_groups, n_political_groups, n_kin_groups, n_religious_groups, n_economic_groups, n_party_groups, n_groups_in_active_quest, primary_group_kind_one_hot(8), authority_in_top_group, leadership_count (groups where I'm Leader), founder_count.
-
-#### 2.1.4 Spatial slot arrays (~1030)
-
-```
-nearby_actors[K=12]          sorted by 3D distance           45 × 12 = 540
-                             (creature_type discriminates wolves
-                              from humans, etc.)
-nearby_resources[K=8]        sorted by 3D distance           13 ×  8 = 104
-                             derived view over voxel materials + harvest events
-nearby_structures[K=6]       sorted by 3D distance           15 ×  6 =  90
-                             derived view over tile/voxel regions
-threats[K=8]                 sorted by time_to_impact        12 ×  8 =  96
-recent_memory_events[K=12]   from latest                     22 × 12 = 264
-                             (+1 for source_one_hot_bucket)
-cooldowns[K=8]               for current verbs                10 ×  8 =  80
-
-** Per-actor slot features (~40 floats):
-   relative_pos: vec3 (x, y, z)                                              (3)
-   z_separation_log       log-normalized |self.z - other.z|                  (1)
-   creature_type_one_hot(~8)                                                 (8)
-   hp_pct, level_log, role_tag_bits(8)                                      (10)
-   relationship_valence (signed), relationship_familiarity                   (2)
-   n_shared_groups_log, n_opposed_groups_log, closest_shared_group_kind(8)  (10)
-   is_in_active_quest_with_me, is_spouse, is_kin, is_mentor, is_apprentice   (5)
-   info_source_one_hot[5]  Witnessed / TalkedWith / Overheard / Rumor /
-                           NeverMet — from MemoryEvent.source for the
-                           most recent memory referencing this actor          (5)
-   exists                                                                    (1)
-   →                                                                       (~45)
-```
-
-Per-pair relationship valence + group-overlap counts carry inter-agent disposition. Hostility is derived per-pair via `is_hostile(self, other) = relationship_valence < HOSTILE_THRESH ∨ groups_at_war(self, other) ∨ predator_prey(self.creature_type, other.creature_type)`.
-
-#### 2.1.5 Non-spatial slot arrays (~350)
-
-Entities the agent knows about regardless of proximity — group leaders, distant rivals, absent spouses, named adversaries.
-
-```
-known_actors[K=10]           agents the agent knows about by id
-  relative_or_absent_pos: vec3, hp_pct,
-  z_separation_log,
-  relationship_valence, relationship_familiarity,
-  n_shared_groups, n_opposed_groups,
-  relationship_kind_one_hot(8) (Spouse, Kin, Mentor, Apprentice,
-                                 Friend, Rival, Sworn Enemy, Stranger),
-  info_source_one_hot[5] (Witnessed / TalkedWith / Overheard /
-                          Rumor / NeverMet),
-  last_known_loc_age, in_nearby_actors_slot_idx, exists                     29 × 10 = 290
-
-known_groups[K=6]            groups the agent knows about (own + nearby +
-                             at-war + allied + suzerain + vassals)
-  group_kind_one_hot(8), my_membership (member/leader/none/exiled),
-  group_size_log, group_strength_log,
-  standing_with_me_one_hot(4) (Allied, Neutral, Tense, AtWar),
-  exists                                                                     10 ×  6 =  60
-```
-
-`known_actors` is populated from a per-agent view: `union(spouse_id, mentor_id, apprentice_id, group_leader_ids of my groups, top-K-grudges, top-K-friendships)` deduped. Each slot has a "currently in nearby_actors slot N" backref so the model can correlate.
-
-`known_groups` covers any group kind the agent has cause to know about.
-
-#### 2.1.6 Known resources / quests (~170)
-
-```
-known_named_resources[K=6]   from agent.known_resources                     11 × 6 = 66
-known_voxel_resources[K=6]   from agent.known_voxel_resources               11 × 6 = 66
-active_quests[K=4]           includes group-scoped wars where applicable    10 × 4 = 40
-```
-
-#### 2.1.7 Context blocks (~80)
-
-Settlement context (~30): treasury_log, food_status, threat_level, population_log, infrastructure_level, n_active_quests_at_settlement, charter_one_hot(8), specialty_one_hot(8), context_tags(14), recent_chronicle_event_counts_by_category. (Settlement is itself a Group; this block is the residence-group context.)
-
-Region context (~12): terrain_one_hot(8), sub_biome_one_hot(8), elevation, monster_density (now: hostile-creature-type density), threat_level, unrest, control_score, n_dungeons, has_river_access, distance_to_coast.
-
-World context (~20): tick_normalized, current_year, season_one_hot(4), time_of_day, current_world_age_one_hot(8), n_legendary_agents, n_settlements, recent_world_event_counts_by_kind.
-
-#### 2.1.8 Total
-
-```
-self atomic            ~60
-self contextual       ~155   (+ knowledge_domain_bits[32] + memory_fill_pct)
-group memberships     ~130   (+ group_intel_velocity per slot)
-spatial slots       ~1030
-non-spatial slots    ~350
-known resources/quests 170
-context               ~80
-─────────────────────────
-total              ~1975 floats per agent
-```
-
-~1975 × 4 bytes × 20K agents = 158 MB observation tensor per tick. On-GPU is free; CPU pack <5ms. The extra z-axis + info features add ~320 floats net — dominated by the per-slot vec3 + info_source_one_hot expansion in `nearby_actors` and `known_actors`.
-
-### 2.2 Action space (after vocabulary collapse)
-
-```
-action {
-  // Macro head — one of 6 (or NoOp)
-  head categorical macro_kind: enum {
-    NoOp, PostQuest, AcceptQuest, Bid, Announce, InviteToGroup, AcceptInvite
-  }
-
-  // Micro head (when macro_kind = NoOp, this is the actual action)
-  head categorical micro_kind: enum {
-    Hold,
-    MoveToward, Flee,                                      // movement
-    Attack, Cast, UseItem,                                 // combat
-    Harvest, Eat, Drink, Rest,                             // resource
-    PlaceTile, PlaceVoxel, HarvestVoxel,                   // construction
-    Converse, ShareStory, Communicate, Read,               // social / info
-    Remember                                               // memory
-  }
-
-  // Pointer head — select from observation slots
-  head pointer target: select_from
-    nearby_actors ∪ nearby_resources ∪ nearby_structures
-    ∪ known_actors ∪ known_groups ∪ active_quests
-    ∪ memberships ∪ recent_memory_events
-
-  // Continuous heads
-  head continuous pos_delta: vec3 ∈ [-1, 1]³
-  head continuous magnitude: f32 ∈ [0, 1]
-
-  // Macro-action structured params (only relevant when macro_kind != NoOp)
-  head categorical quest_type:        enum QuestType  (~16 variants)
-  head categorical party_scope:       enum PartyScope  (~6 variants)
-  head categorical reward_type:       enum RewardKind  (~10 variants)
-  head categorical payment_type:      enum PaymentKind  (~6 variants)
-  head categorical announce_audience: enum AnnounceAudience (Group / Area / Anyone)
-  head pointer     fact_ref:          select_from recent_memory_events
-                                                    // FactRef = local memory event_id
-}
-```
-
-`macro_kind` and `micro_kind` are decoupled. When the model emits `macro_kind=PostQuest`, the `quest_type/party_scope/reward_type` heads are read; `micro_kind` is ignored (or forced to NoOp). When `macro_kind=NoOp`, the `micro_kind` and its associated heads (target, pos_delta, magnitude) drive a per-tick physical/social act.
-
-This **two-level head** is the hierarchical decomposition the attacker called for. Macro decisions are rare (a few per NPC per ~100 ticks), micro decisions are per-tick. Training can up-weight rare macro decisions or use separate heads with different learning rates.
-
-### 2.3 Mask — load-bearing role gate
-
-Per-tick boolean array of valid actions, computed declaratively:
-
-Distance predicates come in three flavors:
-- `distance(a, b)` — 3D Euclidean. Default for combat, threat, direct interaction.
-- `planar_distance(a, b)` — xy-only. Default for social range, audibility, formations.
-- `z_separation(a, b)` — |a.z − b.z|. For altitude-gated predicates ("can't melee-attack someone 20m above without flight").
-
-Info-gated predicates:
-- `knows_event(self, event_kind, target_pattern)` — `self.memory` contains a matching event (any source).
-- `knows_agent(self, agent_id)` — `self.memory` references `agent_id` OR `agent_id ∈ self.relationships`.
-- `confident_about(self, fact, threshold=0.5)` — `self.memory` contains `fact` with `confidence ≥ threshold`.
-- `recent(self, event_kind, max_age_ticks)` — `self.memory` contains matching event with `(now − tick) ≤ max_age_ticks`.
-
-```
-mask {
-  // Micro
-  Attack(t)         when t.alive ∧ is_hostile(self, t)
-                         ∧ distance(self, t) < AGGRO_RANGE
-                         ∧ (z_separation(self, t) < MELEE_Z_TOLERANCE ∨ self.can_fly)
-                    // is_hostile = relationship.valence < HOSTILE_THRESH
-                    //              ∨ groups_at_war(self, t)
-                    //              ∨ predator_prey(self.creature_type, t.creature_type)
-  Eat               when self.inventory.food > MEAL_COST
-  Harvest(r)        when r.remaining > 0 ∧ distance(self, r) < HARVEST_RANGE
-                    // r is a derived view from voxel materials, not a Resource entity
-  PlaceTile(p, _)   when distance(self, p) < REACH ∧ tile_at(p).tile_type == Empty
-  Converse(t)       when t.creature_type.can_speak
-                         ∧ planar_distance(self, t) < SOCIAL_RANGE
-                         ∧ z_separation(self, t) < 2.0
-  Communicate(r, fact_ref)
-                    when r.can_hear ∧ self.can_speak
-                         ∧ planar_distance(self, r) < CONVERSE_RANGE
-                         ∧ z_separation(self, r) < 2.0
-                         ∧ fact_ref ∈ self.memory
-  Read(doc)         when doc ∈ self.inventory.documents
-                         ∨ (distance(self, doc.pos) < REACH ∧ doc.tile_type == Document)
-
-  // Macro — gated by group membership/role and info state
-  PostQuest{type=Conquest, party=Group(g), ...}    when g ∈ self.leader_groups
-                                                        ∧ g.kind ∈ {Faction, Pack}
-                                                        ∧ g.military_strength > 0
-  PostQuest{type=Marriage, party=Individual(_), target=Agent(t), ...}
-                                                  when self.creature_type.can_marry
-                                                        ∧ ¬married(self)
-                                                        ∧ ¬married(t)
-                                                        ∧ relationship(self, t).valence > MIN_TRUST
-                                                        // planar_distance NOT required —
-                                                        // political marriages by message
-  PostQuest{type=Found, party=Group(g), ...}       when g ∈ self.leader_groups
-                                                        ∧ population(home_settlement(g)) > THRESH
-  PostBounty(t)           when knows_agent(self, t)
-                                ∧ confident_about(self, Fact::CommittedCrime(t), 0.5)
-  Announce{audience=Group(g), fact_ref=f}
-                          when g ∈ self.memberships
-                                ∧ f ∈ self.memory
-                                ∧ self.can_speak
-  Announce{audience=Area(c, r), fact_ref=f}
-                          when f ∈ self.memory
-                                ∧ self.can_speak
-                                ∧ r ≤ MAX_ANNOUNCE_RADIUS
-  Bid(auction_id, ...)    when auction.visibility ⊇ self
-                                ∧ self.gold ≥ auction.min_bid
-                                ∧ auction.deadline > now
-  AcceptQuest(qid)        when self ∈ quest.eligible_acceptors
-                                ∧ ¬conflicts_with_my_active_quests(qid)
-  JoinGroup(g)            when g.recruitment_open
-                                ∧ self.eligible_for(g)
-                                // covers: enlisting in faction, joining religion,
-                                //         apprenticeship, party membership, etc.
-  LeaveGroup(g)           when g ∈ self.memberships
-                                ∧ ¬self.binding_oaths_with(g)
-                                // covers: defection (with reputation cascade),
-                                //         excommunication petition, divorce, etc.
-
-  // Theory-of-mind gated
-  Deceive(t, fact)        when ¬believed_knowledge(t, fact.domain)
-                                ∧ planar_distance(self, t) < SOCIAL_RANGE
-  ...
-}
-```
-
-Mask predicates compile to:
-- A per-tick boolean tensor `[N × NUM_ACTIONS]` where `NUM_ACTIONS` = product over heads of valid combinations (NOT a flat enumeration; that would be combinatorial)
-- For sampling efficiency, the mask is per-head: `categorical_mask[N × NUM_KINDS]`, `target_mask[N × NUM_SLOTS]`, etc. The model samples each head independently respecting its mask.
-
-The role gating happens entirely here. Removing or adding a role's powers = changing mask predicates, no model retraining needed (the model just sees more/fewer logits passing the mask).
-
-### 2.4 Backend (singular)
-
-```rust
-trait PolicyBackend {
-    fn evaluate_batch(
-        &self,
-        observations: &PackedObservationBatch,  // [N, OBS_DIM]
-        masks:        &PackedMaskBatch,         // per-head masks
-    ) -> ActionBatch;                           // [N] of typed Action
-}
-
-// Production:
-impl PolicyBackend for NeuralBackend {
-    fn evaluate_batch(...) -> ActionBatch {
-        let logits = self.model.forward(observations);
-        let actions = sample_with_mask(logits, masks, self.temperature);
-        actions
-    }
-}
-
-// Training-time only:
-impl PolicyBackend for UtilityBackend {
-    // declarative scoring rules from DSL; argmax over masked candidates
-}
-
-// Research-time only (off the per-tick path):
-impl PolicyBackend for LlmBackend {
-    // serialize obs to JSON, send to LFM, parse action; usable for prototyping
-    // novel behaviors before training a model on them
-}
-```
-
-One `evaluate_batch` call per tick. All N alive NPCs go through one forward pass. No per-role dispatch at runtime; the role differences live in the observation features and mask, both of which are already per-NPC.
-
-[OPEN] When LlmBackend is used for prototyping, it's not in the per-tick loop — it runs slower-than-real-time on a subset of NPCs to generate trajectories that get distilled into NeuralBackend training data.
-
-### 2.5 Reward (for ML training)
-
-Declarative per-policy:
-
-```
-reward {
-  delta(self.needs.satisfaction_avg)         × 0.1   // need recovery
-  delta(self.hp_frac)                        × 5     // damage hurts, healing rewards
-  +1.0  on event(EntityDied{killer=self ∧ target.team ≠ self.team})
-  -1.0  on event(EntityDied{target ∈ self.close_friends})
-  +0.05 per behavior_tag accumulated this tick
-  +2.0  on event(QuestCompleted{quest.party_member_ids ∋ self})
-  -1.0  on event(QuestExpired{quest.party_member_ids ∋ self})
-  +0.02 × delta(self.fame_log)
-  -0.5  on event(self.role transition: Leader → Outlaw)
-  ...
-}
-```
-
-Compiler emits:
-- A per-tick reward kernel that diffs pre/post-tick observations + scans events involving self
-- Logging hooks for (observation, action, reward) tuples → training dataset emission
-- Validation: reward components must reference declared views/events
-
-[OPEN] Reward shaping for rare macro actions (Conquest reward arrives 2000+ ticks after the PostQuest decision). Need temporal credit assignment — GAE/lambda returns or hierarchical RL.
-
----
-
-### B.2 Mask — concrete predicates
-
-Per-tick boolean array of valid actions, computed declaratively:
-
-Distance predicates come in three flavors:
-- `distance(a, b)` — 3D Euclidean. Default for combat, threat, direct interaction.
-- `planar_distance(a, b)` — xy-only. Default for social range, audibility, formations.
-- `z_separation(a, b)` — |a.z − b.z|. For altitude-gated predicates ("can't melee-attack someone 20m above without flight").
-
-Info-gated predicates:
-- `knows_event(self, event_kind, target_pattern)` — `self.memory` contains a matching event (any source).
-- `knows_agent(self, agent_id)` — `self.memory` references `agent_id` OR `agent_id ∈ self.relationships`.
-- `confident_about(self, fact, threshold=0.5)` — `self.memory` contains `fact` with `confidence ≥ threshold`.
-- `recent(self, event_kind, max_age_ticks)` — `self.memory` contains matching event with `(now − tick) ≤ max_age_ticks`.
-
-```
-mask {
-  // Micro
-  Attack(t)         when t.alive ∧ is_hostile(self, t)
-                         ∧ distance(self, t) < AGGRO_RANGE
-                         ∧ (z_separation(self, t) < MELEE_Z_TOLERANCE ∨ self.can_fly)
-                    // is_hostile = relationship.valence < HOSTILE_THRESH
-                    //              ∨ groups_at_war(self, t)
-                    //              ∨ predator_prey(self.creature_type, t.creature_type)
-  Eat               when self.inventory.food > MEAL_COST
-  Harvest(r)        when r.remaining > 0 ∧ distance(self, r) < HARVEST_RANGE
-                    // r is a derived view from voxel materials, not a Resource entity
-  PlaceTile(p, _)   when distance(self, p) < REACH ∧ tile_at(p).tile_type == Empty
-  Converse(t)       when t.creature_type.can_speak
-                         ∧ planar_distance(self, t) < SOCIAL_RANGE
-                         ∧ z_separation(self, t) < 2.0
-  Communicate(r, fact_ref)
-                    when r.can_hear ∧ self.can_speak
-                         ∧ planar_distance(self, r) < CONVERSE_RANGE
-                         ∧ z_separation(self, r) < 2.0
-                         ∧ fact_ref ∈ self.memory
-  Read(doc)         when doc ∈ self.inventory.documents
-                         ∨ (distance(self, doc.pos) < REACH ∧ doc.tile_type == Document)
-
-  // Macro — gated by group membership/role and info state
-  PostQuest{type=Conquest, party=Group(g), ...}    when g ∈ self.leader_groups
-                                                        ∧ g.kind ∈ {Faction, Pack}
-                                                        ∧ g.military_strength > 0
-  PostQuest{type=Marriage, party=Individual(_), target=Agent(t), ...}
-                                                  when self.creature_type.can_marry
-                                                        ∧ ¬married(self)
-                                                        ∧ ¬married(t)
-                                                        ∧ relationship(self, t).valence > MIN_TRUST
-                                                        // planar_distance NOT required —
-                                                        // political marriages by message
-  PostQuest{type=Found, party=Group(g), ...}       when g ∈ self.leader_groups
-                                                        ∧ population(home_settlement(g)) > THRESH
-  PostBounty(t)           when knows_agent(self, t)
-                                ∧ confident_about(self, Fact::CommittedCrime(t), 0.5)
-  Announce{audience=Group(g), fact_ref=f}
-                          when g ∈ self.memberships
-                                ∧ f ∈ self.memory
-                                ∧ self.can_speak
-  Announce{audience=Area(c, r), fact_ref=f}
-                          when f ∈ self.memory
-                                ∧ self.can_speak
-                                ∧ r ≤ MAX_ANNOUNCE_RADIUS
-  Bid(auction_id, ...)    when auction.visibility ⊇ self
-                                ∧ self.gold ≥ auction.min_bid
-                                ∧ auction.deadline > now
-  AcceptQuest(qid)        when self ∈ quest.eligible_acceptors
-                                ∧ ¬conflicts_with_my_active_quests(qid)
-  JoinGroup(g)            when g.recruitment_open
-                                ∧ self.eligible_for(g)
-                                // covers: enlisting in faction, joining religion,
-                                //         apprenticeship, party membership, etc.
-  LeaveGroup(g)           when g ∈ self.memberships
-                                ∧ ¬self.binding_oaths_with(g)
-                                // covers: defection (with reputation cascade),
-                                //         excommunication petition, divorce, etc.
-
-  // Theory-of-mind gated
-  Deceive(t, fact)        when ¬believed_knowledge(t, fact.domain)
-                                ∧ planar_distance(self, t) < SOCIAL_RANGE
-  ...
-}
-```
-
-Mask predicates compile to:
-- A per-tick boolean tensor `[N × NUM_ACTIONS]` where `NUM_ACTIONS` = product over heads of valid combinations (NOT a flat enumeration; that would be combinatorial)
-- For sampling efficiency, the mask is per-head: `categorical_mask[N × NUM_KINDS]`, `target_mask[N × NUM_SLOTS]`, etc. The model samples each head independently respecting its mask.
-
-The role gating happens entirely here. Removing or adding a role's powers = changing mask predicates, no model retraining needed (the model just sees more/fewer logits passing the mask).
-
-### 2.4 Backend (singular)
-
-```rust
-trait PolicyBackend {
-    fn evaluate_batch(
-        &self,
-        observations: &PackedObservationBatch,  // [N, OBS_DIM]
-        masks:        &PackedMaskBatch,         // per-head masks
-    ) -> ActionBatch;                           // [N] of typed Action
-}
-
-// Production:
-impl PolicyBackend for NeuralBackend {
-    fn evaluate_batch(...) -> ActionBatch {
-        let logits = self.model.forward(observations);
-        let actions = sample_with_mask(logits, masks, self.temperature);
-        actions
-    }
-}
-
-// Training-time only:
-impl PolicyBackend for UtilityBackend {
-    // declarative scoring rules from DSL; argmax over masked candidates
-}
-
-// Research-time only (off the per-tick path):
-impl PolicyBackend for LlmBackend {
-    // serialize obs to JSON, send to LFM, parse action; usable for prototyping
-    // novel behaviors before training a model on them
-}
-```
-
-One `evaluate_batch` call per tick. All N alive NPCs go through one forward pass. No per-role dispatch at runtime; the role differences live in the observation features and mask, both of which are already per-NPC.
-
-[OPEN] When LlmBackend is used for prototyping, it's not in the per-tick loop — it runs slower-than-real-time on a subset of NPCs to generate trajectories that get distilled into NeuralBackend training data.
-
-### 2.5 Reward (for ML training)
-
-Declarative per-policy:
-
-```
-reward {
-  delta(self.needs.satisfaction_avg)         × 0.1   // need recovery
-  delta(self.hp_frac)                        × 5     // damage hurts, healing rewards
-  +1.0  on event(EntityDied{killer=self ∧ target.team ≠ self.team})
-  -1.0  on event(EntityDied{target ∈ self.close_friends})
-  +0.05 per behavior_tag accumulated this tick
-  +2.0  on event(QuestCompleted{quest.party_member_ids ∋ self})
-  -1.0  on event(QuestExpired{quest.party_member_ids ∋ self})
-  +0.02 × delta(self.fame_log)
-  -0.5  on event(self.role transition: Leader → Outlaw)
-  ...
-}
-```
-
-Compiler emits:
-- A per-tick reward kernel that diffs pre/post-tick observations + scans events involving self
-- Logging hooks for (observation, action, reward) tuples → training dataset emission
-- Validation: reward components must reference declared views/events
-
-[OPEN] Reward shaping for rare macro actions (Conquest reward arrives 2000+ ticks after the PostQuest decision). Need temporal credit assignment — GAE/lambda returns or hierarchical RL.
-
----
-
-### B.3 Reward — concrete DSL block
-
-Declarative per-policy:
-
-```
-reward {
-  delta(self.needs.satisfaction_avg)         × 0.1   // need recovery
-  delta(self.hp_frac)                        × 5     // damage hurts, healing rewards
-  +1.0  on event(EntityDied{killer=self ∧ target.team ≠ self.team})
-  -1.0  on event(EntityDied{target ∈ self.close_friends})
-  +0.05 per behavior_tag accumulated this tick
-  +2.0  on event(QuestCompleted{quest.party_member_ids ∋ self})
-  -1.0  on event(QuestExpired{quest.party_member_ids ∋ self})
-  +0.02 × delta(self.fame_log)
-  -0.5  on event(self.role transition: Leader → Outlaw)
-  ...
-}
-```
-
-Compiler emits:
-- A per-tick reward kernel that diffs pre/post-tick observations + scans events involving self
-- Logging hooks for (observation, action, reward) tuples → training dataset emission
-- Validation: reward components must reference declared views/events
-
-[OPEN] Reward shaping for rare macro actions (Conquest reward arrives 2000+ ticks after the PostQuest decision). Need temporal credit assignment — GAE/lambda returns or hierarchical RL.
-
----
