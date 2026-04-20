@@ -11,16 +11,34 @@ edition = "2021"
 # registers it behind an optional `gpu` feature.
 
 [features]
-# Phase 0 is always-CPU-forwarding, so there's no wgpu/naga yet. `gpu` is
-# still wired as a feature on this crate so the parity harness in
-# `tests/parity_with_cpu.rs` can be gated behind it — Phase 1+ uses the
-# same flag to pull in the real wgpu/naga stack, and the test is meaningful
-# only when the GPU path is compiled in.
+# Phase 1 wires the `gpu` feature to the real wgpu/naga stack. Default
+# builds stay on the CPU path — no wgpu/naga compile cost, no GPU device
+# creation. The parity harness in `tests/parity_with_cpu.rs` is gated
+# behind `gpu` because it's the only test that exercises the GPU kernel.
 default = []
-gpu = []
+gpu = ["dep:wgpu", "dep:naga", "dep:pollster", "dep:dsl_compiler", "dep:bytemuck"]
 
 [dependencies]
 engine = { path = "../engine" }
+# glam is used by the Phase 1 CPU reference bitmap computation. It's
+# cheap (pure-math crate, no transitive deps of note) so we take it as
+# a non-optional dep rather than gate behind `gpu` — the CPU reference
+# isn't used without the feature, but the Vec3 type plumbs through
+# `engine::state::SimState::agent_pos` regardless.
+glam = "0.29"
+# Phase 1 deps — all optional, pulled in only via the `gpu` feature.
+# Pinned to exact minor versions per docs/plans/gpu_megakernel_plan.md's
+# build-time-mitigation rule: `=26.x` prevents a silent re-resolve to
+# a newer wgpu with breaking API drift between builds.
+wgpu = { version = "=26.0.1", optional = true }
+naga = { version = "=26.0.0", optional = true, features = ["wgsl-in", "wgsl-out"] }
+pollster = { version = "0.4", optional = true }
+# WGSL source for the Attack mask is emitted by the compiler at backend
+# init time — runtime parse, not build-time codegen, so the emitted
+# string stays in sync with the CPU path without a build.rs invocation.
+dsl_compiler = { path = "../dsl_compiler", optional = true }
+# Pod re-interpret helper for uploading SoA fields as flat byte buffers.
+bytemuck = { version = "1.16", optional = true, features = ["derive"] }
 
 [dev-dependencies]
 engine_rules = { path = "../engine_rules" }

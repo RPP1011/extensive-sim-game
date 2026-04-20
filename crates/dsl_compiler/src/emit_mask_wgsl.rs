@@ -100,7 +100,11 @@ fn emit_mask_wgsl_result(mask: &MaskIR) -> Result<String, EmitError> {
         )));
     }
 
-    let target_name = match &mask.head.shape {
+    // WGSL reserves `target` as a keyword, so we alias the DSL-level
+    // target binding name to a kernel-local `wgsl_target` symbol. The
+    // Rust emitter's `target` binding has no such conflict — this
+    // aliasing is WGSL-only.
+    let dsl_target_name = match &mask.head.shape {
         IrActionHeadShape::Positional(binds) if binds.len() == 1 => binds[0].0.clone(),
         _ => {
             return Err(EmitError::Unsupported(format!(
@@ -109,12 +113,13 @@ fn emit_mask_wgsl_result(mask: &MaskIR) -> Result<String, EmitError> {
             )));
         }
     };
+    let wgsl_target_name = "wgsl_target".to_string();
 
     let mut out = String::new();
     emit_header(&mut out, mask);
     emit_bindings(&mut out);
     emit_helpers(&mut out);
-    emit_kernel(&mut out, mask, &target_name)?;
+    emit_kernel(&mut out, mask, &dsl_target_name, &wgsl_target_name)?;
     Ok(out)
 }
 
@@ -267,7 +272,12 @@ fn emit_helpers(out: &mut String) {
 // Kernel body
 // ---------------------------------------------------------------------------
 
-fn emit_kernel(out: &mut String, mask: &MaskIR, target_name: &str) -> Result<(), EmitError> {
+fn emit_kernel(
+    out: &mut String,
+    mask: &MaskIR,
+    dsl_target_name: &str,
+    wgsl_target_name: &str,
+) -> Result<(), EmitError> {
     let kernel_name = format!("cs_{}", snake_case(&mask.head.name));
 
     writeln!(
@@ -315,32 +325,32 @@ fn emit_kernel(out: &mut String, mask: &MaskIR, target_name: &str) -> Result<(),
     writeln!(out, "    var found: bool = false;").unwrap();
     writeln!(
         out,
-        "    for (var {target}: u32 = 0u; {target} < n; {target} = {target} + 1u) {{",
-        target = target_name
+        "    for (var {t}: u32 = 0u; {t} < n; {t} = {t} + 1u) {{",
+        t = wgsl_target_name
     )
     .unwrap();
     writeln!(
         out,
-        "        if ({target} == self_id) {{ continue; }}",
-        target = target_name
+        "        if ({t} == self_id) {{ continue; }}",
+        t = wgsl_target_name
     )
     .unwrap();
     writeln!(
         out,
-        "        if (agent_alive[{target}] == 0u) {{ continue; }}",
-        target = target_name
+        "        if (agent_alive[{t}] == 0u) {{ continue; }}",
+        t = wgsl_target_name
     )
     .unwrap();
     writeln!(
         out,
-        "        let {target}_pos = agent_pos[{target}];",
-        target = target_name
+        "        let {t}_pos = agent_pos[{t}];",
+        t = wgsl_target_name
     )
     .unwrap();
     writeln!(
         out,
-        "        let {target}_ct = agent_creature_type[{target}];",
-        target = target_name
+        "        let {t}_ct = agent_creature_type[{t}];",
+        t = wgsl_target_name
     )
     .unwrap();
     // Radius prefilter — the `from` clause bound. Note: for the attack
@@ -349,18 +359,22 @@ fn emit_kernel(out: &mut String, mask: &MaskIR, target_name: &str) -> Result<(),
     // the inner predicate still enforces the tighter bound.
     writeln!(
         out,
-        "        if (vec3_distance(self_pos, {target}_pos) > radius) {{ continue; }}",
-        target = target_name
+        "        if (vec3_distance(self_pos, {t}_pos) > radius) {{ continue; }}",
+        t = wgsl_target_name
     )
     .unwrap();
 
-    // Now lower the predicate body clauses.
+    // Now lower the predicate body clauses. The lowerer rewrites every
+    // occurrence of the DSL-level `target` local to `wgsl_target` so
+    // the emitted expression references the loop variable the kernel
+    // just established.
     let mut clauses: Vec<&IrExprNode> = Vec::new();
     flatten_and(&mask.predicate, &mut clauses);
 
     let hoisted = Vec::<String>::new();
+    let ctx = LowerCtx { dsl_target_name, wgsl_target_name };
     for clause in &clauses {
-        let cond = lower_expr(clause, &hoisted, target_name)?;
+        let cond = lower_expr(clause, &hoisted, ctx)?;
         writeln!(
             out,
             "        if (!({cond})) {{ continue; }}"
@@ -401,73 +415,90 @@ fn flatten_and<'a>(node: &'a IrExprNode, out: &mut Vec<&'a IrExprNode>) {
     }
 }
 
+/// Per-kernel lowering context. Carries the rename from the DSL-level
+/// target binding (e.g. `target`) to the WGSL kernel-local loop var
+/// (`wgsl_target` — the DSL name collides with a reserved keyword).
+/// Every `Local(_, name)` lookup and every `agents.pos(local)` →
+/// `<name>_pos` rewrite routes through this context so the rename is
+/// a single chokepoint.
+#[derive(Copy, Clone)]
+struct LowerCtx<'a> {
+    /// The DSL-level name of the target local (e.g. `target`).
+    dsl_target_name: &'a str,
+    /// The WGSL-level kernel symbol for the same local
+    /// (e.g. `wgsl_target`).
+    wgsl_target_name: &'a str,
+}
+
+impl<'a> LowerCtx<'a> {
+    /// Translate a DSL local name into the WGSL symbol to emit.
+    fn rename_local(&self, dsl_name: &str) -> String {
+        if dsl_name == "self" {
+            "self_id".to_string()
+        } else if dsl_name == self.dsl_target_name {
+            self.wgsl_target_name.to_string()
+        } else {
+            dsl_name.to_string()
+        }
+    }
+
+    /// Name of the hoisted `<local>_pos` WGSL binding for a DSL local.
+    fn pos_binding(&self, dsl_name: &str) -> String {
+        if dsl_name == "self" {
+            "self_pos".to_string()
+        } else if dsl_name == self.dsl_target_name {
+            format!("{}_pos", self.wgsl_target_name)
+        } else {
+            format!("{dsl_name}_pos")
+        }
+    }
+}
+
 fn lower_expr(
     node: &IrExprNode,
     hoisted: &[String],
-    target_name: &str,
+    ctx: LowerCtx<'_>,
 ) -> Result<String, EmitError> {
     match &node.kind {
         IrExpr::LitBool(b) => Ok(if *b { "true".into() } else { "false".into() }),
         IrExpr::LitInt(v) => Ok(format!("{v}")),
         IrExpr::LitFloat(v) => Ok(render_float_wgsl(*v)),
-        IrExpr::Local(_, name) => {
-            if name == "self" {
-                Ok("self_id".into())
-            } else if name == target_name {
-                Ok(name.clone())
-            } else {
-                Ok(name.clone())
-            }
-        }
+        IrExpr::Local(_, name) => Ok(ctx.rename_local(name)),
         IrExpr::NamespaceField { ns, field, .. } => lower_namespace_field(*ns, field),
         IrExpr::NamespaceCall { ns, method, args } => {
-            // Hoisted agents.pos — we already compute `<name>_pos` in the
-            // kernel prelude.
+            // Hoisted agents.pos — use the pre-computed `<t>_pos` binding.
             if *ns == NamespaceId::Agents && method == "pos" && args.len() == 1 {
                 if let IrExpr::Local(_, name) = &args[0].value.kind {
-                    let bind = if name == "self" {
-                        "self_pos".to_string()
-                    } else {
-                        format!("{name}_pos")
-                    };
-                    let _ = hoisted; // symmetry w/ Rust emitter
-                    return Ok(bind);
+                    let _ = hoisted;
+                    return Ok(ctx.pos_binding(name));
                 }
             }
-            lower_namespace_call(*ns, method, args, hoisted, target_name)
+            lower_namespace_call(*ns, method, args, hoisted, ctx)
         }
-        IrExpr::BuiltinCall(b, args) => lower_builtin_call(*b, args, hoisted, target_name),
+        IrExpr::BuiltinCall(b, args) => lower_builtin_call(*b, args, hoisted, ctx),
         IrExpr::ViewCall(_view_ref, args) => {
-            // Phase 1 only accepts a single view: `is_hostile(a, b)` — we
-            // inline it against the creature-type table baked into
-            // `emit_helpers`. General @lazy-view lowering is Phase 2
-            // material. Accept any 2-arg ViewCall as `is_hostile` — the
-            // type system has already matched the right ref, and the
-            // only view the Attack mask references is `is_hostile`.
             if args.len() != 2 {
                 return Err(EmitError::Unsupported(format!(
                     "Phase 1 WGSL: view call with {} args — only is_hostile(a,b) supported",
                     args.len()
                 )));
             }
-            let a = lower_expr(&args[0].value, hoisted, target_name)?;
-            let b = lower_expr(&args[1].value, hoisted, target_name)?;
-            // `a`/`b` are slot-indices; we need the creature_type array
-            // lookup inlined.
-            let a_ct = ct_for(&a);
-            let b_ct = ct_for(&b);
+            let a = lower_expr(&args[0].value, hoisted, ctx)?;
+            let b = lower_expr(&args[1].value, hoisted, ctx)?;
+            let a_ct = ct_for(&a, ctx);
+            let b_ct = ct_for(&b, ctx);
             Ok(format!("is_hostile({a_ct}, {b_ct})"))
         }
         IrExpr::UnresolvedCall(name, args) => {
             // Phase 1 accepts the pre-resolver `is_hostile(self, target)`
-            // shape that `emit_mask.rs`'s test fixture uses — real DSL
-            // goes through ViewCall, but keeping this arm makes the
-            // WGSL emitter testable against the same fixture.
+            // shape that the emit_mask tests use. Real DSL goes through
+            // ViewCall; this arm makes the WGSL emitter exercise the
+            // same fixture shape without a full resolver run.
             if name == "is_hostile" && args.len() == 2 {
-                let a = lower_expr(&args[0].value, hoisted, target_name)?;
-                let b = lower_expr(&args[1].value, hoisted, target_name)?;
-                let a_ct = ct_for(&a);
-                let b_ct = ct_for(&b);
+                let a = lower_expr(&args[0].value, hoisted, ctx)?;
+                let b = lower_expr(&args[1].value, hoisted, ctx)?;
+                let a_ct = ct_for(&a, ctx);
+                let b_ct = ct_for(&b, ctx);
                 return Ok(format!("is_hostile({a_ct}, {b_ct})"));
             }
             Err(EmitError::Unsupported(format!(
@@ -475,12 +506,12 @@ fn lower_expr(
             )))
         }
         IrExpr::Binary(op, lhs, rhs) => {
-            let l = lower_expr(lhs, hoisted, target_name)?;
-            let r = lower_expr(rhs, hoisted, target_name)?;
+            let l = lower_expr(lhs, hoisted, ctx)?;
+            let r = lower_expr(rhs, hoisted, ctx)?;
             Ok(format!("({l} {} {r})", binop_str(*op)?))
         }
         IrExpr::Unary(op, rhs) => {
-            let r = lower_expr(rhs, hoisted, target_name)?;
+            let r = lower_expr(rhs, hoisted, ctx)?;
             Ok(format!("({}{r})", unop_str(*op)))
         }
         other => Err(EmitError::Unsupported(format!(
@@ -510,11 +541,11 @@ fn lower_namespace_call(
     method: &str,
     args: &[IrCallArg],
     hoisted: &[String],
-    target_name: &str,
+    ctx: LowerCtx<'_>,
 ) -> Result<String, EmitError> {
     let lowered: Result<Vec<String>, EmitError> = args
         .iter()
-        .map(|a| lower_expr(&a.value, hoisted, target_name))
+        .map(|a| lower_expr(&a.value, hoisted, ctx))
         .collect();
     let lowered = lowered?;
     match (ns, method) {
@@ -538,11 +569,11 @@ fn lower_builtin_call(
     b: Builtin,
     args: &[IrCallArg],
     hoisted: &[String],
-    target_name: &str,
+    ctx: LowerCtx<'_>,
 ) -> Result<String, EmitError> {
     let lowered: Result<Vec<String>, EmitError> = args
         .iter()
-        .map(|a| lower_expr(&a.value, hoisted, target_name))
+        .map(|a| lower_expr(&a.value, hoisted, ctx))
         .collect();
     let lowered = lowered?;
     match b {
@@ -606,14 +637,19 @@ fn render_float_wgsl(v: f64) -> String {
     }
 }
 
-/// Map a lowered slot-index expression (`self_id`, `target`) to the
-/// matching creature-type array read. Used by the view-call inliner so
-/// `is_hostile(a, b)` in DSL becomes `is_hostile(agent_creature_type[a], …)`
-/// in WGSL — the generated helper takes creature ordinals, not slot ids.
-fn ct_for(slot_expr: &str) -> String {
+/// Map a lowered slot-index expression (`self_id`, `wgsl_target`) to
+/// the matching creature-type array read. Used by the view-call
+/// inliner so `is_hostile(a, b)` in DSL becomes
+/// `is_hostile(self_ct, wgsl_target_ct)` in WGSL — the generated
+/// helper takes creature ordinals, not slot ids, and the kernel
+/// prelude has pre-hoisted `<sym>_ct` bindings for each slot it
+/// touches.
+fn ct_for(slot_expr: &str, ctx: LowerCtx<'_>) -> String {
     let trimmed = slot_expr.trim();
     if trimmed == "self_id" {
         "self_ct".to_string()
+    } else if trimmed == ctx.wgsl_target_name {
+        format!("{}_ct", ctx.wgsl_target_name)
     } else if trimmed
         .chars()
         .all(|c| c.is_alphanumeric() || c == '_')
@@ -745,9 +781,22 @@ mod tests {
 
         // Alive-gate + hostility inline.
         assert!(src.contains("agent_alive[self_id] == 0u"));
-        assert!(src.contains("is_hostile(self_ct, target_ct)"));
-        // Distance check inlined.
-        assert!(src.contains("vec3_distance(self_pos, target_pos) < 2.0"));
+        // `target` is a WGSL reserved keyword; emitter aliases the DSL
+        // binding to `wgsl_target` inside the kernel scope.
+        assert!(
+            src.contains("is_hostile(self_ct, wgsl_target_ct)"),
+            "missing is_hostile call in:\n{src}"
+        );
+        // Distance check inlined against the renamed target pos.
+        assert!(
+            src.contains("vec3_distance(self_pos, wgsl_target_pos) < 2.0"),
+            "missing distance clause in:\n{src}"
+        );
+        // Loop var is `wgsl_target`, not `target`.
+        assert!(
+            src.contains("for (var wgsl_target: u32"),
+            "missing renamed loop var in:\n{src}"
+        );
         // Bit-packed atomic write.
         assert!(src.contains("atomicOr(&mask_out[word_idx], 1u << bit_idx)"));
     }
