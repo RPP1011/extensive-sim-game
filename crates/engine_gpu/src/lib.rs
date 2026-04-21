@@ -53,6 +53,12 @@ use engine::{
 #[cfg(feature = "gpu")]
 pub mod mask;
 
+/// Phase 4 — per-view GPU storage + fold kernels. Not wired into the
+/// backend's tick loop yet; the follow-up integration task swaps
+/// scoring's stub views for reads against this module.
+#[cfg(feature = "gpu")]
+pub mod view_storage;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
