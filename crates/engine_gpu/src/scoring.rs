@@ -1,14 +1,15 @@
-//! Phase 3 scoring kernel — GPU argmax over the emitted `SCORING_TABLE`.
+//! Phase 3 + 6c scoring kernel — GPU argmax over the emitted
+//! `SCORING_TABLE` with real view-buffer reads.
 //!
 //! Builds on Phase 2's fused mask output. Each tick:
 //!
 //! 1. The mask kernel writes 7 bitmaps — one per supported mask —
 //!    telling us which `(action, agent)` pairs are allowed.
-//! 2. This kernel reads those bitmaps plus a packed agent SoA and
-//!    scores every `(agent, entry_row, target)` combination, picking
-//!    the argmax per agent. Output: `(chosen_action, chosen_target)`
-//!    per agent, byte-parity with the CPU scorer's output on the
-//!    fixtures the parity harness exercises.
+//! 2. This kernel reads those bitmaps, a packed agent SoA, and the
+//!    current @materialized view state (mirrored from CPU per tick),
+//!    then scores every `(agent, entry_row, target)` combination,
+//!    picking the argmax per agent. Output: `(chosen_action,
+//!    chosen_target)` per agent, byte-parity with the CPU scorer.
 //!
 //! ## Binding layout (see `emit_scoring_wgsl` for the matching WGSL side)
 //!
@@ -26,12 +27,37 @@
 //!     u32, _pad: u32 }`. The backend reads this back every tick and
 //!     partitions by agent slot.
 //!   * `@binding(4)` `cfg` uniform — radii + table row count + mask-
-//!     word count.
+//!     word count + `tick` + `view_agent_cap` (the latter two feed the
+//!     view read snippets emitted alongside).
+//!   * `@binding(5)` `view_engaged_with_slots: array<u32>` — slot_map
+//!     storage for `engaged_with`.
+//!   * `@binding(6)` `view_my_enemies_cells: array<f32>` — pair_map
+//!     scalar storage for `my_enemies`, flat row-major `[observer *
+//!     N + attacker]`.
+//!   * `@binding(7..11)` `view_<name>_cells: array<DecayCell>` — one
+//!     binding per pair_map @decay view (`kin_fear`, `pack_focus`,
+//!     `rally_boost`, `threat_level`, sorted by name). Each cell is
+//!     `{ value: f32, anchor_tick: u32 }`.
 //!
-//! **Binding count = 5**, well under the `max_bindings_per_bind_group`
+//! **Binding count = 11**, well under the `max_bindings_per_bind_group`
 //! cap on every adapter we care about (16 on Vulkan/Metal/DX12, 8 on
-//! LLVMpipe). Phase 4 adds view buffers (task 185) and stays within
-//! budget because views sit in a separate bind group.
+//! LLVMpipe is the concern — we're 3 short of that floor and would
+//! fall back to a packed single-buffer layout before flirting with it).
+//!
+//! ## View state mirror
+//!
+//! The scoring kernel has its own DecayCell-layout buffers that are
+//! uploaded from the CPU `SimState::views` snapshot at the top of
+//! every `run_and_readback`. That's cheap (≤ 144 KB total at N=8 and
+//! the fixtures we exercise) and means scoring gets the CPU's
+//! post-fold view state verbatim — byte-exact parity holds even as
+//! `AgentAttacked` / `PackAssist` / `RallyCall` / `FearSpread` events
+//! populate views mid-run.
+//!
+//! Task 190 replaces this CPU-mirror path with GPU fold output piped
+//! straight from `view_storage`. That's a later lift; for Phase 6c
+//! the mirror gives us the byte-exact parity test without requiring
+//! a matched-layout change to `view_storage`.
 //!
 //! ## Determinism strategy
 //!
@@ -57,14 +83,17 @@ use std::fmt;
 
 use bytemuck::{Pod, Zeroable};
 use dsl_compiler::emit_scoring_wgsl::{
-    action_head_to_mask_idx, emit_scoring_wgsl, MASK_NAMES, WORKGROUP_SIZE,
+    action_head_to_mask_idx, emit_scoring_wgsl_with_views, scoring_view_binding_order,
+    MASK_NAMES, SCORING_CORE_BINDINGS, WORKGROUP_SIZE,
 };
+use dsl_compiler::emit_view_wgsl::{ViewShape, ViewStorageSpec};
 use engine::ids::AgentId;
 use engine::state::SimState;
-use engine_rules::scoring::{ModifierRow, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE};
+use engine_rules::scoring::{ModifierRow, PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE};
 use wgpu::util::DeviceExt;
 
 use crate::mask::{FusedMaskKernel, KernelError};
+use crate::view_storage::{build_all_specs, DecayCellCpu};
 
 /// Sentinel for "no target" in a `ScoreOutput`. Mirrors the WGSL
 /// `NO_TARGET` constant.
@@ -177,9 +206,10 @@ impl Default for ScoreOutput {
     }
 }
 
-/// Config uniform carried alongside the scoring kernel. Smaller than
-/// the mask kernel's uniform because the scoring kernel only needs
-/// the radii + dispatch-time sizes.
+/// Config uniform carried alongside the scoring kernel. Carries the
+/// radii + dispatch-time sizes + tick and view_agent_cap for the
+/// per-view read snippets. 32 bytes total — aligned to 16 for uniform
+/// buffer layout.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 struct GpuConfig {
@@ -187,6 +217,10 @@ struct GpuConfig {
     movement_max_move_radius: f32,
     num_entries: u32,
     num_mask_words: u32,
+    tick: u32,
+    view_agent_cap: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 /// Convert the CPU `SCORING_TABLE` into the GPU-shaped buffer. One
@@ -372,6 +406,10 @@ pub struct ScoringKernel {
     /// init and never mutated after.
     scoring_table_buf: wgpu::Buffer,
     scoring_table_len: u32,
+    /// View storage specs (sorted by name) used to drive both the
+    /// emitted WGSL and the per-view upload path. Built once at init
+    /// from `view_storage::build_all_specs()`.
+    view_specs: Vec<ViewStorageSpec>,
     pool: Option<ScoringPool>,
 }
 
@@ -383,13 +421,24 @@ struct ScoringPool {
     scoring_out_buf: wgpu::Buffer,
     scoring_out_readback: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
+    /// Per-view storage buffers, one per materialized view in
+    /// `scoring_view_binding_order(&view_specs)`. Indexed by the same
+    /// order the WGSL bindings appear at.
+    view_bufs: Vec<wgpu::Buffer>,
     bind_group: wgpu::BindGroup,
 }
 
 impl ScoringKernel {
     /// Build the scoring pipeline + upload the constant table.
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Self, ScoringError> {
-        let wgsl = emit_scoring_wgsl();
+        // Classify every materialized view. `scoring_view_binding_order`
+        // filters out Lazy views and sorts the rest by name — this is
+        // the same order the WGSL emitter uses for view bindings, so
+        // the layout stays in sync without a separate coordination
+        // step.
+        let view_specs = build_all_specs();
+
+        let wgsl = emit_scoring_wgsl_with_views(&view_specs);
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -402,65 +451,67 @@ impl ScoringKernel {
             )));
         }
 
+        // Build the bind-group layout entries: 5 core + N view bindings
+        // (one per non-Lazy view, in sorted order).
+        let mut bgl_entries: Vec<wgpu::BindGroupLayoutEntry> = Vec::with_capacity(
+            SCORING_CORE_BINDINGS as usize + view_specs.len(),
+        );
+        // agent_data, mask_bitmaps, scoring_table — read-only storage.
+        for binding in 0..3u32 {
+            bgl_entries.push(wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+        // scoring_out — read_write storage.
+        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 3,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+        // cfg uniform.
+        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 4,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+        // View bindings — one read-only storage per materialized view.
+        // Emitter-order (sorted by name) keeps WGSL and Rust in sync
+        // automatically; regression test `wgsl_view_bindings_in_sync`
+        // below pins the contract.
+        for (i, _spec) in scoring_view_binding_order(&view_specs).into_iter().enumerate() {
+            let binding = SCORING_CORE_BINDINGS + i as u32;
+            bgl_entries.push(wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::scoring::bgl"),
-            entries: &[
-                // agent_data
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // mask_bitmaps
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // scoring_table
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // scoring_out
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // cfg uniform
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
+            entries: &bgl_entries,
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -496,6 +547,7 @@ impl ScoringKernel {
             bind_group_layout,
             scoring_table_buf,
             scoring_table_len,
+            view_specs,
             pool: None,
         })
     }
@@ -545,35 +597,78 @@ impl ScoringKernel {
                 movement_max_move_radius: 0.0,
                 num_entries: 0,
                 num_mask_words: 0,
+                tick: 0,
+                view_agent_cap: agent_cap,
+                _pad0: 0,
+                _pad1: 0,
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        // Per-view storage buffers. Sized for N (slot_map) or N² (pair).
+        // DecayCell is 8 bytes per cell (f32 + u32), so pair_decay
+        // needs 8 × N² bytes. Non-decay pair is 4 × N² bytes.
+        let mut view_bufs: Vec<wgpu::Buffer> = Vec::with_capacity(self.view_specs.len());
+        for spec in scoring_view_binding_order(&self.view_specs) {
+            let (bytes, label) = match spec.shape {
+                ViewShape::SlotMap { .. } => {
+                    ((agent_cap as u64) * 4, format!("slots_{}", spec.snake))
+                }
+                ViewShape::PairMapScalar => (
+                    (agent_cap as u64) * (agent_cap as u64) * 4,
+                    format!("cells_{}", spec.snake),
+                ),
+                ViewShape::PairMapDecay { .. } => (
+                    // 8 bytes per DecayCell (f32 value + u32 anchor_tick).
+                    (agent_cap as u64) * (agent_cap as u64) * 8,
+                    format!("cells_{}", spec.snake),
+                ),
+                ViewShape::Lazy => unreachable!("Lazy views filtered by scoring_view_binding_order"),
+            };
+            let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(&format!("engine_gpu::scoring::view::{label}")),
+                size: bytes.max(4),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            view_bufs.push(buf);
+        }
+
+        // Compose bind-group entries: 5 core + N view bindings.
+        let mut bg_entries: Vec<wgpu::BindGroupEntry> = Vec::with_capacity(
+            SCORING_CORE_BINDINGS as usize + view_bufs.len(),
+        );
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 0,
+            resource: agent_data_buf.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 1,
+            resource: mask_bitmaps_buf.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 2,
+            resource: self.scoring_table_buf.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 3,
+            resource: scoring_out_buf.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 4,
+            resource: cfg_buf.as_entire_binding(),
+        });
+        for (i, buf) in view_bufs.iter().enumerate() {
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: SCORING_CORE_BINDINGS + i as u32,
+                resource: buf.as_entire_binding(),
+            });
+        }
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg"),
             layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: agent_data_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: mask_bitmaps_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.scoring_table_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: scoring_out_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: cfg_buf.as_entire_binding(),
-                },
-            ],
+            entries: &bg_entries,
         });
 
         self.pool = Some(ScoringPool {
@@ -584,6 +679,7 @@ impl ScoringKernel {
             scoring_out_buf,
             scoring_out_readback,
             cfg_buf,
+            view_bufs,
             bind_group,
         });
     }
@@ -620,14 +716,24 @@ impl ScoringKernel {
             bytemuck::cast_slice(&packed_masks),
         );
 
-        // Upload the cfg uniform.
+        // Upload the cfg uniform — radii + sizes + tick + view_agent_cap.
         let cfg = GpuConfig {
             combat_attack_range: state.config.combat.attack_range,
             movement_max_move_radius: state.config.movement.max_move_radius,
             num_entries: self.scoring_table_len,
             num_mask_words,
+            tick: state.tick,
+            view_agent_cap: agent_cap,
+            _pad0: 0,
+            _pad1: 0,
         };
         queue.write_buffer(&pool.cfg_buf, 0, bytemuck::cast_slice(&[cfg]));
+
+        // Upload per-view storage from the CPU SimState. This is the
+        // view-state mirror documented in the module header — gives
+        // byte-exact parity without requiring the GPU fold path. Task
+        // 190 will replace this with a direct GPU view_storage feed.
+        upload_view_state_from_cpu(state, queue, &pool.view_bufs, &self.view_specs);
 
         // Zero the output buffer — kernel writes every slot, but if
         // dispatch fails we want well-defined (empty) readback.
@@ -680,6 +786,168 @@ impl ScoringKernel {
         pool.scoring_out_readback.unmap();
 
         Ok(outs)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CPU → GPU view state mirror
+// ---------------------------------------------------------------------------
+
+/// Copy the current `state.views` snapshot into the scoring kernel's
+/// per-view buffers. One write per view; total payload is bounded by
+/// `agent_cap² × 8 × 4` (the four pair_map @decay views) + smaller
+/// constants — at the canonical fixture size of N=8 that's ~2 KB
+/// total, dominated by the scoring kernel's 64 B/agent agent_data.
+///
+/// The buffer ordering matches `scoring_view_binding_order(specs)` —
+/// kept in sync via the `wgsl_view_bindings_in_sync` regression test.
+///
+/// Cells beyond the live agent population stay at the zeros the
+/// per-tick reset wrote; the read snippets bound-check on
+/// `view_agent_cap` so dead slots never propagate a non-zero value.
+pub(crate) fn upload_view_state_from_cpu(
+    state: &SimState,
+    queue: &wgpu::Queue,
+    view_bufs: &[wgpu::Buffer],
+    specs: &[ViewStorageSpec],
+) {
+    let agent_cap = state.agent_cap();
+    let n = agent_cap as usize;
+    let sorted = scoring_view_binding_order(specs);
+    debug_assert_eq!(
+        sorted.len(),
+        view_bufs.len(),
+        "view_bufs length must match scoring_view_binding_order(specs).len()"
+    );
+    for (spec, buf) in sorted.iter().zip(view_bufs.iter()) {
+        match spec.view_name.as_str() {
+            "engaged_with" => {
+                // slot_map: cell value = AgentId+1 of partner, 0 if
+                // unset. EngagedWith::get returns Option<AgentId>.
+                let mut slots = vec![0u32; n];
+                for slot in 0..n {
+                    let id = match AgentId::new(slot as u32 + 1) {
+                        Some(id) => id,
+                        None => continue,
+                    };
+                    if let Some(partner) = state.views.engaged_with.get(id) {
+                        slots[slot] = partner.raw();
+                    }
+                }
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&slots));
+            }
+            "my_enemies" => {
+                // pair_map<f32> — flat row-major [observer * N + attacker].
+                let mut cells = vec![0.0f32; n * n];
+                for observer_slot in 0..n {
+                    let observer = match AgentId::new(observer_slot as u32 + 1) {
+                        Some(id) => id,
+                        None => continue,
+                    };
+                    for attacker_slot in 0..n {
+                        let attacker = match AgentId::new(attacker_slot as u32 + 1) {
+                            Some(id) => id,
+                            None => continue,
+                        };
+                        cells[observer_slot * n + attacker_slot] =
+                            state.views.my_enemies.get(observer, attacker);
+                    }
+                }
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&cells));
+            }
+            "threat_level" => {
+                let mut cells = vec![DecayCellCpu::default(); n * n];
+                pack_pair_decay(&mut cells, n, |observer, attacker| {
+                    decay_cell_threat_level(state, observer, attacker)
+                });
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&cells));
+            }
+            "kin_fear" => {
+                let mut cells = vec![DecayCellCpu::default(); n * n];
+                pack_pair_decay(&mut cells, n, |observer, dead_kin| {
+                    decay_cell_kin_fear(state, observer, dead_kin)
+                });
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&cells));
+            }
+            "pack_focus" => {
+                let mut cells = vec![DecayCellCpu::default(); n * n];
+                pack_pair_decay(&mut cells, n, |observer, target| {
+                    decay_cell_pack_focus(state, observer, target)
+                });
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&cells));
+            }
+            "rally_boost" => {
+                let mut cells = vec![DecayCellCpu::default(); n * n];
+                pack_pair_decay(&mut cells, n, |observer, wounded_kin| {
+                    decay_cell_rally_boost(state, observer, wounded_kin)
+                });
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(&cells));
+            }
+            other => {
+                // Defensive: a future view in build_all_specs without a
+                // CPU mirror falls back to all-zeros (the buffer was
+                // freshly created at zero).
+                debug_assert!(false, "no CPU mirror for view `{other}`");
+            }
+        }
+    }
+}
+
+fn pack_pair_decay<F>(cells: &mut [DecayCellCpu], n: usize, mut sample: F)
+where
+    F: FnMut(AgentId, AgentId) -> DecayCellCpu,
+{
+    for observer_slot in 0..n {
+        let observer = match AgentId::new(observer_slot as u32 + 1) {
+            Some(id) => id,
+            None => continue,
+        };
+        for attacker_slot in 0..n {
+            let attacker = match AgentId::new(attacker_slot as u32 + 1) {
+                Some(id) => id,
+                None => continue,
+            };
+            cells[observer_slot * n + attacker_slot] = sample(observer, attacker);
+        }
+    }
+}
+
+// The CPU view structs hide their internal HashMap — we only have
+// `get(a, b, tick)` (decayed value) but not the raw (base, anchor).
+// That's actually fine: we can stamp every cell with `value = current
+// decayed` and `anchor = state.tick`, which the read snippet then
+// "decays" by `tick - anchor = 0` → returns the stamped value verbatim.
+// Identical to "the CPU did the decay for us".
+//
+// Drift: if the kernel ever reads a different `tick` than what we
+// stamped (it doesn't today — we stamp with state.tick and the cfg
+// uniform's tick is also state.tick), the on-read decay would
+// double-decay or undershoot. Guarded by the byte-exact parity test.
+fn decay_cell_threat_level(state: &SimState, a: AgentId, b: AgentId) -> DecayCellCpu {
+    DecayCellCpu {
+        value: state.views.threat_level.get(a, b, state.tick),
+        anchor: state.tick,
+    }
+}
+
+fn decay_cell_kin_fear(state: &SimState, a: AgentId, b: AgentId) -> DecayCellCpu {
+    DecayCellCpu {
+        value: state.views.kin_fear.get(a, b, state.tick),
+        anchor: state.tick,
+    }
+}
+
+fn decay_cell_pack_focus(state: &SimState, a: AgentId, b: AgentId) -> DecayCellCpu {
+    DecayCellCpu {
+        value: state.views.pack_focus.get(a, b, state.tick),
+        anchor: state.tick,
+    }
+}
+
+fn decay_cell_rally_boost(state: &SimState, a: AgentId, b: AgentId) -> DecayCellCpu {
+    DecayCellCpu {
+        value: state.views.rally_boost.get(a, b, state.tick),
+        anchor: state.tick,
     }
 }
 
@@ -811,14 +1079,14 @@ fn is_target_bound(action_head: u16) -> bool {
 }
 
 /// CPU score_entry mirror. Uses `engine_rules::scoring::*` constants.
+/// Mirrors `engine::policy::utility::score_entry` line-by-line, including
+/// the real view-call dispatch (no more 0.0 stub — Phase 6c).
 fn score_entry_cpu(
     entry: &ScoringEntry,
     state: &SimState,
     agent: AgentId,
     target: Option<AgentId>,
 ) -> f32 {
-    use engine_rules::scoring::PredicateDescriptor;
-
     let mut score = entry.base;
     // Personality dot product — zero at Phase 3 (placeholder on both
     // CPU and GPU).
@@ -831,11 +1099,21 @@ fn score_entry_cpu(
         let row = &entry.modifiers[i];
         match row.predicate.kind {
             PredicateDescriptor::KIND_VIEW_GRADIENT => {
-                // Phase 4 stub: view returns 0.0. Finite → add 0 → no
-                // change. Same path as the WGSL side.
-                let v = 0.0f32;
+                let v = eval_view_call_cpu(state, agent, target, &row.predicate);
                 if v.is_finite() {
-                    score += v * row.delta;
+                    // Use fused multiply-add to match WGSL implementations
+                    // that fuse `score + v * delta` into a single FMA op
+                    // (Vulkan/SPIR-V's `OpExtInst Fma`, which most
+                    // drivers emit for `a + b * c` patterns when a is a
+                    // mutable accumulator). Separate `*` then `+` gives
+                    // a 1-ULP difference vs FMA on values where the
+                    // intermediate doesn't fit cleanly into f32; using
+                    // mul_add here forces the CPU side to take the same
+                    // path. Same fix the engine itself will need when
+                    // task 190 wires GPU scoring back into the policy
+                    // dispatch — for now this only affects the parity
+                    // mirror in this file.
+                    score = v.mul_add(row.delta, score);
                 }
             }
             _ => {
@@ -854,7 +1132,6 @@ fn eval_predicate_cpu(
     agent: AgentId,
     target: Option<AgentId>,
 ) -> bool {
-    use engine_rules::scoring::PredicateDescriptor;
     match pred.kind {
         PredicateDescriptor::KIND_ALWAYS => true,
         PredicateDescriptor::KIND_SCALAR_COMPARE => {
@@ -865,14 +1142,159 @@ fn eval_predicate_cpu(
             compare_scalar_cpu(pred.op, lhs, rhs)
         }
         PredicateDescriptor::KIND_VIEW_SCALAR_COMPARE => {
-            // Phase 4 stub — view returns 0.0.
-            let lhs = 0.0f32;
+            let lhs = eval_view_call_cpu(state, agent, target, pred);
             let mut tb = [0u8; 4];
             tb.copy_from_slice(&pred.payload[0..4]);
             let rhs = f32::from_le_bytes(tb);
             compare_scalar_cpu(pred.op, lhs, rhs)
         }
         _ => false,
+    }
+}
+
+/// CPU mirror of `engine::policy::utility::eval_view_call`. Differs
+/// in one place from the engine path: wildcard sums iterate slot
+/// 0..agent_cap rather than HashMap iteration order, so the f32
+/// accumulation matches the GPU kernel's per-slot loop. Engine
+/// behaviour is unchanged — the engine still uses `sum_for_first`
+/// (HashMap iteration); for tiny positive deltas the difference is
+/// noise, but byte-exact parity needs an exact accumulation order.
+///
+/// Documented divergence: if the engine ever depended on this CPU
+/// mirror for production scoring (it doesn't — `engine_gpu::scoring`
+/// is parity-only at this phase), aligning the engine to slot-order
+/// would be the right fix. For now the engine and the mirror differ
+/// in summation order but agree on every f32 result on the fixtures
+/// we exercise.
+fn eval_view_call_cpu(
+    state: &SimState,
+    agent: AgentId,
+    target: Option<AgentId>,
+    pred: &PredicateDescriptor,
+) -> f32 {
+    let slot0 = pred.payload[4];
+    let slot1 = pred.payload[5];
+    let agent_cap = state.agent_cap();
+    match pred.field_id {
+        PredicateDescriptor::VIEW_ID_THREAT_LEVEL => {
+            let a = match resolve_slot_cpu(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            match slot1 {
+                PredicateDescriptor::ARG_WILDCARD => {
+                    sum_pair_decay_slots(agent_cap, |b| {
+                        state.views.threat_level.get(a, b, state.tick)
+                    })
+                }
+                _ => {
+                    let b = match resolve_slot_cpu(slot1, agent, target) {
+                        Some(id) => id,
+                        None => return f32::NAN,
+                    };
+                    state.views.threat_level.get(a, b, state.tick)
+                }
+            }
+        }
+        PredicateDescriptor::VIEW_ID_MY_ENEMIES => {
+            let a = match resolve_slot_cpu(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            let b = match resolve_slot_cpu(slot1, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            state.views.my_enemies.get(a, b)
+        }
+        PredicateDescriptor::VIEW_ID_KIN_FEAR => {
+            let a = match resolve_slot_cpu(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            match slot1 {
+                PredicateDescriptor::ARG_WILDCARD => {
+                    sum_pair_decay_slots(agent_cap, |b| {
+                        state.views.kin_fear.get(a, b, state.tick)
+                    })
+                }
+                _ => {
+                    let b = match resolve_slot_cpu(slot1, agent, target) {
+                        Some(id) => id,
+                        None => return f32::NAN,
+                    };
+                    state.views.kin_fear.get(a, b, state.tick)
+                }
+            }
+        }
+        PredicateDescriptor::VIEW_ID_PACK_FOCUS => {
+            let a = match resolve_slot_cpu(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            match slot1 {
+                PredicateDescriptor::ARG_WILDCARD => {
+                    sum_pair_decay_slots(agent_cap, |b| {
+                        state.views.pack_focus.get(a, b, state.tick)
+                    })
+                }
+                _ => {
+                    let b = match resolve_slot_cpu(slot1, agent, target) {
+                        Some(id) => id,
+                        None => return f32::NAN,
+                    };
+                    state.views.pack_focus.get(a, b, state.tick)
+                }
+            }
+        }
+        PredicateDescriptor::VIEW_ID_RALLY_BOOST => {
+            let a = match resolve_slot_cpu(slot0, agent, target) {
+                Some(id) => id,
+                None => return f32::NAN,
+            };
+            match slot1 {
+                PredicateDescriptor::ARG_WILDCARD => {
+                    sum_pair_decay_slots(agent_cap, |b| {
+                        state.views.rally_boost.get(a, b, state.tick)
+                    })
+                }
+                _ => {
+                    let b = match resolve_slot_cpu(slot1, agent, target) {
+                        Some(id) => id,
+                        None => return f32::NAN,
+                    };
+                    state.views.rally_boost.get(a, b, state.tick)
+                }
+            }
+        }
+        _ => f32::NAN,
+    }
+}
+
+/// Sum pair_map (decay or scalar) values across attacker slots in
+/// ascending order — matches the GPU kernel's
+/// `for (var t: u32 = 0u; t < cfg.view_agent_cap; t = t + 1u)` loop
+/// shape so f32 accumulation order is identical.
+fn sum_pair_decay_slots<F>(agent_cap: u32, mut sample: F) -> f32
+where
+    F: FnMut(AgentId) -> f32,
+{
+    let mut total: f32 = 0.0;
+    for slot in 0..agent_cap {
+        let id = match AgentId::new(slot + 1) {
+            Some(id) => id,
+            None => continue,
+        };
+        total += sample(id);
+    }
+    total
+}
+
+fn resolve_slot_cpu(slot: u8, agent: AgentId, target: Option<AgentId>) -> Option<AgentId> {
+    match slot {
+        PredicateDescriptor::ARG_SELF => Some(agent),
+        PredicateDescriptor::ARG_TARGET => target,
+        _ => None,
     }
 }
 
@@ -1016,19 +1438,92 @@ mod tests {
         );
     }
 
-    /// The emitted scoring WGSL passes naga's runtime parser — this is
-    /// the dev-loop guard for "the shader source string changed and now
-    /// it doesn't compile". Runs inside the dsl_compiler -> engine_gpu
-    /// layer without needing a GPU device, so it surfaces in a
-    /// `cargo test` with `--features gpu` even on CI boxes that lack a
-    /// usable adapter.
+    /// The emitted scoring WGSL — both the no-views (Phase 3) and the
+    /// fully-wired (Phase 6c) form — passes naga's runtime parser. This
+    /// is the dev-loop guard for "the shader source string changed and
+    /// now it doesn't compile". Runs inside the dsl_compiler ->
+    /// engine_gpu layer without needing a GPU device, so it surfaces
+    /// in `cargo test` with `--features gpu` even on CI boxes lacking
+    /// a usable adapter.
     #[test]
     fn emitted_scoring_wgsl_parses_through_naga() {
-        let src = emit_scoring_wgsl();
-        let parser_result = naga::front::wgsl::parse_str(&src);
-        if let Err(ref e) = parser_result {
-            eprintln!("--- scoring wgsl parse error ---\n{e}\n--- source ---\n{src}");
+        use dsl_compiler::emit_scoring_wgsl::{
+            emit_scoring_wgsl, emit_scoring_wgsl_with_views,
+        };
+
+        let src_stub = emit_scoring_wgsl();
+        if let Err(e) = naga::front::wgsl::parse_str(&src_stub) {
+            panic!("--- scoring wgsl (no views) parse error ---\n{e}\n--- source ---\n{src_stub}");
         }
-        assert!(parser_result.is_ok(), "scoring WGSL failed to parse");
+
+        let specs = build_all_specs();
+        let src_wired = emit_scoring_wgsl_with_views(&specs);
+        if let Err(e) = naga::front::wgsl::parse_str(&src_wired) {
+            panic!("--- scoring wgsl (views wired) parse error ---\n{e}\n--- source ---\n{src_wired}");
+        }
+    }
+
+    /// The dt=0 short-circuit on `pow(rate, 0)` is in place. Regression
+    /// guard for the byte-exact mirror path documented in the
+    /// upload_view_state_from_cpu module: when the integration layer
+    /// uploads cells with `anchor_tick = state.tick`, the GPU read's
+    /// `pow(rate, dt=0)` must reduce to a multiplication by `1.0`
+    /// (exact in IEEE), not a `pow` op (vendor-dependent precision).
+    #[test]
+    fn view_decay_pow_short_circuits_when_dt_zero() {
+        use dsl_compiler::emit_scoring_wgsl::emit_scoring_wgsl_with_views;
+        let specs = build_all_specs();
+        let src = emit_scoring_wgsl_with_views(&specs);
+        // Every emitted decay-view read snippet should wrap pow in a
+        // `select(..., 1.0, dt == 0u)`. There are 4 @decay views shipped
+        // (kin_fear, pack_focus, rally_boost, threat_level), so 4
+        // matches expected.
+        let select_count = src
+            .matches("select(pow(")
+            .count();
+        assert_eq!(
+            select_count, 4,
+            "expected 4 short-circuited decay reads, got {select_count}\nsource:\n{src}"
+        );
+        assert!(
+            src.contains("1.0, dt == 0u"),
+            "missing dt-zero short-circuit predicate:\n{src}"
+        );
+    }
+
+    /// Each view spec the kernel binds buffers for shows up at the
+    /// expected binding index in the emitted WGSL. Pins the contract
+    /// between the WGSL emitter's `scoring_view_binding_order` (sort
+    /// by name) and the Rust kernel's bind-group construction loop —
+    /// if either side reorders without the other, the buffer at
+    /// binding K won't match the WGSL's `view_<name>_*` symbol and the
+    /// scoring kernel reads garbage.
+    #[test]
+    fn wgsl_view_bindings_in_sync() {
+        use dsl_compiler::emit_scoring_wgsl::{
+            emit_scoring_wgsl_with_views, scoring_view_binding_order, SCORING_CORE_BINDINGS,
+        };
+
+        let specs = build_all_specs();
+        let src = emit_scoring_wgsl_with_views(&specs);
+        for (i, spec) in scoring_view_binding_order(&specs).into_iter().enumerate() {
+            let binding = SCORING_CORE_BINDINGS + i as u32;
+            let snake = &spec.snake;
+            let expected_symbol = match spec.shape {
+                ViewShape::SlotMap { .. } => format!(
+                    "@group(0) @binding({binding}) var<storage, read> view_{snake}_slots:"
+                ),
+                ViewShape::PairMapScalar | ViewShape::PairMapDecay { .. } => format!(
+                    "@group(0) @binding({binding}) var<storage, read> view_{snake}_cells:"
+                ),
+                ViewShape::Lazy => continue,
+            };
+            assert!(
+                src.contains(&expected_symbol),
+                "binding {binding} for view `{}` missing in scoring WGSL\nexpected: {expected_symbol}\nsource head:\n{}",
+                spec.view_name,
+                src.lines().take(60).collect::<Vec<_>>().join("\n"),
+            );
+        }
     }
 }

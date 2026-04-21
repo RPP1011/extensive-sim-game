@@ -497,14 +497,96 @@ fn emit_view_read_snippets(out: &mut String, specs: &[ViewStorageSpec]) {
             Ok(s) => s,
             Err(_) => continue,
         };
-        // Replace free `view_agent_cap` references with `cfg.view_agent_cap`.
-        // The snippet uses it as a RHS in `let n = view_agent_cap;`; a
-        // simple string replace is safe since the identifier is unique
-        // within the snippet.
+        // Two text rewrites on the upstream emit_view_wgsl snippet:
+        //
+        // 1. Replace the free `view_agent_cap` symbol with
+        //    `cfg.view_agent_cap` (the snippet was authored against a
+        //    module-scope const that we don't have — our cap lives in
+        //    the cfg uniform).
+        //
+        // 2. For pair_map @decay views, short-circuit `pow(rate, 0)`
+        //    to `1.0` exactly. The integration layer uploads cells
+        //    with `anchor_tick = state.tick`, so `dt = 0` on every
+        //    read. WGSL's `pow(x, 0)` isn't required to return
+        //    bit-exact `1.0` (Vulkan/SPIR-V `OpExtInst Pow` allows ~3
+        //    ULPs of error and the implementations we've tested do
+        //    drift), so multiplying by it injects 1-ULP noise into
+        //    the `value * pow(rate, 0)` result and breaks byte-exact
+        //    parity with the CPU-uploaded value. We wrap the pow with
+        //    a `select` so dt=0 returns 1.0 exactly.
+        //
+        // The substring we patch is stable across `render_float_wgsl`
+        // outputs because the rate literal contains a `.` (every
+        // shipped decay rate is a fraction, and emit_view_wgsl
+        // formats them via `f64::to_string` which emits at least one
+        // decimal digit). Defensive: if a future rate emitter shape
+        // breaks the pattern, the snippet stays correct, just slower
+        // by one extra branch — and the parity test catches the
+        // regression loudly.
         let rewritten = snippet.replace("view_agent_cap", "cfg.view_agent_cap");
+        let rewritten = rewrite_pow_short_circuit(&rewritten);
         out.push_str(&rewritten);
         writeln!(out).unwrap();
     }
+}
+
+/// Rewrite every `cell.value * pow(rate, f32(dt))` expression in the
+/// snippet to `cell.value * select(pow(rate, f32(dt)), 1.0, dt == 0u)`.
+/// This skips the pow op when the integration layer uploads with
+/// `anchor_tick == read_tick` (the byte-exact path) — IEEE `pow(x, 0)`
+/// is mathematically 1.0 but WGSL doesn't bit-guarantee it.
+fn rewrite_pow_short_circuit(src: &str) -> String {
+    // The exact pattern from emit_pair_map_decay_read is:
+    //   let decayed = cell.value * pow({rate_lit}, f32(dt));
+    // We rewrite it to:
+    //   let decayed = cell.value * select(pow({rate_lit}, f32(dt)), 1.0, dt == 0u);
+    //
+    // Only ever appears once per snippet (one decay view per snippet),
+    // so a single substring substitution is enough.
+    let needle = "let decayed = cell.value * pow(";
+    let pos = match src.find(needle) {
+        Some(p) => p,
+        None => return src.to_string(),
+    };
+    let after_needle = pos + needle.len();
+    // Find the closing `);` of `pow(...);`. The pow argument list is
+    // `{rate_lit}, f32(dt)` with no nested parens beyond `f32(dt)`.
+    let rest = &src[after_needle..];
+    let close_paren = match find_matching_close_paren(rest) {
+        Some(p) => p,
+        None => return src.to_string(),
+    };
+    let pow_args = &rest[..close_paren]; // e.g. "0.98, f32(dt)"
+    let post = &rest[close_paren + 1..]; // ");\n    ..."
+    let mut out = String::with_capacity(src.len() + 64);
+    out.push_str(&src[..pos]);
+    out.push_str("let decayed = cell.value * select(pow(");
+    out.push_str(pow_args);
+    out.push_str("), 1.0, dt == 0u)");
+    out.push_str(post);
+    out
+}
+
+/// Walk a WGSL substring tracking paren depth, return the index of the
+/// closing `)` that matches an implicit opening at position 0. The
+/// substring is assumed to start AFTER an open paren (i.e. depth=1
+/// initially); the helper returns the byte index of the matching
+/// close. Returns None if the string is unbalanced.
+fn find_matching_close_paren(s: &str) -> Option<usize> {
+    let mut depth = 1i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Deterministic ordering of views for binding-index assignment. Sort
