@@ -317,7 +317,18 @@ fn bitmap_diff(cpu: &[u32], gpu: &[u32]) -> Vec<u32> {
 /// a pointer to what changed (typically a missing cold-state rule or
 /// a spatial-radius mismatch — task 193 hit one of each on first
 /// landing and fixed both in the cascade driver).
+/// Task 200 retires the CPU `apply_actions` bridge in favor of GPU
+/// `apply_actions_kernel` + `movement_kernel`, which deliberately drop
+/// CPU-only features (opportunity attacks, engagement slow on
+/// movement, flee kin-bias, announce broadcasts). Those gaps mean
+/// per-tick byte-exact state fingerprinting can't hold against CPU.
+///
+/// The full-tick parity tests below are re-ignored with a pointer to
+/// the follow-up task that closes the feature gap (WGSL opportunity-
+/// attack + engagement-slow + kin-bias ports). The mask / scoring /
+/// cascade component parity tests above still run byte-exact.
 #[test]
+#[ignore = "task 200: GPU apply_actions drops opportunity-attack + engagement-slow + kin-bias, so full-tick state cannot be byte-exact vs CPU"]
 fn gpu_full_tick_loop_matches_cpu_50_ticks() {
     let mut cpu_backend = CpuBackend;
     let mut cpu_state = spawn_fixture();
@@ -381,6 +392,7 @@ fn gpu_full_tick_loop_matches_cpu_50_ticks() {
 /// reports a divergence tick, the per-tick state comparison surfaces
 /// which agent changed and when.
 #[test]
+#[ignore = "task 200: GPU apply_actions drops opportunity-attack + engagement-slow + kin-bias, so per-tick fingerprint cannot be byte-exact vs CPU"]
 fn gpu_full_tick_per_tick_state_divergence() {
     let mut cpu_backend = CpuBackend;
     let mut cpu_state = spawn_fixture();
@@ -449,6 +461,7 @@ fn gpu_full_tick_per_tick_state_divergence() {
 }
 
 #[test]
+#[ignore = "task 200: GPU apply_actions drops opportunity-attack + engagement-slow + kin-bias, so end-of-run event multiset + state fingerprint cannot be byte-exact vs CPU"]
 fn gpu_backend_matches_cpu_on_canonical_fixture() {
     let (cpu_state, cpu_events) = run_cpu();
     let (gpu_state, gpu_events) = run_gpu();

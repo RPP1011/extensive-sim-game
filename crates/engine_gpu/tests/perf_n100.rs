@@ -216,19 +216,20 @@ fn perf_n100() {
         "alive parity exceeded tolerance: cpu={alive_cpu} gpu={alive_gpu} delta={delta} tolerance={tolerance:.1}"
     );
 
-    // Task 197: with CPU mask + policy-evaluate replaced by GPU scoring,
-    // the GPU backend should land within ~8x of the CPU backend at
-    // N=1000 (was 12-14x pre-197). This is a loose upper bound —
-    // steady-state ratio on a discrete GPU runs 2-3x on this fixture;
-    // 8x leaves headroom for noisy llvmpipe / shared CI GPUs / thermal
-    // variance. The real target (per the task 197 plan) is 1-2x; the
-    // remaining gap is the upload+readback fences, which the full WGSL
-    // apply_actions + movement kernel port will close.
+    // Task 200: with GPU apply_actions + movement kernels wired, the
+    // CPU apply_actions bridge is retired and the cascade iterates on
+    // the GPU-authored seed events directly. Steady-state ratio on a
+    // discrete GPU now lands below 1x on a warm run (GPU faster than
+    // CPU at N=1000); we assert `ratio ≤ 5x` as a regression ceiling
+    // with headroom for noisy llvmpipe / shared CI GPUs / thermal
+    // variance and run-to-run noise (observed: 0.3x-1.8x across
+    // back-to-back runs on the same host). Anything above 5x signals
+    // a kernel regression or a CPU fallback that shouldn't be firing.
     let ratio = gpu_steady_per / cpu_per;
     assert!(
-        ratio <= 8.0,
-        "task 197 regression: GPU steady per-tick = {gpu_steady_per:.1}µs, \
-         CPU per-tick = {cpu_per:.1}µs, ratio = {ratio:.2}x (expected ≤ 8x)"
+        ratio <= 5.0,
+        "task 200 regression: GPU steady per-tick = {gpu_steady_per:.1}µs, \
+         CPU per-tick = {cpu_per:.1}µs, ratio = {ratio:.2}x (expected ≤ 5x)"
     );
 }
 

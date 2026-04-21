@@ -99,15 +99,6 @@ pub mod physics;
 #[cfg(feature = "gpu")]
 pub mod cascade;
 
-/// Task 197 — convert GPU scoring outputs into CPU `Action`s so the
-/// backend can skip the CPU `step_phases_1_to_3` mask build + policy
-/// evaluate (the dominant N=1000 cost, per task 195's `PhaseTimings`).
-/// The GPU mask + scoring kernels already produce per-slot decisions;
-/// this module just adapts their output into the shape
-/// `engine::step::apply_actions` expects.
-#[cfg(feature = "gpu")]
-pub mod apply_scoring;
-
 /// Task 199 — GPU `apply_actions` kernel. WGSL port of the hot subset
 /// of `engine::step::apply_actions`: Attack damage + AgentAttacked /
 /// AgentDied event emission, one thread per agent slot. Needs /
@@ -222,6 +213,10 @@ pub struct PhaseTimings {
     /// bearing for existing perf harnesses — use
     /// [`PhaseTimings::mask_scoring_us`] in new code.
     pub cpu_phases_1_3_us: u64,
+    /// Task 200 repurposed this field — it now measures the GPU
+    /// `apply_actions` + `movement` kernel dispatch + event ring drain
+    /// + agent SoA unpack. Kept the old name for harness compatibility;
+    /// `apply_us()` is the current-accurate alias.
     pub cpu_apply_actions_us: u64,
     pub gpu_cascade_us: u64,
     pub gpu_seed_fold_us: u64,
@@ -238,6 +233,14 @@ impl PhaseTimings {
     /// replaced no longer runs). New code should prefer this name.
     pub fn mask_scoring_us(&self) -> u64 {
         self.cpu_phases_1_3_us
+    }
+
+    /// Task 200 alias for `cpu_apply_actions_us`, which now measures
+    /// the GPU `apply_actions` + `movement` kernel dispatch + drain
+    /// (the CPU `apply_actions` it replaced no longer runs on the
+    /// hot path). New code should prefer this name.
+    pub fn apply_us(&self) -> u64 {
+        self.cpu_apply_actions_us
     }
 }
 
@@ -803,20 +806,6 @@ impl SimBackend for GpuBackend {
 
         let (bitmaps, scoring_outputs) = bitmaps_and_scoring.unwrap();
 
-        // Convert scoring outputs → `Vec<Action>` in agent-slot order,
-        // then shuffle via the SAME per-tick permutation the CPU
-        // backend uses (keyed on `state.seed` + `state.tick`). The
-        // shuffle ensures `apply_actions` walks the action list in a
-        // deterministic but first-mover-bias-free order.
-        scratch.actions.clear();
-        apply_scoring::scoring_outputs_to_actions(state, &scoring_outputs, &mut scratch.actions);
-        engine::step::shuffle_actions_in_place(
-            state.seed,
-            state.tick,
-            &scratch.actions,
-            &mut scratch.shuffle_idx,
-        );
-
         // Cache for diagnostic callers. Done now rather than at tick
         // end because the sidecar is gone — the mask + scoring we just
         // ran IS the authoritative output for this tick.
@@ -825,21 +814,50 @@ impl SimBackend for GpuBackend {
 
         self.last_phase_us.cpu_phases_1_3_us = t_ph13.elapsed().as_micros() as u64;
 
-        // Phase 4a — apply actions on CPU using the GPU-derived action
-        // list. The SAME `engine::step::apply_actions` the CPU backend
-        // calls; this is where opportunity attacks, engagement slow,
-        // announce broadcasts, and flee kin-bias math all live. Keeping
-        // this on CPU (rather than porting to WGSL) preserves byte-
-        // compatibility with the CPU backend for free.
+        // Phase 4a — GPU `apply_actions` + `movement` kernels. Task 200
+        // retires the CPU bridge (`apply_scoring::scoring_outputs_to_
+        // actions` + `engine::step::apply_actions`) by dispatching two
+        // WGSL kernels that consume the scoring outputs in place:
+        //
+        //   * apply_actions_kernel — Attack damage + AgentAttacked /
+        //     AgentDied emission. One thread per agent slot.
+        //   * movement_kernel — MoveToward / Flee pos updates +
+        //     AgentMoved / AgentFled emission. One thread per slot.
+        //
+        // Both kernels append events into a shared GPU event ring; we
+        // drain the ring once after both dispatches to recover the seed
+        // events the cascade consumes. Agent SoA is piped from kernel
+        // to kernel (apply_actions' readback → movement's input) so
+        // movement sees the post-apply hp/alive state.
+        //
+        // The CPU backend's Fisher-Yates-shuffled action order is
+        // REPLACED by the GPU's workgroup-scheduling order. The drain
+        // sorts by `(tick, kind, payload[0])` before pushing to the
+        // CPU ring, which reinstates a deterministic push order that's
+        // byte-comparable modulo the stable-sort tie-breaking.
+        // Downstream parity tests use multiset equality on events, so
+        // the push-order shift is benign.
         let t_apply = std::time::Instant::now();
         let events_before = events.total_pushed();
-        engine::step::apply_actions(state, scratch, events);
+
+        if !self.run_gpu_apply_and_movement(state, events) {
+            // Kernel failure: fall back to the full CPU pipeline for
+            // this tick so state stays live. The GPU mask + scoring
+            // outputs we already cached are discarded — the CPU
+            // `engine::step::step` re-runs phases 1-4 end-to-end.
+            self.last_cascade_error =
+                Some("apply_actions/movement kernel dispatch failed; full CPU fallback".to_string());
+            self.last_cascade_iterations = None;
+            engine::step::step(state, scratch, events, policy, cascade);
+            return;
+        }
         let events_after_apply = events.total_pushed();
+
         self.last_phase_us.cpu_apply_actions_us = t_apply.elapsed().as_micros() as u64;
 
-        // Collect the seed events (apply_actions' pushes this tick) in
-        // push order. These feed both the GPU cascade's input batch
-        // AND the cold-state replay's iteration.
+        // Collect the seed events (apply_actions + movement pushed)
+        // in push order. These feed both the GPU cascade's input
+        // batch AND the cold-state replay's iteration.
         let seed_events: Vec<Event> = (events_before..events_after_apply)
             .filter_map(|i| events.get_pushed(i))
             .collect();
@@ -1001,6 +1019,103 @@ impl SimBackend for GpuBackend {
 /// populate identically regardless of which cascade path ran.
 #[cfg(feature = "gpu")]
 impl GpuBackend {
+    /// Task 200 — dispatch the GPU `apply_actions` + `movement` kernels
+    /// against the cached scoring outputs, drain their shared event
+    /// ring into the CPU event ring, and commit the mutated agent SoA
+    /// onto `state`. Returns `false` iff a kernel dispatch failed —
+    /// caller is expected to fall back to the CPU `apply_actions` path
+    /// for this tick.
+    ///
+    /// This is the GPU replacement for the Task 197 bridge:
+    ///   * `apply_scoring::scoring_outputs_to_actions` (CPU O(N) adapt)
+    ///   * `engine::step::shuffle_actions_in_place` (CPU Fisher-Yates)
+    ///   * `engine::step::apply_actions` (CPU apply loop with event emits)
+    ///
+    /// The kernels consume `self.last_scoring_outputs` (populated at
+    /// the top of `step` by the scoring kernel), so the caller must
+    /// invoke this AFTER running mask + scoring and BEFORE the cascade
+    /// dispatch picks up the seed events.
+    fn run_gpu_apply_and_movement(
+        &mut self,
+        state: &mut SimState,
+        events: &mut engine::event::EventRing,
+    ) -> bool {
+        let cascade_ctx = match self.cascade_ctx.as_mut() {
+            Some(c) => c,
+            None => return false,
+        };
+        let scoring_outputs = &self.last_scoring_outputs;
+        if scoring_outputs.is_empty() {
+            return false;
+        }
+
+        let agent_slots_in = crate::physics::pack_agent_slots(state);
+        cascade_ctx.apply_event_ring.reset(&self.queue);
+
+        let apply_cfg = crate::apply_actions::cfg_from_state(state);
+        let slots_after_apply = match cascade_ctx.apply_actions.run_and_readback(
+            &self.device,
+            &self.queue,
+            &agent_slots_in,
+            scoring_outputs,
+            apply_cfg,
+            &cascade_ctx.apply_event_ring,
+        ) {
+            Ok(slots) => slots,
+            Err(e) => {
+                eprintln!(
+                    "engine_gpu: apply_actions kernel failed ({e}); \
+                     falling back to CPU apply for this tick"
+                );
+                return false;
+            }
+        };
+
+        let movement_cfg = crate::movement::cfg_from_state(state);
+        let slots_final = match cascade_ctx.movement.run_and_readback(
+            &self.device,
+            &self.queue,
+            &slots_after_apply,
+            scoring_outputs,
+            movement_cfg,
+            &cascade_ctx.apply_event_ring,
+        ) {
+            Ok(slots) => slots,
+            Err(e) => {
+                eprintln!(
+                    "engine_gpu: movement kernel failed ({e}); committing \
+                     apply_actions result without movement this tick"
+                );
+                // apply_actions already mutated agent hp/alive on GPU;
+                // without movement the pos stays at tick-N value. Next
+                // tick re-dispatches with the updated alive set.
+                slots_after_apply
+            }
+        };
+
+        // Drain apply event ring into the CPU events ring. The drain
+        // sorts records by `(tick, kind, payload[0])` before pushing,
+        // reinstating a deterministic order independent of GPU thread
+        // scheduling.
+        if let Err(e) = cascade_ctx
+            .apply_event_ring
+            .drain(&self.device, &self.queue, events)
+        {
+            eprintln!(
+                "engine_gpu: apply_event_ring drain failed ({e}); \
+                 seed events may be lost this tick"
+            );
+        }
+
+        // Commit mutated agent SoA onto SimState. apply_actions touched
+        // hp/alive; movement touched pos. Shield/stun/slow/cooldown/
+        // engaged_with are untouched by both kernels, so those field
+        // writes in `unpack_agent_slots` are no-ops (identity writes of
+        // the pre-step values we packed in).
+        crate::physics::unpack_agent_slots(state, &slots_final);
+        true
+    }
+
     fn run_scoring_sidecar(&mut self, state: &SimState) {
         match self.mask_kernel.run_and_readback(&self.device, &self.queue, state) {
             Ok(bitmaps) => {

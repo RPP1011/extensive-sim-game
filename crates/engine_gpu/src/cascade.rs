@@ -72,7 +72,9 @@ use dsl_compiler::emit_physics_wgsl::EmitContext;
 use engine::event::{Event, EventRing};
 use engine::state::SimState;
 
-use crate::event_ring::{pack_event, unpack_record, DrainOutcome, EventRecord};
+use crate::apply_actions::{ApplyActionsError, ApplyActionsKernel};
+use crate::event_ring::{pack_event, unpack_record, DrainOutcome, EventRecord, GpuEventRing};
+use crate::movement::{MovementError, MovementKernel};
 use crate::physics::{
     pack_agent_slots, unpack_agent_slots, GpuAgentSlot, GpuKinList, PackedAbilityRegistry,
     PhysicsBatchOutput, PhysicsCfg, PhysicsError, PhysicsKernel, MAX_ABILITIES, MAX_EFFECTS,
@@ -754,6 +756,20 @@ pub struct CascadeCtx {
     /// Retained so `EmitContext { events, event_tags }` points into
     /// storage that outlives the per-tick call.
     pub comp: dsl_compiler::ir::Compilation,
+    /// Task 200: GPU `apply_actions` kernel — replaces the CPU
+    /// `scoring → actions → apply_actions` bridge with a WGSL dispatch
+    /// that consumes scoring outputs directly and emits events into
+    /// `apply_event_ring`.
+    pub apply_actions: ApplyActionsKernel,
+    /// Task 200: GPU movement kernel — writes agent pos updates for
+    /// `MoveToward` / `Flee` and emits `AgentMoved` / `AgentFled` into
+    /// `apply_event_ring`.
+    pub movement: MovementKernel,
+    /// Task 200: event ring shared by `apply_actions` + `movement`. A
+    /// dedicated ring (separate from the physics kernel's internal
+    /// ring) keeps the seed-events batch for the cascade isolated from
+    /// the cascade's own emissions.
+    pub apply_event_ring: GpuEventRing,
 }
 
 /// Errors surfaced by `CascadeCtx::new`. Wraps the sub-component init
@@ -764,6 +780,8 @@ pub enum CascadeCtxError {
     Load(LoadError),
     Physics(PhysicsError),
     Spatial(SpatialError),
+    ApplyActions(ApplyActionsError),
+    Movement(MovementError),
 }
 
 impl std::fmt::Display for CascadeCtxError {
@@ -772,6 +790,8 @@ impl std::fmt::Display for CascadeCtxError {
             CascadeCtxError::Load(e) => write!(f, "load compilation: {e}"),
             CascadeCtxError::Physics(e) => write!(f, "physics kernel: {e}"),
             CascadeCtxError::Spatial(e) => write!(f, "spatial hash: {e}"),
+            CascadeCtxError::ApplyActions(e) => write!(f, "apply_actions kernel: {e}"),
+            CascadeCtxError::Movement(e) => write!(f, "movement kernel: {e}"),
         }
     }
 }
@@ -796,6 +816,25 @@ impl From<SpatialError> for CascadeCtxError {
     }
 }
 
+impl From<ApplyActionsError> for CascadeCtxError {
+    fn from(e: ApplyActionsError) -> Self {
+        CascadeCtxError::ApplyActions(e)
+    }
+}
+
+impl From<MovementError> for CascadeCtxError {
+    fn from(e: MovementError) -> Self {
+        CascadeCtxError::Movement(e)
+    }
+}
+
+/// Event-ring capacity shared by the `apply_actions` + `movement`
+/// kernels. These two kernels emit one event per alive agent at worst
+/// (AgentAttacked/Died from apply, AgentMoved/Fled from movement), so
+/// the bound is 2× agent_cap. 65 536 slots covers every fixture the
+/// parity / perf harnesses hit (agent_cap ≤ 1024) without resizing.
+pub const APPLY_EVENT_RING_CAPACITY: u32 = 65_536;
+
 impl CascadeCtx {
     /// Build a fresh cascade context: load the DSL assets, compile the
     /// physics kernel, spin up a spatial hash, and keep an empty ability
@@ -811,11 +850,21 @@ impl CascadeCtx {
         let physics = PhysicsKernel::new(device, &comp.physics, &ctx, 65_536)?;
         let spatial = GpuSpatialHash::new(device)?;
         let abilities = PackedAbilityRegistry::empty();
+        // Task 200: apply_actions + movement kernels share a dedicated
+        // GPU event ring. Both kernels atomically append to it; the
+        // backend drains once after both dispatches to recover the seed
+        // events the cascade consumes.
+        let apply_actions = ApplyActionsKernel::new(device, APPLY_EVENT_RING_CAPACITY)?;
+        let movement = MovementKernel::new(device, APPLY_EVENT_RING_CAPACITY)?;
+        let apply_event_ring = GpuEventRing::new(device, APPLY_EVENT_RING_CAPACITY);
         Ok(Self {
             physics,
             spatial,
             abilities,
             comp,
+            apply_actions,
+            movement,
+            apply_event_ring,
         })
     }
 }
