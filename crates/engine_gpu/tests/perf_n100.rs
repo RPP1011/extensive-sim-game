@@ -93,6 +93,7 @@ fn perf_n100() {
 
     // GPU
     let mut gpu_backend = GpuBackend::new().expect("gpu init");
+    gpu_backend.set_skip_scoring_sidecar(true);
     let mut state = spawn_n(N_AGENTS);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(EVENT_RING_CAP);
@@ -102,10 +103,21 @@ fn perf_n100() {
     let first_tick = t_first.elapsed();
 
     let t_rest = Instant::now();
+    let mut iter_counts: Vec<u32> = Vec::new();
     for _ in 1..TICKS {
         gpu_backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+        if let Some(n) = gpu_backend.last_cascade_iterations() {
+            iter_counts.push(n);
+        }
     }
     let rest = t_rest.elapsed();
+    let avg_iters: f64 = if iter_counts.is_empty() {
+        0.0
+    } else {
+        iter_counts.iter().copied().map(|n| n as f64).sum::<f64>() / iter_counts.len() as f64
+    };
+    eprintln!("avg cascade iterations/tick: {avg_iters:.2}");
+    eprintln!("GPU backend label: {}", gpu_backend.backend_label());
     let alive_gpu = state.agents_alive().count();
 
     let cpu_per = cpu_total.as_secs_f64() * 1e6 / TICKS as f64;
