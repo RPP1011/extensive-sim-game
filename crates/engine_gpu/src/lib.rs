@@ -1,33 +1,37 @@
-//! GPU backend for the engine — Phase 1 (Attack mask E2E).
+//! GPU backend for the engine — Phase 2 (fused mask kernel).
 //!
 //! See `docs/plans/gpu_megakernel_plan.md`. Phase 0 shipped a pure
-//! CPU-forwarding stub. Phase 1 adds:
+//! CPU-forwarding stub. Phase 1 wired the Attack mask end-to-end via a
+//! single-kernel dispatch. Phase 2 generalises: one WGSL module with
+//! one `cs_fused_masks` entry point writes every supported mask's
+//! bitmap in a single dispatch.
 //!
-//!   * Real `wgpu::Device` + `wgpu::Queue` handles, created lazily on
-//!     `GpuBackend::new()` via `pollster::block_on` (kept sync —
-//!     callers don't need to be async).
-//!   * A WGSL compute pipeline for the Attack mask, emitted at
-//!     construction time by `dsl_compiler::emit_mask_wgsl` and parsed
-//!     through `naga` at runtime.
-//!   * Per-tick storage-buffer uploads, dispatch, and readback of the
-//!     Attack mask bitmap (one bit per agent slot).
+//! ## What runs on GPU in Phase 2
 //!
-//! ## Phase 1 scope — what the backend actually does each tick
+//! Seven of the engine's eight masks lower cleanly to the Phase 2
+//! emitter subset and run in the fused kernel:
 //!
-//! Per the plan's "strongly prefer the alternative approach" guidance,
-//! `GpuBackend::step` still forwards to `engine::step::step` (CPU
-//! kernel) and ADDITIONALLY runs the Attack mask on GPU. The GPU result
-//! is not yet spliced into the engine's scratch buffers — it lives on
-//! the backend and is exposed via
-//! [`GpuBackend::last_attack_mask_bitmap`], which the parity harness
-//! calls and compares against a CPU reference bitmap computed by
-//! [`attack_mask::cpu_attack_mask_bitmap`]. That's the Phase 1 proof
-//! point: WGSL emit → naga parse → dispatch → readback all work, and
-//! the kernel produces byte-identical output to the CPU attack mask.
+//!   * Attack / MoveToward (target-bound, radius-filtered)
+//!   * Hold / Flee / Eat / Drink / Rest (self-only, alive gate)
 //!
-//! Phase 2 swaps the GPU result into `SimScratch.mask` directly, at
-//! which point the CPU mask-build for Attack becomes dead code and can
-//! be deleted.
+//! Cast is skipped — its `(ability: AbilityId)` parametric head and
+//! view / cooldown dependencies need the Phase 4+ storage layer. The
+//! fused kernel is built from the subset the emitter accepts; the
+//! skipped name is documented alongside the emitter and in
+//! `engine_gpu::mask`.
+//!
+//! ## Step semantics
+//!
+//! As in Phase 1, `GpuBackend::step` still forwards to
+//! `engine::step::step` (CPU kernel) and ADDITIONALLY runs the fused
+//! mask kernel. The seven GPU-computed bitmaps are not yet spliced
+//! into the engine's scratch buffers — they live on the backend and
+//! are exposed via [`GpuBackend::last_mask_bitmaps`] for the parity
+//! harness to compare against CPU references (one reference per mask,
+//! computed by `engine_gpu::mask::cpu_mask_bitmap`).
+//!
+//! Phase 3 feeds the GPU bitmaps back into the argmax scoring path;
+//! that's when the CPU mask-build becomes dead code.
 //!
 //! ## `#[cfg(feature = "gpu")]` boundary
 //!
@@ -47,7 +51,7 @@ use engine::{
 };
 
 #[cfg(feature = "gpu")]
-pub mod attack_mask;
+pub mod mask;
 
 /// Phase 1 GPU backend.
 ///
@@ -65,18 +69,20 @@ pub struct GpuBackend {
 pub struct GpuBackend {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    attack_mask: attack_mask::AttackMaskKernel,
+    mask_kernel: mask::FusedMaskKernel,
     /// Name of the backend wgpu selected (Vulkan / Metal / DX12 / GL /
     /// BrowserWebGpu / llvmpipe (GL/Vulkan software)). Captured at
     /// construction so tests can report which path they exercised.
     backend_label: String,
-    /// GPU-computed Attack mask bitmap from the most recent `step`, in
-    /// word order (`bit i of word i/32` set iff slot `i`'s agent passed
-    /// the Attack predicate). Empty before the first `step`.
-    last_attack_bitmap: Vec<u32>,
+    /// Per-mask bitmaps from the most recent `step`, in the emitter's
+    /// binding order (see `FusedMaskKernel::bindings`). Each inner
+    /// `Vec<u32>` is a packed bitmap: bit `i` of word `i/32` is set
+    /// iff slot `i`'s agent passed that mask's predicate this tick.
+    /// Empty before the first `step`.
+    last_mask_bitmaps: Vec<Vec<u32>>,
 }
 
-/// Errors surfaced by `GpuBackend::new` at Phase 1.
+/// Errors surfaced by `GpuBackend::new`.
 #[cfg(feature = "gpu")]
 #[derive(Debug)]
 pub enum GpuInitError {
@@ -87,7 +93,7 @@ pub enum GpuInitError {
     /// Device request failed — driver bug, feature mismatch, etc.
     RequestDevice(String),
     /// Kernel init failed — WGSL emit or naga parse.
-    Kernel(attack_mask::KernelError),
+    Kernel(mask::KernelError),
 }
 
 #[cfg(feature = "gpu")]
@@ -105,8 +111,8 @@ impl std::fmt::Display for GpuInitError {
 impl std::error::Error for GpuInitError {}
 
 #[cfg(feature = "gpu")]
-impl From<attack_mask::KernelError> for GpuInitError {
-    fn from(e: attack_mask::KernelError) -> Self {
+impl From<mask::KernelError> for GpuInitError {
+    fn from(e: mask::KernelError) -> Self {
         GpuInitError::Kernel(e)
     }
 }
@@ -173,25 +179,36 @@ impl GpuBackend {
             .await
             .map_err(|_| GpuInitError::NoAdapter)?;
         let backend_label = format!("{:?}", adapter.get_info().backend);
+        // `downlevel_defaults` caps `max_storage_buffers_per_shader_stage`
+        // at 4 — fine for the Phase 1 Attack-only kernel (4 storage
+        // buffers + 1 uniform) but the Phase 2 fused kernel needs 10
+        // (3 SoA reads + 7 per-mask bitmap writes). The adapter's real
+        // limit on every Vulkan / Metal / DX12 target we care about is
+        // at least 16; lean on that by asking for the adapter's full
+        // limits. On CI-style software adapters (LLVMpipe) this still
+        // works: LLVMpipe reports >= 8 and we only need 10. If some
+        // future target returns a smaller limit we'll have to cap N
+        // and split the dispatch — but that's a Phase 3+ concern.
+        let adapter_limits = adapter.limits();
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("engine_gpu::device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_limits: adapter_limits,
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
             })
             .await
             .map_err(|e| GpuInitError::RequestDevice(format!("{e}")))?;
 
-        let attack_mask = attack_mask::AttackMaskKernel::new(&device)?;
+        let mask_kernel = mask::FusedMaskKernel::new(&device)?;
 
         Ok(Self {
             device,
             queue,
-            attack_mask,
+            mask_kernel,
             backend_label,
-            last_attack_bitmap: Vec::new(),
+            last_mask_bitmaps: Vec::new(),
         })
     }
 
@@ -203,23 +220,45 @@ impl GpuBackend {
         &self.backend_label
     }
 
-    /// Packed u32 bitmap from the most recent `step`. Bit `i` of word
-    /// `i/32` is `1` iff slot `i`'s agent passed the Attack-mask
-    /// predicate against at least one target. Empty before the first
-    /// `step` — check `.is_empty()` before indexing.
-    pub fn last_attack_mask_bitmap(&self) -> &[u32] {
-        &self.last_attack_bitmap
+    /// Per-mask packed bitmaps from the most recent `step`, in the
+    /// same order as `mask_bindings()`. Bit `i` of word `i/32` of
+    /// `last_mask_bitmaps()[k]` is set iff slot `i`'s agent passed
+    /// mask `k`'s predicate this tick. Empty before the first `step`;
+    /// `last_mask_bitmaps()[k]` is `None`-empty if the kernel dispatch
+    /// failed the most recent tick.
+    pub fn last_mask_bitmaps(&self) -> &[Vec<u32>] {
+        &self.last_mask_bitmaps
     }
 
-    /// Run the Attack-mask kernel on the current `state` without
-    /// touching the CPU step — used by the parity test's
-    /// "compare GPU to CPU at every tick" mode. Returns the packed
-    /// bitmap; caller compares against `attack_mask::cpu_attack_mask_bitmap`.
-    pub fn verify_attack_mask_on_gpu(
+    /// Per-mask metadata (name, index, shape) in fused-kernel order.
+    /// Stable across ticks — set at `GpuBackend::new` when the
+    /// pipeline compiles. Callers use this to pair a bitmap from
+    /// `last_mask_bitmaps` with its DSL mask name for diagnostics or
+    /// mask-specific handling.
+    pub fn mask_bindings(&self) -> &[dsl_compiler::emit_mask_wgsl::FusedMaskBinding] {
+        self.mask_kernel.bindings()
+    }
+
+    /// Convenience lookup — scan `mask_bindings()` for the slot
+    /// matching `name` and return the corresponding bitmap from the
+    /// most recent `step`, or `None` if the mask isn't in the fused
+    /// kernel (Cast, future non-agent masks) or `step` hasn't run yet.
+    pub fn last_bitmap_for(&self, name: &str) -> Option<&[u32]> {
+        let bindings = self.mask_kernel.bindings();
+        let idx = bindings.iter().position(|b| b.mask_name == name)?;
+        self.last_mask_bitmaps.get(idx).map(|v| v.as_slice())
+    }
+
+    /// Run the fused-mask kernel against the current `state` without
+    /// touching the CPU step — used by the parity test's direct
+    /// "known-state spawn check" mode. Returns every bitmap in the
+    /// emitter's binding order; caller pairs each against
+    /// `mask::cpu_mask_bitmap(state, name)`.
+    pub fn verify_masks_on_gpu(
         &mut self,
         state: &SimState,
-    ) -> Result<Vec<u32>, attack_mask::KernelError> {
-        self.attack_mask.run_and_readback(&self.device, &self.queue, state)
+    ) -> Result<Vec<Vec<u32>>, mask::KernelError> {
+        self.mask_kernel.run_and_readback(&self.device, &self.queue, state)
     }
 }
 
@@ -233,22 +272,22 @@ impl SimBackend for GpuBackend {
         policy: &B,
         cascade: &CascadeRegistry,
     ) {
-        // Phase 1: still forward the CPU step — the GPU kernel runs
-        // alongside and its output is validated against CPU by the
-        // parity harness. Phase 2 replaces the Attack mask portion of
-        // CPU mask-build with the GPU bitmap.
+        // Phase 2: still forward the CPU step — the fused mask kernel
+        // runs alongside and every output is compared against CPU by
+        // the parity harness. Phase 3 feeds the GPU bitmaps back into
+        // the argmax scoring path.
         engine::step::step(state, scratch, events, policy, cascade);
 
-        // Run the Attack mask on GPU using the post-step state. Capture
-        // the result on the backend so callers (parity test) can read
-        // it out without re-running the kernel. Errors are not fatal —
-        // if the dispatch failed we clear the bitmap, which the parity
-        // harness surfaces as an assertion failure ("GPU bitmap empty
-        // after step").
-        match self.attack_mask.run_and_readback(&self.device, &self.queue, state) {
-            Ok(bits) => self.last_attack_bitmap = bits,
+        // Run the fused mask kernel on the post-step state. Capture
+        // every per-mask bitmap on the backend so callers (parity
+        // test) can read them out without re-running the kernel.
+        // Errors are not fatal — if the dispatch failed we clear the
+        // bitmap vec, which the parity harness surfaces as an
+        // assertion failure ("GPU bitmaps empty after step").
+        match self.mask_kernel.run_and_readback(&self.device, &self.queue, state) {
+            Ok(bitmaps) => self.last_mask_bitmaps = bitmaps,
             Err(_e) => {
-                self.last_attack_bitmap.clear();
+                self.last_mask_bitmaps.clear();
             }
         }
     }
