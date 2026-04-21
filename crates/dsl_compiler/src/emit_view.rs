@@ -73,7 +73,14 @@ fn emit_view_result(view: &ViewIR, source_file: Option<&str>) -> Result<String, 
             emit_lazy_fn(&mut out, view)?;
         }
         ViewKind::Materialized(hint) => {
-            emit_imports_materialized(&mut out);
+            // Topk(K>=2) lowers to Vec<[TopkSlot; K]> — no HashMap
+            // needed. Emit a slimmer import block to avoid an unused-
+            // import warning in the generated file.
+            let uses_hashmap = !matches!(
+                hint,
+                StorageHint::PerEntityTopK { k, .. } if k >= 2
+            );
+            emit_imports_materialized(&mut out, uses_hashmap);
             emit_materialized_struct(&mut out, view, hint)?;
         }
     }
@@ -218,9 +225,11 @@ fn emit_imports_lazy(out: &mut String) {
     writeln!(out).unwrap();
 }
 
-fn emit_imports_materialized(out: &mut String) {
-    writeln!(out, "use std::collections::HashMap;").unwrap();
-    writeln!(out).unwrap();
+fn emit_imports_materialized(out: &mut String, uses_hashmap: bool) {
+    if uses_hashmap {
+        writeln!(out, "use std::collections::HashMap;").unwrap();
+        writeln!(out).unwrap();
+    }
     writeln!(out, "use crate::event::Event;").unwrap();
     writeln!(out, "use crate::ids::AgentId;").unwrap();
     writeln!(out).unwrap();

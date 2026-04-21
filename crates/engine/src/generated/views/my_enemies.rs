@@ -2,48 +2,140 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use std::collections::HashMap;
-
 use crate::event::Event;
 use crate::ids::AgentId;
 
-/// @materialized view `my_enemies` — `storage = pair_map<(AgentId, AgentId), f32>`.
+/// @materialized view `my_enemies` — `storage = per_entity_topk(K=8)`.
+/// Storage: one `[TopkSlot; 8]` per observer slot in a `Vec`. Total footprint
+/// is O(N·K) — at K=8 and N=200k that's 18 MB vs the dense pair_map's
+/// O(N²·4) ≈ 160 GB. Fold semantics: find-or-evict-else-drop (task 196).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TopkSlot {
+    /// Raw AgentId (1-based). 0 means empty.
+    pub id: u32,
+    /// Stored value; decay (if configured) applies on read.
+    pub value: f32,
+    /// Tick when `value` was last written (@decay anchor).
+    pub anchor_tick: u32,
+}
+
 #[derive(Debug, Default)]
 pub struct MyEnemies {
-    value: HashMap<(AgentId, AgentId), f32>,
+    /// One array of 8 slots per observer. `Vec::len()` grows on demand
+    /// as `fold_event` sees higher observer ids.
+    slots: Vec<[TopkSlot; 8]>,
 }
 
 impl MyEnemies {
+    /// Slot count per observer — the `K` from `per_entity_topk(K=8)`.
+    pub const K: usize = 8;
+
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Number of observer slots currently provisioned. `fold_event` grows
+    /// this on demand up to `max_observer + 1`.
     pub fn len(&self) -> usize {
-        self.value.len()
+        self.slots.len()
     }
     pub fn is_empty(&self) -> bool {
-        self.value.is_empty()
+        self.slots.is_empty()
     }
 
-    /// Current value for the given pair.
+    /// Current value for `attacker` as observed by `observer`.
+    /// Returns `initial` when the pair isn't in observer's top-8.
     pub fn get(&self, observer: AgentId, attacker: AgentId) -> f32 {
-        self.value
-            .get(&(observer, attacker))
-            .copied()
-            .unwrap_or(0.0)
+        let obs_slot = (observer.raw() - 1) as usize;
+        let atk_id = attacker.raw();
+        let Some(row) = self.slots.get(obs_slot) else {
+            return 0.0;
+        };
+        for s in row.iter() {
+            if s.id == atk_id {
+                return s.value;
+            }
+        }
+        0.0
+    }
+
+    /// Σ get(observer, x) over `observer`'s top-8 slots.
+    /// Semantic drift vs dense pair_map: sum is over top-K attackers, not every recorded pair.
+    pub fn sum_for_first(&self, observer: AgentId) -> f32 {
+        let obs_slot = (observer.raw() - 1) as usize;
+        let Some(row) = self.slots.get(obs_slot) else {
+            return 0.0;
+        };
+        let mut total: f32 = 0.0;
+        for s in row.iter() {
+            if s.id == 0 {
+                continue;
+            }
+            total += s.value;
+        }
+        total
+    }
+
+    fn row_mut(&mut self, obs_slot: usize) -> &mut [TopkSlot; 8] {
+        if obs_slot >= self.slots.len() {
+            self.slots.resize(obs_slot + 1, [TopkSlot::default(); 8]);
+        }
+        &mut self.slots[obs_slot]
+    }
+
+    /// Fold `delta` into the (observer, attacker) slot. See the
+    /// module docstring above for find-or-evict-else-drop semantics.
+    fn fold_one(&mut self, observer: u32, attacker: u32, delta: f32, tick: u32) {
+        if observer == 0 || attacker == 0 {
+            return;
+        }
+        let obs_slot = (observer - 1) as usize;
+        let row = self.row_mut(obs_slot);
+        for i in 0..8 {
+            if row[i].id == attacker {
+                let updated = row[i].value + delta;
+                let updated = updated.clamp(0.0, 1.0);
+                row[i].value = updated;
+                row[i].anchor_tick = tick;
+                return;
+            }
+        }
+        for i in 0..8 {
+            if row[i].id == 0 {
+                let v = delta.clamp(0.0, 1.0);
+                row[i] = TopkSlot {
+                    id: attacker,
+                    value: v,
+                    anchor_tick: tick,
+                };
+                return;
+            }
+        }
+        // Full row — evict the smallest-value slot if `delta` beats it,
+        // else drop the fold (too weak to displace).
+        let mut min_i: usize = 0;
+        let mut min_v: f32 = row[0].value;
+        for i in 1..8 {
+            if row[i].value < min_v {
+                min_v = row[i].value;
+                min_i = i;
+            }
+        }
+        if delta > min_v {
+            let v = delta.clamp(0.0, 1.0);
+            row[min_i] = TopkSlot {
+                id: attacker,
+                value: v,
+                anchor_tick: tick,
+            };
+        }
     }
 
     /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase.
     pub fn fold_event(&mut self, event: &Event, tick: u32) {
         match event {
             Event::AgentAttacked { target, actor, .. } => {
-                let key = (*target, *actor);
-                let amount: f32 = 1.0;
-                let prev = self.value.get(&key).copied().unwrap_or(0.0);
-                let updated = prev + amount;
-                let updated = updated.clamp(0.0, 1.0);
-                self.value.insert(key, updated);
-                let _ = tick;
+                self.fold_one(target.raw(), actor.raw(), 1.0, tick);
             }
             _ => {}
         }

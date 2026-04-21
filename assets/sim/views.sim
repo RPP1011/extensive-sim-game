@@ -62,13 +62,15 @@ view slow_factor(a: Agent) -> i16 {
 // by 1; the stored value decays at 0.98^tick between events. Clamped
 // to `[0.0, 1000.0]` so long-running simulations don't overflow.
 //
-// Storage: `pair_map<(AgentId, AgentId), f32>` — the default per spec
-// §9 D31 when the view is keyed on a small-N × small-N pair. At the
-// spec's N=200K scale `pair_map` is infeasible for `(AgentId, AgentId)`;
-// this view is intended for short-lived combat scenarios where the
-// populated pair count is bounded. The compiler will reject the
-// storage combination once the feasibility check lands (future task).
-@materialized(on_event = [AgentAttacked, EffectDamageApplied], storage = pair_map)
+// Storage: `per_entity_topk(K=8)` (task 196) — one bounded slot list
+// of 8 entries per observer, keyed on the first parameter. At N=200K
+// this is ~77 MB vs the dense pair_map's ~160 GB, unblocking the
+// spec-scale run. The topk fold uses find-or-evict-else-drop: repeat
+// attackers accumulate in-slot; new attackers land in an empty slot
+// or evict the lowest-value occupant; weak newcomers drop silently.
+// Wildcard reads now sum over the 8 stored attackers rather than
+// every recorded pair — documented drift vs the old pair_map.
+@materialized(on_event = [AgentAttacked, EffectDamageApplied], storage = per_entity_topk(K = 8))
 @decay(rate = 0.98, per = tick)
 view threat_level(a: Agent, b: Agent) -> f32 {
   initial: 0.0,
@@ -112,9 +114,13 @@ view engaged_with(a: Agent) -> Agent {
 // wolf remembers who hurt it and prefers that specific human over
 // an equivalent fresh target.
 //
-// Storage: `pair_map<(AgentId, AgentId), f32>` — same default as
-// `threat_level`, per spec §9 D31.
-@materialized(on_event = [AgentAttacked], storage = pair_map)
+// Storage: `per_entity_topk(K=8)` (task 196) — bounded per-observer
+// slot list matching threat_level's sparsification. Because my_enemies
+// clamps at 1.0, the fold stays useful under the topk shape: the first
+// hit marks a slot at 1.0 and subsequent hits are no-ops on the same
+// slot; new attackers fill empty slots or evict (tied at 1.0 each, so
+// the "delta > min" check drops ties and keeps the original order).
+@materialized(on_event = [AgentAttacked], storage = per_entity_topk(K = 8))
 view my_enemies(observer: Agent, attacker: Agent) -> f32 {
   initial: 0.0,
   on AgentAttacked { actor: attacker, target: observer } { self += 1.0 }
@@ -193,11 +199,10 @@ view kin_fear(observer: Agent, dead_kin: Agent) -> f32 {
 // engage human → pack focus on human" and "human sees human engage
 // wolf → pack focus on wolf" both flow through the same fold.
 //
-// Storage: `pair_map<(AgentId, AgentId), (f32, u32)>` (the @decay
-// variant stores (base, anchor_tick) per pair). Same bounded-population
-// assumption as kin_fear / threat_level / my_enemies — pair count stays
-// small in combat scenarios.
-@materialized(on_event = [PackAssist], storage = pair_map)
+// Storage: `per_entity_topk(K=8)` (task 196). Pack focus naturally
+// concentrates on a few targets the pack is converging on; K=8 covers
+// a large pack without loss.
+@materialized(on_event = [PackAssist], storage = per_entity_topk(K = 8))
 @decay(rate = 0.933, per = tick)
 view pack_focus(observer: Agent, target: Agent) -> f32 {
   initial: 0.0,
@@ -226,16 +231,11 @@ view pack_focus(observer: Agent, target: Agent) -> f32 {
 //   kin_fear   : observer saw kin die  → +Flee  (rout)
 //   rally_boost: observer saw kin hurt → +Attack (revenge / rally)
 //
-// Task constraint (per-pair keying instead of single-slot): the
-// project's @decay storage currently supports only `pair_map` over
-// 2-arg views; 1-arg @decay views are not a shape the compiler
-// emits (see `emit_view.rs::emit_per_entity_topk1_struct` —
-// `per_entity_topk(1)` storage does not support `@decay`). Keeping
-// the signature `(observer, wounded_kin)` matches the `kin_fear`
-// mirror exactly, and scoring uses the wildcard `_` slot to sum
-// across every recorded wounded-kin pair for the observer — so the
-// behavioural intent "any recent wound rallies me" is expressed at
-// the scoring site, not the view shape.
+// Storage (task 196): `per_entity_topk(K=8)` — matches the other
+// sparsified pair-keyed decay views. Each observer tracks up to 8
+// wounded kin; wildcard sum is now over those 8 slots rather than
+// every recorded pair. Task 139's "topk can't combine with @decay"
+// restriction was lifted in task 196.
 //
 // Consumed by scoring's Attack row through the wildcard-slot helper
 // `sum_for_first(observer, tick)` — `view::rally_boost(self, _) > 0.3
@@ -248,12 +248,7 @@ view pack_focus(observer: Agent, target: Agent) -> f32 {
 // wounded_kin). The view itself is species-agnostic — "wolf sees
 // wolf wounded → rally", "human sees human wounded → rally" both
 // flow through the same fold.
-//
-// Storage: `pair_map<(AgentId, AgentId), (f32, u32)>` (the @decay
-// variant stores (base, anchor_tick) per pair). Same bounded-
-// population assumption as kin_fear — pair count stays small in
-// combat scenarios.
-@materialized(on_event = [RallyCall], storage = pair_map)
+@materialized(on_event = [RallyCall], storage = per_entity_topk(K = 8))
 @decay(rate = 0.891, per = tick)
 view rally_boost(observer: Agent, wounded_kin: Agent) -> f32 {
   initial: 0.0,
