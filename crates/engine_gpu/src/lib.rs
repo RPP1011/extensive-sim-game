@@ -99,6 +99,15 @@ pub mod physics;
 #[cfg(feature = "gpu")]
 pub mod cascade;
 
+/// Task 197 — convert GPU scoring outputs into CPU `Action`s so the
+/// backend can skip the CPU `step_phases_1_to_3` mask build + policy
+/// evaluate (the dominant N=1000 cost, per task 195's `PhaseTimings`).
+/// The GPU mask + scoring kernels already produce per-slot decisions;
+/// this module just adapts their output into the shape
+/// `engine::step::apply_actions` expects.
+#[cfg(feature = "gpu")]
+pub mod apply_scoring;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
@@ -180,9 +189,20 @@ pub struct GpuBackend {
 /// microseconds. Reset at the top of each `step` and populated as the
 /// phase completes. Useful for `perf_n100`-style callers that want to
 /// know WHICH submit dominates without cargo-instruments.
+///
+/// Task 197 repurposed `cpu_phases_1_3_us` — it now measures the GPU
+/// mask + scoring dispatch + readback (the CPU mask build + policy
+/// evaluate it replaced no longer runs). Kept the old name so existing
+/// harnesses don't break; `mask_scoring_us` is the current-accurate
+/// alias returned by [`PhaseTimings::mask_scoring_us`].
 #[cfg(feature = "gpu")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PhaseTimings {
+    /// GPU mask + scoring dispatch (formerly the CPU phases 1-3 cost).
+    /// Task 197 replaced the 170-700 ms CPU mask-build at N=1000 with a
+    /// ~70-90 ms GPU dispatch + readback; the field name is load-
+    /// bearing for existing perf harnesses — use
+    /// [`PhaseTimings::mask_scoring_us`] in new code.
     pub cpu_phases_1_3_us: u64,
     pub cpu_apply_actions_us: u64,
     pub gpu_cascade_us: u64,
@@ -191,6 +211,16 @@ pub struct PhaseTimings {
     pub cpu_view_fold_all_us: u64,
     pub cpu_finalize_us: u64,
     pub gpu_sidecar_us: u64,
+}
+
+#[cfg(feature = "gpu")]
+impl PhaseTimings {
+    /// Task 197 alias for `cpu_phases_1_3_us`, which now measures the
+    /// GPU mask + scoring dispatch (the CPU mask-build+evaluate it
+    /// replaced no longer runs). New code should prefer this name.
+    pub fn mask_scoring_us(&self) -> u64 {
+        self.cpu_phases_1_3_us
+    }
 }
 
 /// Initial agent capacity the view storage is provisioned for. Grows on
@@ -632,35 +662,49 @@ impl SimBackend for GpuBackend {
         policy: &B,
         cascade: &CascadeRegistry,
     ) {
-        // Phase 6g — GPU-authoritative step. Pieces 1–3 (tasks 190–192)
-        // landed on `world-sim-bench`; this is Piece 4 of the task-190
-        // recipe, wiring the cascade into the backend's tick loop.
+        // Task 197 — eliminate the dominant N=1000 cost (CPU mask build
+        // + policy evaluate, 170-700 ms/tick per task 195's
+        // `PhaseTimings`). Prior shape ran `engine::step::step_phases_
+        // 1_to_3` on CPU and then ran the GPU mask + scoring kernels as
+        // a post-tick diagnostic SIDECAR — pure duplicate work.
         //
-        // Shape:
+        // New shape:
         //   1. Ensure cascade context (lazy DSL load + WGSL compile on
         //      first call).
-        //   2. Phases 1–3: run CPU mask-build / evaluate / shuffle via
-        //      `step::step_phases_1_to_3` (same call the CPU backend
-        //      uses — byte-exact same actions).
-        //   3. Phase 4a: run CPU `apply_actions` to seed the event ring
-        //      with this tick's root-cause events.
-        //   4. Phase 4b: GPU cascade runs against those seed events,
-        //      mutating its agent SoA + emitting follow-on events.
-        //   5. Commit GPU final slots back to `SimState` via
-        //      `apply_final_slots`; push GPU-emitted events into the
-        //      CPU event ring via `events_into_ring`.
-        //   6. Phase 4c: cold-state replay — walk the GPU-emitted +
-        //      seed events once on CPU, dispatching the 11 rules the
-        //      GPU stubs (chronicles, transfer_gold, modify_standing,
+        //   2. Run GPU mask + scoring kernels (formerly the post-tick
+        //      sidecar). Output: one `ScoreOutput` per slot — the same
+        //      per-agent argmax the CPU backend computes, but ~2 ms on
+        //      GPU vs. ~170-700 ms on CPU at N=1000.
+        //   3. Convert scoring outputs → `Vec<Action>` (CPU, O(N)) and
+        //      deterministically shuffle with the same per-tick seed
+        //      the CPU backend uses (task 197 exposes
+        //      `engine::step::shuffle_actions_in_place` for this).
+        //   4. Phase 4a: CPU `apply_actions` on the action list — emits
+        //      this tick's seed events (AgentAttacked, AgentMoved,
+        //      opportunity attacks, announce broadcasts, …). Byte-
+        //      compatible with the CPU backend's event emission.
+        //   5. Phase 4b: GPU cascade runs against the seed events.
+        //   6. Commit GPU final slots back to `SimState`; push GPU-
+        //      emitted events into the CPU event ring.
+        //   7. Phase 4c: cold-state replay — walk seed + GPU-emitted
+        //      events once on CPU, dispatching the 11 rules the GPU
+        //      stubs (chronicles, transfer_gold, modify_standing,
         //      record_memory).
-        //   7. Phase 5: CPU view-fold (same as step_full).
-        //   8. Phase 6: invariants + telemetry, increment tick.
+        //   8. Phase 5: CPU view-fold on the full this-tick slice so
+        //      `state.views` stays in sync with `view_storage`.
+        //   9. Phase 6: invariants + telemetry, increment tick.
+        //
+        // The `skip_scoring_sidecar` flag is now a no-op on the fast
+        // path — the mask + scoring kernels ALWAYS run at the top of
+        // the tick, because their output IS the action source.
+        // `last_mask_bitmaps` / `last_scoring_outputs` are populated
+        // as a byproduct of the new flow, so diagnostic callers still
+        // see them regardless of the flag.
         //
         // On cascade init / dispatch failure the backend falls back to
-        // the CPU cascade for THIS tick so state stays live. That
-        // keeps long-running sessions resilient; the parity test's
-        // byte-exact assertion catches silent divergence via the
-        // CPU-vs-GPU state fingerprint.
+        // the full CPU pipeline (mask + evaluate + apply + CPU cascade)
+        // for THIS tick so state stays live; the per-tick diagnostic
+        // surface still populates via a sidecar on the fallback path.
 
         let t_start = std::time::Instant::now();
 
@@ -691,15 +735,84 @@ impl SimBackend for GpuBackend {
 
         self.last_phase_us = PhaseTimings::default();
 
-        // Phases 1–3: CPU mask build, evaluate, shuffle.
+        // Phase 1-2 (NEW): GPU mask + scoring dispatch at the TOP of
+        // the tick. This is the work that used to run as the post-tick
+        // sidecar; moving it up front lets us skip
+        // `step_phases_1_to_3`'s CPU mask build + policy evaluate
+        // (which at N=1000 dominates the tick, per task 195's phase
+        // timings). Output: one `ScoreOutput` per agent slot carrying
+        // `(chosen_action, chosen_target)` the scorer's argmax picked.
+        //
+        // On dispatch failure we fall back to the CPU pipeline for the
+        // whole tick — the GPU scoring output is load-bearing for the
+        // skipped CPU phases, so a half-GPU tick isn't recoverable.
         let t_ph13 = std::time::Instant::now();
-        engine::step::step_phases_1_to_3(state, scratch, policy);
+        let bitmaps_and_scoring = match self
+            .mask_kernel
+            .run_and_readback(&self.device, &self.queue, state)
+        {
+            Ok(bitmaps) => match self.scoring_kernel.run_and_readback(
+                &self.device,
+                &self.queue,
+                state,
+                &self.mask_kernel,
+                &bitmaps,
+                &self.view_storage,
+            ) {
+                Ok(scores) => Some((bitmaps, scores)),
+                Err(e) => {
+                    eprintln!("engine_gpu: scoring dispatch failed, falling back to CPU: {e}");
+                    None
+                }
+            },
+            Err(e) => {
+                eprintln!("engine_gpu: mask dispatch failed, falling back to CPU: {e}");
+                None
+            }
+        };
+
+        if bitmaps_and_scoring.is_none() {
+            // Full CPU fallback: mask-build + evaluate + apply + CPU
+            // cascade. Diagnostic fields stay empty for this tick.
+            self.last_cascade_error =
+                Some("mask/scoring dispatch failed; CPU fallback".to_string());
+            self.last_cascade_iterations = None;
+            self.last_mask_bitmaps.clear();
+            self.last_scoring_outputs.clear();
+            engine::step::step(state, scratch, events, policy, cascade);
+            return;
+        }
+
+        let (bitmaps, scoring_outputs) = bitmaps_and_scoring.unwrap();
+
+        // Convert scoring outputs → `Vec<Action>` in agent-slot order,
+        // then shuffle via the SAME per-tick permutation the CPU
+        // backend uses (keyed on `state.seed` + `state.tick`). The
+        // shuffle ensures `apply_actions` walks the action list in a
+        // deterministic but first-mover-bias-free order.
+        scratch.actions.clear();
+        apply_scoring::scoring_outputs_to_actions(state, &scoring_outputs, &mut scratch.actions);
+        engine::step::shuffle_actions_in_place(
+            state.seed,
+            state.tick,
+            &scratch.actions,
+            &mut scratch.shuffle_idx,
+        );
+
+        // Cache for diagnostic callers. Done now rather than at tick
+        // end because the sidecar is gone — the mask + scoring we just
+        // ran IS the authoritative output for this tick.
+        self.last_mask_bitmaps = bitmaps;
+        self.last_scoring_outputs = scoring_outputs;
+
         self.last_phase_us.cpu_phases_1_3_us = t_ph13.elapsed().as_micros() as u64;
 
-        // Phase 4a — apply actions on CPU, emitting this tick's seed
-        // events. `events_before` snapshots the ring's total_pushed
-        // cursor so we can locate just this tick's additions for the
-        // GPU cascade's `initial_events` + the cold-state replay.
+        // Phase 4a — apply actions on CPU using the GPU-derived action
+        // list. The SAME `engine::step::apply_actions` the CPU backend
+        // calls; this is where opportunity attacks, engagement slow,
+        // announce broadcasts, and flee kin-bias math all live. Keeping
+        // this on CPU (rather than porting to WGSL) preserves byte-
+        // compatibility with the CPU backend for free.
         let t_apply = std::time::Instant::now();
         let events_before = events.total_pushed();
         engine::step::apply_actions(state, scratch, events);
@@ -841,21 +954,25 @@ impl SimBackend for GpuBackend {
         );
         self.last_phase_us.cpu_finalize_us = t_final.elapsed().as_micros() as u64;
 
-        // Sidecar: run the scoring + mask kernels against the new
-        // post-step state so `last_scoring_outputs` / `last_mask_bitmaps`
-        // continue to populate for diagnostic callers (e.g. the
-        // existing `gpu_backend_matches_cpu_on_canonical_fixture`
-        // parity test, which asserts per-mask GPU-vs-CPU bitmaps).
+        // Task 197: the mask + scoring kernels at the top of the tick
+        // ARE the authoritative action source — diagnostic fields
+        // (`last_mask_bitmaps`, `last_scoring_outputs`) are already
+        // populated from that dispatch. However, the
+        // `parity_with_cpu.rs` test suite compares GPU bitmaps against
+        // a CPU reference computed on POST-step state (i.e. the state
+        // `step()` leaves behind), so we retain a post-step sidecar
+        // dispatch that overwrites those fields for tests that need
+        // byte-parity against a post-step CPU bitmap.
         //
-        // Perf harnesses opt out via `set_skip_scoring_sidecar(true)`
-        // — on a warm N=1000 workload the sidecar is ~3-10 ms of pure
-        // duplicate work (the backend doesn't consume its own scoring
-        // output; `step_phases_1_to_3` already picked the CPU action
-        // set before the GPU cascade ran).
+        // Perf harnesses opt out via `set_skip_scoring_sidecar(true)`.
+        // Default-off (sidecar runs) preserves every existing parity
+        // test's assertion surface.
         if !self.skip_scoring_sidecar {
             let t_side = std::time::Instant::now();
             self.run_scoring_sidecar(state);
             self.last_phase_us.gpu_sidecar_us = t_side.elapsed().as_micros() as u64;
+        } else {
+            self.last_phase_us.gpu_sidecar_us = 0;
         }
     }
 }

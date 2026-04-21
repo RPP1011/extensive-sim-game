@@ -621,24 +621,34 @@ impl FusedMaskKernel {
         }
         queue.submit(Some(encoder.finish()));
 
-        // --- Readback (serial — one map_async per mask) ---
-        // The total bytes here are tiny (mask_words × 4 × 7 ≈ < 1 KB
-        // at Phase 2 fixture sizes), so the serial map/unmap loop is
-        // fine. Phase 3+ can batch all map_asyncs and poll once if
-        // this becomes the bottleneck.
-        let mut out: Vec<Vec<u32>> = Vec::with_capacity(self.bindings.len());
+        // --- Readback (batched map_async + single poll) ---
+        //
+        // Prior shape did one map_async + poll PER mask, issuing 7 GPU
+        // synchronisation fences per dispatch. Task 197 fires every
+        // map_async up front then drains with one `device.poll(Wait)`.
+        // On backends where map_async commits are lazy (Vulkan), this
+        // collapses the sync overhead onto the single poll rather than
+        // paying one fence per mask.
+        let n = self.bindings.len();
+        let mut rxs: Vec<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>> =
+            Vec::with_capacity(n);
         for readback in &pool.bitmap_readback_bufs {
             let slice = readback.slice(..);
             let (tx, rx) = std::sync::mpsc::channel();
             slice.map_async(wgpu::MapMode::Read, move |r| {
                 let _ = tx.send(r);
             });
-            let _ = device.poll(wgpu::PollType::Wait);
+            rxs.push(rx);
+        }
+        let _ = device.poll(wgpu::PollType::Wait);
+
+        let mut out: Vec<Vec<u32>> = Vec::with_capacity(n);
+        for (readback, rx) in pool.bitmap_readback_bufs.iter().zip(rxs.into_iter()) {
             let map_result = rx
                 .recv()
                 .map_err(|e| KernelError::Dispatch(format!("map_async channel closed: {e}")))?;
             map_result.map_err(|e| KernelError::Dispatch(format!("map_async: {e:?}")))?;
-
+            let slice = readback.slice(..);
             let data = slice.get_mapped_range();
             let words: Vec<u32> = bytemuck::cast_slice(&data).to_vec();
             drop(data);

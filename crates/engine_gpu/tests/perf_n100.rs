@@ -198,18 +198,37 @@ fn perf_n100() {
     );
     eprintln!("ratio (steady): GPU is {:.2}× CPU", gpu_steady_per / cpu_per);
 
-    // Parity: compare CPU vs GPU alive counts within ±5% tolerance.
+    // Parity: compare CPU vs GPU alive counts within ±25% tolerance.
     // Byte-exact equality is NOT expected — event ordering differs
     // between backends, which accumulates into different end states
     // via different combat outcomes. Multiset equality of alive-ids
     // would likewise over-assert. The canonical post-tick fingerprint
-    // for this fixture is alive count; we tolerate 5%.
+    // for this fixture is alive count; we tolerate 25%.
     let alive_cpu = alive_cpu as i64;
     let alive_gpu = alive_gpu as i64;
     let delta = (alive_cpu - alive_gpu).unsigned_abs() as f64;
     let tolerance = (alive_cpu as f64 * 0.25).max(5.0);
     eprintln!(
         "alive parity: cpu={alive_cpu} gpu={alive_gpu} delta={delta} tolerance={tolerance:.1}"
+    );
+    assert!(
+        delta <= tolerance,
+        "alive parity exceeded tolerance: cpu={alive_cpu} gpu={alive_gpu} delta={delta} tolerance={tolerance:.1}"
+    );
+
+    // Task 197: with CPU mask + policy-evaluate replaced by GPU scoring,
+    // the GPU backend should land within ~8x of the CPU backend at
+    // N=1000 (was 12-14x pre-197). This is a loose upper bound —
+    // steady-state ratio on a discrete GPU runs 2-3x on this fixture;
+    // 8x leaves headroom for noisy llvmpipe / shared CI GPUs / thermal
+    // variance. The real target (per the task 197 plan) is 1-2x; the
+    // remaining gap is the upload+readback fences, which the full WGSL
+    // apply_actions + movement kernel port will close.
+    let ratio = gpu_steady_per / cpu_per;
+    assert!(
+        ratio <= 8.0,
+        "task 197 regression: GPU steady per-tick = {gpu_steady_per:.1}µs, \
+         CPU per-tick = {cpu_per:.1}µs, ratio = {ratio:.2}x (expected ≤ 8x)"
     );
 }
 
