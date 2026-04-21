@@ -59,6 +59,12 @@ pub mod mask;
 #[cfg(feature = "gpu")]
 pub mod view_storage;
 
+/// Phase 5 — GPU spatial hash + nearest-hostile / nearby-kin queries.
+/// Not yet consumed by the backend's step loop; the scoring / physics
+/// kernels will call into `spatial_gpu::SPATIAL_WGSL` helpers.
+#[cfg(feature = "gpu")]
+pub mod spatial_gpu;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
