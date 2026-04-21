@@ -1,15 +1,15 @@
 //! Phase 5 — GPU spatial hash + query primitives.
 //!
 //! Port of the CPU `SpatialHash` in `crates/engine/src/spatial.rs` to a
-//! GPU-resident grid of cells. The module ships in two layers:
+//! GPU-resident grid of cells. Supports the three query primitives the
+//! DSL physics rules rely on:
 //!
-//!   * **Rebuild + within_radius** (this commit) — clear/count/scatter/
-//!     sort the per-cell buckets each tick, plus the foundational
-//!     `within_radius(pos, radius)` query that walks the cell-rect
-//!     around `pos` and returns alive agents in raw-id order.
-//!   * **nearest_hostile_to + nearby_kin** (follow-up) — layered on top
-//!     of the same cell walk; both reduce over the candidates
-//!     `within_radius` already touches.
+//!   * `within_radius(pos, radius)` — alive agents whose position is
+//!     within Euclidean radius of `pos`.
+//!   * `nearest_hostile_to(center, radius)` — closest alive hostile,
+//!     tied on distance broken by lowest raw `AgentId`.
+//!   * `nearby_kin(center, radius)` — alive same-species neighbours of
+//!     `center`, excluding `center` itself.
 //!
 //! ## Rebuild scheme (per tick)
 //!
@@ -197,23 +197,25 @@ impl GpuQueryResult {
 // WGSL source
 // ---------------------------------------------------------------------------
 
-/// WGSL module covering the spatial-hash rebuild passes + the
-/// `within_radius` query primitive. Emitted as one fused source so the
-/// host only has to manage one shader module; individual entry points
-/// drive each pass.
+/// WGSL module covering the spatial-hash rebuild passes + the three
+/// query primitives. Emitted as one fused source so the host only has
+/// to manage one shader module; individual entry points drive each
+/// pass.
 pub const SPATIAL_WGSL: &str = r#"
 // === Bindings ===
 //
-//  @binding(0) agent_pos: array<Pos>
-//  @binding(1) agent_alive: array<u32>           // 1 = alive
-//  @binding(2) agent_creature_type: array<u32>   // u8 CreatureType, u32::MAX for unspawned
-//  @binding(3) cell_counts: array<atomic<u32>>   // GRID_CELLS words
-//  @binding(4) cell_offsets: array<u32>          // GRID_CELLS words (CPU-written after prefix sum)
-//  @binding(5) cell_fills: array<atomic<u32>>    // GRID_CELLS words (reset by clear pass)
-//  @binding(6) cell_data: array<u32>             // agent_cap words, raw ids in cell order
-//  @binding(7) within_results: array<QueryResult>
-//  @binding(8) cfg: SpatialCfg
-//  @binding(9) qcfg: QueryCfg
+//  @binding(0)  agent_pos: array<Pos>
+//  @binding(1)  agent_alive: array<u32>           // 1 = alive
+//  @binding(2)  agent_creature_type: array<u32>   // u8 CreatureType, u32::MAX for unspawned
+//  @binding(3)  cell_counts: array<atomic<u32>>   // GRID_CELLS words
+//  @binding(4)  cell_offsets: array<u32>          // GRID_CELLS words (CPU-written after prefix sum)
+//  @binding(5)  cell_fills: array<atomic<u32>>    // GRID_CELLS words (reset by clear pass)
+//  @binding(6)  cell_data: array<u32>             // agent_cap words, raw ids in cell order
+//  @binding(7)  within_results: array<QueryResult>
+//  @binding(8)  kin_results: array<QueryResult>
+//  @binding(9)  nearest_results: array<u32>       // AgentId.raw() or NO_HOSTILE
+//  @binding(10) cfg: SpatialCfg
+//  @binding(11) qcfg: QueryCfg
 
 struct Pos { x: f32, y: f32, z: f32, _pad: f32 };
 
@@ -251,8 +253,31 @@ struct QueryResult {
 @group(0) @binding(5) var<storage, read_write> cell_fills: array<atomic<u32>>;
 @group(0) @binding(6) var<storage, read_write> cell_data: array<u32>;
 @group(0) @binding(7) var<storage, read_write> within_results: array<QueryResult>;
-@group(0) @binding(8) var<uniform> cfg: SpatialCfg;
-@group(0) @binding(9) var<uniform> qcfg: QueryCfg;
+@group(0) @binding(8) var<storage, read_write> kin_results: array<QueryResult>;
+@group(0) @binding(9) var<storage, read_write> nearest_results: array<u32>;
+@group(0) @binding(10) var<uniform> cfg: SpatialCfg;
+@group(0) @binding(11) var<uniform> qcfg: QueryCfg;
+
+// === Hostility table ===
+//
+// Mirrors the symmetric closure in `engine_rules::entities::CreatureType::is_hostile_to`.
+// Enum encoding: 0=Human, 1=Wolf, 2=Deer, 3=Dragon. Humans↔Wolves, Wolves↔Deer,
+// Dragons↔everyone are mutually hostile. Unspawned slots carry
+// `u32::MAX` as their creature_type, which fails every clause here
+// (no hostility with the void).
+fn is_hostile(a: u32, b: u32) -> bool {
+    if (a == 0u && b == 1u) { return true; } // Human vs Wolf
+    if (a == 0u && b == 3u) { return true; } // Human vs Dragon
+    if (a == 1u && b == 0u) { return true; } // Wolf vs Human
+    if (a == 1u && b == 2u) { return true; } // Wolf vs Deer
+    if (a == 1u && b == 3u) { return true; } // Wolf vs Dragon
+    if (a == 2u && b == 1u) { return true; } // Deer vs Wolf
+    if (a == 2u && b == 3u) { return true; } // Deer vs Dragon
+    if (a == 3u && b == 0u) { return true; } // Dragon vs Human
+    if (a == 3u && b == 1u) { return true; } // Dragon vs Wolf
+    if (a == 3u && b == 2u) { return true; } // Dragon vs Deer
+    return false;
+}
 
 // === Cell hash ===
 //
@@ -347,38 +372,99 @@ fn cs_sort(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }
 
-// === Pass 2: batched within_radius query ===
+// === Sorted-insert helper ===
 //
-// One thread per agent slot. Alive agents compute `within_radius` (3-D
-// Euclidean) and write the result to `within_results[slot]`. Dead /
-// unspawned slots write an empty result.
+// Insert `new_id` into the top-K-by-lowest-id buffer `ids` (length
+// `count`, cap `k_cap`). If the buffer isn't full, insertion-sort as
+// usual. If it is full, drop the new id unless it's smaller than the
+// current max — in that case shift the tail and replace. Sets the
+// truncated flag whenever a push was refused. Callers maintain the
+// buffer in ascending-order throughout.
+fn sorted_insert_topk(count_ptr: ptr<function, u32>,
+                      trunc_ptr: ptr<function, u32>,
+                      ids: ptr<function, array<u32, K_CAP_REPLACE>>,
+                      new_id: u32) {
+    let c = *count_ptr;
+    if (c < cfg.k_cap) {
+        var j: i32 = i32(c) - 1;
+        loop {
+            if (j < 0) { break; }
+            let yv = (*ids)[u32(j)];
+            if (yv <= new_id) { break; }
+            (*ids)[u32(j + 1)] = yv;
+            j = j - 1;
+        }
+        (*ids)[u32(j + 1)] = new_id;
+        *count_ptr = c + 1u;
+    } else {
+        let max_idx_k = cfg.k_cap - 1u;
+        if (new_id < (*ids)[max_idx_k]) {
+            var j: i32 = i32(max_idx_k) - 1;
+            loop {
+                if (j < 0) { break; }
+                let yv = (*ids)[u32(j)];
+                if (yv <= new_id) { break; }
+                (*ids)[u32(j + 1)] = yv;
+                j = j - 1;
+            }
+            (*ids)[u32(j + 1)] = new_id;
+        }
+        *trunc_ptr = 1u;
+    }
+}
+
+// === Pass 2: batched query ===
+//
+// One thread per agent slot. Alive agents compute all three query
+// primitives in a single cell walk:
+//   * within_radius (3-D) → within_results[slot]
+//   * nearby_kin          → kin_results[slot] (same species, excludes self)
+//   * nearest_hostile_to  → nearest_results[slot] (raw id or NO_HOSTILE)
+// Dead / unspawned slots write empty results and NO_HOSTILE.
 @compute @workgroup_size(64)
 fn cs_query(@builtin(global_invocation_id) gid: vec3<u32>) {
     let slot = gid.x;
     if (slot >= cfg.agent_cap) { return; }
 
-    // Default-init output.
+    // Default-init outputs. Slots past `count` stay at u32::MAX
+    // sentinel.
     var w_count: u32 = 0u;
     var w_trunc: u32 = 0u;
     var w_ids: array<u32, K_CAP_REPLACE>;
     for (var i: u32 = 0u; i < cfg.k_cap; i = i + 1u) { w_ids[i] = 0xFFFFFFFFu; }
 
+    var k_count: u32 = 0u;
+    var k_trunc: u32 = 0u;
+    var k_ids: array<u32, K_CAP_REPLACE>;
+    for (var i: u32 = 0u; i < cfg.k_cap; i = i + 1u) { k_ids[i] = 0xFFFFFFFFu; }
+
+    var nearest: u32 = 0xFFFFFFFFu;
+
     if (agent_alive[slot] == 0u) {
         within_results[slot].count = 0u;
         within_results[slot].truncated = 0u;
+        kin_results[slot].count = 0u;
+        kin_results[slot].truncated = 0u;
         for (var i: u32 = 0u; i < cfg.k_cap; i = i + 1u) {
             within_results[slot].ids[i] = 0xFFFFFFFFu;
+            kin_results[slot].ids[i] = 0xFFFFFFFFu;
         }
+        nearest_results[slot] = nearest;
         return;
     }
 
+    let my_id = slot + 1u;
     let my_pos = agent_pos[slot];
+    let my_ct = agent_creature_type[slot];
     let radius = qcfg.radius;
     let r2 = radius * radius;
     let cx = i32(floor((my_pos.x - cfg.world_origin_x) / cfg.cell_size));
     let cy = i32(floor((my_pos.y - cfg.world_origin_y) / cfg.cell_size));
     let reach = cell_reach_for_radius(radius);
     let max_idx = i32(cfg.grid_dim) - 1;
+
+    var best_id: u32 = 0xFFFFFFFFu;
+    var best_d2: f32 = 3.4e38;
 
     for (var dy: i32 = -reach; dy <= reach; dy = dy + 1) {
         for (var dx: i32 = -reach; dx <= reach; dx = dx + 1) {
@@ -403,42 +489,30 @@ fn cs_query(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let d2 = ex * ex + ey * ey + ez * ez;
                 if (d2 > r2) { continue; }
 
-                // Sorted-insert with top-K retention. The result stays
-                // in raw-id ascending order. If `other_id` is already
-                // larger than the K-th-smallest, drop it and set the
-                // truncated flag — CPU's sorted list would have it at
-                // position > K, so the parity contract is "GPU result
-                // == cpu_result[:K]" at the call site.
-                if (w_count < cfg.k_cap) {
-                    // Room available — insertion-sort into w_ids.
-                    var j: i32 = i32(w_count) - 1;
-                    loop {
-                        if (j < 0) { break; }
-                        let yv = w_ids[u32(j)];
-                        if (yv <= other_id) { break; }
-                        w_ids[u32(j + 1)] = yv;
-                        j = j - 1;
+                // within_radius includes self when alive + in range —
+                // matches `SpatialHash::within_radius`. Callers who need
+                // self-exclusion strip it themselves.
+                sorted_insert_topk(&w_count, &w_trunc, &w_ids, other_id);
+
+                if (other_id == my_id) { continue; }
+
+                let other_ct = agent_creature_type[other_slot];
+
+                // nearby_kin — same species, excludes self.
+                if (other_ct == my_ct) {
+                    sorted_insert_topk(&k_count, &k_trunc, &k_ids, other_id);
+                }
+
+                // nearest_hostile_to — closest alive hostile, ties
+                // broken on ascending raw id. Using squared distance
+                // matches the CPU helper's ordering up to f32 precision.
+                if (is_hostile(my_ct, other_ct)) {
+                    if (d2 < best_d2) {
+                        best_d2 = d2;
+                        best_id = other_id;
+                    } else if (d2 == best_d2 && other_id < best_id) {
+                        best_id = other_id;
                     }
-                    w_ids[u32(j + 1)] = other_id;
-                    w_count = w_count + 1u;
-                } else {
-                    // Buffer full. Only replace when the new id is
-                    // smaller than the current max — maintains the
-                    // "lowest K raw ids" invariant.
-                    let max_idx_k = cfg.k_cap - 1u;
-                    if (other_id < w_ids[max_idx_k]) {
-                        // Shift to insert, drop the max.
-                        var j: i32 = i32(max_idx_k) - 1;
-                        loop {
-                            if (j < 0) { break; }
-                            let yv = w_ids[u32(j)];
-                            if (yv <= other_id) { break; }
-                            w_ids[u32(j + 1)] = yv;
-                            j = j - 1;
-                        }
-                        w_ids[u32(j + 1)] = other_id;
-                    }
-                    w_trunc = 1u;
                 }
             }
         }
@@ -447,6 +521,10 @@ fn cs_query(@builtin(global_invocation_id) gid: vec3<u32>) {
     within_results[slot].count = w_count;
     within_results[slot].truncated = w_trunc;
     for (var i: u32 = 0u; i < cfg.k_cap; i = i + 1u) { within_results[slot].ids[i] = w_ids[i]; }
+    kin_results[slot].count = k_count;
+    kin_results[slot].truncated = k_trunc;
+    for (var i: u32 = 0u; i < cfg.k_cap; i = i + 1u) { kin_results[slot].ids[i] = k_ids[i]; }
+    nearest_results[slot] = best_id;
 }
 "#;
 
@@ -479,15 +557,22 @@ struct BufferPool {
     cell_data_buf: wgpu::Buffer,
     within_buf: wgpu::Buffer,
     within_readback: wgpu::Buffer,
+    kin_buf: wgpu::Buffer,
+    kin_readback: wgpu::Buffer,
+    nearest_buf: wgpu::Buffer,
+    nearest_readback: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
     qcfg_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
 /// Aggregated per-agent query results, one entry per slot in spawn
-/// order. Empty slots (dead / unspawned) report `count=0`.
+/// order. Empty slots (dead / unspawned) report `count=0` for the
+/// lists and `NO_HOSTILE` for `nearest_hostile`.
 pub struct SpatialQueryResults {
     pub within_radius: Vec<GpuQueryResult>,
+    pub nearby_kin: Vec<GpuQueryResult>,
+    pub nearest_hostile: Vec<u32>,
 }
 
 impl GpuSpatialHash {
@@ -535,8 +620,10 @@ impl GpuSpatialHash {
             storage_entry(5, false), // cell_fills (atomic)
             storage_entry(6, false), // cell_data
             storage_entry(7, false), // within_results
-            uniform_entry(8),        // cfg
-            uniform_entry(9),        // qcfg
+            storage_entry(8, false), // kin_results
+            storage_entry(9, false), // nearest_results
+            uniform_entry(10),       // cfg
+            uniform_entry(11),       // qcfg
         ];
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::spatial::bgl"),
@@ -648,6 +735,31 @@ impl GpuSpatialHash {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let kin_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::spatial::kin_results"),
+            size: qr_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let kin_readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::spatial::kin_results_readback"),
+            size: qr_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let nearest_bytes = (agent_cap_u * 4) as u64;
+        let nearest_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::spatial::nearest_results"),
+            size: nearest_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let nearest_readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::spatial::nearest_results_readback"),
+            size: nearest_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("engine_gpu::spatial::cfg"),
@@ -686,8 +798,10 @@ impl GpuSpatialHash {
                 wgpu::BindGroupEntry { binding: 5, resource: cell_fills_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 6, resource: cell_data_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 7, resource: within_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 8, resource: cfg_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 9, resource: qcfg_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 8, resource: kin_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 9, resource: nearest_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 10, resource: cfg_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 11, resource: qcfg_buf.as_entire_binding() },
             ],
         });
 
@@ -703,6 +817,10 @@ impl GpuSpatialHash {
             cell_data_buf,
             within_buf,
             within_readback,
+            kin_buf,
+            kin_readback,
+            nearest_buf,
+            nearest_readback,
             cfg_buf,
             qcfg_buf,
             bind_group,
@@ -831,10 +949,30 @@ impl GpuSpatialHash {
             0,
             (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64,
         );
+        encoder.copy_buffer_to_buffer(
+            &pool.kin_buf,
+            0,
+            &pool.kin_readback,
+            0,
+            (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64,
+        );
+        encoder.copy_buffer_to_buffer(
+            &pool.nearest_buf,
+            0,
+            &pool.nearest_readback,
+            0,
+            (agent_cap as u64) * 4,
+        );
         queue.submit(Some(encoder.finish()));
 
         let within = map_read_query_results(&pool.within_readback, device, agent_cap as usize)?;
-        Ok(SpatialQueryResults { within_radius: within })
+        let kin = map_read_query_results(&pool.kin_readback, device, agent_cap as usize)?;
+        let nearest = map_read_u32(&pool.nearest_readback, device, agent_cap as usize)?;
+        Ok(SpatialQueryResults {
+            within_radius: within,
+            nearby_kin: kin,
+            nearest_hostile: nearest,
+        })
     }
 }
 
@@ -898,14 +1036,24 @@ fn map_read_u32(
 // underlying `&[u32]`.
 // ---------------------------------------------------------------------------
 
-/// `within_radius` CPU reference for the whole agent_cap.
+/// `within_radius` CPU reference for the whole agent_cap. Kept for
+/// callers from the Phase 5 commit 1 that only wanted the within_radius
+/// arm — the kin / nearest arms live in `cpu_reference`.
 pub struct CpuWithinRadiusReference {
     pub within_radius: Vec<Vec<u32>>,
 }
 
+/// Full CPU reference — mirrors `SpatialQueryResults` layout. Per-slot
+/// entries are in raw-id ascending order (within / kin), or carry
+/// `NO_HOSTILE` when no hostile is in range (nearest_hostile).
+pub struct CpuSpatialReference {
+    pub within_radius: Vec<Vec<u32>>,
+    pub nearby_kin: Vec<Vec<u32>>,
+    pub nearest_hostile: Vec<u32>,
+}
+
 /// Sentinel returned by `nearest_hostile_to` when no hostile is in
-/// range. Matches the CPU's `None`. Exposed here so the follow-up
-/// commit's parity arm has a stable symbol to import.
+/// range. Matches the CPU's `None`.
 pub const NO_HOSTILE: u32 = u32::MAX;
 
 /// Compute the CPU-side `within_radius` reference for a given radius.
@@ -939,6 +1087,56 @@ pub fn cpu_reference_within(state: &SimState, radius: f32) -> CpuWithinRadiusRef
         within[slot as usize] = hits;
     }
     CpuWithinRadiusReference { within_radius: within }
+}
+
+/// Full CPU reference for all three query primitives.
+///
+/// `within_radius` goes through `SpatialHash::within_radius`; `kin` and
+/// `nearest_hostile` use the dedicated `engine::spatial::*` helpers so
+/// parity is checked against the exact code paths physics rules call
+/// (`engagement_on_move`, `fear_spread_on_death`).
+pub fn cpu_reference(state: &SimState, radius: f32) -> CpuSpatialReference {
+    let agent_cap = state.agent_cap() as usize;
+    let mut within: Vec<Vec<u32>> = vec![Vec::new(); agent_cap];
+    let mut kin: Vec<Vec<u32>> = vec![Vec::new(); agent_cap];
+    let mut nearest: Vec<u32> = vec![NO_HOSTILE; agent_cap];
+
+    let spatial = state.spatial();
+    for slot in 0..(agent_cap as u32) {
+        let id = match AgentId::new(slot + 1) {
+            Some(id) => id,
+            None => continue,
+        };
+        if !state.agent_alive(id) {
+            continue;
+        }
+        let pos = match state.agent_pos(id) {
+            Some(p) => p,
+            None => continue,
+        };
+        let mut hits: Vec<u32> = spatial
+            .within_radius(state, pos, radius)
+            .into_iter()
+            .filter(|other| state.agent_alive(*other))
+            .map(|a| a.raw())
+            .collect();
+        hits.sort_unstable();
+        within[slot as usize] = hits;
+
+        kin[slot as usize] = engine::spatial::nearby_kin(state, id, radius)
+            .into_iter()
+            .map(|a| a.raw())
+            .collect();
+
+        nearest[slot as usize] = engine::spatial::nearest_hostile_to(state, id, radius)
+            .map(|a| a.raw())
+            .unwrap_or(NO_HOSTILE);
+    }
+    CpuSpatialReference {
+        within_radius: within,
+        nearby_kin: kin,
+        nearest_hostile: nearest,
+    }
 }
 
 fn map_read_query_results(
