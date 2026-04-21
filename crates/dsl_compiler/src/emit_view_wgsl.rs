@@ -122,7 +122,10 @@ pub struct ViewStorageSpec {
     /// Rust/WGSL-level ident prefix (snake_case view name — matches the
     /// generated Rust `mod` name).
     pub snake: String,
-    /// Classified shape.
+    /// Classified shape. For topk(K>1) views this reports the
+    /// underlying pair_map shape (scalar or decay) so scoring's
+    /// bind-group layout keeps compiling; the `topk` field below
+    /// carries the K for storage sizing.
     pub shape: ViewShape,
     /// Clamp `(lo, hi)` if the view has `clamp: [lo, hi]`. Lowered as
     /// plain f32 literals; types other than f32 aren't clamped in any
@@ -137,6 +140,13 @@ pub struct ViewStorageSpec {
     /// changes the emitter raises `Unsupported` with a pointer to the
     /// offending view's body.
     pub folds: Vec<FoldSpec>,
+    /// `Some(K)` when the view declared `per_entity_topk(K = N)` with
+    /// N >= 2 (task 196). The GPU storage layer uses this to size the
+    /// sparse per-entity buffers at N·K entries instead of the dense
+    /// pair_map's N² entries. `None` for dense pair_map and K=1
+    /// slot_map views. Only meaningful when `shape` is a pair-map
+    /// variant (scalar or decay).
+    pub topk: Option<u16>,
 }
 
 /// One event → view fold. Carries just enough to emit both the Rust
@@ -175,6 +185,7 @@ pub fn classify_view(view: &ViewIR) -> Result<ViewStorageSpec, EmitError> {
             clamp: None,
             initial: 0.0,
             folds: Vec::new(),
+            topk: None,
         });
     }
 
@@ -207,6 +218,7 @@ pub fn classify_view(view: &ViewIR) -> Result<ViewStorageSpec, EmitError> {
         None => None,
     };
 
+    let mut topk_k: Option<u16> = None;
     let shape = match storage {
         StorageHint::PairMap => {
             if view.params.len() != 2 {
@@ -230,36 +242,57 @@ pub fn classify_view(view: &ViewIR) -> Result<ViewStorageSpec, EmitError> {
             }
         }
         StorageHint::PerEntityTopK { k, .. } => {
-            if k != 1 {
-                return Err(EmitError::Unsupported(format!(
-                    "view `{}` storage=per_entity_topk(K={k}); only K=1 supported on GPU",
-                    view.name
-                )));
-            }
-            if view.decay.is_some() {
-                return Err(EmitError::Unsupported(format!(
-                    "view `{}`: per_entity_topk(1) + @decay not supported (matches Rust emitter)",
-                    view.name
-                )));
-            }
-            if view.params.len() != 1 {
-                return Err(EmitError::Unsupported(format!(
-                    "view `{}` storage=per_entity_topk(1) needs 1 param, got {}",
-                    view.name,
-                    view.params.len()
-                )));
-            }
-            // Return type must be AgentId for the slot_map u32 coding
-            // (AgentId+1; 0 = empty). If that invariant changes we'll
-            // need to pick a different sentinel.
-            if !matches!(view.return_ty, IrType::AgentId) {
-                return Err(EmitError::Unsupported(format!(
-                    "view `{}` per_entity_topk(1) return type {:?} — only AgentId supported on GPU",
-                    view.name, view.return_ty
-                )));
-            }
-            ViewShape::SlotMap {
-                return_u32_as_option: true,
+            if k == 1 {
+                // Task-139 single-slot shape — small HashMap<Agent,
+                // Agent>. Only `engaged_with` uses this today.
+                if view.decay.is_some() {
+                    return Err(EmitError::Unsupported(format!(
+                        "view `{}`: per_entity_topk(1) + @decay not supported (matches Rust emitter)",
+                        view.name
+                    )));
+                }
+                if view.params.len() != 1 {
+                    return Err(EmitError::Unsupported(format!(
+                        "view `{}` storage=per_entity_topk(1) needs 1 param, got {}",
+                        view.name,
+                        view.params.len()
+                    )));
+                }
+                if !matches!(view.return_ty, IrType::AgentId) {
+                    return Err(EmitError::Unsupported(format!(
+                        "view `{}` per_entity_topk(1) return type {:?} — only AgentId supported on GPU",
+                        view.name, view.return_ty
+                    )));
+                }
+                ViewShape::SlotMap {
+                    return_u32_as_option: true,
+                }
+            } else {
+                // Task-196 sparse topk — K slots per observer. We
+                // classify as the matching pair_map shape (scalar /
+                // decay) so scoring.rs's bind-group layout keeps
+                // working; the `topk` field carries K so the storage
+                // layer knows to allocate N·K buffers rather than N².
+                if view.params.len() != 2 {
+                    return Err(EmitError::Unsupported(format!(
+                        "view `{}` storage=per_entity_topk(K={k}) requires 2 params, got {}",
+                        view.name,
+                        view.params.len()
+                    )));
+                }
+                topk_k = Some(k);
+                match view.decay {
+                    Some(d) => {
+                        if !matches!(d.per, DecayUnit::Tick) {
+                            return Err(EmitError::Unsupported(format!(
+                                "view `{}` @decay per-unit not supported on GPU",
+                                view.name
+                            )));
+                        }
+                        ViewShape::PairMapDecay { rate: d.rate }
+                    }
+                    None => ViewShape::PairMapScalar,
+                }
             }
         }
         StorageHint::LazyCached => {
@@ -285,6 +318,7 @@ pub fn classify_view(view: &ViewIR) -> Result<ViewStorageSpec, EmitError> {
         clamp: clamp_pair,
         initial,
         folds,
+        topk: topk_k,
     })
 }
 
