@@ -89,6 +89,12 @@ pub enum AnnotationValue {
     List(Vec<AnnotationValue>),
     /// `>= Medium`, `< 0.5`, etc — a comparator followed by a value.
     Comparator { op: String, value: Box<AnnotationValue> },
+    /// `per_entity_topk(K = 8)` — an identifier followed by a parenthesised
+    /// argument list. Used by storage hints that carry tuning knobs
+    /// (task 196 added the `K = N` parameter to `per_entity_topk`). The
+    /// inner args re-use the same `AnnotationArg` shape as top-level
+    /// annotations — each arg is `key = value` or a bare positional.
+    Call { name: String, args: Vec<AnnotationArg> },
 }
 
 // ---------------------------------------------------------------------------

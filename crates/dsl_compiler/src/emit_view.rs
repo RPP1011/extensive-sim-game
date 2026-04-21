@@ -302,23 +302,29 @@ fn emit_materialized_struct(
             emit_pair_map_struct(out, view, initial, handlers, clamp, view.decay.as_ref())
         }
         StorageHint::PerEntityTopK { k, .. } => {
-            // v1 supports K=1 only: the "single-slot per entity" shape used
-            // by `engaged_with` (task 139). K>1 (e.g. top-N threats) needs a
-            // bounded sorted slot list and stays Unsupported until a view
-            // demands it.
-            if k != 1 {
-                return Err(EmitError::Unsupported(format!(
-                    "`per_entity_topk(K={k})` on view `{}` not implemented; only K=1 supported in v1 (task 139)",
-                    view.name
-                )));
+            // K=1 keeps the task-139 slot_map shape (AgentId partner per
+            // observer, no decay). K>1 lowers to the bounded-topk shape
+            // added in task 196 — a Vec<[TopkSlot; K]> keyed by observer
+            // slot, with find-or-evict-else-drop fold semantics.
+            if k == 1 {
+                if view.decay.is_some() {
+                    return Err(EmitError::Unsupported(format!(
+                        "`per_entity_topk(K=1)` storage on view `{}` does not support `@decay` (task 139; use K>=2 for topk+decay)",
+                        view.name
+                    )));
+                }
+                emit_per_entity_topk1_struct(out, view, handlers)
+            } else {
+                emit_per_entity_topk_k_struct(
+                    out,
+                    view,
+                    initial,
+                    handlers,
+                    clamp,
+                    view.decay.as_ref(),
+                    k as usize,
+                )
             }
-            if view.decay.is_some() {
-                return Err(EmitError::Unsupported(format!(
-                    "`per_entity_topk(1)` storage on view `{}` does not support `@decay` (task 139)",
-                    view.name
-                )));
-            }
-            emit_per_entity_topk1_struct(out, view, handlers)
         }
         StorageHint::LazyCached => Err(EmitError::Unsupported(format!(
             "`lazy_cached` storage hint on view `{}` is not implemented yet (spec §9 D31)",
@@ -732,6 +738,527 @@ fn emit_per_entity_topk1_fold_arm(
         writeln!(out, "                self.value.insert(*target, *actor);").unwrap();
         writeln!(out, "            }}").unwrap();
     }
+    let _ = view;
+    Ok(())
+}
+
+/// Emit the `per_entity_topk(K=N)` shape for N >= 2 (task 196). Storage
+/// is `slots: Vec<[TopkSlot; K]>`, one array per observer slot. The fold
+/// path follows find-or-evict-else-drop semantics:
+///
+///  1. Scan the K slots for `id == attacker`.
+///  2. If found: accumulate (`value = clamp(value + delta)`), update
+///     anchor (for @decay views). Anchor refreshes to `tick` so decay
+///     math matches the pair_map baseline.
+///  3. If not found and any slot is empty (id == 0): insert.
+///  4. If not found and K full: find the slot whose *decayed* value is
+///     smallest; if `delta > that value`, evict and insert; otherwise
+///     drop the fold.
+///
+/// Reads (`get(a, b)` / `get(a, b, tick)`) scan the K slots for
+/// `id == b`, apply decay if configured, and return `initial` if
+/// the pair isn't stored. The wildcard-sum `sum_for_first(a, tick)`
+/// walks the K slots and sums decayed values — the semantic drift
+/// versus dense pair_map is: "sum across observer's top-K
+/// attackers" rather than "sum across every recorded pair". The
+/// drift is documented in `assets/sim/views.sim`.
+fn emit_per_entity_topk_k_struct(
+    out: &mut String,
+    view: &ViewIR,
+    initial: &IrExprNode,
+    handlers: &[FoldHandlerIR],
+    clamp: Option<&(IrExprNode, IrExprNode)>,
+    decay: Option<&crate::ir::DecayHint>,
+    k: usize,
+) -> Result<(), EmitError> {
+    if view.params.len() != 2 {
+        return Err(EmitError::Unsupported(format!(
+            "`per_entity_topk(K={k})` storage on view `{}` requires exactly 2 params; got {}",
+            view.name,
+            view.params.len()
+        )));
+    }
+    let val_ty = rust_type_for(&view.return_ty)?;
+    let k1 = rust_type_for(&view.params[0].ty)?;
+    let k2 = rust_type_for(&view.params[1].ty)?;
+    let a_name = view.params[0].name.as_str();
+    let b_name = view.params[1].name.as_str();
+    let ty_name = pascal_case(&view.name);
+    let initial_lit = lower_scalar_literal(initial)?;
+
+    writeln!(
+        out,
+        "/// @materialized view `{}` — `storage = per_entity_topk(K={k})`.",
+        view.name
+    )
+    .unwrap();
+    if let Some(d) = decay {
+        let per = match d.per {
+            DecayUnit::Tick => "tick",
+        };
+        writeln!(
+            out,
+            "/// @decay(rate = {}, per = {per}) — anchor-pattern decay applied on read.",
+            d.rate
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "/// Storage: one `[TopkSlot; {k}]` per observer slot in a `Vec`. Total footprint"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// is O(N·K) — at K={k} and N=200k that's {} MB vs the dense pair_map's",
+        (k * 12 * 200_000) / (1024 * 1024)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// O(N²·4) ≈ 160 GB. Fold semantics: find-or-evict-else-drop (task 196)."
+    )
+    .unwrap();
+
+    // Inner slot struct. Name-spaced to the view's module so callers
+    // don't collide with other topk views' slot types.
+    writeln!(out, "#[derive(Debug, Clone, Copy, Default)]").unwrap();
+    writeln!(out, "pub struct TopkSlot {{").unwrap();
+    writeln!(out, "    /// Raw AgentId (1-based). 0 means empty.").unwrap();
+    writeln!(out, "    pub id: u32,").unwrap();
+    writeln!(out, "    /// Stored value; decay (if configured) applies on read.").unwrap();
+    writeln!(out, "    pub value: {val_ty},").unwrap();
+    writeln!(out, "    /// Tick when `value` was last written (@decay anchor).").unwrap();
+    writeln!(out, "    pub anchor_tick: u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "#[derive(Debug, Default)]").unwrap();
+    writeln!(out, "pub struct {ty_name} {{").unwrap();
+    writeln!(
+        out,
+        "    /// One array of {k} slots per observer. `Vec::len()` grows on demand"
+    )
+    .unwrap();
+    writeln!(out, "    /// as `fold_event` sees higher observer ids.").unwrap();
+    writeln!(out, "    slots: Vec<[TopkSlot; {k}]>,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "impl {ty_name} {{").unwrap();
+    writeln!(out, "    /// Slot count per observer — the `K` from `per_entity_topk(K={k})`.").unwrap();
+    writeln!(out, "    pub const K: usize = {k};").unwrap();
+    if let Some(d) = decay {
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "    /// Decay rate per tick — compile-time constant from `@decay(rate = {})`.",
+            d.rate
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pub const RATE: {val_ty} = {}_f32;",
+            format_f32_lit(d.rate)
+        )
+        .unwrap();
+    }
+    writeln!(out).unwrap();
+    writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "    /// Number of observer slots currently provisioned. `fold_event` grows"
+    )
+    .unwrap();
+    writeln!(out, "    /// this on demand up to `max_observer + 1`.").unwrap();
+    writeln!(out, "    pub fn len(&self) -> usize {{ self.slots.len() }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn is_empty(&self) -> bool {{ self.slots.is_empty() }}"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // get(): signature depends on decay. Both flavours scan K slots.
+    if decay.is_some() {
+        writeln!(
+            out,
+            "    /// Current value for `{b_name}` as observed by `{a_name}`,"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    /// decayed from its anchor tick. Returns `initial` when the pair isn't in {a_name}'s top-{k}."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pub fn get(&self, {a_name}: {k1}, {b_name}: {k2}, tick: u32) -> {val_ty} {{"
+        )
+        .unwrap();
+        writeln!(out, "        let obs_slot = ({a_name}.raw() - 1) as usize;").unwrap();
+        writeln!(out, "        let atk_id = {b_name}.raw();").unwrap();
+        writeln!(
+            out,
+            "        let Some(row) = self.slots.get(obs_slot) else {{ return {initial_lit}; }};"
+        )
+        .unwrap();
+        writeln!(out, "        for s in row.iter() {{").unwrap();
+        writeln!(out, "            if s.id == atk_id {{").unwrap();
+        writeln!(
+            out,
+            "                let dt = tick.saturating_sub(s.anchor_tick);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                let decayed = s.value * Self::RATE.powi(dt as i32);"
+        )
+        .unwrap();
+        if let Some((lo, hi)) = clamp {
+            let lo_s = lower_scalar_literal(lo)?;
+            let hi_s = lower_scalar_literal(hi)?;
+            writeln!(out, "                return decayed.clamp({lo_s}, {hi_s});").unwrap();
+        } else {
+            writeln!(out, "                return decayed;").unwrap();
+        }
+        writeln!(out, "            }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        {initial_lit}").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(out).unwrap();
+        // sum_for_first — now sums across at-most-K slots.
+        writeln!(
+            out,
+            "    /// Σ get({a_name}, x, tick) over `{a_name}`'s top-{k} slots."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    /// Semantic drift vs dense pair_map: sum is over the top-K attackers, not every recorded pair."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pub fn sum_for_first(&self, {a_name}: {k1}, tick: u32) -> {val_ty} {{"
+        )
+        .unwrap();
+        writeln!(out, "        let obs_slot = ({a_name}.raw() - 1) as usize;").unwrap();
+        writeln!(
+            out,
+            "        let Some(row) = self.slots.get(obs_slot) else {{ return {initial_lit}; }};"
+        )
+        .unwrap();
+        writeln!(out, "        let mut total: {val_ty} = {initial_lit};").unwrap();
+        writeln!(out, "        for s in row.iter() {{").unwrap();
+        writeln!(out, "            if s.id == 0 {{ continue; }}").unwrap();
+        writeln!(
+            out,
+            "            let dt = tick.saturating_sub(s.anchor_tick);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            let decayed = s.value * Self::RATE.powi(dt as i32);"
+        )
+        .unwrap();
+        if let Some((lo, hi)) = clamp {
+            let lo_s = lower_scalar_literal(lo)?;
+            let hi_s = lower_scalar_literal(hi)?;
+            writeln!(out, "            total += decayed.clamp({lo_s}, {hi_s});").unwrap();
+        } else {
+            writeln!(out, "            total += decayed;").unwrap();
+        }
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        total").unwrap();
+        writeln!(out, "    }}").unwrap();
+    } else {
+        writeln!(
+            out,
+            "    /// Current value for `{b_name}` as observed by `{a_name}`."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    /// Returns `initial` when the pair isn't in {a_name}'s top-{k}."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pub fn get(&self, {a_name}: {k1}, {b_name}: {k2}) -> {val_ty} {{"
+        )
+        .unwrap();
+        writeln!(out, "        let obs_slot = ({a_name}.raw() - 1) as usize;").unwrap();
+        writeln!(out, "        let atk_id = {b_name}.raw();").unwrap();
+        writeln!(
+            out,
+            "        let Some(row) = self.slots.get(obs_slot) else {{ return {initial_lit}; }};"
+        )
+        .unwrap();
+        writeln!(out, "        for s in row.iter() {{").unwrap();
+        writeln!(out, "            if s.id == atk_id {{ return s.value; }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        {initial_lit}").unwrap();
+        writeln!(out, "    }}").unwrap();
+        writeln!(out).unwrap();
+        // sum_for_first also useful even without decay — emit it for
+        // consistency so scoring's `_` wildcard slot works across all
+        // topk views.
+        writeln!(
+            out,
+            "    /// Σ get({a_name}, x) over `{a_name}`'s top-{k} slots."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    /// Semantic drift vs dense pair_map: sum is over top-K attackers, not every recorded pair."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pub fn sum_for_first(&self, {a_name}: {k1}) -> {val_ty} {{"
+        )
+        .unwrap();
+        writeln!(out, "        let obs_slot = ({a_name}.raw() - 1) as usize;").unwrap();
+        writeln!(
+            out,
+            "        let Some(row) = self.slots.get(obs_slot) else {{ return {initial_lit}; }};"
+        )
+        .unwrap();
+        writeln!(out, "        let mut total: {val_ty} = {initial_lit};").unwrap();
+        writeln!(out, "        for s in row.iter() {{").unwrap();
+        writeln!(out, "            if s.id == 0 {{ continue; }}").unwrap();
+        writeln!(out, "            total += s.value;").unwrap();
+        writeln!(out, "        }}").unwrap();
+        writeln!(out, "        total").unwrap();
+        writeln!(out, "    }}").unwrap();
+    }
+    writeln!(out).unwrap();
+
+    // Internal row-access helper. Grows `slots` on demand.
+    writeln!(
+        out,
+        "    fn row_mut(&mut self, obs_slot: usize) -> &mut [TopkSlot; {k}] {{"
+    )
+    .unwrap();
+    writeln!(out, "        if obs_slot >= self.slots.len() {{").unwrap();
+    writeln!(
+        out,
+        "            self.slots.resize(obs_slot + 1, [TopkSlot::default(); {k}]);"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        &mut self.slots[obs_slot]").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // Shared fold core. Does find-or-evict-else-drop for one (obs, atk,
+    // delta) triple. Called from every match arm.
+    let clamp_lo_lit = if let Some((lo, _)) = clamp {
+        Some(lower_scalar_literal(lo)?)
+    } else {
+        None
+    };
+    let clamp_hi_lit = if let Some((_, hi)) = clamp {
+        Some(lower_scalar_literal(hi)?)
+    } else {
+        None
+    };
+    writeln!(
+        out,
+        "    /// Fold `delta` into the (observer, attacker) slot. See the"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// module docstring above for find-or-evict-else-drop semantics."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    fn fold_one(&mut self, observer: u32, attacker: u32, delta: {val_ty}, tick: u32) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if observer == 0 || attacker == 0 {{ return; }}"
+    )
+    .unwrap();
+    writeln!(out, "        let obs_slot = (observer - 1) as usize;").unwrap();
+    writeln!(out, "        let row = self.row_mut(obs_slot);").unwrap();
+    // 1. Try find.
+    writeln!(out, "        for i in 0..{k} {{").unwrap();
+    writeln!(out, "            if row[i].id == attacker {{").unwrap();
+    if decay.is_some() {
+        // Decay: current observable = value * rate^(tick - anchor). Add
+        // delta to the decayed value (matches pair_map @decay fold).
+        writeln!(
+            out,
+            "                let dt = tick.saturating_sub(row[i].anchor_tick);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                let current = row[i].value * Self::RATE.powi(dt as i32);"
+        )
+        .unwrap();
+        writeln!(out, "                let updated = current + delta;").unwrap();
+    } else {
+        writeln!(out, "                let updated = row[i].value + delta;").unwrap();
+    }
+    if let (Some(lo), Some(hi)) = (&clamp_lo_lit, &clamp_hi_lit) {
+        writeln!(
+            out,
+            "                let updated = updated.clamp({lo}, {hi});"
+        )
+        .unwrap();
+    }
+    writeln!(out, "                row[i].value = updated;").unwrap();
+    writeln!(out, "                row[i].anchor_tick = tick;").unwrap();
+    writeln!(out, "                return;").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    // 2. Try empty slot.
+    writeln!(out, "        for i in 0..{k} {{").unwrap();
+    writeln!(out, "            if row[i].id == 0 {{").unwrap();
+    if let (Some(lo), Some(hi)) = (&clamp_lo_lit, &clamp_hi_lit) {
+        writeln!(
+            out,
+            "                let v = delta.clamp({lo}, {hi});"
+        )
+        .unwrap();
+    } else {
+        writeln!(out, "                let v = delta;").unwrap();
+    }
+    writeln!(out, "                row[i] = TopkSlot {{ id: attacker, value: v, anchor_tick: tick }};").unwrap();
+    writeln!(out, "                return;").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    // 3. Evict smallest-value (by current decayed value) if delta beats it.
+    if decay.is_some() {
+        writeln!(out, "        // Full row — compute each slot's decayed value, evict the smallest").unwrap();
+        writeln!(out, "        // if `delta` can outweigh it; otherwise drop the fold.").unwrap();
+        writeln!(out, "        let mut min_i: usize = 0;").unwrap();
+        writeln!(
+            out,
+            "        let mut min_v: {val_ty} = {{"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            let dt = tick.saturating_sub(row[0].anchor_tick);"
+        )
+        .unwrap();
+        writeln!(out, "            row[0].value * Self::RATE.powi(dt as i32)").unwrap();
+        writeln!(out, "        }};").unwrap();
+        writeln!(out, "        for i in 1..{k} {{").unwrap();
+        writeln!(
+            out,
+            "            let dt = tick.saturating_sub(row[i].anchor_tick);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            let v = row[i].value * Self::RATE.powi(dt as i32);"
+        )
+        .unwrap();
+        writeln!(out, "            if v < min_v {{ min_v = v; min_i = i; }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    } else {
+        writeln!(out, "        // Full row — evict the smallest-value slot if `delta` beats it,").unwrap();
+        writeln!(out, "        // else drop the fold (too weak to displace).").unwrap();
+        writeln!(out, "        let mut min_i: usize = 0;").unwrap();
+        writeln!(out, "        let mut min_v: {val_ty} = row[0].value;").unwrap();
+        writeln!(out, "        for i in 1..{k} {{").unwrap();
+        writeln!(out, "            if row[i].value < min_v {{ min_v = row[i].value; min_i = i; }}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "        if delta > min_v {{").unwrap();
+    if let (Some(lo), Some(hi)) = (&clamp_lo_lit, &clamp_hi_lit) {
+        writeln!(
+            out,
+            "            let v = delta.clamp({lo}, {hi});"
+        )
+        .unwrap();
+    } else {
+        writeln!(out, "            let v = delta;").unwrap();
+    }
+    writeln!(out, "            row[min_i] = TopkSlot {{ id: attacker, value: v, anchor_tick: tick }};").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // fold_event dispatch. One arm per handler.
+    writeln!(
+        out,
+        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
+    )
+    .unwrap();
+    if handlers.is_empty() {
+        writeln!(out, "        let _ = (event, tick);").unwrap();
+    } else {
+        writeln!(out, "        match event {{").unwrap();
+        for h in handlers {
+            emit_topk_k_fold_arm(out, view, a_name, b_name, h)?;
+        }
+        writeln!(out, "            _ => {{}}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
+}
+
+/// Emit one match arm for a topk(K>=2) fold handler. Mirrors the
+/// pair_map `emit_fold_arm` pattern scan — figure out which event
+/// field maps to the view's (observer, attacker) parameter pair, then
+/// call the shared `fold_one` with delta = 1.0 (every shipped view
+/// folds a constant +1.0; variable deltas raise Unsupported upstream).
+fn emit_topk_k_fold_arm(
+    out: &mut String,
+    view: &ViewIR,
+    a_name: &str,
+    b_name: &str,
+    handler: &FoldHandlerIR,
+) -> Result<(), EmitError> {
+    let ev_name = handler.pattern.name.as_str();
+    // Find which event field feeds which view arg — same heuristic as
+    // emit_fold_arm for pair_map (see ~line 780). `actor_field` is the
+    // event field bound to the view's first param (observer);
+    // `target_field` is bound to the second param (attacker).
+    let mut actor_field: Option<&str> = None;
+    let mut target_field: Option<&str> = None;
+    for b in &handler.pattern.bindings {
+        let field = b.field.as_str();
+        if let crate::ir::IrPattern::Bind { name, .. } = &b.value {
+            if name == a_name {
+                actor_field = Some(field);
+            } else if name == b_name {
+                target_field = Some(field);
+            }
+        }
+    }
+    let (observer_field, attacker_field) = match (actor_field, target_field) {
+        (Some(a), Some(b)) => (a, b),
+        _ => ("actor", "target"),
+    };
+    writeln!(
+        out,
+        "            Event::{ev_name} {{ {observer_field}, {attacker_field}, .. }} => {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                self.fold_one({observer_field}.raw(), {attacker_field}.raw(), 1.0, tick);"
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
     let _ = view;
     Ok(())
 }
@@ -1506,11 +2033,130 @@ mod tests {
     }
 
     #[test]
-    fn per_entity_topk_k_greater_than_1_is_rejected() {
+    fn per_entity_topk_k_greater_than_1_requires_two_params() {
+        // Task 196: K > 1 is now supported for 2-param views. Using a
+        // 1-param view (engaged_with shape) with K=4 should fail with
+        // the param-count diagnostic, not the old "only K=1 supported"
+        // rejection.
         let mut v = engaged_with_view();
         v.kind = ViewKind::Materialized(StorageHint::PerEntityTopK { k: 4, keyed_on: 0 });
         let err = emit_view(&v, None).unwrap_err();
-        assert!(err.contains("K=4"), "expected K=4 diagnostic, got: {err}");
+        assert!(
+            err.contains("2 params"),
+            "expected 2-params diagnostic, got: {err}"
+        );
+    }
+
+    // Task 196: topk(K>1) on a 2-param view emits the new storage shape.
+    fn two_param_threat_topk_view(k: u16, decay: Option<f32>) -> ViewIR {
+        ViewIR {
+            name: "my_enemies".into(),
+            params: vec![
+                IrParam {
+                    name: "observer".into(),
+                    local: LocalRef(0),
+                    ty: IrType::AgentId,
+                    span: Span::dummy(),
+                },
+                IrParam {
+                    name: "attacker".into(),
+                    local: LocalRef(1),
+                    ty: IrType::AgentId,
+                    span: Span::dummy(),
+                },
+            ],
+            return_ty: IrType::F32,
+            body: ViewBodyIR::Fold {
+                initial: node(IrExpr::LitFloat(0.0)),
+                handlers: vec![FoldHandlerIR {
+                    pattern: IrEventPattern {
+                        name: "AgentAttacked".to_string(),
+                        event: None,
+                        bindings: vec![
+                            crate::ir::IrPatternBinding {
+                                field: "actor".into(),
+                                value: crate::ir::IrPattern::Bind {
+                                    name: "attacker".into(),
+                                    local: LocalRef(1),
+                                },
+                                span: Span::dummy(),
+                            },
+                            crate::ir::IrPatternBinding {
+                                field: "target".into(),
+                                value: crate::ir::IrPattern::Bind {
+                                    name: "observer".into(),
+                                    local: LocalRef(0),
+                                },
+                                span: Span::dummy(),
+                            },
+                        ],
+                        span: Span::dummy(),
+                    },
+                    body: vec![],
+                    span: Span::dummy(),
+                }],
+                clamp: Some((node(IrExpr::LitFloat(0.0)), node(IrExpr::LitFloat(1.0)))),
+            },
+            annotations: vec![],
+            kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k, keyed_on: 0 }),
+            decay: decay.map(|r| DecayHint {
+                rate: r,
+                per: DecayUnit::Tick,
+                span: Span::dummy(),
+            }),
+            span: Span::dummy(),
+        }
+    }
+
+    #[test]
+    fn topk_k8_no_decay_emits_fold_one_and_get() {
+        let v = two_param_threat_topk_view(8, None);
+        let out = emit_view(&v, None).unwrap();
+        assert!(out.contains("pub struct MyEnemies"), "bad struct:\n{out}");
+        assert!(
+            out.contains("slots: Vec<[TopkSlot; 8]>"),
+            "expected topk slot storage:\n{out}"
+        );
+        assert!(
+            out.contains("pub const K: usize = 8;"),
+            "missing K constant:\n{out}"
+        );
+        assert!(
+            out.contains("pub fn get(&self, observer: AgentId, attacker: AgentId) -> f32"),
+            "bad get sig (expected non-decay form):\n{out}"
+        );
+        assert!(
+            out.contains("fn fold_one"),
+            "missing fold_one helper:\n{out}"
+        );
+        assert!(
+            out.contains("self.fold_one(target.raw(), actor.raw(), 1.0, tick);"),
+            "fold arm should wire event fields to fold_one:\n{out}"
+        );
+    }
+
+    #[test]
+    fn topk_k8_with_decay_emits_rate_constant_and_decay_get() {
+        let v = two_param_threat_topk_view(8, Some(0.98));
+        let out = emit_view(&v, None).unwrap();
+        assert!(
+            out.contains("pub const RATE: f32 = 0.98"),
+            "missing RATE constant:\n{out}"
+        );
+        assert!(
+            out.contains(
+                "pub fn get(&self, observer: AgentId, attacker: AgentId, tick: u32) -> f32"
+            ),
+            "bad get sig (expected decay form with tick):\n{out}"
+        );
+        assert!(
+            out.contains("Self::RATE.powi"),
+            "decay math missing in emitted view:\n{out}"
+        );
+        assert!(
+            out.contains("pub fn sum_for_first"),
+            "sum_for_first helper missing:\n{out}"
+        );
     }
 
     #[test]

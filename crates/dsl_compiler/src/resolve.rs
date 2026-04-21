@@ -2308,11 +2308,11 @@ fn lower_view_kind(
 /// Accepts:
 /// - `pair_map`
 /// - `lazy_cached`
-/// - `per_entity_topk(K, keyed_on = <arg>)` — but our annotation grammar
-///   doesn't carry generic / call syntax, so in v1 we accept the bare
-///   identifier `per_entity_topk` with defaults `K=1, keyed_on=0` (task 139)
-///   and allow authors to drop into the parameterised form in a later pass
-///   once the emitter supports `K>1`.
+/// - `per_entity_topk` (bare) — defaults `K=1, keyed_on=0` (task 139).
+/// - `per_entity_topk(K = N)` — task 196. The call form carries the K
+///   slot count as a `key = value` argument. `keyed_on` defaults to 0
+///   (the view's first parameter) — authors drop in the named form once
+///   we support views keyed on the second parameter.
 fn parse_storage_hint(
     view_name: &str,
     arg: &ast::AnnotationArg,
@@ -2330,6 +2330,17 @@ fn parse_storage_hint(
                 span: arg.span,
             }),
         },
+        ast::AnnotationValue::Call { name, args } => match name.as_str() {
+            "per_entity_topk" => parse_per_entity_topk_call(view_name, args, arg.span),
+            other => Err(ResolveError::InvalidViewKind {
+                view_name: view_name.to_string(),
+                detail: format!(
+                    "`storage = {other}(...)` is not a known parameterised hint; \
+                     only `per_entity_topk(K = N)` accepts call-form arguments"
+                ),
+                span: arg.span,
+            }),
+        },
         other => Err(ResolveError::InvalidViewKind {
             view_name: view_name.to_string(),
             detail: format!(
@@ -2338,6 +2349,73 @@ fn parse_storage_hint(
             span: arg.span,
         }),
     }
+}
+
+/// Resolve `per_entity_topk(K = N, ...)` call-form args. Only `K` is
+/// recognised today; any other key errors so typos don't silently slip
+/// through. `K` must be a positive i64 that fits in u16 (we store it
+/// as `u16` in `StorageHint::PerEntityTopK` because the runtime uses
+/// small K — typical values are 1..=16).
+fn parse_per_entity_topk_call(
+    view_name: &str,
+    args: &[ast::AnnotationArg],
+    _call_span: Span,
+) -> Result<StorageHint, ResolveError> {
+    let mut k: Option<u16> = None;
+    for inner in args {
+        let key = match &inner.key {
+            Some(k) => k.as_str(),
+            None => {
+                return Err(ResolveError::InvalidViewKind {
+                    view_name: view_name.to_string(),
+                    detail:
+                        "`per_entity_topk(...)` requires `key = value` args (e.g. `K = 8`); got a positional arg"
+                            .into(),
+                    span: inner.span,
+                });
+            }
+        };
+        match key {
+            "K" => {
+                let n = match &inner.value {
+                    ast::AnnotationValue::Int(n) => *n,
+                    other => {
+                        return Err(ResolveError::InvalidViewKind {
+                            view_name: view_name.to_string(),
+                            detail: format!(
+                                "`K` must be a positive integer literal; got {other:?}"
+                            ),
+                            span: inner.span,
+                        });
+                    }
+                };
+                if n <= 0 || n > u16::MAX as i64 {
+                    return Err(ResolveError::InvalidViewKind {
+                        view_name: view_name.to_string(),
+                        detail: format!(
+                            "`K = {n}` out of range; must satisfy 1 <= K <= {}",
+                            u16::MAX
+                        ),
+                        span: inner.span,
+                    });
+                }
+                k = Some(n as u16);
+            }
+            other => {
+                return Err(ResolveError::InvalidViewKind {
+                    view_name: view_name.to_string(),
+                    detail: format!(
+                        "unknown `per_entity_topk` argument `{other}`; expected `K`"
+                    ),
+                    span: inner.span,
+                });
+            }
+        }
+    }
+    Ok(StorageHint::PerEntityTopK {
+        k: k.unwrap_or(1),
+        keyed_on: 0,
+    })
 }
 
 // ---------------------------------------------------------------------------
