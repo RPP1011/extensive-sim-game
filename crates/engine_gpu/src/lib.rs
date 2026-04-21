@@ -72,6 +72,16 @@ pub mod view_storage;
 #[cfg(feature = "gpu")]
 pub mod spatial_gpu;
 
+/// Phase 6b — GPU event ring primitive. Fixed-capacity device buffer
+/// of `EventRecord` slots + atomic tail counter. Kernels emit events
+/// via the `gpu_emit_event_*` helpers in `event_ring::EVENT_RING_WGSL`;
+/// the host drains back into `engine::event::EventRing` per
+/// sub-dispatch. Not yet wired into the backend's tick loop — the
+/// physics WGSL emitter (task 187) is the first consumer; the
+/// integration task after this plumbs both together.
+#[cfg(feature = "gpu")]
+pub mod event_ring;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
