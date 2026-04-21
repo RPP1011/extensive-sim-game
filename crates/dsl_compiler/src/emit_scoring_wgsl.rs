@@ -1,4 +1,4 @@
-//! WGSL emission for scoring — Phase 3 of the GPU megakernel plan.
+//! WGSL emission for scoring — Phase 3 + 6c of the GPU megakernel plan.
 //!
 //! Companion to [`emit_scoring`]: same table shape
 //! (`ScoringEntry { action_head, base, personality_weights,
@@ -13,6 +13,13 @@
 //!   * The shared SoA storage bindings (agent data, mask bitmaps,
 //!     scoring table, scoring output, config uniform) — see the
 //!     "Binding layout" section below.
+//!   * Per-view storage bindings (5-10) and read snippets produced by
+//!     [`crate::emit_view_wgsl::emit_view_read_wgsl`], one per
+//!     materialized view (`engaged_with`, `my_enemies`, `threat_level`,
+//!     `kin_fear`, `pack_focus`, `rally_boost`). These replace the
+//!     Phase 3 `eval_view_call` 0.0-stub; the emitter dispatches on
+//!     `pred.field_id` (the runtime VIEW_ID) + the two arg-slot codes
+//!     (`ARG_SELF=0`, `ARG_TARGET=1`, `ARG_WILDCARD=0xFE`).
 //!   * Helper functions: `read_field`, `compare_scalar`, `eval_view_call`,
 //!     `eval_predicate`, `score_entry`.
 //!   * The single `cs_scoring` compute entry point: one thread per
@@ -22,16 +29,16 @@
 //!     ties).
 //!
 //! The GPU-side scorer mirrors `crates/engine/src/policy/utility.rs`
-//! exactly for the predicate kinds the Phase 3 emitter supports:
+//! exactly for every predicate kind today:
 //!
 //!   * `KIND_ALWAYS` — always true.
 //!   * `KIND_SCALAR_COMPARE` — self- or target-side scalar compare
 //!     (field_id low range = self; `0x4000 | fid` = target).
-//!   * `KIND_VIEW_SCALAR_COMPARE` / `KIND_VIEW_GRADIENT` — **stubbed**
-//!     to return 0 (scalar compare against threshold) / NaN (gradient).
-//!     View storage is Phase 4+ work (task 185); the stub's shape is
-//!     documented alongside `eval_view_call` so the Phase 4 emitter
-//!     can swap in real view-buffer reads without reshaping callers.
+//!   * `KIND_VIEW_SCALAR_COMPARE` / `KIND_VIEW_GRADIENT` — now read
+//!     real view storage via per-view `view_<name>_get` functions.
+//!     Wildcards (`ARG_WILDCARD=0xFE` on slot1) loop over every
+//!     attacker slot 0..view_agent_cap and sum the decayed-and-clamped
+//!     cell value, mirroring `sum_for_first(a, tick)` on the CPU side.
 //!
 //! ## Determinism
 //!
@@ -61,9 +68,8 @@
 //!
 //! ## Binding layout
 //!
-//! Everything is packed into 5 storage / uniform bindings to stay well
-//! under `wgpu::Limits::max_bindings_per_bind_group` on every adapter
-//! we care about. The layout:
+//! 11 bindings total — under the 16-per-bind-group ceiling on every
+//! adapter we care about (Vulkan / Metal / DX12 / GL / LLVMpipe).
 //!
 //!   * `@binding(0)` `agent_data: array<AgentData>` — packed per-slot
 //!     struct carrying every scalar `read_field` needs. Matches
@@ -76,12 +82,25 @@
 //!   * `@binding(3)` `scoring_out: array<ScoreOutput>` — per-agent
 //!     `(chosen_action, chosen_target)`. Agent slot `i` writes to
 //!     `scoring_out[i]`.
-//!   * `@binding(4)` `cfg: ConfigUniform` — knobs the scoring path
-//!     doesn't read directly at Phase 3 but that keep the binding
-//!     layout identical to the mask kernel's, making a future fused
-//!     mask+scoring shader a trivial merge.
+//!   * `@binding(4)` `cfg: ConfigUniform` — radii + table row count +
+//!     mask-word count + `tick` + `view_agent_cap` (the latter two are
+//!     consumed by the view read snippets emitted alongside).
+//!   * `@binding(5)` `view_engaged_with_slots: array<u32>` — slot_map
+//!     storage for `engaged_with`; cell value is `AgentId+1` or 0 when
+//!     unset.
+//!   * `@binding(6)` `view_my_enemies_cells: array<f32>` — pair_map
+//!     scalar storage for `my_enemies`, flat row-major
+//!     `[observer * N + attacker]`.
+//!   * `@binding(7..11)` `view_<name>_cells: array<DecayCell>` — one
+//!     binding per pair_map @decay view (`threat_level`, `kin_fear`,
+//!     `pack_focus`, `rally_boost`). Each cell is a two-field struct:
+//!     `{ value: f32, anchor_tick: u32 }`. The scoring kernel decays
+//!     values on read (`value * pow(rate, tick - anchor_tick)`) and
+//!     clamps per-view.
 
 use std::fmt::Write;
+
+use crate::emit_view_wgsl::{emit_view_read_wgsl, ViewShape, ViewStorageSpec};
 
 /// Fixed workgroup size. Matches `emit_mask_wgsl::WORKGROUP_SIZE`.
 pub const WORKGROUP_SIZE: u32 = 64;
@@ -147,20 +166,81 @@ pub fn action_head_is_target_bound(action_head: u16) -> bool {
     matches!(action_head, 1 | 3)
 }
 
-/// Emit the scoring WGSL module. Returns the full shader source string.
+/// Emit the scoring WGSL module with the Phase 3 view-call stub
+/// (returns 0.0 for every view read). Kept for callers that don't have
+/// view storage wired up yet; [`emit_scoring_wgsl_with_views`] is the
+/// real Phase 6c entry point.
 pub fn emit_scoring_wgsl() -> String {
+    emit_scoring_wgsl_with_views(&[])
+}
+
+/// Emit the scoring WGSL module, splicing in real per-view read
+/// functions produced by [`emit_view_read_wgsl`]. Pass the same
+/// `ViewStorageSpec` list the engine_gpu side uses to provision buffers
+/// — the emitter reads `spec.view_name` (to map VIEW_ID → fn name) and
+/// `spec.shape` (to generate the right call signature).
+///
+/// Views that appear in [`SCORING_VIEW_IDS`] but not in the given
+/// `specs` slice fall back to the 0.0 stub with a loud comment, so a
+/// partial wiring doesn't silently break parity.
+pub fn emit_scoring_wgsl_with_views(specs: &[ViewStorageSpec]) -> String {
     let mut out = String::new();
     emit_header(&mut out);
     emit_types(&mut out);
     emit_bindings(&mut out);
+    emit_view_bindings(&mut out, specs);
+    emit_view_read_snippets(&mut out, specs);
     emit_helpers(&mut out);
     emit_read_field(&mut out);
-    emit_eval_view_call(&mut out);
+    emit_eval_view_call(&mut out, specs);
     emit_eval_predicate(&mut out);
     emit_score_entry(&mut out);
     emit_kernel(&mut out);
     out
 }
+
+/// Scoring-table VIEW_ID constants. Must match
+/// `engine_rules::scoring::PredicateDescriptor::VIEW_ID_*`. Kept here
+/// so the emitter can dispatch on VIEW_ID without depending on
+/// engine_rules (the compiler crate has no such dep, intentionally).
+pub const VIEW_ID_THREAT_LEVEL: u16 = 0;
+pub const VIEW_ID_MY_ENEMIES: u16 = 1;
+pub const VIEW_ID_KIN_FEAR: u16 = 2;
+pub const VIEW_ID_PACK_FOCUS: u16 = 3;
+pub const VIEW_ID_RALLY_BOOST: u16 = 4;
+
+/// Arg-slot codes — mirror of
+/// `engine_rules::scoring::PredicateDescriptor::ARG_*`.
+pub const ARG_SELF: u8 = 0;
+pub const ARG_TARGET: u8 = 1;
+pub const ARG_WILDCARD: u8 = 0xFE;
+#[allow(dead_code)]
+pub const ARG_NONE: u8 = 0xFF;
+
+/// Map a runtime VIEW_ID to the DSL view name the scoring table
+/// references. Keeps the dispatch at [`emit_eval_view_call`] in lockstep
+/// with `engine_rules::scoring::PredicateDescriptor::VIEW_ID_*`.
+pub fn view_id_to_name(view_id: u16) -> Option<&'static str> {
+    match view_id {
+        VIEW_ID_THREAT_LEVEL => Some("threat_level"),
+        VIEW_ID_MY_ENEMIES => Some("my_enemies"),
+        VIEW_ID_KIN_FEAR => Some("kin_fear"),
+        VIEW_ID_PACK_FOCUS => Some("pack_focus"),
+        VIEW_ID_RALLY_BOOST => Some("rally_boost"),
+        _ => None,
+    }
+}
+
+/// VIEW_IDs the scoring table references. Integration layer builds
+/// `ViewStorageSpec`s for these views + `engaged_with` (not scored
+/// today but owned by the view storage bind group).
+pub const SCORING_VIEW_IDS: &[u16] = &[
+    VIEW_ID_THREAT_LEVEL,
+    VIEW_ID_MY_ENEMIES,
+    VIEW_ID_KIN_FEAR,
+    VIEW_ID_PACK_FOCUS,
+    VIEW_ID_RALLY_BOOST,
+];
 
 fn emit_header(out: &mut String) {
     writeln!(out, "// GENERATED by dsl_compiler::emit_scoring_wgsl (Phase 3).").unwrap();
@@ -284,6 +364,28 @@ fn emit_types(out: &mut String) {
     writeln!(out, "    movement_max_move_radius: f32,").unwrap();
     writeln!(out, "    num_entries: u32,").unwrap();
     writeln!(out, "    num_mask_words: u32,").unwrap();
+    // Current tick — consumed by view_<name>_get on @decay views for
+    // the `tick - anchor_tick` decay math. Uploaded as part of the
+    // cfg uniform so no extra binding is needed.
+    writeln!(out, "    tick: u32,").unwrap();
+    // Agent capacity — the view read snippets reference a WGSL-level
+    // `view_agent_cap` symbol (see emit_view_wgsl::emit_pair_map_*),
+    // which the emitter generates as a module-scope `const` from this
+    // cfg field. Uploaded as u32 so a future non-N² storage layout
+    // doesn't require reshaping the uniform.
+    writeln!(out, "    view_agent_cap: u32,").unwrap();
+    writeln!(out, "    _pad0: u32,").unwrap();
+    writeln!(out, "    _pad1: u32,").unwrap();
+    writeln!(out, "}};").unwrap();
+    writeln!(out).unwrap();
+
+    // Pair-map @decay cell layout. Matches the scoring kernel's
+    // per-view DecayCell buffers — one `f32` base value + one `u32`
+    // anchor tick. Callers read `cell.value`, `cell.anchor_tick`; the
+    // on-read decay formula is emitted by emit_view_wgsl.
+    writeln!(out, "struct DecayCell {{").unwrap();
+    writeln!(out, "    value: f32,").unwrap();
+    writeln!(out, "    anchor_tick: u32,").unwrap();
     writeln!(out, "}};").unwrap();
     writeln!(out).unwrap();
 }
@@ -316,6 +418,111 @@ fn emit_bindings(out: &mut String) {
     .unwrap();
     writeln!(out).unwrap();
 }
+
+/// Emit the per-view storage bindings, one binding per view in
+/// `specs` (order determined by [`scoring_view_binding_order`]). Each
+/// pair_map @decay view gets ONE binding carrying an
+/// `array<DecayCell>`; non-decay pair_maps get an `array<f32>`;
+/// slot_maps get an `array<u32>`.
+///
+/// Bindings start at index 5 (right after the 5 core scoring
+/// bindings); the integration layer on the engine_gpu side wires
+/// buffers in the same order.
+fn emit_view_bindings(out: &mut String, specs: &[ViewStorageSpec]) {
+    for (i, spec) in scoring_view_binding_order(specs).into_iter().enumerate() {
+        let binding = SCORING_CORE_BINDINGS + i as u32;
+        let snake = &spec.snake;
+        let (wgsl_ty, comment) = match &spec.shape {
+            ViewShape::SlotMap { .. } => (
+                format!("array<u32>"),
+                format!("slot_map storage for `{}`", spec.view_name),
+            ),
+            ViewShape::PairMapScalar => (
+                format!("array<f32>"),
+                format!("pair_map<f32> storage for `{}`", spec.view_name),
+            ),
+            ViewShape::PairMapDecay { rate } => (
+                format!("array<DecayCell>"),
+                format!(
+                    "pair_map<DecayCell> @decay(rate={rate}) storage for `{}`",
+                    spec.view_name
+                ),
+            ),
+            ViewShape::Lazy => continue,
+        };
+        let storage_name = match &spec.shape {
+            ViewShape::SlotMap { .. } => format!("view_{snake}_slots"),
+            _ => format!("view_{snake}_cells"),
+        };
+        writeln!(out, "// {comment}").unwrap();
+        writeln!(
+            out,
+            "@group(0) @binding({binding}) var<storage, read> {storage_name}: {wgsl_ty};"
+        )
+        .unwrap();
+    }
+    writeln!(out).unwrap();
+}
+
+/// Emit the per-view `fn view_<snake>_get(...)` functions using
+/// [`emit_view_read_wgsl`]. Each snippet assumes:
+///   * `view_<snake>_cells` / `view_<snake>_slots` buffer is bound
+///     (emit_view_bindings handles that);
+///   * a module-scope `view_agent_cap: u32` const is in scope — we
+///     emit a `let view_agent_cap = cfg.view_agent_cap;` at every call
+///     site via a small shim (emit_view_read_wgsl references
+///     `view_agent_cap` as a free symbol).
+///
+/// Since emit_view_read_wgsl expects `view_agent_cap` as a free symbol
+/// and we can't introduce it as a WGSL `const` (the value is only
+/// known at dispatch time), we wrap each emitted read function with a
+/// one-line helper that shadows the symbol from `cfg`. The simplest
+/// wiring is a WGSL-level `let view_agent_cap = cfg.view_agent_cap;`
+/// at the top of every read function — but emit_view_read_wgsl emits
+/// the function body including that let itself? No, it uses
+/// `view_agent_cap` as a direct reference. We emit a wrapper.
+fn emit_view_read_snippets(out: &mut String, specs: &[ViewStorageSpec]) {
+    // Emit a module-scope accessor to bridge `cfg.view_agent_cap` into
+    // the `view_agent_cap` symbol the per-view snippets reference.
+    // WGSL doesn't allow reading a uniform from a module-scope `const`
+    // initializer, so we emit a small helper function and have our
+    // wrapper `view_<name>_get_adapter` evaluate it at call time.
+    //
+    // Strategy: we rename the emit_view_wgsl function by text-editing
+    // (simpler than shadowing): the snippet uses `view_agent_cap` as
+    // an identifier, so we do a one-line string substitution to point
+    // it at `cfg.view_agent_cap` before splicing the snippet in.
+    for spec in scoring_view_binding_order(specs) {
+        let snippet = match emit_view_read_wgsl(spec) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        // Replace free `view_agent_cap` references with `cfg.view_agent_cap`.
+        // The snippet uses it as a RHS in `let n = view_agent_cap;`; a
+        // simple string replace is safe since the identifier is unique
+        // within the snippet.
+        let rewritten = snippet.replace("view_agent_cap", "cfg.view_agent_cap");
+        out.push_str(&rewritten);
+        writeln!(out).unwrap();
+    }
+}
+
+/// Deterministic ordering of views for binding-index assignment. Sort
+/// by view name so a re-run produces the same WGSL and the engine_gpu
+/// side can bind buffers in matching order without coordinating a
+/// separate list.
+pub fn scoring_view_binding_order(specs: &[ViewStorageSpec]) -> Vec<&ViewStorageSpec> {
+    let mut sorted: Vec<&ViewStorageSpec> = specs
+        .iter()
+        .filter(|s| !matches!(s.shape, ViewShape::Lazy))
+        .collect();
+    sorted.sort_by(|a, b| a.view_name.cmp(&b.view_name));
+    sorted
+}
+
+/// Core scoring bindings (agent_data, mask_bitmaps, scoring_table,
+/// scoring_out, cfg) — view bindings start at this index.
+pub const SCORING_CORE_BINDINGS: u32 = 5;
 
 fn emit_helpers(out: &mut String) {
     // Predicate-kind + op discriminants. Must match
@@ -492,37 +699,166 @@ fn emit_read_field(out: &mut String) {
     writeln!(out).unwrap();
 }
 
-fn emit_eval_view_call(out: &mut String) {
-    // STUB — Phase 4 (task 185) wires real view storage. Returning 0
-    // means: a view-scalar-compare with a positive threshold
-    // (OP_GT / OP_GE) returns false; a view-scalar-compare with a
-    // non-positive threshold (rare in practice) may spuriously pass.
-    // A KIND_VIEW_GRADIENT multiplies by 0 and adds nothing.
+fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec]) {
+    // Per-VIEW_ID dispatch into the emitted `view_<name>_get` snippets.
+    // Each arm resolves the two arg-slot codes from the predicate
+    // payload, fans out to the view's read function, and (for
+    // wildcards) loops over every attacker slot to emulate
+    // sum_for_first(a, tick) on the CPU side.
     //
-    // Callers (eval_predicate / score_entry) are oblivious to the stub;
-    // Phase 4 swaps the body for real view-buffer reads without
-    // reshaping any caller.
+    // The `specs` slice determines which VIEW_IDs have real bindings.
+    // Any VIEW_ID without a matching spec falls through to the 0.0
+    // stub with a comment so the divergence is visible in the emitted
+    // source. In practice the engine_gpu integration always passes
+    // specs for every VIEW_ID in SCORING_VIEW_IDS; the stub is
+    // defensive against partial wiring (e.g. a future task that adds a
+    // new VIEW_ID before its storage).
+    writeln!(out, "const ARG_SELF: u32 = 0u;").unwrap();
+    writeln!(out, "const ARG_TARGET: u32 = 1u;").unwrap();
+    writeln!(out, "const ARG_WILDCARD: u32 = 0xFEu;").unwrap();
+    writeln!(out, "const ARG_NONE: u32 = 0xFFu;").unwrap();
+    writeln!(out).unwrap();
+
+    // Helper: resolve an arg-slot code to an agent slot index.
+    // Returns NO_TARGET for "unbound" (ARG_TARGET with no target
+    // slot) / "unknown" (any other code). Matches `resolve_slot` in
+    // engine/src/policy/utility.rs.
     writeln!(
         out,
-        "// STUB: Phase 3 view-call evaluator returns 0. Phase 4 (task 185)\n\
-         // wires real view storage. Documented scoring divergence: any\n\
-         // scoring row with a KIND_VIEW_* modifier whose CPU-evaluated\n\
-         // contribution would be non-zero will underscore on the GPU path\n\
-         // here, which *may* flip the argmax when that modifier tips the\n\
-         // scales. The parity test's fixtures are chosen so no such flip\n\
-         // happens (1v1 with no kin nearby — no kin_fear/pack_focus/\n\
-         // rally_boost/threat_level/my_enemies triggers)."
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "fn eval_view_call(agent_slot: u32, target_slot: u32, pred: PredicateDescriptor) -> f32 {{\n\
-         \x20   // Phase 4 replaces this with a per-VIEW_ID dispatch reading\n\
-         \x20   // from bound view storage buffers.\n\
-         \x20   return 0.0;\n\
+        "fn resolve_view_arg(code: u32, agent_slot: u32, target_slot: u32) -> u32 {{\n\
+         \x20   if (code == ARG_SELF) {{ return agent_slot; }}\n\
+         \x20   if (code == ARG_TARGET) {{ return target_slot; }}\n\
+         \x20   return NO_TARGET;\n\
          }}"
     )
     .unwrap();
+    writeln!(out).unwrap();
+
+    // Build a lookup from VIEW_ID → (view name, shape). Only views
+    // whose spec is present in `specs` get a real dispatch arm; the
+    // rest use the stub.
+    let view_by_id: Vec<(u16, &ViewStorageSpec)> = SCORING_VIEW_IDS
+        .iter()
+        .filter_map(|vid| {
+            let name = view_id_to_name(*vid)?;
+            specs
+                .iter()
+                .find(|s| s.view_name == name)
+                .map(|s| (*vid, s))
+        })
+        .collect();
+
+    writeln!(
+        out,
+        "fn eval_view_call(agent_slot: u32, target_slot: u32, pred: PredicateDescriptor) -> f32 {{"
+    )
+    .unwrap();
+    writeln!(out, "    let slot0 = (pred.payload1) & 0xFFu;").unwrap();
+    writeln!(out, "    let slot1 = (pred.payload1 >> 8u) & 0xFFu;").unwrap();
+    writeln!(out, "    let view_id = pred.field_id;").unwrap();
+    writeln!(out, "    let a = resolve_view_arg(slot0, agent_slot, target_slot);").unwrap();
+    writeln!(out, "    if (a == NO_TARGET) {{ return bitcast<f32>(0x7FC00000u); }}").unwrap();
+    writeln!(out, "    switch (view_id) {{").unwrap();
+
+    for (vid, spec) in &view_by_id {
+        let name = &spec.view_name;
+        let snake = &spec.snake;
+        writeln!(out, "        case {vid}u: {{").unwrap();
+        writeln!(out, "            // VIEW `{name}`").unwrap();
+        match &spec.shape {
+            ViewShape::PairMapScalar => {
+                writeln!(out, "            if (slot1 == ARG_WILDCARD) {{").unwrap();
+                writeln!(out, "                var total: f32 = 0.0;").unwrap();
+                writeln!(
+                    out,
+                    "                for (var t: u32 = 0u; t < cfg.view_agent_cap; t = t + 1u) {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "                    total = total + view_{snake}_get(a, t);"
+                )
+                .unwrap();
+                writeln!(out, "                }}").unwrap();
+                writeln!(out, "                return total;").unwrap();
+                writeln!(out, "            }}").unwrap();
+                writeln!(
+                    out,
+                    "            let b = resolve_view_arg(slot1, agent_slot, target_slot);"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "            if (b == NO_TARGET) {{ return bitcast<f32>(0x7FC00000u); }}"
+                )
+                .unwrap();
+                writeln!(out, "            return view_{snake}_get(a, b);").unwrap();
+            }
+            ViewShape::PairMapDecay { .. } => {
+                writeln!(out, "            if (slot1 == ARG_WILDCARD) {{").unwrap();
+                writeln!(out, "                var total: f32 = 0.0;").unwrap();
+                writeln!(
+                    out,
+                    "                for (var t: u32 = 0u; t < cfg.view_agent_cap; t = t + 1u) {{"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "                    total = total + view_{snake}_get(a, t, cfg.tick);"
+                )
+                .unwrap();
+                writeln!(out, "                }}").unwrap();
+                writeln!(out, "                return total;").unwrap();
+                writeln!(out, "            }}").unwrap();
+                writeln!(
+                    out,
+                    "            let b = resolve_view_arg(slot1, agent_slot, target_slot);"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "            if (b == NO_TARGET) {{ return bitcast<f32>(0x7FC00000u); }}"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "            return view_{snake}_get(a, b, cfg.tick);"
+                )
+                .unwrap();
+            }
+            ViewShape::SlotMap { .. } => {
+                // slot_map views aren't referenced from scoring today
+                // but include for completeness — returns the partner
+                // slot + 1 as f32 (0 for "no partner"). Scoring tables
+                // that care would compare against the encoded value.
+                writeln!(
+                    out,
+                    "            return f32(view_{snake}_get(a));"
+                )
+                .unwrap();
+            }
+            ViewShape::Lazy => unreachable!(),
+        }
+        writeln!(out, "        }}").unwrap();
+    }
+
+    // Default arm: unknown or not-wired VIEW_ID.
+    writeln!(out, "        default: {{").unwrap();
+    writeln!(
+        out,
+        "            // VIEW_ID not wired — fall back to the 0.0 stub. The"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            // integration layer should register every VIEW_ID in"
+    )
+    .unwrap();
+    writeln!(out, "            // SCORING_VIEW_IDS via emit_scoring_wgsl_with_views.").unwrap();
+    writeln!(out, "            return 0.0;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 }
 
@@ -862,8 +1198,9 @@ mod tests {
             "missing cs_scoring entry point:\n{src}"
         );
 
-        // Five bindings — agent_data, mask_bitmaps, scoring_table,
-        // scoring_out, cfg — all on group 0.
+        // Five core bindings — agent_data, mask_bitmaps, scoring_table,
+        // scoring_out, cfg — all on group 0. View bindings (5..) only
+        // appear when emit_scoring_wgsl_with_views receives specs.
         assert!(src.contains("@group(0) @binding(0) var<storage, read> agent_data"));
         assert!(src.contains("@group(0) @binding(1) var<storage, read> mask_bitmaps"));
         assert!(src.contains("@group(0) @binding(2) var<storage, read> scoring_table"));
@@ -880,9 +1217,9 @@ mod tests {
             "missing Hold fallthrough:\n{src}"
         );
 
-        // View stub present with a loud docstring so a drop-in Phase 4
-        // implementation doesn't accidentally silently-pass.
-        assert!(src.contains("Phase 3 view-call evaluator returns 0"));
+        // With no view specs, the eval_view_call dispatch falls
+        // through to the 0.0 default arm.
+        assert!(src.contains("return 0.0"));
     }
 
     /// Action-head mask slot mapping matches the engine's MicroKind
@@ -931,6 +1268,76 @@ mod tests {
                 action_head_is_target_bound(ah),
                 expect,
                 "head {ah}"
+            );
+        }
+    }
+
+    /// With view specs passed in, each materialized view spawns a
+    /// binding in the emitter-fixed order and the
+    /// `view_<name>_get` function body appears verbatim in the module
+    /// source. Defensive regression — if the emit_view_wgsl snippets
+    /// ever stop producing the expected function name, this fails loud.
+    #[test]
+    fn wired_views_emit_bindings_and_read_fns() {
+        use crate::emit_view_wgsl::{FoldSpec, ViewShape, ViewStorageSpec};
+
+        let specs = vec![
+            ViewStorageSpec {
+                view_name: "my_enemies".into(),
+                snake: "my_enemies".into(),
+                shape: ViewShape::PairMapScalar,
+                clamp: Some((0.0, 1.0)),
+                initial: 0.0,
+                folds: vec![FoldSpec {
+                    event_name: "AgentAttacked".into(),
+                    first_key_field: "target".into(),
+                    second_key_field: Some("actor".into()),
+                }],
+            },
+            ViewStorageSpec {
+                view_name: "threat_level".into(),
+                snake: "threat_level".into(),
+                shape: ViewShape::PairMapDecay { rate: 0.98 },
+                clamp: Some((0.0, 1000.0)),
+                initial: 0.0,
+                folds: vec![],
+            },
+        ];
+
+        let src = emit_scoring_wgsl_with_views(&specs);
+        // Binding 5 = first view in sorted-by-name order = my_enemies.
+        assert!(
+            src.contains("@group(0) @binding(5) var<storage, read> view_my_enemies_cells: array<f32>"),
+            "missing my_enemies binding:\n{src}"
+        );
+        // Binding 6 = threat_level.
+        assert!(
+            src.contains("@group(0) @binding(6) var<storage, read> view_threat_level_cells: array<DecayCell>"),
+            "missing threat_level binding:\n{src}"
+        );
+        assert!(src.contains("fn view_my_enemies_get("), "missing view_my_enemies_get:\n{src}");
+        assert!(src.contains("fn view_threat_level_get("), "missing view_threat_level_get:\n{src}");
+        // eval_view_call dispatch has a case for VIEW_ID_MY_ENEMIES (1).
+        assert!(src.contains("case 1u:"), "missing VIEW_ID_MY_ENEMIES case:\n{src}");
+        // Wildcard loop form.
+        assert!(
+            src.contains("for (var t: u32 = 0u; t < cfg.view_agent_cap"),
+            "missing wildcard loop:\n{src}"
+        );
+        // cfg.view_agent_cap substitution inside the view read snippet.
+        assert!(
+            src.contains("let n = cfg.view_agent_cap;"),
+            "missing cfg.view_agent_cap rewrite in view snippet:\n{src}"
+        );
+    }
+
+    /// Round-trip: `view_id_to_name` ↔ `SCORING_VIEW_IDS` stay in sync.
+    #[test]
+    fn scoring_view_ids_resolve_to_names() {
+        for &vid in SCORING_VIEW_IDS {
+            assert!(
+                view_id_to_name(vid).is_some(),
+                "VIEW_ID {vid} in SCORING_VIEW_IDS has no name mapping"
             );
         }
     }
