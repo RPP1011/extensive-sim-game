@@ -461,15 +461,15 @@ impl ScoringKernel {
         }
 
         // Build the bind-group layout entries: 5 core + per-view.
-        // Decay views get TWO view bindings (cells + anchors). Others
-        // get one. Matches the atomic-mode WGSL emitter's layout.
+        // Non-topk dense decay views get TWO view bindings (cells + anchors).
+        // Task 198: topk views get THREE bindings (cells + anchors + ids) —
+        // even topk PairMapScalar, whose anchors are all zeros in the
+        // fold kernel but still backed by a real buffer in view_storage.
+        // Others get one. Matches the atomic-mode WGSL emitter's layout.
         let total_view_bindings: usize =
             scoring_view_binding_order(&view_specs)
                 .iter()
-                .map(|s| match s.shape {
-                    ViewShape::PairMapDecay { .. } => 2,
-                    _ => 1,
-                })
+                .map(|s| view_binding_count(s))
                 .sum();
         let mut bgl_entries: Vec<wgpu::BindGroupLayoutEntry> = Vec::with_capacity(
             SCORING_CORE_BINDINGS as usize + total_view_bindings,
@@ -533,6 +533,7 @@ impl ScoringKernel {
                     next_binding += 1;
                 }
                 ViewShape::PairMapScalar => {
+                    // Cells — atomic<u32>.
                     bgl_entries.push(wgpu::BindGroupLayoutEntry {
                         binding: next_binding,
                         visibility: wgpu::ShaderStages::COMPUTE,
@@ -548,6 +549,34 @@ impl ScoringKernel {
                         count: None,
                     });
                     next_binding += 1;
+                    if spec.topk.is_some() {
+                        // Task 198: topk scalar also binds anchors + ids.
+                        // Anchors are zero-initialised and never written
+                        // for non-decay topk (no `tick - anchor` math),
+                        // but the buffer still exists in view_storage.
+                        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+                            binding: next_binding,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        });
+                        next_binding += 1;
+                        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+                            binding: next_binding,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        });
+                        next_binding += 1;
+                    }
                 }
                 ViewShape::PairMapDecay { .. } => {
                     // Values buffer — atomic<u32>.
@@ -574,6 +603,22 @@ impl ScoringKernel {
                         count: None,
                     });
                     next_binding += 1;
+                    if spec.topk.is_some() {
+                        // Task 198: topk decay adds `ids` buffer so
+                        // scoring can match stored AgentIds against the
+                        // query attacker in the K-slot scan.
+                        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+                            binding: next_binding,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        });
+                        next_binding += 1;
+                    }
                 }
                 ViewShape::Lazy => {}
             }
@@ -813,7 +858,15 @@ impl ScoringKernel {
     }
 
     /// Construct the per-run bind group: 5 core entries (from the pool)
-    /// plus one or two per view (from `view_storage`'s buffers).
+    /// plus one, two, or three per view (from `view_storage`'s buffers).
+    ///
+    /// Binding-count per view shape (matches `emit_view_bindings_for_mode`
+    /// in dsl_compiler + the BGL constructed in `new`):
+    ///   * SlotMap (engaged_with) — 1 binding (slots).
+    ///   * PairMapScalar, non-topk — 1 binding (cells).
+    ///   * PairMapScalar, topk (task 198) — 3 bindings (cells, anchors, ids).
+    ///   * PairMapDecay, non-topk — 2 bindings (cells, anchors).
+    ///   * PairMapDecay, topk (task 198) — 3 bindings (cells, anchors, ids).
     fn build_bind_group(
         &self,
         device: &wgpu::Device,
@@ -821,13 +874,7 @@ impl ScoringKernel {
         view_storage: &ViewStorage,
     ) -> Result<wgpu::BindGroup, ScoringError> {
         let sorted = scoring_view_binding_order(&self.view_specs);
-        let total_view_bindings: usize = sorted
-            .iter()
-            .map(|s| match s.shape {
-                ViewShape::PairMapDecay { .. } => 2,
-                _ => 1,
-            })
-            .sum();
+        let total_view_bindings: usize = sorted.iter().map(|s| view_binding_count(s)).sum();
         let mut bg_entries: Vec<wgpu::BindGroupEntry> =
             Vec::with_capacity(SCORING_CORE_BINDINGS as usize + total_view_bindings);
         bg_entries.push(wgpu::BindGroupEntry {
@@ -859,12 +906,44 @@ impl ScoringKernel {
                 ))
             })?;
             match spec.shape {
-                ViewShape::SlotMap { .. } | ViewShape::PairMapScalar => {
+                ViewShape::SlotMap { .. } => {
                     bg_entries.push(wgpu::BindGroupEntry {
                         binding: next_binding,
                         resource: primary.as_entire_binding(),
                     });
                     next_binding += 1;
+                }
+                ViewShape::PairMapScalar => {
+                    bg_entries.push(wgpu::BindGroupEntry {
+                        binding: next_binding,
+                        resource: primary.as_entire_binding(),
+                    });
+                    next_binding += 1;
+                    if spec.topk.is_some() {
+                        let anchor =
+                            view_storage.anchor_buffer(&spec.view_name).ok_or_else(|| {
+                                ScoringError::Dispatch(format!(
+                                    "view_storage missing anchor buffer for topk scalar view `{}`",
+                                    spec.view_name
+                                ))
+                            })?;
+                        let ids = view_storage.ids_buffer(&spec.view_name).ok_or_else(|| {
+                            ScoringError::Dispatch(format!(
+                                "view_storage missing ids buffer for topk view `{}`",
+                                spec.view_name
+                            ))
+                        })?;
+                        bg_entries.push(wgpu::BindGroupEntry {
+                            binding: next_binding,
+                            resource: anchor.as_entire_binding(),
+                        });
+                        next_binding += 1;
+                        bg_entries.push(wgpu::BindGroupEntry {
+                            binding: next_binding,
+                            resource: ids.as_entire_binding(),
+                        });
+                        next_binding += 1;
+                    }
                 }
                 ViewShape::PairMapDecay { .. } => {
                     let anchor = view_storage.anchor_buffer(&spec.view_name).ok_or_else(|| {
@@ -883,6 +962,19 @@ impl ScoringKernel {
                         resource: anchor.as_entire_binding(),
                     });
                     next_binding += 1;
+                    if spec.topk.is_some() {
+                        let ids = view_storage.ids_buffer(&spec.view_name).ok_or_else(|| {
+                            ScoringError::Dispatch(format!(
+                                "view_storage missing ids buffer for topk decay view `{}`",
+                                spec.view_name
+                            ))
+                        })?;
+                        bg_entries.push(wgpu::BindGroupEntry {
+                            binding: next_binding,
+                            resource: ids.as_entire_binding(),
+                        });
+                        next_binding += 1;
+                    }
                 }
                 ViewShape::Lazy => {}
             }
@@ -892,6 +984,22 @@ impl ScoringKernel {
             layout: &self.bind_group_layout,
             entries: &bg_entries,
         }))
+    }
+}
+
+/// Task 198: number of bindings the scoring bind group reserves for a
+/// single view, matching dsl_compiler's `emit_view_bindings_for_mode`
+/// in `AtomicStorage` mode. Topk views add an `ids` binding; topk
+/// scalar also adds anchors (unused at read-time but bound symmetric
+/// with the topk decay layout).
+fn view_binding_count(spec: &ViewStorageSpec) -> usize {
+    match (spec.shape, spec.topk.is_some()) {
+        (ViewShape::SlotMap { .. }, _) => 1,
+        (ViewShape::PairMapScalar, false) => 1,
+        (ViewShape::PairMapScalar, true) => 3, // cells + anchors + ids
+        (ViewShape::PairMapDecay { .. }, false) => 2,
+        (ViewShape::PairMapDecay { .. }, true) => 3, // cells + anchors + ids
+        (ViewShape::Lazy, _) => 0,
     }
 }
 
@@ -1476,6 +1584,9 @@ mod tests {
     /// appear in name-sorted order; pair_map_decay views consume two
     /// consecutive bindings (cells + anchors) rather than the single
     /// `DecayCell` binding the plain-array mode used.
+    ///
+    /// Task 198: topk views append an `ids` binding after cells (+ anchors
+    /// for decay, or + zero-initialised anchors for scalar).
     #[test]
     fn wgsl_atomic_view_bindings_in_sync() {
         use dsl_compiler::emit_scoring_wgsl::{
@@ -1509,6 +1620,24 @@ mod tests {
                         src.lines().take(80).collect::<Vec<_>>().join("\n")
                     );
                     binding += 1;
+                    if spec.topk.is_some() {
+                        let exp_anchors = format!(
+                            "@group(0) @binding({binding}) var<storage, read_write> view_{snake}_anchors: array<atomic<u32>>"
+                        );
+                        let exp_ids = format!(
+                            "@group(0) @binding({}) var<storage, read_write> view_{snake}_ids: array<atomic<u32>>",
+                            binding + 1
+                        );
+                        assert!(
+                            src.contains(&exp_anchors),
+                            "topk scalar anchors binding missing: {exp_anchors}"
+                        );
+                        assert!(
+                            src.contains(&exp_ids),
+                            "topk scalar ids binding missing: {exp_ids}"
+                        );
+                        binding += 2;
+                    }
                 }
                 ViewShape::PairMapDecay { .. } => {
                     let exp_cells = format!(
@@ -1527,10 +1656,36 @@ mod tests {
                         "pair_decay atomic anchors binding missing: {exp_anchors}"
                     );
                     binding += 2;
+                    if spec.topk.is_some() {
+                        let exp_ids = format!(
+                            "@group(0) @binding({binding}) var<storage, read_write> view_{snake}_ids: array<atomic<u32>>"
+                        );
+                        assert!(
+                            src.contains(&exp_ids),
+                            "topk decay ids binding missing: {exp_ids}"
+                        );
+                        binding += 1;
+                    }
                 }
                 ViewShape::Lazy => {}
             }
         }
+    }
+
+    /// Task 198: the scoring bind group count has a known upper bound
+    /// after topk wiring. Helps catch accidental binding inflation
+    /// without exercising a real GPU. See `build_bind_group` for the
+    /// canonical layout.
+    #[test]
+    fn scoring_binding_count_matches_emitter() {
+        use dsl_compiler::emit_scoring_wgsl::scoring_total_bindings;
+        let specs = build_all_specs();
+        let count = scoring_total_bindings(&specs, true);
+        // Baseline post-task 196: 15 (5 core + 1 slot_map + 4 pair_scalar-or-decay-cells
+        // + 3 pair_decay anchors + 2 kin_fear dense cells+anchors).
+        // Task 198: +4 ids bindings (one per topk view) + 1 anchors for
+        // topk scalar (my_enemies) = 15 + 5 = 20.
+        assert_eq!(count, 20, "scoring bind group should emit 20 bindings");
     }
 
     /// Phase 6d: the atomic-mode WGSL parses through naga. This exercises

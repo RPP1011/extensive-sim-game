@@ -233,7 +233,7 @@ fn emit_scoring_wgsl_inner(specs: &[ViewStorageSpec], mode: ViewBindingMode) -> 
     emit_view_read_snippets_for_mode(&mut out, specs, mode);
     emit_helpers(&mut out);
     emit_read_field(&mut out);
-    emit_eval_view_call(&mut out, specs);
+    emit_eval_view_call(&mut out, specs, mode);
     emit_eval_predicate(&mut out);
     emit_score_entry(&mut out);
     emit_kernel(&mut out);
@@ -244,16 +244,32 @@ fn emit_scoring_wgsl_inner(specs: &[ViewStorageSpec], mode: ViewBindingMode) -> 
 /// wire a matching bind-group layout. Always 5 core bindings plus per-
 /// view bindings (1 per slot/pair-scalar, 2 per pair-decay in atomic
 /// mode, 1 per pair-decay in plain mode).
+///
+/// Task 198: topk views (see `ViewStorageSpec::topk`) in atomic mode get
+/// an extra `ids` binding so the scoring kernel can match stored
+/// AgentIds against the query attacker. PairMapScalar+topk also gains
+/// the anchors binding (pre-topk scalar had none) so its layout mirrors
+/// the PairMapDecay+topk one — simplifies `build_bind_group`.
 pub fn scoring_total_bindings(specs: &[ViewStorageSpec], atomic_mode: bool) -> u32 {
     let mut count = SCORING_CORE_BINDINGS;
     for spec in scoring_view_binding_order(specs) {
-        match spec.shape {
-            ViewShape::SlotMap { .. } => count += 1,
-            ViewShape::PairMapScalar => count += 1,
-            ViewShape::PairMapDecay { .. } => {
+        match (spec.shape, spec.topk) {
+            (ViewShape::SlotMap { .. }, _) => count += 1,
+            (ViewShape::PairMapScalar, None) => count += 1,
+            (ViewShape::PairMapScalar, Some(_)) if atomic_mode => {
+                // topk scalar: cells + anchors + ids.
+                count += 3;
+            }
+            (ViewShape::PairMapScalar, Some(_)) => count += 1,
+            (ViewShape::PairMapDecay { .. }, None) => {
                 count += if atomic_mode { 2 } else { 1 };
             }
-            ViewShape::Lazy => {}
+            (ViewShape::PairMapDecay { .. }, Some(_)) if atomic_mode => {
+                // topk decay: cells + anchors + ids.
+                count += 3;
+            }
+            (ViewShape::PairMapDecay { .. }, Some(_)) => count += 1,
+            (ViewShape::Lazy, _) => {}
         }
     }
     count
@@ -539,6 +555,26 @@ fn emit_view_bindings_for_mode(
                 )
                 .unwrap();
                 next_binding += 1;
+                // Task 198: topk PairMapScalar needs anchors + ids buffers
+                // even though scoring doesn't apply decay on read — the
+                // storage layout in view_storage.rs always allocates
+                // (values, anchors, ids) for topk views, and binding them
+                // all keeps the bind-group layout symmetric across topk
+                // variants (scalar vs decay).
+                if spec.topk.is_some() {
+                    writeln!(
+                        out,
+                        "@group(0) @binding({next_binding}) var<storage, read_write> view_{snake}_anchors: array<atomic<u32>>;"
+                    )
+                    .unwrap();
+                    next_binding += 1;
+                    writeln!(
+                        out,
+                        "@group(0) @binding({next_binding}) var<storage, read_write> view_{snake}_ids: array<atomic<u32>>;"
+                    )
+                    .unwrap();
+                    next_binding += 1;
+                }
             }
             (ViewShape::PairMapDecay { rate }, ViewBindingMode::PlainArrays) => {
                 let comment = format!(
@@ -559,6 +595,10 @@ fn emit_view_bindings_for_mode(
                 // ticks. Matches view_storage's PairMapDecay layout.
                 // WGSL requires read_write on atomic storage bindings
                 // (even if we only atomicLoad them).
+                //
+                // Task 198: topk PairMapDecay additionally gets an `ids`
+                // buffer so the scoring kernel can match per-slot stored
+                // AgentIds against the query attacker.
                 let comment = format!(
                     "pair_map<DecayCell> @decay(rate={rate}) storage for `{}` (atomic split-pair mode)",
                     spec.view_name
@@ -577,6 +617,15 @@ fn emit_view_bindings_for_mode(
                 )
                 .unwrap();
                 next_binding += 1;
+                if spec.topk.is_some() {
+                    writeln!(out, "// {comment} — ids (topk slot → AgentId_raw+1, 0=empty)").unwrap();
+                    writeln!(
+                        out,
+                        "@group(0) @binding({next_binding}) var<storage, read_write> view_{snake}_ids: array<atomic<u32>>;"
+                    )
+                    .unwrap();
+                    next_binding += 1;
+                }
             }
             (ViewShape::Lazy, _) => continue,
         }
@@ -610,8 +659,20 @@ fn emit_view_bindings_for_mode(
 ///   * PairMapScalar: `fn view_<snake>_get(a: u32, b: u32) -> f32`
 ///   * PairMapDecay:  `fn view_<snake>_get(a: u32, b: u32, tick: u32) -> f32`
 ///
+/// Task 198: topk views (spec.topk.is_some()) emit a per-row K-slot scan
+/// that matches the stored AgentId against the query attacker, instead
+/// of indexing `observer * N + attacker` into the dense pair layout the
+/// plain-pair path uses. For wildcards the caller dispatches to a
+/// companion `view_<snake>_sum` function (see `emit_atomic_view_sum`)
+/// that walks the same K slots without filtering.
+///
 /// Semantics (bounds + clamp) identical to the plain-array reader.
 fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec) {
+    if let Some(k) = spec.topk {
+        emit_atomic_topk_read(out, spec, k);
+        emit_atomic_topk_sum(out, spec, k);
+        return;
+    }
     let snake = &spec.snake;
     let initial = render_float_wgsl(spec.initial as f64);
     match &spec.shape {
@@ -723,6 +784,179 @@ fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec) {
             // skipped by caller
         }
     }
+}
+
+/// Task 198: emit `view_<snake>_get(observer, attacker, [tick])` for a
+/// topk view. Walks `observer`'s K slots in `view_<snake>_ids`, matches
+/// on `id == attacker + 1u` (empty slot is 0; stored ids are
+/// `AgentId_raw = slot + 1`). Returns `initial` (0.0 on every shipped
+/// view) when the attacker isn't in observer's top-K, matching CPU's
+/// `get` semantics in `crates/engine/src/generated/views/*.rs`.
+fn emit_atomic_topk_read(out: &mut String, spec: &ViewStorageSpec, k: u16) {
+    let snake = &spec.snake;
+    let initial = render_float_wgsl(spec.initial as f64);
+    let is_decay = matches!(spec.shape, ViewShape::PairMapDecay { .. });
+    let rate_lit = match spec.shape {
+        ViewShape::PairMapDecay { rate } => Some(render_float_wgsl(rate as f64)),
+        _ => None,
+    };
+    let sig = if is_decay {
+        format!("fn view_{snake}_get(observer: u32, attacker: u32, tick: u32) -> f32 {{")
+    } else {
+        format!("fn view_{snake}_get(observer: u32, attacker: u32) -> f32 {{")
+    };
+    writeln!(
+        out,
+        "// view `{}` — topk(K={k}) atomic storage (task 196 sparse layout, task 198 reads).",
+        spec.view_name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// Scans observer's K slots for `id == attacker + 1u` (1-based AgentId; 0 = empty)."
+    )
+    .unwrap();
+    writeln!(out, "{sig}").unwrap();
+    writeln!(out, "    let n = cfg.view_agent_cap;").unwrap();
+    writeln!(
+        out,
+        "    if (observer >= n || attacker >= n) {{ return {initial}; }}"
+    )
+    .unwrap();
+    writeln!(out, "    let base = observer * {k}u;").unwrap();
+    writeln!(out, "    let target_id = attacker + 1u;").unwrap();
+    writeln!(out, "    for (var i: u32 = 0u; i < {k}u; i = i + 1u) {{").unwrap();
+    writeln!(out, "        let slot_idx = base + i;").unwrap();
+    writeln!(
+        out,
+        "        if (atomicLoad(&view_{snake}_ids[slot_idx]) != target_id) {{ continue; }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let v_bits = atomicLoad(&view_{snake}_cells[slot_idx]);"
+    )
+    .unwrap();
+    writeln!(out, "        let base_v = bitcast<f32>(v_bits);").unwrap();
+    if let Some(rate) = rate_lit {
+        writeln!(
+            out,
+            "        let anchor = atomicLoad(&view_{snake}_anchors[slot_idx]);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let dt = select(0u, tick - anchor, tick >= anchor);"
+        )
+        .unwrap();
+        // dt=0 short-circuit — matches rewrite_pow_short_circuit on the
+        // dense-decay path. pow(x, 0) isn't bit-exact 1.0 on every
+        // adapter; the select lets freshly-folded cells (anchor==tick)
+        // read back as `value * 1.0 = value` for byte parity with CPU.
+        writeln!(
+            out,
+            "        let decayed = base_v * select(pow({rate}, f32(dt)), 1.0, dt == 0u);"
+        )
+        .unwrap();
+        if let Some((lo, hi)) = spec.clamp {
+            let lo = render_float_wgsl(lo as f64);
+            let hi = render_float_wgsl(hi as f64);
+            writeln!(out, "        return clamp(decayed, {lo}, {hi});").unwrap();
+        } else {
+            writeln!(out, "        return decayed;").unwrap();
+        }
+    } else {
+        // No decay — store-and-return. Non-decay topk views still
+        // clamp on read to match CPU's clamp-on-fold range.
+        if let Some((lo, hi)) = spec.clamp {
+            let lo = render_float_wgsl(lo as f64);
+            let hi = render_float_wgsl(hi as f64);
+            writeln!(out, "        return clamp(base_v, {lo}, {hi});").unwrap();
+        } else {
+            writeln!(out, "        return base_v;").unwrap();
+        }
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    return {initial};").unwrap();
+    writeln!(out, "}}").unwrap();
+}
+
+/// Task 198: emit `view_<snake>_sum(observer, [tick])` — sums the
+/// decayed-and-clamped values of every non-empty slot in observer's
+/// top-K row. Replaces the O(N·K) wildcard loop in `eval_view_call`
+/// (which called `view_<snake>_get(a, t)` for every t in 0..view_agent_cap)
+/// with an O(K) scan, matching `sum_for_first` on the CPU side.
+fn emit_atomic_topk_sum(out: &mut String, spec: &ViewStorageSpec, k: u16) {
+    let snake = &spec.snake;
+    let is_decay = matches!(spec.shape, ViewShape::PairMapDecay { .. });
+    let rate_lit = match spec.shape {
+        ViewShape::PairMapDecay { rate } => Some(render_float_wgsl(rate as f64)),
+        _ => None,
+    };
+    let sig = if is_decay {
+        format!("fn view_{snake}_sum(observer: u32, tick: u32) -> f32 {{")
+    } else {
+        format!("fn view_{snake}_sum(observer: u32) -> f32 {{")
+    };
+    writeln!(
+        out,
+        "// view `{}` — topk(K={k}) wildcard sum. Mirrors CPU `sum_for_first`:",
+        spec.view_name
+    )
+    .unwrap();
+    writeln!(out, "// walks K slots, skips empties (id==0), sums decayed+clamped values.")
+        .unwrap();
+    writeln!(out, "{sig}").unwrap();
+    writeln!(out, "    let n = cfg.view_agent_cap;").unwrap();
+    writeln!(out, "    if (observer >= n) {{ return 0.0; }}").unwrap();
+    writeln!(out, "    let base = observer * {k}u;").unwrap();
+    writeln!(out, "    var total: f32 = 0.0;").unwrap();
+    writeln!(out, "    for (var i: u32 = 0u; i < {k}u; i = i + 1u) {{").unwrap();
+    writeln!(out, "        let slot_idx = base + i;").unwrap();
+    writeln!(
+        out,
+        "        if (atomicLoad(&view_{snake}_ids[slot_idx]) == 0u) {{ continue; }}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let v_bits = atomicLoad(&view_{snake}_cells[slot_idx]);"
+    )
+    .unwrap();
+    writeln!(out, "        let base_v = bitcast<f32>(v_bits);").unwrap();
+    if let Some(rate) = rate_lit {
+        writeln!(
+            out,
+            "        let anchor = atomicLoad(&view_{snake}_anchors[slot_idx]);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let dt = select(0u, tick - anchor, tick >= anchor);"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "        let decayed = base_v * select(pow({rate}, f32(dt)), 1.0, dt == 0u);"
+        )
+        .unwrap();
+        if let Some((lo, hi)) = spec.clamp {
+            let lo = render_float_wgsl(lo as f64);
+            let hi = render_float_wgsl(hi as f64);
+            writeln!(out, "        total = total + clamp(decayed, {lo}, {hi});").unwrap();
+        } else {
+            writeln!(out, "        total = total + decayed;").unwrap();
+        }
+    } else if let Some((lo, hi)) = spec.clamp {
+        let lo = render_float_wgsl(lo as f64);
+        let hi = render_float_wgsl(hi as f64);
+        writeln!(out, "        total = total + clamp(base_v, {lo}, {hi});").unwrap();
+    } else {
+        writeln!(out, "        total = total + base_v;").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    return total;").unwrap();
+    writeln!(out, "}}").unwrap();
 }
 
 #[allow(dead_code)]
@@ -1057,7 +1291,7 @@ fn emit_read_field(out: &mut String) {
     writeln!(out).unwrap();
 }
 
-fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec]) {
+fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec], mode: ViewBindingMode) {
     // Per-VIEW_ID dispatch into the emitted `view_<name>_get` snippets.
     // Each arm resolves the two arg-slot codes from the predicate
     // payload, fans out to the view's read function, and (for
@@ -1121,24 +1355,36 @@ fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec]) {
     for (vid, spec) in &view_by_id {
         let name = &spec.view_name;
         let snake = &spec.snake;
+        // Topk-sparse wildcard sums only work in atomic mode — the
+        // `view_<name>_sum` function references the atomic ids/cells
+        // buffers. Plain mode falls back to the outer t-loop (which
+        // also reads dense cells; it's an already-broken legacy path
+        // post-task 196 for topk views but keeps the WGSL naga-parsable).
+        let is_topk = spec.topk.is_some() && mode == ViewBindingMode::AtomicStorage;
         writeln!(out, "        case {vid}u: {{").unwrap();
         writeln!(out, "            // VIEW `{name}`").unwrap();
         match &spec.shape {
             ViewShape::PairMapScalar => {
                 writeln!(out, "            if (slot1 == ARG_WILDCARD) {{").unwrap();
-                writeln!(out, "                var total: f32 = 0.0;").unwrap();
-                writeln!(
-                    out,
-                    "                for (var t: u32 = 0u; t < cfg.view_agent_cap; t = t + 1u) {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "                    total = total + view_{snake}_get(a, t);"
-                )
-                .unwrap();
-                writeln!(out, "                }}").unwrap();
-                writeln!(out, "                return total;").unwrap();
+                if is_topk {
+                    // Task 198: topk wildcard collapses to an O(K) scan
+                    // inside view_<name>_sum, no outer t-loop.
+                    writeln!(out, "                return view_{snake}_sum(a);").unwrap();
+                } else {
+                    writeln!(out, "                var total: f32 = 0.0;").unwrap();
+                    writeln!(
+                        out,
+                        "                for (var t: u32 = 0u; t < cfg.view_agent_cap; t = t + 1u) {{"
+                    )
+                    .unwrap();
+                    writeln!(
+                        out,
+                        "                    total = total + view_{snake}_get(a, t);"
+                    )
+                    .unwrap();
+                    writeln!(out, "                }}").unwrap();
+                    writeln!(out, "                return total;").unwrap();
+                }
                 writeln!(out, "            }}").unwrap();
                 writeln!(
                     out,
@@ -1154,19 +1400,27 @@ fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec]) {
             }
             ViewShape::PairMapDecay { .. } => {
                 writeln!(out, "            if (slot1 == ARG_WILDCARD) {{").unwrap();
-                writeln!(out, "                var total: f32 = 0.0;").unwrap();
-                writeln!(
-                    out,
-                    "                for (var t: u32 = 0u; t < cfg.view_agent_cap; t = t + 1u) {{"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "                    total = total + view_{snake}_get(a, t, cfg.tick);"
-                )
-                .unwrap();
-                writeln!(out, "                }}").unwrap();
-                writeln!(out, "                return total;").unwrap();
+                if is_topk {
+                    writeln!(
+                        out,
+                        "                return view_{snake}_sum(a, cfg.tick);"
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(out, "                var total: f32 = 0.0;").unwrap();
+                    writeln!(
+                        out,
+                        "                for (var t: u32 = 0u; t < cfg.view_agent_cap; t = t + 1u) {{"
+                    )
+                    .unwrap();
+                    writeln!(
+                        out,
+                        "                    total = total + view_{snake}_get(a, t, cfg.tick);"
+                    )
+                    .unwrap();
+                    writeln!(out, "                }}").unwrap();
+                    writeln!(out, "                return total;").unwrap();
+                }
                 writeln!(out, "            }}").unwrap();
                 writeln!(
                     out,
@@ -1808,5 +2062,35 @@ mod tests {
         assert_eq!(scoring_total_bindings(&specs, false), 7);
         // Atomic: 5 core + 1 scalar + 2 decay (cells+anchors) = 8.
         assert_eq!(scoring_total_bindings(&specs, true), 8);
+    }
+
+    /// Task 198: topk views claim an extra `ids` binding in atomic mode,
+    /// and topk `PairMapScalar` also gains the anchors binding so its
+    /// layout mirrors the topk decay variant (cells, anchors, ids).
+    #[test]
+    fn scoring_total_bindings_counts_topk_ids() {
+        use crate::emit_view_wgsl::{ViewShape, ViewStorageSpec};
+        let topk_scalar = ViewStorageSpec {
+            view_name: "my_enemies".into(),
+            snake: "my_enemies".into(),
+            shape: ViewShape::PairMapScalar,
+            clamp: None,
+            initial: 0.0,
+            folds: vec![],
+            topk: Some(8),
+        };
+        let topk_decay = ViewStorageSpec {
+            view_name: "threat_level".into(),
+            snake: "threat_level".into(),
+            shape: ViewShape::PairMapDecay { rate: 0.98 },
+            clamp: None,
+            initial: 0.0,
+            folds: vec![],
+            topk: Some(8),
+        };
+        // Atomic: 5 core + 3 (topk scalar: cells+anchors+ids)
+        //                + 3 (topk decay: cells+anchors+ids) = 11.
+        let specs = vec![topk_scalar, topk_decay];
+        assert_eq!(scoring_total_bindings(&specs, true), 11);
     }
 }

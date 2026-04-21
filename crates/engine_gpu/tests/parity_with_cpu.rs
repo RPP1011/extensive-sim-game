@@ -758,7 +758,6 @@ fn gpu_scoring_matches_cpu_no_combat_fixture() {
 /// stubbed at 0.0). Task 189 (Phase 6c) wired real view reads, so
 /// this test now hard-asserts byte-exact for every tick.
 #[test]
-#[ignore = "task 196 moved views to per_entity_topk layout; scoring still reads dense indices into topk buffers. re-enable after scoring wiring follow-up."]
 fn gpu_scoring_canonical_fixture_exact() {
     let mut backend = GpuBackend::new().expect("GpuBackend init");
     let mut state = spawn_fixture();
@@ -787,7 +786,6 @@ fn gpu_scoring_canonical_fixture_exact() {
 /// regressions in the upload path's pair_map_scalar handling that
 /// the natural-evolution test would only surface on tick 25+.
 #[test]
-#[ignore = "task 196 moved views to per_entity_topk layout; scoring still reads dense indices into topk buffers. re-enable after scoring wiring follow-up."]
 fn gpu_scoring_with_grudges_byte_exact() {
     use engine::ids::AgentId;
     use engine_gpu::view_storage::FoldInputPair;
@@ -885,7 +883,6 @@ fn gpu_scoring_with_grudges_byte_exact() {
 /// assertion fires. That's the Piece 1 contract: scoring + fold
 /// share the same buffer.
 #[test]
-#[ignore = "task 196 moved views to per_entity_topk layout; scoring still reads dense indices into topk buffers. re-enable after scoring wiring follow-up."]
 fn gpu_scoring_reads_fold_kernel_output_byte_exact() {
     use engine::ids::AgentId;
     use engine_gpu::view_storage::FoldInputPair;
@@ -950,23 +947,38 @@ fn gpu_scoring_reads_fold_kernel_output_byte_exact() {
     // registry's values bit-for-bit. If this fails, the scoring-level
     // assertion below would be ambiguous between "fold diverged" and
     // "scoring read diverged".
-    let gpu_cells = backend
+    //
+    // Task 196: my_enemies migrated to per_entity_topk(K=8), so the GPU
+    // readback is a sparse (ids, values, anchors) triple per observer
+    // rather than a dense N² buffer. We reconstruct the per-pair value
+    // by scanning observer's K slots for the target AgentId, matching
+    // the CPU's `MyEnemies::get(observer, attacker)` semantics (return
+    // `initial=0.0` if not in top-K).
+    let rb = backend
         .view_storage()
-        .readback_pair_scalar(&device, &queue, "my_enemies")
-        .expect("readback my_enemies");
+        .readback_topk(&device, &queue, "my_enemies")
+        .expect("readback_topk my_enemies");
     let n = state.agent_cap() as usize;
     for observer_slot in 0..n {
         let obs = match AgentId::new(observer_slot as u32 + 1) {
             Some(id) => id,
             None => continue,
         };
+        let (ids, vals, _anchors) = rb.row(observer_slot as u32);
         for attacker_slot in 0..n {
             let atk = match AgentId::new(attacker_slot as u32 + 1) {
                 Some(id) => id,
                 None => continue,
             };
             let cpu_v = state.views.my_enemies.get(obs, atk);
-            let gpu_v = gpu_cells[observer_slot * n + attacker_slot];
+            // Topk slot scan: find the slot whose stored id == atk.raw()
+            // (1-based); return 0.0 if absent (matches CPU `get`).
+            let gpu_v = ids
+                .iter()
+                .zip(vals.iter())
+                .find(|(id, _)| **id == atk.raw())
+                .map(|(_, v)| *v)
+                .unwrap_or(0.0);
             assert_eq!(
                 cpu_v.to_bits(), gpu_v.to_bits(),
                 "my_enemies[{observer_slot},{attacker_slot}] CPU={cpu_v} GPU={gpu_v} after GPU fold"
