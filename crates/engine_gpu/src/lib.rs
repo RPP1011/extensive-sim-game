@@ -82,6 +82,13 @@ pub mod spatial_gpu;
 #[cfg(feature = "gpu")]
 pub mod event_ring;
 
+/// Phase 6e — GPU physics kernel (Piece 2 of the cascade megakernel).
+/// Drives task 187's emitted WGSL against the event ring + agent SoA.
+/// Processes one cascade iteration per `run_batch` call — the cascade
+/// loop (Piece 3) drives re-dispatches until the ring stops growing.
+#[cfg(feature = "gpu")]
+pub mod physics;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
