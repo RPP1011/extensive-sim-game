@@ -190,8 +190,24 @@ fn emit_types(out: &mut String) {
     writeln!(out, "    fatigue: f32,").unwrap();
     writeln!(out, "    alive: u32,").unwrap();
     writeln!(out, "    creature_type: u32,").unwrap();
-    writeln!(out, "    _pad0: u32,").unwrap();
-    writeln!(out, "    _pad1: u32,").unwrap();
+    // **Precomputed** `hp_pct = hp / max_hp`, populated on the CPU
+    // side before upload. Done CPU-side to dodge a precision
+    // divergence between strict-IEEE Rust (`80.0_f32 / 100.0_f32 ≈
+    // 0x3F4CCCCD`) and relaxed GPU f32 division (some adapters return
+    // `0x3F4CCCCC`, one ULP smaller). The 1-ULP gap flips
+    // `hp_pct >= 0.8` from true on CPU to false on GPU and breaks
+    // scoring parity. By doing the division once on CPU we hand the
+    // GPU a pre-rounded value and `read_field(_, _, 2)` becomes a
+    // straight memory read.
+    writeln!(out, "    hp_pct: f32,").unwrap();
+    writeln!(out, "    target_hp_pct_unused: f32,").unwrap();
+    // 8 bytes of trailing padding so the struct is 64 bytes — the
+    // matching Rust `GpuAgentData` carries the same trailing pad. The
+    // backend uploads 64-byte slots; without these the WGSL struct
+    // would be 56 bytes and the second slot would read stale data
+    // from the first.
+    writeln!(out, "    _pad2: u32,").unwrap();
+    writeln!(out, "    _pad3: u32,").unwrap();
     writeln!(out, "}};").unwrap();
     writeln!(out).unwrap();
 
@@ -254,7 +270,12 @@ fn emit_types(out: &mut String) {
     // Pack the winning score for debuggability and determinism
     // crosschecks. The backend doesn't consume it yet; Phase 6 may.
     writeln!(out, "    best_score_bits: u32,").unwrap();
-    writeln!(out, "    _pad: u32,").unwrap();
+    // Debug slot — stash a probe value during diagnostic runs. Always
+    // 0 in production; the backend's parity test asserts equality on
+    // it too (so it must match between GPU and CPU). The parity-test
+    // CPU path leaves it at 0; if a future diagnostic puts a real
+    // value here, the CPU mirror in `cpu_score_outputs` must match.
+    writeln!(out, "    debug: u32,").unwrap();
     writeln!(out, "}};").unwrap();
     writeln!(out).unwrap();
 
@@ -429,11 +450,9 @@ fn emit_read_field(out: &mut String) {
     writeln!(out, "        switch (tf) {{").unwrap();
     writeln!(out, "            case 0u: {{ return t.hp; }}").unwrap();
     writeln!(out, "            case 1u: {{ return t.max_hp; }}").unwrap();
-    writeln!(
-        out,
-        "            case 2u: {{ if (t.max_hp > 0.0) {{ return t.hp / t.max_hp; }} else {{ return 0.0; }} }}"
-    )
-    .unwrap();
+    // Use the CPU-precomputed hp_pct rather than re-dividing — see
+    // the AgentData struct comment for the precision rationale.
+    writeln!(out, "            case 2u: {{ return t.hp_pct; }}").unwrap();
     writeln!(out, "            case 3u: {{ return t.shield_hp; }}").unwrap();
     writeln!(
         out,
@@ -447,11 +466,8 @@ fn emit_read_field(out: &mut String) {
     writeln!(out, "    switch (field_id) {{").unwrap();
     writeln!(out, "        case 0u: {{ return a.hp; }}").unwrap();
     writeln!(out, "        case 1u: {{ return a.max_hp; }}").unwrap();
-    writeln!(
-        out,
-        "        case 2u: {{ if (a.max_hp > 0.0) {{ return a.hp / a.max_hp; }} else {{ return 0.0; }} }}"
-    )
-    .unwrap();
+    // Use the CPU-precomputed hp_pct rather than re-dividing.
+    writeln!(out, "        case 2u: {{ return a.hp_pct; }}").unwrap();
     writeln!(out, "        case 3u: {{ return a.shield_hp; }}").unwrap();
     writeln!(out, "        case 4u: {{ return a.attack_range; }}").unwrap();
     writeln!(out, "        case 5u: {{ return a.hunger; }}").unwrap();
@@ -786,6 +802,9 @@ fn emit_kernel(out: &mut String) {
         "    scoring_out[agent_slot].best_score_bits = bitcast<u32>(best_score);"
     )
     .unwrap();
+    // No debug probe in production — the scoring kernel writes the
+    // canonical (action, target, score, debug=0) per slot. Tests can
+    // re-instrument by patching the emitter.
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 

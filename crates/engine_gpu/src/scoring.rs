@@ -97,10 +97,14 @@ pub struct GpuAgentData {
     pub fatigue: f32,
     pub alive: u32,
     pub creature_type: u32,
-    pub _pad0: u32,
-    pub _pad1: u32,
-    // Trailing pad to align to 16. WGSL AgentData sits at 64 bytes; the
-    // 14 fields above total 56, so 2 more padding u32s = 8 bytes = 64.
+    /// Precomputed `hp / max_hp`, populated CPU-side. Read by the
+    /// scoring kernel for `field_id == 2 (hp_pct)` instead of
+    /// recomputing the division on GPU. Avoids a 1-ULP precision
+    /// gap between CPU strict-IEEE and GPU relaxed f32 division
+    /// that flips `hp_pct >= 0.8` from true on CPU to false on GPU.
+    pub hp_pct: f32,
+    /// Reserved — paired with `hp_pct` for symmetry; not yet read.
+    pub target_hp_pct_unused: f32,
     pub _pad2: u32,
     pub _pad3: u32,
 }
@@ -155,7 +159,10 @@ pub struct ScoreOutput {
     /// Bit-pattern of the winning f32 score. Useful for diagnostics —
     /// the backend doesn't consume it yet.
     pub best_score_bits: u32,
-    pub _pad: u32,
+    /// Debug slot — read by diagnostics tests, ignored by production
+    /// callers. The CPU reference leaves it at 0 unless a test wires
+    /// one in.
+    pub debug: u32,
 }
 
 impl Default for ScoreOutput {
@@ -165,7 +172,7 @@ impl Default for ScoreOutput {
             chosen_action: 0,
             chosen_target: NO_TARGET,
             best_score_bits: 0,
-            _pad: 0,
+            debug: 0,
         }
     }
 }
@@ -250,12 +257,15 @@ pub fn pack_agent_data(state: &SimState) -> Vec<GpuAgentData> {
             continue;
         }
         let pos = state.agent_pos(id).unwrap_or(glam::Vec3::ZERO);
+        let hp = state.agent_hp(id).unwrap_or(0.0);
+        let max_hp = state.agent_max_hp(id).unwrap_or(1.0);
+        let hp_pct = if max_hp > 0.0 { hp / max_hp } else { 0.0 };
         out.push(GpuAgentData {
             pos_x: pos.x,
             pos_y: pos.y,
             pos_z: pos.z,
-            hp: state.agent_hp(id).unwrap_or(0.0),
-            max_hp: state.agent_max_hp(id).unwrap_or(1.0),
+            hp,
+            max_hp,
             shield_hp: state.agent_shield_hp(id).unwrap_or(0.0),
             attack_range: state.agent_attack_range(id).unwrap_or(2.0),
             hunger: state.agent_hunger(id).unwrap_or(0.0),
@@ -263,8 +273,8 @@ pub fn pack_agent_data(state: &SimState) -> Vec<GpuAgentData> {
             fatigue: state.agent_rest_timer(id).unwrap_or(0.0),
             alive: 1,
             creature_type: state.agent_creature_type(id).map(|c| c as u32).unwrap_or(u32::MAX),
-            _pad0: 0,
-            _pad1: 0,
+            hp_pct,
+            target_hp_pct_unused: 0.0,
             _pad2: 0,
             _pad3: 0,
         });
@@ -788,7 +798,7 @@ pub fn cpu_score_outputs(state: &SimState) -> Vec<ScoreOutput> {
             chosen_action: action,
             chosen_target: target,
             best_score_bits: score_bits,
-            _pad: 0,
+            debug: 0,
         };
         // Silence unused import warning in minimal builds.
         let _ = std::mem::size_of::<PredicateDescriptor>();
@@ -964,6 +974,46 @@ mod tests {
         assert_eq!(std::mem::size_of::<GpuModifierRow>(), 32);
         // Header (16 bytes) + weights (20) + pad (12) + modifiers (32 × 8 = 256) = 304.
         assert_eq!(std::mem::size_of::<GpuScoringEntry>(), 16 + 20 + 12 + 256);
+    }
+
+    /// `pack_agent_data` writes the wolf's hp/max_hp into the slot
+    /// the WGSL kernel will read. Regression guard: a slot offset of 1
+    /// (id-based instead of slot-based) would put zeros at slot 3.
+    #[test]
+    fn pack_agent_data_wolf_slot_has_hp_and_max_hp() {
+        use engine::creature::CreatureType;
+        use engine::state::{AgentSpawn, SimState};
+        use glam::Vec3;
+        let mut state = SimState::new(8, 0xDEAD_BEEF);
+        for i in 0..3 {
+            state
+                .spawn_agent(AgentSpawn {
+                    creature_type: CreatureType::Human,
+                    pos: Vec3::new(i as f32 * 2.0, 0.0, 0.0),
+                    hp: 100.0,
+                    ..Default::default()
+                })
+                .expect("human spawn");
+        }
+        state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Wolf,
+                pos: Vec3::new(3.0, 0.0, 0.0),
+                hp: 80.0,
+                ..Default::default()
+            })
+            .expect("wolf spawn");
+        let packed = pack_agent_data(&state);
+        assert_eq!(packed.len(), 8, "agent cap");
+        let wolf = packed[3];
+        assert_eq!(wolf.alive, 1, "wolf alive");
+        assert_eq!(wolf.creature_type, CreatureType::Wolf as u32, "wolf ct");
+        assert!((wolf.hp - 80.0).abs() < 1e-6, "wolf hp = {}", wolf.hp);
+        assert!(
+            (wolf.max_hp - 100.0).abs() < 1e-6,
+            "wolf max_hp = {} (expected 100)",
+            wolf.max_hp
+        );
     }
 
     /// The emitted scoring WGSL passes naga's runtime parser — this is

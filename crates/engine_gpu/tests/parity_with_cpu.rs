@@ -41,7 +41,11 @@ use engine::event::{Event, EventRing};
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::SimScratch;
-use engine_gpu::{mask::cpu_mask_bitmap, GpuBackend};
+use engine_gpu::{
+    mask::cpu_mask_bitmap,
+    scoring::{cpu_score_outputs, ScoreOutput, NO_TARGET},
+    GpuBackend,
+};
 use glam::Vec3;
 
 const SEED: u64 = 0xD00D_FACE_0042_0042;
@@ -363,4 +367,226 @@ fn gpu_fused_masks_match_cpu_on_spawn_state() {
         move_toward_cpu[0], expected_alive,
         "CPU MoveToward reference should set every alive slot (all within max_move_radius)"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — scoring parity tests
+// ---------------------------------------------------------------------------
+//
+// Two scoring tests live below. The first one is the byte-exact one
+// (spawn state, view buffers all empty so the GPU's view stub matches
+// CPU's "view returns 0"). The second is a multi-tick best-effort
+// fixture (humans only — no hostile pairs, so no AgentAttacked events
+// land, so view storage stays empty for the whole run).
+//
+// The full canonical 3v2 fixture is intentionally NOT used for scoring
+// parity: as soon as the wolves attack, the CPU's view buffers
+// (threat_level, my_enemies) populate but the GPU stub returns 0,
+// flipping the argmax on Attack/Flee rows that depend on view
+// modifiers. Phase 4 (task 185) wires real view storage; at that
+// point this comment can come down and the canonical fixture joins
+// the scoring parity sweep.
+
+/// Fixture with 4 humans only, spaced inside max_move_radius.
+/// Humans aren't hostile to each other; no `AgentAttacked` events ever
+/// land; views (threat_level / my_enemies / kin_fear / pack_focus /
+/// rally_boost) stay empty for the entire run. That makes the GPU's
+/// view stub (returning 0) byte-equivalent to the CPU's actual view
+/// reads (also 0 because the views are empty), so scoring parity
+/// holds tick-by-tick.
+fn spawn_no_combat_fixture() -> SimState {
+    let mut state = SimState::new(AGENT_CAP, SEED);
+    let positions = [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(8.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 8.0),
+        Vec3::new(8.0, 0.0, 8.0),
+    ];
+    for pos in positions {
+        state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Human,
+                pos,
+                hp: 100.0,
+                ..Default::default()
+            })
+            .expect("human spawn");
+    }
+    state
+}
+
+/// Phase 3 byte-exact test: the GPU scoring kernel produces the same
+/// `(chosen_action, chosen_target)` per agent as the CPU reference on
+/// the canonical 3v2 spawn state. Tick 0 — no combat has occurred,
+/// every view buffer is empty, so the view stub on the GPU side
+/// (returning 0) matches what the CPU's view reads return on an empty
+/// view (also 0). This isolates "kernel correctness on a known state"
+/// from "kernel correctness across the tick-by-tick state evolution".
+#[test]
+fn gpu_scoring_matches_cpu_on_spawn_state() {
+    let mut backend = GpuBackend::new().expect("GpuBackend init");
+    let state = spawn_fixture();
+    let gpu_outs = backend
+        .verify_scoring_on_gpu(&state)
+        .expect("GPU scoring dispatch");
+    let cpu_outs = cpu_score_outputs(&state);
+
+    assert_eq!(
+        gpu_outs.len(),
+        cpu_outs.len(),
+        "scoring output length differs"
+    );
+
+    // Diagnostic: print per-slot summaries before asserting so a fail
+    // shows what diverged at a glance.
+    eprintln!("gpu_scoring_matches_cpu_on_spawn_state: per-slot outputs");
+    for slot in 0..gpu_outs.len() {
+        let gpu = &gpu_outs[slot];
+        let cpu = &cpu_outs[slot];
+        eprintln!(
+            "  slot {slot}: GPU=(action={}, target={}, score={:.4}) CPU=(action={}, target={}, score={:.4}){}",
+            gpu.chosen_action,
+            gpu.chosen_target,
+            f32::from_bits(gpu.best_score_bits),
+            cpu.chosen_action,
+            cpu.chosen_target,
+            f32::from_bits(cpu.best_score_bits),
+            if gpu.chosen_action != cpu.chosen_action || gpu.chosen_target != cpu.chosen_target {
+                "  <-- DIVERGENCE"
+            } else {
+                ""
+            },
+        );
+    }
+
+    // Per-slot equality. We compare on (chosen_action, chosen_target)
+    // and the score's bit-pattern for full-byte parity. Pad bytes are
+    // zero on both sides (GPU initialises to 0 before dispatch; CPU
+    // ScoreOutput::default has _pad: 0).
+    for (slot, (gpu, cpu)) in gpu_outs.iter().zip(cpu_outs.iter()).enumerate() {
+        assert_scoring_eq(slot, gpu, cpu);
+    }
+}
+
+/// Same shape as the byte-exact spawn-state test, but runs through
+/// `TICKS` ticks of a no-combat fixture (4 humans, no wolves). Every
+/// tick the GPU's `(chosen_action, chosen_target)` per agent must
+/// match the CPU reference — view buffers stay empty for the whole
+/// run because no hostile events fire, so the view stub doesn't
+/// poison the argmax.
+#[test]
+fn gpu_scoring_matches_cpu_no_combat_fixture() {
+    let mut backend = GpuBackend::new().expect("GpuBackend init");
+    let mut state = spawn_no_combat_fixture();
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    for tick_i in 0..TICKS {
+        backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+
+        let gpu_outs = backend.last_scoring_outputs();
+        assert!(
+            !gpu_outs.is_empty(),
+            "tick {tick_i}: GpuBackend::last_scoring_outputs empty — kernel dispatch failed?"
+        );
+        assert_eq!(
+            gpu_outs.len(),
+            state.agent_cap() as usize,
+            "tick {tick_i}: scoring output length mismatch"
+        );
+
+        let cpu_outs = cpu_score_outputs(&state);
+        for (slot, (gpu, cpu)) in gpu_outs.iter().zip(cpu_outs.iter()).enumerate() {
+            assert_scoring_eq_with_tick(tick_i, slot, gpu, cpu);
+        }
+    }
+}
+
+/// Best-effort scoring parity on the canonical 3v2 fixture. The
+/// expectation is that for tick 0 (before any combat) the outputs
+/// match byte-exact, but for later ticks the GPU's stubbed view-call
+/// evaluator may diverge from the CPU's real view reads. We assert
+/// only the first tick rigorously and log mismatches for later ticks
+/// to make the divergence boundary visible without failing CI.
+///
+/// Phase 4 (task 185) wires real view storage; at that point this
+/// test can drop the "best effort after tick 0" treatment and assert
+/// byte-exact parity for the full run.
+#[test]
+fn gpu_scoring_canonical_fixture_best_effort() {
+    let mut backend = GpuBackend::new().expect("GpuBackend init");
+    let mut state = spawn_fixture();
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    let mut divergences = 0usize;
+    let mut first_diverging_tick: Option<u32> = None;
+
+    for tick_i in 0..TICKS {
+        backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+        let gpu_outs = backend.last_scoring_outputs();
+        let cpu_outs = cpu_score_outputs(&state);
+        assert_eq!(gpu_outs.len(), cpu_outs.len(), "tick {tick_i}: len");
+
+        let mut tick_diff = 0;
+        for (slot, (gpu, cpu)) in gpu_outs.iter().zip(cpu_outs.iter()).enumerate() {
+            if !scoring_eq(gpu, cpu) {
+                tick_diff += 1;
+                if tick_i == 0 {
+                    // Tick 0 mismatch is a real bug — assert hard.
+                    assert_scoring_eq_with_tick(tick_i, slot, gpu, cpu);
+                }
+            }
+        }
+        if tick_diff > 0 {
+            divergences += tick_diff;
+            if first_diverging_tick.is_none() {
+                first_diverging_tick = Some(tick_i);
+            }
+        }
+    }
+    eprintln!(
+        "gpu_scoring_canonical_fixture_best_effort: {divergences} per-(slot, tick) divergences \
+         across {TICKS} ticks (first at tick {:?}). View storage lands in Phase 4 (task 185); \
+         this number should drop to 0.",
+        first_diverging_tick
+    );
+}
+
+fn scoring_eq(a: &ScoreOutput, b: &ScoreOutput) -> bool {
+    a.chosen_action == b.chosen_action
+        && a.chosen_target == b.chosen_target
+        && a.best_score_bits == b.best_score_bits
+}
+
+fn assert_scoring_eq(slot: usize, gpu: &ScoreOutput, cpu: &ScoreOutput) {
+    assert_scoring_eq_with_tick(u32::MAX, slot, gpu, cpu);
+}
+
+fn assert_scoring_eq_with_tick(tick: u32, slot: usize, gpu: &ScoreOutput, cpu: &ScoreOutput) {
+    let tick_str = if tick == u32::MAX {
+        "spawn".to_string()
+    } else {
+        format!("tick {tick}")
+    };
+    assert_eq!(
+        gpu.chosen_action, cpu.chosen_action,
+        "{tick_str} slot {slot}: chosen_action GPU={} CPU={}",
+        gpu.chosen_action, cpu.chosen_action
+    );
+    assert_eq!(
+        gpu.chosen_target, cpu.chosen_target,
+        "{tick_str} slot {slot}: chosen_target GPU={} CPU={} (NO_TARGET={NO_TARGET})",
+        gpu.chosen_target, cpu.chosen_target,
+    );
+    if gpu.best_score_bits != cpu.best_score_bits {
+        let gpu_score = f32::from_bits(gpu.best_score_bits);
+        let cpu_score = f32::from_bits(cpu.best_score_bits);
+        panic!(
+            "{tick_str} slot {slot}: best_score_bits GPU=0x{:08x} ({gpu_score}) CPU=0x{:08x} ({cpu_score})",
+            gpu.best_score_bits, cpu.best_score_bits,
+        );
+    }
 }
