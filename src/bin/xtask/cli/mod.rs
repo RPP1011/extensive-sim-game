@@ -122,6 +122,31 @@ pub struct ChronicleArgs {
     /// error and exits rather than silently falling back.
     #[arg(long)]
     pub gpu: bool,
+    /// Perf sweep mode — measure CPU vs GPU `step()` wall-clock across a
+    /// fixed set of agent counts (N = 8, 32, 128, 512, 2048, optionally
+    /// 8192) and emit a comparison table. Task #194 / Phase 8 of the GPU
+    /// megakernel plan. Each N spawns a scaled humans/wolves/deer fixture
+    /// at the requested density, runs 2 warmup ticks, then times T ticks
+    /// (default 200) on each backend. Requires `--features gpu` — prints
+    /// a clear error and exits on CPU-only builds. Mutually exclusive
+    /// with `--bench` / `--sweep` (distinct timing shapes). Intended to
+    /// be run under `--release`.
+    #[arg(long)]
+    pub perf_sweep: bool,
+    /// How many timed ticks per N in the `--perf-sweep` pass. Default
+    /// 200: long enough to amortise one-shot first-tick dispatches, short
+    /// enough that an N=2048 GPU sweep finishes in under a few minutes.
+    /// Ignored outside `--perf-sweep`.
+    #[arg(long, default_value_t = 200)]
+    pub perf_ticks: u32,
+    /// Cap on which N values the `--perf-sweep` pass probes. Useful for
+    /// quick dev loops: `--perf-max-n 128` runs 8/32/128 only. Defaults
+    /// to 2048 — the largest N that reliably fits the current wgpu view
+    /// storage layout. `--perf-max-n 8192` enables the ambitious tier
+    /// (which may OOM on smaller GPUs — that failure is data). Ignored
+    /// outside `--perf-sweep`.
+    #[arg(long, default_value_t = 2048)]
+    pub perf_max_n: u32,
 }
 
 #[derive(Debug, Parser)]

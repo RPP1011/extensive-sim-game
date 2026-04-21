@@ -95,6 +95,32 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
         return run_bench(&mut stdout);
     }
 
+    // Perf sweep mode (task #194 / Phase 8): CPU vs GPU wall-clock across
+    // a scaled N ladder. Orthogonal to `--bench` (different shape —
+    // per-tick measurement, not per-fixture throughput) and `--sweep`
+    // (balance analysis, not perf). Gated on the `gpu` feature so the
+    // CPU-only build doesn't silently produce a half-answer.
+    if args.perf_sweep {
+        if args.bench || args.sweep.is_some() || args.csv.is_some() {
+            eprintln!("chronicle: --perf-sweep is mutually exclusive with --bench/--sweep/--csv");
+            return ExitCode::FAILURE;
+        }
+        #[cfg(feature = "gpu")]
+        {
+            let mut stdout = std::io::stdout().lock();
+            return run_perf_sweep(&mut stdout, args.perf_ticks, args.perf_max_n);
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            eprintln!(
+                "chronicle: --perf-sweep requires a build with the `gpu` feature \
+                 (rebuild with `cargo run --bin xtask --release --features gpu -- \
+                 chronicle --perf-sweep`)"
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+
     // Sweep mode short-circuits seed resolution: it has its own base-seed
     // knob and always runs a showcase fixture (`--fixture` picks which
     // preset). `--sweep 0` is a no-op that we surface as an error so
@@ -1103,6 +1129,460 @@ fn run_bench<W: std::io::Write>(out: &mut W) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+// ---------------------------------------------------------------------------
+// Perf sweep (task #194 / Phase 8)
+// ---------------------------------------------------------------------------
+//
+// Wall-clock per-tick timing of CpuBackend vs GpuBackend across a scaled N
+// ladder. The fixture shape mirrors the showcase's 2:2:1 humans:wolves:deer
+// ratio but scales to arbitrary N. Positions are deterministic per seed via
+// `SpawnRng` (xorshift64*), with cluster centres stretched outward at
+// higher N so the layout stays sparse enough that per-tick behaviour isn't
+// completely dominated by flee/engage fan-out on top of each other.
+//
+// At each N we:
+//   1. Spawn a fresh `SimState` and scratch/events/cascade.
+//   2. Run 2 warmup ticks on each backend (GPU's first tick pays for the
+//      cascade-ctx init + WGSL compile; dropping it from the timed window
+//      gives us steady-state numbers).
+//   3. Run `ticks` timed ticks, recording per-tick wall-clock (ns).
+//   4. Collect event counts + cascade iteration counts so the report can
+//      show "events per tick" as a scale check.
+//
+// The N ladder is fixed — 8/32/128/512/2048, plus 8192 if `--perf-max-n
+// 8192` is passed. 8192 is the "try it, see what blows up" tier; at that
+// scale each pair_map view is ~256 MB, total view storage is ~1 GB, and
+// most consumer GPUs will OOM. The sweep records the failure mode rather
+// than panicking.
+
+/// Fixed N ladder the perf sweep probes, in ascending order. Capped at
+/// `--perf-max-n` by the caller — everything above the cap is skipped with
+/// a logged reason.
+const PERF_SWEEP_N: &[u32] = &[8, 32, 128, 512, 2048, 8192];
+
+/// Warmup ticks per N. GPU's first tick pays for lazy cascade init
+/// (DSL parse + WGSL compile). A second warmup tick covers any pipeline
+/// hazard in the scoring sidecar's first dispatch.
+const PERF_WARMUP_TICKS: u32 = 2;
+
+/// Base seed shared across every sweep N. Same seed ⇒ same spawn jitter
+/// for any given N, so the sweep is reproducible.
+const PERF_SWEEP_SEED: u64 = 0xC0FFEE_B001_BABE_42;
+
+/// Events-per-tick ceiling the event ring can hold before `push` starts
+/// evicting. The CPU path silently rotates; the GPU path's cascade event
+/// ring is capacity 4096 per iteration. We log when either is close.
+const EVENT_RING_SOFT_CAP: usize = EVENT_RING_CAP;
+
+/// Scaled cluster spec for the perf sweep. Unlike the showcase fixture's
+/// frozen base arrays, we generate base positions procedurally so N can
+/// scale without hand-authoring 2048 positions.
+#[derive(Clone, Copy)]
+struct PerfSpecies {
+    creature: CreatureType,
+    hp: f32,
+    /// Fraction of total N to allocate to this species. Summed across
+    /// species should equal 1.0 (rounding leftovers land on the last
+    /// species). We use 0.4/0.4/0.2 to match the showcase's 8:8:4 ratio.
+    fraction: f32,
+    /// Cluster centre in world units. Humans SE, wolves NW, deer middle —
+    /// matches the showcase's quadrant layout so dynamics stay comparable.
+    cluster_centre: (f32, f32),
+    /// Short label for diagnostics if a spawn fails.
+    label: &'static str,
+}
+
+const PERF_SPECIES: &[PerfSpecies] = &[
+    PerfSpecies {
+        creature: CreatureType::Human,
+        hp: 100.0,
+        fraction: 0.4,
+        cluster_centre: (12.0, 12.0),
+        label: "human",
+    },
+    PerfSpecies {
+        creature: CreatureType::Wolf,
+        hp: 80.0,
+        fraction: 0.4,
+        cluster_centre: (-12.0, -12.0),
+        label: "wolf",
+    },
+    PerfSpecies {
+        creature: CreatureType::Deer,
+        hp: 60.0,
+        fraction: 0.2,
+        cluster_centre: (0.0, 0.0),
+        label: "deer",
+    },
+];
+
+/// Spawn a scaled fixture with `n` agents total. Split into
+/// 40%/40%/20% humans/wolves/deer, with any rounding leftover folded
+/// into the last species so the total is exactly `n`. Positions follow
+/// the showcase's clustered layout (humans SE, wolves NW, deer centre),
+/// but each cluster's radius grows with √count so density stays roughly
+/// constant — keeps per-tick combat dynamics in a similar regime across
+/// the sweep rather than flipping from sparse duels to 2048-agent
+/// omnidirectional brawls.
+///
+/// Returns the fresh state + the per-species counts so the renderer can
+/// show the actual composition (not just `n`).
+fn spawn_perf_fixture(n: u32, seed: u64) -> (SimState, SpawnCounts) {
+    // Agent cap = n (tight; the sweep never spawns beyond the initial
+    // set). `SimState::new` builds the SoA at exactly this cap.
+    let mut state = SimState::new(n, seed);
+    let mut rng = SpawnRng::new(seed);
+
+    // Cluster radius grows with sqrt(count) so agents don't overlap at
+    // large N. At N=8 (0.4 * 8 ≈ 3 per cluster) radius ≈ 3 m; at
+    // N=2048 (~820 per cluster) it's ≈ 45 m — still well below the
+    // 12 m kin / 2 m engagement radii interacting in overlapping ways.
+    // Note: scales with *per-species count*, not total N, so the deer
+    // stay in a smaller cluster than the humans/wolves.
+    let cluster_radius = |count: u32| -> f32 {
+        // Tuned so spawn density stays roughly 1 agent / 8 m² — matches
+        // the showcase's 8 agents in ~6×6 quadrant. Square-root because
+        // per-cluster area is O(count).
+        ((count as f32) * 8.0).sqrt().max(3.0)
+    };
+
+    let mut counts = SpawnCounts::default();
+    let mut assigned = 0u32;
+    for (i, sp) in PERF_SPECIES.iter().enumerate() {
+        let take = if i == PERF_SPECIES.len() - 1 {
+            // Last species soaks rounding leftovers so the total == n.
+            n - assigned
+        } else {
+            ((n as f32) * sp.fraction).round() as u32
+        };
+        assigned += take;
+        let r = cluster_radius(take);
+        for agent_idx in 0..take {
+            // Deterministic position: uniform within a disc via
+            // rejection-free polar — sqrt(uniform) radius for uniform
+            // area density. `SpawnRng::jitter` returns values in
+            // [-amp, amp]; we turn the first draw into a [0, 1) radial
+            // fraction and the second into an angle.
+            let rad_frac = (rng.jitter(1.0) + 1.0) * 0.5; // [0, 1)
+            let rad = r * rad_frac.sqrt();
+            let ang_unit = (rng.jitter(1.0) + 1.0) * 0.5; // [0, 1)
+            let theta = ang_unit * std::f32::consts::TAU;
+            let (cx, cz) = sp.cluster_centre;
+            let pos = Vec3::new(cx + rad * theta.cos(), 0.0, cz + rad * theta.sin());
+            state
+                .spawn_agent(AgentSpawn {
+                    creature_type: sp.creature,
+                    pos,
+                    hp: sp.hp,
+                    max_hp: sp.hp,
+                })
+                .unwrap_or_else(|| panic!("perf sweep: {} {} spawn at N={}", sp.label, agent_idx, n));
+        }
+        match sp.creature {
+            CreatureType::Human => counts.humans = take,
+            CreatureType::Wolf => counts.wolves = take,
+            CreatureType::Deer => counts.deer = take,
+            _ => {}
+        }
+    }
+    debug_assert_eq!(assigned, n);
+    (state, counts)
+}
+
+/// One row in the final sweep table. `gpu_*` fields are `None` when the
+/// GPU path failed at this N (init error, view storage OOM, cascade
+/// overflow); the renderer shows "FAIL" in place of a number.
+#[derive(Debug, Default, Clone)]
+struct PerfRow {
+    n: u32,
+    counts: SpawnCounts,
+    /// Wall-clock per-tick summary on the CPU backend.
+    cpu_ns_mean: Option<u128>,
+    cpu_ns_median: Option<u128>,
+    cpu_ns_p95: Option<u128>,
+    /// Wall-clock per-tick summary on the GPU backend.
+    gpu_ns_mean: Option<u128>,
+    gpu_ns_median: Option<u128>,
+    gpu_ns_p95: Option<u128>,
+    /// Events per tick — median across the timed sample. Useful to spot
+    /// event-ring overflow and to sanity-check that scaling the fixture
+    /// actually adds meaningful work per tick.
+    events_per_tick: Option<f64>,
+    /// GPU cascade iterations per tick — mean across the timed sample.
+    /// Higher = more re-dispatch overhead in the GPU path.
+    cascade_iters_mean: Option<f64>,
+    /// If the GPU path failed at this N, why.
+    gpu_error: Option<String>,
+}
+
+#[cfg(feature = "gpu")]
+fn time_cpu_sweep(n: u32, ticks: u32, seed: u64) -> (Vec<u128>, u64) {
+    let (mut state, _) = spawn_perf_fixture(n, seed);
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_SOFT_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut backend = engine::backend::CpuBackend;
+    use engine::backend::SimBackend as _;
+
+    // Warmup.
+    for _ in 0..PERF_WARMUP_TICKS {
+        backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+    }
+    let events_before = events.total_pushed();
+
+    let mut per_tick = Vec::with_capacity(ticks as usize);
+    for _ in 0..ticks {
+        let t0 = std::time::Instant::now();
+        backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+        per_tick.push(t0.elapsed().as_nanos());
+    }
+    let events_after = events.total_pushed();
+    let total_events = (events_after - events_before) as u64;
+    (per_tick, total_events)
+}
+
+/// Result of a single GPU sweep run. The `Option`s allow `time_gpu_sweep`
+/// to report partial-failure telemetry (e.g. GPU init succeeded but a
+/// particular tick's cascade overflowed).
+#[cfg(feature = "gpu")]
+struct GpuSweepResult {
+    per_tick_ns: Vec<u128>,
+    total_events: u64,
+    cascade_iters_sum: u64,
+    cascade_iters_samples: u32,
+}
+
+#[cfg(feature = "gpu")]
+fn time_gpu_sweep(n: u32, ticks: u32, seed: u64) -> Result<GpuSweepResult, String> {
+    use engine::backend::SimBackend as _;
+
+    let mut backend = engine_gpu::GpuBackend::new().map_err(|e| format!("init: {e}"))?;
+    // Pre-size view storage to N up front so we don't eat an O(N²) GPU
+    // alloc inside the first timed tick. If this fails, report rather
+    // than panic.
+    backend
+        .rebuild_view_storage(n)
+        .map_err(|e| format!("view_storage resize to N={n}: {e}"))?;
+
+    let (mut state, _) = spawn_perf_fixture(n, seed);
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_SOFT_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    // Warmup — pays for lazy cascade init on the first step.
+    for _ in 0..PERF_WARMUP_TICKS {
+        backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+        if let Some(err) = backend.last_cascade_error() {
+            return Err(format!("warmup cascade error: {err}"));
+        }
+    }
+    let events_before = events.total_pushed();
+
+    let mut per_tick = Vec::with_capacity(ticks as usize);
+    let mut cascade_iters_sum: u64 = 0;
+    let mut cascade_iters_samples: u32 = 0;
+    for _ in 0..ticks {
+        let t0 = std::time::Instant::now();
+        backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+        per_tick.push(t0.elapsed().as_nanos());
+        if let Some(iters) = backend.last_cascade_iterations() {
+            cascade_iters_sum += iters as u64;
+            cascade_iters_samples += 1;
+        }
+    }
+    let events_after = events.total_pushed();
+    let total_events = (events_after - events_before) as u64;
+    Ok(GpuSweepResult {
+        per_tick_ns: per_tick,
+        total_events,
+        cascade_iters_sum,
+        cascade_iters_samples,
+    })
+}
+
+/// Percentile + mean helper on an unsorted slice. Returns `(mean, median,
+/// p95)` in ns. Mean is computed on the raw slice (order-independent);
+/// median/p95 sort a copy.
+fn summarize_ns(samples: &[u128]) -> Option<(u128, u128, u128)> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut sorted: Vec<u128> = samples.to_vec();
+    sorted.sort_unstable();
+    let mean = samples.iter().sum::<u128>() / samples.len() as u128;
+    let median = linear_interp_percentile_u128(&sorted, 0.5);
+    let p95 = linear_interp_percentile_u128(&sorted, 0.95);
+    Some((mean, median, p95))
+}
+
+#[cfg(feature = "gpu")]
+fn run_perf_sweep<W: std::io::Write>(
+    out: &mut W,
+    ticks: u32,
+    max_n: u32,
+) -> ExitCode {
+    writeln!(out, "=== GPU Megakernel Phase 8 — Perf Sweep ===").ok();
+    let build_mode = if cfg!(debug_assertions) { "DEBUG" } else { "release" };
+    writeln!(
+        out,
+        "Rust: {} build, {} warmup + {} timed ticks per N, seed=0x{:016X}",
+        build_mode, PERF_WARMUP_TICKS, ticks, PERF_SWEEP_SEED,
+    )
+    .ok();
+    if cfg!(debug_assertions) {
+        writeln!(out).ok();
+        writeln!(
+            out,
+            "!! WARNING: perf-sweep in debug mode; timings are 10-50× slower than release.",
+        )
+        .ok();
+        writeln!(
+            out,
+            "!!          Rerun with `cargo run --bin xtask --release --features gpu -- \
+             chronicle --perf-sweep`.",
+        )
+        .ok();
+    }
+    writeln!(out).ok();
+
+    let mut rows: Vec<PerfRow> = Vec::new();
+    for &n in PERF_SWEEP_N {
+        if n > max_n {
+            eprintln!("perf-sweep: skipping N={n} (> --perf-max-n {max_n})");
+            continue;
+        }
+        eprint!("perf-sweep: N={n}... ");
+        let _ = std::io::stderr().flush();
+
+        let (_, counts) = spawn_perf_fixture(n, PERF_SWEEP_SEED);
+        let (cpu_ns, cpu_events) = time_cpu_sweep(n, ticks, PERF_SWEEP_SEED);
+        let gpu = time_gpu_sweep(n, ticks, PERF_SWEEP_SEED);
+
+        let mut row = PerfRow {
+            n,
+            counts,
+            ..Default::default()
+        };
+        if let Some((mean, median, p95)) = summarize_ns(&cpu_ns) {
+            row.cpu_ns_mean = Some(mean);
+            row.cpu_ns_median = Some(median);
+            row.cpu_ns_p95 = Some(p95);
+        }
+        // Events/tick is the CPU measurement — CPU is authoritative, and
+        // the GPU path should (modulo float drift / non-commutative
+        // fold) produce the same event stream at small N.
+        row.events_per_tick = Some((cpu_events as f64) / (ticks as f64));
+
+        match gpu {
+            Ok(g) => {
+                if let Some((mean, median, p95)) = summarize_ns(&g.per_tick_ns) {
+                    row.gpu_ns_mean = Some(mean);
+                    row.gpu_ns_median = Some(median);
+                    row.gpu_ns_p95 = Some(p95);
+                }
+                if g.cascade_iters_samples > 0 {
+                    row.cascade_iters_mean = Some(
+                        (g.cascade_iters_sum as f64) / (g.cascade_iters_samples as f64),
+                    );
+                }
+                // Cross-check GPU events — if substantially different
+                // from CPU, log it (float drift at large N is expected).
+                let gpu_events = g.total_events;
+                if gpu_events != cpu_events {
+                    eprintln!(
+                        "\nperf-sweep: N={n} event-count drift: CPU={} GPU={} (float / fold order at scale — not a bug)",
+                        cpu_events, gpu_events,
+                    );
+                }
+                eprintln!("done (CPU {:.1} µs/tick, GPU {:.1} µs/tick)",
+                    row.cpu_ns_median.unwrap_or(0) as f64 / 1_000.0,
+                    row.gpu_ns_median.unwrap_or(0) as f64 / 1_000.0);
+            }
+            Err(e) => {
+                row.gpu_error = Some(e.clone());
+                eprintln!("GPU FAIL: {e}");
+            }
+        }
+
+        rows.push(row);
+    }
+
+    render_perf_table(out, &rows).ok();
+    ExitCode::SUCCESS
+}
+
+#[cfg(feature = "gpu")]
+fn render_perf_table<W: std::io::Write>(
+    out: &mut W,
+    rows: &[PerfRow],
+) -> std::io::Result<()> {
+    writeln!(out)?;
+    writeln!(
+        out,
+        "| {:>5} | {:>13} | {:>13} | {:>8} | {:>12} | {:>13} | {}",
+        "N", "CPU µs/tick", "GPU µs/tick", "ratio", "events/tick", "cascade_iters", "status",
+    )?;
+    writeln!(
+        out,
+        "|-------|---------------|---------------|----------|--------------|---------------|{}",
+        "-".repeat(8),
+    )?;
+    for r in rows {
+        let cpu_us = r
+            .cpu_ns_median
+            .map(|ns| format!("{:.2}", ns as f64 / 1_000.0))
+            .unwrap_or_else(|| "—".to_string());
+        let gpu_us = r
+            .gpu_ns_median
+            .map(|ns| format!("{:.2}", ns as f64 / 1_000.0))
+            .unwrap_or_else(|| "FAIL".to_string());
+        let ratio = match (r.cpu_ns_median, r.gpu_ns_median) {
+            (Some(c), Some(g)) if c > 0 => format!("{:.3}×", (g as f64) / (c as f64)),
+            _ => "—".to_string(),
+        };
+        let evs = r
+            .events_per_tick
+            .map(|v| format!("{:.1}", v))
+            .unwrap_or_else(|| "—".to_string());
+        let iters = r
+            .cascade_iters_mean
+            .map(|v| format!("{:.2}", v))
+            .unwrap_or_else(|| "—".to_string());
+        let status = if r.gpu_error.is_some() {
+            "GPU FAIL"
+        } else if let Some(ept) = r.events_per_tick {
+            if ept * r.n as f64 > EVENT_RING_SOFT_CAP as f64 * 0.75 {
+                "near ring cap"
+            } else {
+                "ok"
+            }
+        } else {
+            "ok"
+        };
+        writeln!(
+            out,
+            "| {:>5} | {:>13} | {:>13} | {:>8} | {:>12} | {:>13} | {}",
+            r.n, cpu_us, gpu_us, ratio, evs, iters, status,
+        )?;
+    }
+    writeln!(out)?;
+    for r in rows {
+        if let Some(ref e) = r.gpu_error {
+            writeln!(out, "N={} GPU failure: {}", r.n, e)?;
+        }
+    }
+    // Fixture composition footer.
+    writeln!(out, "Composition per N (humans/wolves/deer, 2:2:1):")?;
+    for r in rows {
+        writeln!(
+            out,
+            "  N={:>5}: {} humans, {} wolves, {} deer",
+            r.n, r.counts.humans, r.counts.wolves, r.counts.deer,
+        )?;
+    }
+    Ok(())
+}
+
 fn simulate(state: &mut SimState, ticks: u32) -> EventRing {
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(EVENT_RING_CAP);
@@ -1555,6 +2035,9 @@ mod tests {
             fixture: "showcase".to_string(),
             bench: false,
             gpu: false,
+            perf_sweep: false,
+            perf_ticks: 200,
+            perf_max_n: 2048,
         }
     }
 
@@ -2220,5 +2703,63 @@ mod tests {
         assert_eq!(format_tps(100.0), "100.0");
         // 1000 is the threshold where a comma appears.
         assert_eq!(format_tps(1000.0), "1,000.0");
+    }
+
+    #[test]
+    fn perf_fixture_has_requested_agent_count() {
+        // Task #194: scaled fixture must produce exactly N agents split
+        // across the 2:2:1 ratio, with rounding absorbed by the last
+        // species (deer). Deterministic per seed — same (N, seed) pair
+        // yields the same composition every time.
+        for &n in &[8u32, 32, 128, 512, 2048] {
+            let (state, counts) = spawn_perf_fixture(n, PERF_SWEEP_SEED);
+            // Alive after spawn (before any ticks) — every agent slot
+            // populated, no deaths yet.
+            let alive = alive_by_type(&state);
+            assert_eq!(
+                counts.humans + counts.wolves + counts.deer,
+                n,
+                "total count mismatch at N={n}",
+            );
+            assert_eq!(
+                alive.humans + alive.wolves + alive.deer,
+                n,
+                "alive count mismatch at N={n}",
+            );
+            // 2:2:1 ratio — humans and wolves get equal shares, deer
+            // gets (roughly) half. Exact counts land at round(0.4*N),
+            // round(0.4*N), and whatever's left.
+            let expected_h = ((n as f32) * 0.4).round() as u32;
+            let expected_w = ((n as f32) * 0.4).round() as u32;
+            let expected_d = n - expected_h - expected_w;
+            assert_eq!(counts.humans, expected_h, "humans at N={n}");
+            assert_eq!(counts.wolves, expected_w, "wolves at N={n}");
+            assert_eq!(counts.deer, expected_d, "deer at N={n}");
+        }
+    }
+
+    #[test]
+    fn perf_fixture_is_deterministic() {
+        // Same seed + same N ⇒ byte-identical state. Spawn positions
+        // come from the xorshift64* RNG, so any drift here would break
+        // the sweep's run-to-run comparability.
+        let (s1, c1) = spawn_perf_fixture(128, PERF_SWEEP_SEED);
+        let (s2, c2) = spawn_perf_fixture(128, PERF_SWEEP_SEED);
+        assert_eq!(c1.humans, c2.humans);
+        assert_eq!(c1.wolves, c2.wolves);
+        assert_eq!(c1.deer, c2.deer);
+        // Spot-check a couple of positions via the public agent
+        // accessor — full-state equality would require exposing private
+        // SoA fields, and position match is what actually matters for
+        // determinism (cluster layout, first engagement tick, etc.).
+        for id in s1.agents_alive() {
+            let p1 = s1.agent_pos(id).expect("pos 1");
+            let p2 = s2.agent_pos(id).expect("pos 2");
+            assert_eq!(
+                p1.to_array(),
+                p2.to_array(),
+                "pos differs for agent {id:?}",
+            );
+        }
     }
 }
