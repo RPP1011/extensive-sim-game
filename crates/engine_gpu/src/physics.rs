@@ -914,6 +914,18 @@ struct BufferPool {
     events_in_buf: wgpu::Buffer,
     events_in_capacity: u32,
     cfg_buf: wgpu::Buffer,
+    /// Persistent staging for the event-ring tail readback. Phase 9
+    /// (task 195): sized once at init to avoid per-tick buffer alloc.
+    drain_tail_staging: wgpu::Buffer,
+    /// Persistent staging for the event-ring records readback. Phase 9
+    /// (task 195): sized to the ring's capacity at init so each drain
+    /// reuses the same staging rather than allocating 2.6 MB of
+    /// throwaway readback per cascade iteration.
+    drain_records_staging: wgpu::Buffer,
+    /// Ring capacity the drain staging was sized for. Validated by
+    /// `drain_raw_records_pooled` so a ring resize doesn't silently
+    /// read partial records.
+    drain_ring_capacity: u32,
 }
 
 impl PhysicsKernel {
@@ -1109,6 +1121,25 @@ impl PhysicsKernel {
             mapped_at_creation: false,
         });
 
+        // Phase 9 (task 195): persistent drain staging. Previously
+        // allocated per-drain, which at MAX_CASCADE_ITERATIONS=8 iterations
+        // meant 8 fresh 2.6 MB buffers + 8 × 4 B tail buffers per tick.
+        let ring_cap = self.event_ring_capacity.max(1);
+        let drain_records_bytes =
+            (ring_cap as u64) * (std::mem::size_of::<EventRecord>() as u64);
+        let drain_tail_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::physics::drain_tail_staging"),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let drain_records_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::physics::drain_records_staging"),
+            size: drain_records_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         self.pool = Some(BufferPool {
             agent_cap: want_agent_cap,
             agents_buf,
@@ -1122,6 +1153,9 @@ impl PhysicsKernel {
             events_in_buf,
             events_in_capacity: want_events_cap,
             cfg_buf,
+            drain_tail_staging,
+            drain_records_staging,
+            drain_ring_capacity: ring_cap,
         });
     }
 
@@ -1286,7 +1320,10 @@ impl PhysicsKernel {
             ],
         });
 
-        // Dispatch.
+        // Phase 9 (task 195): encode physics dispatch + agents readback
+        // copy + event-ring (tail + records) readback copy into ONE
+        // command encoder so we submit + wait once per cascade iteration
+        // rather than three times.
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("engine_gpu::physics::enc"),
         });
@@ -1308,147 +1345,121 @@ impl PhysicsKernel {
             0,
             (agent_cap as u64) * (std::mem::size_of::<GpuAgentSlot>() as u64),
         );
+        // Readback event-ring tail + records into the POOLED staging
+        // (allocated once at pool init). Capacity is the ring's
+        // capacity, so we always copy the full buffer; the drain logic
+        // reads only `[0, tail_raw)`.
+        if pool.drain_ring_capacity < self.event_ring_capacity {
+            return Err(PhysicsError::Dispatch(format!(
+                "drain staging sized for {} records but ring capacity is {}",
+                pool.drain_ring_capacity, self.event_ring_capacity,
+            )));
+        }
+        let ring_cap = self.event_ring_capacity;
+        let ring_bytes = (ring_cap as u64) * (std::mem::size_of::<EventRecord>() as u64);
+        encoder.copy_buffer_to_buffer(
+            self.event_ring.tail_buffer(),
+            0,
+            &pool.drain_tail_staging,
+            0,
+            4,
+        );
+        encoder.copy_buffer_to_buffer(
+            self.event_ring.records_buffer(),
+            0,
+            &pool.drain_records_staging,
+            0,
+            ring_bytes,
+        );
         queue.submit(Some(encoder.finish()));
 
-        // Drain the event ring into a Vec<EventRecord>. We want the raw
-        // records, not the (sorted + unpacked) Event instances — the
-        // cascade driver re-feeds them as events_in for the next
-        // iteration. Unlike `GpuEventRing::drain`, we don't push into an
-        // EventRing yet.
-        let events_out = drain_raw_records(&self.event_ring, device, queue)?;
-
-        // Readback agents.
-        let slice = pool.agents_readback.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
+        // Issue all three map_async calls up front, then poll ONCE.
+        // Three separate poll calls would serialise the waits; GPU can
+        // finish all copies in parallel and the driver can wake all
+        // three callbacks during a single poll.
+        let agents_slice = pool.agents_readback.slice(..);
+        let (agents_tx, agents_rx) = std::sync::mpsc::channel();
+        agents_slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = agents_tx.send(r);
+        });
+        let tail_slice = pool.drain_tail_staging.slice(..);
+        let (tail_tx, tail_rx) = std::sync::mpsc::channel();
+        tail_slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tail_tx.send(r);
+        });
+        let records_slice = pool.drain_records_staging.slice(..);
+        let (records_tx, records_rx) = std::sync::mpsc::channel();
+        records_slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = records_tx.send(r);
         });
         let _ = device.poll(wgpu::PollType::Wait);
-        let map_result = rx
-            .recv()
-            .map_err(|e| PhysicsError::Dispatch(format!("agents readback channel closed: {e}")))?;
-        map_result.map_err(|e| PhysicsError::Dispatch(format!("agents map_async: {e:?}")))?;
-        let data = slice.get_mapped_range();
+
+        // Collect agents.
+        let agents_result = agents_rx.recv().map_err(|e| {
+            PhysicsError::Dispatch(format!("agents readback channel closed: {e}"))
+        })?;
+        agents_result
+            .map_err(|e| PhysicsError::Dispatch(format!("agents map_async: {e:?}")))?;
+        let data = agents_slice.get_mapped_range();
         let agent_slots_out: Vec<GpuAgentSlot> = bytemuck::cast_slice(&data).to_vec();
         drop(data);
         pool.agents_readback.unmap();
 
+        // Collect tail.
+        let tail_result = tail_rx
+            .recv()
+            .map_err(|e| PhysicsError::Dispatch(format!("tail map channel closed: {e}")))?;
+        tail_result.map_err(|e| PhysicsError::Dispatch(format!("tail map: {e:?}")))?;
+        let data = tail_slice.get_mapped_range();
+        let mut tb = [0u8; 4];
+        tb.copy_from_slice(&data[..4]);
+        drop(data);
+        pool.drain_tail_staging.unmap();
+        let tail_raw = u32::from_le_bytes(tb);
+        let drained_count = tail_raw.min(ring_cap);
+        let overflowed = tail_raw > ring_cap;
+
+        // Collect records. Always unmap even if we're not going to keep
+        // them (drained_count == 0) so the next iteration's map_async
+        // doesn't fail with "buffer already mapped".
+        let records_result = records_rx
+            .recv()
+            .map_err(|e| PhysicsError::Dispatch(format!("records map channel closed: {e}")))?;
+        records_result
+            .map_err(|e| PhysicsError::Dispatch(format!("records map: {e:?}")))?;
+        let events_out: Vec<EventRecord> = {
+            let data = records_slice.get_mapped_range();
+            let all: &[EventRecord] = bytemuck::cast_slice(&data);
+            let out = if drained_count == 0 {
+                Vec::new()
+            } else {
+                all[..drained_count as usize].to_vec()
+            };
+            drop(data);
+            pool.drain_records_staging.unmap();
+            out
+        };
+        let mut events_out = events_out;
+        // Deterministic sort — matches GpuEventRing::drain's sort key.
+        events_out.sort_by_key(|r| (r.tick, r.kind, r.payload[0]));
+
         Ok(PhysicsBatchOutput {
             agent_slots_out,
-            events_out: events_out.records,
-            drain: events_out.outcome,
+            events_out,
+            drain: DrainOutcome {
+                tail_raw,
+                drained: drained_count,
+                overflowed,
+            },
         })
     }
 }
 
-/// Drain the event ring's raw records without rehydrating into
-/// `EventRing`. Used by the physics batch path — the driver may want
-/// the raw records to feed back into a subsequent dispatch.
-struct DrainRaw {
-    records: Vec<EventRecord>,
-    outcome: DrainOutcome,
-}
-
-fn drain_raw_records(
-    ring: &GpuEventRing,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> Result<DrainRaw, PhysicsError> {
-    // Use a throwaway EventRing just to invoke the existing drain API
-    // without rewriting it — but we care about the raw records the GPU
-    // wrote, not the CPU-side deserialised `Event`. So we read the tail
-    // + records directly using the same path the GpuEventRing uses.
-    //
-    // Rather than duplicate read_u32 / read_records, we use a scratch
-    // EventRing and interpret its internal drain path via a temporary
-    // EventRing. Simpler: write a small local duplicate, since the
-    // drain API is small.
-    use std::mem::size_of;
-    let capacity = ring.capacity();
-    // Copy tail into a mapped staging buffer.
-    let tail_staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("engine_gpu::physics::drain_tail_rb"),
-        size: 4,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let records_staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("engine_gpu::physics::drain_records_rb"),
-        size: (capacity as u64) * (size_of::<EventRecord>() as u64),
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("engine_gpu::physics::drain_copy"),
-    });
-    encoder.copy_buffer_to_buffer(ring.tail_buffer(), 0, &tail_staging, 0, 4);
-    let rec_bytes = (capacity as u64) * (size_of::<EventRecord>() as u64);
-    encoder.copy_buffer_to_buffer(ring.records_buffer(), 0, &records_staging, 0, rec_bytes);
-    queue.submit(Some(encoder.finish()));
-
-    // Map tail.
-    let tail_raw = {
-        let slice = tail_staging.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        let _ = device.poll(wgpu::PollType::Wait);
-        let map_result = rx
-            .recv()
-            .map_err(|e| PhysicsError::Dispatch(format!("tail map channel closed: {e}")))?;
-        map_result.map_err(|e| PhysicsError::Dispatch(format!("tail map: {e:?}")))?;
-        let data = slice.get_mapped_range();
-        let mut b = [0u8; 4];
-        b.copy_from_slice(&data[..4]);
-        drop(data);
-        tail_staging.unmap();
-        u32::from_le_bytes(b)
-    };
-
-    let drained = tail_raw.min(capacity);
-    let overflowed = tail_raw > capacity;
-
-    if drained == 0 {
-        return Ok(DrainRaw {
-            records: Vec::new(),
-            outcome: DrainOutcome {
-                tail_raw,
-                drained: 0,
-                overflowed,
-            },
-        });
-    }
-
-    let slice = records_staging.slice(..);
-    let (tx, rx) = std::sync::mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |r| {
-        let _ = tx.send(r);
-    });
-    let _ = device.poll(wgpu::PollType::Wait);
-    let map_result = rx
-        .recv()
-        .map_err(|e| PhysicsError::Dispatch(format!("records map channel closed: {e}")))?;
-    map_result.map_err(|e| PhysicsError::Dispatch(format!("records map: {e:?}")))?;
-    let data = slice.get_mapped_range();
-    let all: &[EventRecord] = bytemuck::cast_slice(&data);
-    let mut records: Vec<EventRecord> = all[..drained as usize].to_vec();
-    drop(data);
-    records_staging.unmap();
-
-    // Sort for determinism — matches GpuEventRing::drain's sort key
-    // (tick, kind, payload[0]).
-    records.sort_by_key(|r| (r.tick, r.kind, r.payload[0]));
-
-    Ok(DrainRaw {
-        records,
-        outcome: DrainOutcome {
-            tail_raw,
-            drained,
-            overflowed,
-        },
-    })
-}
+// Phase 9 (task 195): `drain_raw_records` retired. The fused
+// submit+readback path in `PhysicsKernel::run_batch` inlines the tail
+// + records copy into the same encoder as the physics dispatch and
+// the agents-readback copy, eliminating two extra submits + two extra
+// map_async waits per cascade iteration.
 
 /// Result of a single `PhysicsKernel::run_batch` call.
 pub struct PhysicsBatchOutput {
