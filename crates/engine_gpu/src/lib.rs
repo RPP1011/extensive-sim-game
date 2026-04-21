@@ -89,6 +89,14 @@ pub mod event_ring;
 #[cfg(feature = "gpu")]
 pub mod physics;
 
+/// Phase 6f — cascade sub-dispatch loop (Piece 3). Drives `physics::run_batch`
+/// in a fixed-point loop, folds each iteration's emitted events into
+/// `view_storage`, and returns the aggregated output. Not yet authoritative
+/// inside `GpuBackend::step` — Piece 4 replaces the CPU forward with a
+/// cascade call.
+#[cfg(feature = "gpu")]
+pub mod cascade;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
