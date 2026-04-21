@@ -300,6 +300,40 @@ fn parse_annotation_value(c: &mut Cursor) -> PResult<AnnotationValue> {
     }
     if let Some(name) = peek_ident(c) {
         c.bump(name.len());
+        // `per_entity_topk(K = 8)` — an ident followed by `(` opens a
+        // Call form. The inner args reuse `parse_annotation_arg` so
+        // `key = value` and bare positional args parse identically to
+        // the top-level annotation grammar.
+        let save = c.pos;
+        c.skip_ws();
+        if c.starts_with_char('(') {
+            c.bump(1);
+            let mut args = Vec::new();
+            loop {
+                c.skip_ws();
+                if c.starts_with_char(')') {
+                    c.bump(1);
+                    break;
+                }
+                args.push(parse_annotation_arg(c)?);
+                c.skip_ws();
+                if c.starts_with_char(',') {
+                    c.bump(1);
+                    continue;
+                }
+                if c.starts_with_char(')') {
+                    c.bump(1);
+                    break;
+                }
+                return Err(ParseErr::at(here(c), "expected `,` or `)` in annotation call args"));
+            }
+            return Ok(AnnotationValue::Call { name, args });
+        }
+        // No `(` — rewind past the whitespace we consumed to keep the
+        // cursor exactly after the bare ident. The caller's trailing-
+        // annotation lookahead relies on the end-of-value position being
+        // the end of the ident, not the end of any whitespace after it.
+        c.pos = save;
         return Ok(AnnotationValue::Ident(name));
     }
     Err(ParseErr::at(here(c), "expected annotation value"))

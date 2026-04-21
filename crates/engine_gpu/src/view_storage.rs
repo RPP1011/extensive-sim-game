@@ -167,26 +167,64 @@ impl Default for DecayCellCpu {
     }
 }
 
+/// Task 196: flat readback of a topk view's three buffers. Each `Vec`
+/// has length `agent_cap * K`; observer `obs`'s K slots live at
+/// indices `obs*K .. (obs+1)*K`.
+#[derive(Debug, Clone)]
+pub struct TopkReadback {
+    pub k: u16,
+    pub agent_cap: u32,
+    pub ids: Vec<u32>,
+    pub values: Vec<f32>,
+    pub anchors: Vec<u32>,
+}
+
+impl TopkReadback {
+    /// Return a borrowed `(ids, values, anchors)` for observer `obs`'s
+    /// K slots. Empty range if `obs >= agent_cap`.
+    pub fn row(&self, obs: u32) -> (&[u32], &[f32], &[u32]) {
+        let k = self.k as usize;
+        let base = (obs as usize) * k;
+        if base + k > self.ids.len() {
+            return (&[], &[], &[]);
+        }
+        (
+            &self.ids[base..base + k],
+            &self.values[base..base + k],
+            &self.anchors[base..base + k],
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Per-view pipeline + buffers
 // ---------------------------------------------------------------------------
 
 struct ViewEntry {
     spec: ViewStorageSpec,
-    /// Primary storage buffer:
-    ///   - SlotMap: `array<u32>` length = N
-    ///   - PairMapScalar: `array<atomic<u32>>` length = N*N (f32 bits)
-    ///   - PairMapDecay: `array<atomic<u32>>` length = N*N (f32 value bits)
+    /// Primary storage buffer. Layout depends on the entry's shape:
+    ///   - SlotMap (K=1): `array<u32>` length = N
+    ///   - Dense PairMapScalar: `array<atomic<u32>>` length = N*N (f32 bits)
+    ///   - Dense PairMapDecay: `array<atomic<u32>>` length = N*N (f32 value bits)
+    ///   - Topk (task 196): `array<atomic<u32>>` length = N*K (f32 value bits).
+    ///     An extra `ids` buffer below holds the per-slot ids.
     primary: wgpu::Buffer,
-    /// Only set for PairMapDecay: parallel `array<atomic<u32>>` for
-    /// anchor_tick. None for other shapes.
+    /// Only set for dense PairMapDecay or any topk (scalar or decay): parallel
+    /// `array<atomic<u32>>` for anchor_tick. `anchor.len() == primary.len()`.
+    /// For topk non-decay views the anchor buffer is present but unused (all
+    /// zeros); keeping the layout symmetric simplifies the WGSL.
     anchor: Option<wgpu::Buffer>,
+    /// Only set for topk views (task 196): `array<atomic<u32>>` holding
+    /// the stored AgentId raw per slot. 0 = empty slot. length = N*K.
+    ids: Option<wgpu::Buffer>,
     /// Byte size of `primary`.
     primary_bytes: u64,
     /// Readback staging for `primary` — MAP_READ | COPY_DST.
     primary_readback: wgpu::Buffer,
     /// Readback for anchor (if present).
     anchor_readback: Option<wgpu::Buffer>,
+    /// Readback for ids (topk views only).
+    ids_readback: Option<wgpu::Buffer>,
     /// Compiled fold kernel for this view.
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -196,6 +234,10 @@ struct ViewEntry {
     input_cap: u32,
     /// Uniform — carries (N, event_count).
     uniform: wgpu::Buffer,
+    /// `Some(K)` when this entry is topk-backed. The fold-dispatch path
+    /// uses this to serialise events (one kernel dispatch per event) and
+    /// to size the ids/values/anchors buffers at N·K.
+    topk: Option<u16>,
 }
 
 /// GPU view storage — one buffer/pipeline per materialized view + the
@@ -228,12 +270,22 @@ impl ViewStorage {
         self.agent_cap
     }
 
-    /// Byte sum of every primary + anchor buffer currently allocated.
+    /// Byte sum of every primary + anchor + ids buffer currently allocated.
     /// Handy for benchmarks / docs; the task report references this.
+    /// Task 196: topk views count their ids buffer too (N·K·4 bytes).
     pub fn total_primary_bytes(&self) -> u64 {
         self.entries
             .values()
-            .map(|e| e.primary_bytes + e.anchor.as_ref().map(|_| e.primary_bytes).unwrap_or(0))
+            .map(|e| {
+                let mut bytes = e.primary_bytes;
+                if e.anchor.is_some() {
+                    bytes += e.primary_bytes;
+                }
+                if e.ids.is_some() {
+                    bytes += e.primary_bytes;
+                }
+                bytes
+            })
             .sum()
     }
 
@@ -247,6 +299,9 @@ impl ViewStorage {
             queue.write_buffer(&entry.primary, 0, &zeros);
             if let Some(anchor) = &entry.anchor {
                 queue.write_buffer(anchor, 0, &zeros);
+            }
+            if let Some(ids) = &entry.ids {
+                queue.write_buffer(ids, 0, &zeros);
             }
         }
     }
@@ -288,6 +343,41 @@ impl ViewStorage {
                     entry.spec.shape
                 )));
             }
+        }
+        if let Some(k) = entry.topk {
+            // Task 196: topk dispatch is serialised — one event per
+            // dispatch. The find-or-evict-else-drop scan touches all K
+            // slots of an observer row; parallelising events against
+            // the same row would race on the atomics and break
+            // determinism. The outer driver (cascade.rs) hands us
+            // batches of events per tick; we fan them out here.
+            let (input_buf, input_cap) = ensure_input_buf_pair(device, entry, 1);
+            entry.input_buf = input_buf;
+            entry.input_cap = input_cap;
+            for ev in events {
+                queue.write_buffer(
+                    &entry.input_buf,
+                    0,
+                    bytemuck::cast_slice(std::slice::from_ref(ev)),
+                );
+                let uniform_data = [agent_cap, 1u32, k as u32, 0u32];
+                queue.write_buffer(&entry.uniform, 0, bytemuck::cast_slice(&uniform_data));
+                let bg = bind_group_for(device, entry);
+                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("engine_gpu::view_storage::fold_encoder_topk"),
+                });
+                {
+                    let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("engine_gpu::view_storage::fold_cpass_topk"),
+                        timestamp_writes: None,
+                    });
+                    cpass.set_pipeline(&entry.pipeline);
+                    cpass.set_bind_group(0, &bg, &[]);
+                    cpass.dispatch_workgroups(1, 1, 1);
+                }
+                queue.submit(Some(encoder.finish()));
+            }
+            return Ok(());
         }
         let (input_buf, input_cap) = ensure_input_buf_pair(device, entry, events.len() as u32);
         entry.input_buf = input_buf;
@@ -448,6 +538,56 @@ impl ViewStorage {
         Ok(out)
     }
 
+    /// Task 196: read back a topk view's (ids, values, anchors) as
+    /// parallel `Vec<u32>`s. Each vec has length `agent_cap * K`.
+    /// Callers reconstruct per-observer rows by slicing at
+    /// `obs * K .. (obs+1) * K`.
+    pub fn readback_topk(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        view_name: &str,
+    ) -> Result<TopkReadback, ViewStorageError> {
+        let entry = self
+            .entries
+            .get(view_name)
+            .ok_or_else(|| ViewStorageError::Dispatch(format!("unknown view `{view_name}`")))?;
+        let k = entry.topk.ok_or_else(|| {
+            ViewStorageError::Dispatch(format!(
+                "readback_topk on non-topk view `{view_name}`"
+            ))
+        })?;
+        let ids_buf = entry.ids.as_ref().unwrap();
+        let anchor_buf = entry.anchor.as_ref().unwrap();
+        let ids_rb = entry.ids_readback.as_ref().unwrap();
+        let anchor_rb = entry.anchor_readback.as_ref().unwrap();
+
+        let ids = copy_and_map::<u32>(
+            device,
+            queue,
+            ids_buf,
+            ids_rb,
+            entry.primary_bytes,
+        )?;
+        let values_bits = copy_and_map::<u32>(
+            device,
+            queue,
+            &entry.primary,
+            &entry.primary_readback,
+            entry.primary_bytes,
+        )?;
+        let anchors =
+            copy_and_map::<u32>(device, queue, anchor_buf, anchor_rb, entry.primary_bytes)?;
+        let values = values_bits.iter().map(|bits| f32::from_bits(*bits)).collect();
+        Ok(TopkReadback {
+            k,
+            agent_cap: self.agent_cap,
+            ids,
+            values,
+            anchors,
+        })
+    }
+
     /// The ViewStorageSpec each buffer was built from — exposed so the
     /// parity test can introspect rate / clamp without rebuilding.
     pub fn spec(&self, view_name: &str) -> Option<&ViewStorageSpec> {
@@ -473,6 +613,23 @@ impl ViewStorage {
         self.entries
             .get(view_name)
             .and_then(|e| e.anchor.as_ref())
+    }
+
+    /// Task 196: the per-slot `ids` buffer for a topk view. `AgentId_raw`
+    /// per slot, 0 = empty. None for non-topk views.
+    pub fn ids_buffer(&self, view_name: &str) -> Option<&wgpu::Buffer> {
+        self.entries.get(view_name).and_then(|e| e.ids.as_ref())
+    }
+
+    /// Task 196: topk parameters — `Some((K, total_slots))` when the
+    /// view is backed by per-entity topk storage; `None` otherwise.
+    /// `total_slots = agent_cap * K` is the buffer length used by every
+    /// topk storage buffer (ids / values / anchors are all the same
+    /// size).
+    pub fn topk_dims(&self, view_name: &str) -> Option<(u16, u32)> {
+        let entry = self.entries.get(view_name)?;
+        let k = entry.topk?;
+        Some((k, self.agent_cap * k as u32))
     }
 
     /// Byte size of the primary buffer for `view_name`. Matches
@@ -539,25 +696,54 @@ fn clone_buffer_handle(buf: &wgpu::Buffer) -> wgpu::Buffer {
 }
 
 fn bind_group_for(device: &wgpu::Device, entry: &ViewEntry) -> wgpu::BindGroup {
-    let mut entries = Vec::with_capacity(4);
+    // Binding layout per shape (matches build_fold_module_wgsl + the BGL):
+    //   * slot_map           : 0=inputs, 1=cells,               2=cfg
+    //   * pair_map scalar    : 0=inputs, 1=cells,               2=cfg
+    //   * pair_map decay     : 0=inputs, 1=cells, 2=anchors,    3=cfg
+    //   * topk scalar/decay  : 0=inputs, 1=ids, 2=values, 3=anchors, 4=cfg
+    let mut entries = Vec::with_capacity(5);
     entries.push(wgpu::BindGroupEntry {
         binding: 0,
         resource: entry.input_buf.as_entire_binding(),
     });
-    entries.push(wgpu::BindGroupEntry {
-        binding: 1,
-        resource: entry.primary.as_entire_binding(),
-    });
-    if let Some(anchor) = &entry.anchor {
+    if entry.topk.is_some() {
+        let ids = entry.ids.as_ref().expect("topk entry missing ids buffer");
+        let anchor = entry
+            .anchor
+            .as_ref()
+            .expect("topk entry missing anchor buffer");
+        entries.push(wgpu::BindGroupEntry {
+            binding: 1,
+            resource: ids.as_entire_binding(),
+        });
         entries.push(wgpu::BindGroupEntry {
             binding: 2,
+            resource: entry.primary.as_entire_binding(),
+        });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 3,
             resource: anchor.as_entire_binding(),
         });
+        entries.push(wgpu::BindGroupEntry {
+            binding: 4,
+            resource: entry.uniform.as_entire_binding(),
+        });
+    } else {
+        entries.push(wgpu::BindGroupEntry {
+            binding: 1,
+            resource: entry.primary.as_entire_binding(),
+        });
+        if let Some(anchor) = &entry.anchor {
+            entries.push(wgpu::BindGroupEntry {
+                binding: 2,
+                resource: anchor.as_entire_binding(),
+            });
+        }
+        entries.push(wgpu::BindGroupEntry {
+            binding: if entry.anchor.is_some() { 3 } else { 2 },
+            resource: entry.uniform.as_entire_binding(),
+        });
     }
-    entries.push(wgpu::BindGroupEntry {
-        binding: if entry.anchor.is_some() { 3 } else { 2 },
-        resource: entry.uniform.as_entire_binding(),
-    });
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("engine_gpu::view_storage::bg"),
         layout: &entry.bind_group_layout,
@@ -570,10 +756,25 @@ fn build_view_entry(
     agent_cap: u32,
     spec: ViewStorageSpec,
 ) -> Result<ViewEntry, ViewStorageError> {
-    let (primary_elems, has_anchor) = match spec.shape {
-        ViewShape::SlotMap { .. } => (agent_cap as u64, false),
-        ViewShape::PairMapScalar => ((agent_cap as u64) * (agent_cap as u64), false),
-        ViewShape::PairMapDecay { .. } => ((agent_cap as u64) * (agent_cap as u64), true),
+    // Topk (task 196): N·K values + N·K anchors + N·K ids. For scoring.rs
+    // compat we keep `shape` reporting the original pair_map variant, so
+    // `primary_buffer()` exposes values and `anchor_buffer()` exposes
+    // anchors — the sizes change (N·K not N²) but the binding count
+    // stays the same. scoring.rs's N² indexing breaks at runtime; the
+    // follow-up task swaps it over to topk reads.
+    //
+    // Dense pair_map (topk.is_none()) keeps the old N² layout. slot_map
+    // keeps the N `array<u32>` shape.
+    let (primary_elems, has_anchor, has_ids) = match spec.shape {
+        ViewShape::SlotMap { .. } => (agent_cap as u64, false, false),
+        ViewShape::PairMapScalar => match spec.topk {
+            Some(k) => ((agent_cap as u64) * (k as u64), true, true),
+            None => ((agent_cap as u64) * (agent_cap as u64), false, false),
+        },
+        ViewShape::PairMapDecay { .. } => match spec.topk {
+            Some(k) => ((agent_cap as u64) * (k as u64), true, true),
+            None => ((agent_cap as u64) * (agent_cap as u64), true, false),
+        },
         ViewShape::Lazy => unreachable!(),
     };
     let primary_bytes = primary_elems * 4; // u32/f32-bits.
@@ -602,6 +803,26 @@ fn build_view_entry(
     let anchor_readback = if has_anchor {
         Some(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("engine_gpu::view::{}::anchor_rb", spec.snake)),
+            size: primary_bytes.max(4),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }))
+    } else {
+        None
+    };
+    let ids = if has_ids {
+        Some(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("engine_gpu::view::{}::ids", spec.snake)),
+            size: primary_bytes.max(4),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }))
+    } else {
+        None
+    };
+    let ids_readback = if has_ids {
+        Some(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("engine_gpu::view::{}::ids_rb", spec.snake)),
             size: primary_bytes.max(4),
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -643,8 +864,11 @@ fn build_view_entry(
     }
 
     // ---- Bind-group layout ----
-    // Bindings: 0 input (read), 1 primary (read_write), [2 anchor (read_write)], 2|3 uniform.
-    let mut bgl_entries = Vec::with_capacity(4);
+    // Three layouts — kept in sync with `bind_group_for` + build_fold_module_wgsl:
+    //   * dense pair_map / slot_map: 0 inputs, 1 primary, [2 anchor], 2|3 cfg
+    //   * topk (ids + vals + anchors): 0 inputs, 1 ids, 2 vals, 3 anchors, 4 cfg
+    let is_topk = has_ids;
+    let mut bgl_entries = Vec::with_capacity(5);
     bgl_entries.push(wgpu::BindGroupLayoutEntry {
         binding: 0,
         visibility: wgpu::ShaderStages::COMPUTE,
@@ -655,19 +879,33 @@ fn build_view_entry(
         },
         count: None,
     });
-    bgl_entries.push(wgpu::BindGroupLayoutEntry {
-        binding: 1,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    });
-    if has_anchor {
+    if is_topk {
+        // topk: ids, values, anchors — all atomic<u32> / u32 storage.
+        for binding in [1u32, 2, 3] {
+            bgl_entries.push(wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
         bgl_entries.push(wgpu::BindGroupLayoutEntry {
-            binding: 2,
+            binding: 4,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+    } else {
+        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 1,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -676,18 +914,30 @@ fn build_view_entry(
             },
             count: None,
         });
+        if has_anchor {
+            bgl_entries.push(wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+        let uniform_binding = if has_anchor { 3 } else { 2 };
+        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: uniform_binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
     }
-    let uniform_binding = if has_anchor { 3 } else { 2 };
-    bgl_entries.push(wgpu::BindGroupLayoutEntry {
-        binding: uniform_binding,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Uniform,
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    });
     let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(&format!("engine_gpu::view::{}::bgl", spec.snake)),
         entries: &bgl_entries,
@@ -706,18 +956,22 @@ fn build_view_entry(
         cache: None,
     });
 
+    let topk = spec.topk;
     Ok(ViewEntry {
         spec,
         primary,
         anchor,
+        ids,
         primary_bytes,
         primary_readback,
         anchor_readback,
+        ids_readback,
         pipeline,
         bind_group_layout: bgl,
         input_buf,
         input_cap: default_events,
         uniform,
+        topk,
     })
 }
 
@@ -747,6 +1001,107 @@ fn build_fold_module_wgsl(spec: &ViewStorageSpec) -> String {
     out.push_str("// GENERATED by engine_gpu::view_storage — fold kernel.\n");
     out.push_str(&format!("// View: {}\n", spec.view_name));
     out.push_str(&format!("// Shape: {:?}\n", spec.shape));
+    if let Some(k) = spec.topk {
+        out.push_str(&format!("// Topk: K={k} (task 196 sparse storage)\n"));
+        // Task 196 per_entity_topk(K>=2) fold kernel. One thread per
+        // event; caller serialises dispatches (1 event per dispatch)
+        // because the find-or-evict-else-drop scan touches K slots of
+        // the same observer row. Sequential dispatch keeps the fold
+        // deterministic without per-row locks.
+        let rate = match &spec.shape {
+            ViewShape::PairMapDecay { rate } => Some(*rate),
+            _ => None,
+        };
+        let clamp_lo = spec.clamp.map(|(lo, _)| lo).unwrap_or(f32::MIN);
+        let clamp_hi = spec.clamp.map(|(_, hi)| hi).unwrap_or(f32::MAX);
+        out.push_str(
+            "struct FoldInput { first: u32, second: u32, tick: u32, _pad: u32 };\n\
+             struct Uniform   { n: u32, event_count: u32, k: u32, _pad: u32 };\n\
+             @group(0) @binding(0) var<storage, read>       inputs:  array<FoldInput>;\n\
+             @group(0) @binding(1) var<storage, read_write> ids:     array<atomic<u32>>;\n\
+             @group(0) @binding(2) var<storage, read_write> values:  array<atomic<u32>>;\n\
+             @group(0) @binding(3) var<storage, read_write> anchors: array<atomic<u32>>;\n\
+             @group(0) @binding(4) var<uniform>             cfg:     Uniform;\n\n",
+        );
+        let decay_apply = match rate {
+            Some(r) => format!(
+                "let dt = select(0u, tick_now - atomicLoad(&anchors[base_idx + i]), tick_now >= atomicLoad(&anchors[base_idx + i]));\n\
+                 \x20           let decayed = v * pow({r_lit}, f32(dt));",
+                r_lit = render_float_wgsl(r as f64),
+            ),
+            None => "let decayed = v;".to_string(),
+        };
+        let current_decay = match rate {
+            Some(r) => format!(
+                "let dt_cur = select(0u, tick_now - atomicLoad(&anchors[base_idx + i]), tick_now >= atomicLoad(&anchors[base_idx + i]));\n\
+                 \x20           let current = v * pow({r_lit}, f32(dt_cur));",
+                r_lit = render_float_wgsl(r as f64),
+            ),
+            None => "let current = v;".to_string(),
+        };
+        out.push_str(&format!(
+            "@compute @workgroup_size(1) fn cs_fold(@builtin(global_invocation_id) gid: vec3<u32>) {{\n\
+             \x20   let e_i = gid.x;\n\
+             \x20   if (e_i >= cfg.event_count) {{ return; }}\n\
+             \x20   let ev = inputs[e_i];\n\
+             \x20   // `first` / `second` are 0-based slot indices — both are\n\
+             \x20   // valid when in `[0, n)`. `0` is slot 0, not an empty sentinel.\n\
+             \x20   if (ev.first >= cfg.n || ev.second >= cfg.n) {{ return; }}\n\
+             \x20   let k = cfg.k;\n\
+             \x20   let base_idx = ev.first * k;\n\
+             \x20   let attacker = ev.second + 1u;  // store raw AgentId (1-based)\n\
+             \x20   let tick_now = ev.tick;\n\
+             \x20   let delta: f32 = 1.0;\n\
+             \x20   // Phase 1: find-existing.\n\
+             \x20   for (var i: u32 = 0u; i < k; i = i + 1u) {{\n\
+             \x20       if (atomicLoad(&ids[base_idx + i]) == attacker) {{\n\
+             \x20           let v_bits = atomicLoad(&values[base_idx + i]);\n\
+             \x20           let v = bitcast<f32>(v_bits);\n\
+             \x20           {current_decay}\n\
+             \x20           let updated = clamp(current + delta, {lo}, {hi});\n\
+             \x20           atomicStore(&values[base_idx + i], bitcast<u32>(updated));\n\
+             \x20           atomicStore(&anchors[base_idx + i], tick_now);\n\
+             \x20           return;\n\
+             \x20       }}\n\
+             \x20   }}\n\
+             \x20   // Phase 2: find-empty.\n\
+             \x20   for (var i: u32 = 0u; i < k; i = i + 1u) {{\n\
+             \x20       if (atomicLoad(&ids[base_idx + i]) == 0u) {{\n\
+             \x20           let v = clamp(delta, {lo}, {hi});\n\
+             \x20           atomicStore(&ids[base_idx + i], attacker);\n\
+             \x20           atomicStore(&values[base_idx + i], bitcast<u32>(v));\n\
+             \x20           atomicStore(&anchors[base_idx + i], tick_now);\n\
+             \x20           return;\n\
+             \x20       }}\n\
+             \x20   }}\n\
+             \x20   // Phase 3: evict-smallest-if-better (find min by decayed value).\n\
+             \x20   var min_i: u32 = 0u;\n\
+             \x20   var min_v: f32 = 0.0;\n\
+             \x20   for (var i: u32 = 0u; i < k; i = i + 1u) {{\n\
+             \x20       let v_bits = atomicLoad(&values[base_idx + i]);\n\
+             \x20       let v = bitcast<f32>(v_bits);\n\
+             \x20       {decay_apply}\n\
+             \x20       if (i == 0u || decayed < min_v) {{ min_v = decayed; min_i = i; }}\n\
+             \x20   }}\n\
+             \x20   let clamped_delta = clamp(delta, {lo}, {hi});\n\
+             \x20   if (clamped_delta > min_v) {{\n\
+             \x20       atomicStore(&ids[base_idx + min_i], attacker);\n\
+             \x20       atomicStore(&values[base_idx + min_i], bitcast<u32>(clamped_delta));\n\
+             \x20       atomicStore(&anchors[base_idx + min_i], tick_now);\n\
+             \x20   }}\n\
+             }}\n",
+            lo = render_float_wgsl(clamp_lo as f64),
+            hi = render_float_wgsl(clamp_hi as f64),
+            decay_apply = decay_apply,
+            current_decay = current_decay,
+        ));
+        // Exercise the emitter snippets so spec drift surfaces at build
+        // — they're not linked into the kernel but the compile check
+        // catches emitter API regressions.
+        let _ = emit_view_read_wgsl(spec);
+        let _ = emit_view_fold_wgsl(spec);
+        return out;
+    }
 
     match &spec.shape {
         ViewShape::SlotMap { .. } => {
@@ -981,7 +1336,9 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
             decay: None,
             span,
         },
-        // ------------- my_enemies: pair_map no decay -------------
+        // ------------- my_enemies: per_entity_topk(K=8) no decay -------------
+        // Task 196: sparsified from pair_map to topk(K=8). At N=200k
+        // this drops the storage from ~160 GB (pair_map) to ~77 MB (topk).
         ViewIR {
             name: "my_enemies".into(),
             params: vec![
@@ -998,11 +1355,11 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
                 clamp: Some((lit_f(0.0), lit_f(1.0))),
             },
             annotations: vec![],
-            kind: ViewKind::Materialized(StorageHint::PairMap),
+            kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
             decay: None,
             span,
         },
-        // ------------- threat_level: pair_map @decay(0.98) -------------
+        // ------------- threat_level: per_entity_topk(K=8) @decay(0.98) -------------
         ViewIR {
             name: "threat_level".into(),
             params: vec![param("a", IrType::AgentId), param("b", IrType::AgentId)],
@@ -1022,7 +1379,7 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
                 clamp: Some((lit_f(0.0), lit_f(1000.0))),
             },
             annotations: vec![],
-            kind: ViewKind::Materialized(StorageHint::PairMap),
+            kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
             decay: Some(DecayHint {
                 rate: 0.98,
                 per: DecayUnit::Tick,
@@ -1031,6 +1388,8 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
             span,
         },
         // ------------- kin_fear: pair_map @decay(0.891) -------------
+        // Not migrated — FearSpread events are rare and per-death;
+        // dense pair_map stays feasible. (See `assets/sim/views.sim`.)
         ViewIR {
             name: "kin_fear".into(),
             params: vec![
@@ -1055,7 +1414,7 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
             }),
             span,
         },
-        // ------------- pack_focus: pair_map @decay(0.933) -------------
+        // ------------- pack_focus: per_entity_topk(K=8) @decay(0.933) -------------
         ViewIR {
             name: "pack_focus".into(),
             params: vec![
@@ -1072,7 +1431,7 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
                 clamp: Some((lit_f(0.0), lit_f(10.0))),
             },
             annotations: vec![],
-            kind: ViewKind::Materialized(StorageHint::PairMap),
+            kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
             decay: Some(DecayHint {
                 rate: 0.933,
                 per: DecayUnit::Tick,
@@ -1080,7 +1439,7 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
             }),
             span,
         },
-        // ------------- rally_boost: pair_map @decay(0.891) -------------
+        // ------------- rally_boost: per_entity_topk(K=8) @decay(0.891) -------------
         ViewIR {
             name: "rally_boost".into(),
             params: vec![
@@ -1100,7 +1459,7 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
                 clamp: Some((lit_f(0.0), lit_f(10.0))),
             },
             annotations: vec![],
-            kind: ViewKind::Materialized(StorageHint::PairMap),
+            kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
             decay: Some(DecayHint {
                 rate: 0.891,
                 per: DecayUnit::Tick,

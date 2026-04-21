@@ -1651,6 +1651,7 @@ mod tests {
                     first_key_field: "target".into(),
                     second_key_field: Some("actor".into()),
                 }],
+                topk: None,
             },
             ViewStorageSpec {
                 view_name: "threat_level".into(),
@@ -1659,6 +1660,7 @@ mod tests {
                 clamp: Some((0.0, 1000.0)),
                 initial: 0.0,
                 folds: vec![],
+                topk: None,
             },
         ];
 
@@ -1720,6 +1722,7 @@ mod tests {
                     first_key_field: "target".into(),
                     second_key_field: Some("actor".into()),
                 }],
+                topk: None,
             },
             ViewStorageSpec {
                 view_name: "threat_level".into(),
@@ -1728,6 +1731,7 @@ mod tests {
                 clamp: Some((0.0, 1000.0)),
                 initial: 0.0,
                 folds: vec![],
+                topk: None,
             },
         ];
 
@@ -1788,6 +1792,7 @@ mod tests {
                 clamp: None,
                 initial: 0.0,
                 folds: vec![],
+                topk: None,
             },
             ViewStorageSpec {
                 view_name: "threat_level".into(),
@@ -1796,6 +1801,7 @@ mod tests {
                 clamp: None,
                 initial: 0.0,
                 folds: vec![],
+                topk: None,
             },
         ];
         // Plain: 5 core + 1 scalar + 1 decay = 7.

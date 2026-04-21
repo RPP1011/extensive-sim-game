@@ -291,9 +291,11 @@ fn assert_view_parity(
     let n = cpu.agent_cap() as usize;
     let tick = cpu.tick;
 
-    // my_enemies — scalar pair_map, no decay.
-    let my_enemies_gpu = view_storage
-        .readback_pair_scalar(device, queue, "my_enemies")
+    // my_enemies — task 196 topk(K=8) (no decay). Readback via
+    // `readback_topk` and compare `cpu.views.my_enemies.get()` values
+    // slot-by-slot.
+    let my_rb = view_storage
+        .readback_topk(device, queue, "my_enemies")
         .expect("readback my_enemies");
     for obs_slot in 0..n {
         let obs = match AgentId::new(obs_slot as u32 + 1) {
@@ -306,18 +308,23 @@ fn assert_view_parity(
                 None => continue,
             };
             let cpu_v = cpu.views.my_enemies.get(obs, atk);
-            let gpu_v = my_enemies_gpu[obs_slot * n + atk_slot];
+            let (ids, vals, _an) = my_rb.row(obs_slot as u32);
+            let gpu_v = ids
+                .iter()
+                .zip(vals.iter())
+                .find(|(id, _)| **id == atk.raw())
+                .map(|(_, v)| *v)
+                .unwrap_or(0.0);
             assert_eq!(
-                cpu_v.to_bits(), gpu_v.to_bits(),
+                cpu_v.to_bits(),
+                gpu_v.to_bits(),
                 "[{ctx}] my_enemies[obs={obs_slot},atk={atk_slot}] cpu={cpu_v} gpu={gpu_v}",
             );
         }
     }
 
-    // threat_level / kin_fear / pack_focus / rally_boost — decay pair_map.
-    // CPU-side `get(a, b, tick)` already applies the decay; the GPU
-    // readback returns (value, anchor) tuples. We reconstruct the "now"
-    // value the CPU way and compare.
+    // threat_level / pack_focus / rally_boost — task 196 topk(K=8) @decay.
+    // kin_fear is NOT migrated and stays on dense pair_map.
     let decay_pairs: &[(&str, Box<dyn Fn(AgentId, AgentId) -> f32>)] = &[
         (
             "threat_level",
@@ -347,6 +354,48 @@ fn assert_view_parity(
             _ => continue,
         };
         let clamp = spec.clamp;
+        if view_storage.topk_dims(name).is_some() {
+            // Topk path (task 196): readback parallel buffers.
+            let rb = view_storage
+                .readback_topk(device, queue, name)
+                .unwrap_or_else(|e| panic!("[{ctx}] readback_topk {name}: {e}"));
+            for a_slot in 0..n {
+                let a_id = match AgentId::new(a_slot as u32 + 1) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                for b_slot in 0..n {
+                    let b_id = match AgentId::new(b_slot as u32 + 1) {
+                        Some(id) => id,
+                        None => continue,
+                    };
+                    let cpu_v = getter(a_id, b_id);
+                    let (ids, vals, anchors) = rb.row(a_slot as u32);
+                    let gpu_raw = ids
+                        .iter()
+                        .zip(vals.iter().zip(anchors.iter()))
+                        .find(|(id, _)| **id == b_id.raw())
+                        .map(|(_, (v, a))| (*v, *a));
+                    let decayed = match gpu_raw {
+                        Some((value, anchor)) => {
+                            let dt = tick.saturating_sub(anchor);
+                            let mut d = value * rate.powi(dt as i32);
+                            if let Some((lo, hi)) = clamp {
+                                d = d.clamp(lo as f32, hi as f32);
+                            }
+                            d
+                        }
+                        None => 0.0,
+                    };
+                    let diff = (cpu_v - decayed).abs();
+                    assert!(
+                        diff < 1e-5,
+                        "[{ctx}] {name}[{a_slot},{b_slot}] cpu={cpu_v} gpu={decayed} diff={diff}",
+                    );
+                }
+            }
+            continue;
+        }
         let cells = view_storage
             .readback_pair_decay(device, queue, name)
             .unwrap_or_else(|e| panic!("[{ctx}] readback {name}: {e}"));
@@ -369,10 +418,6 @@ fn assert_view_parity(
                 if let Some((lo, hi)) = clamp {
                     decayed = decayed.clamp(lo as f32, hi as f32);
                 }
-                // Floating-point rounding between the GPU's WGSL pow and
-                // the CPU's DecayCell::get formula is controlled enough
-                // that bit-equality holds for zero cells and for the
-                // dt=0 case; once dt > 0 we drop to an epsilon compare.
                 if dt == 0 {
                     assert_eq!(
                         cpu_v.to_bits(), decayed.to_bits(),
@@ -382,9 +427,6 @@ fn assert_view_parity(
                     );
                 } else {
                     let diff = (cpu_v - decayed).abs();
-                    // rate^dt shrinks quickly; the absolute difference
-                    // stays under 1e-5 for dt up to ~100 given the
-                    // rates in views.sim.
                     assert!(
                         diff < 1e-5,
                         "[{ctx}] {name}[{a_slot},{b_slot}] dt={dt} cpu={cpu_v} gpu={decayed} diff={diff}",
