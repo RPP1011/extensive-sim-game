@@ -229,9 +229,15 @@ pub fn emit_physics_wgsl(
     //   3. Destructure payload into locals.
     //   4. Optional `where` clause → early-return guard.
     //   5. Rule body, statement by statement.
+    //
+    // The event-slot local is named `ev_rec` (not `e`) so DSL-author
+    // bindings that choose short single-letter names like `e` (as in
+    // `expires_at_tick: e` on EffectSlowApplied) don't collide with
+    // the fn-scope event record. Internal reads reference `ev_rec.kind`
+    // / `ev_rec.payload[N]` / `ev_rec.tick`.
     let (kind_const, destructure) = emit_event_destructure(handler, ctx)?;
-    writeln!(out, "    let e = events_in[event_idx];").unwrap();
-    writeln!(out, "    if (e.kind != {kind_const}) {{ return; }}").unwrap();
+    writeln!(out, "    let ev_rec = events_in[event_idx];").unwrap();
+    writeln!(out, "    if (ev_rec.kind != {kind_const}) {{ return; }}").unwrap();
     for line in &destructure {
         writeln!(out, "    {line}").unwrap();
     }
@@ -280,6 +286,9 @@ pub fn emit_physics_dispatcher_wgsl(
         writeln!(out, "    // No physics rules in scope.").unwrap();
         writeln!(out, "    return;").unwrap();
     } else {
+        // Read the kind from the event record. Uses the same binding
+        // name convention as the per-rule fns (`ev_rec.*`) for visual
+        // consistency.
         writeln!(out, "    let kind = events_in[event_idx].kind;").unwrap();
         for kind in &kinds {
             let kind_const = event_kind_const(kind);
@@ -375,7 +384,13 @@ fn emit_event_destructure(
                         ))
                     })?;
                     let wgsl_name = wgsl_ident(name);
-                    let (ty_str, rhs) = payload_read(&field.ty, slot)?;
+                    let (ty_str, rhs) = if slot == u32::MAX {
+                        // `tick` — read from the dedicated EventRecord.tick
+                        // field, not the payload array.
+                        ("u32".to_string(), "ev_rec.tick".to_string())
+                    } else {
+                        payload_read(&field.ty, slot)?
+                    };
                     lines.push(format!("let {wgsl_name}: {ty_str} = {rhs};"));
                 }
             }
@@ -405,33 +420,49 @@ fn emit_event_destructure(
 }
 
 /// Map a field name to its payload-slot index. Slots are assigned in
-/// the event's declaration order with the implicit `tick` added last
-/// if absent (matches [`fields_with_implicit_tick`]).
+/// the event's declaration order; the implicit `tick` is read from the
+/// event record's dedicated `tick: u32` field (see `payload_tick_read`)
+/// rather than a payload slot.
 fn payload_slot(fields: &[EventField], name: &str) -> Option<u32> {
+    // The `tick` field lives outside the payload array on EventRecord.
+    // Bindings that reference it read `e.tick` directly; we return
+    // `u32::MAX` as a sentinel to flag that the caller should use the
+    // tick-specific read path instead.
+    if name == "tick" {
+        return Some(u32::MAX);
+    }
     fields
         .iter()
+        .filter(|f| f.name != "tick")
         .position(|f| f.name == name)
         .map(|p| p as u32)
 }
 
 /// Emit the `(type, rhs)` pair for reading a single payload slot.
+///
+/// Payload slots are indexed into the `payload[N]` array carried by
+/// the event_ring primitive's `EventRecord` struct (8 u32 slots). The
+/// emitter previously used `e.payload_N` bare field syntax; switching
+/// to the array access form keeps us in lockstep with task 188's WGSL
+/// `EventRecord { kind: u32, tick: u32, payload: array<u32, 8> }`
+/// layout so both emitters can share the same record struct definition.
 fn payload_read(ty: &IrType, slot: u32) -> Result<(String, String), EmitError> {
     match ty {
         IrType::F32 | IrType::F64 => Ok((
             "f32".into(),
-            format!("bitcast<f32>(e.payload_{slot})"),
+            format!("bitcast<f32>(ev_rec.payload[{slot}])"),
         )),
         IrType::Bool => Ok((
             "bool".into(),
-            format!("(e.payload_{slot} != 0u)"),
+            format!("(ev_rec.payload[{slot}] != 0u)"),
         )),
         IrType::I8 | IrType::I16 | IrType::I32 | IrType::I64 => Ok((
             "i32".into(),
-            format!("bitcast<i32>(e.payload_{slot})"),
+            format!("bitcast<i32>(ev_rec.payload[{slot}])"),
         )),
         IrType::U8 | IrType::U16 | IrType::U32 | IrType::U64 => Ok((
             "u32".into(),
-            format!("e.payload_{slot}"),
+            format!("ev_rec.payload[{slot}]"),
         )),
         IrType::AgentId
         | IrType::ItemId
@@ -439,7 +470,7 @@ fn payload_read(ty: &IrType, slot: u32) -> Result<(String, String), EmitError> {
         | IrType::QuestId
         | IrType::AuctionId
         | IrType::EventId
-        | IrType::AbilityId => Ok(("u32".into(), format!("e.payload_{slot}"))),
+        | IrType::AbilityId => Ok(("u32".into(), format!("ev_rec.payload[{slot}]"))),
         other => Err(EmitError::Unsupported(format!(
             "payload field of type {other:?} — no WGSL payload read mapping"
         ))),
@@ -838,45 +869,52 @@ fn emit_emit(out: &mut String, emit: &IrEmit, indent: usize) -> Result<(), EmitE
     }
     let kind_const = event_kind_const(&emit.event_name);
 
-    // Build payload args in declared (source) field order, with an
-    // implicit `tick: state.tick` appended if not spelled out. The
-    // integration phase's `gpu_emit_event` signature has a fixed number
-    // of u32 slots (6); unused slots pass `0u`.
-    let mut saw_tick = false;
+    // Build payload args in declared (source) field order. `tick` is a
+    // dedicated header word on the event record (not a payload slot), so
+    // a spelled-out `tick:` field becomes the call's `tick` arg instead
+    // of a payload slot. If no `tick:` is provided, the emitter appends
+    // `wgsl_world_tick` (the CPU-driven tick uniform).
+    //
+    // Event-ring contract (task 188): `gpu_emit_event(kind, tick, p0..p7)`
+    // takes 8 payload slots — matches `EventRecord.payload: array<u32, 8>`.
+    let mut tick_arg: Option<String> = None;
     let mut slots: Vec<String> = Vec::new();
     for f in &emit.fields {
-        if f.name == "tick" {
-            saw_tick = true;
-        }
         let lowered = lower_expr(&f.value)?;
+        if f.name == "tick" {
+            // `tick` goes into the header word, not the payload array.
+            // The DSL allows either an explicit `tick: N` field (e.g.
+            // `cast` forwards the caster's event tick through nested
+            // emits) or relies on the implicit append below. The lowered
+            // value is already a u32 — no bitcast needed.
+            tick_arg = Some(lowered);
+            continue;
+        }
         let slot = lower_emit_field(&f.value, &lowered)?;
         slots.push(slot);
     }
-    if !saw_tick {
-        // `state.tick` shows up as `world.tick` in DSL physics handlers;
-        // the rust emitter silently appends `tick: state.tick`. Mirror
-        // that here — tick is a plain u32 uniform.
-        slots.push("wgsl_world_tick".to_string());
-    }
-    while slots.len() < 6 {
+    let tick = tick_arg.unwrap_or_else(|| "wgsl_world_tick".to_string());
+    while slots.len() < 8 {
         slots.push("0u".into());
     }
-    if slots.len() > 6 {
+    if slots.len() > 8 {
         return Err(EmitError::Unsupported(format!(
-            "event `{}` has {} payload fields; WGSL gpu_emit_event caps at 6",
+            "event `{}` has {} payload fields; WGSL gpu_emit_event caps at 8",
             emit.event_name,
             slots.len()
         )));
     }
     writeln!(
         out,
-        "{pad}gpu_emit_event({kind_const}, {s0}, {s1}, {s2}, {s3}, {s4}, {s5});",
+        "{pad}gpu_emit_event({kind_const}, {tick}, {s0}, {s1}, {s2}, {s3}, {s4}, {s5}, {s6}, {s7});",
         s0 = slots[0],
         s1 = slots[1],
         s2 = slots[2],
         s3 = slots[3],
         s4 = slots[4],
         s5 = slots[5],
+        s6 = slots[6],
+        s7 = slots[7],
     )
     .unwrap();
     Ok(())
@@ -1567,6 +1605,46 @@ fn is_wgsl_reserved(name: &str) -> bool {
             | "do"
             | "goto"
             | "yield"
+            // WGSL-reserved words that show up as natural DSL binding
+            // names (e.g. `EffectGoldTransfer { from: from, to: to }`).
+            // The emitter prefixes these with `wgsl_` before use.
+            | "from"
+            | "to"
+            | "in"
+            | "out"
+            | "target"
+            | "private"
+            | "new"
+            | "old"
+            | "ref"
+            | "workgroup"
+            | "storage"
+            | "function"
+            | "uniform"
+            | "read"
+            | "write"
+            | "read_write"
+            | "sampler"
+            | "texture_1d"
+            | "texture_2d"
+            | "texture_2d_array"
+            | "texture_3d"
+            | "texture_cube"
+            | "texture_cube_array"
+            | "texture_multisampled_2d"
+            | "texture_storage_1d"
+            | "texture_storage_2d"
+            | "texture_storage_2d_array"
+            | "texture_storage_3d"
+            | "texture_depth_2d"
+            | "texture_depth_2d_array"
+            | "texture_depth_cube"
+            | "texture_depth_cube_array"
+            | "texture_depth_multisampled_2d"
+            | "i32"
+            | "u32"
+            | "f32"
+            | "f16"
     )
 }
 
@@ -1784,18 +1862,18 @@ mod tests {
             "missing fn signature:\n{out}"
         );
         assert!(
-            out.contains("if (e.kind != EVENT_KIND_EFFECT_DAMAGE_APPLIED)"),
+            out.contains("if (ev_rec.kind != EVENT_KIND_EFFECT_DAMAGE_APPLIED)"),
             "missing kind guard:\n{out}"
         );
 
         // Payload destructuring.
-        assert!(out.contains("let c: u32 = e.payload_0;"), "missing actor bind:\n{out}");
+        assert!(out.contains("let c: u32 = ev_rec.payload[0];"), "missing actor bind:\n{out}");
         assert!(
-            out.contains("let t: u32 = e.payload_1;"),
+            out.contains("let t: u32 = ev_rec.payload[1];"),
             "missing target bind:\n{out}"
         );
         assert!(
-            out.contains("let a: f32 = bitcast<f32>(e.payload_2);"),
+            out.contains("let a: f32 = bitcast<f32>(ev_rec.payload[2]);"),
             "missing amount bitcast bind:\n{out}"
         );
 
@@ -2001,11 +2079,11 @@ mod tests {
             "missing fn signature:\n{out}"
         );
         assert!(
-            out.contains("if (e.kind != EVENT_KIND_AGENT_DIED)"),
+            out.contains("if (ev_rec.kind != EVENT_KIND_AGENT_DIED)"),
             "missing kind guard:\n{out}"
         );
         assert!(
-            out.contains("let dead: u32 = e.payload_0;"),
+            out.contains("let dead: u32 = ev_rec.payload[0];"),
             "missing dead bind:\n{out}"
         );
 
@@ -2019,9 +2097,11 @@ mod tests {
             "missing nearby_kin_at stub:\n{out}"
         );
 
-        // Emit call with implicit tick appended.
+        // Emit call — `tick` is the header word (slot before payload),
+        // not a payload slot. Payload has 8 slots (matches event_ring);
+        // fields beyond the event's declared arity are padded with `0u`.
         assert!(
-            out.contains("gpu_emit_event(EVENT_KIND_FEAR_SPREAD, kin, dead, wgsl_world_tick, 0u, 0u, 0u);"),
+            out.contains("gpu_emit_event(EVENT_KIND_FEAR_SPREAD, wgsl_world_tick, kin, dead, 0u, 0u, 0u, 0u, 0u, 0u);"),
             "missing gpu_emit_event for FearSpread:\n{out}"
         );
     }
@@ -2078,12 +2158,19 @@ mod tests {
     #[test]
     fn wgsl_ident_prefixes_reserved_words() {
         assert_eq!(wgsl_ident("actor"), "actor");
-        assert_eq!(wgsl_ident("target"), "target");
+        // `target` is WGSL-reserved as of wgpu 26 / naga 26 — an updated
+        // reserved-word list folds it in now, so the prefix fires.
+        assert_eq!(wgsl_ident("target"), "wgsl_target");
         assert_eq!(wgsl_ident("pass"), "wgsl_pass");
         assert_eq!(wgsl_ident("break"), "wgsl_break");
         assert_eq!(wgsl_ident("loop"), "wgsl_loop");
         assert_eq!(wgsl_ident("let"), "wgsl_let");
         assert_eq!(wgsl_ident("match"), "wgsl_match");
+        // New reservations the physics shader hit in the wild.
+        assert_eq!(wgsl_ident("from"), "wgsl_from");
+        assert_eq!(wgsl_ident("to"), "wgsl_to");
+        assert_eq!(wgsl_ident("new"), "wgsl_new");
+        assert_eq!(wgsl_ident("old"), "wgsl_old");
     }
 
     #[test]
