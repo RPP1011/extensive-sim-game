@@ -867,6 +867,16 @@ fn emit_emit(out: &mut String, emit: &IrEmit, indent: usize) -> Result<(), EmitE
     if emit.event.is_none() {
         return Err(EmitError::UnresolvedEventInEmit(emit.event_name.clone()));
     }
+
+    // Task 203 — chronicle events route to a dedicated GPU ring to keep
+    // the hot path out of the observability tail. Detect by event name:
+    // only `ChronicleEntry` has this special dispatch. Payload shape is
+    // fixed (`template_id, agent, target, tick`), matching the DSL
+    // emit sites in `assets/sim/physics.sim` (8 chronicle rules).
+    if emit.event_name == "ChronicleEntry" {
+        return emit_chronicle_emit(out, emit, indent, &pad);
+    }
+
     let kind_const = event_kind_const(&emit.event_name);
 
     // Build payload args in declared (source) field order. `tick` is a
@@ -915,6 +925,71 @@ fn emit_emit(out: &mut String, emit: &IrEmit, indent: usize) -> Result<(), EmitE
         s5 = slots[5],
         s6 = slots[6],
         s7 = slots[7],
+    )
+    .unwrap();
+    Ok(())
+}
+
+/// Task 203 — lower `emit ChronicleEntry { template_id, agent, target, tick? }`
+/// to a call on the dedicated chronicle ring instead of the main
+/// `gpu_emit_event`. Keeps observability volume off the hot path.
+///
+/// The DSL surface for `ChronicleEntry` is fixed at four fields in the
+/// event catalog (`template_id: u32, agent: AgentId, target: AgentId`)
+/// plus the implicit `tick` every event carries; the emitter enforces
+/// this here by name so a new field added to the event would surface
+/// as `Unsupported` rather than silently getting dropped.
+fn emit_chronicle_emit(
+    out: &mut String,
+    emit: &IrEmit,
+    _indent: usize,
+    pad: &str,
+) -> Result<(), EmitError> {
+    let mut template_id: Option<String> = None;
+    let mut agent: Option<String> = None;
+    let mut target: Option<String> = None;
+    let mut tick_arg: Option<String> = None;
+
+    for f in &emit.fields {
+        let lowered = lower_expr(&f.value)?;
+        match f.name.as_str() {
+            "template_id" => {
+                // template_id is a u32 literal in every chronicle site;
+                // lower_emit_field keeps the type discipline for it.
+                template_id = Some(lower_emit_field(&f.value, &lowered)?);
+            }
+            "agent" => agent = Some(lowered),
+            "target" => target = Some(lowered),
+            "tick" => tick_arg = Some(lowered),
+            other => {
+                return Err(EmitError::Unsupported(format!(
+                    "ChronicleEntry emit has unexpected field `{other}` — \
+                     only template_id/agent/target/tick are allowed",
+                )));
+            }
+        }
+    }
+
+    let template_id = template_id.ok_or_else(|| {
+        EmitError::Unsupported(
+            "ChronicleEntry emit missing `template_id` field".to_string(),
+        )
+    })?;
+    let agent = agent.ok_or_else(|| {
+        EmitError::Unsupported(
+            "ChronicleEntry emit missing `agent` field".to_string(),
+        )
+    })?;
+    let target = target.ok_or_else(|| {
+        EmitError::Unsupported(
+            "ChronicleEntry emit missing `target` field".to_string(),
+        )
+    })?;
+    let tick = tick_arg.unwrap_or_else(|| "wgsl_world_tick".to_string());
+
+    writeln!(
+        out,
+        "{pad}gpu_emit_chronicle_event({template_id}, {agent}, {target}, {tick});",
     )
     .unwrap();
     Ok(())
@@ -2360,5 +2435,131 @@ mod tests {
             out.contains("gpu_emit_event(EVENT_KIND_EFFECT_DAMAGE_APPLIED"),
             "missing gpu_emit_event for damage:\n{out}"
         );
+    }
+
+    // --- Task 203: chronicle emits route to the dedicated chronicle ring ---
+
+    fn chronicle_entry_event() -> EventIR {
+        EventIR {
+            name: "ChronicleEntry".into(),
+            fields: vec![
+                EventField { name: "template_id".into(), ty: IrType::U32, span: span() },
+                EventField { name: "agent".into(), ty: IrType::AgentId, span: span() },
+                EventField { name: "target".into(), ty: IrType::AgentId, span: span() },
+            ],
+            tags: vec![],
+            annotations: vec![],
+            span: span(),
+        }
+    }
+
+    fn lit_u32(v: u64) -> IrExprNode {
+        IrExprNode {
+            kind: IrExpr::LitInt(v as i64),
+            span: span(),
+        }
+    }
+
+    /// `chronicle_death` on AgentDied { agent_id: a } emits
+    ///   `ChronicleEntry { template_id: 1, agent: a, target: a }`.
+    /// The WGSL emitter must route this through `gpu_emit_chronicle_event`
+    /// rather than `gpu_emit_event(EVENT_KIND_CHRONICLE_ENTRY, ...)`.
+    #[test]
+    fn chronicle_emit_routes_to_chronicle_ring_helper() {
+        let pattern = IrPhysicsPattern::Kind(IrEventPattern {
+            name: "AgentDied".into(),
+            event: Some(EventRef(0)),
+            bindings: vec![pattern_bind("agent_id", "a", 0)],
+            span: span(),
+        });
+        let body = vec![IrStmt::Emit(IrEmit {
+            event_name: "ChronicleEntry".into(),
+            event: Some(EventRef(1)),
+            fields: vec![
+                IrFieldInit { name: "template_id".into(), value: lit_u32(1), span: span() },
+                IrFieldInit { name: "agent".into(), value: local("a", 0), span: span() },
+                IrFieldInit { name: "target".into(), value: local("a", 0), span: span() },
+            ],
+            span: span(),
+        })];
+        let p = PhysicsIR {
+            name: "chronicle_death".into(),
+            handlers: vec![PhysicsHandlerIR {
+                pattern,
+                where_clause: None,
+                body,
+                span: span(),
+            }],
+            annotations: vec![],
+            span: span(),
+        };
+        let died = agent_died_event();
+        let chronicle = chronicle_entry_event();
+        let ctx = EmitContext {
+            events: &[died, chronicle],
+            event_tags: &[],
+        };
+        let out = emit_physics_wgsl(&p, &ctx).unwrap();
+
+        // The new emission site uses the chronicle helper.
+        assert!(
+            out.contains("gpu_emit_chronicle_event(1u, a, a, wgsl_world_tick);"),
+            "chronicle emit should route to gpu_emit_chronicle_event:\n{out}"
+        );
+        // It must NOT fall through to the main-ring helper.
+        assert!(
+            !out.contains("gpu_emit_event(EVENT_KIND_CHRONICLE_ENTRY"),
+            "chronicle emit must not hit the main event ring:\n{out}"
+        );
+    }
+
+    #[test]
+    fn chronicle_emit_rejects_unknown_fields() {
+        let pattern = IrPhysicsPattern::Kind(IrEventPattern {
+            name: "AgentDied".into(),
+            event: Some(EventRef(0)),
+            bindings: vec![pattern_bind("agent_id", "a", 0)],
+            span: span(),
+        });
+        let body = vec![IrStmt::Emit(IrEmit {
+            event_name: "ChronicleEntry".into(),
+            event: Some(EventRef(1)),
+            fields: vec![
+                IrFieldInit { name: "template_id".into(), value: lit_u32(1), span: span() },
+                IrFieldInit { name: "agent".into(), value: local("a", 0), span: span() },
+                IrFieldInit { name: "target".into(), value: local("a", 0), span: span() },
+                // Bogus field — a future schema change would surface
+                // here rather than silently getting dropped.
+                IrFieldInit { name: "extra".into(), value: lit_u32(42), span: span() },
+            ],
+            span: span(),
+        })];
+        let p = PhysicsIR {
+            name: "chronicle_with_extra".into(),
+            handlers: vec![PhysicsHandlerIR {
+                pattern,
+                where_clause: None,
+                body,
+                span: span(),
+            }],
+            annotations: vec![],
+            span: span(),
+        };
+        let died = agent_died_event();
+        let chronicle = chronicle_entry_event();
+        let ctx = EmitContext {
+            events: &[died, chronicle],
+            event_tags: &[],
+        };
+        let err = emit_physics_wgsl(&p, &ctx).unwrap_err();
+        match err {
+            EmitError::Unsupported(s) => {
+                assert!(
+                    s.contains("unexpected field `extra`"),
+                    "error message should name the bogus field: {s}"
+                );
+            }
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
     }
 }

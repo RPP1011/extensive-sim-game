@@ -457,6 +457,58 @@ impl GpuBackend {
         self.last_phase_us
     }
 
+    /// Task 203 — drain the GPU chronicle ring into the CPU event
+    /// ring. The chronicle ring is written to by physics every tick
+    /// (via `emit ChronicleEntry` rules) but is NOT drained by the
+    /// cascade driver — it accumulates across ticks until this method
+    /// runs. Every currently-resident record is pushed into `events`
+    /// as an `Event::ChronicleEntry`, then the ring's tail atomic is
+    /// reset to 0 so the next session starts with a fresh window.
+    ///
+    /// Returns the chronicle drain outcome, or `None` if the cascade
+    /// context hasn't been initialised yet (no step has run and
+    /// there's nothing to drain).
+    ///
+    /// ## Relationship to the CPU `cold_state_replay` path
+    ///
+    /// The authoritative source of `Event::ChronicleEntry` in the CPU
+    /// event ring today is `cascade::cold_state_replay`, which walks
+    /// the drained seed + cascade events once per tick and dispatches
+    /// the 8 chronicle rules CPU-side. That path runs inside
+    /// `GpuBackend::step` unconditionally — flushing the GPU
+    /// chronicle ring on top of that would double-count every
+    /// narrative entry.
+    ///
+    /// So `flush_chronicle` is opt-in for callers that DISABLE
+    /// `cold_state_replay` (e.g., a future observability tool that
+    /// wants to read chronicles off the GPU without round-tripping
+    /// through the CPU cold-state handler). In the default step
+    /// pipeline the chronicle ring is a write-only observability
+    /// channel that tests/tools can peek at without perturbing the
+    /// CPU ring's contents.
+    pub fn flush_chronicle(
+        &mut self,
+        events: &mut EventRing,
+    ) -> Option<crate::event_ring::ChronicleDrainOutcome> {
+        let cascade_ctx = self.cascade_ctx.as_mut()?;
+        let outcome = match cascade_ctx
+            .physics
+            .chronicle_ring()
+            .drain(&self.device, &self.queue, events)
+        {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("engine_gpu::flush_chronicle: drain failed: {e}");
+                return None;
+            }
+        };
+        // Reset the tail so subsequent ticks don't re-see already-
+        // drained records. The records buffer stays populated (stale
+        // slots beyond the new tail are invisible to the next drain).
+        cascade_ctx.physics.chronicle_ring().reset(&self.queue);
+        Some(outcome)
+    }
+
     /// Set iff the most recent `step` fell back to the CPU cascade
     /// (init or dispatch error). The backend records the error string
     /// rather than returning it so the `SimBackend::step` signature

@@ -100,7 +100,8 @@ use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
 use engine::state::SimState;
 use crate::event_ring::{
-    pack_event, unpack_record, wgsl_prefix, DrainOutcome, EventRecord, GpuEventRing,
+    chronicle_wgsl_prefix, pack_event, unpack_record, wgsl_prefix, DrainOutcome, EventRecord,
+    GpuChronicleRing, GpuEventRing, CHRONICLE_RING_WGSL, DEFAULT_CHRONICLE_CAPACITY,
     EVENT_RING_WGSL, PAYLOAD_WORDS,
 };
 
@@ -380,8 +381,28 @@ pub fn build_physics_shader(
     ctx: &EmitContext<'_>,
     event_ring_capacity: u32,
 ) -> Result<String, PhysicsError> {
+    build_physics_shader_with_chronicle(
+        physics,
+        ctx,
+        event_ring_capacity,
+        DEFAULT_CHRONICLE_CAPACITY,
+    )
+}
+
+/// Task 203 — explicit-capacity variant. `chronicle_ring_capacity`
+/// picks the size of the dedicated chronicle ring that physics routes
+/// `emit ChronicleEntry` sites into. Exposed separately so tests can
+/// shrink the chronicle ring without touching the main event ring
+/// configuration.
+pub fn build_physics_shader_with_chronicle(
+    physics: &[PhysicsIR],
+    ctx: &EmitContext<'_>,
+    event_ring_capacity: u32,
+    chronicle_ring_capacity: u32,
+) -> Result<String, PhysicsError> {
     let mut out = String::new();
     out.push_str(&wgsl_prefix(event_ring_capacity));
+    out.push_str(&chronicle_wgsl_prefix(chronicle_ring_capacity));
     out.push_str(&format!(
         "const PHYSICS_MAX_EFFECTS: u32 = {}u;\n\
          const PHYSICS_MAX_ABILITIES: u32 = {}u;\n\
@@ -514,6 +535,21 @@ pub fn build_physics_shader(
     out.push_str(
         "@group(0) @binding(7) var<storage, read> events_in: array<EventRecord>;\n\n",
     );
+
+    // Task 203 — chronicle ring. Parallel to the main event ring but
+    // only receives `emit ChronicleEntry` records. Physics bodies route
+    // chronicle emits through `gpu_emit_chronicle_event(...)` (from
+    // CHRONICLE_RING_WGSL below); the main ring sees zero chronicle
+    // traffic, shrinking its atomic-tail contention + drain cost.
+    //
+    // Bindings 11 / 12 sit after the cfg uniform (binding 10) so
+    // adding them doesn't disturb the preexisting bind-group ordering.
+    out.push_str(
+        "@group(0) @binding(11) var<storage, read_write> chronicle_ring: array<ChronicleRecord>;\n\
+         @group(0) @binding(12) var<storage, read_write> chronicle_ring_tail: atomic<u32>;\n",
+    );
+    out.push_str(CHRONICLE_RING_WGSL);
+    out.push_str("\n");
 
     // ---- State stub fns ----
     //
@@ -893,12 +929,23 @@ pub struct PhysicsKernel {
     /// Event ring owned by the kernel — physics writes into this ring
     /// and the driver drains it after each dispatch.
     event_ring: GpuEventRing,
+    /// Task 203 — chronicle ring owned by the kernel. Dedicated buffer
+    /// for `emit ChronicleEntry` records so the main event ring stays
+    /// free of observability traffic. The cascade driver does NOT
+    /// drain this ring per tick; callers opt in via
+    /// [`GpuBackend::flush_chronicle`].
+    chronicle_ring: GpuChronicleRing,
     pool: Option<BufferPool>,
     /// Capacity the ring was provisioned with. Retained for diagnostics
     /// (Piece 3 may surface it in run reports); currently unread so the
     /// `allow(dead_code)` keeps the compiler happy.
     #[allow(dead_code)]
     event_ring_capacity: u32,
+    /// Chronicle ring capacity — retained for pipeline-time validation
+    /// of the shader constant `CHRONICLE_RING_CAP` matches the host
+    /// buffer size.
+    #[allow(dead_code)]
+    chronicle_ring_capacity: u32,
 }
 
 struct BufferPool {
@@ -938,7 +985,32 @@ impl PhysicsKernel {
         ctx: &EmitContext<'_>,
         event_ring_capacity: u32,
     ) -> Result<Self, PhysicsError> {
-        let wgsl = build_physics_shader(physics, ctx, event_ring_capacity)?;
+        Self::new_with_chronicle(
+            device,
+            physics,
+            ctx,
+            event_ring_capacity,
+            DEFAULT_CHRONICLE_CAPACITY,
+        )
+    }
+
+    /// Task 203 — explicit-capacity variant that lets callers size the
+    /// chronicle ring independently of the main event ring. Default
+    /// callers use [`PhysicsKernel::new`] which picks
+    /// [`DEFAULT_CHRONICLE_CAPACITY`] (1 M records).
+    pub fn new_with_chronicle(
+        device: &wgpu::Device,
+        physics: &[PhysicsIR],
+        ctx: &EmitContext<'_>,
+        event_ring_capacity: u32,
+        chronicle_ring_capacity: u32,
+    ) -> Result<Self, PhysicsError> {
+        let wgsl = build_physics_shader_with_chronicle(
+            physics,
+            ctx,
+            event_ring_capacity,
+            chronicle_ring_capacity,
+        )?;
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -993,6 +1065,10 @@ impl PhysicsKernel {
             storage_rw(8), // event_ring records
             storage_rw(9), // event_ring tail
             uniform(10),   // cfg
+            // Task 203 — dedicated chronicle ring. Physics routes
+            // `emit ChronicleEntry` here instead of the main event ring.
+            storage_rw(11), // chronicle_ring records
+            storage_rw(12), // chronicle_ring tail
         ];
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::physics::bgl"),
@@ -1013,14 +1089,28 @@ impl PhysicsKernel {
         });
 
         let event_ring = GpuEventRing::new(device, event_ring_capacity);
+        let chronicle_ring = GpuChronicleRing::new(device, chronicle_ring_capacity);
 
         Ok(Self {
             pipeline,
             bind_group_layout,
             event_ring,
+            chronicle_ring,
             pool: None,
             event_ring_capacity,
+            chronicle_ring_capacity,
         })
+    }
+
+    /// Borrow the chronicle ring. `GpuBackend::flush_chronicle` drains
+    /// this ring on demand; the cascade driver leaves it untouched so
+    /// it accumulates across ticks until the caller explicitly drains.
+    pub fn chronicle_ring(&self) -> &GpuChronicleRing {
+        &self.chronicle_ring
+    }
+
+    pub fn chronicle_ring_mut(&mut self) -> &mut GpuChronicleRing {
+        &mut self.chronicle_ring
     }
 
     /// Borrow the event ring — the cascade driver (Piece 3) reads the
@@ -1316,6 +1406,18 @@ impl PhysicsKernel {
                 wgpu::BindGroupEntry {
                     binding: 10,
                     resource: pool.cfg_buf.as_entire_binding(),
+                },
+                // Task 203 — chronicle ring bindings. The tail atomic
+                // is NOT reset per dispatch: chronicle records
+                // accumulate across ticks and are drained lazily via
+                // `GpuBackend::flush_chronicle`.
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: self.chronicle_ring.records_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: self.chronicle_ring.tail_buffer().as_entire_binding(),
                 },
             ],
         });

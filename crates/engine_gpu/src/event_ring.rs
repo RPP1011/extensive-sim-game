@@ -90,6 +90,20 @@ pub const PAYLOAD_WORDS: usize = 8;
 /// the drain logs a warning before clamping.
 pub const DEFAULT_CAPACITY: u32 = 65_536;
 
+/// Task 203 — default chronicle ring capacity. The chronicle ring is
+/// parallel to the main event ring but holds ONLY narrative
+/// `ChronicleEntry` events. Because chronicle observability dwarfs the
+/// replayable event volume (every AgentAttacked fires chronicle_attack
+/// + chronicle_wound, every AgentDied fires chronicle_death, etc.) we
+/// provision roughly 16× the main-ring default: 1 M records ≈ 24 MiB
+/// at [`CHRONICLE_RECORD_BYTES`] = 24 B.
+///
+/// Overflow semantics: wrap-with-warning. The chronicle is observability
+/// only — losing old entries when the ring fills mid-session is
+/// acceptable (unlike the main ring, where every record is physics
+/// state that must be accounted for). See [`GpuChronicleRing::drain`].
+pub const DEFAULT_CHRONICLE_CAPACITY: u32 = 1_000_000;
+
 /// Bytes per record on the wire. `(kind + tick + PAYLOAD_WORDS) * 4`.
 pub const RECORD_BYTES: u64 = ((2 + PAYLOAD_WORDS) as u64) * 4;
 
@@ -1268,6 +1282,385 @@ impl GpuEventRing {
 }
 
 // ---------------------------------------------------------------------------
+// Task 203 — GPU chronicle ring (separate from the replayable event ring)
+// ---------------------------------------------------------------------------
+//
+// The hot path shouldn't pay for observability. The eight chronicle
+// rules (`chronicle_attack`, `_death`, `_engagement`, `_wound`, `_break`,
+// `_rout`, `_flee`, `_rally`) each fire on a replayable trigger and
+// push a `ChronicleEntry` event. In the prior design those entries went
+// into the main `event_ring` alongside state-mutating events, so every
+// chronicle emission cost an atomicAdd on the shared ring tail and
+// 40 B of bandwidth per record. The CPU drain then dropped them
+// (`unpack_record` returns None for kind=24), making the GPU work
+// entirely wasted — and the cascade convergence detection had to scan
+// past chronicle records on every sub-dispatch.
+//
+// The chronicle ring is a dedicated, larger buffer that only holds
+// chronicle records. Physics emitter routes `emit ChronicleEntry` to
+// the chronicle ring's helper instead of the main ring. The host
+// drains it lazily — see [`GpuBackend::flush_chronicle`].
+//
+// ## Record layout
+//
+// Chronicle records are narrower than the main record (16 B vs. 40 B):
+//
+// ```text
+// struct ChronicleRecord {
+//     template_id: u32,
+//     agent:       u32,   // 1-based AgentId
+//     target:      u32,   // 1-based AgentId
+//     tick:        u32,
+// }
+// ```
+//
+// ## Overflow
+//
+// On overflow the chronicle ring WRAPS with a warning rather than
+// dropping records at the tail. Because chronicle is observability —
+// not physics state — losing the OLDEST entries when the ring fills
+// is acceptable; losing the NEWEST would drop the most recent
+// narrative, which is exactly what a caller invoking
+// `flush_chronicle` mid-session wants to see. The kernel-side emit
+// path stores into `slot = idx % cap` unconditionally; the host-side
+// drain detects `tail_raw > capacity` and prints a warning with the
+// number of dropped-from-head records. The drain still recovers every
+// record currently resident in the buffer (up to `capacity`), just in
+// a rotated order that's flagged in the outcome.
+
+/// Record layout for the chronicle ring. 16 B total, matches the WGSL
+/// `ChronicleRecord` struct.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable, PartialEq, Eq)]
+pub struct ChronicleRecord {
+    pub template_id: u32,
+    pub agent: u32,
+    pub target: u32,
+    pub tick: u32,
+}
+
+impl ChronicleRecord {
+    pub fn new(template_id: u32, agent: AgentId, target: AgentId, tick: u32) -> Self {
+        Self {
+            template_id,
+            agent: agent.raw(),
+            target: target.raw(),
+            tick,
+        }
+    }
+}
+
+/// Bytes per chronicle record on the wire.
+pub const CHRONICLE_RECORD_BYTES: u64 = 16;
+
+/// WGSL fragment the physics emitter splices into the kernel. Declares:
+///
+///   * the `ChronicleRecord` struct matching the Rust `#[repr(C)]` layout
+///   * the `chronicle_ring` storage array + `chronicle_ring_tail` atomic
+///   * the `gpu_emit_chronicle_event` helper used by the physics emitter
+///     for `emit ChronicleEntry` sites
+///
+/// `CHRONICLE_RING_CAP` is declared as a host-substituted const in the
+/// shader prefix. The kernel inserts its own `@group` / `@binding`
+/// declarations at whatever slot it reserves for chronicle.
+///
+/// Wrap-on-overflow: if the atomic tail exceeds capacity the store
+/// writes to `slot = idx % cap`. Older entries at that wrapped slot
+/// are overwritten — acceptable because the chronicle is
+/// observability (not replay), per the task 203 contract.
+pub const CHRONICLE_RING_WGSL: &str = r#"
+struct ChronicleRecord {
+    template_id: u32,
+    agent: u32,
+    target_id: u32,
+    tick: u32,
+};
+
+// Append a chronicle record. `target_id` argname avoids the WGSL
+// reserved word `target`. Wraps on overflow: the atomic increment
+// always succeeds, but slot selection is `idx % cap` so older entries
+// get overwritten rather than newer ones dropped. The caller can read
+// `chronicle_ring_tail` post-dispatch to learn whether overflow
+// occurred (`tail_raw > cap`).
+fn gpu_emit_chronicle_event(template_id: u32, agent: u32, target_id: u32, tick: u32) -> u32 {
+    let idx = atomicAdd(&chronicle_ring_tail, 1u);
+    let slot = idx % CHRONICLE_RING_CAP;
+    var r: ChronicleRecord;
+    r.template_id = template_id;
+    r.agent = agent;
+    r.target_id = target_id;
+    r.tick = tick;
+    chronicle_ring[slot] = r;
+    return idx;
+}
+"#;
+
+/// Prefix constant declarations the host emitter prepends before
+/// [`CHRONICLE_RING_WGSL`]. Capacity is substituted per-ring.
+pub fn chronicle_wgsl_prefix(capacity: u32) -> String {
+    format!("const CHRONICLE_RING_CAP: u32 = {}u;\n", capacity)
+}
+
+/// Outcome of a single [`GpuChronicleRing::drain`] call.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ChronicleDrainOutcome {
+    /// Cumulative number of records the kernel atomically claimed
+    /// since the last [`GpuChronicleRing::reset`]. Includes wrapped
+    /// records that overwrote older entries.
+    pub tail_raw: u32,
+    /// Number of records read back and pushed into the CPU
+    /// [`EventRing`]. Equal to `min(tail_raw, capacity)`.
+    pub drained: u32,
+    /// True iff `tail_raw > capacity` — older records were overwritten.
+    /// The drain still returns what IS in the buffer, just flags that
+    /// history before `tail_raw - capacity` is lost.
+    pub wrapped: bool,
+}
+
+/// Host-side handle to a GPU-resident chronicle ring. Owns the
+/// storage buffer, tail atomic, and a readback staging buffer sized to
+/// the ring capacity.
+pub struct GpuChronicleRing {
+    buffer: wgpu::Buffer,
+    tail_buffer: wgpu::Buffer,
+    tail_readback: wgpu::Buffer,
+    staging: wgpu::Buffer,
+    capacity: u32,
+}
+
+impl GpuChronicleRing {
+    /// Allocate a chronicle ring with `capacity` record slots. At the
+    /// default 1 M capacity the records buffer is 16 MB — callers on
+    /// memory-constrained adapters can shrink this via an explicit
+    /// capacity, at the cost of more frequent wrap-around warnings in
+    /// long-running sessions.
+    pub fn new(device: &wgpu::Device, capacity: u32) -> Self {
+        let cap = capacity.max(1);
+        let buffer_bytes = (cap as u64) * CHRONICLE_RECORD_BYTES;
+
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::chronicle_ring::buffer"),
+            size: buffer_bytes,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let tail_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::chronicle_ring::tail"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let tail_readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::chronicle_ring::tail_readback"),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::chronicle_ring::staging"),
+            size: buffer_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        Self { buffer, tail_buffer, tail_readback, staging, capacity: cap }
+    }
+
+    pub fn capacity(&self) -> u32 {
+        self.capacity
+    }
+
+    /// Byte size of the GPU-resident records buffer.
+    pub fn buffer_bytes(&self) -> u64 {
+        (self.capacity as u64) * CHRONICLE_RECORD_BYTES
+    }
+
+    /// Zero the tail atomic. Kernel `atomicAdd` resets to 0; the
+    /// records buffer itself is NOT cleared, but the drain only reads
+    /// `[0, min(tail_raw, capacity))` so stale records are invisible.
+    pub fn reset(&self, queue: &wgpu::Queue) {
+        queue.write_buffer(&self.tail_buffer, 0, &0u32.to_le_bytes());
+    }
+
+    /// Bind-group-layout entries (records + tail) offset from
+    /// `base_binding`. Mirrors [`GpuEventRing::bind_group_layout_entries`].
+    pub fn bind_group_layout_entries(&self, base_binding: u32) -> Vec<wgpu::BindGroupLayoutEntry> {
+        vec![
+            wgpu::BindGroupLayoutEntry {
+                binding: base_binding,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: base_binding + 1,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ]
+    }
+
+    /// Bind-group entries pointing at records + tail buffers.
+    pub fn bind_group_entries(&self, base_binding: u32) -> Vec<wgpu::BindGroupEntry<'_>> {
+        vec![
+            wgpu::BindGroupEntry {
+                binding: base_binding,
+                resource: self.buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: base_binding + 1,
+                resource: self.tail_buffer.as_entire_binding(),
+            },
+        ]
+    }
+
+    pub fn records_buffer(&self) -> &wgpu::Buffer {
+        &self.buffer
+    }
+
+    pub fn tail_buffer(&self) -> &wgpu::Buffer {
+        &self.tail_buffer
+    }
+
+    /// Drain the chronicle ring into `events`. Every resident record
+    /// becomes an `Event::ChronicleEntry` on the CPU ring. Does NOT
+    /// sort — chronicle events are observability-only, never
+    /// replayable, so ordering is best-effort (tail-order within a
+    /// single drain, plus wrap rotation if overflow occurred).
+    ///
+    /// Overflow (`tail_raw > capacity`) produces a warning on stderr
+    /// naming the number of lost-from-head records. The drain still
+    /// pushes every currently-resident record — including the wrap
+    /// survivors — into the CPU ring. After the drain, the kernel
+    /// sees the tail atomic UNCHANGED (the drain does not reset),
+    /// matching the lazy-drain contract: callers opt in to clearing
+    /// via [`reset`] when they want a fresh window.
+    pub fn drain(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        events: &mut EventRing,
+    ) -> Result<ChronicleDrainOutcome, EventRingError> {
+        // Copy tail into readback buffer.
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("engine_gpu::chronicle_ring::drain_tail_copy"),
+        });
+        encoder.copy_buffer_to_buffer(&self.tail_buffer, 0, &self.tail_readback, 0, 4);
+        queue.submit(Some(encoder.finish()));
+
+        let tail_raw = read_u32(&self.tail_readback, device)?;
+        let drained_count = tail_raw.min(self.capacity);
+        let wrapped = tail_raw > self.capacity;
+
+        if wrapped {
+            eprintln!(
+                "engine_gpu::chronicle_ring: wrapped — tail={tail_raw} exceeds capacity={} \
+                 ({} oldest entries overwritten; observability-only, not a replay hazard)",
+                self.capacity,
+                tail_raw - self.capacity,
+            );
+        }
+
+        if drained_count == 0 {
+            return Ok(ChronicleDrainOutcome {
+                tail_raw,
+                drained: 0,
+                wrapped,
+            });
+        }
+
+        let drained_bytes = (drained_count as u64) * CHRONICLE_RECORD_BYTES;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("engine_gpu::chronicle_ring::drain_records_copy"),
+        });
+        encoder.copy_buffer_to_buffer(&self.buffer, 0, &self.staging, 0, drained_bytes);
+        queue.submit(Some(encoder.finish()));
+
+        let records = read_chronicle_records(&self.staging, device, drained_count as usize)?;
+
+        let mut pushed = 0u32;
+        for r in &records {
+            // Malformed ids (zero) surface as a skipped record rather
+            // than a panic — a kernel bug in the physics emitter would
+            // produce a zero AgentId slot, but chronicle is
+            // non-replayable so a silent drop is strictly better than
+            // a crash.
+            let Some(agent) = AgentId::new(r.agent) else { continue };
+            let Some(target) = AgentId::new(r.target) else { continue };
+            events.push(Event::ChronicleEntry {
+                template_id: r.template_id,
+                agent,
+                target,
+                tick: r.tick,
+            });
+            pushed += 1;
+        }
+
+        Ok(ChronicleDrainOutcome {
+            tail_raw,
+            drained: pushed,
+            wrapped,
+        })
+    }
+
+    /// CPU-side test helper: write a batch of pre-packed records
+    /// directly to the GPU buffer and set the tail to match. Panics
+    /// if `records.len() > capacity`.
+    pub fn seed_for_test(&self, queue: &wgpu::Queue, records: &[ChronicleRecord]) {
+        assert!(
+            records.len() <= self.capacity as usize,
+            "chronicle seed_for_test: {} records > capacity {}",
+            records.len(),
+            self.capacity,
+        );
+        if records.is_empty() {
+            queue.write_buffer(&self.tail_buffer, 0, &0u32.to_le_bytes());
+            return;
+        }
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(records));
+        let tail = records.len() as u32;
+        queue.write_buffer(&self.tail_buffer, 0, &tail.to_le_bytes());
+    }
+}
+
+fn read_chronicle_records(
+    buffer: &wgpu::Buffer,
+    device: &wgpu::Device,
+    n: usize,
+) -> Result<Vec<ChronicleRecord>, EventRingError> {
+    let byte_len = (n as u64) * CHRONICLE_RECORD_BYTES;
+    let slice = buffer.slice(..byte_len);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    let _ = device.poll(wgpu::PollType::Wait);
+    let map_result = rx
+        .recv()
+        .map_err(|e| EventRingError::Map(format!("channel closed: {e}")))?;
+    map_result.map_err(|e| EventRingError::Map(format!("{e:?}")))?;
+    let data = slice.get_mapped_range();
+    let casted: &[ChronicleRecord] = bytemuck::cast_slice(&data);
+    let out = casted[..n].to_vec();
+    drop(data);
+    buffer.unmap();
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
 // Small wgpu readback helpers (private)
 // ---------------------------------------------------------------------------
 
@@ -1633,5 +2026,60 @@ mod tests {
         assert!(EVENT_RING_WGSL.contains("fn gpu_emit_event("));
         assert!(EVENT_RING_WGSL.contains("fn gpu_emit_agent_attacked("));
         assert!(EVENT_RING_WGSL.contains("atomicAdd(&event_ring_tail"));
+    }
+
+    #[test]
+    fn chronicle_record_size_is_16_bytes() {
+        assert_eq!(
+            std::mem::size_of::<ChronicleRecord>() as u64,
+            CHRONICLE_RECORD_BYTES
+        );
+    }
+
+    #[test]
+    fn chronicle_wgsl_prefix_contains_cap() {
+        let s = chronicle_wgsl_prefix(4096);
+        assert!(s.contains("CHRONICLE_RING_CAP: u32 = 4096u"));
+    }
+
+    #[test]
+    fn chronicle_wgsl_source_declares_core_fn() {
+        assert!(CHRONICLE_RING_WGSL.contains("fn gpu_emit_chronicle_event("));
+        assert!(CHRONICLE_RING_WGSL.contains("atomicAdd(&chronicle_ring_tail"));
+        assert!(CHRONICLE_RING_WGSL.contains("struct ChronicleRecord"));
+    }
+
+    #[test]
+    fn chronicle_record_layout_matches_wgsl_order() {
+        // Field order on both sides: template_id, agent, target, tick.
+        // A mismatch would corrupt readback; bytemuck::Pod makes the
+        // layout `#[repr(C)]` and validates field types, but it can't
+        // check semantic ordering vs. WGSL. This test pins the order
+        // by construction.
+        let r = ChronicleRecord {
+            template_id: 7,
+            agent: 100,
+            target: 200,
+            tick: 42,
+        };
+        let bytes: &[u8] = bytemuck::bytes_of(&r);
+        // Little-endian u32 layout:
+        //   0..4   = 7
+        //   4..8   = 100
+        //   8..12  = 200
+        //   12..16 = 42
+        assert_eq!(&bytes[0..4], &7u32.to_le_bytes());
+        assert_eq!(&bytes[4..8], &100u32.to_le_bytes());
+        assert_eq!(&bytes[8..12], &200u32.to_le_bytes());
+        assert_eq!(&bytes[12..16], &42u32.to_le_bytes());
+    }
+
+    #[test]
+    fn default_chronicle_capacity_is_1m() {
+        assert_eq!(DEFAULT_CHRONICLE_CAPACITY, 1_000_000);
+        // 1 M × 16 B = 16 MB — documented overhead for the
+        // observability-only ring.
+        let bytes = (DEFAULT_CHRONICLE_CAPACITY as u64) * CHRONICLE_RECORD_BYTES;
+        assert_eq!(bytes, 16_000_000);
     }
 }
