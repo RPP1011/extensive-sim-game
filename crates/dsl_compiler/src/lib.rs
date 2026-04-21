@@ -15,6 +15,7 @@ pub mod emit_enum;
 pub mod emit_mask;
 pub mod emit_mask_wgsl;
 pub mod emit_physics;
+pub mod emit_physics_wgsl;
 pub mod emit_python;
 pub mod emit_rust;
 pub mod emit_scoring;
