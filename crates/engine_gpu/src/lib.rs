@@ -108,6 +108,24 @@ pub mod cascade;
 #[cfg(feature = "gpu")]
 pub mod apply_scoring;
 
+/// Task 199 — GPU `apply_actions` kernel. WGSL port of the hot subset
+/// of `engine::step::apply_actions`: Attack damage + AgentAttacked /
+/// AgentDied event emission, one thread per agent slot. Needs /
+/// opportunity attacks / engagement-slow / announce are documented as
+/// out-of-scope in the module header. Not yet wired into
+/// `GpuBackend::step` as authoritative — scaffolding for a follow-up
+/// that removes the CPU `apply_actions` call entirely once the
+/// engagement-slow + opportunity-attack gaps close.
+#[cfg(feature = "gpu")]
+pub mod apply_actions;
+
+/// Task 199 — GPU movement kernel. WGSL port of the MoveToward / Flee
+/// position updates, one thread per agent slot. Pure-away flee only
+/// (no kin-flee-bias) in the initial landing — deer herding is a
+/// follow-up. Not yet wired into `GpuBackend::step` as authoritative.
+#[cfg(feature = "gpu")]
+pub mod movement;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
