@@ -318,7 +318,6 @@ fn bitmap_diff(cpu: &[u32], gpu: &[u32]) -> Vec<u32> {
 /// a spatial-radius mismatch — task 193 hit one of each on first
 /// landing and fixed both in the cascade driver).
 #[test]
-#[ignore = "regresses after task 196 topk layout — scoring reads dense indices. task 198 wiring should restore."]
 fn gpu_full_tick_loop_matches_cpu_50_ticks() {
     let mut cpu_backend = CpuBackend;
     let mut cpu_state = spawn_fixture();
@@ -382,7 +381,6 @@ fn gpu_full_tick_loop_matches_cpu_50_ticks() {
 /// reports a divergence tick, the per-tick state comparison surfaces
 /// which agent changed and when.
 #[test]
-#[ignore = "regresses after task 196 topk layout — scoring reads dense indices. task 198 wiring should restore."]
 fn gpu_full_tick_per_tick_state_divergence() {
     let mut cpu_backend = CpuBackend;
     let mut cpu_state = spawn_fixture();
@@ -451,7 +449,6 @@ fn gpu_full_tick_per_tick_state_divergence() {
 }
 
 #[test]
-#[ignore = "regresses after task 196 topk layout — scoring reads dense indices. task 198 wiring should restore."]
 fn gpu_backend_matches_cpu_on_canonical_fixture() {
     let (cpu_state, cpu_events) = run_cpu();
     let (gpu_state, gpu_events) = run_gpu();
