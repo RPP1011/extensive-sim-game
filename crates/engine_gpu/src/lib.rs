@@ -580,6 +580,46 @@ impl GpuBackend {
             &self.view_storage,
         )
     }
+
+    /// Phase 9 (task 195) — batched step API. Runs `n_ticks` ticks in
+    /// a row without any CPU-side work between them beyond what
+    /// `SimBackend::step` already does per tick. The API exists to
+    /// give callers a single entry point for "just advance the sim N
+    /// ticks"; the per-tick pipeline still submits + waits on GPU work
+    /// individually.
+    ///
+    /// This API is a scaffolding deliverable for the full megakernel
+    /// plan: the next milestone would be to share a single command
+    /// buffer across all N ticks (no wgpu submit between ticks), with
+    /// a GPU-resident cascade range buffer so physics can iterate on
+    /// its own output without CPU readback. That requires:
+    ///   * a WGSL `update_cascade_range` kernel that reads the
+    ///     event-ring tail + writes the next iteration's (start, count)
+    ///     into a storage buffer physics reads,
+    ///   * a physics shader rebind that consumes its events-in slice
+    ///     from the shared event ring rather than a separate
+    ///     `events_in_buf`,
+    ///   * GPU-side apply_actions + movement kernels so phases 4a and
+    ///     movement don't need CPU-side state mutation.
+    ///
+    /// The scope of all three changes is ~800-1200 LOC of WGSL + Rust
+    /// glue. Task 195 lands the per-tick wins (pooled staging, fused
+    /// submits, sidecar opt-out, diagnostic surface) that unblock the
+    /// measurement work; task 196+ consumes those + lands the
+    /// cross-tick single-submit pipeline.
+    pub fn step_batch<B: PolicyBackend>(
+        &mut self,
+        state: &mut SimState,
+        scratch: &mut SimScratch,
+        events: &mut EventRing,
+        policy: &B,
+        cascade: &CascadeRegistry,
+        n_ticks: u32,
+    ) {
+        for _ in 0..n_ticks {
+            <Self as SimBackend>::step(self, state, scratch, events, policy, cascade);
+        }
+    }
 }
 
 #[cfg(feature = "gpu")]
