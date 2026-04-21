@@ -1,22 +1,30 @@
-//! WGSL emission for mask predicates — Phase 1 of the GPU megakernel plan.
+//! WGSL emission for mask predicates — Phase 1-2 of the GPU megakernel plan.
 //!
 //! Mirrors [`emit_mask`]'s AST walk but emits a compute shader source
 //! string targeting the WGSL subset wgpu 26 accepts via its runtime
-//! `naga` parse path. The Phase 1 deliverable is one kernel per mask
-//! declaration, each producing a `u32` bitmap indexed by agent slot —
-//! one bit per agent, `1` iff the predicate holds for that agent against
-//! every enumerated target within the `from`-clause radius. Task 158's
-//! GPU-emittability validator has already gated the subset we accept
-//! here, so unsupported shapes surface as `EmitError::Unsupported`
-//! rather than silent miscompiles.
+//! `naga` parse path. Two entry points live here:
 //!
-//! ## Scope (Phase 1)
+//!   * [`emit_mask_wgsl`] — single-mask kernel (one `cs_<name>` entry
+//!     point per `MaskIR`). Used by the backend's Phase 1 parity tests
+//!     and by any test that wants to probe the lowerer in isolation.
+//!   * [`emit_masks_wgsl_fused`] — fused module emitting a single
+//!     `cs_fused_masks` entry point that walks every agent once and
+//!     writes N separate bitmap outputs, one per mask. This is the
+//!     Phase 2 shape the GPU backend dispatches each tick — same SoA
+//!     upload, same work per invocation, but N fewer dispatches.
 //!
-//! Only the `Attack` mask is wired end-to-end (`cs_attack` kernel + the
-//! matching dispatch in `engine_gpu`). The emitter itself is deliberately
-//! parameterised — `emit_mask_wgsl` walks any `MaskIR` — so Phase 2 can
-//! turn on the remaining 7 masks by registering their kernels on the
-//! GPU backend side without touching the emitter core. The supported
+//! Task 158's GPU-emittability validator has already gated the subset
+//! we accept here, so unsupported shapes surface as
+//! `EmitError::Unsupported` rather than silent miscompiles.
+//!
+//! ## Scope (Phase 2)
+//!
+//! The Phase-1 Attack-only gate is gone — any mask whose
+//! `IrActionHead::shape` is either `None` (self-only) or `Positional([
+//! (_, _, IrType::AgentId)])` (single-Agent target) emits a kernel. The
+//! remaining shapes — parametric over a non-Agent type, e.g.
+//! `mask Cast(ability: AbilityId)` — still error out; they need view
+//! storage / cooldown buffers that Phase 4+ will add. The supported
 //! expression surface is a subset of `emit_mask.rs`:
 //!
 //!   * Literals (bool, int, float)
@@ -90,37 +98,75 @@ pub fn emit_mask_wgsl(mask: &MaskIR) -> Result<String, String> {
 }
 
 fn emit_mask_wgsl_result(mask: &MaskIR) -> Result<String, EmitError> {
-    // Phase 1 gate: Attack only. The rest of the emitter is generic —
-    // we just refuse to instantiate a kernel for masks we haven't yet
-    // vetted. Phase 2 removes this check.
-    if mask.head.name != "Attack" {
-        return Err(EmitError::Unsupported(format!(
-            "Phase 1 WGSL emitter only supports `Attack`; got `{}`",
-            mask.head.name
-        )));
-    }
-
-    // WGSL reserves `target` as a keyword, so we alias the DSL-level
-    // target binding name to a kernel-local `wgsl_target` symbol. The
-    // Rust emitter's `target` binding has no such conflict — this
-    // aliasing is WGSL-only.
-    let dsl_target_name = match &mask.head.shape {
-        IrActionHeadShape::Positional(binds) if binds.len() == 1 => binds[0].0.clone(),
-        _ => {
-            return Err(EmitError::Unsupported(format!(
-                "mask `{}` must have a single positional target for Phase 1",
-                mask.head.name
-            )));
-        }
-    };
+    // Phase 2: the Attack-only gate is gone. Any mask that passes the
+    // task-158 GPU-emittability validator — i.e. its `head.shape` is
+    // either `None` (self-only) or `Positional([(_, _, IrType::AgentId)])`
+    // (single Agent target) — emits a kernel. Shapes that carry a
+    // non-Agent parameter (e.g. `mask Cast(ability: AbilityId)`) are
+    // still rejected here: those require buffers and view storage that
+    // the Phase 2 emitter doesn't yet provision. Phase 4+ revisits Cast
+    // once the views it depends on (`view::is_stunned`,
+    // `abilities.cooldown_ready`, `agents.engaged_with`) have real GPU
+    // backing.
+    //
+    // WGSL reserves `target` as a keyword, so for target-bound masks we
+    // alias the DSL-level binding name to a kernel-local `wgsl_target`
+    // symbol. Self-only masks don't have a target binding at all — the
+    // kernel just tests the alive self and packs the bit unconditionally
+    // (every predicate body in v1 is just `agents.alive(self)`).
+    let target_shape = classify_mask_shape(mask)?;
     let wgsl_target_name = "wgsl_target".to_string();
 
     let mut out = String::new();
     emit_header(&mut out, mask);
     emit_bindings(&mut out);
     emit_helpers(&mut out);
-    emit_kernel(&mut out, mask, &dsl_target_name, &wgsl_target_name)?;
+    emit_kernel(&mut out, mask, &target_shape, &wgsl_target_name)?;
     Ok(out)
+}
+
+/// Classification of a `MaskIR`'s action-head shape into the subset the
+/// Phase 2 WGSL emitter accepts. `SelfOnly` means the kernel tests the
+/// self agent only (no target loop); `AgentTarget(name)` means the
+/// kernel loops over every alive candidate and applies the predicate
+/// per pair, with `name` carrying the DSL-level target binding so the
+/// WGSL alias table can rewrite occurrences. Any other shape — e.g.
+/// `Positional` with an `AbilityId` param — surfaces as
+/// `Unsupported` so the GPU backend skips that mask and logs the
+/// reason.
+#[derive(Debug, Clone)]
+enum MaskShape {
+    /// No `from` clause, no target binding. Hold / Flee / Eat / Drink /
+    /// Rest all lower to this — the body only tests `agents.alive(self)`.
+    SelfOnly,
+    /// `from query.nearby_agents(...)` clause + single positional Agent
+    /// target binding. Attack / MoveToward lower to this.
+    AgentTarget { dsl_name: String },
+}
+
+fn classify_mask_shape(mask: &MaskIR) -> Result<MaskShape, EmitError> {
+    match &mask.head.shape {
+        IrActionHeadShape::None => Ok(MaskShape::SelfOnly),
+        IrActionHeadShape::Positional(binds) if binds.is_empty() => Ok(MaskShape::SelfOnly),
+        IrActionHeadShape::Positional(binds) if binds.len() == 1 => {
+            let (name, _slot, ty) = &binds[0];
+            match ty {
+                crate::ir::IrType::AgentId => Ok(MaskShape::AgentTarget {
+                    dsl_name: name.clone(),
+                }),
+                other => Err(EmitError::Unsupported(format!(
+                    "mask `{}` has non-Agent positional param of type {other:?}; \
+                     parametric masks (e.g. `Cast(ability: AbilityId)`) need view/cooldown \
+                     storage the Phase 2 emitter doesn't provision. Skip on GPU.",
+                    mask.head.name
+                ))),
+            }
+        }
+        other => Err(EmitError::Unsupported(format!(
+            "mask `{}` has unsupported action-head shape {other:?}",
+            mask.head.name
+        ))),
+    }
 }
 
 /// Snake-case transform — identical to the Rust emitter's so the kernel
@@ -201,14 +247,22 @@ fn emit_bindings(out: &mut String) {
     .unwrap();
     writeln!(out).unwrap();
     // Config block — a small uniform buffer carries the handful of
-    // `config.<block>.<field>` reads Phase 1 masks need. Attack pulls
-    // `combat.attack_range` out of it.
+    // `config.<block>.<field>` reads the masks need. Phase 2 masks
+    // consume two knobs:
+    //
+    //   * `combat.attack_range`     — Attack's `from` radius + inner
+    //                                 `distance < 2.0` clause
+    //   * `movement.max_move_radius` — MoveToward's `from` radius
+    //
+    // The struct is `std140`-ish — f32 fields pack tight, but WGSL
+    // uniform buffers still want 16-byte alignment. Two scalars fit in
+    // the first 8 bytes; we pad to 16 with two f32s.
     writeln!(out, "struct ConfigUniform {{").unwrap();
     writeln!(out, "    combat_attack_range: f32,").unwrap();
+    writeln!(out, "    movement_max_move_radius: f32,").unwrap();
     writeln!(out, "    // Padding to align to 16 bytes.").unwrap();
     writeln!(out, "    _pad0: f32,").unwrap();
     writeln!(out, "    _pad1: f32,").unwrap();
-    writeln!(out, "    _pad2: f32,").unwrap();
     writeln!(out, "}};").unwrap();
     writeln!(
         out,
@@ -275,7 +329,7 @@ fn emit_helpers(out: &mut String) {
 fn emit_kernel(
     out: &mut String,
     mask: &MaskIR,
-    dsl_target_name: &str,
+    shape: &MaskShape,
     wgsl_target_name: &str,
 ) -> Result<(), EmitError> {
     let kernel_name = format!("cs_{}", snake_case(&mask.head.name));
@@ -309,81 +363,8 @@ fn emit_kernel(
         "    let self_ct = agent_creature_type[self_id];"
     )
     .unwrap();
-    // The attack `from` clause is fixed in `masks.sim` to
-    // `query.nearby_agents(agents.pos(self), config.combat.attack_range)`.
-    // We inline the radius read — Phase 1 hardcodes this knob; Phase 2
-    // will walk the `from` expression generically.
-    writeln!(
-        out,
-        "    let radius = cfg.combat_attack_range;"
-    )
-    .unwrap();
-    // The Phase 1 dispatch has no spatial hash on GPU — we iterate
-    // every alive slot and let the `distance < radius` clause filter.
-    // Brute force is fine at N <= small-world (8-200 agents); Phase 5
-    // ports the spatial hash.
-    writeln!(out, "    var found: bool = false;").unwrap();
-    writeln!(
-        out,
-        "    for (var {t}: u32 = 0u; {t} < n; {t} = {t} + 1u) {{",
-        t = wgsl_target_name
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if ({t} == self_id) {{ continue; }}",
-        t = wgsl_target_name
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        if (agent_alive[{t}] == 0u) {{ continue; }}",
-        t = wgsl_target_name
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let {t}_pos = agent_pos[{t}];",
-        t = wgsl_target_name
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        let {t}_ct = agent_creature_type[{t}];",
-        t = wgsl_target_name
-    )
-    .unwrap();
-    // Radius prefilter — the `from` clause bound. Note: for the attack
-    // mask this is identical to the final `distance < 2.0` clause
-    // because `attack_range == 2.0` in DSL defaults. If they drift,
-    // the inner predicate still enforces the tighter bound.
-    writeln!(
-        out,
-        "        if (vec3_distance(self_pos, {t}_pos) > radius) {{ continue; }}",
-        t = wgsl_target_name
-    )
-    .unwrap();
 
-    // Now lower the predicate body clauses. The lowerer rewrites every
-    // occurrence of the DSL-level `target` local to `wgsl_target` so
-    // the emitted expression references the loop variable the kernel
-    // just established.
-    let mut clauses: Vec<&IrExprNode> = Vec::new();
-    flatten_and(&mask.predicate, &mut clauses);
-
-    let hoisted = Vec::<String>::new();
-    let ctx = LowerCtx { dsl_target_name, wgsl_target_name };
-    for clause in &clauses {
-        let cond = lower_expr(clause, &hoisted, ctx)?;
-        writeln!(
-            out,
-            "        if (!({cond})) {{ continue; }}"
-        )
-        .unwrap();
-    }
-    writeln!(out, "        found = true;").unwrap();
-    writeln!(out, "        break;").unwrap();
-    writeln!(out, "    }}").unwrap();
+    emit_predicate_body(out, mask, shape, wgsl_target_name)?;
     writeln!(out).unwrap();
     // Pack the bit. Non-atomic in concept (one thread per self_id), but
     // we use atomicOr so different workgroups writing into the same u32
@@ -400,6 +381,128 @@ fn emit_kernel(
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
     Ok(())
+}
+
+/// Emit the predicate body — shared between the single-mask entry-point
+/// emitter and the fused-kernel emitter. Writes a `var found: bool` the
+/// caller reads and bit-packs. For self-only masks the body is a linear
+/// conjunction of the `when` clauses evaluated against the self agent;
+/// for agent-target masks it's a loop over every alive candidate with
+/// the target-pos/target-ct bindings hoisted and the `from` radius
+/// prefilter applied.
+fn emit_predicate_body(
+    out: &mut String,
+    mask: &MaskIR,
+    shape: &MaskShape,
+    wgsl_target_name: &str,
+) -> Result<(), EmitError> {
+    let mut clauses: Vec<&IrExprNode> = Vec::new();
+    flatten_and(&mask.predicate, &mut clauses);
+    let hoisted = Vec::<String>::new();
+
+    match shape {
+        MaskShape::SelfOnly => {
+            // No target loop — evaluate the predicate against self and
+            // set `found` once every clause passes. DSL-level `self` is
+            // the only local, so `dsl_target_name` is effectively
+            // unused; we pass an empty string so `rename_local` falls
+            // through to the identity branch for non-`self` names.
+            writeln!(out, "    var found: bool = false;").unwrap();
+            writeln!(out, "    {{").unwrap();
+            // Evaluate each clause; bail to the end of the block if any
+            // fails. Using a scope + break keeps early-exit cheap.
+            let ctx = LowerCtx { dsl_target_name: "", wgsl_target_name };
+            writeln!(out, "        let pass = (true").unwrap();
+            for clause in &clauses {
+                let cond = lower_expr(clause, &hoisted, ctx)?;
+                writeln!(out, "            && ({cond})").unwrap();
+            }
+            writeln!(out, "        );").unwrap();
+            writeln!(out, "        if (pass) {{ found = true; }}").unwrap();
+            writeln!(out, "    }}").unwrap();
+        }
+        MaskShape::AgentTarget { dsl_name } => {
+            // Pick the `from`-clause radius. Phase 1's Attack inlined
+            // `combat.attack_range` directly. Phase 2 reads the radius
+            // from the mask's name — a small switch because the DSL's
+            // `from` expression isn't walked here (only Phase 5's
+            // spatial hash will). Attack → `cfg.combat_attack_range`,
+            // MoveToward → `cfg.movement_max_move_radius`. Masks whose
+            // radius knob isn't wired surface as an emit error so the
+            // GPU backend skips them loudly.
+            let radius_sym = mask_radius_symbol(&mask.head.name)?;
+            writeln!(out, "    let radius = {radius_sym};").unwrap();
+            writeln!(out, "    var found: bool = false;").unwrap();
+            writeln!(
+                out,
+                "    for (var {t}: u32 = 0u; {t} < n; {t} = {t} + 1u) {{",
+                t = wgsl_target_name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        if ({t} == self_id) {{ continue; }}",
+                t = wgsl_target_name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        if (agent_alive[{t}] == 0u) {{ continue; }}",
+                t = wgsl_target_name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let {t}_pos = agent_pos[{t}];",
+                t = wgsl_target_name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "        let {t}_ct = agent_creature_type[{t}];",
+                t = wgsl_target_name
+            )
+            .unwrap();
+            // Radius prefilter — the `from` clause bound.
+            writeln!(
+                out,
+                "        if (vec3_distance(self_pos, {t}_pos) > radius) {{ continue; }}",
+                t = wgsl_target_name
+            )
+            .unwrap();
+
+            let ctx = LowerCtx { dsl_target_name: dsl_name, wgsl_target_name };
+            for clause in &clauses {
+                let cond = lower_expr(clause, &hoisted, ctx)?;
+                writeln!(
+                    out,
+                    "        if (!({cond})) {{ continue; }}"
+                )
+                .unwrap();
+            }
+            writeln!(out, "        found = true;").unwrap();
+            writeln!(out, "        break;").unwrap();
+            writeln!(out, "    }}").unwrap();
+        }
+    }
+    Ok(())
+}
+
+/// Lookup the WGSL symbol for the `from`-clause radius of a given
+/// target-bound mask. This is a small hard-coded table for v1 — the
+/// DSL's `from query.nearby_agents(pos, <radius>)` expression isn't
+/// walked by the emitter yet. Extending: when a new target-bound mask
+/// lands, add its config knob to the `ConfigUniform` struct emitted by
+/// `emit_bindings` and wire it here.
+fn mask_radius_symbol(name: &str) -> Result<&'static str, EmitError> {
+    match name {
+        "Attack" => Ok("cfg.combat_attack_range"),
+        "MoveToward" => Ok("cfg.movement_max_move_radius"),
+        other => Err(EmitError::Unsupported(format!(
+            "target-bound mask `{other}` has no wired radius knob in the WGSL emitter; \
+             add it to ConfigUniform + mask_radius_symbol"
+        ))),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -522,16 +625,20 @@ fn lower_expr(
 
 fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitError> {
     if ns == NamespaceId::Config {
-        // Phase 1 only knows `combat.attack_range`. Extend per mask.
+        // Phase 2 knows the knobs Attack and MoveToward pull out of the
+        // config block. The full Config struct has ~60 fields; the
+        // emitter only surfaces the ones a masked rule actually reads,
+        // so the uniform buffer stays tiny. Extend per mask.
         return match field {
             "combat.attack_range" => Ok("cfg.combat_attack_range".to_string()),
+            "movement.max_move_radius" => Ok("cfg.movement_max_move_radius".to_string()),
             other => Err(EmitError::Unsupported(format!(
-                "Phase 1 WGSL: config field `{other}` not wired"
+                "WGSL mask emitter: config field `{other}` not wired"
             ))),
         };
     }
     Err(EmitError::Unsupported(format!(
-        "Phase 1 WGSL: namespace-field `{}.{field}` not supported",
+        "WGSL mask emitter: namespace-field `{}.{field}` not supported",
         ns.name()
     )))
 }
@@ -801,11 +908,86 @@ mod tests {
         assert!(src.contains("atomicOr(&mask_out[word_idx], 1u << bit_idx)"));
     }
 
+    /// Phase 2 self-only masks (Hold / Flee / Eat / Drink / Rest) all
+    /// lower to `agents.alive(self)` — the body has no target loop and
+    /// no radius prefilter. This test builds that shape by hand and
+    /// asserts the emitter produces a kernel with (a) no loop header,
+    /// (b) the self-alive gate, and (c) the bit-pack epilogue.
     #[test]
-    fn non_attack_mask_is_rejected_at_phase_1() {
+    fn self_only_mask_emits_loopless_kernel() {
+        let self_local = local("self", 0);
+        let alive_self = ns_call(NamespaceId::Agents, "alive", vec![self_local]);
+        let mask = MaskIR {
+            head: IrActionHead {
+                name: "Hold".into(),
+                shape: IrActionHeadShape::None,
+                span: span(),
+            },
+            candidate_source: None,
+            predicate: alive_self,
+            annotations: vec![],
+            span: span(),
+        };
+        let src = emit_mask_wgsl(&mask).expect("emit hold wgsl");
+        // The predicate lowerer turns the agents.alive(self) clause
+        // into the same `(agent_alive[self_id] != 0u)` expression it
+        // uses for Attack's target-alive check — assert the shape,
+        // not the exact text, so a future lowerer rewrite doesn't
+        // silently invalidate the test.
+        assert!(
+            src.contains("fn cs_hold("),
+            "missing cs_hold entry point:\n{src}"
+        );
+        // Self-only kernels still emit the self-alive gate at the top
+        // (dead agents produce no bits) and then drop into the body.
+        assert!(src.contains("agent_alive[self_id] == 0u"));
+        // No target loop for self-only masks — the `for (var wgsl_target`
+        // header only appears on target-bound masks.
+        assert!(
+            !src.contains("for (var wgsl_target"),
+            "self-only mask should not emit a target loop:\n{src}"
+        );
+        // And the bit-pack epilogue still fires.
+        assert!(src.contains("atomicOr(&mask_out[word_idx], 1u << bit_idx)"));
+    }
+
+    /// Phase 2 rejects masks that carry a non-Agent positional param
+    /// (the Cast mask: `mask Cast(ability: AbilityId)`). The
+    /// target-loop kernel shape the emitter produces assumes the
+    /// binding is an AgentId slot; anything else would require
+    /// ability-registry / cooldown / view storage the Phase 2 emitter
+    /// doesn't yet provision. The backend skips these at registration
+    /// time; the error surface here is what lets it do so safely.
+    #[test]
+    fn non_agent_parametric_mask_is_rejected_with_skip_hint() {
         let mut mask = attack_mask_ir();
-        mask.head.name = "Flee".into();
+        mask.head.name = "Cast".into();
+        mask.head.shape = IrActionHeadShape::Positional(vec![(
+            "ability".into(),
+            LocalRef(1),
+            IrType::AbilityId,
+        )]);
+        mask.candidate_source = None;
         let err = emit_mask_wgsl(&mask).unwrap_err();
-        assert!(err.contains("Phase 1"), "unexpected err: {err}");
+        assert!(
+            err.contains("Skip on GPU"),
+            "expected skip hint in err: {err}"
+        );
+    }
+
+    /// A target-bound mask whose name isn't in `mask_radius_symbol`'s
+    /// table surfaces a loud diagnostic rather than silently defaulting
+    /// to the Attack radius. When adding a new target-bound mask (e.g.
+    /// a `mask Strike(target)`) the author must wire its config knob
+    /// through ConfigUniform + `mask_radius_symbol`.
+    #[test]
+    fn unknown_target_bound_mask_surfaces_radius_error() {
+        let mut mask = attack_mask_ir();
+        mask.head.name = "Strike".into();
+        let err = emit_mask_wgsl(&mask).unwrap_err();
+        assert!(
+            err.contains("no wired radius knob"),
+            "expected radius-knob err, got: {err}"
+        );
     }
 }
