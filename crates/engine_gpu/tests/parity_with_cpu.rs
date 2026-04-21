@@ -503,26 +503,27 @@ fn gpu_scoring_matches_cpu_no_combat_fixture() {
     }
 }
 
-/// Best-effort scoring parity on the canonical 3v2 fixture. The
-/// expectation is that for tick 0 (before any combat) the outputs
-/// match byte-exact, but for later ticks the GPU's stubbed view-call
-/// evaluator may diverge from the CPU's real view reads. We assert
-/// only the first tick rigorously and log mismatches for later ticks
-/// to make the divergence boundary visible without failing CI.
+/// Phase 6c byte-exact: the GPU scoring kernel matches the CPU
+/// reference's `(action, target, score)` per agent on EVERY tick of
+/// the canonical 3-humans-2-wolves fixture. View modifiers
+/// (grudges, pack_focus once engagements commit, rally_boost after
+/// wounds) populate naturally over 50 ticks of combat, so this test
+/// exercises the full view-read dispatch — including the wildcard
+/// loop that mirrors `sum_for_first(a, tick)` and the dt=0 short-
+/// circuit on `pow(rate, 0)` that keeps f32 byte-exact with the
+/// uploaded value. Failure: any per-slot divergence at any tick.
 ///
-/// Phase 4 (task 185) wires real view storage; at that point this
-/// test can drop the "best effort after tick 0" treatment and assert
-/// byte-exact parity for the full run.
+/// Renamed from `gpu_scoring_canonical_fixture_best_effort` (which
+/// allowed log-and-continue divergences while view storage was
+/// stubbed at 0.0). Task 189 (Phase 6c) wired real view reads, so
+/// this test now hard-asserts byte-exact for every tick.
 #[test]
-fn gpu_scoring_canonical_fixture_best_effort() {
+fn gpu_scoring_canonical_fixture_exact() {
     let mut backend = GpuBackend::new().expect("GpuBackend init");
     let mut state = spawn_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(EVENT_RING_CAP);
     let cascade = CascadeRegistry::with_engine_builtins();
-
-    let mut divergences = 0usize;
-    let mut first_diverging_tick: Option<u32> = None;
 
     for tick_i in 0..TICKS {
         backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
@@ -530,35 +531,68 @@ fn gpu_scoring_canonical_fixture_best_effort() {
         let cpu_outs = cpu_score_outputs(&state);
         assert_eq!(gpu_outs.len(), cpu_outs.len(), "tick {tick_i}: len");
 
-        let mut tick_diff = 0;
         for (slot, (gpu, cpu)) in gpu_outs.iter().zip(cpu_outs.iter()).enumerate() {
-            if !scoring_eq(gpu, cpu) {
-                tick_diff += 1;
-                if tick_i == 0 {
-                    // Tick 0 mismatch is a real bug — assert hard.
-                    assert_scoring_eq_with_tick(tick_i, slot, gpu, cpu);
-                }
-            }
-        }
-        if tick_diff > 0 {
-            divergences += tick_diff;
-            if first_diverging_tick.is_none() {
-                first_diverging_tick = Some(tick_i);
-            }
+            assert_scoring_eq_with_tick(tick_i, slot, gpu, cpu);
         }
     }
-    eprintln!(
-        "gpu_scoring_canonical_fixture_best_effort: {divergences} per-(slot, tick) divergences \
-         across {TICKS} ticks (first at tick {:?}). View storage lands in Phase 4 (task 185); \
-         this number should drop to 0.",
-        first_diverging_tick
-    );
 }
 
-fn scoring_eq(a: &ScoreOutput, b: &ScoreOutput) -> bool {
-    a.chosen_action == b.chosen_action
-        && a.chosen_target == b.chosen_target
-        && a.best_score_bits == b.best_score_bits
+/// Byte-exact scoring parity with deliberate `AgentAttacked` events
+/// folded into `my_enemies` ahead of time. The canonical 3v2 fixture
+/// will populate `my_enemies` naturally over a long run, but this
+/// test forces grudges into existence at tick 0 so the per-pair
+/// wildcard sum + the modifier 5 (`my_enemies > 0.5` → +0.4 on
+/// Attack) fires from the very first scoring dispatch. Catches
+/// regressions in the upload path's pair_map_scalar handling that
+/// the natural-evolution test would only surface on tick 25+.
+#[test]
+fn gpu_scoring_with_grudges_byte_exact() {
+    use engine::ids::AgentId;
+
+    let mut backend = GpuBackend::new().expect("GpuBackend init");
+    let mut state = spawn_fixture();
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    // Inject grudges: every wolf has attacked every human in the past.
+    // Folds straight into the CPU view registry — the GPU mirror reads
+    // it back on the next step's upload, so both sides see the same
+    // saturated `my_enemies` cells.
+    let humans = [AgentId::new(1).unwrap(), AgentId::new(2).unwrap(), AgentId::new(3).unwrap()];
+    let wolves = [AgentId::new(4).unwrap(), AgentId::new(5).unwrap()];
+    for &wolf in &wolves {
+        for &human in &humans {
+            // my_enemies fold pattern: AgentAttacked { actor, target } →
+            // my_enemies[target, actor] += 1.0 (clamped to [0, 1]).
+            // Inject by emitting the event into the ring and having the
+            // view registry fold it.
+            events.push(engine::event::Event::AgentAttacked {
+                actor: wolf,
+                target: human,
+                damage: 0.0,
+                tick: state.tick,
+            });
+        }
+    }
+    let events_before = events.push_count() - (humans.len() * wolves.len());
+    state.views.fold_all(&events, events_before, state.tick);
+
+    // Confirm the CPU view registers the grudges.
+    let pre_check = state.views.my_enemies.get(humans[0], wolves[0]);
+    assert!(pre_check > 0.0, "grudge fold didn't take: my_enemies[h1, w1] = {pre_check}");
+
+    // Now run TICKS ticks. At every tick the GPU's `my_enemies` cells
+    // mirror the CPU's, and any scoring row that reads
+    // `my_enemies(target, self)` will fire identically on both sides.
+    for tick_i in 0..TICKS {
+        backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+        let gpu_outs = backend.last_scoring_outputs();
+        let cpu_outs = cpu_score_outputs(&state);
+        for (slot, (gpu, cpu)) in gpu_outs.iter().zip(cpu_outs.iter()).enumerate() {
+            assert_scoring_eq_with_tick(tick_i, slot, gpu, cpu);
+        }
+    }
 }
 
 fn assert_scoring_eq(slot: usize, gpu: &ScoreOutput, cpu: &ScoreOutput) {
