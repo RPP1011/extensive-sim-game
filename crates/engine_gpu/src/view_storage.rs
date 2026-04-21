@@ -453,6 +453,35 @@ impl ViewStorage {
     pub fn spec(&self, view_name: &str) -> Option<&ViewStorageSpec> {
         self.entries.get(view_name).map(|e| &e.spec)
     }
+
+    /// Primary storage buffer for `view_name`. For slot_map this is an
+    /// `array<u32>`; for pair_map (scalar or decay) it's an
+    /// `array<atomic<u32>>` carrying f32 bits (scalar) or decay value
+    /// bits (decay). None if the view isn't provisioned.
+    ///
+    /// Phase 6d: scoring / physics kernels bind this directly so their
+    /// reads see the same post-fold cells view_storage's fold kernels
+    /// wrote. No CPU mirror in between.
+    pub fn primary_buffer(&self, view_name: &str) -> Option<&wgpu::Buffer> {
+        self.entries.get(view_name).map(|e| &e.primary)
+    }
+
+    /// Anchor-tick buffer for a pair-map @decay view (f32-bits value
+    /// parallel buffer). None for slot_map / pair-scalar (no anchor)
+    /// or unknown views.
+    pub fn anchor_buffer(&self, view_name: &str) -> Option<&wgpu::Buffer> {
+        self.entries
+            .get(view_name)
+            .and_then(|e| e.anchor.as_ref())
+    }
+
+    /// Byte size of the primary buffer for `view_name`. Matches
+    /// `agent_cap` for slot_map (as bytes of u32) and `agent_cap²*4` for
+    /// pair_map. Used by integration tests to size zeroing / readback
+    /// writes without reaching into the private buffer handle.
+    pub fn primary_bytes(&self, view_name: &str) -> Option<u64> {
+        self.entries.get(view_name).map(|e| e.primary_bytes)
+    }
 }
 
 fn ensure_input_buf_pair(

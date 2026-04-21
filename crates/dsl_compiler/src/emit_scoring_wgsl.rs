@@ -183,13 +183,54 @@ pub fn emit_scoring_wgsl() -> String {
 /// Views that appear in [`SCORING_VIEW_IDS`] but not in the given
 /// `specs` slice fall back to the 0.0 stub with a loud comment, so a
 /// partial wiring doesn't silently break parity.
+///
+/// Uses the "plain array" view binding layout (pair_map scalar as
+/// `array<f32>`, decay as `array<DecayCell>`). CPU-uploaded view state
+/// path — kept for callers that still run the legacy mirror. Phase 6d
+/// and onward prefer [`emit_scoring_wgsl_atomic_views`], which binds
+/// view_storage's `atomic<u32>` buffers directly.
 pub fn emit_scoring_wgsl_with_views(specs: &[ViewStorageSpec]) -> String {
+    emit_scoring_wgsl_inner(specs, ViewBindingMode::PlainArrays)
+}
+
+/// Emit the scoring WGSL module using **atomic-storage view bindings**
+/// that match `engine_gpu::view_storage`'s buffer layout:
+///
+///   * Pair-map scalar: `array<atomic<u32>>`, cells hold f32 bits.
+///   * Pair-map decay:  `array<atomic<u32>>` for values (f32 bits) +
+///     a parallel `array<atomic<u32>>` for per-cell anchor ticks.
+///   * Slot-map: `array<u32>` (unchanged — no atomics needed).
+///
+/// This is the Phase 6d unified layout: scoring reads directly from
+/// the same buffers view_storage's fold kernels write to, eliminating
+/// the per-tick CPU mirror in `engine_gpu::scoring::upload_view_state_from_cpu`.
+///
+/// Bindings are two-per-decay-view, so the binding count grows by
+/// `num_decay_views` relative to `emit_scoring_wgsl_with_views`. At
+/// Phase 6d the 4 decay views push the binding count to 5 core + 1
+/// slot-map + 1 pair-scalar + 2*4 pair-decay = 15 — just under the
+/// per-group cap of 16. If a future view bumps this, split to group 1.
+pub fn emit_scoring_wgsl_atomic_views(specs: &[ViewStorageSpec]) -> String {
+    emit_scoring_wgsl_inner(specs, ViewBindingMode::AtomicStorage)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum ViewBindingMode {
+    /// Pair views as `array<f32>` / `array<DecayCell>`. CPU uploads the
+    /// view snapshot every tick.
+    PlainArrays,
+    /// Pair views as `array<atomic<u32>>` (+ parallel anchors for decay).
+    /// Matches `engine_gpu::view_storage` buffer layout — GPU-native.
+    AtomicStorage,
+}
+
+fn emit_scoring_wgsl_inner(specs: &[ViewStorageSpec], mode: ViewBindingMode) -> String {
     let mut out = String::new();
     emit_header(&mut out);
     emit_types(&mut out);
     emit_bindings(&mut out);
-    emit_view_bindings(&mut out, specs);
-    emit_view_read_snippets(&mut out, specs);
+    emit_view_bindings_for_mode(&mut out, specs, mode);
+    emit_view_read_snippets_for_mode(&mut out, specs, mode);
     emit_helpers(&mut out);
     emit_read_field(&mut out);
     emit_eval_view_call(&mut out, specs);
@@ -197,6 +238,25 @@ pub fn emit_scoring_wgsl_with_views(specs: &[ViewStorageSpec]) -> String {
     emit_score_entry(&mut out);
     emit_kernel(&mut out);
     out
+}
+
+/// Total binding count at `specs` / `mode` — used by the backend to
+/// wire a matching bind-group layout. Always 5 core bindings plus per-
+/// view bindings (1 per slot/pair-scalar, 2 per pair-decay in atomic
+/// mode, 1 per pair-decay in plain mode).
+pub fn scoring_total_bindings(specs: &[ViewStorageSpec], atomic_mode: bool) -> u32 {
+    let mut count = SCORING_CORE_BINDINGS;
+    for spec in scoring_view_binding_order(specs) {
+        match spec.shape {
+            ViewShape::SlotMap { .. } => count += 1,
+            ViewShape::PairMapScalar => count += 1,
+            ViewShape::PairMapDecay { .. } => {
+                count += if atomic_mode { 2 } else { 1 };
+            }
+            ViewShape::Lazy => {}
+        }
+    }
+    count
 }
 
 /// Scoring-table VIEW_ID constants. Must match
@@ -428,38 +488,98 @@ fn emit_bindings(out: &mut String) {
 /// Bindings start at index 5 (right after the 5 core scoring
 /// bindings); the integration layer on the engine_gpu side wires
 /// buffers in the same order.
+#[allow(dead_code)]
 fn emit_view_bindings(out: &mut String, specs: &[ViewStorageSpec]) {
-    for (i, spec) in scoring_view_binding_order(specs).into_iter().enumerate() {
-        let binding = SCORING_CORE_BINDINGS + i as u32;
+    emit_view_bindings_for_mode(out, specs, ViewBindingMode::PlainArrays);
+}
+
+fn emit_view_bindings_for_mode(
+    out: &mut String,
+    specs: &[ViewStorageSpec],
+    mode: ViewBindingMode,
+) {
+    let mut next_binding = SCORING_CORE_BINDINGS;
+    for spec in scoring_view_binding_order(specs) {
         let snake = &spec.snake;
-        let (wgsl_ty, comment) = match &spec.shape {
-            ViewShape::SlotMap { .. } => (
-                format!("array<u32>"),
-                format!("slot_map storage for `{}`", spec.view_name),
-            ),
-            ViewShape::PairMapScalar => (
-                format!("array<f32>"),
-                format!("pair_map<f32> storage for `{}`", spec.view_name),
-            ),
-            ViewShape::PairMapDecay { rate } => (
-                format!("array<DecayCell>"),
-                format!(
-                    "pair_map<DecayCell> @decay(rate={rate}) storage for `{}`",
+        match (&spec.shape, mode) {
+            (ViewShape::SlotMap { .. }, _) => {
+                let comment = format!("slot_map storage for `{}`", spec.view_name);
+                writeln!(out, "// {comment}").unwrap();
+                writeln!(
+                    out,
+                    "@group(0) @binding({next_binding}) var<storage, read> view_{snake}_slots: array<u32>;"
+                )
+                .unwrap();
+                next_binding += 1;
+            }
+            (ViewShape::PairMapScalar, ViewBindingMode::PlainArrays) => {
+                let comment =
+                    format!("pair_map<f32> storage for `{}` (plain-array mode)", spec.view_name);
+                writeln!(out, "// {comment}").unwrap();
+                writeln!(
+                    out,
+                    "@group(0) @binding({next_binding}) var<storage, read> view_{snake}_cells: array<f32>;"
+                )
+                .unwrap();
+                next_binding += 1;
+            }
+            (ViewShape::PairMapScalar, ViewBindingMode::AtomicStorage) => {
+                let comment = format!(
+                    "pair_map<f32> storage for `{}` (atomic<u32> mode, matches view_storage layout)",
                     spec.view_name
-                ),
-            ),
-            ViewShape::Lazy => continue,
-        };
-        let storage_name = match &spec.shape {
-            ViewShape::SlotMap { .. } => format!("view_{snake}_slots"),
-            _ => format!("view_{snake}_cells"),
-        };
-        writeln!(out, "// {comment}").unwrap();
-        writeln!(
-            out,
-            "@group(0) @binding({binding}) var<storage, read> {storage_name}: {wgsl_ty};"
-        )
-        .unwrap();
+                );
+                writeln!(out, "// {comment}").unwrap();
+                // WGSL: atomic<u32> in storage address space requires
+                // read_write access mode, even if the shader only calls
+                // atomicLoad. view_storage's fold kernels are the sole
+                // writers; scoring just reads.
+                writeln!(
+                    out,
+                    "@group(0) @binding({next_binding}) var<storage, read_write> view_{snake}_cells: array<atomic<u32>>;"
+                )
+                .unwrap();
+                next_binding += 1;
+            }
+            (ViewShape::PairMapDecay { rate }, ViewBindingMode::PlainArrays) => {
+                let comment = format!(
+                    "pair_map<DecayCell> @decay(rate={rate}) storage for `{}` (plain-array mode)",
+                    spec.view_name
+                );
+                writeln!(out, "// {comment}").unwrap();
+                writeln!(
+                    out,
+                    "@group(0) @binding({next_binding}) var<storage, read> view_{snake}_cells: array<DecayCell>;"
+                )
+                .unwrap();
+                next_binding += 1;
+            }
+            (ViewShape::PairMapDecay { rate }, ViewBindingMode::AtomicStorage) => {
+                // Atomic-mode decay views: split into two parallel
+                // `array<atomic<u32>>` — values (f32 bits) + anchor
+                // ticks. Matches view_storage's PairMapDecay layout.
+                // WGSL requires read_write on atomic storage bindings
+                // (even if we only atomicLoad them).
+                let comment = format!(
+                    "pair_map<DecayCell> @decay(rate={rate}) storage for `{}` (atomic split-pair mode)",
+                    spec.view_name
+                );
+                writeln!(out, "// {comment} — values").unwrap();
+                writeln!(
+                    out,
+                    "@group(0) @binding({next_binding}) var<storage, read_write> view_{snake}_cells: array<atomic<u32>>;"
+                )
+                .unwrap();
+                next_binding += 1;
+                writeln!(out, "// {comment} — anchors").unwrap();
+                writeln!(
+                    out,
+                    "@group(0) @binding({next_binding}) var<storage, read_write> view_{snake}_anchors: array<atomic<u32>>;"
+                )
+                .unwrap();
+                next_binding += 1;
+            }
+            (ViewShape::Lazy, _) => continue,
+        }
     }
     writeln!(out).unwrap();
 }
@@ -481,7 +601,150 @@ fn emit_view_bindings(out: &mut String, specs: &[ViewStorageSpec]) {
 /// at the top of every read function — but emit_view_read_wgsl emits
 /// the function body including that let itself? No, it uses
 /// `view_agent_cap` as a direct reference. We emit a wrapper.
+/// Emit `view_<snake>_get` for a single view against the atomic-storage
+/// binding layout. Handwritten (not delegated to emit_view_wgsl) because
+/// the bind shape (atomic<u32>) is engine_gpu-specific.
+///
+/// Signatures match the plain-array reader variant:
+///   * SlotMap:       `fn view_<snake>_get(observer: u32) -> u32`
+///   * PairMapScalar: `fn view_<snake>_get(a: u32, b: u32) -> f32`
+///   * PairMapDecay:  `fn view_<snake>_get(a: u32, b: u32, tick: u32) -> f32`
+///
+/// Semantics (bounds + clamp) identical to the plain-array reader.
+fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec) {
+    let snake = &spec.snake;
+    let initial = render_float_wgsl(spec.initial as f64);
+    match &spec.shape {
+        ViewShape::SlotMap { .. } => {
+            writeln!(
+                out,
+                "// view `{}` — slot_map storage (atomic mode, but no atomic needed for u32 slot load).",
+                spec.view_name
+            )
+            .unwrap();
+            writeln!(out, "fn view_{snake}_get(observer: u32) -> u32 {{").unwrap();
+            writeln!(out, "    let n = arrayLength(&view_{snake}_slots);").unwrap();
+            writeln!(out, "    if (observer >= n) {{ return 0u; }}").unwrap();
+            writeln!(out, "    return view_{snake}_slots[observer];").unwrap();
+            writeln!(out, "}}").unwrap();
+        }
+        ViewShape::PairMapScalar => {
+            writeln!(
+                out,
+                "// view `{}` — pair_map<f32> atomic storage. atomicLoad + bitcast.",
+                spec.view_name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "fn view_{snake}_get(observer: u32, attacker: u32) -> f32 {{"
+            )
+            .unwrap();
+            writeln!(out, "    let n = cfg.view_agent_cap;").unwrap();
+            writeln!(
+                out,
+                "    if (observer >= n || attacker >= n) {{ return {initial}; }}"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    let bits = atomicLoad(&view_{snake}_cells[observer * n + attacker]);"
+            )
+            .unwrap();
+            writeln!(out, "    let raw = bitcast<f32>(bits);").unwrap();
+            if let Some((lo, hi)) = spec.clamp {
+                let lo = render_float_wgsl(lo as f64);
+                let hi = render_float_wgsl(hi as f64);
+                writeln!(out, "    return clamp(raw, {lo}, {hi});").unwrap();
+            } else {
+                writeln!(out, "    return raw;").unwrap();
+            }
+            writeln!(out, "}}").unwrap();
+        }
+        ViewShape::PairMapDecay { rate } => {
+            let rate_lit = render_float_wgsl(*rate as f64);
+            writeln!(
+                out,
+                "// view `{}` — pair_map<DecayCell> atomic split-pair storage.",
+                spec.view_name
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "// values buffer stores f32 bits; anchors buffer stores per-cell tick."
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "fn view_{snake}_get(observer: u32, attacker: u32, tick: u32) -> f32 {{"
+            )
+            .unwrap();
+            writeln!(out, "    let n = cfg.view_agent_cap;").unwrap();
+            writeln!(
+                out,
+                "    if (observer >= n || attacker >= n) {{ return {initial}; }}"
+            )
+            .unwrap();
+            writeln!(out, "    let idx = observer * n + attacker;").unwrap();
+            writeln!(
+                out,
+                "    let v_bits = atomicLoad(&view_{snake}_cells[idx]);"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    let anchor = atomicLoad(&view_{snake}_anchors[idx]);"
+            )
+            .unwrap();
+            writeln!(out, "    let base = bitcast<f32>(v_bits);").unwrap();
+            writeln!(
+                out,
+                "    let dt = select(0u, tick - anchor, tick >= anchor);"
+            )
+            .unwrap();
+            // Apply the dt=0 short-circuit identical to
+            // rewrite_pow_short_circuit: multiply by select(pow, 1.0, dt==0)
+            // so cells freshly folded at read_tick stay bit-exact.
+            writeln!(
+                out,
+                "    let decayed = base * select(pow({rate_lit}, f32(dt)), 1.0, dt == 0u);"
+            )
+            .unwrap();
+            if let Some((lo, hi)) = spec.clamp {
+                let lo = render_float_wgsl(lo as f64);
+                let hi = render_float_wgsl(hi as f64);
+                writeln!(out, "    return clamp(decayed, {lo}, {hi});").unwrap();
+            } else {
+                writeln!(out, "    return decayed;").unwrap();
+            }
+            writeln!(out, "}}").unwrap();
+        }
+        ViewShape::Lazy => {
+            // skipped by caller
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn emit_view_read_snippets(out: &mut String, specs: &[ViewStorageSpec]) {
+    emit_view_read_snippets_for_mode(out, specs, ViewBindingMode::PlainArrays);
+}
+
+fn emit_view_read_snippets_for_mode(
+    out: &mut String,
+    specs: &[ViewStorageSpec],
+    mode: ViewBindingMode,
+) {
+    // In AtomicStorage mode we emit our own read functions against
+    // the atomic<u32> bindings directly (see emit_atomic_view_read).
+    // PlainArrays mode delegates to emit_view_wgsl as before.
+    if mode == ViewBindingMode::AtomicStorage {
+        for spec in scoring_view_binding_order(specs) {
+            emit_atomic_view_read(out, spec);
+            writeln!(out).unwrap();
+        }
+        return;
+    }
     // Emit a module-scope accessor to bridge `cfg.view_agent_cap` into
     // the `view_agent_cap` symbol the per-view snippets reference.
     // WGSL doesn't allow reading a uniform from a module-scope `const`
@@ -587,6 +850,19 @@ fn find_matching_close_paren(s: &str) -> Option<usize> {
         }
     }
     None
+}
+
+/// Local float formatter used by the atomic-storage view reads. Mirrors
+/// the private helpers in emit_view_wgsl / emit_physics_wgsl — kept
+/// duplicated so scoring's WGSL emission doesn't pull those modules'
+/// private items into its path.
+fn render_float_wgsl(v: f64) -> String {
+    let s = format!("{v}");
+    if s.contains('.') || s.contains('e') || s.contains('E') {
+        s
+    } else {
+        format!("{s}.0")
+    }
 }
 
 /// Deterministic ordering of views for binding-index assignment. Sort
@@ -1422,5 +1698,109 @@ mod tests {
                 "VIEW_ID {vid} in SCORING_VIEW_IDS has no name mapping"
             );
         }
+    }
+
+    /// Atomic-mode scoring WGSL emits pair views as `array<atomic<u32>>`
+    /// and decay views get parallel `_cells` + `_anchors` bindings.
+    /// Shape-only; end-to-end behaviour is exercised by the engine_gpu
+    /// parity tests.
+    #[test]
+    fn atomic_mode_emits_atomic_bindings_and_reads() {
+        use crate::emit_view_wgsl::{FoldSpec, ViewShape, ViewStorageSpec};
+
+        let specs = vec![
+            ViewStorageSpec {
+                view_name: "my_enemies".into(),
+                snake: "my_enemies".into(),
+                shape: ViewShape::PairMapScalar,
+                clamp: Some((0.0, 1.0)),
+                initial: 0.0,
+                folds: vec![FoldSpec {
+                    event_name: "AgentAttacked".into(),
+                    first_key_field: "target".into(),
+                    second_key_field: Some("actor".into()),
+                }],
+            },
+            ViewStorageSpec {
+                view_name: "threat_level".into(),
+                snake: "threat_level".into(),
+                shape: ViewShape::PairMapDecay { rate: 0.98 },
+                clamp: Some((0.0, 1000.0)),
+                initial: 0.0,
+                folds: vec![],
+            },
+        ];
+
+        let src = emit_scoring_wgsl_atomic_views(&specs);
+        // Scalar pair view: atomic<u32> cells — read_write access required by WGSL.
+        assert!(
+            src.contains(
+                "@group(0) @binding(5) var<storage, read_write> view_my_enemies_cells: array<atomic<u32>>"
+            ),
+            "missing atomic scalar binding:\n{src}"
+        );
+        // Decay view gets two bindings: cells + anchors.
+        assert!(
+            src.contains(
+                "@group(0) @binding(6) var<storage, read_write> view_threat_level_cells: array<atomic<u32>>"
+            ),
+            "missing atomic decay cells binding:\n{src}"
+        );
+        assert!(
+            src.contains(
+                "@group(0) @binding(7) var<storage, read_write> view_threat_level_anchors: array<atomic<u32>>"
+            ),
+            "missing atomic decay anchors binding:\n{src}"
+        );
+        // Reads use atomicLoad + bitcast.
+        assert!(
+            src.contains("atomicLoad(&view_my_enemies_cells["),
+            "missing atomicLoad for my_enemies:\n{src}"
+        );
+        assert!(
+            src.contains("atomicLoad(&view_threat_level_cells["),
+            "missing atomicLoad for threat_level cells:\n{src}"
+        );
+        assert!(
+            src.contains("atomicLoad(&view_threat_level_anchors["),
+            "missing atomicLoad for threat_level anchors:\n{src}"
+        );
+        // dt=0 short-circuit preserved.
+        assert!(
+            src.contains("select(pow(") && src.contains("1.0, dt == 0u"),
+            "missing dt=0 short-circuit in atomic decay read:\n{src}"
+        );
+
+        // naga runtime parse check runs in the engine_gpu crate (where
+        // naga is a dep). Shape-only assertions above are enough here.
+    }
+
+    /// `scoring_total_bindings` returns a bump in atomic mode for each
+    /// decay view (values + anchors).
+    #[test]
+    fn scoring_total_bindings_counts_atomic_anchors() {
+        use crate::emit_view_wgsl::{ViewShape, ViewStorageSpec};
+        let specs = vec![
+            ViewStorageSpec {
+                view_name: "my_enemies".into(),
+                snake: "my_enemies".into(),
+                shape: ViewShape::PairMapScalar,
+                clamp: None,
+                initial: 0.0,
+                folds: vec![],
+            },
+            ViewStorageSpec {
+                view_name: "threat_level".into(),
+                snake: "threat_level".into(),
+                shape: ViewShape::PairMapDecay { rate: 0.98 },
+                clamp: None,
+                initial: 0.0,
+                folds: vec![],
+            },
+        ];
+        // Plain: 5 core + 1 scalar + 1 decay = 7.
+        assert_eq!(scoring_total_bindings(&specs, false), 7);
+        // Atomic: 5 core + 1 scalar + 2 decay (cells+anchors) = 8.
+        assert_eq!(scoring_total_bindings(&specs, true), 8);
     }
 }

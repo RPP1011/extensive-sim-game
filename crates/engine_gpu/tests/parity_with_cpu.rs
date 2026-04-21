@@ -595,6 +595,120 @@ fn gpu_scoring_with_grudges_byte_exact() {
     }
 }
 
+/// Phase 6d: scoring reads view cells straight from view_storage's
+/// atomic buffers. This test exercises the *GPU* fold path end-to-end:
+/// inject a handful of synthetic AgentAttacked events into BOTH the
+/// CPU view registry and the GPU `view_storage::fold_pair_events`
+/// kernel, then call `verify_scoring_on_gpu` and assert byte-exact
+/// `(chosen_action, chosen_target, best_score_bits)` against the CPU
+/// reference.
+///
+/// Divergences from `gpu_scoring_with_grudges_byte_exact` (which uses
+/// `GpuBackend::step`'s CPU→GPU mirror bridge): this test bypasses
+/// the mirror and folds directly via view_storage's kernel. If the
+/// fold kernel's atomic CAS loop, the scoring kernel's `atomicLoad`
+/// reads, or the anchor stamping disagree at the bit level, the
+/// assertion fires. That's the Piece 1 contract: scoring + fold
+/// share the same buffer.
+#[test]
+fn gpu_scoring_reads_fold_kernel_output_byte_exact() {
+    use engine::ids::AgentId;
+    use engine_gpu::view_storage::FoldInputPair;
+
+    let mut backend = GpuBackend::new().expect("GpuBackend init");
+    let mut state = spawn_fixture();
+
+    // Grow view_storage if needed so its cap matches the fixture's 8.
+    backend
+        .rebuild_view_storage(state.agent_cap())
+        .expect("rebuild view_storage to match state.agent_cap");
+
+    // Inject grudges on BOTH sides:
+    //   CPU: push events into the ring + fold_all into state.views.
+    //   GPU: call view_storage.fold_pair_events on my_enemies with the
+    //        same (observer, attacker, tick) tuples.
+    let humans = [AgentId::new(1).unwrap(), AgentId::new(2).unwrap(), AgentId::new(3).unwrap()];
+    let wolves = [AgentId::new(4).unwrap(), AgentId::new(5).unwrap()];
+
+    let mut events = EventRing::with_cap(EVENT_RING_CAP);
+    let mut pair_events: Vec<FoldInputPair> = Vec::new();
+    for &wolf in &wolves {
+        for &human in &humans {
+            // CPU side — AgentAttacked folds into my_enemies AND
+            // threat_level (see assets/sim/views.sim fold handlers).
+            events.push(engine::event::Event::AgentAttacked {
+                actor: wolf,
+                target: human,
+                damage: 0.0,
+                tick: state.tick,
+            });
+            // GPU side — my_enemies fold key = (observer=target, attacker=actor).
+            // threat_level fold key = (a=target, b=actor).
+            pair_events.push(FoldInputPair {
+                first: human.raw() - 1,
+                second: wolf.raw() - 1,
+                tick: state.tick,
+                _pad: 0,
+            });
+        }
+    }
+    state.views.fold_all(&events, 0, state.tick);
+
+    // Reset + fold into view_storage on the GPU side. AgentAttacked
+    // folds into TWO views — my_enemies (the +grudge fold) and
+    // threat_level (the +decayed-threat fold) — so we dispatch the
+    // same pair-events list against both. If this list ever diverges
+    // from what's in CPU's `state.views.fold_all`, scoring's byte
+    // comparison further down catches it.
+    let (device, queue) = (backend.device().clone(), backend.queue().clone());
+    backend.view_storage().reset(&queue);
+    backend
+        .view_storage_mut()
+        .fold_pair_events(&device, &queue, "my_enemies", &pair_events)
+        .expect("fold_pair_events(my_enemies)");
+    backend
+        .view_storage_mut()
+        .fold_pair_events(&device, &queue, "threat_level", &pair_events)
+        .expect("fold_pair_events(threat_level)");
+
+    // Cross-check: the GPU-folded my_enemies cells match the CPU view
+    // registry's values bit-for-bit. If this fails, the scoring-level
+    // assertion below would be ambiguous between "fold diverged" and
+    // "scoring read diverged".
+    let gpu_cells = backend
+        .view_storage()
+        .readback_pair_scalar(&device, &queue, "my_enemies")
+        .expect("readback my_enemies");
+    let n = state.agent_cap() as usize;
+    for observer_slot in 0..n {
+        let obs = match AgentId::new(observer_slot as u32 + 1) {
+            Some(id) => id,
+            None => continue,
+        };
+        for attacker_slot in 0..n {
+            let atk = match AgentId::new(attacker_slot as u32 + 1) {
+                Some(id) => id,
+                None => continue,
+            };
+            let cpu_v = state.views.my_enemies.get(obs, atk);
+            let gpu_v = gpu_cells[observer_slot * n + attacker_slot];
+            assert_eq!(
+                cpu_v.to_bits(), gpu_v.to_bits(),
+                "my_enemies[{observer_slot},{attacker_slot}] CPU={cpu_v} GPU={gpu_v} after GPU fold"
+            );
+        }
+    }
+
+    // Now run scoring and assert per-slot byte-exact.
+    let gpu_outs = backend
+        .verify_scoring_on_gpu_preserving_views(&state)
+        .expect("scoring dispatch");
+    let cpu_outs = cpu_score_outputs(&state);
+    for (slot, (gpu, cpu)) in gpu_outs.iter().zip(cpu_outs.iter()).enumerate() {
+        assert_scoring_eq(slot, gpu, cpu);
+    }
+}
+
 fn assert_scoring_eq(slot: usize, gpu: &ScoreOutput, cpu: &ScoreOutput) {
     assert_scoring_eq_with_tick(u32::MAX, slot, gpu, cpu);
 }
