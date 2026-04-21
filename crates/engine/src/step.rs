@@ -195,42 +195,10 @@ pub fn step_full<B: PolicyBackend>(
 ) {
     let t_start = std::time::Instant::now();
 
-    // Task 143 retired the tick-start timer decrement pass. Stun / slow
-    // expiry are now stored as absolute expiry ticks; mask predicates
-    // read `agent_stunned(id)` / `effective_slow_factor_q8(id)` which
-    // compare `state.tick` against the stored expiry without mutating
-    // anything. Task 139 had already moved the engagement update off
-    // this phase onto the event-driven `crate::engagement::*` handlers,
-    // so there is no longer any tick-start bookkeeping to run — step
-    // jumps straight to mask build.
-
-    // Phase 1 — mask build. Task 138: target-bound kinds (Attack /
-    // MoveToward) also populate per-agent candidate lists in
-    // `target_mask`; the scorer argmaxes over those lists rather than
-    // using the retired `nearest_other` heuristic.
-    scratch.mask.reset();
-    scratch.target_mask.reset();
-    scratch.mask.mark_hold_allowed(state);
-    scratch.mask.mark_move_allowed_from_candidates(state, &mut scratch.target_mask);
-    scratch.mask.mark_flee_allowed_if_threat_exists(state);
-    scratch.mask.mark_attack_allowed_from_candidates(state, &mut scratch.target_mask);
-    scratch.mask.mark_needs_allowed(state);
-    scratch.mask.mark_domain_hook_micros_allowed(state);
-
-    // Phase 2 — policy evaluate.
-    scratch.actions.clear();
-    backend.evaluate(state, &scratch.mask, &scratch.target_mask, &mut scratch.actions);
-
-    // Phase 3 — deterministic per-tick action shuffle. Populates
-    // `scratch.shuffle_idx` with a permutation over `scratch.actions` keyed by
-    // `(state.seed, state.tick)`. `scratch.actions` itself is left untouched;
-    // the apply kernel walks it via `shuffle_idx`.
-    shuffle_actions_in_place(
-        state.seed,
-        state.tick,
-        &scratch.actions,
-        &mut scratch.shuffle_idx,
-    );
+    // Phases 1-3 — mask build, policy evaluate, action shuffle. Extracted
+    // into `step_phases_1_to_3` so GPU-backed drivers can share the same
+    // CPU-side decision pipeline and only swap phase 4.
+    step_phases_1_to_3(state, scratch, backend);
 
     // Phase 4 — apply actions + run cascade fixed-point. Record events emitted
     // so phase 6 can report an accurate per-tick counter.
@@ -261,7 +229,68 @@ pub fn step_full<B: PolicyBackend>(
     // rather than O(cumulative retained).
     state.views.fold_all(events, events_before, state.tick);
 
-    // Phase 6 — invariants + built-in telemetry metrics.
+    finalize_tick(state, scratch, events, invariants, telemetry, t_start, events_emitted);
+}
+
+/// Run phases 1-3 of the canonical tick pipeline: mask build, policy
+/// evaluate, and action shuffle. After this returns, `scratch.actions`
+/// holds the chosen actions for every alive agent (in policy-emit order)
+/// and `scratch.shuffle_idx` holds the deterministic shuffle permutation
+/// keyed by `(state.seed, state.tick)`.
+///
+/// Exposed as a standalone helper so the `engine_gpu` backend can drive
+/// phases 1-3 on CPU, then swap the cascade dispatch in phase 4 for a
+/// GPU-authoritative cascade, without duplicating the CPU-side decision
+/// pipeline.
+pub fn step_phases_1_to_3<B: PolicyBackend>(
+    state:   &mut SimState,
+    scratch: &mut SimScratch,
+    backend: &B,
+) {
+    // Phase 1 — mask build. Task 138: target-bound kinds (Attack /
+    // MoveToward) also populate per-agent candidate lists in
+    // `target_mask`; the scorer argmaxes over those lists rather than
+    // using the retired `nearest_other` heuristic.
+    scratch.mask.reset();
+    scratch.target_mask.reset();
+    scratch.mask.mark_hold_allowed(state);
+    scratch.mask.mark_move_allowed_from_candidates(state, &mut scratch.target_mask);
+    scratch.mask.mark_flee_allowed_if_threat_exists(state);
+    scratch.mask.mark_attack_allowed_from_candidates(state, &mut scratch.target_mask);
+    scratch.mask.mark_needs_allowed(state);
+    scratch.mask.mark_domain_hook_micros_allowed(state);
+
+    // Phase 2 — policy evaluate.
+    scratch.actions.clear();
+    backend.evaluate(state, &scratch.mask, &scratch.target_mask, &mut scratch.actions);
+
+    // Phase 3 — deterministic per-tick action shuffle. Populates
+    // `scratch.shuffle_idx` with a permutation over `scratch.actions` keyed by
+    // `(state.seed, state.tick)`. `scratch.actions` itself is left untouched;
+    // the apply kernel walks it via `shuffle_idx`.
+    shuffle_actions_in_place(
+        state.seed,
+        state.tick,
+        &scratch.actions,
+        &mut scratch.shuffle_idx,
+    );
+}
+
+/// Phase 6 — invariants + built-in telemetry metrics. Also advances
+/// `state.tick` by 1. Exposed so GPU-backed drivers reuse the same
+/// shutdown path that `step_full` runs. `t_start` is the `Instant`
+/// captured at the top of the tick for the `TICK_MS` histogram;
+/// `events_emitted` is the count of events appended to the ring during
+/// this tick, for the `EVENT_COUNT` counter.
+pub fn finalize_tick(
+    state:          &mut SimState,
+    scratch:        &SimScratch,
+    events:         &EventRing,
+    invariants:     &InvariantRegistry,
+    telemetry:      &dyn TelemetrySink,
+    t_start:        std::time::Instant,
+    events_emitted: usize,
+) {
     let violations = invariants.check_all(state, events);
     for report in &violations {
         let mode_str = match report.failure_mode {
@@ -325,7 +354,17 @@ fn shuffle_order_into(order: &mut Vec<u32>, n: usize, world_seed: u64, tick: u32
     }
 }
 
-fn apply_actions(
+/// Phase 4a — apply the shuffled micro/macro actions in `scratch` onto
+/// `state`, emitting a root-cause event into `events` for every action
+/// that produces a visible effect. The action vector is consumed in the
+/// order `scratch.shuffle_idx` dictates (populated by
+/// `step_phases_1_to_3`); any ill-formed `(kind, target)` combination is
+/// silently dropped — policy backends are responsible for only emitting
+/// well-formed actions (mask predicates gate this on the CPU side).
+///
+/// Exposed `pub` so GPU-backed drivers can reuse the CPU apply pass as
+/// the seed event generator for a GPU cascade dispatch.
+pub fn apply_actions(
     state:   &mut SimState,
     scratch: &SimScratch,
     events:  &mut EventRing,

@@ -64,6 +64,9 @@
 
 #![cfg(feature = "gpu")]
 
+use std::path::PathBuf;
+
+use dsl_compiler::ast::Program;
 use dsl_compiler::emit_physics_wgsl::EmitContext;
 
 use engine::event::{Event, EventRing};
@@ -200,18 +203,28 @@ pub fn run_cascade(
     let agent_cap = state.agent_cap();
     let mut agent_slots = pack_agent_slots(state);
 
-    // Spatial precompute — one dispatch per cascade call. We run at the
-    // config's engagement range for `nearest_hostile` and at the kin
-    // radius (12 m) for `nearby_kin`; the query kernel populates both in
-    // one pass. `rebuild_and_query` takes a single radius, but the GPU
-    // physics kernel reads the kin list at whatever radius the caller
-    // used, and all three kin-sensitive rules share the 12 m radius.
+    // Spatial precompute — two dispatches per cascade call:
+    //
+    //   * At `kin_radius` (12 m) — feeds `nearby_kin` for fear/pack/rally.
+    //   * At `combat.engagement_range` (2 m by default) — feeds
+    //     `nearest_hostile_to` for `engagement_on_move`. Without this
+    //     second query, `engagement_on_move` would engage any hostile
+    //     within the kin radius, not the engagement radius, which
+    //     causes the CPU cascade (which uses engagement_range) and the
+    //     GPU cascade to diverge on any fixture where agents come
+    //     within 12 m but outside 2 m of each other.
     //
     // Task 190's physics emitter wraps the spatial queries as
-    // `spatial_nearest_hostile_to(agent, radius)` — the wrapped call
-    // IGNORES `radius`, so the precompute's single radius is acceptable.
-    let spatial_results = spatial.rebuild_and_query(device, queue, state, kin_radius)?;
-    let kin_lists: Vec<GpuKinList> = spatial_results
+    // `spatial_nearest_hostile_to(agent, radius)` where the wrapped
+    // call ignores the radius argument — it reads the precomputed
+    // result. Running the precompute at engagement_range lines the
+    // read back up with what the DSL rule's `nearest_hostile_to(mover,
+    // engagement_range)` call intended.
+    let kin_results = spatial.rebuild_and_query(device, queue, state, kin_radius)?;
+    let engagement_range = state.config.combat.engagement_range;
+    let hostile_results = spatial.rebuild_and_query(device, queue, state, engagement_range)?;
+
+    let kin_lists: Vec<GpuKinList> = kin_results
         .nearby_kin
         .iter()
         .map(|q| {
@@ -226,7 +239,7 @@ pub fn run_cascade(
     // Pad to agent_cap. Should already be len==agent_cap from spatial.
     let mut kin_lists = kin_lists;
     kin_lists.resize(agent_cap as usize, GpuKinList::default());
-    let mut nearest_hostile = spatial_results.nearest_hostile.clone();
+    let mut nearest_hostile = hostile_results.nearest_hostile.clone();
     nearest_hostile.resize(agent_cap as usize, NO_HOSTILE);
 
     // Config uniform — stable across all iterations.
@@ -534,6 +547,277 @@ pub fn events_into_ring(records: &[EventRecord], ring: &mut EventRing) -> usize 
 /// module boundaries for it.
 pub fn apply_final_slots(state: &mut SimState, slots: &[GpuAgentSlot]) {
     unpack_agent_slots(state, slots);
+}
+
+/// Walk an event slice (typically GPU-cascade emissions + the
+/// apply-actions seed set for the current tick) and dispatch the 11
+/// "cold-state" physics rules the GPU kernel stubs — the ones that
+/// mutate state the packed agent SoA doesn't carry:
+///
+///   * `transfer_gold` / `modify_standing` / `record_memory` — mutate
+///     gold, standing matrix, memory ring. GPU physics emits the
+///     corresponding `EffectGoldTransfer` / `EffectStandingDelta` /
+///     `RecordMemory` events but leaves the side effect to CPU.
+///   * Chronicles (8 rules) — push `ChronicleEntry` narrative events
+///     in response to AgentAttacked / AgentDied / AgentFled /
+///     EngagementCommitted / EngagementBroken / FearSpread / RallyCall
+///     and the conditional `chronicle_wound` on low-hp attacks.
+///
+/// Every other physics rule (damage, heal, shield, stun, slow,
+/// engagement_on_move, engagement_on_death, fear_spread_on_death,
+/// pack_focus_on_engagement, rally_on_wound, opportunity_attack, cast)
+/// was already executed by the GPU kernel — double-applying would
+/// corrupt state / duplicate events.
+///
+/// The `events_slice` argument is iterated in push order so chronicle
+/// output order matches the CPU path.
+pub fn cold_state_replay(
+    state: &mut SimState,
+    events: &mut EventRing,
+    events_slice: &[Event],
+) {
+    use engine::generated::physics::{
+        chronicle_attack, chronicle_break, chronicle_death, chronicle_engagement,
+        chronicle_flee, chronicle_rally, chronicle_rout, chronicle_wound, modify_standing,
+        record_memory, transfer_gold,
+    };
+
+    for ev in events_slice {
+        match *ev {
+            // --- AgentAttacked: chronicle_attack + chronicle_wound ---
+            // (rally_on_wound stays GPU-owned; the GPU kernel emits
+            //  the matching `RallyCall` event.)
+            Event::AgentAttacked { actor, target, .. } => {
+                chronicle_attack::chronicle_attack(actor, target, state, events);
+                chronicle_wound::chronicle_wound(actor, target, state, events);
+            }
+            // --- AgentDied: chronicle_death ---
+            Event::AgentDied { agent_id, .. } => {
+                chronicle_death::chronicle_death(agent_id, state, events);
+            }
+            // --- AgentFled: chronicle_flee ---
+            Event::AgentFled { agent_id, .. } => {
+                chronicle_flee::chronicle_flee(agent_id, state, events);
+            }
+            // --- EngagementCommitted: chronicle_engagement ---
+            Event::EngagementCommitted { actor, target, .. } => {
+                chronicle_engagement::chronicle_engagement(actor, target, state, events);
+            }
+            // --- EngagementBroken: chronicle_break ---
+            Event::EngagementBroken {
+                actor, former_target, ..
+            } => {
+                chronicle_break::chronicle_break(actor, former_target, state, events);
+            }
+            // --- FearSpread: chronicle_rout ---
+            Event::FearSpread {
+                observer, dead_kin, ..
+            } => {
+                chronicle_rout::chronicle_rout(observer, dead_kin, state, events);
+            }
+            // --- RallyCall: chronicle_rally ---
+            Event::RallyCall {
+                observer,
+                wounded_kin,
+                ..
+            } => {
+                chronicle_rally::chronicle_rally(observer, wounded_kin, state, events);
+            }
+            // --- EffectGoldTransfer: transfer_gold (mutates inventory) ---
+            Event::EffectGoldTransfer {
+                from, to, amount, ..
+            } => {
+                transfer_gold::transfer_gold(from, to, amount, state, events);
+            }
+            // --- EffectStandingDelta: modify_standing (mutates standing) ---
+            Event::EffectStandingDelta { a, b, delta, .. } => {
+                modify_standing::modify_standing(a, b, delta, state, events);
+            }
+            // --- RecordMemory: record_memory (pushes memory ring) ---
+            Event::RecordMemory {
+                observer,
+                source,
+                fact_payload,
+                confidence,
+                tick,
+            } => {
+                record_memory::record_memory(
+                    observer,
+                    source,
+                    fact_payload,
+                    confidence,
+                    tick,
+                    state,
+                    events,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Compilation loader
+// ---------------------------------------------------------------------------
+
+/// Errors surfaced by `load_compilation_from_assets`.
+#[derive(Debug)]
+pub enum LoadError {
+    Io(std::io::Error, PathBuf),
+    Parse(String, PathBuf),
+    Resolve(String),
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadError::Io(e, p) => write!(f, "read {}: {e}", p.display()),
+            LoadError::Parse(e, p) => write!(f, "parse {}: {e}", p.display()),
+            LoadError::Resolve(e) => write!(f, "resolve: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
+
+/// Load the sim DSL compilation the cascade kernels need (config, enums,
+/// events, physics) from `assets/sim/*.sim`. Walks up from the workspace
+/// `CARGO_MANIFEST_DIR` so the helper works whether the caller is inside
+/// `crates/engine_gpu` (two-level pop) or a binary crate at the workspace
+/// root (no pop needed). Tries a few candidate roots in order and returns
+/// the first one where every expected file opens cleanly.
+pub fn load_compilation_from_assets() -> Result<dsl_compiler::ir::Compilation, LoadError> {
+    // Candidate workspace roots. Every worktree has `assets/sim/` at the
+    // repo root, so we probe:
+    //   * `CARGO_MANIFEST_DIR/../../` — `crates/engine_gpu/` case.
+    //   * `CARGO_MANIFEST_DIR/../` — binaries living in `crates/<bin>/`.
+    //   * `CARGO_MANIFEST_DIR/` — workspace-root binaries.
+    //   * `./` — random callers with the workspace as CWD.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(manifest) = option_env!("CARGO_MANIFEST_DIR") {
+        let base = PathBuf::from(manifest);
+        candidates.push(base.join("../../assets/sim"));
+        candidates.push(base.join("../assets/sim"));
+        candidates.push(base.join("assets/sim"));
+    }
+    candidates.push(PathBuf::from("assets/sim"));
+
+    let files = ["config.sim", "enums.sim", "events.sim", "physics.sim"];
+    let mut chosen: Option<PathBuf> = None;
+    for c in &candidates {
+        if files.iter().all(|f| c.join(f).exists()) {
+            chosen = Some(c.clone());
+            break;
+        }
+    }
+    let root = chosen.ok_or_else(|| {
+        LoadError::Io(
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "no assets/sim directory found in any of: {:?}",
+                    candidates
+                ),
+            ),
+            PathBuf::from("assets/sim"),
+        )
+    })?;
+
+    let mut merged = Program { decls: Vec::new() };
+    for f in &files {
+        let path = root.join(f);
+        let src = std::fs::read_to_string(&path).map_err(|e| LoadError::Io(e, path.clone()))?;
+        let prog = dsl_compiler::parse(&src)
+            .map_err(|e| LoadError::Parse(format!("{e:?}"), path.clone()))?;
+        merged.decls.extend(prog.decls);
+    }
+    dsl_compiler::compile_ast(merged).map_err(|e| LoadError::Resolve(format!("{e:?}")))
+}
+
+// ---------------------------------------------------------------------------
+// CascadeCtx — lazy-initialised holder for the three GPU components the
+// backend needs to drive a cascade every tick: physics kernel (compiled
+// against a concrete Compilation), spatial hash, and packed ability
+// registry. Also caches the Compilation itself so `EmitContext` borrows
+// back into stable data.
+// ---------------------------------------------------------------------------
+
+/// Lazily-initialised GPU cascade context owned by `GpuBackend`. Holds
+/// the physics kernel + spatial hash + packed ability registry (empty for
+/// now — the ability registry upload path is Phase 7 work). Also retains
+/// the `Compilation` so the per-tick `EmitContext` has stable event /
+/// event_tag borrows.
+pub struct CascadeCtx {
+    pub physics: PhysicsKernel,
+    pub spatial: GpuSpatialHash,
+    pub abilities: PackedAbilityRegistry,
+    /// Retained so `EmitContext { events, event_tags }` points into
+    /// storage that outlives the per-tick call.
+    pub comp: dsl_compiler::ir::Compilation,
+}
+
+/// Errors surfaced by `CascadeCtx::new`. Wraps the sub-component init
+/// errors so the backend's `ensure_cascade_initialized` returns a single
+/// type.
+#[derive(Debug)]
+pub enum CascadeCtxError {
+    Load(LoadError),
+    Physics(PhysicsError),
+    Spatial(SpatialError),
+}
+
+impl std::fmt::Display for CascadeCtxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CascadeCtxError::Load(e) => write!(f, "load compilation: {e}"),
+            CascadeCtxError::Physics(e) => write!(f, "physics kernel: {e}"),
+            CascadeCtxError::Spatial(e) => write!(f, "spatial hash: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for CascadeCtxError {}
+
+impl From<LoadError> for CascadeCtxError {
+    fn from(e: LoadError) -> Self {
+        CascadeCtxError::Load(e)
+    }
+}
+
+impl From<PhysicsError> for CascadeCtxError {
+    fn from(e: PhysicsError) -> Self {
+        CascadeCtxError::Physics(e)
+    }
+}
+
+impl From<SpatialError> for CascadeCtxError {
+    fn from(e: SpatialError) -> Self {
+        CascadeCtxError::Spatial(e)
+    }
+}
+
+impl CascadeCtx {
+    /// Build a fresh cascade context: load the DSL assets, compile the
+    /// physics kernel, spin up a spatial hash, and keep an empty ability
+    /// registry. Caller provides the wgpu device/queue pair the backend
+    /// owns; event-ring capacity is picked at the cascade driver's
+    /// default (4096 slots — matches the parity harness).
+    pub fn new(device: &wgpu::Device) -> Result<Self, CascadeCtxError> {
+        let comp = load_compilation_from_assets()?;
+        let ctx = EmitContext {
+            events: &comp.events,
+            event_tags: &comp.event_tags,
+        };
+        let physics = PhysicsKernel::new(device, &comp.physics, &ctx, 4096)?;
+        let spatial = GpuSpatialHash::new(device)?;
+        let abilities = PackedAbilityRegistry::empty();
+        Ok(Self {
+            physics,
+            spatial,
+            abilities,
+            comp,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -835,7 +835,14 @@ fn state_kill_agent(id: u32) {
     let s = slot_of(id);
     if (s == 0xFFFFFFFFu) { return; }
     agents[s].alive = 0u;
-    agents[s].engaged_with = ENGAGED_SENTINEL;
+    // Intentionally NOT clearing `engaged_with` here — the CPU's
+    // `SimState::kill_agent` doesn't touch the engagement field either.
+    // The `engagement_on_death` physics rule (triggered by the
+    // AgentDied event) is what tears down the pairing + emits
+    // EngagementBroken. If `state_kill_agent` wipes engaged_with
+    // pre-cascade, `engagement_on_death` sees a self-engaged sentinel
+    // and skips the teardown — a silent miss of the EngagementBroken
+    // event the CPU cascade emits.
 }
 // Memory push: no-op. The CPU cascade owns the memory ring; the GPU
 // record_memory rule lands here and documents the gap. If a future

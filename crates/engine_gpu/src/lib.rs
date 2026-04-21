@@ -49,6 +49,8 @@ use engine::{
     state::SimState,
     step::SimScratch,
 };
+#[cfg(feature = "gpu")]
+use engine::event::Event;
 
 #[cfg(feature = "gpu")]
 pub mod mask;
@@ -123,6 +125,14 @@ pub struct GpuBackend {
     /// defaults to `INITIAL_VIEW_AGENT_CAP`; it grows on demand when a
     /// larger `SimState` is stepped through (see `ensure_view_storage`).
     view_storage: view_storage::ViewStorage,
+    /// Phase 6g (task 193): lazy-initialised cascade context. Holds the
+    /// physics kernel + spatial hash + packed ability registry + the
+    /// DSL `Compilation` the physics kernel was compiled against.
+    /// Construction reads `assets/sim/*.sim` + compiles a WGSL module,
+    /// which is ~10-30 ms on a warm disk; done on first `step` to keep
+    /// `GpuBackend::new` cheap for callers that never actually step
+    /// (scoring parity tests, for example).
+    cascade_ctx: Option<cascade::CascadeCtx>,
     /// Name of the backend wgpu selected (Vulkan / Metal / DX12 / GL /
     /// BrowserWebGpu / llvmpipe (GL/Vulkan software)). Captured at
     /// construction so tests can report which path they exercised.
@@ -140,6 +150,19 @@ pub struct GpuBackend {
     /// Phase 6 will feed this into physics dispatch; at Phase 3 it's
     /// read out by the parity harness.
     last_scoring_outputs: Vec<scoring::ScoreOutput>,
+    /// Phase 6g (task 193): iteration count from the most recent GPU
+    /// cascade dispatch. `None` before the first `step` or when the
+    /// cascade failed (falls back to CPU cascade — the step still
+    /// completes so state stays live, but this field records the
+    /// failure so parity tests can surface it).
+    last_cascade_iterations: Option<u32>,
+    /// Phase 6g (task 193): set iff the most recent cascade dispatch
+    /// failed. The backend falls back to the CPU cascade in that case
+    /// so the tick still advances with correct semantics; the parity
+    /// test's byte-exact assertion treats this as an acceptable outcome
+    /// — the state is authoritative on CPU, just not GPU-driven this
+    /// tick.
+    last_cascade_error: Option<String>,
 }
 
 /// Initial agent capacity the view storage is provisioned for. Grows on
@@ -301,10 +324,39 @@ impl GpuBackend {
             mask_kernel,
             scoring_kernel,
             view_storage,
+            cascade_ctx: None,
             backend_label,
             last_mask_bitmaps: Vec::new(),
             last_scoring_outputs: Vec::new(),
+            last_cascade_iterations: None,
+            last_cascade_error: None,
         })
+    }
+
+    /// Lazily build the cascade context on first `step`. Caches the
+    /// result on the backend; subsequent ticks are amortised — no more
+    /// DSL parsing or WGSL compilation. Exposed as its own fn so tests
+    /// can ask for the init cost explicitly before a timing loop starts.
+    pub fn ensure_cascade_initialized(&mut self) -> Result<(), cascade::CascadeCtxError> {
+        if self.cascade_ctx.is_none() {
+            let ctx = cascade::CascadeCtx::new(&self.device)?;
+            self.cascade_ctx = Some(ctx);
+        }
+        Ok(())
+    }
+
+    /// Iteration count from the most recent GPU cascade. `None` before
+    /// the first `step` or when cascade init failed on that tick.
+    pub fn last_cascade_iterations(&self) -> Option<u32> {
+        self.last_cascade_iterations
+    }
+
+    /// Set iff the most recent `step` fell back to the CPU cascade
+    /// (init or dispatch error). The backend records the error string
+    /// rather than returning it so the `SimBackend::step` signature
+    /// stays byte-for-byte compatible with `CpuBackend`.
+    pub fn last_cascade_error(&self) -> Option<&str> {
+        self.last_cascade_error.as_deref()
     }
 
     /// Borrow the backing view storage. Tests and integration callers
@@ -485,52 +537,212 @@ impl SimBackend for GpuBackend {
         policy: &B,
         cascade: &CascadeRegistry,
     ) {
-        // Phase 2: still forward the CPU step — the fused mask kernel
-        // runs alongside and every output is compared against CPU by
-        // the parity harness. Phase 3 feeds the GPU bitmaps back into
-        // the argmax scoring path.
+        // Phase 6g — GPU-authoritative step. Pieces 1–3 (tasks 190–192)
+        // landed on `world-sim-bench`; this is Piece 4 of the task-190
+        // recipe, wiring the cascade into the backend's tick loop.
         //
-        // Phase 6d: view storage is now the scoring kernel's read
-        // source. We keep the CPU step as authoritative for fold state
-        // and mirror the post-step `SimState::views` into
-        // `view_storage` via `mirror_cpu_views_into_gpu_view_storage`
-        // before dispatching the GPU scoring kernel. That preserves
-        // the Phase 6c byte-exact parity contract (same view values as
-        // CPU scoring sees) while proving out the direct-read binding
-        // layout end-to-end. Pieces 2/3 replace this mirror with GPU
-        // fold dispatch; until then scoring sees fold results via a
-        // one-way CPU-to-GPU copy rather than the CPU-uploaded
-        // DecayCell buffers the Phase 6c path used.
-        engine::step::step(state, scratch, events, policy, cascade);
+        // Shape:
+        //   1. Ensure cascade context (lazy DSL load + WGSL compile on
+        //      first call).
+        //   2. Phases 1–3: run CPU mask-build / evaluate / shuffle via
+        //      `step::step_phases_1_to_3` (same call the CPU backend
+        //      uses — byte-exact same actions).
+        //   3. Phase 4a: run CPU `apply_actions` to seed the event ring
+        //      with this tick's root-cause events.
+        //   4. Phase 4b: GPU cascade runs against those seed events,
+        //      mutating its agent SoA + emitting follow-on events.
+        //   5. Commit GPU final slots back to `SimState` via
+        //      `apply_final_slots`; push GPU-emitted events into the
+        //      CPU event ring via `events_into_ring`.
+        //   6. Phase 4c: cold-state replay — walk the GPU-emitted +
+        //      seed events once on CPU, dispatching the 11 rules the
+        //      GPU stubs (chronicles, transfer_gold, modify_standing,
+        //      record_memory).
+        //   7. Phase 5: CPU view-fold (same as step_full).
+        //   8. Phase 6: invariants + telemetry, increment tick.
+        //
+        // On cascade init / dispatch failure the backend falls back to
+        // the CPU cascade for THIS tick so state stays live. That
+        // keeps long-running sessions resilient; the parity test's
+        // byte-exact assertion catches silent divergence via the
+        // CPU-vs-GPU state fingerprint.
 
-        if let Err(_e) = self.ensure_view_storage_cap(state.agent_cap()) {
-            self.last_mask_bitmaps.clear();
-            self.last_scoring_outputs.clear();
+        let t_start = std::time::Instant::now();
+
+        // Lazy cascade ctx init. If this fails, fall back to CPU
+        // end-to-end — the tick still advances correctly, we just
+        // don't exercise GPU cascade this time.
+        if let Err(e) = self.ensure_cascade_initialized() {
+            self.last_cascade_error = Some(format!("init: {e}"));
+            self.last_cascade_iterations = None;
+            engine::step::step(state, scratch, events, policy, cascade);
+            // Run scoring / view mirror so the per-tick diagnostic
+            // surface still populates.
+            self.run_scoring_sidecar(state);
             return;
         }
-        // Seed view_storage's atomic buffers with the CPU view registry's
-        // post-step contents. Temporary bridge for Piece 1 parity — a
-        // later piece replaces this with native GPU folds driven by
-        // the CPU-pushed event slice.
-        mirror_cpu_views_into_gpu_view_storage(
-            state,
+
+        if let Err(_e) = self.ensure_view_storage_cap(state.agent_cap()) {
+            self.last_cascade_error = Some("view_storage resize failed".to_string());
+            self.last_cascade_iterations = None;
+            engine::step::step(state, scratch, events, policy, cascade);
+            self.run_scoring_sidecar(state);
+            return;
+        }
+
+        // Phases 1–3: CPU mask build, evaluate, shuffle.
+        engine::step::step_phases_1_to_3(state, scratch, policy);
+
+        // Phase 4a — apply actions on CPU, emitting this tick's seed
+        // events. `events_before` snapshots the ring's total_pushed
+        // cursor so we can locate just this tick's additions for the
+        // GPU cascade's `initial_events` + the cold-state replay.
+        let events_before = events.total_pushed();
+        engine::step::apply_actions(state, scratch, events);
+        let events_after_apply = events.total_pushed();
+
+        // Collect the seed events (apply_actions' pushes this tick) in
+        // push order. These feed both the GPU cascade's input batch
+        // AND the cold-state replay's iteration.
+        let seed_events: Vec<Event> = (events_before..events_after_apply)
+            .filter_map(|i| events.get_pushed(i))
+            .collect();
+        let initial_records = cascade::pack_initial_events(&seed_events);
+
+        // Phase 4b — GPU cascade.
+        let cascade_ctx = self
+            .cascade_ctx
+            .as_mut()
+            .expect("cascade_ctx ensured above");
+        let emit_ctx = dsl_compiler::emit_physics_wgsl::EmitContext {
+            events: &cascade_ctx.comp.events,
+            event_tags: &cascade_ctx.comp.event_tags,
+        };
+
+        // `view_storage` is NOT reset between ticks. It accumulates
+        // across the whole session — fold kernels update cells in place
+        // (CAS saturating-add for pair_map scalars, max-decay for the
+        // decay cells) so scoring on tick N reads the union of every
+        // event ever folded. The `cascade_parity.rs` harness resets
+        // because each test seeds a fresh isolated state; here the
+        // backend tick loop mirrors CPU `state.views` semantics, which
+        // never clears either.
+
+        let cascade_out = cascade::run_cascade(
+            &self.device,
             &self.queue,
+            state,
+            &mut cascade_ctx.physics,
             &mut self.view_storage,
+            &mut cascade_ctx.spatial,
+            &cascade_ctx.abilities,
+            &initial_records,
+            cascade::DEFAULT_KIN_RADIUS,
+            &emit_ctx,
         );
 
-        // Run the fused mask kernel on the post-step state. Capture
-        // every per-mask bitmap on the backend so callers (parity
-        // test) can read them out without re-running the kernel.
-        // Errors are not fatal — if the dispatch failed we clear the
-        // bitmap vec, which the parity harness surfaces as an
-        // assertion failure ("GPU bitmaps empty after step").
+        // Fold the seed events into view_storage too — the cascade
+        // driver only folds what ITS kernel emits; the apply-phase
+        // events (AgentAttacked, AgentMoved, etc.) also carry view
+        // updates (my_enemies / threat_level / engaged_with) that
+        // scoring on the next tick needs to see.
+        if let Err(e) = cascade::fold_iteration_events(
+            &self.device,
+            &self.queue,
+            &mut self.view_storage,
+            &initial_records,
+        ) {
+            eprintln!("engine_gpu: seed-fold failed: {e}");
+        }
+
+        match cascade_out {
+            Ok(out) => {
+                self.last_cascade_iterations = Some(out.iterations);
+                self.last_cascade_error = None;
+
+                // Commit GPU-mutated agent SoA to SimState.
+                cascade::apply_final_slots(state, &out.final_agent_slots);
+
+                // Drain GPU-emitted events into the CPU ring.
+                cascade::events_into_ring(&out.all_emitted_events, events);
+
+                // Collect GPU-emitted events we just pushed so the
+                // cold-state replay walks them in push order.
+                let gpu_events: Vec<Event> = out
+                    .all_emitted_events
+                    .iter()
+                    .filter_map(crate::event_ring::unpack_record)
+                    .collect();
+
+                // Phase 4c — cold-state replay on (seed + GPU-emitted)
+                // events. Seeds first, matching the CPU cascade's
+                // event-order semantics (apply_actions pushes before
+                // cascade runs).
+                //
+                // Chronicle rules push ChronicleEntry events; those
+                // re-enter the ring and don't need further replay
+                // (ChronicleEntry is non-replayable and nothing
+                // dispatches on it).
+                cascade::cold_state_replay(state, events, &seed_events);
+                cascade::cold_state_replay(state, events, &gpu_events);
+            }
+            Err(e) => {
+                // Cascade dispatch failed mid-tick. Fall back to the
+                // CPU cascade on the events already in the ring so
+                // state stays correct. The fallback is idempotent —
+                // cascade.run_fixed_point_tel resumes from
+                // events.dispatched() so events we've already
+                // dispatched (none yet, this is the first cascade
+                // call this tick) aren't redispatched.
+                self.last_cascade_error = Some(format!("dispatch: {e}"));
+                self.last_cascade_iterations = None;
+                eprintln!("engine_gpu: GPU cascade failed, falling back to CPU cascade: {e}");
+                cascade.run_fixed_point_tel(state, events, &engine::telemetry::NullSink);
+            }
+        }
+
+        let events_emitted = events.total_pushed().saturating_sub(events_before);
+
+        // Phase 5 — CPU view-fold on the full this-tick event slice.
+        // The GPU view_storage was folded above (per iteration + seed
+        // events); this keeps the CPU `state.views` registry in sync
+        // so any future CPU-path dispatch (fallback, or a test that
+        // pokes `state.views`) sees the same values. Cheap for the
+        // 50-tick parity test; O(this-tick events).
+        state.views.fold_all(events, events_before, state.tick);
+
+        // Phase 6 — invariants + telemetry + tick++. Reuses the CPU
+        // helper so every backend reports the same telemetry metric
+        // shape.
+        let empty_invariants = engine::invariant::InvariantRegistry::new();
+        engine::step::finalize_tick(
+            state,
+            scratch,
+            events,
+            &empty_invariants,
+            &engine::telemetry::NullSink,
+            t_start,
+            events_emitted,
+        );
+
+        // Sidecar: run the scoring + mask kernels against the new
+        // post-step state so `last_scoring_outputs` / `last_mask_bitmaps`
+        // continue to populate for diagnostic callers (e.g. the
+        // existing `gpu_backend_matches_cpu_on_canonical_fixture`
+        // parity test, which asserts per-mask GPU-vs-CPU bitmaps).
+        self.run_scoring_sidecar(state);
+    }
+}
+
+/// Internal helper: run the mask kernel + scoring kernel against the
+/// current state and cache their outputs on the backend. Used at the
+/// end of `step` and on the CPU-fallback paths so diagnostic fields
+/// populate identically regardless of which cascade path ran.
+#[cfg(feature = "gpu")]
+impl GpuBackend {
+    fn run_scoring_sidecar(&mut self, state: &SimState) {
         match self.mask_kernel.run_and_readback(&self.device, &self.queue, state) {
             Ok(bitmaps) => {
-                // Phase 3: feed the GPU bitmaps into the scoring kernel.
-                // The CPU has already produced its own actions during
-                // the `step()` call above; this pass exists for parity
-                // assertion only at Phase 3 and becomes the engine's
-                // actual decision source in Phase 6.
                 match self.scoring_kernel.run_and_readback(
                     &self.device,
                     &self.queue,
@@ -552,130 +764,10 @@ impl SimBackend for GpuBackend {
     }
 }
 
-/// Bridge: copy the post-step CPU `state.views` contents into
-/// `view_storage`'s GPU-resident atomic buffers. Used by
-/// `GpuBackend::step` so Piece 1's byte-exact parity harness can
-/// exercise scoring's direct-read path against real fold state without
-/// Pieces 2/3 (GPU physics + fold dispatch) in place yet.
-///
-/// Writes are `queue.write_buffer` — the WGSL-side reads issue
-/// `atomicLoad`, which is compatible with a CPU-side plain write as
-/// long as no concurrent GPU writer touches the same buffer. Inside
-/// `GpuBackend::step` the fold kernels haven't been dispatched yet, so
-/// this is safe.
-#[cfg(feature = "gpu")]
-fn mirror_cpu_views_into_gpu_view_storage(
-    state: &engine::state::SimState,
-    queue: &wgpu::Queue,
-    view_storage: &mut view_storage::ViewStorage,
-) {
-    use engine::ids::AgentId;
-
-    let agent_cap = view_storage.agent_cap();
-    let n = agent_cap as usize;
-
-    // engaged_with — slot_map<u32>, sized for agent_cap slots.
-    if let Some(buf) = view_storage.primary_buffer("engaged_with") {
-        let mut slots = vec![0u32; n];
-        for slot in 0..n.min(state.agent_cap() as usize) {
-            let id = match AgentId::new(slot as u32 + 1) {
-                Some(id) => id,
-                None => continue,
-            };
-            if let Some(partner) = state.views.engaged_with.get(id) {
-                slots[slot] = partner.raw();
-            }
-        }
-        queue.write_buffer(buf, 0, bytemuck::cast_slice(&slots));
-    }
-
-    let live_n = state.agent_cap() as usize;
-
-    // my_enemies — pair_map<atomic<u32>>, cells hold f32 bits.
-    if let Some(buf) = view_storage.primary_buffer("my_enemies") {
-        let mut cells = vec![0u32; n * n];
-        for observer_slot in 0..live_n.min(n) {
-            let observer = match AgentId::new(observer_slot as u32 + 1) {
-                Some(id) => id,
-                None => continue,
-            };
-            for attacker_slot in 0..live_n.min(n) {
-                let attacker = match AgentId::new(attacker_slot as u32 + 1) {
-                    Some(id) => id,
-                    None => continue,
-                };
-                let v = state.views.my_enemies.get(observer, attacker);
-                cells[observer_slot * n + attacker_slot] = v.to_bits();
-            }
-        }
-        queue.write_buffer(buf, 0, bytemuck::cast_slice(&cells));
-    }
-
-    // Decay views — values + anchors. We stamp anchor = state.tick and
-    // value = already-decayed, matching the trick the Phase 6c CPU
-    // mirror used: read-tick will equal stamp-tick so dt=0 →
-    // the read snippet returns the stamped value verbatim. Byte-exact
-    // with the CPU scoring path (which applies the same dt=0 short
-    // circuit in its predicate evaluator).
-    //
-    // One closure per decay view because their concrete types differ
-    // (generated per-view structs, no shared trait).
-    mirror_decay_view(
-        view_storage, queue, live_n, n, state.tick, "threat_level",
-        |a, b| state.views.threat_level.get(a, b, state.tick),
-    );
-    mirror_decay_view(
-        view_storage, queue, live_n, n, state.tick, "kin_fear",
-        |a, b| state.views.kin_fear.get(a, b, state.tick),
-    );
-    mirror_decay_view(
-        view_storage, queue, live_n, n, state.tick, "pack_focus",
-        |a, b| state.views.pack_focus.get(a, b, state.tick),
-    );
-    mirror_decay_view(
-        view_storage, queue, live_n, n, state.tick, "rally_boost",
-        |a, b| state.views.rally_boost.get(a, b, state.tick),
-    );
-}
-
-#[cfg(feature = "gpu")]
-fn mirror_decay_view<F>(
-    view_storage: &view_storage::ViewStorage,
-    queue: &wgpu::Queue,
-    live_n: usize,
-    n: usize,
-    tick: u32,
-    name: &str,
-    mut getter: F,
-) where
-    F: FnMut(engine::ids::AgentId, engine::ids::AgentId) -> f32,
-{
-    use engine::ids::AgentId;
-    let primary = match view_storage.primary_buffer(name) {
-        Some(b) => b,
-        None => return,
-    };
-    let anchor = match view_storage.anchor_buffer(name) {
-        Some(b) => b,
-        None => return,
-    };
-    let mut values = vec![0u32; n * n];
-    let mut anchors = vec![0u32; n * n];
-    for observer_slot in 0..live_n.min(n) {
-        let observer = match AgentId::new(observer_slot as u32 + 1) {
-            Some(id) => id,
-            None => continue,
-        };
-        for attacker_slot in 0..live_n.min(n) {
-            let attacker = match AgentId::new(attacker_slot as u32 + 1) {
-                Some(id) => id,
-                None => continue,
-            };
-            let v = getter(observer, attacker);
-            values[observer_slot * n + attacker_slot] = v.to_bits();
-            anchors[observer_slot * n + attacker_slot] = tick;
-        }
-    }
-    queue.write_buffer(primary, 0, bytemuck::cast_slice(&values));
-    queue.write_buffer(anchor, 0, bytemuck::cast_slice(&anchors));
-}
+// Task 193 (Phase 6g) retired the previous Piece 1 `mirror_cpu_views_
+// into_gpu_view_storage` bridge. The GPU cascade now folds both seed
+// events (apply_actions' pushes) and cascade-emitted events into
+// `view_storage` directly inside `step`; the CPU `state.views`
+// registry is kept in sync by a parallel CPU `fold_all` call, but
+// scoring reads from the GPU-owned `view_storage` atomics without
+// needing a cross-device copy.
