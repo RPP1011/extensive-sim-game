@@ -162,7 +162,7 @@ view my_enemies(observer: Agent, attacker: Agent) -> f32 {
 // variant stores (base, anchor_tick) per pair). Same bounded-population
 // assumption as threat_level / my_enemies — pair count stays small in
 // combat scenarios.
-@materialized(on_event = [FearSpread], storage = pair_map)
+@materialized(on_event = [FearSpread], storage = per_entity_topk(K = 8))
 @decay(rate = 0.891, per = tick)
 view kin_fear(observer: Agent, dead_kin: Agent) -> f32 {
   initial: 0.0,

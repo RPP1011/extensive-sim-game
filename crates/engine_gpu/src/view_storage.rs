@@ -1387,9 +1387,11 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
             }),
             span,
         },
-        // ------------- kin_fear: pair_map @decay(0.891) -------------
-        // Not migrated — FearSpread events are rare and per-death;
-        // dense pair_map stays feasible. (See `assets/sim/views.sim`.)
+        // ------------- kin_fear: per_entity_topk(K=8) @decay(0.891) -------------
+        // Migrated to topk for scale — flocking-style local aggregation:
+        // only the K most-recent nearby dead kin matter; older fears decay
+        // away before eviction matters. Sim at N=8 stays byte-identical
+        // (K=8 > typical nearby dead kin count). Unblocks N≥25k.
         ViewIR {
             name: "kin_fear".into(),
             params: vec![
@@ -1406,7 +1408,7 @@ pub fn build_materialized_view_irs() -> Vec<ViewIR> {
                 clamp: Some((lit_f(0.0), lit_f(10.0))),
             },
             annotations: vec![],
-            kind: ViewKind::Materialized(StorageHint::PairMap),
+            kind: ViewKind::Materialized(StorageHint::PerEntityTopK { k: 8, keyed_on: 0 }),
             decay: Some(DecayHint {
                 rate: 0.891,
                 per: DecayUnit::Tick,

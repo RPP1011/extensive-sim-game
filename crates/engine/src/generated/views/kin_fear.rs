@@ -2,21 +2,35 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use std::collections::HashMap;
-
 use crate::event::Event;
 use crate::ids::AgentId;
 
-/// @materialized view `kin_fear` — `storage = pair_map<(AgentId, AgentId), f32>`.
-/// @decay(rate = 0.891, per = tick) — anchor-pattern storage. Spec §2.3.
+/// @materialized view `kin_fear` — `storage = per_entity_topk(K=8)`.
+/// @decay(rate = 0.891, per = tick) — anchor-pattern decay applied on read.
+/// Storage: one `[TopkSlot; 8]` per observer slot in a `Vec`. Total footprint
+/// is O(N·K) — at K=8 and N=200k that's 18 MB vs the dense pair_map's
+/// O(N²·4) ≈ 160 GB. Fold semantics: find-or-evict-else-drop (task 196).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TopkSlot {
+    /// Raw AgentId (1-based). 0 means empty.
+    pub id: u32,
+    /// Stored value; decay (if configured) applies on read.
+    pub value: f32,
+    /// Tick when `value` was last written (@decay anchor).
+    pub anchor_tick: u32,
+}
+
 #[derive(Debug, Default)]
 pub struct KinFear {
-    /// `(base_at_anchor, anchor_tick)` per-pair. Observable value at `tick`
-    /// is `base * rate.powi((tick - anchor) as i32)` clamped.
-    value: HashMap<(AgentId, AgentId), (f32, u32)>,
+    /// One array of 8 slots per observer. `Vec::len()` grows on demand
+    /// as `fold_event` sees higher observer ids.
+    slots: Vec<[TopkSlot; 8]>,
 }
 
 impl KinFear {
+    /// Slot count per observer — the `K` from `per_entity_topk(K=8)`.
+    pub const K: usize = 8;
+
     /// Decay rate per tick — compile-time constant from `@decay(rate = 0.891)`.
     pub const RATE: f32 = 0.891_f32;
 
@@ -24,36 +38,112 @@ impl KinFear {
         Self::default()
     }
 
+    /// Number of observer slots currently provisioned. `fold_event` grows
+    /// this on demand up to `max_observer + 1`.
     pub fn len(&self) -> usize {
-        self.value.len()
+        self.slots.len()
     }
     pub fn is_empty(&self) -> bool {
-        self.value.is_empty()
+        self.slots.is_empty()
     }
 
-    /// Current value at `tick`, decayed from the anchor.
+    /// Current value for `dead_kin` as observed by `observer`,
+    /// decayed from its anchor tick. Returns `initial` when the pair isn't in observer's top-8.
     pub fn get(&self, observer: AgentId, dead_kin: AgentId, tick: u32) -> f32 {
-        let (base, anchor) = self
-            .value
-            .get(&(observer, dead_kin))
-            .copied()
-            .unwrap_or((0.0, tick));
-        let decayed = base * Self::RATE.powi(tick.saturating_sub(anchor) as i32);
-        decayed.clamp(0.0, 10.0)
+        let obs_slot = (observer.raw() - 1) as usize;
+        let atk_id = dead_kin.raw();
+        let Some(row) = self.slots.get(obs_slot) else {
+            return 0.0;
+        };
+        for s in row.iter() {
+            if s.id == atk_id {
+                let dt = tick.saturating_sub(s.anchor_tick);
+                let decayed = s.value * Self::RATE.powi(dt as i32);
+                return decayed.clamp(0.0, 10.0);
+            }
+        }
+        0.0
     }
 
-    /// Σ get(observer, x, tick) over every recorded second-argument `x`.
-    /// Used by scoring's view-call wildcard slot (`_`). O(|pair_map|).
+    /// Σ get(observer, x, tick) over `observer`'s top-8 slots.
+    /// Semantic drift vs dense pair_map: sum is over the top-K attackers, not every recorded pair.
     pub fn sum_for_first(&self, observer: AgentId, tick: u32) -> f32 {
+        let obs_slot = (observer.raw() - 1) as usize;
+        let Some(row) = self.slots.get(obs_slot) else {
+            return 0.0;
+        };
         let mut total: f32 = 0.0;
-        for (&(k_a, _k_b), &(base, anchor)) in self.value.iter() {
-            if k_a != observer {
+        for s in row.iter() {
+            if s.id == 0 {
                 continue;
             }
-            let decayed = base * Self::RATE.powi(tick.saturating_sub(anchor) as i32);
+            let dt = tick.saturating_sub(s.anchor_tick);
+            let decayed = s.value * Self::RATE.powi(dt as i32);
             total += decayed.clamp(0.0, 10.0);
         }
         total
+    }
+
+    fn row_mut(&mut self, obs_slot: usize) -> &mut [TopkSlot; 8] {
+        if obs_slot >= self.slots.len() {
+            self.slots.resize(obs_slot + 1, [TopkSlot::default(); 8]);
+        }
+        &mut self.slots[obs_slot]
+    }
+
+    /// Fold `delta` into the (observer, attacker) slot. See the
+    /// module docstring above for find-or-evict-else-drop semantics.
+    fn fold_one(&mut self, observer: u32, attacker: u32, delta: f32, tick: u32) {
+        if observer == 0 || attacker == 0 {
+            return;
+        }
+        let obs_slot = (observer - 1) as usize;
+        let row = self.row_mut(obs_slot);
+        for i in 0..8 {
+            if row[i].id == attacker {
+                let dt = tick.saturating_sub(row[i].anchor_tick);
+                let current = row[i].value * Self::RATE.powi(dt as i32);
+                let updated = current + delta;
+                let updated = updated.clamp(0.0, 10.0);
+                row[i].value = updated;
+                row[i].anchor_tick = tick;
+                return;
+            }
+        }
+        for i in 0..8 {
+            if row[i].id == 0 {
+                let v = delta.clamp(0.0, 10.0);
+                row[i] = TopkSlot {
+                    id: attacker,
+                    value: v,
+                    anchor_tick: tick,
+                };
+                return;
+            }
+        }
+        // Full row — compute each slot's decayed value, evict the smallest
+        // if `delta` can outweigh it; otherwise drop the fold.
+        let mut min_i: usize = 0;
+        let mut min_v: f32 = {
+            let dt = tick.saturating_sub(row[0].anchor_tick);
+            row[0].value * Self::RATE.powi(dt as i32)
+        };
+        for i in 1..8 {
+            let dt = tick.saturating_sub(row[i].anchor_tick);
+            let v = row[i].value * Self::RATE.powi(dt as i32);
+            if v < min_v {
+                min_v = v;
+                min_i = i;
+            }
+        }
+        if delta > min_v {
+            let v = delta.clamp(0.0, 10.0);
+            row[min_i] = TopkSlot {
+                id: attacker,
+                value: v,
+                anchor_tick: tick,
+            };
+        }
     }
 
     /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase.
@@ -62,13 +152,7 @@ impl KinFear {
             Event::FearSpread {
                 observer, dead_kin, ..
             } => {
-                let key = (*observer, *dead_kin);
-                let amount: f32 = 1.0;
-                let (base, anchor) = self.value.get(&key).copied().unwrap_or((0.0, tick));
-                let current = base * Self::RATE.powi(tick.saturating_sub(anchor) as i32);
-                let updated = current + amount;
-                let updated = updated.clamp(0.0, 10.0);
-                self.value.insert(key, (updated, tick));
+                self.fold_one(observer.raw(), dead_kin.raw(), 1.0, tick);
             }
             _ => {}
         }
