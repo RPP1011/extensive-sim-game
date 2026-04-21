@@ -808,7 +808,7 @@ impl CascadeCtx {
             events: &comp.events,
             event_tags: &comp.event_tags,
         };
-        let physics = PhysicsKernel::new(device, &comp.physics, &ctx, 4096)?;
+        let physics = PhysicsKernel::new(device, &comp.physics, &ctx, 65_536)?;
         let spatial = GpuSpatialHash::new(device)?;
         let abilities = PackedAbilityRegistry::empty();
         Ok(Self {
