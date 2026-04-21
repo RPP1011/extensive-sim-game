@@ -53,6 +53,9 @@ use engine::{
 #[cfg(feature = "gpu")]
 pub mod mask;
 
+#[cfg(feature = "gpu")]
+pub mod scoring;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
@@ -70,6 +73,9 @@ pub struct GpuBackend {
     device: wgpu::Device,
     queue: wgpu::Queue,
     mask_kernel: mask::FusedMaskKernel,
+    /// Phase 3 scoring kernel. Consumes the fused mask bitmaps + packed
+    /// agent SoA and produces one `ScoreOutput` per agent slot.
+    scoring_kernel: scoring::ScoringKernel,
     /// Name of the backend wgpu selected (Vulkan / Metal / DX12 / GL /
     /// BrowserWebGpu / llvmpipe (GL/Vulkan software)). Captured at
     /// construction so tests can report which path they exercised.
@@ -80,6 +86,13 @@ pub struct GpuBackend {
     /// iff slot `i`'s agent passed that mask's predicate this tick.
     /// Empty before the first `step`.
     last_mask_bitmaps: Vec<Vec<u32>>,
+    /// Per-agent scoring outputs from the most recent `step` — one
+    /// `ScoreOutput` per agent slot carrying the GPU's argmax choice
+    /// (chosen_action, chosen_target, best_score_bits). Empty before
+    /// the first `step` and when the mask / scoring dispatch fails.
+    /// Phase 6 will feed this into physics dispatch; at Phase 3 it's
+    /// read out by the parity harness.
+    last_scoring_outputs: Vec<scoring::ScoreOutput>,
 }
 
 /// Errors surfaced by `GpuBackend::new`.
@@ -94,6 +107,9 @@ pub enum GpuInitError {
     RequestDevice(String),
     /// Kernel init failed — WGSL emit or naga parse.
     Kernel(mask::KernelError),
+    /// Phase 3 scoring kernel init failed — WGSL compile / pipeline
+    /// construction.
+    Scoring(scoring::ScoringError),
 }
 
 #[cfg(feature = "gpu")]
@@ -103,6 +119,7 @@ impl std::fmt::Display for GpuInitError {
             GpuInitError::NoAdapter => write!(f, "no compatible GPU adapter"),
             GpuInitError::RequestDevice(s) => write!(f, "request_device: {s}"),
             GpuInitError::Kernel(e) => write!(f, "kernel init: {e}"),
+            GpuInitError::Scoring(e) => write!(f, "scoring init: {e}"),
         }
     }
 }
@@ -114,6 +131,13 @@ impl std::error::Error for GpuInitError {}
 impl From<mask::KernelError> for GpuInitError {
     fn from(e: mask::KernelError) -> Self {
         GpuInitError::Kernel(e)
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl From<scoring::ScoringError> for GpuInitError {
+    fn from(e: scoring::ScoringError) -> Self {
+        GpuInitError::Scoring(e)
     }
 }
 
@@ -202,13 +226,16 @@ impl GpuBackend {
             .map_err(|e| GpuInitError::RequestDevice(format!("{e}")))?;
 
         let mask_kernel = mask::FusedMaskKernel::new(&device)?;
+        let scoring_kernel = scoring::ScoringKernel::new(&device, &queue)?;
 
         Ok(Self {
             device,
             queue,
             mask_kernel,
+            scoring_kernel,
             backend_label,
             last_mask_bitmaps: Vec::new(),
+            last_scoring_outputs: Vec::new(),
         })
     }
 
@@ -260,6 +287,36 @@ impl GpuBackend {
     ) -> Result<Vec<Vec<u32>>, mask::KernelError> {
         self.mask_kernel.run_and_readback(&self.device, &self.queue, state)
     }
+
+    /// Per-agent scoring outputs from the most recent `step` — one
+    /// `ScoreOutput` per agent slot. Carries the GPU's argmax decision
+    /// (chosen_action, chosen_target). Empty before the first `step`
+    /// or when the scoring kernel dispatch failed.
+    pub fn last_scoring_outputs(&self) -> &[scoring::ScoreOutput] {
+        &self.last_scoring_outputs
+    }
+
+    /// Run the scoring kernel against `state`'s current snapshot
+    /// (without advancing the CPU step). Used by the parity test's
+    /// "known-state spawn check" mode — same shape as
+    /// `verify_masks_on_gpu` but for scoring. Internally runs the
+    /// fused mask kernel first to get the bitmaps the scoring kernel
+    /// reads.
+    pub fn verify_scoring_on_gpu(
+        &mut self,
+        state: &SimState,
+    ) -> Result<Vec<scoring::ScoreOutput>, scoring::ScoringError> {
+        let bitmaps = self
+            .mask_kernel
+            .run_and_readback(&self.device, &self.queue, state)?;
+        self.scoring_kernel.run_and_readback(
+            &self.device,
+            &self.queue,
+            state,
+            &self.mask_kernel,
+            &bitmaps,
+        )
+    }
 }
 
 #[cfg(feature = "gpu")]
@@ -285,9 +342,27 @@ impl SimBackend for GpuBackend {
         // bitmap vec, which the parity harness surfaces as an
         // assertion failure ("GPU bitmaps empty after step").
         match self.mask_kernel.run_and_readback(&self.device, &self.queue, state) {
-            Ok(bitmaps) => self.last_mask_bitmaps = bitmaps,
+            Ok(bitmaps) => {
+                // Phase 3: feed the GPU bitmaps into the scoring kernel.
+                // The CPU has already produced its own actions during
+                // the `step()` call above; this pass exists for parity
+                // assertion only at Phase 3 and becomes the engine's
+                // actual decision source in Phase 6.
+                match self.scoring_kernel.run_and_readback(
+                    &self.device,
+                    &self.queue,
+                    state,
+                    &self.mask_kernel,
+                    &bitmaps,
+                ) {
+                    Ok(scores) => self.last_scoring_outputs = scores,
+                    Err(_e) => self.last_scoring_outputs.clear(),
+                }
+                self.last_mask_bitmaps = bitmaps;
+            }
             Err(_e) => {
                 self.last_mask_bitmaps.clear();
+                self.last_scoring_outputs.clear();
             }
         }
     }

@@ -16,7 +16,7 @@ edition = "2021"
 # creation. The parity harness in `tests/parity_with_cpu.rs` is gated
 # behind `gpu` because it's the only test that exercises the GPU kernel.
 default = []
-gpu = ["dep:wgpu", "dep:naga", "dep:pollster", "dep:dsl_compiler", "dep:bytemuck"]
+gpu = ["dep:wgpu", "dep:naga", "dep:pollster", "dep:dsl_compiler", "dep:bytemuck", "dep:engine_rules"]
 
 [dependencies]
 engine = { path = "../engine" }
@@ -39,6 +39,10 @@ pollster = { version = "0.4", optional = true }
 dsl_compiler = { path = "../dsl_compiler", optional = true }
 # Pod re-interpret helper for uploading SoA fields as flat byte buffers.
 bytemuck = { version = "1.16", optional = true, features = ["derive"] }
+# Phase 3 scoring kernel reads SCORING_TABLE (POD) + the scoring types
+# (PredicateDescriptor constants). Required when the `gpu` feature is
+# enabled so the CPU reference + GPU pack paths both compile.
+engine_rules = { path = "../engine_rules", optional = true }
 
 [dev-dependencies]
 engine_rules = { path = "../engine_rules" }
