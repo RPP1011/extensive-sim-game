@@ -53,6 +53,9 @@ use engine::{
 #[cfg(feature = "gpu")]
 pub mod mask;
 
+#[cfg(feature = "gpu")]
+pub mod spatial_gpu;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
