@@ -163,6 +163,13 @@ pub struct GpuBackend {
     /// — the state is authoritative on CPU, just not GPU-driven this
     /// tick.
     last_cascade_error: Option<String>,
+    /// Phase 9 (task 195): skip the post-step mask/scoring sidecar.
+    /// Default is `false` so existing tests that assert on
+    /// `last_mask_bitmaps` / `last_scoring_outputs` keep working. Perf
+    /// harnesses and batch callers flip this to `true` — the sidecar
+    /// duplicates a full mask+scoring dispatch (~3-10 ms at N=1000)
+    /// that the `SimBackend::step` contract doesn't require.
+    skip_scoring_sidecar: bool,
 }
 
 /// Initial agent capacity the view storage is provisioned for. Grows on
@@ -330,6 +337,7 @@ impl GpuBackend {
             last_scoring_outputs: Vec::new(),
             last_cascade_iterations: None,
             last_cascade_error: None,
+            skip_scoring_sidecar: false,
         })
     }
 
@@ -349,6 +357,23 @@ impl GpuBackend {
     /// the first `step` or when cascade init failed on that tick.
     pub fn last_cascade_iterations(&self) -> Option<u32> {
         self.last_cascade_iterations
+    }
+
+    /// Enable or disable the post-step scoring sidecar. The sidecar
+    /// runs a full mask + scoring kernel dispatch against post-step
+    /// state to populate `last_mask_bitmaps` / `last_scoring_outputs`
+    /// for diagnostic callers. Perf harnesses turn it off to shave
+    /// ~3-10 ms/tick at N=1000 (the sidecar dispatches are pure
+    /// duplication since the backend doesn't use its own scoring
+    /// output — the CPU `step_phases_1_to_3` already decided actions).
+    pub fn set_skip_scoring_sidecar(&mut self, skip: bool) {
+        self.skip_scoring_sidecar = skip;
+    }
+
+    /// True iff the scoring sidecar is currently disabled. Default
+    /// is `false` so existing tests keep working.
+    pub fn skip_scoring_sidecar(&self) -> bool {
+        self.skip_scoring_sidecar
     }
 
     /// Set iff the most recent `step` fell back to the CPU cascade
@@ -578,7 +603,9 @@ impl SimBackend for GpuBackend {
             engine::step::step(state, scratch, events, policy, cascade);
             // Run scoring / view mirror so the per-tick diagnostic
             // surface still populates.
-            self.run_scoring_sidecar(state);
+            if !self.skip_scoring_sidecar {
+                self.run_scoring_sidecar(state);
+            }
             return;
         }
 
@@ -586,7 +613,9 @@ impl SimBackend for GpuBackend {
             self.last_cascade_error = Some("view_storage resize failed".to_string());
             self.last_cascade_iterations = None;
             engine::step::step(state, scratch, events, policy, cascade);
-            self.run_scoring_sidecar(state);
+            if !self.skip_scoring_sidecar {
+                self.run_scoring_sidecar(state);
+            }
             return;
         }
 
@@ -730,7 +759,15 @@ impl SimBackend for GpuBackend {
         // continue to populate for diagnostic callers (e.g. the
         // existing `gpu_backend_matches_cpu_on_canonical_fixture`
         // parity test, which asserts per-mask GPU-vs-CPU bitmaps).
-        self.run_scoring_sidecar(state);
+        //
+        // Perf harnesses opt out via `set_skip_scoring_sidecar(true)`
+        // — on a warm N=1000 workload the sidecar is ~3-10 ms of pure
+        // duplicate work (the backend doesn't consume its own scoring
+        // output; `step_phases_1_to_3` already picked the CPU action
+        // set before the GPU cascade ran).
+        if !self.skip_scoring_sidecar {
+            self.run_scoring_sidecar(state);
+        }
     }
 }
 
