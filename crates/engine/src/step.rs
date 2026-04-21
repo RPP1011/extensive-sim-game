@@ -325,7 +325,11 @@ fn fraction_true(bits: &[bool]) -> f64 {
 /// `0..actions.len()`, keyed by `(world_seed, tick)` via [`per_agent_u32`]
 /// using the sentinel `AgentId(1)` as the shuffle stream discriminator.
 /// Deterministic: same `(seed, tick, actions.len())` → same permutation.
-fn shuffle_actions_in_place(
+///
+/// Exposed `pub` so GPU-backed drivers can reuse the exact shuffle
+/// function the CPU backend uses — divergence here silently breaks
+/// determinism (first-mover-bias test, `shuffle_is_deterministic`, etc.).
+pub fn shuffle_actions_in_place(
     world_seed:  u64,
     tick:        u32,
     actions:     &[Action],
