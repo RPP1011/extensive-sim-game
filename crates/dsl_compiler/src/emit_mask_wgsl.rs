@@ -50,7 +50,7 @@
 //! `cold_creature_type` as flat `Vec3`/`u32` arrays aligned to the
 //! agent-slot index. Layout matches 1:1 with the CPU-side `SimState`
 //! so the uploader is a memcpy — no re-interpretation. See
-//! `engine_gpu::attack_mask` for the binding table; this file is the
+//! `engine_gpu::mask` for the binding table; this file is the
 //! source of the WGSL that reads it.
 
 use std::fmt::Write;
@@ -409,16 +409,19 @@ fn emit_predicate_body(
             // through to the identity branch for non-`self` names.
             writeln!(out, "    var found: bool = false;").unwrap();
             writeln!(out, "    {{").unwrap();
-            // Evaluate each clause; bail to the end of the block if any
-            // fails. Using a scope + break keeps early-exit cheap.
+            // Evaluate each clause; the composite boolean becomes
+            // `found`. `pass` looks like the right name here but WGSL
+            // reserves it — the emitter uses `gate_ok` instead. The
+            // scope keeps the binding out of the surrounding fused
+            // kernel's namespace so each mask's `gate_ok` stays local.
             let ctx = LowerCtx { dsl_target_name: "", wgsl_target_name };
-            writeln!(out, "        let pass = (true").unwrap();
+            writeln!(out, "        let gate_ok = (true").unwrap();
             for clause in &clauses {
                 let cond = lower_expr(clause, &hoisted, ctx)?;
                 writeln!(out, "            && ({cond})").unwrap();
             }
             writeln!(out, "        );").unwrap();
-            writeln!(out, "        if (pass) {{ found = true; }}").unwrap();
+            writeln!(out, "        if (gate_ok) {{ found = true; }}").unwrap();
             writeln!(out, "    }}").unwrap();
         }
         MaskShape::AgentTarget { dsl_name } => {
