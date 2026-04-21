@@ -84,12 +84,32 @@ fn perf_n100() {
     let mut events = EventRing::with_cap(EVENT_RING_CAP);
     let cascade = CascadeRegistry::with_engine_builtins();
 
+    // Warm-up tick (trigger any lazy init / amortise first-tick cost).
+    cpu_backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+
     let t0 = Instant::now();
-    for _ in 0..TICKS {
-        cpu_backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+    let mut cpu_phases_1_3_total = Duration::ZERO;
+    for tick_i in 1..TICKS {
+        let tp = Instant::now();
+        engine::step::step_phases_1_to_3(&mut state, &mut scratch, &UtilityBackend);
+        let ph13 = tp.elapsed();
+        cpu_phases_1_3_total += ph13;
+        if tick_i % 10 == 0 {
+            eprintln!("CPU tick {tick_i} phases_1_3: {}us", ph13.as_micros());
+        }
+        // Continue with rest of CPU step manually
+        let events_before = events.total_pushed();
+        engine::step::apply_actions(&mut state, &scratch, &mut events);
+        cascade.run_fixed_point_tel(&mut state, &mut events, &engine::telemetry::NullSink);
+        state.views.fold_all(&events, events_before, state.tick);
+        state.tick += 1;
     }
     let cpu_total: Duration = t0.elapsed();
     let alive_cpu = state.agents_alive().count();
+    eprintln!(
+        "CPU phases 1-3 avg: {} µs/tick",
+        cpu_phases_1_3_total.as_micros() / (TICKS - 1) as u128
+    );
 
     // GPU
     let mut gpu_backend = GpuBackend::new().expect("gpu init");
@@ -102,13 +122,38 @@ fn perf_n100() {
     gpu_backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
     let first_tick = t_first.elapsed();
 
+    // Warm-up tick on GPU path.
+    gpu_backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+
+    // Direct measurement of phases 1-3 on GPU-evolved state (should be
+    // identical CPU function call, differs only in state contents).
+    let t_direct = Instant::now();
+    for _ in 0..5 {
+        engine::step::step_phases_1_to_3(&mut state, &mut scratch, &UtilityBackend);
+    }
+    let direct_us = t_direct.elapsed().as_micros() / 5;
+    eprintln!(
+        "Direct call to step_phases_1_to_3 on GPU-state (post-warmup, avg of 5): {} µs",
+        direct_us
+    );
+
     let t_rest = Instant::now();
     let mut iter_counts: Vec<u32> = Vec::new();
+    let mut accum = engine_gpu::PhaseTimings::default();
     for _ in 1..TICKS {
         gpu_backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
         if let Some(n) = gpu_backend.last_cascade_iterations() {
             iter_counts.push(n);
         }
+        let p = gpu_backend.last_phase_timings();
+        accum.cpu_phases_1_3_us += p.cpu_phases_1_3_us;
+        accum.cpu_apply_actions_us += p.cpu_apply_actions_us;
+        accum.gpu_cascade_us += p.gpu_cascade_us;
+        accum.gpu_seed_fold_us += p.gpu_seed_fold_us;
+        accum.cpu_cold_state_us += p.cpu_cold_state_us;
+        accum.cpu_view_fold_all_us += p.cpu_view_fold_all_us;
+        accum.cpu_finalize_us += p.cpu_finalize_us;
+        accum.gpu_sidecar_us += p.gpu_sidecar_us;
     }
     let rest = t_rest.elapsed();
     let avg_iters: f64 = if iter_counts.is_empty() {
@@ -116,11 +161,21 @@ fn perf_n100() {
     } else {
         iter_counts.iter().copied().map(|n| n as f64).sum::<f64>() / iter_counts.len() as f64
     };
+    let ticks_measured = (TICKS - 1) as u64;
     eprintln!("avg cascade iterations/tick: {avg_iters:.2}");
+    eprintln!("per-phase averages (µs/tick):");
+    eprintln!("  cpu phases 1-3:     {}", accum.cpu_phases_1_3_us / ticks_measured);
+    eprintln!("  cpu apply_actions:  {}", accum.cpu_apply_actions_us / ticks_measured);
+    eprintln!("  gpu cascade:        {}", accum.gpu_cascade_us / ticks_measured);
+    eprintln!("  gpu seed fold:      {}", accum.gpu_seed_fold_us / ticks_measured);
+    eprintln!("  cpu cold state:     {}", accum.cpu_cold_state_us / ticks_measured);
+    eprintln!("  cpu view fold_all:  {}", accum.cpu_view_fold_all_us / ticks_measured);
+    eprintln!("  cpu finalize:       {}", accum.cpu_finalize_us / ticks_measured);
+    eprintln!("  gpu sidecar:        {}", accum.gpu_sidecar_us / ticks_measured);
     eprintln!("GPU backend label: {}", gpu_backend.backend_label());
     let alive_gpu = state.agents_alive().count();
 
-    let cpu_per = cpu_total.as_secs_f64() * 1e6 / TICKS as f64;
+    let cpu_per = cpu_total.as_secs_f64() * 1e6 / (TICKS - 1) as f64;
     let gpu_steady_per = rest.as_secs_f64() * 1e6 / (TICKS - 1) as f64;
 
     eprintln!("=== N=100 perf ===");

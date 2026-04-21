@@ -170,6 +170,27 @@ pub struct GpuBackend {
     /// duplicates a full mask+scoring dispatch (~3-10 ms at N=1000)
     /// that the `SimBackend::step` contract doesn't require.
     skip_scoring_sidecar: bool,
+    /// Phase 9 (task 195): cumulative phase timings for diagnostic use
+    /// by perf harnesses. Zeroed per-tick at `step` entry; readable
+    /// via `last_phase_timings`.
+    last_phase_us: PhaseTimings,
+}
+
+/// Phase 9 (task 195): per-tick GPU pipeline phase timings in
+/// microseconds. Reset at the top of each `step` and populated as the
+/// phase completes. Useful for `perf_n100`-style callers that want to
+/// know WHICH submit dominates without cargo-instruments.
+#[cfg(feature = "gpu")]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PhaseTimings {
+    pub cpu_phases_1_3_us: u64,
+    pub cpu_apply_actions_us: u64,
+    pub gpu_cascade_us: u64,
+    pub gpu_seed_fold_us: u64,
+    pub cpu_cold_state_us: u64,
+    pub cpu_view_fold_all_us: u64,
+    pub cpu_finalize_us: u64,
+    pub gpu_sidecar_us: u64,
 }
 
 /// Initial agent capacity the view storage is provisioned for. Grows on
@@ -338,6 +359,7 @@ impl GpuBackend {
             last_cascade_iterations: None,
             last_cascade_error: None,
             skip_scoring_sidecar: false,
+            last_phase_us: PhaseTimings::default(),
         })
     }
 
@@ -374,6 +396,14 @@ impl GpuBackend {
     /// is `false` so existing tests keep working.
     pub fn skip_scoring_sidecar(&self) -> bool {
         self.skip_scoring_sidecar
+    }
+
+    /// Per-tick phase timings from the most recent `step`. Reset at
+    /// the top of each step; populated as each phase finishes. Fields
+    /// are in microseconds. A zero field means the phase was skipped
+    /// on that tick (e.g. sidecar with `skip_scoring_sidecar = true`).
+    pub fn last_phase_timings(&self) -> PhaseTimings {
+        self.last_phase_us
     }
 
     /// Set iff the most recent `step` fell back to the CPU cascade
@@ -619,16 +649,22 @@ impl SimBackend for GpuBackend {
             return;
         }
 
+        self.last_phase_us = PhaseTimings::default();
+
         // Phases 1–3: CPU mask build, evaluate, shuffle.
+        let t_ph13 = std::time::Instant::now();
         engine::step::step_phases_1_to_3(state, scratch, policy);
+        self.last_phase_us.cpu_phases_1_3_us = t_ph13.elapsed().as_micros() as u64;
 
         // Phase 4a — apply actions on CPU, emitting this tick's seed
         // events. `events_before` snapshots the ring's total_pushed
         // cursor so we can locate just this tick's additions for the
         // GPU cascade's `initial_events` + the cold-state replay.
+        let t_apply = std::time::Instant::now();
         let events_before = events.total_pushed();
         engine::step::apply_actions(state, scratch, events);
         let events_after_apply = events.total_pushed();
+        self.last_phase_us.cpu_apply_actions_us = t_apply.elapsed().as_micros() as u64;
 
         // Collect the seed events (apply_actions' pushes this tick) in
         // push order. These feed both the GPU cascade's input batch
@@ -657,6 +693,7 @@ impl SimBackend for GpuBackend {
         // backend tick loop mirrors CPU `state.views` semantics, which
         // never clears either.
 
+        let t_cascade = std::time::Instant::now();
         let cascade_out = cascade::run_cascade(
             &self.device,
             &self.queue,
@@ -669,12 +706,14 @@ impl SimBackend for GpuBackend {
             cascade::DEFAULT_KIN_RADIUS,
             &emit_ctx,
         );
+        self.last_phase_us.gpu_cascade_us = t_cascade.elapsed().as_micros() as u64;
 
         // Fold the seed events into view_storage too — the cascade
         // driver only folds what ITS kernel emits; the apply-phase
         // events (AgentAttacked, AgentMoved, etc.) also carry view
         // updates (my_enemies / threat_level / engaged_with) that
         // scoring on the next tick needs to see.
+        let t_seed_fold = std::time::Instant::now();
         if let Err(e) = cascade::fold_iteration_events(
             &self.device,
             &self.queue,
@@ -683,6 +722,7 @@ impl SimBackend for GpuBackend {
         ) {
             eprintln!("engine_gpu: seed-fold failed: {e}");
         }
+        self.last_phase_us.gpu_seed_fold_us = t_seed_fold.elapsed().as_micros() as u64;
 
         match cascade_out {
             Ok(out) => {
@@ -712,8 +752,10 @@ impl SimBackend for GpuBackend {
                 // re-enter the ring and don't need further replay
                 // (ChronicleEntry is non-replayable and nothing
                 // dispatches on it).
+                let t_cold = std::time::Instant::now();
                 cascade::cold_state_replay(state, events, &seed_events);
                 cascade::cold_state_replay(state, events, &gpu_events);
+                self.last_phase_us.cpu_cold_state_us = t_cold.elapsed().as_micros() as u64;
             }
             Err(e) => {
                 // Cascade dispatch failed mid-tick. Fall back to the
@@ -738,11 +780,15 @@ impl SimBackend for GpuBackend {
         // so any future CPU-path dispatch (fallback, or a test that
         // pokes `state.views`) sees the same values. Cheap for the
         // 50-tick parity test; O(this-tick events).
+        let t_cpu_fold_all = std::time::Instant::now();
         state.views.fold_all(events, events_before, state.tick);
+        self.last_phase_us.cpu_view_fold_all_us =
+            t_cpu_fold_all.elapsed().as_micros() as u64;
 
         // Phase 6 — invariants + telemetry + tick++. Reuses the CPU
         // helper so every backend reports the same telemetry metric
         // shape.
+        let t_final = std::time::Instant::now();
         let empty_invariants = engine::invariant::InvariantRegistry::new();
         engine::step::finalize_tick(
             state,
@@ -753,6 +799,7 @@ impl SimBackend for GpuBackend {
             t_start,
             events_emitted,
         );
+        self.last_phase_us.cpu_finalize_us = t_final.elapsed().as_micros() as u64;
 
         // Sidecar: run the scoring + mask kernels against the new
         // post-step state so `last_scoring_outputs` / `last_mask_bitmaps`
@@ -766,7 +813,9 @@ impl SimBackend for GpuBackend {
         // output; `step_phases_1_to_3` already picked the CPU action
         // set before the GPU cascade ran).
         if !self.skip_scoring_sidecar {
+            let t_side = std::time::Instant::now();
             self.run_scoring_sidecar(state);
+            self.last_phase_us.gpu_sidecar_us = t_side.elapsed().as_micros() as u64;
         }
     }
 }
