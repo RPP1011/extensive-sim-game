@@ -2308,6 +2308,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine_generated"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "smallvec",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "engine_gpu"
 version = "0.1.0"
 dependencies = [
@@ -2325,11 +2335,8 @@ dependencies = [
 name = "engine_rules"
 version = "0.1.0"
 dependencies = [
- "glam",
- "serde",
- "smallvec",
+ "engine_generated",
  "tempfile",
- "toml 0.8.23",
 ]
 
 [[package]]

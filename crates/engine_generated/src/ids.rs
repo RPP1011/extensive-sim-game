@@ -76,7 +76,7 @@ impl AbilityId {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct EventId {
     pub tick: u32,
-    pub seq:  u32,
+    pub seq: u32,
 }
 
 #[cfg(test)]

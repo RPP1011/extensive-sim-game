@@ -1,8 +1,8 @@
-pub mod scenario;
 pub mod map;
+pub mod scenario;
 
-pub use scenario::*;
 pub use map::*;
+pub use scenario::*;
 
 use std::path::PathBuf;
 
@@ -33,10 +33,13 @@ pub enum TaskCommand {
     ChampionGen(ChampionGenArgs),
     /// Generate synthetic abilities via grammar walker
     SynthAbilities {
-        #[arg(long, default_value_t = 100000)] count: usize,
-        #[arg(long, default_value_t = 42)] seed: u64,
+        #[arg(long, default_value_t = 100000)]
+        count: usize,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
         /// Emit DSL text instead of slot JSONL
-        #[arg(long)] dsl: bool,
+        #[arg(long)]
+        dsl: bool,
     },
     /// Run world simulation benchmark with profiling
     WorldSim(WorldSimArgs),
@@ -155,9 +158,9 @@ pub struct CompileDslArgs {
     /// Source directory holding `*.sim` files (recursively walked).
     #[arg(long, default_value = "assets/sim")]
     pub src: PathBuf,
-    /// Destination root for Rust output. Files are written under
-    /// `<out-rust>/events/` and `<out-rust>/schema.rs`.
-    #[arg(long, default_value = "crates/engine_rules/src")]
+    /// Destination root for generated shared Rust output. Files are written
+    /// under `<out-rust>/events/` and `<out-rust>/schema.rs`.
+    #[arg(long, default_value = "crates/engine_generated/src")]
     pub out_rust: PathBuf,
     /// Destination root for emitted physics handlers. Files are written
     /// under `<out-physics>/` (per-rule modules + `mod.rs`). Defaults into
@@ -174,18 +177,18 @@ pub struct CompileDslArgs {
     pub out_mask: PathBuf,
     /// Destination root for emitted scoring tables. Scoring rows are POD
     /// data shared between CPU scorer and GPU kernel, so they live in
-    /// `engine_rules` with the other shared-data emissions.
-    #[arg(long, default_value = "crates/engine_rules/src/scoring")]
+    /// `engine_generated` with the other shared-data emissions.
+    #[arg(long, default_value = "crates/engine_generated/src/scoring")]
     pub out_scoring: PathBuf,
     /// Destination root for emitted entity data (CreatureType enum,
     /// capability structs, hostility matrix). Pure data; lives in
-    /// `engine_rules` next to events.
-    #[arg(long, default_value = "crates/engine_rules/src/entities")]
+    /// `engine_generated` next to events.
+    #[arg(long, default_value = "crates/engine_generated/src/entities")]
     pub out_entity: PathBuf,
     /// Destination root for emitted config structs (per-block Rust files
     /// plus the aggregator `mod.rs`). Pure data with a TOML loader; lives
-    /// in `engine_rules` alongside the other shared-data emissions.
-    #[arg(long, default_value = "crates/engine_rules/src/config")]
+    /// in `engine_generated` alongside the other shared-data emissions.
+    #[arg(long, default_value = "crates/engine_generated/src/config")]
     pub out_config_rust: PathBuf,
     /// Destination directory for the authored TOML default file. The
     /// compiler writes `<out-config-toml>/default.toml`; runtime callers
@@ -194,7 +197,7 @@ pub struct CompileDslArgs {
     pub out_config_toml: PathBuf,
     /// Destination root for emitted enum declarations (per-enum Rust
     /// files + aggregator `mod.rs`). Pure data, no engine dependency.
-    #[arg(long, default_value = "crates/engine_rules/src/enums")]
+    #[arg(long, default_value = "crates/engine_generated/src/enums")]
     pub out_enum: PathBuf,
     /// Destination root for emitted view modules (`@lazy` inline fns +
     /// `@materialized` fold-storage structs + aggregator `ViewRegistry`).
@@ -317,9 +320,10 @@ pub struct ChampionGenArgs {
     pub candidates: usize,
 }
 
-
 #[derive(Debug, Parser)]
-#[command(about = "IMPALA V6 training (auto-configures libtorch env, builds burn-gpu, runs training)")]
+#[command(
+    about = "IMPALA V6 training (auto-configures libtorch env, builds burn-gpu, runs training)"
+)]
 pub struct TrainV6Args {
     /// Path(s) to scenario .toml file(s) or directory(ies)
     #[arg(default_value = "dataset/scenarios/hvh")]

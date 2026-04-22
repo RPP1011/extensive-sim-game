@@ -1,0 +1,10 @@
+[package]
+name = "engine_generated"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+glam = "0.29"
+smallvec = "1.13"
+toml = "0.8"

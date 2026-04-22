@@ -77,7 +77,7 @@ impl std::error::Error for CompileError {}
 /// extension and parent directory to use.
 #[derive(Debug, Clone)]
 pub struct EmittedArtifacts {
-    /// Content of the events-mod file (`crates/engine_rules/src/events/mod.rs`).
+    /// Content of the events-mod file (`crates/engine_generated/src/events/mod.rs`).
     pub rust_events_mod: String,
     /// `(filename_without_dir, content)` pairs, one per event.
     pub rust_event_structs: Vec<(String, String)>,
@@ -98,28 +98,28 @@ pub struct EmittedArtifacts {
     /// Content of `crates/engine/src/generated/mask/mod.rs`.
     pub rust_mask_mod: String,
     /// Scoring-table modules (milestone 4). One file per `scoring`
-    /// declaration; target `crates/engine_rules/src/scoring/`. Scoring rows
+    /// declaration; target `crates/engine_generated/src/scoring/`. Scoring rows
     /// are POD `#[repr(C)]` so CPU + GPU backends read the same layout.
     pub rust_scoring_modules: Vec<(String, String)>,
-    /// Content of `crates/engine_rules/src/scoring/mod.rs`.
+    /// Content of `crates/engine_generated/src/scoring/mod.rs`.
     pub rust_scoring_mod: String,
     /// Entity modules (milestone 5). One file per `entity` declaration;
-    /// target `crates/engine_rules/src/entities/`.
+    /// target `crates/engine_generated/src/entities/`.
     pub rust_entity_modules: Vec<(String, String)>,
-    /// Content of `crates/engine_rules/src/entities/mod.rs`.
+    /// Content of `crates/engine_generated/src/entities/mod.rs`.
     pub rust_entity_mod: String,
     /// Config modules. One file per `config` declaration; target
-    /// `crates/engine_rules/src/config/`. Pure data, no engine dependency.
+    /// `crates/engine_generated/src/config/`. Pure data, no engine dependency.
     pub rust_config_modules: Vec<(String, String)>,
-    /// Content of `crates/engine_rules/src/config/mod.rs` — aggregate
+    /// Content of `crates/engine_generated/src/config/mod.rs` — aggregate
     /// `Config` struct, per-block re-exports, TOML loader.
     pub rust_config_mod: String,
     /// TOML-encoded defaults — written to `assets/config/default.toml`.
     pub config_default_toml: String,
     /// Enum modules. One file per `enum` declaration; target
-    /// `crates/engine_rules/src/enums/`.
+    /// `crates/engine_generated/src/enums/`.
     pub rust_enum_modules: Vec<(String, String)>,
-    /// Content of `crates/engine_rules/src/enums/mod.rs`.
+    /// Content of `crates/engine_generated/src/enums/mod.rs`.
     pub rust_enum_mod: String,
     /// View modules. One file per `view` declaration; target
     /// `crates/engine/src/generated/views/`. `@lazy` views become inline
@@ -158,7 +158,7 @@ pub struct EmittedArtifacts {
     /// Combined hash per `docs/compiler/spec.md` §2 — rolls every
     /// sub-hash together with a stable canonical ordering.
     pub combined_hash: [u8; 32],
-    /// Content of `crates/engine_rules/src/schema.rs`.
+    /// Content of `crates/engine_generated/src/schema.rs`.
     pub schema_rs: String,
 }
 
@@ -236,10 +236,7 @@ pub fn emit_with_per_kind_sources(
         match emit_physics::emit_physics(physics, sources.physics, &physics_ctx) {
             Ok(rs) => rust_physics_modules.push((format!("{stem}.rs"), rs)),
             Err(e) => {
-                panic!(
-                    "physics emission failed for `{}`: {e}",
-                    physics.name
-                );
+                panic!("physics emission failed for `{}`: {e}", physics.name);
             }
         }
     }
@@ -305,8 +302,10 @@ pub fn emit_with_per_kind_sources(
     for e in &comp.enums {
         let stem = snake_case(&e.name);
         rust_enum_modules.push((format!("{stem}.rs"), emit_enum::emit_enum(e, sources.enums)));
-        python_enum_modules
-            .push((format!("{stem}.py"), emit_enum::emit_enum_py(e, sources.enums)));
+        python_enum_modules.push((
+            format!("{stem}.py"),
+            emit_enum::emit_enum_py(e, sources.enums),
+        ));
     }
     rust_enum_modules.sort_by(|a, b| a.0.cmp(&b.0));
     python_enum_modules.sort_by(|a, b| a.0.cmp(&b.0));

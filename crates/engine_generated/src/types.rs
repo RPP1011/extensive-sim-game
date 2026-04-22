@@ -36,10 +36,10 @@ pub enum Resolution {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum QuestCategory {
-    Physical  = 0,
+    Physical = 0,
     Political = 1,
-    Personal  = 2,
-    Economic  = 3,
+    Personal = 2,
+    Economic = 3,
     Narrative = 4,
 }
 

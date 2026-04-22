@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_rules", "crates/engine_gpu", "crates/viz", "crates/dsl_compiler"]
+members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_generated", "crates/engine_rules", "crates/engine_gpu", "crates/viz", "crates/dsl_compiler"]
 exclude = ["crates/world_sim_bench"]
 
 

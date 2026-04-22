@@ -41,14 +41,18 @@ pub mod event_id {
         tick: u32,
         seq: u32,
     }
-    pub fn serialize<S: Serializer>(
-        id: &crate::ids::EventId,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        Wire { tick: id.tick, seq: id.seq }.serialize(s)
+    pub fn serialize<S: Serializer>(id: &crate::ids::EventId, s: S) -> Result<S::Ok, S::Error> {
+        Wire {
+            tick: id.tick,
+            seq: id.seq,
+        }
+        .serialize(s)
     }
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<crate::ids::EventId, D::Error> {
         let w = Wire::deserialize(d)?;
-        Ok(crate::ids::EventId { tick: w.tick, seq: w.seq })
+        Ok(crate::ids::EventId {
+            tick: w.tick,
+            seq: w.seq,
+        })
     }
 }
