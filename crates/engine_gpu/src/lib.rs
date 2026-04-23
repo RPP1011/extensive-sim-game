@@ -219,15 +219,12 @@ pub struct GpuBackend {
     /// Phase D — persistent agent SoA buffer for the resident path.
     /// Allocated on first step_batch call, reused across ticks. Sync
     /// path still uses per-kernel pooled buffers.
-    #[allow(dead_code)] // TODO Phase D Task D4: consumed by step_batch rewrite
     resident_agents_buf: Option<wgpu::Buffer>,
-    #[allow(dead_code)] // TODO Phase D Task D4: consumed by step_batch rewrite
     resident_agents_cap: u32,
 
     /// Phase D — indirect dispatch args for the resident cascade.
     /// MAX_CASCADE_ITERATIONS + 1 slots (one seed slot + one per
     /// iter). Lazy-initialised in step_batch.
-    #[allow(dead_code)] // TODO Phase D Task D4: consumed by step_batch rewrite
     resident_indirect_args: Option<crate::gpu_util::indirect::IndirectArgsBuffer>,
 
     /// Phase D — double-buffered snapshot staging. `front` is the one
@@ -249,8 +246,14 @@ pub struct GpuBackend {
     /// Phase D — the most recent tick recorded by `step_batch`.
     /// Exposed via snapshot for the observer. Updated each tick the
     /// batch loop advances.
-    #[allow(dead_code)] // TODO Phase D Task D4: consumed by step_batch rewrite
     latest_recorded_tick: u32,
+
+    /// Phase D — Task D4: resident cascade driver context. Holds the
+    /// caller-owned spatial/ability/physics-ring buffers the
+    /// `cascade_resident::run_cascade_resident` driver consumes across
+    /// ticks. Lazy-initialised inside `ensure_resident_init` on first
+    /// `step_batch` call.
+    resident_cascade_ctx: Option<crate::cascade_resident::CascadeResidentCtx>,
 }
 
 /// Phase 9 (task 195): per-tick GPU pipeline phase timings in
@@ -521,6 +524,7 @@ impl GpuBackend {
             snapshot_event_ring_read: 0,
             snapshot_chronicle_ring_read: 0,
             latest_recorded_tick: 0,
+            resident_cascade_ctx: None,
         })
     }
 
@@ -820,6 +824,40 @@ impl GpuBackend {
     /// submits, sidecar opt-out, diagnostic surface) that unblock the
     /// measurement work; task 196+ consumes those + lands the
     /// cross-tick single-submit pipeline.
+    /// Phase D — Task D4: GPU-resident batched step. Records `n_ticks`
+    /// ticks of resident cascade execution into a single command
+    /// encoder, submits once, polls once.
+    ///
+    /// Unlike the per-tick `step`, this path is explicitly
+    /// non-deterministic and does NOT keep `state` byte-for-byte in
+    /// lockstep with the GPU buffer mid-batch — the caller's `state` is
+    /// slightly stale at end-of-batch (CPU-side `state.tick` is advanced,
+    /// but agent HP / position / alive fields are NOT read back from
+    /// the GPU `resident_agents_buf` until a future integration task
+    /// lands a commit step). Observers consume the GPU-side snapshot
+    /// via [`Self::snapshot`] instead.
+    ///
+    /// ### Unused parameters (batch path)
+    ///
+    /// * `scratch` — kept for signature compatibility with the sync
+    ///   `SimBackend::step` trait. The resident kernels don't use the
+    ///   CPU scratch buffers.
+    /// * `events` — the batch path does NOT push to the CPU event ring
+    ///   per-tick. GPU-emitted events stay resident in the physics
+    ///   rings and are observed via `snapshot()`.
+    /// * `policy` — the batch path has no policy hook. The GPU scoring
+    ///   kernel runs its own deterministic argmax.
+    /// * `cascade` — the batch path uses its own `cascade_resident`
+    ///   driver with the engine-builtin cascade physics compiled into
+    ///   the lazy `cascade_ctx`.
+    ///
+    /// ### Fallback
+    ///
+    /// If resident init fails (GPU allocation error, cascade DSL load
+    /// failure, etc.) the batch path falls back to calling the sync
+    /// `SimBackend::step` N times so the tick loop still advances.
+    /// Mid-batch kernel failures panic via `expect(...)` — the batch
+    /// path is committed once init succeeds.
     pub fn step_batch<B: PolicyBackend>(
         &mut self,
         state: &mut SimState,
@@ -829,9 +867,237 @@ impl GpuBackend {
         cascade: &CascadeRegistry,
         n_ticks: u32,
     ) {
-        for _ in 0..n_ticks {
-            <Self as SimBackend>::step(self, state, scratch, events, policy, cascade);
+        if let Err(e) = self.ensure_resident_init(state) {
+            eprintln!(
+                "engine_gpu::step_batch: resident init failed ({e}), falling back to sync loop"
+            );
+            for _ in 0..n_ticks {
+                <Self as SimBackend>::step(self, state, scratch, events, policy, cascade);
+            }
+            return;
         }
+
+        // Shadow unused params so the reader sees they're intentional
+        // no-ops on the batch path (doc-commented above).
+        let _ = (scratch, events, policy, cascade);
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine_gpu::step_batch::enc"),
+            });
+
+        for _ in 0..n_ticks {
+            // 1. Mask: upload SoA + encode resident dispatch.
+            self.mask_kernel
+                .upload_soa_from_state(&self.device, &self.queue, state);
+            let agents_buf = self
+                .resident_agents_buf
+                .as_ref()
+                .expect("resident_agents_buf ensured by ensure_resident_init");
+            self.mask_kernel
+                .run_resident(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    agents_buf,
+                    state.agent_cap(),
+                )
+                .expect("mask resident dispatch");
+
+            // 2. Scoring: upload SoA + encode resident dispatch. Reads
+            //    the mask bitmaps concat buffer produced above.
+            self.scoring_kernel
+                .upload_soa_from_state(&self.device, &self.queue, state, &self.view_storage)
+                .expect("scoring upload_soa_from_state");
+            self.scoring_kernel
+                .run_resident(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    agents_buf,
+                    self.mask_kernel.mask_bitmaps_buf(),
+                    state.agent_cap(),
+                )
+                .expect("scoring resident dispatch");
+
+            // 3. apply_actions + movement: both read from the scoring
+            //    output buffer, mutate `resident_agents_buf`, and append
+            //    events into the shared apply_event_ring. Reset the
+            //    ring's tail inside the encoder so the reset is ordered
+            //    relative to this tick's kernels (not all ticks'
+            //    kernels — queue.write_buffer would collapse).
+            let cascade_ctx = self
+                .cascade_ctx
+                .as_mut()
+                .expect("cascade_ctx ensured by ensure_resident_init");
+            encoder.clear_buffer(cascade_ctx.apply_event_ring.tail_buffer(), 0, None);
+
+            cascade_ctx
+                .apply_actions
+                .upload_soa_from_state(&self.device, &self.queue, state);
+            cascade_ctx
+                .apply_actions
+                .run_resident(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    agents_buf,
+                    self.scoring_kernel.scoring_buf(),
+                    &cascade_ctx.apply_event_ring,
+                    state.agent_cap(),
+                )
+                .expect("apply_actions resident dispatch");
+
+            cascade_ctx
+                .movement
+                .upload_soa_from_state(&self.device, &self.queue, state);
+            cascade_ctx
+                .movement
+                .run_resident(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    agents_buf,
+                    self.scoring_kernel.scoring_buf(),
+                    &cascade_ctx.apply_event_ring,
+                    state.agent_cap(),
+                )
+                .expect("movement resident dispatch");
+
+            // 4. Cascade: 2× spatial queries + seed + N physics iterations.
+            //    The resident driver records all of it into the current
+            //    encoder.
+            //
+            //    Split borrow: `run_cascade_resident` takes `&mut
+            //    CascadeCtx` AND `&GpuEventRing` (the apply ring that
+            //    lives inside that same CascadeCtx). The borrow checker
+            //    can't see that the driver only touches
+            //    `physics`/`spatial`/`abilities` through the `&mut`
+            //    path and only reads `apply_event_ring`'s buffer
+            //    handles through the `&` path, so a naive pair of
+            //    references rejects. We lift the shared `&` out of the
+            //    `&mut` by reborrowing via a raw pointer — safe because
+            //    the driver guarantees no aliased writes between the
+            //    two fields within a single call.
+            let resident_ctx = self
+                .resident_cascade_ctx
+                .as_mut()
+                .expect("resident_cascade_ctx ensured by ensure_resident_init");
+            let indirect_args = self
+                .resident_indirect_args
+                .as_ref()
+                .expect("resident_indirect_args ensured by ensure_resident_init");
+            // SAFETY: `cascade_ctx` is a `&mut CascadeCtx`. We reborrow
+            // `apply_event_ring` through a `*const` so the compiler
+            // doesn't consider the `&mut cascade_ctx` later in the
+            // call to alias it. The driver's body reads `tail_buffer()`
+            // + `records_buffer()` on the ring (both immutable &
+            // accessors) and never reaches into `cascade_ctx.
+            // apply_event_ring` through the `&mut` path, so there is
+            // no data race or aliased mutation. The pointer's lifetime
+            // is bounded by the same block.
+            let apply_ring_ptr: *const crate::event_ring::GpuEventRing =
+                &cascade_ctx.apply_event_ring;
+            let apply_ring_ref: &crate::event_ring::GpuEventRing =
+                unsafe { &*apply_ring_ptr };
+            crate::cascade_resident::run_cascade_resident(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                state,
+                cascade_ctx,
+                resident_ctx,
+                agents_buf,
+                apply_ring_ref,
+                indirect_args,
+            )
+            .expect("cascade_resident dispatch");
+
+            // 5. Advance the tick counter on CPU. GPU-side tick / rng
+            //    advance is deferred (plan Open Question #1) — the
+            //    batch path's non-determinism disclaimer covers it.
+            state.tick = state.tick.wrapping_add(1);
+            self.latest_recorded_tick = state.tick;
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+        let _ = self.device.poll(wgpu::PollType::Wait);
+    }
+
+    /// Phase D — Task D4: Lazy-init for the resident batch path.
+    ///
+    /// Allocates:
+    ///   * `resident_agents_buf` sized to `state.agent_cap() *
+    ///     size_of::<GpuAgentSlot>()` bytes (STORAGE | COPY_SRC |
+    ///     COPY_DST), uploaded with the initial agent SoA via
+    ///     `physics::pack_agent_slots(state)`.
+    ///   * `resident_indirect_args` at `MAX_CASCADE_ITERATIONS + 1` slots.
+    ///   * `cascade_ctx` via `ensure_cascade_initialized` if not already.
+    ///   * `resident_cascade_ctx` via `CascadeResidentCtx::new`.
+    ///
+    /// Also grows `view_storage` if `state.agent_cap()` exceeds the
+    /// current cap, and resizes `resident_agents_buf` / re-uploads the
+    /// initial state on agent_cap grow.
+    ///
+    /// Idempotent on a stable `agent_cap` — no allocation or upload
+    /// happens after the first successful call until the cap changes.
+    fn ensure_resident_init(&mut self, state: &SimState) -> Result<(), String> {
+        let agent_cap = state.agent_cap();
+
+        // Cascade context (DSL load + physics WGSL compile). Idempotent.
+        self.ensure_cascade_initialized()
+            .map_err(|e| format!("ensure_cascade_initialized: {e}"))?;
+
+        // View storage must cover agent_cap so the scoring kernel's
+        // view bindings don't go OOB.
+        self.ensure_view_storage_cap(agent_cap)
+            .map_err(|e| format!("ensure_view_storage_cap: {e}"))?;
+
+        // Resident agent buffer. Allocate-or-grow; (re)upload the
+        // current SimState agent SoA on (re)allocate so the kernels see
+        // a well-defined starting state.
+        let need_alloc = match &self.resident_agents_buf {
+            Some(_) => self.resident_agents_cap < agent_cap,
+            None => true,
+        };
+        if need_alloc {
+            let bytes = (agent_cap as u64)
+                * (std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64);
+            let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu::resident_agents_buf"),
+                size: bytes.max(std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let packed = crate::physics::pack_agent_slots(state);
+            self.queue
+                .write_buffer(&buf, 0, bytemuck::cast_slice(&packed));
+            self.resident_agents_buf = Some(buf);
+            self.resident_agents_cap = agent_cap;
+        }
+
+        // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`
+        // slots (seed + one per cascade iter).
+        if self.resident_indirect_args.is_none() {
+            let slots = crate::cascade::MAX_CASCADE_ITERATIONS + 1;
+            self.resident_indirect_args = Some(
+                crate::gpu_util::indirect::IndirectArgsBuffer::new(&self.device, slots),
+            );
+        }
+
+        // Resident cascade driver context. Allocates the ping-pong
+        // physics rings, the ability buffers, the seed kernel, and the
+        // chronicle ring.
+        if self.resident_cascade_ctx.is_none() {
+            let ctx = crate::cascade_resident::CascadeResidentCtx::new(&self.device)
+                .map_err(|e| format!("CascadeResidentCtx::new: {e}"))?;
+            self.resident_cascade_ctx = Some(ctx);
+        }
+
+        Ok(())
     }
 
     /// Cheap non-blocking snapshot via double-buffered staging. First
