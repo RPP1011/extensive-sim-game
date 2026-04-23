@@ -56,6 +56,7 @@
 use std::fmt::Write;
 
 use crate::ast::{BinOp, UnOp};
+use crate::emit_sim_cfg::emit_sim_cfg_struct_wgsl;
 use crate::ir::{Builtin, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, MaskIR, NamespaceId};
 
 /// Errors raised during WGSL mask emission. Narrow mirror of
@@ -281,38 +282,6 @@ fn emit_bindings(out: &mut String) {
     // Storage (not uniform) because the seed-indirect kernel
     // atomically increments `tick` on this same buffer.
     emit_sim_cfg_struct_wgsl(out, /* binding */ 5);
-}
-
-/// Emit the shared `SimCfg` struct declaration + binding. Layout mirrors
-/// `engine_gpu::sim_cfg::SimCfg` exactly; the `sim_cfg_layout`
-/// regression test fences drift. The `binding` argument parameterises
-/// the `@binding(...)` attribute so the caller can place it past the
-/// last mask bitmap in the fused emitter.
-fn emit_sim_cfg_struct_wgsl(out: &mut String, binding: u32) {
-    writeln!(out, "struct SimCfg {{").unwrap();
-    writeln!(out, "    tick:                          u32,").unwrap();
-    writeln!(out, "    world_seed_lo:                 u32,").unwrap();
-    writeln!(out, "    world_seed_hi:                 u32,").unwrap();
-    writeln!(out, "    _sim_cfg_pad0:                 u32,").unwrap();
-    writeln!(out, "    engagement_range:              f32,").unwrap();
-    writeln!(out, "    attack_damage:                 f32,").unwrap();
-    writeln!(out, "    attack_range:                  f32,").unwrap();
-    writeln!(out, "    move_speed:                    f32,").unwrap();
-    writeln!(out, "    move_speed_mult:               f32,").unwrap();
-    writeln!(out, "    kin_radius:                    f32,").unwrap();
-    writeln!(out, "    cascade_max_iterations:        u32,").unwrap();
-    writeln!(out, "    rules_registry_generation:     u32,").unwrap();
-    writeln!(out, "    abilities_registry_generation: u32,").unwrap();
-    writeln!(out, "    _sim_cfg_reserved0:            u32,").unwrap();
-    writeln!(out, "    _sim_cfg_reserved1:            u32,").unwrap();
-    writeln!(out, "    _sim_cfg_reserved2:            u32,").unwrap();
-    writeln!(out, "}};").unwrap();
-    writeln!(
-        out,
-        "@group(0) @binding({binding}) var<storage, read> sim_cfg: SimCfg;"
-    )
-    .unwrap();
-    writeln!(out).unwrap();
 }
 
 /// Helper fns shared across kernels — creature-type hostility table,

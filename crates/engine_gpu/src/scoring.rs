@@ -88,8 +88,8 @@ use std::fmt;
 
 use bytemuck::{Pod, Zeroable};
 use dsl_compiler::emit_scoring_wgsl::{
-    action_head_to_mask_idx, emit_scoring_wgsl_atomic_views, scoring_view_binding_order,
-    MASK_NAMES, SCORING_CORE_BINDINGS, WORKGROUP_SIZE,
+    action_head_to_mask_idx, emit_scoring_wgsl_atomic_views, scoring_sim_cfg_binding,
+    scoring_view_binding_order, MASK_NAMES, SCORING_CORE_BINDINGS, WORKGROUP_SIZE,
 };
 use dsl_compiler::emit_view_wgsl::{ViewShape, ViewStorageSpec};
 use engine::ids::AgentId;
@@ -212,20 +212,22 @@ impl Default for ScoreOutput {
 }
 
 /// Config uniform carried alongside the scoring kernel. Carries the
-/// radii + dispatch-time sizes + tick and view_agent_cap for the
-/// per-view read snippets. 32 bytes total — aligned to 16 for uniform
-/// buffer layout.
+/// subsystem-local radius + dispatch-time sizes + view_agent_cap for
+/// the per-view read snippets. 16 bytes total — one `vec4<u32>`
+/// naturally aligned for uniform buffer layout.
+///
+/// Task 2.5 of the GPU sim-state refactor migrated `attack_range` and
+/// `tick` out of this struct and into the shared `SimCfg` storage
+/// buffer bound at [`dsl_compiler::emit_scoring_wgsl::
+/// scoring_sim_cfg_binding`]. The scoring WGSL reads
+/// `sim_cfg.attack_range` / `sim_cfg.tick` instead of `cfg.*`.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 struct GpuConfig {
-    combat_attack_range: f32,
     movement_max_move_radius: f32,
     num_entries: u32,
     num_mask_words: u32,
-    tick: u32,
     view_agent_cap: u32,
-    _pad0: u32,
-    _pad1: u32,
 }
 
 /// Convert the CPU `SCORING_TABLE` into the GPU-shaped buffer. One
@@ -415,6 +417,11 @@ pub struct ScoringKernel {
     /// emitted WGSL and the per-view upload path. Built once at init
     /// from `view_storage::build_all_specs()`.
     view_specs: Vec<ViewStorageSpec>,
+    /// Binding index of the shared `SimCfg` storage buffer in this
+    /// kernel's BGL. Sits immediately past the last view binding; the
+    /// resident path binds the caller-supplied `sim_cfg_buf` here,
+    /// while the sync path binds the pool-owned `sync_sim_cfg_buf`.
+    sim_cfg_binding: u32,
     pool: Option<ScoringPool>,
 }
 
@@ -451,18 +458,28 @@ struct ScoringPool {
     /// Last-known `view_storage.agent_cap()` captured by the resident
     /// path at `initialize_for_batch` time. Stable across a batch —
     /// ViewStorage only rebuilds when agent_cap grows, which forces a
-    /// pool rebuild here too. Read by
-    /// [`ScoringKernel::refresh_tick_cfg_for_resident`] to re-emit cfg
-    /// without carrying `&ViewStorage` into the per-tick loop.
+    /// pool rebuild here too. Retained so callers introspecting the
+    /// storage-layout cap (distinct from `state.agent_cap()`) have a
+    /// stable reference without touching `ViewStorage` directly.
     cached_view_agent_cap: u32,
 
-    /// Cached resident-path bind group keyed by the caller-supplied
-    /// `mask_bitmaps_buf` identity. All other bindings (agent_data,
-    /// scoring_table, scoring_out, cfg, view buffers) are stable across
-    /// a batch (they change only on pool rebuild which rebuilds this
-    /// cache from scratch). `wgpu::Buffer: Eq + Hash` via its internal
-    /// Arc, so key comparison is cheap.
-    cached_resident_bg: Option<(wgpu::Buffer, wgpu::BindGroup)>,
+    /// Pool-owned `SimCfg` snapshot buffer — used by the sync path
+    /// (`run_and_readback`) so it can keep operating without a
+    /// caller-supplied resident `sim_cfg_buf`. The resident path
+    /// (`run_resident`) binds the caller's buffer instead via
+    /// `cached_resident_bg`. Uploaded from `SimCfg::from_state(state)`
+    /// every tick in `run_and_readback` / `upload_soa_from_state`.
+    sync_sim_cfg_buf: wgpu::Buffer,
+
+    /// Cached resident-path bind group keyed by the pair of
+    /// caller-supplied buffers it references — `mask_bitmaps_buf` +
+    /// `sim_cfg_buf`. All other bindings (agent_data, scoring_table,
+    /// scoring_out, cfg, view buffers) are stable across a batch (they
+    /// change only on pool rebuild which rebuilds this cache from
+    /// scratch). `wgpu::Buffer: Eq + Hash` via its internal Arc, so
+    /// key comparison is cheap.
+    cached_resident_bg:
+        Option<(wgpu::Buffer, wgpu::Buffer, wgpu::BindGroup)>,
 }
 
 impl ScoringKernel {
@@ -657,6 +674,28 @@ impl ScoringKernel {
             }
         }
 
+        // SimCfg binding (Task 2.5) — shared world-scalars, read-only
+        // storage. Sits immediately past the last view binding. The
+        // scoring kernel reads `sim_cfg.attack_range` (target-radius
+        // gate for Attack rows) and `sim_cfg.tick` (view-decay math).
+        let sim_cfg_binding = scoring_sim_cfg_binding(&view_specs, /* atomic */ true);
+        debug_assert_eq!(
+            sim_cfg_binding, next_binding,
+            "scoring_sim_cfg_binding must agree with the locally-tallied view binding count"
+        );
+        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: sim_cfg_binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: std::num::NonZeroU64::new(
+                    std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
+                ),
+            },
+            count: None,
+        });
+
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::scoring::bgl"),
             entries: &bgl_entries,
@@ -696,6 +735,7 @@ impl ScoringKernel {
             scoring_table_buf,
             scoring_table_len,
             view_specs,
+            sim_cfg_binding,
             pool: None,
         })
     }
@@ -741,16 +781,24 @@ impl ScoringKernel {
         let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("engine_gpu::scoring::cfg"),
             contents: bytemuck::cast_slice(&[GpuConfig {
-                combat_attack_range: 0.0,
                 movement_max_move_radius: 0.0,
                 num_entries: 0,
                 num_mask_words: 0,
-                tick: 0,
                 view_agent_cap: agent_cap,
-                _pad0: 0,
-                _pad1: 0,
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Sync-path fallback `SimCfg` buffer (Task 2.5). `run_and_readback`
+        // uploads a fresh `SimCfg::from_state(state)` here every tick
+        // and binds it at `self.sim_cfg_binding` via the sync bind
+        // group; the resident path binds the caller-supplied buffer
+        // instead.
+        let sync_sim_cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::scoring::sync_sim_cfg"),
+            size: std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         // Phase 6d: view buffers now live in `ViewStorage` and are
@@ -770,6 +818,7 @@ impl ScoringKernel {
             // so it leaves this empty.
             view_buf_handles: Vec::new(),
             cached_view_agent_cap: 0,
+            sync_sim_cfg_buf,
             cached_resident_bg: None,
         });
     }
@@ -846,22 +895,25 @@ impl ScoringKernel {
             bytemuck::cast_slice(&packed_masks),
         );
 
-        // Upload the cfg uniform — radii + sizes + tick + view_agent_cap.
+        // Upload the cfg uniform — subsystem-local knobs only
+        // (movement radius, table shape, view_agent_cap). World-scalars
+        // (`attack_range`, `tick`) migrated to `SimCfg` in Task 2.5.
         // `view_agent_cap` here tracks `view_storage.agent_cap()`, NOT
         // state.agent_cap, because the flat row-major view buffers are
         // sized by that cap and cell address = observer * cap + attacker
         // must use the storage-layout cap.
         let cfg = GpuConfig {
-            combat_attack_range: state.config.combat.attack_range,
             movement_max_move_radius: state.config.movement.max_move_radius,
             num_entries: self.scoring_table_len,
             num_mask_words,
-            tick: state.tick,
             view_agent_cap: view_storage.agent_cap(),
-            _pad0: 0,
-            _pad1: 0,
         };
         queue.write_buffer(&pool.cfg_buf, 0, bytemuck::cast_slice(&[cfg]));
+
+        // Upload sync-path `SimCfg` snapshot — the sync bind group
+        // binds `pool.sync_sim_cfg_buf` at `self.sim_cfg_binding`.
+        let sim_cfg = crate::sim_cfg::SimCfg::from_state(state);
+        crate::sim_cfg::upload_sim_cfg(queue, &pool.sync_sim_cfg_buf, &sim_cfg);
 
         // Build the per-run bind group referencing view_storage's
         // buffers. Since view_storage is borrowed immutably and its
@@ -1044,6 +1096,13 @@ impl ScoringKernel {
                 ViewShape::Lazy => {}
             }
         }
+        // Task 2.5: sync path binds the pool-owned `sync_sim_cfg_buf`
+        // at the emitter-assigned `self.sim_cfg_binding`. The resident
+        // path builds its own bind group with the caller's buffer.
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: self.sim_cfg_binding,
+            resource: pool.sync_sim_cfg_buf.as_entire_binding(),
+        });
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg"),
             layout: &self.bind_group_layout,
@@ -1130,22 +1189,28 @@ impl ScoringKernel {
             bytemuck::cast_slice(&agent_data),
         );
 
-        // Upload cfg uniform — radii + sizes + tick + view_agent_cap.
+        // Upload cfg uniform — subsystem-local knobs only. World-scalars
+        // (`attack_range`, `tick`) migrated to `SimCfg` in Task 2.5; see
+        // `sync_sim_cfg_buf` upload below.
         // `view_agent_cap` tracks `view_storage.agent_cap()` because
         // the flat row-major view buffers are sized by that cap and
         // cell address = observer * cap + attacker must use the
         // storage-layout cap. Matches the sync path.
         let cfg = GpuConfig {
-            combat_attack_range: state.config.combat.attack_range,
             movement_max_move_radius: state.config.movement.max_move_radius,
             num_entries: self.scoring_table_len,
             num_mask_words,
-            tick: state.tick,
             view_agent_cap: view_storage.agent_cap(),
-            _pad0: 0,
-            _pad1: 0,
         };
         queue.write_buffer(&pool.cfg_buf, 0, bytemuck::cast_slice(&[cfg]));
+
+        // Keep the sync-path `SimCfg` fallback in lockstep with state.
+        // Callers of the resident path supply their own `sim_cfg_buf`
+        // and never read from this one, but we still refresh it so
+        // `run_and_readback` (which uses it via the sync bind group)
+        // sees current values without a separate entry point.
+        let sim_cfg = crate::sim_cfg::SimCfg::from_state(state);
+        crate::sim_cfg::upload_sim_cfg(queue, &pool.sync_sim_cfg_buf, &sim_cfg);
 
         // Zero scoring_out — kernel writes every slot, but pre-zero
         // guarantees well-defined state even if dispatch is a no-op.
@@ -1201,9 +1266,15 @@ impl ScoringKernel {
     ///     `&ViewStorage`. Handles are stable across ticks within a
     ///     given `agent_cap`.
     ///
-    /// The per-tick companion is
-    /// [`Self::refresh_tick_cfg_for_resident`], which updates only
-    /// the fields that change within a batch (`tick`).
+    /// Task 2.5 of the GPU sim-state refactor retired the per-tick
+    /// scoring cfg refresh. Every remaining `GpuConfig` field is
+    /// batch-stable (radii, table shape, `view_agent_cap`); the two
+    /// tick-varying scalars (`attack_range`, `tick`) moved to the
+    /// shared `SimCfg` storage buffer, which the seed-indirect kernel
+    /// mutates directly on-GPU. `initialize_for_batch` seeds the pool
+    /// cfg + sync SimCfg once, and the resident dispatch reads the
+    /// caller's `sim_cfg_buf` every tick thereafter — no separate
+    /// refresh hook is needed.
     pub fn initialize_for_batch(
         &mut self,
         device: &wgpu::Device,
@@ -1213,54 +1284,9 @@ impl ScoringKernel {
     ) -> Result<(), ScoringError> {
         // Full upload path is identical to the sync path's
         // `upload_soa_from_state`: pack agent_data, write cfg, zero
-        // scoring_out, snapshot view handles. We reuse it verbatim
-        // since it was written to be idempotent.
+        // scoring_out, snapshot view handles, refresh sync SimCfg. We
+        // reuse it verbatim since it was written to be idempotent.
         self.upload_soa_from_state(device, queue, state, view_storage)
-    }
-
-    /// Per-tick cfg refresh for the resident batch path. Rewrites
-    /// only the fields that change within a batch (`tick`). Other
-    /// cfg scalars (radii, num_entries, num_mask_words,
-    /// view_agent_cap) are constant across a batch and remain at
-    /// their tick-0 values from
-    /// [`Self::initialize_for_batch`].
-    ///
-    /// `view_agent_cap` is captured ONCE at init time because the
-    /// flat row-major view buffers are sized to the ViewStorage cap,
-    /// which does not change within a batch (ViewStorage only
-    /// rebuilds on `agent_cap` grow, handled by
-    /// `initialize_for_batch`).
-    pub fn refresh_tick_cfg_for_resident(
-        &mut self,
-        queue: &wgpu::Queue,
-        state: &SimState,
-    ) -> Result<(), ScoringError> {
-        let pool = self.pool.as_ref().ok_or_else(|| {
-            ScoringError::Dispatch(
-                "refresh_tick_cfg_for_resident: pool not initialised"
-                    .to_string(),
-            )
-        })?;
-        // cfg is 32 bytes (8 u32-equivalents). Only `tick` changes
-        // per iteration inside a batch, but WebGPU write_buffer
-        // requires COPY_BUFFER_ALIGNMENT (4) chunks and the kernel
-        // reads the full struct, so rewrite all 32 bytes each time.
-        // The cost is ~0.5 µs/tick — negligible vs the ~450 µs/tick
-        // pack+upload path this replaces.
-        let cfg = GpuConfig {
-            combat_attack_range: state.config.combat.attack_range,
-            movement_max_move_radius: state.config.movement.max_move_radius,
-            num_entries: self.scoring_table_len,
-            num_mask_words: state.agent_cap().div_ceil(32).max(1),
-            tick: state.tick,
-            // Take from the pool's previously-snapshotted value —
-            // preserves the `initialize_for_batch`-time cap.
-            view_agent_cap: pool.cached_view_agent_cap,
-            _pad0: 0,
-            _pad1: 0,
-        };
-        queue.write_buffer(&pool.cfg_buf, 0, bytemuck::cast_slice(&[cfg]));
-        Ok(())
     }
 
     /// Resident-path sibling to [`Self::run_and_readback`].
@@ -1297,6 +1323,7 @@ impl ScoringKernel {
         encoder: &mut wgpu::CommandEncoder,
         agents_buf: &wgpu::Buffer,
         mask_bitmaps_buf: &wgpu::Buffer,
+        sim_cfg_buf: &wgpu::Buffer,
         agent_cap: u32,
     ) -> Result<(), ScoringError> {
         // Silence unused-param lint without sacrificing the stable
@@ -1320,25 +1347,35 @@ impl ScoringKernel {
             }
         }
 
-        // Cache the resident BG keyed by mask_bitmaps_buf identity. All
-        // other bindings come from the pool which, once sized, is
-        // stable across the batch — pool rebuild drops the cache.
+        // Cache the resident BG keyed by the pair of caller-supplied
+        // buffers it references — `mask_bitmaps_buf` + `sim_cfg_buf`.
+        // All other bindings come from the pool which, once sized, is
+        // stable across the batch — pool rebuild drops the cache. Both
+        // keys are typically stable across a batch (the backend holds
+        // resident handles), so this amortises to one BG build per
+        // batch.
         let need_rebuild = match &self.pool.as_ref().unwrap().cached_resident_bg {
-            Some((buf, _)) => buf != mask_bitmaps_buf,
+            Some((mb, sc, _)) => mb != mask_bitmaps_buf || sc != sim_cfg_buf,
             None => true,
         };
         if need_rebuild {
             let pool = self.pool.as_ref().expect("pool ensured");
-            let bg = self.build_resident_bind_group(device, pool, mask_bitmaps_buf)?;
+            let bg = self.build_resident_bind_group(
+                device,
+                pool,
+                mask_bitmaps_buf,
+                sim_cfg_buf,
+            )?;
             let pool_mut = self.pool.as_mut().expect("pool ensured");
-            pool_mut.cached_resident_bg = Some((mask_bitmaps_buf.clone(), bg));
+            pool_mut.cached_resident_bg =
+                Some((mask_bitmaps_buf.clone(), sim_cfg_buf.clone(), bg));
         }
         let pool = self.pool.as_ref().expect("pool ensured");
         let bind_group = &pool
             .cached_resident_bg
             .as_ref()
             .expect("cached_resident_bg populated above")
-            .1;
+            .2;
 
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1366,6 +1403,7 @@ impl ScoringKernel {
         device: &wgpu::Device,
         pool: &ScoringPool,
         mask_bitmaps_buf: &wgpu::Buffer,
+        sim_cfg_buf: &wgpu::Buffer,
     ) -> Result<wgpu::BindGroup, ScoringError> {
         let sorted = scoring_view_binding_order(&self.view_specs);
         let total_view_bindings: usize = sorted.iter().map(|s| view_binding_count(s)).sum();
@@ -1473,6 +1511,14 @@ impl ScoringKernel {
                 ViewShape::Lazy => {}
             }
         }
+        // Task 2.5: bind the caller-supplied SimCfg buffer at the
+        // emitter-assigned binding. The resident path's `sim_cfg_buf`
+        // is owned by the backend (see `ensure_resident_init`) and
+        // stable across a batch, so this BG caches cleanly.
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: self.sim_cfg_binding,
+            resource: sim_cfg_buf.as_entire_binding(),
+        });
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg_resident"),
             layout: &self.bind_group_layout,

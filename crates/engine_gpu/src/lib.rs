@@ -886,13 +886,12 @@ impl GpuBackend {
                 .expect("mask resident dispatch");
 
             // 2. Scoring: reads mask_bitmaps + agent_data (both
-            //    populated above). Only the `tick` field of cfg is
-            //    refreshed; other cfg scalars are stable across the
-            //    batch.
-            self.sync
-                .scoring_kernel
-                .refresh_tick_cfg_for_resident(&self.queue, state)
-                .expect("scoring refresh_tick_cfg_for_resident");
+            //    populated above). Task 2.5 of the GPU sim-state
+            //    refactor retired the per-tick `refresh_tick_cfg_for_resident`:
+            //    every remaining `GpuConfig` field is batch-stable and the
+            //    two tick-varying scalars (`attack_range`, `tick`) now
+            //    live in `sim_cfg_buf`, which the seed-indirect kernel
+            //    mutates on-GPU.
             self.sync
                 .scoring_kernel
                 .run_resident(
@@ -901,6 +900,7 @@ impl GpuBackend {
                     &mut encoder,
                     agents_buf,
                     self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_sim_cfg_ref,
                     agent_cap,
                 )
                 .expect("scoring resident dispatch");

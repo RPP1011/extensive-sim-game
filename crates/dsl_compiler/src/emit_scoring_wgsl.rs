@@ -82,9 +82,13 @@
 //!   * `@binding(3)` `scoring_out: array<ScoreOutput>` — per-agent
 //!     `(chosen_action, chosen_target)`. Agent slot `i` writes to
 //!     `scoring_out[i]`.
-//!   * `@binding(4)` `cfg: ConfigUniform` — radii + table row count +
-//!     mask-word count + `tick` + `view_agent_cap` (the latter two are
-//!     consumed by the view read snippets emitted alongside).
+//!   * `@binding(4)` `cfg: ConfigUniform` — kernel-local knobs
+//!     (`movement_max_move_radius`, table row count, mask-word count,
+//!     `view_agent_cap`). The per-view read snippets reference
+//!     `cfg.view_agent_cap` from here. World-scalars (`attack_range`,
+//!     `tick`) live in the shared `SimCfg` storage buffer bound at
+//!     `scoring_sim_cfg_binding(specs, atomic)` — one past the last
+//!     view binding (Task 2.5 of the GPU sim-state refactor).
 //!   * `@binding(5)` `view_engaged_with_slots: array<u32>` — slot_map
 //!     storage for `engaged_with`; cell value is `AgentId+1` or 0 when
 //!     unset.
@@ -100,6 +104,7 @@
 
 use std::fmt::Write;
 
+use crate::emit_sim_cfg::emit_sim_cfg_struct_wgsl;
 use crate::emit_view_wgsl::{emit_view_read_wgsl, ViewShape, ViewStorageSpec};
 
 /// Fixed workgroup size. Matches `emit_mask_wgsl::WORKGROUP_SIZE`.
@@ -230,6 +235,13 @@ fn emit_scoring_wgsl_inner(specs: &[ViewStorageSpec], mode: ViewBindingMode) -> 
     emit_types(&mut out);
     emit_bindings(&mut out);
     emit_view_bindings_for_mode(&mut out, specs, mode);
+    // SimCfg — world-scalar fields shared across kernels (Task 2.5 of
+    // the GPU sim-state refactor). Bound immediately after the last view
+    // binding; the scoring kernel reads `sim_cfg.attack_range` (promoted
+    // from per-kernel `cfg.combat_attack_range`) and `sim_cfg.tick`
+    // (promoted from `cfg.tick`) from this shared buffer.
+    let atomic = matches!(mode, ViewBindingMode::AtomicStorage);
+    emit_sim_cfg_struct_wgsl(&mut out, scoring_sim_cfg_binding(specs, atomic));
     emit_view_read_snippets_for_mode(&mut out, specs, mode);
     emit_helpers(&mut out);
     emit_read_field(&mut out);
@@ -238,6 +250,17 @@ fn emit_scoring_wgsl_inner(specs: &[ViewStorageSpec], mode: ViewBindingMode) -> 
     emit_score_entry(&mut out);
     emit_kernel(&mut out);
     out
+}
+
+/// Binding number of the shared `SimCfg` storage buffer in the emitted
+/// scoring module. Sits immediately past the last per-view binding.
+/// Callers (engine_gpu scoring kernel) consume this to wire the bind-
+/// group layout + bind group entries.
+///
+/// `atomic_mode = true` matches [`emit_scoring_wgsl_atomic_views`];
+/// `false` matches [`emit_scoring_wgsl_with_views`].
+pub fn scoring_sim_cfg_binding(specs: &[ViewStorageSpec], atomic_mode: bool) -> u32 {
+    scoring_total_bindings(specs, atomic_mode)
 }
 
 /// Total binding count at `specs` / `mode` — used by the backend to
@@ -435,23 +458,21 @@ fn emit_types(out: &mut String) {
     writeln!(out, "}};").unwrap();
     writeln!(out).unwrap();
 
+    // Subsystem-local scoring uniform. World-scalars (`attack_range`,
+    // `tick`) were migrated to the shared `SimCfg` storage buffer in
+    // Task 2.5 of the GPU sim-state refactor; this struct now carries
+    // only scoring-kernel-local knobs (move radius, table shape, view
+    // cap). 16 bytes total → one `vec4<u32>` — no trailing pad needed.
     writeln!(out, "struct ConfigUniform {{").unwrap();
-    writeln!(out, "    combat_attack_range: f32,").unwrap();
     writeln!(out, "    movement_max_move_radius: f32,").unwrap();
     writeln!(out, "    num_entries: u32,").unwrap();
     writeln!(out, "    num_mask_words: u32,").unwrap();
-    // Current tick — consumed by view_<name>_get on @decay views for
-    // the `tick - anchor_tick` decay math. Uploaded as part of the
-    // cfg uniform so no extra binding is needed.
-    writeln!(out, "    tick: u32,").unwrap();
     // Agent capacity — the view read snippets reference a WGSL-level
     // `view_agent_cap` symbol (see emit_view_wgsl::emit_pair_map_*),
     // which the emitter generates as a module-scope `const` from this
     // cfg field. Uploaded as u32 so a future non-N² storage layout
     // doesn't require reshaping the uniform.
     writeln!(out, "    view_agent_cap: u32,").unwrap();
-    writeln!(out, "    _pad0: u32,").unwrap();
-    writeln!(out, "    _pad1: u32,").unwrap();
     writeln!(out, "}};").unwrap();
     writeln!(out).unwrap();
 
@@ -1403,7 +1424,7 @@ fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec], mode: ViewBi
                 if is_topk {
                     writeln!(
                         out,
-                        "                return view_{snake}_sum(a, cfg.tick);"
+                        "                return view_{snake}_sum(a, sim_cfg.tick);"
                     )
                     .unwrap();
                 } else {
@@ -1415,7 +1436,7 @@ fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec], mode: ViewBi
                     .unwrap();
                     writeln!(
                         out,
-                        "                    total = total + view_{snake}_get(a, t, cfg.tick);"
+                        "                    total = total + view_{snake}_get(a, t, sim_cfg.tick);"
                     )
                     .unwrap();
                     writeln!(out, "                }}").unwrap();
@@ -1434,7 +1455,7 @@ fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec], mode: ViewBi
                 .unwrap();
                 writeln!(
                     out,
-                    "            return view_{snake}_get(a, b, cfg.tick);"
+                    "            return view_{snake}_get(a, b, sim_cfg.tick);"
                 )
                 .unwrap();
             }
@@ -1675,7 +1696,7 @@ fn emit_kernel(out: &mut String) {
     // `combat.attack_range`; for MoveToward it's `movement.max_move_radius`.
     writeln!(out, "                let radius = select(").unwrap();
     writeln!(out, "                    cfg.movement_max_move_radius,").unwrap();
-    writeln!(out, "                    cfg.combat_attack_range,").unwrap();
+    writeln!(out, "                    sim_cfg.attack_range,").unwrap();
     writeln!(out, "                    action_head == 3u").unwrap();
     writeln!(out, "                );").unwrap();
     writeln!(
