@@ -165,32 +165,10 @@ pub struct GpuBackend {
     /// `backend::resident_ctx::ResidentPathContext`.
     pub resident: crate::backend::ResidentPathContext,
 
-    // -------------------------------------------------------------------
-    // Phase D — Task D2: snapshot staging fields for the GPU-resident
-    // cascade driver. Declared here in D2; consumed by D3
-    // (`snapshot()`). Task 1.4 of the GPU sim-state refactor moves
-    // these into `SnapshotContext`.
-    // -------------------------------------------------------------------
-    /// Phase D — double-buffered snapshot staging. `front` is the one
-    /// that will be read next (filled by the previous `snapshot()`
-    /// call); `back` is the one currently filling for the NEXT call.
-    /// Both `None` until first snapshot() call lazy-inits them.
-    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
-    snapshot_front: Option<crate::snapshot::GpuStaging>,
-    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
-    snapshot_back: Option<crate::snapshot::GpuStaging>,
-
-    /// Phase D — watermark tracking what portion of the main event /
-    /// chronicle rings have been snapshotted. Advances monotonically.
-    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
-    snapshot_event_ring_read: u64,
-    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
-    snapshot_chronicle_ring_read: u64,
-
-    /// Phase D — the most recent tick recorded by `step_batch`.
-    /// Exposed via snapshot for the observer. Updated each tick the
-    /// batch loop advances.
-    latest_recorded_tick: u32,
+    /// Snapshot read-back state: double-buffered staging + ring
+    /// watermarks consumed by `GpuBackend::snapshot()`. See
+    /// `backend::snapshot_ctx::SnapshotContext`.
+    pub snapshot: crate::backend::SnapshotContext,
 }
 
 /// Phase 9 (task 195): per-tick GPU pipeline phase timings in
@@ -452,19 +430,14 @@ impl GpuBackend {
             fused_unpack_kernel,
         );
 
+        let snapshot = crate::backend::SnapshotContext::new();
+
         Ok(Self {
             device,
             queue,
             sync,
             resident,
-            // Phase D — Task D2: snapshot staging. All `None` / `0` at
-            // construction; lazy-initialised on first `snapshot()` (D3)
-            // call.
-            snapshot_front: None,
-            snapshot_back: None,
-            snapshot_event_ring_read: 0,
-            snapshot_chronicle_ring_read: 0,
-            latest_recorded_tick: 0,
+            snapshot,
         })
     }
 
@@ -853,7 +826,7 @@ impl GpuBackend {
             resident_ctx.reset_batch_events_ring(&mut encoder);
             resident_ctx.reset_chronicle_ring(&mut encoder);
         }
-        self.snapshot_event_ring_read = 0;
+        self.snapshot.snapshot_event_ring_read = 0;
 
         let agent_cap = state.agent_cap();
         for _ in 0..n_ticks {
@@ -1073,7 +1046,7 @@ impl GpuBackend {
             //    advance is deferred (plan Open Question #1) — the
             //    batch path's non-determinism disclaimer covers it.
             state.tick = state.tick.wrapping_add(1);
-            self.latest_recorded_tick = state.tick;
+            self.snapshot.latest_recorded_tick = state.tick;
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -1268,14 +1241,14 @@ impl GpuBackend {
         // current resident agent capacity + the event ring's default
         // capacity envelope (the physics ring is sized at the same
         // default so this is a conservative upper bound).
-        if self.snapshot_front.is_none() && self.snapshot_back.is_none() {
+        if self.snapshot.snapshot_front.is_none() && self.snapshot.snapshot_back.is_none() {
             let event_cap = crate::event_ring::DEFAULT_CAPACITY;
-            self.snapshot_front = Some(crate::snapshot::GpuStaging::new(
+            self.snapshot.snapshot_front = Some(crate::snapshot::GpuStaging::new(
                 &self.device,
                 self.resident.resident_agents_cap,
                 event_cap,
             ));
-            self.snapshot_back = Some(crate::snapshot::GpuStaging::new(
+            self.snapshot.snapshot_back = Some(crate::snapshot::GpuStaging::new(
                 &self.device,
                 self.resident.resident_agents_cap,
                 event_cap,
@@ -1287,16 +1260,17 @@ impl GpuBackend {
         // empty from `take_snapshot` — correct behaviour, next call
         // populates at the new size.
         let event_cap = crate::event_ring::DEFAULT_CAPACITY;
-        if let Some(front) = self.snapshot_front.as_mut() {
+        if let Some(front) = self.snapshot.snapshot_front.as_mut() {
             front.ensure_cap(&self.device, self.resident.resident_agents_cap, event_cap);
         }
-        if let Some(back) = self.snapshot_back.as_mut() {
+        if let Some(back) = self.snapshot.snapshot_back.as_mut() {
             back.ensure_cap(&self.device, self.resident.resident_agents_cap, event_cap);
         }
 
         // 1. Take a snapshot of the FRONT (filled by the previous
         //    snapshot call — returns empty on the first real call).
         let snap = self
+            .snapshot
             .snapshot_front
             .as_mut()
             .expect("snapshot_front lazy-inited above")
@@ -1335,7 +1309,7 @@ impl GpuBackend {
         // slice length — in that case the caller will just observe an
         // empty slice for that call (the test accessor resets the
         // watermark to 0 anyway on new-batch detection).
-        let start: u64 = self.snapshot_event_ring_read;
+        let start: u64 = self.snapshot.snapshot_event_ring_read;
         let event_ring_cap = main_event_ring.capacity() as u64;
         let end = event_ring_tail.min(event_ring_cap).max(start);
         let mut encoder = self
@@ -1343,7 +1317,8 @@ impl GpuBackend {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("engine_gpu::snapshot::kick_copy"),
             });
-        self.snapshot_back
+        self.snapshot
+            .snapshot_back
             .as_mut()
             .expect("snapshot_back lazy-inited above")
             .kick_copy(
@@ -1353,18 +1328,21 @@ impl GpuBackend {
                 main_event_ring,
                 start,
                 end,
-                self.latest_recorded_tick,
+                self.snapshot.latest_recorded_tick,
             );
         self.queue.submit(Some(encoder.finish()));
         // Advance the watermark. The batch events ring is append-only
         // within a batch, so this is a true watermark — the next
         // snapshot reads records in `[end, new_tail)`. Reset to 0 at
         // the top of each `step_batch` call.
-        self.snapshot_event_ring_read = end;
+        self.snapshot.snapshot_event_ring_read = end;
 
         // 4. Swap front / back — next call takes the one we just
         //    filled, and fills the one we just took from.
-        std::mem::swap(&mut self.snapshot_front, &mut self.snapshot_back);
+        std::mem::swap(
+            &mut self.snapshot.snapshot_front,
+            &mut self.snapshot.snapshot_back,
+        );
 
         Ok(snap)
     }
@@ -1374,7 +1352,7 @@ impl GpuBackend {
     /// pointer advances each call. Not part of the stable public API.
     #[doc(hidden)]
     pub fn snapshot_event_ring_read_for_test(&self) -> u64 {
-        self.snapshot_event_ring_read
+        self.snapshot.snapshot_event_ring_read
     }
 }
 
