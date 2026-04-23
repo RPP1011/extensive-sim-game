@@ -3,7 +3,7 @@
 
 #![cfg(feature = "gpu")]
 
-use engine_gpu::spatial_gpu::{GpuSpatialHash, GRID_CELLS};
+use engine_gpu::spatial_gpu::{SpatialTestHarness, GRID_CELLS};
 
 fn cpu_exclusive_scan(input: &[u32]) -> Vec<u32> {
     let mut out = vec![0u32; input.len()];
@@ -17,7 +17,7 @@ fn cpu_exclusive_scan(input: &[u32]) -> Vec<u32> {
 
 #[test]
 fn prefix_scan_matches_cpu_reference() {
-    let mut hash = GpuSpatialHash::new_for_test().expect("spatial init");
+    let mut harness = SpatialTestHarness::new().expect("spatial init");
 
     // Deterministic pseudo-random counts.
     let mut counts = vec![0u32; GRID_CELLS as usize];
@@ -28,27 +28,27 @@ fn prefix_scan_matches_cpu_reference() {
     }
 
     let expected = cpu_exclusive_scan(&counts);
-    let actual = hash.run_scan_for_test(&counts).expect("scan dispatch");
+    let actual = harness.run_scan(&counts).expect("scan dispatch");
 
     assert_eq!(actual, expected, "GPU scan must equal CPU exclusive-scan");
 }
 
 #[test]
 fn prefix_scan_all_zeros() {
-    let mut hash = GpuSpatialHash::new_for_test().expect("spatial init");
+    let mut harness = SpatialTestHarness::new().expect("spatial init");
     let counts = vec![0u32; GRID_CELLS as usize];
-    let actual = hash.run_scan_for_test(&counts).expect("scan dispatch");
+    let actual = harness.run_scan(&counts).expect("scan dispatch");
     assert!(actual.iter().all(|&x| x == 0));
 }
 
 #[test]
 fn prefix_scan_saturates() {
     // If total > u32::MAX, cpu_exclusive_scan saturates; GPU must too.
-    let mut hash = GpuSpatialHash::new_for_test().expect("spatial init");
+    let mut harness = SpatialTestHarness::new().expect("spatial init");
     let mut counts = vec![0u32; GRID_CELLS as usize];
     counts[0] = u32::MAX;
     counts[1] = 10;
     let expected = cpu_exclusive_scan(&counts);
-    let actual = hash.run_scan_for_test(&counts).expect("scan dispatch");
+    let actual = harness.run_scan(&counts).expect("scan dispatch");
     assert_eq!(actual, expected);
 }

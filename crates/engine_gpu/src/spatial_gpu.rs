@@ -224,10 +224,6 @@ fn saturate_add(a: u32, b: u32) -> u32 {
     return select(sum, 0xFFFFFFFFu, sum < a);
 }
 
-fn saturate_sub(a: u32, b: u32) -> u32 {
-    return select(a - b, 0u, a < b);
-}
-
 @compute @workgroup_size(1024, 1, 1)
 fn scan_main(@builtin(local_invocation_id) lid: vec3<u32>) {
     let tid = lid.x;
@@ -633,14 +629,6 @@ pub struct GpuSpatialHash {
     scan_bg_layout: wgpu::BindGroupLayout,
     bind_group_layout: wgpu::BindGroupLayout,
     pool: Option<BufferPool>,
-    /// Set only by [`Self::new_for_test`] so test helpers can dispatch
-    /// without the caller threading device/queue handles. The sync
-    /// `rebuild_and_query` path still takes device + queue explicitly
-    /// and never touches these fields.
-    #[allow(dead_code)]
-    test_device: Option<wgpu::Device>,
-    #[allow(dead_code)]
-    test_queue: Option<wgpu::Queue>,
 }
 
 #[allow(dead_code)] // Several buffers only ever referenced through the bind group.
@@ -653,8 +641,8 @@ struct BufferPool {
     cell_counts_readback: wgpu::Buffer,
     cell_offsets_buf: wgpu::Buffer,
     /// Task A1 — readback target for the GPU prefix-scan kernel.
-    /// Only exercised by the `run_scan_for_test` helper today; the
-    /// sync `rebuild_and_query` path still keeps offsets GPU-resident.
+    /// Only exercised by the `SpatialTestHarness::run_scan` helper today;
+    /// the sync `rebuild_and_query` path still keeps offsets GPU-resident.
     cell_offsets_readback: wgpu::Buffer,
     cell_fills_buf: wgpu::Buffer,
     cell_data_buf: wgpu::Buffer,
@@ -807,8 +795,6 @@ impl GpuSpatialHash {
             scan_bg_layout,
             bind_group_layout,
             pool: None,
-            test_device: None,
-            test_queue: None,
         })
     }
 
@@ -854,8 +840,8 @@ impl GpuSpatialHash {
         let cell_offsets_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("engine_gpu::spatial::cell_offsets"),
             size: (grid_cells * 4) as u64,
-            // COPY_SRC added in Task A1 so `run_scan_for_test` can read
-            // the GPU-produced offsets back via a staging buffer.
+            // COPY_SRC added in Task A1 so `SpatialTestHarness::run_scan`
+            // can read the GPU-produced offsets back via a staging buffer.
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -1144,32 +1130,43 @@ impl GpuSpatialHash {
         })
     }
 
-    // ------------------------------------------------------------------
-    // Task A1 — test-only helpers for the prefix-scan kernel.
-    //
-    // These are `#[doc(hidden)]` because they're only consumed by the
-    // `gpu_prefix_scan` integration test; production callers go through
-    // `rebuild_and_query` (or, once Task A2 lands, `rebuild_and_query_resident`).
-    // ------------------------------------------------------------------
+}
 
-    /// Test-only: build a fresh `GpuSpatialHash` backed by its own
-    /// wgpu device + queue. The device/queue are stashed on the
-    /// struct so `run_scan_for_test` can dispatch without the caller
-    /// threading them through.
+// ------------------------------------------------------------------
+// Task A1 — test-only harness for the prefix-scan kernel.
+//
+// Owns a fresh wgpu device/queue pair alongside the spatial hash so
+// unit tests don't have to plumb them separately. Construct via
+// [`SpatialTestHarness::new`]. Scales cleanly as later tasks add more
+// kernel-specific test helpers: each gets a method here rather than
+// cluttering the production `GpuSpatialHash` with `*_for_test` state.
+// ------------------------------------------------------------------
+
+/// Test-only harness: owns a fresh device/queue pair alongside the
+/// spatial hash so unit tests don't have to plumb them separately.
+/// Construct via [`SpatialTestHarness::new`].
+#[doc(hidden)]
+pub struct SpatialTestHarness {
+    pub hash: GpuSpatialHash,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+}
+
+impl SpatialTestHarness {
+    /// Build a harness with a fresh `GpuSpatialHash` backed by its own
+    /// wgpu device + queue (sourced from [`crate::test_device`]).
     #[doc(hidden)]
-    pub fn new_for_test() -> Result<Self, SpatialError> {
+    pub fn new() -> Result<Self, SpatialError> {
         let (device, queue) = crate::test_device()
             .map_err(|e| SpatialError::Dispatch(format!("test_device: {e}")))?;
-        let mut hash = Self::new(&device)?;
-        hash.test_device = Some(device);
-        hash.test_queue = Some(queue);
-        Ok(hash)
+        let hash = GpuSpatialHash::new(&device)?;
+        Ok(Self { hash, device, queue })
     }
 
-    /// Test-only: run just the prefix-scan kernel on a user-supplied
-    /// count vector. Uploads `counts` to `cell_counts_buf`, dispatches
-    /// `scan_main`, copies `cell_offsets_buf` back into
-    /// `cell_offsets_readback`, and returns the mapped result.
+    /// Run just the prefix-scan kernel on a user-supplied count vector.
+    /// Uploads `counts` to `cell_counts_buf`, dispatches `scan_main`,
+    /// copies `cell_offsets_buf` back into `cell_offsets_readback`,
+    /// and returns the mapped result.
     ///
     /// `counts.len()` must equal `GRID_CELLS` so the single-workgroup
     /// scan covers the entire input. The test pool is sized for
@@ -1177,36 +1174,21 @@ impl GpuSpatialHash {
     /// doesn't touch agent buffers, but we pick the smallest useful
     /// value to keep fixture memory tiny.
     #[doc(hidden)]
-    pub fn run_scan_for_test(
-        &mut self,
-        counts: &[u32],
-    ) -> Result<Vec<u32>, SpatialError> {
+    pub fn run_scan(&mut self, counts: &[u32]) -> Result<Vec<u32>, SpatialError> {
         assert_eq!(
             counts.len(),
             GRID_CELLS as usize,
-            "run_scan_for_test: expected {} counts, got {}",
+            "run_scan: expected {} counts, got {}",
             GRID_CELLS,
             counts.len(),
         );
 
-        // Ensure a pool exists. Borrow device/queue locally so we can
-        // drop the self-reborrow before calling `ensure_pool`.
-        let device = self
-            .test_device
-            .as_ref()
-            .expect("run_scan_for_test requires new_for_test")
-            .clone();
-        let queue = self
-            .test_queue
-            .as_ref()
-            .expect("run_scan_for_test requires new_for_test")
-            .clone();
-        self.ensure_pool(&device, 32);
-        let pool = self.pool.as_ref().expect("pool ensured");
+        self.hash.ensure_pool(&self.device, 32);
+        let pool = self.hash.pool.as_ref().expect("pool ensured");
 
-        queue.write_buffer(&pool.cell_counts_buf, 0, bytemuck::cast_slice(counts));
+        self.queue.write_buffer(&pool.cell_counts_buf, 0, bytemuck::cast_slice(counts));
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("engine_gpu::spatial::scan_test_enc"),
         });
         {
@@ -1215,7 +1197,9 @@ impl GpuSpatialHash {
                 timestamp_writes: None,
             });
             cpass.set_bind_group(0, &pool.scan_bind_group, &[]);
-            cpass.set_pipeline(&self.scan_pipeline);
+            cpass.set_pipeline(&self.hash.scan_pipeline);
+            // Single-workgroup kernel; do not increase dispatch count —
+            // shared-memory state is not valid across workgroups.
             cpass.dispatch_workgroups(1, 1, 1);
         }
         encoder.copy_buffer_to_buffer(
@@ -1225,9 +1209,9 @@ impl GpuSpatialHash {
             0,
             (GRID_CELLS as u64) * 4,
         );
-        queue.submit(Some(encoder.finish()));
+        self.queue.submit(Some(encoder.finish()));
 
-        map_read_u32(&pool.cell_offsets_readback, &device, GRID_CELLS as usize)
+        map_read_u32(&pool.cell_offsets_readback, &self.device, GRID_CELLS as usize)
     }
 }
 
