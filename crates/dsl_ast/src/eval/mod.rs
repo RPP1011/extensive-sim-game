@@ -31,6 +31,13 @@
 //! - `ViewContext: ReadContext`    — adds fold-accumulator mutation; used by
 //!   materialized view fold handlers.
 //!
+//! **Naming deviation from the plan (acceptance criterion #6):** The plan names
+//! four traits `MaskContext` / `ScoringContext` / `CascadeContext` / `ViewContext`.
+//! Masks and scoring share an identical read-only surface, so they collapse into
+//! one `ReadContext`.  Mask interpreters (Task 3) and scoring interpreters
+//! (Task 4) both bind `C: ReadContext`.  `CascadeContext` and `ViewContext` keep
+//! their names unchanged.
+//!
 //! The `engine` crate (Task 7) provides the `SimState`-backed impls.  Until
 //! then the traits compile with zero impls.
 //!
@@ -42,29 +49,45 @@
 //! `EffectOp` enum is a local mirror of `engine::ability::EffectOp` used by
 //! the `abilities.effects` iterator in physics rules; the variants and field
 //! types must stay byte-compatible with the engine type.
+//!
+//! **TODO (Task 7):** Add a compile-time assertion in
+//! `crates/engine/src/evaluator/context.rs` verifying discriminant and layout
+//! match between `engine::ability::program::EffectOp` and
+//! `dsl_ast::eval::EffectOp`.  Something like:
+//! ```ignore
+//! const _: () = assert!(
+//!     std::mem::size_of::<engine::ability::program::EffectOp>()
+//!         == std::mem::size_of::<dsl_ast::eval::EffectOp>()
+//! );
+//! ```
+//! plus variant-count / discriminant checks.  No implementation needed before
+//! Task 7 — this note records the intent.
 
 // ---------------------------------------------------------------------------
 // Runtime ID newtypes (engine-agnostic)
 // ---------------------------------------------------------------------------
 
-/// Identifies a live agent in the simulation.  Wraps a non-zero `u32`; zero
-/// is the sentinel "no agent" / "none".  Mirrors `engine_generated::ids::AgentId`.
+/// Identifies a live agent in the simulation.
+///
+/// The engine uses `NonZeroU32` internally, making `Option<AgentId>::None` the
+/// canonical zero-cost "absent" representation.  `dsl_ast` mirrors this via the
+/// `new()` constructor + `Option<AgentId>` at trait boundaries; the inner field
+/// is private to prevent accidental sentinel construction.
+///
+/// Mirrors `engine_generated::ids::AgentId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct AgentId(pub u32);
+pub struct AgentId(u32);
 
 impl AgentId {
-    /// The sentinel value meaning "no agent".  Mirrors the engine convention
-    /// where `AgentId(u32::MAX)` or an `Option<AgentId>::None` signals absence.
-    /// The interpreter uses `Option<AgentId>` at the trait boundary so the
-    /// sentinel never leaks into expressions.
-    pub const NONE: u32 = 0;
-
-    /// Construct from a raw non-zero value.  Returns `None` for zero.
+    /// Construct from a raw non-zero value.  Returns `None` for zero (the
+    /// `Option<AgentId>::None` niche).
     #[inline]
     pub fn new(raw: u32) -> Option<Self> {
         if raw == 0 { None } else { Some(AgentId(raw)) }
     }
 
+    /// Return the underlying raw `u32`.  Use to bridge to the engine's
+    /// `NonZeroU32::get()` in Task 7 Context impls.
     #[inline]
     pub fn raw(self) -> u32 {
         self.0
@@ -72,16 +95,23 @@ impl AgentId {
 }
 
 /// Identifies a registered ability program in the ability registry.
+///
+/// Same sentinel discipline as [`AgentId`]: the inner field is private;
+/// construct via `AbilityId::new(raw)` and test absence via `Option<AbilityId>`.
+///
 /// Mirrors `engine_generated::ids::AbilityId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct AbilityId(pub u32);
+pub struct AbilityId(u32);
 
 impl AbilityId {
+    /// Construct from a raw non-zero value.  Returns `None` for zero.
     #[inline]
     pub fn new(raw: u32) -> Option<Self> {
         if raw == 0 { None } else { Some(AbilityId(raw)) }
     }
 
+    /// Return the underlying raw `u32`.  Use to bridge to the engine's
+    /// `NonZeroU32::get()` in Task 7 Context impls.
     #[inline]
     pub fn raw(self) -> u32 {
         self.0
@@ -183,6 +213,9 @@ pub trait ReadContext {
     fn agents_attack_damage(&self, agent: AgentId) -> f32;
 
     /// The agent `agent` is currently engaged with, if any.
+    ///
+    /// Also serves the DSL's `engaged_with_or(x, sentinel)` form — the physics
+    /// interpreter unwraps `None` to the sentinel at the call site.
     fn agents_engaged_with(&self, agent: AgentId) -> Option<AgentId>;
 
     /// Hostility predicate: does `a` treat `b` as a hostile?
@@ -318,6 +351,10 @@ pub trait CascadeContext: ReadContext {
 
     /// Mark that `agent`'s cooldown for ability `ab` starts now; the ability
     /// will be ready again at `world_tick() + cooldown_ticks(ab)`.
+    ///
+    /// Writes to the per-`(agent, ability)` cooldown slot — not to agent state
+    /// itself.  This is why the method name uses the `abilities_` prefix rather
+    /// than `agents_`, making the naming asymmetry explicit.
     fn abilities_set_cooldown_next_ready(&mut self, agent: AgentId, ab: AbilityId, ready_at: u32);
 
     // ---- cascade event emission ----
@@ -360,6 +397,10 @@ pub trait ViewContext: ReadContext {
 ///
 /// Kept deliberately small — only the types reachable in wolves+humans event
 /// emissions.  The engine impl matches on this to populate event structs.
+///
+/// The variant set is intentionally restricted to what wolves+humans exercises.
+/// Future rule classes may need `Str(&'static str)` or similar; resist adding
+/// variants speculatively — add them when a concrete rule class requires them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EvalValue {
     Bool(bool),

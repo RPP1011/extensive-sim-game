@@ -104,7 +104,7 @@ None.
 3. **`cargo test -p engine` green** (default — compiled path).
 4. **`cargo test -p engine --features interpreted-rules` green** — including the `wolves_and_humans_parity` test, which must match the committed baseline byte-for-byte.
 5. **Each of `MaskIR::eval`, `ScoringIR::eval`, `PhysicsIR::apply`, `ViewIR::fold` has unit tests against hand-crafted IR values** — tests live in the respective `dsl_ast/src/eval/*.rs` files and run under `cargo test -p dsl_ast`.
-6. **`dsl_ast::eval::{MaskContext, ScoringContext, CascadeContext, ViewContext}` (or a unified `RuleContext`) is a stable public API** — no panics-on-default, no unimplemented methods.
+6. **`dsl_ast::eval::{ReadContext, CascadeContext, ViewContext}` is a stable public API** — no panics-on-default, no unimplemented methods.  (Masks + scoring share `ReadContext` per the design decision in Task 2: `MaskContext` and `ScoringContext` from the original naming collapse into one read-only `ReadContext`.  Mask interpreters (Task 3) and scoring interpreters (Task 4) both bind `C: ReadContext`.)
 7. **The compiled path (`generated/mask/*.rs` etc.) is unchanged.** No drift in files under `crates/engine/src/generated/` or `crates/engine_generated/src/`.
 8. **CI enforces the interpreted-rules parity gate** — a new CI job / matrix entry fails the PR if the hash diverges.
 
