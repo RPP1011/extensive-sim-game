@@ -653,6 +653,28 @@ impl SimState {
         }
     }
 
+    /// True iff the given ability slot is off cooldown (both global GCD
+    /// and per-slot local cooldown have cleared at `now`).
+    ///
+    /// Returns `false` for unknown agents. Out-of-range slot indices
+    /// return `true` (defensive default; callers should bound-check
+    /// against the live ability registry separately).
+    pub fn can_cast_ability(&self, agent: AgentId, slot: u8, now: u32) -> bool {
+        let agent_slot = AgentSlotPool::slot_of_agent(agent);
+        let Some(&global_next_ready) = self.hot_cooldown_next_ready_tick.get(agent_slot) else {
+            return false;
+        };
+        if (slot as usize) >= crate::ability::MAX_ABILITIES {
+            return true;
+        }
+        let Some(local_slots) = self.ability_cooldowns.get(agent_slot) else {
+            return false;
+        };
+        let global_ready = global_next_ready <= now;
+        let local_ready = local_slots[slot as usize] <= now;
+        global_ready && local_ready
+    }
+
     // Per-pair standing (Combat Foundation Task 1).
     pub fn standing(&self, a: AgentId, b: AgentId) -> i16 {
         self.cold_standing.get(a, b)
