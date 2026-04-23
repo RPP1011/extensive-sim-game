@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_types;
 pub mod entity_pool;
 
+use crate::ability::MAX_ABILITIES;
 use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
@@ -125,6 +126,17 @@ pub struct SimState {
     cold_creditor_ledger:   Vec<SmallVec<[Creditor; 16]>>,
     // Mentor lineage (state.md §Relationships mentor_lineage) — 8-deep chain.
     cold_mentor_lineage:    Vec<[Option<AgentId>; 8]>,
+    /// Per-(agent, ability-slot) local cooldown cursor. Value = the
+    /// tick when this specific ability slot next becomes ready;
+    /// `0` means ready now (or never cast). Gated together with
+    /// `hot_cooldown_next_ready_tick` (global GCD) by
+    /// `SimState::can_cast_ability` (added in a later task).
+    ///
+    /// Added 2026-04-22 to fix a shared-cursor bug where all
+    /// abilities on one agent were gated by the single global cursor.
+    /// Read only on cast-gate evaluation, so grouped with the cold
+    /// SoA fields.
+    pub ability_cooldowns: Vec<[u32; MAX_ABILITIES]>,
     // Per-pair standing (Combat Foundation Task 1). Symmetric (keyed by
     // ordered tuple), i16 clamped to [-1000, 1000] by `adjust_standing`.
     cold_standing:          SparseStandings,
@@ -237,6 +249,7 @@ impl SimState {
             cold_class_definitions: vec![[ClassSlot::default(); 4]; cap],
             cold_creditor_ledger:   (0..cap).map(|_| SmallVec::new()).collect(),
             cold_mentor_lineage:    vec![[None; 8]; cap],
+            ability_cooldowns:      vec![[0u32; MAX_ABILITIES]; cap],
             cold_standing:          SparseStandings::new(),
             // Incremental spatial hash — sized for `cap` agent slots.
             // Mutators push O(1) deltas; no per-mutation rebuild.
@@ -335,6 +348,7 @@ impl SimState {
         self.cold_class_definitions[slot] = [ClassSlot::default(); 4];
         self.cold_creditor_ledger[slot].clear();
         self.cold_mentor_lineage[slot] = [None; 8];
+        self.ability_cooldowns[slot]   = [0u32; MAX_ABILITIES];
         // Incremental spatial-hash insert — O(1).
         self.spatial.insert(id, spec.pos, MovementMode::Walk);
         Some(id)

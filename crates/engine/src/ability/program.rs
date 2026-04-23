@@ -27,6 +27,17 @@ use smallvec::SmallVec;
 /// is a schema-hash bump.
 pub const MAX_EFFECTS_PER_PROGRAM: usize = 4;
 
+/// Maximum number of ability slots per agent. Governs the inner
+/// dimension of `SimState::ability_cooldowns`, which carries a
+/// per-(agent, ability-slot) local cooldown cursor alongside the
+/// per-agent global GCD in `hot_cooldown_next_ready_tick`.
+///
+/// Added 2026-04-22 with the ability-cooldowns subsystem. 8 matches
+/// the Ability Registry's per-unit slot budget from prior hero
+/// templates; raise if/when a subsystem needs more per-agent slots
+/// (storage cost is `8 × agent_cap × 4B` for the u32 cursor array).
+pub const MAX_ABILITIES: usize = 8;
+
 /// How a cast is delivered to its target.
 ///
 /// MVP ships `Instant` only — the effect applies on the tick the cast resolves.

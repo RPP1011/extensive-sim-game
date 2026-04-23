@@ -44,6 +44,8 @@ pub use id::AbilityId;
 pub mod program;
 pub mod registry;
 
-pub use program::{Area, Delivery, EffectOp, Gate, TargetSelector, MAX_EFFECTS_PER_PROGRAM};
+pub use program::{
+    Area, Delivery, EffectOp, Gate, TargetSelector, MAX_ABILITIES, MAX_EFFECTS_PER_PROGRAM,
+};
 pub use program::AbilityProgram;
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
