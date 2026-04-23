@@ -253,10 +253,33 @@ struct SeedCfg {
     _pad2: u32,
 };
 
+// Must match `engine_gpu::sim_cfg::SimCfg` byte-for-byte. The
+// `sim_cfg_layout` regression test fences the Rust-side offsets;
+// any drift surfaces as subtle corruption of world-scalar fields.
+struct SimCfg {
+    tick:                          atomic<u32>,
+    world_seed_lo:                 u32,
+    world_seed_hi:                 u32,
+    _pad0:                         u32,
+    engagement_range:              f32,
+    attack_damage:                 f32,
+    attack_range:                  f32,
+    move_speed:                    f32,
+    move_speed_mult:               f32,
+    kin_radius:                    f32,
+    cascade_max_iterations:        u32,
+    rules_registry_generation:     u32,
+    abilities_registry_generation: u32,
+    _reserved0:                    u32,
+    _reserved1:                    u32,
+    _reserved2:                    u32,
+};
+
 @group(0) @binding(0) var<storage, read>       apply_tail: array<atomic<u32>>;
 @group(0) @binding(1) var<storage, read_write> indirect_args: array<u32>;
 @group(0) @binding(2) var<storage, read_write> num_events: array<u32>;
 @group(0) @binding(3) var<uniform>             cfg: SeedCfg;
+@group(0) @binding(4) var<storage, read_write> sim_cfg: SimCfg;
 
 const WG: u32 = 64u;
 
@@ -270,6 +293,12 @@ fn seed() {
     indirect_args[0] = wg;
     indirect_args[1] = 1u;
     indirect_args[2] = 1u;
+    // Advance GPU-side tick once per cascade dispatch. Single thread,
+    // single atomic — no race. CPU still increments `state.tick` until
+    // Task 2.10 removes that; during the overlap both paths advance in
+    // lockstep (no observer reads `sim_cfg.tick` yet — Task 2.11 wires
+    // it for snapshot readback).
+    atomicAdd(&sim_cfg.tick, 1u);
 }
 "#;
 
@@ -295,6 +324,7 @@ struct SeedBgKey {
     apply_tail: wgpu::Buffer,
     indirect_args: wgpu::Buffer,
     num_events: wgpu::Buffer,
+    sim_cfg: wgpu::Buffer,
 }
 
 impl SeedIndirectKernel {
@@ -333,7 +363,25 @@ impl SeedIndirectKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("cascade_resident::seed::bgl"),
             // apply_tail: read-only storage (but contains atomic<u32>; read-only is fine for atomicLoad)
-            entries: &[storage(0, true), storage(1, false), storage(2, false), uniform(3)],
+            // binding 4: sim_cfg (rw storage) — kernel atomically increments `tick` at end-of-dispatch.
+            entries: &[
+                storage(0, true),
+                storage(1, false),
+                storage(2, false),
+                uniform(3),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: std::num::NonZeroU64::new(
+                            std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
+                        ),
+                    },
+                    count: None,
+                },
+            ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cascade_resident::seed::pl"),
@@ -376,6 +424,7 @@ impl SeedIndirectKernel {
         apply_tail_buf: &wgpu::Buffer,
         indirect_args: &IndirectArgsBuffer,
         num_events_buf: &wgpu::Buffer,
+        sim_cfg_buf: &wgpu::Buffer,
         agent_cap: u32,
     ) {
         let cap_wg = agent_cap.div_ceil(PHYSICS_WORKGROUP_SIZE).max(1);
@@ -393,6 +442,7 @@ impl SeedIndirectKernel {
             apply_tail: apply_tail_buf.clone(),
             indirect_args: indirect_args.buffer().clone(),
             num_events: num_events_buf.clone(),
+            sim_cfg: sim_cfg_buf.clone(),
         };
         let need_rebuild = match &self.cached_bg {
             Some((k, _)) => *k != key,
@@ -418,6 +468,10 @@ impl SeedIndirectKernel {
                     wgpu::BindGroupEntry {
                         binding: 3,
                         resource: self.cfg_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: sim_cfg_buf.as_entire_binding(),
                     },
                 ],
             });
@@ -923,6 +977,7 @@ pub fn run_cascade_resident(
     agents_buf: &wgpu::Buffer,
     apply_event_ring: &GpuEventRing,
     indirect_args: &IndirectArgsBuffer,
+    sim_cfg_buf: &wgpu::Buffer,
 ) -> Result<(), CascadeResidentError> {
     run_cascade_resident_with_iter_cap(
         device,
@@ -934,6 +989,7 @@ pub fn run_cascade_resident(
         agents_buf,
         apply_event_ring,
         indirect_args,
+        sim_cfg_buf,
         MAX_CASCADE_ITERATIONS,
     )
 }
@@ -958,6 +1014,7 @@ pub fn run_cascade_resident_with_iter_cap(
     agents_buf: &wgpu::Buffer,
     apply_event_ring: &GpuEventRing,
     indirect_args: &IndirectArgsBuffer,
+    sim_cfg_buf: &wgpu::Buffer,
     max_iters: u32,
 ) -> Result<(), CascadeResidentError> {
     let max_iters = max_iters.clamp(1, MAX_CASCADE_ITERATIONS);
@@ -1035,6 +1092,7 @@ pub fn run_cascade_resident_with_iter_cap(
         apply_event_ring.tail_buffer(),
         indirect_args,
         &resident_ctx.num_events_buf,
+        sim_cfg_buf,
         agent_cap,
     );
 

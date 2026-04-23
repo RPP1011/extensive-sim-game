@@ -842,6 +842,7 @@ impl GpuBackend {
                 resident_agents_buf,
                 resident_indirect_args,
                 resident_cascade_ctx,
+                sim_cfg_buf,
                 fused_unpack_kernel,
                 ..
             } = &mut self.resident;
@@ -1031,6 +1032,9 @@ impl GpuBackend {
                 Some(n) => (n + 2).min(crate::cascade::MAX_CASCADE_ITERATIONS),
                 None => crate::cascade::MAX_CASCADE_ITERATIONS,
             };
+            let sim_cfg_ref = sim_cfg_buf
+                .as_ref()
+                .expect("sim_cfg_buf ensured by ensure_resident_init");
             crate::cascade_resident::run_cascade_resident_with_iter_cap(
                 &self.device,
                 &self.queue,
@@ -1041,6 +1045,7 @@ impl GpuBackend {
                 agents_buf,
                 apply_ring_ref,
                 indirect_args,
+                sim_cfg_ref,
                 iter_cap,
             )
             .expect("cascade_resident dispatch");
