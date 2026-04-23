@@ -9,6 +9,14 @@
 //!   * the per-rule WGSL body for the GPU rule includes its fn name
 //!   * the dispatcher contains a call to the GPU rule only; the
 //!     `@cpu_only` rule's handler fn is never referenced.
+//!
+//! Task 2.16 — regression fence for the *CPU* emit path. The CPU
+//! handler emit (`emit_physics::emit_physics`) must remain unaffected
+//! by the `@cpu_only` flag: both annotated and regular rules must
+//! still get their CPU handler function emitted, so the narrative /
+//! event-replay path continues to run them. If a future change
+//! mistakenly gates CPU emit on `cpu_only` (e.g. "skip WGSL AND skip
+//! CPU"), this test catches it.
 
 use dsl_compiler::emit_physics_wgsl::{
     emit_physics_dispatcher_wgsl, emit_physics_wgsl, EmitContext,
@@ -109,5 +117,83 @@ fn cpu_only_rule_has_no_wgsl_emit_and_no_dispatch_entry() {
     assert!(
         !dispatcher.contains("physics_narrative_rule"),
         "dispatcher must not reference the @cpu_only rule's handler fn, got:\n{dispatcher}"
+    );
+}
+
+/// Regression fence — CPU handler emit must keep firing for `@cpu_only`
+/// rules. Tasks 2.12-2.15 gate *WGSL* emission on the flag; the CPU
+/// path in `emit_physics::emit_physics` is intentionally untouched so
+/// narrative rules still get a Rust handler fn wired into the
+/// per-event-kind dispatcher. If a future change (e.g. "skip every
+/// backend for cpu_only") breaks this, the emit-output inspection
+/// below fires.
+#[test]
+fn cpu_only_rule_still_emits_cpu_handler() {
+    let comp = dsl_compiler::compile(SRC).expect("compile OK");
+    let artifacts = dsl_compiler::emit(&comp);
+
+    // Each physics rule lowers to its own Rust module file
+    // (`<snake_case(rule_name)>.rs`) in `rust_physics_modules`, plus
+    // the aggregate dispatcher lives in `rust_physics_mod`. The
+    // `@cpu_only` rule must land in both.
+    let filenames: Vec<&str> = artifacts
+        .rust_physics_modules
+        .iter()
+        .map(|(f, _)| f.as_str())
+        .collect();
+    assert!(
+        filenames.iter().any(|f| *f == "narrative_rule.rs"),
+        "@cpu_only narrative_rule must still emit a Rust module; got files: {filenames:?}"
+    );
+    assert!(
+        filenames.iter().any(|f| *f == "gpu_rule.rs"),
+        "regular gpu_rule must emit a Rust module; got files: {filenames:?}"
+    );
+
+    let narrative_rs = &artifacts
+        .rust_physics_modules
+        .iter()
+        .find(|(f, _)| f == "narrative_rule.rs")
+        .expect("narrative_rule.rs must be present")
+        .1;
+    let gpu_rs = &artifacts
+        .rust_physics_modules
+        .iter()
+        .find(|(f, _)| f == "gpu_rule.rs")
+        .expect("gpu_rule.rs must be present")
+        .1;
+
+    // Handler fn uses the snake_case rule name as its identifier — see
+    // `emit_physics::handler_fn_name`. Both rules must have one.
+    assert!(
+        narrative_rs.contains("pub fn narrative_rule("),
+        "@cpu_only narrative_rule must still emit its CPU handler fn, got:\n{narrative_rs}"
+    );
+    assert!(
+        gpu_rs.contains("pub fn gpu_rule("),
+        "regular gpu_rule must emit its CPU handler fn, got:\n{gpu_rs}"
+    );
+
+    // The aggregate `physics/mod.rs` dispatcher routes the triggering
+    // event through *every* applicable handler, `@cpu_only` included.
+    let physics_mod = &artifacts.rust_physics_mod;
+    assert!(
+        physics_mod.contains("pub mod narrative_rule;"),
+        "physics/mod.rs must `pub mod` the @cpu_only rule, got:\n{physics_mod}"
+    );
+    assert!(
+        physics_mod.contains("pub mod gpu_rule;"),
+        "physics/mod.rs must `pub mod` gpu_rule, got:\n{physics_mod}"
+    );
+    // Both handler names must appear in the per-kind dispatcher call
+    // list. Exact call shape is `narrative_rule::narrative_rule(...)`
+    // / `gpu_rule::gpu_rule(...)`.
+    assert!(
+        physics_mod.contains("narrative_rule::narrative_rule("),
+        "dispatcher must call @cpu_only narrative_rule's CPU handler, got:\n{physics_mod}"
+    );
+    assert!(
+        physics_mod.contains("gpu_rule::gpu_rule("),
+        "dispatcher must call gpu_rule's CPU handler, got:\n{physics_mod}"
     );
 }
