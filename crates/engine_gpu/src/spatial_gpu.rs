@@ -197,6 +197,89 @@ impl GpuQueryResult {
 // WGSL source
 // ---------------------------------------------------------------------------
 
+/// Single-workgroup exclusive prefix-scan over `GRID_CELLS` u32s using
+/// Hillis-Steele double-buffering in shared memory. Correct because
+/// `GRID_CELLS` fits in one workgroup-sized chunked loop (64×64 = 4096
+/// cells; workgroup size 1024 with 4 serial chunks, each producing a
+/// log2(1024) = 10-round Hillis-Steele scan). If `GRID_CELLS` grows
+/// past the single-workgroup budget, switch to a multi-pass Blelloch
+/// scan.
+///
+/// `{GRID_CELLS}` is string-substituted at pipeline build time (see
+/// `GpuSpatialHash::new`) so the constant matches the host-side
+/// [`GRID_CELLS`] without a second source of truth.
+const PREFIX_SCAN_WGSL: &str = r#"
+@group(0) @binding(0) var<storage, read_write> cell_counts: array<u32>;
+@group(0) @binding(1) var<storage, read_write> cell_offsets: array<u32>;
+
+const CELLS: u32 = {GRID_CELLS}u;
+const WG: u32 = 1024u;
+const CHUNKS: u32 = (CELLS + WG - 1u) / WG;
+
+var<workgroup> scratch_a: array<u32, 1024>;
+var<workgroup> scratch_b: array<u32, 1024>;
+
+fn saturate_add(a: u32, b: u32) -> u32 {
+    let sum = a + b;
+    return select(sum, 0xFFFFFFFFu, sum < a);
+}
+
+fn saturate_sub(a: u32, b: u32) -> u32 {
+    return select(a - b, 0u, a < b);
+}
+
+@compute @workgroup_size(1024, 1, 1)
+fn scan_main(@builtin(local_invocation_id) lid: vec3<u32>) {
+    let tid = lid.x;
+
+    // Running total carried across chunks so we produce a single
+    // exclusive scan over CELLS items using only one workgroup.
+    var carry: u32 = 0u;
+
+    for (var chunk: u32 = 0u; chunk < CHUNKS; chunk = chunk + 1u) {
+        let global_idx = chunk * WG + tid;
+        let val = select(0u, cell_counts[global_idx], global_idx < CELLS);
+        scratch_a[tid] = val;
+        workgroupBarrier();
+
+        // Hillis-Steele inclusive scan over the chunk with ping-pong
+        // double-buffering. `src_is_a` tracks which scratch array
+        // holds the most recently written data.
+        var offset: u32 = 1u;
+        var src_is_a = true;
+        while (offset < WG) {
+            let prev_a = scratch_a[select(0u, tid - offset, tid >= offset)];
+            let prev_b = scratch_b[select(0u, tid - offset, tid >= offset)];
+            let prev = select(prev_b, prev_a, src_is_a);
+            let cur = select(scratch_b[tid], scratch_a[tid], src_is_a);
+            let sum = select(cur, saturate_add(cur, prev), tid >= offset);
+            if (src_is_a) { scratch_b[tid] = sum; } else { scratch_a[tid] = sum; }
+            src_is_a = !src_is_a;
+            workgroupBarrier();
+            offset = offset << 1u;
+        }
+
+        // Convert inclusive → exclusive by reading the previous lane's
+        // inclusive value (tid 0 gets 0). Shift-right-by-one avoids the
+        // incorrect-saturation case where `inclusive[tid] - val[tid]`
+        // loses information once inclusive has clamped to u32::MAX.
+        let prev_lane = select(0u, tid - 1u, tid >= 1u);
+        let exclusive_a = select(0u, scratch_a[prev_lane], tid >= 1u);
+        let exclusive_b = select(0u, scratch_b[prev_lane], tid >= 1u);
+        let exclusive = select(exclusive_b, exclusive_a, src_is_a);
+
+        if (global_idx < CELLS) {
+            cell_offsets[global_idx] = saturate_add(exclusive, carry);
+        }
+        // Update carry to inclusive-sum of the chunk (value at tid=WG-1).
+        workgroupBarrier();
+        let chunk_total = select(scratch_b[WG - 1u], scratch_a[WG - 1u], src_is_a);
+        carry = saturate_add(carry, chunk_total);
+        workgroupBarrier();
+    }
+}
+"#;
+
 /// WGSL module covering the spatial-hash rebuild passes + the three
 /// query primitives. Emitted as one fused source so the host only has
 /// to manage one shader module; individual entry points drive each
@@ -540,8 +623,24 @@ pub struct GpuSpatialHash {
     scatter_pipeline: wgpu::ComputePipeline,
     sort_pipeline: wgpu::ComputePipeline,
     query_pipeline: wgpu::ComputePipeline,
+    /// Exclusive prefix-scan over `cell_counts` → `cell_offsets`.
+    /// Wired up in Task A1; not yet used by the sync
+    /// `rebuild_and_query` path (a follow-up task switches it in).
+    /// Uses its own bind-group layout (two read_write storage buffers
+    /// at bindings 0 and 1) because the main `bind_group_layout`
+    /// binds `cell_offsets` as read-only.
+    scan_pipeline: wgpu::ComputePipeline,
+    scan_bg_layout: wgpu::BindGroupLayout,
     bind_group_layout: wgpu::BindGroupLayout,
     pool: Option<BufferPool>,
+    /// Set only by [`Self::new_for_test`] so test helpers can dispatch
+    /// without the caller threading device/queue handles. The sync
+    /// `rebuild_and_query` path still takes device + queue explicitly
+    /// and never touches these fields.
+    #[allow(dead_code)]
+    test_device: Option<wgpu::Device>,
+    #[allow(dead_code)]
+    test_queue: Option<wgpu::Queue>,
 }
 
 #[allow(dead_code)] // Several buffers only ever referenced through the bind group.
@@ -553,6 +652,10 @@ struct BufferPool {
     cell_counts_buf: wgpu::Buffer,
     cell_counts_readback: wgpu::Buffer,
     cell_offsets_buf: wgpu::Buffer,
+    /// Task A1 — readback target for the GPU prefix-scan kernel.
+    /// Only exercised by the `run_scan_for_test` helper today; the
+    /// sync `rebuild_and_query` path still keeps offsets GPU-resident.
+    cell_offsets_readback: wgpu::Buffer,
     cell_fills_buf: wgpu::Buffer,
     cell_data_buf: wgpu::Buffer,
     within_buf: wgpu::Buffer,
@@ -564,6 +667,11 @@ struct BufferPool {
     cfg_buf: wgpu::Buffer,
     qcfg_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    /// Task A1 — bind group for the prefix-scan pipeline. Binds
+    /// `cell_counts_buf` + `cell_offsets_buf` as read_write at
+    /// bindings 0 and 1 (the main `bind_group` binds `cell_offsets`
+    /// as read-only which the scan kernel cannot use).
+    scan_bind_group: wgpu::BindGroup,
 }
 
 /// Aggregated per-agent query results, one entry per slot in spawn
@@ -652,14 +760,55 @@ impl GpuSpatialHash {
         let sort_pipeline = make_pipe("cs_sort");
         let query_pipeline = make_pipe("cs_query");
 
+        // --- Task A1 prefix-scan pipeline ------------------------
+        // A minimal 2-binding layout (cell_counts + cell_offsets as
+        // read_write storage). Separate from `bind_group_layout`
+        // because that one binds `cell_offsets` as read-only and the
+        // scan needs to write it. The WGSL is parameterised on
+        // `GRID_CELLS` via substitution so the shader constant tracks
+        // the host constant without a second source of truth.
+        let scan_bg_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("engine_gpu::spatial::scan_bgl"),
+            entries: &[
+                storage_entry(0, false), // cell_counts (read_write)
+                storage_entry(1, false), // cell_offsets (read_write)
+            ],
+        });
+        let scan_wgsl = PREFIX_SCAN_WGSL.replace("{GRID_CELLS}", &GRID_CELLS.to_string());
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let scan_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("engine_gpu::spatial::scan_shader"),
+            source: wgpu::ShaderSource::Wgsl(scan_wgsl.into()),
+        });
+        if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+            return Err(SpatialError::ShaderCompile(format!("scan: {err}")));
+        }
+        let scan_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("engine_gpu::spatial::scan_pl"),
+            bind_group_layouts: &[&scan_bg_layout],
+            push_constant_ranges: &[],
+        });
+        let scan_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("engine_gpu::spatial::cp_scan"),
+            layout: Some(&scan_pipeline_layout),
+            module: &scan_module,
+            entry_point: Some("scan_main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
         Ok(Self {
             clear_pipeline,
             count_pipeline,
             scatter_pipeline,
             sort_pipeline,
             query_pipeline,
+            scan_pipeline,
+            scan_bg_layout,
             bind_group_layout,
             pool: None,
+            test_device: None,
+            test_queue: None,
         })
     }
 
@@ -705,7 +854,17 @@ impl GpuSpatialHash {
         let cell_offsets_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("engine_gpu::spatial::cell_offsets"),
             size: (grid_cells * 4) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            // COPY_SRC added in Task A1 so `run_scan_for_test` can read
+            // the GPU-produced offsets back via a staging buffer.
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let cell_offsets_readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::spatial::cell_offsets_readback"),
+            size: (grid_cells * 4) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let cell_fills_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -804,6 +963,14 @@ impl GpuSpatialHash {
                 wgpu::BindGroupEntry { binding: 11, resource: qcfg_buf.as_entire_binding() },
             ],
         });
+        let scan_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("engine_gpu::spatial::scan_bg"),
+            layout: &self.scan_bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: cell_counts_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: cell_offsets_buf.as_entire_binding() },
+            ],
+        });
 
         self.pool = Some(BufferPool {
             agent_cap,
@@ -813,6 +980,7 @@ impl GpuSpatialHash {
             cell_counts_buf,
             cell_counts_readback,
             cell_offsets_buf,
+            cell_offsets_readback,
             cell_fills_buf,
             cell_data_buf,
             within_buf,
@@ -824,6 +992,7 @@ impl GpuSpatialHash {
             cfg_buf,
             qcfg_buf,
             bind_group,
+            scan_bind_group,
         });
     }
 
@@ -973,6 +1142,92 @@ impl GpuSpatialHash {
             nearby_kin: kin,
             nearest_hostile: nearest,
         })
+    }
+
+    // ------------------------------------------------------------------
+    // Task A1 — test-only helpers for the prefix-scan kernel.
+    //
+    // These are `#[doc(hidden)]` because they're only consumed by the
+    // `gpu_prefix_scan` integration test; production callers go through
+    // `rebuild_and_query` (or, once Task A2 lands, `rebuild_and_query_resident`).
+    // ------------------------------------------------------------------
+
+    /// Test-only: build a fresh `GpuSpatialHash` backed by its own
+    /// wgpu device + queue. The device/queue are stashed on the
+    /// struct so `run_scan_for_test` can dispatch without the caller
+    /// threading them through.
+    #[doc(hidden)]
+    pub fn new_for_test() -> Result<Self, SpatialError> {
+        let (device, queue) = crate::test_device()
+            .map_err(|e| SpatialError::Dispatch(format!("test_device: {e}")))?;
+        let mut hash = Self::new(&device)?;
+        hash.test_device = Some(device);
+        hash.test_queue = Some(queue);
+        Ok(hash)
+    }
+
+    /// Test-only: run just the prefix-scan kernel on a user-supplied
+    /// count vector. Uploads `counts` to `cell_counts_buf`, dispatches
+    /// `scan_main`, copies `cell_offsets_buf` back into
+    /// `cell_offsets_readback`, and returns the mapped result.
+    ///
+    /// `counts.len()` must equal `GRID_CELLS` so the single-workgroup
+    /// scan covers the entire input. The test pool is sized for
+    /// `agent_cap = 32` — any agent_cap works since the scan kernel
+    /// doesn't touch agent buffers, but we pick the smallest useful
+    /// value to keep fixture memory tiny.
+    #[doc(hidden)]
+    pub fn run_scan_for_test(
+        &mut self,
+        counts: &[u32],
+    ) -> Result<Vec<u32>, SpatialError> {
+        assert_eq!(
+            counts.len(),
+            GRID_CELLS as usize,
+            "run_scan_for_test: expected {} counts, got {}",
+            GRID_CELLS,
+            counts.len(),
+        );
+
+        // Ensure a pool exists. Borrow device/queue locally so we can
+        // drop the self-reborrow before calling `ensure_pool`.
+        let device = self
+            .test_device
+            .as_ref()
+            .expect("run_scan_for_test requires new_for_test")
+            .clone();
+        let queue = self
+            .test_queue
+            .as_ref()
+            .expect("run_scan_for_test requires new_for_test")
+            .clone();
+        self.ensure_pool(&device, 32);
+        let pool = self.pool.as_ref().expect("pool ensured");
+
+        queue.write_buffer(&pool.cell_counts_buf, 0, bytemuck::cast_slice(counts));
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("engine_gpu::spatial::scan_test_enc"),
+        });
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::spatial::scan_test_cpass"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &pool.scan_bind_group, &[]);
+            cpass.set_pipeline(&self.scan_pipeline);
+            cpass.dispatch_workgroups(1, 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(
+            &pool.cell_offsets_buf,
+            0,
+            &pool.cell_offsets_readback,
+            0,
+            (GRID_CELLS as u64) * 4,
+        );
+        queue.submit(Some(encoder.finish()));
+
+        map_read_u32(&pool.cell_offsets_readback, &device, GRID_CELLS as usize)
     }
 }
 

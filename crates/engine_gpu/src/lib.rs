@@ -343,6 +343,46 @@ impl SimBackend for GpuBackend {
 // Phase 1 impl (`gpu` feature) — real wgpu + Attack mask kernel.
 // -----------------------------------------------------------------------
 
+/// Test-only helper — spin up a fresh wgpu device + queue pair with
+/// the same adapter-selection logic as [`GpuBackend::new`], blocking on
+/// the async setup via `pollster::block_on`. Used by standalone unit
+/// tests (e.g. `gpu_prefix_scan`) that need a device but don't want to
+/// pay for the full backend (mask + scoring + view storage
+/// pipelines).
+///
+/// Returns the same `GpuInitError::NoAdapter` / `::RequestDevice`
+/// variants that production init would, so tests can forward the
+/// error reason if they care.
+#[cfg(feature = "gpu")]
+#[doc(hidden)]
+pub fn test_device() -> Result<(wgpu::Device, wgpu::Queue), GpuInitError> {
+    pollster::block_on(async {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .await
+            .map_err(|_| GpuInitError::NoAdapter)?;
+        let adapter_limits = adapter.limits();
+        adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("engine_gpu::test_device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: adapter_limits,
+                memory_hints: wgpu::MemoryHints::default(),
+                trace: wgpu::Trace::Off,
+            })
+            .await
+            .map_err(|e| GpuInitError::RequestDevice(format!("{e}")))
+    })
+}
+
 #[cfg(feature = "gpu")]
 impl GpuBackend {
     /// Spin up a wgpu instance, request an adapter + device, and
