@@ -5,4 +5,5 @@
 //! idiom — kept here so the batch-path drivers in `cascade_resident`
 //! and `snapshot` don't reintroduce the duplication.
 
+pub mod indirect;
 pub mod readback;
