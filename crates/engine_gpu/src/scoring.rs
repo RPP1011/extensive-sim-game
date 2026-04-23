@@ -455,6 +455,14 @@ struct ScoringPool {
     /// [`ScoringKernel::refresh_tick_cfg_for_resident`] to re-emit cfg
     /// without carrying `&ViewStorage` into the per-tick loop.
     cached_view_agent_cap: u32,
+
+    /// Cached resident-path bind group keyed by the caller-supplied
+    /// `mask_bitmaps_buf` identity. All other bindings (agent_data,
+    /// scoring_table, scoring_out, cfg, view buffers) are stable across
+    /// a batch (they change only on pool rebuild which rebuilds this
+    /// cache from scratch). `wgpu::Buffer: Eq + Hash` via its internal
+    /// Arc, so key comparison is cheap.
+    cached_resident_bg: Option<(wgpu::Buffer, wgpu::BindGroup)>,
 }
 
 impl ScoringKernel {
@@ -762,6 +770,7 @@ impl ScoringKernel {
             // so it leaves this empty.
             view_buf_handles: Vec::new(),
             cached_view_agent_cap: 0,
+            cached_resident_bg: None,
         });
     }
 
@@ -1272,19 +1281,39 @@ impl ScoringKernel {
 
         let num_mask_words = agent_cap.div_ceil(32).max(1);
         self.ensure_pool(device, agent_cap, num_mask_words);
-        let pool = self.pool.as_ref().expect("pool ensured");
-        debug_assert_eq!(
-            pool.agent_cap, agent_cap,
-            "ensure_pool must size the pool to the requested agent_cap",
-        );
-        if pool.view_buf_handles.is_empty() {
-            return Err(ScoringError::Dispatch(
-                "scoring::run_resident: pool view handles empty — call upload_soa_from_state first"
-                    .to_string(),
-            ));
+        {
+            let pool = self.pool.as_ref().expect("pool ensured");
+            debug_assert_eq!(
+                pool.agent_cap, agent_cap,
+                "ensure_pool must size the pool to the requested agent_cap",
+            );
+            if pool.view_buf_handles.is_empty() {
+                return Err(ScoringError::Dispatch(
+                    "scoring::run_resident: pool view handles empty — call upload_soa_from_state first"
+                        .to_string(),
+                ));
+            }
         }
 
-        let bind_group = self.build_resident_bind_group(device, pool, mask_bitmaps_buf)?;
+        // Cache the resident BG keyed by mask_bitmaps_buf identity. All
+        // other bindings come from the pool which, once sized, is
+        // stable across the batch — pool rebuild drops the cache.
+        let need_rebuild = match &self.pool.as_ref().unwrap().cached_resident_bg {
+            Some((buf, _)) => buf != mask_bitmaps_buf,
+            None => true,
+        };
+        if need_rebuild {
+            let pool = self.pool.as_ref().expect("pool ensured");
+            let bg = self.build_resident_bind_group(device, pool, mask_bitmaps_buf)?;
+            let pool_mut = self.pool.as_mut().expect("pool ensured");
+            pool_mut.cached_resident_bg = Some((mask_bitmaps_buf.clone(), bg));
+        }
+        let pool = self.pool.as_ref().expect("pool ensured");
+        let bind_group = &pool
+            .cached_resident_bg
+            .as_ref()
+            .expect("cached_resident_bg populated above")
+            .1;
 
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -1292,7 +1321,7 @@ impl ScoringKernel {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&self.pipeline);
-            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_bind_group(0, bind_group, &[]);
             let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
             cpass.dispatch_workgroups(groups, 1, 1);
         }

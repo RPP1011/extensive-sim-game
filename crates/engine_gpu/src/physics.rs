@@ -1077,6 +1077,16 @@ pub struct PhysicsKernel {
     /// events. Separate from `pool` so the sync path's allocations
     /// aren't perturbed by resident-only callers.
     pool_resident: Option<ResidentBufferPool>,
+    /// Resident-path bind-group cache. Keyed by the 13 stable buffer
+    /// identities plus the 3 iter-dependent ones (events_in +
+    /// event_ring.records + event_ring.tail). Each cascade tick hits
+    /// at most 3 distinct keys (iter 0, odd iters ≥ 1, even iters ≥ 2)
+    /// and the ones in slot are stable across ticks in a batch. The
+    /// HashMap thus has ≤ 3 entries and hits 100% after iter 0 of
+    /// tick 1. Keyed by hashing the wgpu Buffer handles (`Buffer: Eq +
+    /// Hash` via its internal Arc pointer — see wgpu-26's
+    /// `impl_eq_ord_hash_proxy!`).
+    resident_bg_cache: std::collections::HashMap<ResidentBgKey, wgpu::BindGroup>,
     /// Capacity the ring was provisioned with. Retained for diagnostics
     /// (Piece 3 may surface it in run reports); currently unread so the
     /// `allow(dead_code)` keeps the compiler happy.
@@ -1101,6 +1111,31 @@ struct ResidentBufferPool {
     agent_cap: u32,
     cfg_buf: wgpu::Buffer,
     resident_cfg_buf: wgpu::Buffer,
+}
+
+/// Cache key for `PhysicsKernel::resident_bg_cache`. Combines
+/// agent_cap with the wgpu buffer identities of every caller-supplied
+/// resident binding. `wgpu::Buffer: Eq + Hash` is derived from its
+/// internal Arc pointer (see wgpu-26's `impl_eq_ord_hash_proxy!`), so
+/// the key compares "same underlying buffer handle" rather than byte
+/// contents — exactly what the cache wants.
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct ResidentBgKey {
+    agent_cap: u32,
+    agents: wgpu::Buffer,
+    ability_known: wgpu::Buffer,
+    ability_cooldown: wgpu::Buffer,
+    ability_effects_count: wgpu::Buffer,
+    ability_effects: wgpu::Buffer,
+    kin: wgpu::Buffer,
+    nearest_hostile: wgpu::Buffer,
+    events_in: wgpu::Buffer,
+    event_ring_records: wgpu::Buffer,
+    event_ring_tail: wgpu::Buffer,
+    chronicle_records: wgpu::Buffer,
+    chronicle_tail: wgpu::Buffer,
+    indirect_args: wgpu::Buffer,
+    num_events: wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -1318,6 +1353,7 @@ impl PhysicsKernel {
             chronicle_ring,
             pool: None,
             pool_resident: None,
+            resident_bg_cache: std::collections::HashMap::new(),
             event_ring_capacity,
             chronicle_ring_capacity,
         })
@@ -1806,6 +1842,10 @@ impl PhysicsKernel {
             cfg_buf,
             resident_cfg_buf,
         });
+        // Pool rebuilt — cached resident BGs reference the *old*
+        // pool.cfg_buf / pool.resident_cfg_buf, so drop them.
+        // Repopulated lazily on next run_batch_resident call.
+        self.resident_bg_cache.clear();
     }
 
     /// Task B7 — resident-path sibling to [`Self::run_batch`].
@@ -1910,79 +1950,100 @@ impl PhysicsKernel {
             bytemuck::bytes_of(&resident_cfg),
         );
 
-        // Per-call bind group — every buffer except the two cfg
-        // uniforms is caller-supplied, so we rebuild the group each
-        // call. Building once upfront is impossible: the caller may
-        // swap buffers between iterations (ping-pong events_in).
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("engine_gpu::physics::bg_resident"),
-            layout: &self.bind_group_layout_resident,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: agents_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: abilities_known_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: abilities_cooldown_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: abilities_effects_count_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: abilities_effects_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: kin_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: nearest_hostile_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: events_in_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 8,
-                    resource: event_ring.records_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 9,
-                    resource: event_ring.tail_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 10,
-                    resource: pool.cfg_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 11,
-                    resource: chronicle_ring.records_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 12,
-                    resource: chronicle_ring.tail_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 13,
-                    resource: indirect_args.buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 14,
-                    resource: num_events_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 15,
-                    resource: pool.resident_cfg_buf.as_entire_binding(),
-                },
-            ],
+        // Cache the bind group. Across 8 cascade iterations per tick
+        // the caller drives us with at most 3 distinct buffer tuples
+        // (iter 0: apply-ring in, ring_a out; odd: ring_a in, ring_b
+        // out; even ≥ 2: ring_b in, ring_a out). All other bindings
+        // (agents, abilities, spatial, indirect_args, etc.) are stable
+        // across a batch, so the cache hits 100% after the first tick.
+        let key = ResidentBgKey {
+            agent_cap,
+            agents: agents_buf.clone(),
+            ability_known: abilities_known_buf.clone(),
+            ability_cooldown: abilities_cooldown_buf.clone(),
+            ability_effects_count: abilities_effects_count_buf.clone(),
+            ability_effects: abilities_effects_buf.clone(),
+            kin: kin_buf.clone(),
+            nearest_hostile: nearest_hostile_buf.clone(),
+            events_in: events_in_buf.clone(),
+            event_ring_records: event_ring.records_buffer().clone(),
+            event_ring_tail: event_ring.tail_buffer().clone(),
+            chronicle_records: chronicle_ring.records_buffer().clone(),
+            chronicle_tail: chronicle_ring.tail_buffer().clone(),
+            indirect_args: indirect_args.buffer().clone(),
+            num_events: num_events_buf.clone(),
+        };
+        let bind_group: &wgpu::BindGroup = self.resident_bg_cache.entry(key).or_insert_with(|| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("engine_gpu::physics::bg_resident"),
+                layout: &self.bind_group_layout_resident,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: agents_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: abilities_known_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: abilities_cooldown_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: abilities_effects_count_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: abilities_effects_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: kin_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: nearest_hostile_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: events_in_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: event_ring.records_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 9,
+                        resource: event_ring.tail_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 10,
+                        resource: pool.cfg_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: chronicle_ring.records_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: chronicle_ring.tail_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: indirect_args.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: num_events_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 15,
+                        resource: pool.resident_cfg_buf.as_entire_binding(),
+                    },
+                ],
+            })
         });
 
         {
@@ -1991,7 +2052,7 @@ impl PhysicsKernel {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&self.pipeline_resident);
-            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_bind_group(0, bind_group, &[]);
             cpass.dispatch_workgroups_indirect(
                 indirect_args.buffer(),
                 indirect_args.slot_offset(read_slot),

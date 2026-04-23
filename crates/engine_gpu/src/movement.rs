@@ -114,6 +114,19 @@ pub struct MovementKernel {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     pool: Option<BufferPool>,
+    /// Cached resident-path bind group keyed by the caller-supplied
+    /// `agents_buf`, `scoring_buf`, and `event_ring` buffer identities.
+    /// Stable across a batch — pool rebuild invalidates the cache.
+    cached_resident_bg: Option<(ResidentBgKey, wgpu::BindGroup)>,
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct ResidentBgKey {
+    agent_cap: u32,
+    agents: wgpu::Buffer,
+    scoring: wgpu::Buffer,
+    event_ring_records: wgpu::Buffer,
+    event_ring_tail: wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -198,6 +211,7 @@ impl MovementKernel {
             pipeline,
             bind_group_layout,
             pool: None,
+            cached_resident_bg: None,
         })
     }
 
@@ -244,6 +258,8 @@ impl MovementKernel {
             scoring_buf,
             cfg_buf,
         });
+        // Pool rebuilt — cached BG references the old pool.cfg_buf.
+        self.cached_resident_bg = None;
     }
 
     /// Run the movement kernel. Returns the mutated agent slots. The
@@ -430,34 +446,53 @@ impl MovementKernel {
         agent_cap: u32,
     ) -> Result<(), MovementError> {
         self.ensure_pool_cap(device, agent_cap);
-        let pool = self.pool.as_ref().expect("pool ensured");
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("engine_gpu::movement::bg_resident"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: agents_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: scoring_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: pool.cfg_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: event_ring.records_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: event_ring.tail_buffer().as_entire_binding(),
-                },
-            ],
-        });
+        let key = ResidentBgKey {
+            agent_cap,
+            agents: agents_buf.clone(),
+            scoring: scoring_buf.clone(),
+            event_ring_records: event_ring.records_buffer().clone(),
+            event_ring_tail: event_ring.tail_buffer().clone(),
+        };
+        let need_rebuild = match &self.cached_resident_bg {
+            Some((k, _)) => *k != key,
+            None => true,
+        };
+        if need_rebuild {
+            let pool = self.pool.as_ref().expect("pool ensured");
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("engine_gpu::movement::bg_resident"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: agents_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: scoring_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: pool.cfg_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: event_ring.records_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: event_ring.tail_buffer().as_entire_binding(),
+                    },
+                ],
+            });
+            self.cached_resident_bg = Some((key, bg));
+        }
+        let bind_group = &self
+            .cached_resident_bg
+            .as_ref()
+            .expect("cached_resident_bg populated above")
+            .1;
 
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -465,7 +500,7 @@ impl MovementKernel {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&self.pipeline);
-            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.set_bind_group(0, bind_group, &[]);
             let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
             cpass.dispatch_workgroups(groups, 1, 1);
         }
