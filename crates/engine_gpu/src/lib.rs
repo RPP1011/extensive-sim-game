@@ -59,6 +59,9 @@ pub mod backend;
 pub mod gpu_util;
 
 #[cfg(feature = "gpu")]
+pub mod sim_cfg;
+
+#[cfg(feature = "gpu")]
 pub mod mask;
 
 /// Phase 3 — scoring kernel + deterministic argmax. Consumes fused

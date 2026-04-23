@@ -47,3 +47,4 @@ engine_rules = { path = "../engine_rules", optional = true }
 [dev-dependencies]
 engine_rules = { path = "../engine_rules" }
 glam = "0.29"
+memoffset = "0.9"
