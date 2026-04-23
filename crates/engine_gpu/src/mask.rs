@@ -314,6 +314,12 @@ struct BufferPool {
     bitmap_bufs: Vec<wgpu::Buffer>,
     /// Matching readback (MAP_READ) buffers, in `bindings` order.
     bitmap_readback_bufs: Vec<wgpu::Buffer>,
+    /// Concat of all per-mask bitmaps (`N * mask_words` u32 words,
+    /// `bindings` order). Populated by the resident path via
+    /// `copy_buffer_to_buffer` after the dispatch; exposed to
+    /// downstream kernels through [`FusedMaskKernel::mask_bitmaps_buf`].
+    /// Not used by the sync `run_and_readback` path.
+    bitmaps_concat_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -498,6 +504,20 @@ impl FusedMaskKernel {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        // Resident-path output: single concat of all per-mask bitmaps.
+        // `bindings.len() * mask_words` u32 words, in `bindings` order
+        // (same order the scoring kernel's `mask_bitmaps` binding
+        // expects after `pack_mask_bitmaps` on the sync path).
+        let concat_words = (self.bindings.len() as u64) * (mask_words as u64);
+        let bitmaps_concat_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::fused_mask::bitmaps_concat"),
+            size: concat_words * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // Bind group — SoA (0..=2), N bitmaps, cfg.
         let mut bg_entries: Vec<wgpu::BindGroupEntry<'_>> = Vec::with_capacity(3 + bitmap_bufs.len() + 1);
         bg_entries.push(wgpu::BindGroupEntry { binding: 0, resource: pos_buf.as_entire_binding() });
@@ -532,9 +552,205 @@ impl FusedMaskKernel {
             creature_type_buf,
             bitmap_bufs,
             bitmap_readback_bufs,
+            bitmaps_concat_buf,
             cfg_buf,
             bind_group,
         });
+    }
+
+    // -----------------------------------------------------------------
+    // Resident path (Phase B of the GPU-resident cascade refactor)
+    //
+    // The resident entry point encodes the mask dispatch into a
+    // caller-owned command encoder and writes output into a stable
+    // concat buffer (see [`Self::mask_bitmaps_buf`]). The sync path
+    // [`Self::run_and_readback`] is untouched and continues to own its
+    // own submit + readback chain.
+    //
+    // ### Note on `agents_buf`
+    //
+    // The plan's `run_resident` signature (see
+    // `docs/superpowers/plans/2026-04-22-gpu-resident-cascade.md` §B3)
+    // takes a caller-supplied `agents_buf: &wgpu::Buffer` alongside
+    // `agent_cap`. That signature was written assuming the mask kernel
+    // reads a single packed `GpuAgentSlot` AoS buffer (like the
+    // physics / apply_actions / movement kernels do).
+    //
+    // The current fused-mask WGSL, however, binds three separate SoA
+    // buffers at @binding(0..=2) — `agent_pos`, `agent_alive`,
+    // `agent_creature_type` — sized to `agent_cap` elements each. It
+    // does NOT read a packed AgentSlot. Until the WGSL is rewritten to
+    // consume a packed layout (tracked as a follow-up — out of scope
+    // for this infra-only task), the resident path keeps uploading
+    // SoA into the pool's internal buffers through
+    // [`Self::upload_soa_from_state`], which callers must invoke once
+    // per tick before [`Self::run_resident`].
+    //
+    // `run_resident` therefore accepts `agents_buf` to lock in the
+    // planned signature (so Task D4's cascade wiring compiles and
+    // stays stable across the follow-up WGSL rewrite) but does not
+    // bind it. When the WGSL is rewritten the body will swap out the
+    // three SoA bindings for `agents_buf` without a signature change.
+    // -----------------------------------------------------------------
+
+    /// Upload the SoA fields + config uniform + clear bitmaps for the
+    /// resident path, from `state`. Must be called once per tick,
+    /// before [`Self::run_resident`], so the dispatch sees current
+    /// agent state.
+    ///
+    /// Separated from `run_resident` so the resident path's signature
+    /// matches the plan (no `&SimState` argument) — see the module-
+    /// level note above `run_resident` on why the SoA upload remains.
+    pub fn upload_soa_from_state(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        state: &SimState,
+    ) {
+        let agent_cap = state.agent_cap();
+        self.ensure_pool(device, agent_cap);
+        let pool = self.pool.as_ref().expect("pool ensured");
+
+        let pos_src: Vec<GpuPos> = state
+            .hot_pos()
+            .iter()
+            .map(|v| GpuPos { x: v.x, y: v.y, z: v.z })
+            .collect();
+        queue.write_buffer(&pool.pos_buf, 0, bytemuck::cast_slice(&pos_src));
+
+        let alive_src: Vec<u32> = state
+            .hot_alive()
+            .iter()
+            .map(|&b| if b { 1u32 } else { 0u32 })
+            .collect();
+        queue.write_buffer(&pool.alive_buf, 0, bytemuck::cast_slice(&alive_src));
+
+        let ct_src: Vec<u32> = (0..agent_cap)
+            .map(|slot| {
+                let id = AgentId::new(slot + 1).unwrap();
+                match state.agent_creature_type(id) {
+                    Some(ct) => ct as u8 as u32,
+                    None => u32::MAX,
+                }
+            })
+            .collect();
+        queue.write_buffer(&pool.creature_type_buf, 0, bytemuck::cast_slice(&ct_src));
+
+        queue.write_buffer(
+            &pool.cfg_buf,
+            0,
+            bytemuck::cast_slice(&[GpuConfig {
+                combat_attack_range: state.config.combat.attack_range,
+                movement_max_move_radius: state.config.movement.max_move_radius,
+                _pad0: 0.0,
+                _pad1: 0.0,
+            }]),
+        );
+
+        // Zero every per-mask bitmap — atomicOr accumulates, so
+        // leftover bits from a previous tick would poison the next
+        // read.
+        let zeros = vec![0u32; pool.mask_words as usize];
+        for buf in &pool.bitmap_bufs {
+            queue.write_buffer(buf, 0, bytemuck::cast_slice(&zeros));
+        }
+    }
+
+    /// Resident-path sibling to [`Self::run_and_readback`].
+    ///
+    /// Records the mask dispatch into `encoder` and, within the same
+    /// command list, copies each per-mask bitmap into the concat
+    /// output buffer exposed by [`Self::mask_bitmaps_buf`]. Does NOT
+    /// submit, does NOT copy bitmaps to CPU — the caller binds the
+    /// concat buffer directly into the next kernel (typically
+    /// scoring).
+    ///
+    /// ### Preconditions
+    ///
+    /// * [`Self::upload_soa_from_state`] must have been called on
+    ///   this tick (same `queue`) with a `state` whose `agent_cap()`
+    ///   equals the `agent_cap` argument passed here. The SoA
+    ///   buffers, the cfg uniform, and the per-mask bitmap clears
+    ///   all happen there.
+    ///
+    /// ### `agents_buf`
+    ///
+    /// Accepted but currently unused — see the module-level note
+    /// immediately above this method for the rationale (mask WGSL
+    /// reads three SoA buffers, not a packed `GpuAgentSlot`). The
+    /// parameter is present to lock in the planned signature so Task
+    /// D4's caller wiring stays stable across a future WGSL rewrite.
+    pub fn run_resident(
+        &mut self,
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        agents_buf: &wgpu::Buffer,
+        agent_cap: u32,
+    ) -> Result<(), KernelError> {
+        // Silence unused-param lint without sacrificing the stable
+        // API surface — `agents_buf` will be bound once the WGSL is
+        // rewritten to read a packed AgentSlot layout.
+        let _ = agents_buf;
+
+        self.ensure_pool(device, agent_cap);
+        let pool = self.pool.as_ref().expect("pool ensured");
+        debug_assert_eq!(
+            pool.agent_cap, agent_cap,
+            "ensure_pool must size the pool to the requested agent_cap",
+        );
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::fused_mask::cpass_resident"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline);
+            cpass.set_bind_group(0, &pool.bind_group, &[]);
+            let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
+
+        // Pack per-mask bitmaps into the single concat buffer the
+        // resident path exposes. Downstream kernels (scoring) expect
+        // a single flat layout `[mask_0_words, mask_1_words, ...]`
+        // matching `pack_mask_bitmaps`'s contract.
+        let mask_bytes = (pool.mask_words as u64) * 4;
+        for (i, storage) in pool.bitmap_bufs.iter().enumerate() {
+            let dst_offset = (i as u64) * mask_bytes;
+            encoder.copy_buffer_to_buffer(
+                storage,
+                0,
+                &pool.bitmaps_concat_buf,
+                dst_offset,
+                mask_bytes,
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Buffer handle for the concat mask-bitmap output on the
+    /// resident path. Stable across ticks within a given `agent_cap`
+    /// — the pool rebuilds (and this handle is invalidated) if
+    /// `agent_cap` changes between calls.
+    ///
+    /// Layout: `bindings().len() * mask_words` `u32` words, laid out
+    /// as `[mask_0 bitmap, mask_1 bitmap, ...]` in [`Self::bindings`]
+    /// order. Matches what [`crate::scoring::pack_mask_bitmaps`]
+    /// produces on the sync path.
+    ///
+    /// ### Panics
+    ///
+    /// Panics if [`Self::run_resident`] (or another pool-sizing
+    /// method such as [`Self::upload_soa_from_state`]) has not been
+    /// called yet — the pool is lazily initialised on first use.
+    pub fn mask_bitmaps_buf(&self) -> &wgpu::Buffer {
+        &self
+            .pool
+            .as_ref()
+            .expect("mask_bitmaps_buf: pool not initialised; call run_resident or upload_soa_from_state first")
+            .bitmaps_concat_buf
     }
 
     /// Upload state into the GPU buffers, dispatch the fused kernel,
