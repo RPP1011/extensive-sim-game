@@ -155,15 +155,19 @@ fn run_one_iteration(
     let nearest_hostile = vec![u32::MAX; agent_cap as usize];
 
     let cfg = PhysicsCfg {
-        tick: gpu_state.tick,
         num_events: 0,
-        combat_engagement_range: gpu_state.config.combat.engagement_range,
-        cascade_max_iterations: 8,
         agent_cap,
         max_abilities: engine_gpu::physics::MAX_ABILITIES as u32,
         max_effects: engine_gpu::physics::MAX_EFFECTS as u32,
-        _pad: 0,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
     };
+    // Task 2.8 — world-scalars (`tick`, `engagement_range`,
+    // `cascade_max_iterations`) live in the shared SimCfg buffer; the
+    // sync `run_batch` uploads this into its pool-owned fallback buf.
+    let sim_cfg = engine_gpu::sim_cfg::SimCfg::from_state(&gpu_state);
     let events_in: Vec<_> = seeded.iter().filter_map(pack_event).collect();
     let out = kernel
         .run_batch(
@@ -175,6 +179,7 @@ fn run_one_iteration(
             &nearest_hostile,
             &events_in,
             cfg,
+            &sim_cfg,
         )
         .expect("run_batch");
     assert!(

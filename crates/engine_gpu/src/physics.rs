@@ -108,6 +108,19 @@ use crate::event_ring::{
 /// Workgroup size for the physics dispatcher.
 pub const PHYSICS_WORKGROUP_SIZE: u32 = 64;
 
+/// Binding number of the shared `SimCfg` storage buffer (Task 2.8 of
+/// the GPU sim-state refactor). Sits past the resident-only bindings
+/// (10 = cfg, 13/14/15 = indirect_args / num_events_buf / resident_cfg)
+/// so extending the BGL doesn't disturb the existing slot numbering.
+///
+/// Both `cs_physics` (sync) and `cs_physics_resident` entry points
+/// reference this binding, so the sync + resident BGLs both include an
+/// entry at `SIM_CFG_BINDING`. The sync path binds a pool-owned
+/// `sync_sim_cfg_buf` (refreshed per `run_batch` via
+/// `SimCfg::from_state(state)`); the resident path binds the caller-
+/// supplied batch-scope SimCfg buffer the cascade driver threads in.
+pub const SIM_CFG_BINDING: u32 = 16;
+
 /// Max effects per ability program. The ability-registry buffer is
 /// flat-indexed as `ab * MAX_EFFECTS + effect_idx`. Bumping this grows
 /// the registry buffer size linearly with the ability count. 8 matches
@@ -193,18 +206,27 @@ impl Default for GpuKinList {
     }
 }
 
-/// Config uniform the physics kernel reads.
+/// Kernel-local config uniform. 32 bytes — preserved across Task 2.8
+/// to avoid perturbing the uniform's 16-byte WGSL alignment.
+///
+/// Task 2.8 of the GPU sim-state refactor migrated the world-scalar
+/// fields (`tick`, `combat_engagement_range`, `cascade_max_iterations`)
+/// onto the shared `SimCfg` storage buffer bound at `SIM_CFG_BINDING`.
+/// The remaining fields are all kernel-local: `num_events` varies per
+/// sync dispatch; `agent_cap`, `max_abilities`, `max_effects` are
+/// build-time bounds that the kernel uses for loop caps and slot
+/// validation.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable, Debug, PartialEq)]
 pub struct PhysicsCfg {
-    pub tick: u32,
     pub num_events: u32,
-    pub combat_engagement_range: f32,
-    pub cascade_max_iterations: u32,
     pub agent_cap: u32,
     pub max_abilities: u32,
     pub max_effects: u32,
-    pub _pad: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+    pub _pad3: u32,
 }
 
 /// Task B7 — resident-path uniform. Tells the resident kernel which
@@ -496,14 +518,14 @@ pub fn build_physics_shader_with_chronicle(
          \x20 ids: array<u32, 32>,\n\
          };\n\n\
          struct PhysicsConfig {\n\
-         \x20 tick: u32,\n\
          \x20 num_events: u32,\n\
-         \x20 combat_engagement_range: f32,\n\
-         \x20 cascade_max_iterations: u32,\n\
          \x20 agent_cap: u32,\n\
          \x20 max_abilities: u32,\n\
          \x20 max_effects: u32,\n\
-         \x20 _pad: u32,\n\
+         \x20 _pad0: u32,\n\
+         \x20 _pad1: u32,\n\
+         \x20 _pad2: u32,\n\
+         \x20 _pad3: u32,\n\
          };\n\n",
     );
 
@@ -539,6 +561,17 @@ pub fn build_physics_shader_with_chronicle(
          @group(0) @binding(10) var<uniform>             cfg: PhysicsConfig;\n\n",
     );
 
+    // SimCfg — shared world-scalar storage buffer (Task 2.8 of the GPU
+    // sim-state refactor). Declared via the dsl_compiler helper so the
+    // struct layout stays in lockstep with `engine_gpu::sim_cfg::SimCfg`
+    // — any future field added there becomes visible to physics
+    // without a round of edits here. The physics emitter rewrites
+    // `config.combat.engagement_range` → `sim_cfg.engagement_range`,
+    // `cascade.max_iterations` → `sim_cfg.cascade_max_iterations`, and
+    // `state.tick` → `wgsl_world_tick` (function-scope alias to
+    // `sim_cfg.tick` injected by `wrap_rule_with_tick_alias`).
+    dsl_compiler::emit_sim_cfg::emit_sim_cfg_struct_wgsl(&mut out, SIM_CFG_BINDING);
+
     // Pull in event_ring's WGSL: defines `EventRecord` struct and the
     // `gpu_emit_event(...)` + per-kind helpers the physics emitter's
     // output calls into.
@@ -573,39 +606,29 @@ pub fn build_physics_shader_with_chronicle(
     // standing, memory) are no-ops documented as such.
     out.push_str(&state_stub_fns());
 
-    // ---- `cfg` namespace-field lookups (via `cfg.<snake>` in emitter) ----
+    // ---- `cfg` namespace-field lookups ----
     //
-    // The emitter lowers `config.combat.engagement_range` to
-    // `cfg.combat_engagement_range` and `cascade.max_iterations` to
-    // `cfg.cascade_max_iterations`. Our `PhysicsConfig` struct uses
-    // those exact field names, so the reads land correctly.
+    // Task 2.8 of the GPU sim-state refactor migrated the emitter's
+    // world-scalar references off the per-kernel `cfg` uniform onto
+    // the shared `SimCfg` storage buffer. The emitter now lowers:
+    //
+    //   * `config.combat.engagement_range` → `sim_cfg.engagement_range`
+    //   * `cascade.max_iterations`         → `sim_cfg.cascade_max_iterations`
+    //
+    // Those fields are read directly from the SimCfg binding declared
+    // above. Kernel-local fields (`num_events`, `agent_cap`,
+    // `max_abilities`, `max_effects`) keep living on `cfg`.
 
-    // ---- `wgsl_world_tick` (tick uniform) ----
-    out.push_str(
-        "fn wgsl_world_tick_fn() -> u32 { return cfg.tick; }\n\
-         // Shadow variable for the emitter's implicit tick reference —\n\
-         // the emitted code spells it `wgsl_world_tick` as a bare name,\n\
-         // so an init-at-top-of-each-fn alias is impractical. Rely on a\n\
-         // module-level `let`-equivalent via a const expression fn the\n\
-         // lowered code calls instead.\n",
-    );
-    // Actually we need `wgsl_world_tick` as an identifier — emit it as a
-    // local shadowed in the dispatcher. The emitter doesn't generate fn
-    // bodies that initialise this local; it just references
-    // `wgsl_world_tick` as if it's in scope. We declare it as a
-    // module-level `const` by embedding cfg.tick inline via a helper,
-    // but WGSL module-level consts can't reference uniform storage.
+    // ---- `wgsl_world_tick` (tick alias) ----
     //
-    // Workaround: emit a per-rule wrapper that injects
-    // `let wgsl_world_tick = cfg.tick;` at the top. That keeps the
-    // emitter output unchanged and scopes the variable per-fn.
-    //
-    // Implementation: rather than rewriting the emitter, wrap each
-    // rule fn in a macro-expand step. Simpler: declare the ident as a
-    // function-scope `let` inside every emitted fn. The emitter already
-    // emits `let ... = ...` lines at the top of each rule body from the
-    // destructure prelude, so we post-process the emitted source by
-    // injecting one more `let` line right after the `fn ... {` header.
+    // The emitter spells every `state.tick` reference as the bare
+    // identifier `wgsl_world_tick` so integration decides where the
+    // value comes from. Post-Task-2.8 it comes from the shared SimCfg
+    // storage buffer (`sim_cfg.tick`); the seed-indirect kernel's
+    // atomic `tick++` is the sole writer, and every physics read sees
+    // the post-increment value. Declaring the alias as a function-
+    // scope `let` inside each rule fn (via `wrap_rule_with_tick_alias`)
+    // keeps the emitter output unchanged.
 
     // ---- Spatial query wrappers ----
     //
@@ -787,10 +810,18 @@ pub fn build_physics_shader_resident(
     Ok(out)
 }
 
-/// Inject `let wgsl_world_tick = cfg.tick;` right after the rule's
+/// Inject `let wgsl_world_tick = sim_cfg.tick;` right after the rule's
 /// `fn name(event_idx: u32) {` header. The emitter produces that
 /// identifier as a bare name in emit sites; declaring it as a function-
 /// scope `let` keeps the emitter output unchanged.
+///
+/// Task 2.8 of the GPU sim-state refactor swapped the source from the
+/// per-kernel `cfg.tick` uniform to the shared `SimCfg` storage buffer
+/// so physics + scoring + movement + apply_actions all read the same
+/// atomically-incremented tick. `sim_cfg.tick` is a plain (non-atomic)
+/// read here — the seed-indirect kernel is the sole atomic writer, and
+/// wgpu's compute-pass scheduling sequences the seed dispatch before
+/// the physics dispatches that consume the post-increment value.
 fn wrap_rule_with_tick_alias(wgsl: &str) -> String {
     // Find the first `{` after `fn physics_...(event_idx: u32)`.
     let mut out = String::with_capacity(wgsl.len() + 64);
@@ -799,7 +830,7 @@ fn wrap_rule_with_tick_alias(wgsl: &str) -> String {
         out.push_str(line);
         out.push('\n');
         if !injected && line.contains("fn physics_") && line.trim_end().ends_with('{') {
-            out.push_str("    let wgsl_world_tick: u32 = cfg.tick;\n");
+            out.push_str("    let wgsl_world_tick: u32 = sim_cfg.tick;\n");
             injected = true;
         }
     }
@@ -1142,6 +1173,11 @@ struct ResidentBgKey {
     chronicle_tail: wgpu::Buffer,
     indirect_args: wgpu::Buffer,
     num_events: wgpu::Buffer,
+    /// Task 2.8 — caller-supplied shared `SimCfg` buffer. The backend
+    /// holds one resident handle per `GpuBackend`, so this key is
+    /// stable across every cascade iteration in a batch (the cache
+    /// still hits 100% after iter 0).
+    sim_cfg: wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -1157,6 +1193,12 @@ struct BufferPool {
     events_in_buf: wgpu::Buffer,
     events_in_capacity: u32,
     cfg_buf: wgpu::Buffer,
+    /// Task 2.8 — pool-owned `SimCfg` buffer used only by the sync
+    /// `run_batch` path so it stays self-contained without a caller-
+    /// supplied resident SimCfg. Refreshed each `run_batch` call via
+    /// `SimCfg::from_state(state)` + `upload_sim_cfg`. The resident
+    /// path binds the caller's buffer instead and does not read this.
+    sync_sim_cfg_buf: wgpu::Buffer,
     /// Persistent staging for the event-ring tail readback. Phase 9
     /// (task 195): sized once at init to avoid per-tick buffer alloc.
     drain_tail_staging: wgpu::Buffer,
@@ -1265,6 +1307,11 @@ impl PhysicsKernel {
             // `emit ChronicleEntry` here instead of the main event ring.
             storage_rw(11), // chronicle_ring records
             storage_rw(12), // chronicle_ring tail
+            // Task 2.8 — shared SimCfg storage buffer (world-scalars:
+            // tick, engagement_range, cascade_max_iterations, ...).
+            // Read-only; the seed-indirect kernel is the sole writer
+            // and runs in a prior dispatch.
+            storage_ro(SIM_CFG_BINDING),
         ];
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::physics::bgl"),
@@ -1326,6 +1373,10 @@ impl PhysicsKernel {
             storage_rw(13), // indirect_args
             storage_rw(14), // num_events_buf
             uniform(15),    // resident_cfg
+            // Task 2.8 — shared SimCfg storage buffer. Same binding
+            // index as the sync BGL so both WGSL entry points reference
+            // the identical `@binding(SIM_CFG_BINDING)` declaration.
+            storage_ro(SIM_CFG_BINDING),
         ];
         let bind_group_layout_resident =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1474,6 +1525,17 @@ impl PhysicsKernel {
             mapped_at_creation: false,
         });
 
+        // Task 2.8 — sync-path fallback SimCfg buffer. Owned by the
+        // pool so `run_batch` stays self-contained; `SimCfg::from_state`
+        // is called per dispatch and the result is uploaded here before
+        // the bind group binds it at `SIM_CFG_BINDING`.
+        let sync_sim_cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::physics::sync_sim_cfg"),
+            size: std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // Phase 9 (task 195): persistent drain staging. Previously
         // allocated per-drain, which at MAX_CASCADE_ITERATIONS=8 iterations
         // meant 8 fresh 2.6 MB buffers + 8 × 4 B tail buffers per tick.
@@ -1506,6 +1568,7 @@ impl PhysicsKernel {
             events_in_buf,
             events_in_capacity: want_events_cap,
             cfg_buf,
+            sync_sim_cfg_buf,
             drain_tail_staging,
             drain_records_staging,
             drain_ring_capacity: ring_cap,
@@ -1526,7 +1589,15 @@ impl PhysicsKernel {
     ///     AgentId of the closest hostile or `0xFFFFFFFFu`.
     ///   * `events_in` — the batch to dispatch physics on. Slots are
     ///     1:1 with `gpu_dispatch` invocations; one thread per event.
-    ///   * `cfg` — per-run config (tick, agent_cap, etc.).
+    ///   * `cfg` — kernel-local per-run config (`num_events`,
+    ///     `agent_cap`, `max_abilities`, `max_effects`). World-scalars
+    ///     (`tick`, `engagement_range`, `cascade_max_iterations`) flow
+    ///     via `sim_cfg` — Task 2.8 of the GPU sim-state refactor.
+    ///   * `sim_cfg` — shared world-scalar snapshot. The sync path
+    ///     uploads it into the pool-owned `sync_sim_cfg_buf` each
+    ///     dispatch so this caller doesn't need to manage a resident
+    ///     handle; the resident path uses `run_batch_resident` which
+    ///     takes a caller-supplied `sim_cfg_buf` instead.
     ///
     /// Outputs:
     ///   * `agent_slots_out` — mutated SoA after physics.
@@ -1542,6 +1613,7 @@ impl PhysicsKernel {
         nearest_hostile: &[u32],
         events_in: &[EventRecord],
         cfg: PhysicsCfg,
+        sim_cfg: &crate::sim_cfg::SimCfg,
     ) -> Result<PhysicsBatchOutput, PhysicsError> {
         let agent_cap = cfg.agent_cap;
         if (agent_slots_in.len() as u32) < agent_cap {
@@ -1616,6 +1688,10 @@ impl PhysicsKernel {
             ..cfg
         };
         queue.write_buffer(&pool.cfg_buf, 0, bytemuck::bytes_of(&cfg_on_wire));
+        // Task 2.8 — upload the SimCfg snapshot into the pool-owned
+        // fallback buffer so the sync bind group's `sim_cfg` binding
+        // sees current tick + engagement_range + cascade_max_iterations.
+        crate::sim_cfg::upload_sim_cfg(queue, &pool.sync_sim_cfg_buf, sim_cfg);
 
         // Reset the event ring tail so outputs start at slot 0.
         self.event_ring.reset(queue);
@@ -1681,6 +1757,12 @@ impl PhysicsKernel {
                 wgpu::BindGroupEntry {
                     binding: 12,
                     resource: self.chronicle_ring.tail_buffer().as_entire_binding(),
+                },
+                // Task 2.8 — shared SimCfg (sync path uses pool-owned
+                // fallback buffer populated just above).
+                wgpu::BindGroupEntry {
+                    binding: SIM_CFG_BINDING,
+                    resource: pool.sync_sim_cfg_buf.as_entire_binding(),
                 },
             ],
         });
@@ -1923,6 +2005,7 @@ impl PhysicsKernel {
         chronicle_ring: &GpuChronicleRing,
         indirect_args: &crate::gpu_util::indirect::IndirectArgsBuffer,
         num_events_buf: &wgpu::Buffer,
+        sim_cfg_buf: &wgpu::Buffer,
         read_slot: u32,
         write_slot: u32,
         cfg: PhysicsCfg,
@@ -1984,6 +2067,7 @@ impl PhysicsKernel {
             chronicle_tail: chronicle_ring.tail_buffer().clone(),
             indirect_args: indirect_args.buffer().clone(),
             num_events: num_events_buf.clone(),
+            sim_cfg: sim_cfg_buf.clone(),
         };
         let bind_group: &wgpu::BindGroup = self.resident_bg_cache.entry(key).or_insert_with(|| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2053,6 +2137,11 @@ impl PhysicsKernel {
                     wgpu::BindGroupEntry {
                         binding: 15,
                         resource: pool.resident_cfg_buf.as_entire_binding(),
+                    },
+                    // Task 2.8 — caller-supplied shared SimCfg buffer.
+                    wgpu::BindGroupEntry {
+                        binding: SIM_CFG_BINDING,
+                        resource: sim_cfg_buf.as_entire_binding(),
                     },
                 ],
             })

@@ -244,17 +244,27 @@ pub fn run_cascade(
     let mut nearest_hostile = hostile_results.nearest_hostile.clone();
     nearest_hostile.resize(agent_cap as usize, NO_HOSTILE);
 
-    // Config uniform — stable across all iterations.
+    // Kernel-local PhysicsCfg — stable across all iterations. Task 2.8
+    // of the GPU sim-state refactor migrated the world-scalar fields
+    // (`tick`, `combat_engagement_range`, `cascade_max_iterations`) to
+    // the shared `SimCfg` storage buffer; the sync physics path
+    // uploads a `SimCfg::from_state(state)` snapshot into its pool-
+    // owned fallback buffer each `run_batch` call.
     let cfg_template = PhysicsCfg {
-        tick: state.tick,
         num_events: 0, // overridden per iteration by run_batch
-        combat_engagement_range: state.config.combat.engagement_range,
-        cascade_max_iterations: MAX_CASCADE_ITERATIONS,
         agent_cap,
         max_abilities: MAX_ABILITIES as u32,
         max_effects: MAX_EFFECTS as u32,
-        _pad: 0,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
     };
+    // World-scalars — uploaded into the physics sync-path SimCfg buffer
+    // by `run_batch` via `upload_sim_cfg`. We snapshot once and reuse
+    // across all cascade iterations since none of the fields change
+    // within a single cascade run.
+    let sim_cfg = crate::sim_cfg::SimCfg::from_state(state);
 
     let mut all_emitted: Vec<EventRecord> = Vec::new();
     let mut drain_outcomes: Vec<DrainOutcome> = Vec::new();
@@ -292,6 +302,7 @@ pub fn run_cascade(
             &nearest_hostile,
             &events_in,
             cfg_template,
+            &sim_cfg,
         )?;
 
         if drain.overflowed {

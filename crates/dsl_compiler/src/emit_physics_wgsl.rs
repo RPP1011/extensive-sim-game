@@ -99,9 +99,13 @@
 //!     - `events_in: array<EventSlot>` — read binding. `EventSlot`
 //!       carries `kind: u32` + six `u32` payload words.
 //!
-//!   * **Config** (shared uniform with mask/scoring emitters):
-//!     - `cfg.combat_engagement_range: f32`
-//!     - `cfg.cascade_max_iterations: u32`
+//!   * **Config** (world-scalars live in the shared `SimCfg` storage
+//!     buffer emitted via `emit_sim_cfg_struct_wgsl`; see Task 2.8 of
+//!     the GPU sim-state refactor):
+//!     - `sim_cfg.engagement_range: f32`   (← `config.combat.engagement_range`)
+//!     - `sim_cfg.cascade_max_iterations: u32` (← `cascade.max_iterations`)
+//!     - `sim_cfg.tick: u32`               (← `state.tick` via the
+//!       `wgsl_world_tick` alias injected by `physics.rs`)
 //!
 //!   * **View reads** (Task 185):
 //!     - `view_<snake>_get(args..., [tick])` where applicable.
@@ -1179,15 +1183,27 @@ fn lower_expr_kind(kind: &IrExpr) -> Result<String, EmitError> {
 fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitError> {
     match ns {
         NamespaceId::Config => {
-            // Mirrors the mask/scoring emitters: two-hop `config.<block>.<field>`
-            // collapses into a single `cfg.<block>_<field>` read against the
-            // shared config uniform.
-            let snake = field.replace('.', "_");
-            Ok(format!("cfg.{snake}"))
+            // Task 2.8 — world-scalar `config.combat.engagement_range`
+            // migrated off the per-kernel `cfg` uniform onto the shared
+            // `SimCfg` storage buffer (`sim_cfg.engagement_range`). The
+            // mask/scoring emitters perform the analogous swap for their
+            // own world-scalar reads. Any future `config.<ns>.<field>`
+            // that lands in the shared SimCfg extends this match.
+            match field {
+                "combat.engagement_range" => Ok("sim_cfg.engagement_range".into()),
+                _ => Err(EmitError::Unsupported(format!(
+                    "config field `.{field}` not wired in physics WGSL \
+                     (world-scalars live in SimCfg; kernel-locals in cfg)",
+                ))),
+            }
         }
         NamespaceId::World => {
             if field == "tick" {
-                // `state.tick` is uploaded as a uniform scalar each tick.
+                // Emitter-side alias: the emitter keeps spelling the
+                // tick reference as the bare identifier `wgsl_world_tick`
+                // so integration code can choose where the value comes
+                // from. Physics resolves it to `sim_cfg.tick` via a
+                // function-scope `let` injected by `wrap_rule_with_tick_alias`.
                 return Ok("wgsl_world_tick".into());
             }
             Err(EmitError::Unsupported(format!(
@@ -1196,7 +1212,13 @@ fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitErr
         }
         NamespaceId::Cascade => {
             if field == "max_iterations" {
-                return Ok("cfg.cascade_max_iterations".into());
+                // Task 2.8 — migrated from `cfg.cascade_max_iterations`
+                // to the shared SimCfg storage buffer. The kernel reads
+                // this in the `cast_depth` guard, which is one lookup per
+                // physics-dispatch thread — cheap enough that running it
+                // through the shared buffer instead of a dedicated uniform
+                // has negligible overhead.
+                return Ok("sim_cfg.cascade_max_iterations".into());
             }
             Err(EmitError::Unsupported(format!(
                 "cascade field `.{field}` not wired in physics WGSL"

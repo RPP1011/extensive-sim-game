@@ -172,15 +172,20 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
     });
 
     let cfg = PhysicsCfg {
-        tick: state.tick,
         num_events: 0,
-        combat_engagement_range: state.config.combat.engagement_range,
-        cascade_max_iterations: 4,
         agent_cap,
         max_abilities: MAX_ABILITIES as u32,
         max_effects: MAX_EFFECTS as u32,
-        _pad: 0,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
     };
+
+    // Task 2.8 — world-scalars via shared SimCfg buffer.
+    let sim_cfg_snapshot = engine_gpu::sim_cfg::SimCfg::from_state(&state);
+    let sim_cfg_buf = engine_gpu::sim_cfg::create_sim_cfg_buffer(&device);
+    engine_gpu::sim_cfg::upload_sim_cfg(&queue, &sim_cfg_buf, &sim_cfg_snapshot);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("smoke::encoder"),
@@ -202,6 +207,7 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
             &chronicle_ring,
             &indirect,
             &num_events_buf,
+            &sim_cfg_buf,
             0, // read_slot
             1, // write_slot
             cfg,
@@ -279,15 +285,20 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
     });
 
     let cfg = PhysicsCfg {
-        tick: state.tick,
         num_events: 1,
-        combat_engagement_range: state.config.combat.engagement_range,
-        cascade_max_iterations: 4,
         agent_cap,
         max_abilities: MAX_ABILITIES as u32,
         max_effects: MAX_EFFECTS as u32,
-        _pad: 0,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
     };
+
+    // Task 2.8 — world-scalars via shared SimCfg buffer.
+    let sim_cfg_snapshot = engine_gpu::sim_cfg::SimCfg::from_state(&state);
+    let sim_cfg_buf = engine_gpu::sim_cfg::create_sim_cfg_buffer(&device);
+    engine_gpu::sim_cfg::upload_sim_cfg(&queue, &sim_cfg_buf, &sim_cfg_snapshot);
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("smoke::encoder"),
@@ -309,6 +320,7 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
             &chronicle_ring,
             &indirect,
             &num_events_buf,
+            &sim_cfg_buf,
             0, // read_slot
             1, // write_slot
             cfg,

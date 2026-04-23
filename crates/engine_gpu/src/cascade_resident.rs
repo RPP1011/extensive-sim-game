@@ -1097,19 +1097,24 @@ pub fn run_cascade_resident_with_iter_cap(
     );
 
     // ---- 4. Encode N physics iterations ---------------------------------
+    // Task 2.8 — world-scalars (`tick`, `combat_engagement_range`,
+    // `cascade_max_iterations`) migrated to the shared SimCfg storage
+    // buffer. `PhysicsCfg` now carries only kernel-local fields; physics
+    // reads `state.tick` from `sim_cfg.tick` (atomically incremented
+    // by the seed-indirect kernel, not taken from this `state`).
     let cfg_template = PhysicsCfg {
-        tick: state.tick,
         // `num_events` in the `PhysicsCfg` uniform is *unused* by the
         // resident entry point — it reads its count from
         // `num_events_buf[read_slot]` instead. We keep a 0 default so
         // any stale read surfaces obviously as a no-op.
         num_events: 0,
-        combat_engagement_range: engagement_range,
-        cascade_max_iterations: MAX_CASCADE_ITERATIONS,
         agent_cap,
         max_abilities: MAX_ABILITIES as u32,
         max_effects: MAX_EFFECTS as u32,
-        _pad: 0,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
     };
 
     for iter in 0..max_iters {
@@ -1140,6 +1145,7 @@ pub fn run_cascade_resident_with_iter_cap(
             &resident_ctx.chronicle_ring,
             indirect_args,
             &resident_ctx.num_events_buf,
+            sim_cfg_buf,
             iter,       // read_slot
             iter + 1,   // write_slot
             cfg_template,

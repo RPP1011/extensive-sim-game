@@ -867,15 +867,17 @@ fn chronicle_events_route_to_chronicle_ring_not_main_ring() {
     let kin_lists = vec![GpuKinList::default(); agent_cap as usize];
     let nearest_hostile = vec![u32::MAX; agent_cap as usize];
     let cfg = PhysicsCfg {
-        tick: 0,
         num_events: 0,
-        combat_engagement_range: state.config.combat.engagement_range,
-        cascade_max_iterations: 8,
         agent_cap,
         max_abilities: engine_gpu::physics::MAX_ABILITIES as u32,
         max_effects: engine_gpu::physics::MAX_EFFECTS as u32,
-        _pad: 0,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
+        _pad3: 0,
     };
+    // Task 2.8 — world-scalars flow via the shared SimCfg buffer.
+    let sim_cfg = engine_gpu::sim_cfg::SimCfg::from_state(&state);
     let abilities = PackedAbilityRegistry::empty();
     let seeded = vec![Event::AgentAttacked {
         actor: AgentId::new(1).unwrap(),
@@ -895,6 +897,7 @@ fn chronicle_events_route_to_chronicle_ring_not_main_ring() {
             &nearest_hostile,
             &events_in,
             cfg,
+            &sim_cfg,
         )
         .expect("run_batch");
     assert!(!out.drain.overflowed, "main event ring should not overflow");
