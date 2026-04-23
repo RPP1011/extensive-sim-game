@@ -13,6 +13,7 @@
 //! `assets/sim/views.sim`.
 
 use dsl_compiler::ast::{AnnotationValue, Decl};
+use dsl_compiler::ir::{StorageHint, ViewKind};
 use dsl_compiler::parse;
 
 const SRC: &str = r#"
@@ -78,5 +79,25 @@ fn symmetric_pair_topk_carries_k_argument() {
             assert_eq!(*n, 8, "K should equal 8");
         }
         other => panic!("K value should be Int(8), got {other:?}"),
+    }
+}
+
+/// Task 1.3 — `@symmetric_pair_topk(K = 8)` lowers to the matching IR
+/// `StorageHint::SymmetricPairTopK { k: 8 }` variant. The resolver
+/// converts the annotation into the typed view storage hint so
+/// downstream emitters (tasks 1.5-1.8) can dispatch on shape.
+#[test]
+fn symmetric_pair_topk_lowers_to_ir_variant() {
+    let comp = dsl_compiler::compile(SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "standing")
+        .expect("view IR should exist");
+    match view.kind {
+        ViewKind::Materialized(StorageHint::SymmetricPairTopK { k }) => {
+            assert_eq!(k, 8, "K should equal 8")
+        }
+        other => panic!("expected Materialized(SymmetricPairTopK {{ k: 8 }}), got {other:?}"),
     }
 }

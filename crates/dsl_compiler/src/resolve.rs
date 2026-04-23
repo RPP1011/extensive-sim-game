@@ -2323,10 +2323,113 @@ fn lower_view_kind(
     }
     let _ = saw_on_event; // presence is advisory — handlers are in the body
 
+    // Sibling view-shape annotations — `@symmetric_pair_topk(K = N)`
+    // and `@per_entity_ring(K = N)`. Each supplies the storage hint
+    // directly; conflicting with an explicit `storage = ...` inside
+    // `@materialized(...)` is a hard error. GPU cold-state replay
+    // plan (2026-04-22) tasks 1.3 + 1.4.
+    let sym_ann = annotations.iter().find(|a| a.name == "symmetric_pair_topk");
+    let ring_ann = annotations.iter().find(|a| a.name == "per_entity_ring");
+    if let (Some(a), Some(b)) = (sym_ann, ring_ann) {
+        let span = if a.span.start < b.span.start { b.span } else { a.span };
+        return Err(ResolveError::InvalidViewKind {
+            view_name: view_name.to_string(),
+            detail:
+                "`@symmetric_pair_topk` and `@per_entity_ring` are mutually exclusive view-shape annotations"
+                    .into(),
+            span,
+        });
+    }
+    if let Some(ann) = sym_ann.or(ring_ann) {
+        if storage.is_some() {
+            return Err(ResolveError::InvalidViewKind {
+                view_name: view_name.to_string(),
+                detail: format!(
+                    "`@{}` conflicts with an explicit `@materialized(storage = ...)` hint; drop one",
+                    ann.name
+                ),
+                span: ann.span,
+            });
+        }
+        let k = annotation_k_arg(ann)?;
+        let hint = if ann.name == "symmetric_pair_topk" {
+            StorageHint::SymmetricPairTopK { k }
+        } else {
+            StorageHint::PerEntityRing { k }
+        };
+        return Ok(ViewKind::Materialized(hint));
+    }
+
     // Default storage hint is `pair_map` per spec §9 D31.
     let storage = storage.unwrap_or(StorageHint::PairMap);
     let _ = storage_span;
     Ok(ViewKind::Materialized(storage))
+}
+
+/// Extract the `K = <positive int>` argument from a view-shape annotation
+/// like `@symmetric_pair_topk(K = 8)` or `@per_entity_ring(K = 64)`.
+/// Returns the K value clamped into `u16` (storage layer uses small K —
+/// typical values are 8..=64). Errors if `K` is missing, non-int, out of
+/// range, or if unknown sibling keys appear.
+fn annotation_k_arg(ann: &ast::Annotation) -> Result<u16, ResolveError> {
+    let mut k: Option<u16> = None;
+    for arg in &ann.args {
+        let key = match &arg.key {
+            Some(k) => k.as_str(),
+            None => {
+                return Err(ResolveError::InvalidViewKind {
+                    view_name: ann.name.clone(),
+                    detail: format!(
+                        "`@{}(...)` requires `key = value` args (e.g. `K = 8`); got a positional arg",
+                        ann.name
+                    ),
+                    span: arg.span,
+                });
+            }
+        };
+        match key {
+            "K" => {
+                let n = match &arg.value {
+                    ast::AnnotationValue::Int(n) => *n,
+                    other => {
+                        return Err(ResolveError::InvalidViewKind {
+                            view_name: ann.name.clone(),
+                            detail: format!(
+                                "`K` must be a positive integer literal; got {other:?}"
+                            ),
+                            span: arg.span,
+                        });
+                    }
+                };
+                if n <= 0 || n > u16::MAX as i64 {
+                    return Err(ResolveError::InvalidViewKind {
+                        view_name: ann.name.clone(),
+                        detail: format!(
+                            "`K = {n}` out of range; must satisfy 1 <= K <= {}",
+                            u16::MAX
+                        ),
+                        span: arg.span,
+                    });
+                }
+                k = Some(n as u16);
+            }
+            other => {
+                return Err(ResolveError::InvalidViewKind {
+                    view_name: ann.name.clone(),
+                    detail: format!(
+                        "unknown `@{}` argument `{other}`; expected `K`",
+                        ann.name
+                    ),
+                    span: arg.span,
+                });
+            }
+        }
+    }
+    k.ok_or_else(|| ResolveError::InvalidViewKind {
+        view_name: ann.name.clone(),
+        detail: format!("`@{}` requires a `K = <n>` argument", ann.name),
+        span: ann.span,
+    })
 }
 
 /// Parse a `storage = <hint>` annotation argument into a `StorageHint`.

@@ -533,7 +533,9 @@ pub enum ViewKind {
 }
 
 /// Storage hint for `@materialized` views. Parsed from
-/// `@materialized(storage = <hint>)`. Spec §9 D31.
+/// `@materialized(storage = <hint>)` or from sibling view-shape
+/// annotations (`@symmetric_pair_topk(...)`, `@per_entity_ring(...)`).
+/// Spec §9 D31 + GPU cold-state replay plan (2026-04-22).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum StorageHint {
     /// Dense pair-keyed map. Backed by `HashMap<(K1, K2), V>`. Default when
@@ -543,6 +545,16 @@ pub enum StorageHint {
     /// Bounded per-entity top-K. Backed by
     /// `HashMap<KeyedOn, SortedVec<V, K>>`.
     PerEntityTopK { k: u16, keyed_on: u8 },
+    /// Symmetric pair-keyed per-entity storage. Each agent keeps up to
+    /// `k` edges; reads dedupe by ordered-pair key so `(a, b)` and
+    /// `(b, a)` resolve to the same entry. Bounded at K per agent with
+    /// weakest-evicted policy. Gated by the
+    /// `@symmetric_pair_topk(K = <n>)` view annotation.
+    SymmetricPairTopK { k: u16 },
+    /// Per-entity FIFO ring of fixed size K. Atomic write cursor
+    /// increments mod K; oldest record evicted. Gated by the
+    /// `@per_entity_ring(K = <n>)` view annotation.
+    PerEntityRing { k: u16 },
     /// Compute-on-demand with per-tick cache. Backed by
     /// `RefCell<HashMap<Args, (V, tick)>>`.
     LazyCached,

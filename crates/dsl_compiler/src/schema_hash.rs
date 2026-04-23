@@ -229,6 +229,14 @@ pub fn views_hash(views: &[ViewIR]) -> [u8; 32] {
                         h.update([keyed_on]);
                     }
                     StorageHint::LazyCached => h.update([0x12u8]),
+                    StorageHint::SymmetricPairTopK { k } => {
+                        h.update([0x13u8]);
+                        h.update(&k.to_le_bytes());
+                    }
+                    StorageHint::PerEntityRing { k } => {
+                        h.update([0x14u8]);
+                        h.update(&k.to_le_bytes());
+                    }
                 }
             }
         }

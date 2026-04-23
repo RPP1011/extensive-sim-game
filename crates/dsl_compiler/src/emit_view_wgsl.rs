@@ -295,6 +295,18 @@ pub fn classify_view(view: &ViewIR) -> Result<ViewStorageSpec, EmitError> {
                 }
             }
         }
+        StorageHint::SymmetricPairTopK { .. } => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` storage=symmetric_pair_topk has no GPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
+                view.name
+            )));
+        }
+        StorageHint::PerEntityRing { .. } => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` storage=per_entity_ring has no GPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
+                view.name
+            )));
+        }
         StorageHint::LazyCached => {
             return Err(EmitError::Unsupported(format!(
                 "view `{}` storage=lazy_cached not supported on GPU",

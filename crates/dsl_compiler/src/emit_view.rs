@@ -335,6 +335,14 @@ fn emit_materialized_struct(
                 )
             }
         }
+        StorageHint::SymmetricPairTopK { .. } => Err(EmitError::Unsupported(format!(
+            "`symmetric_pair_topk` storage hint on view `{}` has no CPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
+            view.name
+        ))),
+        StorageHint::PerEntityRing { .. } => Err(EmitError::Unsupported(format!(
+            "`per_entity_ring` storage hint on view `{}` has no CPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
+            view.name
+        ))),
         StorageHint::LazyCached => Err(EmitError::Unsupported(format!(
             "`lazy_cached` storage hint on view `{}` is not implemented yet (spec §9 D31)",
             view.name
