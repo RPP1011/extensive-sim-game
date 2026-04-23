@@ -440,3 +440,4 @@ impl From<AbilityId> for EvalValue {
 
 pub(crate) mod builtins;
 pub mod mask;
+pub mod scoring;
