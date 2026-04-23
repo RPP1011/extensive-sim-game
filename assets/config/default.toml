@@ -10,6 +10,7 @@ attack_range = 2.0
 aggro_range = 50.0
 engagement_range = 2.0
 engagement_slow_factor = 0.3
+kin_radius = 12.0
 kin_flee_bias = 0.5
 kin_flee_radius = 12.0
 

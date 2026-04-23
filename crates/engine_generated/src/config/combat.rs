@@ -13,6 +13,7 @@ pub struct CombatConfig {
     pub aggro_range: f32,
     pub engagement_range: f32,
     pub engagement_slow_factor: f32,
+    pub kin_radius: f32,
     pub kin_flee_bias: f32,
     pub kin_flee_radius: f32,
 }
@@ -25,6 +26,7 @@ impl Default for CombatConfig {
             aggro_range: 50.0_f32,
             engagement_range: 2.0_f32,
             engagement_slow_factor: 0.3_f32,
+            kin_radius: 12.0_f32,
             kin_flee_bias: 0.5_f32,
             kin_flee_radius: 12.0_f32,
         }

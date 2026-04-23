@@ -87,9 +87,10 @@ impl SimCfg {
             // No sim-wide move-speed multiplier today — per-agent only.
             // Seed to the spawn default (1.0).
             move_speed_mult:               1.0,
-            // Mirrors `engine_gpu::cascade::DEFAULT_KIN_RADIUS` without
-            // introducing an intra-crate module dependency.
-            kin_radius:                    12.0,
+            // Designer-tunable via `config combat.kin_radius` in
+            // `assets/sim/config.sim` (promoted from a hardcoded const
+            // 2026-04-23).
+            kin_radius:                    state.config.combat.kin_radius,
             // Mirrors `engine_gpu::cascade::MAX_CASCADE_ITERATIONS`.
             cascade_max_iterations:        8,
             rules_registry_generation:     0,

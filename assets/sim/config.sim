@@ -17,6 +17,13 @@ config combat {
     aggro_range: f32 = 50.0,
     engagement_range: f32 = 2.0,
     engagement_slow_factor: f32 = 0.3,
+    // Radius (m) for same-species kin spatial queries driving the
+    // kin_fear / pack_focus / rally_boost views (tasks 167/169). Used
+    // by the cascade's spatial precompute. 12.0 is the "visual
+    // contact" default; previously hardcoded as
+    // `engine_gpu::cascade::DEFAULT_KIN_RADIUS`, promoted to
+    // designer-tunable config 2026-04-23.
+    kin_radius: f32 = 12.0,
     // Task 177 — deer herding. Weight on "toward kin centroid"
     // relative to "away from threat" when an agent with
     // capabilities.herds_when_fleeing = true picks a flee vector.
