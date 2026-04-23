@@ -1231,19 +1231,96 @@ impl GpuSpatialHash {
         radius: f32,
         outputs: SpatialOutputs<'_>,
     ) -> Result<(), SpatialError> {
+        // Back-compat wrapper: does the full pipeline (upload + rebuild +
+        // query). New callers in the resident driver should split the
+        // rebuild (once per tick) from the query (once per radius) via
+        // [`Self::rebuild_resident`] + [`Self::query_resident`] to avoid
+        // redundant CPU packs and GPU scatter/sort dispatches when
+        // multiple radii share the same agent SoA.
+        self.rebuild_resident(device, queue, encoder, state)?;
+        self.query_resident(device, encoder, state.agent_cap(), radius, outputs);
+        Ok(())
+    }
+
+    /// Upload agent SoA and run the radius-independent spatial-hash
+    /// rebuild passes (clear → count → scan → scatter → sort). None of
+    /// these depend on the query radius, so running this once per tick
+    /// (instead of once per query) avoids redundant CPU packs and GPU
+    /// dispatches when multiple radii share the same agent state.
+    ///
+    /// After this returns, follow up with one or more [`Self::query_resident`]
+    /// calls — each with its own radius and caller-owned output trio —
+    /// before submitting the encoder.
+    pub fn rebuild_resident(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        state: &SimState,
+    ) -> Result<(), SpatialError> {
         let agent_cap = state.agent_cap();
-        // Upload agent SoA + world-origin cfg. We pass `radius = 0.0`
-        // here because the qcfg written by `upload_agent_soa` would be
-        // shared across multiple resident calls in the same encoder
-        // (last write wins). Instead we allocate a *fresh* qcfg
-        // uniform buffer per call below, so two back-to-back calls
-        // with different radii each see their own qcfg at dispatch.
+        // `radius = 0.0` placeholder — the scatter/sort passes don't
+        // read qcfg, and each query call writes its own qcfg below.
         self.upload_agent_soa(device, queue, state, 0.0)?;
 
-        // Per-call qcfg uniform. Fresh buffer per call so multiple
-        // resident dispatches in one encoder don't race on a shared
-        // `queue.write_buffer` (whose writes collapse to last-wins
-        // when a buffer is written twice before submit).
+        let pool = self.pool.as_ref().expect("pool ensured");
+
+        // Clear + count: writes to cell_counts (atomics reset here).
+        // Bindings 7/8/9/11 (output trio + qcfg) aren't read by clear
+        // or count, so we can reuse the pool's internal bind_group
+        // which points at the pool's own within/kin/nearest buffers.
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::spatial::resident_clear_count"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &pool.bind_group, &[]);
+            cpass.set_pipeline(&self.clear_pipeline);
+            cpass.dispatch_workgroups(GRID_CELLS.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+            cpass.set_pipeline(&self.count_pipeline);
+            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+        }
+
+        // Prefix scan (GPU).
+        self.encode_scan(encoder);
+
+        // Scatter + sort: populate cell_data/cell_fills (radius-
+        // independent — only cs_query reads qcfg). Reuses the pool's
+        // internal bind_group for the same reason as clear+count.
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::spatial::resident_scatter_sort"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &pool.bind_group, &[]);
+            cpass.set_pipeline(&self.scatter_pipeline);
+            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+            cpass.set_pipeline(&self.sort_pipeline);
+            cpass.dispatch_workgroups(GRID_CELLS.div_ceil(SORT_WORKGROUP_SIZE).max(1), 1, 1);
+        }
+
+        Ok(())
+    }
+
+    /// Dispatch one per-slot query at `radius` into `outputs`. Must be
+    /// preceded in the same encoder by a [`Self::rebuild_resident`]
+    /// call (which uploads the agent SoA and populates the spatial
+    /// scratch buffers).
+    ///
+    /// Builds a fresh qcfg uniform + bind group per call so multiple
+    /// back-to-back queries with different radii in one encoder each
+    /// see their own qcfg (avoiding `queue.write_buffer`'s
+    /// last-write-wins collapse).
+    pub fn query_resident(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        agent_cap: u32,
+        radius: f32,
+        outputs: SpatialOutputs<'_>,
+    ) {
+        // Per-call qcfg uniform buffer. Fresh per call so the two
+        // radii (kin + engagement) don't race on a shared write.
         let qcfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("engine_gpu::spatial::resident_qcfg"),
             contents: bytemuck::cast_slice(&[QueryCfg {
@@ -1257,12 +1334,6 @@ impl GpuSpatialHash {
 
         let pool = self.pool.as_ref().expect("pool ensured");
 
-        // Build a per-call bind group that redirects bindings 7/8/9 to
-        // the caller-supplied output buffers and binding 11 to the
-        // fresh per-call qcfg. Everything else (agent SoA, cell
-        // counts/offsets/fills/data, cfg uniform) points at the
-        // pool's internal scratch buffers, which are overwritten
-        // per rebuild anyway so sharing across calls is safe.
         let query_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::spatial::resident_bg"),
             layout: &self.bind_group_layout,
@@ -1282,32 +1353,13 @@ impl GpuSpatialHash {
             ],
         });
 
-        // --- Clear + count ---
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("engine_gpu::spatial::resident_clear_count"),
-                timestamp_writes: None,
-            });
-            cpass.set_bind_group(0, &query_bind_group, &[]);
-            cpass.set_pipeline(&self.clear_pipeline);
-            cpass.dispatch_workgroups(GRID_CELLS.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
-            cpass.set_pipeline(&self.count_pipeline);
-            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
-        }
-
-        // --- Prefix scan (GPU, replaces the CPU exclusive-scan the sync
-        // path uses) ---
-        self.encode_scan(encoder);
-
-        // --- Scatter + sort + query ---
-        self.encode_scatter_sort_query(
-            encoder,
-            &query_bind_group,
-            agent_cap,
-            "engine_gpu::spatial::resident_scatter_query",
-        );
-
-        Ok(())
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("engine_gpu::spatial::resident_query"),
+            timestamp_writes: None,
+        });
+        cpass.set_bind_group(0, &query_bind_group, &[]);
+        cpass.set_pipeline(&self.query_pipeline);
+        cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
     }
 
     /// Encode a single-workgroup `cell_counts` → `cell_offsets` exclusive

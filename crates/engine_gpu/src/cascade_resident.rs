@@ -860,22 +860,25 @@ pub fn run_cascade_resident(
     let kin_radius = DEFAULT_KIN_RADIUS;
     let engagement_range = state.config.combat.engagement_range;
 
-    cascade_ctx.spatial.rebuild_and_query_resident(
+    // Split the spatial pipeline: the CPU SoA pack + clear/count/scan/
+    // scatter/sort passes are radius-independent and run exactly once
+    // per tick. Only the query kernel (which reads qcfg) runs per
+    // radius, against its own caller-owned output trio.
+    cascade_ctx.spatial.rebuild_resident(device, queue, encoder, state)?;
+    cascade_ctx.spatial.query_resident(
         device,
-        queue,
         encoder,
-        state,
+        agent_cap,
         kin_radius,
         spatial_bufs.kin_outputs(),
-    )?;
-    cascade_ctx.spatial.rebuild_and_query_resident(
+    );
+    cascade_ctx.spatial.query_resident(
         device,
-        queue,
         encoder,
-        state,
+        agent_cap,
         engagement_range,
         spatial_bufs.engagement_outputs(),
-    )?;
+    );
 
     // ---- 2. Upload ability registry to resident buffers -----------------
     // Must happen before the first physics dispatch binds the buffers.
