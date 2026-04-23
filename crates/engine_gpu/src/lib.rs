@@ -128,6 +128,13 @@ pub mod movement;
 #[cfg(feature = "gpu")]
 pub mod cascade_resident;
 
+/// Phase D (task D1) — double-buffered snapshot staging primitives.
+/// `GpuStaging` owns one side of an agents+events staging pair;
+/// `GpuSnapshot` is the read-only observed state returned to callers.
+/// Task D3 consumes these inside `GpuBackend::snapshot()`.
+#[cfg(feature = "gpu")]
+pub mod snapshot;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
