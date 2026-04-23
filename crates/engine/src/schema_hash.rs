@@ -30,7 +30,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"StatusEffectKind:Stun=0,Slow=1,Root=2,Silence=3,Dot=4,Hot=5,Buff=6,Debuff=7");
     h.update(b"Membership{group=GroupId,role=u8,joined_tick=u32,standing_q8=i16}");
     h.update(b"GroupRole:Member=0,Officer=1,Leader=2,Founder=3,Apprentice=4,Outcast=5");
-    h.update(b"Inventory{gold=i64,commodities=[u16;8]}");
+    h.update(b"Inventory{gold=i32,commodities=[u16;8]}");
     h.update(b"MemoryEvent{source=AgentId,kind=u8,payload=u64,confidence_q8=u8,tick=u32}");
     h.update(b"Relationship{other=AgentId,valence_q8=i16,tenure_ticks=u32}");
     h.update(b"ClassSlot{class_tag=u32,level=u8}");
@@ -51,7 +51,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"EventKindId:AgentMoved=0,AgentAttacked=1,AgentDied=2,AgentFled=3,AgentAte=4,AgentDrank=5,AgentRested=6,AgentCast=7,AgentUsedItem=8,AgentHarvested=9,AgentPlacedTile=10,AgentPlacedVoxel=11,AgentHarvestedVoxel=12,AgentConversed=13,AgentSharedStory=14,AgentCommunicated=15,InformationRequested=16,AgentRemembered=17,QuestPosted=18,QuestAccepted=19,BidPlaced=20,AnnounceEmitted=21,RecordMemory=22,OpportunityAttackTriggered=25,EffectDamageApplied=26,EffectHealApplied=27,EffectShieldApplied=28,EffectStunApplied=29,EffectSlowApplied=30,EffectGoldTransfer=31,EffectStandingDelta=32,CastDepthExceeded=33,ChronicleEntry=128");
     h.update(b"AbilityId=NonZeroU32;MAX_EFFECTS_PER_PROGRAM=4");
     h.update(b"Delivery:Instant=0;Area:SingleTarget{range=f32};Gate{cooldown_ticks=u32,hostile_only=bool,line_of_sight=bool};TargetSelector:Target=0,Caster=1");
-    h.update(b"EffectOp:Damage=0{amount=f32},Heal=1{amount=f32},Shield=2{amount=f32},Stun=3{duration_ticks=u32},Slow=4{duration_ticks=u32,factor_q8=i16},TransferGold=5{amount=i64},ModifyStanding=6{delta=i16},CastAbility=7{ability=AbilityId,selector=TargetSelector}");
+    h.update(b"EffectOp:Damage=0{amount=f32},Heal=1{amount=f32},Shield=2{amount=f32},Stun=3{duration_ticks=u32},Slow=4{duration_ticks=u32,factor_q8=i16},TransferGold=5{amount=i32},ModifyStanding=6{delta=i16},CastAbility=7{ability=AbilityId,selector=TargetSelector}");
     h.update(b"MicroTarget:None,Agent,Position,ItemSlot,AbilityIdx,Ability{id=AbilityId,target=AgentId},Query,Opaque");
     h.update(b"EventPacking:QuestPosted:resolution_tag+min_parties_byte,BidPlaced:amount_f32bits,AnnounceEmitted:audience_tag_u8+fact_payload_u64le,RecordMemory:confidence_f32bits,AgentCast:depth_u8");
     h.update(b"Lane:Validation=0,Effect=1,Reaction=2,Audit=3");

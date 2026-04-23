@@ -8,6 +8,6 @@ use crate::ids::AgentId;
 pub struct EffectGoldTransfer {
     pub from: AgentId,
     pub to: AgentId,
-    pub amount: i64,
+    pub amount: i32,
     pub tick: u32,
 }

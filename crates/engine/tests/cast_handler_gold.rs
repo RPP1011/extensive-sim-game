@@ -2,7 +2,7 @@
 //! two agents' `cold_inventory[*].gold` fields.
 //!
 //! Invariants pinned:
-//! - Signed `i64`: debt is representable (no overdraft guard).
+//! - Signed `i32`: debt is representable (no overdraft guard).
 //! - Zero-sum: `sum(gold_from, gold_to)` is invariant under any transfer.
 //! - Negative `amount` reverses the flow (handler treats it as "take n from
 //!   `to` and give to `from`" via the same add/subtract pair).
@@ -21,13 +21,13 @@ fn spawn(state: &mut SimState, ct: CreatureType) -> AgentId {
     state.spawn_agent(AgentSpawn { creature_type: ct, pos: Vec3::ZERO, hp: 100.0, ..Default::default() }).unwrap()
 }
 
-fn set_gold(state: &mut SimState, id: AgentId, gold: i64) {
+fn set_gold(state: &mut SimState, id: AgentId, gold: i32) {
     let mut inv = state.agent_inventory(id).unwrap_or_default();
     inv.gold = gold;
     state.set_agent_inventory(id, inv);
 }
 
-fn gold_of(state: &SimState, id: AgentId) -> i64 {
+fn gold_of(state: &SimState, id: AgentId) -> i32 {
     state.agent_inventory(id).map(|i| i.gold).unwrap_or(0)
 }
 
@@ -83,7 +83,7 @@ fn conservation_sum_is_invariant_under_arbitrary_transfers() {
     set_gold(&mut state, bob,   250);
     let initial_sum = gold_of(&state, alice) + gold_of(&state, bob);
 
-    for amt in [17_i64, -123, 500, -7, 1, -1, 999_999, -1_000_000] {
+    for amt in [17_i32, -123, 500, -7, 1, -1, 999_999, -1_000_000] {
         dispatch_effect_gold_transfer(
             &Event::EffectGoldTransfer { from: alice, to: bob, amount: amt, tick: 0 },
             &mut state,

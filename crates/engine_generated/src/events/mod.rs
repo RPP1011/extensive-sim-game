@@ -210,7 +210,7 @@ pub enum Event {
     EffectGoldTransfer {
         from: AgentId,
         to: AgentId,
-        amount: i64,
+        amount: i32,
         tick: u32,
     },
     EffectHealApplied {

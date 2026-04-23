@@ -64,13 +64,13 @@ pub struct Membership {
 
 // ---- Task H: Inventory ---------------------------------------------------
 
-/// Portable commodity storage, one per agent. `gold` is signed (`i64`) so debt
-/// is representable as a negative balance — reconciled 2026-04-19 with state.md
-/// §AgentData and Ability Plan 1's `TransferGold` effect op. 8-commodity fixed
-/// slot table. Real item entities are a later plan.
+/// Portable commodity storage, one per agent. `gold` is signed (`i32`) so debt
+/// is representable as a negative balance. Narrowed from i64 on 2026-04-22 so
+/// `transfer_gold` can run on GPU (WGSL has no atomic i64). i32's ±2.1B range
+/// is well above any practical economic-sim value.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Inventory {
-    pub gold:        i64,
+    pub gold:        i32,
     pub commodities: [u16; 8],
 }
 

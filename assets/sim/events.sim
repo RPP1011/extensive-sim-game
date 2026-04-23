@@ -104,7 +104,7 @@ event_tag Audit    { actor: AgentId }
 // views.
 @replayable @harmful event EffectStunApplied { actor: AgentId, target: AgentId, expires_at_tick: u32 }
 @replayable @harmful event EffectSlowApplied { actor: AgentId, target: AgentId, expires_at_tick: u32, factor_q8: i16 }
-@replayable event EffectGoldTransfer { from: AgentId, to: AgentId, amount: i64 }
+@replayable event EffectGoldTransfer { from: AgentId, to: AgentId, amount: i32 }
 @replayable event EffectStandingDelta { a: AgentId, b: AgentId, delta: i16 }
 
 // Audit event emitted by `CastHandler` when a recursive `CastAbility`

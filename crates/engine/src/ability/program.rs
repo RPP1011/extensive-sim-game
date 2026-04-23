@@ -14,8 +14,9 @@
 //! - The Meta effect (`CastAbility`) is what makes the subsystem recursive.
 //!   Recursion is bounded by the engine's `MAX_CASCADE_ITERATIONS = 8` —
 //!   Task 18 pins the depth budget.
-//! - `TransferGold.amount` is `i64` (signed) so debt / refunds round-trip
-//!   through the same op. `Inventory.gold` is also `i64` (state port Task H).
+//! - `TransferGold.amount` is `i32` (signed) so debt / refunds round-trip
+//!   through the same op. `Inventory.gold` is also `i32` (narrowed 2026-04-22
+//!   for GPU atomic compatibility; was i64).
 
 use crate::ability::AbilityId;
 use smallvec::SmallVec;
@@ -97,8 +98,9 @@ pub enum EffectOp {
 
     // --- World (2) ---
     /// Move gold between caster and target via `cold_inventory[slot].gold`.
-    /// Signed i64 — debt is allowed; negative `amount` reverses the flow.
-    TransferGold { amount: i64 } = 5,
+    /// Signed i32 — debt is allowed; negative `amount` reverses the flow.
+    /// Narrowed from i64 on 2026-04-22 for GPU atomic compatibility.
+    TransferGold { amount: i32 } = 5,
 
     /// Adjust symmetric `cold_standing` between caster and target by `delta`.
     /// Clamped to `[-1000, 1000]` inside the handler.
@@ -145,9 +147,10 @@ mod tests {
 
     #[test]
     fn effect_op_size_budget() {
-        // 16-byte budget: largest payload is TransferGold { amount: i64 } at
-        // 8 bytes plus a u8 discriminant, padded to 16. Anything larger means
-        // we've accidentally grown a variant — catch it at the first site.
+        // 16-byte budget: largest payload is CastAbility at ~6 bytes plus a
+        // u8 discriminant, padded to 16. Anything larger means we've
+        // accidentally grown a variant — catch it at the first site.
+        // (TransferGold was i64 pre-2026-04-22; now i32.)
         let sz = std::mem::size_of::<EffectOp>();
         assert!(sz <= 16, "EffectOp grew past 16B budget: {sz}");
     }

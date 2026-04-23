@@ -10,7 +10,7 @@ use crate::state::SimState;
 pub fn transfer_gold(
     from: AgentId,
     to: AgentId,
-    a: i64,
+    a: i32,
     state: &mut SimState,
     events: &mut EventRing,
 ) {
