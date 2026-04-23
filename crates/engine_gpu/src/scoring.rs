@@ -2454,7 +2454,10 @@ mod tests {
         // + 3 pair_decay anchors + 2 kin_fear dense cells+anchors).
         // Task 198: +4 ids bindings (one per topk view) + 1 anchors for
         // topk scalar (my_enemies) = 15 + 5 = 20.
-        assert_eq!(count, 20, "scoring bind group should emit 20 bindings");
+        // kin_fear topk (commit fe688fbd): kin_fear migrated from dense
+        // pair_decay (2 bindings: cells+anchors) to topk pair_decay (3
+        // bindings: cells+anchors+ids). Net +1 → 21.
+        assert_eq!(count, 21, "scoring bind group should emit 21 bindings");
     }
 
     /// Phase 6d: the atomic-mode WGSL parses through naga. This exercises
