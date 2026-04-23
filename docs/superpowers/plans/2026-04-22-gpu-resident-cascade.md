@@ -1709,6 +1709,12 @@ pub fn step_batch<B: PolicyBackend>(
 
     for _ in 0..n_ticks {
         // 1. Mask resident.
+        // NOTE (from Task B3): the fused mask WGSL reads three SoA
+        // buffers (pos/alive/creature_type) rather than a packed
+        // GpuAgentSlot, so the caller must upload SoA fields before
+        // run_resident. `agents_buf` is passed through for future
+        // API unification but currently unused by the mask path.
+        self.mask.upload_soa_from_state(device, queue, state);
         self.mask.run_resident(
             device, queue, &mut encoder,
             self.resident_agents_buf.as_ref().unwrap(),
