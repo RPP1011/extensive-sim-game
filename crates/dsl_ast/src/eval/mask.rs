@@ -36,7 +36,7 @@
 //! | `distance(pos1, pos2)` | pure Rust — 3D Euclidean |
 //! | `abilities.known(self, ability)` | `ReadContext::abilities_known` |
 //! | `abilities.cooldown_ready(self, ability)` | `ReadContext::abilities_cooldown_ready` |
-//! | `world.tick` | `ReadContext::world_tick` |
+//! | `world.tick` | `ctx.world_tick()` — single source of truth |
 //! | `view::is_stunned(x)` | `ReadContext::view_is_stunned` |
 //! | `view::is_hostile(a, b)` | `ReadContext::view_is_hostile` |
 //!
@@ -99,6 +99,7 @@ impl Val {
     }
 
     /// Coerce to `Vec3`. Panics on non-vector shapes.
+    #[allow(dead_code)] // used transitively via EvalVal conversion in eval_builtin
     fn as_vec3(&self) -> Vec3 {
         match self {
             Val::Vec3(v) => *v,
@@ -159,11 +160,14 @@ impl MaskIR {
     /// masks (`Cast(ability: AbilityId)`) pass one `AbilityId`.
     ///
     /// Returns `true` iff all predicate clauses pass for the given context.
+    ///
+    /// The simulation tick is read from `ctx.world_tick()` — the single
+    /// source of truth.  No tick parameter is accepted; callers that previously
+    /// passed an explicit tick should remove that argument.
     pub fn eval<C: ReadContext>(
         &self,
         ctx: &C,
         agent: AgentId,
-        tick: u32,
         params: &[LocalParam],
     ) -> bool {
         // Build the locals map from the action-head parameter bindings.
@@ -175,20 +179,27 @@ impl MaskIR {
 
         // Bind the explicit positional parameters declared in the mask head.
         use crate::ir::IrActionHeadShape;
-        if let IrActionHeadShape::Positional(binds) = &self.head.shape {
-            for (i, (name, local_ref, _ty)) in binds.iter().enumerate() {
-                let val = params.get(i).cloned().unwrap_or_else(|| {
-                    panic!(
-                        "dsl_ast::eval::mask: mask `{}` head param `{name}` (slot {}) \
-                         has no matching entry in params slice (len={})",
-                        self.head.name, local_ref.0, params.len()
-                    )
-                });
-                locals.insert(local_ref.0, val.into_val());
+        match &self.head.shape {
+            IrActionHeadShape::Positional(binds) => {
+                for (i, (name, local_ref, _ty)) in binds.iter().enumerate() {
+                    let val = params.get(i).cloned().unwrap_or_else(|| {
+                        panic!(
+                            "dsl_ast::eval::mask: mask `{}` head param `{name}` (slot {}) \
+                             has no matching entry in params slice (len={})",
+                            self.head.name, local_ref.0, params.len()
+                        )
+                    });
+                    locals.insert(local_ref.0, val.into_val());
+                }
             }
+            IrActionHeadShape::None => {}
+            IrActionHeadShape::Named(_) => unimplemented!(
+                "dsl_ast::eval::mask: IrActionHeadShape::Named is not in the wolves+humans \
+                 survey — see docs/superpowers/notes/2026-04-22-wolves-humans-interp-coverage.md §1"
+            ),
         }
 
-        eval_expr(&self.predicate, ctx, agent, tick, &locals).as_bool()
+        eval_expr(&self.predicate, ctx, agent, &locals).as_bool()
     }
 }
 
@@ -221,17 +232,15 @@ fn eval_expr<C: ReadContext>(
     node: &IrExprNode,
     ctx: &C,
     agent: AgentId,
-    tick: u32,
     locals: &Locals,
 ) -> Val {
-    eval_kind(&node.kind, ctx, agent, tick, locals)
+    eval_kind(&node.kind, ctx, agent, locals)
 }
 
 fn eval_kind<C: ReadContext>(
     kind: &IrExpr,
     ctx: &C,
     agent: AgentId,
-    tick: u32,
     locals: &Locals,
 ) -> Val {
     match kind {
@@ -258,36 +267,36 @@ fn eval_kind<C: ReadContext>(
 
         // ---- namespace field reads ------------------------------------------
         IrExpr::NamespaceField { ns, field, .. } => {
-            eval_namespace_field(*ns, field, ctx, tick)
+            eval_namespace_field(*ns, field, ctx)
         }
 
         // ---- namespace method calls -----------------------------------------
         IrExpr::NamespaceCall { ns, method, args } => {
-            eval_namespace_call(*ns, method, args, ctx, agent, tick, locals)
+            eval_namespace_call(*ns, method, args, ctx, agent, locals)
         }
 
         // ---- view calls -----------------------------------------------------
         IrExpr::ViewCall(view_ref, args) => {
-            eval_view_call(*view_ref, args, ctx, agent, tick, locals)
+            eval_view_call(*view_ref, args, ctx, agent, locals)
         }
 
         // ---- builtin calls --------------------------------------------------
         IrExpr::BuiltinCall(builtin, args) => {
-            eval_builtin(*builtin, args, ctx, agent, tick, locals)
+            eval_builtin(*builtin, args, ctx, agent, locals)
         }
 
         // ---- binary operators -----------------------------------------------
         IrExpr::Binary(op, lhs, rhs) => {
-            eval_binary(*op, lhs, rhs, ctx, agent, tick, locals)
+            eval_binary(*op, lhs, rhs, ctx, agent, locals)
         }
 
         // ---- unary operators ------------------------------------------------
         IrExpr::Unary(UnOp::Not, rhs) => {
-            let v = eval_expr(rhs, ctx, agent, tick, locals).as_bool();
+            let v = eval_expr(rhs, ctx, agent, locals).as_bool();
             Val::Bool(!v)
         }
         IrExpr::Unary(UnOp::Neg, rhs) => {
-            let v = eval_expr(rhs, ctx, agent, tick, locals).as_f32();
+            let v = eval_expr(rhs, ctx, agent, locals).as_f32();
             Val::Float(-v)
         }
 
@@ -310,24 +319,23 @@ fn eval_binary<C: ReadContext>(
     rhs: &IrExprNode,
     ctx: &C,
     agent: AgentId,
-    tick: u32,
     locals: &Locals,
 ) -> Val {
     // Short-circuit boolean operators first.
     match op {
         BinOp::And => {
-            let l = eval_expr(lhs, ctx, agent, tick, locals).as_bool();
+            let l = eval_expr(lhs, ctx, agent, locals).as_bool();
             if !l {
                 return Val::Bool(false);
             }
-            return Val::Bool(eval_expr(rhs, ctx, agent, tick, locals).as_bool());
+            return Val::Bool(eval_expr(rhs, ctx, agent, locals).as_bool());
         }
         BinOp::Or => {
-            let l = eval_expr(lhs, ctx, agent, tick, locals).as_bool();
+            let l = eval_expr(lhs, ctx, agent, locals).as_bool();
             if l {
                 return Val::Bool(true);
             }
-            return Val::Bool(eval_expr(rhs, ctx, agent, tick, locals).as_bool());
+            return Val::Bool(eval_expr(rhs, ctx, agent, locals).as_bool());
         }
         _ => {}
     }
@@ -335,8 +343,8 @@ fn eval_binary<C: ReadContext>(
     // For `== None` / `!= None` patterns the RHS may be an Agent(None) sentinel.
     // Detect these before requiring both sides to be the same numeric type.
     if matches!(op, BinOp::Eq | BinOp::NotEq) {
-        let lv = eval_expr(lhs, ctx, agent, tick, locals);
-        let rv = eval_expr(rhs, ctx, agent, tick, locals);
+        let lv = eval_expr(lhs, ctx, agent, locals);
+        let rv = eval_expr(rhs, ctx, agent, locals);
         return match (op, &lv, &rv) {
             (BinOp::Eq, Val::Agent(a), Val::Agent(b)) => Val::Bool(a == b),
             (BinOp::NotEq, Val::Agent(a), Val::Agent(b)) => Val::Bool(a != b),
@@ -358,19 +366,19 @@ fn eval_binary<C: ReadContext>(
         };
     }
 
-    // Numeric / comparison operators.
-    let l = eval_expr(lhs, ctx, agent, tick, locals).as_f32();
-    let r = eval_expr(rhs, ctx, agent, tick, locals).as_f32();
+    // Numeric comparison operators (wolves+humans survey §1.1: <, <=, >, >=).
+    // Arithmetic operators (Add/Sub/Mul/Div/Mod) are delegated to the shared
+    // builtins helper so Tasks 4 and 5 can reuse the same logic.
+    let l = eval_expr(lhs, ctx, agent, locals).as_f32();
+    let r = eval_expr(rhs, ctx, agent, locals).as_f32();
     match op {
         BinOp::Lt => Val::Bool(l < r),
         BinOp::LtEq => Val::Bool(l <= r),
         BinOp::Gt => Val::Bool(l > r),
         BinOp::GtEq => Val::Bool(l >= r),
-        BinOp::Add => Val::Float(l + r),
-        BinOp::Sub => Val::Float(l - r),
-        BinOp::Mul => Val::Float(l * r),
-        BinOp::Div => Val::Float(l / r),
-        BinOp::Mod => Val::Float(l % r),
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+            Val::Float(crate::eval::builtins::eval_arithmetic_binop(op, l, r))
+        }
         BinOp::And | BinOp::Or | BinOp::Eq | BinOp::NotEq => {
             unreachable!("handled above")
         }
@@ -385,10 +393,12 @@ fn eval_namespace_field<C: ReadContext>(
     ns: NamespaceId,
     field: &str,
     ctx: &C,
-    tick: u32,
 ) -> Val {
     match (ns, field) {
-        (NamespaceId::World, "tick") => Val::Float(tick as f32),
+        // Reads from ctx.world_tick() — the single source of truth for the
+        // current tick. No separate tick parameter is accepted; see the
+        // module doc-comment for rationale.
+        (NamespaceId::World, "tick") => Val::Float(ctx.world_tick() as f32),
         (NamespaceId::Config, f) => eval_config_field(f, ctx),
         _ => unimplemented!(
             "dsl_ast::eval::mask: NamespaceField `{}.{}` is not in the wolves+humans survey — \
@@ -422,11 +432,10 @@ fn eval_namespace_call<C: ReadContext>(
     args: &[IrCallArg],
     ctx: &C,
     agent: AgentId,
-    tick: u32,
     locals: &Locals,
 ) -> Val {
     // Helper to evaluate a positional arg by index.
-    let arg = |i: usize| eval_expr(&args[i].value, ctx, agent, tick, locals);
+    let arg = |i: usize| eval_expr(&args[i].value, ctx, agent, locals);
 
     match (ns, method) {
         // ---- agents namespace -----------------------------------------------
@@ -489,7 +498,6 @@ fn eval_view_call<C: ReadContext>(
     args: &[IrCallArg],
     ctx: &C,
     agent: AgentId,
-    tick: u32,
     locals: &Locals,
 ) -> Val {
     // We don't have the view registry here (dsl_ast stays a leaf crate),
@@ -502,7 +510,7 @@ fn eval_view_call<C: ReadContext>(
     // registry, enabling name-based dispatch. For now arity-dispatch is
     // sufficient for the wolves+humans fixture.
     let _ = view_ref; // reserved for registry-aware lookup in Task 7
-    let arg = |i: usize| eval_expr(&args[i].value, ctx, agent, tick, locals);
+    let arg = |i: usize| eval_expr(&args[i].value, ctx, agent, locals);
     match args.len() {
         1 => {
             // is_stunned(x)
@@ -531,50 +539,44 @@ fn eval_builtin<C: ReadContext>(
     args: &[IrCallArg],
     ctx: &C,
     agent: AgentId,
-    tick: u32,
     locals: &Locals,
 ) -> Val {
-    let arg = |i: usize| eval_expr(&args[i].value, ctx, agent, tick, locals);
-    match builtin {
-        Builtin::Distance => {
-            assert_eq!(args.len(), 2, "distance expects 2 args");
-            let a = arg(0).as_vec3();
-            let b = arg(1).as_vec3();
-            Val::Float(vec3_distance(a, b))
-        }
-        Builtin::Min => {
-            assert_eq!(args.len(), 2, "min expects 2 args");
-            Val::Float(arg(0).as_f32().min(arg(1).as_f32()))
-        }
-        Builtin::Max => {
-            assert_eq!(args.len(), 2, "max expects 2 args");
-            Val::Float(arg(0).as_f32().max(arg(1).as_f32()))
-        }
-        Builtin::SaturatingAdd => {
-            assert_eq!(args.len(), 2, "saturating_add expects 2 args");
-            let a = arg(0).as_f32() as u32;
-            let b = arg(1).as_f32() as u32;
-            Val::Float(a.saturating_add(b) as f32)
-        }
-        other => unimplemented!(
-            "dsl_ast::eval::mask: Builtin::{} is not in the wolves+humans survey — \
-             see docs/superpowers/notes/2026-04-22-wolves-humans-interp-coverage.md §1",
-            other.name()
-        ),
+    use crate::eval::builtins::eval_numeric_builtin;
+
+    // Evaluate arguments eagerly; delegate to shared numeric-builtin helper.
+    // The helper handles Distance/Min/Max/SaturatingAdd and returns None for
+    // unknown names, at which point we fall through to the unimplemented arm.
+    let eval_args: Vec<crate::eval::builtins::EvalVal> = args
+        .iter()
+        .map(|a| {
+            let v = eval_expr(&a.value, ctx, agent, locals);
+            // Convert local Val to shared EvalVal.
+            match v {
+                Val::Bool(b) => crate::eval::builtins::EvalVal::Bool(b),
+                Val::Float(f) => crate::eval::builtins::EvalVal::Float(f),
+                Val::Vec3(v3) => crate::eval::builtins::EvalVal::Vec3(v3),
+                Val::Agent(opt) => crate::eval::builtins::EvalVal::Agent(opt),
+                Val::Ability(ab) => crate::eval::builtins::EvalVal::Ability(ab),
+            }
+        })
+        .collect();
+
+    if let Some(result) = eval_numeric_builtin(builtin.name(), &eval_args) {
+        // Convert shared EvalVal back to local Val.
+        return match result {
+            crate::eval::builtins::EvalVal::Bool(b) => Val::Bool(b),
+            crate::eval::builtins::EvalVal::Float(f) => Val::Float(f),
+            crate::eval::builtins::EvalVal::Vec3(v3) => Val::Vec3(v3),
+            crate::eval::builtins::EvalVal::Agent(opt) => Val::Agent(opt),
+            crate::eval::builtins::EvalVal::Ability(ab) => Val::Ability(ab),
+        };
     }
-}
 
-// ---------------------------------------------------------------------------
-// Pure helpers
-// ---------------------------------------------------------------------------
-
-/// Euclidean distance between two `Vec3` positions.
-#[inline]
-fn vec3_distance(a: Vec3, b: Vec3) -> f32 {
-    let dx = a[0] - b[0];
-    let dy = a[1] - b[1];
-    let dz = a[2] - b[2];
-    (dx * dx + dy * dy + dz * dz).sqrt()
+    unimplemented!(
+        "dsl_ast::eval::mask: Builtin::{} is not in the wolves+humans survey — \
+         see docs/superpowers/notes/2026-04-22-wolves-humans-interp-coverage.md §1",
+        builtin.name()
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -849,7 +851,7 @@ mod tests {
         let mut ctx = StubCtx::new();
         ctx.alive.insert(1, true);
 
-        let result = mask.eval(&ctx, aid(1), 0, &[]);
+        let result = mask.eval(&ctx, aid(1), &[]);
         assert!(result, "alive agent should pass Hold mask");
     }
 
@@ -861,7 +863,7 @@ mod tests {
         let mut ctx = StubCtx::new();
         ctx.alive.insert(1, false);
 
-        let result = mask.eval(&ctx, aid(1), 0, &[]);
+        let result = mask.eval(&ctx, aid(1), &[]);
         assert!(!result, "dead agent should fail Hold mask");
     }
 
@@ -880,26 +882,52 @@ mod tests {
         let mut ctx = StubCtx::new();
         ctx.alive.insert(1, true);
 
-        assert!(mask.eval(&ctx, aid(1), 0, &[]));
+        assert!(mask.eval(&ctx, aid(1), &[]));
     }
 
-    /// Short-circuit AND: if left is false, right is not evaluated.
+    /// Short-circuit AND: if left is false, right must not be evaluated.
+    ///
+    /// The right-hand side references local slot 99, which is not in the
+    /// locals map.  If the interpreter evaluates it, it will panic with a
+    /// "slot not found" error.  If short-circuit works correctly, the slot
+    /// lookup is never reached and the test passes.
     #[test]
     fn boolean_and_short_circuits_on_false_left() {
-        let alive_false = {
+        let ctx = {
             let mut m = StubCtx::new();
             m.alive.insert(1, false);
             m
         };
-        // Predicate: `agents.alive(self) && agents.alive(self)`
-        // With self dead, second clause never runs — but both would return false anyway.
+        // Predicate: `agents.alive(self) && Local(99, "missing")`
+        // Left is false (agent 1 is dead), so the right must be skipped.
+        // If it is NOT skipped the Local(99) lookup panics immediately.
         let predicate = binary(
             BinOp::And,
             ns_call(NamespaceId::Agents, "alive", vec![local("self", 0)]),
-            ns_call(NamespaceId::Agents, "alive", vec![local("self", 0)]),
+            local("missing", 99), // slot 99 — deliberately absent from locals
         );
         let mask = mask_no_params(predicate);
-        assert!(!mask.eval(&alive_false, aid(1), 0, &[]));
+        assert!(!mask.eval(&ctx, aid(1), &[]),
+            "short-circuit: left=false, right must not be evaluated");
+    }
+
+    /// Short-circuit AND: if left is true, right IS evaluated (no spurious skip).
+    #[test]
+    fn boolean_and_evaluates_right_when_left_is_true() {
+        let ctx = {
+            let mut m = StubCtx::new();
+            m.alive.insert(1, true);
+            m
+        };
+        // Left = true, right = false → result false.
+        let predicate = binary(
+            BinOp::And,
+            ns_call(NamespaceId::Agents, "alive", vec![local("self", 0)]),
+            lit_bool(false),
+        );
+        let mask = mask_no_params(predicate);
+        assert!(!mask.eval(&ctx, aid(1), &[]),
+            "true && false must be false (right side was evaluated)");
     }
 
     /// OR: true if either side is true.
@@ -908,7 +936,7 @@ mod tests {
         let predicate = binary(BinOp::Or, lit_bool(false), lit_bool(true));
         let mask = mask_no_params(predicate);
         let ctx = StubCtx::new();
-        assert!(mask.eval(&ctx, aid(1), 0, &[]));
+        assert!(mask.eval(&ctx, aid(1), &[]));
     }
 
     // -----------------------------------------------------------------------
@@ -929,7 +957,7 @@ mod tests {
         ctx.pos.insert(1, [0.0, 0.0, 0.0]);
         ctx.pos.insert(2, [1.0, 0.0, 0.0]);
 
-        let result = mask.eval(&ctx, aid(1), 0, &[LocalParam::Agent(aid(2))]);
+        let result = mask.eval(&ctx, aid(1), &[LocalParam::Agent(aid(2))]);
         assert!(result, "distance 1.0 < 2.0 should be true");
     }
 
@@ -947,7 +975,7 @@ mod tests {
         ctx.pos.insert(1, [0.0, 0.0, 0.0]);
         ctx.pos.insert(2, [3.0, 0.0, 0.0]);
 
-        let result = mask.eval(&ctx, aid(1), 0, &[LocalParam::Agent(aid(2))]);
+        let result = mask.eval(&ctx, aid(1), &[LocalParam::Agent(aid(2))]);
         assert!(!result, "distance 3.0 < 2.0 should be false");
     }
 
@@ -966,7 +994,7 @@ mod tests {
         let mut ctx = StubCtx::new();
         ctx.view_stunned.insert(1, true);
 
-        assert!(!mask.eval(&ctx, aid(1), 0, &[]), "stunned agent should fail cast mask");
+        assert!(!mask.eval(&ctx, aid(1), &[]), "stunned agent should fail cast mask");
     }
 
     #[test]
@@ -976,7 +1004,7 @@ mod tests {
         let mask = mask_no_params(predicate);
 
         let ctx = StubCtx::new(); // view_stunned defaults to false
-        assert!(mask.eval(&ctx, aid(1), 0, &[]), "non-stunned agent should pass cast mask");
+        assert!(mask.eval(&ctx, aid(1), &[]), "non-stunned agent should pass cast mask");
     }
 
     /// Predicate: `view::is_hostile(self, target)` — Attack hostility check.
@@ -993,8 +1021,8 @@ mod tests {
         ctx.view_hostile.insert((1, 2), true);
         ctx.view_hostile.insert((1, 3), false);
 
-        assert!(mask.eval(&ctx, aid(1), 0, &[LocalParam::Agent(aid(2))]));
-        assert!(!mask.eval(&ctx, aid(1), 0, &[LocalParam::Agent(aid(3))]));
+        assert!(mask.eval(&ctx, aid(1), &[LocalParam::Agent(aid(2))]));
+        assert!(!mask.eval(&ctx, aid(1), &[LocalParam::Agent(aid(3))]));
     }
 
     // -----------------------------------------------------------------------
@@ -1025,7 +1053,7 @@ mod tests {
         ctx.pos.insert(2, [1.0, 0.0, 0.0]);
         ctx.view_hostile.insert((1, 2), true);
 
-        assert!(mask.eval(&ctx, aid(1), 0, &[LocalParam::Agent(aid(2))]));
+        assert!(mask.eval(&ctx, aid(1), &[LocalParam::Agent(aid(2))]));
     }
 
     #[test]
@@ -1049,7 +1077,7 @@ mod tests {
         ctx.pos.insert(2, [1.0, 0.0, 0.0]);
         ctx.view_hostile.insert((1, 2), true);
 
-        assert!(!mask.eval(&ctx, aid(1), 0, &[LocalParam::Agent(aid(2))]));
+        assert!(!mask.eval(&ctx, aid(1), &[LocalParam::Agent(aid(2))]));
     }
 
     // -----------------------------------------------------------------------
@@ -1116,7 +1144,7 @@ mod tests {
         // engaged_with returns None by default (not in map)
 
         let ab = abid(5);
-        assert!(mask.eval(&ctx, aid(1), 0, &[LocalParam::Ability(ab)]));
+        assert!(mask.eval(&ctx, aid(1), &[LocalParam::Ability(ab)]));
     }
 
     #[test]
@@ -1176,6 +1204,6 @@ mod tests {
         ctx.engaged_with.insert(1, Some(2)); // engaged with agent 2
 
         let ab = abid(5);
-        assert!(!mask.eval(&ctx, aid(1), 0, &[LocalParam::Ability(ab)]));
+        assert!(!mask.eval(&ctx, aid(1), &[LocalParam::Ability(ab)]));
     }
 }

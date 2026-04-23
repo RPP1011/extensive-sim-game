@@ -438,4 +438,5 @@ impl From<AbilityId> for EvalValue {
 // Interpreter sub-modules (one per rule class)
 // ---------------------------------------------------------------------------
 
+pub(crate) mod builtins;
 pub mod mask;
