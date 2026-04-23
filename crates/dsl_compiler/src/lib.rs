@@ -30,7 +30,7 @@ pub mod emit_view_wgsl;
 pub use dsl_ast::error;
 pub use dsl_ast::ir;
 pub use dsl_ast::parser;
-pub mod resolve;
+pub use dsl_ast::resolve;
 pub use dsl_ast::resolve_error;
 pub mod schema_hash;
 pub use dsl_ast::tokens;

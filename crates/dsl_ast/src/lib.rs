@@ -10,12 +10,19 @@ pub mod error;
 pub mod resolve_error;
 pub mod ir;
 pub mod parser;
+pub mod resolve;
 
 pub use ast::{Decl, Program, Span, Spanned};
 pub use error::ParseError;
+pub use ir::Compilation;
 pub use resolve_error::ResolveError;
 
 /// Parse a DSL source string into a `Program` AST.
 pub fn parse(source: &str) -> Result<Program, ParseError> {
     parser::parse_program(source)
+}
+
+/// Resolve a parsed `Program` into a typed IR `Compilation`.
+pub fn compile_ast(program: Program) -> Result<Compilation, ResolveError> {
+    resolve::resolve(program)
 }
