@@ -2673,6 +2673,15 @@ pub(crate) fn validate_physics_bodies(comp: &Compilation) -> Result<(), ResolveE
     }
 
     for (idx, p) in comp.physics.iter().enumerate() {
+        // `@cpu_only` rules are intentionally-CPU-only; they'll never be
+        // lowered to WGSL, so primitives like strings, unbounded
+        // allocations, recursion, etc. inside their bodies don't need to
+        // pass the GPU-emittable check. Short-circuit accept — the CPU
+        // handler path runs arbitrary Rust and has no such restrictions.
+        if p.cpu_only {
+            continue;
+        }
+
         // Two escape hatches for self-emission bounded recursion:
         //
         //   1. `@terminating_in(N)` annotation — spec §2.4's explicit

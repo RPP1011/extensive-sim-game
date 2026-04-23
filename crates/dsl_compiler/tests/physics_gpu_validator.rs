@@ -215,3 +215,134 @@ fn physics_indirect_emission_cycle_rejected() {
         other => panic!("expected NotGpuEmittable(indirect recursion); got: {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Task 2.14 — `@cpu_only` rules bypass the GPU-emittable validator
+// ---------------------------------------------------------------------------
+//
+// Rules annotated `@cpu_only` are intentionally-CPU-only: the compiler
+// skips WGSL emission + GPU dispatcher entry for them (Task 2.15), so
+// their bodies are free to use primitives the GPU-emittable validator
+// would otherwise reject — strings, unbounded allocation, user-defined
+// helpers, unbounded recursion, etc. These tests pin that bypass. Each
+// one mirrors a rejection case above but with the `@cpu_only`
+// annotation, and asserts compilation succeeds.
+
+#[test]
+fn cpu_only_rule_string_let_binding_accepted() {
+    // Without `@cpu_only` this mirrors
+    // `physics_string_let_binding_rejected`. With the annotation, the
+    // validator short-circuits and the rule compiles cleanly — this is
+    // the shape narrative chronicle rules will take once annotated.
+    let src = r#"
+        event Trigger { actor: AgentId }
+        @cpu_only physics narrative_rule @phase(event) {
+            on Trigger { actor: a } {
+                let note = "hello"
+                emit Trigger { actor: a }
+            }
+        }
+    "#;
+    dsl_compiler::compile(src).expect(
+        "@cpu_only rule with String let-binding should bypass GPU-emittable validator",
+    );
+}
+
+#[test]
+fn cpu_only_rule_unresolved_call_accepted() {
+    // Without `@cpu_only` this mirrors
+    // `physics_body_unresolved_call_rejected`. CPU-only rules can call
+    // arbitrary host-side helpers (the actual Rust glue is generated
+    // separately).
+    let src = r#"
+        event Trigger { actor: AgentId }
+        @cpu_only physics narrative_rule @phase(event) {
+            on Trigger { actor: a } {
+                let x = game_helper(a)
+                emit Trigger { actor: a }
+            }
+        }
+    "#;
+    dsl_compiler::compile(src).expect(
+        "@cpu_only rule with UDF call should bypass GPU-emittable validator",
+    );
+}
+
+#[test]
+fn cpu_only_rule_unbounded_self_recursion_accepted() {
+    // Without `@cpu_only` this mirrors
+    // `physics_unbounded_self_recursion_rejected`. The CPU dispatcher
+    // runs under the cascade framework's `MAX_CASCADE_ITERATIONS` cap,
+    // so even unannotated self-recursion is safe at runtime — it just
+    // isn't safe for SPIR-V codegen.
+    let src = r#"
+        event Trigger { actor: AgentId }
+        @cpu_only physics loop_rule @phase(event) {
+            on Trigger { actor: a } {
+                emit Trigger { actor: a }
+            }
+        }
+    "#;
+    dsl_compiler::compile(src).expect(
+        "@cpu_only rule with unbounded self-recursion should bypass GPU-emittable validator",
+    );
+}
+
+#[test]
+fn cpu_only_rule_for_over_udf_accepted() {
+    // Without `@cpu_only` this mirrors
+    // `physics_for_over_user_defined_helper_rejected`. CPU-only rules
+    // can iterate over anything a host-side helper returns.
+    let src = r#"
+        event Trigger { actor: AgentId, ability: AbilityId }
+        @cpu_only physics narrative_rule @phase(event) {
+            on Trigger { actor: a, ability: ab } {
+                for op in my_helper(ab) {
+                    emit Trigger { actor: a, ability: ab }
+                }
+            }
+        }
+    "#;
+    dsl_compiler::compile(src).expect(
+        "@cpu_only rule iterating a UDF should bypass GPU-emittable validator",
+    );
+}
+
+#[test]
+fn cpu_only_bypass_does_not_leak_to_sibling_gpu_rule() {
+    // A `@cpu_only` rule next to a regular GPU rule must not cause the
+    // GPU rule to skip validation. We pair an accepted CPU-only rule
+    // (with a forbidden `String` let-binding) against a GPU rule that
+    // violates the validator (unresolved call) and assert the GPU rule
+    // still gets rejected — i.e. the bypass is strictly per-rule.
+    let src = r#"
+        event Trigger { actor: AgentId }
+        @cpu_only physics narrative_rule @phase(event) {
+            on Trigger { actor: a } {
+                let note = "hello"
+                emit Trigger { actor: a }
+            }
+        }
+        physics gpu_rule @phase(event) @terminating_in(1) {
+            on Trigger { actor: a } {
+                let x = game_helper(a)
+                emit Trigger { actor: a }
+            }
+        }
+    "#;
+    let err = dsl_compiler::compile(src)
+        .expect_err("sibling GPU rule should still be validated");
+    match err {
+        CompileError::Resolve(ResolveError::NotGpuEmittable {
+            physics_name,
+            construct,
+            ..
+        }) => {
+            assert_eq!(physics_name, "gpu_rule");
+            assert!(construct.contains("game_helper"));
+        }
+        other => panic!(
+            "expected NotGpuEmittable on sibling gpu_rule; got: {other:?}"
+        ),
+    }
+}
