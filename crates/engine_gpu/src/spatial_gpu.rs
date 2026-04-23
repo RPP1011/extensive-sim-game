@@ -671,6 +671,18 @@ pub struct SpatialQueryResults {
     pub nearest_hostile: Vec<u32>,
 }
 
+/// Opaque handle returned by [`GpuSpatialHash::rebuild_and_query_resident`].
+/// Lets callers fetch the device-side `kin_buf` / `nearest_buf` after the
+/// resident path has encoded (but not yet submitted) its dispatches, so
+/// downstream kernels can bind them directly without a host roundtrip.
+///
+/// The current implementation keeps a single pool per `GpuSpatialHash`, so
+/// `PoolHandle(0)` is the only valid value — but the wrapper type keeps
+/// the public API honest about the fact that these buffers live inside
+/// the spatial-hash instance and have a managed lifetime tied to it.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct PoolHandle(u32);
+
 impl GpuSpatialHash {
     /// Build the pipelines on `device`. Parses the shared WGSL source
     /// once via wgpu's `naga` frontend; five compute pipelines share
@@ -1130,6 +1142,158 @@ impl GpuSpatialHash {
         })
     }
 
+    /// GPU-resident rebuild + query. Unlike [`Self::rebuild_and_query`],
+    /// this path:
+    ///
+    /// - encodes every pass (clear, count, scan, scatter, sort, query)
+    ///   into the caller's encoder — no intermediate submits, no CPU
+    ///   roundtrip on the prefix-sum,
+    /// - does not read anything back; the caller keeps the result buffers
+    ///   device-resident and binds them into downstream kernels via
+    ///   [`Self::kin_buf`] / [`Self::nearest_buf`].
+    ///
+    /// Uploads of `agent_pos`, `agent_alive`, `agent_creature_type`, `cfg`
+    /// and `qcfg` use `queue.write_buffer` (implicit pre-pass on the same
+    /// queue as the encoder submit). The scan kernel is the same one
+    /// `gpu_prefix_scan.rs` tests for parity against a CPU exclusive-scan.
+    ///
+    /// Returns a [`PoolHandle`] so the caller can fetch the GPU-resident
+    /// result buffers. The handle is stable until `ensure_pool` rebuilds
+    /// the pool (only happens when `state.agent_cap()` changes).
+    pub fn rebuild_and_query_resident(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        state: &SimState,
+        radius: f32,
+    ) -> Result<PoolHandle, SpatialError> {
+        let agent_cap = state.agent_cap();
+        self.ensure_pool(device, agent_cap);
+
+        let pos_src: Vec<GpuPos> = state
+            .hot_pos()
+            .iter()
+            .map(|v| GpuPos { x: v.x, y: v.y, z: v.z, _pad: 0.0 })
+            .collect();
+        let alive_src: Vec<u32> = state
+            .hot_alive()
+            .iter()
+            .map(|&b| if b { 1u32 } else { 0u32 })
+            .collect();
+        let ct_src: Vec<u32> = (0..agent_cap)
+            .map(|slot| {
+                let id = AgentId::new(slot + 1).unwrap();
+                match state.agent_creature_type(id) {
+                    Some(ct) => ct as u8 as u32,
+                    None => u32::MAX,
+                }
+            })
+            .collect();
+        let (world_origin_x, world_origin_y) = compute_world_origin(state);
+
+        let pool = self.pool.as_ref().expect("pool ensured");
+        queue.write_buffer(&pool.pos_buf, 0, bytemuck::cast_slice(&pos_src));
+        queue.write_buffer(&pool.alive_buf, 0, bytemuck::cast_slice(&alive_src));
+        queue.write_buffer(&pool.creature_type_buf, 0, bytemuck::cast_slice(&ct_src));
+        queue.write_buffer(
+            &pool.cfg_buf,
+            0,
+            bytemuck::cast_slice(&[SpatialCfg {
+                world_origin_x,
+                world_origin_y,
+                cell_size: CELL_SIZE,
+                grid_dim: GRID_DIM,
+                agent_cap,
+                k_cap: K,
+                _pad0: 0,
+                _pad1: 0,
+            }]),
+        );
+        queue.write_buffer(
+            &pool.qcfg_buf,
+            0,
+            bytemuck::cast_slice(&[QueryCfg {
+                radius,
+                _pad0: 0.0,
+                _pad1: 0.0,
+                _pad2: 0.0,
+            }]),
+        );
+
+        // --- Clear + count ---
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::spatial::resident_clear_count"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &pool.bind_group, &[]);
+            cpass.set_pipeline(&self.clear_pipeline);
+            cpass.dispatch_workgroups(GRID_CELLS.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+            cpass.set_pipeline(&self.count_pipeline);
+            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+        }
+
+        // --- Prefix scan (GPU, replaces the CPU exclusive-scan the sync
+        // path uses) ---
+        self.encode_scan(encoder);
+
+        // --- Scatter + sort + query ---
+        let pool = self.pool.as_ref().expect("pool ensured");
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::spatial::resident_scatter_query"),
+                timestamp_writes: None,
+            });
+            cpass.set_bind_group(0, &pool.bind_group, &[]);
+            cpass.set_pipeline(&self.scatter_pipeline);
+            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+            cpass.set_pipeline(&self.sort_pipeline);
+            cpass.dispatch_workgroups(GRID_CELLS.div_ceil(SORT_WORKGROUP_SIZE).max(1), 1, 1);
+            cpass.set_pipeline(&self.query_pipeline);
+            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+        }
+
+        Ok(PoolHandle(0))
+    }
+
+    /// GPU-resident kin-result buffer produced by the most recent
+    /// [`Self::rebuild_and_query_resident`] call. `handle` must come from
+    /// that same call.
+    pub fn kin_buf(&self, _handle: PoolHandle) -> &wgpu::Buffer {
+        &self.pool.as_ref().expect("pool ensured").kin_buf
+    }
+
+    /// GPU-resident nearest-hostile result buffer. One `u32` per agent
+    /// slot; value is raw-`AgentId` or [`NO_HOSTILE`] when no hostile is
+    /// in range.
+    pub fn nearest_buf(&self, _handle: PoolHandle) -> &wgpu::Buffer {
+        &self.pool.as_ref().expect("pool ensured").nearest_buf
+    }
+
+    /// Within-radius result buffer. Not currently needed by the cascade
+    /// pipeline but exposed for symmetry with [`Self::kin_buf`].
+    #[doc(hidden)]
+    pub fn within_buf(&self, _handle: PoolHandle) -> &wgpu::Buffer {
+        &self.pool.as_ref().expect("pool ensured").within_buf
+    }
+
+    /// Encode a single-workgroup `cell_counts` → `cell_offsets` exclusive
+    /// prefix-scan into `encoder`. Replaces the CPU scan the sync path
+    /// runs between count and scatter.
+    fn encode_scan(&self, encoder: &mut wgpu::CommandEncoder) {
+        let pool = self.pool.as_ref().expect("pool ensured");
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("engine_gpu::spatial::resident_scan"),
+            timestamp_writes: None,
+        });
+        cpass.set_bind_group(0, &pool.scan_bind_group, &[]);
+        cpass.set_pipeline(&self.scan_pipeline);
+        // Single workgroup — shared-memory state isn't valid across
+        // workgroups. The kernel chunks internally over `GRID_CELLS`.
+        cpass.dispatch_workgroups(1, 1, 1);
+    }
+
 }
 
 // ------------------------------------------------------------------
@@ -1212,6 +1376,87 @@ impl SpatialTestHarness {
         self.queue.submit(Some(encoder.finish()));
 
         map_read_u32(&pool.cell_offsets_readback, &self.device, GRID_CELLS as usize)
+    }
+
+    /// Thin wrapper over [`GpuSpatialHash::rebuild_and_query`] — the
+    /// legacy sync path with CPU prefix-scan. Used by A2 tests to check
+    /// parity against the resident path.
+    #[doc(hidden)]
+    pub fn run_sync(
+        &mut self,
+        state: &SimState,
+        radius: f32,
+    ) -> Result<SpatialQueryResults, SpatialError> {
+        self.hash.rebuild_and_query(&self.device, &self.queue, state, radius)
+    }
+
+    /// Build an encoder, call [`GpuSpatialHash::rebuild_and_query_resident`],
+    /// append copy-to-readback ops for `within_buf` / `kin_buf` /
+    /// `nearest_buf`, submit, and map back into `SpatialQueryResults`.
+    /// Test-only because the production resident path keeps results
+    /// device-resident — the readback here just lets tests assert on the
+    /// values without plumbing another kernel.
+    #[doc(hidden)]
+    pub fn run_resident(
+        &mut self,
+        state: &SimState,
+        radius: f32,
+    ) -> Result<SpatialQueryResults, SpatialError> {
+        let agent_cap = state.agent_cap();
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine_gpu::spatial::resident_test_enc"),
+            });
+        let handle = self
+            .hash
+            .rebuild_and_query_resident(&self.device, &self.queue, &mut encoder, state, radius)?;
+
+        let pool = self.hash.pool.as_ref().expect("pool ensured");
+        let _ = handle; // handle is always PoolHandle(0) today.
+        encoder.copy_buffer_to_buffer(
+            &pool.within_buf,
+            0,
+            &pool.within_readback,
+            0,
+            (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64,
+        );
+        encoder.copy_buffer_to_buffer(
+            &pool.kin_buf,
+            0,
+            &pool.kin_readback,
+            0,
+            (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64,
+        );
+        encoder.copy_buffer_to_buffer(
+            &pool.nearest_buf,
+            0,
+            &pool.nearest_readback,
+            0,
+            (agent_cap as u64) * 4,
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let within = map_read_query_results(
+            &pool.within_readback,
+            &self.device,
+            agent_cap as usize,
+        )?;
+        let kin = map_read_query_results(
+            &pool.kin_readback,
+            &self.device,
+            agent_cap as usize,
+        )?;
+        let nearest = map_read_u32(
+            &pool.nearest_readback,
+            &self.device,
+            agent_cap as usize,
+        )?;
+        Ok(SpatialQueryResults {
+            within_radius: within,
+            nearby_kin: kin,
+            nearest_hostile: nearest,
+        })
     }
 }
 
