@@ -154,65 +154,11 @@ pub struct GpuBackend {
 pub struct GpuBackend {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    mask_kernel: mask::FusedMaskKernel,
-    /// Phase 3 scoring kernel. Consumes the fused mask bitmaps + packed
-    /// agent SoA and produces one `ScoreOutput` per agent slot.
-    scoring_kernel: scoring::ScoringKernel,
-    /// Phase 6d: GPU-resident view storage. Scoring reads from these
-    /// buffers directly; fold kernels (driven by the integration loop
-    /// below) write them in response to events. Initial `agent_cap`
-    /// defaults to `INITIAL_VIEW_AGENT_CAP`; it grows on demand when a
-    /// larger `SimState` is stepped through (see `ensure_view_storage`).
-    view_storage: view_storage::ViewStorage,
-    /// Phase 6g (task 193): lazy-initialised cascade context. Holds the
-    /// physics kernel + spatial hash + packed ability registry + the
-    /// DSL `Compilation` the physics kernel was compiled against.
-    /// Construction reads `assets/sim/*.sim` + compiles a WGSL module,
-    /// which is ~10-30 ms on a warm disk; done on first `step` to keep
-    /// `GpuBackend::new` cheap for callers that never actually step
-    /// (scoring parity tests, for example).
-    cascade_ctx: Option<cascade::CascadeCtx>,
-    /// Name of the backend wgpu selected (Vulkan / Metal / DX12 / GL /
-    /// BrowserWebGpu / llvmpipe (GL/Vulkan software)). Captured at
-    /// construction so tests can report which path they exercised.
-    backend_label: String,
-    /// Per-mask bitmaps from the most recent `step`, in the emitter's
-    /// binding order (see `FusedMaskKernel::bindings`). Each inner
-    /// `Vec<u32>` is a packed bitmap: bit `i` of word `i/32` is set
-    /// iff slot `i`'s agent passed that mask's predicate this tick.
-    /// Empty before the first `step`.
-    last_mask_bitmaps: Vec<Vec<u32>>,
-    /// Per-agent scoring outputs from the most recent `step` — one
-    /// `ScoreOutput` per agent slot carrying the GPU's argmax choice
-    /// (chosen_action, chosen_target, best_score_bits). Empty before
-    /// the first `step` and when the mask / scoring dispatch fails.
-    /// Phase 6 will feed this into physics dispatch; at Phase 3 it's
-    /// read out by the parity harness.
-    last_scoring_outputs: Vec<scoring::ScoreOutput>,
-    /// Phase 6g (task 193): iteration count from the most recent GPU
-    /// cascade dispatch. `None` before the first `step` or when the
-    /// cascade failed (falls back to CPU cascade — the step still
-    /// completes so state stays live, but this field records the
-    /// failure so parity tests can surface it).
-    last_cascade_iterations: Option<u32>,
-    /// Phase 6g (task 193): set iff the most recent cascade dispatch
-    /// failed. The backend falls back to the CPU cascade in that case
-    /// so the tick still advances with correct semantics; the parity
-    /// test's byte-exact assertion treats this as an acceptable outcome
-    /// — the state is authoritative on CPU, just not GPU-driven this
-    /// tick.
-    last_cascade_error: Option<String>,
-    /// Phase 9 (task 195): skip the post-step mask/scoring sidecar.
-    /// Default is `true` for normal runs — the sidecar is pure
-    /// diagnostics and duplicates a full mask+scoring dispatch the
-    /// `SimBackend::step` contract doesn't require. Tests that assert on
-    /// `last_mask_bitmaps` / `last_scoring_outputs` explicitly re-enable
-    /// it.
-    skip_scoring_sidecar: bool,
-    /// Phase 9 (task 195): cumulative phase timings for diagnostic use
-    /// by perf harnesses. Zeroed per-tick at `step` entry; readable
-    /// via `last_phase_timings`.
-    last_phase_us: PhaseTimings,
+
+    /// Sync-path state: kernels + view storage + diagnostic fields used
+    /// exclusively by `SimBackend::step`. See
+    /// `backend::sync_ctx::SyncPathContext`.
+    pub sync: crate::backend::SyncPathContext,
 
     // -------------------------------------------------------------------
     // Phase D — Task D2: persistent buffers + snapshot staging fields
@@ -535,20 +481,17 @@ impl GpuBackend {
         let scoring_unpack_kernel = scoring::ScoringUnpackKernel::new(&device)?;
         let fused_unpack_kernel = mask::FusedAgentUnpackKernel::new(&device)?;
 
-        Ok(Self {
-            device,
-            queue,
+        let sync = crate::backend::SyncPathContext::new(
             mask_kernel,
             scoring_kernel,
             view_storage,
-            cascade_ctx: None,
             backend_label,
-            last_mask_bitmaps: Vec::new(),
-            last_scoring_outputs: Vec::new(),
-            last_cascade_iterations: None,
-            last_cascade_error: None,
-            skip_scoring_sidecar: true,
-            last_phase_us: PhaseTimings::default(),
+        );
+
+        Ok(Self {
+            device,
+            queue,
+            sync,
             // Phase D — Task D2: persistent buffers + snapshot staging.
             // All `None` / `0` at construction; lazy-initialised on
             // first `step_batch` (D4) / `snapshot()` (D3) call.
@@ -572,9 +515,9 @@ impl GpuBackend {
     /// DSL parsing or WGSL compilation. Exposed as its own fn so tests
     /// can ask for the init cost explicitly before a timing loop starts.
     pub fn ensure_cascade_initialized(&mut self) -> Result<(), cascade::CascadeCtxError> {
-        if self.cascade_ctx.is_none() {
+        if self.sync.cascade_ctx.is_none() {
             let ctx = cascade::CascadeCtx::new(&self.device)?;
-            self.cascade_ctx = Some(ctx);
+            self.sync.cascade_ctx = Some(ctx);
         }
         Ok(())
     }
@@ -582,7 +525,7 @@ impl GpuBackend {
     /// Iteration count from the most recent GPU cascade. `None` before
     /// the first `step` or when cascade init failed on that tick.
     pub fn last_cascade_iterations(&self) -> Option<u32> {
-        self.last_cascade_iterations
+        self.sync.last_cascade_iterations
     }
 
     /// Enable or disable the post-step scoring sidecar. The sidecar
@@ -593,13 +536,13 @@ impl GpuBackend {
     /// duplication since the backend doesn't use its own scoring
     /// output — the CPU `step_phases_1_to_3` already decided actions).
     pub fn set_skip_scoring_sidecar(&mut self, skip: bool) {
-        self.skip_scoring_sidecar = skip;
+        self.sync.skip_scoring_sidecar = skip;
     }
 
     /// True iff the scoring sidecar is currently disabled. Default
     /// is `false` so existing tests keep working.
     pub fn skip_scoring_sidecar(&self) -> bool {
-        self.skip_scoring_sidecar
+        self.sync.skip_scoring_sidecar
     }
 
     /// Per-tick phase timings from the most recent `step`. Reset at
@@ -607,7 +550,7 @@ impl GpuBackend {
     /// are in microseconds. A zero field means the phase was skipped
     /// on that tick (e.g. sidecar with `skip_scoring_sidecar = true`).
     pub fn last_phase_timings(&self) -> PhaseTimings {
-        self.last_phase_us
+        self.sync.last_phase_us
     }
 
     /// Task 203 — drain the GPU chronicle ring into the CPU event
@@ -643,7 +586,7 @@ impl GpuBackend {
         &mut self,
         events: &mut EventRing,
     ) -> Option<crate::event_ring::ChronicleDrainOutcome> {
-        let cascade_ctx = self.cascade_ctx.as_mut()?;
+        let cascade_ctx = self.sync.cascade_ctx.as_mut()?;
         let outcome = match cascade_ctx
             .physics
             .chronicle_ring()
@@ -667,20 +610,20 @@ impl GpuBackend {
     /// rather than returning it so the `SimBackend::step` signature
     /// stays byte-for-byte compatible with `CpuBackend`.
     pub fn last_cascade_error(&self) -> Option<&str> {
-        self.last_cascade_error.as_deref()
+        self.sync.last_cascade_error.as_deref()
     }
 
     /// Borrow the backing view storage. Tests and integration callers
     /// use this to fold events into the view cells before a scoring
     /// dispatch.
     pub fn view_storage(&self) -> &view_storage::ViewStorage {
-        &self.view_storage
+        &self.sync.view_storage
     }
 
     /// Mutable borrow of the view storage — the integration layer uses
     /// this to dispatch fold kernels against the backend's device/queue.
     pub fn view_storage_mut(&mut self) -> &mut view_storage::ViewStorage {
-        &mut self.view_storage
+        &mut self.sync.view_storage
     }
 
     /// The backend's wgpu device — exposed so tests / integration can
@@ -704,7 +647,7 @@ impl GpuBackend {
         &mut self,
         agent_cap: u32,
     ) -> Result<(), view_storage::ViewStorageError> {
-        self.view_storage = view_storage::ViewStorage::new(&self.device, agent_cap)?;
+        self.sync.view_storage = view_storage::ViewStorage::new(&self.device, agent_cap)?;
         Ok(())
     }
 
@@ -713,7 +656,7 @@ impl GpuBackend {
     /// `Empty`. Captured at init so tests can log which path they
     /// actually exercised (useful when Linux falls back to `Gl`/LLVMpipe).
     pub fn backend_label(&self) -> &str {
-        &self.backend_label
+        &self.sync.backend_label
     }
 
     /// Per-mask packed bitmaps from the most recent `step`, in the
@@ -723,7 +666,7 @@ impl GpuBackend {
     /// `last_mask_bitmaps()[k]` is `None`-empty if the kernel dispatch
     /// failed the most recent tick.
     pub fn last_mask_bitmaps(&self) -> &[Vec<u32>] {
-        &self.last_mask_bitmaps
+        &self.sync.last_mask_bitmaps
     }
 
     /// Per-mask metadata (name, index, shape) in fused-kernel order.
@@ -732,7 +675,7 @@ impl GpuBackend {
     /// `last_mask_bitmaps` with its DSL mask name for diagnostics or
     /// mask-specific handling.
     pub fn mask_bindings(&self) -> &[dsl_compiler::emit_mask_wgsl::FusedMaskBinding] {
-        self.mask_kernel.bindings()
+        self.sync.mask_kernel.bindings()
     }
 
     /// Convenience lookup — scan `mask_bindings()` for the slot
@@ -740,9 +683,9 @@ impl GpuBackend {
     /// most recent `step`, or `None` if the mask isn't in the fused
     /// kernel (Cast, future non-agent masks) or `step` hasn't run yet.
     pub fn last_bitmap_for(&self, name: &str) -> Option<&[u32]> {
-        let bindings = self.mask_kernel.bindings();
+        let bindings = self.sync.mask_kernel.bindings();
         let idx = bindings.iter().position(|b| b.mask_name == name)?;
-        self.last_mask_bitmaps.get(idx).map(|v| v.as_slice())
+        self.sync.last_mask_bitmaps.get(idx).map(|v| v.as_slice())
     }
 
     /// Run the fused-mask kernel against the current `state` without
@@ -754,7 +697,7 @@ impl GpuBackend {
         &mut self,
         state: &SimState,
     ) -> Result<Vec<Vec<u32>>, mask::KernelError> {
-        self.mask_kernel.run_and_readback(&self.device, &self.queue, state)
+        self.sync.mask_kernel.run_and_readback(&self.device, &self.queue, state)
     }
 
     /// Per-agent scoring outputs from the most recent `step` — one
@@ -762,7 +705,7 @@ impl GpuBackend {
     /// (chosen_action, chosen_target). Empty before the first `step`
     /// or when the scoring kernel dispatch failed.
     pub fn last_scoring_outputs(&self) -> &[scoring::ScoreOutput] {
-        &self.last_scoring_outputs
+        &self.sync.last_scoring_outputs
     }
 
     /// Run the scoring kernel against `state`'s current snapshot
@@ -782,17 +725,18 @@ impl GpuBackend {
         state: &SimState,
     ) -> Result<Vec<scoring::ScoreOutput>, scoring::ScoringError> {
         self.ensure_view_storage_cap(state.agent_cap())?;
-        self.view_storage.reset(&self.queue);
+        self.sync.view_storage.reset(&self.queue);
         let bitmaps = self
+            .sync
             .mask_kernel
             .run_and_readback(&self.device, &self.queue, state)?;
-        self.scoring_kernel.run_and_readback(
+        self.sync.scoring_kernel.run_and_readback(
             &self.device,
             &self.queue,
             state,
-            &self.mask_kernel,
+            &self.sync.mask_kernel,
             &bitmaps,
-            &self.view_storage,
+            &self.sync.view_storage,
         )
     }
 
@@ -804,9 +748,9 @@ impl GpuBackend {
         &mut self,
         agent_cap: u32,
     ) -> Result<(), scoring::ScoringError> {
-        if self.view_storage.agent_cap() < agent_cap {
+        if self.sync.view_storage.agent_cap() < agent_cap {
             view_storage::ViewStorage::new(&self.device, agent_cap)
-                .map(|vs| self.view_storage = vs)
+                .map(|vs| self.sync.view_storage = vs)
                 .map_err(|e| scoring::ScoringError::Dispatch(format!(
                     "view_storage rebuild for agent_cap={agent_cap} failed: {e}"
                 )))?;
@@ -825,15 +769,16 @@ impl GpuBackend {
     ) -> Result<Vec<scoring::ScoreOutput>, scoring::ScoringError> {
         self.ensure_view_storage_cap(state.agent_cap())?;
         let bitmaps = self
+            .sync
             .mask_kernel
             .run_and_readback(&self.device, &self.queue, state)?;
-        self.scoring_kernel.run_and_readback(
+        self.sync.scoring_kernel.run_and_readback(
             &self.device,
             &self.queue,
             state,
-            &self.mask_kernel,
+            &self.sync.mask_kernel,
             &bitmaps,
-            &self.view_storage,
+            &self.sync.view_storage,
         )
     }
 
@@ -972,13 +917,14 @@ impl GpuBackend {
                     &self.device,
                     &self.queue,
                     &mut encoder,
-                    &mut self.mask_kernel,
-                    &mut self.scoring_kernel,
+                    &mut self.sync.mask_kernel,
+                    &mut self.sync.scoring_kernel,
                     agents_buf,
                     agent_cap,
                 )
                 .expect("fused unpack dispatch");
-            self.mask_kernel
+            self.sync
+                .mask_kernel
                 .run_resident(
                     &self.device,
                     &self.queue,
@@ -992,16 +938,18 @@ impl GpuBackend {
             //    populated above). Only the `tick` field of cfg is
             //    refreshed; other cfg scalars are stable across the
             //    batch.
-            self.scoring_kernel
+            self.sync
+                .scoring_kernel
                 .refresh_tick_cfg_for_resident(&self.queue, state)
                 .expect("scoring refresh_tick_cfg_for_resident");
-            self.scoring_kernel
+            self.sync
+                .scoring_kernel
                 .run_resident(
                     &self.device,
                     &self.queue,
                     &mut encoder,
                     agents_buf,
-                    self.mask_kernel.mask_bitmaps_buf(),
+                    self.sync.mask_kernel.mask_bitmaps_buf(),
                     agent_cap,
                 )
                 .expect("scoring resident dispatch");
@@ -1018,8 +966,22 @@ impl GpuBackend {
             //    batch path lets drift per the step_batch
             //    non-determinism contract — see the plan's Open
             //    Question #1).
-            let cascade_ctx = self
-                .cascade_ctx
+            // Cache `last_cascade_iterations` before the split-borrow
+            // below — the destructure holds the whole `self.sync`
+            // across the rest of this block so we can't reach in for
+            // it after.
+            let last_cascade_iterations_copy = self.sync.last_cascade_iterations;
+
+            // Split-borrow `self.sync` so we can hold a `&mut cascade_ctx`
+            // and read `scoring_kernel.scoring_buf()` simultaneously.
+            // Field destructuring of `&mut self.sync` gives the borrow
+            // checker independent per-field borrows.
+            let crate::backend::SyncPathContext {
+                cascade_ctx: sync_cascade_ctx_opt,
+                scoring_kernel: sync_scoring_kernel,
+                ..
+            } = &mut self.sync;
+            let cascade_ctx = sync_cascade_ctx_opt
                 .as_mut()
                 .expect("cascade_ctx ensured by ensure_resident_init");
             encoder.clear_buffer(cascade_ctx.apply_event_ring.tail_buffer(), 0, None);
@@ -1031,7 +993,7 @@ impl GpuBackend {
                     &self.queue,
                     &mut encoder,
                     agents_buf,
-                    self.scoring_kernel.scoring_buf(),
+                    sync_scoring_kernel.scoring_buf(),
                     &cascade_ctx.apply_event_ring,
                     agent_cap,
                 )
@@ -1044,7 +1006,7 @@ impl GpuBackend {
                     &self.queue,
                     &mut encoder,
                     agents_buf,
-                    self.scoring_kernel.scoring_buf(),
+                    sync_scoring_kernel.scoring_buf(),
                     &cascade_ctx.apply_event_ring,
                     agent_cap,
                 )
@@ -1122,7 +1084,7 @@ impl GpuBackend {
             // MAX_CASCADE_ITERATIONS for safety. The +2 margin
             // tolerates modest run-to-run variance; workloads with
             // deeper cascades pay the same cost as today.
-            let iter_cap = match self.last_cascade_iterations {
+            let iter_cap = match last_cascade_iterations_copy {
                 Some(n) => (n + 2).min(crate::cascade::MAX_CASCADE_ITERATIONS),
                 None => crate::cascade::MAX_CASCADE_ITERATIONS,
             };
@@ -1245,13 +1207,24 @@ impl GpuBackend {
         //     step_batch non-determinism contract, but re-uploading
         //     them per tick cost the batch path a `write_buffer` each
         //     for no correctness benefit.
-        self.mask_kernel
+        self.sync
+            .mask_kernel
             .upload_soa_from_state(&self.device, &self.queue, state);
-        self.scoring_kernel
-            .initialize_for_batch(&self.device, &self.queue, state, &self.view_storage)
-            .map_err(|e| format!("scoring initialize_for_batch: {e}"))?;
+        {
+            // Split-borrow so scoring_kernel (mut) and view_storage (ref)
+            // can coexist.
+            let crate::backend::SyncPathContext {
+                scoring_kernel,
+                view_storage,
+                ..
+            } = &mut self.sync;
+            scoring_kernel
+                .initialize_for_batch(&self.device, &self.queue, state, view_storage)
+                .map_err(|e| format!("scoring initialize_for_batch: {e}"))?;
+        }
         {
             let cascade_ctx = self
+                .sync
                 .cascade_ctx
                 .as_mut()
                 .expect("cascade_ctx ensured above");
@@ -1498,28 +1471,28 @@ impl SimBackend for GpuBackend {
         // end-to-end — the tick still advances correctly, we just
         // don't exercise GPU cascade this time.
         if let Err(e) = self.ensure_cascade_initialized() {
-            self.last_cascade_error = Some(format!("init: {e}"));
-            self.last_cascade_iterations = None;
+            self.sync.last_cascade_error = Some(format!("init: {e}"));
+            self.sync.last_cascade_iterations = None;
             engine::step::step(state, scratch, events, policy, cascade);
             // Run scoring / view mirror so the per-tick diagnostic
             // surface still populates.
-            if !self.skip_scoring_sidecar {
+            if !self.sync.skip_scoring_sidecar {
                 self.run_scoring_sidecar(state);
             }
             return;
         }
 
         if let Err(_e) = self.ensure_view_storage_cap(state.agent_cap()) {
-            self.last_cascade_error = Some("view_storage resize failed".to_string());
-            self.last_cascade_iterations = None;
+            self.sync.last_cascade_error = Some("view_storage resize failed".to_string());
+            self.sync.last_cascade_iterations = None;
             engine::step::step(state, scratch, events, policy, cascade);
-            if !self.skip_scoring_sidecar {
+            if !self.sync.skip_scoring_sidecar {
                 self.run_scoring_sidecar(state);
             }
             return;
         }
 
-        self.last_phase_us = PhaseTimings::default();
+        self.sync.last_phase_us = PhaseTimings::default();
 
         // Phase 1-2 (NEW): GPU mask + scoring dispatch at the TOP of
         // the tick. This is the work that used to run as the post-tick
@@ -1533,38 +1506,45 @@ impl SimBackend for GpuBackend {
         // whole tick — the GPU scoring output is load-bearing for the
         // skipped CPU phases, so a half-GPU tick isn't recoverable.
         let t_ph13 = std::time::Instant::now();
-        let bitmaps_and_scoring = match self
-            .mask_kernel
-            .run_and_readback(&self.device, &self.queue, state)
-        {
-            Ok(bitmaps) => match self.scoring_kernel.run_and_readback(
-                &self.device,
-                &self.queue,
-                state,
-                &self.mask_kernel,
-                &bitmaps,
-                &self.view_storage,
-            ) {
-                Ok(scores) => Some((bitmaps, scores)),
+        let bitmaps_and_scoring = {
+            // Split-borrow so mask_kernel + scoring_kernel + view_storage
+            // can participate in one scoring dispatch.
+            let crate::backend::SyncPathContext {
+                mask_kernel,
+                scoring_kernel,
+                view_storage,
+                ..
+            } = &mut self.sync;
+            match mask_kernel.run_and_readback(&self.device, &self.queue, state) {
+                Ok(bitmaps) => match scoring_kernel.run_and_readback(
+                    &self.device,
+                    &self.queue,
+                    state,
+                    mask_kernel,
+                    &bitmaps,
+                    view_storage,
+                ) {
+                    Ok(scores) => Some((bitmaps, scores)),
+                    Err(e) => {
+                        eprintln!("engine_gpu: scoring dispatch failed, falling back to CPU: {e}");
+                        None
+                    }
+                },
                 Err(e) => {
-                    eprintln!("engine_gpu: scoring dispatch failed, falling back to CPU: {e}");
+                    eprintln!("engine_gpu: mask dispatch failed, falling back to CPU: {e}");
                     None
                 }
-            },
-            Err(e) => {
-                eprintln!("engine_gpu: mask dispatch failed, falling back to CPU: {e}");
-                None
             }
         };
 
         if bitmaps_and_scoring.is_none() {
             // Full CPU fallback: mask-build + evaluate + apply + CPU
             // cascade. Diagnostic fields stay empty for this tick.
-            self.last_cascade_error =
+            self.sync.last_cascade_error =
                 Some("mask/scoring dispatch failed; CPU fallback".to_string());
-            self.last_cascade_iterations = None;
-            self.last_mask_bitmaps.clear();
-            self.last_scoring_outputs.clear();
+            self.sync.last_cascade_iterations = None;
+            self.sync.last_mask_bitmaps.clear();
+            self.sync.last_scoring_outputs.clear();
             engine::step::step(state, scratch, events, policy, cascade);
             return;
         }
@@ -1574,10 +1554,10 @@ impl SimBackend for GpuBackend {
         // Cache for diagnostic callers. Done now rather than at tick
         // end because the sidecar is gone — the mask + scoring we just
         // ran IS the authoritative output for this tick.
-        self.last_mask_bitmaps = bitmaps;
-        self.last_scoring_outputs = scoring_outputs;
+        self.sync.last_mask_bitmaps = bitmaps;
+        self.sync.last_scoring_outputs = scoring_outputs;
 
-        self.last_phase_us.cpu_phases_1_3_us = t_ph13.elapsed().as_micros() as u64;
+        self.sync.last_phase_us.cpu_phases_1_3_us = t_ph13.elapsed().as_micros() as u64;
 
         // Phase 4a — GPU `apply_actions` + `movement` kernels. Task 200
         // retires the CPU bridge (`apply_scoring::scoring_outputs_to_
@@ -1610,15 +1590,15 @@ impl SimBackend for GpuBackend {
             // this tick so state stays live. The GPU mask + scoring
             // outputs we already cached are discarded — the CPU
             // `engine::step::step` re-runs phases 1-4 end-to-end.
-            self.last_cascade_error =
+            self.sync.last_cascade_error =
                 Some("apply_actions/movement kernel dispatch failed; full CPU fallback".to_string());
-            self.last_cascade_iterations = None;
+            self.sync.last_cascade_iterations = None;
             engine::step::step(state, scratch, events, policy, cascade);
             return;
         }
         let events_after_apply = events.total_pushed();
 
-        self.last_phase_us.cpu_apply_actions_us = t_apply.elapsed().as_micros() as u64;
+        self.sync.last_phase_us.cpu_apply_actions_us = t_apply.elapsed().as_micros() as u64;
 
         // Collect the seed events (apply_actions + movement pushed)
         // in push order. These feed both the GPU cascade's input
@@ -1627,16 +1607,6 @@ impl SimBackend for GpuBackend {
             .filter_map(|i| events.get_pushed(i))
             .collect();
         let initial_records = cascade::pack_initial_events(&seed_events);
-
-        // Phase 4b — GPU cascade.
-        let cascade_ctx = self
-            .cascade_ctx
-            .as_mut()
-            .expect("cascade_ctx ensured above");
-        let emit_ctx = dsl_compiler::emit_physics_wgsl::EmitContext {
-            events: &cascade_ctx.comp.events,
-            event_tags: &cascade_ctx.comp.event_tags,
-        };
 
         // `view_storage` is NOT reset between ticks. It accumulates
         // across the whole session — fold kernels update cells in place
@@ -1648,19 +1618,38 @@ impl SimBackend for GpuBackend {
         // never clears either.
 
         let t_cascade = std::time::Instant::now();
-        let cascade_out = cascade::run_cascade(
-            &self.device,
-            &self.queue,
-            state,
-            &mut cascade_ctx.physics,
-            &mut self.view_storage,
-            &mut cascade_ctx.spatial,
-            &cascade_ctx.abilities,
-            &initial_records,
-            cascade::DEFAULT_KIN_RADIUS,
-            &emit_ctx,
-        );
-        self.last_phase_us.gpu_cascade_us = t_cascade.elapsed().as_micros() as u64;
+        // Phase 4b — GPU cascade.
+        // Scoped split-borrow so cascade_ctx (mut) and view_storage (mut)
+        // in `self.sync` can both be handed to run_cascade — borrows
+        // drop at the end of this block so later `self.sync.*` writes
+        // succeed.
+        let cascade_out = {
+            let crate::backend::SyncPathContext {
+                cascade_ctx: sync_cascade_ctx_opt,
+                view_storage: sync_view_storage,
+                ..
+            } = &mut self.sync;
+            let cascade_ctx = sync_cascade_ctx_opt
+                .as_mut()
+                .expect("cascade_ctx ensured above");
+            let emit_ctx = dsl_compiler::emit_physics_wgsl::EmitContext {
+                events: &cascade_ctx.comp.events,
+                event_tags: &cascade_ctx.comp.event_tags,
+            };
+            cascade::run_cascade(
+                &self.device,
+                &self.queue,
+                state,
+                &mut cascade_ctx.physics,
+                sync_view_storage,
+                &mut cascade_ctx.spatial,
+                &cascade_ctx.abilities,
+                &initial_records,
+                cascade::DEFAULT_KIN_RADIUS,
+                &emit_ctx,
+            )
+        };
+        self.sync.last_phase_us.gpu_cascade_us = t_cascade.elapsed().as_micros() as u64;
 
         // Fold the seed events into view_storage too — the cascade
         // driver only folds what ITS kernel emits; the apply-phase
@@ -1671,17 +1660,17 @@ impl SimBackend for GpuBackend {
         if let Err(e) = cascade::fold_iteration_events(
             &self.device,
             &self.queue,
-            &mut self.view_storage,
+            &mut self.sync.view_storage,
             &initial_records,
         ) {
             eprintln!("engine_gpu: seed-fold failed: {e}");
         }
-        self.last_phase_us.gpu_seed_fold_us = t_seed_fold.elapsed().as_micros() as u64;
+        self.sync.last_phase_us.gpu_seed_fold_us = t_seed_fold.elapsed().as_micros() as u64;
 
         match cascade_out {
             Ok(out) => {
-                self.last_cascade_iterations = Some(out.iterations);
-                self.last_cascade_error = None;
+                self.sync.last_cascade_iterations = Some(out.iterations);
+                self.sync.last_cascade_error = None;
 
                 // Commit GPU-mutated agent SoA to SimState.
                 cascade::apply_final_slots(state, &out.final_agent_slots);
@@ -1709,7 +1698,7 @@ impl SimBackend for GpuBackend {
                 let t_cold = std::time::Instant::now();
                 cascade::cold_state_replay(state, events, &seed_events);
                 cascade::cold_state_replay(state, events, &gpu_events);
-                self.last_phase_us.cpu_cold_state_us = t_cold.elapsed().as_micros() as u64;
+                self.sync.last_phase_us.cpu_cold_state_us = t_cold.elapsed().as_micros() as u64;
             }
             Err(e) => {
                 // Cascade dispatch failed mid-tick. Fall back to the
@@ -1719,8 +1708,8 @@ impl SimBackend for GpuBackend {
                 // events.dispatched() so events we've already
                 // dispatched (none yet, this is the first cascade
                 // call this tick) aren't redispatched.
-                self.last_cascade_error = Some(format!("dispatch: {e}"));
-                self.last_cascade_iterations = None;
+                self.sync.last_cascade_error = Some(format!("dispatch: {e}"));
+                self.sync.last_cascade_iterations = None;
                 eprintln!("engine_gpu: GPU cascade failed, falling back to CPU cascade: {e}");
                 cascade.run_fixed_point_tel(state, events, &engine::telemetry::NullSink);
             }
@@ -1736,7 +1725,7 @@ impl SimBackend for GpuBackend {
         // 50-tick parity test; O(this-tick events).
         let t_cpu_fold_all = std::time::Instant::now();
         state.views.fold_all(events, events_before, state.tick);
-        self.last_phase_us.cpu_view_fold_all_us =
+        self.sync.last_phase_us.cpu_view_fold_all_us =
             t_cpu_fold_all.elapsed().as_micros() as u64;
 
         // Phase 6 — invariants + telemetry + tick++. Reuses the CPU
@@ -1753,7 +1742,7 @@ impl SimBackend for GpuBackend {
             t_start,
             events_emitted,
         );
-        self.last_phase_us.cpu_finalize_us = t_final.elapsed().as_micros() as u64;
+        self.sync.last_phase_us.cpu_finalize_us = t_final.elapsed().as_micros() as u64;
 
         // Task 197: the mask + scoring kernels at the top of the tick
         // ARE the authoritative action source — diagnostic fields
@@ -1768,12 +1757,12 @@ impl SimBackend for GpuBackend {
         // Perf harnesses opt out via `set_skip_scoring_sidecar(true)`.
         // Default-off (sidecar runs) preserves every existing parity
         // test's assertion surface.
-        if !self.skip_scoring_sidecar {
+        if !self.sync.skip_scoring_sidecar {
             let t_side = std::time::Instant::now();
             self.run_scoring_sidecar(state);
-            self.last_phase_us.gpu_sidecar_us = t_side.elapsed().as_micros() as u64;
+            self.sync.last_phase_us.gpu_sidecar_us = t_side.elapsed().as_micros() as u64;
         } else {
-            self.last_phase_us.gpu_sidecar_us = 0;
+            self.sync.last_phase_us.gpu_sidecar_us = 0;
         }
     }
 }
@@ -1796,7 +1785,7 @@ impl GpuBackend {
     ///   * `engine::step::shuffle_actions_in_place` (CPU Fisher-Yates)
     ///   * `engine::step::apply_actions` (CPU apply loop with event emits)
     ///
-    /// The kernels consume `self.last_scoring_outputs` (populated at
+    /// The kernels consume `self.sync.last_scoring_outputs` (populated at
     /// the top of `step` by the scoring kernel), so the caller must
     /// invoke this AFTER running mask + scoring and BEFORE the cascade
     /// dispatch picks up the seed events.
@@ -1805,11 +1794,16 @@ impl GpuBackend {
         state: &mut SimState,
         events: &mut engine::event::EventRing,
     ) -> bool {
-        let cascade_ctx = match self.cascade_ctx.as_mut() {
+        let crate::backend::SyncPathContext {
+            cascade_ctx: sync_cascade_ctx_opt,
+            last_scoring_outputs,
+            ..
+        } = &mut self.sync;
+        let cascade_ctx = match sync_cascade_ctx_opt.as_mut() {
             Some(c) => c,
             None => return false,
         };
-        let scoring_outputs = &self.last_scoring_outputs;
+        let scoring_outputs: &[scoring::ScoreOutput] = last_scoring_outputs;
         if scoring_outputs.is_empty() {
             return false;
         }
@@ -1882,24 +1876,32 @@ impl GpuBackend {
     }
 
     fn run_scoring_sidecar(&mut self, state: &SimState) {
-        match self.mask_kernel.run_and_readback(&self.device, &self.queue, state) {
+        let crate::backend::SyncPathContext {
+            mask_kernel,
+            scoring_kernel,
+            view_storage,
+            last_mask_bitmaps,
+            last_scoring_outputs,
+            ..
+        } = &mut self.sync;
+        match mask_kernel.run_and_readback(&self.device, &self.queue, state) {
             Ok(bitmaps) => {
-                match self.scoring_kernel.run_and_readback(
+                match scoring_kernel.run_and_readback(
                     &self.device,
                     &self.queue,
                     state,
-                    &self.mask_kernel,
+                    mask_kernel,
                     &bitmaps,
-                    &self.view_storage,
+                    view_storage,
                 ) {
-                    Ok(scores) => self.last_scoring_outputs = scores,
-                    Err(_e) => self.last_scoring_outputs.clear(),
+                    Ok(scores) => *last_scoring_outputs = scores,
+                    Err(_e) => last_scoring_outputs.clear(),
                 }
-                self.last_mask_bitmaps = bitmaps;
+                *last_mask_bitmaps = bitmaps;
             }
             Err(_e) => {
-                self.last_mask_bitmaps.clear();
-                self.last_scoring_outputs.clear();
+                last_mask_bitmaps.clear();
+                last_scoring_outputs.clear();
             }
         }
     }
