@@ -833,6 +833,144 @@ impl GpuBackend {
             <Self as SimBackend>::step(self, state, scratch, events, policy, cascade);
         }
     }
+
+    /// Cheap non-blocking snapshot via double-buffered staging. First
+    /// call returns [`crate::snapshot::GpuSnapshot::empty`] (no previous
+    /// frame to map). Subsequent calls return state as-of the *previous*
+    /// snapshot call (one-frame lag — acceptable for rendering, which
+    /// will interpolate via its own delta mechanism).
+    ///
+    /// One `device.poll(Wait)` per call.
+    ///
+    /// Must be called from a context where `step_batch` has been invoked
+    /// at least once — before `step_batch` there's no
+    /// `resident_agents_buf` to snapshot, so this returns
+    /// `Ok(GpuSnapshot::empty())` without error. Similarly returns empty
+    /// if the cascade context has not yet been initialised (no physics
+    /// event ring to read).
+    ///
+    /// # Event ring choice
+    ///
+    /// Snapshots the physics kernel's primary `event_ring` (the ring
+    /// written by cascade iterations in the current non-resident path).
+    /// Once Phase D4 rewrites `step_batch` to drive
+    /// `cascade_resident::run_cascade_resident`, this choice may shift
+    /// to whichever of the resident context's rings holds the most
+    /// recent iteration's output — for D3 we observe the ring that
+    /// today's `step`/`step_batch` actually writes to.
+    pub fn snapshot(
+        &mut self,
+    ) -> Result<crate::snapshot::GpuSnapshot, crate::snapshot::SnapshotError> {
+        // Case 1: `step_batch` hasn't allocated the resident agents
+        // buffer yet. Nothing to snapshot — return empty.
+        let agents_buf = match self.resident_agents_buf.as_ref() {
+            Some(b) => b,
+            None => return Ok(crate::snapshot::GpuSnapshot::empty()),
+        };
+
+        // Case 2: cascade context not initialised — no physics event
+        // ring exists to read either. `step_batch` path always ensures
+        // this before allocating `resident_agents_buf`, but defend
+        // against a misuse / future reorder.
+        let cascade_ctx = match self.cascade_ctx.as_ref() {
+            Some(c) => c,
+            None => return Ok(crate::snapshot::GpuSnapshot::empty()),
+        };
+
+        // Lazy-init the staging pair on first call. Size for the
+        // current resident agent capacity + the event ring's default
+        // capacity envelope (the physics ring is sized at the same
+        // default so this is a conservative upper bound).
+        if self.snapshot_front.is_none() && self.snapshot_back.is_none() {
+            let event_cap = crate::event_ring::DEFAULT_CAPACITY;
+            self.snapshot_front = Some(crate::snapshot::GpuStaging::new(
+                &self.device,
+                self.resident_agents_cap,
+                event_cap,
+            ));
+            self.snapshot_back = Some(crate::snapshot::GpuStaging::new(
+                &self.device,
+                self.resident_agents_cap,
+                event_cap,
+            ));
+        }
+
+        // Grow staging if the resident capacity changed. `ensure_cap`
+        // resets the filled flag, so a freshly-grown front returns
+        // empty from `take_snapshot` — correct behaviour, next call
+        // populates at the new size.
+        let event_cap = crate::event_ring::DEFAULT_CAPACITY;
+        if let Some(front) = self.snapshot_front.as_mut() {
+            front.ensure_cap(&self.device, self.resident_agents_cap, event_cap);
+        }
+        if let Some(back) = self.snapshot_back.as_mut() {
+            back.ensure_cap(&self.device, self.resident_agents_cap, event_cap);
+        }
+
+        // 1. Take a snapshot of the FRONT (filled by the previous
+        //    snapshot call — returns empty on the first real call).
+        let snap = self
+            .snapshot_front
+            .as_mut()
+            .expect("snapshot_front lazy-inited above")
+            .take_snapshot(&self.device, self.resident_agents_cap as usize)?;
+
+        // 2. Read the physics event ring's current tail so we know
+        //    which slice to copy into the BACK. One 4-byte blocking
+        //    readback per snapshot — acceptable per plan Option (a).
+        let main_event_ring = cascade_ctx.physics.event_ring();
+        let tail_vec: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
+            &self.device,
+            &self.queue,
+            main_event_ring.tail_buffer(),
+            4,
+        )
+        .map_err(crate::snapshot::SnapshotError::Ring)?;
+        let event_ring_tail = *tail_vec.first().unwrap_or(&0) as u64;
+
+        // 3. Kick the copy into the BACK (filling for the next call).
+        //    Encoder + submit live entirely inside this method.
+        let agent_bytes = (self.resident_agents_cap as u64)
+            * (std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64);
+        let start = self.snapshot_event_ring_read;
+        // Guard against a ring reset that rewinds the tail below our
+        // watermark — treat such a case as "no new events" rather than
+        // an error.
+        let end = event_ring_tail.max(start);
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine_gpu::snapshot::kick_copy"),
+            });
+        self.snapshot_back
+            .as_mut()
+            .expect("snapshot_back lazy-inited above")
+            .kick_copy(
+                &mut encoder,
+                agents_buf,
+                agent_bytes,
+                main_event_ring,
+                start,
+                end,
+                self.latest_recorded_tick,
+            );
+        self.queue.submit(Some(encoder.finish()));
+        self.snapshot_event_ring_read = end;
+
+        // 4. Swap front / back — next call takes the one we just
+        //    filled, and fills the one we just took from.
+        std::mem::swap(&mut self.snapshot_front, &mut self.snapshot_back);
+
+        Ok(snap)
+    }
+
+    /// Test-only accessor for the snapshot event-ring watermark. Used
+    /// by the Phase D6 end-to-end test to assert the observer's read
+    /// pointer advances each call. Not part of the stable public API.
+    #[doc(hidden)]
+    pub fn snapshot_event_ring_read_for_test(&self) -> u64 {
+        self.snapshot_event_ring_read
+    }
 }
 
 #[cfg(feature = "gpu")]
