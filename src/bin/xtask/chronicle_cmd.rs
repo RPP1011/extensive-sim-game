@@ -108,7 +108,13 @@ pub fn run_chronicle(args: ChronicleArgs) -> ExitCode {
         #[cfg(feature = "gpu")]
         {
             let mut stdout = std::io::stdout().lock();
-            return run_perf_sweep(&mut stdout, args.perf_ticks, args.perf_max_n);
+            return run_perf_sweep(
+                &mut stdout,
+                args.perf_ticks,
+                args.perf_max_n,
+                args.use_batch,
+                args.batch_ticks,
+            );
         }
         #[cfg(not(feature = "gpu"))]
         {
@@ -1439,6 +1445,80 @@ fn time_gpu_sweep(n: u32, ticks: u32, seed: u64) -> Result<GpuSweepResult, Strin
     })
 }
 
+/// Batch-path GPU timer for `--perf-sweep --use-batch`. Issues
+/// `ticks / batch_ticks` `step_batch` calls, records per-batch wall
+/// clock, and emits the equivalent per-tick samples (batch_ns /
+/// batch_ticks, repeated once per batch) so downstream statistical
+/// aggregation can treat batch mode the same as sync mode.
+///
+/// NOTE: `step_batch` does NOT populate the caller-owned `EventRing`
+/// — it writes into the GPU-resident event ring only. So
+/// `total_events` reported here is 0. The batch-mode "events/tick"
+/// column in the sweep table will therefore read 0.0; that is
+/// intentional for Task E1 and noted in the banner.
+/// `cascade_iters_*` are likewise unmeasured on the batch path.
+#[cfg(feature = "gpu")]
+fn time_gpu_batch_sweep(
+    n: u32,
+    ticks: u32,
+    batch_ticks: u32,
+    seed: u64,
+) -> Result<GpuSweepResult, String> {
+    use engine::backend::SimBackend as _;
+
+    let mut backend = engine_gpu::GpuBackend::new().map_err(|e| format!("init: {e}"))?;
+    backend
+        .rebuild_view_storage(n)
+        .map_err(|e| format!("view_storage resize to N={n}: {e}"))?;
+
+    let (mut state, _) = spawn_perf_fixture(n, seed);
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(EVENT_RING_SOFT_CAP);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    // Warmup ticks via sync step() to prime kernel pipelines +
+    // allocate resident buffers.
+    for _ in 0..PERF_WARMUP_TICKS {
+        backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+    }
+    let events_before = events.total_pushed();
+
+    let total_batches = (ticks + batch_ticks - 1) / batch_ticks;
+    let mut per_batch_ns: Vec<u128> = Vec::with_capacity(total_batches as usize);
+
+    for _ in 0..total_batches {
+        let t0 = std::time::Instant::now();
+        backend.step_batch(
+            &mut state,
+            &mut scratch,
+            &mut events,
+            &UtilityBackend,
+            &cascade,
+            batch_ticks,
+        );
+        per_batch_ns.push(t0.elapsed().as_nanos());
+    }
+    let events_after = events.total_pushed();
+    let total_events = events_after.saturating_sub(events_before) as u64;
+
+    // Per-tick ns = batch ns / batch_ticks. Statistical aggregation
+    // downstream expects per-tick samples, so expand each batch ns
+    // into `batch_ticks` equal per-tick samples.
+    let per_tick_ns: Vec<u128> = per_batch_ns
+        .iter()
+        .map(|&ns| ns / batch_ticks as u128)
+        .collect();
+
+    Ok(GpuSweepResult {
+        per_tick_ns,
+        total_events,
+        cascade_iters_sum: 0,
+        cascade_iters_samples: 0,
+        phase_totals: engine_gpu::PhaseTimings::default(),
+        phase_samples: 0,
+    })
+}
+
 /// Percentile + mean helper on an unsorted slice. Returns `(mean, median,
 /// p95)` in ns. Mean is computed on the raw slice (order-independent);
 /// median/p95 sort a copy.
@@ -1459,15 +1539,26 @@ fn run_perf_sweep<W: std::io::Write>(
     out: &mut W,
     ticks: u32,
     max_n: u32,
+    use_batch: bool,
+    batch_ticks: u32,
 ) -> ExitCode {
     writeln!(out, "=== GPU Megakernel Phase 8 — Perf Sweep ===").ok();
     let build_mode = if cfg!(debug_assertions) { "DEBUG" } else { "release" };
-    writeln!(
-        out,
-        "Rust: {} build, {} warmup + {} timed ticks per N, seed=0x{:016X}",
-        build_mode, PERF_WARMUP_TICKS, ticks, PERF_SWEEP_SEED,
-    )
-    .ok();
+    if use_batch {
+        writeln!(
+            out,
+            "Rust: {} build, {} warmup + {} timed ticks per N, seed=0x{:016X} (BATCH MODE, batch_ticks={})",
+            build_mode, PERF_WARMUP_TICKS, ticks, PERF_SWEEP_SEED, batch_ticks,
+        )
+        .ok();
+    } else {
+        writeln!(
+            out,
+            "Rust: {} build, {} warmup + {} timed ticks per N, seed=0x{:016X}",
+            build_mode, PERF_WARMUP_TICKS, ticks, PERF_SWEEP_SEED,
+        )
+        .ok();
+    }
     if cfg!(debug_assertions) {
         writeln!(out).ok();
         writeln!(
@@ -1495,7 +1586,11 @@ fn run_perf_sweep<W: std::io::Write>(
 
         let (_, counts) = spawn_perf_fixture(n, PERF_SWEEP_SEED);
         let (cpu_ns, cpu_events) = time_cpu_sweep(n, ticks, PERF_SWEEP_SEED);
-        let gpu = time_gpu_sweep(n, ticks, PERF_SWEEP_SEED);
+        let gpu = if use_batch {
+            time_gpu_batch_sweep(n, ticks, batch_ticks, PERF_SWEEP_SEED)
+        } else {
+            time_gpu_sweep(n, ticks, PERF_SWEEP_SEED)
+        };
 
         let mut row = PerfRow {
             n,

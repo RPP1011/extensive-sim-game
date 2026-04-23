@@ -150,6 +150,18 @@ pub struct ChronicleArgs {
     /// outside `--perf-sweep`.
     #[arg(long, default_value_t = 2048)]
     pub perf_max_n: u32,
+    /// Enable the batch path in --perf-sweep. Without this, --perf-sweep
+    /// uses the tick-by-tick sync path (today's behaviour). With it,
+    /// --perf-sweep runs `ticks / batch_ticks` step_batch calls and
+    /// reports per-batch wall clock amortised per tick.
+    #[arg(long)]
+    pub use_batch: bool,
+    /// Ticks per `step_batch` call when `--use-batch` is set. Default
+    /// 100: long enough to amortise one-shot first-tick dispatches,
+    /// short enough that an N=2048 batch finishes quickly. Ignored
+    /// without --use-batch.
+    #[arg(long, default_value_t = 100)]
+    pub batch_ticks: u32,
 }
 
 #[derive(Debug, Parser)]
