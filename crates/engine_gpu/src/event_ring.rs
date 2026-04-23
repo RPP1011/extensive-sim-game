@@ -718,7 +718,7 @@ pub fn unpack_record(r: &EventRecord) -> Option<Event> {
         EventKindTag::EffectGoldTransfer => Event::EffectGoldTransfer {
             from: aid(p[0])?,
             to: aid(p[1])?,
-            amount: join_u64(p[2], p[3]) as i64,
+            amount: join_u64(p[2], p[3]) as i32,
             tick,
         },
         EventKindTag::EffectStandingDelta => Event::EffectStandingDelta {
@@ -1806,13 +1806,13 @@ mod tests {
         roundtrip(Event::EffectGoldTransfer {
             from: aid(1),
             to: aid(2),
-            amount: i64::MIN,
+            amount: i32::MIN,
             tick: 1,
         });
         roundtrip(Event::EffectGoldTransfer {
             from: aid(1),
             to: aid(2),
-            amount: i64::MAX,
+            amount: i32::MAX,
             tick: 1,
         });
     }
