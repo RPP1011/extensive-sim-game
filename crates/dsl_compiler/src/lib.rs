@@ -28,7 +28,7 @@ pub mod emit_step;
 pub mod emit_view;
 pub mod emit_view_wgsl;
 pub use dsl_ast::error;
-pub mod ir;
+pub use dsl_ast::ir;
 pub mod parser;
 pub mod resolve;
 pub use dsl_ast::resolve_error;

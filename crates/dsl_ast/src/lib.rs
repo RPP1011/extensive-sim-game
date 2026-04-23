@@ -8,3 +8,4 @@ pub mod ast;
 pub mod tokens;
 pub mod error;
 pub mod resolve_error;
+pub mod ir;
