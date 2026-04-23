@@ -222,7 +222,6 @@ physics record_memory @phase(event) {
 physics cast @phase(event) {
   on AgentCast { actor: caster, ability: ab, target: target, depth: depth, tick: t } {
     if abilities.is_known(ab) {
-      let cooldown_ticks = abilities.cooldown_ticks(ab)
       for op in abilities.effects(ab) {
         match op {
           Damage { amount } => {
@@ -259,8 +258,20 @@ physics cast @phase(event) {
           }
         }
       }
-      let next_ready = saturating_add(t, cooldown_ticks)
-      agents.set_cooldown_next_ready(caster, next_ready)
+      // Post-cast dual-cursor bookkeeping (2026-04-22
+      // ability-cooldowns subsystem). Writes BOTH the per-agent
+      // global cooldown cursor (GCD, from
+      // `config.combat.global_cooldown_ticks`) and the per-(agent,
+      // slot) local cooldown cursor (from the ability's own
+      // `gate.cooldown_ticks`). Replaces the prior
+      // `agents.set_cooldown_next_ready(caster, t + cooldown_ticks)`
+      // — that wrote the ability's cooldown onto the shared global
+      // cursor, which was the bug this subsystem fixes: a 10-tick
+      // fireball locked out a 0-tick auto-attack because they shared
+      // a cursor. The Rust helper `SimState::record_cast_cooldowns`
+      // owns both the GCD lookup and the per-slot write so the DSL
+      // stays declarative.
+      agents.record_cast_cooldowns(caster, ab, t)
     }
   }
 }

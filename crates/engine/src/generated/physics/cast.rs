@@ -17,11 +17,6 @@ pub fn cast(
     events: &mut EventRing,
 ) {
     if state.ability_registry.get(ab).is_some() {
-        let cooldown_ticks = state
-            .ability_registry
-            .get(ab)
-            .map(|p| p.gate.cooldown_ticks)
-            .unwrap_or(0);
         for op in {
             let __effects: smallvec::SmallVec<
                 [crate::ability::EffectOp; crate::ability::MAX_EFFECTS_PER_PROGRAM],
@@ -123,7 +118,6 @@ pub fn cast(
                 }
             }
         }
-        let next_ready = (t).saturating_add(cooldown_ticks);
-        state.set_agent_cooldown_next_ready(caster, next_ready);
+        state.record_cast_cooldowns(caster, ab, t);
     }
 }

@@ -279,6 +279,15 @@ mod stdlib {
             // caster's next-ready tick after all effects dispatch.
             (NamespaceId::Agents, "cooldown_next_ready") => Some((1, IrType::U32)),
             (NamespaceId::Agents, "set_cooldown_next_ready") => Some((2, IrType::Unknown)),
+            // Post-cast dual-cursor bookkeeping (2026-04-22 ability-cooldowns
+            // subsystem). Args: `(caster, ability, now)`. Writes BOTH the
+            // per-agent global cursor (with `config.combat.global_cooldown_ticks`)
+            // and the per-(agent, slot) local cursor (with the ability's
+            // own `gate.cooldown_ticks`). Replaces `set_cooldown_next_ready`
+            // in the `physics cast` rule; the split-primitive form fixes
+            // the shared-cursor bug where all abilities on one agent were
+            // gated by a single cursor.
+            (NamespaceId::Agents, "record_cast_cooldowns") => Some((3, IrType::Unknown)),
             // Ability registry accessors. `is_known` tells the cast handler
             // whether to bail out silently on an unregistered ability id;
             // `cooldown_ticks` returns the program's `gate.cooldown_ticks`;

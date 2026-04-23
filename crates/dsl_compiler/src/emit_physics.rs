@@ -1057,6 +1057,18 @@ fn lower_namespace_call(
                 lowered[0], lowered[1]
             ))
         }
+        // 2026-04-22 ability-cooldowns subsystem — dual-cursor post-cast
+        // write. Args: `(caster, ability, now)`. Writes both the per-agent
+        // global cursor (`hot_cooldown_next_ready_tick`) and the
+        // per-(agent, slot) local cursor (`ability_cooldowns`). See
+        // `SimState::record_cast_cooldowns` for the semantics.
+        (NamespaceId::Agents, "record_cast_cooldowns") => {
+            expect_arity(args, 3, "agents.record_cast_cooldowns")?;
+            Ok(format!(
+                "state.record_cast_cooldowns({}, {}, {})",
+                lowered[0], lowered[1], lowered[2]
+            ))
+        }
         // Engagement accessors (task 163). The DSL `engagement_on_move` /
         // `engagement_on_death` physics rules call these to eagerly write
         // the SoA `hot_engaged_with` slot. `clear_engaged_with` writes

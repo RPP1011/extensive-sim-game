@@ -134,8 +134,18 @@ fn cast_handler_starts_cooldown() {
 
     step(&mut state, &mut scratch, &mut events, &backend, &cascade);
 
-    // Cast resolved on tick 0 with cooldown_ticks=10 → next_ready_tick=10.
-    assert_eq!(state.agent_cooldown_next_ready(a), Some(10));
+    // Ability-cooldowns subsystem (2026-04-22): the post-cast helper
+    // writes BOTH cursors. Assertions updated accordingly.
+    //   * global (GCD) cursor:  tick 0 + `combat.global_cooldown_ticks`
+    //     (default 5) = 5.
+    //   * local cooldown slot:  tick 0 + `ability.gate.cooldown_ticks`
+    //     (= 10) = 10.
+    // Previously both were fused onto the single global cursor (=10), which
+    // was the shared-cursor bug the subsystem fixes.
+    let gcd = state.config.combat.global_cooldown_ticks;
+    assert_eq!(state.agent_cooldown_next_ready(a), Some(gcd));
+    let agent_slot = (a.raw() - 1) as usize;
+    assert_eq!(state.ability_cooldowns[agent_slot][0], 10);
 }
 
 #[test]

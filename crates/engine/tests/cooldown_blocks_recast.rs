@@ -2,11 +2,19 @@
 //!
 //! `mask Cast` (task 157) treats `hot_cooldown_next_ready_tick` as an
 //! absolute tick. The `CastHandler` sets it to `current_tick +
-//! cooldown_ticks` after a cast resolves. This test pins the contract
-//! end-to-end:
+//! global_cooldown_ticks` after a cast resolves (ability-cooldowns
+//! subsystem, 2026-04-22). Ability-level `cooldown_ticks` drives the
+//! parallel per-(agent, slot) `ability_cooldowns` cursor, NOT the
+//! global cursor — the mask's current reader still consults the
+//! global cursor exclusively (migration to the dual-gate
+//! `can_cast_ability` helper lands in Task 6 of the cooldowns plan).
 //!
-//! 1. Tick 0: first cast fires → `next_ready_tick = 10`.
-//! 2. Ticks 1..=9: mask returns false (cooldown pending),
+//! This test pins the global-cursor contract end-to-end by pinning
+//! `combat.global_cooldown_ticks` to match the ability's cooldown, so
+//! the legacy "one cursor" expectations still hold:
+//!
+//! 1. Tick 0: first cast fires → global cursor = GCD (10).
+//! 2. Ticks 1..=9: mask returns false (global cooldown pending),
 //!    `UtilityBackend`-style flow never re-emits the cast.
 //! 3. Tick 10: mask flips true; a second cast fires and re-sets the
 //!    cooldown.
@@ -62,8 +70,11 @@ impl PolicyBackend for GatedCastBackend {
 
 #[test]
 fn cooldown_blocks_recast_until_next_ready_tick() {
-    // Register an ability with a 10-tick cooldown. Cast at tick 0 → next_ready=10.
-    // Ticks 1..=9: gate false (cooldown pending). Tick 10: gate true, re-fires.
+    // Register an ability with a 10-tick cooldown. Pin GCD=10 so the
+    // global cursor (which the mask reader currently consults) matches
+    // the legacy test expectation. Cast at tick 0 → next_ready=10.
+    // Ticks 1..=9: gate false (cooldown pending). Tick 10: gate true,
+    // re-fires.
     let mut b = AbilityRegistryBuilder::new();
     let ability = b.register(AbilityProgram::new_single_target(
         5.0,
@@ -74,6 +85,12 @@ fn cooldown_blocks_recast_until_next_ready_tick() {
 
     let mut state = SimState::new(8, 42);
     state.ability_registry = registry;
+    // Ability-cooldowns subsystem (2026-04-22): the post-cast write now
+    // splits across `hot_cooldown_next_ready_tick` (GCD) and the
+    // per-(agent, slot) `ability_cooldowns`. Pin GCD to the ability's
+    // own cooldown so this mask-side regression keeps pinning the same
+    // global-cursor timeline it always did.
+    state.config.combat.global_cooldown_ticks = 10;
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(2.0, 0.0, 0.0));
 
@@ -126,9 +143,16 @@ fn cooldown_blocks_recast_until_next_ready_tick() {
 
 #[test]
 fn zero_cooldown_ability_can_recast_every_tick() {
-    // gate.cooldown_ticks = 0 → next_ready == current_tick after every cast,
-    // which the gate treats as "ready now". Over 5 ticks the GatedCastBackend
-    // should fire 5 casts.
+    // gate.cooldown_ticks = 0 → local cursor reads "ready". Pin GCD=0
+    // so the shared global cursor also clears after every cast; over 5
+    // ticks the GatedCastBackend should fire 5 casts.
+    //
+    // Ability-cooldowns subsystem (2026-04-22): the default
+    // `combat.global_cooldown_ticks = 5` would otherwise rate-limit
+    // this test to 1 cast per 5 ticks. Overriding to 0 matches the
+    // original "every tick" intent — callers that want a literal
+    // every-tick cast can either set GCD=0 globally or land a
+    // per-agent / per-ability-tag GCD override in a later subsystem.
     let mut b = AbilityRegistryBuilder::new();
     let ability = b.register(AbilityProgram::new_single_target(
         5.0,
@@ -139,6 +163,7 @@ fn zero_cooldown_ability_can_recast_every_tick() {
 
     let mut state = SimState::new(8, 42);
     state.ability_registry = registry;
+    state.config.combat.global_cooldown_ticks = 0;
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(2.0, 0.0, 0.0));
     let mut scratch = SimScratch::new(state.agent_cap() as usize);

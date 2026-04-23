@@ -675,6 +675,75 @@ impl SimState {
         global_ready && local_ready
     }
 
+    /// Map an `AbilityId` to its per-agent local-cooldown slot index.
+    /// MVP contract: the ability registry is shared globally, so the
+    /// per-agent slot index is the same as the registry slot. Returns
+    /// `None` when the id falls outside the `MAX_ABILITIES` local
+    /// cooldown window (the gate still fires; only the local cursor
+    /// write/read is skipped).
+    ///
+    /// Added 2026-04-22 alongside `record_cast_cooldowns` to give the
+    /// DSL-emitted `physics cast` rule a single entry point for the
+    /// dual-cursor write.
+    #[inline]
+    pub fn ability_slot_for(&self, _agent: AgentId, ability: crate::ability::AbilityId) -> Option<u8> {
+        let slot = ability.slot();
+        if slot < crate::ability::MAX_ABILITIES {
+            Some(slot as u8)
+        } else {
+            None
+        }
+    }
+
+    /// Post-cast cooldown bookkeeping: set **both** the per-agent
+    /// global cooldown cursor (GCD, from `config.combat.global_cooldown_ticks`)
+    /// and the per-(agent, slot) local cooldown cursor (from
+    /// `ability.gate.cooldown_ticks`). Idempotent for unknown agents /
+    /// unknown abilities — silently drops rather than panicking, which
+    /// matches the `physics cast` rule's "unknown id is a silent drop"
+    /// contract.
+    ///
+    /// Writes use saturating arithmetic; near-`u32::MAX` ticks clamp
+    /// rather than wrapping, keeping the cooldown gate monotonic.
+    ///
+    /// Added 2026-04-22 by the ability-cooldowns subsystem — previously
+    /// only the global cursor was written (with the ability's own
+    /// cooldown), which was the shared-cursor bug this helper fixes.
+    pub fn record_cast_cooldowns(
+        &mut self,
+        caster: AgentId,
+        ability: crate::ability::AbilityId,
+        now: u32,
+    ) {
+        let agent_slot = AgentSlotPool::slot_of_agent(caster);
+        // Global GCD — short shared gate across every ability the caster
+        // owns. Configurable via `combat.global_cooldown_ticks` (default
+        // 5 ticks = 0.5s at 10 Hz).
+        let gcd = self.config.combat.global_cooldown_ticks;
+        let global_next_ready = now.saturating_add(gcd);
+        if let Some(s) = self.hot_cooldown_next_ready_tick.get_mut(agent_slot) {
+            *s = global_next_ready;
+        }
+        // Local cooldown — per-ability refresh. Unknown ability id or
+        // out-of-range slot: skip the local write (the global cursor
+        // still applies, matching the pre-subsystem behaviour as a
+        // defensive fallback).
+        let Some(local_cd) = self
+            .ability_registry
+            .get(ability)
+            .map(|p| p.gate.cooldown_ticks)
+        else {
+            return;
+        };
+        let Some(slot) = self.ability_slot_for(caster, ability) else {
+            return;
+        };
+        let local_next_ready = now.saturating_add(local_cd);
+        if let Some(row) = self.ability_cooldowns.get_mut(agent_slot) {
+            row[slot as usize] = local_next_ready;
+        }
+    }
+
     // Per-pair standing (Combat Foundation Task 1).
     pub fn standing(&self, a: AgentId, b: AgentId) -> i16 {
         self.cold_standing.get(a, b)
