@@ -1384,6 +1384,21 @@ fn lower_namespace_call(
                 lowered[0], lowered[1]
             ))
         }
+        // agents.record_cast_cooldowns(caster, ability, t) on GPU writes
+        // ONLY the global cooldown cursor (`t + ability.cooldown_ticks`),
+        // preserving pre-Task-4 single-cursor semantics. CPU-side lowering
+        // writes both global (GCD) + local cursors. Subsystem (3) — GPU
+        // ability evaluation — will expose `ability_cooldowns` to GPU and
+        // align the two paths.
+        (NamespaceId::Agents, "record_cast_cooldowns") => {
+            expect_arity(args, 3, "agents.record_cast_cooldowns")?;
+            Ok(format!(
+                "state_set_agent_cooldown_next_ready({caster}, ({t} + abilities_cooldown_ticks({ab})))",
+                caster = lowered[0],
+                ab = lowered[1],
+                t = lowered[2],
+            ))
+        }
         (NamespaceId::Agents, "set_engaged_with") => {
             expect_arity(args, 2, "agents.set_engaged_with")?;
             Ok(format!(
