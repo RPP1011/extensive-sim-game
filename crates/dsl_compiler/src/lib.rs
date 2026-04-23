@@ -27,11 +27,11 @@ pub mod emit_sim_cfg;
 pub mod emit_step;
 pub mod emit_view;
 pub mod emit_view_wgsl;
-pub mod error;
+pub use dsl_ast::error;
 pub mod ir;
 pub mod parser;
 pub mod resolve;
-pub mod resolve_error;
+pub use dsl_ast::resolve_error;
 pub mod schema_hash;
 pub use dsl_ast::tokens;
 
