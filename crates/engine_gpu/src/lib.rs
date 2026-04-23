@@ -1056,11 +1056,10 @@ impl GpuBackend {
             )
             .expect("cascade_resident dispatch");
 
-            // 5. Advance the tick counter on CPU. GPU-side tick / rng
-            //    advance is deferred (plan Open Question #1) — the
-            //    batch path's non-determinism disclaimer covers it.
-            state.tick = state.tick.wrapping_add(1);
-            self.snapshot.latest_recorded_tick = state.tick;
+            // Tick advance is GPU-side (seed-indirect kernel atomicAdd
+            // into sim_cfg.tick). CPU state.tick stays stale during the
+            // batch; snapshot() reads sim_cfg.tick to expose the current
+            // value (Task 2.11).
         }
 
         self.queue.submit(Some(encoder.finish()));
