@@ -182,11 +182,11 @@ pub struct GpuBackend {
     /// tick.
     last_cascade_error: Option<String>,
     /// Phase 9 (task 195): skip the post-step mask/scoring sidecar.
-    /// Default is `false` so existing tests that assert on
-    /// `last_mask_bitmaps` / `last_scoring_outputs` keep working. Perf
-    /// harnesses and batch callers flip this to `true` — the sidecar
-    /// duplicates a full mask+scoring dispatch (~3-10 ms at N=1000)
-    /// that the `SimBackend::step` contract doesn't require.
+    /// Default is `true` for normal runs — the sidecar is pure
+    /// diagnostics and duplicates a full mask+scoring dispatch the
+    /// `SimBackend::step` contract doesn't require. Tests that assert on
+    /// `last_mask_bitmaps` / `last_scoring_outputs` explicitly re-enable
+    /// it.
     skip_scoring_sidecar: bool,
     /// Phase 9 (task 195): cumulative phase timings for diagnostic use
     /// by perf harnesses. Zeroed per-tick at `step` entry; readable
@@ -409,7 +409,7 @@ impl GpuBackend {
             last_scoring_outputs: Vec::new(),
             last_cascade_iterations: None,
             last_cascade_error: None,
-            skip_scoring_sidecar: false,
+            skip_scoring_sidecar: true,
             last_phase_us: PhaseTimings::default(),
         })
     }

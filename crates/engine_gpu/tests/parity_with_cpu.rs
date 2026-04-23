@@ -169,6 +169,7 @@ fn run_cpu() -> (SimState, EventRing) {
 /// parity check.
 fn run_gpu() -> (SimState, EventRing) {
     let mut backend = GpuBackend::new().expect("GpuBackend init");
+    backend.set_skip_scoring_sidecar(false);
     eprintln!("parity_with_cpu: wgpu backend = {}", backend.backend_label());
 
     // Log which masks the GPU actually runs — if the fused-kernel emitter
@@ -337,6 +338,7 @@ fn gpu_full_tick_loop_matches_cpu_50_ticks() {
     let cpu_cascade = CascadeRegistry::with_engine_builtins();
 
     let mut gpu_backend = GpuBackend::new().expect("GpuBackend init");
+    gpu_backend.set_skip_scoring_sidecar(false);
     let mut gpu_state = spawn_fixture();
     let mut gpu_scratch = SimScratch::new(gpu_state.agent_cap() as usize);
     let mut gpu_events = EventRing::with_cap(EVENT_RING_CAP);
@@ -401,6 +403,7 @@ fn gpu_full_tick_per_tick_state_divergence() {
     let cpu_cascade = CascadeRegistry::with_engine_builtins();
 
     let mut gpu_backend = GpuBackend::new().expect("GpuBackend init");
+    gpu_backend.set_skip_scoring_sidecar(false);
     let mut gpu_state = spawn_fixture();
     let mut gpu_scratch = SimScratch::new(gpu_state.agent_cap() as usize);
     let mut gpu_events = EventRing::with_cap(EVENT_RING_CAP);
@@ -569,6 +572,7 @@ fn cpu_backend_is_deterministic_on_canonical_fixture() {
 #[test]
 fn gpu_fused_masks_match_cpu_on_spawn_state() {
     let mut backend = GpuBackend::new().expect("GpuBackend init");
+    backend.set_skip_scoring_sidecar(false);
     let state = spawn_fixture();
     let gpu_bitmaps = backend
         .verify_masks_on_gpu(&state)
@@ -675,6 +679,7 @@ fn spawn_no_combat_fixture() -> SimState {
 #[test]
 fn gpu_scoring_matches_cpu_on_spawn_state() {
     let mut backend = GpuBackend::new().expect("GpuBackend init");
+    backend.set_skip_scoring_sidecar(false);
     let state = spawn_fixture();
     let gpu_outs = backend
         .verify_scoring_on_gpu(&state)
@@ -727,6 +732,7 @@ fn gpu_scoring_matches_cpu_on_spawn_state() {
 #[test]
 fn gpu_scoring_matches_cpu_no_combat_fixture() {
     let mut backend = GpuBackend::new().expect("GpuBackend init");
+    backend.set_skip_scoring_sidecar(false);
     let mut state = spawn_no_combat_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(EVENT_RING_CAP);
@@ -770,6 +776,7 @@ fn gpu_scoring_matches_cpu_no_combat_fixture() {
 #[test]
 fn gpu_scoring_canonical_fixture_exact() {
     let mut backend = GpuBackend::new().expect("GpuBackend init");
+    backend.set_skip_scoring_sidecar(false);
     let mut state = spawn_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(EVENT_RING_CAP);
@@ -801,6 +808,7 @@ fn gpu_scoring_with_grudges_byte_exact() {
     use engine_gpu::view_storage::FoldInputPair;
 
     let mut backend = GpuBackend::new().expect("GpuBackend init");
+    backend.set_skip_scoring_sidecar(false);
     let mut state = spawn_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(EVENT_RING_CAP);
@@ -898,6 +906,7 @@ fn gpu_scoring_reads_fold_kernel_output_byte_exact() {
     use engine_gpu::view_storage::FoldInputPair;
 
     let mut backend = GpuBackend::new().expect("GpuBackend init");
+    backend.set_skip_scoring_sidecar(false);
     let mut state = spawn_fixture();
 
     // Grow view_storage if needed so its cap matches the fixture's 8.
