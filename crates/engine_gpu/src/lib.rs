@@ -870,6 +870,9 @@ impl GpuBackend {
                     agent_cap,
                 )
                 .expect("fused unpack dispatch");
+            let mask_sim_cfg_ref = sim_cfg_buf
+                .as_ref()
+                .expect("sim_cfg_buf ensured by ensure_resident_init");
             self.sync
                 .mask_kernel
                 .run_resident(
@@ -877,6 +880,7 @@ impl GpuBackend {
                     &self.queue,
                     &mut encoder,
                     agents_buf,
+                    mask_sim_cfg_ref,
                     agent_cap,
                 )
                 .expect("mask resident dispatch");

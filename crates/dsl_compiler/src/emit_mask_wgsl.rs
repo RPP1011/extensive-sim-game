@@ -247,26 +247,69 @@ fn emit_bindings(out: &mut String) {
     .unwrap();
     writeln!(out).unwrap();
     // Config block — a small uniform buffer carries the handful of
-    // `config.<block>.<field>` reads the masks need. Phase 2 masks
-    // consume two knobs:
+    // `config.<block>.<field>` reads the masks need that are NOT
+    // world-scalars in `SimCfg`. Phase 2 masks consume one knob here:
     //
-    //   * `combat.attack_range`     — Attack's `from` radius + inner
-    //                                 `distance < 2.0` clause
     //   * `movement.max_move_radius` — MoveToward's `from` radius
+    //     (not part of `SimCfg`; subsystem-local config).
+    //
+    // `combat.attack_range` used to live here too but was promoted to
+    // `sim_cfg.attack_range` (Task 2.4 of the GPU sim-state refactor) so
+    // the mask kernel shares the resident SimCfg buffer with other
+    // kernels instead of paying its own per-tick uniform upload.
     //
     // The struct is `std140`-ish — f32 fields pack tight, but WGSL
-    // uniform buffers still want 16-byte alignment. Two scalars fit in
-    // the first 8 bytes; we pad to 16 with two f32s.
+    // uniform buffers still want 16-byte alignment. One scalar plus
+    // 12 bytes of padding.
     writeln!(out, "struct ConfigUniform {{").unwrap();
-    writeln!(out, "    combat_attack_range: f32,").unwrap();
     writeln!(out, "    movement_max_move_radius: f32,").unwrap();
     writeln!(out, "    // Padding to align to 16 bytes.").unwrap();
     writeln!(out, "    _pad0: f32,").unwrap();
     writeln!(out, "    _pad1: f32,").unwrap();
+    writeln!(out, "    _pad2: f32,").unwrap();
     writeln!(out, "}};").unwrap();
     writeln!(
         out,
         "@group(0) @binding(4) var<uniform> cfg: ConfigUniform;"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // SimCfg — world-scalar fields shared across kernels. Layout must
+    // match `engine_gpu::sim_cfg::SimCfg` byte-for-byte; the
+    // `sim_cfg_layout` regression test fences the Rust-side offsets.
+    // Storage (not uniform) because the seed-indirect kernel
+    // atomically increments `tick` on this same buffer.
+    emit_sim_cfg_struct_wgsl(out, /* binding */ 5);
+}
+
+/// Emit the shared `SimCfg` struct declaration + binding. Layout mirrors
+/// `engine_gpu::sim_cfg::SimCfg` exactly; the `sim_cfg_layout`
+/// regression test fences drift. The `binding` argument parameterises
+/// the `@binding(...)` attribute so the caller can place it past the
+/// last mask bitmap in the fused emitter.
+fn emit_sim_cfg_struct_wgsl(out: &mut String, binding: u32) {
+    writeln!(out, "struct SimCfg {{").unwrap();
+    writeln!(out, "    tick:                          u32,").unwrap();
+    writeln!(out, "    world_seed_lo:                 u32,").unwrap();
+    writeln!(out, "    world_seed_hi:                 u32,").unwrap();
+    writeln!(out, "    _sim_cfg_pad0:                 u32,").unwrap();
+    writeln!(out, "    engagement_range:              f32,").unwrap();
+    writeln!(out, "    attack_damage:                 f32,").unwrap();
+    writeln!(out, "    attack_range:                  f32,").unwrap();
+    writeln!(out, "    move_speed:                    f32,").unwrap();
+    writeln!(out, "    move_speed_mult:               f32,").unwrap();
+    writeln!(out, "    kin_radius:                    f32,").unwrap();
+    writeln!(out, "    cascade_max_iterations:        u32,").unwrap();
+    writeln!(out, "    rules_registry_generation:     u32,").unwrap();
+    writeln!(out, "    abilities_registry_generation: u32,").unwrap();
+    writeln!(out, "    _sim_cfg_reserved0:            u32,").unwrap();
+    writeln!(out, "    _sim_cfg_reserved1:            u32,").unwrap();
+    writeln!(out, "    _sim_cfg_reserved2:            u32,").unwrap();
+    writeln!(out, "}};").unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding({binding}) var<storage, read> sim_cfg: SimCfg;"
     )
     .unwrap();
     writeln!(out).unwrap();
@@ -499,7 +542,11 @@ fn emit_predicate_body(
 /// `emit_bindings` and wire it here.
 fn mask_radius_symbol(name: &str) -> Result<&'static str, EmitError> {
     match name {
-        "Attack" => Ok("cfg.combat_attack_range"),
+        // `attack_range` is a world-scalar — reads from the shared
+        // `SimCfg` storage buffer (Task 2.4 of the GPU sim-state
+        // refactor). `movement.max_move_radius` is subsystem-local
+        // config and stays in the per-kernel `ConfigUniform`.
+        "Attack" => Ok("sim_cfg.attack_range"),
         "MoveToward" => Ok("cfg.movement_max_move_radius"),
         other => Err(EmitError::Unsupported(format!(
             "target-bound mask `{other}` has no wired radius knob in the WGSL emitter; \
@@ -633,7 +680,9 @@ fn lower_namespace_field(ns: NamespaceId, field: &str) -> Result<String, EmitErr
         // emitter only surfaces the ones a masked rule actually reads,
         // so the uniform buffer stays tiny. Extend per mask.
         return match field {
-            "combat.attack_range" => Ok("cfg.combat_attack_range".to_string()),
+            // World-scalar — migrated to SimCfg (Task 2.4).
+            "combat.attack_range" => Ok("sim_cfg.attack_range".to_string()),
+            // Subsystem-local — stays in per-kernel ConfigUniform.
             "movement.max_move_radius" => Ok("cfg.movement_max_move_radius".to_string()),
             other => Err(EmitError::Unsupported(format!(
                 "WGSL mask emitter: config field `{other}` not wired"
@@ -828,6 +877,10 @@ pub struct FusedMaskModule {
     /// Binding number of the shared `ConfigUniform` — one past the
     /// last bitmap.
     pub config_binding: u32,
+    /// Binding number of the shared `SimCfg` storage buffer —
+    /// immediately after `config_binding`. World-scalar reads
+    /// (currently `attack_range`) resolve to this buffer.
+    pub sim_cfg_binding: u32,
 }
 
 /// Emit a fused compute module covering every mask in `masks`. The
@@ -921,13 +974,15 @@ fn emit_masks_wgsl_fused_result(masks: &[MaskIR]) -> Result<FusedMaskModule, Emi
     }
     writeln!(out).unwrap();
 
-    // Config uniform — sits one past the last bitmap.
+    // Config uniform — sits one past the last bitmap. Carries
+    // subsystem-local knobs only; world-scalars live in `SimCfg`
+    // (bound immediately after).
     let config_binding = FUSED_BITMAP_BINDING_BASE + classified.len() as u32;
     writeln!(out, "struct ConfigUniform {{").unwrap();
-    writeln!(out, "    combat_attack_range: f32,").unwrap();
     writeln!(out, "    movement_max_move_radius: f32,").unwrap();
     writeln!(out, "    _pad0: f32,").unwrap();
     writeln!(out, "    _pad1: f32,").unwrap();
+    writeln!(out, "    _pad2: f32,").unwrap();
     writeln!(out, "}};").unwrap();
     writeln!(
         out,
@@ -935,6 +990,12 @@ fn emit_masks_wgsl_fused_result(masks: &[MaskIR]) -> Result<FusedMaskModule, Emi
     )
     .unwrap();
     writeln!(out).unwrap();
+
+    // SimCfg — world-scalar fields shared across kernels. Task 2.4
+    // migrated `combat.attack_range` reads here; future kernel tasks
+    // (2.5-2.9) will migrate the remaining world-scalars.
+    let sim_cfg_binding = config_binding + 1;
+    emit_sim_cfg_struct_wgsl(&mut out, sim_cfg_binding);
 
     // Helpers — identical to the per-mask module.
     emit_helpers(&mut out);
@@ -999,6 +1060,7 @@ fn emit_masks_wgsl_fused_result(masks: &[MaskIR]) -> Result<FusedMaskModule, Emi
         wgsl: out,
         bindings,
         config_binding,
+        sim_cfg_binding,
     })
 }
 

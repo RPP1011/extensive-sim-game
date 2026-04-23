@@ -87,15 +87,19 @@ struct GpuPos {
 }
 
 /// Config uniform buffer — matches `struct ConfigUniform` in the WGSL.
-/// Two scalars (attack_range, max_move_radius) plus 8 bytes of padding
-/// to align the block to 16 bytes.
+/// Carries subsystem-local scalars only; world-scalars (currently
+/// `attack_range`) live in `SimCfg` and are bound separately as of
+/// Task 2.4 of the GPU sim-state refactor.
+///
+/// One live scalar (`movement_max_move_radius`) plus 12 bytes of
+/// padding to align the block to 16 bytes (WGSL uniform alignment).
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 struct GpuConfig {
-    combat_attack_range: f32,
     movement_max_move_radius: f32,
     _pad0: f32,
     _pad1: f32,
+    _pad2: f32,
 }
 
 /// Error surface for fused-kernel init + dispatch.
@@ -301,6 +305,10 @@ pub struct FusedMaskKernel {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     bindings: Vec<FusedMaskBinding>,
+    /// Binding number of the shared `SimCfg` storage buffer in this
+    /// kernel's BGL. The resident path binds the caller-supplied
+    /// `sim_cfg_buf` here; the sync path binds the pool-owned fallback.
+    sim_cfg_binding: u32,
     pool: Option<BufferPool>,
 }
 
@@ -321,7 +329,19 @@ struct BufferPool {
     /// Not used by the sync `run_and_readback` path.
     bitmaps_concat_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
+    /// Pool-owned `SimCfg` snapshot buffer — used by the sync path
+    /// (`run_and_readback`) so it can keep operating without a
+    /// caller-supplied resident `sim_cfg_buf`. The resident path
+    /// (`run_resident`) binds the caller's buffer instead, via
+    /// `resident_bg`.
+    sync_sim_cfg_buf: wgpu::Buffer,
+    /// Bind group wired with the sync-path `sync_sim_cfg_buf`.
+    /// Used by `run_and_readback` only.
+    sync_bind_group: wgpu::BindGroup,
+    /// Cached bind group for the resident path, keyed by the caller-
+    /// supplied `sim_cfg_buf` identity. Stable across a batch (same
+    /// buffer every tick), so this amortises to a single BG build.
+    resident_bind_group: Option<(wgpu::Buffer, wgpu::BindGroup)>,
 }
 
 impl FusedMaskKernel {
@@ -403,6 +423,21 @@ impl FusedMaskKernel {
             },
             count: None,
         });
+        // SimCfg binding (Task 2.4) — shared world-scalars, read-only
+        // storage. The kernel only reads `sim_cfg.attack_range` today;
+        // future kernel migrations will widen the read surface.
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: module.sim_cfg_binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: std::num::NonZeroU64::new(
+                    std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
+                ),
+            },
+            count: None,
+        });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::fused_mask::bgl"),
@@ -428,9 +463,16 @@ impl FusedMaskKernel {
             wgsl: _,
             bindings,
             config_binding: _,
+            sim_cfg_binding,
         } = module;
 
-        Ok(Self { pipeline, bind_group_layout, bindings, pool: None })
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+            bindings,
+            sim_cfg_binding,
+            pool: None,
+        })
     }
 
     /// Per-mask binding metadata — name, index, shape — in emission
@@ -496,12 +538,24 @@ impl FusedMaskKernel {
         let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("engine_gpu::fused_mask::cfg"),
             contents: bytemuck::cast_slice(&[GpuConfig {
-                combat_attack_range: 0.0,
                 movement_max_move_radius: 0.0,
                 _pad0: 0.0,
                 _pad1: 0.0,
+                _pad2: 0.0,
             }]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Sync-path fallback `SimCfg` buffer. `run_and_readback` keeps
+        // its historical behaviour (upload full cfg uniform on each
+        // tick) by uploading a fresh snapshot here too. The resident
+        // path ignores this and binds the caller-supplied `sim_cfg_buf`
+        // in `resident_bind_group`.
+        let sync_sim_cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::fused_mask::sync_sim_cfg"),
+            size: std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         // Resident-path output: single concat of all per-mask bitmaps.
@@ -518,8 +572,12 @@ impl FusedMaskKernel {
             mapped_at_creation: false,
         });
 
-        // Bind group — SoA (0..=2), N bitmaps, cfg.
-        let mut bg_entries: Vec<wgpu::BindGroupEntry<'_>> = Vec::with_capacity(3 + bitmap_bufs.len() + 1);
+        // Sync-path bind group — SoA (0..=2), N bitmaps, cfg uniform,
+        // sync-path `SimCfg` storage fallback. Used by
+        // `run_and_readback` only; the resident path uses
+        // `resident_bind_group` with the caller's `sim_cfg_buf`.
+        let mut bg_entries: Vec<wgpu::BindGroupEntry<'_>> =
+            Vec::with_capacity(3 + bitmap_bufs.len() + 2);
         bg_entries.push(wgpu::BindGroupEntry { binding: 0, resource: pos_buf.as_entire_binding() });
         bg_entries.push(wgpu::BindGroupEntry { binding: 1, resource: alive_buf.as_entire_binding() });
         bg_entries.push(wgpu::BindGroupEntry {
@@ -537,9 +595,13 @@ impl FusedMaskKernel {
             binding: cfg_binding,
             resource: cfg_buf.as_entire_binding(),
         });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: self.sim_cfg_binding,
+            resource: sync_sim_cfg_buf.as_entire_binding(),
+        });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("engine_gpu::fused_mask::bg"),
+        let sync_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("engine_gpu::fused_mask::sync_bg"),
             layout: &self.bind_group_layout,
             entries: &bg_entries,
         });
@@ -554,7 +616,9 @@ impl FusedMaskKernel {
             bitmap_readback_bufs,
             bitmaps_concat_buf,
             cfg_buf,
-            bind_group,
+            sync_sim_cfg_buf,
+            sync_bind_group,
+            resident_bind_group: None,
         });
     }
 
@@ -640,12 +704,20 @@ impl FusedMaskKernel {
             &pool.cfg_buf,
             0,
             bytemuck::cast_slice(&[GpuConfig {
-                combat_attack_range: state.config.combat.attack_range,
                 movement_max_move_radius: state.config.movement.max_move_radius,
                 _pad0: 0.0,
                 _pad1: 0.0,
+                _pad2: 0.0,
             }]),
         );
+
+        // Keep the sync-path fallback `SimCfg` snapshot in lockstep.
+        // Callers of the resident path supply their own `sim_cfg_buf`
+        // and never read from this one, but we still refresh it so
+        // `run_and_readback` (which uses this buffer via
+        // `sync_bind_group`) sees current values.
+        let sim_cfg = crate::sim_cfg::SimCfg::from_state(state);
+        crate::sim_cfg::upload_sim_cfg(queue, &pool.sync_sim_cfg_buf, &sim_cfg);
 
         // Zero every per-mask bitmap — atomicOr accumulates, so
         // leftover bits from a previous tick would poison the next
@@ -686,6 +758,7 @@ impl FusedMaskKernel {
         _queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         agents_buf: &wgpu::Buffer,
+        sim_cfg_buf: &wgpu::Buffer,
         agent_cap: u32,
     ) -> Result<(), KernelError> {
         // Silence unused-param lint without sacrificing the stable
@@ -694,11 +767,64 @@ impl FusedMaskKernel {
         let _ = agents_buf;
 
         self.ensure_pool(device, agent_cap);
-        let pool = self.pool.as_ref().expect("pool ensured");
+
+        // Build (or reuse the cached) resident bind group that binds
+        // the caller-supplied `sim_cfg_buf` at `self.sim_cfg_binding`.
+        // Cache hits once per batch (the backend holds a stable
+        // resident `sim_cfg_buf` across all ticks of a batch).
+        let sim_cfg_binding = self.sim_cfg_binding;
+        let bind_group_layout = &self.bind_group_layout;
+        let pool = self.pool.as_mut().expect("pool ensured");
         debug_assert_eq!(
             pool.agent_cap, agent_cap,
             "ensure_pool must size the pool to the requested agent_cap",
         );
+        let needs_rebuild = match &pool.resident_bind_group {
+            Some((cached_buf, _)) => cached_buf != sim_cfg_buf,
+            None => true,
+        };
+        if needs_rebuild {
+            let mut bg_entries: Vec<wgpu::BindGroupEntry<'_>> =
+                Vec::with_capacity(3 + pool.bitmap_bufs.len() + 2);
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: 0,
+                resource: pool.pos_buf.as_entire_binding(),
+            });
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: 1,
+                resource: pool.alive_buf.as_entire_binding(),
+            });
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: 2,
+                resource: pool.creature_type_buf.as_entire_binding(),
+            });
+            for (i, buf) in pool.bitmap_bufs.iter().enumerate() {
+                bg_entries.push(wgpu::BindGroupEntry {
+                    binding: FUSED_BITMAP_BINDING_BASE + i as u32,
+                    resource: buf.as_entire_binding(),
+                });
+            }
+            let cfg_binding = FUSED_BITMAP_BINDING_BASE + pool.bitmap_bufs.len() as u32;
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: cfg_binding,
+                resource: pool.cfg_buf.as_entire_binding(),
+            });
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: sim_cfg_binding,
+                resource: sim_cfg_buf.as_entire_binding(),
+            });
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("engine_gpu::fused_mask::resident_bg"),
+                layout: bind_group_layout,
+                entries: &bg_entries,
+            });
+            pool.resident_bind_group = Some((sim_cfg_buf.clone(), bg));
+        }
+        let resident_bg = &pool
+            .resident_bind_group
+            .as_ref()
+            .expect("resident_bind_group just built")
+            .1;
 
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -706,7 +832,7 @@ impl FusedMaskKernel {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&self.pipeline);
-            cpass.set_bind_group(0, &pool.bind_group, &[]);
+            cpass.set_bind_group(0, resident_bg, &[]);
             let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
             cpass.dispatch_workgroups(groups, 1, 1);
         }
@@ -798,17 +924,23 @@ impl FusedMaskKernel {
             .collect();
         queue.write_buffer(&pool.creature_type_buf, 0, bytemuck::cast_slice(&ct_src));
 
-        // Config uniform — pack the knobs the fused kernel reads.
+        // Config uniform — subsystem-local knobs only. World-scalars
+        // live in the pool's `sync_sim_cfg_buf`, uploaded just below.
         queue.write_buffer(
             &pool.cfg_buf,
             0,
             bytemuck::cast_slice(&[GpuConfig {
-                combat_attack_range: state.config.combat.attack_range,
                 movement_max_move_radius: state.config.movement.max_move_radius,
                 _pad0: 0.0,
                 _pad1: 0.0,
+                _pad2: 0.0,
             }]),
         );
+
+        // Upload sync-path `SimCfg` snapshot — the sync bind group
+        // wires `pool.sync_sim_cfg_buf` at `self.sim_cfg_binding`.
+        let sim_cfg = crate::sim_cfg::SimCfg::from_state(state);
+        crate::sim_cfg::upload_sim_cfg(queue, &pool.sync_sim_cfg_buf, &sim_cfg);
 
         // Zero every bitmap — atomicOr accumulates, so leftover bits
         // from a previous tick would poison the next read.
@@ -827,7 +959,7 @@ impl FusedMaskKernel {
                 timestamp_writes: None,
             });
             cpass.set_pipeline(&self.pipeline);
-            cpass.set_bind_group(0, &pool.bind_group, &[]);
+            cpass.set_bind_group(0, &pool.sync_bind_group, &[]);
             let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
             cpass.dispatch_workgroups(groups, 1, 1);
         }
