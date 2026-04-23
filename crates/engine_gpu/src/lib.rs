@@ -1076,6 +1076,18 @@ impl GpuBackend {
     fn ensure_resident_init(&mut self, state: &SimState) -> Result<(), String> {
         let agent_cap = state.agent_cap();
 
+        // --- SimCfg (Phase 2 / Task 2.2) ---
+        // Allocate + upload once per batch entry. The tick field is
+        // advanced GPU-side by the seed-indirect kernel (Task 2.3) and
+        // read by every kernel that currently reads world-scalar fields
+        // from a per-kernel cfg uniform (Tasks 2.4-2.9).
+        if self.resident.sim_cfg_buf.is_none() {
+            let buf = crate::sim_cfg::create_sim_cfg_buffer(&self.device);
+            let cfg = crate::sim_cfg::SimCfg::from_state(state);
+            crate::sim_cfg::upload_sim_cfg(&self.queue, &buf, &cfg);
+            self.resident.sim_cfg_buf = Some(buf);
+        }
+
         // Cascade context (DSL load + physics WGSL compile). Idempotent.
         self.ensure_cascade_initialized()
             .map_err(|e| format!("ensure_cascade_initialized: {e}"))?;

@@ -25,6 +25,17 @@ pub struct ResidentPathContext {
     /// ticks.
     pub resident_cascade_ctx:   Option<CascadeResidentCtx>,
 
+    /// Phase 2 (subsystem 1 follow-up) — GPU-resident sim state buffer.
+    /// Holds tick, world seed, world-scalar fields, and cache-invalidation
+    /// generation counters. Kernels bind this instead of reading
+    /// duplicated fields from per-kernel cfg uniforms. The tick field is
+    /// atomically incremented by the seed-indirect kernel at end of each
+    /// cascade iteration (Task 2.3).
+    ///
+    /// Lazy-initialised by `GpuBackend::ensure_resident_init` on first
+    /// `step_batch` call.
+    pub sim_cfg_buf:            Option<wgpu::Buffer>,
+
     /// Phase E: retained for backward compatibility but NOT on the hot
     /// batch path — subsumed by [`FusedAgentUnpackKernel`].
     #[allow(dead_code)]
@@ -56,6 +67,7 @@ impl ResidentPathContext {
             mask_unpack_kernel,
             scoring_unpack_kernel,
             fused_unpack_kernel,
+            sim_cfg_buf:            None,
         }
     }
 }
