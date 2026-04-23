@@ -907,6 +907,31 @@ impl GpuBackend {
                 label: Some("engine_gpu::step_batch::enc"),
             });
 
+        // C1 + C2 fix: reset the batch-scoped event accumulator and the
+        // chronicle ring at the START of each batch. Both rings are
+        // append-only within a batch — the batch events ring collects
+        // apply+movement events across every tick (per-tick-reset of
+        // `apply_event_ring` would otherwise drop all but the last
+        // tick's events from `snapshot()`'s view), and the chronicle
+        // ring collects narrative entries the physics kernel emits.
+        // Without these resets the chronicle ring would grow
+        // unboundedly across back-to-back `step_batch` calls in a
+        // long-running session and eventually overflow its
+        // `DEFAULT_CHRONICLE_CAPACITY`.
+        //
+        // Also zero the snapshot watermark — the batch ring is reset,
+        // so any watermark recorded during the previous batch is
+        // meaningless against the new tail.
+        {
+            let resident_ctx = self
+                .resident_cascade_ctx
+                .as_ref()
+                .expect("resident_cascade_ctx ensured by ensure_resident_init");
+            resident_ctx.reset_batch_events_ring(&mut encoder);
+            resident_ctx.reset_chronicle_ring(&mut encoder);
+        }
+        self.snapshot_event_ring_read = 0;
+
         let agent_cap = state.agent_cap();
         for _ in 0..n_ticks {
             let agents_buf = self
@@ -1021,6 +1046,33 @@ impl GpuBackend {
                     agent_cap,
                 )
                 .expect("movement resident dispatch");
+
+            // 3b. C1 fix: append apply+movement events into the
+            //     batch-scoped accumulator BEFORE the cascade seed
+            //     clears-and-consumes `apply_event_ring.tail`. Reads
+            //     apply_tail atomically and copies records 0..tail into
+            //     `batch_events_ring`, advancing its atomic tail. This
+            //     is what `snapshot()` later reads from — so the
+            //     snapshot sees events from EVERY tick in the batch,
+            //     not just the last one.
+            //
+            //     Ordered inside the encoder (and between compute
+            //     passes) so it lands AFTER movement writes into
+            //     `apply_event_ring` and BEFORE the cascade seed reads
+            //     the tail.
+            {
+                let resident_ctx = self
+                    .resident_cascade_ctx
+                    .as_mut()
+                    .expect("resident_cascade_ctx ensured by ensure_resident_init");
+                resident_ctx.encode_append_apply_events(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    &cascade_ctx.apply_event_ring,
+                    agent_cap,
+                );
+            }
 
             // 4. Cascade: 2× spatial queries + seed + N physics iterations.
             //    The resident driver records all of it into the current
@@ -1214,23 +1266,28 @@ impl GpuBackend {
     ///
     /// # Event ring choice
     ///
-    /// Snapshots `cascade_ctx.apply_event_ring` — the ring that the
-    /// resident path's `apply_actions` + `movement` kernels write into
-    /// every tick. D4's `step_batch` clears this ring's tail at the
-    /// top of each tick, so the tail always reflects *only the most
-    /// recently completed tick's* apply + movement events (not the
-    /// per-iteration cascade events, which live in
-    /// `resident_cascade_ctx`'s internal ping-pong rings and are also
-    /// reset per iteration). That's sufficient for the observer's
-    /// use-case: a consistent stream of "what happened last tick."
+    /// Snapshots `resident_cascade_ctx.batch_events_ring` — the
+    /// batch-scoped accumulator into which `step_batch` copies every
+    /// tick's apply+movement events (via a small GPU append kernel,
+    /// see [`crate::cascade_resident::CascadeResidentCtx`]). That ring
+    /// is reset at the top of each `step_batch` call and accumulates
+    /// monotonically within the batch, so a snapshot taken after
+    /// `step_batch(N)` observes events from all N ticks — not just the
+    /// last one.
     ///
-    /// Because the ring is reset every tick, the `start` offset is
-    /// fixed at 0 and the `snapshot_event_ring_read` watermark is
-    /// unused on this path (kept as a no-op for the test accessor).
-    /// If a future observer wants cross-tick accumulation, the path is
-    /// to snapshot the append-only chronicle ring on
-    /// `resident_cascade_ctx` instead — that's the append-only stream
-    /// the design doc reserved for "durable history."
+    /// The physics `apply_event_ring` itself can't be snapshotted
+    /// because its tail is cleared at the top of every tick inside the
+    /// batch (required for cascade-seed correctness: the seed kernel
+    /// consumes `apply_tail` for the initial event count and re-seeing
+    /// last tick's events would double-count). The `batch_events_ring`
+    /// is append-only across the batch so it preserves the multi-tick
+    /// view `snapshot()` callers need.
+    ///
+    /// The `snapshot_event_ring_read` watermark is a cross-snapshot
+    /// cursor — reset to 0 whenever `step_batch` is called (since the
+    /// underlying ring was reset) and advanced to the current tail
+    /// after each successful snapshot. Back-to-back snapshots within a
+    /// single batch yield disjoint event slices.
     pub fn snapshot(
         &mut self,
     ) -> Result<crate::snapshot::GpuSnapshot, crate::snapshot::SnapshotError> {
@@ -1241,11 +1298,11 @@ impl GpuBackend {
             None => return Ok(crate::snapshot::GpuSnapshot::empty()),
         };
 
-        // Case 2: cascade context not initialised — no physics event
-        // ring exists to read either. `step_batch` path always ensures
-        // this before allocating `resident_agents_buf`, but defend
-        // against a misuse / future reorder.
-        let cascade_ctx = match self.cascade_ctx.as_ref() {
+        // Case 2: resident cascade context not initialised — no batch
+        // events ring exists to read either. `step_batch` path always
+        // ensures this before allocating `resident_agents_buf`, but
+        // defend against a misuse / future reorder.
+        let resident_ctx = match self.resident_cascade_ctx.as_ref() {
             Some(c) => c,
             None => return Ok(crate::snapshot::GpuSnapshot::empty()),
         };
@@ -1288,13 +1345,14 @@ impl GpuBackend {
             .expect("snapshot_front lazy-inited above")
             .take_snapshot(&self.device, self.resident_agents_cap as usize)?;
 
-        // 2. Read the apply event ring's current tail so we know
+        // 2. Read the batch events ring's current tail so we know
         //    which slice to copy into the BACK. One 4-byte blocking
         //    readback per snapshot — acceptable per plan Option (a).
-        //    This ring is reset at the top of every tick by
-        //    `step_batch`, so its tail reflects only the most recent
-        //    completed tick's events.
-        let main_event_ring = &cascade_ctx.apply_event_ring;
+        //    This ring is reset at the top of each `step_batch` call
+        //    and accumulates apply+movement events across every tick
+        //    in that batch, so its tail reflects the cumulative event
+        //    count for the current batch.
+        let main_event_ring = resident_ctx.batch_events_ring();
         let tail_vec: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
             &self.device,
             &self.queue,
@@ -1308,13 +1366,21 @@ impl GpuBackend {
         //    Encoder + submit live entirely inside this method.
         let agent_bytes = (self.resident_agents_cap as u64)
             * (std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64);
-        // Apply event ring is cleared every tick, so its contents are
-        // always [0, tail). Always read the full ring rather than
-        // tracking a watermark — the watermark model is for
-        // append-only rings (which is what the chronicle ring is, if
-        // we ever route it through here).
-        let start: u64 = 0;
-        let end = event_ring_tail;
+        // The batch events ring is append-only across the batch.
+        // Observers who snapshot more than once per batch get the
+        // delta since their last call via the `snapshot_event_ring_read`
+        // watermark. The watermark is reset to 0 at the top of each
+        // `step_batch` (since the ring itself is reset), so the first
+        // in-batch snapshot starts at 0 and captures the entire ring
+        // up to the current tail. If the tail has somehow regressed
+        // relative to the watermark (a new batch was started since the
+        // last snapshot), `end.max(start)` guards against a negative
+        // slice length — in that case the caller will just observe an
+        // empty slice for that call (the test accessor resets the
+        // watermark to 0 anyway on new-batch detection).
+        let start: u64 = self.snapshot_event_ring_read;
+        let event_ring_cap = main_event_ring.capacity() as u64;
+        let end = event_ring_tail.min(event_ring_cap).max(start);
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1333,9 +1399,10 @@ impl GpuBackend {
                 self.latest_recorded_tick,
             );
         self.queue.submit(Some(encoder.finish()));
-        // Record end as the most-recent tail for the test accessor.
-        // Not a true watermark (ring is per-tick-reset, see above),
-        // but useful as a "events last observed" indicator.
+        // Advance the watermark. The batch events ring is append-only
+        // within a batch, so this is a true watermark — the next
+        // snapshot reads records in `[end, new_tail)`. Reset to 0 at
+        // the top of each `step_batch` call.
         self.snapshot_event_ring_read = end;
 
         // 4. Swap front / back — next call takes the one we just

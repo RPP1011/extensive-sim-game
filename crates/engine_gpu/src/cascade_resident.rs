@@ -26,7 +26,7 @@ use bytemuck::{Pod, Zeroable};
 use engine::state::SimState;
 
 use crate::cascade::{CascadeCtx, DEFAULT_KIN_RADIUS, MAX_CASCADE_ITERATIONS};
-use crate::event_ring::GpuEventRing;
+use crate::event_ring::{GpuEventRing, DEFAULT_CAPACITY, PAYLOAD_WORDS};
 use crate::gpu_util::indirect::IndirectArgsBuffer;
 use crate::physics::{
     GpuAgentSlot, GpuKinList, PackedAbilityRegistry, PhysicsCfg, PHYSICS_WORKGROUP_SIZE,
@@ -381,6 +381,235 @@ impl SeedIndirectKernel {
 }
 
 // ---------------------------------------------------------------------------
+// Append-events kernel (C1 fix)
+// ---------------------------------------------------------------------------
+//
+// `step_batch` clears `apply_event_ring.tail` at the top of every tick so
+// the per-iter cascade seed kernel sees a fresh count. That clear means
+// only the *last* tick's apply+movement events are observable at end-of-
+// batch — all prior ticks' events are lost to the snapshot consumer.
+//
+// This kernel accumulates apply+movement events into a dedicated
+// `batch_events_ring` across every tick in a batch. Per-tick flow:
+//
+//   1. apply_actions + movement run, appending to `apply_event_ring`.
+//   2. This append kernel dispatches: each thread i < apply_tail copies
+//      record i from apply_event_ring into batch_events_ring at slot
+//      atomic-reserved on batch_tail.
+//   3. Seed kernel reads apply_tail for the cascade.
+//   4. apply_event_ring.tail is cleared (at the top of the *next* tick).
+//
+// The batch ring is reset once per `step_batch` call so
+// snapshot()-observed events are scoped to that batch's execution.
+//
+// Dispatch size is computed on CPU from a conservative upper bound
+// (apply + movement together can emit at most `agent_cap * 4`
+// events — 2 events per agent per kernel, very loose). Threads past
+// `apply_tail` early-exit after reading the atomic once, so the
+// over-dispatch cost is a few hundred no-op threads per tick.
+
+/// WGSL source for the append kernel. Each thread handles one record.
+/// `apply_tail[0]` bounds the work; `batch_tail[0]` is atomicAdd'd once
+/// per copied record to reserve a destination slot.
+///
+/// Record layout: 10 u32s (kind + tick + 8 payload words). See
+/// [`crate::event_ring::RECORD_BYTES`].
+const APPEND_EVENTS_WGSL: &str = r#"
+const RECORD_U32S: u32 = 10u;
+
+@group(0) @binding(0) var<storage, read>       apply_tail: array<atomic<u32>>;
+@group(0) @binding(1) var<storage, read>       apply_records: array<u32>;
+@group(0) @binding(2) var<storage, read_write> batch_tail: array<atomic<u32>>;
+@group(0) @binding(3) var<storage, read_write> batch_records: array<u32>;
+@group(0) @binding(4) var<uniform>             cfg: AppendCfg;
+
+struct AppendCfg {
+    batch_cap: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@compute @workgroup_size(64)
+fn append(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let n = atomicLoad(&apply_tail[0]);
+    let i = gid.x;
+    if (i >= n) { return; }
+    let dst = atomicAdd(&batch_tail[0], 1u);
+    if (dst >= cfg.batch_cap) { return; }
+    let src_off = i * RECORD_U32S;
+    let dst_off = dst * RECORD_U32S;
+    for (var w: u32 = 0u; w < RECORD_U32S; w = w + 1u) {
+        batch_records[dst_off + w] = apply_records[src_off + w];
+    }
+}
+"#;
+
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable, Debug)]
+struct AppendCfg {
+    batch_cap: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+/// Small compute kernel that copies `apply_event_ring.records[0..tail]`
+/// into `batch_events_ring.records[batch_tail..]`, advancing the batch
+/// ring's atomic tail by the apply-tail count. Used by `step_batch`
+/// after apply+movement and before the cascade seed, so the batch ring
+/// accumulates ALL apply+movement events across every tick in the
+/// batch (rather than just the last tick's, which is all that
+/// `apply_event_ring` still holds by end-of-batch because its tail is
+/// cleared at the top of each tick for cascade-seed correctness).
+struct AppendEventsKernel {
+    pipeline: wgpu::ComputePipeline,
+    bgl: wgpu::BindGroupLayout,
+    cfg_buf: wgpu::Buffer,
+    /// `batch_cap` the cfg buffer was last uploaded with.
+    last_cap: u32,
+}
+
+impl AppendEventsKernel {
+    fn new(device: &wgpu::Device) -> Result<Self, CascadeResidentError> {
+        // Sanity: WGSL assumes 10 u32s per record.
+        debug_assert_eq!(2 + PAYLOAD_WORDS, 10);
+
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cascade_resident::append::shader"),
+            source: wgpu::ShaderSource::Wgsl(APPEND_EVENTS_WGSL.into()),
+        });
+        if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+            return Err(CascadeResidentError::Kernel(format!(
+                "append shader compile: {err}"
+            )));
+        }
+
+        let storage = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let uniform = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cascade_resident::append::bgl"),
+            entries: &[
+                storage(0, true),  // apply_tail (atomic — read via atomicLoad)
+                storage(1, true),  // apply_records
+                storage(2, false), // batch_tail (atomicAdd)
+                storage(3, false), // batch_records
+                uniform(4),
+            ],
+        });
+        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cascade_resident::append::pl"),
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("cascade_resident::append::pipeline"),
+            layout: Some(&pl),
+            module: &shader,
+            entry_point: Some("append"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cascade_resident::append::cfg"),
+            size: std::mem::size_of::<AppendCfg>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Ok(Self {
+            pipeline,
+            bgl,
+            cfg_buf,
+            last_cap: u32::MAX,
+        })
+    }
+
+    /// Encode the dispatch. `agent_cap` is used to compute a
+    /// conservative workgroup count — apply + movement together emit at
+    /// most ~2 events per agent per kernel (very loose upper bound: 4).
+    /// Threads past the observed `apply_tail` early-exit after a single
+    /// atomic load.
+    #[allow(clippy::too_many_arguments)]
+    fn record(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        apply_ring: &GpuEventRing,
+        batch_ring: &GpuEventRing,
+        agent_cap: u32,
+    ) {
+        let batch_cap = batch_ring.capacity();
+        if batch_cap != self.last_cap {
+            let cfg = AppendCfg {
+                batch_cap,
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+            };
+            queue.write_buffer(&self.cfg_buf, 0, bytemuck::bytes_of(&cfg));
+            self.last_cap = batch_cap;
+        }
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cascade_resident::append::bg"),
+            layout: &self.bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: apply_ring.tail_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: apply_ring.records_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: batch_ring.tail_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: batch_ring.records_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.cfg_buf.as_entire_binding(),
+                },
+            ],
+        });
+        // Conservative upper bound: 4 events per agent across apply +
+        // movement (real max ~2). Threads past apply_tail early-exit.
+        let max_events = agent_cap.saturating_mul(4).max(64);
+        let workgroups = max_events.div_ceil(PHYSICS_WORKGROUP_SIZE).max(1);
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("cascade_resident::append::cpass"),
+            timestamp_writes: None,
+        });
+        cpass.set_pipeline(&self.pipeline);
+        cpass.set_bind_group(0, &bg, &[]);
+        cpass.dispatch_workgroups(workgroups, 1, 1);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Driver context
 // ---------------------------------------------------------------------------
 
@@ -398,6 +627,10 @@ pub struct CascadeResidentCtx {
     spatial_bufs: Option<ResidentSpatialBuffers>,
     ability_bufs: ResidentAbilityBuffers,
     seed_kernel: SeedIndirectKernel,
+    /// Append kernel that copies apply_event_ring contents into the
+    /// batch-scoped `batch_events_ring` on each tick. See
+    /// [`AppendEventsKernel`] for rationale.
+    append_kernel: AppendEventsKernel,
     /// Ping-pong pair of physics event rings. Iter `i` (starting at
     /// 0) reads from `apply_event_ring` (for i=0) or the ring at index
     /// `(i - 1) & 1` (for i>0), and writes into the ring at index
@@ -413,7 +646,16 @@ pub struct CascadeResidentCtx {
     num_events_buf: wgpu::Buffer,
     /// Chronicle ring — caller-owned in the resident path. Shared
     /// across all iterations (append-only).
-    chronicle_ring: crate::event_ring::GpuChronicleRing,
+    pub(crate) chronicle_ring: crate::event_ring::GpuChronicleRing,
+    /// Batch-scoped accumulator for apply + movement events. The
+    /// physics `apply_event_ring` is cleared at the top of every tick
+    /// in `step_batch` (the cascade seed kernel reads its tail and we
+    /// can't re-seed without zeroing), which means only the *last*
+    /// tick's events remain observable at end-of-batch. The append
+    /// kernel copies each tick's apply+movement events into this ring
+    /// before the cascade seed runs, so `snapshot()` can observe the
+    /// full N-tick batch. Reset at the start of each `step_batch` call.
+    pub(crate) batch_events_ring: GpuEventRing,
     /// `agent_cap` the resident physics ability buffers + agent-cap
     /// dependent buffers were last sized for.
     last_agent_cap: u32,
@@ -431,6 +673,7 @@ impl CascadeResidentCtx {
     pub fn new(device: &wgpu::Device) -> Result<Self, CascadeResidentError> {
         let ability_bufs = ResidentAbilityBuffers::new(device);
         let seed_kernel = SeedIndirectKernel::new(device)?;
+        let append_kernel = AppendEventsKernel::new(device)?;
         let physics_ring_a = GpuEventRing::new(device, PHYSICS_EVENT_RING_CAPACITY);
         let physics_ring_b = GpuEventRing::new(device, PHYSICS_EVENT_RING_CAPACITY);
         // `MAX_CASCADE_ITERATIONS + 1` u32 slots: iter `i` reads
@@ -450,16 +693,70 @@ impl CascadeResidentCtx {
             device,
             crate::event_ring::DEFAULT_CHRONICLE_CAPACITY,
         );
+        // Batch-scoped event accumulator sized at the main-ring default
+        // capacity. At 655_360 records × 40 B that's ~25 MiB — matches
+        // the `apply_event_ring` envelope the batch path already budgets
+        // and gives ample room for ~N ticks × ~10× overflow.
+        let batch_events_ring = GpuEventRing::new(device, DEFAULT_CAPACITY);
         Ok(Self {
             spatial_bufs: None,
             ability_bufs,
             seed_kernel,
+            append_kernel,
             physics_ring_a,
             physics_ring_b,
             num_events_buf,
             chronicle_ring,
+            batch_events_ring,
             last_agent_cap: 0,
         })
+    }
+
+    /// Encode the append dispatch that copies `apply_event_ring`'s
+    /// contents into the batch-scoped accumulator. Used by
+    /// `step_batch` after apply+movement and before the cascade seed.
+    pub(crate) fn encode_append_apply_events(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        apply_ring: &GpuEventRing,
+        agent_cap: u32,
+    ) {
+        self.append_kernel.record(
+            device,
+            queue,
+            encoder,
+            apply_ring,
+            &self.batch_events_ring,
+            agent_cap,
+        );
+    }
+
+    /// Reset the batch-scoped accumulator's tail. Called at the top of
+    /// each `step_batch` so each batch begins with a fresh events view.
+    /// Emits a GPU `clear_buffer` op (ordered inside the command buffer,
+    /// not a queue write).
+    pub(crate) fn reset_batch_events_ring(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.clear_buffer(self.batch_events_ring.tail_buffer(), 0, None);
+    }
+
+    /// Reset the chronicle ring's tail. Called at the top of each
+    /// `step_batch` so chronicle emissions are scoped to the current
+    /// batch — otherwise the append-only ring would accumulate across
+    /// every batch call in a long-running session and eventually
+    /// overflow its `DEFAULT_CHRONICLE_CAPACITY`.
+    pub(crate) fn reset_chronicle_ring(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.clear_buffer(self.chronicle_ring.tail_buffer(), 0, None);
+    }
+
+    /// Read-only handle to the batch-scoped events accumulator.
+    /// `GpuBackend::snapshot()` reads this ring instead of
+    /// `apply_event_ring` so the snapshot covers every tick in the
+    /// batch (the apply ring holds only the last tick's events because
+    /// its tail is cleared per-tick for cascade-seed correctness).
+    pub(crate) fn batch_events_ring(&self) -> &GpuEventRing {
+        &self.batch_events_ring
     }
 
     fn ensure_spatial(&mut self, device: &wgpu::Device, agent_cap: u32) {
