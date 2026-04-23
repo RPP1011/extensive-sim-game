@@ -49,10 +49,18 @@
 //!   * `@group(0) @binding(2)` — `cfg: ApplyActionsCfg` (uniform)
 //!   * `@group(0) @binding(3)` — `event_ring: array<EventRecord>` (read_write)
 //!   * `@group(0) @binding(4)` — `event_ring_tail: atomic<u32>` (read_write)
+//!   * `@group(0) @binding(5)` — `sim_cfg: SimCfg` (storage, read-only) — Task 2.6
 //!
-//! 5 bindings, well under the 16-per-group cap. Event ring borrows
+//! 6 bindings, well under the 16-per-group cap. Event ring borrows
 //! `GpuEventRing`'s buffers; the physics + apply_actions kernels share
 //! the same event ring (different dispatches, same underlying storage).
+//!
+//! Task 2.6 of the GPU sim-state refactor migrated the `tick` +
+//! `attack_range_default` reads out of the per-kernel cfg uniform and
+//! onto the shared `SimCfg` storage buffer bound at `@binding(5)`. The
+//! remaining per-kernel cfg fields are all kernel-local
+//! (`agent_cap` for dispatch bounds; unused restore stubs kept for
+//! future Eat/Drink/Rest porting).
 
 #![cfg(feature = "gpu")]
 
@@ -70,6 +78,12 @@ use crate::scoring::ScoreOutput;
 /// groups — one thread per agent slot. Matches the mask/scoring
 /// kernels for consistency.
 pub const WORKGROUP_SIZE: u32 = 64;
+
+/// Binding number of the shared `SimCfg` storage buffer (Task 2.6).
+/// Sits immediately past the event-ring tail binding (4) so it's the
+/// last entry in the BGL; the shared WGSL emitter writes
+/// `@binding(SIM_CFG_BINDING)` into the shader source.
+const SIM_CFG_BINDING: u32 = 5;
 
 // ---------------------------------------------------------------------------
 // GPU-POD wire types
@@ -107,17 +121,25 @@ const _: () = assert!(std::mem::size_of::<ActionApplyAgent>() == 64);
 
 /// Uniform config carried per-dispatch. 32 bytes (WGSL uniform rule
 /// minimum alignment).
+///
+/// Task 2.6 of the GPU sim-state refactor migrated `tick` +
+/// `attack_range_default` out of this struct; they now live in the
+/// shared `SimCfg` storage buffer (`sim_cfg.tick` /
+/// `sim_cfg.attack_range`). The remaining fields are either
+/// subsystem-local (dispatch bound `agent_cap`) or unused stubs
+/// preserved for a future Eat/Drink/Rest port (see the `Needs` comment
+/// in `cs_apply_actions`).
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable, Debug)]
 pub struct ApplyActionsCfg {
     pub agent_cap: u32,
-    pub tick: u32,
     pub attack_damage_default: f32,
-    pub attack_range_default: f32,
     pub eat_restore: f32,
     pub drink_restore: f32,
     pub rest_restore: f32,
-    pub _pad: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
 }
 
 const _: () = assert!(std::mem::size_of::<ApplyActionsCfg>() == 32);
@@ -167,6 +189,10 @@ struct ResidentBgKey {
     scoring: wgpu::Buffer,
     event_ring_records: wgpu::Buffer,
     event_ring_tail: wgpu::Buffer,
+    /// Task 2.6: caller-supplied shared `SimCfg` buffer. Stable across
+    /// a batch (backend holds one resident buffer), so adding it here
+    /// still amortises to a single BG build per batch.
+    sim_cfg: wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -175,6 +201,11 @@ struct BufferPool {
     agents_readback: wgpu::Buffer,
     scoring_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
+    /// Pool-owned `SimCfg` snapshot buffer — used only by the sync
+    /// path (`run_and_readback`) so it stays self-contained. The
+    /// resident path (`run_resident`) binds the caller-supplied
+    /// `sim_cfg_buf` at `SIM_CFG_BINDING` instead.
+    sync_sim_cfg_buf: wgpu::Buffer,
 }
 
 impl ApplyActionsKernel {
@@ -222,12 +253,25 @@ impl ApplyActionsKernel {
             },
             count: None,
         };
+        let sim_cfg_storage_ro = |b: u32| wgpu::BindGroupLayoutEntry {
+            binding: b,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: std::num::NonZeroU64::new(
+                    std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
+                ),
+            },
+            count: None,
+        };
         let bgl_entries = [
             storage_rw(0), // agents
             storage_ro(1), // scoring
             uniform(2),    // cfg
             storage_rw(3), // event_ring records
             storage_rw(4), // event_ring tail
+            sim_cfg_storage_ro(SIM_CFG_BINDING), // Task 2.6: shared SimCfg
         ];
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::apply_actions::bgl"),
@@ -290,6 +334,17 @@ impl ApplyActionsKernel {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // Task 2.6: sync-path fallback `SimCfg` buffer. `run_and_readback`
+        // uploads a fresh `SimCfg::from_state(state)` here every tick
+        // so the sync path stays self-contained without requiring a
+        // caller-supplied resident `sim_cfg_buf`. The resident path
+        // ignores this and binds the caller's buffer instead.
+        let sync_sim_cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::apply_actions::sync_sim_cfg"),
+            size: std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         self.pool = Some(BufferPool {
             agent_cap,
@@ -297,6 +352,7 @@ impl ApplyActionsKernel {
             agents_readback,
             scoring_buf,
             cfg_buf,
+            sync_sim_cfg_buf,
         });
         // Pool rebuild — cached BG references the old pool.cfg_buf
         // (and implicitly the old agent_cap). Drop it.
@@ -308,6 +364,13 @@ impl ApplyActionsKernel {
     /// mutated agent slots. The event ring is drained by the caller
     /// (the ring is shared with the physics kernel so the caller
     /// orchestrates the drain timing).
+    ///
+    /// `sim_cfg` carries the world-scalar sim state (tick + attack
+    /// range) that this kernel reads via the shared `SimCfg` binding.
+    /// The sync path uploads this into the pool-owned fallback buffer
+    /// each tick; the resident path (which binds a caller-supplied
+    /// `sim_cfg_buf` instead) does not touch it. Migrated from
+    /// `ApplyActionsCfg` in Task 2.6 of the GPU sim-state refactor.
     pub fn run_and_readback(
         &mut self,
         device: &wgpu::Device,
@@ -315,6 +378,7 @@ impl ApplyActionsKernel {
         agent_slots_in: &[GpuAgentSlot],
         scoring: &[ScoreOutput],
         cfg: ApplyActionsCfg,
+        sim_cfg: &crate::sim_cfg::SimCfg,
         event_ring: &GpuEventRing,
     ) -> Result<Vec<GpuAgentSlot>, ApplyActionsError> {
         let agent_cap = cfg.agent_cap;
@@ -346,6 +410,10 @@ impl ApplyActionsKernel {
             bytemuck::cast_slice(&scoring[..agent_cap as usize]),
         );
         queue.write_buffer(&pool.cfg_buf, 0, bytemuck::bytes_of(&cfg));
+        // Task 2.6: upload the SimCfg snapshot into the pool-owned
+        // fallback buffer so the sync bind group's `sim_cfg` binding
+        // sees current `tick` + `attack_range`.
+        crate::sim_cfg::upload_sim_cfg(queue, &pool.sync_sim_cfg_buf, sim_cfg);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::apply_actions::bg"),
@@ -370,6 +438,10 @@ impl ApplyActionsKernel {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: event_ring.tail_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: SIM_CFG_BINDING,
+                    resource: pool.sync_sim_cfg_buf.as_entire_binding(),
                 },
             ],
         });
@@ -471,8 +543,9 @@ impl ApplyActionsKernel {
     /// Records the apply_actions dispatch into `encoder`, binding
     /// caller-supplied `agents_buf` (read_write, packed
     /// `GpuAgentSlot`), `scoring_buf` (read-only, packed
-    /// `ScoreOutput`), and the shared `event_ring`. Does NOT submit,
-    /// does NOT read back.
+    /// `ScoreOutput`), `sim_cfg_buf` (read-only shared world-scalars,
+    /// Task 2.6), and the shared `event_ring`. Does NOT submit, does
+    /// NOT read back.
     ///
     /// Agent HP deltas, alive=0 writes, and event emissions all land
     /// in the caller's buffers — no internal pool-owned mutation.
@@ -487,6 +560,10 @@ impl ApplyActionsKernel {
     ///   bytes and usable as `STORAGE` (read_write).
     /// * `scoring_buf` must be at least `agent_cap * size_of::<ScoreOutput>()`
     ///   bytes and usable as `STORAGE` (read-only).
+    /// * `sim_cfg_buf` must be at least `size_of::<SimCfg>()` bytes and
+    ///   usable as `STORAGE` (read-only). The backend populates it
+    ///   once per batch via `SimCfg::from_state(state)` + atomic tick
+    ///   increments on the seed-indirect kernel.
     pub fn run_resident(
         &mut self,
         device: &wgpu::Device,
@@ -494,6 +571,7 @@ impl ApplyActionsKernel {
         encoder: &mut wgpu::CommandEncoder,
         agents_buf: &wgpu::Buffer,
         scoring_buf: &wgpu::Buffer,
+        sim_cfg_buf: &wgpu::Buffer,
         event_ring: &GpuEventRing,
         agent_cap: u32,
     ) -> Result<(), ApplyActionsError> {
@@ -505,6 +583,7 @@ impl ApplyActionsKernel {
             scoring: scoring_buf.clone(),
             event_ring_records: event_ring.records_buffer().clone(),
             event_ring_tail: event_ring.tail_buffer().clone(),
+            sim_cfg: sim_cfg_buf.clone(),
         };
         let need_rebuild = match &self.cached_resident_bg {
             Some((k, _)) => *k != key,
@@ -535,6 +614,10 @@ impl ApplyActionsKernel {
                     wgpu::BindGroupEntry {
                         binding: 4,
                         resource: event_ring.tail_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: SIM_CFG_BINDING,
+                        resource: sim_cfg_buf.as_entire_binding(),
                     },
                 ],
             });
@@ -603,13 +686,13 @@ struct ScoreOutput {
 
 struct ApplyActionsCfg {
     agent_cap: u32,
-    tick: u32,
     attack_damage_default: f32,
-    attack_range_default: f32,
     eat_restore: f32,
     drink_restore: f32,
     rest_restore: f32,
-    _pad: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 };
 
 @group(0) @binding(0) var<storage, read_write> agents: array<AgentSlot>;
@@ -619,6 +702,14 @@ struct ApplyActionsCfg {
 @group(0) @binding(4) var<storage, read_write> event_ring_tail: atomic<u32>;
 "#,
     );
+
+    // SimCfg binding (Task 2.6) — shared world-scalars, read-only
+    // storage. This kernel reads `sim_cfg.tick` (event emission
+    // timestamps) and `sim_cfg.attack_range` (range-check guard on the
+    // Attack head). The struct declaration + binding come from the
+    // dsl_compiler shared helper so the WGSL stays in lockstep with
+    // `SimCfg`'s Rust layout.
+    dsl_compiler::emit_sim_cfg::emit_sim_cfg_struct_wgsl(&mut out, SIM_CFG_BINDING);
 
     // Pull in the event_ring WGSL — defines `EventRecord` and the
     // `gpu_emit_event_*` helpers. Note: we use only a tiny subset
@@ -675,7 +766,7 @@ fn cs_apply_actions(@builtin(global_invocation_id) gid: vec3<u32>) {{
     let so = scoring[slot];
     let action = so.chosen_action;
     let tgt_slot_raw = so.chosen_target;  // already 0-based slot
-    let tick = cfg.tick;
+    let tick = sim_cfg.tick;
 
     // --- Attack ---
     if (action == ACTION_ATTACK) {{
@@ -696,12 +787,14 @@ fn cs_apply_actions(@builtin(global_invocation_id) gid: vec3<u32>) {{
         let dy = sy - ty;
         let dz = sz - tz;
         let dist = sqrt(dx * dx + dy * dy + dz * dz);
-        // Use the default from cfg — per-agent attack_range is not in
-        // `GpuAgentSlot` yet. The mask kernel already radius-filters
-        // with per-agent range on the SoA scoring buffer, so this
-        // kernel can trust the mask's gate; the cfg default is a
-        // defence-in-depth guard.
-        let range = cfg.attack_range_default;
+        // Use the world-scalar attack_range from SimCfg — per-agent
+        // attack_range is not in `GpuAgentSlot` yet. The mask kernel
+        // already radius-filters with per-agent range on the SoA
+        // scoring buffer, so this kernel can trust the mask's gate;
+        // the SimCfg value is a defence-in-depth guard. (Migrated from
+        // the per-kernel `cfg.attack_range_default` uniform in Task 2.6
+        // of the GPU sim-state refactor.)
+        let range = sim_cfg.attack_range;
         if (dist > range) {{ return; }}
 
         let dmg = agents[slot].attack_damage;
@@ -742,20 +835,21 @@ fn cs_apply_actions(@builtin(global_invocation_id) gid: vec3<u32>) {{
 // Helpers exposed to the backend
 // ---------------------------------------------------------------------------
 
-/// Build an `ApplyActionsCfg` from a SimState. Default-attack-range and
-/// default-attack-damage come off the config block; the kernel falls
-/// back to these when a per-agent stat isn't plumbed (see the comment
-/// in `cs_apply_actions`).
+/// Build an `ApplyActionsCfg` from a SimState. Default-attack-damage
+/// comes off the config block; the kernel falls back to it when a
+/// per-agent stat isn't plumbed. `tick` + `attack_range` moved to
+/// `SimCfg` in Task 2.6 and are NOT set here — callers populate the
+/// shared buffer via `SimCfg::from_state(state)`.
 pub fn cfg_from_state(state: &SimState) -> ApplyActionsCfg {
     ApplyActionsCfg {
         agent_cap: state.agent_cap(),
-        tick: state.tick,
         attack_damage_default: state.config.combat.attack_damage,
-        attack_range_default: state.config.combat.attack_range,
         eat_restore: state.config.needs.eat_restore,
         drink_restore: state.config.needs.drink_restore,
         rest_restore: state.config.needs.rest_restore,
-        _pad: 0,
+        _pad0: 0,
+        _pad1: 0,
+        _pad2: 0,
     }
 }
 

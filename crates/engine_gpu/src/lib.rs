@@ -945,6 +945,7 @@ impl GpuBackend {
                     &mut encoder,
                     agents_buf,
                     sync_scoring_kernel.scoring_buf(),
+                    mask_sim_cfg_ref,
                     &cascade_ctx.apply_event_ring,
                     agent_cap,
                 )
@@ -1781,12 +1782,18 @@ impl GpuBackend {
         cascade_ctx.apply_event_ring.reset(&self.queue);
 
         let apply_cfg = crate::apply_actions::cfg_from_state(state);
+        // Task 2.6: build the shared SimCfg snapshot — the kernel
+        // reads `sim_cfg.tick` + `sim_cfg.attack_range` via the shared
+        // storage binding. The sync path uploads this into the
+        // kernel's pool-owned fallback buffer.
+        let apply_sim_cfg = crate::sim_cfg::SimCfg::from_state(state);
         let slots_after_apply = match cascade_ctx.apply_actions.run_and_readback(
             &self.device,
             &self.queue,
             &agent_slots_in,
             scoring_outputs,
             apply_cfg,
+            &apply_sim_cfg,
             &cascade_ctx.apply_event_ring,
         ) {
             Ok(slots) => slots,
