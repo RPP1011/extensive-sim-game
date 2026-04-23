@@ -83,12 +83,13 @@ use glam::Vec3;
 /// as `array<EventRecord>` without variant-specific strides.
 pub const PAYLOAD_WORDS: usize = 8;
 
-/// Default capacity when the caller doesn't supply one. 65 536 records
-/// per tick is the generous upper bound documented in the plan —
-/// at `RECORD_BYTES = 40 B` this is a `2.5 MiB` buffer. Adjust via
-/// [`GpuEventRing::new`] if a workload pushes past this envelope;
-/// the drain logs a warning before clamping.
-pub const DEFAULT_CAPACITY: u32 = 65_536;
+/// Default capacity when the caller doesn't supply one. 655 360 records
+/// per tick — 10× the original 65 536 envelope — at `RECORD_BYTES = 40 B`
+/// this is a `25 MiB` buffer. Bumped so the perf sweep stays overflow-
+/// free up to agent_cap ≈ 100 000. Adjust via [`GpuEventRing::new`] if
+/// a workload pushes past this envelope; the drain logs a warning
+/// before clamping.
+pub const DEFAULT_CAPACITY: u32 = 655_360;
 
 /// Task 203 — default chronicle ring capacity. The chronicle ring is
 /// parallel to the main event ring but holds ONLY narrative

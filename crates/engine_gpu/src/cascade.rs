@@ -831,9 +831,11 @@ impl From<MovementError> for CascadeCtxError {
 /// Event-ring capacity shared by the `apply_actions` + `movement`
 /// kernels. These two kernels emit one event per alive agent at worst
 /// (AgentAttacked/Died from apply, AgentMoved/Fled from movement), so
-/// the bound is 2× agent_cap. 65 536 slots covers every fixture the
-/// parity / perf harnesses hit (agent_cap ≤ 1024) without resizing.
-pub const APPLY_EVENT_RING_CAPACITY: u32 = 65_536;
+/// the bound is 2× agent_cap. 655 360 slots (10× the original 65 536
+/// envelope) keeps the perf sweep headroom-comfortable up to
+/// agent_cap ≈ 100 000 without resizing. At RECORD_BYTES = 40 this is
+/// a 25 MiB device buffer.
+pub const APPLY_EVENT_RING_CAPACITY: u32 = 655_360;
 
 impl CascadeCtx {
     /// Build a fresh cascade context: load the DSL assets, compile the
@@ -847,7 +849,7 @@ impl CascadeCtx {
             events: &comp.events,
             event_tags: &comp.event_tags,
         };
-        let physics = PhysicsKernel::new(device, &comp.physics, &ctx, 65_536)?;
+        let physics = PhysicsKernel::new(device, &comp.physics, &ctx, 655_360)?;
         let spatial = GpuSpatialHash::new(device)?;
         let abilities = PackedAbilityRegistry::empty();
         // Task 200: apply_actions + movement kernels share a dedicated

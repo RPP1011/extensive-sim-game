@@ -40,7 +40,7 @@ use super::cli::ChronicleArgs;
 
 const CANONICAL_AGENT_CAP: u32 = 8;
 const SHOWCASE_AGENT_CAP: u32 = 32;
-const EVENT_RING_CAP: usize = 1 << 16;
+const EVENT_RING_CAP: usize = (1 << 16) * 10;
 
 const CANONICAL_DEFAULT_SEED: &str = "0xD00DFACE00420042";
 const CANONICAL_DEFAULT_TICKS: u32 = 100;
@@ -1313,6 +1313,17 @@ struct PerfRow {
     cascade_iters_mean: Option<f64>,
     /// If the GPU path failed at this N, why.
     gpu_error: Option<String>,
+    /// Per-phase GPU breakdown — mean µs/tick across the timed sample.
+    /// Populated from `engine_gpu::PhaseTimings`; `None` if the GPU path
+    /// failed at this N.
+    gpu_mask_scoring_us: Option<f64>,
+    gpu_apply_move_us: Option<f64>,
+    gpu_cascade_us: Option<f64>,
+    gpu_seed_fold_us: Option<f64>,
+    gpu_cold_state_us: Option<f64>,
+    gpu_view_fold_all_us: Option<f64>,
+    gpu_finalize_us: Option<f64>,
+    gpu_sidecar_us: Option<f64>,
 }
 
 #[cfg(feature = "gpu")]
@@ -1350,6 +1361,10 @@ struct GpuSweepResult {
     total_events: u64,
     cascade_iters_sum: u64,
     cascade_iters_samples: u32,
+    /// Accumulated per-phase GPU timings (µs) across all timed ticks.
+    /// Divide by `phase_samples` to get mean µs/tick per phase.
+    phase_totals: engine_gpu::PhaseTimings,
+    phase_samples: u32,
 }
 
 #[cfg(feature = "gpu")]
@@ -1381,14 +1396,36 @@ fn time_gpu_sweep(n: u32, ticks: u32, seed: u64) -> Result<GpuSweepResult, Strin
     let mut per_tick = Vec::with_capacity(ticks as usize);
     let mut cascade_iters_sum: u64 = 0;
     let mut cascade_iters_samples: u32 = 0;
+    let mut phase_totals = engine_gpu::PhaseTimings::default();
+    let mut phase_samples: u32 = 0;
     for _ in 0..ticks {
         let t0 = std::time::Instant::now();
         backend.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
         per_tick.push(t0.elapsed().as_nanos());
+        if let Some(err) = backend.last_cascade_error() {
+            return Err(format!("timed tick cascade error: {err}"));
+        }
         if let Some(iters) = backend.last_cascade_iterations() {
             cascade_iters_sum += iters as u64;
             cascade_iters_samples += 1;
+        } else {
+            return Err(
+                "timed tick did not report cascade iterations (GPU path likely fell back)".into(),
+            );
         }
+        // Accumulate per-phase µs timings from this tick. Only run on
+        // timed ticks (warmup is excluded) so the mean reflects steady-
+        // state work.
+        let p = backend.last_phase_timings();
+        phase_totals.cpu_phases_1_3_us += p.cpu_phases_1_3_us;
+        phase_totals.cpu_apply_actions_us += p.cpu_apply_actions_us;
+        phase_totals.gpu_cascade_us += p.gpu_cascade_us;
+        phase_totals.gpu_seed_fold_us += p.gpu_seed_fold_us;
+        phase_totals.cpu_cold_state_us += p.cpu_cold_state_us;
+        phase_totals.cpu_view_fold_all_us += p.cpu_view_fold_all_us;
+        phase_totals.cpu_finalize_us += p.cpu_finalize_us;
+        phase_totals.gpu_sidecar_us += p.gpu_sidecar_us;
+        phase_samples += 1;
     }
     let events_after = events.total_pushed();
     let total_events = (events_after - events_before) as u64;
@@ -1397,6 +1434,8 @@ fn time_gpu_sweep(n: u32, ticks: u32, seed: u64) -> Result<GpuSweepResult, Strin
         total_events,
         cascade_iters_sum,
         cascade_iters_samples,
+        phase_totals,
+        phase_samples,
     })
 }
 
@@ -1485,6 +1524,25 @@ fn run_perf_sweep<W: std::io::Write>(
                         (g.cascade_iters_sum as f64) / (g.cascade_iters_samples as f64),
                     );
                 }
+                if g.phase_samples > 0 {
+                    let n_samples = g.phase_samples as f64;
+                    let p = &g.phase_totals;
+                    row.gpu_mask_scoring_us =
+                        Some((p.cpu_phases_1_3_us as f64) / n_samples);
+                    row.gpu_apply_move_us =
+                        Some((p.cpu_apply_actions_us as f64) / n_samples);
+                    row.gpu_cascade_us = Some((p.gpu_cascade_us as f64) / n_samples);
+                    row.gpu_seed_fold_us =
+                        Some((p.gpu_seed_fold_us as f64) / n_samples);
+                    row.gpu_cold_state_us =
+                        Some((p.cpu_cold_state_us as f64) / n_samples);
+                    row.gpu_view_fold_all_us =
+                        Some((p.cpu_view_fold_all_us as f64) / n_samples);
+                    row.gpu_finalize_us =
+                        Some((p.cpu_finalize_us as f64) / n_samples);
+                    row.gpu_sidecar_us =
+                        Some((p.gpu_sidecar_us as f64) / n_samples);
+                }
                 // Cross-check GPU events — if substantially different
                 // from CPU, log it (float drift at large N is expected).
                 let gpu_events = g.total_events;
@@ -1508,7 +1566,60 @@ fn run_perf_sweep<W: std::io::Write>(
     }
 
     render_perf_table(out, &rows).ok();
+    render_phase_breakdown_table(out, &rows).ok();
     ExitCode::SUCCESS
+}
+
+/// Render a second table showing the per-phase GPU breakdown (µs/tick,
+/// mean) sourced from `engine_gpu::PhaseTimings`. Always rendered — no
+/// flag required. Columns use alias names where the `PhaseTimings`
+/// field name is misleading (see task 197 / 200 comments in
+/// `engine_gpu/src/lib.rs`). Rows with a GPU failure show "-" across
+/// all phase columns.
+#[cfg(feature = "gpu")]
+fn render_phase_breakdown_table<W: std::io::Write>(
+    out: &mut W,
+    rows: &[PerfRow],
+) -> std::io::Result<()> {
+    writeln!(out)?;
+    writeln!(out, "Per-phase GPU breakdown (µs/tick, mean)")?;
+    writeln!(
+        out,
+        "| {:>5} | {:>12} | {:>12} | {:>9} | {:>9} | {:>10} | {:>13} | {:>9} | {:>8} |",
+        "N",
+        "mask+scor",
+        "apply+move",
+        "cascade",
+        "seed_fold",
+        "cold_state",
+        "view_fold_all",
+        "finalize",
+        "sidecar",
+    )?;
+    writeln!(
+        out,
+        "|-------|--------------|--------------|-----------|-----------|------------|---------------|-----------|----------|",
+    )?;
+    let fmt = |v: Option<f64>| -> String {
+        v.map(|x| format!("{:.1}", x)).unwrap_or_else(|| "-".to_string())
+    };
+    for r in rows {
+        writeln!(
+            out,
+            "| {:>5} | {:>12} | {:>12} | {:>9} | {:>9} | {:>10} | {:>13} | {:>9} | {:>8} |",
+            r.n,
+            fmt(r.gpu_mask_scoring_us),
+            fmt(r.gpu_apply_move_us),
+            fmt(r.gpu_cascade_us),
+            fmt(r.gpu_seed_fold_us),
+            fmt(r.gpu_cold_state_us),
+            fmt(r.gpu_view_fold_all_us),
+            fmt(r.gpu_finalize_us),
+            fmt(r.gpu_sidecar_us),
+        )?;
+    }
+    writeln!(out)?;
+    Ok(())
 }
 
 #[cfg(feature = "gpu")]
