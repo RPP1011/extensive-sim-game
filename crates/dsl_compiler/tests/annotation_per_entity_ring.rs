@@ -99,3 +99,122 @@ fn per_entity_ring_lowers_to_ir_variant() {
         other => panic!("expected Materialized(PerEntityRing {{ k: 64 }}), got {other:?}"),
     }
 }
+
+/// Task 1.6 — the CPU emitter produces a storage struct + `push` /
+/// `fold_event` impl block for `@per_entity_ring` views. Parallels
+/// Task 1.5's `@symmetric_pair_topk` emitter; ring is strictly simpler
+/// (FIFO, no canonicalisation, no |v|-evict).
+#[test]
+fn per_entity_ring_emits_cpu_storage() {
+    let comp = dsl_compiler::compile(SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "memory")
+        .expect("view IR should exist");
+    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+
+    // Storage struct + per-entry slot struct.
+    assert!(
+        rust.contains("pub struct Memory"),
+        "missing struct:\n{rust}"
+    );
+    assert!(
+        rust.contains("pub struct MemoryEntry"),
+        "missing slot struct:\n{rust}"
+    );
+    assert!(
+        rust.contains("rings: Vec<[MemoryEntry; 64]>"),
+        "storage should be Vec<[Entry; K]>:\n{rust}"
+    );
+    assert!(
+        rust.contains("cursors: Vec<u32>"),
+        "cursor array missing:\n{rust}"
+    );
+    assert!(
+        rust.contains("pub const K: usize = 64"),
+        "missing K constant:\n{rust}"
+    );
+
+    // Public accessors. `push` is the load-bearing writer, the rest are
+    // reader conveniences (cursor, get, entries).
+    assert!(
+        rust.contains("pub fn push(&mut self, observer_raw: u32, entry: MemoryEntry)"),
+        "missing push():\n{rust}"
+    );
+    assert!(
+        rust.contains("pub fn fold_event(&mut self, event: &Event, tick: u32)"),
+        "missing fold_event():\n{rust}"
+    );
+    assert!(
+        rust.contains("pub fn cursor(&self, observer: AgentId) -> u32"),
+        "missing cursor():\n{rust}"
+    );
+    assert!(
+        rust.contains("pub fn get(&self, observer: AgentId) -> f32"),
+        "missing get() for latest value:\n{rust}"
+    );
+}
+
+/// Task 1.6 — the generated `fold_event` routes `RecordMemory` through
+/// `self.push`, projecting the event's `observer` field onto the ring
+/// owner and `source` onto the entry's `source` handle.
+#[test]
+fn per_entity_ring_fold_handles_record_memory() {
+    let comp = dsl_compiler::compile(SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "memory")
+        .expect("view IR should exist");
+    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+
+    // Arm destructures the RecordMemory event and pushes into the ring.
+    assert!(
+        rust.contains("Event::RecordMemory { observer, source, .. }"),
+        "fold arm should destructure RecordMemory's owner/source fields:\n{rust}"
+    );
+    assert!(
+        rust.contains("self.push(observer.raw()"),
+        "fold arm should call push with the observer's raw id:\n{rust}"
+    );
+    assert!(
+        rust.contains("source: source.raw()"),
+        "fold arm should populate entry.source from the event's source field:\n{rust}"
+    );
+    assert!(
+        rust.contains("anchor_tick: tick"),
+        "fold arm should stamp anchor_tick with the current tick:\n{rust}"
+    );
+}
+
+/// Task 1.6 — `@decay` on a ring view is rejected with `Unsupported`.
+/// The ring semantics (FIFO, no accumulation) don't compose with the
+/// anchor-pattern decay; punting to Phase 3.
+#[test]
+fn per_entity_ring_rejects_decay() {
+    const SRC_DECAY: &str = r#"
+event RecordMemory { observer: AgentId, source: AgentId, fact: u64, confidence: f32 }
+
+@materialized(on_event = [RecordMemory])
+@per_entity_ring(K = 32)
+@decay(rate = 0.9, per = tick)
+view memory(observer: Agent, source: Agent) -> f32 {
+  initial: 0.0,
+  on RecordMemory { observer: observer, source: source, fact: f, confidence: c } { self += 1.0 }
+}
+"#;
+    let comp = dsl_compiler::compile(SRC_DECAY).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "memory")
+        .expect("view IR should exist");
+    let err = dsl_compiler::emit_view::emit_view(view, None).expect_err(
+        "decay on per_entity_ring should fail until Phase 3 defines its semantics",
+    );
+    assert!(
+        err.contains("decay"),
+        "error should mention `decay`, got: {err}"
+    );
+}

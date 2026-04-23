@@ -79,7 +79,8 @@ fn emit_view_result(view: &ViewIR, source_file: Option<&str>) -> Result<String, 
             let uses_hashmap = !matches!(
                 hint,
                 StorageHint::PerEntityTopK { k, .. } if k >= 2
-            ) && !matches!(hint, StorageHint::SymmetricPairTopK { .. });
+            ) && !matches!(hint, StorageHint::SymmetricPairTopK { .. })
+                && !matches!(hint, StorageHint::PerEntityRing { .. });
             emit_imports_materialized(&mut out, uses_hashmap);
             emit_materialized_struct(&mut out, view, hint)?;
         }
@@ -344,10 +345,15 @@ fn emit_materialized_struct(
             view.decay.as_ref(),
             k as usize,
         ),
-        StorageHint::PerEntityRing { .. } => Err(EmitError::Unsupported(format!(
-            "`per_entity_ring` storage hint on view `{}` has no CPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
-            view.name
-        ))),
+        StorageHint::PerEntityRing { k } => emit_per_entity_ring_struct(
+            out,
+            view,
+            initial,
+            handlers,
+            clamp,
+            view.decay.as_ref(),
+            k as usize,
+        ),
         StorageHint::LazyCached => Err(EmitError::Unsupported(format!(
             "`lazy_cached` storage hint on view `{}` is not implemented yet (spec §9 D31)",
             view.name
@@ -1682,6 +1688,382 @@ fn emit_symmetric_pair_fold_arm(
     .unwrap();
     writeln!(out, "            }}").unwrap();
     let _ = view;
+    Ok(())
+}
+
+/// Emit the `@per_entity_ring(K = N)` shape (GPU cold-state replay plan
+/// task 1.6). Storage is `rings: Vec<[<Name>Entry; K]>` plus a parallel
+/// `cursors: Vec<u32>` — one ring + cursor per owner agent. The cursor
+/// is monotonic; the write slot is `cursor % K`, and the oldest entry
+/// is evicted implicitly on overflow (FIFO).
+///
+/// Fold semantics: every matched event projects its non-owner fields
+/// into an `<Name>Entry`, then `push(observer, entry)` writes into the
+/// ring at `cursor % K` and bumps the cursor. No tiebreak, no
+/// canonicalisation — the ring doesn't dedupe.
+///
+/// Structurally simpler than `symmetric_pair_topk` (no owner-chooser,
+/// no |v|-evict), so the emitter is shorter. Entry shape mirrors Task
+/// 1.5's `<Name>Edge` — a `source: u32` handle (AgentId raw) plus
+/// `value: {val_ty}` plus `anchor_tick: u32`. Event fields beyond the
+/// owner + second pair binding are dropped in v1; Phase 4 can widen the
+/// entry shape when the `record_memory` port drives a concrete need.
+fn emit_per_entity_ring_struct(
+    out: &mut String,
+    view: &ViewIR,
+    initial: &IrExprNode,
+    handlers: &[FoldHandlerIR],
+    clamp: Option<&(IrExprNode, IrExprNode)>,
+    decay: Option<&crate::ir::DecayHint>,
+    k: usize,
+) -> Result<(), EmitError> {
+    // Ring views carry an owner key (first param) plus an optional
+    // "source" handle (second param). K=0 is meaningless; require >= 1.
+    if k == 0 {
+        return Err(EmitError::Unsupported(format!(
+            "`per_entity_ring(K=0)` on view `{}` — ring capacity must be >= 1",
+            view.name
+        )));
+    }
+    if view.params.is_empty() {
+        return Err(EmitError::Unsupported(format!(
+            "`per_entity_ring(K={k})` storage on view `{}` requires >= 1 param (the ring owner); got 0",
+            view.name
+        )));
+    }
+    if view.params.len() > 2 {
+        return Err(EmitError::Unsupported(format!(
+            "`per_entity_ring(K={k})` storage on view `{}` supports at most 2 params (owner + optional source); got {}",
+            view.name,
+            view.params.len()
+        )));
+    }
+    if decay.is_some() {
+        // Ring is FIFO; layering decay on top needs a recency-scored
+        // read path. Leave to Phase 3+.
+        return Err(EmitError::Unsupported(format!(
+            "`per_entity_ring` storage on view `{}` does not support `@decay` yet (GPU cold-state replay plan phase 3)",
+            view.name
+        )));
+    }
+    if clamp.is_some() {
+        // Ring values aren't accumulated, so clamp has no well-defined
+        // semantics on the stored entry. Reject until a use case lands.
+        return Err(EmitError::Unsupported(format!(
+            "`per_entity_ring` storage on view `{}` does not support `clamp` (ring entries are not accumulated)",
+            view.name
+        )));
+    }
+
+    let val_ty = rust_type_for(&view.return_ty)?;
+    let owner_ty = rust_type_for(&view.params[0].ty)?;
+    let owner_name = view.params[0].name.as_str();
+    let second_name: Option<&str> = view.params.get(1).map(|p| p.name.as_str());
+    let ty_name = pascal_case(&view.name);
+    let entry_ty = format!("{ty_name}Entry");
+    let initial_lit = lower_scalar_literal(initial)?;
+
+    writeln!(
+        out,
+        "/// @materialized view `{}` — `storage = per_entity_ring(K={k})`.",
+        view.name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// Per-owner FIFO ring of fixed capacity {k}. Writes append at"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// `cursor % K` and bump the cursor; the oldest entry is evicted"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// implicitly on overflow. Reads iterate the ring in most-recent-first order."
+    )
+    .unwrap();
+
+    // Per-ring slot struct. `source == 0` marks an empty slot (AgentId is
+    // 1-based, matching the `per_entity_topk` / `symmetric_pair_topk`
+    // convention).
+    writeln!(out, "#[derive(Debug, Clone, Copy, Default, PartialEq)]").unwrap();
+    writeln!(out, "pub struct {entry_ty} {{").unwrap();
+    writeln!(
+        out,
+        "    /// Raw AgentId of the \"other\" endpoint (the event's non-owner field)."
+    )
+    .unwrap();
+    writeln!(out, "    /// 0 means empty / never written.").unwrap();
+    writeln!(out, "    pub source: u32,").unwrap();
+    writeln!(out, "    /// Stored value for this ring entry.").unwrap();
+    writeln!(out, "    pub value: {val_ty},").unwrap();
+    writeln!(out, "    /// Tick when this entry was written.").unwrap();
+    writeln!(out, "    pub anchor_tick: u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "#[derive(Debug, Default)]").unwrap();
+    writeln!(out, "pub struct {ty_name} {{").unwrap();
+    writeln!(
+        out,
+        "    /// One ring of {k} slots per owner agent. `Vec::len()` grows on"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// demand as `fold_event` sees higher owner ids."
+    )
+    .unwrap();
+    writeln!(out, "    rings: Vec<[{entry_ty}; {k}]>,").unwrap();
+    writeln!(
+        out,
+        "    /// Monotonic write cursor per owner. Slot index = `cursor % K`."
+    )
+    .unwrap();
+    writeln!(out, "    cursors: Vec<u32>,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "impl {ty_name} {{").unwrap();
+    writeln!(
+        out,
+        "    /// Ring capacity per owner — the `K` from `per_entity_ring(K={k})`."
+    )
+    .unwrap();
+    writeln!(out, "    pub const K: usize = {k};").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "    /// Number of owner rings currently provisioned. `fold_event` grows"
+    )
+    .unwrap();
+    writeln!(out, "    /// this on demand up to `max_owner + 1`.").unwrap();
+    writeln!(out, "    pub fn len(&self) -> usize {{ self.rings.len() }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn is_empty(&self) -> bool {{ self.rings.is_empty() }}"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // Internal row-access helper. Grows both `rings` and `cursors` in
+    // lockstep so the parallel layout invariant holds.
+    writeln!(
+        out,
+        "    fn row_mut(&mut self, owner_slot: usize) -> &mut [{entry_ty}; {k}] {{"
+    )
+    .unwrap();
+    writeln!(out, "        if owner_slot >= self.rings.len() {{").unwrap();
+    writeln!(
+        out,
+        "            self.rings.resize(owner_slot + 1, [{entry_ty}::default(); {k}]);"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if owner_slot >= self.cursors.len() {{").unwrap();
+    writeln!(out, "            self.cursors.resize(owner_slot + 1, 0u32);").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        &mut self.rings[owner_slot]").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // push(): write at cursor % K, bump cursor. Raw-u32 signature so the
+    // fold arm can pass `observer.raw()` without re-wrapping.
+    writeln!(
+        out,
+        "    /// Append `entry` to the ring owned by `observer_raw` (raw AgentId,"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// 1-based). Writes at `cursor % K` and increments the cursor. A full"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// ring silently evicts the oldest entry (FIFO). `observer_raw == 0`"
+    )
+    .unwrap();
+    writeln!(out, "    /// is a no-op.").unwrap();
+    writeln!(
+        out,
+        "    pub fn push(&mut self, observer_raw: u32, entry: {entry_ty}) {{"
+    )
+    .unwrap();
+    writeln!(out, "        if observer_raw == 0 {{ return; }}").unwrap();
+    writeln!(out, "        let owner_slot = (observer_raw - 1) as usize;").unwrap();
+    writeln!(out, "        let row = self.row_mut(owner_slot);").unwrap();
+    writeln!(out, "        let cursor = self.cursors[owner_slot];").unwrap();
+    writeln!(out, "        let slot = (cursor as usize) % {k};").unwrap();
+    writeln!(out, "        row[slot] = entry;").unwrap();
+    writeln!(
+        out,
+        "        self.cursors[owner_slot] = cursor.wrapping_add(1);"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // cursor(): inspect the write cursor for testing / replay.
+    writeln!(
+        out,
+        "    /// Current write cursor for `observer` (0 if the ring was never written)."
+    )
+    .unwrap();
+    writeln!(out, "    /// Monotonic; wraps on u32 overflow.").unwrap();
+    writeln!(
+        out,
+        "    pub fn cursor(&self, {owner_name}: {owner_ty}) -> u32 {{"
+    )
+    .unwrap();
+    writeln!(out, "        if {owner_name}.raw() == 0 {{ return 0; }}").unwrap();
+    writeln!(out, "        let owner_slot = ({owner_name}.raw() - 1) as usize;").unwrap();
+    writeln!(out, "        self.cursors.get(owner_slot).copied().unwrap_or(0)").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // recent(): return the most-recent entry, or the initial value when
+    // the ring is empty. Mirrors the `get` accessor of the topk shapes so
+    // lazy consumers have a single-value read path.
+    writeln!(
+        out,
+        "    /// Most recently written `value` for `{owner_name}`'s ring, or `initial`"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// when the ring has never been written."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn get(&self, {owner_name}: {owner_ty}) -> {val_ty} {{"
+    )
+    .unwrap();
+    writeln!(out, "        if {owner_name}.raw() == 0 {{ return {initial_lit}; }}").unwrap();
+    writeln!(out, "        let owner_slot = ({owner_name}.raw() - 1) as usize;").unwrap();
+    writeln!(
+        out,
+        "        let Some(row) = self.rings.get(owner_slot) else {{ return {initial_lit}; }};"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let cursor = self.cursors.get(owner_slot).copied().unwrap_or(0);"
+    )
+    .unwrap();
+    writeln!(out, "        if cursor == 0 {{ return {initial_lit}; }}").unwrap();
+    writeln!(
+        out,
+        "        let slot = (cursor.wrapping_sub(1) as usize) % {k};"
+    )
+    .unwrap();
+    writeln!(out, "        row[slot].value").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // entries(): slice access for replay / inspection. Returns the raw
+    // ring in slot order (not cursor-relative); callers that need MRU
+    // ordering can combine with `cursor()`.
+    writeln!(
+        out,
+        "    /// Raw ring slice for `{owner_name}` in slot order. Returns `None` when"
+    )
+    .unwrap();
+    writeln!(out, "    /// the ring has not yet been provisioned.").unwrap();
+    writeln!(
+        out,
+        "    pub fn entries(&self, {owner_name}: {owner_ty}) -> Option<&[{entry_ty}; {k}]> {{"
+    )
+    .unwrap();
+    writeln!(out, "        if {owner_name}.raw() == 0 {{ return None; }}").unwrap();
+    writeln!(out, "        let owner_slot = ({owner_name}.raw() - 1) as usize;").unwrap();
+    writeln!(out, "        self.rings.get(owner_slot)").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // fold_event dispatch. One arm per handler; each projects the event
+    // fields into an `<Name>Entry` and calls `push`.
+    writeln!(
+        out,
+        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
+    )
+    .unwrap();
+    if handlers.is_empty() {
+        writeln!(out, "        let _ = (event, tick);").unwrap();
+    } else {
+        writeln!(out, "        match event {{").unwrap();
+        for h in handlers {
+            emit_per_entity_ring_fold_arm(out, view, owner_name, second_name, &entry_ty, h)?;
+        }
+        writeln!(out, "            _ => {{}}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
+}
+
+/// Emit one match arm for a `per_entity_ring` fold handler. Mirrors
+/// `emit_symmetric_pair_fold_arm` — figure out which event field maps
+/// to the view's owner param (first param), which maps to the optional
+/// second param (stored as `entry.source`), then call `push` with the
+/// default `+1.0` value. Entries beyond those two bindings are dropped
+/// until Phase 4 widens the entry shape.
+fn emit_per_entity_ring_fold_arm(
+    out: &mut String,
+    view: &ViewIR,
+    owner_name: &str,
+    second_name: Option<&str>,
+    entry_ty: &str,
+    handler: &FoldHandlerIR,
+) -> Result<(), EmitError> {
+    let ev_name = handler.pattern.name.as_str();
+    let mut owner_field: Option<&str> = None;
+    let mut source_field: Option<&str> = None;
+    for b in &handler.pattern.bindings {
+        let field = b.field.as_str();
+        if let crate::ir::IrPattern::Bind { name, .. } = &b.value {
+            if name == owner_name {
+                owner_field = Some(field);
+            } else if let Some(sn) = second_name {
+                if name == sn {
+                    source_field = Some(field);
+                }
+            }
+        }
+    }
+    // Canonical fallback: `observer` names the ring owner, `source`
+    // names the stored handle. Matches the `RecordMemory` shape in the
+    // GPU cold-state replay plan.
+    let owner_field = owner_field.unwrap_or("observer");
+    let source_field = source_field.unwrap_or("source");
+    let val_ty = rust_type_for(&view.return_ty)?;
+    writeln!(
+        out,
+        "            Event::{ev_name} {{ {owner_field}, {source_field}, .. }} => {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                let entry = {entry_ty} {{ source: {source_field}.raw(), value: 1.0 as {val_ty}, anchor_tick: tick }};"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                self.push({owner_field}.raw(), entry);"
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
     Ok(())
 }
 
