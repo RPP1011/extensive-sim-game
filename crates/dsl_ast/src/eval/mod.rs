@@ -433,3 +433,9 @@ impl From<AgentId> for EvalValue {
 impl From<AbilityId> for EvalValue {
     fn from(v: AbilityId) -> Self { EvalValue::Ability(v) }
 }
+
+// ---------------------------------------------------------------------------
+// Interpreter sub-modules (one per rule class)
+// ---------------------------------------------------------------------------
+
+pub mod mask;
