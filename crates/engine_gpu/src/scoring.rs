@@ -430,6 +430,23 @@ struct ScoringPool {
     // per-run. The bind group is also re-built per-run since it
     // references view_storage's buffers (whose handles we don't keep
     // across calls).
+
+    // Phase B4 (resident path): the resident path's `run_resident`
+    // can't take `&ViewStorage` (plan signature is frozen so Task D4's
+    // cascade wiring stays stable). Instead, `upload_soa_from_state`
+    // clones the view_storage buffer handles (wgpu::Buffer is
+    // Arc-backed, cheap to clone) into this pool, in
+    // `scoring_view_binding_order` — same order `build_bind_group`
+    // walks. `run_resident` then builds the bind group from these
+    // cached handles + the caller-supplied `mask_bitmaps_buf`. The
+    // cache is invalidated whenever `agent_cap` changes (pool
+    // rebuild) so a ViewStorage rebuild (which only happens when cap
+    // grows) drops stale handles for free.
+    //
+    // Each entry holds `(primary, Option<anchor>, Option<ids>)` —
+    // matching `primary_buffer / anchor_buffer / ids_buffer` on
+    // ViewStorage. Order matches `scoring_view_binding_order`.
+    view_buf_handles: Vec<(wgpu::Buffer, Option<wgpu::Buffer>, Option<wgpu::Buffer>)>,
 }
 
 impl ScoringKernel {
@@ -731,6 +748,11 @@ impl ScoringKernel {
             scoring_out_buf,
             scoring_out_readback,
             cfg_buf,
+            // View buffer handles are populated lazily by
+            // `upload_soa_from_state` on the resident path; sync path
+            // rebuilds its bind group per-run from live view_storage
+            // so it leaves this empty.
+            view_buf_handles: Vec::new(),
         });
     }
 
@@ -984,6 +1006,356 @@ impl ScoringKernel {
             layout: &self.bind_group_layout,
             entries: &bg_entries,
         }))
+    }
+
+    // -----------------------------------------------------------------
+    // Resident path (Phase B of the GPU-resident cascade refactor)
+    //
+    // Sibling to the sync `run_and_readback` entry point. The resident
+    // entry records the scoring dispatch into a caller-owned encoder
+    // and writes into a stable output buffer exposed by
+    // [`Self::scoring_buf`] — no submit, no readback. Downstream
+    // kernels (apply_actions) bind `scoring_buf()` directly.
+    //
+    // ### Notes on `agents_buf` and view_storage
+    //
+    // The plan's `run_resident` signature takes a caller-supplied
+    // `agents_buf: &wgpu::Buffer` alongside `agent_cap` (matching
+    // physics/apply's packed `GpuAgentSlot` layout). The scoring
+    // kernel's WGSL, however, reads a *different* packed layout:
+    // `GpuAgentData` (64 bytes/slot, see the struct above) populated
+    // via `pack_agent_data(state)`. It is NOT a drop-in for the
+    // physics-shaped `GpuAgentSlot`. Until a future task rewrites the
+    // scoring WGSL to read `GpuAgentSlot` directly (or adds a
+    // precompute kernel that packs `GpuAgentData` on-GPU), the
+    // resident path keeps uploading `GpuAgentData` into the pool's
+    // internal `agent_data_buf` via [`Self::upload_soa_from_state`].
+    // `run_resident` accepts `agents_buf` for signature uniformity
+    // with mask/physics/apply but does not bind it.
+    //
+    // Additionally, scoring's bind group references ViewStorage-owned
+    // buffers (engaged_with / my_enemies / decay views). Task D4's
+    // cascade-wiring site (see the plan) calls `scoring.run_resident`
+    // without a `&ViewStorage` argument. To accommodate that,
+    // [`Self::upload_soa_from_state`] takes `view_storage` and clones
+    // each view's buffer handles into the pool (wgpu::Buffer is
+    // Arc-backed — cheap to clone). `run_resident` builds its per-run
+    // bind group from those cached handles + the caller-supplied
+    // `mask_bitmaps_buf`. Handles are invalidated whenever
+    // `agent_cap` changes (pool rebuild), so a ViewStorage rebuild
+    // drops stale handles for free.
+    // -----------------------------------------------------------------
+
+    /// Upload agent_data + cfg uniform + zero the scoring output, and
+    /// snapshot view_storage's buffer handles into the pool for the
+    /// resident path. Must be called once per tick, before
+    /// [`Self::run_resident`], so the dispatch sees current agent
+    /// state and binds live view buffers.
+    ///
+    /// Separated from `run_resident` so the resident dispatch's
+    /// signature stays `&SimState`-free and matches the plan.
+    ///
+    /// Unlike the mask kernel's `upload_soa_from_state` (which uploads
+    /// three SoA buffers), scoring's agent input is a single packed
+    /// `GpuAgentData` AoS — see the module-level note above
+    /// `run_resident` for why. The helper name is kept (`_soa_`) for
+    /// API symmetry across kernels.
+    pub fn upload_soa_from_state(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        state: &SimState,
+        view_storage: &ViewStorage,
+    ) -> Result<(), ScoringError> {
+        let agent_cap = state.agent_cap();
+        let num_mask_words = agent_cap.div_ceil(32).max(1);
+        if view_storage.agent_cap() < agent_cap {
+            return Err(ScoringError::Dispatch(format!(
+                "view_storage.agent_cap ({}) < state.agent_cap ({}); rebuild ViewStorage",
+                view_storage.agent_cap(),
+                agent_cap,
+            )));
+        }
+        self.ensure_pool(device, agent_cap, num_mask_words);
+        let pool = self.pool.as_mut().expect("pool ensured");
+
+        // Pack + upload agent_data.
+        let agent_data = pack_agent_data(state);
+        queue.write_buffer(
+            &pool.agent_data_buf,
+            0,
+            bytemuck::cast_slice(&agent_data),
+        );
+
+        // Upload cfg uniform — radii + sizes + tick + view_agent_cap.
+        // `view_agent_cap` tracks `view_storage.agent_cap()` because
+        // the flat row-major view buffers are sized by that cap and
+        // cell address = observer * cap + attacker must use the
+        // storage-layout cap. Matches the sync path.
+        let cfg = GpuConfig {
+            combat_attack_range: state.config.combat.attack_range,
+            movement_max_move_radius: state.config.movement.max_move_radius,
+            num_entries: self.scoring_table_len,
+            num_mask_words,
+            tick: state.tick,
+            view_agent_cap: view_storage.agent_cap(),
+            _pad0: 0,
+            _pad1: 0,
+        };
+        queue.write_buffer(&pool.cfg_buf, 0, bytemuck::cast_slice(&[cfg]));
+
+        // Zero scoring_out — kernel writes every slot, but pre-zero
+        // guarantees well-defined state even if dispatch is a no-op.
+        let zero_outs = vec![ScoreOutput::default(); agent_cap as usize];
+        queue.write_buffer(
+            &pool.scoring_out_buf,
+            0,
+            bytemuck::cast_slice(&zero_outs),
+        );
+
+        // Snapshot view_storage handles, in
+        // `scoring_view_binding_order` — same order
+        // `build_bind_group` / `build_resident_bind_group` walk.
+        // wgpu::Buffer is Arc-backed so these clones are cheap.
+        let sorted = scoring_view_binding_order(&self.view_specs);
+        let mut handles: Vec<(wgpu::Buffer, Option<wgpu::Buffer>, Option<wgpu::Buffer>)> =
+            Vec::with_capacity(sorted.len());
+        for spec in sorted {
+            let primary = view_storage
+                .primary_buffer(&spec.view_name)
+                .cloned()
+                .ok_or_else(|| {
+                    ScoringError::Dispatch(format!(
+                        "view_storage missing buffer for `{}`",
+                        spec.view_name
+                    ))
+                })?;
+            let anchor = view_storage.anchor_buffer(&spec.view_name).cloned();
+            let ids = view_storage.ids_buffer(&spec.view_name).cloned();
+            handles.push((primary, anchor, ids));
+        }
+        pool.view_buf_handles = handles;
+
+        Ok(())
+    }
+
+    /// Resident-path sibling to [`Self::run_and_readback`].
+    ///
+    /// Records the scoring dispatch into `encoder`, binding the
+    /// caller-supplied `mask_bitmaps_buf` (layout: flat
+    /// `MASK_NAMES.len() * num_mask_words` u32 words — same concat
+    /// layout [`pack_mask_bitmaps`] produces; passing
+    /// [`FusedMaskKernel::mask_bitmaps_buf`] directly is the intended
+    /// wiring) as input. Writes into the pool's scoring output
+    /// buffer, exposed by [`Self::scoring_buf`]. Does NOT submit,
+    /// does NOT read back.
+    ///
+    /// ### Preconditions
+    ///
+    /// * [`Self::upload_soa_from_state`] must have been called on
+    ///   this tick with a `state` whose `agent_cap()` equals the
+    ///   `agent_cap` argument passed here. That helper uploads
+    ///   agent_data, the cfg uniform, and snapshots view_storage's
+    ///   buffer handles into the pool.
+    ///
+    /// ### `agents_buf`
+    ///
+    /// Accepted but currently unused — see the module-level note
+    /// immediately above this method for the rationale (scoring WGSL
+    /// reads packed `GpuAgentData`, not the physics-shaped
+    /// `GpuAgentSlot`). The parameter is present to lock in the
+    /// planned signature so Task D4's caller wiring stays stable
+    /// across a future WGSL rewrite.
+    pub fn run_resident(
+        &mut self,
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        agents_buf: &wgpu::Buffer,
+        mask_bitmaps_buf: &wgpu::Buffer,
+        agent_cap: u32,
+    ) -> Result<(), ScoringError> {
+        // Silence unused-param lint without sacrificing the stable
+        // API surface — `agents_buf` will be bound once the WGSL is
+        // rewritten to read packed `GpuAgentSlot`.
+        let _ = agents_buf;
+
+        let num_mask_words = agent_cap.div_ceil(32).max(1);
+        self.ensure_pool(device, agent_cap, num_mask_words);
+        let pool = self.pool.as_ref().expect("pool ensured");
+        debug_assert_eq!(
+            pool.agent_cap, agent_cap,
+            "ensure_pool must size the pool to the requested agent_cap",
+        );
+        if pool.view_buf_handles.is_empty() {
+            return Err(ScoringError::Dispatch(
+                "scoring::run_resident: pool view handles empty — call upload_soa_from_state first"
+                    .to_string(),
+            ));
+        }
+
+        let bind_group = self.build_resident_bind_group(device, pool, mask_bitmaps_buf)?;
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::scoring::cpass_resident"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
+        Ok(())
+    }
+
+    /// Per-run bind group for the resident path. Identical view-
+    /// binding layout to [`Self::build_bind_group`] but reads view
+    /// buffer handles from the pool's `view_buf_handles` cache
+    /// (populated by [`Self::upload_soa_from_state`]) instead of from
+    /// a borrowed `&ViewStorage`, and uses the caller-supplied
+    /// `mask_bitmaps_buf` at binding(1) instead of the pool's
+    /// internal `mask_bitmaps_buf` (which the resident path does not
+    /// upload to).
+    fn build_resident_bind_group(
+        &self,
+        device: &wgpu::Device,
+        pool: &ScoringPool,
+        mask_bitmaps_buf: &wgpu::Buffer,
+    ) -> Result<wgpu::BindGroup, ScoringError> {
+        let sorted = scoring_view_binding_order(&self.view_specs);
+        let total_view_bindings: usize = sorted.iter().map(|s| view_binding_count(s)).sum();
+        if pool.view_buf_handles.len() != sorted.len() {
+            return Err(ScoringError::Dispatch(format!(
+                "scoring::run_resident: pool has {} view handles, expected {}",
+                pool.view_buf_handles.len(),
+                sorted.len()
+            )));
+        }
+        let mut bg_entries: Vec<wgpu::BindGroupEntry> =
+            Vec::with_capacity(SCORING_CORE_BINDINGS as usize + total_view_bindings);
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 0,
+            resource: pool.agent_data_buf.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 1,
+            resource: mask_bitmaps_buf.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 2,
+            resource: self.scoring_table_buf.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 3,
+            resource: pool.scoring_out_buf.as_entire_binding(),
+        });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: 4,
+            resource: pool.cfg_buf.as_entire_binding(),
+        });
+        let mut next_binding = SCORING_CORE_BINDINGS;
+        for (spec, (primary, anchor, ids)) in sorted.iter().zip(pool.view_buf_handles.iter()) {
+            match spec.shape {
+                ViewShape::SlotMap { .. } => {
+                    bg_entries.push(wgpu::BindGroupEntry {
+                        binding: next_binding,
+                        resource: primary.as_entire_binding(),
+                    });
+                    next_binding += 1;
+                }
+                ViewShape::PairMapScalar => {
+                    bg_entries.push(wgpu::BindGroupEntry {
+                        binding: next_binding,
+                        resource: primary.as_entire_binding(),
+                    });
+                    next_binding += 1;
+                    if spec.topk.is_some() {
+                        let anchor = anchor.as_ref().ok_or_else(|| {
+                            ScoringError::Dispatch(format!(
+                                "pool missing cached anchor buffer for topk scalar view `{}`",
+                                spec.view_name
+                            ))
+                        })?;
+                        let ids = ids.as_ref().ok_or_else(|| {
+                            ScoringError::Dispatch(format!(
+                                "pool missing cached ids buffer for topk view `{}`",
+                                spec.view_name
+                            ))
+                        })?;
+                        bg_entries.push(wgpu::BindGroupEntry {
+                            binding: next_binding,
+                            resource: anchor.as_entire_binding(),
+                        });
+                        next_binding += 1;
+                        bg_entries.push(wgpu::BindGroupEntry {
+                            binding: next_binding,
+                            resource: ids.as_entire_binding(),
+                        });
+                        next_binding += 1;
+                    }
+                }
+                ViewShape::PairMapDecay { .. } => {
+                    let anchor = anchor.as_ref().ok_or_else(|| {
+                        ScoringError::Dispatch(format!(
+                            "pool missing cached anchor buffer for decay view `{}`",
+                            spec.view_name
+                        ))
+                    })?;
+                    bg_entries.push(wgpu::BindGroupEntry {
+                        binding: next_binding,
+                        resource: primary.as_entire_binding(),
+                    });
+                    next_binding += 1;
+                    bg_entries.push(wgpu::BindGroupEntry {
+                        binding: next_binding,
+                        resource: anchor.as_entire_binding(),
+                    });
+                    next_binding += 1;
+                    if spec.topk.is_some() {
+                        let ids = ids.as_ref().ok_or_else(|| {
+                            ScoringError::Dispatch(format!(
+                                "pool missing cached ids buffer for topk decay view `{}`",
+                                spec.view_name
+                            ))
+                        })?;
+                        bg_entries.push(wgpu::BindGroupEntry {
+                            binding: next_binding,
+                            resource: ids.as_entire_binding(),
+                        });
+                        next_binding += 1;
+                    }
+                }
+                ViewShape::Lazy => {}
+            }
+        }
+        Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("engine_gpu::scoring::bg_resident"),
+            layout: &self.bind_group_layout,
+            entries: &bg_entries,
+        }))
+    }
+
+    /// Buffer handle for the scoring output on the resident path.
+    /// Stable across ticks within a given `agent_cap` — the pool
+    /// rebuilds (and this handle is invalidated) if `agent_cap`
+    /// changes between calls.
+    ///
+    /// Layout: one [`ScoreOutput`] per agent slot, slot-indexed.
+    /// Downstream kernels (apply_actions) bind this at their action
+    /// input binding.
+    ///
+    /// ### Panics
+    ///
+    /// Panics if [`Self::run_resident`] (or another pool-sizing
+    /// method such as [`Self::upload_soa_from_state`]) has not been
+    /// called yet — the pool is lazily initialised on first use.
+    pub fn scoring_buf(&self) -> &wgpu::Buffer {
+        &self
+            .pool
+            .as_ref()
+            .expect("scoring_buf: pool not initialised; call run_resident or upload_soa_from_state first")
+            .scoring_out_buf
     }
 }
 
