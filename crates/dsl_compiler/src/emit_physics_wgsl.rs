@@ -207,6 +207,15 @@ pub fn emit_physics_wgsl(
     physics: &PhysicsIR,
     ctx: &EmitContext<'_>,
 ) -> Result<String, EmitError> {
+    // `@cpu_only` rules have no WGSL representation. The CPU handler
+    // (emitted separately in `emit_physics.rs`) runs the body; the GPU
+    // event-kind dispatcher (below, via `applicable_rules`) also skips
+    // this rule so its handler fn name is never referenced from WGSL.
+    // Callers that concatenate per-rule output append an empty string,
+    // keeping the GPU shader free of any mention of the rule.
+    if physics.cpu_only {
+        return Ok(String::new());
+    }
     if physics.handlers.len() != 1 {
         return Err(EmitError::Unsupported(format!(
             "expected exactly one `on` handler per physics rule (got {} in `{}`)",
@@ -322,7 +331,10 @@ fn applicable_rules<'a>(
 ) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    let mut sorted: Vec<&PhysicsIR> = physics.iter().collect();
+    // Skip `@cpu_only` rules — their handler fns don't exist in WGSL,
+    // so the dispatcher must not reference them. The CPU dispatcher
+    // (emit_physics.rs) still routes these through the Rust side.
+    let mut sorted: Vec<&PhysicsIR> = physics.iter().filter(|p| !p.cpu_only).collect();
     sorted.sort_by(|a, b| a.name.cmp(&b.name));
 
     // Kind-matched.
