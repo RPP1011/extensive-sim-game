@@ -284,6 +284,17 @@ struct SeedIndirectKernel {
     /// `cap_wg` the cfg buffer was last uploaded with; used to skip
     /// redundant uploads on stable agent_cap.
     last_cap_wg: u32,
+    /// Cached BG keyed by the 3 caller-supplied buffer identities.
+    /// All are stable across a batch, so the cache hits 100% after
+    /// tick 1.
+    cached_bg: Option<(SeedBgKey, wgpu::BindGroup)>,
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct SeedBgKey {
+    apply_tail: wgpu::Buffer,
+    indirect_args: wgpu::Buffer,
+    num_events: wgpu::Buffer,
 }
 
 impl SeedIndirectKernel {
@@ -348,6 +359,7 @@ impl SeedIndirectKernel {
             bgl,
             cfg_buf,
             last_cap_wg: u32::MAX,
+            cached_bg: None,
         })
     }
 
@@ -377,34 +389,47 @@ impl SeedIndirectKernel {
             queue.write_buffer(&self.cfg_buf, 0, bytemuck::bytes_of(&cfg));
             self.last_cap_wg = cap_wg;
         }
-        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("cascade_resident::seed::bg"),
-            layout: &self.bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: apply_tail_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: indirect_args.buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: num_events_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: self.cfg_buf.as_entire_binding(),
-                },
-            ],
-        });
+        let key = SeedBgKey {
+            apply_tail: apply_tail_buf.clone(),
+            indirect_args: indirect_args.buffer().clone(),
+            num_events: num_events_buf.clone(),
+        };
+        let need_rebuild = match &self.cached_bg {
+            Some((k, _)) => *k != key,
+            None => true,
+        };
+        if need_rebuild {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cascade_resident::seed::bg"),
+                layout: &self.bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: apply_tail_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: indirect_args.buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: num_events_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: self.cfg_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            self.cached_bg = Some((key, bg));
+        }
+        let bg = &self.cached_bg.as_ref().expect("cached_bg populated").1;
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("cascade_resident::seed::cpass"),
             timestamp_writes: None,
         });
         cpass.set_pipeline(&self.pipeline);
-        cpass.set_bind_group(0, &bg, &[]);
+        cpass.set_bind_group(0, bg, &[]);
         cpass.dispatch_workgroups(1, 1, 1);
     }
 }
@@ -497,6 +522,18 @@ struct AppendEventsKernel {
     cfg_buf: wgpu::Buffer,
     /// `batch_cap` the cfg buffer was last uploaded with.
     last_cap: u32,
+    /// Cached BG keyed by the five caller-supplied buffer identities.
+    /// apply_ring and batch_ring are stable across a batch, so the
+    /// cache hits 100% after tick 1.
+    cached_bg: Option<(AppendBgKey, wgpu::BindGroup)>,
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct AppendBgKey {
+    apply_tail: wgpu::Buffer,
+    apply_records: wgpu::Buffer,
+    batch_tail: wgpu::Buffer,
+    batch_records: wgpu::Buffer,
 }
 
 impl AppendEventsKernel {
@@ -569,6 +606,7 @@ impl AppendEventsKernel {
             bgl,
             cfg_buf,
             last_cap: u32::MAX,
+            cached_bg: None,
         })
     }
 
@@ -598,32 +636,46 @@ impl AppendEventsKernel {
             queue.write_buffer(&self.cfg_buf, 0, bytemuck::bytes_of(&cfg));
             self.last_cap = batch_cap;
         }
-        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("cascade_resident::append::bg"),
-            layout: &self.bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: apply_ring.tail_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: apply_ring.records_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: batch_ring.tail_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: batch_ring.records_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: self.cfg_buf.as_entire_binding(),
-                },
-            ],
-        });
+        let key = AppendBgKey {
+            apply_tail: apply_ring.tail_buffer().clone(),
+            apply_records: apply_ring.records_buffer().clone(),
+            batch_tail: batch_ring.tail_buffer().clone(),
+            batch_records: batch_ring.records_buffer().clone(),
+        };
+        let need_rebuild = match &self.cached_bg {
+            Some((k, _)) => *k != key,
+            None => true,
+        };
+        if need_rebuild {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cascade_resident::append::bg"),
+                layout: &self.bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: apply_ring.tail_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: apply_ring.records_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: batch_ring.tail_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: batch_ring.records_buffer().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.cfg_buf.as_entire_binding(),
+                    },
+                ],
+            });
+            self.cached_bg = Some((key, bg));
+        }
+        let bg = &self.cached_bg.as_ref().expect("cached_bg populated").1;
         // Conservative upper bound: 4 events per agent across apply +
         // movement (real max ~2). Threads past apply_tail early-exit.
         let max_events = agent_cap.saturating_mul(4).max(64);
@@ -633,7 +685,7 @@ impl AppendEventsKernel {
             timestamp_writes: None,
         });
         cpass.set_pipeline(&self.pipeline);
-        cpass.set_bind_group(0, &bg, &[]);
+        cpass.set_bind_group(0, bg, &[]);
         cpass.dispatch_workgroups(workgroups, 1, 1);
     }
 }
