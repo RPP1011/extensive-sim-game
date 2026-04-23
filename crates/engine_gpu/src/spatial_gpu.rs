@@ -671,17 +671,29 @@ pub struct SpatialQueryResults {
     pub nearest_hostile: Vec<u32>,
 }
 
-/// Opaque handle returned by [`GpuSpatialHash::rebuild_and_query_resident`].
-/// Lets callers fetch the device-side `kin_buf` / `nearest_buf` after the
-/// resident path has encoded (but not yet submitted) its dispatches, so
-/// downstream kernels can bind them directly without a host roundtrip.
+/// Caller-owned output buffer trio that [`GpuSpatialHash::rebuild_and_query_resident`]
+/// writes into. Each must be sized for `agent_cap` elements of the
+/// appropriate stride:
 ///
-/// The current implementation keeps a single pool per `GpuSpatialHash`, so
-/// `PoolHandle(0)` is the only valid value — but the wrapper type keeps
-/// the public API honest about the fact that these buffers live inside
-/// the spatial-hash instance and have a managed lifetime tied to it.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct PoolHandle(u32);
+/// - `within`: `agent_cap × size_of::<GpuQueryResult>()`
+/// - `kin`:    `agent_cap × size_of::<GpuQueryResult>()`
+/// - `nearest`: `agent_cap × 4` (one `u32` per slot)
+///
+/// All three must carry `BufferUsages::STORAGE` (they are bound as
+/// `storage, read_write`). Callers typically keep a stable trio alive
+/// across ticks and reuse it; per-call bind-group allocation picks up
+/// whatever buffer references the caller hands in here.
+///
+/// Providing caller-owned outputs is what lets callers run two
+/// independent resident queries back-to-back into distinct buffers in a
+/// single encoder (e.g. `kin_radius=12.0` → one trio, `engagement=2.0` →
+/// another) without the second clobbering the first.
+#[derive(Copy, Clone)]
+pub struct SpatialOutputs<'a> {
+    pub within: &'a wgpu::Buffer,
+    pub kin: &'a wgpu::Buffer,
+    pub nearest: &'a wgpu::Buffer,
+}
 
 impl GpuSpatialHash {
     /// Build the pipelines on `device`. Parses the shared WGSL source
@@ -994,16 +1006,21 @@ impl GpuSpatialHash {
         });
     }
 
-    /// Rebuild the spatial hash from `state`, then run the batched
-    /// `within_radius` kernel with the given radius. Per-slot results
-    /// are indexed by `(AgentId.raw() - 1)`.
-    pub fn rebuild_and_query(
+    /// Upload agent SoA (`pos`, `alive`, `creature_type`) + the two
+    /// config uniforms (`cfg`, `qcfg`) into the pool buffers. Shared
+    /// prelude for both [`Self::rebuild_and_query`] (sync) and
+    /// [`Self::rebuild_and_query_resident`]. After this returns, the
+    /// pool is ready for the clear + count compute pass.
+    ///
+    /// Ensures the pool exists (via [`Self::ensure_pool`]) so callers
+    /// can immediately reach for `self.pool.as_ref().unwrap()` after.
+    fn upload_agent_soa(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         state: &SimState,
         radius: f32,
-    ) -> Result<SpatialQueryResults, SpatialError> {
+    ) -> Result<(), SpatialError> {
         let agent_cap = state.agent_cap();
         self.ensure_pool(device, agent_cap);
 
@@ -1056,6 +1073,49 @@ impl GpuSpatialHash {
                 _pad2: 0.0,
             }]),
         );
+        Ok(())
+    }
+
+    /// Encode the scatter → sort → query dispatch triple into
+    /// `encoder`, using `bind_group` for bindings. Both the sync and
+    /// resident paths run the same three dispatches; the only thing
+    /// that differs is which bind group they use (sync path binds the
+    /// in-pool result buffers, resident path binds caller-owned
+    /// output buffers via [`SpatialOutputs`]).
+    fn encode_scatter_sort_query(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        bind_group: &wgpu::BindGroup,
+        agent_cap: u32,
+        label: &str,
+    ) {
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some(label),
+            timestamp_writes: None,
+        });
+        cpass.set_bind_group(0, bind_group, &[]);
+        cpass.set_pipeline(&self.scatter_pipeline);
+        cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+        cpass.set_pipeline(&self.sort_pipeline);
+        cpass.dispatch_workgroups(GRID_CELLS.div_ceil(SORT_WORKGROUP_SIZE).max(1), 1, 1);
+        cpass.set_pipeline(&self.query_pipeline);
+        cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
+    }
+
+    /// Rebuild the spatial hash from `state`, then run the batched
+    /// `within_radius` kernel with the given radius. Per-slot results
+    /// are indexed by `(AgentId.raw() - 1)`.
+    pub fn rebuild_and_query(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        state: &SimState,
+        radius: f32,
+    ) -> Result<SpatialQueryResults, SpatialError> {
+        let agent_cap = state.agent_cap();
+        self.upload_agent_soa(device, queue, state, radius)?;
+
+        let pool = self.pool.as_ref().expect("pool ensured");
 
         // --- Phase A: clear + count ---
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1096,19 +1156,12 @@ impl GpuSpatialHash {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("engine_gpu::spatial::enc_scatter_query"),
         });
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("engine_gpu::spatial::cpass_scatter_query"),
-                timestamp_writes: None,
-            });
-            cpass.set_bind_group(0, &pool.bind_group, &[]);
-            cpass.set_pipeline(&self.scatter_pipeline);
-            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
-            cpass.set_pipeline(&self.sort_pipeline);
-            cpass.dispatch_workgroups(GRID_CELLS.div_ceil(SORT_WORKGROUP_SIZE).max(1), 1, 1);
-            cpass.set_pipeline(&self.query_pipeline);
-            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
-        }
+        self.encode_scatter_sort_query(
+            &mut encoder,
+            &pool.bind_group,
+            agent_cap,
+            "engine_gpu::spatial::cpass_scatter_query",
+        );
         encoder.copy_buffer_to_buffer(
             &pool.within_buf,
             0,
@@ -1148,18 +1201,27 @@ impl GpuSpatialHash {
     /// - encodes every pass (clear, count, scan, scatter, sort, query)
     ///   into the caller's encoder — no intermediate submits, no CPU
     ///   roundtrip on the prefix-sum,
-    /// - does not read anything back; the caller keeps the result buffers
-    ///   device-resident and binds them into downstream kernels via
-    ///   [`Self::kin_buf`] / [`Self::nearest_buf`].
+    /// - writes query results into **caller-owned** buffers supplied
+    ///   via [`SpatialOutputs`], not into the spatial-hash's internal
+    ///   pool. This lets two calls in one encoder (e.g. `kin_radius`
+    ///   followed by `engagement_range`) target distinct output trios
+    ///   without the second clobbering the first.
     ///
-    /// Uploads of `agent_pos`, `agent_alive`, `agent_creature_type`, `cfg`
-    /// and `qcfg` use `queue.write_buffer` (implicit pre-pass on the same
-    /// queue as the encoder submit). The scan kernel is the same one
+    /// Uploads of `agent_pos`, `agent_alive`, `agent_creature_type`, and
+    /// `cfg` use `queue.write_buffer` (implicit pre-pass on the same
+    /// queue as the encoder submit). `qcfg` (the query radius) is
+    /// allocated fresh per call so multiple resident dispatches in one
+    /// encoder each see their own radius — `queue.write_buffer`'s
+    /// last-write-wins semantics would otherwise collapse two calls
+    /// onto a single radius. The scan kernel is the same one
     /// `gpu_prefix_scan.rs` tests for parity against a CPU exclusive-scan.
     ///
-    /// Returns a [`PoolHandle`] so the caller can fetch the GPU-resident
-    /// result buffers. The handle is stable until `ensure_pool` rebuilds
-    /// the pool (only happens when `state.agent_cap()` changes).
+    /// The caller is responsible for sizing each of
+    /// `outputs.{within,kin,nearest}` correctly (see [`SpatialOutputs`])
+    /// and for keeping the `Buffer`s alive until the encoder's submit
+    /// retires. A fresh bind group is built per call against the
+    /// caller-supplied buffers — cheap compared to the dispatch cost
+    /// and keeps the aliasing contract honest.
     pub fn rebuild_and_query_resident(
         &mut self,
         device: &wgpu::Device,
@@ -1167,59 +1229,58 @@ impl GpuSpatialHash {
         encoder: &mut wgpu::CommandEncoder,
         state: &SimState,
         radius: f32,
-    ) -> Result<PoolHandle, SpatialError> {
+        outputs: SpatialOutputs<'_>,
+    ) -> Result<(), SpatialError> {
         let agent_cap = state.agent_cap();
-        self.ensure_pool(device, agent_cap);
+        // Upload agent SoA + world-origin cfg. We pass `radius = 0.0`
+        // here because the qcfg written by `upload_agent_soa` would be
+        // shared across multiple resident calls in the same encoder
+        // (last write wins). Instead we allocate a *fresh* qcfg
+        // uniform buffer per call below, so two back-to-back calls
+        // with different radii each see their own qcfg at dispatch.
+        self.upload_agent_soa(device, queue, state, 0.0)?;
 
-        let pos_src: Vec<GpuPos> = state
-            .hot_pos()
-            .iter()
-            .map(|v| GpuPos { x: v.x, y: v.y, z: v.z, _pad: 0.0 })
-            .collect();
-        let alive_src: Vec<u32> = state
-            .hot_alive()
-            .iter()
-            .map(|&b| if b { 1u32 } else { 0u32 })
-            .collect();
-        let ct_src: Vec<u32> = (0..agent_cap)
-            .map(|slot| {
-                let id = AgentId::new(slot + 1).unwrap();
-                match state.agent_creature_type(id) {
-                    Some(ct) => ct as u8 as u32,
-                    None => u32::MAX,
-                }
-            })
-            .collect();
-        let (world_origin_x, world_origin_y) = compute_world_origin(state);
-
-        let pool = self.pool.as_ref().expect("pool ensured");
-        queue.write_buffer(&pool.pos_buf, 0, bytemuck::cast_slice(&pos_src));
-        queue.write_buffer(&pool.alive_buf, 0, bytemuck::cast_slice(&alive_src));
-        queue.write_buffer(&pool.creature_type_buf, 0, bytemuck::cast_slice(&ct_src));
-        queue.write_buffer(
-            &pool.cfg_buf,
-            0,
-            bytemuck::cast_slice(&[SpatialCfg {
-                world_origin_x,
-                world_origin_y,
-                cell_size: CELL_SIZE,
-                grid_dim: GRID_DIM,
-                agent_cap,
-                k_cap: K,
-                _pad0: 0,
-                _pad1: 0,
-            }]),
-        );
-        queue.write_buffer(
-            &pool.qcfg_buf,
-            0,
-            bytemuck::cast_slice(&[QueryCfg {
+        // Per-call qcfg uniform. Fresh buffer per call so multiple
+        // resident dispatches in one encoder don't race on a shared
+        // `queue.write_buffer` (whose writes collapse to last-wins
+        // when a buffer is written twice before submit).
+        let qcfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("engine_gpu::spatial::resident_qcfg"),
+            contents: bytemuck::cast_slice(&[QueryCfg {
                 radius,
                 _pad0: 0.0,
                 _pad1: 0.0,
                 _pad2: 0.0,
             }]),
-        );
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
+        let pool = self.pool.as_ref().expect("pool ensured");
+
+        // Build a per-call bind group that redirects bindings 7/8/9 to
+        // the caller-supplied output buffers and binding 11 to the
+        // fresh per-call qcfg. Everything else (agent SoA, cell
+        // counts/offsets/fills/data, cfg uniform) points at the
+        // pool's internal scratch buffers, which are overwritten
+        // per rebuild anyway so sharing across calls is safe.
+        let query_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("engine_gpu::spatial::resident_bg"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: pool.pos_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: pool.alive_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: pool.creature_type_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: pool.cell_counts_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: pool.cell_offsets_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: pool.cell_fills_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 6, resource: pool.cell_data_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 7, resource: outputs.within.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 8, resource: outputs.kin.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 9, resource: outputs.nearest.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 10, resource: pool.cfg_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 11, resource: qcfg_buf.as_entire_binding() },
+            ],
+        });
 
         // --- Clear + count ---
         {
@@ -1227,7 +1288,7 @@ impl GpuSpatialHash {
                 label: Some("engine_gpu::spatial::resident_clear_count"),
                 timestamp_writes: None,
             });
-            cpass.set_bind_group(0, &pool.bind_group, &[]);
+            cpass.set_bind_group(0, &query_bind_group, &[]);
             cpass.set_pipeline(&self.clear_pipeline);
             cpass.dispatch_workgroups(GRID_CELLS.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
             cpass.set_pipeline(&self.count_pipeline);
@@ -1239,43 +1300,14 @@ impl GpuSpatialHash {
         self.encode_scan(encoder);
 
         // --- Scatter + sort + query ---
-        let pool = self.pool.as_ref().expect("pool ensured");
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("engine_gpu::spatial::resident_scatter_query"),
-                timestamp_writes: None,
-            });
-            cpass.set_bind_group(0, &pool.bind_group, &[]);
-            cpass.set_pipeline(&self.scatter_pipeline);
-            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
-            cpass.set_pipeline(&self.sort_pipeline);
-            cpass.dispatch_workgroups(GRID_CELLS.div_ceil(SORT_WORKGROUP_SIZE).max(1), 1, 1);
-            cpass.set_pipeline(&self.query_pipeline);
-            cpass.dispatch_workgroups(agent_cap.div_ceil(WORKGROUP_SIZE).max(1), 1, 1);
-        }
+        self.encode_scatter_sort_query(
+            encoder,
+            &query_bind_group,
+            agent_cap,
+            "engine_gpu::spatial::resident_scatter_query",
+        );
 
-        Ok(PoolHandle(0))
-    }
-
-    /// GPU-resident kin-result buffer produced by the most recent
-    /// [`Self::rebuild_and_query_resident`] call. `handle` must come from
-    /// that same call.
-    pub fn kin_buf(&self, _handle: PoolHandle) -> &wgpu::Buffer {
-        &self.pool.as_ref().expect("pool ensured").kin_buf
-    }
-
-    /// GPU-resident nearest-hostile result buffer. One `u32` per agent
-    /// slot; value is raw-`AgentId` or [`NO_HOSTILE`] when no hostile is
-    /// in range.
-    pub fn nearest_buf(&self, _handle: PoolHandle) -> &wgpu::Buffer {
-        &self.pool.as_ref().expect("pool ensured").nearest_buf
-    }
-
-    /// Within-radius result buffer. Not currently needed by the cascade
-    /// pipeline but exposed for symmetry with [`Self::kin_buf`].
-    #[doc(hidden)]
-    pub fn within_buf(&self, _handle: PoolHandle) -> &wgpu::Buffer {
-        &self.pool.as_ref().expect("pool ensured").within_buf
+        Ok(())
     }
 
     /// Encode a single-workgroup `cell_counts` → `cell_offsets` exclusive
@@ -1314,6 +1346,70 @@ pub struct SpatialTestHarness {
     pub hash: GpuSpatialHash,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    /// Lazily-allocated caller-owned output buffer trio + readbacks
+    /// for the resident path. Reused across `run_resident` calls so
+    /// tests don't pay a fresh allocation per call — the buffers are
+    /// reallocated iff `agent_cap` grows.
+    resident_outputs: Option<ResidentOutputBuffers>,
+}
+
+/// Buffer trio + readbacks the test harness uses to back
+/// [`SpatialTestHarness::run_resident`]. Allocated on first use,
+/// grown if a later call needs more slots.
+struct ResidentOutputBuffers {
+    agent_cap: u32,
+    within: wgpu::Buffer,
+    within_readback: wgpu::Buffer,
+    kin: wgpu::Buffer,
+    kin_readback: wgpu::Buffer,
+    nearest: wgpu::Buffer,
+    nearest_readback: wgpu::Buffer,
+}
+
+impl ResidentOutputBuffers {
+    fn new(device: &wgpu::Device, agent_cap: u32, label_suffix: &str) -> Self {
+        let agent_cap_u = agent_cap as usize;
+        let qr_bytes = (agent_cap_u * std::mem::size_of::<GpuQueryResult>()) as u64;
+        let nearest_bytes = (agent_cap_u * 4) as u64;
+        let mk_output = |size: u64, label: &str| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let mk_readback = |size: u64, label: &str| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        Self {
+            agent_cap,
+            within: mk_output(qr_bytes, &format!("test::resident_within_{label_suffix}")),
+            within_readback: mk_readback(qr_bytes, &format!("test::resident_within_rb_{label_suffix}")),
+            kin: mk_output(qr_bytes, &format!("test::resident_kin_{label_suffix}")),
+            kin_readback: mk_readback(qr_bytes, &format!("test::resident_kin_rb_{label_suffix}")),
+            nearest: mk_output(nearest_bytes, &format!("test::resident_nearest_{label_suffix}")),
+            nearest_readback: mk_readback(
+                nearest_bytes,
+                &format!("test::resident_nearest_rb_{label_suffix}"),
+            ),
+        }
+    }
+
+    fn as_outputs(&self) -> SpatialOutputs<'_> {
+        SpatialOutputs {
+            within: &self.within,
+            kin: &self.kin,
+            nearest: &self.nearest,
+        }
+    }
 }
 
 impl SpatialTestHarness {
@@ -1324,7 +1420,158 @@ impl SpatialTestHarness {
         let (device, queue) = crate::test_device()
             .map_err(|e| SpatialError::Dispatch(format!("test_device: {e}")))?;
         let hash = GpuSpatialHash::new(&device)?;
-        Ok(Self { hash, device, queue })
+        Ok(Self { hash, device, queue, resident_outputs: None })
+    }
+
+    /// Allocate a fresh caller-owned [`SpatialOutputs`] buffer trio
+    /// sized for `agent_cap` slots. Used by the aliasing test that
+    /// needs two independent trios in a single encoder. The returned
+    /// [`ResidentOutputBuffers`] owns storage + readback buffers and
+    /// can't be used with the harness's own `run_resident` (which
+    /// reuses its own cached trio) — it's a low-level helper for the
+    /// test that drives two resident queries side-by-side.
+    #[doc(hidden)]
+    pub fn alloc_output_buffers(&self, agent_cap: u32, label: &str) -> TestOutputBufferTrio {
+        TestOutputBufferTrio {
+            inner: ResidentOutputBuffers::new(&self.device, agent_cap, label),
+        }
+    }
+
+    /// Run the resident path with a caller-supplied output trio,
+    /// copy-to-readback, submit, and map back into `SpatialQueryResults`.
+    /// Used by the aliasing test to drive two back-to-back queries in
+    /// one encoder into distinct trios.
+    #[doc(hidden)]
+    pub fn run_resident_with(
+        &mut self,
+        state: &SimState,
+        radius: f32,
+        outputs: &TestOutputBufferTrio,
+    ) -> Result<SpatialQueryResults, SpatialError> {
+        let agent_cap = state.agent_cap();
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine_gpu::spatial::resident_test_enc_single"),
+            });
+        self.hash.rebuild_and_query_resident(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            state,
+            radius,
+            outputs.inner.as_outputs(),
+        )?;
+        encoder.copy_buffer_to_buffer(
+            &outputs.inner.within,
+            0,
+            &outputs.inner.within_readback,
+            0,
+            (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64,
+        );
+        encoder.copy_buffer_to_buffer(
+            &outputs.inner.kin,
+            0,
+            &outputs.inner.kin_readback,
+            0,
+            (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64,
+        );
+        encoder.copy_buffer_to_buffer(
+            &outputs.inner.nearest,
+            0,
+            &outputs.inner.nearest_readback,
+            0,
+            (agent_cap as u64) * 4,
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let within = map_read_query_results(
+            &outputs.inner.within_readback,
+            &self.device,
+            agent_cap as usize,
+        )?;
+        let kin = map_read_query_results(
+            &outputs.inner.kin_readback,
+            &self.device,
+            agent_cap as usize,
+        )?;
+        let nearest = map_read_u32(
+            &outputs.inner.nearest_readback,
+            &self.device,
+            agent_cap as usize,
+        )?;
+        Ok(SpatialQueryResults {
+            within_radius: within,
+            nearby_kin: kin,
+            nearest_hostile: nearest,
+        })
+    }
+
+    /// Drive two resident queries (possibly with different radii) into
+    /// two independent [`SpatialOutputs`] trios within a single
+    /// encoder. Submits once, maps back both. Exists so the aliasing
+    /// test can prove the two calls don't clobber each other.
+    #[doc(hidden)]
+    pub fn run_two_resident_queries_in_one_encoder(
+        &mut self,
+        state: &SimState,
+        radius_a: f32,
+        outputs_a: &TestOutputBufferTrio,
+        radius_b: f32,
+        outputs_b: &TestOutputBufferTrio,
+    ) -> Result<(SpatialQueryResults, SpatialQueryResults), SpatialError> {
+        let agent_cap = state.agent_cap();
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine_gpu::spatial::resident_test_enc_two"),
+            });
+        self.hash.rebuild_and_query_resident(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            state,
+            radius_a,
+            outputs_a.inner.as_outputs(),
+        )?;
+        self.hash.rebuild_and_query_resident(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            state,
+            radius_b,
+            outputs_b.inner.as_outputs(),
+        )?;
+
+        let qr_bytes = (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64;
+        let nearest_bytes = (agent_cap as u64) * 4;
+        for o in [&outputs_a.inner, &outputs_b.inner] {
+            encoder.copy_buffer_to_buffer(&o.within, 0, &o.within_readback, 0, qr_bytes);
+            encoder.copy_buffer_to_buffer(&o.kin, 0, &o.kin_readback, 0, qr_bytes);
+            encoder.copy_buffer_to_buffer(&o.nearest, 0, &o.nearest_readback, 0, nearest_bytes);
+        }
+        self.queue.submit(Some(encoder.finish()));
+
+        let map_one = |o: &ResidentOutputBuffers| -> Result<SpatialQueryResults, SpatialError> {
+            Ok(SpatialQueryResults {
+                within_radius: map_read_query_results(
+                    &o.within_readback,
+                    &self.device,
+                    agent_cap as usize,
+                )?,
+                nearby_kin: map_read_query_results(
+                    &o.kin_readback,
+                    &self.device,
+                    agent_cap as usize,
+                )?,
+                nearest_hostile: map_read_u32(
+                    &o.nearest_readback,
+                    &self.device,
+                    agent_cap as usize,
+                )?,
+            })
+        };
+        Ok((map_one(&outputs_a.inner)?, map_one(&outputs_b.inner)?))
     }
 
     /// Run just the prefix-scan kernel on a user-supplied count vector.
@@ -1390,12 +1637,15 @@ impl SpatialTestHarness {
         self.hash.rebuild_and_query(&self.device, &self.queue, state, radius)
     }
 
-    /// Build an encoder, call [`GpuSpatialHash::rebuild_and_query_resident`],
-    /// append copy-to-readback ops for `within_buf` / `kin_buf` /
-    /// `nearest_buf`, submit, and map back into `SpatialQueryResults`.
-    /// Test-only because the production resident path keeps results
-    /// device-resident — the readback here just lets tests assert on the
-    /// values without plumbing another kernel.
+    /// Build an encoder, call [`GpuSpatialHash::rebuild_and_query_resident`]
+    /// with a harness-owned [`SpatialOutputs`] trio, append
+    /// copy-to-readback ops, submit, and map back into
+    /// `SpatialQueryResults`. Test-only because the production resident
+    /// path keeps results device-resident — the readback here just lets
+    /// tests assert on the values without plumbing another kernel.
+    ///
+    /// The output trio is cached on the harness and reused across calls
+    /// (reallocated iff `state.agent_cap()` grows).
     #[doc(hidden)]
     pub fn run_resident(
         &mut self,
@@ -1403,52 +1653,68 @@ impl SpatialTestHarness {
         radius: f32,
     ) -> Result<SpatialQueryResults, SpatialError> {
         let agent_cap = state.agent_cap();
+        let needs_realloc = self
+            .resident_outputs
+            .as_ref()
+            .is_none_or(|o| o.agent_cap != agent_cap);
+        if needs_realloc {
+            self.resident_outputs = Some(ResidentOutputBuffers::new(
+                &self.device,
+                agent_cap,
+                "harness",
+            ));
+        }
+        let outputs = self.resident_outputs.as_ref().expect("allocated above");
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("engine_gpu::spatial::resident_test_enc"),
             });
-        let handle = self
-            .hash
-            .rebuild_and_query_resident(&self.device, &self.queue, &mut encoder, state, radius)?;
+        self.hash.rebuild_and_query_resident(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            state,
+            radius,
+            outputs.as_outputs(),
+        )?;
 
-        let pool = self.hash.pool.as_ref().expect("pool ensured");
-        let _ = handle; // handle is always PoolHandle(0) today.
         encoder.copy_buffer_to_buffer(
-            &pool.within_buf,
+            &outputs.within,
             0,
-            &pool.within_readback,
+            &outputs.within_readback,
             0,
             (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64,
         );
         encoder.copy_buffer_to_buffer(
-            &pool.kin_buf,
+            &outputs.kin,
             0,
-            &pool.kin_readback,
+            &outputs.kin_readback,
             0,
             (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64,
         );
         encoder.copy_buffer_to_buffer(
-            &pool.nearest_buf,
+            &outputs.nearest,
             0,
-            &pool.nearest_readback,
+            &outputs.nearest_readback,
             0,
             (agent_cap as u64) * 4,
         );
         self.queue.submit(Some(encoder.finish()));
 
         let within = map_read_query_results(
-            &pool.within_readback,
+            &outputs.within_readback,
             &self.device,
             agent_cap as usize,
         )?;
         let kin = map_read_query_results(
-            &pool.kin_readback,
+            &outputs.kin_readback,
             &self.device,
             agent_cap as usize,
         )?;
         let nearest = map_read_u32(
-            &pool.nearest_readback,
+            &outputs.nearest_readback,
             &self.device,
             agent_cap as usize,
         )?;
@@ -1458,6 +1724,14 @@ impl SpatialTestHarness {
             nearest_hostile: nearest,
         })
     }
+}
+
+/// Test-only wrapper around a caller-owned output buffer trio +
+/// readbacks. Used by the aliasing test to allocate two independent
+/// trios and drive two back-to-back resident queries into them.
+#[doc(hidden)]
+pub struct TestOutputBufferTrio {
+    inner: ResidentOutputBuffers,
 }
 
 /// Compute the AABB of alive agent positions (XY) and pick a world
