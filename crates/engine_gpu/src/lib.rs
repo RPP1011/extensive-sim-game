@@ -53,6 +53,9 @@ use engine::{
 use engine::event::Event;
 
 #[cfg(feature = "gpu")]
+pub mod gpu_util;
+
+#[cfg(feature = "gpu")]
 pub mod mask;
 
 /// Phase 3 — scoring kernel + deterministic argmax. Consumes fused
