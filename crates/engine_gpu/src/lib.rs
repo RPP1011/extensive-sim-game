@@ -210,6 +210,47 @@ pub struct GpuBackend {
     /// by perf harnesses. Zeroed per-tick at `step` entry; readable
     /// via `last_phase_timings`.
     last_phase_us: PhaseTimings,
+
+    // -------------------------------------------------------------------
+    // Phase D — Task D2: persistent buffers + snapshot staging fields
+    // for the GPU-resident cascade driver. Declared here in D2; consumed
+    // by D3 (`snapshot()`) and D4 (`step_batch` rewrite).
+    // -------------------------------------------------------------------
+    /// Phase D — persistent agent SoA buffer for the resident path.
+    /// Allocated on first step_batch call, reused across ticks. Sync
+    /// path still uses per-kernel pooled buffers.
+    #[allow(dead_code)] // TODO Phase D Task D4: consumed by step_batch rewrite
+    resident_agents_buf: Option<wgpu::Buffer>,
+    #[allow(dead_code)] // TODO Phase D Task D4: consumed by step_batch rewrite
+    resident_agents_cap: u32,
+
+    /// Phase D — indirect dispatch args for the resident cascade.
+    /// MAX_CASCADE_ITERATIONS + 1 slots (one seed slot + one per
+    /// iter). Lazy-initialised in step_batch.
+    #[allow(dead_code)] // TODO Phase D Task D4: consumed by step_batch rewrite
+    resident_indirect_args: Option<crate::gpu_util::indirect::IndirectArgsBuffer>,
+
+    /// Phase D — double-buffered snapshot staging. `front` is the one
+    /// that will be read next (filled by the previous `snapshot()`
+    /// call); `back` is the one currently filling for the NEXT call.
+    /// Both `None` until first snapshot() call lazy-inits them.
+    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
+    snapshot_front: Option<crate::snapshot::GpuStaging>,
+    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
+    snapshot_back: Option<crate::snapshot::GpuStaging>,
+
+    /// Phase D — watermark tracking what portion of the main event /
+    /// chronicle rings have been snapshotted. Advances monotonically.
+    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
+    snapshot_event_ring_read: u64,
+    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
+    snapshot_chronicle_ring_read: u64,
+
+    /// Phase D — the most recent tick recorded by `step_batch`.
+    /// Exposed via snapshot for the observer. Updated each tick the
+    /// batch loop advances.
+    #[allow(dead_code)] // TODO Phase D Task D4: consumed by step_batch rewrite
+    latest_recorded_tick: u32,
 }
 
 /// Phase 9 (task 195): per-tick GPU pipeline phase timings in
@@ -469,6 +510,17 @@ impl GpuBackend {
             last_cascade_error: None,
             skip_scoring_sidecar: true,
             last_phase_us: PhaseTimings::default(),
+            // Phase D — Task D2: persistent buffers + snapshot staging.
+            // All `None` / `0` at construction; lazy-initialised on
+            // first `step_batch` (D4) / `snapshot()` (D3) call.
+            resident_agents_buf: None,
+            resident_agents_cap: 0,
+            resident_indirect_args: None,
+            snapshot_front: None,
+            snapshot_back: None,
+            snapshot_event_ring_read: 0,
+            snapshot_chronicle_ring_read: 0,
+            latest_recorded_tick: 0,
         })
     }
 
