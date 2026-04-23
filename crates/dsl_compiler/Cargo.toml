@@ -12,3 +12,7 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+# WGSL parse/validate for emit_view_wgsl / emit_scoring_wgsl tests.
+# Pinned to match engine_gpu's `=26.0.0` so the same WGSL dialect
+# stays authoritative across the DSL + runtime sides.
+naga = { version = "=26.0.0", features = ["wgsl-in"] }

@@ -296,8 +296,19 @@ pub fn classify_view(view: &ViewIR) -> Result<ViewStorageSpec, EmitError> {
             }
         }
         StorageHint::SymmetricPairTopK { .. } => {
+            // Symmetric pair top-K has its own WGSL emit entry point —
+            // [`emit_symmetric_pair_topk_fold_wgsl`] — because its
+            // storage layout (per-owner slot arrays with min/max
+            // canonicalisation) doesn't fit the existing pair-map /
+            // slot-map shape enum without cascading changes to
+            // scoring's dispatch (see module docstring).
+            //
+            // `classify_view` rejects here so callers walking every
+            // view through the generic pipeline get a clear signal;
+            // phase 3's consumer invokes the dedicated entry point
+            // directly with a `ViewIR`.
             return Err(EmitError::Unsupported(format!(
-                "view `{}` storage=symmetric_pair_topk has no GPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
+                "view `{}` storage=symmetric_pair_topk uses a dedicated entry point — call `emit_symmetric_pair_topk_fold_wgsl(&view_ir)` instead of the generic classify/fold pipeline",
                 view.name
             )));
         }
@@ -792,6 +803,687 @@ fn emit_atomic_add_f32(
     .unwrap();
     writeln!(out, "        if (cas.exchanged) {{ break; }}").unwrap();
     writeln!(out, "    }}").unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// SymmetricPairTopK fold-kernel emission (GPU cold-state replay plan task 1.7)
+// ---------------------------------------------------------------------------
+
+/// Emit a standalone WGSL compute kernel that folds pair-keyed events
+/// into symmetric-pair-topk storage. Companion to the CPU emitter at
+/// `emit_view::emit_symmetric_pair_topk_struct` — this function
+/// mirrors the Rust-side layout byte-for-byte so a fold that ran on
+/// CPU reproduces on GPU.
+///
+/// Unlike [`emit_view_fold_wgsl`], this emitter takes the view IR
+/// directly (not a [`ViewStorageSpec`]). The pair-owner canonical
+/// order, per-row slot array, and |v|-evict policy don't map cleanly
+/// onto the existing `ViewShape` enum without cascading changes to the
+/// scoring emitter's dispatch, so `@symmetric_pair_topk` stays on its
+/// own code path until Phase 3 ports scoring reads.
+///
+/// ## Storage layout (must match the Rust emit byte-for-byte)
+///
+/// Per the CPU emitter, each `<ViewName>Edge` is:
+///
+/// ```text
+/// struct <ViewName>Edge {
+///     other:       u32,   // AgentId_raw of the higher-id endpoint; 0 = empty
+///     value:       <T>,   // view return type (f32 for `standing`)
+///     anchor_tick: u32,   // tick of last write (reserved for future decay)
+/// }
+/// ```
+///
+/// ...and storage is `slots: Vec<[Edge; K]>` on CPU, which flattens to
+/// `array<Edge>` of length `agent_cap * K` on GPU (row `owner` spans
+/// `[owner*K, owner*K + K)`). The WGSL `struct` uses `_pad` to round
+/// the 12-byte edge out to 16 bytes so array indexing stays aligned
+/// (WGSL `storage` structs require 16-byte alignment for top-level
+/// struct members when the element type is used in an `array<T>`;
+/// padding to 16B matches the CPU struct's natural alignment too).
+///
+/// A parallel `counts: array<atomic<u32>>` of length `agent_cap`
+/// tracks how many slots per owner are occupied so the find/insert
+/// logic can atomically reserve an empty slot without a linear scan
+/// for zeros.
+///
+/// ## Canonicalisation
+///
+/// The invariant `(owner, other) = (min(a, b), max(a, b))` mirrors the
+/// CPU emitter's `canonical_pair(a, b)` helper, so reads and writes
+/// produce the same result regardless of which side of the pair the
+/// caller specifies.
+///
+/// ## Concurrency caveats (documented in the emitted WGSL as well)
+///
+/// - **Count-reservation race**: the kernel uses `atomicAdd` on
+///   `counts[owner]` to reserve an empty slot. If multiple invocations
+///   race past the `count < K` branch, `atomicAdd` serialises them
+///   and the loser (whose `new_idx >= K`) falls through to the evict
+///   path. Phase 3's consumer should validate this is tolerable in
+///   practice — for `+= 1.0`-style folds the loser just retries via
+///   the evict arm, so no event is silently dropped if there's room
+///   for eviction.
+///
+/// - **Non-atomic value update**: the update-in-place arm does a plain
+///   `slots[row + i].value += delta` without CAS. This is safe only
+///   if events for the same canonical pair don't co-fire in the same
+///   dispatch. For Phase 1's read-only cold-state replay where
+///   events stream in from a per-tick queue this holds; Phase 3 will
+///   validate whether hot-path users need a CAS loop.
+///
+/// - **Evict path race**: when K is full, the kernel linear-scans for
+///   the smallest-|value| slot and overwrites it non-atomically.
+///   Concurrent evictions can lose updates; same Phase-3-validate
+///   caveat as above.
+///
+/// Flagged as `TODO(phase-3)` in the emitted kernel comments so the
+/// consumer-port surface notices them.
+///
+/// ## Errors
+///
+/// Returns `Unsupported` when:
+/// - The view isn't `@materialized(storage = symmetric_pair_topk(K = N))`.
+/// - The view has `@decay` (Phase 3 layers decay on top of anchor_tick).
+/// - The view's param count isn't 2 or return type isn't WGSL-scalar.
+pub fn emit_symmetric_pair_topk_fold_wgsl(view: &ViewIR) -> Result<String, EmitError> {
+    // Pull the SymmetricPairTopK K out of the view kind; reject any
+    // other storage hint.
+    let k = match view.kind {
+        ViewKind::Materialized(StorageHint::SymmetricPairTopK { k }) => k as u32,
+        ViewKind::Materialized(other) => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` isn't symmetric_pair_topk (got storage={:?}) — use emit_view_fold_wgsl for other shapes",
+                view.name, other
+            )));
+        }
+        ViewKind::Lazy => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` is @lazy — no fold kernel required",
+                view.name
+            )));
+        }
+    };
+
+    if view.params.len() != 2 {
+        return Err(EmitError::Unsupported(format!(
+            "view `{}` symmetric_pair_topk requires 2 params (the pair endpoints); got {}",
+            view.name,
+            view.params.len()
+        )));
+    }
+    if view.decay.is_some() {
+        return Err(EmitError::Unsupported(format!(
+            "view `{}` symmetric_pair_topk + @decay not supported yet (Phase 3 layers decay on anchor_tick)",
+            view.name
+        )));
+    }
+
+    // Fold body extraction. Only Fold bodies are valid for materialized
+    // views — the resolver already enforces this, but guard anyway.
+    let (_initial, handlers, _clamp) = match &view.body {
+        ViewBodyIR::Fold {
+            initial,
+            handlers,
+            clamp,
+        } => (initial, handlers, clamp.as_ref()),
+        ViewBodyIR::Expr(_) => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` symmetric_pair_topk requires a Fold body, not an Expr",
+                view.name
+            )));
+        }
+    };
+
+    // Value WGSL type for the edge struct. Match the CPU emitter's
+    // rust_type_for: f32 / i32 / u32 are the WGSL-portable scalars we
+    // can store without extensions. Anything else falls out today.
+    let val_wgsl = match view.return_ty {
+        IrType::F32 => "f32",
+        IrType::I32 => "i32",
+        IrType::U32 => "u32",
+        ref other => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` symmetric_pair_topk return type {other:?} not yet supported on GPU (only f32/i32/u32)",
+                view.name
+            )));
+        }
+    };
+
+    // Name derivation matches the CPU emitter: PascalCase view name
+    // suffixed with `Edge` for the slot struct.
+    let edge_ty = format!("{}Edge", pascal_case(&view.name));
+    let snake = snake_case(&view.name);
+    let a_name = view.params[0].name.as_str();
+    let b_name = view.params[1].name.as_str();
+
+    let mut out = String::new();
+
+    // ---- Module header ----
+    writeln!(
+        out,
+        "// WGSL fold kernel for @materialized view `{}` — storage = symmetric_pair_topk(K = {}).",
+        view.name, k
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// Companion to the CPU emitter in emit_view::emit_symmetric_pair_topk_struct;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// layout must match byte-for-byte so a fold that runs on CPU reproduces on GPU."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "//"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// Concurrency caveats (TODO(phase-3): validate in the real consumer):"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "//  * Update-in-place writes `slots[i].value += delta` non-atomically. Safe when"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "//    events for the same canonical pair don't co-fire in the same dispatch."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "//  * Reserve-slot races serialise through atomicAdd on counts[]; the loser falls"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "//    through to the evict arm (smallest-|value| replace)."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "//  * Evict scan + write is non-atomic; concurrent evictions on the same row can"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "//    lose updates. Phase 3 can upgrade to a CAS loop if usage requires it."
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Compile-time K constant ----
+    writeln!(
+        out,
+        "// Slot count per owner — the `K` from symmetric_pair_topk(K = {}).",
+        k
+    )
+    .unwrap();
+    writeln!(out, "const K: u32 = {}u;", k).unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Edge struct ----
+    writeln!(
+        out,
+        "// Per-edge slot — mirrors the Rust `{edge_ty}` struct (12B payload + 4B pad → 16B)."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// `other == 0u` marks an empty slot (AgentIds are 1-based, so 0 is unused)."
+    )
+    .unwrap();
+    writeln!(out, "struct {edge_ty} {{").unwrap();
+    writeln!(out, "    other:       u32,").unwrap();
+    writeln!(out, "    value:       {val_wgsl},").unwrap();
+    writeln!(out, "    anchor_tick: u32,").unwrap();
+    writeln!(out, "    _pad:        u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Fold-dispatch uniform ----
+    writeln!(
+        out,
+        "// Dispatch-level uniform: event count + current tick. The event buffer layout"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// comes from the DSL event struct; engine_gpu packs it into `events[]` below."
+    )
+    .unwrap();
+    writeln!(out, "struct FoldCfg {{").unwrap();
+    writeln!(out, "    num_events: u32,").unwrap();
+    writeln!(out, "    tick:       u32,").unwrap();
+    writeln!(out, "    agent_cap:  u32,").unwrap();
+    writeln!(out, "    _pad:       u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Bindings ----
+    writeln!(
+        out,
+        "// Bindings — engine_gpu owns the bind-group layout; these numbers are the"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// dedicated symmetric-pair-topk slot (kept disjoint from pair_map / slot_map)."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding(0) var<storage, read_write> view_{snake}_slots:  array<{edge_ty}>;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding(1) var<storage, read_write> view_{snake}_counts: array<atomic<u32>>;"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Fold kernels, one per handler ----
+    if handlers.is_empty() {
+        // No handlers — emit an empty kernel so downstream bindings
+        // still compile. Matches what the CPU side does: `fold_event`
+        // becomes a no-op when no handlers match.
+        writeln!(
+            out,
+            "// No fold handlers — view receives no events. Kernel is a no-op for symmetry."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "@compute @workgroup_size(64) fn view_{snake}_fold_noop(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+        )
+        .unwrap();
+        writeln!(out, "    let _ = gid;").unwrap();
+        writeln!(out, "}}").unwrap();
+        return Ok(out);
+    }
+
+    // Per-handler event-struct + compute entry point. Each handler
+    // emits its own `<EventName>Delta`-style event struct and a
+    // dedicated `view_<snake>_fold_<event>` compute entry point — this
+    // matches how the existing CPU dispatch iterates Event variants.
+    for (idx, handler) in handlers.iter().enumerate() {
+        emit_symmetric_pair_topk_fold_handler_wgsl(
+            &mut out,
+            view,
+            handler,
+            idx,
+            &snake,
+            &edge_ty,
+            val_wgsl,
+            a_name,
+            b_name,
+        )?;
+    }
+
+    Ok(out)
+}
+
+/// Emit the per-handler event struct + compute entry point. Factored
+/// out so the main function stays readable; called once per
+/// `FoldHandlerIR` on the view.
+#[allow(clippy::too_many_arguments)]
+fn emit_symmetric_pair_topk_fold_handler_wgsl(
+    out: &mut String,
+    view: &ViewIR,
+    handler: &FoldHandlerIR,
+    idx: usize,
+    snake: &str,
+    _edge_ty: &str,
+    val_wgsl: &str,
+    a_name: &str,
+    b_name: &str,
+) -> Result<(), EmitError> {
+    let ev_name = handler.pattern.name.as_str();
+    let ev_snake = snake_case(ev_name);
+
+    // Figure out which event fields feed view-arg 0 (a_name) and
+    // view-arg 1 (b_name). Mirrors the CPU emitter's binding scan
+    // (emit_view::emit_symmetric_pair_fold_arm) — when the pattern
+    // doesn't explicitly rebind, fall back to the canonical (a, b)
+    // event-field names.
+    let mut first_field: Option<String> = None;
+    let mut second_field: Option<String> = None;
+    for b in &handler.pattern.bindings {
+        let field = b.field.clone();
+        if let IrPattern::Bind { name, .. } = &b.value {
+            if name == a_name {
+                first_field = Some(field);
+            } else if name == b_name {
+                second_field = Some(field);
+            }
+        }
+    }
+    let first_field = first_field.unwrap_or_else(|| a_name.to_string());
+    let second_field = second_field.unwrap_or_else(|| b_name.to_string());
+
+    // Emit a per-handler event-carrier struct. The engine_gpu side
+    // packs incoming events into this layout before dispatch.
+    // Layout: (first_id: u32, second_id: u32, delta: val_wgsl, _pad: u32).
+    // 16 bytes when val_wgsl is 4-byte.
+    writeln!(
+        out,
+        "// Event-carrier struct for `{ev_name}` → `{view_name}` fold.",
+        view_name = view.name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// engine_gpu packs the event's `{first_field}` / `{second_field}` AgentIds (raw u32s)"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// plus the `delta` payload into this struct for each pending event."
+    )
+    .unwrap();
+    writeln!(out, "struct {ev_name}Fold {{").unwrap();
+    writeln!(out, "    first:  u32,").unwrap();
+    writeln!(out, "    second: u32,").unwrap();
+    writeln!(out, "    delta:  {val_wgsl},").unwrap();
+    writeln!(out, "    _pad:   u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    // Bindings for this handler's event buffer + cfg. Keep the bind
+    // indices disjoint from the slot/counts bindings by offsetting
+    // from idx.
+    let ev_buf_binding = 2 + (idx as u32) * 2;
+    let cfg_binding = 2 + (idx as u32) * 2 + 1;
+    writeln!(
+        out,
+        "@group(0) @binding({ev_buf_binding}) var<storage, read>  events_{ev_snake}: array<{ev_name}Fold>;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding({cfg_binding}) var<uniform>         cfg_{ev_snake}:   FoldCfg;"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // Compute entry point. One invocation per event.
+    writeln!(
+        out,
+        "// Fold `{ev_name}` events into view `{view_name}`. One thread per event;"
+        ,
+        view_name = view.name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// canonicalises (a, b) -> (min, max), then find-or-insert-or-evict-weakest-|v|."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "@compute @workgroup_size(64)"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "fn view_{snake}_fold_{ev_snake}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+    )
+    .unwrap();
+    writeln!(out, "    let event_idx = gid.x;").unwrap();
+    writeln!(
+        out,
+        "    if (event_idx >= cfg_{ev_snake}.num_events) {{ return; }}"
+    )
+    .unwrap();
+    writeln!(out, "    let e = events_{ev_snake}[event_idx];").unwrap();
+    writeln!(out).unwrap();
+
+    // Empty-agent guard: 0 is the unused/sentinel raw id (AgentIds are
+    // 1-based). Skip the whole fold if either side is 0.
+    writeln!(
+        out,
+        "    // AgentIds are 1-based; raw id 0 means \"unassigned\" and can't own or be on an edge."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    if (e.first == 0u || e.second == 0u) {{ return; }}"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // Canonicalise the pair: owner = min(a, b), other = max(a, b).
+    writeln!(
+        out,
+        "    // Canonical pair: lower-id agent owns the row, higher-id agent is `other`."
+    )
+    .unwrap();
+    writeln!(out, "    let owner = min(e.first, e.second);").unwrap();
+    writeln!(out, "    let other_id = max(e.first, e.second);").unwrap();
+    writeln!(
+        out,
+        "    let row_base = (owner - 1u) * K; // AgentId is 1-based → subtract 1 to index rows"
+    )
+    .unwrap();
+    writeln!(out, "    let owner_slot = owner - 1u;").unwrap();
+    writeln!(
+        out,
+        "    if (owner_slot >= cfg_{ev_snake}.agent_cap) {{ return; }}"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // 1. Find existing edge — linear scan up to the current count.
+    writeln!(
+        out,
+        "    // 1. Find-existing: scan the occupied prefix for a matching `other`."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let count = atomicLoad(&view_{snake}_counts[owner_slot]);"
+    )
+    .unwrap();
+    writeln!(out, "    var found_idx: u32 = 0xFFFFFFFFu;").unwrap();
+    writeln!(
+        out,
+        "    let scan_len = min(count, K);"
+    )
+    .unwrap();
+    writeln!(out, "    for (var i: u32 = 0u; i < scan_len; i = i + 1u) {{").unwrap();
+    writeln!(
+        out,
+        "        if (view_{snake}_slots[row_base + i].other == other_id) {{"
+    )
+    .unwrap();
+    writeln!(out, "            found_idx = i;").unwrap();
+    writeln!(out, "            break;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "    if (found_idx != 0xFFFFFFFFu) {{").unwrap();
+    writeln!(
+        out,
+        "        // Update-in-place. Non-atomic — see kernel header for the race caveat."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        // TODO(phase-3): upgrade to a CAS loop if concurrent fold events to the"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        // same canonical pair become a real possibility for this view."
+    )
+    .unwrap();
+    // Update-in-place using += (read-modify-write).
+    writeln!(
+        out,
+        "        let cur = view_{snake}_slots[row_base + found_idx].value;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        view_{snake}_slots[row_base + found_idx].value = cur + e.delta;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        view_{snake}_slots[row_base + found_idx].anchor_tick = cfg_{ev_snake}.tick;"
+    )
+    .unwrap();
+    writeln!(out, "        return;").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // 2. Reserve an empty slot — atomicAdd on counts[owner_slot] and
+    //    race-check the result against K.
+    writeln!(
+        out,
+        "    // 2. Reserve an empty slot via atomicAdd on counts. If we win a slot < K,"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    // install the new edge. Losers (count already >= K) fall through to evict."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    if (count < K) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let new_idx = atomicAdd(&view_{snake}_counts[owner_slot], 1u);"
+    )
+    .unwrap();
+    writeln!(out, "        if (new_idx < K) {{").unwrap();
+    writeln!(
+        out,
+        "            view_{snake}_slots[row_base + new_idx].other       = other_id;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            view_{snake}_slots[row_base + new_idx].value       = e.delta;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            view_{snake}_slots[row_base + new_idx].anchor_tick = cfg_{ev_snake}.tick;"
+    )
+    .unwrap();
+    writeln!(out, "            return;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(
+        out,
+        "        // Lost the reserve race — new_idx >= K. Counts overshot by one; that's"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        // benign because future scans use `min(count, K)`. Fall through to evict."
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // 3. Evict smallest-|value| slot. Matches the CPU emit's policy.
+    writeln!(
+        out,
+        "    // 3. Evict: find the slot with the smallest |value| and overwrite if |delta|"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    // beats the weakest. Preserves both strong allies and strong enemies."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    // TODO(phase-3): the scan + write pair is non-atomic — concurrent evictions"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    // on the same row can lose updates. Revisit if real usage is racy."
+    )
+    .unwrap();
+    writeln!(out, "    var weakest_idx: u32 = 0u;").unwrap();
+    // abs() behaves differently for f32 vs i32 — WGSL's `abs` is
+    // polymorphic so the same call works for both; u32's absolute
+    // value is itself, which is already "magnitude", so this still
+    // does the right thing for unsigned scalars.
+    writeln!(
+        out,
+        "    var weakest_mag: {val_wgsl} = abs(view_{snake}_slots[row_base].value);"
+    )
+    .unwrap();
+    writeln!(out, "    for (var i: u32 = 1u; i < K; i = i + 1u) {{").unwrap();
+    writeln!(
+        out,
+        "        let mag = abs(view_{snake}_slots[row_base + i].value);"
+    )
+    .unwrap();
+    writeln!(out, "        if (mag < weakest_mag) {{").unwrap();
+    writeln!(out, "            weakest_mag = mag;").unwrap();
+    writeln!(out, "            weakest_idx = i;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    if (abs(e.delta) > weakest_mag) {{").unwrap();
+    writeln!(
+        out,
+        "        view_{snake}_slots[row_base + weakest_idx].other       = other_id;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        view_{snake}_slots[row_base + weakest_idx].value       = e.delta;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        view_{snake}_slots[row_base + weakest_idx].anchor_tick = cfg_{ev_snake}.tick;"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+/// PascalCase a `snake_case` or single-word identifier. Matches the
+/// CPU emitter's `pascal_case` helper (duplicated to avoid the cross-
+/// module dependency — same reasoning as `snake_case` below).
+fn pascal_case(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut up = true;
+    for ch in name.chars() {
+        if ch == '_' {
+            up = true;
+            continue;
+        }
+        if up {
+            for upper in ch.to_uppercase() {
+                out.push(upper);
+            }
+            up = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
