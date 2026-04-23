@@ -160,22 +160,17 @@ pub struct GpuBackend {
     /// `backend::sync_ctx::SyncPathContext`.
     pub sync: crate::backend::SyncPathContext,
 
-    // -------------------------------------------------------------------
-    // Phase D — Task D2: persistent buffers + snapshot staging fields
-    // for the GPU-resident cascade driver. Declared here in D2; consumed
-    // by D3 (`snapshot()`) and D4 (`step_batch` rewrite).
-    // -------------------------------------------------------------------
-    /// Phase D — persistent agent SoA buffer for the resident path.
-    /// Allocated on first step_batch call, reused across ticks. Sync
-    /// path still uses per-kernel pooled buffers.
-    resident_agents_buf: Option<wgpu::Buffer>,
-    resident_agents_cap: u32,
+    /// Resident-path (batch) state: persistent buffers + unpack kernels
+    /// used by `step_batch()`. See
+    /// `backend::resident_ctx::ResidentPathContext`.
+    pub resident: crate::backend::ResidentPathContext,
 
-    /// Phase D — indirect dispatch args for the resident cascade.
-    /// MAX_CASCADE_ITERATIONS + 1 slots (one seed slot + one per
-    /// iter). Lazy-initialised in step_batch.
-    resident_indirect_args: Option<crate::gpu_util::indirect::IndirectArgsBuffer>,
-
+    // -------------------------------------------------------------------
+    // Phase D — Task D2: snapshot staging fields for the GPU-resident
+    // cascade driver. Declared here in D2; consumed by D3
+    // (`snapshot()`). Task 1.4 of the GPU sim-state refactor moves
+    // these into `SnapshotContext`.
+    // -------------------------------------------------------------------
     /// Phase D — double-buffered snapshot staging. `front` is the one
     /// that will be read next (filled by the previous `snapshot()`
     /// call); `back` is the one currently filling for the NEXT call.
@@ -196,43 +191,6 @@ pub struct GpuBackend {
     /// Exposed via snapshot for the observer. Updated each tick the
     /// batch loop advances.
     latest_recorded_tick: u32,
-
-    /// Phase D — Task D4: resident cascade driver context. Holds the
-    /// caller-owned spatial/ability/physics-ring buffers the
-    /// `cascade_resident::run_cascade_resident` driver consumes across
-    /// ticks. Lazy-initialised inside `ensure_resident_init` on first
-    /// `step_batch` call.
-    resident_cascade_ctx: Option<crate::cascade_resident::CascadeResidentCtx>,
-
-    /// Phase E: GPU-side unpack kernel for the mask's SoA buffers.
-    /// Derives `agent_pos` / `agent_alive` / `agent_creature_type` from
-    /// the resident `GpuAgentSlot` AoS each batch tick, replacing the
-    /// host-side pack-and-upload path in the batch loop. The sync
-    /// `step()` still uses `FusedMaskKernel::upload_soa_from_state`
-    /// from `SimState` — this kernel is only used by `step_batch`.
-    ///
-    /// Retained for backward compatibility but NOT called on the
-    /// step_batch hot path — subsumed by [`mask::FusedAgentUnpackKernel`].
-    #[allow(dead_code)]
-    mask_unpack_kernel: mask::MaskUnpackKernel,
-
-    /// Phase E: GPU-side unpack kernel for scoring's `agent_data_buf`
-    /// AoS. Derives the mutable subset (pos/hp/shield/alive/
-    /// creature_type/hp_pct) from the resident `GpuAgentSlot` AoS each
-    /// batch tick. Static fields (attack_range, hunger, thirst,
-    /// fatigue) keep their tick-0 values written by
-    /// `ScoringKernel::initialize_for_batch`.
-    ///
-    /// Retained for backward compatibility but NOT called on the
-    /// step_batch hot path — the fused [`mask::FusedAgentUnpackKernel`]
-    /// subsumes both mask and scoring unpacks into one dispatch.
-    #[allow(dead_code)]
-    scoring_unpack_kernel: scoring::ScoringUnpackKernel,
-    /// Suspect 5: fused mask+scoring unpack kernel. Writes mask's SoA
-    /// (pos/alive/creature_type) + scoring's `agent_data_buf` in a
-    /// single dispatch, saving one compute pass begin/end + one
-    /// pipeline set per batch tick.
-    fused_unpack_kernel: mask::FusedAgentUnpackKernel,
 }
 
 /// Phase 9 (task 195): per-tick GPU pipeline phase timings in
@@ -488,25 +446,25 @@ impl GpuBackend {
             backend_label,
         );
 
+        let resident = crate::backend::ResidentPathContext::new(
+            mask_unpack_kernel,
+            scoring_unpack_kernel,
+            fused_unpack_kernel,
+        );
+
         Ok(Self {
             device,
             queue,
             sync,
-            // Phase D — Task D2: persistent buffers + snapshot staging.
-            // All `None` / `0` at construction; lazy-initialised on
-            // first `step_batch` (D4) / `snapshot()` (D3) call.
-            resident_agents_buf: None,
-            resident_agents_cap: 0,
-            resident_indirect_args: None,
+            resident,
+            // Phase D — Task D2: snapshot staging. All `None` / `0` at
+            // construction; lazy-initialised on first `snapshot()` (D3)
+            // call.
             snapshot_front: None,
             snapshot_back: None,
             snapshot_event_ring_read: 0,
             snapshot_chronicle_ring_read: 0,
             latest_recorded_tick: 0,
-            resident_cascade_ctx: None,
-            mask_unpack_kernel,
-            scoring_unpack_kernel,
-            fused_unpack_kernel,
         })
     }
 
@@ -888,6 +846,7 @@ impl GpuBackend {
         // meaningless against the new tail.
         {
             let resident_ctx = self
+                .resident
                 .resident_cascade_ctx
                 .as_ref()
                 .expect("resident_cascade_ctx ensured by ensure_resident_init");
@@ -898,8 +857,19 @@ impl GpuBackend {
 
         let agent_cap = state.agent_cap();
         for _ in 0..n_ticks {
-            let agents_buf = self
-                .resident_agents_buf
+            // Split-borrow: need `&` to `resident_agents_buf` plus
+            // `&mut` to `fused_unpack_kernel` (and later `&mut` to
+            // `resident_cascade_ctx` + `&` to `resident_indirect_args`)
+            // simultaneously. Destructuring `&mut self.resident` gives
+            // independent per-field borrows.
+            let crate::backend::ResidentPathContext {
+                resident_agents_buf,
+                resident_indirect_args,
+                resident_cascade_ctx,
+                fused_unpack_kernel,
+                ..
+            } = &mut self.resident;
+            let agents_buf = resident_agents_buf
                 .as_ref()
                 .expect("resident_agents_buf ensured by ensure_resident_init");
 
@@ -912,7 +882,7 @@ impl GpuBackend {
             //    the per-tick mask-bitmap clears (mask kernel
             //    atomicOr's bits in, so stale bits would poison
             //    subsequent ticks).
-            self.fused_unpack_kernel
+            fused_unpack_kernel
                 .encode_unpack(
                     &self.device,
                     &self.queue,
@@ -1026,8 +996,7 @@ impl GpuBackend {
             //     `apply_event_ring` and BEFORE the cascade seed reads
             //     the tail.
             {
-                let resident_ctx = self
-                    .resident_cascade_ctx
+                let resident_ctx = resident_cascade_ctx
                     .as_mut()
                     .expect("resident_cascade_ctx ensured by ensure_resident_init");
                 resident_ctx.encode_append_apply_events(
@@ -1054,12 +1023,10 @@ impl GpuBackend {
             //    `&mut` by reborrowing via a raw pointer — safe because
             //    the driver guarantees no aliased writes between the
             //    two fields within a single call.
-            let resident_ctx = self
-                .resident_cascade_ctx
+            let resident_ctx = resident_cascade_ctx
                 .as_mut()
                 .expect("resident_cascade_ctx ensured by ensure_resident_init");
-            let indirect_args = self
-                .resident_indirect_args
+            let indirect_args = resident_indirect_args
                 .as_ref()
                 .expect("resident_indirect_args ensured by ensure_resident_init");
             // SAFETY: `cascade_ctx` is a `&mut CascadeCtx`. We reborrow
@@ -1145,8 +1112,8 @@ impl GpuBackend {
         // Resident agent buffer. Allocate-or-grow; (re)upload the
         // current SimState agent SoA on (re)allocate so the kernels see
         // a well-defined starting state.
-        let need_alloc = match &self.resident_agents_buf {
-            Some(_) => self.resident_agents_cap < agent_cap,
+        let need_alloc = match &self.resident.resident_agents_buf {
+            Some(_) => self.resident.resident_agents_cap < agent_cap,
             None => true,
         };
         if need_alloc {
@@ -1163,15 +1130,15 @@ impl GpuBackend {
             let packed = crate::physics::pack_agent_slots(state);
             self.queue
                 .write_buffer(&buf, 0, bytemuck::cast_slice(&packed));
-            self.resident_agents_buf = Some(buf);
-            self.resident_agents_cap = agent_cap;
+            self.resident.resident_agents_buf = Some(buf);
+            self.resident.resident_agents_cap = agent_cap;
         }
 
         // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`
         // slots (seed + one per cascade iter).
-        if self.resident_indirect_args.is_none() {
+        if self.resident.resident_indirect_args.is_none() {
             let slots = crate::cascade::MAX_CASCADE_ITERATIONS + 1;
-            self.resident_indirect_args = Some(
+            self.resident.resident_indirect_args = Some(
                 crate::gpu_util::indirect::IndirectArgsBuffer::new(&self.device, slots),
             );
         }
@@ -1179,10 +1146,10 @@ impl GpuBackend {
         // Resident cascade driver context. Allocates the ping-pong
         // physics rings, the ability buffers, the seed kernel, and the
         // chronicle ring.
-        if self.resident_cascade_ctx.is_none() {
+        if self.resident.resident_cascade_ctx.is_none() {
             let ctx = crate::cascade_resident::CascadeResidentCtx::new(&self.device)
                 .map_err(|e| format!("CascadeResidentCtx::new: {e}"))?;
-            self.resident_cascade_ctx = Some(ctx);
+            self.resident.resident_cascade_ctx = Some(ctx);
         }
 
         // Phase E: seed the kernel-internal buffers the batch path no
@@ -1283,7 +1250,7 @@ impl GpuBackend {
     ) -> Result<crate::snapshot::GpuSnapshot, crate::snapshot::SnapshotError> {
         // Case 1: `step_batch` hasn't allocated the resident agents
         // buffer yet. Nothing to snapshot — return empty.
-        let agents_buf = match self.resident_agents_buf.as_ref() {
+        let agents_buf = match self.resident.resident_agents_buf.as_ref() {
             Some(b) => b,
             None => return Ok(crate::snapshot::GpuSnapshot::empty()),
         };
@@ -1292,7 +1259,7 @@ impl GpuBackend {
         // events ring exists to read either. `step_batch` path always
         // ensures this before allocating `resident_agents_buf`, but
         // defend against a misuse / future reorder.
-        let resident_ctx = match self.resident_cascade_ctx.as_ref() {
+        let resident_ctx = match self.resident.resident_cascade_ctx.as_ref() {
             Some(c) => c,
             None => return Ok(crate::snapshot::GpuSnapshot::empty()),
         };
@@ -1305,12 +1272,12 @@ impl GpuBackend {
             let event_cap = crate::event_ring::DEFAULT_CAPACITY;
             self.snapshot_front = Some(crate::snapshot::GpuStaging::new(
                 &self.device,
-                self.resident_agents_cap,
+                self.resident.resident_agents_cap,
                 event_cap,
             ));
             self.snapshot_back = Some(crate::snapshot::GpuStaging::new(
                 &self.device,
-                self.resident_agents_cap,
+                self.resident.resident_agents_cap,
                 event_cap,
             ));
         }
@@ -1321,10 +1288,10 @@ impl GpuBackend {
         // populates at the new size.
         let event_cap = crate::event_ring::DEFAULT_CAPACITY;
         if let Some(front) = self.snapshot_front.as_mut() {
-            front.ensure_cap(&self.device, self.resident_agents_cap, event_cap);
+            front.ensure_cap(&self.device, self.resident.resident_agents_cap, event_cap);
         }
         if let Some(back) = self.snapshot_back.as_mut() {
-            back.ensure_cap(&self.device, self.resident_agents_cap, event_cap);
+            back.ensure_cap(&self.device, self.resident.resident_agents_cap, event_cap);
         }
 
         // 1. Take a snapshot of the FRONT (filled by the previous
@@ -1333,7 +1300,7 @@ impl GpuBackend {
             .snapshot_front
             .as_mut()
             .expect("snapshot_front lazy-inited above")
-            .take_snapshot(&self.device, self.resident_agents_cap as usize)?;
+            .take_snapshot(&self.device, self.resident.resident_agents_cap as usize)?;
 
         // 2. Read the batch events ring's current tail so we know
         //    which slice to copy into the BACK. One 4-byte blocking
@@ -1354,7 +1321,7 @@ impl GpuBackend {
 
         // 3. Kick the copy into the BACK (filling for the next call).
         //    Encoder + submit live entirely inside this method.
-        let agent_bytes = (self.resident_agents_cap as u64)
+        let agent_bytes = (self.resident.resident_agents_cap as u64)
             * (std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64);
         // The batch events ring is append-only across the batch.
         // Observers who snapshot more than once per batch get the
