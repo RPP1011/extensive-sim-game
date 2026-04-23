@@ -409,6 +409,7 @@ fn topk_lookup_decay(
 /// map a readback `DecayCellCpu` to its observable value at a query
 /// tick. Mirrors `threat_level::ThreatLevel::get` and the emitter's
 /// WGSL formula: `base * rate^(tick - anchor)` clamped.
+#[allow(dead_code)]
 fn decay_get(cell: &DecayCellCpu, rate: f32, tick: u32, lo: f32, hi: f32) -> f32 {
     if cell.value == 0.0 {
         return 0.0;
@@ -425,10 +426,11 @@ fn decay_get(cell: &DecayCellCpu, rate: f32, tick: u32, lo: f32, hi: f32) -> f32
 // ---------------------------------------------------------------------------
 
 #[test]
-fn pair_map_decay_kin_fear_parity() {
-    // kin_fear is NOT migrated to topk (task 196) — FearSpread events
-    // are per-death and bounded-population. Stays on dense pair_map.
-    run_dense_decay_parity_scenario(
+fn topk_decay_kin_fear_parity() {
+    // kin_fear was migrated to per_entity_topk(K=8) post-task-196 (flocking
+    // analogy: only the K most-recent nearby dead kin matter; older fears
+    // decay away before eviction). See commit fe688fbd.
+    run_topk_decay_parity_scenario(
         "kin_fear",
         KinFear::RATE,
         0.0,
@@ -568,8 +570,10 @@ fn run_topk_decay_parity_scenario<M>(
     let _ = Vec3::ZERO;
 }
 
-/// Dense pair_map @decay parity scaffold — kin_fear still lives on
-/// this path (task 196 kept it dense).
+/// Dense pair_map @decay parity scaffold — originally for kin_fear,
+/// which has since been migrated to topk. Kept for future dense @decay
+/// views; not currently called from a live test.
+#[allow(dead_code)]
 fn run_dense_decay_parity_scenario<M>(
     view_name: &str,
     rate: f32,
