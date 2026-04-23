@@ -1186,6 +1186,296 @@ impl MaskUnpackKernel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Fused agent-SoA unpack kernel (merges mask_unpack + scoring_unpack)
+// ---------------------------------------------------------------------------
+
+/// WGSL source for the fused unpack kernel. Combines the two
+/// single-pass unpack kernels (`MASK_UNPACK_WGSL` +
+/// `SCORING_UNPACK_WGSL`) into ONE kernel that writes all four output
+/// buffers in a single dispatch. Saves one compute pass begin/end +
+/// one pipeline set per tick in `step_batch`. Bindings:
+///
+///   0 (ro) agents:          array<AgentSlot>
+///   1 (rw) mask_pos_out:    array<Vec3f32>      (mask SoA)
+///   2 (rw) mask_alive_out:  array<u32>          (mask SoA)
+///   3 (rw) mask_ct_out:     array<u32>          (mask SoA)
+///   4 (rw) scoring_data:    array<AgentData>    (scoring AoS)
+///   5 (uniform) cfg:        UnpackCfg
+const FUSED_AGENT_UNPACK_WGSL: &str = r#"
+struct Vec3f32 { x: f32, y: f32, z: f32 };
+
+struct AgentSlot {
+    hp: f32,
+    max_hp: f32,
+    shield_hp: f32,
+    attack_damage: f32,
+    alive: u32,
+    creature_type: u32,
+    engaged_with: u32,
+    stun_expires_at: u32,
+    slow_expires_at: u32,
+    slow_factor_q8: u32,
+    cooldown_next_ready: u32,
+    pos_x: f32,
+    pos_y: f32,
+    pos_z: f32,
+    _pad0: u32,
+    _pad1: u32,
+};
+
+// Must match `GpuAgentData` 1:1 — fields this kernel writes are pos,
+// hp, max_hp, shield_hp, alive, creature_type, hp_pct. Static fields
+// (attack_range, hunger, thirst, fatigue) are left untouched.
+struct AgentData {
+    pos: Vec3f32,
+    hp: f32,
+    max_hp: f32,
+    shield_hp: f32,
+    attack_range: f32,
+    hunger: f32,
+    thirst: f32,
+    fatigue: f32,
+    alive: u32,
+    creature_type: u32,
+    hp_pct: f32,
+    target_hp_pct_unused: f32,
+    _pad2: u32,
+    _pad3: u32,
+};
+
+struct UnpackCfg {
+    agent_cap: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read>       agents:            array<AgentSlot>;
+@group(0) @binding(1) var<storage, read_write> mask_pos_out:      array<Vec3f32>;
+@group(0) @binding(2) var<storage, read_write> mask_alive_out:    array<u32>;
+@group(0) @binding(3) var<storage, read_write> mask_ct_out:       array<u32>;
+@group(0) @binding(4) var<storage, read_write> scoring_data:      array<AgentData>;
+@group(0) @binding(5) var<uniform>             cfg:               UnpackCfg;
+
+@compute @workgroup_size(64)
+fn cs_fused_unpack(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= cfg.agent_cap) { return; }
+    let a = agents[i];
+    // Mask SoA outputs.
+    mask_pos_out[i] = Vec3f32(a.pos_x, a.pos_y, a.pos_z);
+    mask_alive_out[i] = a.alive;
+    if (a.alive == 0u) {
+        mask_ct_out[i] = 0xFFFFFFFFu;
+    } else {
+        mask_ct_out[i] = a.creature_type;
+    }
+    // Scoring AoS outputs (mutable subset only — leaves static fields
+    // alone).
+    scoring_data[i].pos = Vec3f32(a.pos_x, a.pos_y, a.pos_z);
+    scoring_data[i].hp = a.hp;
+    scoring_data[i].max_hp = a.max_hp;
+    scoring_data[i].shield_hp = a.shield_hp;
+    scoring_data[i].alive = a.alive;
+    if (a.alive == 0u) {
+        scoring_data[i].creature_type = 0xFFFFFFFFu;
+        scoring_data[i].hp_pct = 0.0;
+    } else {
+        scoring_data[i].creature_type = a.creature_type;
+        if (a.max_hp > 0.0) {
+            scoring_data[i].hp_pct = a.hp / a.max_hp;
+        } else {
+            scoring_data[i].hp_pct = 0.0;
+        }
+    }
+}
+"#;
+
+/// GPU-side fused unpack kernel: replaces the back-to-back
+/// [`MaskUnpackKernel`] and `ScoringUnpackKernel` dispatches with a
+/// single dispatch that writes to all four output buffers at once.
+/// Saves one compute-pass begin/end + one pipeline set per tick.
+pub struct FusedAgentUnpackKernel {
+    pipeline: wgpu::ComputePipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
+    cfg_buf: Option<wgpu::Buffer>,
+    last_agent_cap: u32,
+    cached_bg: Option<(u32, wgpu::BindGroup)>,
+}
+
+impl FusedAgentUnpackKernel {
+    /// Build the fused unpack pipeline on `device`.
+    pub fn new(device: &wgpu::Device) -> Result<Self, KernelError> {
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("engine_gpu::fused_unpack::wgsl"),
+            source: wgpu::ShaderSource::Wgsl(FUSED_AGENT_UNPACK_WGSL.into()),
+        });
+        if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+            return Err(KernelError::ShaderCompile(format!(
+                "{err}\n--- WGSL source ---\n{FUSED_AGENT_UNPACK_WGSL}"
+            )));
+        }
+
+        let storage_ro = |b: u32| wgpu::BindGroupLayoutEntry {
+            binding: b,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let storage_rw = |b: u32| wgpu::BindGroupLayoutEntry {
+            binding: b,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let uniform = |b: u32| wgpu::BindGroupLayoutEntry {
+            binding: b,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("engine_gpu::fused_unpack::bgl"),
+            entries: &[
+                storage_ro(0),
+                storage_rw(1),
+                storage_rw(2),
+                storage_rw(3),
+                storage_rw(4),
+                uniform(5),
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("engine_gpu::fused_unpack::pl"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("engine_gpu::fused_unpack::cp"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("cs_fused_unpack"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+            cfg_buf: None,
+            last_agent_cap: 0,
+            cached_bg: None,
+        })
+    }
+
+    /// Record the fused unpack dispatch into `encoder`. Reads
+    /// `agents_buf` (packed `GpuAgentSlot` AoS) and writes:
+    ///   * mask's SoA (pos / alive / creature_type) via the
+    ///     `mask.pool` buffers,
+    ///   * scoring's `agent_data_buf` (mutable subset).
+    ///
+    /// Also emits the per-tick mask-bitmap clears (outside the pass)
+    /// since the mask kernel uses atomicOr and requires zeroed bitmaps.
+    pub fn encode_unpack(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        mask: &mut FusedMaskKernel,
+        scoring: &mut crate::scoring::ScoringKernel,
+        agents_buf: &wgpu::Buffer,
+        agent_cap: u32,
+    ) -> Result<(), KernelError> {
+        let num_mask_words = agent_cap.div_ceil(32).max(1);
+        mask.ensure_pool(device, agent_cap);
+        scoring
+            .ensure_pool_for_fused_unpack(device, agent_cap, num_mask_words);
+
+        let mask_pool = mask.pool.as_ref().expect("mask pool ensured");
+        let scoring_pool = scoring
+            .pool_buffers_for_fused_unpack()
+            .expect("scoring pool ensured");
+
+        // (Re)write cfg uniform only if agent_cap changed.
+        let cfg_buf = match &self.cfg_buf {
+            Some(b) if self.last_agent_cap == agent_cap => b,
+            Some(b) => {
+                let cfg = UnpackCfg { agent_cap, _pad0: 0, _pad1: 0, _pad2: 0 };
+                queue.write_buffer(b, 0, bytemuck::bytes_of(&cfg));
+                self.last_agent_cap = agent_cap;
+                b
+            }
+            None => {
+                let cfg = UnpackCfg { agent_cap, _pad0: 0, _pad1: 0, _pad2: 0 };
+                let b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("engine_gpu::fused_unpack::cfg"),
+                    contents: bytemuck::bytes_of(&cfg),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                self.cfg_buf = Some(b);
+                self.last_agent_cap = agent_cap;
+                self.cfg_buf.as_ref().unwrap()
+            }
+        };
+
+        let need_rebuild = match &self.cached_bg {
+            Some((cap, _)) => *cap != agent_cap,
+            None => true,
+        };
+        if need_rebuild {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("engine_gpu::fused_unpack::bg"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: agents_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: mask_pool.pos_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: mask_pool.alive_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: mask_pool.creature_type_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: scoring_pool.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 5, resource: cfg_buf.as_entire_binding() },
+                ],
+            });
+            self.cached_bg = Some((agent_cap, bg));
+        }
+        let bind_group = &self.cached_bg.as_ref().expect("cached_bg populated").1;
+
+        // Bitmap clears — required before the mask dispatch (which
+        // atomicOr's bits into these).
+        let mask_bytes = (mask_pool.mask_words as u64) * 4;
+        for buf in &mask_pool.bitmap_bufs {
+            encoder.clear_buffer(buf, 0, Some(mask_bytes));
+        }
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::fused_unpack::cpass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline);
+            cpass.set_bind_group(0, bind_group, &[]);
+            let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
+
+        Ok(())
+    }
+}
+
 /// Local snake-case helper — identical shape to the emitter's, kept in
 /// this module so the buffer-label strings don't depend on the
 /// emitter's private naming contract. If the emitter's `snake_case`

@@ -261,6 +261,10 @@ pub struct GpuBackend {
     /// host-side pack-and-upload path in the batch loop. The sync
     /// `step()` still uses `FusedMaskKernel::upload_soa_from_state`
     /// from `SimState` — this kernel is only used by `step_batch`.
+    ///
+    /// Retained for backward compatibility but NOT called on the
+    /// step_batch hot path — subsumed by [`mask::FusedAgentUnpackKernel`].
+    #[allow(dead_code)]
     mask_unpack_kernel: mask::MaskUnpackKernel,
 
     /// Phase E: GPU-side unpack kernel for scoring's `agent_data_buf`
@@ -269,7 +273,17 @@ pub struct GpuBackend {
     /// batch tick. Static fields (attack_range, hunger, thirst,
     /// fatigue) keep their tick-0 values written by
     /// `ScoringKernel::initialize_for_batch`.
+    ///
+    /// Retained for backward compatibility but NOT called on the
+    /// step_batch hot path — the fused [`mask::FusedAgentUnpackKernel`]
+    /// subsumes both mask and scoring unpacks into one dispatch.
+    #[allow(dead_code)]
     scoring_unpack_kernel: scoring::ScoringUnpackKernel,
+    /// Suspect 5: fused mask+scoring unpack kernel. Writes mask's SoA
+    /// (pos/alive/creature_type) + scoring's `agent_data_buf` in a
+    /// single dispatch, saving one compute pass begin/end + one
+    /// pipeline set per batch tick.
+    fused_unpack_kernel: mask::FusedAgentUnpackKernel,
 }
 
 /// Phase 9 (task 195): per-tick GPU pipeline phase timings in
@@ -516,6 +530,7 @@ impl GpuBackend {
         let view_storage = view_storage::ViewStorage::new(&device, INITIAL_VIEW_AGENT_CAP)?;
         let mask_unpack_kernel = mask::MaskUnpackKernel::new(&device)?;
         let scoring_unpack_kernel = scoring::ScoringUnpackKernel::new(&device)?;
+        let fused_unpack_kernel = mask::FusedAgentUnpackKernel::new(&device)?;
 
         Ok(Self {
             device,
@@ -545,6 +560,7 @@ impl GpuBackend {
             resident_cascade_ctx: None,
             mask_unpack_kernel,
             scoring_unpack_kernel,
+            fused_unpack_kernel,
         })
     }
 
@@ -939,23 +955,26 @@ impl GpuBackend {
                 .as_ref()
                 .expect("resident_agents_buf ensured by ensure_resident_init");
 
-            // 1. Mask unpack + dispatch. The unpack kernel reads the
-            //    resident `GpuAgentSlot` AoS and writes mask's internal
-            //    pos / alive / creature_type SoA buffers — so the mask
-            //    predicate sees current GPU state, not tick-0
-            //    `SimState`. Replaces the host-side pack in
-            //    `FusedMaskKernel::upload_soa_from_state`, which would
-            //    also (a) read stale `SimState` mid-batch and (b) cost
-            //    ~450 µs/tick at N=2048 just in the pack loop + three
-            //    `write_buffer` calls.
-            self.mask_unpack_kernel.encode_unpack(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                &mut self.mask_kernel,
-                agents_buf,
-                agent_cap,
-            );
+            // 1. Fused unpack: one dispatch writes both mask's SoA
+            //    (pos/alive/creature_type) and scoring's
+            //    `agent_data_buf` (mutable subset: pos/hp/shield/alive/
+            //    creature_type/hp_pct). Merges what used to be two
+            //    separate unpack dispatches into one — saves a compute
+            //    pass begin/end + pipeline set per tick. Also emits
+            //    the per-tick mask-bitmap clears (mask kernel
+            //    atomicOr's bits in, so stale bits would poison
+            //    subsequent ticks).
+            self.fused_unpack_kernel
+                .encode_unpack(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    &mut self.mask_kernel,
+                    &mut self.scoring_kernel,
+                    agents_buf,
+                    agent_cap,
+                )
+                .expect("fused unpack dispatch");
             self.mask_kernel
                 .run_resident(
                     &self.device,
@@ -966,29 +985,10 @@ impl GpuBackend {
                 )
                 .expect("mask resident dispatch");
 
-            // 2. Scoring unpack + dispatch. The unpack kernel refreshes
-            //    the mutable subset of the scoring `GpuAgentData` AoS
-            //    (pos/hp/shield/alive/creature_type/hp_pct) from the
-            //    resident `GpuAgentSlot` AoS. Static fields
-            //    (attack_range, hunger, thirst, fatigue) retain the
-            //    tick-0 values written by
-            //    `ScoringKernel::initialize_for_batch` inside
-            //    `ensure_resident_init`. The view_storage handles
-            //    captured at init time are still valid (ViewStorage
-            //    only rebuilds on agent_cap grow, which triggers a
-            //    resident pool rebuild too). Only the `tick` field of
-            //    cfg is refreshed; other cfg scalars are stable across
-            //    the batch.
-            self.scoring_unpack_kernel
-                .encode_unpack(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    &mut self.scoring_kernel,
-                    agents_buf,
-                    agent_cap,
-                )
-                .expect("scoring unpack dispatch");
+            // 2. Scoring: reads mask_bitmaps + agent_data (both
+            //    populated above). Only the `tick` field of cfg is
+            //    refreshed; other cfg scalars are stable across the
+            //    batch.
             self.scoring_kernel
                 .refresh_tick_cfg_for_resident(&self.queue, state)
                 .expect("scoring refresh_tick_cfg_for_resident");

@@ -774,6 +774,31 @@ impl ScoringKernel {
         });
     }
 
+    /// Sibling of [`Self::ensure_pool`] callable by the fused
+    /// mask+scoring unpack kernel — delegates to `ensure_pool` so
+    /// scoring's pool is sized for `agent_cap` before the fused
+    /// kernel binds `pool.agent_data_buf`.
+    #[doc(hidden)]
+    pub fn ensure_pool_for_fused_unpack(
+        &mut self,
+        device: &wgpu::Device,
+        agent_cap: u32,
+        num_mask_words: u32,
+    ) {
+        self.ensure_pool(device, agent_cap, num_mask_words);
+    }
+
+    /// Borrow handle to the scoring pool's `agent_data_buf` — the
+    /// buffer the fused mask+scoring unpack kernel writes into.
+    /// Returns `None` if the pool hasn't been ensured yet (which is
+    /// a programmer error if called on the fused path). Exists so
+    /// the fused kernel in `mask.rs` can bind scoring's buffer
+    /// without `ScoringPool` being visible outside this module.
+    #[doc(hidden)]
+    pub fn pool_buffers_for_fused_unpack(&self) -> Option<&wgpu::Buffer> {
+        self.pool.as_ref().map(|p| &p.agent_data_buf)
+    }
+
     /// Dispatch the scoring kernel, reading agent data from `state`,
     /// mask bitmaps from the companion mask kernel, and view cells
     /// directly from `view_storage`'s atomic buffers.
