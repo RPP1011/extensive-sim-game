@@ -169,35 +169,239 @@ world fits in the pool so eviction pressure never triggers.
 
 ---
 
-## 6. External references worth reading
+## 6. Literature review — reading list
 
-Bucketed by where they'd apply:
+Grouped by the research question they bear on, with enough bibliographic
+handle to look each one up (author, venue, year). Star next to the first
+thing to read in each group. When a blog/talk is more useful than the
+academic source, I've put the blog first and marked the paper as
+"follow-up". Anything I'm unsure about is tagged `[verify]`.
 
-**Voxel rendering & streaming**
-- John Lin's voxel engine devlogs (brick-maps, sparse voxel DAGs).
-- Douglas Dwyer's 8-bit voxel talk — in particular the argument for
-  128³ chunks over 64³ when raycasting dominates.
-- Teardown GDC talk on chunk streaming (MagicaVoxel-style, but at scale).
-- *Nanite* paper sections on cluster culling — relevant to GPU-driven cull
-  even though we're not mesh-based.
+### 6.1 Voxel data structures & raycasting
 
-**GPU terrain generation**
-- Sebastian Lague "Coding Adventure: Terrain Generation" series — the GPU
-  dispatch patterns are close to what `terrain_compute` does.
-- `wgpu` compute shader examples; we're on `ash` but the dispatch sizing
-  lore is shared.
+Question: can we cut per-pixel march cost without rewriting the whole
+renderer? What do the state-of-the-art voxel engines actually store?
 
-**Large simulation loops**
-- Dwarf Fortress dev logs on the ~140-system ordering problem. Ours is
-  smaller in count but has the same "which system wakes which" headache.
-- Factorio blogs on parallelism (FFFs #176 and #244) — ECS-style data
-  layout arguments, most of which apply whether or not we use bevy_ecs.
+- ★ Laine & Karras, *"Efficient Sparse Voxel Octrees"*, I3D 2010 / IEEE
+  TVCG 2011. Canonical SVO paper; contour voxels + beam optimisation.
+  The beam-opt section is directly applicable to our raycaster.
+- Kämpe, Sintorn, Assarsson, *"High Resolution Sparse Voxel DAGs"*,
+  SIGGRAPH 2013. DAG compression of an SVO — orders of magnitude memory
+  reduction for static scenes. Worth reading for the "is our `VoxelGrid`
+  3D texture the right representation?" question.
+- Villanueva, Marton, Gobbetti, *"Symmetry-aware Sparse Voxel DAGs"*,
+  I3D 2016 / CGF 2017. Follow-up to SVDAG.
+- Amanatides & Woo, *"A Fast Voxel Traversal Algorithm for Ray Tracing"*,
+  Eurographics 1987. DDA traversal primitive. Short, foundational,
+  probably already matches what `terrain_compute`'s shader does — useful
+  to confirm.
+- Revelles, Ureña, Lastra, *"An Efficient Parametric Algorithm for Octree
+  Traversal"*, WSCG 2000. Octree variant of the above.
+- 0fps blog — Mikola Lysenko, *"Meshing in a Minecraft Game"* series
+  (parts 1 & 2, 2012). Greedy meshing reference; relevant if we ever
+  consider a mesh path alongside the raycaster.
+- John Lin's YouTube voxel-engine devlogs — brick-map layout, LOD
+  cross-fades. Informal but practical. `[verify current channel]`
+- Dennis Gustafsson, *"Teardown Teardown"*, GDC 2022. Streaming + voxel
+  destruction at production scale. The streaming discussion is the part
+  that applies to us.
+- Douglas Dwyer, *"I spent 100 hours making the world's most beautiful
+  voxel engine"* and follow-ups, YouTube 2023–2024. Specifically his
+  argument for larger chunks when raycasting dominates.
+- Alex Evans, *"Learning from Failure: A Survey of Promising, Unconventional
+  and Mostly Abandoned Renderers for 'Dreams PS4'"*, SIGGRAPH 2015
+  Advances course. SDF + point-splatting discussion; relevant as an
+  alternate data structure path.
+- Iñigo Quilez, *iquilezles.org* SDF articles. Reference for analytic
+  distance functions if we move any terrain features to SDF evaluation.
 
-**Measurement**
-- `tracy` Rust integration guide (`tracing-tracy`).
-- Brendan Gregg — "Flame Graphs" and "Off-CPU Analysis". The
-  `epoll_wait` sleep inside `pump_app_events` is an off-CPU blocker we've
-  never characterised.
+### 6.2 GPU-driven culling & streaming
+
+Question: what does the current per-frame mega cull cost, and what's the
+ceiling if we move it GPU-side?
+
+- ★ Karis, Stubbe, Wihlidal et al., *"A Deep Dive into Nanite Virtualized
+  Geometry"*, SIGGRAPH 2021 Advances course. Section on cluster culling
+  + persistent-thread traversal is the template for GPU-driven cull.
+  Heavy read; skim the cull sections first.
+- Losasso & Hoppe, *"Geometry Clipmaps: Terrain Rendering Using Nested
+  Regular Grids"*, SIGGRAPH 2004. LOD via concentric rings; directly
+  analogous to our radius-based chunk disk. GPU Gems 2, chapter 2 is
+  the hands-on version.
+- Mittring (Crytek), *"Advanced Virtual Texture Topics"*, SIGGRAPH 2008.
+  Virtual-texture streaming logic; informs how we might prioritise
+  chunk submissions by screen-space coverage rather than distance.
+- Wihlidal, *"Optimizing the Graphics Pipeline with Compute"*, GDC 2016.
+  Frostbite's GPU-driven cull, including the indirect-draw machinery
+  we don't use yet.
+- Haar & Aaltonen, *"GPU-Driven Rendering Pipelines"*, SIGGRAPH 2015.
+  Ubisoft/Assassin's Creed version of the same idea, earlier and more
+  accessible than Nanite.
+
+### 6.3 GPU procedural generation
+
+Question: the CPU `HALO=256` feature placement is the biggest
+pre-generation cost; what's the right GPU architecture for scatter-style
+feature placement?
+
+- ★ Sebastian Lague, *"Coding Adventure: Compute Shaders"* and
+  *"Coding Adventure: Terrain Generation"* YouTube series. Hands-on
+  dispatch patterns that match `terrain_compute`.
+- Ken Perlin, *"Improving Noise"*, SIGGRAPH 2002. Foundational; the hash
+  we're using is a PCG-based replacement, but the gradient math is
+  Perlin's. Compare against Stefan Gustavson's simplex noise notes for
+  whether to switch.
+- Gustavson, *"Simplex noise demystified"*, 2005 (PDF, linköping). Free
+  and correct reference implementation; useful if we ever swap FBM
+  primitives.
+- Sean Murray, *"Building Worlds Using Maths(s)"*, GDC 2017 (No Man's
+  Sky). Large-scale procedural world pipelines; talks through the
+  prioritisation / budgeting problem specifically.
+- Juniper / Atomontage blog posts on GPU scatter buffers `[verify]`.
+  Less rigorous than academic sources but closer to our actual
+  problem shape.
+- Jump-Flood Algorithm, Rong & Tan, *"Jump Flooding in GPU with
+  Applications to Voronoi Diagram and Distance Transform"*, I3D 2006.
+  If we want GPU-side Voronoi for settlement / region placement
+  without round-tripping to CPU.
+
+### 6.4 Chunk streaming policies
+
+Question: what's the right priority function when pool size < demand
+(the `LOAD_RADIUS=704` overflow case)?
+
+- Carmack, *"id Tech 5 MegaTextures"*, QuakeCon 2007 & 2008 keynotes.
+  Disk-to-GPU streaming with priority queues; the original "stream
+  only what's visible" architecture at game scale.
+- van Waveren, *"The Asynchronous Texture Streaming System of Rage"*,
+  2012 (Intel). Implementation details behind MegaTextures.
+- Google / NASA tile-pyramid literature (Google Maps, WorldWind). Older
+  than voxels but the priority heuristics — screen-space error,
+  frustum coverage, predicted motion — translate directly.
+- Lengyel, *"Transvoxel Algorithm"*, in *Game Engine Gems 3*, 2012.
+  Seam handling between LOD levels; becomes relevant if we ever add a
+  second LOD tier.
+
+### 6.5 Determinism & lockstep simulation
+
+Question: how far can we push the "CPU and GPU generate bit-identical
+chunks from the same inputs" contract?
+
+- ★ Glenn Fiedler, *gafferongames.com* — *"Deterministic Lockstep"* and
+  *"Floating Point Determinism"*. Plain-English foundation; mostly about
+  networking but the FP-determinism parts apply 1:1 to our CPU/GPU
+  parity contract.
+- Paul Tozour, *"The Age of Empires II AI"*, Game Programming Gems 3,
+  2002. Early detailed write-up on lockstep determinism in a shipping
+  RTS.
+- Intel, *"Differences in Floating-Point Arithmetic Between Intel
+  Architectures"* (whitepaper). Directly relevant to whether the same
+  Rust code produces identical results across AVX-level differences.
+- Kahan, *"How Futile are Mindless Assessments of Roundoff in
+  Floating-Point Computation?"*, 2006. The grandfather paper; cite when
+  someone proposes "just use f64, it's fine".
+- GLSL / SPIR-V spec sections on floating-point determinism and the
+  `RelaxedPrecision` flag. Worth confirming we're not accidentally
+  letting the compiler reorder our hash.
+
+### 6.6 Large-scale agent simulation
+
+Question: how do other ~140-system games schedule work and what do they
+do for dependency ordering?
+
+- ★ Tarn Adams, multiple *Dwarf Fortress* talks and interviews on
+  Roguelike Celebration / GDC. Informal but the system-ordering rants
+  are unusually direct.
+- Factorio FFFs — *#176 "Belt optimisations"*, *#204 "10 000 trains"*,
+  *#244 "Multithreading"*. Data-oriented layout arguments plus concrete
+  profiling numbers.
+- Mike Acton, *"Data-Oriented Design and C++"*, CppCon 2014. The talk
+  that made DOD canon; applies regardless of ECS choice.
+- Richard Fabian, *Data-Oriented Design* (book, 2018, free online at
+  dataorienteddesign.com). Long-form version of the same ideas.
+- Christian Gyrling, *"Parallelizing the Naughty Dog Engine Using
+  Fibers"*, GDC 2015. Fiber-based job system; worth reading even if we
+  stick with rayon, because it covers the dependency-DAG scheduling
+  problem we're about to hit if more systems parallelise.
+- Aras Pranckevičius, *"'Entities' Redux — Data Oriented Tech Stack"*
+  and the Unity DOTS talks. Closer to our layout since we're not using
+  bevy_ecs either.
+- Orkin, *"Three States and a Plan: The AI of F.E.A.R."*, GDC 2006. GOAP
+  origin paper; our `src/ai/goap/` implements this. Good to re-read
+  when scaling GOAP to hundreds of agents.
+- Dave Mark, *"Improving AI Decision Modeling Through Utility Theory"*,
+  GDC 2010. Utility-AI counterpoint to GOAP; useful framing when
+  deciding which systems should override which.
+
+### 6.7 Profiling & measurement methodology
+
+Question: what tools exist between "`perf record`" and "Tracy" and how
+do we actually diagnose a 20× `set_title` regression?
+
+- ★ Brendan Gregg, *Systems Performance* (book, 2nd ed., 2020). The
+  reference. Chapters on off-CPU analysis and flame graphs are the ones
+  we need now.
+- Gregg's blog — *"The PMCs of EC2"*, *"Off-CPU Analysis"*,
+  *"Flame Graphs"*. Free, skimmable versions of the book chapters.
+- Fabian Giesen, *"A Trip through the Graphics Pipeline 2011"* (blog
+  series, ryg). Mental model for what the GPU is actually doing when
+  we `vkQueueSubmit`.
+- Bartosz Taudul, *Tracy manual* (PDF, shipped with Tracy). Not a paper
+  but the authoritative explanation of frame markers, plots, GPU zones.
+- Agner Fog, *"Optimizing software in C++"* + microarchitecture manuals.
+  For the L1i / branch-predictor questions raised by the `FRAME_BATCH`
+  ceiling.
+- Denis Bakhvalov, *Performance Analysis and Tuning on Modern CPUs*
+  (book, 2020, free online). Practical guide to `perf`, `toplev`,
+  top-down methodology. Bridges Gregg (system) and Fog (micro).
+- Linux `perf` wiki — *"Tutorial"* and *"Top-down Microarchitecture
+  Analysis"* pages. Command-line recipes for the events we'd want.
+
+### 6.8 Compositor / windowing performance
+
+Question: why does dropping `set_title` cause a 20× regression? This
+might be niche enough that no paper exists, but there's domain
+literature.
+
+- Wayland / wlroots architecture docs — frame-callback + commit
+  scheduling. Explains what a compositor expects from a well-behaved
+  client.
+- Pekka Paalanen, *"Wayland explained, part 1–3"*, 2016. Blog series
+  covering frame callbacks specifically.
+- X.org EWMH / ICCCM specs — what `_NET_WM_NAME` changes actually
+  signal to the WM. If the hypothesis is "compositor priority-boosts
+  active clients", the protocol docs will confirm or deny.
+- winit issue tracker — search for "priority", "throttle",
+  "about_to_wait". Several existing issues touch on event-pump
+  scheduling on Linux.
+
+### 6.9 Adjacent but probably out of scope
+
+Listed so we don't rediscover them by accident.
+
+- Neural terrain generation (NVIDIA's *GAN-based* landscape papers,
+  *Infinite Nature* etc.). Probably not worth it for our art style;
+  procedural gets us there cheaper.
+- Euclideon / Atomontage marketing material. Historically over-claims;
+  the technically interesting parts are covered by SVDAG papers above.
+- Mesh shaders (Vulkan 1.3 / VK_EXT_mesh_shader). Relevant only if we
+  add a mesh path; our raycaster side-steps the geometry pipeline
+  entirely.
+
+---
+
+### How to actually run the review
+
+1. Pull PDFs for every ★ entry into `docs/references/` (already has
+   `elit_part1.pdf`, `elit_part2.pdf` — use that pattern).
+2. For each ★, write a 5-line note: problem, technique, applicability
+   to our codebase, decision (adopt / adapt / reject / defer).
+3. Promote the non-rejected ones into issues tagged `research-adopt`,
+   one per paper. Then §7 of this doc can be re-ranked against them.
+
+A single-day pass through the ★ list is the minimum viable literature
+review for this branch. Extending to everything else is probably a
+week of evenings.
 
 ---
 
