@@ -394,6 +394,133 @@ impl ApplyActionsKernel {
 
         Ok(agent_slots_out)
     }
+
+    /// Ensure the internal buffer pool can hold `agent_cap` slots.
+    /// Resident entry point (B5) uses this as the owner-agnostic knob
+    /// since agents / scoring / event_ring are all caller-supplied —
+    /// only the cfg uniform is pool-owned.
+    fn ensure_pool_cap(&mut self, device: &wgpu::Device, agent_cap: u32) {
+        self.ensure_pool(device, agent_cap);
+    }
+
+    // Phase B5 (resident path): the resident path's `run_resident`
+    // accepts a caller-supplied `agents_buf` (packed `GpuAgentSlot`
+    // AoS, shared with the physics kernel) bound as read_write — HP
+    // deltas and alive=0 writes land directly in the caller's buffer.
+    // `scoring_buf` is read-only, `event_ring` is append-only (records
+    // + tail are both read_write since the kernel emits
+    // AgentAttacked / AgentDied).
+    //
+    // Unlike B3 (mask) + B4 (scoring), apply_actions has no internal
+    // SoA to upload — the caller owns `agents_buf` and the scorer's
+    // `scoring_buf`. The only pool-owned input is the cfg uniform,
+    // which [`Self::upload_soa_from_state`] writes from `SimState`.
+    // The helper's name is kept (`_soa_`) for API symmetry with B3/B4
+    // even though nothing SoA-shaped is uploaded here.
+
+    /// Upload the cfg uniform from `SimState` into the pool. Must be
+    /// called once per tick before [`Self::run_resident`], so the
+    /// dispatch sees current `agent_cap`, `tick`, and restore deltas.
+    ///
+    /// Separated from `run_resident` so the resident path's signature
+    /// does not require a `&SimState` at dispatch time — matches the
+    /// B3/B4 pattern where SimState ingress is staged ahead of the
+    /// cascade dispatch.
+    ///
+    /// Unlike the mask / scoring kernels' `upload_soa_from_state`,
+    /// this helper uploads ONLY the cfg uniform — the agent and
+    /// scoring buffers flow in as caller-supplied parameters to
+    /// `run_resident` (since apply_actions reuses the physics
+    /// `GpuAgentSlot` layout directly, there's no per-kernel SoA to
+    /// pack here).
+    pub fn upload_soa_from_state(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        state: &SimState,
+    ) {
+        let agent_cap = state.agent_cap();
+        self.ensure_pool_cap(device, agent_cap);
+        let pool = self.pool.as_ref().expect("pool ensured");
+        let cfg = cfg_from_state(state);
+        queue.write_buffer(&pool.cfg_buf, 0, bytemuck::bytes_of(&cfg));
+    }
+
+    /// Resident-path sibling to [`Self::run_and_readback`].
+    ///
+    /// Records the apply_actions dispatch into `encoder`, binding
+    /// caller-supplied `agents_buf` (read_write, packed
+    /// `GpuAgentSlot`), `scoring_buf` (read-only, packed
+    /// `ScoreOutput`), and the shared `event_ring`. Does NOT submit,
+    /// does NOT read back.
+    ///
+    /// Agent HP deltas, alive=0 writes, and event emissions all land
+    /// in the caller's buffers — no internal pool-owned mutation.
+    ///
+    /// ### Preconditions
+    ///
+    /// * [`Self::upload_soa_from_state`] must have been called on
+    ///   this tick with a `state` whose `agent_cap()` equals the
+    ///   `agent_cap` argument passed here. That helper uploads the
+    ///   cfg uniform into the pool.
+    /// * `agents_buf` must be at least `agent_cap * size_of::<GpuAgentSlot>()`
+    ///   bytes and usable as `STORAGE` (read_write).
+    /// * `scoring_buf` must be at least `agent_cap * size_of::<ScoreOutput>()`
+    ///   bytes and usable as `STORAGE` (read-only).
+    pub fn run_resident(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        agents_buf: &wgpu::Buffer,
+        scoring_buf: &wgpu::Buffer,
+        event_ring: &GpuEventRing,
+        agent_cap: u32,
+    ) -> Result<(), ApplyActionsError> {
+        self.ensure_pool_cap(device, agent_cap);
+        let pool = self.pool.as_ref().expect("pool ensured");
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("engine_gpu::apply_actions::bg_resident"),
+            layout: &self.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: agents_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: scoring_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: pool.cfg_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: event_ring.records_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: event_ring.tail_buffer().as_entire_binding(),
+                },
+            ],
+        });
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::apply_actions::cpass_resident"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
+
+        let _ = queue; // kept for signature parity with B3/B4; cfg writes go through upload_soa_from_state.
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
