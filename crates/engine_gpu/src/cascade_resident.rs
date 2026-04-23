@@ -1,0 +1,700 @@
+//! GPU-resident cascade driver. Records `MAX_CASCADE_ITERATIONS`
+//! physics iterations into a single command encoder with no Rust-side
+//! convergence check and no per-iter readback — convergence is encoded
+//! as indirect dispatch args written by each iteration's physics kernel
+//! (0 workgroups = no-op for downstream iters once events stop
+//! propagating).
+//!
+//! The sync cascade in [`crate::cascade`] is untouched — that path
+//! remains authoritative for callers that need determinism or per-tick
+//! CPU observability. This module is scaffolding for Phase D's
+//! `step_batch(n)` which encodes one submit + one poll across N ticks.
+//!
+//! ### Scope of Task C1
+//!
+//! This module encodes the full per-iteration physics dispatch sequence
+//! plus the two resident spatial queries + the indirect-args seed
+//! kernel. It does *not* yet run the fold kernels that project events
+//! into view storage — `cascade::fold_iteration_events` is sync-only
+//! and re-entering it here would reintroduce per-iter submit+poll.
+//! Task D4 is scheduled to add a resident fold kernel; until then
+//! callers that need view storage updated must invoke the sync fold
+//! path separately.
+
+use bytemuck::{Pod, Zeroable};
+
+use engine::state::SimState;
+
+use crate::cascade::{CascadeCtx, DEFAULT_KIN_RADIUS, MAX_CASCADE_ITERATIONS};
+use crate::event_ring::GpuEventRing;
+use crate::gpu_util::indirect::IndirectArgsBuffer;
+use crate::physics::{
+    GpuAgentSlot, GpuKinList, PackedAbilityRegistry, PhysicsCfg, PHYSICS_WORKGROUP_SIZE,
+    MAX_ABILITIES, MAX_EFFECTS,
+};
+use crate::spatial_gpu::{GpuQueryResult, SpatialOutputs};
+
+/// Capacity of the ping-pong physics event rings owned by
+/// [`CascadeResidentCtx`]. Matches [`crate::cascade::APPLY_EVENT_RING_CAPACITY`]
+/// so the rings have headroom equivalent to the apply-path ring the
+/// cascade consumes on iter 0.
+pub const PHYSICS_EVENT_RING_CAPACITY: u32 = crate::cascade::APPLY_EVENT_RING_CAPACITY;
+
+// ---------------------------------------------------------------------------
+// Error surface
+// ---------------------------------------------------------------------------
+
+/// Errors surfaced by the resident cascade driver. Wraps sub-component
+/// error types so the caller gets a single `Result` type.
+#[derive(Debug)]
+pub enum CascadeResidentError {
+    Physics(crate::physics::PhysicsError),
+    Spatial(crate::spatial_gpu::SpatialError),
+    /// Any other kernel init / dispatch failure originating in this
+    /// module's own helpers (e.g. seed kernel compile).
+    Kernel(String),
+}
+
+impl std::fmt::Display for CascadeResidentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CascadeResidentError::Physics(e) => write!(f, "cascade_resident physics: {e}"),
+            CascadeResidentError::Spatial(e) => write!(f, "cascade_resident spatial: {e}"),
+            CascadeResidentError::Kernel(s) => write!(f, "cascade_resident kernel: {s}"),
+        }
+    }
+}
+
+impl std::error::Error for CascadeResidentError {}
+
+impl From<crate::physics::PhysicsError> for CascadeResidentError {
+    fn from(e: crate::physics::PhysicsError) -> Self {
+        CascadeResidentError::Physics(e)
+    }
+}
+
+impl From<crate::spatial_gpu::SpatialError> for CascadeResidentError {
+    fn from(e: crate::spatial_gpu::SpatialError) -> Self {
+        CascadeResidentError::Spatial(e)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resident spatial output buffer trios
+// ---------------------------------------------------------------------------
+
+/// Two caller-owned spatial output trios kept alive across ticks. One
+/// trio per radius: `kin` (12 m — feeds `nearby_kin`) and `engagement`
+/// (2 m — feeds `nearest_hostile`). Reallocated iff `agent_cap` grows.
+struct ResidentSpatialBuffers {
+    agent_cap: u32,
+    // kin-radius trio
+    kin_within: wgpu::Buffer,
+    kin_kin: wgpu::Buffer,
+    kin_nearest: wgpu::Buffer,
+    // engagement-radius trio
+    eng_within: wgpu::Buffer,
+    eng_kin: wgpu::Buffer,
+    eng_nearest: wgpu::Buffer,
+}
+
+impl ResidentSpatialBuffers {
+    fn new(device: &wgpu::Device, agent_cap: u32) -> Self {
+        let qr_bytes = (agent_cap as u64) * (std::mem::size_of::<GpuQueryResult>() as u64);
+        let nearest_bytes = (agent_cap as u64) * 4;
+        let storage = wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST;
+        let mk = |size: u64, label: &str| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage: storage,
+                mapped_at_creation: false,
+            })
+        };
+        Self {
+            agent_cap,
+            kin_within: mk(qr_bytes, "cascade_resident::spatial::kin_within"),
+            kin_kin: mk(qr_bytes, "cascade_resident::spatial::kin_kin"),
+            kin_nearest: mk(nearest_bytes, "cascade_resident::spatial::kin_nearest"),
+            eng_within: mk(qr_bytes, "cascade_resident::spatial::eng_within"),
+            eng_kin: mk(qr_bytes, "cascade_resident::spatial::eng_kin"),
+            eng_nearest: mk(nearest_bytes, "cascade_resident::spatial::eng_nearest"),
+        }
+    }
+
+    fn kin_outputs(&self) -> SpatialOutputs<'_> {
+        SpatialOutputs {
+            within: &self.kin_within,
+            kin: &self.kin_kin,
+            nearest: &self.kin_nearest,
+        }
+    }
+
+    fn engagement_outputs(&self) -> SpatialOutputs<'_> {
+        SpatialOutputs {
+            within: &self.eng_within,
+            kin: &self.eng_kin,
+            nearest: &self.eng_nearest,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resident ability buffers (caller-owned for the physics resident path)
+// ---------------------------------------------------------------------------
+
+/// Caller-owned ability-registry buffers the physics resident path
+/// reads from. Sized for `MAX_ABILITIES` × `MAX_EFFECTS` at construction
+/// — fixed by the kernel's WGSL bounds so the buffers never need to
+/// grow. Contents are re-uploaded from `PackedAbilityRegistry` each
+/// tick because the registry can change (unit composition / ability
+/// lineage).
+struct ResidentAbilityBuffers {
+    known: wgpu::Buffer,
+    cooldown: wgpu::Buffer,
+    effects_count: wgpu::Buffer,
+    effects: wgpu::Buffer,
+}
+
+impl ResidentAbilityBuffers {
+    fn new(device: &wgpu::Device) -> Self {
+        use crate::physics::GpuEffectOp;
+        let u32_buf = |label: &str| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: (MAX_ABILITIES * 4) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        let effects = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cascade_resident::abilities::effects"),
+            size: (MAX_ABILITIES * MAX_EFFECTS) as u64
+                * std::mem::size_of::<GpuEffectOp>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Self {
+            known: u32_buf("cascade_resident::abilities::known"),
+            cooldown: u32_buf("cascade_resident::abilities::cooldown"),
+            effects_count: u32_buf("cascade_resident::abilities::effects_count"),
+            effects,
+        }
+    }
+
+    fn upload(&self, queue: &wgpu::Queue, abilities: &PackedAbilityRegistry) {
+        queue.write_buffer(&self.known, 0, bytemuck::cast_slice(&abilities.known));
+        queue.write_buffer(&self.cooldown, 0, bytemuck::cast_slice(&abilities.cooldown));
+        queue.write_buffer(
+            &self.effects_count,
+            0,
+            bytemuck::cast_slice(&abilities.effects_count),
+        );
+        queue.write_buffer(&self.effects, 0, bytemuck::cast_slice(&abilities.effects));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Seed-indirect kernel
+// ---------------------------------------------------------------------------
+
+/// Uniform for the seed kernel. `cap_wg` clamps the seeded workgroup
+/// count at `ceil(agent_cap / PHYSICS_WORKGROUP_SIZE)` so a huge
+/// initial-event batch can't overflow the kernel's one-thread-per-agent
+/// bound.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable, Debug)]
+struct SeedIndirectCfg {
+    cap_wg: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+/// WGSL source for the seed kernel. Writes slot 0 of the indirect args
+/// buffer + slot 0 of the num_events buffer from the apply-path ring
+/// tail atomic. One workgroup, one thread.
+const SEED_INDIRECT_WGSL: &str = r#"
+struct SeedCfg {
+    cap_wg: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read>       apply_tail: array<atomic<u32>>;
+@group(0) @binding(1) var<storage, read_write> indirect_args: array<u32>;
+@group(0) @binding(2) var<storage, read_write> num_events: array<u32>;
+@group(0) @binding(3) var<uniform>             cfg: SeedCfg;
+
+const WG: u32 = 64u;
+
+@compute @workgroup_size(1)
+fn seed() {
+    let n = atomicLoad(&apply_tail[0]);
+    num_events[0] = n;
+    let req = (n + WG - 1u) / WG;
+    var wg = req;
+    if (wg > cfg.cap_wg) { wg = cfg.cap_wg; }
+    indirect_args[0] = wg;
+    indirect_args[1] = 1u;
+    indirect_args[2] = 1u;
+}
+"#;
+
+/// Small compute kernel that writes slot 0 of both the cascade
+/// indirect-args buffer and the per-iter num_events buffer from the
+/// apply-path event ring's atomic tail. Runs as a single 1-workgroup,
+/// 1-thread dispatch at the top of every tick's resident cascade.
+struct SeedIndirectKernel {
+    pipeline: wgpu::ComputePipeline,
+    bgl: wgpu::BindGroupLayout,
+    cfg_buf: wgpu::Buffer,
+    /// `cap_wg` the cfg buffer was last uploaded with; used to skip
+    /// redundant uploads on stable agent_cap.
+    last_cap_wg: u32,
+}
+
+impl SeedIndirectKernel {
+    fn new(device: &wgpu::Device) -> Result<Self, CascadeResidentError> {
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("cascade_resident::seed::shader"),
+            source: wgpu::ShaderSource::Wgsl(SEED_INDIRECT_WGSL.into()),
+        });
+        if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+            return Err(CascadeResidentError::Kernel(format!(
+                "seed shader compile: {err}"
+            )));
+        }
+
+        let storage = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let uniform = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cascade_resident::seed::bgl"),
+            // apply_tail: read-only storage (but contains atomic<u32>; read-only is fine for atomicLoad)
+            entries: &[storage(0, true), storage(1, false), storage(2, false), uniform(3)],
+        });
+        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("cascade_resident::seed::pl"),
+            bind_group_layouts: &[&bgl],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("cascade_resident::seed::pipeline"),
+            layout: Some(&pl),
+            module: &shader,
+            entry_point: Some("seed"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cascade_resident::seed::cfg"),
+            size: std::mem::size_of::<SeedIndirectCfg>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Ok(Self {
+            pipeline,
+            bgl,
+            cfg_buf,
+            last_cap_wg: u32::MAX,
+        })
+    }
+
+    /// Encode a 1-thread dispatch that reads `apply_tail[0]` and writes
+    /// slot 0 of `indirect_args` + `num_events`. Uploads the `cap_wg`
+    /// uniform iff it changed since the last call (typical case:
+    /// agent_cap is stable across ticks).
+    #[allow(clippy::too_many_arguments)]
+    fn record(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        apply_tail_buf: &wgpu::Buffer,
+        indirect_args: &IndirectArgsBuffer,
+        num_events_buf: &wgpu::Buffer,
+        agent_cap: u32,
+    ) {
+        let cap_wg = agent_cap.div_ceil(PHYSICS_WORKGROUP_SIZE).max(1);
+        if cap_wg != self.last_cap_wg {
+            let cfg = SeedIndirectCfg {
+                cap_wg,
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+            };
+            queue.write_buffer(&self.cfg_buf, 0, bytemuck::bytes_of(&cfg));
+            self.last_cap_wg = cap_wg;
+        }
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("cascade_resident::seed::bg"),
+            layout: &self.bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: apply_tail_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: indirect_args.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: num_events_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.cfg_buf.as_entire_binding(),
+                },
+            ],
+        });
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("cascade_resident::seed::cpass"),
+            timestamp_writes: None,
+        });
+        cpass.set_pipeline(&self.pipeline);
+        cpass.set_bind_group(0, &bg, &[]);
+        cpass.dispatch_workgroups(1, 1, 1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Driver context
+// ---------------------------------------------------------------------------
+
+/// Per-backend state the resident cascade driver owns across ticks.
+/// Holds the caller-owned buffer trios the resident kernels consume so
+/// we don't pay a fresh allocation per tick. Construct once on the
+/// first `run_cascade_resident` call; buffers grow lazily with
+/// `agent_cap`.
+///
+/// Phase D moves this onto `GpuBackend` alongside `cascade_ctx`. For
+/// C1 it's constructed inline by [`run_cascade_resident`] via
+/// [`Self::ensure`] on a caller-held `Option<CascadeResidentCtx>` — the
+/// caller owns the lifetime so the Phase D wiring is a rename away.
+pub struct CascadeResidentCtx {
+    spatial_bufs: Option<ResidentSpatialBuffers>,
+    ability_bufs: ResidentAbilityBuffers,
+    seed_kernel: SeedIndirectKernel,
+    /// Ping-pong pair of physics event rings. Iter `i` (starting at
+    /// 0) reads from `apply_event_ring` (for i=0) or the ring at index
+    /// `(i - 1) & 1` (for i>0), and writes into the ring at index
+    /// `i & 1`. Both rings live here so the driver can bind whichever
+    /// pair the current iteration needs without the caller caring.
+    physics_ring_a: GpuEventRing,
+    physics_ring_b: GpuEventRing,
+    /// Per-iter event count buffer. Slot `i` holds the number of events
+    /// the iter-`i` dispatch must process (slot 0 is written by the
+    /// seed kernel; slots 1..=MAX are written by physics in its
+    /// epilogue). Sized for `MAX_CASCADE_ITERATIONS + 1` u32s so the
+    /// final iteration's epilogue has a valid write target.
+    num_events_buf: wgpu::Buffer,
+    /// Chronicle ring — caller-owned in the resident path. Shared
+    /// across all iterations (append-only).
+    chronicle_ring: crate::event_ring::GpuChronicleRing,
+    /// `agent_cap` the resident physics ability buffers + agent-cap
+    /// dependent buffers were last sized for.
+    last_agent_cap: u32,
+}
+
+impl CascadeResidentCtx {
+    /// Build a fresh driver context on the supplied device. Allocates
+    /// the ability-registry buffers (fixed size — `MAX_ABILITIES * MAX_EFFECTS`),
+    /// the two physics event rings at `PHYSICS_EVENT_RING_CAPACITY`,
+    /// the per-iter `num_events` buffer sized for `MAX_CASCADE_ITERATIONS + 1`
+    /// u32s, the seed kernel, and a fresh chronicle ring at
+    /// `DEFAULT_CHRONICLE_CAPACITY`. Spatial output buffers are lazy —
+    /// allocated on first `run_cascade_resident` once `state.agent_cap`
+    /// is known.
+    pub fn new(device: &wgpu::Device) -> Result<Self, CascadeResidentError> {
+        let ability_bufs = ResidentAbilityBuffers::new(device);
+        let seed_kernel = SeedIndirectKernel::new(device)?;
+        let physics_ring_a = GpuEventRing::new(device, PHYSICS_EVENT_RING_CAPACITY);
+        let physics_ring_b = GpuEventRing::new(device, PHYSICS_EVENT_RING_CAPACITY);
+        // `MAX_CASCADE_ITERATIONS + 1` u32 slots: iter `i` reads
+        // num_events[i] and physics writes num_events[i+1] in its
+        // epilogue (write_slot is `i+1`). Max i is `MAX_CASCADE_ITERATIONS - 1`,
+        // so max write_slot is `MAX_CASCADE_ITERATIONS`.
+        let num_events_slots = (MAX_CASCADE_ITERATIONS + 1) as u64;
+        let num_events_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cascade_resident::num_events"),
+            size: num_events_slots * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let chronicle_ring = crate::event_ring::GpuChronicleRing::new(
+            device,
+            crate::event_ring::DEFAULT_CHRONICLE_CAPACITY,
+        );
+        Ok(Self {
+            spatial_bufs: None,
+            ability_bufs,
+            seed_kernel,
+            physics_ring_a,
+            physics_ring_b,
+            num_events_buf,
+            chronicle_ring,
+            last_agent_cap: 0,
+        })
+    }
+
+    fn ensure_spatial(&mut self, device: &wgpu::Device, agent_cap: u32) {
+        let need = !matches!(
+            &self.spatial_bufs,
+            Some(b) if b.agent_cap >= agent_cap
+        );
+        if need {
+            self.spatial_bufs = Some(ResidentSpatialBuffers::new(device, agent_cap));
+        }
+    }
+
+    /// For iter `i`, returns `(events_in_records, events_out_ring)` —
+    /// the input records buffer the physics kernel reads from and the
+    /// output ring it appends to. `apply_event_ring_records` is the
+    /// buffer handed in by the caller that holds the initial events
+    /// (consumed on iter 0 only).
+    fn iter_rings<'a>(
+        &'a self,
+        iter: u32,
+        apply_event_ring_records: &'a wgpu::Buffer,
+    ) -> (&'a wgpu::Buffer, &'a GpuEventRing) {
+        let out = if iter & 1 == 0 {
+            &self.physics_ring_a
+        } else {
+            &self.physics_ring_b
+        };
+        let in_buf = if iter == 0 {
+            apply_event_ring_records
+        } else if (iter - 1) & 1 == 0 {
+            self.physics_ring_a.records_buffer()
+        } else {
+            self.physics_ring_b.records_buffer()
+        };
+        (in_buf, out)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public driver entry point
+// ---------------------------------------------------------------------------
+
+/// One-tick resident cascade. Encodes into `encoder`:
+///
+///   1. Two spatial queries (kin radius + engagement range) into the
+///      driver's caller-owned output buffer trios.
+///   2. Seed of `indirect_args[0]` + `num_events[0]` from
+///      `apply_event_ring`'s atomic tail.
+///   3. `MAX_CASCADE_ITERATIONS` indirect physics dispatches, each
+///      reading `indirect_args[iter]` and writing
+///      `indirect_args[iter+1]` via the physics kernel's epilogue. On
+///      convergence (an iteration that emits zero events) every
+///      subsequent iteration indirect-dispatches with
+///      `(x=0, y=1, z=1)`, so the trailing kernels run but do no work.
+///
+/// Preconditions:
+///   * The caller has already run mask → scoring → apply+movement
+///     earlier in the same `encoder` (or earlier in the submit batch),
+///     so `apply_event_ring` contains this tick's initial events.
+///   * `agents_buf` is sized to `state.agent_cap() *
+///     size_of::<GpuAgentSlot>()` bytes with usage `STORAGE`.
+///   * `indirect_args` has at least `MAX_CASCADE_ITERATIONS + 1` slots.
+///   * `ctx.abilities` is populated with the current tick's registry.
+///
+/// Does NOT submit, does NOT poll, does NOT drain events. The caller
+/// owns those steps — the whole point of this driver is to keep the
+/// cascade resident in a single command buffer.
+///
+/// TODO(D4): view-storage folding is deferred until a resident fold
+/// kernel lands. Callers that need view storage updated by the
+/// cascade's emissions must invoke
+/// [`crate::cascade::fold_iteration_events`] on a separately-drained
+/// event list — that path submits + polls internally which is at odds
+/// with the resident driver's one-submit-per-tick goal.
+#[allow(clippy::too_many_arguments)]
+pub fn run_cascade_resident(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    state: &SimState,
+    cascade_ctx: &mut CascadeCtx,
+    resident_ctx: &mut CascadeResidentCtx,
+    agents_buf: &wgpu::Buffer,
+    apply_event_ring: &GpuEventRing,
+    indirect_args: &IndirectArgsBuffer,
+) -> Result<(), CascadeResidentError> {
+    let agent_cap = state.agent_cap();
+
+    // ---- 1. Spatial queries ---------------------------------------------
+    // Two resident dispatches into distinct caller-owned output trios
+    // so the engagement query doesn't clobber the kin query. Each call
+    // allocates a per-call `qcfg` uniform internally so the two radii
+    // don't race on a shared uniform.
+    resident_ctx.ensure_spatial(device, agent_cap);
+    resident_ctx.last_agent_cap = agent_cap;
+    let spatial_bufs = resident_ctx
+        .spatial_bufs
+        .as_ref()
+        .expect("spatial_bufs ensured");
+
+    let kin_radius = DEFAULT_KIN_RADIUS;
+    let engagement_range = state.config.combat.engagement_range;
+
+    cascade_ctx.spatial.rebuild_and_query_resident(
+        device,
+        queue,
+        encoder,
+        state,
+        kin_radius,
+        spatial_bufs.kin_outputs(),
+    )?;
+    cascade_ctx.spatial.rebuild_and_query_resident(
+        device,
+        queue,
+        encoder,
+        state,
+        engagement_range,
+        spatial_bufs.engagement_outputs(),
+    )?;
+
+    // ---- 2. Upload ability registry to resident buffers -----------------
+    // Must happen before the first physics dispatch binds the buffers.
+    resident_ctx.ability_bufs.upload(queue, &cascade_ctx.abilities);
+
+    // ---- 3. Reset physics event rings + seed indirect slot 0 ------------
+    // Both physics rings start each tick at tail=0 so the ping-pong
+    // binds a known-clean output buffer. The chronicle ring is *not*
+    // reset — it's append-only across the whole run (apps drain it
+    // separately).
+    //
+    // We use `encoder.clear_buffer` rather than `queue.write_buffer`
+    // because the clears must be ordered *inside* the command buffer:
+    // later iterations re-use the same ring as their output and
+    // re-clearing its tail between iterations needs to land *between*
+    // adjacent compute passes, not at submit time (queue writes all
+    // execute before any command-buffer command, collapsing multiple
+    // writes to the same offset). `clear_buffer` emits a transfer
+    // operation at the current encoder position, so the ordering
+    // matches the iteration schedule.
+    encoder.clear_buffer(resident_ctx.physics_ring_a.tail_buffer(), 0, None);
+    encoder.clear_buffer(resident_ctx.physics_ring_b.tail_buffer(), 0, None);
+    // Zero the entire num_events buffer so slots 1..=MAX_ITER start at
+    // 0. The seed kernel overwrites slot 0 on dispatch. Ordered inside
+    // the encoder for the same reason as the ring-tail clears above —
+    // the seed dispatch must see the zeroed slots, and later
+    // iterations' epilogues overwrite their write-slot anyway.
+    encoder.clear_buffer(&resident_ctx.num_events_buf, 0, None);
+
+    // Seed dispatch: reads apply_event_ring.tail, writes
+    // indirect_args[0] + num_events[0].
+    resident_ctx.seed_kernel.record(
+        device,
+        queue,
+        encoder,
+        apply_event_ring.tail_buffer(),
+        indirect_args,
+        &resident_ctx.num_events_buf,
+        agent_cap,
+    );
+
+    // ---- 4. Encode N physics iterations ---------------------------------
+    let cfg_template = PhysicsCfg {
+        tick: state.tick,
+        // `num_events` in the `PhysicsCfg` uniform is *unused* by the
+        // resident entry point — it reads its count from
+        // `num_events_buf[read_slot]` instead. We keep a 0 default so
+        // any stale read surfaces obviously as a no-op.
+        num_events: 0,
+        combat_engagement_range: engagement_range,
+        cascade_max_iterations: MAX_CASCADE_ITERATIONS,
+        agent_cap,
+        max_abilities: MAX_ABILITIES as u32,
+        max_effects: MAX_EFFECTS as u32,
+        _pad: 0,
+    };
+
+    for iter in 0..MAX_CASCADE_ITERATIONS {
+        // Pick this iter's input records buffer + output ring. Iter 0
+        // reads from `apply_event_ring`; iter 1+ alternates between
+        // the two resident physics rings.
+        let (events_in_buf, events_out_ring) =
+            resident_ctx.iter_rings(iter, apply_event_ring.records_buffer());
+
+        cascade_ctx.physics.run_batch_resident(
+            device,
+            queue,
+            encoder,
+            agents_buf,
+            &resident_ctx.ability_bufs.known,
+            &resident_ctx.ability_bufs.cooldown,
+            &resident_ctx.ability_bufs.effects_count,
+            &resident_ctx.ability_bufs.effects,
+            // Spatial kin buffer: the spatial kernel's `kin` output
+            // and the physics `KinList` have the same byte layout
+            // (u32 count at offset 0, ids[32] at offset 16 — see
+            // `GpuKinList` and `GpuQueryResult`), so we bind the
+            // kin-radius trio's `kin` buffer directly.
+            &spatial_bufs.kin_kin,
+            &spatial_bufs.eng_nearest,
+            events_in_buf,
+            events_out_ring,
+            &resident_ctx.chronicle_ring,
+            indirect_args,
+            &resident_ctx.num_events_buf,
+            iter,       // read_slot
+            iter + 1,   // write_slot
+            cfg_template,
+        )?;
+
+        // For iter 1+ the *next* iter's output ring was used two
+        // iterations ago (ping-pong partner); its tail still holds the
+        // count from that earlier dispatch. Zero it here via
+        // `encoder.clear_buffer` so the next iter's atomicAdds start
+        // at 0. `clear_buffer` is ordered inside the command buffer,
+        // so this clear lands AFTER the current iter's dispatch reads
+        // that ring's records buffer as events_in (iter 1 reads
+        // ring_a; iter 2 reads ring_b; etc.) but BEFORE the next
+        // iter's dispatch writes to its tail. Only needed for iter
+        // >= 1 because iters 0 and 1 write to rings that were already
+        // zeroed by the initial clears above.
+        if iter + 2 < MAX_CASCADE_ITERATIONS {
+            let next_next_out = if (iter + 2) & 1 == 0 {
+                &resident_ctx.physics_ring_a
+            } else {
+                &resident_ctx.physics_ring_b
+            };
+            encoder.clear_buffer(next_next_out.tail_buffer(), 0, None);
+        }
+    }
+
+    // Silence the "imports unused" lint if MAX_ABILITIES/MAX_EFFECTS
+    // or GpuAgentSlot/GpuKinList are only referenced through doc
+    // paths (not the case today — keeping a tiny anchor).
+    let _ = std::mem::size_of::<GpuAgentSlot>();
+    let _ = std::mem::size_of::<GpuKinList>();
+
+    Ok(())
+}

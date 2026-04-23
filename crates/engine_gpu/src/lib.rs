@@ -120,6 +120,14 @@ pub mod apply_actions;
 #[cfg(feature = "gpu")]
 pub mod movement;
 
+/// Phase C (task C1) — GPU-resident cascade driver. Composes Phase B's
+/// resident kernels into one indirect-dispatch sequence per tick with
+/// no Rust-side convergence check and no per-iter readback. Scaffolding
+/// for Phase D's `step_batch(n)`; not yet consumed by `GpuBackend::step`
+/// which still drives the sync cascade in `cascade.rs`.
+#[cfg(feature = "gpu")]
+pub mod cascade_resident;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
