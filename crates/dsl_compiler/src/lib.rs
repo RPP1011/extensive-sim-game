@@ -8,7 +8,7 @@
 //! No engine integration; emitted files land on disk via the xtask
 //! `compile-dsl` subcommand.
 
-pub mod ast;
+pub use dsl_ast::ast;
 pub mod emit_backend;
 pub mod emit_cascade_register;
 pub mod emit_config;
@@ -33,7 +33,7 @@ pub mod parser;
 pub mod resolve;
 pub mod resolve_error;
 pub mod schema_hash;
-pub mod tokens;
+pub use dsl_ast::tokens;
 
 pub use ast::{Decl, Program, Span, Spanned};
 pub use error::ParseError;
