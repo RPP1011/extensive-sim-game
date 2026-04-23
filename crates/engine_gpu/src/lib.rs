@@ -1117,13 +1117,23 @@ impl GpuBackend {
     ///
     /// # Event ring choice
     ///
-    /// Snapshots the physics kernel's primary `event_ring` (the ring
-    /// written by cascade iterations in the current non-resident path).
-    /// Once Phase D4 rewrites `step_batch` to drive
-    /// `cascade_resident::run_cascade_resident`, this choice may shift
-    /// to whichever of the resident context's rings holds the most
-    /// recent iteration's output — for D3 we observe the ring that
-    /// today's `step`/`step_batch` actually writes to.
+    /// Snapshots `cascade_ctx.apply_event_ring` — the ring that the
+    /// resident path's `apply_actions` + `movement` kernels write into
+    /// every tick. D4's `step_batch` clears this ring's tail at the
+    /// top of each tick, so the tail always reflects *only the most
+    /// recently completed tick's* apply + movement events (not the
+    /// per-iteration cascade events, which live in
+    /// `resident_cascade_ctx`'s internal ping-pong rings and are also
+    /// reset per iteration). That's sufficient for the observer's
+    /// use-case: a consistent stream of "what happened last tick."
+    ///
+    /// Because the ring is reset every tick, the `start` offset is
+    /// fixed at 0 and the `snapshot_event_ring_read` watermark is
+    /// unused on this path (kept as a no-op for the test accessor).
+    /// If a future observer wants cross-tick accumulation, the path is
+    /// to snapshot the append-only chronicle ring on
+    /// `resident_cascade_ctx` instead — that's the append-only stream
+    /// the design doc reserved for "durable history."
     pub fn snapshot(
         &mut self,
     ) -> Result<crate::snapshot::GpuSnapshot, crate::snapshot::SnapshotError> {
@@ -1181,10 +1191,13 @@ impl GpuBackend {
             .expect("snapshot_front lazy-inited above")
             .take_snapshot(&self.device, self.resident_agents_cap as usize)?;
 
-        // 2. Read the physics event ring's current tail so we know
+        // 2. Read the apply event ring's current tail so we know
         //    which slice to copy into the BACK. One 4-byte blocking
         //    readback per snapshot — acceptable per plan Option (a).
-        let main_event_ring = cascade_ctx.physics.event_ring();
+        //    This ring is reset at the top of every tick by
+        //    `step_batch`, so its tail reflects only the most recent
+        //    completed tick's events.
+        let main_event_ring = &cascade_ctx.apply_event_ring;
         let tail_vec: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
             &self.device,
             &self.queue,
@@ -1198,11 +1211,13 @@ impl GpuBackend {
         //    Encoder + submit live entirely inside this method.
         let agent_bytes = (self.resident_agents_cap as u64)
             * (std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64);
-        let start = self.snapshot_event_ring_read;
-        // Guard against a ring reset that rewinds the tail below our
-        // watermark — treat such a case as "no new events" rather than
-        // an error.
-        let end = event_ring_tail.max(start);
+        // Apply event ring is cleared every tick, so its contents are
+        // always [0, tail). Always read the full ring rather than
+        // tracking a watermark — the watermark model is for
+        // append-only rings (which is what the chronicle ring is, if
+        // we ever route it through here).
+        let start: u64 = 0;
+        let end = event_ring_tail;
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1221,6 +1236,9 @@ impl GpuBackend {
                 self.latest_recorded_tick,
             );
         self.queue.submit(Some(encoder.finish()));
+        // Record end as the most-recent tail for the test accessor.
+        // Not a true watermark (ring is per-tick-reset, see above),
+        // but useful as a "events last observed" indicator.
         self.snapshot_event_ring_read = end;
 
         // 4. Swap front / back — next call takes the one we just
