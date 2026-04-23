@@ -249,5 +249,44 @@ physics gpu_rule @phase(event) {
     assert!(!rule.cpu_only, "cpu_only should default to false");
 }
 
+#[test]
+fn cpu_only_flag_flows_through_ir_lowering() {
+    // Task 2.13 — the parser sets `cpu_only` on the AST `PhysicsDecl`; the
+    // IR lowering in `resolve.rs` must copy the flag across so downstream
+    // emit paths can branch on it. We check both a `@cpu_only` rule (true)
+    // and a vanilla rule (false) in the same compilation to lock in both
+    // directions.
+    let src = r#"
+event AgentDied { agent_id: AgentId }
+
+@cpu_only physics narrative_rule @phase(event) {
+    on AgentDied { agent_id: a } { }
+}
+
+physics gpu_rule @phase(event) {
+    on AgentDied { agent_id: a } { }
+}
+"#;
+    let comp = dsl_compiler::compile(src).expect("should compile");
+    let narrative = comp
+        .physics
+        .iter()
+        .find(|p| p.name == "narrative_rule")
+        .expect("narrative_rule missing from IR");
+    assert!(
+        narrative.cpu_only,
+        "IR should carry cpu_only=true for @cpu_only rule",
+    );
+    let gpu = comp
+        .physics
+        .iter()
+        .find(|p| p.name == "gpu_rule")
+        .expect("gpu_rule missing from IR");
+    assert!(
+        !gpu.cpu_only,
+        "IR should carry cpu_only=false for unannotated rule",
+    );
+}
+
 #[allow(dead_code)]
 fn _unused_path_helper(_: &Path) {}

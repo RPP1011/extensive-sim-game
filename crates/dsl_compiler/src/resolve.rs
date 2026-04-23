@@ -626,6 +626,7 @@ fn collect(
                     name: d.name.clone(),
                     handlers: Vec::new(),
                     annotations: d.annotations.clone(),
+                    cpu_only: d.cpu_only,
                     span: d.span,
                 });
             }

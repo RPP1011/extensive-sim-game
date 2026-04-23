@@ -219,6 +219,7 @@
           }
         }
       ],
+      "cpu_only": false,
       "span": {
         "start": 324,
         "end": 435

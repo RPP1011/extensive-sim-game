@@ -1478,6 +1478,7 @@ mod tests {
             name: "noop".into(),
             handlers: vec![PhysicsHandlerIR { pattern, where_clause: None, body, span: span() }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         }
     }
@@ -1530,6 +1531,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         };
         let ev = sample_event();
@@ -1606,6 +1608,7 @@ mod tests {
             name: "for_test".into(),
             handlers: vec![PhysicsHandlerIR { pattern, where_clause: None, body, span: span() }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         };
         let ctx = EmitContext { events: &[ev, died_ev], event_tags: &[] };
@@ -1685,6 +1688,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         };
         let ctx = EmitContext { events: &[ev, died_ev], event_tags: &[] };

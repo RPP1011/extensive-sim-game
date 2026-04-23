@@ -1939,6 +1939,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         }
     }
@@ -2069,6 +2070,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         }
     }
@@ -2156,6 +2158,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         }
     }
@@ -2310,6 +2313,7 @@ mod tests {
                 },
             ],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         };
         let died = agent_died_event();
@@ -2346,6 +2350,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         };
         let died = agent_died_event();
@@ -2438,6 +2443,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         };
         let ctx = EmitContext {
@@ -2513,6 +2519,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         };
         let died = agent_died_event();
@@ -2565,6 +2572,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         };
         let died = agent_died_event();

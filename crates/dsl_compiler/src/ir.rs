@@ -396,6 +396,10 @@ pub struct PhysicsIR {
     pub name: String,
     pub handlers: Vec<PhysicsHandlerIR>,
     pub annotations: Vec<Annotation>,
+    /// Intentionally-CPU-only rule (from `@cpu_only` annotation). Emit
+    /// paths check this to skip WGSL emission + GPU dispatcher entry;
+    /// validator uses it to bypass GPU-emittable checks.
+    pub cpu_only: bool,
     pub span: Span,
 }
 

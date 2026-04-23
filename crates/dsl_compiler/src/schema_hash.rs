@@ -968,6 +968,7 @@ mod tests {
                 span: Span::dummy(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: Span::dummy(),
         };
         let h1 = rules_hash(&[mk("a"), mk("b")], &[], &[]);
