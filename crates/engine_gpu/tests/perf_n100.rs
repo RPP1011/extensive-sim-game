@@ -256,5 +256,10 @@ fn step_batch_advances_tick() {
         &cascade,
         5,
     );
-    assert_eq!(state.tick, tick_before + 5, "step_batch should advance tick by n_ticks");
+    // After step_batch, CPU state.tick stays stale; GPU sim_cfg.tick is
+    // authoritative. Observer reads current tick via snapshot.
+    let _e = gpu_backend.snapshot().expect("empty");
+    let _k = gpu_backend.snapshot().expect("kick");
+    let snap = gpu_backend.snapshot().expect("read");
+    assert_eq!(snap.tick, tick_before + 5, "snapshot.tick should advance by n_ticks");
 }

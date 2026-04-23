@@ -75,11 +75,15 @@ fn step_batch_one_tick_does_not_panic() {
         1,
     );
 
+    // After step_batch, CPU state.tick stays stale; GPU sim_cfg.tick is
+    // authoritative. Observer reads current tick via snapshot.
+    let _e = gpu.snapshot().expect("empty");
+    let _k = gpu.snapshot().expect("kick");
+    let snap = gpu.snapshot().expect("read");
     assert_eq!(
-        state.tick,
+        snap.tick,
         tick_before.wrapping_add(1),
-        "step_batch must advance state.tick by n_ticks (=1 here); before={tick_before} after={}",
-        state.tick,
+        "snapshot.tick should advance by 1 after step_batch(1)",
     );
 }
 
@@ -117,10 +121,14 @@ fn step_batch_three_ticks_advances_tick_counter() {
         3,
     );
 
+    // After step_batch, CPU state.tick stays stale; GPU sim_cfg.tick is
+    // authoritative. Observer reads current tick via snapshot.
+    let _e = gpu.snapshot().expect("empty");
+    let _k = gpu.snapshot().expect("kick");
+    let snap = gpu.snapshot().expect("read");
     assert_eq!(
-        state.tick,
+        snap.tick,
         tick_before.wrapping_add(3),
-        "step_batch(n=3) must advance state.tick by 3; before={tick_before} after={}",
-        state.tick,
+        "snapshot.tick should advance by 3 after step_batch(3)",
     );
 }

@@ -88,7 +88,6 @@ fn step_batch_does_not_advance_cpu_tick() {
 }
 
 #[test]
-#[ignore = "Task 2.11 enables this — snapshot() wiring to read SimCfg.tick"]
 fn snapshot_tick_reflects_gpu_advance() {
     let (mut gpu, mut state, mut scratch, mut events, cascade) = spawn_fixture();
 

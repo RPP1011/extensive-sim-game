@@ -1318,6 +1318,25 @@ impl GpuBackend {
         .map_err(crate::snapshot::SnapshotError::Ring)?;
         let event_ring_tail = *tail_vec.first().unwrap_or(&0) as u64;
 
+        // Read current GPU tick from SimCfg. 4-byte readback, ~tens of µs
+        // at end-of-snapshot — acceptable as snapshot is the observer-path
+        // sync point anyway.
+        let gpu_tick: u32 = {
+            let sim_cfg_buf = self.resident.sim_cfg_buf.as_ref().ok_or_else(|| {
+                crate::snapshot::SnapshotError::Ring(
+                    "sim_cfg_buf not initialised; call step_batch first".into(),
+                )
+            })?;
+            let vec: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
+                &self.device,
+                &self.queue,
+                sim_cfg_buf,
+                4,
+            )
+            .map_err(crate::snapshot::SnapshotError::Ring)?;
+            vec[0]
+        };
+
         // 3. Kick the copy into the BACK (filling for the next call).
         //    Encoder + submit live entirely inside this method.
         let agent_bytes = (self.resident.resident_agents_cap as u64)
@@ -1353,7 +1372,7 @@ impl GpuBackend {
                 main_event_ring,
                 start,
                 end,
-                self.snapshot.latest_recorded_tick,
+                gpu_tick,
             );
         self.queue.submit(Some(encoder.finish()));
         // Advance the watermark. The batch events ring is append-only

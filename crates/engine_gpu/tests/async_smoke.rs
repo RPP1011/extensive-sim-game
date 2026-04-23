@@ -66,11 +66,6 @@ fn step_batch_then_snapshot() {
 
     // Run the batch.
     gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, BATCH_TICKS);
-    assert_eq!(
-        state.tick,
-        tick_after_warmup + BATCH_TICKS,
-        "tick must advance by BATCH_TICKS"
-    );
 
     // Second snapshot — front buffer is still empty at this point
     // because step_batch doesn't call snapshot internally.
@@ -78,6 +73,13 @@ fn step_batch_then_snapshot() {
 
     // Third snapshot — now returns the batch state.
     let snap = gpu.snapshot().expect("third snapshot");
+    // After step_batch, CPU state.tick stays stale; GPU sim_cfg.tick is
+    // authoritative. Observer reads current tick via snapshot.
+    assert_eq!(
+        snap.tick,
+        tick_after_warmup + BATCH_TICKS,
+        "snapshot.tick should advance by BATCH_TICKS after step_batch",
+    );
     assert_eq!(
         snap.agents.len(),
         (N_AGENTS + 16) as usize,
