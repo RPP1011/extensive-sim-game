@@ -1,14 +1,20 @@
-//! World Sim DSL compiler — parser + AST + IR + name resolution + emission.
+//! World Sim DSL compiler — Rust/Python/WGSL emission.
 //!
-//! - Milestone 1a: AST → typed IR with cross-references resolved.
-//! - Milestone 2: IR → Rust + Python + schema hash for `event` declarations.
-//! - Milestone 3: IR → Rust `impl CascadeHandler` blocks for `physics`
-//!   declarations + `rules_hash` sub-hash + combined-hash bookkeeping.
-//!
-//! No engine integration; emitted files land on disk via the xtask
-//! `compile-dsl` subcommand.
+//! Frontend (parser, AST, IR, name resolution) lives in the `dsl_ast`
+//! crate and is re-exported here for backward compatibility. This
+//! crate owns schema hashing + Rust/Python/WGSL emitters; emitted
+//! files land on disk via the xtask `compile-dsl` subcommand.
 
+// Frontend re-exports
 pub use dsl_ast::ast;
+pub use dsl_ast::error;
+pub use dsl_ast::ir;
+pub use dsl_ast::parser;
+pub use dsl_ast::resolve;
+pub use dsl_ast::resolve_error;
+pub use dsl_ast::tokens;
+
+// Emitter modules
 pub mod emit_backend;
 pub mod emit_cascade_register;
 pub mod emit_config;
@@ -27,14 +33,9 @@ pub mod emit_sim_cfg;
 pub mod emit_step;
 pub mod emit_view;
 pub mod emit_view_wgsl;
-pub use dsl_ast::error;
-pub use dsl_ast::ir;
-pub use dsl_ast::parser;
-pub use dsl_ast::resolve;
-pub use dsl_ast::resolve_error;
 pub mod schema_hash;
-pub use dsl_ast::tokens;
 
+// Top-level symbol re-exports
 pub use ast::{Decl, Program, Span, Spanned};
 pub use error::ParseError;
 pub use ir::Compilation;

@@ -49,3 +49,15 @@ impl std::fmt::Display for CompileError {
 }
 
 impl std::error::Error for CompileError {}
+
+impl From<ParseError> for CompileError {
+    fn from(e: ParseError) -> Self {
+        CompileError::Parse(e)
+    }
+}
+
+impl From<ResolveError> for CompileError {
+    fn from(e: ResolveError) -> Self {
+        CompileError::Resolve(e)
+    }
+}
