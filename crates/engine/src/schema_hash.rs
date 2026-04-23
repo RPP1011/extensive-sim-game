@@ -57,7 +57,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"Lane:Validation=0,Effect=1,Reaction=2,Audit=3");
     h.update(b"MAX_CASCADE_ITERATIONS=8");
     h.update(b"OVERHEAR_RANGE=30");
-    h.update(b"ENGAGEMENT_RANGE=2.0,ENGAGEMENT_SLOW_FACTOR=0.3,ATTACK_DAMAGE=10,ATTACK_RANGE=2,MOVE_SPEED_MPS=1");
+    h.update(b"ENGAGEMENT_RANGE=2.0,ENGAGEMENT_SLOW_FACTOR=0.3,GLOBAL_COOLDOWN_TICKS=5,ATTACK_DAMAGE=10,ATTACK_RANGE=2,MOVE_SPEED_MPS=1");
     h.update(b"BuiltinMetrics:tick_ms,event_count,agent_alive,cascade_iterations,mask_true_frac");
     h.update(b"BuiltinInvariants:mask_validity,pool_non_overlap");
     h.update(b"FailureMode:Panic,Log");

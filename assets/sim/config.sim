@@ -17,6 +17,12 @@ config combat {
     aggro_range: f32 = 50.0,
     engagement_range: f32 = 2.0,
     engagement_slow_factor: f32 = 0.3,
+    // Shared "global cooldown" (GCD) gate preventing ability spam
+    // across all of an agent's abilities. Applies independently of
+    // each ability's per-slot local cooldown. 5 ticks at 10 Hz =
+    // 0.5s, a standard MMO/MOBA default. Set to 0 to disable the
+    // global gate. Consumed by CastHandler (Task 4).
+    global_cooldown_ticks: u32 = 5,
     // Radius (m) for same-species kin spatial queries driving the
     // kin_fear / pack_focus / rally_boost views (tasks 167/169). Used
     // by the cascade's spatial precompute. 12.0 is the "visual
