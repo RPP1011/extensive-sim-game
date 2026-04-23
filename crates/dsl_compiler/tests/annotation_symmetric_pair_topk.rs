@@ -101,3 +101,90 @@ fn symmetric_pair_topk_lowers_to_ir_variant() {
         other => panic!("expected Materialized(SymmetricPairTopK {{ k: 8 }}), got {other:?}"),
     }
 }
+
+/// Task 1.5 — the CPU emitter produces a storage struct plus a `get` /
+/// `adjust` / `fold_event` impl block for `@symmetric_pair_topk` views.
+/// This mirrors the `per_entity_topk` emitter's public surface so the
+/// engine-side consumers (Phase 3 gold + standing port) can drop the
+/// generated view in without hand-written glue.
+#[test]
+fn symmetric_pair_topk_emits_cpu_storage() {
+    let comp = dsl_compiler::compile(SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "standing")
+        .expect("view IR should exist");
+    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+
+    // Storage struct + pair-edge slot struct.
+    assert!(
+        rust.contains("pub struct Standing"),
+        "missing struct:\n{rust}"
+    );
+    assert!(
+        rust.contains("pub struct StandingEdge"),
+        "missing slot struct:\n{rust}"
+    );
+    assert!(
+        rust.contains("slots: Vec<[StandingEdge; 8]>"),
+        "storage should be Vec<[Edge; K]>:\n{rust}"
+    );
+    assert!(
+        rust.contains("pub const K: usize = 8;"),
+        "missing K constant:\n{rust}"
+    );
+
+    // Public accessors.
+    assert!(
+        rust.contains("pub fn get(&self, a: AgentId, b: AgentId) -> f32"),
+        "missing get():\n{rust}"
+    );
+    assert!(
+        rust.contains("pub fn adjust(&mut self, a: AgentId, b: AgentId, delta: f32, tick: u32) -> f32"),
+        "missing adjust():\n{rust}"
+    );
+    assert!(
+        rust.contains("pub fn fold_event(&mut self, event: &Event, tick: u32)"),
+        "missing fold_event():\n{rust}"
+    );
+
+    // Fold arm wires the event's pair fields into adjust() with the same
+    // +1.0 delta the per_entity_topk(K>=2) emitter uses for its constant
+    // fold bodies.
+    assert!(
+        rust.contains("Event::StandingDelta { a, b, .. }"),
+        "fold arm should destructure the StandingDelta event's pair fields:\n{rust}"
+    );
+    assert!(
+        rust.contains("self.adjust(*a, *b, 1.0, tick);"),
+        "fold arm should call adjust with +1.0:\n{rust}"
+    );
+}
+
+/// Task 1.5 — reads and writes canonicalise the pair so `get(a, b) ==
+/// get(b, a)`. The generated code either calls an explicit
+/// `canonical_pair` helper or performs a `raw()` comparison before
+/// indexing the slot array.
+#[test]
+fn symmetric_pair_topk_canonicalises_pair_reads() {
+    let comp = dsl_compiler::compile(SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "standing")
+        .expect("view IR should exist");
+    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+
+    assert!(
+        rust.contains("fn canonical_pair")
+            || rust.contains("a.raw() <= b.raw()")
+            || rust.contains("min("),
+        "get/adjust should canonicalise pair order:\n{rust}"
+    );
+    // The canonical form is invoked from both the reader and the writer.
+    assert!(
+        rust.matches("Self::canonical_pair").count() >= 2,
+        "canonical_pair should be called from both get() and adjust():\n{rust}"
+    );
+}

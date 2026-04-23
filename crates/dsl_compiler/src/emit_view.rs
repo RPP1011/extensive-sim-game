@@ -73,13 +73,13 @@ fn emit_view_result(view: &ViewIR, source_file: Option<&str>) -> Result<String, 
             emit_lazy_fn(&mut out, view)?;
         }
         ViewKind::Materialized(hint) => {
-            // Topk(K>=2) lowers to Vec<[TopkSlot; K]> — no HashMap
-            // needed. Emit a slimmer import block to avoid an unused-
-            // import warning in the generated file.
+            // Topk(K>=2) and SymmetricPairTopK both lower to Vec<[Slot; K]>
+            // — no HashMap needed. Emit a slimmer import block to avoid an
+            // unused-import warning in the generated file.
             let uses_hashmap = !matches!(
                 hint,
                 StorageHint::PerEntityTopK { k, .. } if k >= 2
-            );
+            ) && !matches!(hint, StorageHint::SymmetricPairTopK { .. });
             emit_imports_materialized(&mut out, uses_hashmap);
             emit_materialized_struct(&mut out, view, hint)?;
         }
@@ -335,10 +335,15 @@ fn emit_materialized_struct(
                 )
             }
         }
-        StorageHint::SymmetricPairTopK { .. } => Err(EmitError::Unsupported(format!(
-            "`symmetric_pair_topk` storage hint on view `{}` has no CPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
-            view.name
-        ))),
+        StorageHint::SymmetricPairTopK { k } => emit_symmetric_pair_topk_struct(
+            out,
+            view,
+            initial,
+            handlers,
+            clamp,
+            view.decay.as_ref(),
+            k as usize,
+        ),
         StorageHint::PerEntityRing { .. } => Err(EmitError::Unsupported(format!(
             "`per_entity_ring` storage hint on view `{}` has no CPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
             view.name
@@ -1273,6 +1278,406 @@ fn emit_topk_k_fold_arm(
     writeln!(
         out,
         "                self.fold_one({observer_field}.raw(), {attacker_field}.raw(), 1.0, tick);"
+    )
+    .unwrap();
+    writeln!(out, "            }}").unwrap();
+    let _ = view;
+    Ok(())
+}
+
+/// Emit the `@symmetric_pair_topk(K = N)` shape (GPU cold-state replay plan
+/// task 1.5). Storage is `slots: Vec<[SymmetricPairEdge; K]>`, one array
+/// per agent. An edge `(a, b)` is always stored on the lower-id endpoint
+/// (the "owner") with `other` pointing at the higher-id endpoint. Reads
+/// canonicalise the query pair so `get(a, b) == get(b, a)` regardless of
+/// which side inserted.
+///
+/// Fold semantics mirror the `per_entity_topk` K>=2 path: find-or-insert-
+/// else-evict-weakest. "Weakest" is the slot with the smallest absolute
+/// value (cold-state standings can go negative; eviction on `|v|` keeps
+/// both strong allies and strong enemies out of the evict pool).
+///
+/// The emitter currently folds a constant `+= 1.0` per handler (matches
+/// the per_entity_topk K>=2 emitter — variable deltas are out of scope
+/// until Phase 3 lowers richer fold bodies).
+fn emit_symmetric_pair_topk_struct(
+    out: &mut String,
+    view: &ViewIR,
+    initial: &IrExprNode,
+    handlers: &[FoldHandlerIR],
+    clamp: Option<&(IrExprNode, IrExprNode)>,
+    decay: Option<&crate::ir::DecayHint>,
+    k: usize,
+) -> Result<(), EmitError> {
+    if view.params.len() != 2 {
+        return Err(EmitError::Unsupported(format!(
+            "`symmetric_pair_topk(K={k})` storage on view `{}` requires exactly 2 params (the symmetric pair); got {}",
+            view.name,
+            view.params.len()
+        )));
+    }
+    if decay.is_some() {
+        // Phase 3 can layer decay on top of the anchor-tick slot field;
+        // the emitter rejects it upfront for now to avoid emitting code
+        // whose semantics haven't been pinned down.
+        return Err(EmitError::Unsupported(format!(
+            "`symmetric_pair_topk` storage on view `{}` does not support `@decay` yet (GPU cold-state replay plan phase 3)",
+            view.name
+        )));
+    }
+    let val_ty = rust_type_for(&view.return_ty)?;
+    let k1 = rust_type_for(&view.params[0].ty)?;
+    let k2 = rust_type_for(&view.params[1].ty)?;
+    let a_name = view.params[0].name.as_str();
+    let b_name = view.params[1].name.as_str();
+    let ty_name = pascal_case(&view.name);
+    let edge_ty = format!("{ty_name}Edge");
+    let initial_lit = lower_scalar_literal(initial)?;
+
+    writeln!(
+        out,
+        "/// @materialized view `{}` — `storage = symmetric_pair_topk(K={k})`.",
+        view.name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// Pair-keyed symmetric storage: an edge `({a_name}, {b_name})` is stored once,"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// on the lower-id endpoint's slot array. Reads canonicalise the query pair so"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "/// `get({a_name}, {b_name}) == get({b_name}, {a_name})`. Fold: find-or-insert-else-evict-weakest-|v|."
+    )
+    .unwrap();
+
+    // Per-edge slot struct. `other == 0` marks an empty slot (AgentId is
+    // 1-based, matching the `per_entity_topk` convention).
+    writeln!(out, "#[derive(Debug, Clone, Copy, Default)]").unwrap();
+    writeln!(out, "pub struct {edge_ty} {{").unwrap();
+    writeln!(
+        out,
+        "    /// Raw AgentId of the higher-id endpoint. 0 means empty."
+    )
+    .unwrap();
+    writeln!(out, "    pub other: u32,").unwrap();
+    writeln!(out, "    /// Stored value for the symmetric pair.").unwrap();
+    writeln!(out, "    pub value: {val_ty},").unwrap();
+    writeln!(
+        out,
+        "    /// Tick when `value` was last written. Reserved for future decay."
+    )
+    .unwrap();
+    writeln!(out, "    pub anchor_tick: u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "#[derive(Debug, Default)]").unwrap();
+    writeln!(out, "pub struct {ty_name} {{").unwrap();
+    writeln!(
+        out,
+        "    /// One array of {k} slots per owner agent. `Vec::len()` grows on demand"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// as `fold_event` sees higher agent ids. Edges live on the lower-id side."
+    )
+    .unwrap();
+    writeln!(out, "    slots: Vec<[{edge_ty}; {k}]>,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "impl {ty_name} {{").unwrap();
+    writeln!(
+        out,
+        "    /// Slot count per owner — the `K` from `symmetric_pair_topk(K={k})`."
+    )
+    .unwrap();
+    writeln!(out, "    pub const K: usize = {k};").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(
+        out,
+        "    /// Number of owner slots currently provisioned. `fold_event` grows this"
+    )
+    .unwrap();
+    writeln!(out, "    /// on demand up to `max_id + 1`.").unwrap();
+    writeln!(out, "    pub fn len(&self) -> usize {{ self.slots.len() }}").unwrap();
+    writeln!(
+        out,
+        "    pub fn is_empty(&self) -> bool {{ self.slots.is_empty() }}"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // canonical_pair helper — min-id owns the edge, max-id is the "other".
+    writeln!(
+        out,
+        "    /// Canonicalise a pair: the lower-id endpoint owns the slot,"
+    )
+    .unwrap();
+    writeln!(out, "    /// the higher-id endpoint is the `other` field.").unwrap();
+    writeln!(
+        out,
+        "    fn canonical_pair({a_name}: {k1}, {b_name}: {k2}) -> ({k1}, {k2}) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if {a_name}.raw() <= {b_name}.raw() {{ ({a_name}, {b_name}) }} else {{ ({b_name}, {a_name}) }}"
+    )
+    .unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // get(): canonicalise then scan owner's slot array for `other == max_id`.
+    writeln!(
+        out,
+        "    /// Current value for the symmetric pair `({a_name}, {b_name})`. Pair order"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// is canonicalised so `get(x, y) == get(y, x)`. Returns `initial` when the"
+    )
+    .unwrap();
+    writeln!(out, "    /// pair isn't in the owner's top-{k}.").unwrap();
+    writeln!(
+        out,
+        "    pub fn get(&self, {a_name}: {k1}, {b_name}: {k2}) -> {val_ty} {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let (owner, other) = Self::canonical_pair({a_name}, {b_name});"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if owner.raw() == 0 || other.raw() == 0 {{ return {initial_lit}; }}"
+    )
+    .unwrap();
+    writeln!(out, "        let owner_slot = (owner.raw() - 1) as usize;").unwrap();
+    writeln!(out, "        let other_id = other.raw();").unwrap();
+    writeln!(
+        out,
+        "        let Some(row) = self.slots.get(owner_slot) else {{ return {initial_lit}; }};"
+    )
+    .unwrap();
+    writeln!(out, "        for s in row.iter() {{").unwrap();
+    writeln!(out, "            if s.other == other_id {{ return s.value; }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        {initial_lit}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // Internal row-access helper. Grows `slots` on demand.
+    writeln!(
+        out,
+        "    fn row_mut(&mut self, owner_slot: usize) -> &mut [{edge_ty}; {k}] {{"
+    )
+    .unwrap();
+    writeln!(out, "        if owner_slot >= self.slots.len() {{").unwrap();
+    writeln!(
+        out,
+        "            self.slots.resize(owner_slot + 1, [{edge_ty}::default(); {k}]);"
+    )
+    .unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        &mut self.slots[owner_slot]").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // adjust(): canonical upsert + clamp. Returns the post-write value.
+    let clamp_lo_lit = if let Some((lo, _)) = clamp {
+        Some(lower_scalar_literal(lo)?)
+    } else {
+        None
+    };
+    let clamp_hi_lit = if let Some((_, hi)) = clamp {
+        Some(lower_scalar_literal(hi)?)
+    } else {
+        None
+    };
+    writeln!(
+        out,
+        "    /// Add `delta` to the symmetric edge `({a_name}, {b_name})` and return the"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// resulting value. Upserts on canonical (min, max) order; evicts the"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    /// weakest-|value| slot when full, iff `|delta|` beats the weakest."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn adjust(&mut self, {a_name}: {k1}, {b_name}: {k2}, delta: {val_ty}, tick: u32) -> {val_ty} {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        let (owner, other) = Self::canonical_pair({a_name}, {b_name});"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        if owner.raw() == 0 || other.raw() == 0 {{ return {initial_lit}; }}"
+    )
+    .unwrap();
+    writeln!(out, "        let owner_slot = (owner.raw() - 1) as usize;").unwrap();
+    writeln!(out, "        let other_id = other.raw();").unwrap();
+    writeln!(out, "        let row = self.row_mut(owner_slot);").unwrap();
+    // 1. Find existing edge.
+    writeln!(out, "        for i in 0..{k} {{").unwrap();
+    writeln!(out, "            if row[i].other == other_id {{").unwrap();
+    writeln!(out, "                let updated = row[i].value + delta;").unwrap();
+    if let (Some(lo), Some(hi)) = (&clamp_lo_lit, &clamp_hi_lit) {
+        writeln!(
+            out,
+            "                let updated = updated.clamp({lo}, {hi});"
+        )
+        .unwrap();
+    }
+    writeln!(out, "                row[i].value = updated;").unwrap();
+    writeln!(out, "                row[i].anchor_tick = tick;").unwrap();
+    writeln!(out, "                return updated;").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    // 2. Empty slot.
+    writeln!(out, "        for i in 0..{k} {{").unwrap();
+    writeln!(out, "            if row[i].other == 0 {{").unwrap();
+    if let (Some(lo), Some(hi)) = (&clamp_lo_lit, &clamp_hi_lit) {
+        writeln!(
+            out,
+            "                let v = delta.clamp({lo}, {hi});"
+        )
+        .unwrap();
+    } else {
+        writeln!(out, "                let v = delta;").unwrap();
+    }
+    writeln!(
+        out,
+        "                row[i] = {edge_ty} {{ other: other_id, value: v, anchor_tick: tick }};"
+    )
+    .unwrap();
+    writeln!(out, "                return v;").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    // 3. Evict smallest-|value| if |delta| beats it.
+    writeln!(
+        out,
+        "        // Full row — evict the slot with the smallest |value| if `|delta|`"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "        // beats it, else drop the fold (too weak to displace)."
+    )
+    .unwrap();
+    writeln!(out, "        let mut min_i: usize = 0;").unwrap();
+    writeln!(out, "        let mut min_mag: {val_ty} = row[0].value.abs();").unwrap();
+    writeln!(out, "        for i in 1..{k} {{").unwrap();
+    writeln!(out, "            let m = row[i].value.abs();").unwrap();
+    writeln!(out, "            if m < min_mag {{ min_mag = m; min_i = i; }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        if delta.abs() > min_mag {{").unwrap();
+    if let (Some(lo), Some(hi)) = (&clamp_lo_lit, &clamp_hi_lit) {
+        writeln!(
+            out,
+            "            let v = delta.clamp({lo}, {hi});"
+        )
+        .unwrap();
+    } else {
+        writeln!(out, "            let v = delta;").unwrap();
+    }
+    writeln!(
+        out,
+        "            row[min_i] = {edge_ty} {{ other: other_id, value: v, anchor_tick: tick }};"
+    )
+    .unwrap();
+    writeln!(out, "            return v;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "        {initial_lit}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    // fold_event dispatch. One arm per handler; each pipes the pair fields
+    // into `adjust` with a constant +1.0 delta (same convention as the
+    // per_entity_topk K>=2 emitter).
+    writeln!(
+        out,
+        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
+    )
+    .unwrap();
+    if handlers.is_empty() {
+        writeln!(out, "        let _ = (event, tick);").unwrap();
+    } else {
+        writeln!(out, "        match event {{").unwrap();
+        for h in handlers {
+            emit_symmetric_pair_fold_arm(out, view, a_name, b_name, h)?;
+        }
+        writeln!(out, "            _ => {{}}").unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
+}
+
+/// Emit one match arm for a `symmetric_pair_topk` fold handler. Mirrors
+/// `emit_topk_k_fold_arm` — figure out which event field maps to the
+/// view's first/second pair param, then call `adjust` with delta = 1.0.
+fn emit_symmetric_pair_fold_arm(
+    out: &mut String,
+    view: &ViewIR,
+    a_name: &str,
+    b_name: &str,
+    handler: &FoldHandlerIR,
+) -> Result<(), EmitError> {
+    let ev_name = handler.pattern.name.as_str();
+    let mut first_field: Option<&str> = None;
+    let mut second_field: Option<&str> = None;
+    for b in &handler.pattern.bindings {
+        let field = b.field.as_str();
+        if let crate::ir::IrPattern::Bind { name, .. } = &b.value {
+            if name == a_name {
+                first_field = Some(field);
+            } else if name == b_name {
+                second_field = Some(field);
+            }
+        }
+    }
+    // Fall back to canonical `(a, b)` event-field names when the pattern
+    // doesn't explicitly rebind — mirrors the per_entity_topk convention.
+    let (first_field, second_field) = match (first_field, second_field) {
+        (Some(a), Some(b)) => (a, b),
+        _ => ("a", "b"),
+    };
+    writeln!(
+        out,
+        "            Event::{ev_name} {{ {first_field}, {second_field}, .. }} => {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                self.adjust(*{first_field}, *{second_field}, 1.0, tick);"
     )
     .unwrap();
     writeln!(out, "            }}").unwrap();
