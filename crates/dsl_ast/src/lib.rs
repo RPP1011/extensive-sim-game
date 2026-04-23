@@ -9,3 +9,13 @@ pub mod tokens;
 pub mod error;
 pub mod resolve_error;
 pub mod ir;
+pub mod parser;
+
+pub use ast::{Decl, Program, Span, Spanned};
+pub use error::ParseError;
+pub use resolve_error::ResolveError;
+
+/// Parse a DSL source string into a `Program` AST.
+pub fn parse(source: &str) -> Result<Program, ParseError> {
+    parser::parse_program(source)
+}
