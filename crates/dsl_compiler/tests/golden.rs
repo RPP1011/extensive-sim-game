@@ -205,5 +205,49 @@ fn orphan_trailing_annotation_at_eof_errors() {
     );
 }
 
+#[test]
+fn cpu_only_annotation_parses_on_physics_rule() {
+    use dsl_compiler::ast::Decl;
+    let src = r#"
+event AgentDied { agent_id: AgentId }
+
+@cpu_only physics narrative_rule @phase(event) {
+    on AgentDied { agent_id: a } { }
+}
+"#;
+    let program = dsl_compiler::parse(src).expect("should parse");
+    let rule = program
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Physics(p) if p.name == "narrative_rule" => Some(p),
+            _ => None,
+        })
+        .expect("rule not found in parsed program");
+    assert!(rule.cpu_only, "cpu_only flag should be set on narrative_rule");
+}
+
+#[test]
+fn rule_without_cpu_only_defaults_to_false() {
+    use dsl_compiler::ast::Decl;
+    let src = r#"
+event AgentDied { agent_id: AgentId }
+
+physics gpu_rule @phase(event) {
+    on AgentDied { agent_id: a } { }
+}
+"#;
+    let program = dsl_compiler::parse(src).expect("should parse");
+    let rule = program
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Physics(p) if p.name == "gpu_rule" => Some(p),
+            _ => None,
+        })
+        .expect("rule not found");
+    assert!(!rule.cpu_only, "cpu_only should default to false");
+}
+
 #[allow(dead_code)]
 fn _unused_path_helper(_: &Path) {}

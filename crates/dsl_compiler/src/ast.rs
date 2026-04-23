@@ -286,6 +286,13 @@ pub struct PhysicsDecl {
     pub annotations: Vec<Annotation>,
     pub name: String,
     pub handlers: Vec<PhysicsHandler>,
+    /// Intentionally-CPU-only rule. Set when the source carries the
+    /// `@cpu_only` annotation. The compiler emits the CPU handler but
+    /// skips WGSL emission and the GPU event-kind dispatcher entry.
+    /// Bypasses the GPU-emittable validator so string-formatting / heap
+    /// allocation / other non-WGSL primitives in the body don't fail the
+    /// build.
+    pub cpu_only: bool,
     pub span: Span,
 }
 

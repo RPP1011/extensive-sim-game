@@ -78,6 +78,11 @@ fn absorb_trailing_annotations(c: &mut Cursor, d: &mut Decl) -> PResult<()> {
             let span = decl_span_mut(d);
             span.end = c.pos;
         }
+        // Keep typed flags on decls in sync with the annotation vec. Today
+        // only `PhysicsDecl::cpu_only` derives from a trailing annotation.
+        if let Decl::Physics(p) = d {
+            p.cpu_only = p.annotations.iter().any(|a| a.name == "cpu_only");
+        }
     }
 }
 
@@ -812,7 +817,14 @@ fn physics_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> P
         }
         handlers.push(parse_physics_handler(c)?);
     }
-    Ok(PhysicsDecl { annotations: all, name, handlers, span: Span::new(start, c.pos) })
+    let cpu_only = all.iter().any(|a| a.name == "cpu_only");
+    Ok(PhysicsDecl {
+        annotations: all,
+        name,
+        handlers,
+        cpu_only,
+        span: Span::new(start, c.pos),
+    })
 }
 
 fn parse_physics_handler(c: &mut Cursor) -> PResult<PhysicsHandler> {
