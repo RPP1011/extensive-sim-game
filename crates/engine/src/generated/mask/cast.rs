@@ -17,7 +17,7 @@ pub fn mask_cast(state: &SimState, self_id: AgentId, ability: crate::ability::Ab
     if !(state.ability_registry.get(ability).is_some()) {
         return false;
     }
-    if !((state.tick as u32) >= state.agent_cooldown_next_ready(self_id).unwrap_or(0)) {
+    if !(state.can_cast_ability(self_id, (ability).slot() as u8, state.tick as u32)) {
         return false;
     }
     if !((state.agent_engaged_with(self_id)).is_none()) {

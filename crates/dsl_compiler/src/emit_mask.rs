@@ -750,18 +750,22 @@ fn lower_namespace_call(
             expect_arity(args, 2, "abilities.known")?;
             Ok(format!("state.ability_registry.get({}).is_some()", lowered[1]))
         }
-        // `abilities.cooldown_ready(agent, ability)` — folds the
-        // `state.tick >= agent_cooldown_next_ready(agent)` read into
-        // one boolean. The ability arg is unused at v1 (cooldowns are
-        // per-agent, not per-ability); kept in the signature so the
-        // future per-ability-cooldown migration doesn't touch call
-        // sites. Task 157.
+        // `abilities.cooldown_ready(agent, ability)` — gates on BOTH
+        // the per-agent global cooldown (GCD) and the per-(agent, slot)
+        // local cooldown. Introduced at task 157 with a single-cursor
+        // gate; migrated 2026-04-22 by the ability-cooldowns subsystem
+        // (Task 6) to route through `SimState::can_cast_ability`, which
+        // reads the dual-cursor pair. The `ability` arg carries a live
+        // `AbilityId` from the `mask Cast` runtime signature; we call
+        // `.slot()` on it to pick out the local-cooldown slot, then
+        // bound-cast to `u8` (helper's signature is `u8`; the registry
+        // caps ability slots at `MAX_ABILITIES = 8`, so the truncation
+        // is lossless).
         (NamespaceId::Abilities, "cooldown_ready") => {
             expect_arity(args, 2, "abilities.cooldown_ready")?;
-            let _ = &lowered[1];
             Ok(format!(
-                "((state.tick as u32) >= state.agent_cooldown_next_ready({}).unwrap_or(0))",
-                lowered[0]
+                "state.can_cast_ability({}, ({}).slot() as u8, state.tick as u32)",
+                lowered[0], lowered[1]
             ))
         }
         // `abilities.hostile_only(ability)` reads `AbilityProgram.gate
