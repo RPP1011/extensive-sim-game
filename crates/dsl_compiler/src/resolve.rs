@@ -103,6 +103,12 @@ mod stdlib {
             // Ability-registry accessor: `is_known(id)`, `cooldown_ticks(id)`,
             // `effects(id)`. Used by the `cast` physics rule.
             ("abilities", NamespaceId::Abilities),
+            // Singular alias for `abilities`. Added 2026-04-22 (ability-
+            // cooldowns subsystem, Task 7) so designers can write
+            // `ability::on_cooldown(<slot>)` in mask / physics predicates
+            // with the natural singular form. Shares the same method
+            // schema as `abilities::`.
+            ("ability", NamespaceId::Abilities),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -313,6 +319,15 @@ mod stdlib {
             // `from`-clause only accepts an `AgentId` source).
             (NamespaceId::Abilities, "known") => Some((2, IrType::Bool)),
             (NamespaceId::Abilities, "cooldown_ready") => Some((2, IrType::Bool)),
+            // Designer-facing inverted form of `cooldown_ready`. Takes a
+            // literal slot index and lets the mask / physics predicate
+            // phrase gates as `ability::on_cooldown(s)` (returns `true`
+            // when the slot is still on cooldown — the natural "gate
+            // blocks" reading). Added 2026-04-22 (ability-cooldowns
+            // subsystem, Task 7). The implicit subject is the rule's
+            // `self`; the slot arg coerces to `u8` via the argument
+            // lowering in the emitter.
+            (NamespaceId::Abilities, "on_cooldown") => Some((1, IrType::Bool)),
             (NamespaceId::Abilities, "hostile_only") => Some((1, IrType::Bool)),
             (NamespaceId::Abilities, "range") => Some((1, IrType::F32)),
             // Engagement accessor — wraps `state.agent_engaged_with(id)`,

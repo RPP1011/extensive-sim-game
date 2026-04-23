@@ -1150,6 +1150,18 @@ fn lower_namespace_call(
                 lowered[0]
             ))
         }
+        // `ability::on_cooldown(slot)` — inverted, designer-facing form
+        // of `abilities.cooldown_ready`. Returns `true` when the
+        // (self, slot) pair is still on cooldown. The implicit subject
+        // is the rule's `self` local; the slot arg is coerced to `u8`.
+        // Added 2026-04-22 (ability-cooldowns subsystem, Task 7).
+        (NamespaceId::Abilities, "on_cooldown") => {
+            expect_arity(args, 1, "ability.on_cooldown")?;
+            Ok(format!(
+                "(!state.can_cast_ability(self, ({}) as u8, state.tick as u32))",
+                lowered[0]
+            ))
+        }
         (NamespaceId::Abilities, "effects") => {
             expect_arity(args, 1, "abilities.effects")?;
             // Yields owned `EffectOp` values so the `for`-loop body doesn't

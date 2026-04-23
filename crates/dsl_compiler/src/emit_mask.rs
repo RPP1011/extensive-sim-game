@@ -768,6 +768,20 @@ fn lower_namespace_call(
                 lowered[0], lowered[1]
             ))
         }
+        // `ability::on_cooldown(slot)` — inverted, designer-facing form
+        // of `abilities.cooldown_ready`. Takes a literal slot index and
+        // returns `true` when the slot is still on cooldown. The
+        // implicit subject is the rule's `self` (`self_id` after the
+        // mask emitter rewrite). The slot arg is coerced to `u8` so the
+        // grammar can accept a plain integer literal. Added 2026-04-22
+        // (ability-cooldowns subsystem, Task 7).
+        (NamespaceId::Abilities, "on_cooldown") => {
+            expect_arity(args, 1, "ability.on_cooldown")?;
+            Ok(format!(
+                "(!state.can_cast_ability(self_id, ({}) as u8, state.tick as u32))",
+                lowered[0]
+            ))
+        }
         // `abilities.hostile_only(ability)` reads `AbilityProgram.gate
         // .hostile_only`. Unknown ids fall back to `false` — same
         // permissive behaviour as `abilities.is_known` in physics
@@ -1144,6 +1158,35 @@ mod tests {
     fn lower_expr_local_rewrites_self() {
         let out = lower_expr(&local("self", 0)).unwrap();
         assert_eq!(out, "self_id");
+    }
+
+    #[test]
+    fn ability_on_cooldown_lowers_to_can_cast_ability_call() {
+        // `ability::on_cooldown(slot)` — Task 7 of the ability-cooldowns
+        // subsystem. The mask emitter lowers the call to the inverted
+        // form of `SimState::can_cast_ability`, implicitly threading
+        // `self_id` as the caster. The slot expression is coerced to
+        // `u8` at the call site so the grammar can accept a plain
+        // integer literal.
+        let lit_int = IrExprNode { kind: IrExpr::LitInt(0), span: span() };
+        let call = ns_call(NamespaceId::Abilities, "on_cooldown", vec![lit_int]);
+        let out = lower_expr(&call).expect("on_cooldown lowers");
+        assert!(
+            out.contains("can_cast_ability"),
+            "expected lowered form to reference can_cast_ability, got: {out}"
+        );
+        assert!(
+            out.starts_with("(!"),
+            "expected inverted (`!`) form so `on_cooldown` reads as \"gate blocks\", got: {out}"
+        );
+        assert!(
+            out.contains("self_id"),
+            "expected implicit `self_id` as caster, got: {out}"
+        );
+        assert!(
+            out.contains("state.tick as u32"),
+            "expected `state.tick as u32` as the now arg, got: {out}"
+        );
     }
 
     #[test]
