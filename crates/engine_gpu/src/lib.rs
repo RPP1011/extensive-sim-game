@@ -959,6 +959,7 @@ impl GpuBackend {
                     &mut encoder,
                     agents_buf,
                     sync_scoring_kernel.scoring_buf(),
+                    mask_sim_cfg_ref,
                     &cascade_ctx.apply_event_ring,
                     agent_cap,
                 )
@@ -1807,12 +1808,19 @@ impl GpuBackend {
         };
 
         let movement_cfg = crate::movement::cfg_from_state(state);
+        // Task 2.7: build the shared SimCfg snapshot — the movement
+        // kernel reads `sim_cfg.tick` + `sim_cfg.move_speed` +
+        // `sim_cfg.kin_radius` via the shared storage binding. The
+        // sync path uploads this into the kernel's pool-owned fallback
+        // buffer. Reuses `apply_sim_cfg` above (same `SimState`, same
+        // tick) rather than re-snapshotting.
         let slots_final = match cascade_ctx.movement.run_and_readback(
             &self.device,
             &self.queue,
             &slots_after_apply,
             scoring_outputs,
             movement_cfg,
+            &apply_sim_cfg,
             &cascade_ctx.apply_event_ring,
         ) {
             Ok(slots) => slots,
