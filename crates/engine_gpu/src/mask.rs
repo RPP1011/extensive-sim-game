@@ -441,7 +441,7 @@ impl FusedMaskKernel {
         &self.bindings
     }
 
-    fn ensure_pool(&mut self, device: &wgpu::Device, agent_cap: u32) {
+    pub(crate) fn ensure_pool(&mut self, device: &wgpu::Device, agent_cap: u32) {
         if let Some(p) = &self.pool {
             if p.agent_cap == agent_cap {
                 return;
@@ -873,6 +873,316 @@ impl FusedMaskKernel {
         }
 
         Ok(out)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mask unpack kernel — GPU-side SoA derivation from GpuAgentSlot AoS.
+// ---------------------------------------------------------------------------
+//
+// The fused mask WGSL binds three SoA buffers (agent_pos / agent_alive
+// / agent_creature_type), sized to `agent_cap`. The sync path packs
+// these host-side via [`FusedMaskKernel::upload_soa_from_state`]; the
+// resident batch path would do the same 100× per 100-tick batch which
+// (a) costs ~450 µs/tick at N=2048 in pack loops + write_buffer and
+// (b) reads STALE `SimState` positions because `step_batch` mutates
+// `resident_agents_buf` on GPU without syncing back to `SimState`
+// mid-batch.
+//
+// [`MaskUnpackKernel`] fixes both: a one-pass compute kernel reads
+// the caller-supplied `resident_agents_buf` (packed `GpuAgentSlot`)
+// and writes the three SoA buffers inside the same encoder the batch
+// loop is building, so targeting decisions see current GPU state at
+// every tick.
+
+/// Unpack-kernel config uniform. One u32 (agent_cap) + 12 bytes of
+/// padding for 16B alignment.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+struct UnpackCfg {
+    agent_cap: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+/// WGSL source for the mask-SoA unpack kernel. Mirrors the physics
+/// `AgentSlot` layout (64 bytes) 1:1 — if `GpuAgentSlot` changes in
+/// `physics.rs`, this struct must move in lockstep.
+const MASK_UNPACK_WGSL: &str = r#"
+struct Vec3f32 { x: f32, y: f32, z: f32 };
+
+struct AgentSlot {
+    hp: f32,
+    max_hp: f32,
+    shield_hp: f32,
+    attack_damage: f32,
+    alive: u32,
+    creature_type: u32,
+    engaged_with: u32,
+    stun_expires_at: u32,
+    slow_expires_at: u32,
+    slow_factor_q8: u32,
+    cooldown_next_ready: u32,
+    pos_x: f32,
+    pos_y: f32,
+    pos_z: f32,
+    _pad0: u32,
+    _pad1: u32,
+};
+
+struct UnpackCfg {
+    agent_cap: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read>       agents:            array<AgentSlot>;
+@group(0) @binding(1) var<storage, read_write> pos_out:           array<Vec3f32>;
+@group(0) @binding(2) var<storage, read_write> alive_out:         array<u32>;
+@group(0) @binding(3) var<storage, read_write> creature_type_out: array<u32>;
+@group(0) @binding(4) var<uniform>             cfg:               UnpackCfg;
+
+@compute @workgroup_size(64)
+fn cs_mask_unpack(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= cfg.agent_cap) { return; }
+    let a = agents[i];
+    pos_out[i] = Vec3f32(a.pos_x, a.pos_y, a.pos_z);
+    alive_out[i] = a.alive;
+    if (a.alive == 0u) {
+        creature_type_out[i] = 0xFFFFFFFFu;
+    } else {
+        creature_type_out[i] = a.creature_type;
+    }
+}
+"#;
+
+/// GPU-side unpack kernel: derives mask's SoA buffers (pos / alive /
+/// creature_type) from the resident `GpuAgentSlot` AoS each tick.
+///
+/// Lives alongside [`FusedMaskKernel`] — shares its pool's SoA buffers
+/// so the mask dispatch reads fresh data without any host-side pack.
+pub struct MaskUnpackKernel {
+    pipeline: wgpu::ComputePipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
+    /// Cfg uniform buffer — 16 bytes, lazy-init on first use. The
+    /// bind group is rebuilt every call since `agents_buf` + mask's
+    /// SoA buffer handles can change if the backend grows
+    /// `agent_cap`; bind-group construction is cheap relative to the
+    /// ~20–1700 µs/tick work this kernel replaces.
+    cfg_buf: Option<wgpu::Buffer>,
+    /// Last agent_cap written to `cfg_buf`. Skip redundant writes —
+    /// agent_cap is stable across a batch (only changes on
+    /// `ensure_pool` grow, which also flips the SoA buffer handles so
+    /// the bind group rebuilds anyway).
+    last_agent_cap: u32,
+    /// Cached bind group keyed by agent_cap. The (agents_buf,
+    /// mask_pool_SoA, cfg_buf) tuple is stable across a batch; we
+    /// invalidate on agent_cap change (which swaps agents_buf +
+    /// mask's SoA handles, invalidating this bind group). Saves a
+    /// bind-group build per batch tick.
+    cached_bg: Option<(u32, wgpu::BindGroup)>,
+}
+
+impl MaskUnpackKernel {
+    /// Build the unpack pipeline on `device`. WGSL is statically
+    /// embedded — no emitter round-trip.
+    pub fn new(device: &wgpu::Device) -> Result<Self, KernelError> {
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("engine_gpu::mask_unpack::wgsl"),
+            source: wgpu::ShaderSource::Wgsl(MASK_UNPACK_WGSL.into()),
+        });
+        if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+            return Err(KernelError::ShaderCompile(format!(
+                "{err}\n--- WGSL source ---\n{MASK_UNPACK_WGSL}"
+            )));
+        }
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("engine_gpu::mask_unpack::bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("engine_gpu::mask_unpack::pl"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("engine_gpu::mask_unpack::cp"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("cs_mask_unpack"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+            cfg_buf: None,
+            last_agent_cap: 0,
+            cached_bg: None,
+        })
+    }
+
+    /// Record the unpack dispatch into `encoder`. Reads `agents_buf`
+    /// (packed `GpuAgentSlot` AoS, size ≥ agent_cap slots), writes
+    /// mask's internal SoA buffers.
+    ///
+    /// Must be called AFTER [`FusedMaskKernel::ensure_pool`] (which
+    /// allocates the SoA buffers this kernel writes into) — the
+    /// caller-supplied `mask` argument hands the pool to us. Any
+    /// subsequent mask dispatch on `mask` in the same encoder reads
+    /// the fresh SoA.
+    pub fn encode_unpack(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        mask: &mut FusedMaskKernel,
+        agents_buf: &wgpu::Buffer,
+        agent_cap: u32,
+    ) {
+        // Make sure mask's pool exists at `agent_cap` — that's where
+        // our SoA writes land, and the subsequent mask dispatch reads
+        // from. Cheap no-op if already sized.
+        mask.ensure_pool(device, agent_cap);
+        let pool = mask.pool.as_ref().expect("mask pool ensured");
+
+        // (Re)write cfg uniform only if agent_cap changed. Stable
+        // across a batch — agent_cap only changes on `ensure_pool`
+        // grow, which forces a SoA-buffer rebuild anyway. Saves a
+        // 16-byte `queue.write_buffer` per batch tick.
+        let cfg_buf = match &self.cfg_buf {
+            Some(b) if self.last_agent_cap == agent_cap => b,
+            Some(b) => {
+                let cfg = UnpackCfg { agent_cap, _pad0: 0, _pad1: 0, _pad2: 0 };
+                queue.write_buffer(b, 0, bytemuck::bytes_of(&cfg));
+                self.last_agent_cap = agent_cap;
+                b
+            }
+            None => {
+                let cfg = UnpackCfg { agent_cap, _pad0: 0, _pad1: 0, _pad2: 0 };
+                let b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("engine_gpu::mask_unpack::cfg"),
+                    contents: bytemuck::bytes_of(&cfg),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                self.cfg_buf = Some(b);
+                self.last_agent_cap = agent_cap;
+                self.cfg_buf.as_ref().unwrap()
+            }
+        };
+
+        // Reuse cached bind group when agent_cap is unchanged. The
+        // caller-supplied `agents_buf` is assumed stable across a
+        // batch (enforced by `GpuBackend::ensure_resident_init` —
+        // agent_cap grow rebuilds `resident_agents_buf` AND invokes
+        // `ensure_pool(..., agent_cap)` on the mask pool, both of
+        // which trip the cap mismatch below).
+        let need_rebuild = match &self.cached_bg {
+            Some((cap, _)) => *cap != agent_cap,
+            None => true,
+        };
+        if need_rebuild {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("engine_gpu::mask_unpack::bg"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: agents_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: pool.pos_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: pool.alive_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: pool.creature_type_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry { binding: 4, resource: cfg_buf.as_entire_binding() },
+                ],
+            });
+            self.cached_bg = Some((agent_cap, bg));
+        }
+        let bind_group = &self
+            .cached_bg
+            .as_ref()
+            .expect("cached_bg populated above")
+            .1;
+
+        // Zero every per-mask bitmap — the mask kernel uses atomicOr
+        // to set bits, so leftover bits from a previous tick would
+        // poison the next read. The sync path does this inside
+        // `upload_soa_from_state` via `write_buffer`; here we record
+        // a GPU clear so the whole tick stays on the GPU.
+        let mask_bytes = (pool.mask_words as u64) * 4;
+        for buf in &pool.bitmap_bufs {
+            encoder.clear_buffer(buf, 0, Some(mask_bytes));
+        }
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::mask_unpack::cpass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline);
+            cpass.set_bind_group(0, bind_group, &[]);
+            let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
     }
 }
 

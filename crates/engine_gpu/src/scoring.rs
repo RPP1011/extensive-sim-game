@@ -447,6 +447,14 @@ struct ScoringPool {
     // matching `primary_buffer / anchor_buffer / ids_buffer` on
     // ViewStorage. Order matches `scoring_view_binding_order`.
     view_buf_handles: Vec<(wgpu::Buffer, Option<wgpu::Buffer>, Option<wgpu::Buffer>)>,
+
+    /// Last-known `view_storage.agent_cap()` captured by the resident
+    /// path at `initialize_for_batch` time. Stable across a batch —
+    /// ViewStorage only rebuilds when agent_cap grows, which forces a
+    /// pool rebuild here too. Read by
+    /// [`ScoringKernel::refresh_tick_cfg_for_resident`] to re-emit cfg
+    /// without carrying `&ViewStorage` into the per-tick loop.
+    cached_view_agent_cap: u32,
 }
 
 impl ScoringKernel {
@@ -684,7 +692,7 @@ impl ScoringKernel {
         })
     }
 
-    fn ensure_pool(&mut self, device: &wgpu::Device, agent_cap: u32, num_mask_words: u32) {
+    pub(crate) fn ensure_pool(&mut self, device: &wgpu::Device, agent_cap: u32, num_mask_words: u32) {
         if let Some(p) = &self.pool {
             if p.agent_cap == agent_cap && p.num_mask_words == num_mask_words {
                 return;
@@ -753,6 +761,7 @@ impl ScoringKernel {
             // rebuilds its bind group per-run from live view_storage
             // so it leaves this empty.
             view_buf_handles: Vec::new(),
+            cached_view_agent_cap: 0,
         });
     }
 
@@ -1135,7 +1144,88 @@ impl ScoringKernel {
             handles.push((primary, anchor, ids));
         }
         pool.view_buf_handles = handles;
+        pool.cached_view_agent_cap = view_storage.agent_cap();
 
+        Ok(())
+    }
+
+    /// One-time initialisation for the resident batch path. Call
+    /// from `ensure_resident_init` (or on `agent_cap` grow):
+    ///
+    ///   * Packs a full `GpuAgentData` from `state` and writes it
+    ///     into the pool so the static fields (`attack_range`,
+    ///     `hunger`, `thirst`, `fatigue`, pads) are populated with
+    ///     tick-0 values — the GPU-side unpack kernel
+    ///     ([`ScoringUnpackKernel::encode_unpack`]) only overwrites
+    ///     the mutable subset (pos/hp/shield/alive/ct/hp_pct) on
+    ///     subsequent ticks.
+    ///   * Writes the cfg uniform with tick-0 values (radii + sizes
+    ///     + view_agent_cap).
+    ///   * Zeros the scoring output buffer.
+    ///   * Snapshots `view_storage`'s buffer handles into the pool
+    ///     so `run_resident` can build its bind group without
+    ///     `&ViewStorage`. Handles are stable across ticks within a
+    ///     given `agent_cap`.
+    ///
+    /// The per-tick companion is
+    /// [`Self::refresh_tick_cfg_for_resident`], which updates only
+    /// the fields that change within a batch (`tick`).
+    pub fn initialize_for_batch(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        state: &SimState,
+        view_storage: &ViewStorage,
+    ) -> Result<(), ScoringError> {
+        // Full upload path is identical to the sync path's
+        // `upload_soa_from_state`: pack agent_data, write cfg, zero
+        // scoring_out, snapshot view handles. We reuse it verbatim
+        // since it was written to be idempotent.
+        self.upload_soa_from_state(device, queue, state, view_storage)
+    }
+
+    /// Per-tick cfg refresh for the resident batch path. Rewrites
+    /// only the fields that change within a batch (`tick`). Other
+    /// cfg scalars (radii, num_entries, num_mask_words,
+    /// view_agent_cap) are constant across a batch and remain at
+    /// their tick-0 values from
+    /// [`Self::initialize_for_batch`].
+    ///
+    /// `view_agent_cap` is captured ONCE at init time because the
+    /// flat row-major view buffers are sized to the ViewStorage cap,
+    /// which does not change within a batch (ViewStorage only
+    /// rebuilds on `agent_cap` grow, handled by
+    /// `initialize_for_batch`).
+    pub fn refresh_tick_cfg_for_resident(
+        &mut self,
+        queue: &wgpu::Queue,
+        state: &SimState,
+    ) -> Result<(), ScoringError> {
+        let pool = self.pool.as_ref().ok_or_else(|| {
+            ScoringError::Dispatch(
+                "refresh_tick_cfg_for_resident: pool not initialised"
+                    .to_string(),
+            )
+        })?;
+        // cfg is 32 bytes (8 u32-equivalents). Only `tick` changes
+        // per iteration inside a batch, but WebGPU write_buffer
+        // requires COPY_BUFFER_ALIGNMENT (4) chunks and the kernel
+        // reads the full struct, so rewrite all 32 bytes each time.
+        // The cost is ~0.5 µs/tick — negligible vs the ~450 µs/tick
+        // pack+upload path this replaces.
+        let cfg = GpuConfig {
+            combat_attack_range: state.config.combat.attack_range,
+            movement_max_move_radius: state.config.movement.max_move_radius,
+            num_entries: self.scoring_table_len,
+            num_mask_words: state.agent_cap().div_ceil(32).max(1),
+            tick: state.tick,
+            // Take from the pool's previously-snapshotted value —
+            // preserves the `initialize_for_batch`-time cap.
+            view_agent_cap: pool.cached_view_agent_cap,
+            _pad0: 0,
+            _pad1: 0,
+        };
+        queue.write_buffer(&pool.cfg_buf, 0, bytemuck::cast_slice(&[cfg]));
         Ok(())
     }
 
@@ -1784,6 +1874,313 @@ fn compare_scalar_cpu(op: u8, lhs: f32, rhs: f32) -> bool {
         PredicateDescriptor::OP_GT => lhs > rhs,
         PredicateDescriptor::OP_NE => lhs != rhs,
         _ => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scoring unpack kernel — GPU-side GpuAgentData derivation from
+// GpuAgentSlot AoS.
+// ---------------------------------------------------------------------------
+//
+// The sync path packs `GpuAgentData` host-side via `pack_agent_data`
+// and `write_buffer`s it into the scoring pool's `agent_data_buf`. In
+// the resident batch path that's ~450 µs/tick at N=2048 and, worse,
+// reads STALE `SimState` (the GPU mutates `resident_agents_buf`
+// without syncing `SimState` mid-batch).
+//
+// `ScoringUnpackKernel` fixes both. Each tick it:
+//   * reads `resident_agents_buf` (packed `GpuAgentSlot`)
+//   * writes pos / hp / max_hp / shield_hp / alive / creature_type /
+//     hp_pct into the scoring pool's `agent_data_buf`
+//
+// The remaining `GpuAgentData` fields (`attack_range`, `hunger`,
+// `thirst`, `fatigue`, `target_hp_pct_unused`, pads) live in
+// `SimState.hot_*` only — no GPU kernel mutates them — so they stay
+// at their tick-0 values written by the caller's
+// [`ScoringKernel::initialize_static_agent_data`] helper and are
+// NEVER touched by this kernel. If a future GPU kernel starts
+// mutating any of them, either pack them into `GpuAgentSlot` or
+// extend this unpack kernel's output.
+
+/// Unpack-kernel config uniform. One u32 (agent_cap) + 12 bytes of
+/// padding for 16B uniform alignment.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+struct ScoringUnpackCfg {
+    agent_cap: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+/// WGSL source for the scoring-AgentData unpack kernel. `AgentSlot`
+/// matches `engine_gpu::physics::GpuAgentSlot` (64 bytes) verbatim;
+/// `AgentData` matches `engine_gpu::scoring::GpuAgentData` (64
+/// bytes) verbatim.
+const SCORING_UNPACK_WGSL: &str = r#"
+struct Vec3f32 { x: f32, y: f32, z: f32 };
+
+struct AgentSlot {
+    hp: f32,
+    max_hp: f32,
+    shield_hp: f32,
+    attack_damage: f32,
+    alive: u32,
+    creature_type: u32,
+    engaged_with: u32,
+    stun_expires_at: u32,
+    slow_expires_at: u32,
+    slow_factor_q8: u32,
+    cooldown_next_ready: u32,
+    pos_x: f32,
+    pos_y: f32,
+    pos_z: f32,
+    _pad0: u32,
+    _pad1: u32,
+};
+
+// Must match `GpuAgentData` 1:1 — see `scoring::GpuAgentData` and
+// the WGSL emitter's `AgentData` struct. Fields this kernel WRITES:
+//   pos, hp, max_hp, shield_hp, alive, creature_type, hp_pct.
+// Fields this kernel LEAVES ALONE (populated once at init from
+// `SimState.hot_*`): attack_range, hunger, thirst, fatigue,
+// target_hp_pct_unused, _pad2, _pad3.
+struct AgentData {
+    pos: Vec3f32,
+    hp: f32,
+    max_hp: f32,
+    shield_hp: f32,
+    attack_range: f32,
+    hunger: f32,
+    thirst: f32,
+    fatigue: f32,
+    alive: u32,
+    creature_type: u32,
+    hp_pct: f32,
+    target_hp_pct_unused: f32,
+    _pad2: u32,
+    _pad3: u32,
+};
+
+struct UnpackCfg {
+    agent_cap: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+};
+
+@group(0) @binding(0) var<storage, read>       agents:     array<AgentSlot>;
+@group(0) @binding(1) var<storage, read_write> agent_data: array<AgentData>;
+@group(0) @binding(2) var<uniform>             cfg:        UnpackCfg;
+
+@compute @workgroup_size(64)
+fn cs_scoring_unpack(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= cfg.agent_cap) { return; }
+    let a = agents[i];
+
+    // Overwrite only the mutable fields; leave tick-0-sourced needs +
+    // attack_range + pads alone.
+    agent_data[i].pos = Vec3f32(a.pos_x, a.pos_y, a.pos_z);
+    agent_data[i].hp = a.hp;
+    agent_data[i].max_hp = a.max_hp;
+    agent_data[i].shield_hp = a.shield_hp;
+    agent_data[i].alive = a.alive;
+    if (a.alive == 0u) {
+        agent_data[i].creature_type = 0xFFFFFFFFu;
+        agent_data[i].hp_pct = 0.0;
+    } else {
+        agent_data[i].creature_type = a.creature_type;
+        // Guard against max_hp==0 (dead-at-spawn / zeroed slot).
+        if (a.max_hp > 0.0) {
+            agent_data[i].hp_pct = a.hp / a.max_hp;
+        } else {
+            agent_data[i].hp_pct = 0.0;
+        }
+    }
+}
+"#;
+
+/// GPU-side unpack kernel: derives scoring's `agent_data_buf`
+/// (`GpuAgentData` AoS) from the resident `GpuAgentSlot` AoS each
+/// tick, writing only the fields mutated by GPU kernels (pos / hp /
+/// shield / alive / creature_type / hp_pct). Static fields are set
+/// once by [`ScoringKernel::initialize_static_agent_data`].
+pub struct ScoringUnpackKernel {
+    pipeline: wgpu::ComputePipeline,
+    bind_group_layout: wgpu::BindGroupLayout,
+    cfg_buf: Option<wgpu::Buffer>,
+    /// Last agent_cap written to `cfg_buf`. Skip redundant writes —
+    /// agent_cap is stable across a batch (only changes on
+    /// `ensure_pool` grow, which also flips the `agent_data_buf`
+    /// handle so the bind group rebuilds anyway).
+    last_agent_cap: u32,
+    /// Cached bind group keyed by agent_cap. Saves a per-tick bind
+    /// group build in `step_batch`. Invalidated on agent_cap change.
+    cached_bg: Option<(u32, wgpu::BindGroup)>,
+}
+
+impl ScoringUnpackKernel {
+    /// Build the unpack pipeline on `device`. WGSL is statically
+    /// embedded.
+    pub fn new(device: &wgpu::Device) -> Result<Self, ScoringError> {
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("engine_gpu::scoring_unpack::wgsl"),
+            source: wgpu::ShaderSource::Wgsl(SCORING_UNPACK_WGSL.into()),
+        });
+        if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+            return Err(ScoringError::ShaderCompile(format!(
+                "{err}\n--- WGSL source ---\n{SCORING_UNPACK_WGSL}"
+            )));
+        }
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("engine_gpu::scoring_unpack::bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("engine_gpu::scoring_unpack::pl"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("engine_gpu::scoring_unpack::cp"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("cs_scoring_unpack"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+
+        Ok(Self {
+            pipeline,
+            bind_group_layout,
+            cfg_buf: None,
+            last_agent_cap: 0,
+            cached_bg: None,
+        })
+    }
+
+    /// Record the unpack dispatch into `encoder`. Reads `agents_buf`
+    /// (packed `GpuAgentSlot`) and writes the mutable subset of
+    /// `GpuAgentData` into `scoring`'s pool `agent_data_buf`.
+    ///
+    /// Callers MUST invoke [`ScoringKernel::initialize_static_agent_data`]
+    /// at least once for this `agent_cap` before the first
+    /// `encode_unpack` so tick-0 values for the static fields
+    /// (attack_range, hunger, thirst, fatigue) are present in the
+    /// pool buffer.
+    pub fn encode_unpack(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        scoring: &mut ScoringKernel,
+        agents_buf: &wgpu::Buffer,
+        agent_cap: u32,
+    ) -> Result<(), ScoringError> {
+        let num_mask_words = agent_cap.div_ceil(32).max(1);
+        scoring.ensure_pool(device, agent_cap, num_mask_words);
+        let pool = scoring.pool.as_ref().expect("scoring pool ensured");
+
+        // (Re)write cfg uniform only if agent_cap changed. Stable
+        // across a batch — saves a 16-byte `queue.write_buffer` per
+        // batch tick.
+        let cfg_buf = match &self.cfg_buf {
+            Some(b) if self.last_agent_cap == agent_cap => b,
+            Some(b) => {
+                let cfg = ScoringUnpackCfg { agent_cap, _pad0: 0, _pad1: 0, _pad2: 0 };
+                queue.write_buffer(b, 0, bytemuck::bytes_of(&cfg));
+                self.last_agent_cap = agent_cap;
+                b
+            }
+            None => {
+                let cfg = ScoringUnpackCfg { agent_cap, _pad0: 0, _pad1: 0, _pad2: 0 };
+                let b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("engine_gpu::scoring_unpack::cfg"),
+                    contents: bytemuck::bytes_of(&cfg),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                self.cfg_buf = Some(b);
+                self.last_agent_cap = agent_cap;
+                self.cfg_buf.as_ref().unwrap()
+            }
+        };
+
+        // Reuse cached bind group when agent_cap is unchanged.
+        // `agents_buf` and `pool.agent_data_buf` are both stable
+        // across a batch — `agents_buf` gets replaced only on
+        // `ensure_resident_init` agent_cap grow, which triggers a
+        // `scoring.ensure_pool` rebuild and flips the cap-mismatch
+        // check here. Saves a bind-group build per batch tick.
+        let need_rebuild = match &self.cached_bg {
+            Some((cap, _)) => *cap != agent_cap,
+            None => true,
+        };
+        if need_rebuild {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("engine_gpu::scoring_unpack::bg"),
+                layout: &self.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: agents_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: pool.agent_data_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: cfg_buf.as_entire_binding() },
+                ],
+            });
+            self.cached_bg = Some((agent_cap, bg));
+        }
+        let bind_group = &self
+            .cached_bg
+            .as_ref()
+            .expect("cached_bg populated above")
+            .1;
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::scoring_unpack::cpass"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline);
+            cpass.set_bind_group(0, bind_group, &[]);
+            let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
+
+        Ok(())
     }
 }
 

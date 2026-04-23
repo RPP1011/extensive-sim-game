@@ -88,13 +88,25 @@ fn step_batch_then_snapshot() {
         "events must accumulate during batch"
     );
 
-    // Alive count: use the sim's own tracker for cross-check (allowing ±25%).
-    let alive_in_state = state.agents_alive().count();
+    // Alive-count sanity. The batch path does NOT sync CPU
+    // `SimState` back from the GPU mid-batch, so `state.agents_alive()`
+    // reflects tick-0 (pre-batch) alive count — every spawned agent.
+    // The snapshot, by contrast, reflects actual GPU-side combat
+    // across 100 batch ticks and SHOULD show meaningful casualties.
+    //
+    // Bound: snap alive count must be strictly < spawn count (combat
+    // happened) but > 0 (world isn't empty). Refined in Phase E when
+    // the mask/scoring unpack kernels replaced the stale-state
+    // host-side pack — previously the batch targeted tick-0 neighbours
+    // and combat was underwhelming; now GPU targeting tracks current
+    // state so more agents actually die.
     let alive_in_snap = snap.agents.iter().filter(|a| a.alive != 0).count();
-    let lo = (alive_in_state as f64 * 0.75) as usize;
-    let hi = (alive_in_state as f64 * 1.25) as usize;
     assert!(
-        alive_in_snap >= lo && alive_in_snap <= hi,
-        "snapshot alive count {alive_in_snap} outside ±25% of state {alive_in_state} (range {lo}..={hi})"
+        alive_in_snap > 0,
+        "snapshot alive count should be > 0 — world cleared itself ({alive_in_snap} alive)"
+    );
+    assert!(
+        (alive_in_snap as u32) < N_AGENTS,
+        "snapshot alive count ({alive_in_snap}) == spawn ({N_AGENTS}) — combat appears to be a no-op"
     );
 }
