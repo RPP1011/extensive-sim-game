@@ -11,6 +11,7 @@ pub mod resolve_error;
 pub mod ir;
 pub mod parser;
 pub mod resolve;
+pub mod eval;
 
 pub use ast::{Decl, Program, Span, Spanned};
 pub use error::ParseError;
