@@ -168,7 +168,12 @@ fn scan_main(@builtin(local_invocation_id) lid: vec3<u32>) {
         }
 
         let inclusive = select(scratch_b[tid], scratch_a[tid], src_is_a);
-        let exclusive = saturate_sub(inclusive, val);
+        // Convert inclusive → exclusive via shift-right (tid - 1),
+        // NOT `saturate_sub(inclusive, val)` — saturate_sub is wrong
+        // once inclusive has saturated at u32::MAX. Proven by the
+        // `prefix_scan_saturates` test.
+        let exclusive = select(scratch_b[tid - 1u], scratch_a[tid - 1u], src_is_a);
+        let exclusive = select(exclusive, 0u, tid == 0u);
 
         if (global_idx < CELLS) {
             cell_offsets[global_idx] = saturate_add(exclusive, carry);
