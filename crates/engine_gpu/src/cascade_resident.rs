@@ -148,14 +148,23 @@ impl ResidentSpatialBuffers {
 /// Caller-owned ability-registry buffers the physics resident path
 /// reads from. Sized for `MAX_ABILITIES` × `MAX_EFFECTS` at construction
 /// — fixed by the kernel's WGSL bounds so the buffers never need to
-/// grow. Contents are re-uploaded from `PackedAbilityRegistry` each
-/// tick because the registry can change (unit composition / ability
-/// lineage).
+/// grow.
+///
+/// Registry contents don't change on most ticks (only on unit
+/// composition / ability lineage changes). `upload` hashes the packed
+/// registry and skips the 4× queue.write_buffer call if unchanged —
+/// saves ~64 KB of host-to-GPU traffic + 4 encoder-internal
+/// serialisation points per tick on the hot path.
 struct ResidentAbilityBuffers {
     known: wgpu::Buffer,
     cooldown: wgpu::Buffer,
     effects_count: wgpu::Buffer,
     effects: wgpu::Buffer,
+    /// Hash of the last uploaded `PackedAbilityRegistry`. `None` =
+    /// never uploaded. Computed over the concatenation of the four
+    /// slices that get written; collision-resistant enough for a
+    /// same-tick dirty check (FxHash over ~64 KB is microseconds).
+    last_hash: std::cell::Cell<Option<u64>>,
 }
 
 impl ResidentAbilityBuffers {
@@ -181,10 +190,29 @@ impl ResidentAbilityBuffers {
             cooldown: u32_buf("cascade_resident::abilities::cooldown"),
             effects_count: u32_buf("cascade_resident::abilities::effects_count"),
             effects,
+            last_hash: std::cell::Cell::new(None),
         }
     }
 
     fn upload(&self, queue: &wgpu::Queue, abilities: &PackedAbilityRegistry) {
+        // Content-addressed dirty check: skip the 4× write_buffer if
+        // the registry bytes haven't changed since last upload. The
+        // hash is over all four slice contents — any single-byte
+        // change anywhere triggers a full re-upload. `std::hash`'s
+        // DefaultHasher is SipHash-1-3 which is fine for a
+        // non-adversarial equality check (the alternative — a per-tick
+        // memcmp against the old bytes — would need keeping a shadow
+        // copy, which defeats the point).
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bytemuck::cast_slice::<_, u8>(&abilities.known).hash(&mut hasher);
+        bytemuck::cast_slice::<_, u8>(&abilities.cooldown).hash(&mut hasher);
+        bytemuck::cast_slice::<_, u8>(&abilities.effects_count).hash(&mut hasher);
+        bytemuck::cast_slice::<_, u8>(&abilities.effects).hash(&mut hasher);
+        let h = hasher.finish();
+        if self.last_hash.get() == Some(h) {
+            return;
+        }
         queue.write_buffer(&self.known, 0, bytemuck::cast_slice(&abilities.known));
         queue.write_buffer(&self.cooldown, 0, bytemuck::cast_slice(&abilities.cooldown));
         queue.write_buffer(
@@ -193,6 +221,7 @@ impl ResidentAbilityBuffers {
             bytemuck::cast_slice(&abilities.effects_count),
         );
         queue.write_buffer(&self.effects, 0, bytemuck::cast_slice(&abilities.effects));
+        self.last_hash.set(Some(h));
     }
 }
 
