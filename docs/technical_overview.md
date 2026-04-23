@@ -158,6 +158,31 @@ At N=100,000 with active combat (~20,000 deaths across 10 ticks), per-tick cost 
 
 The per-event fold dispatch is the next bottleneck. Fixing it (segmented reduction over events grouped by target cell) is the next architectural step.
 
+### 10.1 Batch API — GPU-resident cascade (2026-04-22)
+
+Alongside the per-tick `SimBackend::step()` path, `engine_gpu::GpuBackend` exposes an additive batch API:
+
+- `step_batch(n)` — records N ticks into a single command encoder. One `queue.submit`, one `device.poll(Wait)` at end. Eliminates the ~12 per-tick CPU/GPU fences of the sync path.
+- `snapshot()` — double-buffered staging; returns agent state + events accumulated since the previous snapshot. Non-blocking GPU copy; one-frame lag.
+
+The batch path uses indirect dispatch for cascade iterations (physics kernel writes next-iter workgroup count to a GPU-resident args buffer; zero workgroups means the dispatch GPU-no-ops), caller-owned spatial-output buffers so two queries per tick don't alias, and GPU unpack kernels that derive mask and scoring's kernel-specific layouts from `resident_agents_buf` each tick (no per-tick CPU→GPU uploads).
+
+Parity tests and deterministic chronicle rendering stay on the sync path. The batch path is explicitly non-deterministic in event fold order — acceptable because it's intended for rendering and headless observation, not replay.
+
+Perf envelope (llvmpipe fallback, N-ladder 8..2048, 200 timed ticks):
+
+| N | Sync GPU µs/tick | Batch GPU µs/tick | Batch/Sync |
+|---|---|---|---|
+| 8 | 1679 | 835 | 0.50× |
+| 32 | 1722 | 738 | 0.43× |
+| 128 | 1958 | 1362 | 0.70× |
+| 512 | 2814 | 2981 | 1.06× |
+| 2048 | 6442 | 8114 | 1.26× |
+
+At N ≤ 128 the batch path halves per-tick wall clock by amortising dispatch overhead across the batch. At N = 2048 the cascade work itself dominates, and batch-mode-specific overhead (double spatial rebuild per tick for kin + engagement radii, per-call bind-group construction, always-dispatch-8-iters pattern) pushes batch ~25% slower than sync. The batch path is a correctness-preserving observation primitive today; driving N=2048 below the sync curve requires cascade-level optimisations that are out of scope for the batch API itself.
+
+Design + plan: `docs/superpowers/specs/2026-04-22-gpu-resident-cascade-design.md`, `docs/superpowers/plans/2026-04-22-gpu-resident-cascade.md`.
+
 ## 11. What isn't yet right
 
 - Three full-tick byte-exact parity tests at the 50-agent canonical fixture are passing, but the GPU intentionally omits three CPU-only side effects — opportunity attacks, engagement-slow decel on movement, and flee direction with kin-bias are either absent on GPU or implemented as pure-away — so any test exercising those won't reproduce CPU byte-for-byte. Statistical parity (alive counts, event multisets) holds at all tested scales.
