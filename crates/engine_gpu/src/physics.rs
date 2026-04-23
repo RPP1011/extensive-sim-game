@@ -207,6 +207,21 @@ pub struct PhysicsCfg {
     pub _pad: u32,
 }
 
+/// Task B7 — resident-path uniform. Tells the resident kernel which
+/// slot to read its `num_events` from (`read_slot`) and which slot to
+/// publish the next iteration's workgroup count + event count to
+/// (`write_slot`). Agent cap + other global scalars keep coming from
+/// the shared `PhysicsCfg` so the resident path reuses the existing
+/// uniform rather than duplicating it.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable, Debug)]
+pub struct ResidentPhysicsCfg {
+    pub read_slot: u32,
+    pub write_slot: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
 // ---------------------------------------------------------------------------
 // Error surface
 // ---------------------------------------------------------------------------
@@ -659,6 +674,119 @@ pub fn build_physics_shader_with_chronicle(
     Ok(out)
 }
 
+/// Task B7 — build the resident-path physics shader.
+///
+/// Mirrors [`build_physics_shader_with_chronicle`] but emits:
+///   * three additional bindings (13/14/15) for the indirect-args
+///     cascade: `indirect_args` (storage, read_write,
+///     `array<vec3<u32>>`), `num_events_buf` (storage, read_write,
+///     `array<u32>`), and `resident_cfg` (uniform,
+///     `{read_slot, write_slot, ...}`).
+///   * a separate compute entry point `cs_physics_resident` that reads
+///     its `num_events` bound from `num_events_buf[resident_cfg.read_slot]`
+///     instead of `cfg.num_events`, and — from thread `gid.x == 0u` only
+///     — writes the next iteration's indirect args back into slot
+///     `resident_cfg.write_slot`.
+///
+/// Concat-at-call-site vs emitter extension: we build a FULL separate
+/// shader here (not a string-concat epilogue over the sync shader
+/// source) because the resident path needs a different bind-group
+/// layout — appending to the sync shader would force the resident BGL
+/// into the sync pipeline and break `run_batch`'s byte-identical
+/// behaviour. Sharing the WGSL body text via this dedicated builder
+/// keeps both shaders in lockstep without touching `dsl_compiler`.
+pub fn build_physics_shader_resident(
+    physics: &[PhysicsIR],
+    ctx: &EmitContext<'_>,
+    event_ring_capacity: u32,
+    chronicle_ring_capacity: u32,
+) -> Result<String, PhysicsError> {
+    // Start from the sync shader so the resident path inherits every
+    // struct definition, stub fn, rule body, dispatcher, and the
+    // base 0..12 bindings verbatim. This keeps the two shaders in
+    // lockstep — any new stub / const / struct added for sync flows
+    // into resident automatically.
+    let mut out =
+        build_physics_shader_with_chronicle(physics, ctx, event_ring_capacity, chronicle_ring_capacity)?;
+
+    // Append the resident-only bindings. These are additive — the sync
+    // pipeline doesn't include them in its bind-group layout, but WGSL
+    // allows unused bindings at the module level as long as no entry
+    // point references them. We gate the references behind the
+    // `cs_physics_resident` entry so the sync `cs_physics` entry keeps
+    // its unchanged binding set.
+    //
+    // `indirect_args` is declared as `array<u32>` (NOT
+    // `array<vec3<u32>>`) because WGSL pads `vec3<u32>` to 16-byte
+    // stride in storage arrays, which would misalign the host's
+    // 12-byte `IndirectArgs` layout and the 12-byte offset
+    // `dispatch_workgroups_indirect` reads at. Indexing as
+    // `indirect_args[slot*3 + N]` gives the tight 12-byte stride the
+    // indirect-dispatch API expects.
+    out.push_str(
+        "\n// ---- Task B7 — resident-path bindings + entry point ----\n\
+         @group(0) @binding(13) var<storage, read_write> indirect_args: array<u32>;\n\
+         @group(0) @binding(14) var<storage, read_write> num_events_buf: array<u32>;\n\n\
+         struct ResidentPhysicsCfg {\n\
+         \x20 read_slot: u32,\n\
+         \x20 write_slot: u32,\n\
+         \x20 _pad0: u32,\n\
+         \x20 _pad1: u32,\n\
+         };\n\
+         @group(0) @binding(15) var<uniform> resident_cfg: ResidentPhysicsCfg;\n\n",
+    );
+
+    // Resident entry point. Reads num_events from the indirect slot
+    // chain instead of `cfg.num_events`, and at end-of-dispatch thread
+    // 0 publishes the next iter's workgroup count + num_events into
+    // slot `write_slot`. When `emitted == 0u`, we write
+    // `(0u, 1u, 1u)` — subsequent `dispatch_workgroups_indirect` calls
+    // become GPU no-ops, which is the convergence signal without a
+    // readback.
+    out.push_str(&format!(
+        "@compute @workgroup_size({PHYSICS_WORKGROUP_SIZE})\n\
+         fn cs_physics_resident(@builtin(global_invocation_id) gid: vec3<u32>) {{\n\
+         \x20   let i = gid.x;\n\
+         \x20   let num_events_this_iter = num_events_buf[resident_cfg.read_slot];\n\
+         \x20   if (i < num_events_this_iter) {{\n\
+         \x20       physics_dispatch(i);\n\
+         \x20   }}\n\
+         \x20   // End-of-kernel: thread 0 writes the next iter's wg +\n\
+         \x20   // event count. Workgroup-scope barriers aren't required\n\
+         \x20   // here because `atomicLoad` on `event_ring_tail` sees the\n\
+         \x20   // post-dispatch tail; every emitter finishes its\n\
+         \x20   // `atomicAdd` before the workgroup exits.\n\
+         \x20   //\n\
+         \x20   // NOTE: this assumes all emitter threads across all\n\
+         \x20   // workgroups have also completed. A true global barrier\n\
+         \x20   // is not available in WGSL, but in practice the driver\n\
+         \x20   // serialises workgroups within a dispatch, and this\n\
+         \x20   // kernel's single-writer thread is in the SAME dispatch.\n\
+         \x20   // The indirect dispatch for the NEXT iter reads the new\n\
+         \x20   // slot value AFTER this entire dispatch retires, via the\n\
+         \x20   // wgpu command-buffer ordering guarantee. That ordering\n\
+         \x20   // is what makes this correct without a cross-workgroup\n\
+         \x20   // barrier.\n\
+         \x20   if (i == 0u) {{\n\
+         \x20       let emitted = atomicLoad(&event_ring_tail);\n\
+         \x20       let wg_size = {PHYSICS_WORKGROUP_SIZE}u;\n\
+         \x20       let cap_wg = (cfg.agent_cap + wg_size - 1u) / wg_size;\n\
+         \x20       let requested = (emitted + wg_size - 1u) / wg_size;\n\
+         \x20       var wg = requested;\n\
+         \x20       if (wg > cap_wg) {{ wg = cap_wg; }}\n\
+         \x20       // 12-byte stride layout: (x, y, z) at slot*3 + (0, 1, 2).\n\
+         \x20       let base = resident_cfg.write_slot * 3u;\n\
+         \x20       indirect_args[base + 0u] = wg;\n\
+         \x20       indirect_args[base + 1u] = 1u;\n\
+         \x20       indirect_args[base + 2u] = 1u;\n\
+         \x20       num_events_buf[resident_cfg.write_slot] = emitted;\n\
+         \x20   }}\n\
+         }}\n",
+    ));
+
+    Ok(out)
+}
+
 /// Inject `let wgsl_world_tick = cfg.tick;` right after the rule's
 /// `fn name(event_idx: u32) {` header. The emitter produces that
 /// identifier as a bare name in emit sites; declaring it as a function-
@@ -926,6 +1054,13 @@ fn spatial_nearby_kin_at(agent: u32, radius: f32, idx: u32) -> u32 {
 pub struct PhysicsKernel {
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
+    /// Task B7 — resident pipeline + BGL. Separate from the sync
+    /// pipeline so the sync path's bind-group shape stays unchanged.
+    /// The resident BGL extends the sync BGL with bindings 13/14/15:
+    /// `indirect_args` (storage rw), `num_events_buf` (storage rw),
+    /// `resident_cfg` (uniform).
+    pipeline_resident: wgpu::ComputePipeline,
+    bind_group_layout_resident: wgpu::BindGroupLayout,
     /// Event ring owned by the kernel — physics writes into this ring
     /// and the driver drains it after each dispatch.
     event_ring: GpuEventRing,
@@ -936,6 +1071,12 @@ pub struct PhysicsKernel {
     /// [`GpuBackend::flush_chronicle`].
     chronicle_ring: GpuChronicleRing,
     pool: Option<BufferPool>,
+    /// Task B7 — resident-path pool. Holds cfg uniforms (main +
+    /// resident), scratch spatial / ability buffers that the resident
+    /// path still needs to bind even though caller supplies agents /
+    /// events. Separate from `pool` so the sync path's allocations
+    /// aren't perturbed by resident-only callers.
+    pool_resident: Option<ResidentBufferPool>,
     /// Capacity the ring was provisioned with. Retained for diagnostics
     /// (Piece 3 may surface it in run reports); currently unread so the
     /// `allow(dead_code)` keeps the compiler happy.
@@ -946,6 +1087,20 @@ pub struct PhysicsKernel {
     /// buffer size.
     #[allow(dead_code)]
     chronicle_ring_capacity: u32,
+}
+
+/// Task B7 — resident-path pool. Holds ONLY what the resident
+/// dispatch cannot get from caller-supplied buffers: the main
+/// `PhysicsCfg` uniform and the new `ResidentPhysicsCfg` uniform
+/// (read_slot / write_slot).
+///
+/// Agents / abilities / kin / nearest-hostile / events / event ring
+/// all flow in as caller-supplied buffers, matching the B5/B6 pattern
+/// where the resident caller owns the big state arrays.
+struct ResidentBufferPool {
+    agent_cap: u32,
+    cfg_buf: wgpu::Buffer,
+    resident_cfg_buf: wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -1088,15 +1243,81 @@ impl PhysicsKernel {
             cache: None,
         });
 
+        // ---- Task B7 — resident pipeline + BGL ----
+        //
+        // Built from a DIFFERENT shader source (the sync source plus
+        // the 13/14/15 bindings + cs_physics_resident entry point).
+        // A separate shader module is mandatory because the sync
+        // shader source has no declaration for bindings 13-15 — adding
+        // them here would perturb the sync shader bytes. Keeping the
+        // resident path in its own module isolates the WGSL epilogue
+        // from the sync byte-identity contract.
+        let resident_wgsl = build_physics_shader_resident(
+            physics,
+            ctx,
+            event_ring_capacity,
+            chronicle_ring_capacity,
+        )?;
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let shader_resident = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("engine_gpu::physics::wgsl_resident"),
+            source: wgpu::ShaderSource::Wgsl(resident_wgsl.clone().into()),
+        });
+        if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+            return Err(PhysicsError::ShaderCompile(format!(
+                "resident: {err}\n--- WGSL source ---\n{resident_wgsl}"
+            )));
+        }
+        let bgl_entries_resident = [
+            storage_rw(0),  // agents
+            storage_ro(1),  // abilities_known
+            storage_ro(2),  // abilities_cooldown
+            storage_ro(3),  // abilities_effects_count
+            storage_ro(4),  // abilities_effects
+            storage_ro(5),  // kin_lists
+            storage_ro(6),  // nearest_hostile
+            storage_ro(7),  // events_in
+            storage_rw(8),  // event_ring records
+            storage_rw(9),  // event_ring tail
+            uniform(10),    // cfg
+            storage_rw(11), // chronicle_ring records
+            storage_rw(12), // chronicle_ring tail
+            storage_rw(13), // indirect_args
+            storage_rw(14), // num_events_buf
+            uniform(15),    // resident_cfg
+        ];
+        let bind_group_layout_resident =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("engine_gpu::physics::bgl_resident"),
+                entries: &bgl_entries_resident,
+            });
+        let pipeline_layout_resident = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("engine_gpu::physics::pl_resident"),
+            bind_group_layouts: &[&bind_group_layout_resident],
+            push_constant_ranges: &[],
+        });
+        let pipeline_resident =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("engine_gpu::physics::cp_resident"),
+                layout: Some(&pipeline_layout_resident),
+                module: &shader_resident,
+                entry_point: Some("cs_physics_resident"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+
         let event_ring = GpuEventRing::new(device, event_ring_capacity);
         let chronicle_ring = GpuChronicleRing::new(device, chronicle_ring_capacity);
 
         Ok(Self {
             pipeline,
             bind_group_layout,
+            pipeline_resident,
+            bind_group_layout_resident,
             event_ring,
             chronicle_ring,
             pool: None,
+            pool_resident: None,
             event_ring_capacity,
             chronicle_ring_capacity,
         })
@@ -1555,6 +1776,229 @@ impl PhysicsKernel {
             },
         })
     }
+
+    /// Task B7 — ensure the resident-path cfg-uniform pool is allocated
+    /// and sized for `agent_cap`. The resident path's compute inputs
+    /// (agents / abilities / kin / events / event_ring) all flow in as
+    /// caller-supplied buffers, so this pool holds only the two
+    /// uniforms the kernel still needs.
+    fn ensure_resident_pool(&mut self, device: &wgpu::Device, agent_cap: u32) {
+        let want_agent_cap = agent_cap.max(1);
+        if let Some(p) = &self.pool_resident {
+            if p.agent_cap == want_agent_cap {
+                return;
+            }
+        }
+        let cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::physics::resident::cfg"),
+            size: std::mem::size_of::<PhysicsCfg>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let resident_cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::physics::resident::resident_cfg"),
+            size: std::mem::size_of::<ResidentPhysicsCfg>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.pool_resident = Some(ResidentBufferPool {
+            agent_cap: want_agent_cap,
+            cfg_buf,
+            resident_cfg_buf,
+        });
+    }
+
+    /// Task B7 — resident-path sibling to [`Self::run_batch`].
+    ///
+    /// Records ONE physics iteration dispatch into `encoder` using
+    /// `dispatch_workgroups_indirect`, reading its workgroup count from
+    /// `indirect_args.buffer()` at byte offset
+    /// `indirect_args.slot_offset(read_slot)`. At end of dispatch, the
+    /// kernel (thread 0) writes the workgroup count for iteration
+    /// `write_slot` into `indirect_args[write_slot]` AND the event
+    /// count into `num_events_buf[write_slot]`. When the kernel
+    /// emitted zero events, the write lands `(0u, 1u, 1u)` — subsequent
+    /// `dispatch_workgroups_indirect` calls become GPU no-ops,
+    /// converging the cascade without a readback.
+    ///
+    /// The caller chains MAX_CASCADE_ITERATIONS calls with
+    /// `(read_slot, write_slot)` pairs: iter 0 reads slot 0 (pre-seeded
+    /// by the caller with the initial event count + workgroup count),
+    /// writes slot 1; iter 1 reads slot 1, writes slot 2; and so on.
+    /// Slot 0's seed is written by the driver (typically a tiny "seed"
+    /// kernel that reads `apply_event_ring.tail` and writes
+    /// `(ceil(tail/WG), 1, 1)` into slot 0 + `tail` into
+    /// `num_events_buf[0]`).
+    ///
+    /// ### Scope (this signature intentionally differs from the plan)
+    ///
+    /// The plan sketch's signature collapses ability / kin buffers into
+    /// single handles; the implementation splits them back out to match
+    /// the sync path's bind-group layout (4 ability buffers, 1 kin
+    /// buffer, 1 nearest-hostile buffer). This keeps the WGSL shared
+    /// between sync + resident and avoids the caller having to re-pack
+    /// data into an aliased layout. It also adds `events_in_buf`
+    /// explicitly — the WGSL binding 7 needs a read-only buffer of
+    /// records, and wgpu forbids aliasing the same buffer as both
+    /// read-only and read-write in the same bind group, so events_in
+    /// cannot be satisfied from `event_ring.records_buffer()` alone.
+    /// The C1/C2 driver (future work) will own the ping-pong between
+    /// the input events buffer and the output event ring.
+    ///
+    /// ### Preconditions
+    ///
+    /// * `agents_buf` is at least `agent_cap * size_of::<GpuAgentSlot>()`
+    ///   bytes, STORAGE (read_write).
+    /// * `abilities_*_buf` match the sync `PackedAbilityRegistry` sizes.
+    /// * `kin_buf` / `nearest_hostile_buf` are sized per `agent_cap`.
+    /// * `events_in_buf` has at least `ceil(num_events/WG)*WG` records
+    ///   — beyond the current `num_events`, contents are ignored.
+    /// * `event_ring` is caller-owned; its tail should be reset by the
+    ///   caller before iter 0, then left alone (physics appends via
+    ///   atomicAdd).
+    /// * `indirect_args` has at least `write_slot+1` slots.
+    /// * `num_events_buf_size_u32 >= write_slot+1`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_batch_resident(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        agents_buf: &wgpu::Buffer,
+        abilities_known_buf: &wgpu::Buffer,
+        abilities_cooldown_buf: &wgpu::Buffer,
+        abilities_effects_count_buf: &wgpu::Buffer,
+        abilities_effects_buf: &wgpu::Buffer,
+        kin_buf: &wgpu::Buffer,
+        nearest_hostile_buf: &wgpu::Buffer,
+        events_in_buf: &wgpu::Buffer,
+        event_ring: &GpuEventRing,
+        chronicle_ring: &GpuChronicleRing,
+        indirect_args: &crate::gpu_util::indirect::IndirectArgsBuffer,
+        num_events_buf: &wgpu::Buffer,
+        read_slot: u32,
+        write_slot: u32,
+        cfg: PhysicsCfg,
+    ) -> Result<(), PhysicsError> {
+        if read_slot >= indirect_args.slots() || write_slot >= indirect_args.slots() {
+            return Err(PhysicsError::Dispatch(format!(
+                "indirect slot OOB: read={read_slot} write={write_slot} slots={}",
+                indirect_args.slots()
+            )));
+        }
+        let agent_cap = cfg.agent_cap;
+        self.ensure_resident_pool(device, agent_cap);
+        let pool = self
+            .pool_resident
+            .as_ref()
+            .expect("resident pool ensured");
+
+        // Uniform uploads. The main `cfg` uniform carries agent_cap,
+        // tick, engagement range, etc. — `num_events` is ignored by the
+        // resident entry (it reads from `num_events_buf[read_slot]`
+        // instead) so we leave whatever the caller supplied.
+        queue.write_buffer(&pool.cfg_buf, 0, bytemuck::bytes_of(&cfg));
+        let resident_cfg = ResidentPhysicsCfg {
+            read_slot,
+            write_slot,
+            _pad0: 0,
+            _pad1: 0,
+        };
+        queue.write_buffer(
+            &pool.resident_cfg_buf,
+            0,
+            bytemuck::bytes_of(&resident_cfg),
+        );
+
+        // Per-call bind group — every buffer except the two cfg
+        // uniforms is caller-supplied, so we rebuild the group each
+        // call. Building once upfront is impossible: the caller may
+        // swap buffers between iterations (ping-pong events_in).
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("engine_gpu::physics::bg_resident"),
+            layout: &self.bind_group_layout_resident,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: agents_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: abilities_known_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: abilities_cooldown_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: abilities_effects_count_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: abilities_effects_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: kin_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: nearest_hostile_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: events_in_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: event_ring.records_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: event_ring.tail_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: pool.cfg_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: chronicle_ring.records_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: chronicle_ring.tail_buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: indirect_args.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 14,
+                    resource: num_events_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 15,
+                    resource: pool.resident_cfg_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::physics::cpass_resident"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.pipeline_resident);
+            cpass.set_bind_group(0, &bind_group, &[]);
+            cpass.dispatch_workgroups_indirect(
+                indirect_args.buffer(),
+                indirect_args.slot_offset(read_slot),
+            );
+        }
+        Ok(())
+    }
 }
 
 // Phase 9 (task 195): `drain_raw_records` retired. The fused
@@ -1623,6 +2067,14 @@ mod tests {
     }
 
     #[test]
+    fn resident_physics_cfg_size_is_16_bytes() {
+        // WGSL `ResidentPhysicsCfg { read_slot, write_slot, _pad0,
+        // _pad1 }` must match host size so the uniform upload has the
+        // exact bytes the kernel expects.
+        assert_eq!(std::mem::size_of::<ResidentPhysicsCfg>(), 16);
+    }
+
+    #[test]
     fn physics_shader_parses_through_naga() {
         // Assemble the full WGSL shader from every rule in physics.sim
         // and feed it through naga — catches integration bugs (missing
@@ -1656,6 +2108,57 @@ mod tests {
                 "physics shader failed naga parse:\n{e}\n--- WGSL source ---\n{wgsl}"
             );
         }
+    }
+
+    #[test]
+    fn physics_resident_shader_parses_through_naga() {
+        // Task B7 — mirror of `physics_shader_parses_through_naga` for
+        // the resident shader. Catches WGSL bugs in the appended
+        // bindings + `cs_physics_resident` entry point without
+        // requiring a GPU device.
+        use dsl_compiler::ast::Program;
+        use std::fs;
+        use std::path::PathBuf;
+
+        let mut root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        root.pop();
+        root.pop();
+        root.push("assets/sim");
+
+        let mut merged = Program { decls: Vec::new() };
+        for f in &["config.sim", "enums.sim", "events.sim", "physics.sim"] {
+            let src = fs::read_to_string(root.join(f)).expect("read sim source");
+            merged.decls.extend(dsl_compiler::parse(&src).expect("parse").decls);
+        }
+        let comp = dsl_compiler::compile_ast(merged).expect("resolve");
+
+        let ctx = EmitContext {
+            events: &comp.events,
+            event_tags: &comp.event_tags,
+        };
+        let wgsl = build_physics_shader_resident(
+            &comp.physics,
+            &ctx,
+            1024,
+            DEFAULT_CHRONICLE_CAPACITY,
+        )
+        .expect("build resident shader");
+
+        if let Err(e) = naga::front::wgsl::parse_str(&wgsl) {
+            panic!(
+                "physics resident shader failed naga parse:\n{e}\n--- WGSL source ---\n{wgsl}"
+            );
+        }
+
+        // Sanity check: the resident entry point is present.
+        assert!(
+            wgsl.contains("fn cs_physics_resident"),
+            "resident entry point missing"
+        );
+        // And the new bindings are declared.
+        assert!(wgsl.contains("@binding(13) var<storage, read_write> indirect_args"));
+        assert!(wgsl.contains("@binding(14) var<storage, read_write> num_events_buf"));
+        assert!(wgsl.contains("@binding(15) var<uniform> resident_cfg"));
     }
 
     #[test]
