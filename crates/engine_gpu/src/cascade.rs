@@ -88,10 +88,11 @@ use crate::view_storage::{FoldInputPair, FoldInputSlot, ViewStorage, ViewStorage
 /// behaviour there (see `run_cascade` below for the rationale).
 pub const MAX_CASCADE_ITERATIONS: u32 = 8;
 
-/// Default kin-radius used when precomputing `nearby_kin` — matches the
-/// 12 m fold radius used by `fear_spread_on_death` / `pack_focus_on_engagement`
-/// / `rally_on_wound` in `assets/sim/physics.sim`.
-pub const DEFAULT_KIN_RADIUS: f32 = 12.0;
+// NOTE: `DEFAULT_KIN_RADIUS` was retired 2026-04-22 once `kin_radius` became
+// a designer-tunable field on `state.config.combat` (commit `07f2a9c4`).
+// Callsites now source the radius from `state.config.combat.kin_radius`
+// directly. SimCfg's `kin_radius` field mirrors the same value for GPU
+// kernels that need it via the shared uniform.
 
 /// Aggregated result of a cascade run.
 #[derive(Debug)]
@@ -903,8 +904,13 @@ mod tests {
     #[test]
     fn default_kin_radius_matches_physics_rules() {
         // The fear/pack/rally rules all use a 12 m radius in physics.sim;
-        // the precompute must match so the rules read the right kin set.
-        assert_eq!(DEFAULT_KIN_RADIUS, 12.0);
+        // the default `kin_radius` on `Config::combat` must match so the
+        // rules read the right kin set when the designer hasn't overridden
+        // the value in `assets/sim/config.sim`. (Was `DEFAULT_KIN_RADIUS`
+        // before the const was retired in favour of the config field on
+        // 2026-04-22.)
+        use engine_rules::config::Config;
+        assert_eq!(Config::default().combat.kin_radius, 12.0);
     }
 
     #[test]

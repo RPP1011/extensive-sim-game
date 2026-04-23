@@ -34,9 +34,7 @@ use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
-use engine_gpu::cascade::{
-    fold_iteration_events, pack_initial_events, run_cascade, DEFAULT_KIN_RADIUS,
-};
+use engine_gpu::cascade::{fold_iteration_events, pack_initial_events, run_cascade};
 use engine_gpu::event_ring::{pack_event, EventRecord};
 use engine_gpu::physics::{PackedAbilityRegistry, PhysicsKernel};
 use engine_gpu::spatial_gpu::GpuSpatialHash;
@@ -510,7 +508,11 @@ impl GpuHarness {
                 &mut self.spatial,
                 &abilities,
                 &initial,
-                DEFAULT_KIN_RADIUS,
+                // `kin_radius` is designer-tunable via
+                // `state.config.combat.kin_radius`; the retired
+                // `DEFAULT_KIN_RADIUS` const mapped to the same 12 m
+                // default.
+                state.config.combat.kin_radius,
                 &ctx,
             )
         }

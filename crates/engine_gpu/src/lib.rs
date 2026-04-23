@@ -1616,7 +1616,12 @@ impl SimBackend for GpuBackend {
                 &mut cascade_ctx.spatial,
                 &cascade_ctx.abilities,
                 &initial_records,
-                cascade::DEFAULT_KIN_RADIUS,
+                // `kin_radius` is designer-tunable via
+                // `state.config.combat.kin_radius` (promoted from the
+                // retired `cascade::DEFAULT_KIN_RADIUS` const on
+                // 2026-04-22). SimCfg mirrors the same value for
+                // kernels that read it via the shared uniform.
+                state.config.combat.kin_radius,
                 &emit_ctx,
             )
         };

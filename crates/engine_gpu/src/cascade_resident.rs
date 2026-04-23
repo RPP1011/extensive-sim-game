@@ -25,7 +25,7 @@ use bytemuck::{Pod, Zeroable};
 
 use engine::state::SimState;
 
-use crate::cascade::{CascadeCtx, DEFAULT_KIN_RADIUS, MAX_CASCADE_ITERATIONS};
+use crate::cascade::{CascadeCtx, MAX_CASCADE_ITERATIONS};
 use crate::event_ring::{GpuEventRing, DEFAULT_CAPACITY, PAYLOAD_WORDS};
 use crate::gpu_util::indirect::IndirectArgsBuffer;
 use crate::physics::{
@@ -1032,7 +1032,13 @@ pub fn run_cascade_resident_with_iter_cap(
         .as_ref()
         .expect("spatial_bufs ensured");
 
-    let kin_radius = DEFAULT_KIN_RADIUS;
+    // Both radii are now designer-tunable via `state.config.combat.*`
+    // (`kin_radius` was promoted from a hardcoded const on 2026-04-22;
+    // `engagement_range` has always been config-driven). SimCfg mirrors
+    // both fields, but the spatial query kernel takes the radius as a
+    // per-call parameter on its own uniform, so we read from Config
+    // directly here (batch-constant, no GPU readback needed).
+    let kin_radius = state.config.combat.kin_radius;
     let engagement_range = state.config.combat.engagement_range;
 
     // Split the spatial pipeline: the CPU SoA pack + clear/count/scan/

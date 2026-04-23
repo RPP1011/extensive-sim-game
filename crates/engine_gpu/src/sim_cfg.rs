@@ -25,9 +25,10 @@ use engine::state::SimState;
 ///
 ///   * `move_speed_mult` — per-agent field on `SimState`, no sim-wide
 ///     config. Seeded to `1.0` (the spawn default).
-///   * `kin_radius` — const in `engine_gpu::cascade::DEFAULT_KIN_RADIUS`;
-///     duplicated here as a literal `12.0` to keep this module independent
-///     of the cascade module's compile graph.
+///   * `kin_radius` — designer-tunable via `state.config.combat.kin_radius`
+///     (promoted from the retired `engine_gpu::cascade::DEFAULT_KIN_RADIUS`
+///     const on 2026-04-22). SimCfg just mirrors the Config field so GPU
+///     kernels can read it via the shared uniform.
 ///   * `cascade_max_iterations` — const in
 ///     `engine_gpu::cascade::MAX_CASCADE_ITERATIONS`; duplicated as `8`.
 ///
