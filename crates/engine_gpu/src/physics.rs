@@ -195,7 +195,7 @@ impl Default for GpuKinList {
 
 /// Config uniform the physics kernel reads.
 #[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable, Debug)]
+#[derive(Copy, Clone, Pod, Zeroable, Debug, PartialEq)]
 pub struct PhysicsCfg {
     pub tick: u32,
     pub num_events: u32,
@@ -214,7 +214,7 @@ pub struct PhysicsCfg {
 /// the shared `PhysicsCfg` so the resident path reuses the existing
 /// uniform rather than duplicating it.
 #[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable, Debug)]
+#[derive(Copy, Clone, Pod, Zeroable, Debug, PartialEq)]
 pub struct ResidentPhysicsCfg {
     pub read_slot: u32,
     pub write_slot: u32,
@@ -1111,6 +1111,12 @@ struct ResidentBufferPool {
     agent_cap: u32,
     cfg_buf: wgpu::Buffer,
     resident_cfg_buf: wgpu::Buffer,
+    /// Last cfg uploaded via `queue.write_buffer(&cfg_buf, ...)`. The
+    /// driver calls `run_batch_resident` 8× per tick (cascade
+    /// iterations) with the same cfg each time; deduping saves 7 of
+    /// those 8 writes/tick. `None` = never written. Invalidated on
+    /// pool rebuild (new `cfg_buf`).
+    last_cfg: Option<PhysicsCfg>,
 }
 
 /// Cache key for `PhysicsKernel::resident_bg_cache`. Combines
@@ -1841,6 +1847,7 @@ impl PhysicsKernel {
             agent_cap: want_agent_cap,
             cfg_buf,
             resident_cfg_buf,
+            last_cfg: None,
         });
         // Pool rebuilt — cached resident BGs reference the *old*
         // pool.cfg_buf / pool.resident_cfg_buf, so drop them.
@@ -1928,22 +1935,27 @@ impl PhysicsKernel {
         }
         let agent_cap = cfg.agent_cap;
         self.ensure_resident_pool(device, agent_cap);
-        let pool = self
-            .pool_resident
-            .as_ref()
-            .expect("resident pool ensured");
 
-        // Uniform uploads. The main `cfg` uniform carries agent_cap,
-        // tick, engagement range, etc. — `num_events` is ignored by the
-        // resident entry (it reads from `num_events_buf[read_slot]`
-        // instead) so we leave whatever the caller supplied.
-        queue.write_buffer(&pool.cfg_buf, 0, bytemuck::bytes_of(&cfg));
+        // cfg uniform dedupe: the same cfg is used for all 8 cascade
+        // iters of a tick; only `tick` changes between ticks. Dedupe
+        // saves 7/8 queue.write_buffer calls per tick.
+        {
+            let pool_mut = self.pool_resident.as_mut().expect("resident pool ensured");
+            if pool_mut.last_cfg != Some(cfg) {
+                queue.write_buffer(&pool_mut.cfg_buf, 0, bytemuck::bytes_of(&cfg));
+                pool_mut.last_cfg = Some(cfg);
+            }
+        }
         let resident_cfg = ResidentPhysicsCfg {
             read_slot,
             write_slot,
             _pad0: 0,
             _pad1: 0,
         };
+        let pool = self
+            .pool_resident
+            .as_ref()
+            .expect("resident pool ensured");
         queue.write_buffer(
             &pool.resident_cfg_buf,
             0,

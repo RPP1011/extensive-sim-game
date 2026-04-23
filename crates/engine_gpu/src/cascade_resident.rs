@@ -872,6 +872,43 @@ pub fn run_cascade_resident(
     apply_event_ring: &GpuEventRing,
     indirect_args: &IndirectArgsBuffer,
 ) -> Result<(), CascadeResidentError> {
+    run_cascade_resident_with_iter_cap(
+        device,
+        queue,
+        encoder,
+        state,
+        cascade_ctx,
+        resident_ctx,
+        agents_buf,
+        apply_event_ring,
+        indirect_args,
+        MAX_CASCADE_ITERATIONS,
+    )
+}
+
+/// Variant of [`run_cascade_resident`] that caps the number of physics
+/// dispatches recorded at `max_iters`. When `max_iters <
+/// MAX_CASCADE_ITERATIONS`, subsequent iterations are skipped entirely
+/// — neither encoded nor dispatched — saving the per-iter CPU encode
+/// cost for workloads where convergence is known (from a prior tick's
+/// observed iteration count). If a given tick happens to need more
+/// iterations than the cap, remaining propagation is truncated;
+/// callers SHOULD only set a low cap when the application tolerates
+/// this (e.g. perf-critical paths with monitored convergence means).
+#[allow(clippy::too_many_arguments)]
+pub fn run_cascade_resident_with_iter_cap(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    state: &SimState,
+    cascade_ctx: &mut CascadeCtx,
+    resident_ctx: &mut CascadeResidentCtx,
+    agents_buf: &wgpu::Buffer,
+    apply_event_ring: &GpuEventRing,
+    indirect_args: &IndirectArgsBuffer,
+    max_iters: u32,
+) -> Result<(), CascadeResidentError> {
+    let max_iters = max_iters.clamp(1, MAX_CASCADE_ITERATIONS);
     let agent_cap = state.agent_cap();
 
     // ---- 1. Spatial queries ---------------------------------------------
@@ -965,7 +1002,7 @@ pub fn run_cascade_resident(
         _pad: 0,
     };
 
-    for iter in 0..MAX_CASCADE_ITERATIONS {
+    for iter in 0..max_iters {
         // Pick this iter's input records buffer + output ring. Iter 0
         // reads from `apply_event_ring`; iter 1+ alternates between
         // the two resident physics rings.
@@ -1006,10 +1043,8 @@ pub fn run_cascade_resident(
         // so this clear lands AFTER the current iter's dispatch reads
         // that ring's records buffer as events_in (iter 1 reads
         // ring_a; iter 2 reads ring_b; etc.) but BEFORE the next
-        // iter's dispatch writes to its tail. Only needed for iter
-        // >= 1 because iters 0 and 1 write to rings that were already
-        // zeroed by the initial clears above.
-        if iter + 2 < MAX_CASCADE_ITERATIONS {
+        // iter's dispatch writes to its tail.
+        if iter + 2 < max_iters {
             let next_next_out = if (iter + 2) & 1 == 0 {
                 &resident_ctx.physics_ring_a
             } else {

@@ -1110,7 +1110,20 @@ impl GpuBackend {
                 &cascade_ctx.apply_event_ring;
             let apply_ring_ref: &crate::event_ring::GpuEventRing =
                 unsafe { &*apply_ring_ptr };
-            crate::cascade_resident::run_cascade_resident(
+            // Heuristic cap: if a recent sync tick observed cascade
+            // convergence at N iterations, record only N+2 dispatches
+            // this tick — saves the per-iter encode cost for the 6+
+            // no-op iters typical on low-convergence workloads. When
+            // `last_cascade_iterations` is `None` (no prior sync tick,
+            // or cascade failed) fall back to the full
+            // MAX_CASCADE_ITERATIONS for safety. The +2 margin
+            // tolerates modest run-to-run variance; workloads with
+            // deeper cascades pay the same cost as today.
+            let iter_cap = match self.last_cascade_iterations {
+                Some(n) => (n + 2).min(crate::cascade::MAX_CASCADE_ITERATIONS),
+                None => crate::cascade::MAX_CASCADE_ITERATIONS,
+            };
+            crate::cascade_resident::run_cascade_resident_with_iter_cap(
                 &self.device,
                 &self.queue,
                 &mut encoder,
@@ -1120,6 +1133,7 @@ impl GpuBackend {
                 agents_buf,
                 apply_ring_ref,
                 indirect_args,
+                iter_cap,
             )
             .expect("cascade_resident dispatch");
 
