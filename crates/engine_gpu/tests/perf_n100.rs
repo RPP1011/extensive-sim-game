@@ -169,6 +169,23 @@ fn perf_n100() {
     eprintln!("  cpu finalize:       {}", accum.cpu_finalize_us / ticks_measured);
     eprintln!("  gpu sidecar:        {}", accum.gpu_sidecar_us / ticks_measured);
     eprintln!("GPU backend label: {}", gpu_backend.backend_label());
+
+    // Perf Stage A.2 — bind-group cache stats. Sync path dispatches
+    // physics per step (not per-batch), so the counter reflects all
+    // physics iterations across `TICKS` sync steps. Expected: tiny
+    // miss count (seed the cache) then 100% hits for subsequent iters.
+    if let Some((hits, misses)) = gpu_backend.physics_resident_bg_cache_stats() {
+        let total = hits + misses;
+        let hit_rate = if total == 0 {
+            0.0
+        } else {
+            (hits as f64 / total as f64) * 100.0
+        };
+        eprintln!(
+            "resident_bg_cache (sync path, all ticks): {misses} misses, {hits} hits ({hit_rate:.1}% hit rate, {total} lookups)"
+        );
+    }
+
     let alive_gpu = state.agents_alive().count();
 
     let cpu_per = cpu_total.as_secs_f64() * 1e6 / (TICKS - 1) as f64;

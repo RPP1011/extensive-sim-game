@@ -1550,6 +1550,16 @@ pub struct PhysicsKernel {
     /// Hash` via its internal Arc pointer — see wgpu-26's
     /// `impl_eq_ord_hash_proxy!`).
     resident_bg_cache: std::collections::HashMap<ResidentBgKey, wgpu::BindGroup>,
+    /// Perf Stage A.2 — running hit/miss counter for
+    /// `resident_bg_cache`. Incremented on every lookup in
+    /// `run_batch_resident`. A cold start hits ~3 misses per tick
+    /// (one per unique (events_in, events_out, resident_cfg) triple:
+    /// iter 0, odd iters ≥ 1, even iters ≥ 2) for the first tick, then
+    /// 100% hits thereafter. `resident_bg_cache_stats()` surfaces the
+    /// numbers so perf tests can flag a thrash bug (e.g. 400 misses
+    /// across 400 lookups = keyed-identity drift).
+    resident_bg_cache_hits:   u64,
+    resident_bg_cache_misses: u64,
     /// Capacity the ring was provisioned with. Retained for diagnostics
     /// (Piece 3 may surface it in run reports); currently unread so the
     /// `allow(dead_code)` keeps the compiler happy.
@@ -1908,9 +1918,26 @@ impl PhysicsKernel {
             pool: None,
             pool_resident: None,
             resident_bg_cache: std::collections::HashMap::new(),
+            resident_bg_cache_hits:   0,
+            resident_bg_cache_misses: 0,
             event_ring_capacity,
             chronicle_ring_capacity,
         })
+    }
+
+    /// Perf Stage A.2 — running (hits, misses) counts for the
+    /// resident bind-group cache. Post-warmup the cache should hit
+    /// 100% after the first tick's ≤3 unique (events_in, events_out,
+    /// resident_cfg) triples populate it; regressions show up as
+    /// elevated miss counts relative to the total lookup count
+    /// (`hits + misses`).
+    ///
+    /// Hidden from the top-level docs (consumers are perf tests + the
+    /// research doc's refresh); access via
+    /// `GpuBackend::physics_resident_bg_cache_stats()`.
+    #[doc(hidden)]
+    pub fn resident_bg_cache_stats(&self) -> (u64, u64) {
+        (self.resident_bg_cache_hits, self.resident_bg_cache_misses)
     }
 
     /// Borrow the chronicle ring. `GpuBackend::flush_chronicle` drains
@@ -2626,6 +2653,17 @@ impl PhysicsKernel {
             memory_records: memory_records_buf.clone(),
             memory_cursors: memory_cursors_buf.clone(),
         };
+        // Perf Stage A.2 — probe-before-insert so the hit/miss
+        // counters track actual cache behaviour. `HashMap::entry`
+        // doesn't expose whether it was `Occupied` vs `Vacant` without
+        // moving the key, so we do a pre-lookup. Cost is one extra
+        // hash + buffer-ptr comparison per dispatch (cheap — the whole
+        // point of this cache is that key hashing is fast).
+        if self.resident_bg_cache.contains_key(&key) {
+            self.resident_bg_cache_hits = self.resident_bg_cache_hits.saturating_add(1);
+        } else {
+            self.resident_bg_cache_misses = self.resident_bg_cache_misses.saturating_add(1);
+        }
         let bind_group: &wgpu::BindGroup = self.resident_bg_cache.entry(key).or_insert_with(|| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("engine_gpu::physics::bg_resident"),

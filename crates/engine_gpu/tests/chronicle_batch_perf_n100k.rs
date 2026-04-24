@@ -120,6 +120,13 @@ fn chronicle_batch_perf_n100k() {
     // snapshot() call returns the batch's state (not warmup state).
     let _prime = gpu.snapshot(&mut state).expect("prime snapshot");
 
+    // Perf Stage A.2 — snapshot BG-cache counters BEFORE the batch so
+    // the delta isolates the batch's cache behaviour from the warmup
+    // sync step.
+    let (hits_before, misses_before) = gpu
+        .physics_resident_bg_cache_stats()
+        .unwrap_or((0, 0));
+
     // Timed batch.
     let t_batch = Instant::now();
     gpu.step_batch(
@@ -136,6 +143,40 @@ fn chronicle_batch_perf_n100k() {
     eprintln!(
         "  step_batch({TICKS}): total={batch_ms} ms, avg={batch_us_per_tick} µs/tick"
     );
+
+    // Perf Stage A.1 — per-phase GPU µs breakdown. Empty on adapters
+    // without TIMESTAMP_QUERY; non-empty output on a real discrete GPU.
+    if gpu.gpu_profiler_enabled() {
+        let phases = gpu.last_batch_phase_us();
+        if phases.is_empty() {
+            eprintln!("  gpu timestamps: profiler enabled but no samples produced");
+        } else {
+            eprintln!("  gpu timestamps (µs/tick, mean over {TICKS} ticks):");
+            for (label, total_us) in phases {
+                let per_tick = *total_us / TICKS as u64;
+                eprintln!("    {label:20}: {per_tick}");
+            }
+        }
+    } else {
+        eprintln!("  gpu timestamps: TIMESTAMP_QUERY unavailable on this adapter (CPU wall-clock only)");
+    }
+
+    // Perf Stage A.2 — bind-group cache stats.
+    if let Some((hits_after, misses_after)) =
+        gpu.physics_resident_bg_cache_stats()
+    {
+        let hits = hits_after.saturating_sub(hits_before);
+        let misses = misses_after.saturating_sub(misses_before);
+        let total = hits + misses;
+        let hit_rate = if total == 0 {
+            0.0
+        } else {
+            (hits as f64 / total as f64) * 100.0
+        };
+        eprintln!(
+            "  resident_bg_cache: {misses} misses, {hits} hits ({hit_rate:.1}% hit rate, {total} lookups)"
+        );
+    }
 
     // Triple-snapshot dance.
     let t_snap = Instant::now();

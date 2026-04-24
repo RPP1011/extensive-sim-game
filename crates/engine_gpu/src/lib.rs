@@ -159,6 +159,13 @@ pub mod cascade_resident;
 #[cfg(feature = "gpu")]
 pub mod snapshot;
 
+/// Perf Stage A — GPU-resident timestamp instrumentation for
+/// `step_batch`. Enabled only when the adapter advertises
+/// `TIMESTAMP_QUERY` + `TIMESTAMP_QUERY_INSIDE_ENCODERS`; otherwise a
+/// cheap no-op so CI on software adapters still works.
+#[cfg(feature = "gpu")]
+pub mod gpu_profiling;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
@@ -420,10 +427,25 @@ impl GpuBackend {
         // future target returns a smaller limit we'll have to cap N
         // and split the dispatch — but that's a Phase 3+ concern.
         let adapter_limits = adapter.limits();
+
+        // Perf Stage A.1 — opt-in timestamp-query feature request. We
+        // check the adapter's advertised features and only ask for the
+        // two timestamp bits if the adapter supports them both; asking
+        // for a missing feature would fail device creation. On
+        // llvmpipe / other software adapters that don't advertise these
+        // the profiler falls back to a no-op at runtime.
+        let adapter_features = adapter.features();
+        let timestamps_supported = crate::gpu_profiling::adapter_supports_timestamps(adapter_features);
+        let required_features = if timestamps_supported {
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
+        } else {
+            wgpu::Features::empty()
+        };
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("engine_gpu::device"),
-                required_features: wgpu::Features::empty(),
+                required_features,
                 required_limits: adapter_limits,
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
@@ -445,11 +467,20 @@ impl GpuBackend {
             backend_label,
         );
 
-        let resident = crate::backend::ResidentPathContext::new(
+        let mut resident = crate::backend::ResidentPathContext::new(
             mask_unpack_kernel,
             scoring_unpack_kernel,
             fused_unpack_kernel,
         );
+        // Perf Stage A.1 — allocate the timestamp profiler up front.
+        // Disabled-mode profiler (no QuerySet alloc) when the adapter
+        // lacked the timestamp features; every subsequent `mark` call
+        // is a cheap no-op.
+        resident.profiler = Some(crate::gpu_profiling::GpuProfiler::new(
+            &device,
+            &queue,
+            timestamps_supported,
+        ));
 
         let snapshot = crate::backend::SnapshotContext::new();
 
@@ -503,6 +534,44 @@ impl GpuBackend {
     /// on that tick (e.g. sidecar with `skip_scoring_sidecar = true`).
     pub fn last_phase_timings(&self) -> PhaseTimings {
         self.sync.last_phase_us
+    }
+
+    /// Perf Stage A.1 — per-phase GPU µs from the most recent
+    /// `step_batch` call, summed across every tick in the batch. Each
+    /// entry is `(label, total_us)`; divide by the batch's tick count
+    /// to get a mean µs/tick. Empty when the adapter lacks
+    /// `TIMESTAMP_QUERY` or `step_batch` hasn't run yet.
+    pub fn last_batch_phase_us(&self) -> &[(&'static str, u64)] {
+        &self.resident.last_batch_phase_us
+    }
+
+    /// True iff the GPU profiler is live (adapter advertised
+    /// `TIMESTAMP_QUERY` + `TIMESTAMP_QUERY_INSIDE_ENCODERS` at init
+    /// time and the profiler was constructed accordingly). Tests use
+    /// this to gate the "expected GPU µs breakdown" output section;
+    /// the sync-step wall-clock timing still works regardless.
+    pub fn gpu_profiler_enabled(&self) -> bool {
+        self.resident
+            .profiler
+            .as_ref()
+            .map(|p| p.is_enabled())
+            .unwrap_or(false)
+    }
+
+    /// Perf Stage A.2 — running `(hits, misses)` totals for the
+    /// resident physics bind-group cache. `None` before the cascade
+    /// context is initialized (no step has run).
+    ///
+    /// The cache is expected to converge to 100% hit rate after the
+    /// first batch tick populates its ≤3 unique key tuples; runaway
+    /// misses (e.g. hits=0 after 400 lookups) signal that one of the
+    /// key fields is drifting per-iteration.
+    #[doc(hidden)]
+    pub fn physics_resident_bg_cache_stats(&self) -> Option<(u64, u64)> {
+        self.sync
+            .cascade_ctx
+            .as_ref()
+            .map(|ctx| ctx.physics.resident_bg_cache_stats())
     }
 
     /// Task 203 — drain the GPU chronicle ring into the CPU event
@@ -823,6 +892,12 @@ impl GpuBackend {
                 label: Some("engine_gpu::step_batch::enc"),
             });
 
+        // Perf Stage A.1 — reset the profiler's frame state. No-op when
+        // the adapter didn't advertise TIMESTAMP_QUERY.
+        if let Some(p) = self.resident.profiler.as_mut() {
+            p.begin_frame();
+        }
+
         // C1 + C2 fix: reset the batch-scoped event accumulator and the
         // chronicle ring at the START of each batch. Both rings are
         // append-only within a batch — the batch events ring collects
@@ -866,11 +941,18 @@ impl GpuBackend {
                 standing_storage,
                 memory_storage,
                 fused_unpack_kernel,
+                profiler,
                 ..
             } = &mut self.resident;
             let agents_buf = resident_agents_buf
                 .as_ref()
                 .expect("resident_agents_buf ensured by ensure_resident_init");
+
+            // Perf Stage A.1 — bookend each phase with a timestamp so
+            // the test harness can surface GPU-µs/tick per phase.
+            if let Some(p) = profiler.as_mut() {
+                p.mark(&mut encoder, "fused_unpack");
+            }
 
             // 1. Fused unpack: one dispatch writes both mask's SoA
             //    (pos/alive/creature_type) and scoring's
@@ -895,6 +977,9 @@ impl GpuBackend {
             let mask_sim_cfg_ref = sim_cfg_buf
                 .as_ref()
                 .expect("sim_cfg_buf ensured by ensure_resident_init");
+            if let Some(p) = profiler.as_mut() {
+                p.mark(&mut encoder, "mask+scoring");
+            }
             self.sync
                 .mask_kernel
                 .run_resident(
@@ -926,6 +1011,10 @@ impl GpuBackend {
                     agent_cap,
                 )
                 .expect("scoring resident dispatch");
+
+            if let Some(p) = profiler.as_mut() {
+                p.mark(&mut encoder, "apply+movement");
+            }
 
             // 3. apply_actions + movement: both read from the scoring
             //    output buffer, mutate `resident_agents_buf`, and append
@@ -986,6 +1075,10 @@ impl GpuBackend {
                     agent_cap,
                 )
                 .expect("movement resident dispatch");
+
+            if let Some(p) = profiler.as_mut() {
+                p.mark(&mut encoder, "append_events");
+            }
 
             // 3b. C1 fix: append apply+movement events into the
             //     batch-scoped accumulator BEFORE the cascade seed
@@ -1089,6 +1182,7 @@ impl GpuBackend {
                 &memory_ref.records_buf,
                 &memory_ref.cursors_buf,
                 iter_cap,
+                profiler.as_mut(),
             )
             .expect("cascade_resident dispatch");
 
@@ -1098,8 +1192,49 @@ impl GpuBackend {
             // value (Task 2.11).
         }
 
+        // Perf Stage A.1 — resolve + copy-to-readback the timestamp
+        // query set as the final encoder op of the batch. Safe when
+        // the profiler is disabled or recorded zero marks (no-op).
+        if let Some(p) = self.resident.profiler.as_ref() {
+            p.finish_frame(&mut encoder);
+        }
+
         self.queue.submit(Some(encoder.finish()));
         let _ = self.device.poll(wgpu::PollType::Wait);
+
+        // Perf Stage A.1 — after the submit/poll, map the readback
+        // buffer + convert u64 timestamps to per-phase µs. Accumulate
+        // into `last_batch_phase_us` so each entry is the sum over all
+        // N ticks in the batch (entry.0 is the phase label, entry.1 is
+        // the accumulated µs). The test harness divides by `n_ticks`
+        // to print a mean.
+        let phase_samples_opt = self
+            .resident
+            .profiler
+            .as_ref()
+            .map(|p| p.read_phase_us(&self.device, &self.queue));
+        if let Some(phase_samples) = phase_samples_opt {
+            // Each batch tick records the same phase schedule, so
+            // multi-tick deltas are interleaved. Fold them by label —
+            // labels with the same name add their µs together. This
+            // keeps the output length stable at the per-tick phase
+            // count regardless of `n_ticks`.
+            use std::collections::BTreeMap;
+            let mut totals: BTreeMap<&'static str, u64> = BTreeMap::new();
+            let mut order: Vec<&'static str> = Vec::new();
+            for (label, us) in phase_samples {
+                if !totals.contains_key(label) {
+                    order.push(label);
+                }
+                *totals.entry(label).or_insert(0) += us;
+            }
+            self.resident.last_batch_phase_us = order
+                .into_iter()
+                .map(|l| (l, *totals.get(l).unwrap_or(&0)))
+                .collect();
+        } else {
+            self.resident.last_batch_phase_us.clear();
+        }
     }
 
     /// Phase D — Task D4: Lazy-init for the resident batch path.

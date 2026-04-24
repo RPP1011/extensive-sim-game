@@ -1,11 +1,156 @@
-# Batch-path perf gap analysis (N=2048)
+# Batch-path perf gap analysis (N=2048 → N=100k refresh)
 
-**Status:** research
-**Date:** 2026-04-22
-**Branch:** `world-sim-bench`
+**Status:** research (2026-04-22 baseline + 2026-04-24 refresh)
+**Date:** 2026-04-22 (original) / 2026-04-24 (refresh)
+**Branch:** `world-sim-bench` / `perf-stage-a`
 **Predecessor:** `docs/technical_overview.md` §10.1; `docs/superpowers/specs/2026-04-22-gpu-resident-cascade-design.md`
 
-## Executive summary
+> **Note:** the original analysis below was written against pre-Task-#68
+> code at N=2048 on llvmpipe. The **2026-04-24 refresh** section at the
+> end of this document is the authoritative current-state analysis. It
+> uses GPU timestamp queries (Perf Stage A.1) to attribute GPU-µs by
+> phase at N=100k on an RTX 4090 and supersedes the ranking tables in
+> Sections A–H. Keep the original for commit-history archaeology only.
+
+---
+
+## 2026-04-24 refresh — N=100,000 on RTX 4090, post-Task-#68
+
+### Measurement method
+
+- `cargo test --release --features gpu -p engine_gpu --test chronicle_batch_perf_n100k -- --ignored --nocapture`
+- 100,000 agents (40% human, 40% wolf, 20% deer), 50 ticks, seed
+  `0xC0FFEE_B001_BABE_42`, RTX 4090 / Vulkan backend.
+- Perf Stage A.1 added `wgpu::Features::TIMESTAMP_QUERY +
+  TIMESTAMP_QUERY_INSIDE_ENCODERS` instrumentation inside `step_batch`
+  (`crates/engine_gpu/src/gpu_profiling.rs`). Every phase boundary is
+  bookended with `encoder.write_timestamp` so the resolved per-phase
+  µs values are the **real GPU execution time** between marks, not
+  CPU wall clock.
+- Perf Stage A.2 added `resident_bg_cache_hits / misses` counters on
+  `PhysicsKernel` so we can confirm the 100%-after-warmup hit-rate
+  contract Task #68 established.
+
+### Headline numbers
+
+| Metric | Value |
+|---|---|
+| Wall-clock batch µs/tick (50 ticks) | **319,391 µs (~319 ms)** |
+| GPU-µs accounted by timestamp phases | **37,790 µs (~38 ms)** |
+| Unaccounted CPU/driver time | **~281,000 µs/tick (~88%)** |
+| Cascade iters/tick (post-Task-#79 heuristic) | ~1 (early exit after iter 0) |
+| BG cache (50-tick batch) | 5 misses / 245 hits = **98.0%** hit rate |
+
+### Per-phase GPU µs breakdown (mean over 50 ticks)
+
+| Phase | µs/tick | % of GPU total |
+|---|---:|---:|
+| `mask+scoring` | **37,083** | **98.1%** |
+| `spatial+abilities` | 513 | 1.4% |
+| `cascade iter 0` | 151 | 0.4% |
+| `seed_kernel` | 28 | 0.07% |
+| `fused_unpack` | 4 | 0.01% |
+| `apply+movement` | 4 | 0.01% |
+| `append_events` | 2 | 0.005% |
+| `cascade iter 1..4` | 1–3 each | <0.01% each |
+| `cascade_end` (sentinel) | 0 | — |
+| **TOTAL GPU** | **~37,790** | 100% |
+
+### Findings
+
+1. **`mask+scoring` is 98% of GPU time at N=100k — the unambiguous
+   Stage C target.** At 37 ms/tick for a single mask-bitmap-build plus
+   scoring+argmax dispatch, this phase alone accounts for more than
+   the entirety of every other phase combined. View fold batching
+   (Stage C's stated goal) and any O(N²) work remaining in scoring
+   need to come from this phase. It is the single biggest lever for
+   GPU compute time at N=100k.
+
+2. **Cascade iteration overhead is negligible.** Iter 0 does ~150 µs
+   of real work; iters 1..4 each run <3 µs (indirect dispatch of zero
+   workgroups after the seed converges). The Stage B.1 convergence
+   detection task still matters for encode overhead (CPU-side
+   `queue.write_buffer` + BG construction per iter) but **does not
+   move the GPU-µs needle** — the GPU is already doing ~zero arithmetic
+   per no-op iter.
+
+3. **The ~281 ms/tick unaccounted gap is CPU/driver overhead.** GPU
+   timestamps only measure work between marks, so this delta is
+   whatever the host+driver spends encoding + submitting. At N=100k
+   the dominant candidates (in decreasing likelihood):
+   - `PhysicsKernel::run_batch_resident` still does 2×
+     `queue.write_buffer` per cascade iter for `PhysicsCfg`
+     uniforms (even though cascade iters 1+ are no-ops on this
+     fixture). 50 ticks × 3-8 iters × 2 writes = 300-800 writes.
+   - CPU-side `pack_agent_slots` / agent SoA uploads in
+     `run_batch_resident`'s sibling sync entry point if it's invoked
+     redundantly.
+   - Spatial rebuild's CPU SoA repack + write_buffer at N=100k
+     (~100k agents × 4 floats each = 1.6 MB/tick). Spatial-phase GPU
+     time is only 513 µs but the CPU prep could be much larger.
+   - `queue.submit` blocking until the GPU submission is accepted.
+   - `device.poll(Wait)` at the end of the batch (this one is
+     unavoidable — it's waiting for the 16s of GPU work to complete).
+
+4. **Bind-group cache is healthy.** 5 misses / 245 hits / 98.0% hit
+   rate across a 50-tick batch. The 5 misses correspond exactly to
+   the ≤3 unique (events_in, events_out, resident_cfg) triples the
+   first tick populates plus a couple of edge cases at batch start.
+   **Task #68's per-iter ResidentPhysicsCfg uniform buffer is not
+   thrashing the cache — confirmed.** Any regression here (say, 400
+   misses on 400 lookups) would signal a keyed-identity drift bug
+   and is now flagged by the perf test output.
+
+### Refreshed suspect ranking
+
+Dropping the original ranking in favour of what the timestamps
+actually show:
+
+| # | Suspect | Evidence | Est. µs/tick | Fix priority |
+|---|---|---|---:|---|
+| 1 | `mask+scoring` kernel — 98% of GPU time | GPU timestamps | **37,083** | **Stage C** — view fold batching + scoring restructure |
+| 2 | CPU encode tax (queue.write_buffer, BG build, spatial CPU pack) | 88% wall-clock / 12% GPU | **~281,000** | Stage B/C — requires flame-graph (`cargo flamegraph`) |
+| 3 | `spatial+abilities` phase | GPU timestamps | 513 | Stage B — ability registry dirty-flag + single upload/tick |
+| 4 | `cascade iter 0` (seed+physics) | GPU timestamps | 151 | Stage B.1 covers the encode overhead, GPU cost is already low |
+| 5 | Every other GPU phase combined | GPU timestamps | <60 | No action |
+
+### Recommendation to Stage B/C planners
+
+- **Stage C is the right priority.** The `mask+scoring` phase is 98%
+  of GPU time; anything that reduces it by 2× halves the GPU
+  contribution and rebalances the ratio of GPU work to CPU encode
+  tax. View fold batching + moving scoring work off the hot path is
+  the lever with the biggest headroom.
+- **Stage B.1 (cascade convergence detection) is valuable for CPU
+  encode reduction, not for GPU-µs.** The per-iter BG construction
+  and uniform writes aren't in the GPU timestamps because they're
+  CPU-side.
+- **Stage B.2 (spatial rebuild dedup) affects a 513 µs/tick GPU
+  phase that's already 1.4% of GPU time.** But the CPU-side SoA pack
+  inside `rebuild_resident` at N=100k is likely 10-50ms/tick CPU,
+  which is a much larger fraction of the 281ms CPU gap. Worth doing
+  for CPU-encode-side relief even if GPU timing is tiny.
+- **New work: CPU encode tax attribution.** The single-largest wedge
+  (281 ms/tick, 88% of wall clock) is uninstrumented. A next research
+  pass should profile `step_batch` with `cargo flamegraph` to
+  separate `queue.write_buffer` cost vs `create_bind_group` cost vs
+  `CPU spatial pack` cost vs `queue.submit` / `device.poll(Wait)`.
+
+### Data not measured
+
+- N=20k / N=2048 refresh numbers. The original 2026-04-22 analysis
+  was at N=2048 on llvmpipe; we didn't re-run at those scales for
+  this refresh. Those numbers in the Sections below are stale.
+- Task #82's memory-view impact on physics BG stability. The BG
+  cache shows healthy behaviour so any memory-view-driven keyed
+  drift is not surfacing; Task #82's implementation is correct on
+  this axis.
+- A flame graph of the 281 ms CPU-side tax. Left for a follow-up
+  research pass — outside scope of Stage A's measurement remit.
+
+---
+
+## Executive summary (original, 2026-04-22, stale)
 
 At N=2048 the GPU-resident batch path measures 8114 µs/tick vs 6442 µs/tick
 for the sync path — a **1.26× regression** against the spec's 0.8× target
