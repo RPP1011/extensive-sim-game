@@ -4,6 +4,7 @@
 #![cfg(feature = "gpu")]
 
 use crate::cascade_resident::CascadeResidentCtx;
+use crate::gpu_profiling::GpuProfiler;
 use crate::gpu_util::indirect::IndirectArgsBuffer;
 use crate::mask::{FusedAgentUnpackKernel, MaskUnpackKernel};
 use crate::scoring::ScoringUnpackKernel;
@@ -78,6 +79,20 @@ pub struct ResidentPathContext {
     /// `agent_data_buf` in a single dispatch, saving one compute pass
     /// begin/end + pipeline set per batch tick.
     pub fused_unpack_kernel:    FusedAgentUnpackKernel,
+
+    /// Perf Stage A.1 — GPU-resident timestamp profiler. `None` until
+    /// the first `step_batch` call wires one up via
+    /// `ensure_resident_init`; may be a disabled-mode profiler if the
+    /// adapter lacks `TIMESTAMP_QUERY`. Read back per-phase µs via
+    /// `GpuBackend::last_batch_phase_us`.
+    pub profiler: Option<GpuProfiler>,
+
+    /// Per-phase µs samples from the most recent `step_batch` call.
+    /// Accumulated across all N ticks in the batch (entry `i` is the
+    /// sum of the i-th phase-pair across every tick); divide by the
+    /// batch's tick count in the test harness to print a mean.
+    /// Empty when the profiler is disabled or `step_batch` hasn't run.
+    pub last_batch_phase_us: Vec<(&'static str, u64)>,
 }
 
 impl ResidentPathContext {
@@ -101,6 +116,8 @@ impl ResidentPathContext {
             scoring_unpack_kernel,
             fused_unpack_kernel,
             sim_cfg_buf:            None,
+            profiler:               None,
+            last_batch_phase_us:    Vec::new(),
         }
     }
 }

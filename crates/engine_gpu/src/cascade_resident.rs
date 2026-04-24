@@ -1016,6 +1016,7 @@ pub fn run_cascade_resident(
         memory_records_buf,
         memory_cursors_buf,
         MAX_CASCADE_ITERATIONS,
+        None,
     )
 }
 
@@ -1046,6 +1047,12 @@ pub fn run_cascade_resident_with_iter_cap(
     memory_records_buf: &wgpu::Buffer,
     memory_cursors_buf: &wgpu::Buffer,
     max_iters: u32,
+    // Perf Stage A.1 — optional GPU timestamp profiler. `None` means
+    // no timestamps are emitted (original behaviour). When `Some`, the
+    // driver emits one `write_timestamp` at seed-begin, one at
+    // seed-end, and one at the begin+end of each cascade iteration so
+    // the test harness can surface per-phase GPU µs.
+    profiler: Option<&mut crate::gpu_profiling::GpuProfiler>,
 ) -> Result<(), CascadeResidentError> {
     let max_iters = max_iters.clamp(1, MAX_CASCADE_ITERATIONS);
     let agent_cap = state.agent_cap();
@@ -1119,6 +1126,13 @@ pub fn run_cascade_resident_with_iter_cap(
     // iterations' epilogues overwrite their write-slot anyway.
     encoder.clear_buffer(&resident_ctx.num_events_buf, 0, None);
 
+    // Perf Stage A.1 — use the profiler via a single mutable handle so
+    // the mark calls don't fight the borrow checker against `encoder`.
+    let mut profiler = profiler;
+    if let Some(p) = profiler.as_deref_mut() {
+        p.mark(encoder, "seed_kernel");
+    }
+
     // Seed dispatch: reads apply_event_ring.tail, writes
     // indirect_args[0] + num_events[0].
     resident_ctx.seed_kernel.record(
@@ -1159,6 +1173,15 @@ pub fn run_cascade_resident_with_iter_cap(
         // the two resident physics rings.
         let (events_in_buf, events_out_ring) =
             resident_ctx.iter_rings(iter, apply_event_ring.records_buffer());
+
+        // Perf Stage A.1 — mark begin of this cascade iter.
+        if let Some(p) = profiler.as_deref_mut() {
+            let label = crate::gpu_profiling::CASCADE_ITER_BEGIN_LABELS
+                .get(iter as usize)
+                .copied()
+                .unwrap_or("cascade iter N");
+            p.mark(encoder, label);
+        }
 
         cascade_ctx.physics.run_batch_resident(
             device,
@@ -1209,6 +1232,13 @@ pub fn run_cascade_resident_with_iter_cap(
             };
             encoder.clear_buffer(next_next_out.tail_buffer(), 0, None);
         }
+    }
+
+    // Perf Stage A.1 — close the last cascade iter's timing interval.
+    // The profiler reports `(label_i, delta(ts_{i+1} - ts_i))`, so the
+    // final iter needs a trailing stamp to produce its µs entry.
+    if let Some(p) = profiler.as_deref_mut() {
+        p.mark(encoder, "cascade_end");
     }
 
     // Silence the "imports unused" lint if MAX_ABILITIES/MAX_EFFECTS

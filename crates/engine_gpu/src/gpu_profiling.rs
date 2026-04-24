@@ -257,3 +257,32 @@ pub fn adapter_supports_timestamps(features: wgpu::Features) -> bool {
         && features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
 }
 
+/// Static per-cascade-iteration begin labels for indices 0..7. Used
+/// inside the cascade driver so profiler labels remain `&'static str`
+/// without heap allocation. Matches `MAX_CASCADE_ITERATIONS = 8`.
+pub const CASCADE_ITER_BEGIN_LABELS: [&str; 8] = [
+    "cascade iter 0",
+    "cascade iter 1",
+    "cascade iter 2",
+    "cascade iter 3",
+    "cascade iter 4",
+    "cascade iter 5",
+    "cascade iter 6",
+    "cascade iter 7",
+];
+
+/// Matching "end" labels for each cascade iteration. Each phase entry
+/// in `read_phase_us` is `(begin_label, delta_us)` — the "end" labels
+/// are only used as the final sentinel at the close of iter N so the
+/// last interval resolves cleanly.
+pub const CASCADE_ITER_END_LABELS: [&str; 8] = [
+    "cascade iter 0 end",
+    "cascade iter 1 end",
+    "cascade iter 2 end",
+    "cascade iter 3 end",
+    "cascade iter 4 end",
+    "cascade iter 5 end",
+    "cascade iter 6 end",
+    "cascade iter 7 end",
+];
+
