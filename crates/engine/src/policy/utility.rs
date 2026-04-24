@@ -149,7 +149,75 @@ fn score_entry(
             }
         }
     }
+
+    // Task 81 — terrain height-bonus modifier. Fires on the Attack row
+    // when the shooter sits at least 2 m above the target AND the
+    // straight-line segment between them is unobstructed terrain.
+    //
+    // Implemented as a hardcoded post-step rather than a DSL-emitted
+    // `ModifierRow` because the scoring-table lowering path has no
+    // vec3-typed `self.pos` / `target.pos` field-ids and no TerrainQuery
+    // call kind. The MVP slice deliberately keeps the compiler change
+    // minimal (namespace + method only, previous sub-commit); once a
+    // concrete predicate encoding for `terrain.line_of_sight(a, b)` in
+    // the POD `PredicateDescriptor` lands, this branch collapses to an
+    // emitter-side row and goes away.
+    //
+    // The terrain backend defaults to `FlatPlane`, where every LOS is
+    // clear and every height is 0 — so this branch is a pure no-op for
+    // the wolves+humans parity fixture (every Attack pair sits at
+    // z=0 ± 0.0, failing the `> 2.0` gate) and for every legacy test
+    // that inherits the default.
+    //
+    // Numeric delta (+0.35) sits below the +0.4 `my_enemies` /
+    // `pack_focus` bumps so terrain advantage augments but doesn't
+    // dominate existing targeting signals. Tunable; once terrain is
+    // ubiquitous enough to hit a balance sweep, move to config.
+    if entry.action_head == MicroKind::Attack as u16 {
+        if let Some(t) = target {
+            score += terrain_height_bonus(state, agent, t);
+        }
+    }
+
     score
+}
+
+/// Task 81 height-advantage threshold (m) — shooter must sit strictly
+/// above target by more than this to earn the bonus.
+pub const TERRAIN_HEIGHT_THRESHOLD_M: f32 = 2.0;
+/// Task 81 height-advantage bonus delta added to the Attack row when
+/// both the elevation and LOS gates fire.
+pub const TERRAIN_HEIGHT_BONUS: f32 = 0.35;
+
+/// Terrain height-advantage bonus for `MicroKind::Attack`. Returns
+/// `TERRAIN_HEIGHT_BONUS` when the shooter has >2 m of elevation over
+/// the target and a clear line-of-sight; `0.0` otherwise.
+///
+/// The elevation gate is a hard step so a shooter standing exactly at
+/// `z = target.z + 2.0` doesn't accidentally fire it — defenders need
+/// to commit real height. The LOS check prevents the bonus firing
+/// through solid terrain (a shooter on the far side of a cliff can't
+/// claim the advantage on something they can't see).
+///
+/// Both reads go through `SimState`; a missing agent surfaces as no
+/// bonus (None → 0.0) rather than a NaN propagation. Exposed `pub` so
+/// tests and examples can observe the gate directly without round-
+/// tripping through the full scorer.
+#[inline]
+pub fn terrain_height_bonus(state: &SimState, agent: AgentId, target: AgentId) -> f32 {
+    let from = match state.agent_pos(agent) {
+        Some(p) => p,
+        None => return 0.0,
+    };
+    let to = match state.agent_pos(target) {
+        Some(p) => p,
+        None => return 0.0,
+    };
+    if from.z > to.z + TERRAIN_HEIGHT_THRESHOLD_M && state.terrain.line_of_sight(from, to) {
+        TERRAIN_HEIGHT_BONUS
+    } else {
+        0.0
+    }
 }
 
 /// Read a scalar field referenced by the scoring table. `field_id` is
