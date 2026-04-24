@@ -577,6 +577,7 @@ pub fn build_physics_shader(
         false, // sync path: no gold_buf binding, gold stubs stay no-op
         false, // sync path: no standing_storage, adjust_standing stays no-op
         false, // sync path: no memory_storage, push_agent_memory stays no-op
+        true,  // both sync + resident bind the alive_bitmap at slot 22
     )
 }
 
@@ -593,6 +594,7 @@ pub fn build_physics_shader_with_chronicle(
     has_gold_buf: bool,
     has_standing_storage: bool,
     has_memory_storage: bool,
+    has_alive_bitmap: bool,
 ) -> Result<String, PhysicsError> {
     let mut out = String::new();
     out.push_str(&wgsl_prefix(event_ring_capacity));
@@ -817,6 +819,23 @@ pub fn build_physics_shader_with_chronicle(
         );
     }
 
+    // ---- Alive bitmap (binding 22) ----
+    //
+    // Packed `array<u32>`, one bit per agent slot, written once per
+    // tick by `alive_pack_kernel` (resident path) or host-side
+    // packer (sync path). Every `agents.alive(x)` predicate in
+    // physics rule guards lowers to `alive_bit(slot_of(x))` —
+    // avoiding a 64-byte `AgentSlot` cacheline read.
+    if has_alive_bitmap {
+        out.push_str(
+            "\n// ---- Alive bitmap — per-tick packed alive array ----\n\
+             @group(0) @binding(22) var<storage, read> alive_bitmap: array<u32>;\n\
+             fn alive_bit(slot: u32) -> bool {\n\
+             \x20   return ((alive_bitmap[slot >> 5u] >> (slot & 31u)) & 1u) != 0u;\n\
+             }\n\n",
+        );
+    }
+
     // ---- State stub fns ----
     //
     // Every stub writes/reads exactly one field of the `agents` buffer.
@@ -971,6 +990,7 @@ pub fn build_physics_shader_resident(
         ctx,
         event_ring_capacity,
         chronicle_ring_capacity,
+        true,
         true,
         true,
         true,
@@ -1663,6 +1683,9 @@ struct ResidentBgKey {
     /// across every cascade iteration in a batch.
     memory_records: wgpu::Buffer,
     memory_cursors: wgpu::Buffer,
+    /// Per-tick alive bitmap — single handle per `GpuBackend`, stable
+    /// across every cascade iteration in a batch.
+    alive_bitmap: wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -1684,6 +1707,11 @@ struct BufferPool {
     /// `SimCfg::from_state(state)` + `upload_sim_cfg`. The resident
     /// path binds the caller's buffer instead and does not read this.
     sync_sim_cfg_buf: wgpu::Buffer,
+    /// Alive bitmap for the sync path. Packed host-side from
+    /// `agent_slots_in` on each `run_batch` call and uploaded. The
+    /// resident path uses its own caller-supplied bitmap populated
+    /// by `alive_pack_kernel`; this field is used only by sync.
+    sync_alive_bitmap_buf: wgpu::Buffer,
     /// Persistent staging for the event-ring tail readback. Phase 9
     /// (task 195): sized once at init to avoid per-tick buffer alloc.
     drain_tail_staging: wgpu::Buffer,
@@ -1736,6 +1764,7 @@ impl PhysicsKernel {
             false, // sync pipeline: no gold_buf binding
             false, // sync pipeline: no standing_storage binding
             false, // sync pipeline: no memory_storage binding
+            true,  // sync + resident: alive_bitmap at slot 22 (host-packed on sync path)
         )?;
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -1800,6 +1829,10 @@ impl PhysicsKernel {
             // Read-only; the seed-indirect kernel is the sole writer
             // and runs in a prior dispatch.
             storage_ro(SIM_CFG_BINDING),
+            // Per-tick alive bitmap. Sync path: host-packed on every
+            // `run_batch` call from `agent_slots_in`. Resident path:
+            // written by `alive_pack_kernel` before the cascade runs.
+            storage_ro(crate::alive_bitmap::ALIVE_BITMAP_BINDING),
         ];
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::physics::bgl"),
@@ -1884,6 +1917,10 @@ impl PhysicsKernel {
             // `state_push_agent_memory` body (monotonic ring push).
             storage_rw(20),
             storage_rw(21),
+            // Per-tick alive bitmap at slot 22. Packed by
+            // `alive_pack_kernel` at the top of every `step_batch`
+            // tick; read by every `agents.alive(x)` lowering site.
+            storage_ro(crate::alive_bitmap::ALIVE_BITMAP_BINDING),
         ];
         let bind_group_layout_resident =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -2060,6 +2097,14 @@ impl PhysicsKernel {
             mapped_at_creation: false,
         });
 
+        // Alive bitmap for the sync path — one bit per agent slot,
+        // packed host-side on every `run_batch` call from the
+        // `agent_slots_in` slice + uploaded.
+        let sync_alive_bitmap_buf = crate::alive_bitmap::create_alive_bitmap_buffer(
+            device,
+            want_agent_cap,
+        );
+
         // Phase 9 (task 195): persistent drain staging. Previously
         // allocated per-drain, which at MAX_CASCADE_ITERATIONS=8 iterations
         // meant 8 fresh 2.6 MB buffers + 8 × 4 B tail buffers per tick.
@@ -2093,6 +2138,7 @@ impl PhysicsKernel {
             events_in_capacity: want_events_cap,
             cfg_buf,
             sync_sim_cfg_buf,
+            sync_alive_bitmap_buf,
             drain_tail_staging,
             drain_records_staging,
             drain_ring_capacity: ring_cap,
@@ -2217,6 +2263,21 @@ impl PhysicsKernel {
         // sees current tick + engagement_range + cascade_max_iterations.
         crate::sim_cfg::upload_sim_cfg(queue, &pool.sync_sim_cfg_buf, sim_cfg);
 
+        // Pack the alive bitmap host-side from `agent_slots_in` and
+        // upload. Sync path has no `alive_pack_kernel` dispatch — we
+        // already have the input slots on CPU so packing here is
+        // cheaper than a GPU round-trip.
+        {
+            let words = crate::alive_bitmap::alive_bitmap_words(agent_cap) as usize;
+            let mut packed = vec![0u32; words.max(1)];
+            for (slot_idx, s) in agent_slots_in[..agent_cap as usize].iter().enumerate() {
+                if s.alive != 0 {
+                    packed[slot_idx >> 5] |= 1u32 << (slot_idx & 31);
+                }
+            }
+            queue.write_buffer(&pool.sync_alive_bitmap_buf, 0, bytemuck::cast_slice(&packed));
+        }
+
         // Reset the event ring tail so outputs start at slot 0.
         self.event_ring.reset(queue);
 
@@ -2287,6 +2348,11 @@ impl PhysicsKernel {
                 wgpu::BindGroupEntry {
                     binding: SIM_CFG_BINDING,
                     resource: pool.sync_sim_cfg_buf.as_entire_binding(),
+                },
+                // Per-tick alive bitmap (sync path: host-packed above).
+                wgpu::BindGroupEntry {
+                    binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
+                    resource: pool.sync_alive_bitmap_buf.as_entire_binding(),
                 },
             ],
         });
@@ -2567,6 +2633,7 @@ impl PhysicsKernel {
         standing_counts_buf: &wgpu::Buffer,
         memory_records_buf: &wgpu::Buffer,
         memory_cursors_buf: &wgpu::Buffer,
+        alive_bitmap_buf: &wgpu::Buffer,
         read_slot: u32,
         write_slot: u32,
         cfg: PhysicsCfg,
@@ -2652,6 +2719,9 @@ impl PhysicsKernel {
             // (records + cursors).
             memory_records: memory_records_buf.clone(),
             memory_cursors: memory_cursors_buf.clone(),
+            // Per-tick alive bitmap (resident path: packed by
+            // `alive_pack_kernel` at the top of each tick).
+            alive_bitmap: alive_bitmap_buf.clone(),
         };
         // Perf Stage A.2 — probe-before-insert so the hit/miss
         // counters track actual cache behaviour. `HashMap::entry`
@@ -2760,6 +2830,12 @@ impl PhysicsKernel {
                     wgpu::BindGroupEntry {
                         binding: 21,
                         resource: memory_cursors_buf.as_entire_binding(),
+                    },
+                    // Per-tick alive bitmap (resident path: packed by
+                    // `alive_pack_kernel` at the top of each tick).
+                    wgpu::BindGroupEntry {
+                        binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
+                        resource: alive_bitmap_buf.as_entire_binding(),
                     },
                 ],
             })

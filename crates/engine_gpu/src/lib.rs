@@ -1251,6 +1251,7 @@ impl GpuBackend {
                 &standing_ref.counts_buf,
                 &memory_ref.records_buf,
                 &memory_ref.cursors_buf,
+                alive_bitmap_ref,
                 iter_cap,
                 profiler.as_mut(),
             )
