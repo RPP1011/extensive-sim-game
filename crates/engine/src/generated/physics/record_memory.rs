@@ -16,14 +16,11 @@ pub fn record_memory(
     state: &mut SimState,
     events: &mut EventRing,
 ) {
-    state.push_agent_memory(
-        o,
-        crate::state::agent_types::MemoryEvent {
-            source: s,
-            kind: 0,
-            payload: f,
-            confidence_q8: ((c).clamp(0.0, 1.0) * 255.0) as u8,
-            tick: t,
-        },
-    );
+    {
+        let _ = o;
+        let _ = s;
+        let _ = f;
+        let _ = c;
+        let _ = t;
+    };
 }

@@ -1184,22 +1184,38 @@ fn lower_namespace_call(
             ))
         }
         (NamespaceId::Agents, "record_memory") => {
-            // Audit fix HIGH #4 — primitive that the `record_memory` physics
-            // rule lowers to. Args: `(observer, source, payload, confidence,
-            // tick)`. Quantises `confidence` to q8, builds a `MemoryEvent`
-            // (kind=0 — payload taxonomy is tracked by `payload` alone in the
-            // MVP shell), and pushes it onto the observer's cold memory ring.
-            // Emitted inline so the physics fn stays free of ad-hoc helper
-            // modules; see `crates/engine/src/state/agent_types.rs::MemoryEvent`.
+            // Subsystem 2 Phase 4 PR-5 — `cold_memory` smallvec retired.
+            // The `record_memory` physics rule's side effect is now
+            // owned by the `memory` view's fold: on the CPU sync path
+            // `ViewRegistry::fold_all` processes every `RecordMemory`
+            // event emitted this tick and calls `Memory::fold_event`
+            // → `push`; on the GPU batch path the WGSL
+            // `state_push_agent_memory` stub writes directly into the
+            // resident records/cursors buffers, and `snapshot()`
+            // rehydrates `state.views.memory` from there.
+            //
+            // That means the DSL-lowered call here must NOT
+            // double-write: if this function did its own `push`, the
+            // CPU sync path would end up with two entries per event
+            // (one from this, one from `fold_all`). Lower to a no-op
+            // — the DSL-generated rule body stays in place for event
+            // emission symmetry, but the stdlib primitive is a bind-
+            // through-to-view nothing at the CPU side. The GPU path
+            // keeps the real WGSL body (see
+            // `crates/engine_gpu/src/physics.rs::state_stub_fns`).
+            //
+            // Args are intentionally bound to `_` so the emitter's
+            // lowering still exercises every sub-expression (no-op
+            // `let _ = ...` also suppresses unused-import warnings).
             expect_arity(args, 5, "agents.record_memory")?;
             Ok(format!(
-                "state.push_agent_memory({observer}, crate::state::agent_types::MemoryEvent {{ \
-                 source: {source}, \
-                 kind: 0, \
-                 payload: {payload}, \
-                 confidence_q8: (({confidence}).clamp(0.0, 1.0) * 255.0) as u8, \
-                 tick: {tick}, \
-                 }})",
+                "{{ \
+                 let _ = {observer}; \
+                 let _ = {source}; \
+                 let _ = {payload}; \
+                 let _ = {confidence}; \
+                 let _ = {tick}; \
+                 }}",
                 observer   = lowered[0],
                 source     = lowered[1],
                 payload    = lowered[2],

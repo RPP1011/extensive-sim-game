@@ -2205,9 +2205,16 @@ fn emit_per_entity_ring_struct(
     .unwrap();
     writeln!(out, "        if observer_raw == 0 {{ return; }}").unwrap();
     writeln!(out, "        let owner_slot = (observer_raw - 1) as usize;").unwrap();
-    writeln!(out, "        let row = self.row_mut(owner_slot);").unwrap();
+    // Grow `cursors` in lockstep with `rings` before taking any mutable
+    // borrow, then read `cursor` up front so the subsequent `row_mut`'s
+    // mutable borrow of `self.rings` doesn't collide with the immutable
+    // `self.cursors[..]` read the write-slot index needs.
+    writeln!(out, "        if owner_slot >= self.cursors.len() {{").unwrap();
+    writeln!(out, "            self.cursors.resize(owner_slot + 1, 0u32);").unwrap();
+    writeln!(out, "        }}").unwrap();
     writeln!(out, "        let cursor = self.cursors[owner_slot];").unwrap();
     writeln!(out, "        let slot = (cursor as usize) % {k};").unwrap();
+    writeln!(out, "        let row = self.row_mut(owner_slot);").unwrap();
     writeln!(out, "        row[slot] = entry;").unwrap();
     writeln!(
         out,

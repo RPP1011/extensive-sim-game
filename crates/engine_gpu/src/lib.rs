@@ -1225,10 +1225,11 @@ impl GpuBackend {
         // --- Subsystem 2 Phase 4 PR-3: memory view storage -----------------
         // Per-agent [MemoryEventGpu; K=64] rings + per-owner monotonic
         // u32 cursors. Sized `agent_cap * 64 * 24` B (records) +
-        // `agent_cap * 4` B (cursors). Uploaded from `state.cold_memory`
-        // on allocate + on agent_cap grow. PR-4 binds this into the
-        // resident physics BGL at slots 20 / 21; PR-6 reads back in
-        // snapshot().
+        // `agent_cap * 4` B (cursors). Uploaded from
+        // `state.views.memory` on allocate + on agent_cap grow (PR-5
+        // retired the old `state.cold_memory` smallvec; the view is now
+        // the source of truth). PR-4 binds this into the resident
+        // physics BGL at slots 20 / 21; PR-6 reads back in snapshot().
         let need_memory_alloc = match &self.resident.memory_storage {
             Some(_) => self.resident.memory_storage_cap < agent_cap,
             None => true,
@@ -1240,9 +1241,44 @@ impl GpuBackend {
                 agent_cap,
                 k,
             );
-            let mem = state.cold_memory();
+            // Derive a throwaway `Vec<MemoryEvent>` per owner from the
+            // view's raw ring slice + cursor. The view stores the v1
+            // minimal shape `{source, value=1.0, anchor_tick=tick}`;
+            // project the event fields back so the GPU struct lands
+            // with the matching partial data (`kind=0`, `payload=0`,
+            // `confidence_q8=0`). Upload is a cold path (init /
+            // agent_cap grow only) so the per-owner scan is fine.
+            let view = &state.views.memory;
+            let k_usize = k as usize;
             storage.upload_from_cpu(&self.queue, |slot| {
-                mem.get(slot).map(|row| row.as_slice().to_vec())
+                let raw_id = (slot as u32).saturating_add(1);
+                let Some(owner_id) = engine::ids::AgentId::new(raw_id) else {
+                    return None;
+                };
+                let cursor = view.cursor(owner_id);
+                if cursor == 0 {
+                    return Some(Vec::new());
+                }
+                let row = view.entries(owner_id)?;
+                let writes = (cursor as usize).min(k_usize);
+                let start_abs = (cursor as usize).saturating_sub(writes);
+                let mut out: Vec<engine::state::agent_types::MemoryEvent> =
+                    Vec::with_capacity(writes);
+                for i in 0..writes {
+                    let abs = start_abs + i;
+                    let entry = row[abs % k_usize];
+                    let Some(src) = engine::ids::AgentId::new(entry.source) else {
+                        continue;
+                    };
+                    out.push(engine::state::agent_types::MemoryEvent {
+                        source: src,
+                        kind: 0,
+                        payload: 0,
+                        confidence_q8: 0,
+                        tick: entry.anchor_tick,
+                    });
+                }
+                Some(out)
             });
             self.resident.memory_storage = Some(storage);
             self.resident.memory_storage_cap = agent_cap;

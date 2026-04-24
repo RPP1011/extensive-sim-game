@@ -364,18 +364,47 @@ impl ViewStoragePerEntityRing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use engine::generated::views::memory::MemoryEntry;
     use engine::state::{AgentSpawn, SimState};
     use engine::creature::CreatureType;
     use glam::Vec3;
 
     /// Adapter — given a `SimState` reference, produce a closure that
-    /// converts `cold_memory[slot]` to `Vec<MemoryEvent>` for
-    /// [`ViewStoragePerEntityRing::upload_from_cpu`].
+    /// projects `state.views.memory` (the generated
+    /// `@per_entity_ring(K=64)` view) into
+    /// `Vec<MemoryEvent>`-per-owner rows for
+    /// [`ViewStoragePerEntityRing::upload_from_cpu`]. This mirrors the
+    /// production init adapter in `lib.rs:ensure_resident_init`.
     fn row_getter(
         state: &SimState,
     ) -> impl FnMut(usize) -> Option<Vec<MemoryEvent>> + '_ {
-        let mem = state.cold_memory();
-        move |slot| mem.get(slot).map(|row| row.as_slice().to_vec())
+        let view = &state.views.memory;
+        let k: usize = engine::generated::views::memory::Memory::K;
+        move |slot| {
+            let raw_id = (slot as u32).saturating_add(1);
+            let owner_id = AgentId::new(raw_id)?;
+            let cursor = view.cursor(owner_id);
+            if cursor == 0 {
+                return Some(Vec::new());
+            }
+            let row = view.entries(owner_id)?;
+            let writes = (cursor as usize).min(k);
+            let start_abs = (cursor as usize).saturating_sub(writes);
+            let mut out: Vec<MemoryEvent> = Vec::with_capacity(writes);
+            for i in 0..writes {
+                let abs = start_abs + i;
+                let entry: MemoryEntry = row[abs % k];
+                let src = AgentId::new(entry.source)?;
+                out.push(MemoryEvent {
+                    source: src,
+                    kind: 0,
+                    payload: 0,
+                    confidence_q8: 0,
+                    tick: entry.anchor_tick,
+                });
+            }
+            Some(out)
+        }
     }
 
     fn gpu_device_queue() -> (wgpu::Device, wgpu::Queue) {
@@ -474,14 +503,12 @@ mod tests {
 
         let mut state = seed_state(cap);
         let owner = AgentId::new(3).unwrap();
-        state.push_agent_memory(
-            owner,
-            MemoryEvent {
-                source: AgentId::new(5).unwrap(),
-                kind: 0,
-                payload: 0xDEAD_BEEF,
-                confidence_q8: 200,
-                tick: 11,
+        state.views.memory.push(
+            owner.raw(),
+            MemoryEntry {
+                source: 5,
+                value: 1.0,
+                anchor_tick: 11,
             },
         );
         storage.upload_from_cpu(&queue, row_getter(&state));
@@ -493,8 +520,6 @@ mod tests {
         let owner_row = &out[(owner.raw() - 1) as usize];
         assert_eq!(owner_row.len(), 1);
         assert_eq!(owner_row[0].source.raw(), 5);
-        assert_eq!(owner_row[0].payload, 0xDEAD_BEEF);
-        assert_eq!(owner_row[0].confidence_q8, 200);
         assert_eq!(owner_row[0].tick, 11);
     }
 
@@ -507,14 +532,12 @@ mod tests {
         let mut state = seed_state(cap);
         let owner = AgentId::new(2).unwrap();
         for i in 0..5u32 {
-            state.push_agent_memory(
-                owner,
-                MemoryEvent {
-                    source: AgentId::new(i + 1).unwrap(),
-                    kind: 0,
-                    payload: u64::from(i) + 100,
-                    confidence_q8: 128,
-                    tick: 10 + i,
+            state.views.memory.push(
+                owner.raw(),
+                MemoryEntry {
+                    source: i + 1,
+                    value: 1.0,
+                    anchor_tick: 10 + i,
                 },
             );
         }
@@ -528,7 +551,6 @@ mod tests {
         assert_eq!(row.len(), 5);
         for i in 0..5u32 {
             assert_eq!(row[i as usize].source.raw(), i + 1);
-            assert_eq!(row[i as usize].payload, u64::from(i) + 100);
             assert_eq!(row[i as usize].tick, 10 + i);
         }
     }
