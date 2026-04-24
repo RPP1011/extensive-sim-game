@@ -166,6 +166,20 @@ fn run_batch_resident_emits_chronicle_on_attacked() {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    // Task #79 SP-4 — standing view storage (records + counts).
+    // Test-local buffers sized to agent_cap × K=8 × 12 bytes + counts.
+    let standing_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("probe::standing_records"),
+        size: (agent_cap as u64 * 8 * 12).max(12),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let standing_counts_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("probe::standing_counts"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("probe::encoder"),
@@ -176,6 +190,7 @@ fn run_batch_resident_emits_chronicle_on_attacked() {
         &kin_buf, &nearest_buf,
         &events_in_buf, &event_ring, &chronicle_ring,
         &indirect, &num_events_buf, &sim_cfg_buf, &gold_buf,
+        &standing_records_buf, &standing_counts_buf,
         0, 1, cfg,
     ).expect("run_batch_resident");
     queue.submit(Some(encoder.finish()));
