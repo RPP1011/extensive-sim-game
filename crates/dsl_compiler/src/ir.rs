@@ -738,6 +738,13 @@ pub enum NamespaceId {
     /// Grammar stub only — emitters return `EmitError::Unsupported` until
     /// the memberships runtime lands.
     Membership,
+    /// `relationship::*` — Subsystem §3 (roadmap.md:279-311). Predicates on
+    /// per-agent `cold_relationships` SmallVec. Methods are `is_hostile`,
+    /// `is_friendly`, `knows_well`. All return bool. Grammar stub only —
+    /// emitters return `EmitError::Unsupported` until the relationships
+    /// runtime lands (replaces Combat Foundation's stub `is_hostile_to`
+    /// with valence-based friendship / hostility thresholds).
+    Relationship,
 }
 
 impl NamespaceId {
@@ -761,6 +768,7 @@ impl NamespaceId {
             NamespaceId::Tick => "tick",
             NamespaceId::Abilities => "abilities",
             NamespaceId::Membership => "membership",
+            NamespaceId::Relationship => "relationship",
         }
     }
 }

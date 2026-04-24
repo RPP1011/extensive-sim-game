@@ -216,3 +216,68 @@ fn subsystem_1_memberships_emit_returns_unsupported_cpu_and_gpu() {
         "GPU emit error msg should cite the memberships primitive stub; got: {msg}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Subsystem §3 — Relationships (roadmap.md:279-311)
+// ---------------------------------------------------------------------------
+
+const SUBSYSTEM_3_SRC: &str = r#"
+@replayable event AgentDied { agent_id: AgentId }
+event RelationshipStubFired { agent_id: AgentId, other_id: AgentId }
+
+// `is_hostile(a, self)` and `knows_well(a, self)` exercise two of the
+// three Relationship primitives. The `||` compose gates the follow-up
+// emit — the kind of predicate Subsystem §3's gossip / retaliation
+// rules will lean on once the cold_relationships SoA exists.
+physics relationship_grammar_stub @phase(event) {
+  on AgentDied { agent_id: a } {
+    if relationship::is_hostile(a, a) || relationship::knows_well(a, a) {
+      emit RelationshipStubFired { agent_id: a, other_id: a }
+    }
+  }
+}
+"#;
+
+#[test]
+fn subsystem_3_relationships_parses_and_resolves_with_ns_call_ir() {
+    let comp = dsl_compiler::compile(SUBSYSTEM_3_SRC)
+        .expect("relationship:: primitives must parse + resolve cleanly");
+    assert_methods_resolved(
+        &comp,
+        "relationship_grammar_stub",
+        NamespaceId::Relationship,
+        &["is_hostile", "knows_well"],
+    );
+}
+
+#[test]
+fn subsystem_3_relationships_emit_returns_unsupported_cpu_and_gpu() {
+    let comp = dsl_compiler::compile(SUBSYSTEM_3_SRC).expect("compile OK");
+    let p = comp
+        .physics
+        .iter()
+        .find(|p| p.name == "relationship_grammar_stub")
+        .unwrap();
+
+    let cpu_ctx = CpuCtx { events: &comp.events, event_tags: &comp.event_tags };
+    let cpu = emit_physics(p, None, &cpu_ctx);
+    let msg = match cpu {
+        Err(CpuErr::Unsupported(s)) => s,
+        other => panic!("expected CpuErr::Unsupported, got {other:?}"),
+    };
+    assert!(
+        msg.contains("relationships primitive `relationship::"),
+        "CPU emit error msg should cite the relationships primitive stub; got: {msg}"
+    );
+
+    let gpu_ctx = GpuCtx { events: &comp.events, event_tags: &comp.event_tags };
+    let gpu = emit_physics_wgsl(p, &gpu_ctx);
+    let msg = match gpu {
+        Err(GpuErr::Unsupported(s)) => s,
+        other => panic!("expected GpuErr::Unsupported, got {other:?}"),
+    };
+    assert!(
+        msg.contains("relationships primitive `relationship::"),
+        "GPU emit error msg should cite the relationships primitive stub; got: {msg}"
+    );
+}

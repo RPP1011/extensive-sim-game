@@ -1471,6 +1471,15 @@ fn lower_namespace_call(
         | (NamespaceId::Membership, "is_outcast") => Err(EmitError::Unsupported(format!(
             "memberships primitive `membership::{method}` pending runtime impl"
         ))),
+        // ----------------------------------------------------------------
+        // Roadmap §3 — Relationships (grammar stub). GPU mirror pending
+        // until the runtime lands. See `docs/superpowers/roadmap.md:279-311`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Relationship, "is_hostile")
+        | (NamespaceId::Relationship, "is_friendly")
+        | (NamespaceId::Relationship, "knows_well") => Err(EmitError::Unsupported(format!(
+            "relationships primitive `relationship::{method}` pending runtime impl"
+        ))),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics WGSL emission",
             ns.name()

@@ -113,6 +113,9 @@ mod stdlib {
             // yet); predicates return bool and emitters return
             // `Unsupported`. See `docs/superpowers/roadmap.md:161-211`.
             ("membership", NamespaceId::Membership),
+            // Roadmap §3 — Relationships. Grammar stub (no runtime state
+            // yet). See `docs/superpowers/roadmap.md:279-311`.
+            ("relationship", NamespaceId::Relationship),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -405,6 +408,20 @@ mod stdlib {
             // `is_outcast(agent, group)` — state.md:69 "outcasts cannot
             // vote"; semantically `standing_q8 < OUTCAST_THRESHOLD`.
             (NamespaceId::Membership, "is_outcast") => Some((2, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Roadmap §3 — Relationships. Predicates on `cold_relationships`.
+            // All return bool. Per the roadmap these replace Combat
+            // Foundation's stub `is_hostile_to` once the relationship
+            // runtime lands — the grammar stub keeps the two surface
+            // forms coexisting until the cutover.
+            // See `docs/superpowers/roadmap.md:306-309`.
+            // -------------------------------------------------------------
+            // `is_hostile(a, b)` — valence_q8 < HOSTILE_THRESHOLD.
+            (NamespaceId::Relationship, "is_hostile") => Some((2, IrType::Bool)),
+            // `is_friendly(a, b)` — valence_q8 > FRIENDLY_THRESHOLD.
+            (NamespaceId::Relationship, "is_friendly") => Some((2, IrType::Bool)),
+            // `knows_well(a, b)` — familiarity > 0.5 (roadmap.md:309).
+            (NamespaceId::Relationship, "knows_well") => Some((2, IrType::Bool)),
             _ => None,
         }
     }
