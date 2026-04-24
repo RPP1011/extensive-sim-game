@@ -1057,6 +1057,16 @@ pub fn run_cascade_resident_with_iter_cap(
     let max_iters = max_iters.clamp(1, MAX_CASCADE_ITERATIONS);
     let agent_cap = state.agent_cap();
 
+    // Perf Stage A.1 — reborrow the profiler into an Option<&mut> once,
+    // then use `as_deref_mut` via a shadowed binding. The cascade
+    // driver emits marks at: spatial+abilities begin, seed_kernel,
+    // per-iter begins, cascade_end. Each mark is a no-op when the
+    // profiler is disabled.
+    let mut prof = profiler;
+    if let Some(p) = prof.as_deref_mut() {
+        p.mark(encoder, "spatial+abilities");
+    }
+
     // ---- 1. Spatial queries ---------------------------------------------
     // Two resident dispatches into distinct caller-owned output trios
     // so the engagement query doesn't clobber the kin query. Each call
@@ -1126,10 +1136,10 @@ pub fn run_cascade_resident_with_iter_cap(
     // iterations' epilogues overwrite their write-slot anyway.
     encoder.clear_buffer(&resident_ctx.num_events_buf, 0, None);
 
-    // Perf Stage A.1 — use the profiler via a single mutable handle so
-    // the mark calls don't fight the borrow checker against `encoder`.
-    let mut profiler = profiler;
-    if let Some(p) = profiler.as_deref_mut() {
+    // Perf Stage A.1 — `seed_kernel` mark lands after spatial rebuild
+    // + query + ability-registry upload so their GPU time is credited
+    // to `spatial+abilities` rather than leaking into `seed_kernel`.
+    if let Some(p) = prof.as_deref_mut() {
         p.mark(encoder, "seed_kernel");
     }
 
@@ -1175,7 +1185,7 @@ pub fn run_cascade_resident_with_iter_cap(
             resident_ctx.iter_rings(iter, apply_event_ring.records_buffer());
 
         // Perf Stage A.1 — mark begin of this cascade iter.
-        if let Some(p) = profiler.as_deref_mut() {
+        if let Some(p) = prof.as_deref_mut() {
             let label = crate::gpu_profiling::CASCADE_ITER_BEGIN_LABELS
                 .get(iter as usize)
                 .copied()
@@ -1237,7 +1247,7 @@ pub fn run_cascade_resident_with_iter_cap(
     // Perf Stage A.1 — close the last cascade iter's timing interval.
     // The profiler reports `(label_i, delta(ts_{i+1} - ts_i))`, so the
     // final iter needs a trailing stamp to produce its µs entry.
-    if let Some(p) = profiler.as_deref_mut() {
+    if let Some(p) = prof.as_deref_mut() {
         p.mark(encoder, "cascade_end");
     }
 
