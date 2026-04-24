@@ -682,6 +682,7 @@ fn collect(
                 symbols.scoring.insert(synthetic, ScoringRef(idx));
                 comp.scoring.push(ScoringIR {
                     entries: Vec::new(),
+                    per_ability_rows: Vec::new(),
                     annotations: d.annotations.clone(),
                     span: d.span,
                 });
@@ -992,7 +993,56 @@ fn resolve_bodies(
                         Ok::<_, ResolveError>(ScoringEntryIR { head, expr, span: e.span })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+                // `per_ability` rows — GPU ability evaluation Phase 2.
+                // The row's three clauses share a single local scope
+                // seeded with `self` (the scoring agent) and `ability`
+                // (the implicit binder for the currently-iterated
+                // ability slot; `ability::tag(...)`-style primitives
+                // read it out of context without a user-visible bind).
+                let per_ability_rows = d
+                    .per_ability_rows
+                    .iter()
+                    .map(|r| {
+                        let mut scope = LocalScope::new();
+                        scope.bind("self", IrType::Unknown);
+                        // Seed the implicit `ability` local so expressions
+                        // like `ability::on_cooldown(ability)` resolve the
+                        // inner argument without an UnknownIdent error.
+                        // Phase 3 lowers this into the per-iteration slot
+                        // index; at Phase 2 it's just a stand-in.
+                        scope.bind("ability", IrType::AbilityId);
+                        let guard = match &r.guard {
+                            Some(g) => Some(resolve_expr(g, &mut scope, symbols)?),
+                            None => None,
+                        };
+                        let score = resolve_expr(&r.score, &mut scope, symbols)?;
+                        let target = match &r.target {
+                            Some(t) => Some(resolve_expr(t, &mut scope, symbols)?),
+                            None => None,
+                        };
+                        // Apply the same closed-operator-set validation
+                        // the standard rows take — per_ability rows
+                        // lower onto the same kernel surface (scoring +
+                        // apply_actions side buffer), so `match`-in-body
+                        // stays rejected until Phase 4 proves otherwise.
+                        if let Some(g) = &guard {
+                            validate_scoring_body(g)?;
+                        }
+                        validate_scoring_body(&score)?;
+                        if let Some(t) = &target {
+                            validate_scoring_body(t)?;
+                        }
+                        Ok::<_, ResolveError>(PerAbilityRowIR {
+                            name: r.name.clone(),
+                            guard,
+                            score,
+                            target,
+                            span: r.span,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 comp.scoring[scoring_idx].entries = entries;
+                comp.scoring[scoring_idx].per_ability_rows = per_ability_rows;
                 scoring_idx += 1;
             }
             Decl::View(d) => {

@@ -496,9 +496,29 @@ pub enum IrActionHeadShape {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ScoringIR {
+    /// Standard per-agent rows: `Head = expression`.
     pub entries: Vec<ScoringEntryIR>,
+    /// `row <name> per_ability { ... }` rows. See `PerAbilityRowIR`.
+    /// Added 2026-04-23 (GPU ability evaluation subsystem Phase 2).
+    pub per_ability_rows: Vec<PerAbilityRowIR>,
     pub annotations: Vec<Annotation>,
     pub span: Span,
+}
+
+/// Discriminant for the two scoring-row shapes currently supported.
+///
+/// * `Standard` — the existing per-agent `Head = expr` row. Scored once
+///   per agent; emitted into `SCORING_TABLE` as a `ScoringEntry`.
+/// * `PerAbility` — new `row <name> per_ability { ... }` row. Scored
+///   once per (agent, ability) pair. See `PerAbilityRowIR`.
+///
+/// Kept as a bare enum rather than folded into `ScoringEntryIR` so
+/// downstream emitters (Phase 3 CPU, Phase 4 GPU) can dispatch on row
+/// shape without re-deriving it from the payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub enum ScoringRowKind {
+    Standard,
+    PerAbility,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -506,6 +526,36 @@ pub struct ScoringEntryIR {
     pub head: IrActionHead,
     pub expr: IrExprNode,
     pub span: Span,
+}
+
+/// IR for a `per_ability` scoring row. The scoring kernel iterates each
+/// agent's ability slots and scores every (agent, ability) pair; the
+/// argmax over passing `guard`s is the ability the agent casts this
+/// tick.
+///
+/// * `guard` — optional boolean predicate. `None` parses as `true`.
+/// * `score` — f32 scoring expression (required).
+/// * `target` — optional agent-id expression picking the cast target.
+///
+/// Phase 2 of the GPU ability evaluation subsystem. See
+/// `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`
+/// §Architecture.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PerAbilityRowIR {
+    pub name: String,
+    pub guard: Option<IrExprNode>,
+    pub score: IrExprNode,
+    pub target: Option<IrExprNode>,
+    pub span: Span,
+}
+
+impl PerAbilityRowIR {
+    /// Dispatch helper for downstream emitters that walk scoring
+    /// entries and branch on row shape.
+    #[inline]
+    pub fn kind(&self) -> ScoringRowKind {
+        ScoringRowKind::PerAbility
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
