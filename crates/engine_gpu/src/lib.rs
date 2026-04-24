@@ -1178,6 +1178,28 @@ impl GpuBackend {
             self.resident.gold_buf_cap = agent_cap;
         }
 
+        // --- Task #79 SP-3: standing view storage --------------------------
+        // Per-agent [StandingEdge; K=8] records + per-owner atomic counts.
+        // Sized `agent_cap * 8 * 16` B (records) + `agent_cap * 4` B (counts).
+        // Uploaded from `state.views.standing` on allocate + on agent_cap
+        // grow. SP-4 wires this into the resident physics BGL at slots
+        // 18 / 19; SP-5 reads back in snapshot().
+        let need_standing_alloc = match &self.resident.standing_storage {
+            Some(_) => self.resident.standing_storage_cap < agent_cap,
+            None => true,
+        };
+        if need_standing_alloc {
+            let k = crate::view_storage_symmetric_pair::STANDING_K;
+            let storage = crate::view_storage_symmetric_pair::ViewStorageSymmetricPair::new(
+                &self.device,
+                agent_cap,
+                k,
+            );
+            storage.upload_from_cpu(&self.queue, &state.views.standing);
+            self.resident.standing_storage = Some(storage);
+            self.resident.standing_storage_cap = agent_cap;
+        }
+
         // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`
         // slots (seed + one per cascade iter).
         if self.resident.resident_indirect_args.is_none() {
