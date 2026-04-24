@@ -599,14 +599,23 @@ git commit -m "test(engine_gpu): transfer_gold fires on batch path (Phase 3 inte
 
 ---
 
-## Task 3.7: Integration test — modify_standing via the new view
+## Task 3.7: Integration test — modify_standing via the new view — LANDED AS `#[ignore]`d SKELETON
 
-**Files:**
-- Create: `crates/engine_gpu/tests/cold_state_standing.rs`
+**Files created:** `crates/engine_gpu/tests/cold_state_standing.rs` (skeleton, `#[ignore]`d).
 
-### Goal
+**What shipped:** A one-test file with an ignored body and a comprehensive file-level doc comment explaining the missing prerequisite: the GPU driver for `@symmetric_pair_topk` view storage doesn't exist. Phase 1 emitted the WGSL fold kernel source but nothing in `engine_gpu` allocates per-agent StandingEdge storage, dispatches the fold kernel, or reads it back into `state.views.standing`. That infrastructure is a non-trivial lift that the Phase 3 plan underestimated.
 
-Mirror of Task 3.6 for standing: `EffectStandingDelta` seeded → batch → view folds on GPU → `state.views.standing.get(a, b)` returns the post-fold value on CPU.
+**What's required to re-enable:**
+
+1. Allocate GPU storage for the standing view in `ResidentPathContext` (per-agent `[StandingEdge; K=8]` array + counts — see CPU layout in `crates/engine/src/generated/views/standing.rs`).
+2. Bind those buffers into the resident physics pipeline at new binding slots (18/19/…) parallel to how `gold_buf` landed at 17 in Task 3.4.
+3. Replace the no-op `state_adjust_standing` WGSL stub at `crates/engine_gpu/src/physics.rs:1013` with a body that inlines the Phase 1 find-or-evict-else-drop logic OR calls a standalone fold kernel dispatched after the physics cascade.
+4. Read back the GPU standing storage in `snapshot()` and merge into `state.views.standing`.
+5. Remove the `Event::EffectStandingDelta` arm from `cold_state_replay` at that point (deferred from Task 3.8).
+
+Task 3.8's standing-arm removal is DEFERRED until this infrastructure lands — if we remove it now, modify_standing silently no-ops on the batch path (GPU stub is no-op, CPU arm is gone).
+
+### Original Task 3.7 body (kept for reference)
 
 ### Steps
 
@@ -683,7 +692,9 @@ git commit -m "test(engine_gpu): modify_standing via @symmetric_pair_topk view (
 
 ---
 
-## Task 3.8: Remove gold + standing from `cold_state_replay`
+## Task 3.8: Remove GOLD (only) from `cold_state_replay` — standing deferred
+
+**Scope narrowed per Task 3.7's finding:** standing-arm removal is deferred until the GPU view-storage driver for `@symmetric_pair_topk` lands. Removing it now would silently no-op `modify_standing` on the batch path (GPU stub is no-op + no CPU fallback). Gold is safe to remove because Tasks 3.3-3.5 provide a real GPU path.
 
 **Files:**
 - Modify: `crates/engine_gpu/src/cascade.rs:cold_state_replay` (around line 604)
@@ -691,7 +702,7 @@ git commit -m "test(engine_gpu): modify_standing via @symmetric_pair_topk view (
 
 ### Goal
 
-Now that gold + standing have a real GPU path, the CPU `cold_state_replay` must stop double-applying them. Keep chronicle_* and record_memory arms intact.
+Remove the `Event::EffectGoldTransfer` match arm from `cold_state_replay`. Gold now flows via the resident physics kernel's atomic writes on `gold_buf` (Task 3.4) + snapshot readback (Task 3.5). Keep the `Event::EffectStandingDelta` arm (deferred) AND the chronicle_*/record_memory arms intact.
 
 ### Steps
 
@@ -699,9 +710,9 @@ Now that gold + standing have a real GPU path, the CPU `cold_state_replay` must 
 
 In `cascade.rs:cold_state_replay`, delete the match arm for `Event::EffectGoldTransfer`. Its body calls `transfer_gold::transfer_gold(...)` — no longer needed.
 
-- [ ] **Step 2: Remove the EffectStandingDelta arm**
+- [ ] **Step 2: Leave the EffectStandingDelta arm in place**
 
-Same file — delete the `Event::EffectStandingDelta` arm.
+Deferred until the GPU view-storage driver for standing lands (see Task 3.7's file-level doc in `crates/engine_gpu/tests/cold_state_standing.rs`).
 
 - [ ] **Step 3: Run parity tests**
 
