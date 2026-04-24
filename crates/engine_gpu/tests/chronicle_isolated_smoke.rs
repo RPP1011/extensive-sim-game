@@ -180,6 +180,19 @@ fn run_batch_resident_emits_chronicle_on_attacked() {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    // Subsystem 2 Phase 4 PR-4 — memory view storage (records + cursors).
+    let memory_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("probe::memory_records"),
+        size: (agent_cap as u64 * 64 * 24).max(24),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let memory_cursors_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("probe::memory_cursors"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("probe::encoder"),
@@ -191,6 +204,7 @@ fn run_batch_resident_emits_chronicle_on_attacked() {
         &events_in_buf, &event_ring, &chronicle_ring,
         &indirect, &num_events_buf, &sim_cfg_buf, &gold_buf,
         &standing_records_buf, &standing_counts_buf,
+        &memory_records_buf, &memory_cursors_buf,
         0, 1, cfg,
     ).expect("run_batch_resident");
     queue.submit(Some(encoder.finish()));

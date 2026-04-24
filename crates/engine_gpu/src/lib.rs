@@ -864,6 +864,7 @@ impl GpuBackend {
                 sim_cfg_buf,
                 gold_buf,
                 standing_storage,
+                memory_storage,
                 fused_unpack_kernel,
                 ..
             } = &mut self.resident;
@@ -1068,6 +1069,9 @@ impl GpuBackend {
             let standing_ref = standing_storage
                 .as_ref()
                 .expect("standing_storage ensured by ensure_resident_init");
+            let memory_ref = memory_storage
+                .as_ref()
+                .expect("memory_storage ensured by ensure_resident_init");
             crate::cascade_resident::run_cascade_resident_with_iter_cap(
                 &self.device,
                 &self.queue,
@@ -1082,6 +1086,8 @@ impl GpuBackend {
                 gold_buf_ref,
                 &standing_ref.records_buf,
                 &standing_ref.counts_buf,
+                &memory_ref.records_buf,
+                &memory_ref.cursors_buf,
                 iter_cap,
             )
             .expect("cascade_resident dispatch");

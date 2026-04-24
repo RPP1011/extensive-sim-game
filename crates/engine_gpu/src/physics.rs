@@ -576,6 +576,7 @@ pub fn build_physics_shader(
         DEFAULT_CHRONICLE_CAPACITY,
         false, // sync path: no gold_buf binding, gold stubs stay no-op
         false, // sync path: no standing_storage, adjust_standing stays no-op
+        false, // sync path: no memory_storage, push_agent_memory stays no-op
     )
 }
 
@@ -591,6 +592,7 @@ pub fn build_physics_shader_with_chronicle(
     chronicle_ring_capacity: u32,
     has_gold_buf: bool,
     has_standing_storage: bool,
+    has_memory_storage: bool,
 ) -> Result<String, PhysicsError> {
     let mut out = String::new();
     out.push_str(&wgsl_prefix(event_ring_capacity));
@@ -789,12 +791,42 @@ pub fn build_physics_shader_with_chronicle(
         );
     }
 
+    // Subsystem 2 Phase 4 PR-4 — memory view storage (resident path
+    // only). Bindings 20 (records) + 21 (cursors). Struct matches the
+    // 24-byte `MemoryEventGpu` documented in
+    // `crates/engine_gpu/src/view_storage_per_entity_ring.rs`:
+    // `source | kind | payload_lo | payload_hi | confidence | tick`.
+    // K = 64. Declared before `state_stub_fns` so the real
+    // `state_push_agent_memory` body has the symbols in scope.
+    // Sync path skips: its stub stays no-op (CPU `cold_state_replay`
+    // still handles `RecordMemory` events there).
+    if has_memory_storage {
+        out.push_str(
+            "\n// ---- Subsystem 2 Phase 4 PR-4 — memory view storage ----\n\
+             const MEMORY_K: u32 = 64u;\n\
+             struct MemoryEventGpu {\n\
+             \x20 source:      u32,\n\
+             \x20 kind:        u32,\n\
+             \x20 payload_lo:  u32,\n\
+             \x20 payload_hi:  u32,\n\
+             \x20 confidence:  u32,\n\
+             \x20 tick:        u32,\n\
+             };\n\
+             @group(0) @binding(20) var<storage, read_write> memory_records_buf: array<MemoryEventGpu>;\n\
+             @group(0) @binding(21) var<storage, read_write> memory_cursors_buf: array<atomic<u32>>;\n\n",
+        );
+    }
+
     // ---- State stub fns ----
     //
     // Every stub writes/reads exactly one field of the `agents` buffer.
     // Stubs that the CPU side doesn't have a GPU-side source for (gold,
     // standing, memory) are no-ops documented as such.
-    out.push_str(&state_stub_fns(has_gold_buf, has_standing_storage));
+    out.push_str(&state_stub_fns(
+        has_gold_buf,
+        has_standing_storage,
+        has_memory_storage,
+    ));
 
     // ---- `cfg` namespace-field lookups ----
     //
@@ -929,11 +961,17 @@ pub fn build_physics_shader_resident(
     // `state_adjust_standing` stub emits the real fold body against
     // the binding-18 / 19 standing storage. Sync source keeps the
     // no-op for modify_standing; cold_state_replay covers it.
+    //
+    // Subsystem 2 Phase 4 PR-4: pass `has_memory_storage = true`
+    // so `state_push_agent_memory` writes into the binding-20 / 21
+    // ring + cursor storage. Sync source keeps the no-op; CPU
+    // cold_state_replay handles `RecordMemory` there.
     let mut out = build_physics_shader_with_chronicle(
         physics,
         ctx,
         event_ring_capacity,
         chronicle_ring_capacity,
+        true,
         true,
         true,
     )?;
@@ -1116,7 +1154,19 @@ fn event_kind_consts() -> String {
 /// `state_adjust_standing(a, b, delta)` body is a no-op (sync path,
 /// standing still runs via CPU `cold_state_replay`) or a real
 /// find-or-evict fold against bindings 18 / 19.
-fn state_stub_fns(has_gold_buf: bool, has_standing_storage: bool) -> String {
+///
+/// Subsystem 2 Phase 4 PR-4 — `has_memory_storage` selects whether
+/// the `state_push_agent_memory(observer, source, payload, confidence,
+/// tick)` body is a no-op (sync path — memory still runs via CPU
+/// `cold_state_replay`) or a real monotonic-cursor ring push against
+/// bindings 20 / 21. The stub quantises `confidence: f32` to q8 and
+/// hardcodes `kind = 0` to match the CPU-generated rule at
+/// `crates/engine/src/generated/physics/record_memory.rs`.
+fn state_stub_fns(
+    has_gold_buf: bool,
+    has_standing_storage: bool,
+    has_memory_storage: bool,
+) -> String {
     // The emitter lists every stub name in the module doc. All scalar
     // getters/setters project into a single field of `agents[id - 1]`
     // (ids are 1-based; slot 0 is unused).
@@ -1255,11 +1305,7 @@ fn state_kill_agent(id: u32) {
     // and skips the teardown — a silent miss of the EngagementBroken
     // event the CPU cascade emits.
 }
-// Memory push: no-op. The CPU cascade owns the memory ring; the GPU
-// record_memory rule lands here and documents the gap. If a future
-// phase wants GPU memory, provision a ring buffer + atomic tail and
-// replace this no-op.
-fn state_push_agent_memory(observer: u32, source: u32, payload: u32, confidence: f32, t: u32) { }
+// ---- MEMORY_STUB_PLACEHOLDER ----
 "#;
 
     // Substitute the gold-stub placeholder with either no-op bodies
@@ -1378,8 +1424,59 @@ fn state_push_agent_memory(observer: u32, source: u32, payload: u32, confidence:
          fn state_adjust_standing(a: u32, b: u32, delta: i32) { }\n"
     };
 
+    // Subsystem 2 Phase 4 PR-4 — substitute the memory-stub
+    // placeholder. Real body quantises `confidence: f32` to q8,
+    // hardcodes `kind = 0` (matching CPU `record_memory`), splits
+    // the event's `payload: u32` into `payload_lo = payload,
+    // payload_hi = 0` (DSL lowering today passes only the low word
+    // of the `u64 fact_payload` — documented truncation), and writes
+    // the record at `owner_slot * MEMORY_K + (cursor % MEMORY_K)`
+    // with an `atomicAdd` bumping the cursor. Monotonic cursor +
+    // modulo makes this naturally race-safe (no CAS loop, no evict
+    // scan).
+    let memory_body = if has_memory_storage {
+        "// Subsystem 2 Phase 4 PR-4 — real memory ring push against\n\
+         // bindings 20/21. Monotonic cursor + slot = cursor % K gives\n\
+         // FIFO semantics with natural eviction at K overflow.\n\
+         fn state_push_agent_memory(observer: u32, source: u32, payload: u32, confidence: f32, t: u32) {\n\
+         \x20   let s = slot_of(observer);\n\
+         \x20   if (s == 0xFFFFFFFFu) { return; }\n\
+         \x20\n\
+         \x20   // Reserve a slot by atomically bumping the owner's cursor.\n\
+         \x20   // The returned value is this write's absolute index; slot\n\
+         \x20   // = idx % MEMORY_K. Concurrent writes on the same owner\n\
+         \x20   // serialise through this atomicAdd and each take a\n\
+         \x20   // distinct slot modulo K.\n\
+         \x20   let idx = atomicAdd(&memory_cursors_buf[s], 1u);\n\
+         \x20   let ring_slot = s * MEMORY_K + (idx % MEMORY_K);\n\
+         \x20\n\
+         \x20   // Quantise confidence to q8. CPU `record_memory` does\n\
+         \x20   // `(c.clamp(0.0, 1.0) * 255.0) as u8` — mirror it here.\n\
+         \x20   var c = confidence;\n\
+         \x20   if (c < 0.0) { c = 0.0; }\n\
+         \x20   if (c > 1.0) { c = 1.0; }\n\
+         \x20   let conf_q8: u32 = u32(c * 255.0);\n\
+         \x20\n\
+         \x20   memory_records_buf[ring_slot].source     = source;\n\
+         \x20   memory_records_buf[ring_slot].kind       = 0u;\n\
+         \x20   memory_records_buf[ring_slot].payload_lo = payload;\n\
+         \x20   memory_records_buf[ring_slot].payload_hi = 0u;\n\
+         \x20   memory_records_buf[ring_slot].confidence = conf_q8;\n\
+         \x20   memory_records_buf[ring_slot].tick       = t;\n\
+         }\n"
+    } else {
+        "// Memory push: no-op on GPU for the sync path. The\n\
+         // record_memory rule still fires on the CPU side (via\n\
+         // cold_state_replay); the GPU path preserves state by\n\
+         // leaving the (absent) memory ring storage untouched. The\n\
+         // resident batch path emits the real ring-push body against\n\
+         // bindings 20 / 21.\n\
+         fn state_push_agent_memory(observer: u32, source: u32, payload: u32, confidence: f32, t: u32) { }\n"
+    };
+
     src.replace("// ---- GOLD_STUBS_PLACEHOLDER ----", gold_bodies)
         .replace("// ---- STANDING_STUB_PLACEHOLDER ----", standing_body)
+        .replace("// ---- MEMORY_STUB_PLACEHOLDER ----", memory_body)
 }
 
 /// Emit spatial-query wrapper fns. The emitter calls
@@ -1550,6 +1647,12 @@ struct ResidentBgKey {
     /// iteration in a batch.
     standing_records: wgpu::Buffer,
     standing_counts:  wgpu::Buffer,
+    /// Subsystem 2 Phase 4 PR-4 — resident memory view storage
+    /// (records + cursors). Same stability story as the standing
+    /// buffers above — one pair of handles per `GpuBackend`, stable
+    /// across every cascade iteration in a batch.
+    memory_records: wgpu::Buffer,
+    memory_cursors: wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -1622,6 +1725,7 @@ impl PhysicsKernel {
             chronicle_ring_capacity,
             false, // sync pipeline: no gold_buf binding
             false, // sync pipeline: no standing_storage binding
+            false, // sync pipeline: no memory_storage binding
         )?;
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -1763,6 +1867,13 @@ impl PhysicsKernel {
             // `state_adjust_standing` body (find-or-evict fold).
             storage_rw(18),
             storage_rw(19),
+            // Subsystem 2 Phase 4 PR-4 — memory view storage.
+            // 20: records `array<MemoryEventGpu>` (storage, rw).
+            // 21: cursors `array<atomic<u32>>` (storage, rw).
+            // record_memory DSL rule mutates via the real
+            // `state_push_agent_memory` body (monotonic ring push).
+            storage_rw(20),
+            storage_rw(21),
         ];
         let bind_group_layout_resident =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -2427,6 +2538,8 @@ impl PhysicsKernel {
         gold_buf: &wgpu::Buffer,
         standing_records_buf: &wgpu::Buffer,
         standing_counts_buf: &wgpu::Buffer,
+        memory_records_buf: &wgpu::Buffer,
+        memory_cursors_buf: &wgpu::Buffer,
         read_slot: u32,
         write_slot: u32,
         cfg: PhysicsCfg,
@@ -2508,6 +2621,10 @@ impl PhysicsKernel {
             // Task #79 SP-4 — standing view storage (records + counts).
             standing_records: standing_records_buf.clone(),
             standing_counts: standing_counts_buf.clone(),
+            // Subsystem 2 Phase 4 PR-4 — memory view storage
+            // (records + cursors).
+            memory_records: memory_records_buf.clone(),
+            memory_cursors: memory_cursors_buf.clone(),
         };
         let bind_group: &wgpu::BindGroup = self.resident_bg_cache.entry(key).or_insert_with(|| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2596,6 +2713,15 @@ impl PhysicsKernel {
                     wgpu::BindGroupEntry {
                         binding: 19,
                         resource: standing_counts_buf.as_entire_binding(),
+                    },
+                    // Subsystem 2 Phase 4 PR-4 — memory view storage.
+                    wgpu::BindGroupEntry {
+                        binding: 20,
+                        resource: memory_records_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 21,
+                        resource: memory_cursors_buf.as_entire_binding(),
                     },
                 ],
             })

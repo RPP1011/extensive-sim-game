@@ -996,6 +996,8 @@ pub fn run_cascade_resident(
     gold_buf: &wgpu::Buffer,
     standing_records_buf: &wgpu::Buffer,
     standing_counts_buf: &wgpu::Buffer,
+    memory_records_buf: &wgpu::Buffer,
+    memory_cursors_buf: &wgpu::Buffer,
 ) -> Result<(), CascadeResidentError> {
     run_cascade_resident_with_iter_cap(
         device,
@@ -1011,6 +1013,8 @@ pub fn run_cascade_resident(
         gold_buf,
         standing_records_buf,
         standing_counts_buf,
+        memory_records_buf,
+        memory_cursors_buf,
         MAX_CASCADE_ITERATIONS,
     )
 }
@@ -1039,6 +1043,8 @@ pub fn run_cascade_resident_with_iter_cap(
     gold_buf: &wgpu::Buffer,
     standing_records_buf: &wgpu::Buffer,
     standing_counts_buf: &wgpu::Buffer,
+    memory_records_buf: &wgpu::Buffer,
+    memory_cursors_buf: &wgpu::Buffer,
     max_iters: u32,
 ) -> Result<(), CascadeResidentError> {
     let max_iters = max_iters.clamp(1, MAX_CASCADE_ITERATIONS);
@@ -1179,6 +1185,8 @@ pub fn run_cascade_resident_with_iter_cap(
             gold_buf,
             standing_records_buf,
             standing_counts_buf,
+            memory_records_buf,
+            memory_cursors_buf,
             iter,       // read_slot
             iter + 1,   // write_slot
             cfg_template,

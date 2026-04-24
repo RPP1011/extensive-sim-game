@@ -260,6 +260,20 @@ fn dispatch_one_event(
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    // Memory view storage: unused by this test but required by the
+    // BGL (slots 20 / 21).
+    let memory_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("standing::memory_records"),
+        size: (agent_cap as u64 * 64 * 24).max(24),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let memory_cursors_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("standing::memory_cursors"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("standing::encoder"),
@@ -285,6 +299,8 @@ fn dispatch_one_event(
             &gold_buf,
             standing_records,
             standing_counts,
+            &memory_records_buf,
+            &memory_cursors_buf,
             0, // read_slot
             1, // write_slot
             cfg,
