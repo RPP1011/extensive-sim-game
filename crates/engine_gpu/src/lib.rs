@@ -77,6 +77,14 @@ pub mod scoring;
 #[cfg(feature = "gpu")]
 pub mod view_storage;
 
+/// Task #79 — GPU resident-path storage for `@symmetric_pair_topk`
+/// views (the `standing` view, Task 3.1). Owns per-agent `[StandingEdge;
+/// K=8]` arrays + counts, uploaded from `state.views.standing` on
+/// `ensure_resident_init` and read back in `snapshot()`. Bound into the
+/// resident physics BGL at slots 18 / 19.
+#[cfg(feature = "gpu")]
+pub mod view_storage_symmetric_pair;
+
 /// Phase 5 — GPU spatial hash + nearest-hostile / nearby-kin queries.
 /// Not yet consumed by the backend's step loop; the scoring / physics
 /// kernels will call into `spatial_gpu::SPATIAL_WGSL` helpers.
@@ -845,6 +853,7 @@ impl GpuBackend {
                 resident_cascade_ctx,
                 sim_cfg_buf,
                 gold_buf,
+                standing_storage,
                 fused_unpack_kernel,
                 ..
             } = &mut self.resident;
@@ -1046,6 +1055,9 @@ impl GpuBackend {
             let gold_buf_ref = gold_buf
                 .as_ref()
                 .expect("gold_buf ensured by ensure_resident_init");
+            let standing_ref = standing_storage
+                .as_ref()
+                .expect("standing_storage ensured by ensure_resident_init");
             crate::cascade_resident::run_cascade_resident_with_iter_cap(
                 &self.device,
                 &self.queue,
@@ -1058,6 +1070,8 @@ impl GpuBackend {
                 indirect_args,
                 sim_cfg_ref,
                 gold_buf_ref,
+                &standing_ref.records_buf,
+                &standing_ref.counts_buf,
                 iter_cap,
             )
             .expect("cascade_resident dispatch");
@@ -1168,6 +1182,28 @@ impl GpuBackend {
             self.queue.write_buffer(&buf, 0, bytemuck::cast_slice(&gold_vec));
             self.resident.gold_buf = Some(buf);
             self.resident.gold_buf_cap = agent_cap;
+        }
+
+        // --- Task #79 SP-3: standing view storage --------------------------
+        // Per-agent [StandingEdge; K=8] records + per-owner atomic counts.
+        // Sized `agent_cap * 8 * 16` B (records) + `agent_cap * 4` B (counts).
+        // Uploaded from `state.views.standing` on allocate + on agent_cap
+        // grow. SP-4 wires this into the resident physics BGL at slots
+        // 18 / 19; SP-5 reads back in snapshot().
+        let need_standing_alloc = match &self.resident.standing_storage {
+            Some(_) => self.resident.standing_storage_cap < agent_cap,
+            None => true,
+        };
+        if need_standing_alloc {
+            let k = crate::view_storage_symmetric_pair::STANDING_K;
+            let storage = crate::view_storage_symmetric_pair::ViewStorageSymmetricPair::new(
+                &self.device,
+                agent_cap,
+                k,
+            );
+            storage.upload_from_cpu(&self.queue, &state.views.standing);
+            self.resident.standing_storage = Some(storage);
+            self.resident.standing_storage_cap = agent_cap;
         }
 
         // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`
@@ -1511,6 +1547,28 @@ impl GpuBackend {
                     inv[slot].gold = gold_vec[slot];
                 }
             }
+        }
+
+        // Task #79 SP-5 — standing_storage readback → state.views.standing.
+        //
+        // Mirrors the gold_buf readback pattern above. The resident
+        // physics kernel is the only writer of standing_records_buf /
+        // standing_counts_buf (SP-4's real state_adjust_standing body);
+        // the sync path leaves them untouched and standing flows
+        // through CPU cold_state_replay. Reading back after step_batch
+        // rehydrates state.views.standing so observers see post-batch
+        // standing values via the CPU view's normal get() / adjust()
+        // surface.
+        //
+        // O(agent_cap²) on upload (get_cpu_row scans potential partners)
+        // + two blocking readback_typed calls here. Both one-shot per
+        // snapshot, acceptable per plan Option (a). A future
+        // optimisation could fold this into the existing double-buffered
+        // snapshot staging copy alongside agents / events / chronicle.
+        if let Some(storage) = self.resident.standing_storage.as_ref() {
+            storage
+                .readback_into_cpu(&self.device, &self.queue, &mut state.views.standing)
+                .map_err(crate::snapshot::SnapshotError::Ring)?;
         }
 
         // 4. Swap front / back — next call takes the one we just

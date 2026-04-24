@@ -7,6 +7,7 @@ use crate::cascade_resident::CascadeResidentCtx;
 use crate::gpu_util::indirect::IndirectArgsBuffer;
 use crate::mask::{FusedAgentUnpackKernel, MaskUnpackKernel};
 use crate::scoring::ScoringUnpackKernel;
+use crate::view_storage_symmetric_pair::ViewStorageSymmetricPair;
 
 pub struct ResidentPathContext {
     /// Phase D — persistent agent SoA buffer. Allocated on first
@@ -21,6 +22,15 @@ pub struct ResidentPathContext {
     /// cold_inventory on snapshot() in Task 3.5.
     pub gold_buf:     Option<wgpu::Buffer>,
     pub gold_buf_cap: u32,
+
+    /// Task #79 — resident storage for the `@symmetric_pair_topk`
+    /// `standing` view. Per-agent `[StandingEdge; K=8]` records + per-
+    /// owner atomic counts. Uploaded from `state.views.standing` at
+    /// `ensure_resident_init` (SP-3); bound into the resident physics
+    /// BGL at slots 18 / 19 (SP-4); read back into
+    /// `state.views.standing` on `snapshot()` (SP-5).
+    pub standing_storage:     Option<ViewStorageSymmetricPair>,
+    pub standing_storage_cap: u32,
 
     /// Phase D — indirect dispatch args for the resident cascade.
     /// MAX_CASCADE_ITERATIONS + 1 slots. Lazy-initialised in step_batch.
@@ -71,6 +81,8 @@ impl ResidentPathContext {
             resident_agents_cap:    0,
             gold_buf:               None,
             gold_buf_cap:           0,
+            standing_storage:       None,
+            standing_storage_cap:   0,
             resident_indirect_args: None,
             resident_cascade_ctx:   None,
             mask_unpack_kernel,

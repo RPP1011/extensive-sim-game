@@ -255,6 +255,21 @@ fn transfer_gold_fires_on_resident_kernel() {
     initial_gold[1] = 0;
     queue.write_buffer(&gold_buf, 0, bytemuck::cast_slice(&initial_gold));
 
+    // Task #79 SP-4 — standing view storage. Unused by this test
+    // (only transfer_gold fires) but the resident BGL requires it.
+    let standing_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("gold::standing_records"),
+        size: (agent_cap as u64 * 8 * 16).max(16),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let standing_counts_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("gold::standing_counts"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
     // Baseline readback (sanity: initial values reached the device
     // before dispatch).
     let pre = readback_gold_i32(&device, &queue, &gold_buf, agent_cap);
@@ -283,6 +298,8 @@ fn transfer_gold_fires_on_resident_kernel() {
             &num_events_buf,
             &sim_cfg_buf,
             &gold_buf,
+            &standing_records_buf,
+            &standing_counts_buf,
             0, // read_slot
             1, // write_slot
             cfg,

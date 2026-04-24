@@ -658,6 +658,25 @@ pub fn cold_state_replay(
                 transfer_gold::transfer_gold(from, to, amount, state, events);
             }
             // --- EffectStandingDelta: modify_standing (mutates standing) ---
+            //
+            // Load-bearing for sync — mirrors the gold arm above.
+            // `cold_state_replay` runs on the SYNC `GpuBackend::step`
+            // path, where the physics kernel's `state_adjust_standing`
+            // WGSL stub is still a no-op (Task #79 SP-4's
+            // `has_standing_storage=true` flag only applies to the
+            // resident/batch path shader). The BATCH `step_batch` flow
+            // does NOT call `cold_state_replay` — the resident physics
+            // kernel mutates `standing_records_buf` / `counts_buf`
+            // directly via the real find-or-evict fold (SP-4), and
+            // `snapshot()` reads them back into
+            // `state.views.standing` (SP-5). Removing this arm would
+            // silently drop standing deltas on every sync-path tick.
+            //
+            // Can be removed once sync also binds standing_storage +
+            // emits the real adjust-standing body — tracked as the
+            // "SP-7-follow-up: wire standing on sync BGL" deferred
+            // task in the plan. Parallels the gold arm's follow-up
+            // recorded in the comment block just above.
             Event::EffectStandingDelta { a, b, delta, .. } => {
                 modify_standing::modify_standing(a, b, delta, state, events);
             }
