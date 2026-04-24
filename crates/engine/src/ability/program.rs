@@ -123,19 +123,152 @@ pub enum EffectOp {
     CastAbility { ability: AbilityId, selector: TargetSelector } = 7,
 }
 
+/// Coarse ability-category hint, per `.ability` DSL `hint:` field.
+///
+/// Exposes one hint per ability to scoring — scoring rows read the hint
+/// via the DSL grammar addition `ability::hint` (landing in Phase 2 of
+/// the GPU ability-evaluation subsystem). The sentinel `None` is used
+/// for abilities authored without a `hint:` line; scoring expressions
+/// that compare against a specific hint treat `None` as not-a-match.
+///
+/// Numeric discriminants are pinned so GPU packing (`PackedAbilityRegistry::hints`)
+/// and WGSL `const` comparisons align without a runtime lookup. Renaming or
+/// reordering variants bumps the schema hash.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum AbilityHint {
+    Damage = 0,
+    Defense = 1,
+    CrowdControl = 2,
+    Utility = 3,
+}
+
+impl AbilityHint {
+    /// Parse the coarse category from its DSL token form (`damage`,
+    /// `defense`, `crowd_control`, `utility`). Returns `None` for an
+    /// unknown spelling so upstream can surface the original token in
+    /// its error.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "damage" => Some(Self::Damage),
+            "defense" => Some(Self::Defense),
+            "crowd_control" => Some(Self::CrowdControl),
+            "utility" => Some(Self::Utility),
+            _ => None,
+        }
+    }
+
+    /// Stable discriminant, matching the `#[repr(u8)]` ordinal. Used by
+    /// the GPU packer to drop `Option<AbilityHint>` into a `u32` slot
+    /// alongside `HINT_NONE_SENTINEL`.
+    #[inline]
+    pub fn discriminant(self) -> u8 {
+        self as u8
+    }
+}
+
+/// Fixed initial tag vocabulary for per-effect `[TAG: value]` power
+/// ratings surfaced through the `.ability` DSL.
+///
+/// v1 ships a fixed enum (per the spec's "fixed enum for v1" decision
+/// in `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`
+/// "Open questions"). A user-extensible symbol table is deferred — the
+/// fixed enum lowers each tag to a known GPU buffer index without a
+/// per-scenario rebind.
+///
+/// Numeric discriminants double as the column index into the packed
+/// `tag_values` buffer (`tag_values[ab * NUM_TAGS + tag as usize]`).
+/// Renaming or reordering bumps the schema hash.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum AbilityTag {
+    Physical = 0,
+    Magical = 1,
+    CrowdControl = 2,
+    Heal = 3,
+    Defense = 4,
+    Utility = 5,
+}
+
+impl AbilityTag {
+    /// Total count — pinned to match the `NUM_ABILITY_TAGS` stride used
+    /// by `PackedAbilityRegistry::tag_values`. Bump in lockstep with any
+    /// enum addition.
+    pub const COUNT: usize = 6;
+
+    /// Iterate every variant in declaration order. Useful for packers
+    /// that need to fill a fixed-width row of per-tag values.
+    pub fn all() -> impl Iterator<Item = Self> {
+        [
+            Self::Physical,
+            Self::Magical,
+            Self::CrowdControl,
+            Self::Heal,
+            Self::Defense,
+            Self::Utility,
+        ]
+        .into_iter()
+    }
+
+    /// Parse the tag from its DSL token form (`PHYSICAL`, `MAGICAL`,
+    /// `CROWD_CONTROL`, `HEAL`, `DEFENSE`, `UTILITY`). Returns `None`
+    /// for unknown tags so upstream can surface the original token.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "PHYSICAL" => Some(Self::Physical),
+            "MAGICAL" => Some(Self::Magical),
+            "CROWD_CONTROL" => Some(Self::CrowdControl),
+            "HEAL" => Some(Self::Heal),
+            "DEFENSE" => Some(Self::Defense),
+            "UTILITY" => Some(Self::Utility),
+            _ => None,
+        }
+    }
+
+    /// Column index into the packed `tag_values` row. Matches the
+    /// `#[repr(u8)]` ordinal.
+    #[inline]
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// Maximum tag entries per `AbilityProgram`. Bounded so the tag
+/// smallvec stays stack-resident; `AbilityTag::COUNT` is the natural
+/// upper bound since each tag appears at most once per ability.
+pub const MAX_TAGS_PER_PROGRAM: usize = AbilityTag::COUNT;
+
 /// Compiled ability — the unit `AbilityRegistry` stores and `CastHandler`
 /// dispatches.
+///
+/// Carries the scoring-surface fields (`hint`, `tags`) exposed to GPU
+/// ability evaluation via `PackedAbilityRegistry::pack`. Both default
+/// to empty so legacy test sites (which construct abilities without a
+/// hint or tag vector) keep compiling unchanged — a program with no
+/// tags scores 0 under `ability::tag(...)`, matching the spec's
+/// "returns 0 silently" contract for missing tags.
 #[derive(Clone, Debug)]
 pub struct AbilityProgram {
     pub delivery: Delivery,
     pub area:     Area,
     pub gate:     Gate,
     pub effects:  SmallVec<[EffectOp; MAX_EFFECTS_PER_PROGRAM]>,
+    /// Coarse hint per the `.ability` DSL's `hint:` field. `None` means
+    /// the source file did not specify one.
+    pub hint:     Option<AbilityHint>,
+    /// Per-tag numeric power ratings aggregated across the ability's
+    /// effects. One entry per `(tag, value)` pair — lookup is linear;
+    /// max length is `MAX_TAGS_PER_PROGRAM == AbilityTag::COUNT`.
+    pub tags:     SmallVec<[(AbilityTag, f32); MAX_TAGS_PER_PROGRAM]>,
 }
 
 impl AbilityProgram {
     /// Convenience: a single-target, instant ability with the given gate
     /// and effect list. Most hand-authored test programs use this shape.
+    ///
+    /// Constructs a program with no scoring hint and no tags; callers
+    /// that need them should set `hint` + `tags` on the returned value
+    /// (or use `with_hint` / `with_tags`).
     pub fn new_single_target(
         range:   f32,
         gate:    Gate,
@@ -148,7 +281,37 @@ impl AbilityProgram {
             area:     Area::SingleTarget { range },
             gate,
             effects:  v,
+            hint:     None,
+            tags:     SmallVec::new(),
         }
+    }
+
+    /// Builder-style setter for `hint`. Returns `self` for chaining.
+    pub fn with_hint(mut self, hint: AbilityHint) -> Self {
+        self.hint = Some(hint);
+        self
+    }
+
+    /// Builder-style setter for `tags`. Any prior tag entries are
+    /// replaced. Returns `self` for chaining.
+    pub fn with_tags<I>(mut self, tags: I) -> Self
+    where
+        I: IntoIterator<Item = (AbilityTag, f32)>,
+    {
+        self.tags = SmallVec::new();
+        for t in tags { self.tags.push(t); }
+        self
+    }
+
+    /// Look up the value of a specific tag on this ability. Returns
+    /// `0.0` when absent — the DSL contract for `ability::tag(TAG)` on
+    /// an ability without the tag.
+    #[inline]
+    pub fn tag_value(&self, tag: AbilityTag) -> f32 {
+        for &(t, v) in self.tags.iter() {
+            if t == tag { return v; }
+        }
+        0.0
     }
 }
 

@@ -48,4 +48,5 @@ pub use program::{
     Area, Delivery, EffectOp, Gate, TargetSelector, MAX_ABILITIES, MAX_EFFECTS_PER_PROGRAM,
 };
 pub use program::AbilityProgram;
+pub use program::{AbilityHint, AbilityTag, MAX_TAGS_PER_PROGRAM};
 pub use registry::{AbilityRegistry, AbilityRegistryBuilder};
