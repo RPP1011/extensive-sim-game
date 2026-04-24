@@ -424,6 +424,7 @@ pub fn build_physics_shader(
         event_ring_capacity,
         DEFAULT_CHRONICLE_CAPACITY,
         false, // sync path: no gold_buf binding, gold stubs stay no-op
+        false, // sync path: no standing_storage, adjust_standing stays no-op
     )
 }
 
@@ -438,6 +439,7 @@ pub fn build_physics_shader_with_chronicle(
     event_ring_capacity: u32,
     chronicle_ring_capacity: u32,
     has_gold_buf: bool,
+    has_standing_storage: bool,
 ) -> Result<String, PhysicsError> {
     let mut out = String::new();
     out.push_str(&wgsl_prefix(event_ring_capacity));
@@ -613,12 +615,35 @@ pub fn build_physics_shader_with_chronicle(
         );
     }
 
+    // Task #79 SP-4 — standing view storage (resident path only).
+    // Bindings 18 (records) + 19 (counts). Layout matches the WGSL
+    // fold kernel's struct: `{ other: u32, value: i32, anchor_tick:
+    // u32, _pad: u32 }` = 16 B. K = 8. Declared before
+    // `state_stub_fns` so the real `state_adjust_standing` body has
+    // the symbols in scope. Sync path skips: its stub stays no-op.
+    if has_standing_storage {
+        out.push_str(
+            "\n// ---- Task #79 SP-4 — standing view storage ----\n\
+             const STANDING_K: u32 = 8u;\n\
+             const STANDING_CLAMP_POS: i32 = 1000;\n\
+             const STANDING_CLAMP_NEG: i32 = -1000;\n\
+             struct StandingEdgeGpu {\n\
+             \x20 other:       u32,\n\
+             \x20 value:       i32,\n\
+             \x20 anchor_tick: u32,\n\
+             \x20 _pad:        u32,\n\
+             };\n\
+             @group(0) @binding(18) var<storage, read_write> standing_records_buf: array<StandingEdgeGpu>;\n\
+             @group(0) @binding(19) var<storage, read_write> standing_counts_buf:  array<atomic<u32>>;\n\n",
+        );
+    }
+
     // ---- State stub fns ----
     //
     // Every stub writes/reads exactly one field of the `agents` buffer.
     // Stubs that the CPU side doesn't have a GPU-side source for (gold,
     // standing, memory) are no-ops documented as such.
-    out.push_str(&state_stub_fns(has_gold_buf));
+    out.push_str(&state_stub_fns(has_gold_buf, has_standing_storage));
 
     // ---- `cfg` namespace-field lookups ----
     //
@@ -748,11 +773,17 @@ pub fn build_physics_shader_resident(
     // section in `state_stub_fns` emits atomic bodies against the
     // binding-17 `gold_buf` declaration we append below. The sync
     // source passes `false` and keeps its no-op stubs.
+    //
+    // Task #79 SP-4: pass `has_standing_storage = true` so the
+    // `state_adjust_standing` stub emits the real fold body against
+    // the binding-18 / 19 standing storage. Sync source keeps the
+    // no-op for modify_standing; cold_state_replay covers it.
     let mut out = build_physics_shader_with_chronicle(
         physics,
         ctx,
         event_ring_capacity,
         chronicle_ring_capacity,
+        true,
         true,
     )?;
 
@@ -929,7 +960,12 @@ fn event_kind_consts() -> String {
 /// on `snapshot()` after Task 3.5). The resident shader declares
 /// binding 17 for `gold_buf` before including this prelude so the
 /// real bodies compile.
-fn state_stub_fns(has_gold_buf: bool) -> String {
+///
+/// Task #79 SP-4 — `has_standing_storage` selects whether the
+/// `state_adjust_standing(a, b, delta)` body is a no-op (sync path,
+/// standing still runs via CPU `cold_state_replay`) or a real
+/// find-or-evict fold against bindings 18 / 19.
+fn state_stub_fns(has_gold_buf: bool, has_standing_storage: bool) -> String {
     // The emitter lists every stub name in the module doc. All scalar
     // getters/setters project into a single field of `agents[id - 1]`
     // (ids are 1-based; slot 0 is unused).
@@ -1039,7 +1075,7 @@ fn state_set_agent_slow_factor_q8(id: u32, v: i32) {
     agents[s].slow_factor_q8 = bitcast<u32>(v) & 0xFFFFu;
 }
 // ---- GOLD_STUBS_PLACEHOLDER ----
-fn state_adjust_standing(a: u32, b: u32, delta: i32) { }
+// ---- STANDING_STUB_PLACEHOLDER ----
 fn state_set_agent_cooldown_next_ready(id: u32, v: u32) {
     let s = slot_of(id);
     if (s == 0xFFFFFFFFu) { return; }
@@ -1103,7 +1139,96 @@ fn state_push_agent_memory(observer: u32, source: u32, payload: u32, confidence:
          fn state_set_agent_gold(id: u32, v: i32) { }\n\
          fn state_add_agent_gold(id: u32, delta: i32) { }\n"
     };
+    // Task #79 SP-4 — substitute the standing-stub placeholder.
+    // Real body implements find-or-reserve-or-evict-weakest against
+    // the standing_records_buf + standing_counts_buf (bindings 18 /
+    // 19). Matches the Phase-1 emitter's canonical WGSL fold body at
+    // `crates/dsl_compiler/src/emit_view_wgsl.rs:1123-1475` — inlined
+    // here because the DSL emitter produces a standalone fold kernel
+    // entry point; physics needs the logic callable as a function
+    // from within `state_adjust_standing(a, b, delta)`.
+    let standing_body = if has_standing_storage {
+        "// Task #79 SP-4 — real standing fold against bindings 18/19.\n\
+         // Canonicalises (a, b) → (owner=min, other=max), scans the\n\
+         // owner's row for an existing slot (update-in-place with clamp),\n\
+         // reserves an empty slot via atomicAdd on counts, else evicts\n\
+         // the smallest-|value| slot if |delta| beats it. Mirrors the\n\
+         // CPU Standing::adjust semantics byte-for-byte.\n\
+         fn state_adjust_standing(a: u32, b: u32, delta: i32) {\n\
+         \x20   if (a == 0u || b == 0u) { return; }\n\
+         \x20   let owner = min(a, b);\n\
+         \x20   let other_id = max(a, b);\n\
+         \x20   let owner_slot = owner - 1u;\n\
+         \x20   if (owner_slot >= cfg.agent_cap) { return; }\n\
+         \x20   let row_base = owner_slot * STANDING_K;\n\
+         \x20\n\
+         \x20   // 1. Find existing: scan the occupied prefix for\n\
+         \x20   //    matching `other`. Update in-place + clamp + stamp.\n\
+         \x20   let count = atomicLoad(&standing_counts_buf[owner_slot]);\n\
+         \x20   let scan_len = min(count, STANDING_K);\n\
+         \x20   var found_idx: u32 = 0xFFFFFFFFu;\n\
+         \x20   for (var i: u32 = 0u; i < scan_len; i = i + 1u) {\n\
+         \x20       if (standing_records_buf[row_base + i].other == other_id) {\n\
+         \x20           found_idx = i;\n\
+         \x20           break;\n\
+         \x20       }\n\
+         \x20   }\n\
+         \x20   if (found_idx != 0xFFFFFFFFu) {\n\
+         \x20       let cur = standing_records_buf[row_base + found_idx].value;\n\
+         \x20       var updated = cur + delta;\n\
+         \x20       if (updated > STANDING_CLAMP_POS) { updated = STANDING_CLAMP_POS; }\n\
+         \x20       if (updated < STANDING_CLAMP_NEG) { updated = STANDING_CLAMP_NEG; }\n\
+         \x20       standing_records_buf[row_base + found_idx].value = updated;\n\
+         \x20       standing_records_buf[row_base + found_idx].anchor_tick = sim_cfg.tick;\n\
+         \x20       return;\n\
+         \x20   }\n\
+         \x20\n\
+         \x20   // 2. Reserve-empty: atomicAdd on counts. Losers (index\n\
+         \x20   //    >= K) fall through to evict.\n\
+         \x20   var clamped_delta: i32 = delta;\n\
+         \x20   if (clamped_delta > STANDING_CLAMP_POS) { clamped_delta = STANDING_CLAMP_POS; }\n\
+         \x20   if (clamped_delta < STANDING_CLAMP_NEG) { clamped_delta = STANDING_CLAMP_NEG; }\n\
+         \x20   if (count < STANDING_K) {\n\
+         \x20       let new_idx = atomicAdd(&standing_counts_buf[owner_slot], 1u);\n\
+         \x20       if (new_idx < STANDING_K) {\n\
+         \x20           standing_records_buf[row_base + new_idx].other       = other_id;\n\
+         \x20           standing_records_buf[row_base + new_idx].value       = clamped_delta;\n\
+         \x20           standing_records_buf[row_base + new_idx].anchor_tick = sim_cfg.tick;\n\
+         \x20           standing_records_buf[row_base + new_idx]._pad        = 0u;\n\
+         \x20           return;\n\
+         \x20       }\n\
+         \x20       // Lost the reserve race — counts overshot by one; benign\n\
+         \x20       // because future scans use `min(count, K)`. Fall\n\
+         \x20       // through to evict.\n\
+         \x20   }\n\
+         \x20\n\
+         \x20   // 3. Evict smallest-|value| slot if |delta| beats it.\n\
+         \x20   var weakest_idx: u32 = 0u;\n\
+         \x20   var weakest_mag: i32 = abs(standing_records_buf[row_base].value);\n\
+         \x20   for (var i: u32 = 1u; i < STANDING_K; i = i + 1u) {\n\
+         \x20       let mag = abs(standing_records_buf[row_base + i].value);\n\
+         \x20       if (mag < weakest_mag) {\n\
+         \x20           weakest_mag = mag;\n\
+         \x20           weakest_idx = i;\n\
+         \x20       }\n\
+         \x20   }\n\
+         \x20   if (abs(clamped_delta) > weakest_mag) {\n\
+         \x20       standing_records_buf[row_base + weakest_idx].other       = other_id;\n\
+         \x20       standing_records_buf[row_base + weakest_idx].value       = clamped_delta;\n\
+         \x20       standing_records_buf[row_base + weakest_idx].anchor_tick = sim_cfg.tick;\n\
+         \x20       standing_records_buf[row_base + weakest_idx]._pad        = 0u;\n\
+         \x20   }\n\
+         }\n"
+    } else {
+        "// Standing mutations: no-op on GPU for the sync path.\n\
+         // modify_standing still runs via CPU cold_state_replay. The\n\
+         // resident batch path emits the real fold body against\n\
+         // bindings 18 / 19 (Task #79 SP-4).\n\
+         fn state_adjust_standing(a: u32, b: u32, delta: i32) { }\n"
+    };
+
     src.replace("// ---- GOLD_STUBS_PLACEHOLDER ----", gold_bodies)
+        .replace("// ---- STANDING_STUB_PLACEHOLDER ----", standing_body)
 }
 
 /// Emit spatial-query wrapper fns. The emitter calls
@@ -1242,6 +1367,12 @@ struct ResidentBgKey {
     /// (single handle on the backend, re-allocated only when
     /// `agent_cap` grows), so this key is cache-friendly.
     gold_buf: wgpu::Buffer,
+    /// Task #79 SP-4 — resident standing view storage (records +
+    /// counts). Same stability story as `gold_buf` — one pair of
+    /// handles per `GpuBackend`, stable across every cascade
+    /// iteration in a batch.
+    standing_records: wgpu::Buffer,
+    standing_counts:  wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -1313,6 +1444,7 @@ impl PhysicsKernel {
             event_ring_capacity,
             chronicle_ring_capacity,
             false, // sync pipeline: no gold_buf binding
+            false, // sync pipeline: no standing_storage binding
         )?;
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -1447,6 +1579,13 @@ impl PhysicsKernel {
             // this via `state_add_agent_gold` / `state_set_agent_gold`
             // on the resident path.
             storage_rw(17),
+            // Task #79 SP-4 — standing view storage.
+            // 18: records `array<StandingEdgeGpu>` (storage, rw).
+            // 19: counts  `array<atomic<u32>>` (storage, rw).
+            // modify_standing DSL rule mutates via the real
+            // `state_adjust_standing` body (find-or-evict fold).
+            storage_rw(18),
+            storage_rw(19),
         ];
         let bind_group_layout_resident =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -2077,6 +2216,8 @@ impl PhysicsKernel {
         num_events_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
         gold_buf: &wgpu::Buffer,
+        standing_records_buf: &wgpu::Buffer,
+        standing_counts_buf: &wgpu::Buffer,
         read_slot: u32,
         write_slot: u32,
         cfg: PhysicsCfg,
@@ -2140,6 +2281,8 @@ impl PhysicsKernel {
             num_events: num_events_buf.clone(),
             sim_cfg: sim_cfg_buf.clone(),
             gold_buf: gold_buf.clone(),
+            standing_records: standing_records_buf.clone(),
+            standing_counts: standing_counts_buf.clone(),
         };
         let bind_group: &wgpu::BindGroup = self.resident_bg_cache.entry(key).or_insert_with(|| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2219,6 +2362,15 @@ impl PhysicsKernel {
                     wgpu::BindGroupEntry {
                         binding: 17,
                         resource: gold_buf.as_entire_binding(),
+                    },
+                    // Task #79 SP-4 — standing view storage.
+                    wgpu::BindGroupEntry {
+                        binding: 18,
+                        resource: standing_records_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 19,
+                        resource: standing_counts_buf.as_entire_binding(),
                     },
                 ],
             })

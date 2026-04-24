@@ -197,6 +197,23 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
         mapped_at_creation: false,
     });
 
+    // Task #79 SP-4 — standing view storage. Two buffers sized by
+    // `agent_cap * K * 16` (records) and `agent_cap * 4` (counts).
+    // Contents unused by this test (no EffectStandingDelta events)
+    // — just satisfies the bindings.
+    let standing_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::standing_records"),
+        size: (agent_cap as u64 * 8 * 16).max(16),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let standing_counts_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::standing_counts"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("smoke::encoder"),
     });
@@ -219,6 +236,8 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
             &num_events_buf,
             &sim_cfg_buf,
             &gold_buf,
+            &standing_records_buf,
+            &standing_counts_buf,
             0, // read_slot
             1, // write_slot
             cfg,
@@ -318,6 +337,19 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    // Task #79 SP-4 — standing view storage.
+    let standing_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::standing_records"),
+        size: (agent_cap as u64 * 8 * 16).max(16),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let standing_counts_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::standing_counts"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("smoke::encoder"),
@@ -341,6 +373,8 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
             &num_events_buf,
             &sim_cfg_buf,
             &gold_buf,
+            &standing_records_buf,
+            &standing_counts_buf,
             0, // read_slot
             1, // write_slot
             cfg,

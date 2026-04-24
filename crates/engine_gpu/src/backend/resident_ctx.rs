@@ -28,11 +28,8 @@ pub struct ResidentPathContext {
     /// owner atomic counts. Uploaded from `state.views.standing` at
     /// `ensure_resident_init` (SP-3); bound into the resident physics
     /// BGL at slots 18 / 19 (SP-4); read back into
-    /// `state.views.standing` on `snapshot()` (SP-5). Currently unused
-    /// by any dispatch — SP-4 wires it.
-    #[allow(dead_code)] // TODO Task #79 SP-4: wired into physics bind group
+    /// `state.views.standing` on `snapshot()` (SP-5).
     pub standing_storage:     Option<ViewStorageSymmetricPair>,
-    #[allow(dead_code)] // TODO Task #79 SP-4
     pub standing_storage_cap: u32,
 
     /// Phase D — indirect dispatch args for the resident cascade.
