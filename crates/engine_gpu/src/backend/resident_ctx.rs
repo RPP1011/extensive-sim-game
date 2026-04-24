@@ -110,26 +110,6 @@ pub struct ResidentPathContext {
     /// batch's tick count in the test harness to print a mean.
     /// Empty when the profiler is disabled or `step_batch` hasn't run.
     pub last_batch_phase_us: Vec<(&'static str, u64)>,
-
-    /// Research instrumentation — per-view atomic read counter storage
-    /// buffer. `Some` iff `ENGINE_GPU_SCORING_VIEW_COUNT=1`; allocated
-    /// by `ensure_resident_init`, zeroed at the top of each
-    /// `step_batch`, read back after the batch via
-    /// `view_read_counter_readback_buf`. Bound by the scoring kernel
-    /// at slot 24.
-    pub view_read_counter_buf: Option<wgpu::Buffer>,
-
-    /// Readback companion for `view_read_counter_buf` (MAP_READ). Copied
-    /// from the storage buffer after each `step_batch` submit; host reads
-    /// via `GpuBackend::last_batch_view_read_counts`.
-    pub view_read_counter_readback_buf: Option<wgpu::Buffer>,
-
-    /// Last-read per-view counts from `view_read_counter_readback_buf`.
-    /// Populated at the end of each `step_batch` when
-    /// `ENGINE_GPU_SCORING_VIEW_COUNT=1`. Order matches
-    /// `dsl_compiler::emit_scoring_wgsl::scoring_view_binding_order`
-    /// (alphabetical by view_name). Empty otherwise.
-    pub last_batch_view_read_counts: Vec<(String, u32)>,
 }
 
 impl ResidentPathContext {
@@ -159,9 +139,6 @@ impl ResidentPathContext {
             sim_cfg_buf:            None,
             profiler:               None,
             last_batch_phase_us:    Vec::new(),
-            view_read_counter_buf:          None,
-            view_read_counter_readback_buf: None,
-            last_batch_view_read_counts:    Vec::new(),
         }
     }
 }

@@ -110,74 +110,6 @@ use crate::emit_view_wgsl::{emit_view_read_wgsl, ViewShape, ViewStorageSpec};
 /// Fixed workgroup size. Matches `emit_mask_wgsl::WORKGROUP_SIZE`.
 pub const WORKGROUP_SIZE: u32 = 64;
 
-// =====================================================================
-// Research instrumentation — per-view atomic read counters.
-//
-// Opt-in via `ENGINE_GPU_SCORING_VIEW_COUNT=1`. When set:
-//   1. A `view_read_counter: array<atomic<u32>>` binding is emitted at
-//      slot 24 (after alive_bitmap at 22; slot 23 reserved for task #96's
-//      cascade rule counter).
-//   2. Every `view_<snake>_get` / `view_<snake>_sum` helper gains a
-//      single `atomicAdd(&view_read_counter[VIEW_IDX], 1u)` at the top
-//      of its body. VIEW_IDX matches this view's position in
-//      `scoring_view_binding_order(specs)` — i.e. alphabetical by
-//      view_name.
-//   3. The BGL/BG on the Rust side must match; the engine_gpu scoring
-//      kernel reads this same env var to decide whether to add the slot
-//      24 entry.
-//
-// Counter writes do NOT change scoring output. Revert-friendly —
-// everything is gated behind the env var; production paths (unset) see
-// unchanged WGSL.
-// =====================================================================
-
-/// Binding slot the scoring kernel reserves for the per-view read
-/// counter buffer (see module note above). Only emitted when
-/// [`scoring_view_count_enabled`] returns true.
-pub const VIEW_READ_COUNTER_BINDING: u32 = 24;
-
-/// True iff `ENGINE_GPU_SCORING_VIEW_COUNT` is set to a truthy value.
-/// Cached — read once per process.
-///
-/// This is consulted by both the WGSL emitter (to emit the counter
-/// binding + atomicAdd hooks) and the engine_gpu scoring kernel (to
-/// extend the BGL + allocate the counter buffer). Both sides MUST
-/// agree; a mismatch would create a BGL-vs-shader binding count
-/// divergence at pipeline build time.
-pub fn scoring_view_count_enabled() -> bool {
-    use std::sync::atomic::{AtomicU8, Ordering};
-    static CACHED: AtomicU8 = AtomicU8::new(2); // 0 = off, 1 = on, 2 = uninit
-    match CACHED.load(Ordering::Relaxed) {
-        0 => false,
-        1 => true,
-        _ => {
-            let on = std::env::var("ENGINE_GPU_SCORING_VIEW_COUNT")
-                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes"))
-                .unwrap_or(false);
-            CACHED.store(if on { 1 } else { 0 }, Ordering::Relaxed);
-            on
-        }
-    }
-}
-
-/// Number of per-view counter slots the scoring kernel reserves when
-/// [`scoring_view_count_enabled`] is true. One slot per non-Lazy view in
-/// `scoring_view_binding_order(specs)` order. Used by the engine_gpu
-/// side to size the counter buffer.
-pub fn view_read_counter_slot_count(specs: &[ViewStorageSpec]) -> u32 {
-    scoring_view_binding_order(specs).len() as u32
-}
-
-/// Ordered list of view names the counter slots correspond to, in the
-/// same order as `scoring_view_binding_order(specs)`. Consumers use this
-/// to label the counter dump.
-pub fn view_read_counter_view_names(specs: &[ViewStorageSpec]) -> Vec<String> {
-    scoring_view_binding_order(specs)
-        .iter()
-        .map(|s| s.view_name.clone())
-        .collect()
-}
-
 /// Maximum modifier rows per `ScoringEntry`. Must match
 /// `engine_rules::scoring::MAX_MODIFIERS` and the emitter's
 /// `MAX_MODIFIERS` in `emit_scoring.rs`.
@@ -596,21 +528,6 @@ fn emit_bindings(out: &mut String) {
     )
     .unwrap();
     writeln!(out).unwrap();
-    // Research instrumentation (opt-in): per-view atomic read counters.
-    // See module-level note near `scoring_view_count_enabled`.
-    if scoring_view_count_enabled() {
-        writeln!(
-            out,
-            "// Per-view atomic read counters (ENGINE_GPU_SCORING_VIEW_COUNT=1)."
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "@group(0) @binding({VIEW_READ_COUNTER_BINDING}) var<storage, read_write> view_read_counter: array<atomic<u32>>;"
-        )
-        .unwrap();
-        writeln!(out).unwrap();
-    }
 }
 
 /// Emit the per-view storage bindings, one binding per view in
@@ -785,24 +702,10 @@ fn emit_view_bindings_for_mode(
 /// that walks the same K slots without filtering.
 ///
 /// Semantics (bounds + clamp) identical to the plain-array reader.
-/// Research instrumentation helper: emit a single-line
-/// `atomicAdd(&view_read_counter[counter_idx], 1u);` at the top of a
-/// per-view read helper, or nothing when counting is disabled.
-/// See `scoring_view_count_enabled`.
-fn emit_view_read_counter_hook(out: &mut String, counter_idx: Option<u32>) {
-    if let Some(idx) = counter_idx {
-        writeln!(
-            out,
-            "    atomicAdd(&view_read_counter[{idx}u], 1u);"
-        )
-        .unwrap();
-    }
-}
-
-fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec, counter_idx: Option<u32>) {
+fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec) {
     if let Some(k) = spec.topk {
-        emit_atomic_topk_read(out, spec, k, counter_idx);
-        emit_atomic_topk_sum(out, spec, k, counter_idx);
+        emit_atomic_topk_read(out, spec, k);
+        emit_atomic_topk_sum(out, spec, k);
         return;
     }
     let snake = &spec.snake;
@@ -816,7 +719,6 @@ fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec, counter_idx: 
             )
             .unwrap();
             writeln!(out, "fn view_{snake}_get(observer: u32) -> u32 {{").unwrap();
-            emit_view_read_counter_hook(out, counter_idx);
             writeln!(out, "    let n = arrayLength(&view_{snake}_slots);").unwrap();
             writeln!(out, "    if (observer >= n) {{ return 0u; }}").unwrap();
             writeln!(out, "    return view_{snake}_slots[observer];").unwrap();
@@ -834,7 +736,6 @@ fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec, counter_idx: 
                 "fn view_{snake}_get(observer: u32, attacker: u32) -> f32 {{"
             )
             .unwrap();
-            emit_view_read_counter_hook(out, counter_idx);
             writeln!(out, "    let n = cfg.view_agent_cap;").unwrap();
             writeln!(
                 out,
@@ -874,7 +775,6 @@ fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec, counter_idx: 
                 "fn view_{snake}_get(observer: u32, attacker: u32, tick: u32) -> f32 {{"
             )
             .unwrap();
-            emit_view_read_counter_hook(out, counter_idx);
             writeln!(out, "    let n = cfg.view_agent_cap;").unwrap();
             writeln!(
                 out,
@@ -927,12 +827,7 @@ fn emit_atomic_view_read(out: &mut String, spec: &ViewStorageSpec, counter_idx: 
 /// `AgentId_raw = slot + 1`). Returns `initial` (0.0 on every shipped
 /// view) when the attacker isn't in observer's top-K, matching CPU's
 /// `get` semantics in `crates/engine/src/generated/views/*.rs`.
-fn emit_atomic_topk_read(
-    out: &mut String,
-    spec: &ViewStorageSpec,
-    k: u16,
-    counter_idx: Option<u32>,
-) {
+fn emit_atomic_topk_read(out: &mut String, spec: &ViewStorageSpec, k: u16) {
     let snake = &spec.snake;
     let initial = render_float_wgsl(spec.initial as f64);
     let is_decay = matches!(spec.shape, ViewShape::PairMapDecay { .. });
@@ -957,7 +852,6 @@ fn emit_atomic_topk_read(
     )
     .unwrap();
     writeln!(out, "{sig}").unwrap();
-    emit_view_read_counter_hook(out, counter_idx);
     writeln!(out, "    let n = cfg.view_agent_cap;").unwrap();
     writeln!(
         out,
@@ -1027,12 +921,7 @@ fn emit_atomic_topk_read(
 /// top-K row. Replaces the O(N·K) wildcard loop in `eval_view_call`
 /// (which called `view_<snake>_get(a, t)` for every t in 0..view_agent_cap)
 /// with an O(K) scan, matching `sum_for_first` on the CPU side.
-fn emit_atomic_topk_sum(
-    out: &mut String,
-    spec: &ViewStorageSpec,
-    k: u16,
-    counter_idx: Option<u32>,
-) {
+fn emit_atomic_topk_sum(out: &mut String, spec: &ViewStorageSpec, k: u16) {
     let snake = &spec.snake;
     let is_decay = matches!(spec.shape, ViewShape::PairMapDecay { .. });
     let rate_lit = match spec.shape {
@@ -1053,7 +942,6 @@ fn emit_atomic_topk_sum(
     writeln!(out, "// walks K slots, skips empties (id==0), sums decayed+clamped values.")
         .unwrap();
     writeln!(out, "{sig}").unwrap();
-    emit_view_read_counter_hook(out, counter_idx);
     writeln!(out, "    let n = cfg.view_agent_cap;").unwrap();
     writeln!(out, "    if (observer >= n) {{ return 0.0; }}").unwrap();
     writeln!(out, "    let base = observer * {k}u;").unwrap();
@@ -1120,14 +1008,8 @@ fn emit_view_read_snippets_for_mode(
     // the atomic<u32> bindings directly (see emit_atomic_view_read).
     // PlainArrays mode delegates to emit_view_wgsl as before.
     if mode == ViewBindingMode::AtomicStorage {
-        // Research instrumentation hook (ENGINE_GPU_SCORING_VIEW_COUNT):
-        // when enabled, each per-view read helper gets a
-        // `atomicAdd(&view_read_counter[view_idx], 1u)` at its
-        // entry. view_idx = position in `scoring_view_binding_order`.
-        let counting = scoring_view_count_enabled();
-        for (view_idx, spec) in scoring_view_binding_order(specs).iter().enumerate() {
-            let counter_idx = if counting { Some(view_idx as u32) } else { None };
-            emit_atomic_view_read(out, spec, counter_idx);
+        for spec in scoring_view_binding_order(specs) {
+            emit_atomic_view_read(out, spec);
             writeln!(out).unwrap();
         }
         return;
