@@ -629,6 +629,33 @@ pub struct GpuSpatialHash {
     scan_bg_layout: wgpu::BindGroupLayout,
     bind_group_layout: wgpu::BindGroupLayout,
     pool: Option<BufferPool>,
+    /// Fingerprint of the last `upload_agent_soa` input, used to skip
+    /// the CPU SoA pack + 4× queue.write_buffer calls for
+    /// pos/alive/creature_type/cfg when the input hasn't materially
+    /// changed. Only the per-call `qcfg_buf` (radius) is always
+    /// rewritten below, since sync `rebuild_and_query` calls this
+    /// back-to-back with different radii sharing the same SoA.
+    ///
+    /// Key: `(agent_cap, state.tick, hot_pos.len(), hot_alive.len())`.
+    /// These four numbers are stable within a single `step_batch` run
+    /// (CPU `SimState` is frozen during a batch — the GPU owns
+    /// positions in `resident_agents_buf`, and `state.tick` stays
+    /// stale) and within a single sync tick (two back-to-back
+    /// `rebuild_and_query` calls with different radii run before
+    /// `engine::step::step` increments the tick). They change whenever
+    /// the engine's sync step commits new state (tick++) or a caller
+    /// spawns / grows capacity.
+    ///
+    /// At N=100k this skips ~1 ms of CPU work per tick of a
+    /// `step_batch` run (tick stable → key stable across ticks) and
+    /// also removes a rare (~1 in 50 batches) 30-40 ms
+    /// `queue.write_buffer` spike caused by driver staging-queue
+    /// back-pressure.
+    ///
+    /// Caching by content-hash would be slightly safer but hashing
+    /// 100k × 24 bytes of SoA costs ~1 ms — nearly the same as the
+    /// pack + upload this would save.
+    last_soa_key: Option<(u32, u32, usize, usize)>,
 }
 
 #[allow(dead_code)] // Several buffers only ever referenced through the bind group.
@@ -819,6 +846,7 @@ impl GpuSpatialHash {
             scan_bg_layout,
             bind_group_layout,
             pool: None,
+            last_soa_key: None,
         })
     }
 
@@ -828,6 +856,11 @@ impl GpuSpatialHash {
                 return;
             }
         }
+        // Pool is about to be reallocated — any previously-cached SoA
+        // upload lived in the old buffers which are discarded below.
+        // Invalidate so the next `upload_agent_soa` re-populates the
+        // new pool's buffers.
+        self.last_soa_key = None;
         let grid_cells = GRID_CELLS as usize;
         let agent_cap_u = agent_cap as usize;
 
@@ -1024,45 +1057,67 @@ impl GpuSpatialHash {
         let agent_cap = state.agent_cap();
         self.ensure_pool(device, agent_cap);
 
-        let pos_src: Vec<GpuPos> = state
-            .hot_pos()
-            .iter()
-            .map(|v| GpuPos { x: v.x, y: v.y, z: v.z, _pad: 0.0 })
-            .collect();
-        let alive_src: Vec<u32> = state
-            .hot_alive()
-            .iter()
-            .map(|&b| if b { 1u32 } else { 0u32 })
-            .collect();
-        let ct_src: Vec<u32> = (0..agent_cap)
-            .map(|slot| {
-                let id = AgentId::new(slot + 1).unwrap();
-                match state.agent_creature_type(id) {
-                    Some(ct) => ct as u8 as u32,
-                    None => u32::MAX,
-                }
-            })
-            .collect();
-        let (world_origin_x, world_origin_y) = compute_world_origin(state);
-
-        let pool = self.pool.as_ref().expect("pool ensured");
-        queue.write_buffer(&pool.pos_buf, 0, bytemuck::cast_slice(&pos_src));
-        queue.write_buffer(&pool.alive_buf, 0, bytemuck::cast_slice(&alive_src));
-        queue.write_buffer(&pool.creature_type_buf, 0, bytemuck::cast_slice(&ct_src));
-        queue.write_buffer(
-            &pool.cfg_buf,
-            0,
-            bytemuck::cast_slice(&[SpatialCfg {
-                world_origin_x,
-                world_origin_y,
-                cell_size: CELL_SIZE,
-                grid_dim: GRID_DIM,
-                agent_cap,
-                k_cap: K,
-                _pad0: 0,
-                _pad1: 0,
-            }]),
+        // Dirty-flag dedup: skip the CPU SoA pack + 4 position/alive/
+        // creature_type/cfg queue.write_buffer calls when the last
+        // successful upload used the same `(agent_cap, tick, hot_pos.len,
+        // hot_alive.len)` — in that case the pool's buffers already hold
+        // the same bytes we'd re-pack. Only the per-call `qcfg_buf` (the
+        // radius, which varies between back-to-back queries of the same
+        // SoA) is always rewritten.
+        //
+        // See `Self::last_soa_key` for why these four fields are a safe
+        // proxy for "the CPU-side spatial input bytes are identical".
+        let soa_key = (
+            agent_cap,
+            state.tick,
+            state.hot_pos().len(),
+            state.hot_alive().len(),
         );
+        let soa_hit = self.last_soa_key == Some(soa_key) && self.pool.is_some();
+
+        let (world_origin_x, world_origin_y) = compute_world_origin(state);
+        let pool = self.pool.as_ref().expect("pool ensured");
+
+        if !soa_hit {
+            let pos_src: Vec<GpuPos> = state
+                .hot_pos()
+                .iter()
+                .map(|v| GpuPos { x: v.x, y: v.y, z: v.z, _pad: 0.0 })
+                .collect();
+            let alive_src: Vec<u32> = state
+                .hot_alive()
+                .iter()
+                .map(|&b| if b { 1u32 } else { 0u32 })
+                .collect();
+            let ct_src: Vec<u32> = (0..agent_cap)
+                .map(|slot| {
+                    let id = AgentId::new(slot + 1).unwrap();
+                    match state.agent_creature_type(id) {
+                        Some(ct) => ct as u8 as u32,
+                        None => u32::MAX,
+                    }
+                })
+                .collect();
+            queue.write_buffer(&pool.pos_buf, 0, bytemuck::cast_slice(&pos_src));
+            queue.write_buffer(&pool.alive_buf, 0, bytemuck::cast_slice(&alive_src));
+            queue.write_buffer(&pool.creature_type_buf, 0, bytemuck::cast_slice(&ct_src));
+            queue.write_buffer(
+                &pool.cfg_buf,
+                0,
+                bytemuck::cast_slice(&[SpatialCfg {
+                    world_origin_x,
+                    world_origin_y,
+                    cell_size: CELL_SIZE,
+                    grid_dim: GRID_DIM,
+                    agent_cap,
+                    k_cap: K,
+                    _pad0: 0,
+                    _pad1: 0,
+                }]),
+            );
+            self.last_soa_key = Some(soa_key);
+        }
+
         queue.write_buffer(
             &pool.qcfg_buf,
             0,
