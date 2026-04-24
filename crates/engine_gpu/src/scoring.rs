@@ -423,29 +423,6 @@ pub struct ScoringKernel {
     /// while the sync path binds the pool-owned `sync_sim_cfg_buf`.
     sim_cfg_binding: u32,
     pool: Option<ScoringPool>,
-    /// Measurement-mode split pipelines (task 2026-04-24,
-    /// "scoring kernel row decomposition"). Each pipeline processes one
-    /// row of `SCORING_TABLE` and merges into the existing scoring_out
-    /// slot. Built against the same bind-group layout as `pipeline`
-    /// (one-time compile cost at backend init). Consumed only by
-    /// [`Self::run_resident_split`] when the caller opts into intra-
-    /// kernel per-row timestamps via `ENGINE_GPU_SPLIT_SCORING_MEASURE=1`.
-    split_pipelines: SplitScoringPipelines,
-}
-
-/// Per-row + prefill compute pipelines for the research-mode split
-/// scoring kernel. Pipelines share `ScoringKernel::bind_group_layout`
-/// and a single shader module (`emit_scoring_wgsl_atomic_views_split`).
-///
-/// Ordering matches `SPLIT_SCORING_ROWS` in
-/// `dsl_compiler::emit_scoring_wgsl` — `rows[i]` dispatches
-/// `cs_scoring_row_<rows[i].name>` which processes entry
-/// `SPLIT_SCORING_ROWS[i].0`. The prefill pipeline dispatches
-/// `cs_scoring_prefill` to seed the "no prior winner" sentinel at the
-/// start of every tick.
-struct SplitScoringPipelines {
-    prefill: wgpu::ComputePipeline,
-    rows: Vec<(wgpu::ComputePipeline, &'static str)>,
 }
 
 struct ScoringPool {
@@ -760,18 +737,6 @@ impl ScoringKernel {
             cache: None,
         });
 
-        // --- Research-mode split pipelines (task 2026-04-24) ------
-        // Compile 1 prefill + 7 per-row entry points over the same bind-
-        // group layout. One-time cost at backend init; consumed only
-        // when the caller opts into intra-kernel sub-phase timestamps
-        // via `ENGINE_GPU_SPLIT_SCORING_MEASURE=1`. The default path
-        // keeps dispatching the single fused `cs_scoring` above.
-        let split_pipelines = build_split_scoring_pipelines(
-            device,
-            &pipeline_layout,
-            &view_specs,
-        )?;
-
         // Upload the compile-time-constant SCORING_TABLE.
         let packed_table = pack_scoring_table();
         let scoring_table_len = packed_table.len() as u32;
@@ -793,7 +758,6 @@ impl ScoringKernel {
             view_specs,
             sim_cfg_binding,
             pool: None,
-            split_pipelines,
         })
     }
 
@@ -1483,128 +1447,6 @@ impl ScoringKernel {
         Ok(())
     }
 
-    /// **Measurement-mode** sibling of [`Self::run_resident`] — splits
-    /// the fused scoring kernel's per-agent row loop into N separate
-    /// dispatches (one prefill + one per mask-backed row) so a caller-
-    /// supplied [`crate::gpu_profiling::GpuProfiler`] can place a
-    /// timestamp mark between each sub-phase. See
-    /// `docs/superpowers/research/2026-04-24-scoring-kernel-row-decomposition.md`.
-    ///
-    /// Byte-parity against the fused kernel holds because:
-    ///   * Rows dispatch in `SCORING_TABLE` authoring order so tie-break
-    ///     semantics (lower entry_idx, lower target_slot wins) match.
-    ///   * The prefill pass seeds the scoring_out buffer with the
-    ///     "no prior winner" sentinel (`chosen_action=0,
-    ///     chosen_target=NO_TARGET, best_score_bits=0, debug=0`).
-    ///   * Each row kernel merges via the `debug != 0` found_any flag +
-    ///     "strictly greater" replacement — the same contract the
-    ///     fused kernel maintains across its in-kernel row loop.
-    ///
-    /// Cost vs `run_resident`: 8 compute passes instead of 1 — adds
-    /// `8×` dispatch + pass begin/end overhead. At N=100k on a 4090 the
-    /// overhead is expected to be ~20-80 µs/tick, an order of magnitude
-    /// smaller than the ~21 ms/tick the fused kernel spends; the
-    /// measurement is accurate to ~0.1-0.4%.
-    ///
-    /// Only used when opt-in by env var (see `step_batch` in `lib.rs`).
-    /// Production path stays on [`Self::run_resident`] — the split is
-    /// reverted after the measurement doc is written.
-    pub fn run_resident_split(
-        &mut self,
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        agents_buf: &wgpu::Buffer,
-        mask_bitmaps_buf: &wgpu::Buffer,
-        sim_cfg_buf: &wgpu::Buffer,
-        alive_bitmap_buf: &wgpu::Buffer,
-        agent_cap: u32,
-        mut profiler: Option<&mut crate::gpu_profiling::GpuProfiler>,
-    ) -> Result<(), ScoringError> {
-        // Silence unused-param lint — same rationale as `run_resident`;
-        // reserved for a future WGSL rewrite that reads `GpuAgentSlot`.
-        let _ = agents_buf;
-
-        let num_mask_words = agent_cap.div_ceil(32).max(1);
-        self.ensure_pool(device, agent_cap, num_mask_words);
-        {
-            let pool = self.pool.as_ref().expect("pool ensured");
-            debug_assert_eq!(
-                pool.agent_cap, agent_cap,
-                "ensure_pool must size the pool to the requested agent_cap",
-            );
-            if pool.view_buf_handles.is_empty() {
-                return Err(ScoringError::Dispatch(
-                    "scoring::run_resident_split: pool view handles empty — call upload_soa_from_state first"
-                        .to_string(),
-                ));
-            }
-        }
-
-        // Reuse the resident BG from `run_resident`. Split pipelines
-        // share the identical bind-group layout so the cached BG is
-        // valid for all split dispatches.
-        let need_rebuild = match &self.pool.as_ref().unwrap().cached_resident_bg {
-            Some((mb, sc, _)) => mb != mask_bitmaps_buf || sc != sim_cfg_buf,
-            None => true,
-        };
-        if need_rebuild {
-            let pool = self.pool.as_ref().expect("pool ensured");
-            let bg = self.build_resident_bind_group(
-                device,
-                pool,
-                mask_bitmaps_buf,
-                sim_cfg_buf,
-                alive_bitmap_buf,
-            )?;
-            let pool_mut = self.pool.as_mut().expect("pool ensured");
-            pool_mut.cached_resident_bg =
-                Some((mask_bitmaps_buf.clone(), sim_cfg_buf.clone(), bg));
-        }
-        let pool = self.pool.as_ref().expect("pool ensured");
-        let bind_group = &pool
-            .cached_resident_bg
-            .as_ref()
-            .expect("cached_resident_bg populated above")
-            .2;
-
-        let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
-
-        // --- Sub-phase: prefill ---------------------------------
-        // Seeds scoring_out with the "no prior winner" sentinel.
-        // Labelled so the readback attributes the dispatch time to
-        // `scoring_split_prefill`.
-        if let Some(p) = profiler.as_deref_mut() {
-            p.mark(encoder, "scoring_split_prefill");
-        }
-        {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("engine_gpu::scoring::cpass_split_prefill"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(&self.split_pipelines.prefill);
-            cpass.set_bind_group(0, bind_group, &[]);
-            cpass.dispatch_workgroups(groups, 1, 1);
-        }
-
-        // --- Sub-phase: one per SCORING_TABLE row ----------------
-        // Profiler labels are static `&'static str`s so they live in
-        // the profiler's label table verbatim.
-        for (pipeline, row_name) in &self.split_pipelines.rows {
-            if let Some(p) = profiler.as_deref_mut() {
-                p.mark(encoder, split_row_profiler_label(row_name));
-            }
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("engine_gpu::scoring::cpass_split_row"),
-                timestamp_writes: None,
-            });
-            cpass.set_pipeline(pipeline);
-            cpass.set_bind_group(0, bind_group, &[]);
-            cpass.dispatch_workgroups(groups, 1, 1);
-        }
-        Ok(())
-    }
-
     /// Per-run bind group for the resident path. Identical view-
     /// binding layout to [`Self::build_bind_group`] but reads view
     /// buffer handles from the pool's `view_buf_handles` cache
@@ -1785,87 +1627,6 @@ fn view_binding_count(spec: &ViewStorageSpec) -> usize {
         (ViewShape::PairMapDecay { .. }, true) => 3, // cells + anchors + ids
         (ViewShape::Lazy, _) => 0,
     }
-}
-
-/// Research-mode (task 2026-04-24): map a row name (from
-/// `SPLIT_SCORING_ROWS`) to the static profiler label string. Profiler
-/// marks require `&'static str` so we hardcode the labels here rather
-/// than formatting them at dispatch time. Row-name panics are a
-/// compile-time contract violation against the upstream emitter.
-fn split_row_profiler_label(row_name: &str) -> &'static str {
-    match row_name {
-        "hold" => "scoring_split_hold",
-        "move_toward" => "scoring_split_move_toward",
-        "flee" => "scoring_split_flee",
-        "attack" => "scoring_split_attack",
-        "eat" => "scoring_split_eat",
-        "drink" => "scoring_split_drink",
-        "rest" => "scoring_split_rest",
-        other => {
-            panic!(
-                "split_row_profiler_label: unknown row `{other}` — add it to SPLIT_SCORING_ROWS + this match"
-            );
-        }
-    }
-}
-
-/// Research-mode (task 2026-04-24): compile the per-row split scoring
-/// pipelines. One prefill entry (`cs_scoring_prefill`) plus one per
-/// mask-backed row in `SPLIT_SCORING_ROWS` (Hold / MoveToward / Flee /
-/// Attack / Eat / Drink / Rest). All pipelines share the same bind-
-/// group layout as the fused `cs_scoring` kernel; each row kernel
-/// processes one `entry_idx` and merges into scoring_out via the
-/// `debug != 0` found_any flag. See
-/// `docs/superpowers/research/2026-04-24-scoring-kernel-row-decomposition.md`.
-fn build_split_scoring_pipelines(
-    device: &wgpu::Device,
-    pipeline_layout: &wgpu::PipelineLayout,
-    view_specs: &[ViewStorageSpec],
-) -> Result<SplitScoringPipelines, ScoringError> {
-    use dsl_compiler::emit_scoring_wgsl::{
-        emit_scoring_wgsl_atomic_views_split, SPLIT_SCORING_ROWS,
-    };
-
-    let split_wgsl = emit_scoring_wgsl_atomic_views_split(view_specs);
-
-    device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let split_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("engine_gpu::scoring::split_wgsl"),
-        source: wgpu::ShaderSource::Wgsl(split_wgsl.clone().into()),
-    });
-    if let Some(err) = pollster::block_on(device.pop_error_scope()) {
-        return Err(ScoringError::ShaderCompile(format!(
-            "{err}\n--- split scoring WGSL source ---\n{split_wgsl}"
-        )));
-    }
-
-    let prefill = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("engine_gpu::scoring::split_prefill_cp"),
-        layout: Some(pipeline_layout),
-        module: &split_shader,
-        entry_point: Some("cs_scoring_prefill"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
-    let mut rows = Vec::with_capacity(SPLIT_SCORING_ROWS.len());
-    for (_entry_idx, row_name) in SPLIT_SCORING_ROWS {
-        let entry = format!("cs_scoring_row_{row_name}");
-        // Label leaks at backend init time; `'static` label is required
-        // for the profiler mark below so we reuse the row_name literal
-        // directly as the label.
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("engine_gpu::scoring::split_row_cp"),
-            layout: Some(pipeline_layout),
-            module: &split_shader,
-            entry_point: Some(&entry),
-            compilation_options: Default::default(),
-            cache: None,
-        });
-        rows.push((pipeline, *row_name));
-    }
-
-    Ok(SplitScoringPipelines { prefill, rows })
 }
 
 // ---------------------------------------------------------------------------
@@ -2873,34 +2634,6 @@ mod tests {
         let src = emit_scoring_wgsl_atomic_views(&specs);
         if let Err(e) = naga::front::wgsl::parse_str(&src) {
             panic!("--- atomic-mode scoring WGSL parse error ---\n{e}\n--- source ---\n{src}");
-        }
-    }
-
-    /// Research-mode (task 2026-04-24): the per-row split WGSL parses
-    /// through naga. Surfaces emitter bugs in the split kernels without
-    /// needing the GPU init path. Produces 1 prefill + 7 row entries
-    /// sharing the fused kernel's bind-group layout.
-    #[test]
-    fn split_mode_scoring_wgsl_parses_through_naga() {
-        use dsl_compiler::emit_scoring_wgsl::{
-            emit_scoring_wgsl_atomic_views_split, SPLIT_SCORING_ROWS,
-        };
-        let specs = build_all_specs();
-        let src = emit_scoring_wgsl_atomic_views_split(&specs);
-        if let Err(e) = naga::front::wgsl::parse_str(&src) {
-            panic!("--- split-mode scoring WGSL parse error ---\n{e}\n--- source ---\n{src}");
-        }
-        // Shape check: one prefill + one entry point per row.
-        assert!(
-            src.contains("fn cs_scoring_prefill"),
-            "missing cs_scoring_prefill entry point:\n{src}"
-        );
-        for (_entry_idx, row_name) in SPLIT_SCORING_ROWS {
-            let expected = format!("fn cs_scoring_row_{row_name}");
-            assert!(
-                src.contains(&expected),
-                "missing split row entry point `{expected}`:\n{src}"
-            );
         }
     }
 }
