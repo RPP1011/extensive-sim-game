@@ -319,7 +319,7 @@ pub fn emit_with_per_kind_sources(
     let mut rust_view_modules: Vec<(String, String)> = Vec::with_capacity(comp.views.len());
     for v in &comp.views {
         let stem = snake_case(&v.name);
-        match emit_view::emit_view(v, sources.views) {
+        match emit_view::emit_view(v, &comp.events, sources.views) {
             Ok(rs) => rust_view_modules.push((format!("{stem}.rs"), rs)),
             Err(e) => panic!("view emission failed for `{}`: {e}", v.name),
         }

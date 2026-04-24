@@ -112,7 +112,7 @@ fn per_entity_ring_emits_cpu_storage() {
         .iter()
         .find(|v| v.name == "memory")
         .expect("view IR should exist");
-    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+    let rust = dsl_compiler::emit_view::emit_view(view, &comp.events, None).expect("emit should succeed");
 
     // Storage struct + per-entry slot struct.
     assert!(
@@ -167,7 +167,7 @@ fn per_entity_ring_fold_handles_record_memory() {
         .iter()
         .find(|v| v.name == "memory")
         .expect("view IR should exist");
-    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+    let rust = dsl_compiler::emit_view::emit_view(view, &comp.events, None).expect("emit should succeed");
 
     // Arm destructures the RecordMemory event and pushes into the ring.
     assert!(
@@ -277,7 +277,7 @@ view memory(observer: Agent, source: Agent) -> f32 {
         .iter()
         .find(|v| v.name == "memory")
         .expect("view IR should exist");
-    let err = dsl_compiler::emit_view::emit_view(view, None).expect_err(
+    let err = dsl_compiler::emit_view::emit_view(view, &comp.events, None).expect_err(
         "decay on per_entity_ring should fail until Phase 3 defines its semantics",
     );
     assert!(

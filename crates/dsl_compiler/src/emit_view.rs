@@ -28,7 +28,7 @@ use std::fmt::Write;
 
 use crate::ast::{BinOp, UnOp};
 use crate::ir::{
-    Builtin, DecayUnit, FoldHandlerIR, IrCallArg, IrExpr, IrExprNode, IrType, NamespaceId,
+    Builtin, DecayUnit, EventIR, FoldHandlerIR, IrCallArg, IrExpr, IrExprNode, IrType, NamespaceId,
     StorageHint, ViewBodyIR, ViewIR, ViewKind,
 };
 
@@ -58,13 +58,29 @@ impl std::error::Error for EmitError {}
 /// per `ViewIR`; the result is written to the engine's generated `views/`
 /// directory.
 ///
+/// `events` is the full event catalog — needed so the fold-body RHS lowering
+/// can look up bound-local types against the view's return type and coerce
+/// narrower event-field types (e.g. `i16 delta` folded into an `i32` view)
+/// without tripping the emitted `adjust` call on `E0308 mismatched types`.
+/// Pass `&[]` only when the view's handler body doesn't bind locals whose
+/// types differ from the view's return type (the widening path is a no-op
+/// for identity pairings).
+///
 /// Returns `Err(String)` (not `EmitError`) so the xtask call site stays
 /// symmetric with `emit_mask` / `emit_scoring` / `emit_entity`.
-pub fn emit_view(view: &ViewIR, source_file: Option<&str>) -> Result<String, String> {
-    emit_view_result(view, source_file).map_err(|e| e.to_string())
+pub fn emit_view(
+    view: &ViewIR,
+    events: &[EventIR],
+    source_file: Option<&str>,
+) -> Result<String, String> {
+    emit_view_result(view, events, source_file).map_err(|e| e.to_string())
 }
 
-fn emit_view_result(view: &ViewIR, source_file: Option<&str>) -> Result<String, EmitError> {
+fn emit_view_result(
+    view: &ViewIR,
+    events: &[EventIR],
+    source_file: Option<&str>,
+) -> Result<String, EmitError> {
     let mut out = String::new();
     emit_header(&mut out, source_file);
     match view.kind {
@@ -82,7 +98,7 @@ fn emit_view_result(view: &ViewIR, source_file: Option<&str>) -> Result<String, 
             ) && !matches!(hint, StorageHint::SymmetricPairTopK { .. })
                 && !matches!(hint, StorageHint::PerEntityRing { .. });
             emit_imports_materialized(&mut out, uses_hashmap);
-            emit_materialized_struct(&mut out, view, hint)?;
+            emit_materialized_struct(&mut out, view, events, hint)?;
         }
     }
     Ok(out)
@@ -295,6 +311,7 @@ fn emit_lazy_fn(out: &mut String, view: &ViewIR) -> Result<(), EmitError> {
 fn emit_materialized_struct(
     out: &mut String,
     view: &ViewIR,
+    events: &[EventIR],
     storage: StorageHint,
 ) -> Result<(), EmitError> {
     let (initial, handlers, clamp) = match &view.body {
@@ -339,6 +356,7 @@ fn emit_materialized_struct(
         StorageHint::SymmetricPairTopK { k } => emit_symmetric_pair_topk_struct(
             out,
             view,
+            events,
             initial,
             handlers,
             clamp,
@@ -1309,6 +1327,7 @@ fn emit_topk_k_fold_arm(
 fn emit_symmetric_pair_topk_struct(
     out: &mut String,
     view: &ViewIR,
+    events: &[EventIR],
     initial: &IrExprNode,
     handlers: &[FoldHandlerIR],
     clamp: Option<&(IrExprNode, IrExprNode)>,
@@ -1637,7 +1656,7 @@ fn emit_symmetric_pair_topk_struct(
     } else {
         writeln!(out, "        match event {{").unwrap();
         for h in handlers {
-            emit_symmetric_pair_fold_arm(out, view, a_name, b_name, h)?;
+            emit_symmetric_pair_fold_arm(out, view, events, a_name, b_name, h)?;
         }
         writeln!(out, "            _ => {{}}").unwrap();
         writeln!(out, "        }}").unwrap();
@@ -1661,6 +1680,7 @@ fn emit_symmetric_pair_topk_struct(
 fn emit_symmetric_pair_fold_arm(
     out: &mut String,
     view: &ViewIR,
+    events: &[EventIR],
     a_name: &str,
     b_name: &str,
     handler: &FoldHandlerIR,
@@ -1727,6 +1747,14 @@ fn emit_symmetric_pair_fold_arm(
     // referenced pattern local into a shadowing `let` before lowering.
     // Numeric + AgentId types are `Copy`, so the `let name = *name;`
     // pattern is zero-cost.
+    //
+    // When the event field's IR type is NARROWER than the view's return
+    // type (e.g. `i16 delta` on an `-> i32` view), the shadow-deref must
+    // also widen the local so the downstream `adjust(..., {local}, ...)`
+    // call site sees a value matching the `adjust` signature. Widening
+    // uses `as` (primitive numeric). Narrowing is rejected — explicit DSL
+    // casts are clearer than silent truncation.
+    let event_ir = events.iter().find(|e| e.name == ev_name);
     for b in &handler.pattern.bindings {
         let field = b.field.as_str();
         if field == first_field || field == second_field {
@@ -1734,7 +1762,29 @@ fn emit_symmetric_pair_fold_arm(
         }
         if let crate::ir::IrPattern::Bind { name, .. } = &b.value {
             if body_locals.contains(name) {
-                writeln!(out, "                let {name} = *{name};").unwrap();
+                let field_ty =
+                    event_ir.and_then(|ev| ev.fields.iter().find(|f| f.name == field));
+                let cast = match field_ty {
+                    Some(f) => coerce_to_view_return(&view.name, name, &f.ty, &view.return_ty)?,
+                    // No event IR available (e.g. test calls `emit_view`
+                    // with an empty slice, or a synthetic fixture). Fall
+                    // back to the identity shadow-deref — correct when
+                    // the field type matches the view return type.
+                    None => None,
+                };
+                match cast {
+                    Some(coerce) => {
+                        writeln!(
+                            out,
+                            "                let {name}: {target} = *{name} {coerce};",
+                            target = rust_type_for(&view.return_ty)?,
+                        )
+                        .unwrap();
+                    }
+                    None => {
+                        writeln!(out, "                let {name} = *{name};").unwrap();
+                    }
+                }
             }
         }
     }
@@ -2785,6 +2835,71 @@ fn format_f32_lit(v: f32) -> String {
 // Type lowering
 // ---------------------------------------------------------------------------
 
+/// Compute the coercion suffix needed to fold a bound-local of `from_ty`
+/// into a view whose return type is `to_ty`. Used by the symmetric_pair
+/// fold-arm emitter when the shadow-deref line must match the view's
+/// `adjust` signature — e.g. `let delta: i32 = *delta as i32;` for an
+/// `i16` event field folded into an `-> i32` view.
+///
+/// Returns:
+/// - `Ok(None)` — same type, identity shadow-deref is correct.
+/// - `Ok(Some("as i32"))` — widen via `as`. Caller emits `let {name}: {to}
+///   = *{name} as {to};`.
+/// - `Err(Unsupported)` — narrowing (wider field → narrower view), or a
+///   pairing with no safe numeric widening (bool ↔ int, AgentId ↔ numeric,
+///   etc.). An explicit DSL `as` cast resolves both cases more clearly
+///   than silent truncation / reinterpretation.
+fn coerce_to_view_return(
+    view: &str,
+    local: &str,
+    from_ty: &IrType,
+    to_ty: &IrType,
+) -> Result<Option<String>, EmitError> {
+    // Identity — no coercion, preserve the existing `let x = *x;` form.
+    if from_ty == to_ty {
+        return Ok(None);
+    }
+    // Widening is safe for integer→integer and float→float when the
+    // destination's bit width ≥ source's AND signedness is preserved /
+    // widens safely. Specifically:
+    //   i8  → i16 / i32 / i64
+    //   i16 →        i32 / i64
+    //   i32 →              i64
+    //   u8  → u16 / u32 / u64  (and into i16+ if bits strictly grow: u8 → i16 / i32 / i64)
+    //   u16 →       u32 / u64  (and u16 → i32 / i64)
+    //   u32 →             u64  (and u32 → i64)
+    //   f32 → f64
+    //
+    // Narrowing and mixed signed→unsigned (or unsigned→same-width signed)
+    // are rejected — either truncation or reinterpretation risk.
+    use IrType::*;
+    let widened_to = rust_type_for(to_ty)?;
+    let ok = matches!(
+        (from_ty, to_ty),
+        // Signed widening.
+        (I8, I16) | (I8, I32) | (I8, I64) |
+        (I16, I32) | (I16, I64) |
+        (I32, I64) |
+        // Unsigned widening (same signedness).
+        (U8, U16) | (U8, U32) | (U8, U64) |
+        (U16, U32) | (U16, U64) |
+        (U32, U64) |
+        // Unsigned → wider signed (bits strictly grow).
+        (U8, I16) | (U8, I32) | (U8, I64) |
+        (U16, I32) | (U16, I64) |
+        (U32, I64) |
+        // Float widening.
+        (F32, F64)
+    );
+    if ok {
+        return Ok(Some(format!("as {widened_to}")));
+    }
+    Err(EmitError::Unsupported(format!(
+        "view `{view}`: bound local `{local}` has type {from_ty:?} but view returns {to_ty:?}; \
+         narrowing / non-numeric coercions require an explicit DSL `as` cast"
+    )))
+}
+
 /// Map an IR type to its surface Rust spelling. View emission needs only a
 /// small vocabulary; anything else raises `Unsupported` so the diagnostic
 /// points at the offending view (and the resolver can add coverage later).
@@ -2898,7 +3013,11 @@ pub fn emit_decay_view(view: &ViewIR) -> Result<Option<String>, EmitError> {
     if matches!(tweaked.return_ty, IrType::Unknown) {
         tweaked.return_ty = IrType::F32;
     }
-    let src = emit_view_result(&tweaked, None)?;
+    // `emit_decay_view` is a dump helper for the decay-view plan doc; it
+    // doesn't have access to the full event catalog. Pass an empty slice
+    // — the widening path is only reachable from symmetric_pair_topk fold
+    // arms, which aren't emitted by this helper.
+    let src = emit_view_result(&tweaked, &[], None)?;
     Ok(Some(src))
 }
 
@@ -2977,7 +3096,7 @@ mod tests {
     #[test]
     fn emits_anchor_pattern_struct_with_rate() {
         let v = threat_view();
-        let out = emit_view(&v, None).unwrap();
+        let out = emit_view(&v, &[], None).unwrap();
         assert!(out.contains("pub struct ThreatLevel"), "bad struct in:\n{out}");
         assert!(out.contains("pub const RATE: f32 = 0.98"), "missing RATE:\n{out}");
         assert!(out.contains("pub fn get(&self, a: AgentId, b: AgentId, tick: u32) -> f32"),
@@ -3024,7 +3143,7 @@ mod tests {
             decay: None,
             span: Span::dummy(),
         };
-        let out = emit_view(&v, Some("assets/sim/views.sim")).unwrap();
+        let out = emit_view(&v, &[], Some("assets/sim/views.sim")).unwrap();
         assert!(
             out.contains("pub fn always_true(state: &SimState, a: AgentId) -> bool {"),
             "missing lazy fn sig:\n{out}"
@@ -3146,7 +3265,7 @@ mod tests {
     #[test]
     fn emits_per_entity_topk1_struct_with_paired_fold() {
         let v = engaged_with_view();
-        let out = emit_view(&v, None).unwrap();
+        let out = emit_view(&v, &[], None).unwrap();
         assert!(out.contains("pub struct EngagedWith"), "bad struct:\n{out}");
         assert!(
             out.contains("value: HashMap<AgentId, AgentId>"),
@@ -3194,7 +3313,7 @@ mod tests {
         // rejection.
         let mut v = engaged_with_view();
         v.kind = ViewKind::Materialized(StorageHint::PerEntityTopK { k: 4, keyed_on: 0 });
-        let err = emit_view(&v, None).unwrap_err();
+        let err = emit_view(&v, &[], None).unwrap_err();
         assert!(
             err.contains("2 params"),
             "expected 2-params diagnostic, got: {err}"
@@ -3265,7 +3384,7 @@ mod tests {
     #[test]
     fn topk_k8_no_decay_emits_fold_one_and_get() {
         let v = two_param_threat_topk_view(8, None);
-        let out = emit_view(&v, None).unwrap();
+        let out = emit_view(&v, &[], None).unwrap();
         assert!(out.contains("pub struct MyEnemies"), "bad struct:\n{out}");
         assert!(
             out.contains("slots: Vec<[TopkSlot; 8]>"),
@@ -3292,7 +3411,7 @@ mod tests {
     #[test]
     fn topk_k8_with_decay_emits_rate_constant_and_decay_get() {
         let v = two_param_threat_topk_view(8, Some(0.98));
-        let out = emit_view(&v, None).unwrap();
+        let out = emit_view(&v, &[], None).unwrap();
         assert!(
             out.contains("pub const RATE: f32 = 0.98"),
             "missing RATE constant:\n{out}"

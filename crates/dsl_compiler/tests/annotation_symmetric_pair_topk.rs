@@ -115,7 +115,7 @@ fn symmetric_pair_topk_emits_cpu_storage() {
         .iter()
         .find(|v| v.name == "standing")
         .expect("view IR should exist");
-    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+    let rust = dsl_compiler::emit_view::emit_view(view, &comp.events, None).expect("emit should succeed");
 
     // Storage struct + pair-edge slot struct.
     assert!(
@@ -174,7 +174,7 @@ fn symmetric_pair_topk_canonicalises_pair_reads() {
         .iter()
         .find(|v| v.name == "standing")
         .expect("view IR should exist");
-    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+    let rust = dsl_compiler::emit_view::emit_view(view, &comp.events, None).expect("emit should succeed");
 
     assert!(
         rust.contains("fn canonical_pair")
@@ -453,7 +453,7 @@ view test_standing(a: Agent, b: Agent) -> i32 {
         .iter()
         .find(|v| v.name == "test_standing")
         .expect("view IR should exist");
-    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+    let rust = dsl_compiler::emit_view::emit_view(view, &comp.events, None).expect("emit should succeed");
 
     // (2) i32 return type must appear in both the fold struct's adjust()
     //     signature and the get() accessor.
@@ -535,7 +535,7 @@ fn symmetric_pair_topk_f32_fold_arm_byte_identity() {
         .iter()
         .find(|v| v.name == "standing")
         .expect("view IR should exist");
-    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+    let rust = dsl_compiler::emit_view::emit_view(view, &comp.events, None).expect("emit should succeed");
 
     // Unchanged from Task 1.5: the f32 fold arm still emits `1.0`.
     assert!(
@@ -574,7 +574,7 @@ view test_standing_i16(a: Agent, b: Agent) -> i16 {
         .iter()
         .find(|v| v.name == "test_standing_i16")
         .expect("view IR should exist");
-    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+    let rust = dsl_compiler::emit_view::emit_view(view, &comp.events, None).expect("emit should succeed");
 
     // (1) `-> i16` flows into adjust() and get() signatures.
     assert!(
@@ -619,5 +619,110 @@ view test_standing_i16(a: Agent, b: Agent) -> i16 {
     assert!(
         rust.contains("let delta = *delta;"),
         "fold body must shadow-deref bound locals so Copy numerics flow as values; got:\n{rust}"
+    );
+}
+
+/// Phase 3 task 3.1 precondition — when the event field's IR type is
+/// NARROWER than the view's return type (e.g. `i16 delta` folded into an
+/// `-> i32` view), the shadow-deref must widen the local via `as` so the
+/// downstream `adjust` call compiles. Without this, the emitted Rust fails
+/// with `E0308 mismatched types: expected i32, found i16` at the `adjust`
+/// call site.
+///
+/// Mirrors the real `standing` view in `assets/sim/views.sim`: `-> i32`
+/// return, `EffectStandingDelta { delta: i16 }` event. Uses the canonical
+/// event name so the `standing` view (landed by task 3.1 after this fix)
+/// continues to exercise the same widening path.
+#[test]
+fn symmetric_pair_topk_widening_from_i16_to_i32() {
+    const INT_SRC: &str = r#"
+event EffectStandingDelta { a: AgentId, b: AgentId, delta: i16 }
+
+@materialized(on_event = [EffectStandingDelta])
+@symmetric_pair_topk(K = 4)
+view test_widening(a: Agent, b: Agent) -> i32 {
+  initial: 0,
+  on EffectStandingDelta { a: a, b: b, delta: delta } { self += delta }
+  clamp: [-100, 100],
+}
+"#;
+    let comp = dsl_compiler::compile(INT_SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "test_widening")
+        .expect("view IR should exist");
+    let rust = dsl_compiler::emit_view::emit_view(view, &comp.events, None)
+        .expect("emit should succeed");
+
+    // (1) Widening cast must be present — this is the fix under test.
+    //     The emitted line must thread the i16 event field through to an
+    //     i32 local before the `adjust(..., delta, tick)` call.
+    assert!(
+        rust.contains("let delta: i32 = *delta as i32;"),
+        "widening from i16 event field to i32 view return must emit an `as i32` cast; got:\n{rust}"
+    );
+
+    // (2) The adjust call site still consumes the local by name (now
+    //     widened to i32, matching the view's adjust signature).
+    assert!(
+        rust.contains("self.adjust(*a, *b, delta, tick);"),
+        "fold arm must still pass the widened `delta` to adjust(); got:\n{rust}"
+    );
+
+    // (3) The adjust signature itself takes i32 (view return type), not
+    //     i16 (event field type). Guards against a regression where a
+    //     future widening path accidentally propagates the narrower event
+    //     type into the accessor surface.
+    assert!(
+        rust.contains("pub fn adjust(&mut self, a: AgentId, b: AgentId, delta: i32, tick: u32) -> i32"),
+        "adjust() must surface the view return type (i32), not the event field type (i16); got:\n{rust}"
+    );
+
+    // (4) The emitted widening line must match the target type spelling
+    //     used elsewhere in the file — guards against an out-of-sync cast
+    //     (e.g. `as i16`) that would fail to compile.
+    assert!(
+        !rust.contains("let delta: i32 = *delta as i16"),
+        "widening cast must use the view return type, not the narrower event field type:\n{rust}"
+    );
+    // Full Rust compilation is exercised end-to-end by the workspace
+    // build (cargo build --release once the `standing` view lands); the
+    // structural asserts above are sufficient at the unit-test layer.
+}
+
+/// Phase 3 task 3.1 precondition — the emitter rejects narrowing cleanly
+/// (wider event field folded into a narrower view) with a clear error
+/// pointing at the view + local + types. Narrowing is almost always a
+/// bug; if a future view needs it, an explicit DSL `as` cast is clearer
+/// than silent truncation.
+#[test]
+fn symmetric_pair_topk_narrowing_rejected() {
+    const INT_SRC: &str = r#"
+event EffectWideDelta { a: AgentId, b: AgentId, delta: i32 }
+
+@materialized(on_event = [EffectWideDelta])
+@symmetric_pair_topk(K = 4)
+view test_narrowing(a: Agent, b: Agent) -> i16 {
+  initial: 0,
+  on EffectWideDelta { a: a, b: b, delta: delta } { self += delta }
+  clamp: [-100, 100],
+}
+"#;
+    let comp = dsl_compiler::compile(INT_SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "test_narrowing")
+        .expect("view IR should exist");
+    let err = dsl_compiler::emit_view::emit_view(view, &comp.events, None)
+        .expect_err("narrowing from i32 event field to i16 view must be rejected");
+    assert!(
+        err.contains("test_narrowing") && err.contains("delta"),
+        "error should name the view and local; got: {err}"
+    );
+    assert!(
+        err.contains("narrowing") || err.contains("explicit") || err.contains("cast"),
+        "error should explain why narrowing is rejected and point at an `as` cast; got: {err}"
     );
 }
