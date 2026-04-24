@@ -875,6 +875,8 @@ but completeness wants the full chain.
 
 ### 13. Terrain + voxel collision
 
+> **Companion note:** `docs/superpowers/notes/2026-04-22-terrain-integration-gap.md` argues for an MVP first slice (~300-400 LoC via trait-object injection, Option B) that ships the `TerrainQuery` seam with a `FlatPlane` default + one scoring gate using `line_of_sight`. Unlocks height/cover/chokepoint/flanking mechanics as follow-ons, each <500 LoC once the seam exists. That MVP slice is the recommended first bite of this subsystem — land it before the full ~22-task voxel integration below.
+
 **State touched:** Integrate `voxel_engine::VoxelWorld` beyond viz-only.
 Engine-side: a new `WorldState.voxel_world: VoxelWorld` (state.md:1289-1365),
 backed by GPU-resident chunks via `voxel_engine::FieldHandle` for the GPU
