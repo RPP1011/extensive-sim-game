@@ -1270,41 +1270,31 @@ impl GpuBackend {
         // chronicle ring's actual capacity.
         let chronicle_cap_u32 = resident_ctx.chronicle_ring().capacity();
         if self.snapshot.snapshot_front.is_none() && self.snapshot.snapshot_back.is_none() {
-            let event_cap = crate::event_ring::DEFAULT_CAPACITY;
-            self.snapshot.snapshot_front = Some(crate::snapshot::GpuStaging::new(
-                &self.device,
-                self.resident.resident_agents_cap,
-                event_cap,
-                chronicle_cap_u32,
-            ));
-            self.snapshot.snapshot_back = Some(crate::snapshot::GpuStaging::new(
-                &self.device,
-                self.resident.resident_agents_cap,
-                event_cap,
-                chronicle_cap_u32,
-            ));
+            let caps = crate::snapshot::StagingCaps {
+                agent: self.resident.resident_agents_cap,
+                event_ring: crate::event_ring::DEFAULT_CAPACITY,
+                chronicle_ring: chronicle_cap_u32,
+            };
+            self.snapshot.snapshot_front =
+                Some(crate::snapshot::GpuStaging::new(&self.device, caps));
+            self.snapshot.snapshot_back =
+                Some(crate::snapshot::GpuStaging::new(&self.device, caps));
         }
 
         // Grow staging if the resident capacity changed. `ensure_cap`
         // resets the filled flag, so a freshly-grown front returns
         // empty from `take_snapshot` — correct behaviour, next call
         // populates at the new size.
-        let event_cap = crate::event_ring::DEFAULT_CAPACITY;
+        let caps = crate::snapshot::StagingCaps {
+            agent: self.resident.resident_agents_cap,
+            event_ring: crate::event_ring::DEFAULT_CAPACITY,
+            chronicle_ring: chronicle_cap_u32,
+        };
         if let Some(front) = self.snapshot.snapshot_front.as_mut() {
-            front.ensure_cap(
-                &self.device,
-                self.resident.resident_agents_cap,
-                event_cap,
-                chronicle_cap_u32,
-            );
+            front.ensure_cap(&self.device, caps);
         }
         if let Some(back) = self.snapshot.snapshot_back.as_mut() {
-            back.ensure_cap(
-                &self.device,
-                self.resident.resident_agents_cap,
-                event_cap,
-                chronicle_cap_u32,
-            );
+            back.ensure_cap(&self.device, caps);
         }
 
         // 1. Take a snapshot of the FRONT (filled by the previous

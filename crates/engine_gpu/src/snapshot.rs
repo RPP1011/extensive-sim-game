@@ -58,8 +58,18 @@ impl std::fmt::Display for SnapshotError {
 
 impl std::error::Error for SnapshotError {}
 
+/// Capacities for the staging buffers owned by a `GpuStaging`. Named
+/// fields so call sites can't accidentally transpose the three u32s.
+#[derive(Debug, Clone, Copy)]
+pub struct StagingCaps {
+    pub agent: u32,
+    pub event_ring: u32,
+    pub chronicle_ring: u32,
+}
+
 /// One side of the double buffer. Holds staging buffers for agents +
-/// events + chronicle and a watermark tuple (event_ring_read, tick).
+/// events + chronicle and the record-slice byte lengths + recorded
+/// tick for decode.
 pub struct GpuStaging {
     agents_staging: wgpu::Buffer,
     events_staging: wgpu::Buffer,
@@ -79,18 +89,12 @@ pub struct GpuStaging {
 }
 
 impl GpuStaging {
-    /// Create a fresh staging sized for `agent_cap` + `event_ring_cap`
-    /// + `chronicle_ring_cap`. All three values can grow on a later
-    /// call via `ensure_cap`.
-    pub fn new(
-        device: &wgpu::Device,
-        agent_cap: u32,
-        event_ring_cap: u32,
-        chronicle_ring_cap: u32,
-    ) -> Self {
-        let agent_bytes = Self::agent_bytes_for(agent_cap);
-        let event_bytes = Self::event_bytes_for(event_ring_cap);
-        let chronicle_bytes = Self::chronicle_bytes_for(chronicle_ring_cap);
+    /// Create a fresh staging sized by `caps`. All three values can
+    /// grow on a later call via `ensure_cap`.
+    pub fn new(device: &wgpu::Device, caps: StagingCaps) -> Self {
+        let agent_bytes = Self::agent_bytes_for(caps.agent);
+        let event_bytes = Self::event_bytes_for(caps.event_ring);
+        let chronicle_bytes = Self::chronicle_bytes_for(caps.chronicle_ring);
         Self {
             agents_staging: Self::create_staging(device, "snapshot::agents_staging", agent_bytes),
             events_staging: Self::create_staging(device, "snapshot::events_staging", event_bytes),
@@ -103,9 +107,9 @@ impl GpuStaging {
             chronicle_len_bytes: 0,
             tick: 0,
             filled: false,
-            agent_cap,
-            event_ring_cap,
-            chronicle_ring_cap,
+            agent_cap: caps.agent,
+            event_ring_cap: caps.event_ring,
+            chronicle_ring_cap: caps.chronicle_ring,
         }
     }
 
@@ -133,43 +137,37 @@ impl GpuStaging {
         })
     }
 
-    /// Grow staging if any of `agent_cap`, `event_ring_cap`, or
-    /// `chronicle_ring_cap` has increased. No-op if all three are
+    /// Grow staging if any of `caps.agent`, `caps.event_ring`, or
+    /// `caps.chronicle_ring` has increased. No-op if all three are
     /// already sufficient.
-    pub fn ensure_cap(
-        &mut self,
-        device: &wgpu::Device,
-        agent_cap: u32,
-        event_ring_cap: u32,
-        chronicle_ring_cap: u32,
-    ) {
-        if agent_cap > self.agent_cap {
+    pub fn ensure_cap(&mut self, device: &wgpu::Device, caps: StagingCaps) {
+        if caps.agent > self.agent_cap {
             self.agents_staging = Self::create_staging(
                 device,
                 "snapshot::agents_staging",
-                Self::agent_bytes_for(agent_cap),
+                Self::agent_bytes_for(caps.agent),
             );
-            self.agent_cap = agent_cap;
+            self.agent_cap = caps.agent;
             // Growing invalidates any previously-kicked copy —
             // reset the filled flag so take_snapshot returns empty.
             self.filled = false;
         }
-        if event_ring_cap > self.event_ring_cap {
+        if caps.event_ring > self.event_ring_cap {
             self.events_staging = Self::create_staging(
                 device,
                 "snapshot::events_staging",
-                Self::event_bytes_for(event_ring_cap),
+                Self::event_bytes_for(caps.event_ring),
             );
-            self.event_ring_cap = event_ring_cap;
+            self.event_ring_cap = caps.event_ring;
             self.filled = false;
         }
-        if chronicle_ring_cap > self.chronicle_ring_cap {
+        if caps.chronicle_ring > self.chronicle_ring_cap {
             self.chronicle_staging = Self::create_staging(
                 device,
                 "snapshot::chronicle_staging",
-                Self::chronicle_bytes_for(chronicle_ring_cap),
+                Self::chronicle_bytes_for(caps.chronicle_ring),
             );
-            self.chronicle_ring_cap = chronicle_ring_cap;
+            self.chronicle_ring_cap = caps.chronicle_ring;
             self.filled = false;
         }
     }
