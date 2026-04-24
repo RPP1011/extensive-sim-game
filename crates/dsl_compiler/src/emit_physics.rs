@@ -1207,6 +1207,20 @@ fn lower_namespace_call(
                 tick       = lowered[4],
             ))
         }
+        // ----------------------------------------------------------------
+        // Roadmap §1 — Memberships (grammar stub). Parser + resolver accept
+        // these; the physics emitter refuses to lower them because the
+        // per-agent `cold_memberships: SmallVec<[Membership; 4]>` runtime
+        // state doesn't exist yet. Subsystem §1 implementation will
+        // replace each `Unsupported` arm below with a real lowering.
+        // See `docs/superpowers/roadmap.md:161-211`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Membership, "is_group_member")
+        | (NamespaceId::Membership, "is_group_leader")
+        | (NamespaceId::Membership, "can_join_group")
+        | (NamespaceId::Membership, "is_outcast") => Err(EmitError::Unsupported(format!(
+            "memberships primitive `membership::{method}` pending runtime impl"
+        ))),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics emission",
             ns.name()

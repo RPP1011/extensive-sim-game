@@ -732,6 +732,12 @@ pub enum NamespaceId {
     /// `cast` physics rule can iterate and dispatch a cast's effect list
     /// without a hand-written cascade handler.
     Abilities,
+    /// `membership::*` — Subsystem §1 (roadmap.md:161-211). Predicates on
+    /// per-agent `cold_memberships` SmallVec. Methods are `is_group_member`,
+    /// `is_group_leader`, `can_join_group`, `is_outcast`. All return bool.
+    /// Grammar stub only — emitters return `EmitError::Unsupported` until
+    /// the memberships runtime lands.
+    Membership,
 }
 
 impl NamespaceId {
@@ -754,6 +760,7 @@ impl NamespaceId {
             NamespaceId::Auctions => "auctions",
             NamespaceId::Tick => "tick",
             NamespaceId::Abilities => "abilities",
+            NamespaceId::Membership => "membership",
         }
     }
 }

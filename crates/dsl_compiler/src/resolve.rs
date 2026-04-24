@@ -109,6 +109,10 @@ mod stdlib {
             // with the natural singular form. Shares the same method
             // schema as `abilities::`.
             ("ability", NamespaceId::Abilities),
+            // Roadmap §1 — Memberships. Grammar stub (no runtime state
+            // yet); predicates return bool and emitters return
+            // `Unsupported`. See `docs/superpowers/roadmap.md:161-211`.
+            ("membership", NamespaceId::Membership),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -380,6 +384,27 @@ mod stdlib {
             (NamespaceId::Query, "nearby_kin") => {
                 Some((2, IrType::List(Box::new(IrType::AgentId))))
             }
+            // -------------------------------------------------------------
+            // Roadmap §1 — Memberships. Predicates on `cold_memberships`.
+            // All return bool. The `kind` arg of `is_group_member` would
+            // ideally type to a `GroupKind` enum, but that enum doesn't
+            // exist in the IR yet — fall back to `Unknown` and let
+            // whoever implements Subsystem §1 pick the concrete ID type.
+            // See `docs/superpowers/roadmap.md:180-182`.
+            // -------------------------------------------------------------
+            // `is_group_member(agent, kind)` — `kind` is a `GroupKind`
+            // discriminator (Family/Religion/Faction/...); TODO: resolve
+            // to `IrType::Named("GroupKind")` once the kind enum lands.
+            (NamespaceId::Membership, "is_group_member") => Some((2, IrType::Bool)),
+            // `is_group_leader(agent)` — true iff agent holds any
+            // leader role across its memberships.
+            (NamespaceId::Membership, "is_group_leader") => Some((1, IrType::Bool)),
+            // `can_join_group(agent, group)` — evaluates
+            // `group.eligibility_predicate` against `agent`.
+            (NamespaceId::Membership, "can_join_group") => Some((2, IrType::Bool)),
+            // `is_outcast(agent, group)` — state.md:69 "outcasts cannot
+            // vote"; semantically `standing_q8 < OUTCAST_THRESHOLD`.
+            (NamespaceId::Membership, "is_outcast") => Some((2, IrType::Bool)),
             _ => None,
         }
     }
@@ -1923,6 +1948,25 @@ fn resolve_call(
         if let Some(tail) = name.strip_prefix("view::") {
             if let Some(view_ref) = symbols.views.get(tail) {
                 return Ok(IrExpr::ViewCall(*view_ref, ir_args));
+            }
+        }
+        // Generic `<ns>::<method>(...)` routing — the parser-flattened
+        // sibling of the `<ns>.<method>(...)` dotted path handled above.
+        // If `<ns>` is a registered stdlib namespace, lift the call into
+        // a structured `NamespaceCall` so the resolver's type inference
+        // (and the emitter's per-namespace dispatch) treats the two
+        // surface forms interchangeably. Exact mirror of the dotted
+        // branch: arity is informational at 1a; 1b enforces it.
+        if let Some((ns_name, method)) = name.split_once("::") {
+            if scope.lookup(ns_name).is_none() {
+                if let Some(ns) = symbols.stdlib_namespaces.get(ns_name) {
+                    let _ = stdlib::method_sig(*ns, method);
+                    return Ok(IrExpr::NamespaceCall {
+                        ns: *ns,
+                        method: method.to_string(),
+                        args: ir_args,
+                    });
+                }
             }
         }
         if let Some(r) = symbols.views.get(name) {

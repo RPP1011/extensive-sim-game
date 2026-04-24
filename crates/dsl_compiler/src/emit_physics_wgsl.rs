@@ -1459,6 +1459,18 @@ fn lower_namespace_call(
              not as a scalar expression"
                 .into(),
         )),
+        // ----------------------------------------------------------------
+        // Roadmap §1 — Memberships (grammar stub). Grammar-only: the GPU
+        // physics emitter refuses these until Subsystem §1 lands a GPU-
+        // visible mirror of the per-agent memberships slab.
+        // See `docs/superpowers/roadmap.md:161-211`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Membership, "is_group_member")
+        | (NamespaceId::Membership, "is_group_leader")
+        | (NamespaceId::Membership, "can_join_group")
+        | (NamespaceId::Membership, "is_outcast") => Err(EmitError::Unsupported(format!(
+            "memberships primitive `membership::{method}` pending runtime impl"
+        ))),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics WGSL emission",
             ns.name()
