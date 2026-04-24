@@ -751,6 +751,17 @@ pub enum NamespaceId {
     /// Grammar stub only — emitters return `EmitError::Unsupported` until
     /// the theory-of-mind runtime lands (gossip / belief-tracking fold).
     TheoryOfMind,
+    /// `group::*` — Subsystem §7 (roadmap.md:510-574). Predicates on the
+    /// `AggregatePool<Group>` pool. Methods are `exists`, `is_active`,
+    /// `has_leader`, `can_afford_from_treasury`. All return bool.
+    /// Grammar stub only — emitters return `EmitError::Unsupported` until
+    /// the groups runtime lands (Plan 1 T16 shipped the Pod shape; this
+    /// subsystem populates the instance data).
+    ///
+    /// Singular name `group` chosen to match the roadmap spelling; the
+    /// pre-existing plural `groups` namespace (legacy collection accessor)
+    /// is unchanged and continues to resolve independently.
+    Group,
 }
 
 impl NamespaceId {
@@ -776,6 +787,7 @@ impl NamespaceId {
             NamespaceId::Membership => "membership",
             NamespaceId::Relationship => "relationship",
             NamespaceId::TheoryOfMind => "theory_of_mind",
+            NamespaceId::Group => "group",
         }
     }
 }

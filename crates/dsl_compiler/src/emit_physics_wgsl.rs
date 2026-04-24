@@ -1489,6 +1489,16 @@ fn lower_namespace_call(
         | (NamespaceId::TheoryOfMind, "is_surprised_by") => Err(EmitError::Unsupported(format!(
             "theory_of_mind primitive `theory_of_mind::{method}` pending runtime impl"
         ))),
+        // ----------------------------------------------------------------
+        // Roadmap §7 — Groups (grammar stub). GPU mirror pending until
+        // the runtime lands. See `docs/superpowers/roadmap.md:510-574`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Group, "exists")
+        | (NamespaceId::Group, "is_active")
+        | (NamespaceId::Group, "has_leader")
+        | (NamespaceId::Group, "can_afford_from_treasury") => Err(EmitError::Unsupported(format!(
+            "groups primitive `group::{method}` pending runtime impl"
+        ))),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics WGSL emission",
             ns.name()

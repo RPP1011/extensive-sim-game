@@ -119,6 +119,11 @@ mod stdlib {
             // Roadmap §6 — Theory-of-mind. Grammar stub (no runtime state
             // yet). See `docs/superpowers/roadmap.md:447-506`.
             ("theory_of_mind", NamespaceId::TheoryOfMind),
+            // Roadmap §7 — Groups. Grammar stub (Pod shape exists from
+            // Plan 1 T16; instance data pending). Singular `group`
+            // — distinct from the legacy collection accessor `groups`.
+            // See `docs/superpowers/roadmap.md:510-574`.
+            ("group", NamespaceId::Group),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -445,6 +450,23 @@ mod stdlib {
             // `is_surprised_by(observer, subject, domain)` — fires when
             // an observed action contradicts the domain bit.
             (NamespaceId::TheoryOfMind, "is_surprised_by") => Some((3, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Roadmap §7 — Groups. Predicates on the `AggregatePool<Group>`.
+            // All return bool. The `cost` arg of `can_afford_from_treasury`
+            // is scalar gold (state.md:1134 treasury is an `i64`); argument
+            // type enforcement lands when Subsystem §7 wires the real
+            // method_sig (1a is arity-only).
+            // See `docs/superpowers/roadmap.md:545-546`.
+            // -------------------------------------------------------------
+            // `exists(id)` — is this GroupId slot populated?
+            (NamespaceId::Group, "exists") => Some((1, IrType::Bool)),
+            // `is_active(id)` — populated AND `dissolved_tick.is_none()`
+            // (state.md:1107).
+            (NamespaceId::Group, "is_active") => Some((1, IrType::Bool)),
+            // `has_leader(id)` — `leader_id.is_some()` (state.md:1116).
+            (NamespaceId::Group, "has_leader") => Some((1, IrType::Bool)),
+            // `can_afford_from_treasury(g, cost)` — `treasury >= cost`.
+            (NamespaceId::Group, "can_afford_from_treasury") => Some((2, IrType::Bool)),
             _ => None,
         }
     }

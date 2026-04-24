@@ -348,3 +348,69 @@ fn subsystem_6_theory_of_mind_emit_returns_unsupported_cpu_and_gpu() {
         "GPU emit error msg should cite the theory_of_mind primitive stub; got: {msg}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Subsystem §7 — Groups (roadmap.md:510-574)
+// ---------------------------------------------------------------------------
+
+const SUBSYSTEM_7_SRC: &str = r#"
+// Stub pattern event carrying a GroupId so the body has a typed binding
+// to feed the `group::` predicates (without needing the real
+// MembershipJoined / GroupDissolved events yet).
+event GroupStubPattern { group_id: GroupId, cost: i64 }
+event GroupStubFired { group_id: GroupId }
+
+// `exists(g)` + `can_afford_from_treasury(g, cost)` compose the
+// treasury-dispensing gate the group economics code will lean on.
+physics group_grammar_stub @phase(event) {
+  on GroupStubPattern { group_id: g, cost: c } {
+    if group::exists(g) && group::can_afford_from_treasury(g, c) {
+      emit GroupStubFired { group_id: g }
+    }
+  }
+}
+"#;
+
+#[test]
+fn subsystem_7_groups_parses_and_resolves_with_ns_call_ir() {
+    let comp = dsl_compiler::compile(SUBSYSTEM_7_SRC)
+        .expect("group:: primitives must parse + resolve cleanly");
+    assert_methods_resolved(
+        &comp,
+        "group_grammar_stub",
+        NamespaceId::Group,
+        &["exists", "can_afford_from_treasury"],
+    );
+}
+
+#[test]
+fn subsystem_7_groups_emit_returns_unsupported_cpu_and_gpu() {
+    let comp = dsl_compiler::compile(SUBSYSTEM_7_SRC).expect("compile OK");
+    let p = comp
+        .physics
+        .iter()
+        .find(|p| p.name == "group_grammar_stub")
+        .unwrap();
+
+    let cpu_ctx = CpuCtx { events: &comp.events, event_tags: &comp.event_tags };
+    let cpu = emit_physics(p, None, &cpu_ctx);
+    let msg = match cpu {
+        Err(CpuErr::Unsupported(s)) => s,
+        other => panic!("expected CpuErr::Unsupported, got {other:?}"),
+    };
+    assert!(
+        msg.contains("groups primitive `group::"),
+        "CPU emit error msg should cite the groups primitive stub; got: {msg}"
+    );
+
+    let gpu_ctx = GpuCtx { events: &comp.events, event_tags: &comp.event_tags };
+    let gpu = emit_physics_wgsl(p, &gpu_ctx);
+    let msg = match gpu {
+        Err(GpuErr::Unsupported(s)) => s,
+        other => panic!("expected GpuErr::Unsupported, got {other:?}"),
+    };
+    assert!(
+        msg.contains("groups primitive `group::"),
+        "GPU emit error msg should cite the groups primitive stub; got: {msg}"
+    );
+}
