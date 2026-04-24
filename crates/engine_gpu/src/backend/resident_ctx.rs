@@ -15,6 +15,15 @@ pub struct ResidentPathContext {
     pub resident_agents_buf:    Option<wgpu::Buffer>,
     pub resident_agents_cap:    u32,
 
+    /// Phase 3 Task 3.3 — gold ledger side buffer, one i32 per agent slot.
+    /// Uploaded from SimState.cold_inventory at ensure_resident_init;
+    /// wired into physics via atomic add in Task 3.4; read back into
+    /// cold_inventory on snapshot() in Task 3.5. Currently unused.
+    #[allow(dead_code)] // TODO Phase 3 Task 3.4: wired into physics bind group
+    pub gold_buf:     Option<wgpu::Buffer>,
+    #[allow(dead_code)] // TODO Phase 3 Task 3.4
+    pub gold_buf_cap: u32,
+
     /// Phase D — indirect dispatch args for the resident cascade.
     /// MAX_CASCADE_ITERATIONS + 1 slots. Lazy-initialised in step_batch.
     pub resident_indirect_args: Option<IndirectArgsBuffer>,
@@ -62,6 +71,8 @@ impl ResidentPathContext {
         Self {
             resident_agents_buf:    None,
             resident_agents_cap:    0,
+            gold_buf:               None,
+            gold_buf_cap:           0,
             resident_indirect_args: None,
             resident_cascade_ctx:   None,
             mask_unpack_kernel,

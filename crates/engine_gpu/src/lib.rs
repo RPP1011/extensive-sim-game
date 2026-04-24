@@ -1133,6 +1133,38 @@ impl GpuBackend {
             self.resident.resident_agents_cap = agent_cap;
         }
 
+        // --- Phase 3 Task 3.3: gold_buf side buffer -------------------------
+        // One i32 per agent slot. Uploaded from SimState.cold_inventory on
+        // allocate + on agent_cap grow. Read/written by the physics kernel
+        // via the Task 3.4 `state_add_agent_gold` / `state_set_agent_gold`
+        // real stubs; read back in snapshot() per Task 3.5.
+        let need_gold_alloc = match &self.resident.gold_buf {
+            Some(_) => self.resident.gold_buf_cap < agent_cap,
+            None => true,
+        };
+        if need_gold_alloc {
+            let bytes = (agent_cap as u64) * 4;
+            let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu::gold_buf"),
+                size: bytes.max(4),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let gold_vec: Vec<i32> = (0..agent_cap as usize)
+                .map(|slot| {
+                    state.cold_inventory()
+                        .get(slot)
+                        .map(|inv| inv.gold)
+                        .unwrap_or(0)
+                })
+                .collect();
+            self.queue.write_buffer(&buf, 0, bytemuck::cast_slice(&gold_vec));
+            self.resident.gold_buf = Some(buf);
+            self.resident.gold_buf_cap = agent_cap;
+        }
+
         // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`
         // slots (seed + one per cascade iter).
         if self.resident.resident_indirect_args.is_none() {
