@@ -477,6 +477,29 @@ view test_standing(a: Agent, b: Agent) -> i32 {
         "fold arm must not hardcode 1.0 on an i32 view:\n{rust}"
     );
 
+    // (3a) The match-arm destructure must actually bind `delta` out of
+    //      the event pattern. A substring check on `self.adjust(..., delta, tick)`
+    //      isn't sufficient — dropping `delta` from the destructure would
+    //      produce `Event::EffectStandingDelta { a, b, .. }` and the
+    //      `adjust` call's `delta` reference would be an unbound ident.
+    //      Accept either explicit-only or rest-pattern form.
+    assert!(
+        rust.contains("Event::EffectStandingDelta { a, b, delta, .. }")
+            || rust.contains("Event::EffectStandingDelta { a, b, delta }"),
+        "destructure must bind `delta` from the event pattern; got:\n{rust}"
+    );
+
+    // (3b) Shadow-deref must be present: destructured event fields arrive
+    //      as `&T`, so bound locals consumed as values (Copy numerics,
+    //      AgentIds) need to be rebound with `let name = *name;` before
+    //      the fold body is lowered. A regression that drops this line
+    //      would fail to compile the emitted Rust for any `self += <local>`
+    //      shape.
+    assert!(
+        rust.contains("let delta = *delta;"),
+        "fold body must shadow-deref bound locals so Copy numerics flow as values; got:\n{rust}"
+    );
+
     // (4) Clamp bounds must appear as integer literals (no `.0` suffix).
     assert!(
         rust.contains("updated.clamp(-100, 100)") || rust.contains(".clamp(-100, 100)"),
@@ -523,5 +546,78 @@ fn symmetric_pair_topk_f32_fold_arm_byte_identity() {
     assert!(
         rust.contains("pub fn get(&self, a: AgentId, b: AgentId) -> f32"),
         "f32 get() surface unchanged:\n{rust}"
+    );
+}
+
+/// Pins the `lower_scalar_int` i16 branch: `-> i16` returns must emit
+/// integer literals (no `.0` suffix) through initial + clamp, and the
+/// bound-delta fold body must thread through the same destructure +
+/// shadow-deref path the i32 case exercises. Without this test the i16
+/// arm of `lower_scalar_int` was unreachable from the annotation test
+/// suite.
+#[test]
+fn symmetric_pair_topk_i16_return_with_bound_delta() {
+    const INT_SRC: &str = r#"
+event EffectStandingDelta { a: AgentId, b: AgentId, delta: i16 }
+
+@materialized(on_event = [EffectStandingDelta])
+@symmetric_pair_topk(K = 4)
+view test_standing_i16(a: Agent, b: Agent) -> i16 {
+  initial: 0,
+  on EffectStandingDelta { a: a, b: b, delta: delta } { self += delta }
+  clamp: [-100, 100],
+}
+"#;
+    let comp = dsl_compiler::compile(INT_SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "test_standing_i16")
+        .expect("view IR should exist");
+    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+
+    // (1) `-> i16` flows into adjust() and get() signatures.
+    assert!(
+        rust.contains("-> i16"),
+        "emitted code must carry the i16 return type:\n{rust}"
+    );
+    assert!(
+        rust.contains("pub fn get(&self, a: AgentId, b: AgentId) -> i16"),
+        "missing i16 get():\n{rust}"
+    );
+    assert!(
+        rust.contains(
+            "pub fn adjust(&mut self, a: AgentId, b: AgentId, delta: i16, tick: u32) -> i16"
+        ),
+        "missing i16 adjust():\n{rust}"
+    );
+
+    // (2) No float literals anywhere in the integer view's emission.
+    assert!(
+        !rust.contains("0.0"),
+        "initial must render as `0`, not `0.0` on an i16 view:\n{rust}"
+    );
+    assert!(
+        !rust.contains("100.0"),
+        "clamp upper must render as `100`, not `100.0` on an i16 view:\n{rust}"
+    );
+
+    // (3) Fold arm threads the bound `delta` into adjust().
+    assert!(
+        rust.contains("self.adjust(*a, *b, delta, tick);"),
+        "fold arm must pass the bound `delta` variable:\n{rust}"
+    );
+
+    // (4) Destructure must bind `delta` out of the event pattern.
+    assert!(
+        rust.contains("Event::EffectStandingDelta { a, b, delta, .. }")
+            || rust.contains("Event::EffectStandingDelta { a, b, delta }"),
+        "destructure must bind `delta` from the event pattern; got:\n{rust}"
+    );
+
+    // (5) Shadow-deref line present for the bound local.
+    assert!(
+        rust.contains("let delta = *delta;"),
+        "fold body must shadow-deref bound locals so Copy numerics flow as values; got:\n{rust}"
     );
 }

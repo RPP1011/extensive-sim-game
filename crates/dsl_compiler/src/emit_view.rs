@@ -1799,6 +1799,11 @@ fn collect_locals_in_expr(
     node: &IrExprNode,
     out: &mut std::collections::BTreeSet<String>,
 ) {
+    // Every `IrExpr` variant is listed explicitly — if a future variant is
+    // added (e.g. a new collection literal or a new call kind), the
+    // non-exhaustive match will be a compile error rather than silently
+    // dropping the body's child expressions and producing `cannot find
+    // value X in this scope` at the emitted Rust level.
     match &node.kind {
         IrExpr::Local(_, name) => {
             // `self` is re-emitted as `self_id`; the identifier itself
@@ -1839,9 +1844,77 @@ fn collect_locals_in_expr(
                 collect_locals_in_expr(&a.value, out);
             }
         }
-        // Everything else (literals, namespace fields) has no local
-        // references of interest for the fold-arm destructure.
-        _ => {}
+        IrExpr::VerbCall(_, args) => {
+            for a in args {
+                collect_locals_in_expr(&a.value, out);
+            }
+        }
+        IrExpr::Field { base, .. } => collect_locals_in_expr(base, out),
+        IrExpr::Index(base, idx) => {
+            collect_locals_in_expr(base, out);
+            collect_locals_in_expr(idx, out);
+        }
+        IrExpr::In(lhs, rhs) | IrExpr::Contains(lhs, rhs) => {
+            collect_locals_in_expr(lhs, out);
+            collect_locals_in_expr(rhs, out);
+        }
+        IrExpr::Quantifier { iter, body, .. } => {
+            // Binder-introducing: v1 ignores shadowing. Worst case the
+            // binder's name shows up as an "extra field" we'd try to
+            // destructure, but the caller filters to pattern bindings so
+            // a stray non-event name is harmless (never added to the
+            // arm pattern). If the body references an outer pattern
+            // local, we still want to catch it.
+            collect_locals_in_expr(iter, out);
+            collect_locals_in_expr(body, out);
+        }
+        IrExpr::Fold { iter, body, .. } => {
+            if let Some(it) = iter {
+                collect_locals_in_expr(it, out);
+            }
+            collect_locals_in_expr(body, out);
+        }
+        IrExpr::List(items) | IrExpr::Tuple(items) => {
+            for e in items {
+                collect_locals_in_expr(e, out);
+            }
+        }
+        IrExpr::StructLit { fields, .. } => {
+            for f in fields {
+                collect_locals_in_expr(&f.value, out);
+            }
+        }
+        IrExpr::Ctor { args, .. } => {
+            for e in args {
+                collect_locals_in_expr(e, out);
+            }
+        }
+        IrExpr::Match { scrutinee, arms } => {
+            collect_locals_in_expr(scrutinee, out);
+            for arm in arms {
+                // Binder-introducing via pattern; same rationale as
+                // `Quantifier` above — over-collection is safe.
+                collect_locals_in_expr(&arm.body, out);
+            }
+        }
+        IrExpr::PerUnit { expr, delta } => {
+            collect_locals_in_expr(expr, out);
+            collect_locals_in_expr(delta, out);
+        }
+        // Pure leaves (no child expressions). Listed explicitly so that
+        // adding a new variant forces a decision at compile time.
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::View(_)
+        | IrExpr::Verb(_)
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::Raw(_) => {}
     }
 }
 
