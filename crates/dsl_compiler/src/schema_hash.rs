@@ -664,6 +664,13 @@ fn hash_expr_kind(h: &mut Sha256, kind: &IrExpr) {
             hash_expr(h, expr);
             hash_expr(h, delta);
         }
+        // GPU ability evaluation Phase 2 primitives. Pinned ordinal
+        // bytes so renaming / reordering `AbilityTag` variants bumps
+        // the schema hash (and trace-format guards catch drift).
+        IrExpr::AbilityTag { tag } => {
+            h.update([0x40u8]);
+            h.update([*tag as u8]);
+        }
         IrExpr::Raw(_) => {
             // Raw fallthrough (e.g. an expression the resolver couldn't lower)
             // — fold a stable tag so two `Raw` exprs with different contents

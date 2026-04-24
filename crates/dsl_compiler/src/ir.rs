@@ -45,6 +45,115 @@ pub struct FieldRef {
 }
 
 // ---------------------------------------------------------------------------
+// Ability-evaluation primitives (GPU ability evaluation Phase 2)
+// ---------------------------------------------------------------------------
+//
+// Mirrors of the engine's `AbilityTag` / `AbilityHint` enums from
+// `crates/engine/src/ability/program.rs`. The dsl_compiler crate is
+// intentionally independent of engine (it runs in the xtask build, not
+// the game binary), so the enums are duplicated here with pinned
+// discriminants. Renaming or reordering variants requires a coordinated
+// change on both sides (and a schema-hash bump).
+//
+// Per the spec's "Open questions" §"Tag registry shape": fixed enum for
+// v1. Extensibility deferred until real-world tag usage demands it.
+
+/// Per-effect power-rating tag surfaced via `.ability` DSL's
+/// `[TAG: value]` syntax. Mirrored from `engine::ability::AbilityTag`.
+///
+/// Discriminants are pinned to match the engine-side enum so GPU
+/// packing (`PackedAbilityRegistry::tag_values`) and WGSL `const`
+/// comparisons align without a runtime lookup. Column index into
+/// `tag_values` is the `#[repr(u8)]` ordinal.
+///
+/// Spec: `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`
+/// §"Open questions" (fixed enum for v1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[repr(u8)]
+pub enum AbilityTag {
+    Physical = 0,
+    Magical = 1,
+    CrowdControl = 2,
+    Heal = 3,
+    Defense = 4,
+    Utility = 5,
+}
+
+impl AbilityTag {
+    /// Total variant count. Pinned to match the engine-side
+    /// `AbilityTag::COUNT` + the `NUM_ABILITY_TAGS` stride used by
+    /// `PackedAbilityRegistry::tag_values`. Bump in lockstep with any
+    /// enum addition.
+    pub const COUNT: usize = 6;
+
+    /// Parse the tag from its DSL token form (identifier-case:
+    /// `PHYSICAL`, `MAGICAL`, `CROWD_CONTROL`, `HEAL`, `DEFENSE`,
+    /// `UTILITY`). Returns `None` for an unknown spelling so upstream
+    /// can surface the original token in its error.
+    pub fn parse_ident(s: &str) -> Option<Self> {
+        match s {
+            "PHYSICAL" => Some(Self::Physical),
+            "MAGICAL" => Some(Self::Magical),
+            "CROWD_CONTROL" => Some(Self::CrowdControl),
+            "HEAL" => Some(Self::Heal),
+            "DEFENSE" => Some(Self::Defense),
+            "UTILITY" => Some(Self::Utility),
+            _ => None,
+        }
+    }
+
+    /// Canonical DSL token for this tag (identifier-case).
+    pub fn as_ident(self) -> &'static str {
+        match self {
+            Self::Physical => "PHYSICAL",
+            Self::Magical => "MAGICAL",
+            Self::CrowdControl => "CROWD_CONTROL",
+            Self::Heal => "HEAL",
+            Self::Defense => "DEFENSE",
+            Self::Utility => "UTILITY",
+        }
+    }
+}
+
+/// Coarse ability-category hint. Mirrored from
+/// `engine::ability::AbilityHint`. One hint per ability; rows can
+/// compare via `ability::hint == damage` (DSL uses lowercase
+/// identifier form; parser flattens `::` into a single identifier).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[repr(u8)]
+pub enum AbilityHint {
+    Damage = 0,
+    Defense = 1,
+    CrowdControl = 2,
+    Utility = 3,
+}
+
+impl AbilityHint {
+    /// Parse the hint from its DSL token form (lowercase:
+    /// `damage`, `defense`, `crowd_control`, `utility`). Returns
+    /// `None` for an unknown spelling.
+    pub fn parse_ident(s: &str) -> Option<Self> {
+        match s {
+            "damage" => Some(Self::Damage),
+            "defense" => Some(Self::Defense),
+            "crowd_control" => Some(Self::CrowdControl),
+            "utility" => Some(Self::Utility),
+            _ => None,
+        }
+    }
+
+    /// Canonical DSL token for this hint (lowercase).
+    pub fn as_ident(self) -> &'static str {
+        match self {
+            Self::Damage => "damage",
+            Self::Defense => "defense",
+            Self::CrowdControl => "crowd_control",
+            Self::Utility => "utility",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -203,6 +312,14 @@ pub enum IrExpr {
         expr: Box<IrExprNode>,
         delta: Box<IrExprNode>,
     },
+    /// `ability::tag(TAG_NAME)` — reads the named tag's power rating
+    /// off the currently-scored ability. Returns f32; 0.0 if the
+    /// ability has no entry for the tag. Only meaningful inside a
+    /// `per_ability` scoring row (where "the currently-scored
+    /// ability" has a binding) — Phase 3 enforces this at emit time.
+    ///
+    /// Added 2026-04-23 (GPU ability evaluation Phase 2).
+    AbilityTag { tag: AbilityTag },
     /// Retained original AST shape for anything we can't lower meaningfully.
     Raw(Box<ast::Expr>),
 }

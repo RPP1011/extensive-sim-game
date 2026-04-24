@@ -1964,6 +1964,12 @@ fn collect_locals_in_expr(
         | IrExpr::Namespace(_)
         | IrExpr::NamespaceField { .. }
         | IrExpr::EnumVariant { .. }
+        // GPU ability evaluation Phase 2 — scoring-only primitives.
+        // View fold bodies never see them (the fold-body walker above
+        // rejects them first), but the walker lists every variant
+        // explicitly so adding a new one forces a compile-time
+        // decision here.
+        | IrExpr::AbilityTag { .. }
         | IrExpr::Raw(_) => {}
     }
 }

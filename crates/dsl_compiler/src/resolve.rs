@@ -1923,6 +1923,20 @@ fn resolve_call(
     scope: &mut LocalScope,
     symbols: &SymbolTable,
 ) -> Result<IrExpr, ResolveError> {
+    // GPU ability evaluation Phase 2 primitives. Intercepted here
+    // before the generic Ident-call fallthrough so the arguments
+    // don't get pre-resolved (e.g. `PHYSICAL` would otherwise land
+    // as a stray `EnumVariant` and the tag name would be buried
+    // inside an opaque arg list).
+    //
+    // The parser flattens `ability::tag(PHYSICAL)` into
+    // `Call(Ident("ability::tag"), [Ident("PHYSICAL")])`; the name
+    // is a single string with `::` preserved.
+    if let ExprKind::Ident(name) = &callee.kind {
+        if let Some(expr) = resolve_ability_eval_call(name, args, span)? {
+            return Ok(expr);
+        }
+    }
     // `<namespace>.<method>(...)` — resolved against the stdlib method
     // schema. An unknown method on a known namespace stays structured
     // (ns+method kept), with `Unknown` return type; 1b flags it.
@@ -2009,6 +2023,80 @@ fn resolve_call_arg(
         value: resolve_expr(&a.value, scope, symbols)?,
         span: a.span,
     })
+}
+
+/// GPU ability evaluation Phase 2 primitives that shape-match a
+/// flattened-ident callee into a dedicated `IrExpr` variant.
+///
+/// Returns `Ok(Some(expr))` if the callee matches a known primitive
+/// and lowers successfully; `Ok(None)` if the callee does not match
+/// (caller falls through to the generic Ident-call path); `Err` if
+/// the callee matches but its arguments are malformed (e.g. unknown
+/// tag name).
+///
+/// Only argument-taking primitives route through here —
+/// `ability::hint`, `ability::range` have no `()` suffix and are
+/// handled in `resolve_ident` instead. See
+/// `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`
+/// §Architecture.
+fn resolve_ability_eval_call(
+    name: &str,
+    args: &[ast::CallArg],
+    span: Span,
+) -> Result<Option<IrExpr>, ResolveError> {
+    // `ability::tag(TAG_NAME)` — reads the current ability's tag
+    // value. The argument must be a bare identifier from the
+    // `AbilityTag` vocabulary (identifier-case; e.g. `PHYSICAL`).
+    if name == "ability::tag" || name == "abilities::tag" {
+        if args.len() != 1 {
+            return Err(ResolveError::UnknownIdent {
+                name: format!(
+                    "{name} takes exactly one argument (a tag name), got {}",
+                    args.len()
+                ),
+                span,
+                suggestions: vec![],
+            });
+        }
+        let arg = &args[0];
+        if arg.name.is_some() {
+            return Err(ResolveError::UnknownIdent {
+                name: format!("{name}: tag argument must be positional (no `key:` form)"),
+                span,
+                suggestions: vec![],
+            });
+        }
+        let tag_ident = match &arg.value.kind {
+            ExprKind::Ident(s) => s.clone(),
+            _ => {
+                return Err(ResolveError::UnknownIdent {
+                    name: format!(
+                        "{name}: tag argument must be a bare identifier \
+                         (e.g. `PHYSICAL`); got a non-identifier expression"
+                    ),
+                    span: arg.span,
+                    suggestions: vec![],
+                });
+            }
+        };
+        match AbilityTag::parse_ident(&tag_ident) {
+            Some(tag) => Ok(Some(IrExpr::AbilityTag { tag })),
+            None => Err(ResolveError::UnknownIdent {
+                name: format!(
+                    "unknown ability tag `{tag_ident}`; valid tags are \
+                     PHYSICAL, MAGICAL, CROWD_CONTROL, HEAL, DEFENSE, UTILITY"
+                ),
+                span: arg.span,
+                suggestions: vec![
+                    "PHYSICAL".into(),
+                    "CROWD_CONTROL".into(),
+                    "DEFENSE".into(),
+                ],
+            }),
+        }
+    } else {
+        Ok(None)
+    }
 }
 
 fn resolve_assert(
@@ -2786,6 +2874,15 @@ fn validate_fold_expr(view_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
             offending_construct: "unrecognised expression shape".into(),
             span: e.span,
         }),
+
+        // GPU ability evaluation Phase 2 primitives — scoring-only
+        // surface. A view fold body has no currently-scored ability,
+        // so reading ability tags here is meaningless.
+        IrExpr::AbilityTag { .. } => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct: "`ability::tag(...)` (scoring-only primitive)".into(),
+            span: e.span,
+        }),
     }
 }
 
@@ -3137,6 +3234,19 @@ fn validate_physics_expr(physics_name: &str, e: &IrExprNode) -> Result<(), Resol
                     .into(),
             span: e.span,
         }),
+
+        // GPU ability evaluation Phase 2 primitives. Scoring-only
+        // surface; a physics body has no currently-scored ability.
+        IrExpr::AbilityTag { .. } => Err(ResolveError::NotGpuEmittable {
+            physics_name: physics_name.to_string(),
+            construct: "`ability::tag(...)` in physics body".into(),
+            reason:
+                "`ability::tag(...)` reads the currently-scored ability's \
+                 tag value; it's only meaningful inside a `per_ability` \
+                 scoring row, not a physics handler"
+                    .into(),
+            span: e.span,
+        }),
     }
 }
 
@@ -3223,7 +3333,8 @@ fn validate_physics_iter_source(
         | IrExpr::Match { .. }
         | IrExpr::Fold { .. }
         | IrExpr::Quantifier { .. }
-        | IrExpr::PerUnit { .. } => Err(ResolveError::NotGpuEmittable {
+        | IrExpr::PerUnit { .. }
+        | IrExpr::AbilityTag { .. } => Err(ResolveError::NotGpuEmittable {
             physics_name: physics_name.to_string(),
             construct: "for-loop over non-iterable / unbounded expression".into(),
             reason:
@@ -3588,6 +3699,18 @@ fn validate_mask_body(mask_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
             span: e.span,
         }),
 
+        // GPU ability evaluation Phase 2 primitives. Reachable from
+        // mask bodies would mean a mask predicate depends on the
+        // currently-scored ability — which isn't the mask kernel's
+        // slot; masks run before scoring. Reject.
+        IrExpr::AbilityTag { .. } => Err(ResolveError::UdfInMaskBody {
+            mask_name: mask_name.to_string(),
+            offending_construct:
+                "`ability::tag(...)` (scoring-only primitive; not visible to mask predicates)"
+                    .into(),
+            span: e.span,
+        }),
+
         IrExpr::Raw(_) => Ok(()),
     }
 }
@@ -3695,6 +3818,15 @@ fn validate_scoring_body(e: &IrExprNode) -> Result<(), ResolveError> {
             offending_construct: "`match` expression (use if/else or gradient terms)".into(),
             span: e.span,
         }),
+
+        // GPU ability evaluation Phase 2 primitives. Legal inside
+        // `per_ability` rows (the currently-scored ability is the
+        // row's implicit binder); inside a standard row the primitive
+        // has no meaningful binder. We permit it here at the resolve
+        // stage — Phase 3's CPU emitter decides which row shape it's
+        // in and errors if misused — so the DSL-compiler-level
+        // validator stays permissive for Phase 2.
+        IrExpr::AbilityTag { .. } => Ok(()),
 
         IrExpr::Raw(_) => Ok(()),
     }
