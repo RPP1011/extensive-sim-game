@@ -1345,3 +1345,65 @@ pub fn run_cascade_resident_with_iter_cap(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Stage B.1 — pure-decode tests for `observed_last_active_iter`.
+    // Guards the convergence-detection logic so a one-off GPU-readback
+    // regression can't silently mis-classify a converged tick.
+
+    #[test]
+    fn observed_last_active_iter_all_zeros_reports_zero() {
+        let counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 0);
+    }
+
+    #[test]
+    fn observed_last_active_iter_only_slot_0_reports_one() {
+        let mut counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        counts[0] = 42;
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 1);
+    }
+
+    #[test]
+    fn observed_last_active_iter_contiguous_range_reports_last() {
+        // counts[0..=2] nonzero, counts[3..] zero: iter 2 was the last
+        // one that read a nonzero event count, so last_active is 3.
+        let mut counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        counts[0] = 100;
+        counts[1] = 20;
+        counts[2] = 3;
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 3);
+    }
+
+    #[test]
+    fn observed_last_active_iter_sparse_tail_reports_deepest_active() {
+        // A gap in the middle should not hide a deeper active iter.
+        let mut counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        counts[0] = 5;
+        counts[1] = 0; // physically can't happen — seed always positive
+        counts[3] = 7; // but be robust to degenerate readbacks
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 4);
+    }
+
+    #[test]
+    fn observed_last_active_iter_ignores_trailing_epilogue_write() {
+        // counts[MAX] is the exhaustion epilogue write — the decoder
+        // should not treat it as an "active iter" (it's one PAST the
+        // last iter that actually ran).
+        let mut counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        counts[MAX_CASCADE_ITERATIONS as usize] = 999;
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 0);
+    }
+
+    #[test]
+    fn observed_last_active_iter_full_cascade_reports_max() {
+        let counts = vec![1u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        assert_eq!(
+            CascadeResidentCtx::observed_last_active_iter(&counts),
+            MAX_CASCADE_ITERATIONS
+        );
+    }
+}

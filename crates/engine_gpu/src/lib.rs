@@ -1863,6 +1863,20 @@ impl GpuBackend {
         (tail, records)
     }
 
+    /// Test-only accessor: current value of
+    /// `CascadeResidentCtx::batch_observed_max_iters` — the cascade
+    /// iteration count observed on the final tick of the most recent
+    /// `step_batch` submit. Returns `None` if the resident ctx isn't
+    /// initialised (no batch yet). Used by Stage B.1 tests to verify
+    /// the convergence-observation loop updates across batches.
+    #[doc(hidden)]
+    pub fn batch_observed_max_iters_for_test(&self) -> Option<u32> {
+        self.resident
+            .resident_cascade_ctx
+            .as_ref()
+            .map(|ctx| ctx.batch_observed_max_iters)
+    }
+
     /// Test-only accessor: read the first few slots of `num_events_buf`
     /// from the resident cascade context. Returns `[0; 0]` if the
     /// resident ctx isn't initialised.
