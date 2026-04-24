@@ -77,6 +77,14 @@ pub mod scoring;
 #[cfg(feature = "gpu")]
 pub mod view_storage;
 
+/// Task #79 — GPU resident-path storage for `@symmetric_pair_topk`
+/// views (the `standing` view, Task 3.1). Owns per-agent `[StandingEdge;
+/// K=8]` arrays + counts, uploaded from `state.views.standing` on
+/// `ensure_resident_init` and read back in `snapshot()`. Bound into the
+/// resident physics BGL at slots 18 / 19.
+#[cfg(feature = "gpu")]
+pub mod view_storage_symmetric_pair;
+
 /// Phase 5 — GPU spatial hash + nearest-hostile / nearby-kin queries.
 /// Not yet consumed by the backend's step loop; the scoring / physics
 /// kernels will call into `spatial_gpu::SPATIAL_WGSL` helpers.
