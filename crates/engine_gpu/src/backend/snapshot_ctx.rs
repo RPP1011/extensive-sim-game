@@ -19,7 +19,6 @@ pub struct SnapshotContext {
     /// chronicle rings have been snapshotted. Advances monotonically.
     #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
     pub snapshot_event_ring_read:     u64,
-    #[allow(dead_code)] // TODO Phase D Task D3: consumed by GpuBackend::snapshot()
     pub snapshot_chronicle_ring_read: u64,
 
     /// Phase D — the most recent tick recorded by `step_batch`.

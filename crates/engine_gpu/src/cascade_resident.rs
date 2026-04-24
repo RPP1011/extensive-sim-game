@@ -894,6 +894,13 @@ impl CascadeResidentCtx {
         &self.batch_events_ring
     }
 
+    /// Read-only handle to the dedicated chronicle ring.
+    /// `GpuBackend::snapshot()` reads this ring's tail and records
+    /// buffer to populate `GpuSnapshot::chronicle_since_last`.
+    pub(crate) fn chronicle_ring(&self) -> &crate::event_ring::GpuChronicleRing {
+        &self.chronicle_ring
+    }
+
     fn ensure_spatial(&mut self, device: &wgpu::Device, agent_cap: u32) {
         let need = !matches!(
             &self.spatial_bufs,

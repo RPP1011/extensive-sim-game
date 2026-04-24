@@ -830,6 +830,7 @@ impl GpuBackend {
             resident_ctx.reset_chronicle_ring(&mut encoder);
         }
         self.snapshot.snapshot_event_ring_read = 0;
+        self.snapshot.snapshot_chronicle_ring_read = 0;
 
         let agent_cap = state.agent_cap();
         for _ in 0..n_ticks {
@@ -1265,18 +1266,22 @@ impl GpuBackend {
         // Lazy-init the staging pair on first call. Size for the
         // current resident agent capacity + the event ring's default
         // capacity envelope (the physics ring is sized at the same
-        // default so this is a conservative upper bound).
+        // default so this is a conservative upper bound) + the
+        // chronicle ring's actual capacity.
+        let chronicle_cap_u32 = resident_ctx.chronicle_ring().capacity();
         if self.snapshot.snapshot_front.is_none() && self.snapshot.snapshot_back.is_none() {
             let event_cap = crate::event_ring::DEFAULT_CAPACITY;
             self.snapshot.snapshot_front = Some(crate::snapshot::GpuStaging::new(
                 &self.device,
                 self.resident.resident_agents_cap,
                 event_cap,
+                chronicle_cap_u32,
             ));
             self.snapshot.snapshot_back = Some(crate::snapshot::GpuStaging::new(
                 &self.device,
                 self.resident.resident_agents_cap,
                 event_cap,
+                chronicle_cap_u32,
             ));
         }
 
@@ -1286,10 +1291,20 @@ impl GpuBackend {
         // populates at the new size.
         let event_cap = crate::event_ring::DEFAULT_CAPACITY;
         if let Some(front) = self.snapshot.snapshot_front.as_mut() {
-            front.ensure_cap(&self.device, self.resident.resident_agents_cap, event_cap);
+            front.ensure_cap(
+                &self.device,
+                self.resident.resident_agents_cap,
+                event_cap,
+                chronicle_cap_u32,
+            );
         }
         if let Some(back) = self.snapshot.snapshot_back.as_mut() {
-            back.ensure_cap(&self.device, self.resident.resident_agents_cap, event_cap);
+            back.ensure_cap(
+                &self.device,
+                self.resident.resident_agents_cap,
+                event_cap,
+                chronicle_cap_u32,
+            );
         }
 
         // 1. Take a snapshot of the FRONT (filled by the previous
@@ -1317,6 +1332,40 @@ impl GpuBackend {
         )
         .map_err(crate::snapshot::SnapshotError::Ring)?;
         let event_ring_tail = *tail_vec.first().unwrap_or(&0) as u64;
+
+        // 2b. Readback the chronicle ring's tail. Same cost / shape as
+        //     the event-ring tail readback above. Independent of the
+        //     event ring — the chronicle ring is observability-only and
+        //     lives on its own GPU buffer per task-203.
+        let chronicle_ring = resident_ctx.chronicle_ring();
+        let chronicle_tail_vec: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
+            &self.device,
+            &self.queue,
+            chronicle_ring.tail_buffer(),
+            4,
+        )
+        .map_err(crate::snapshot::SnapshotError::Ring)?;
+        let chronicle_cap = chronicle_ring.capacity() as u64;
+        let chronicle_tail_raw = *chronicle_tail_vec.first().unwrap_or(&0) as u64;
+        if chronicle_tail_raw > chronicle_cap {
+            // Mirror GpuChronicleRing::drain's wrap warning. Wrap
+            // handling — returning the rotated resident window — is
+            // out of scope for Phase 2 Task 2.3 per the chronicle
+            // ring's observability-only contract; the snapshot
+            // returns at most the most recent `chronicle_cap`
+            // records read from slots [0..cap), which after wrap
+            // contain a rotated view of the last `cap` emissions.
+            // TODO(phase-3-overflow): handle rotated window so the
+            // observer sees records in chronological order even
+            // after wrap.
+            eprintln!(
+                "engine_gpu::snapshot: chronicle ring wrapped mid-batch \
+                 (tail={chronicle_tail_raw} > cap={chronicle_cap}); \
+                 returning only last {chronicle_cap} records, older entries \
+                 overwritten. TODO(phase-3-overflow): handle rotated window."
+            );
+        }
+        let chronicle_tail = chronicle_tail_raw.min(chronicle_cap);
 
         // Read current GPU tick from SimCfg. 4-byte readback, ~tens of µs
         // at end-of-snapshot — acceptable as snapshot is the observer-path
@@ -1356,6 +1405,17 @@ impl GpuBackend {
         let start: u64 = self.snapshot.snapshot_event_ring_read;
         let event_ring_cap = main_event_ring.capacity() as u64;
         let end = event_ring_tail.min(event_ring_cap).max(start);
+
+        // Chronicle slice: same watermark pattern as events. The
+        // chronicle ring is reset at the top of each `step_batch` so
+        // `snapshot_chronicle_ring_read` starts at 0 and advances
+        // monotonically across in-batch snapshots. Above we already
+        // clamped `chronicle_tail` to `chronicle_cap` so the slice
+        // never exceeds the underlying buffer; `max(start)` guards
+        // against a reset-but-not-yet-observed watermark.
+        let chronicle_start: u64 = self.snapshot.snapshot_chronicle_ring_read;
+        let chronicle_end = chronicle_tail.max(chronicle_start);
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1372,6 +1432,9 @@ impl GpuBackend {
                 main_event_ring,
                 start,
                 end,
+                chronicle_ring,
+                chronicle_start,
+                chronicle_end,
                 gpu_tick,
             );
         self.queue.submit(Some(encoder.finish()));
@@ -1380,6 +1443,8 @@ impl GpuBackend {
         // snapshot reads records in `[end, new_tail)`. Reset to 0 at
         // the top of each `step_batch` call.
         self.snapshot.snapshot_event_ring_read = end;
+        // Same for the chronicle ring watermark.
+        self.snapshot.snapshot_chronicle_ring_read = chronicle_end;
 
         // 4. Swap front / back — next call takes the one we just
         //    filled, and fills the one we just took from.
