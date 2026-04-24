@@ -264,6 +264,83 @@ fn snapshot_merges_standing_into_state() {
     );
 }
 
+/// Subsystem 2 Phase 4 PR-6 regression: `snapshot()` reads
+/// memory_storage back into `state.views.memory`. With no
+/// `RecordMemory` events firing during the batch, the round-trip
+/// (upload on resident init → real ring-push body that never fires
+/// → readback → merge) must preserve the initial memory ring state
+/// exactly.
+#[test]
+fn snapshot_merges_memory_into_state() {
+    use engine::generated::views::memory::MemoryEntry;
+    use engine::ids::AgentId;
+
+    let mut gpu = GpuBackend::new().expect("gpu init");
+    let mut state = SimState::new(8, 0xD0_CA);
+    for i in 0..4 {
+        state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Human,
+                pos: Vec3::new(i as f32, 0.0, 0.0),
+                hp: 100.0,
+                ..Default::default()
+            })
+            .unwrap();
+    }
+
+    // Seed CPU-side memory BEFORE ensure_resident_init uploads
+    // state.views.memory into memory_records_buf / cursors.
+    let observer = AgentId::new(1).unwrap();
+    let src = AgentId::new(3).unwrap();
+    state.views.memory.push(
+        observer.raw(),
+        MemoryEntry {
+            source: src.raw(),
+            value: 1.0,
+            anchor_tick: 7,
+        },
+    );
+
+    // Sanity: CPU push landed.
+    assert_eq!(state.views.memory.cursor(observer), 1);
+
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(256);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    // Warmup — state.views.memory uploaded to GPU on first
+    // ensure_resident_init.
+    gpu.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+
+    // Batch with no RecordMemory events — round-trip should preserve
+    // the seeded entry. Nothing in base physics.sim emits
+    // `RecordMemory` (it's gameplay-level — `Announce` macro's
+    // fan-out, etc.); no humans announce in this fixture.
+    gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, 3);
+
+    // Triple-snapshot dance (the double-buffer gives observers the
+    // previous tick's data; three calls guarantee we see the post-
+    // batch state).
+    let _ = gpu.snapshot(&mut state).unwrap();
+    let _ = gpu.snapshot(&mut state).unwrap();
+    let _ = gpu.snapshot(&mut state).unwrap();
+
+    // state.views.memory is rehydrated from the GPU — observer sees
+    // the unchanged seeded entry.
+    assert_eq!(
+        state.views.memory.cursor(observer),
+        1,
+        "cursor should round-trip through memory_storage unchanged",
+    );
+    let row = state
+        .views
+        .memory
+        .entries(observer)
+        .expect("owner row present after readback");
+    assert_eq!(row[0].source, src.raw(), "source preserved");
+    assert_eq!(row[0].anchor_tick, 7, "anchor_tick preserved");
+}
+
 fn run_fight_and_snapshot(n_ticks: u32) -> usize {
     let mut gpu = GpuBackend::new().expect("gpu init");
     let mut state = SimState::new(8, 0xC1_F1_A8);

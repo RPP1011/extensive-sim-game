@@ -1649,6 +1649,60 @@ impl GpuBackend {
                 .map_err(crate::snapshot::SnapshotError::Ring)?;
         }
 
+        // Subsystem 2 Phase 4 PR-6 — memory_storage readback →
+        // state.views.memory.
+        //
+        // Mirrors the gold + standing readback pattern. The resident
+        // physics kernel is the sole writer of `memory_records_buf` /
+        // `memory_cursors_buf` (PR-4's real `state_push_agent_memory`
+        // body); the sync path leaves them untouched and `RecordMemory`
+        // events flow through CPU `cold_state_replay` + `fold_all`.
+        // Reading back after `step_batch` rehydrates
+        // `state.views.memory` so observers see post-batch memory ring
+        // state via the same `state.views.memory.entries(...)` surface
+        // the sync path already writes through.
+        //
+        // O(agent_cap * K) on upload (PR-3) + two blocking
+        // `readback_typed` calls here — all one-shot per snapshot.
+        // Acceptable per the plan's §4b cost budget (Option (a) —
+        // consistent with gold + standing; a future batched readback
+        // into the double-buffered snapshot staging is tracked as a
+        // cross-cutting follow-up).
+        if let Some(storage) = self.resident.memory_storage.as_ref() {
+            let rehydrated = storage
+                .readback_into_cpu(&self.device, &self.queue)
+                .map_err(crate::snapshot::SnapshotError::Ring)?;
+            // Replace `state.views.memory` with a fresh struct reflecting
+            // the GPU state. `Memory` has no `clear()` helper, so we
+            // rebuild it by pushing each entry in chronological order —
+            // same convention the view's `fold_event` uses on the CPU
+            // path. `Memory::push` grows the ring + cursor vectors on
+            // demand, so owners with no GPU activity stay at cursor=0
+            // and are not resized.
+            let mut new_memory = engine::generated::views::memory::Memory::new();
+            for (owner_slot, row) in rehydrated.iter().enumerate() {
+                if row.is_empty() {
+                    continue;
+                }
+                let Some(owner_id) = engine::ids::AgentId::new(
+                    (owner_slot as u32).saturating_add(1),
+                ) else {
+                    continue;
+                };
+                for ev in row.iter() {
+                    let entry = engine::generated::views::memory::MemoryEntry {
+                        source: ev.source.raw(),
+                        // v1 minimal projection — the CPU fold writes
+                        // 1.0 on every event, so we mirror here.
+                        value: 1.0,
+                        anchor_tick: ev.tick,
+                    };
+                    new_memory.push(owner_id.raw(), entry);
+                }
+            }
+            state.views.memory = new_memory;
+        }
+
         // 4. Swap front / back — next call takes the one we just
         //    filled, and fills the one we just took from.
         std::mem::swap(
