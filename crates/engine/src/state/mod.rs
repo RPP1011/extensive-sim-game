@@ -7,6 +7,7 @@ use crate::channel::ChannelSet;
 use crate::creature::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 use crate::spatial::SpatialHash;
+use crate::terrain::{FlatPlane, TerrainQuery};
 pub use agent::{AgentSpawn, MovementMode};
 use agent_types::{
     ClassSlot, Creditor, Inventory, MemoryEvent, Membership, Relationship, StatusEffect,
@@ -14,6 +15,7 @@ use agent_types::{
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
 use smallvec::SmallVec;
+use std::sync::Arc;
 
 /// Full SoA agent state — every field `docs/dsl/state.md` commits to, in one
 /// struct. Hot fields are `Vec<T>` indexed by slot and read every tick; cold
@@ -165,6 +167,34 @@ pub struct SimState {
     /// Defaults to empty. Populate via `state.ability_registry =
     /// builder.build()` after spawning the state.
     pub ability_registry: crate::ability::AbilityRegistry,
+
+    /// Terrain backend the engine consults for height / walkability /
+    /// line-of-sight queries. Defaults to `FlatPlane` — height 0
+    /// everywhere, every point walkable, every LOS clear — so the
+    /// wolves+humans canonical fixture and every legacy test stays
+    /// deterministic and terrain-agnostic. Callers that want real
+    /// elevation (examples like `hill_fight`, future voxel adapter)
+    /// replace this field after construction:
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use engine::state::SimState;
+    /// # struct MyHill;
+    /// # impl engine::terrain::TerrainQuery for MyHill {
+    /// #     fn height_at(&self, _x: f32, _y: f32) -> f32 { 0.0 }
+    /// #     fn walkable(&self, _pos: glam::Vec3, _m: engine::state::MovementMode) -> bool { true }
+    /// #     fn line_of_sight(&self, _from: glam::Vec3, _to: glam::Vec3) -> bool { true }
+    /// # }
+    /// let mut state = SimState::new(8, 0);
+    /// state.terrain = Arc::new(MyHill);
+    /// ```
+    ///
+    /// Held as `Arc<dyn TerrainQuery + Send + Sync>` so parallel tick
+    /// paths share one backend without synchronisation. See
+    /// `docs/superpowers/notes/2026-04-22-terrain-integration-gap.md`
+    /// for the design discussion — this is Option B (trait-object
+    /// injection), deliberately chosen so the engine stays headless.
+    pub terrain: Arc<dyn TerrainQuery + Send + Sync>,
 }
 
 impl SimState {
@@ -259,6 +289,10 @@ impl SimState {
             // that need specific abilities do `state.ability_registry =
             // builder.build()` after construction.
             ability_registry:       crate::ability::AbilityRegistry::new(),
+            // Flat-plane terrain default. Caller replaces via
+            // `state.terrain = Arc::new(MyBackend)` to opt into real
+            // elevation / LOS. See field-level docs above.
+            terrain:                Arc::new(FlatPlane),
         }
     }
 

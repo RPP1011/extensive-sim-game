@@ -109,6 +109,13 @@ mod stdlib {
             // with the natural singular form. Shares the same method
             // schema as `abilities::`.
             ("ability", NamespaceId::Abilities),
+            // Terrain backend accessor — MVP Task 81. Sole method:
+            // `terrain.line_of_sight(from, to) -> bool`. Routed through
+            // `SimState.terrain: Arc<dyn TerrainQuery>` at emit time.
+            // The flat-plane default keeps every legacy scoring /
+            // physics path unchanged; examples and future mask rows
+            // opt in by reading through this namespace.
+            ("terrain", NamespaceId::Terrain),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -331,6 +338,14 @@ mod stdlib {
             (NamespaceId::Abilities, "on_cooldown") => Some((1, IrType::Bool)),
             (NamespaceId::Abilities, "hostile_only") => Some((1, IrType::Bool)),
             (NamespaceId::Abilities, "range") => Some((1, IrType::F32)),
+            // Terrain seam — MVP Task 81. Sole method:
+            // `terrain.line_of_sight(from: vec3, to: vec3) -> bool`.
+            // Routes to `SimState.terrain.line_of_sight(from, to)` at
+            // emit time. The `height_at` / `walkable` surface on
+            // `TerrainQuery` is intentionally not exposed to the DSL at
+            // this slice — the smallest possible method set the
+            // height-bonus scoring gate needs.
+            (NamespaceId::Terrain, "line_of_sight") => Some((2, IrType::Bool)),
             // Engagement accessor — wraps `state.agent_engaged_with(id)`,
             // returning `Option<AgentId>` so the mask predicate can
             // compare against `None` (the engagement-lock clause in
