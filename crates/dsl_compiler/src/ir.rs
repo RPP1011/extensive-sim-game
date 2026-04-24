@@ -745,6 +745,12 @@ pub enum NamespaceId {
     /// runtime lands (replaces Combat Foundation's stub `is_hostile_to`
     /// with valence-based friendship / hostility thresholds).
     Relationship,
+    /// `theory_of_mind::*` — Subsystem §6 (roadmap.md:447-506). Predicates
+    /// over `Relationship.believed_knowledge: Bitset<32>`. Methods are
+    /// `believes_knows`, `can_deceive`, `is_surprised_by`. All return bool.
+    /// Grammar stub only — emitters return `EmitError::Unsupported` until
+    /// the theory-of-mind runtime lands (gossip / belief-tracking fold).
+    TheoryOfMind,
 }
 
 impl NamespaceId {
@@ -769,6 +775,7 @@ impl NamespaceId {
             NamespaceId::Abilities => "abilities",
             NamespaceId::Membership => "membership",
             NamespaceId::Relationship => "relationship",
+            NamespaceId::TheoryOfMind => "theory_of_mind",
         }
     }
 }

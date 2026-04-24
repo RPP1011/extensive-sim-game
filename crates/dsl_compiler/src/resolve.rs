@@ -116,6 +116,9 @@ mod stdlib {
             // Roadmap §3 — Relationships. Grammar stub (no runtime state
             // yet). See `docs/superpowers/roadmap.md:279-311`.
             ("relationship", NamespaceId::Relationship),
+            // Roadmap §6 — Theory-of-mind. Grammar stub (no runtime state
+            // yet). See `docs/superpowers/roadmap.md:447-506`.
+            ("theory_of_mind", NamespaceId::TheoryOfMind),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -422,6 +425,26 @@ mod stdlib {
             (NamespaceId::Relationship, "is_friendly") => Some((2, IrType::Bool)),
             // `knows_well(a, b)` — familiarity > 0.5 (roadmap.md:309).
             (NamespaceId::Relationship, "knows_well") => Some((2, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Roadmap §6 — Theory-of-mind. Predicates on the 32-bit
+            // `Relationship.believed_knowledge` domain bitset. All return
+            // bool. The `domain` / `fact` args would ideally type to
+            // `DomainId` / `FactId` enums, but those don't exist in the
+            // IR yet — fall back to `Unknown`. TODO: once Subsystem §6
+            // introduces the DomainId / FactId enums, tighten the
+            // argument types by name (similar to how `EventKindId` is
+            // referenced via `IrType::Named`).
+            // See `docs/superpowers/roadmap.md:471-475`.
+            // -------------------------------------------------------------
+            // `believes_knows(observer, subject, domain)` — primary
+            // bit-read against `Relationship{self→subject}.believed_knowledge`.
+            (NamespaceId::TheoryOfMind, "believes_knows") => Some((3, IrType::Bool)),
+            // `can_deceive(observer, subject, fact)` — sugar for
+            // `!believes_knows(subject, fact)` (roadmap.md:473).
+            (NamespaceId::TheoryOfMind, "can_deceive") => Some((3, IrType::Bool)),
+            // `is_surprised_by(observer, subject, domain)` — fires when
+            // an observed action contradicts the domain bit.
+            (NamespaceId::TheoryOfMind, "is_surprised_by") => Some((3, IrType::Bool)),
             _ => None,
         }
     }

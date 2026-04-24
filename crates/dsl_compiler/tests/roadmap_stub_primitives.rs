@@ -281,3 +281,70 @@ fn subsystem_3_relationships_emit_returns_unsupported_cpu_and_gpu() {
         "GPU emit error msg should cite the relationships primitive stub; got: {msg}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Subsystem §6 — Theory-of-mind (roadmap.md:447-506)
+// ---------------------------------------------------------------------------
+
+const SUBSYSTEM_6_SRC: &str = r#"
+@replayable event AgentDied { agent_id: AgentId }
+event TomStubFired { agent_id: AgentId }
+
+// `believes_knows(a, a, Combat)` + `can_deceive(a, a, SecretX)` compose
+// a deception-gate predicate — representative of the gossip / intrigue
+// mechanics Subsystem §6 unlocks. The `Combat` / `SecretX` idents
+// resolve as typeless EnumVariant placeholders until the DomainId /
+// FactId enums land.
+physics theory_of_mind_grammar_stub @phase(event) {
+  on AgentDied { agent_id: a } {
+    if theory_of_mind::believes_knows(a, a, Combat)
+        && theory_of_mind::can_deceive(a, a, SecretX) {
+      emit TomStubFired { agent_id: a }
+    }
+  }
+}
+"#;
+
+#[test]
+fn subsystem_6_theory_of_mind_parses_and_resolves_with_ns_call_ir() {
+    let comp = dsl_compiler::compile(SUBSYSTEM_6_SRC)
+        .expect("theory_of_mind:: primitives must parse + resolve cleanly");
+    assert_methods_resolved(
+        &comp,
+        "theory_of_mind_grammar_stub",
+        NamespaceId::TheoryOfMind,
+        &["believes_knows", "can_deceive"],
+    );
+}
+
+#[test]
+fn subsystem_6_theory_of_mind_emit_returns_unsupported_cpu_and_gpu() {
+    let comp = dsl_compiler::compile(SUBSYSTEM_6_SRC).expect("compile OK");
+    let p = comp
+        .physics
+        .iter()
+        .find(|p| p.name == "theory_of_mind_grammar_stub")
+        .unwrap();
+
+    let cpu_ctx = CpuCtx { events: &comp.events, event_tags: &comp.event_tags };
+    let cpu = emit_physics(p, None, &cpu_ctx);
+    let msg = match cpu {
+        Err(CpuErr::Unsupported(s)) => s,
+        other => panic!("expected CpuErr::Unsupported, got {other:?}"),
+    };
+    assert!(
+        msg.contains("theory_of_mind primitive `theory_of_mind::"),
+        "CPU emit error msg should cite the theory_of_mind primitive stub; got: {msg}"
+    );
+
+    let gpu_ctx = GpuCtx { events: &comp.events, event_tags: &comp.event_tags };
+    let gpu = emit_physics_wgsl(p, &gpu_ctx);
+    let msg = match gpu {
+        Err(GpuErr::Unsupported(s)) => s,
+        other => panic!("expected GpuErr::Unsupported, got {other:?}"),
+    };
+    assert!(
+        msg.contains("theory_of_mind primitive `theory_of_mind::"),
+        "GPU emit error msg should cite the theory_of_mind primitive stub; got: {msg}"
+    );
+}

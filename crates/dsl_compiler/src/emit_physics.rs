@@ -1232,6 +1232,19 @@ fn lower_namespace_call(
         | (NamespaceId::Relationship, "knows_well") => Err(EmitError::Unsupported(format!(
             "relationships primitive `relationship::{method}` pending runtime impl"
         ))),
+        // ----------------------------------------------------------------
+        // Roadmap §6 — Theory-of-mind (grammar stub). Needs the
+        // `Relationship.believed_knowledge: Bitset<32>` slot + the
+        // DomainId / FactId enums; none of those exist yet. Subsystem §6
+        // implementation lowers each arm to a bit-read against the
+        // observer's relationship slot. See
+        // `docs/superpowers/roadmap.md:447-506`.
+        // ----------------------------------------------------------------
+        (NamespaceId::TheoryOfMind, "believes_knows")
+        | (NamespaceId::TheoryOfMind, "can_deceive")
+        | (NamespaceId::TheoryOfMind, "is_surprised_by") => Err(EmitError::Unsupported(format!(
+            "theory_of_mind primitive `theory_of_mind::{method}` pending runtime impl"
+        ))),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics emission",
             ns.name()
