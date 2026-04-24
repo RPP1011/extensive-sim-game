@@ -1970,6 +1970,8 @@ fn collect_locals_in_expr(
         // explicitly so adding a new one forces a compile-time
         // decision here.
         | IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_)
         | IrExpr::Raw(_) => {}
     }
 }

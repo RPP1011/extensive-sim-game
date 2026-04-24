@@ -16,9 +16,9 @@
 //! See `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`
 //! §Architecture.
 
-use dsl_compiler::ast::{Decl, ExprKind};
+use dsl_compiler::ast::{BinOp, Decl, ExprKind};
 use dsl_compiler::compile;
-use dsl_compiler::ir::{AbilityTag, IrExpr, ScoringRowKind};
+use dsl_compiler::ir::{AbilityHint, AbilityTag, IrExpr, ScoringRowKind};
 use dsl_compiler::parse;
 
 // ---------------------------------------------------------------------------
@@ -166,4 +166,138 @@ scoring {
         msg.contains("ability::tag") || msg.contains("argument"),
         "error should mention arity; got: {msg}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// PER-AB-3: `ability::hint == <ident>` lowers via AbilityHint + AbilityHintLit
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ability_hint_compare_lowers_to_hint_and_hint_lit() {
+    const SRC: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    score: if ability::hint == damage { 1.0 } else { 0.0 }
+  }
+}
+"#;
+    let comp = compile(SRC).expect("compile should succeed");
+    let row = &comp.scoring[0].per_ability_rows[0];
+    // Score body is `if ability::hint == damage { 1.0 } else { 0.0 }`.
+    let IrExpr::If { cond, .. } = &row.score.kind else {
+        panic!("expected `if` wrapper at the top; got {:?}", row.score.kind);
+    };
+    match &cond.kind {
+        IrExpr::Binary(op, lhs, rhs) => {
+            assert_eq!(*op, BinOp::Eq);
+            assert!(
+                matches!(lhs.kind, IrExpr::AbilityHint),
+                "lhs should be AbilityHint; got {:?}",
+                lhs.kind
+            );
+            match &rhs.kind {
+                IrExpr::AbilityHintLit(AbilityHint::Damage) => {}
+                other => panic!("rhs should be AbilityHintLit(Damage); got {other:?}"),
+            }
+        }
+        other => panic!("expected Binary in cond; got {other:?}"),
+    }
+}
+
+#[test]
+fn ability_hint_compare_reversed_order_also_lowers() {
+    // `damage == ability::hint` — mirror form.
+    const SRC: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    score: if damage == ability::hint { 1.0 } else { 0.0 }
+  }
+}
+"#;
+    let comp = compile(SRC).expect("compile should succeed");
+    let row = &comp.scoring[0].per_ability_rows[0];
+    let IrExpr::If { cond, .. } = &row.score.kind else {
+        panic!("expected `if` wrapper at the top; got {:?}", row.score.kind);
+    };
+    match &cond.kind {
+        IrExpr::Binary(op, lhs, rhs) => {
+            assert_eq!(*op, BinOp::Eq);
+            // Source order preserved — lhs should be the literal, rhs the accessor.
+            match &lhs.kind {
+                IrExpr::AbilityHintLit(AbilityHint::Damage) => {}
+                other => panic!("expected AbilityHintLit(Damage) on lhs; got {other:?}"),
+            }
+            assert!(
+                matches!(rhs.kind, IrExpr::AbilityHint),
+                "rhs should be AbilityHint accessor; got {:?}",
+                rhs.kind
+            );
+        }
+        other => panic!("expected Binary in cond; got {other:?}"),
+    }
+}
+
+#[test]
+fn ability_hint_compare_recognises_every_hint_name() {
+    for (ident, expected) in [
+        ("damage", AbilityHint::Damage),
+        ("defense", AbilityHint::Defense),
+        ("crowd_control", AbilityHint::CrowdControl),
+        ("utility", AbilityHint::Utility),
+    ] {
+        let src = format!(
+            r#"
+scoring {{
+  row r per_ability {{
+    score: if ability::hint == {ident} {{ 1.0 }} else {{ 0.0 }}
+  }}
+}}
+"#,
+        );
+        let comp = compile(&src).unwrap_or_else(|e| panic!("compile `{ident}` failed: {e}"));
+        let row = &comp.scoring[0].per_ability_rows[0];
+        let IrExpr::If { cond, .. } = &row.score.kind else {
+            panic!("expected if wrapper for `{ident}`");
+        };
+        let IrExpr::Binary(_, _, rhs) = &cond.kind else {
+            panic!("expected Binary for `{ident}`");
+        };
+        match &rhs.kind {
+            IrExpr::AbilityHintLit(h) => assert_eq!(*h, expected, "hint `{ident}`"),
+            other => panic!("hint `{ident}` lowered to unexpected IR: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn ability_hint_accessor_parses_as_flattened_ident() {
+    // Verify the AST side: `ability::hint` lands as a flattened
+    // Ident("ability::hint") rather than any Field shape.
+    const SRC: &str = r#"
+scoring {
+  row r per_ability {
+    score: if ability::hint == damage { 1.0 } else { 0.0 }
+  }
+}
+"#;
+    let program = parse(SRC).expect("parse should succeed");
+    let scoring = program
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Scoring(s) => Some(s),
+            _ => None,
+        })
+        .unwrap();
+    let row = &scoring.per_ability_rows[0];
+    let ExprKind::If { cond, .. } = &row.score.kind else {
+        panic!("expected if wrapper at AST layer");
+    };
+    let ExprKind::Binary { lhs, .. } = &cond.kind else {
+        panic!("expected Binary cond");
+    };
+    match &lhs.kind {
+        ExprKind::Ident(s) => assert_eq!(s, "ability::hint"),
+        other => panic!("expected flattened Ident(`ability::hint`); got {other:?}"),
+    }
 }

@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{self, ActionHeadShape, AssertExpr, Decl, Expr, ExprKind, Program, Span, Stmt};
+use crate::ast::{self, ActionHeadShape, AssertExpr, BinOp, Decl, Expr, ExprKind, Program, Span, Stmt};
 use crate::ir::*;
 use crate::resolve_error::ResolveError;
 
@@ -1715,11 +1715,18 @@ fn resolve_expr(
             Box::new(resolve_expr(idx, scope, symbols)?),
         ),
         ExprKind::Call(callee, args) => resolve_call(callee, args, span, scope, symbols)?,
-        ExprKind::Binary { op, lhs, rhs } => IrExpr::Binary(
-            *op,
-            Box::new(resolve_expr(lhs, scope, symbols)?),
-            Box::new(resolve_expr(rhs, scope, symbols)?),
-        ),
+        ExprKind::Binary { op, lhs, rhs } => {
+            // GPU ability evaluation Phase 2: the `ability::hint ==
+            // <ident>` shape compares the currently-scored ability's
+            // hint against a lowercase hint literal. The RHS spelling
+            // (`damage`, `defense`, `crowd_control`, `utility`) would
+            // otherwise resolve as an UnknownIdent — so when one side
+            // of an equality is `ability::hint`, we promote a bare
+            // hint ident on the other side to `AbilityHintLit` before
+            // falling through to generic Binary resolution.
+            let (lhs_r, rhs_r) = resolve_hint_compare_or_default(*op, lhs, rhs, scope, symbols)?;
+            IrExpr::Binary(*op, Box::new(lhs_r), Box::new(rhs_r))
+        }
         ExprKind::Unary { op, rhs } => {
             IrExpr::Unary(*op, Box::new(resolve_expr(rhs, scope, symbols)?))
         }
@@ -1880,6 +1887,15 @@ fn resolve_ident(
         // CONSTANT", "Stone", etc — also handled below).
         let _ = t;
     }
+    // GPU ability evaluation Phase 2 primitives that parse as a
+    // flattened namespaced identifier WITHOUT a `(...)` suffix.
+    // `ability::tag(...)` takes an arg and routes through
+    // `resolve_ability_eval_call`; the naked forms are handled here.
+    // See `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`
+    // §Architecture.
+    if name == "ability::hint" || name == "abilities::hint" {
+        return Ok(IrExpr::AbilityHint);
+    }
     // `EnumName::Variant` — recognise the two-segment form and validate
     // against the declared enum.
     if let Some((lhs, rhs)) = name.split_once("::") {
@@ -2023,6 +2039,97 @@ fn resolve_call_arg(
         value: resolve_expr(&a.value, scope, symbols)?,
         span: a.span,
     })
+}
+
+/// Detect `ability::hint == <hint_ident>` (or the mirror `<hint_ident>
+/// == ability::hint`) at the AST layer. When matched, the hint ident
+/// side lowers to `IrExpr::AbilityHintLit(<hint>)` instead of
+/// producing an UnknownIdent error (bare lowercase hint idents aren't
+/// otherwise in scope).
+///
+/// Symmetric across `Eq` / `NotEq`; all other operators fall through.
+/// Symmetric across sides so `damage == ability::hint` parses too.
+///
+/// Returns the two resolved operands. If the shape doesn't match, both
+/// sides go through `resolve_expr` unchanged.
+fn resolve_hint_compare_or_default(
+    op: BinOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    scope: &mut LocalScope,
+    symbols: &SymbolTable,
+) -> Result<(IrExprNode, IrExprNode), ResolveError> {
+    // Only `==` / `!=` — the only ops where a hint literal is
+    // meaningful. Every other op falls through.
+    let is_equality = matches!(op, BinOp::Eq | BinOp::NotEq);
+    if !is_equality {
+        return Ok((
+            resolve_expr(lhs, scope, symbols)?,
+            resolve_expr(rhs, scope, symbols)?,
+        ));
+    }
+    if let Some((hint_side, other_side, hint_on_left)) =
+        match_hint_compare(lhs, rhs)
+    {
+        // Resolve the hint accessor the normal way (it lowers to
+        // `IrExpr::AbilityHint` via the `resolve_ident` hook).
+        let hint_node = resolve_expr(hint_side, scope, symbols)?;
+        // Hint-literal span: whichever side wasn't the accessor.
+        let lit_span = if hint_on_left { rhs.span } else { lhs.span };
+        let lit_node = IrExprNode {
+            kind: IrExpr::AbilityHintLit(other_side),
+            span: lit_span,
+        };
+        // Restore original order so source-level lhs/rhs are preserved
+        // on the resulting Binary.
+        return Ok(if hint_on_left {
+            (hint_node, lit_node)
+        } else {
+            (lit_node, hint_node)
+        });
+    }
+    Ok((
+        resolve_expr(lhs, scope, symbols)?,
+        resolve_expr(rhs, scope, symbols)?,
+    ))
+}
+
+/// If one of `(lhs, rhs)` is the AST form `Ident("ability::hint")` and
+/// the other is a bare lowercase hint ident, return the hint side, the
+/// parsed `AbilityHint`, and a flag telling which side the hint ident
+/// was on (`true` == hint on lhs, `false` == hint on rhs — useful for
+/// preserving source order).
+fn match_hint_compare<'a>(
+    lhs: &'a Expr,
+    rhs: &'a Expr,
+) -> Option<(&'a Expr, AbilityHint, bool)> {
+    let lhs_is_hint = is_ability_hint_accessor(lhs);
+    let rhs_is_hint = is_ability_hint_accessor(rhs);
+    if lhs_is_hint && !rhs_is_hint {
+        if let Some(hint) = as_hint_literal(rhs) {
+            return Some((lhs, hint, true));
+        }
+    }
+    if rhs_is_hint && !lhs_is_hint {
+        if let Some(hint) = as_hint_literal(lhs) {
+            return Some((rhs, hint, false));
+        }
+    }
+    None
+}
+
+fn is_ability_hint_accessor(e: &Expr) -> bool {
+    matches!(
+        &e.kind,
+        ExprKind::Ident(n) if n == "ability::hint" || n == "abilities::hint"
+    )
+}
+
+fn as_hint_literal(e: &Expr) -> Option<AbilityHint> {
+    if let ExprKind::Ident(n) = &e.kind {
+        return AbilityHint::parse_ident(n);
+    }
+    None
 }
 
 /// GPU ability evaluation Phase 2 primitives that shape-match a
@@ -2877,10 +2984,15 @@ fn validate_fold_expr(view_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
 
         // GPU ability evaluation Phase 2 primitives — scoring-only
         // surface. A view fold body has no currently-scored ability,
-        // so reading ability tags here is meaningless.
-        IrExpr::AbilityTag { .. } => Err(ResolveError::UdfInViewFoldBody {
+        // so reading ability tags / hints / ranges / cooldowns here
+        // is meaningless.
+        IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_) => Err(ResolveError::UdfInViewFoldBody {
             view_name: view_name.to_string(),
-            offending_construct: "`ability::tag(...)` (scoring-only primitive)".into(),
+            offending_construct:
+                "ability-evaluation primitive (`ability::tag(...)`, `ability::hint`, ...) — scoring-only surface"
+                    .into(),
             span: e.span,
         }),
     }
@@ -3237,13 +3349,16 @@ fn validate_physics_expr(physics_name: &str, e: &IrExprNode) -> Result<(), Resol
 
         // GPU ability evaluation Phase 2 primitives. Scoring-only
         // surface; a physics body has no currently-scored ability.
-        IrExpr::AbilityTag { .. } => Err(ResolveError::NotGpuEmittable {
+        IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_) => Err(ResolveError::NotGpuEmittable {
             physics_name: physics_name.to_string(),
-            construct: "`ability::tag(...)` in physics body".into(),
+            construct: "ability-evaluation primitive in physics body".into(),
             reason:
-                "`ability::tag(...)` reads the currently-scored ability's \
-                 tag value; it's only meaningful inside a `per_ability` \
-                 scoring row, not a physics handler"
+                "`ability::tag(...)`, `ability::hint`, `ability::range`, \
+                 and `ability::on_cooldown(...)` read state tied to the \
+                 currently-scored ability inside a `per_ability` scoring \
+                 row; they have no meaning inside a physics handler"
                     .into(),
             span: e.span,
         }),
@@ -3334,7 +3449,9 @@ fn validate_physics_iter_source(
         | IrExpr::Fold { .. }
         | IrExpr::Quantifier { .. }
         | IrExpr::PerUnit { .. }
-        | IrExpr::AbilityTag { .. } => Err(ResolveError::NotGpuEmittable {
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_) => Err(ResolveError::NotGpuEmittable {
             physics_name: physics_name.to_string(),
             construct: "for-loop over non-iterable / unbounded expression".into(),
             reason:
@@ -3703,10 +3820,13 @@ fn validate_mask_body(mask_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
         // mask bodies would mean a mask predicate depends on the
         // currently-scored ability — which isn't the mask kernel's
         // slot; masks run before scoring. Reject.
-        IrExpr::AbilityTag { .. } => Err(ResolveError::UdfInMaskBody {
+        IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_) => Err(ResolveError::UdfInMaskBody {
             mask_name: mask_name.to_string(),
             offending_construct:
-                "`ability::tag(...)` (scoring-only primitive; not visible to mask predicates)"
+                "ability-evaluation primitive (`ability::tag(...)`, `ability::hint`, ...) — \
+                 scoring-only surface; not visible to mask predicates"
                     .into(),
             span: e.span,
         }),
@@ -3826,7 +3946,9 @@ fn validate_scoring_body(e: &IrExprNode) -> Result<(), ResolveError> {
         // stage — Phase 3's CPU emitter decides which row shape it's
         // in and errors if misused — so the DSL-compiler-level
         // validator stays permissive for Phase 2.
-        IrExpr::AbilityTag { .. } => Ok(()),
+        IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_) => Ok(()),
 
         IrExpr::Raw(_) => Ok(()),
     }

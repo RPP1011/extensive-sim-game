@@ -320,6 +320,21 @@ pub enum IrExpr {
     ///
     /// Added 2026-04-23 (GPU ability evaluation Phase 2).
     AbilityTag { tag: AbilityTag },
+    /// `ability::hint` — reads the coarse hint category of the
+    /// currently-scored ability. Compared for equality against a
+    /// hint literal (see `AbilityHintLit`).
+    ///
+    /// Phase 3 lowers this to an `Option<AbilityHint>` read off the
+    /// packed registry — the sentinel case (no hint) compares as
+    /// "not a match" against every hint literal.
+    AbilityHint,
+    /// Literal ability-hint value, produced on the RHS of an
+    /// `ability::hint == <ident>` comparison. The DSL spelling uses
+    /// lowercase identifiers (`damage`, `defense`, `crowd_control`,
+    /// `utility`) so this is context-sensitive: the resolver only
+    /// promotes a bare lowercase ident to `AbilityHintLit` when the
+    /// opposite side of the `==` is `AbilityHint`.
+    AbilityHintLit(AbilityHint),
     /// Retained original AST shape for anything we can't lower meaningfully.
     Raw(Box<ast::Expr>),
 }
