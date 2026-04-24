@@ -1264,7 +1264,17 @@ fn lower_namespace_call(
         // Agent scalar getters.
         (NamespaceId::Agents, "alive") => {
             expect_arity(args, 1, "agents.alive")?;
-            Ok(format!("state_agent_alive({})", lowered[0]))
+            // Alive-bitmap lowering: `agents.alive(x)` reads the
+            // per-tick packed bitmap at binding slot 22 instead of
+            // the full 64-byte `AgentSlot` cacheline. The bitmap is
+            // written once at the top of each tick (sync: host-packed
+            // in `run_batch`; resident: GPU `alive_pack_kernel`).
+            // `alive_bit(slot)` + `slot_of(id)` are emitted in the
+            // shader prefix; `state_agent_alive` is retired.
+            Ok(format!(
+                "(slot_of({id}) != 0xFFFFFFFFu && alive_bit(slot_of({id})))",
+                id = lowered[0]
+            ))
         }
         (NamespaceId::Agents, "hp") => {
             expect_arity(args, 1, "agents.hp")?;
@@ -2052,9 +2062,11 @@ mod tests {
         );
 
         // Stub calls — alive check + hp read + set_hp.
+        // `agents.alive(t)` lowers to `alive_bit(slot_of(t))` against
+        // the per-tick alive bitmap at binding 22.
         assert!(
-            out.contains("state_agent_alive(t)"),
-            "missing alive stub call:\n{out}"
+            out.contains("alive_bit(slot_of(t))"),
+            "missing alive bitmap call:\n{out}"
         );
         assert!(
             out.contains("state_agent_hp(t)"),

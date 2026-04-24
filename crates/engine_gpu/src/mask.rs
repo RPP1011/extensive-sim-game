@@ -335,6 +335,11 @@ struct BufferPool {
     /// (`run_resident`) binds the caller's buffer instead, via
     /// `resident_bg`.
     sync_sim_cfg_buf: wgpu::Buffer,
+    /// Pool-owned alive bitmap for the sync path. Packed host-side
+    /// from `state.agent_alive()` on each `run_and_readback` call and
+    /// bound at slot 22. The resident path binds the caller-supplied
+    /// bitmap instead.
+    sync_alive_bitmap_buf: wgpu::Buffer,
     /// Bind group wired with the sync-path `sync_sim_cfg_buf`.
     /// Used by `run_and_readback` only.
     sync_bind_group: wgpu::BindGroup,
@@ -435,6 +440,20 @@ impl FusedMaskKernel {
                 min_binding_size: std::num::NonZeroU64::new(
                     std::mem::size_of::<crate::sim_cfg::SimCfg>() as u64,
                 ),
+            },
+            count: None,
+        });
+        // Per-tick alive bitmap at slot 22 — shared across physics +
+        // scoring + mask kernels. The fused mask WGSL declares the
+        // binding in its shader prefix; the DSL-lowered `alive_bit(x)`
+        // helper reads a single bit instead of a 4 B SoA load.
+        entries.push(wgpu::BindGroupLayoutEntry {
+            binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
             },
             count: None,
         });
@@ -558,6 +577,14 @@ impl FusedMaskKernel {
             mapped_at_creation: false,
         });
 
+        // Sync-path alive bitmap for the mask kernel. Sized for
+        // `agent_cap` — packed host-side from `state.agent_alive()`
+        // on every `run_and_readback` call. The resident path binds
+        // the caller-supplied bitmap (populated by `alive_pack_kernel`)
+        // instead.
+        let sync_alive_bitmap_buf =
+            crate::alive_bitmap::create_alive_bitmap_buffer(device, agent_cap);
+
         // Resident-path output: single concat of all per-mask bitmaps.
         // `bindings.len() * mask_words` u32 words, in `bindings` order
         // (same order the scoring kernel's `mask_bitmaps` binding
@@ -599,6 +626,10 @@ impl FusedMaskKernel {
             binding: self.sim_cfg_binding,
             resource: sync_sim_cfg_buf.as_entire_binding(),
         });
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
+            resource: sync_alive_bitmap_buf.as_entire_binding(),
+        });
 
         let sync_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::fused_mask::sync_bg"),
@@ -617,6 +648,7 @@ impl FusedMaskKernel {
             bitmaps_concat_buf,
             cfg_buf,
             sync_sim_cfg_buf,
+            sync_alive_bitmap_buf,
             sync_bind_group,
             resident_bind_group: None,
         });
@@ -689,6 +721,10 @@ impl FusedMaskKernel {
             .collect();
         queue.write_buffer(&pool.alive_buf, 0, bytemuck::cast_slice(&alive_src));
 
+        // Pack + upload the sync-path alive bitmap. The fused mask
+        // shader's DSL-lowered `alive_bit(x)` calls read from slot 22.
+        upload_sync_alive_bitmap(queue, &pool.sync_alive_bitmap_buf, &alive_src);
+
         let ct_src: Vec<u32> = (0..agent_cap)
             .map(|slot| {
                 let id = AgentId::new(slot + 1).unwrap();
@@ -759,6 +795,7 @@ impl FusedMaskKernel {
         encoder: &mut wgpu::CommandEncoder,
         agents_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
+        alive_bitmap_buf: &wgpu::Buffer,
         agent_cap: u32,
     ) -> Result<(), KernelError> {
         // Silence unused-param lint without sacrificing the stable
@@ -785,7 +822,7 @@ impl FusedMaskKernel {
         };
         if needs_rebuild {
             let mut bg_entries: Vec<wgpu::BindGroupEntry<'_>> =
-                Vec::with_capacity(3 + pool.bitmap_bufs.len() + 2);
+                Vec::with_capacity(3 + pool.bitmap_bufs.len() + 3);
             bg_entries.push(wgpu::BindGroupEntry {
                 binding: 0,
                 resource: pool.pos_buf.as_entire_binding(),
@@ -812,6 +849,12 @@ impl FusedMaskKernel {
             bg_entries.push(wgpu::BindGroupEntry {
                 binding: sim_cfg_binding,
                 resource: sim_cfg_buf.as_entire_binding(),
+            });
+            // Per-tick alive bitmap at slot 22 — caller-supplied on
+            // the resident path (populated by `alive_pack_kernel`).
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
+                resource: alive_bitmap_buf.as_entire_binding(),
             });
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("engine_gpu::fused_mask::resident_bg"),
@@ -913,6 +956,9 @@ impl FusedMaskKernel {
             .collect();
         queue.write_buffer(&pool.alive_buf, 0, bytemuck::cast_slice(&alive_src));
 
+        // Pack + upload the sync-path alive bitmap at slot 22.
+        upload_sync_alive_bitmap(queue, &pool.sync_alive_bitmap_buf, &alive_src);
+
         let ct_src: Vec<u32> = (0..agent_cap)
             .map(|slot| {
                 let id = AgentId::new(slot + 1).unwrap();
@@ -1006,6 +1052,25 @@ impl FusedMaskKernel {
 
         Ok(out)
     }
+}
+
+/// Pack the per-slot `alive_src` u32 array into a bitmap and upload
+/// it to `buf`. Called by both sync-path entry points
+/// (`run_and_readback` + the fused unpack path) after the SoA alive
+/// array is packed — keeps the two representations in lockstep so
+/// the fused mask shader sees the same alive state via both the
+/// traditional `agent_alive[...]` SoA read AND the new `alive_bit(x)`
+/// bitmap read.
+fn upload_sync_alive_bitmap(queue: &wgpu::Queue, buf: &wgpu::Buffer, alive_src: &[u32]) {
+    let agent_cap = alive_src.len() as u32;
+    let words = crate::alive_bitmap::alive_bitmap_words(agent_cap) as usize;
+    let mut packed = vec![0u32; words.max(1)];
+    for (slot_idx, &val) in alive_src.iter().enumerate() {
+        if val != 0 {
+            packed[slot_idx >> 5] |= 1u32 << (slot_idx & 31);
+        }
+    }
+    queue.write_buffer(buf, 0, bytemuck::cast_slice(&packed));
 }
 
 // ---------------------------------------------------------------------------

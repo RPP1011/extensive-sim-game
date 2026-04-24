@@ -683,8 +683,16 @@ fn lower_namespace_call(
                     "agents.alive expects 1 arg".into(),
                 ));
             }
-            // `alive[id]` — stored as u32 { 0, 1 }. Compare to 1u.
-            Ok(format!("(agent_alive[{}] != 0u)", lowered[0]))
+            // Alive-bitmap lowering — `alive_bit(slot)` reads a single
+            // bit from the per-tick bitmap at binding slot 22 instead
+            // of the 4 B `agent_alive[slot]` SoA load. Same asymptotic
+            // cost here (both L1-resident u32 reads), but stays
+            // consistent with the physics emitter's lowering. The
+            // hardcoded self / target alive checks in the fused
+            // kernel's prelude + candidate loop are left as direct
+            // `agent_alive[...]` reads per the task's "keep changes
+            // localized" constraint.
+            Ok(format!("alive_bit({})", lowered[0]))
         }
         _ => Err(EmitError::Unsupported(format!(
             "Phase 1 WGSL: stdlib call `{}.{method}` not supported",
@@ -965,6 +973,25 @@ fn emit_masks_wgsl_fused_result(masks: &[MaskIR]) -> Result<FusedMaskModule, Emi
     // (2.5-2.9) will migrate the remaining world-scalars.
     let sim_cfg_binding = config_binding + 1;
     emit_sim_cfg_struct_wgsl(&mut out, sim_cfg_binding);
+
+    // Per-tick alive bitmap at slot 22 (matches physics + scoring
+    // BGLs). Used by the DSL-lowered `agents.alive(x)` call via
+    // `alive_bit(slot)`. The hardcoded self / target alive gates in
+    // the fused kernel's prelude + candidate loops continue to read
+    // `agent_alive[...]` directly — the bitmap binding is here so
+    // any DSL-level `agents.alive` call in a predicate has a working
+    // lookup helper.
+    writeln!(
+        out,
+        "@group(0) @binding(22) var<storage, read> alive_bitmap: array<u32>;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "fn alive_bit(slot: u32) -> bool {{ return ((alive_bitmap[slot >> 5u] >> (slot & 31u)) & 1u) != 0u; }}"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
 
     // Helpers — identical to the per-mask module.
     emit_helpers(&mut out);

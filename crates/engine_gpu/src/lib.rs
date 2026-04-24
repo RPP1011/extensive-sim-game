@@ -1033,6 +1033,7 @@ impl GpuBackend {
                     &mut encoder,
                     agents_buf,
                     mask_sim_cfg_ref,
+                    alive_bitmap_ref,
                     agent_cap,
                 )
                 .expect("mask resident dispatch");
@@ -1053,6 +1054,7 @@ impl GpuBackend {
                     agents_buf,
                     self.sync.mask_kernel.mask_bitmaps_buf(),
                     mask_sim_cfg_ref,
+                    alive_bitmap_ref,
                     agent_cap,
                 )
                 .expect("scoring resident dispatch");

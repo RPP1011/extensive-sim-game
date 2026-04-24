@@ -471,6 +471,13 @@ struct ScoringPool {
     /// every tick in `run_and_readback` / `upload_soa_from_state`.
     sync_sim_cfg_buf: wgpu::Buffer,
 
+    /// Sync-path alive bitmap. Packed host-side from
+    /// `agent_data`'s alive field on every `run_and_readback` call.
+    /// The resident scoring path uses the caller-supplied bitmap
+    /// (populated by `alive_pack_kernel` upstream); this is only
+    /// used by sync.
+    sync_alive_bitmap_buf: wgpu::Buffer,
+
     /// Cached resident-path bind group keyed by the pair of
     /// caller-supplied buffers it references — `mask_bitmaps_buf` +
     /// `sim_cfg_buf`. All other bindings (agent_data, scoring_table,
@@ -696,6 +703,20 @@ impl ScoringKernel {
             count: None,
         });
 
+        // Per-tick alive bitmap at slot 22 (matches physics BGL).
+        // Read-only storage — the scoring kernel only reads
+        // `alive_bit(t)` in the target walk + self-alive gate.
+        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::scoring::bgl"),
             entries: &bgl_entries,
@@ -801,6 +822,13 @@ impl ScoringKernel {
             mapped_at_creation: false,
         });
 
+        // Sync-path alive bitmap. Packed host-side from `agent_data`'s
+        // alive field on every `run_and_readback` call. Resident
+        // scoring binds the caller-supplied bitmap instead (populated
+        // by `alive_pack_kernel` upstream).
+        let sync_alive_bitmap_buf =
+            crate::alive_bitmap::create_alive_bitmap_buffer(device, agent_cap);
+
         // Phase 6d: view buffers now live in `ViewStorage` and are
         // bound per-run in `run_and_readback`. No local view_bufs.
 
@@ -819,6 +847,7 @@ impl ScoringKernel {
             view_buf_handles: Vec::new(),
             cached_view_agent_cap: 0,
             sync_sim_cfg_buf,
+            sync_alive_bitmap_buf,
             cached_resident_bg: None,
         });
     }
@@ -886,6 +915,25 @@ impl ScoringKernel {
             0,
             bytemuck::cast_slice(&agent_data),
         );
+
+        // Pack + upload the sync-path alive bitmap derived from
+        // `agent_data`'s alive field. Every candidate-walk + self-
+        // alive check in the scoring kernel reads this at slot 22
+        // instead of the 64 B `agent_data[t]` cacheline.
+        {
+            let words = crate::alive_bitmap::alive_bitmap_words(agent_cap) as usize;
+            let mut packed = vec![0u32; words.max(1)];
+            for (slot_idx, d) in agent_data.iter().enumerate() {
+                if d.alive != 0 {
+                    packed[slot_idx >> 5] |= 1u32 << (slot_idx & 31);
+                }
+            }
+            queue.write_buffer(
+                &pool.sync_alive_bitmap_buf,
+                0,
+                bytemuck::cast_slice(&packed),
+            );
+        }
 
         // Pack + upload mask bitmaps.
         let packed_masks = pack_mask_bitmaps(mask_kernel, mask_bitmaps, num_mask_words)?;
@@ -1102,6 +1150,13 @@ impl ScoringKernel {
         bg_entries.push(wgpu::BindGroupEntry {
             binding: self.sim_cfg_binding,
             resource: pool.sync_sim_cfg_buf.as_entire_binding(),
+        });
+        // Per-tick alive bitmap — sync path: host-packed into
+        // `pool.sync_alive_bitmap_buf` by `run_and_readback` before
+        // the dispatch.
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
+            resource: pool.sync_alive_bitmap_buf.as_entire_binding(),
         });
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg"),
@@ -1324,6 +1379,7 @@ impl ScoringKernel {
         agents_buf: &wgpu::Buffer,
         mask_bitmaps_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
+        alive_bitmap_buf: &wgpu::Buffer,
         agent_cap: u32,
     ) -> Result<(), ScoringError> {
         // Silence unused-param lint without sacrificing the stable
@@ -1347,13 +1403,13 @@ impl ScoringKernel {
             }
         }
 
-        // Cache the resident BG keyed by the pair of caller-supplied
-        // buffers it references — `mask_bitmaps_buf` + `sim_cfg_buf`.
-        // All other bindings come from the pool which, once sized, is
-        // stable across the batch — pool rebuild drops the cache. Both
-        // keys are typically stable across a batch (the backend holds
-        // resident handles), so this amortises to one BG build per
-        // batch.
+        // Cache the resident BG keyed by the caller-supplied buffers
+        // it references — `mask_bitmaps_buf` + `sim_cfg_buf` +
+        // `alive_bitmap_buf`. All other bindings come from the pool
+        // which, once sized, is stable across the batch — pool
+        // rebuild drops the cache. All three keys are typically
+        // stable across a batch (the backend holds resident handles),
+        // so this amortises to one BG build per batch.
         let need_rebuild = match &self.pool.as_ref().unwrap().cached_resident_bg {
             Some((mb, sc, _)) => mb != mask_bitmaps_buf || sc != sim_cfg_buf,
             None => true,
@@ -1365,6 +1421,7 @@ impl ScoringKernel {
                 pool,
                 mask_bitmaps_buf,
                 sim_cfg_buf,
+                alive_bitmap_buf,
             )?;
             let pool_mut = self.pool.as_mut().expect("pool ensured");
             pool_mut.cached_resident_bg =
@@ -1404,6 +1461,7 @@ impl ScoringKernel {
         pool: &ScoringPool,
         mask_bitmaps_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
+        alive_bitmap_buf: &wgpu::Buffer,
     ) -> Result<wgpu::BindGroup, ScoringError> {
         let sorted = scoring_view_binding_order(&self.view_specs);
         let total_view_bindings: usize = sorted.iter().map(|s| view_binding_count(s)).sum();
@@ -1518,6 +1576,12 @@ impl ScoringKernel {
         bg_entries.push(wgpu::BindGroupEntry {
             binding: self.sim_cfg_binding,
             resource: sim_cfg_buf.as_entire_binding(),
+        });
+        // Per-tick alive bitmap at slot 22 — caller-supplied, packed
+        // by `alive_pack_kernel` at the top of each `step_batch` tick.
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
+            resource: alive_bitmap_buf.as_entire_binding(),
         });
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg_resident"),
