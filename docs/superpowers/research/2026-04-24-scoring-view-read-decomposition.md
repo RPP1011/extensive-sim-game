@@ -205,8 +205,11 @@ Long-term (after the sparsification lands):
 ## Revert
 
 Instrumentation is research-only. Production path behaviour is
-unchanged when the env var is unset. Keep the counter code gated; do
-not merge into `world-sim-bench`. Revert commit:
+unchanged when the env var is unset. Revert commits applied on this
+branch so production ships clean:
 
-* `<PENDING>` — revert of `188a249a` + `ecf6f41b`, restoring
-  `world-sim-bench` contents.
+* `c1756795 Revert "test(engine_gpu): print per-view scoring read counts in chronicle_batch_perf_n100k"`
+* `79d94954 Revert "feat(engine_gpu): opt-in per-view scoring read counters (slot 24)"`
+
+After the reverts, this branch's file contents equal `world-sim-bench`
+except for this research doc.
