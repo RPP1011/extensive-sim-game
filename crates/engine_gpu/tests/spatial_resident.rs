@@ -1,6 +1,6 @@
 //! Task A2 — `rebuild_and_query_resident` path tests.
 //!
-//! Two coverage points:
+//! Coverage points:
 //!
 //! 1. Parity between the sync `rebuild_and_query` path and the
 //!    GPU-resident `rebuild_and_query_resident` path on a 32-agent
@@ -13,6 +13,12 @@
 //!    kin list. This used to live in `cascade::filter_dead_from_kin` as
 //!    a post-query CPU pass; the WGSL-level check makes that pass
 //!    structurally redundant.
+//!
+//! 3. Stage B.2 dedup parity: one `rebuild_resident` followed by two
+//!    `query_resident` dispatches at different radii must produce
+//!    byte-identical results to the back-compat `rebuild_and_query_resident`
+//!    path that rebuilds the hash twice. Cascade_resident uses the split
+//!    path, so a regression here is a correctness hole in the batch driver.
 
 #![cfg(feature = "gpu")]
 
@@ -209,4 +215,102 @@ fn two_resident_queries_in_one_encoder_do_not_alias() {
         hostile_res.nearest_hostile, sync_tight.nearest_hostile,
         "resident r=2 diverged from sync r=2",
     );
+}
+
+#[test]
+fn split_rebuild_then_two_queries_matches_double_rebuild() {
+    // Stage B.2 dedup parity guard.
+    //
+    // `cascade_resident::run_cascade_resident_with_iter_cap` splits
+    // the spatial pipeline: one `rebuild_resident` per tick (shared
+    // CPU SoA pack + clear/count/scan/scatter/sort) followed by two
+    // `query_resident` dispatches (kin + engagement radii) into
+    // independent caller-owned output trios.
+    //
+    // Confirm the split path produces byte-identical results to the
+    // old back-compat `rebuild_and_query_resident` path (two full
+    // pipelines). If this ever diverges, the dedup broke the
+    // scatter/sort invariant — fast-fail here rather than let it
+    // slip into a cascade regression.
+    let mut state = SimState::new(32, 0xB2B2);
+    for i in 0..8 {
+        state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Human,
+                pos: Vec3::new((i as f32) * 0.5, 0.0, 0.0),
+                hp: 100.0,
+                ..Default::default()
+            })
+            .unwrap();
+    }
+    for i in 0..8 {
+        state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Wolf,
+                pos: Vec3::new((i as f32) * 0.5, 5.0, 0.0),
+                hp: 100.0,
+                ..Default::default()
+            })
+            .unwrap();
+    }
+
+    let mut harness = SpatialTestHarness::new().expect("spatial init");
+    let cap = state.agent_cap();
+
+    // Ground truth: the back-compat double-rebuild path.
+    let outputs_ref_wide = harness.alloc_output_buffers(cap, "ref-wide");
+    let outputs_ref_tight = harness.alloc_output_buffers(cap, "ref-tight");
+    let (ref_wide, ref_tight) = harness
+        .run_two_resident_queries_in_one_encoder(
+            &state,
+            12.0,
+            &outputs_ref_wide,
+            2.0,
+            &outputs_ref_tight,
+        )
+        .expect("double-rebuild path");
+
+    // Under test: one rebuild + two queries.
+    let outputs_split_wide = harness.alloc_output_buffers(cap, "split-wide");
+    let outputs_split_tight = harness.alloc_output_buffers(cap, "split-tight");
+    let (split_wide, split_tight) = harness
+        .run_split_rebuild_then_two_queries(
+            &state,
+            12.0,
+            &outputs_split_wide,
+            2.0,
+            &outputs_split_tight,
+        )
+        .expect("split path");
+
+    assert_eq!(
+        split_wide.nearest_hostile, ref_wide.nearest_hostile,
+        "split r=12 nearest_hostile diverged from double-rebuild r=12",
+    );
+    assert_eq!(
+        split_tight.nearest_hostile, ref_tight.nearest_hostile,
+        "split r=2 nearest_hostile diverged from double-rebuild r=2",
+    );
+    for i in 0..cap as usize {
+        assert_eq!(
+            split_wide.nearby_kin[i].as_slice(),
+            ref_wide.nearby_kin[i].as_slice(),
+            "split r=12 kin diverged at slot {i}",
+        );
+        assert_eq!(
+            split_tight.nearby_kin[i].as_slice(),
+            ref_tight.nearby_kin[i].as_slice(),
+            "split r=2 kin diverged at slot {i}",
+        );
+        assert_eq!(
+            split_wide.within_radius[i].as_slice(),
+            ref_wide.within_radius[i].as_slice(),
+            "split r=12 within_radius diverged at slot {i}",
+        );
+        assert_eq!(
+            split_tight.within_radius[i].as_slice(),
+            ref_tight.within_radius[i].as_slice(),
+            "split r=2 within_radius diverged at slot {i}",
+        );
+    }
 }

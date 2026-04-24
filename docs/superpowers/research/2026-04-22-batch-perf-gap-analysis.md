@@ -16,7 +16,7 @@ optimisations. Ranking by estimated contribution to the 1672 µs/tick gap:
 
 | # | Suspect | Est. µs/tick | Fix cost | Fixable? |
 |---|---|---|---|---|
-| 1 | Double CPU-side pack + write_buffer for spatial SoA (2× `upload_agent_soa`) | 400–900 | Small | yes — cache |
+| 1 | ~~Double CPU-side pack + write_buffer for spatial SoA (2× `upload_agent_soa`)~~ **LANDED 9b7e5699** | ~~400–900~~ | Small | **done** — split rebuild/query |
 | 2 | Per-call bind-group construction in apply_actions/movement/scoring/physics (8×) | 200–400 | Small | yes — cache |
 | 3 | Always-dispatch-8 cascade iters on a `≤ 1.07` iter fixture | 200–500 | Small | yes — indirect cutoff |
 | 4 | Per-tick `PackedAbilityRegistry` re-upload into resident ability buffers | 100–300 | Small | yes — cache+dirty |
@@ -76,7 +76,17 @@ cascade envelope regardless of convergence.
 
 ---
 
-## Section B — Suspect 1: double spatial rebuild
+## Section B — Suspect 1: double spatial rebuild — **LANDED (9b7e5699)**
+
+> **Status (2026-04-23):** Fixed. `rebuild_and_query_resident` was split
+> into `rebuild_resident` (one per tick) + `query_resident` (one per
+> radius) on commit 9b7e5699. `cascade_resident.rs:1078` now calls
+> `rebuild_resident` once, then `query_resident` twice (kin + engagement
+> radii) into independent caller-owned output trios. Measured delta at
+> N=2048: 7898.82 → 6572.41 µs/tick (−1326 µs/tick, 16.8%). Spatial
+> parity guarded by `tests/spatial_resident.rs::split_rebuild_then_two_queries_matches_double_rebuild`.
+> The rest of this section describes the pre-fix state for historical
+> context.
 
 `cascade_resident.rs:863-878` calls `rebuild_and_query_resident` twice
 per tick (kin_radius + engagement_range). Each full pipeline runs 5
@@ -221,7 +231,7 @@ from the batch side. Apples-to-apples for GPU submit only.
 | # | Suspect | Est. µs/tick | Fix cost | Cumulative batch/sync at N=2048 |
 |---|---|---|---|---|
 | 1 | Fix always-dispatch-8 (cache physics BG across iters, or indirect-skip) | 200–500 | Small | 1.19× → 1.14× |
-| 2 | Single `upload_agent_soa` per tick + cache spatial query BG | 400–900 | Small | 1.14× → 1.05× |
+| 2 | ~~Single `upload_agent_soa` per tick + cache spatial query BG~~ **LANDED 9b7e5699 (−1326 µs @ N=2048)** | ~~400–900~~ | Small | 1.14× → 1.05× |
 | 3 | Cache scoring + apply + movement resident BGs | 200–400 | Small | 1.05× → 0.99× |
 | 4 | Dirty-flag `PackedAbilityRegistry` upload | 100–300 | Small | 0.99× → 0.96× |
 | 5 | Merge mask-unpack + scoring-unpack into one dispatch | 50–150 | Medium | 0.96× → 0.95× |

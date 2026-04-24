@@ -1626,6 +1626,81 @@ impl SpatialTestHarness {
         Ok((map_one(&outputs_a.inner)?, map_one(&outputs_b.inner)?))
     }
 
+    /// Drive the **split** resident pipeline: one `rebuild_resident`
+    /// (shared CPU pack + clear/count/scan/scatter/sort) followed by
+    /// two `query_resident` dispatches at different radii into their
+    /// own caller-owned output trios.
+    ///
+    /// This is the Stage B.2 dedup path `cascade_resident.rs` uses on
+    /// the batch driver — exactly one hash rebuild per tick, one query
+    /// per radius. Exists so a parity test can confirm the split
+    /// produces byte-identical results to the back-compat
+    /// `rebuild_and_query_resident` calls (which rebuild twice).
+    #[doc(hidden)]
+    pub fn run_split_rebuild_then_two_queries(
+        &mut self,
+        state: &SimState,
+        radius_a: f32,
+        outputs_a: &TestOutputBufferTrio,
+        radius_b: f32,
+        outputs_b: &TestOutputBufferTrio,
+    ) -> Result<(SpatialQueryResults, SpatialQueryResults), SpatialError> {
+        let agent_cap = state.agent_cap();
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("engine_gpu::spatial::resident_test_enc_split"),
+            });
+        // Single shared rebuild (hash construction only).
+        self.hash
+            .rebuild_resident(&self.device, &self.queue, &mut encoder, state)?;
+        // Two queries into independent output trios.
+        self.hash.query_resident(
+            &self.device,
+            &mut encoder,
+            agent_cap,
+            radius_a,
+            outputs_a.inner.as_outputs(),
+        );
+        self.hash.query_resident(
+            &self.device,
+            &mut encoder,
+            agent_cap,
+            radius_b,
+            outputs_b.inner.as_outputs(),
+        );
+
+        let qr_bytes = (agent_cap as u64) * std::mem::size_of::<GpuQueryResult>() as u64;
+        let nearest_bytes = (agent_cap as u64) * 4;
+        for o in [&outputs_a.inner, &outputs_b.inner] {
+            encoder.copy_buffer_to_buffer(&o.within, 0, &o.within_readback, 0, qr_bytes);
+            encoder.copy_buffer_to_buffer(&o.kin, 0, &o.kin_readback, 0, qr_bytes);
+            encoder.copy_buffer_to_buffer(&o.nearest, 0, &o.nearest_readback, 0, nearest_bytes);
+        }
+        self.queue.submit(Some(encoder.finish()));
+
+        let map_one = |o: &ResidentOutputBuffers| -> Result<SpatialQueryResults, SpatialError> {
+            Ok(SpatialQueryResults {
+                within_radius: map_read_query_results(
+                    &o.within_readback,
+                    &self.device,
+                    agent_cap as usize,
+                )?,
+                nearby_kin: map_read_query_results(
+                    &o.kin_readback,
+                    &self.device,
+                    agent_cap as usize,
+                )?,
+                nearest_hostile: map_read_u32(
+                    &o.nearest_readback,
+                    &self.device,
+                    agent_cap as usize,
+                )?,
+            })
+        };
+        Ok((map_one(&outputs_a.inner)?, map_one(&outputs_b.inner)?))
+    }
+
     /// Run just the prefix-scan kernel on a user-supplied count vector.
     /// Uploads `counts` to `cell_counts_buf`, dispatches `scan_main`,
     /// copies `cell_offsets_buf` back into `cell_offsets_readback`,
