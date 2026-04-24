@@ -313,8 +313,19 @@ pub fn classify_view(view: &ViewIR) -> Result<ViewStorageSpec, EmitError> {
             )));
         }
         StorageHint::PerEntityRing { .. } => {
+            // Per-entity ring has its own WGSL emit entry point —
+            // [`emit_per_entity_ring_fold_wgsl`] — because its storage
+            // layout (per-owner FIFO ring with monotonic cursor) doesn't
+            // fit the existing pair-map / slot-map shape enum. Same
+            // split as symmetric_pair_topk above; Phase 3 wires scoring
+            // reads via a similar dedicated path.
+            //
+            // `classify_view` rejects here so callers walking every
+            // view through the generic pipeline get a clear signal;
+            // phase 3's consumer invokes the dedicated entry point
+            // directly with a `ViewIR`.
             return Err(EmitError::Unsupported(format!(
-                "view `{}` storage=per_entity_ring has no GPU emitter yet (GPU cold-state replay plan tasks 1.5-1.8)",
+                "view `{}` storage=per_entity_ring uses a dedicated entry point — call `emit_per_entity_ring_fold_wgsl(&view_ir)` instead of the generic classify/fold pipeline",
                 view.name
             )));
         }
@@ -1457,6 +1468,512 @@ fn emit_symmetric_pair_topk_fold_handler_wgsl(
     )
     .unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PerEntityRing fold-kernel emission (GPU cold-state replay plan task 1.8)
+// ---------------------------------------------------------------------------
+
+/// Emit a standalone WGSL compute kernel that folds owner-keyed events
+/// into per-entity FIFO ring storage. Companion to the CPU emitter at
+/// `emit_view::emit_per_entity_ring_struct` — this function mirrors
+/// the Rust-side layout byte-for-byte so a fold that ran on CPU
+/// reproduces on GPU.
+///
+/// Unlike [`emit_view_fold_wgsl`], this emitter takes the view IR
+/// directly (not a [`ViewStorageSpec`]). The per-owner ring storage,
+/// monotonic cursor, and FIFO eviction don't map cleanly onto the
+/// existing `ViewShape` enum without cascading changes to the scoring
+/// emitter's dispatch, so `@per_entity_ring` stays on its own code path
+/// — symmetric to how `@symmetric_pair_topk` (Task 1.7) is dispatched.
+///
+/// ## Storage layout (must match the Rust emit byte-for-byte)
+///
+/// Per the CPU emitter, each `<ViewName>Entry` is:
+///
+/// ```text
+/// struct <ViewName>Entry {
+///     source:      u32,   // AgentId_raw of the event's non-owner side; 0 = empty
+///     value:       <T>,   // view return type (f32 for `memory`)
+///     anchor_tick: u32,   // tick of last write
+/// }
+/// ```
+///
+/// ...and storage is `rings: Vec<[Entry; K]>` on CPU, which flattens to
+/// `array<Entry>` of length `agent_cap * K` on GPU (row `owner` spans
+/// `[owner*K, owner*K + K)`). The WGSL `struct` uses `_pad` to round
+/// the 12-byte entry out to 16 bytes — same alignment rule as
+/// `<ViewName>Edge` in the symmetric-pair-topk layout, and matches the
+/// CPU struct's natural alignment too.
+///
+/// A parallel `cursors: array<atomic<u32>>` of length `agent_cap`
+/// tracks the monotonic write cursor per owner. `atomicAdd` on the
+/// cursor gives each event a unique slot index (modulo K) with no
+/// further synchronisation needed.
+///
+/// ## Concurrency
+///
+/// Naturally race-safe — unlike SymmetricPairTopK there is no linear
+/// scan, no CAS loop, and no eviction tiebreak. `atomicAdd` on the
+/// cursor serialises all writers to the same owner row; the returned
+/// counter value mod K is the slot each writer owns. Multiple events
+/// with the same owner in one dispatch all get distinct slot indices.
+/// Order within a dispatch is non-deterministic w.r.t. the CPU
+/// reference, but the "newest K entries win" invariant is preserved.
+///
+/// ## Value projection
+///
+/// Mirrors the CPU emitter's Phase-1 projection: `source = event's
+/// source field (raw u32)`, `value = 1.0` cast to the view's return
+/// type, `anchor_tick = cfg.tick`. Phase 4 will widen the projection
+/// to include the full event payload (e.g. `RecordMemory`'s `fact`
+/// / `confidence`); for now both CPU and GPU side agree on the
+/// minimal shape.
+///
+/// ## Errors
+///
+/// Returns `Unsupported` when:
+/// - The view isn't `@materialized(storage = per_entity_ring(K = N))`.
+/// - The view has `@decay` (Phase 3 layers decay on top of anchor_tick).
+/// - The view's param count is 0 or >2, or return type isn't WGSL-scalar.
+pub fn emit_per_entity_ring_fold_wgsl(view: &ViewIR) -> Result<String, EmitError> {
+    // Pull the PerEntityRing K out of the view kind; reject any other
+    // storage hint.
+    let k = match view.kind {
+        ViewKind::Materialized(StorageHint::PerEntityRing { k }) => k as u32,
+        ViewKind::Materialized(other) => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` isn't per_entity_ring (got storage={:?}) — use emit_view_fold_wgsl for other shapes",
+                view.name, other
+            )));
+        }
+        ViewKind::Lazy => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` is @lazy — no fold kernel required",
+                view.name
+            )));
+        }
+    };
+
+    if k == 0 {
+        return Err(EmitError::Unsupported(format!(
+            "view `{}` per_entity_ring(K=0) is meaningless — ring capacity must be >= 1",
+            view.name
+        )));
+    }
+    if view.params.is_empty() {
+        return Err(EmitError::Unsupported(format!(
+            "view `{}` per_entity_ring requires >= 1 param (the ring owner); got 0",
+            view.name
+        )));
+    }
+    if view.params.len() > 2 {
+        return Err(EmitError::Unsupported(format!(
+            "view `{}` per_entity_ring supports at most 2 params (owner + optional source); got {}",
+            view.name,
+            view.params.len()
+        )));
+    }
+    if view.decay.is_some() {
+        return Err(EmitError::Unsupported(format!(
+            "view `{}` per_entity_ring + @decay not supported yet (Phase 3 layers decay on anchor_tick)",
+            view.name
+        )));
+    }
+
+    // Fold body extraction. Only Fold bodies are valid for materialized
+    // views — the resolver already enforces this, but guard anyway.
+    let (_initial, handlers, _clamp) = match &view.body {
+        ViewBodyIR::Fold {
+            initial,
+            handlers,
+            clamp,
+        } => (initial, handlers, clamp.as_ref()),
+        ViewBodyIR::Expr(_) => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` per_entity_ring requires a Fold body, not an Expr",
+                view.name
+            )));
+        }
+    };
+
+    // Value WGSL type for the entry struct. Match the CPU emitter's
+    // rust_type_for: f32 / i32 / u32 are the WGSL-portable scalars we
+    // can store without extensions. Anything else falls out today.
+    let val_wgsl = match view.return_ty {
+        IrType::F32 => "f32",
+        IrType::I32 => "i32",
+        IrType::U32 => "u32",
+        ref other => {
+            return Err(EmitError::Unsupported(format!(
+                "view `{}` per_entity_ring return type {other:?} not yet supported on GPU (only f32/i32/u32)",
+                view.name
+            )));
+        }
+    };
+
+    // Name derivation matches the CPU emitter: PascalCase view name
+    // suffixed with `Entry` for the slot struct.
+    let entry_ty = format!("{}Entry", pascal_case(&view.name));
+    let snake = snake_case(&view.name);
+    let owner_name = view.params[0].name.as_str();
+    let second_name: Option<&str> = view.params.get(1).map(|p| p.name.as_str());
+
+    let mut out = String::new();
+
+    // ---- Module header ----
+    writeln!(
+        out,
+        "// WGSL fold kernel for @materialized view `{}` — storage = per_entity_ring(K = {}).",
+        view.name, k
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// Companion to the CPU emitter in emit_view::emit_per_entity_ring_struct;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// layout must match byte-for-byte so a fold that runs on CPU reproduces on GPU."
+    )
+    .unwrap();
+    writeln!(out, "//").unwrap();
+    writeln!(
+        out,
+        "// Concurrency: naturally race-safe. `atomicAdd` on cursors[owner] serialises"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// all writers to the same row; each writer's returned counter modulo K is"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// its exclusive slot. No CAS loop, no linear scan, no eviction tiebreak —"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// the ring's FIFO semantics fall out of the monotonic cursor."
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Compile-time K constant ----
+    writeln!(
+        out,
+        "// Slot count per owner — the `K` from per_entity_ring(K = {}).",
+        k
+    )
+    .unwrap();
+    writeln!(out, "const K: u32 = {}u;", k).unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Entry struct ----
+    writeln!(
+        out,
+        "// Per-ring slot — mirrors the Rust `{entry_ty}` struct (12B payload + 4B pad → 16B)."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// `source == 0u` marks an empty slot (AgentIds are 1-based, so 0 is unused)."
+    )
+    .unwrap();
+    writeln!(out, "struct {entry_ty} {{").unwrap();
+    writeln!(out, "    source:      u32,").unwrap();
+    writeln!(out, "    value:       {val_wgsl},").unwrap();
+    writeln!(out, "    anchor_tick: u32,").unwrap();
+    writeln!(out, "    _pad:        u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Fold-dispatch uniform ----
+    writeln!(
+        out,
+        "// Dispatch-level uniform: event count + current tick. The event buffer layout"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// comes from the DSL event struct; engine_gpu packs it into `events[]` below."
+    )
+    .unwrap();
+    writeln!(out, "struct FoldCfg {{").unwrap();
+    writeln!(out, "    num_events: u32,").unwrap();
+    writeln!(out, "    tick:       u32,").unwrap();
+    writeln!(out, "    agent_cap:  u32,").unwrap();
+    writeln!(out, "    _pad:       u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Bindings ----
+    writeln!(
+        out,
+        "// Bindings — engine_gpu owns the bind-group layout; these numbers are the"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// dedicated per-entity-ring slot (kept disjoint from pair_map / slot_map /"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// symmetric_pair_topk). Rings is the flattened `agent_cap * K` entry array;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// cursors is the monotonic write-cursor per owner."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding(0) var<storage, read_write> view_{snake}_rings:   array<{entry_ty}>;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding(1) var<storage, read_write> view_{snake}_cursors: array<atomic<u32>>;"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // ---- Fold kernels, one per handler ----
+    if handlers.is_empty() {
+        // No handlers — emit an empty kernel so downstream bindings
+        // still compile. Matches what the CPU side does: `fold_event`
+        // becomes a no-op when no handlers match.
+        writeln!(
+            out,
+            "// No fold handlers — view receives no events. Kernel is a no-op for symmetry."
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "@compute @workgroup_size(64) fn view_{snake}_fold_noop(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+        )
+        .unwrap();
+        writeln!(out, "    let _ = gid;").unwrap();
+        writeln!(out, "}}").unwrap();
+        return Ok(out);
+    }
+
+    for (idx, handler) in handlers.iter().enumerate() {
+        emit_per_entity_ring_fold_handler_wgsl(
+            &mut out,
+            view,
+            handler,
+            idx,
+            &snake,
+            &entry_ty,
+            val_wgsl,
+            owner_name,
+            second_name,
+        )?;
+    }
+
+    Ok(out)
+}
+
+/// Emit the per-handler event struct + compute entry point. Factored
+/// out so the main function stays readable; called once per
+/// `FoldHandlerIR` on the view.
+#[allow(clippy::too_many_arguments)]
+fn emit_per_entity_ring_fold_handler_wgsl(
+    out: &mut String,
+    view: &ViewIR,
+    handler: &FoldHandlerIR,
+    idx: usize,
+    snake: &str,
+    _entry_ty: &str,
+    val_wgsl: &str,
+    owner_name: &str,
+    second_name: Option<&str>,
+) -> Result<(), EmitError> {
+    let ev_name = handler.pattern.name.as_str();
+    let ev_snake = snake_case(ev_name);
+
+    // Figure out which event fields feed the owner (view-arg 0) and
+    // optional source (view-arg 1). Mirrors the CPU emitter's binding
+    // scan (emit_view::emit_per_entity_ring_fold_arm) — when the
+    // pattern doesn't explicitly rebind, fall back to the canonical
+    // `observer` / `source` event-field names from the `RecordMemory`
+    // shape in the GPU cold-state replay plan.
+    let mut owner_field: Option<String> = None;
+    let mut source_field: Option<String> = None;
+    for b in &handler.pattern.bindings {
+        let field = b.field.clone();
+        if let IrPattern::Bind { name, .. } = &b.value {
+            if name == owner_name {
+                owner_field = Some(field);
+            } else if let Some(sn) = second_name {
+                if name == sn {
+                    source_field = Some(field);
+                }
+            }
+        }
+    }
+    let owner_field = owner_field.unwrap_or_else(|| "observer".to_string());
+    let source_field = source_field.unwrap_or_else(|| "source".to_string());
+
+    // Emit a per-handler event-carrier struct. The engine_gpu side
+    // packs incoming events into this layout before dispatch.
+    // Layout: (owner: u32, source: u32, delta: val_wgsl, _pad: u32).
+    // 16 bytes when val_wgsl is 4-byte.
+    writeln!(
+        out,
+        "// Event-carrier struct for `{ev_name}` → `{view_name}` fold.",
+        view_name = view.name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// engine_gpu packs the event's `{owner_field}` / `{source_field}` AgentIds (raw u32s)"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// plus the `delta` payload into this struct for each pending event."
+    )
+    .unwrap();
+    writeln!(out, "struct {ev_name}Fold {{").unwrap();
+    writeln!(out, "    owner:  u32,").unwrap();
+    writeln!(out, "    source: u32,").unwrap();
+    writeln!(out, "    delta:  {val_wgsl},").unwrap();
+    writeln!(out, "    _pad:   u32,").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+
+    // Bindings for this handler's event buffer + cfg. Keep the bind
+    // indices disjoint from the rings/cursors bindings by offsetting
+    // from idx.
+    let ev_buf_binding = 2 + (idx as u32) * 2;
+    let cfg_binding = 2 + (idx as u32) * 2 + 1;
+    writeln!(
+        out,
+        "@group(0) @binding({ev_buf_binding}) var<storage, read>  events_{ev_snake}: array<{ev_name}Fold>;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding({cfg_binding}) var<uniform>         cfg_{ev_snake}:   FoldCfg;"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
+    // Compute entry point. One invocation per event.
+    writeln!(
+        out,
+        "// Fold `{ev_name}` events into view `{view_name}`. One thread per event;",
+        view_name = view.name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "// atomicAdd on the owner's cursor gives each writer a unique slot index."
+    )
+    .unwrap();
+    writeln!(out, "@compute @workgroup_size(64)").unwrap();
+    writeln!(
+        out,
+        "fn view_{snake}_fold_{ev_snake}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+    )
+    .unwrap();
+    writeln!(out, "    let event_idx = gid.x;").unwrap();
+    writeln!(
+        out,
+        "    if (event_idx >= cfg_{ev_snake}.num_events) {{ return; }}"
+    )
+    .unwrap();
+    writeln!(out, "    let e = events_{ev_snake}[event_idx];").unwrap();
+    writeln!(out).unwrap();
+
+    // Empty-agent guard: 0 is the unused/sentinel raw id (AgentIds are
+    // 1-based). Skip the whole fold if owner is 0.
+    writeln!(
+        out,
+        "    // AgentIds are 1-based; raw id 0 means \"unassigned\" and can't own a ring."
+    )
+    .unwrap();
+    writeln!(out, "    if (e.owner == 0u) {{ return; }}").unwrap();
+    writeln!(out, "    let owner_slot = e.owner - 1u;").unwrap();
+    writeln!(
+        out,
+        "    if (owner_slot >= cfg_{ev_snake}.agent_cap) {{ return; }}"
+    )
+    .unwrap();
+    writeln!(out, "    let row_base = owner_slot * K;").unwrap();
+    writeln!(out).unwrap();
+
+    // Cursor bump — atomicAdd returns the pre-increment value, which
+    // is the exclusive slot index for this writer (mod K).
+    writeln!(
+        out,
+        "    // Reserve a slot: atomicAdd returns the pre-increment cursor, giving this"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    // invocation an exclusive write index. Overflow wraps modulo K (FIFO evict)."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let cursor = atomicAdd(&view_{snake}_cursors[owner_slot], 1u);"
+    )
+    .unwrap();
+    writeln!(out, "    let slot_idx = cursor % K;").unwrap();
+    writeln!(out, "    let write_idx = row_base + slot_idx;").unwrap();
+    writeln!(out).unwrap();
+
+    // Project the event into the entry. Match the CPU emit's Phase-1
+    // projection: source from the event's non-owner field, value = 1.0,
+    // anchor_tick = cfg.tick.
+    writeln!(
+        out,
+        "    // Project the event into an entry. Matches CPU emit's Phase-1 shape:"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    //   source = event's non-owner AgentId (raw), value = 1.0, anchor_tick = tick."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    // Richer projections (e.g. RecordMemory's `fact` / `confidence`) land in Phase 4."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    view_{snake}_rings[write_idx].source      = e.source;"
+    )
+    .unwrap();
+    // Value projection: always 1.0 in Phase 1, cast to the view's return type.
+    let value_lit = match val_wgsl {
+        "f32" => "1.0".to_string(),
+        "i32" => "1".to_string(),
+        "u32" => "1u".to_string(),
+        _ => "1.0".to_string(),
+    };
+    writeln!(
+        out,
+        "    view_{snake}_rings[write_idx].value       = {value_lit};"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    view_{snake}_rings[write_idx].anchor_tick = cfg_{ev_snake}.tick;"
+    )
+    .unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 

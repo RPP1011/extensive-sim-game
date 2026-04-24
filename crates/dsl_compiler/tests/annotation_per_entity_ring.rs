@@ -188,6 +188,73 @@ fn per_entity_ring_fold_handles_record_memory() {
     );
 }
 
+/// Task 1.8 — the WGSL emitter produces a fold kernel for
+/// `@per_entity_ring` views. Companion to Task 1.7's
+/// `emit_symmetric_pair_topk_fold_wgsl`; the ring's simpler semantics
+/// (atomicAdd on cursor, no scan, no evict tiebreak) yield a shorter
+/// kernel that is naturally race-safe.
+#[test]
+fn per_entity_ring_emits_wgsl_fold_kernel() {
+    let out = dsl_compiler::compile(SRC).expect("compile OK");
+    let view_ir = out.views.iter().find(|v| v.name == "memory").unwrap();
+    let wgsl = dsl_compiler::emit_view_wgsl::emit_per_entity_ring_fold_wgsl(view_ir)
+        .expect("WGSL emit OK");
+    assert!(
+        wgsl.contains("view_memory_fold"),
+        "missing fold entry-point name:\n{wgsl}"
+    );
+    assert!(
+        wgsl.contains("@compute"),
+        "emitted kernel should be @compute-decorated:\n{wgsl}"
+    );
+    assert!(
+        wgsl.contains("MemoryEntry"),
+        "missing MemoryEntry struct:\n{wgsl}"
+    );
+    assert!(
+        wgsl.contains("atomicAdd"),
+        "cursor bump must use atomicAdd:\n{wgsl}"
+    );
+    assert!(
+        wgsl.contains("% K") || wgsl.contains("% 64u"),
+        "slot index must wrap mod K:\n{wgsl}"
+    );
+}
+
+/// Task 1.8 — the emitted WGSL parses cleanly through the same naga
+/// frontend engine_gpu runs. The emitted module is a standalone unit
+/// (struct decls + bindings + compute entry point), so naga should
+/// accept it with no prologue.
+#[test]
+fn per_entity_ring_wgsl_parses_through_naga() {
+    let out = dsl_compiler::compile(SRC).expect("compile OK");
+    let view_ir = out.views.iter().find(|v| v.name == "memory").unwrap();
+    let wgsl = dsl_compiler::emit_view_wgsl::emit_per_entity_ring_fold_wgsl(view_ir)
+        .expect("WGSL emit OK");
+    let result = naga::front::wgsl::parse_str(&wgsl);
+    assert!(
+        result.is_ok(),
+        "emitted WGSL should parse: {:?}\n--- WGSL source ---\n{wgsl}",
+        result.err()
+    );
+}
+
+/// Task 1.8 — unlike SymmetricPairTopK (Task 1.7) which documents
+/// concurrency caveats with `TODO(phase-3)` markers, PerEntityRing is
+/// naturally race-safe via atomicAdd. Verify no TODO(phase-3) markers
+/// leak into the emitted WGSL — callers shouldn't see phantom caveats.
+#[test]
+fn per_entity_ring_wgsl_uses_natural_race_serialisation() {
+    let out = dsl_compiler::compile(SRC).expect("compile OK");
+    let view_ir = out.views.iter().find(|v| v.name == "memory").unwrap();
+    let wgsl = dsl_compiler::emit_view_wgsl::emit_per_entity_ring_fold_wgsl(view_ir)
+        .expect("WGSL emit OK");
+    assert!(
+        !wgsl.contains("TODO(phase-3)"),
+        "ring is race-free; no phase-3 TODOs needed:\n{wgsl}"
+    );
+}
+
 /// Task 1.6 — `@decay` on a ring view is rejected with `Unsupported`.
 /// The ring semantics (FIFO, no accumulation) don't compose with the
 /// anchor-pattern decay; punting to Phase 3.
