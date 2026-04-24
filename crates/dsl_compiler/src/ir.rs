@@ -732,6 +732,14 @@ pub enum NamespaceId {
     /// `cast` physics rule can iterate and dispatch a cast's effect list
     /// without a hand-written cascade handler.
     Abilities,
+    /// `terrain.*` — sim-wide accessor for the `TerrainQuery` backend
+    /// living on `SimState`. Methods: `terrain.line_of_sight(from, to)
+    /// -> bool`. Registered 2026-04-23 (Task 81 terrain integration
+    /// MVP). Deliberately tiny surface — MVP slice only exposes LOS;
+    /// `height_at` / `walkable` stay engine-internal for now and can be
+    /// lifted into the DSL in a follow-up once a concrete scoring /
+    /// mask row needs them.
+    Terrain,
 }
 
 impl NamespaceId {
@@ -754,6 +762,7 @@ impl NamespaceId {
             NamespaceId::Auctions => "auctions",
             NamespaceId::Tick => "tick",
             NamespaceId::Abilities => "abilities",
+            NamespaceId::Terrain => "terrain",
         }
     }
 }
