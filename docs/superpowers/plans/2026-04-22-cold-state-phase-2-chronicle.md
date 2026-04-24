@@ -33,80 +33,28 @@
 
 ---
 
-## Task 2.1: Audit `@phase(post)` GPU execution
+## Task 2.1: Audit `@phase(post)` GPU execution — DONE (classification A)
 
-**Files:**
-- Read-only: `crates/dsl_compiler/src/emit_physics_wgsl.rs`, `crates/engine_gpu/src/cascade_resident.rs`, `crates/engine_gpu/src/physics.rs`
+**Result:** All `@phase(post)` rules already run on both sync and batch paths, interleaved with event-phase rules.
 
-### Goal
+**Evidence:**
+- `crates/dsl_compiler/src/parser.rs:804` — parser accepts `@phase(event)` / `@phase(post)` annotations.
+- `crates/dsl_compiler/src/ir.rs:395-402` — `PhysicsIR` only stores `cpu_only`. **No phase field exists on the IR**; the annotation is dropped at lowering.
+- `crates/dsl_compiler/src/emit_physics_wgsl.rs:328-362` — `applicable_rules()` filters only by `p.cpu_only`. All rules regardless of phase land in the generated `physics_dispatch(event_idx)`.
+- `crates/dsl_compiler/src/emit_physics_wgsl.rs:276-319` — `emit_physics_dispatcher_wgsl` emits a single kind-keyed switch with no phase branching.
+- `crates/engine_gpu/src/physics.rs:721-811` — resident physics shader reuses the same dispatcher (via `build_physics_shader_with_chronicle`); the sync path shares the exact same dispatcher function. Both paths call `physics_dispatch(i)` on each event.
+- `crates/engine_gpu/src/cascade_resident.rs:1126-1177` — `run_batch_resident` dispatches the unified physics kernel each cascade iteration. Since events emitted by event-phase rules land in the next iteration's `events_in`, chronicle rules observe them and fire.
+- Existing tests already observe chronicle emission on the batch path: `chronicle_drain_perf.rs`, `physics_parity.rs:10-279`, `event_ring_parity.rs:511`.
 
-Determine whether `@phase(post)` physics rules are:
-- (A) Already emitted to the physics WGSL kernel and run in the cascade iterations.
-- (B) Filtered out by the emitter (e.g. only `@phase(event)` rules run on GPU).
-- (C) Emitted but not dispatched by cascade_resident's driver.
+**Implication:** Task 2.2 is a no-op. Phase 2 collapses to Tasks 2.3 (snapshot wiring) + 2.4 (integration test) + 2.5 (closeout).
 
-### Steps
-
-1. **Grep the WGSL emitter for phase handling**:
-   ```
-   grep -rn "phase\|Phase\|@phase" crates/dsl_compiler/src/emit_physics_wgsl.rs | head -20
-   ```
-
-2. **Read how the main physics kernel handles phase-tagged rules**: check if there's separate `event` vs `post` dispatch, or if all rules run each iter regardless of phase.
-
-3. **Check cascade_resident's physics dispatch**: does it invoke only the event-phase kernel, or does it also run post?
-
-4. **Classify the situation** (A/B/C) in the report.
-
-5. **No code changes** — verification task. The finding shapes Task 2.2's scope.
-
-### Commit (if any)
-
-If classification documents useful engineering notes, commit a short doc:
-```bash
-git commit -m "docs(engine_gpu): @phase(post) execution audit on batch path"
-```
-
-Otherwise no commit — pure read-only investigation feeding Task 2.2.
-
-### Report
-
-Status: DONE (verification task). Include: which of (A/B/C) describes current state + exact code refs.
+**Caveat** (deferred to subsystem 2 Phase 3 / future): the cascade dispatches `@phase(post)` rules *during* the cascade iteration that carries their trigger events, not strictly after cascade convergence. For chronicle rules — which are pure observers that only emit to the chronicle ring, never mutate agent state or feed back into the cascade — this is semantically equivalent to a strict post-cascade pass. If a future `@phase(post)` rule needs to read settled post-cascade state (e.g. final tick HP, not intermediate), it will need a real post-phase dispatch split. The emitter is currently missing phase machinery; adding it is a straightforward follow-up (filter in `applicable_rules`, add `emit_physics_post_dispatcher_wgsl`, dispatch after the cascade loop in `run_batch_resident`).
 
 ---
 
-## Task 2.2: Enable `@phase(post)` rules on batch path (if Task 2.1 reveals they're off)
+## Task 2.2: Enable `@phase(post)` rules on batch path — NO-OP per Task 2.1 finding (A)
 
-**Files (conditional on 2.1 finding):**
-- If (B): `crates/dsl_compiler/src/emit_physics_wgsl.rs` — include post-phase rules in WGSL emit.
-- If (C): `crates/engine_gpu/src/cascade_resident.rs` — dispatch a post-phase physics kernel after event-phase iterations.
-- If (A): task is a no-op; skip to Task 2.3.
-
-### Goal
-
-Ensure the 8 chronicle rules execute on the batch path. Post-phase rules may need their own kernel dispatch (distinct from the event-phase cascade) because they run ONCE after the event-phase converges, not inside the cascade loop.
-
-### Steps
-
-1. If WGSL emitter filters `@phase(post)`: remove the filter, regenerate, verify naga parse passes.
-
-2. If cascade_resident needs post-phase dispatch: add one after `run_cascade_resident`'s event-phase loop, before snapshot handshake. Use the same indirect-dispatch pattern as event-phase if applicable, or direct dispatch (simpler since post runs once).
-
-3. Run existing parity tests to ensure no regression:
-   ```
-   cargo test --release --features gpu -p engine_gpu --test parity_with_cpu --test physics_parity --test cascade_parity
-   ```
-
-4. Commit:
-   ```bash
-   git commit -m "feat(engine_gpu): run @phase(post) physics rules on batch path"
-   ```
-
-### Scope discipline
-
-- Only the specific files needed based on Task 2.1's classification.
-- Do NOT wire snapshot chronicle yet (Task 2.3).
-- Do NOT add new tests yet (Task 2.4).
+Skipped. The dispatcher is phase-agnostic and both batch + sync paths already run all rules. Proceed to Task 2.3.
 
 ---
 
