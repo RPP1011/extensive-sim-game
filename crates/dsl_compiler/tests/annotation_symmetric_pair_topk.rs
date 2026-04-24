@@ -423,3 +423,105 @@ fn symmetric_pair_topk_generic_classify_redirects_to_dedicated_emit() {
         }
     }
 }
+
+/// Phase 3 task 3.0 — `@symmetric_pair_topk` on an `-> i32` view with a
+/// bound-variable fold body (`self += delta`) emits integer literals for
+/// initial / clamp bounds and lowers the fold RHS from the event's
+/// pattern-bound variable instead of hardcoding `1.0`.
+///
+/// This is the precondition for the `standing` view (task 3.1), which
+/// carries a signed-delta event field. Before the type-aware scalar
+/// literal path + fold-body RHS lowering, the emitter produced `0.0` /
+/// `-100.0` / `100.0` into `i32` contexts (8+ E0308 build errors) and
+/// discarded the pattern-bound `delta` in favour of a constant `1.0`.
+#[test]
+fn symmetric_pair_topk_integer_return_with_bound_delta() {
+    const INT_SRC: &str = r#"
+event EffectStandingDelta { a: AgentId, b: AgentId, delta: i32 }
+
+@materialized(on_event = [EffectStandingDelta])
+@symmetric_pair_topk(K = 4)
+view test_standing(a: Agent, b: Agent) -> i32 {
+  initial: 0,
+  on EffectStandingDelta { a: a, b: b, delta: delta } { self += delta }
+  clamp: [-100, 100],
+}
+"#;
+    let comp = dsl_compiler::compile(INT_SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "test_standing")
+        .expect("view IR should exist");
+    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+
+    // (2) i32 return type must appear in both the fold struct's adjust()
+    //     signature and the get() accessor.
+    assert!(
+        rust.contains("pub fn get(&self, a: AgentId, b: AgentId) -> i32"),
+        "missing i32 get():\n{rust}"
+    );
+    assert!(
+        rust.contains("pub fn adjust(&mut self, a: AgentId, b: AgentId, delta: i32, tick: u32) -> i32"),
+        "missing i32 adjust():\n{rust}"
+    );
+
+    // (3) Fold arm must thread the pattern-bound `delta` through to
+    //     adjust() — NOT `1.0` (pre-fix hardcode) or `1i32`.
+    assert!(
+        rust.contains("self.adjust(*a, *b, delta, tick);"),
+        "fold arm must pass the bound `delta` variable:\n{rust}"
+    );
+    assert!(
+        !rust.contains("self.adjust(*a, *b, 1.0, tick)"),
+        "fold arm must not hardcode 1.0 on an i32 view:\n{rust}"
+    );
+
+    // (4) Clamp bounds must appear as integer literals (no `.0` suffix).
+    assert!(
+        rust.contains("updated.clamp(-100, 100)") || rust.contains(".clamp(-100, 100)"),
+        "clamp should use integer literals `-100` / `100`:\n{rust}"
+    );
+    assert!(
+        !rust.contains("100.0"),
+        "clamp bounds must not render as f32 literals on an i32 view:\n{rust}"
+    );
+    assert!(
+        !rust.contains("-100.0"),
+        "clamp lower bound must not render as f32 on an i32 view:\n{rust}"
+    );
+
+    // (5) Initial value must render as a plain integer literal, not
+    //     `0.0`. The initial appears in fallback paths inside adjust()
+    //     and get().
+    assert!(
+        !rust.contains("return 0.0"),
+        "initial must render as integer `0`, not `0.0`:\n{rust}"
+    );
+}
+
+/// Phase 3 task 3.0 — byte-identity guard: the `-> f32` standing test
+/// fixture (literal `self += 1.0`) must continue to emit the same
+/// `self.adjust(*a, *b, 1.0, tick)` surface the pre-refactor emitter
+/// produced. Ensures the type-aware path didn't perturb the f32 baseline.
+#[test]
+fn symmetric_pair_topk_f32_fold_arm_byte_identity() {
+    let comp = dsl_compiler::compile(SRC).expect("compile should succeed");
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "standing")
+        .expect("view IR should exist");
+    let rust = dsl_compiler::emit_view::emit_view(view, None).expect("emit should succeed");
+
+    // Unchanged from Task 1.5: the f32 fold arm still emits `1.0`.
+    assert!(
+        rust.contains("self.adjust(*a, *b, 1.0, tick);"),
+        "f32 fold arm must continue to emit `1.0` literal:\n{rust}"
+    );
+    // And the `-> f32` return type flows through accessors.
+    assert!(
+        rust.contains("pub fn get(&self, a: AgentId, b: AgentId) -> f32"),
+        "f32 get() surface unchanged:\n{rust}"
+    );
+}

@@ -450,7 +450,7 @@ fn emit_pair_map_struct(
     writeln!(out).unwrap();
 
     // get() signature depends on whether @decay is present (needs tick).
-    let initial_lit = lower_scalar_literal(initial)?;
+    let initial_lit = lower_scalar_literal(initial, &view.return_ty)?;
     if decay.is_some() {
         writeln!(
             out,
@@ -474,8 +474,8 @@ fn emit_pair_map_struct(
         )
         .unwrap();
         if let Some((lo, hi)) = clamp {
-            let lo_s = lower_scalar_literal(lo)?;
-            let hi_s = lower_scalar_literal(hi)?;
+            let lo_s = lower_scalar_literal(lo, &view.return_ty)?;
+            let hi_s = lower_scalar_literal(hi, &view.return_ty)?;
             writeln!(out, "        decayed.clamp({lo_s}, {hi_s})").unwrap();
         } else {
             writeln!(out, "        decayed").unwrap();
@@ -520,8 +520,8 @@ fn emit_pair_map_struct(
         )
         .unwrap();
         if let Some((lo, hi)) = clamp {
-            let lo_s = lower_scalar_literal(lo)?;
-            let hi_s = lower_scalar_literal(hi)?;
+            let lo_s = lower_scalar_literal(lo, &view.return_ty)?;
+            let hi_s = lower_scalar_literal(hi, &view.return_ty)?;
             writeln!(out, "            total += decayed.clamp({lo_s}, {hi_s});").unwrap();
         } else {
             writeln!(out, "            total += decayed;").unwrap();
@@ -812,7 +812,7 @@ fn emit_per_entity_topk_k_struct(
     let a_name = view.params[0].name.as_str();
     let b_name = view.params[1].name.as_str();
     let ty_name = pascal_case(&view.name);
-    let initial_lit = lower_scalar_literal(initial)?;
+    let initial_lit = lower_scalar_literal(initial, &view.return_ty)?;
 
     writeln!(
         out,
@@ -945,8 +945,8 @@ fn emit_per_entity_topk_k_struct(
         )
         .unwrap();
         if let Some((lo, hi)) = clamp {
-            let lo_s = lower_scalar_literal(lo)?;
-            let hi_s = lower_scalar_literal(hi)?;
+            let lo_s = lower_scalar_literal(lo, &view.return_ty)?;
+            let hi_s = lower_scalar_literal(hi, &view.return_ty)?;
             writeln!(out, "                return decayed.clamp({lo_s}, {hi_s});").unwrap();
         } else {
             writeln!(out, "                return decayed;").unwrap();
@@ -992,8 +992,8 @@ fn emit_per_entity_topk_k_struct(
         )
         .unwrap();
         if let Some((lo, hi)) = clamp {
-            let lo_s = lower_scalar_literal(lo)?;
-            let hi_s = lower_scalar_literal(hi)?;
+            let lo_s = lower_scalar_literal(lo, &view.return_ty)?;
+            let hi_s = lower_scalar_literal(hi, &view.return_ty)?;
             writeln!(out, "            total += decayed.clamp({lo_s}, {hi_s});").unwrap();
         } else {
             writeln!(out, "            total += decayed;").unwrap();
@@ -1084,12 +1084,12 @@ fn emit_per_entity_topk_k_struct(
     // Shared fold core. Does find-or-evict-else-drop for one (obs, atk,
     // delta) triple. Called from every match arm.
     let clamp_lo_lit = if let Some((lo, _)) = clamp {
-        Some(lower_scalar_literal(lo)?)
+        Some(lower_scalar_literal(lo, &view.return_ty)?)
     } else {
         None
     };
     let clamp_hi_lit = if let Some((_, hi)) = clamp {
-        Some(lower_scalar_literal(hi)?)
+        Some(lower_scalar_literal(hi, &view.return_ty)?)
     } else {
         None
     };
@@ -1338,7 +1338,7 @@ fn emit_symmetric_pair_topk_struct(
     let b_name = view.params[1].name.as_str();
     let ty_name = pascal_case(&view.name);
     let edge_ty = format!("{ty_name}Edge");
-    let initial_lit = lower_scalar_literal(initial)?;
+    let initial_lit = lower_scalar_literal(initial, &view.return_ty)?;
 
     writeln!(
         out,
@@ -1503,12 +1503,12 @@ fn emit_symmetric_pair_topk_struct(
 
     // adjust(): canonical upsert + clamp. Returns the post-write value.
     let clamp_lo_lit = if let Some((lo, _)) = clamp {
-        Some(lower_scalar_literal(lo)?)
+        Some(lower_scalar_literal(lo, &view.return_ty)?)
     } else {
         None
     };
     let clamp_hi_lit = if let Some((_, hi)) = clamp {
-        Some(lower_scalar_literal(hi)?)
+        Some(lower_scalar_literal(hi, &view.return_ty)?)
     } else {
         None
     };
@@ -1649,7 +1649,15 @@ fn emit_symmetric_pair_topk_struct(
 
 /// Emit one match arm for a `symmetric_pair_topk` fold handler. Mirrors
 /// `emit_topk_k_fold_arm` — figure out which event field maps to the
-/// view's first/second pair param, then call `adjust` with delta = 1.0.
+/// view's first/second pair param, then call `adjust` with the fold
+/// body's lowered `self += <expr>` RHS as the delta.
+///
+/// Only a single `self += <expr>` statement is supported for the body;
+/// anything more complex is out of scope until the fold-body language
+/// grows enough shapes to justify it. Existing callers (`threat_level`,
+/// `kin_fear`, `pack_focus`, etc.) all use literal `self += 1.0` or
+/// `self += 1`, which round-trip through `lower_expr` to the same
+/// surface form the pre-type-aware emitter produced.
 fn emit_symmetric_pair_fold_arm(
     out: &mut String,
     view: &ViewIR,
@@ -1676,19 +1684,197 @@ fn emit_symmetric_pair_fold_arm(
         (Some(a), Some(b)) => (a, b),
         _ => ("a", "b"),
     };
+    let delta_expr = lower_fold_self_update_rhs(&handler.body, &view.name)?;
+    // Collect every local referenced by the fold body so the match arm
+    // destructures those event fields too. Without this, a `delta`
+    // reference in `self += delta` lands on an unbound identifier at
+    // compile time because the arm emits `{ a, b, .. }`.
+    let mut body_locals: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for stmt in &handler.body {
+        collect_locals_in_stmt(stmt, &mut body_locals);
+    }
+    // Build the extra-fields list: every pattern binding whose local
+    // name is referenced by the body AND isn't already the (a, b) pair
+    // field. Use the event-field name in the destructure; if the
+    // pattern renames the field (`delta: d`), bind it with the pattern's
+    // local name via `{ <field>: <local>, .. }`.
+    let mut extra_fields: Vec<String> = Vec::new();
+    for b in &handler.pattern.bindings {
+        let field = b.field.as_str();
+        if field == first_field || field == second_field {
+            continue;
+        }
+        if let crate::ir::IrPattern::Bind { name, .. } = &b.value {
+            if body_locals.contains(name) {
+                if name == field {
+                    extra_fields.push(field.to_string());
+                } else {
+                    extra_fields.push(format!("{field}: {name}"));
+                }
+            }
+        }
+    }
+    let destructure = if extra_fields.is_empty() {
+        format!("{{ {first_field}, {second_field}, .. }}")
+    } else {
+        let extras = extra_fields.join(", ");
+        format!("{{ {first_field}, {second_field}, {extras}, .. }}")
+    };
+    writeln!(out, "            Event::{ev_name} {destructure} => {{").unwrap();
+    // Pattern destructure binds event fields as references (`&T`). The
+    // fold body expects the values themselves, so dereference each
+    // referenced pattern local into a shadowing `let` before lowering.
+    // Numeric + AgentId types are `Copy`, so the `let name = *name;`
+    // pattern is zero-cost.
+    for b in &handler.pattern.bindings {
+        let field = b.field.as_str();
+        if field == first_field || field == second_field {
+            continue;
+        }
+        if let crate::ir::IrPattern::Bind { name, .. } = &b.value {
+            if body_locals.contains(name) {
+                writeln!(out, "                let {name} = *{name};").unwrap();
+            }
+        }
+    }
     writeln!(
         out,
-        "            Event::{ev_name} {{ {first_field}, {second_field}, .. }} => {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "                self.adjust(*{first_field}, *{second_field}, 1.0, tick);"
+        "                self.adjust(*{first_field}, *{second_field}, {delta_expr}, tick);"
     )
     .unwrap();
     writeln!(out, "            }}").unwrap();
-    let _ = view;
     Ok(())
+}
+
+/// Walk an `IrStmt` collecting every `IrExpr::Local` name it references.
+/// Used by `emit_symmetric_pair_fold_arm` to decide which event fields
+/// the match arm must destructure for the lowered fold body to compile.
+fn collect_locals_in_stmt(
+    stmt: &crate::ir::IrStmt,
+    out: &mut std::collections::BTreeSet<String>,
+) {
+    use crate::ir::IrStmt;
+    match stmt {
+        IrStmt::Let { value, .. } => collect_locals_in_expr(value, out),
+        IrStmt::Expr(e) => collect_locals_in_expr(e, out),
+        IrStmt::SelfUpdate { value, .. } => collect_locals_in_expr(value, out),
+        IrStmt::For { iter, filter, body, .. } => {
+            collect_locals_in_expr(iter, out);
+            if let Some(f) = filter {
+                collect_locals_in_expr(f, out);
+            }
+            for s in body {
+                collect_locals_in_stmt(s, out);
+            }
+        }
+        IrStmt::If { cond, then_body, else_body, .. } => {
+            collect_locals_in_expr(cond, out);
+            for s in then_body {
+                collect_locals_in_stmt(s, out);
+            }
+            if let Some(eb) = else_body {
+                for s in eb {
+                    collect_locals_in_stmt(s, out);
+                }
+            }
+        }
+        IrStmt::Match { scrutinee, arms, .. } => {
+            collect_locals_in_expr(scrutinee, out);
+            for arm in arms {
+                for s in &arm.body {
+                    collect_locals_in_stmt(s, out);
+                }
+            }
+        }
+        IrStmt::Emit(e) => {
+            for f in &e.fields {
+                collect_locals_in_expr(&f.value, out);
+            }
+        }
+    }
+}
+
+fn collect_locals_in_expr(
+    node: &IrExprNode,
+    out: &mut std::collections::BTreeSet<String>,
+) {
+    match &node.kind {
+        IrExpr::Local(_, name) => {
+            // `self` is re-emitted as `self_id`; the identifier itself
+            // isn't part of the event pattern so we skip it.
+            if name != "self" {
+                out.insert(name.clone());
+            }
+        }
+        IrExpr::Binary(_, lhs, rhs) => {
+            collect_locals_in_expr(lhs, out);
+            collect_locals_in_expr(rhs, out);
+        }
+        IrExpr::Unary(_, inner) => collect_locals_in_expr(inner, out),
+        IrExpr::If { cond, then_expr, else_expr } => {
+            collect_locals_in_expr(cond, out);
+            collect_locals_in_expr(then_expr, out);
+            if let Some(e) = else_expr {
+                collect_locals_in_expr(e, out);
+            }
+        }
+        IrExpr::NamespaceCall { args, .. } => {
+            for a in args {
+                collect_locals_in_expr(&a.value, out);
+            }
+        }
+        IrExpr::BuiltinCall(_, args) => {
+            for a in args {
+                collect_locals_in_expr(&a.value, out);
+            }
+        }
+        IrExpr::UnresolvedCall(_, args) => {
+            for a in args {
+                collect_locals_in_expr(&a.value, out);
+            }
+        }
+        IrExpr::ViewCall(_, args) => {
+            for a in args {
+                collect_locals_in_expr(&a.value, out);
+            }
+        }
+        // Everything else (literals, namespace fields) has no local
+        // references of interest for the fold-arm destructure.
+        _ => {}
+    }
+}
+
+/// Extract the RHS of the single `self += <expr>` statement in a fold
+/// handler body and lower it via `lower_expr`. Any other body shape
+/// (empty, multi-statement, `-=` / `*=`, let-bindings, etc.) raises
+/// `Unsupported` pointing at the view name — the emitter intentionally
+/// handles only the simple addition case that every existing caller
+/// uses.
+fn lower_fold_self_update_rhs(
+    body: &[crate::ir::IrStmt],
+    view_name: &str,
+) -> Result<String, EmitError> {
+    use crate::ir::IrStmt;
+    if body.len() != 1 {
+        return Err(EmitError::Unsupported(format!(
+            "fold body on view `{view_name}` must be a single `self += <expr>` statement (got {} stmts)",
+            body.len()
+        )));
+    }
+    match &body[0] {
+        IrStmt::SelfUpdate { op, value, .. } => {
+            if op != "+=" {
+                return Err(EmitError::Unsupported(format!(
+                    "fold body on view `{view_name}` must use `self += <expr>` (got `self {op} ...`)"
+                )));
+            }
+            lower_expr(value)
+        }
+        _ => Err(EmitError::Unsupported(format!(
+            "fold body on view `{view_name}` must be a single `self += <expr>` statement"
+        ))),
+    }
 }
 
 /// Emit the `@per_entity_ring(K = N)` shape (GPU cold-state replay plan
@@ -1761,7 +1947,7 @@ fn emit_per_entity_ring_struct(
     let second_name: Option<&str> = view.params.get(1).map(|p| p.name.as_str());
     let ty_name = pascal_case(&view.name);
     let entry_ty = format!("{ty_name}Entry");
-    let initial_lit = lower_scalar_literal(initial)?;
+    let initial_lit = lower_scalar_literal(initial, &view.return_ty)?;
 
     writeln!(
         out,
@@ -2151,8 +2337,8 @@ fn emit_fold_arm(
         .unwrap();
         writeln!(out, "                let updated = current + amount;").unwrap();
         if let Some((lo, hi)) = clamp {
-            let lo_s = lower_scalar_literal(lo)?;
-            let hi_s = lower_scalar_literal(hi)?;
+            let lo_s = lower_scalar_literal(lo, &view.return_ty)?;
+            let hi_s = lower_scalar_literal(hi, &view.return_ty)?;
             writeln!(out, "                let updated = updated.clamp({lo_s}, {hi_s});").unwrap();
         }
         writeln!(out, "                self.value.insert(key, (updated, tick));").unwrap();
@@ -2164,8 +2350,8 @@ fn emit_fold_arm(
         .unwrap();
         writeln!(out, "                let updated = prev + amount;").unwrap();
         if let Some((lo, hi)) = clamp {
-            let lo_s = lower_scalar_literal(lo)?;
-            let hi_s = lower_scalar_literal(hi)?;
+            let lo_s = lower_scalar_literal(lo, &view.return_ty)?;
+            let hi_s = lower_scalar_literal(hi, &view.return_ty)?;
             writeln!(out, "                let updated = updated.clamp({lo_s}, {hi_s});").unwrap();
         }
         writeln!(out, "                self.value.insert(key, updated);").unwrap();
@@ -2370,13 +2556,24 @@ fn maybe_paren(s: &str) -> String {
 /// Lower a scalar literal (int / float / simple negation) to its Rust
 /// form. Used for `initial:` and `clamp:` bounds that the pair-map
 /// emission wants as compile-time constants.
-fn lower_scalar_literal(e: &IrExprNode) -> Result<String, EmitError> {
+/// Lower a numeric literal (possibly wrapped in a leading `-`) into a Rust
+/// literal whose textual form matches `target_ty`. For the default `f32`
+/// path, the output is byte-identical to the pre-type-aware behaviour so
+/// existing `@symmetric_pair_topk(-> f32)` / `@per_entity_topk(-> f32)`
+/// views emit unchanged Rust.
+///
+/// Float literals dropped into integer contexts are rejected with
+/// `Unsupported` — we don't silently truncate because the precision loss
+/// is too subtle to catch during review, and the sim's integer views
+/// (`standing: i32`, future `*_u32` views) should carry integer
+/// literals by construction.
+fn lower_scalar_literal(e: &IrExprNode, target_ty: &IrType) -> Result<String, EmitError> {
     match &e.kind {
-        IrExpr::LitFloat(v) => Ok(render_float(*v)),
-        IrExpr::LitInt(v) => Ok(format!("{v}.0")),
+        IrExpr::LitFloat(v) => lower_scalar_float(*v, target_ty),
+        IrExpr::LitInt(v) => lower_scalar_int(*v, target_ty),
         IrExpr::Unary(UnOp::Neg, inner) => match &inner.kind {
-            IrExpr::LitFloat(v) => Ok(render_float(-(*v))),
-            IrExpr::LitInt(v) => Ok(format!("-{v}.0")),
+            IrExpr::LitFloat(v) => lower_scalar_float(-(*v), target_ty),
+            IrExpr::LitInt(v) => lower_scalar_int(-(*v), target_ty),
             _ => Err(EmitError::Unsupported(
                 "scalar-literal position expects a numeric literal".into(),
             )),
@@ -2384,6 +2581,86 @@ fn lower_scalar_literal(e: &IrExprNode) -> Result<String, EmitError> {
         _ => Err(EmitError::Unsupported(
             "scalar-literal position expects a numeric literal".into(),
         )),
+    }
+}
+
+fn lower_scalar_float(v: f64, target_ty: &IrType) -> Result<String, EmitError> {
+    match target_ty {
+        IrType::F32 | IrType::F64 => Ok(render_float(v)),
+        IrType::I32 | IrType::U32 | IrType::I16 | IrType::U16 | IrType::I8 | IrType::U8
+        | IrType::I64 | IrType::U64 => Err(EmitError::Unsupported(format!(
+            "float literal `{v}` cannot appear in an integer-typed ({target_ty:?}) scalar position — lossy conversions must be explicit"
+        ))),
+        _ => Err(EmitError::Unsupported(format!(
+            "scalar literal target type {target_ty:?} not supported in view emission"
+        ))),
+    }
+}
+
+fn lower_scalar_int(v: i64, target_ty: &IrType) -> Result<String, EmitError> {
+    match target_ty {
+        // Byte-identical to the legacy `format!("{v}.0")` output for any
+        // sign/magnitude — `render_float(v as f64)` re-renders the same
+        // canonical form we used before the type-awareness refactor.
+        IrType::F32 | IrType::F64 => Ok(format!("{v}.0")),
+        IrType::I32 => Ok(format!("{v}")),
+        IrType::I64 => Ok(format!("{v}i64")),
+        IrType::I16 => {
+            if v < i16::MIN as i64 || v > i16::MAX as i64 {
+                return Err(EmitError::Unsupported(format!(
+                    "integer literal `{v}` out of range for i16"
+                )));
+            }
+            Ok(format!("{v}i16"))
+        }
+        IrType::I8 => {
+            if v < i8::MIN as i64 || v > i8::MAX as i64 {
+                return Err(EmitError::Unsupported(format!(
+                    "integer literal `{v}` out of range for i8"
+                )));
+            }
+            Ok(format!("{v}i8"))
+        }
+        IrType::U32 => {
+            if v < 0 {
+                return Err(EmitError::Unsupported(format!(
+                    "negative integer literal `{v}` cannot appear in a u32 context"
+                )));
+            }
+            if v > u32::MAX as i64 {
+                return Err(EmitError::Unsupported(format!(
+                    "integer literal `{v}` out of range for u32"
+                )));
+            }
+            Ok(format!("{v}u32"))
+        }
+        IrType::U64 => {
+            if v < 0 {
+                return Err(EmitError::Unsupported(format!(
+                    "negative integer literal `{v}` cannot appear in a u64 context"
+                )));
+            }
+            Ok(format!("{v}u64"))
+        }
+        IrType::U16 => {
+            if v < 0 || v > u16::MAX as i64 {
+                return Err(EmitError::Unsupported(format!(
+                    "integer literal `{v}` out of range for u16"
+                )));
+            }
+            Ok(format!("{v}u16"))
+        }
+        IrType::U8 => {
+            if v < 0 || v > u8::MAX as i64 {
+                return Err(EmitError::Unsupported(format!(
+                    "integer literal `{v}` out of range for u8"
+                )));
+            }
+            Ok(format!("{v}u8"))
+        }
+        _ => Err(EmitError::Unsupported(format!(
+            "scalar literal target type {target_ty:?} not supported in view emission"
+        ))),
     }
 }
 
