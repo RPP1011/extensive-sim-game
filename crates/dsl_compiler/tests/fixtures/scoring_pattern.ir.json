@@ -373,6 +373,7 @@
           }
         }
       ],
+      "per_ability_rows": [],
       "annotations": [],
       "span": {
         "start": 143,

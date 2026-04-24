@@ -1226,15 +1226,31 @@ fn scoring_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> P
     c.skip_ws();
     expect_char(c, '{').map_err(|e| e.with_context("parsing scoring block `{`"))?;
     let mut entries = Vec::new();
+    let mut per_ability_rows = Vec::new();
     loop {
         c.skip_ws();
         if c.starts_with_char('}') {
             c.bump(1);
             break;
         }
+        // `row <name> per_ability { ... }` — new per-ability scoring
+        // row (GPU ability evaluation Phase 2). A leading `row`
+        // keyword is the disambiguator vs. the legacy `Head = expr`
+        // entry shape. Existing scoring files never use `row` as an
+        // action head (action heads start with uppercase letters), so
+        // the keyword check has no ambiguity.
+        if starts_with_keyword(c, "row") {
+            per_ability_rows.push(parse_per_ability_row(c)?);
+            continue;
+        }
         entries.push(parse_scoring_entry(c)?);
     }
-    Ok(ScoringDecl { annotations, entries, span: Span::new(start, c.pos) })
+    Ok(ScoringDecl {
+        annotations,
+        entries,
+        per_ability_rows,
+        span: Span::new(start, c.pos),
+    })
 }
 
 fn parse_scoring_entry(c: &mut Cursor) -> PResult<ScoringEntry> {
@@ -1245,6 +1261,95 @@ fn parse_scoring_entry(c: &mut Cursor) -> PResult<ScoringEntry> {
     c.skip_ws();
     let expr = parse_expr(c)?;
     Ok(ScoringEntry { head, expr, span: Span::new(start, c.pos) })
+}
+
+/// Parse a `row <name> per_ability { guard: ..., score: ..., target: ... }`
+/// row. Three clauses — `guard` and `target` are optional, `score` is
+/// required. Order is not pinned; each clause is keyed by its identifier
+/// and followed by `:`.
+///
+/// Added 2026-04-23 (GPU ability evaluation subsystem Phase 2). See
+/// `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`.
+fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
+    let start = c.pos;
+    expect_keyword(c, "row").map_err(|e| e.with_context("parsing `row` keyword"))?;
+    let name = ident(c).map_err(|e| e.with_context("parsing per_ability row name"))?;
+    c.skip_ws();
+    expect_keyword(c, "per_ability")
+        .map_err(|e| e.with_context("parsing `per_ability` row kind"))?;
+    c.skip_ws();
+    expect_char(c, '{').map_err(|e| e.with_context("parsing per_ability row `{`"))?;
+    let mut guard: Option<Expr> = None;
+    let mut score: Option<Expr> = None;
+    let mut target: Option<Expr> = None;
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        let clause = ident(c).map_err(|e| e.with_context("parsing per_ability clause name"))?;
+        c.skip_ws();
+        expect_char(c, ':').map_err(|e| e.with_context("parsing per_ability clause `:`"))?;
+        c.skip_ws();
+        let expr = parse_expr(c)?;
+        match clause.as_str() {
+            "guard" => {
+                if guard.is_some() {
+                    return Err(ParseErr::at(
+                        here(c),
+                        "duplicate `guard:` clause in per_ability row",
+                    ));
+                }
+                guard = Some(expr);
+            }
+            "score" => {
+                if score.is_some() {
+                    return Err(ParseErr::at(
+                        here(c),
+                        "duplicate `score:` clause in per_ability row",
+                    ));
+                }
+                score = Some(expr);
+            }
+            "target" => {
+                if target.is_some() {
+                    return Err(ParseErr::at(
+                        here(c),
+                        "duplicate `target:` clause in per_ability row",
+                    ));
+                }
+                target = Some(expr);
+            }
+            other => {
+                return Err(ParseErr::at(
+                    here(c),
+                    format!(
+                        "unknown per_ability clause `{other}`; \
+                         expected `guard`, `score`, or `target`"
+                    ),
+                ));
+            }
+        }
+        // Optional trailing comma between clauses.
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+        }
+    }
+    let Some(score) = score else {
+        return Err(ParseErr::at(
+            Span::new(start, c.pos),
+            "per_ability row must include a `score:` clause",
+        ));
+    };
+    Ok(PerAbilityRow {
+        name,
+        guard,
+        score,
+        target,
+        span: Span::new(start, c.pos),
+    })
 }
 
 // ---------------------------------------------------------------------------

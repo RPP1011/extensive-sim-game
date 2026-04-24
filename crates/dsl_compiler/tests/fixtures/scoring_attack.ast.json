@@ -452,6 +452,7 @@
             }
           }
         ],
+        "per_ability_rows": [],
         "span": {
           "start": 38,
           "end": 296

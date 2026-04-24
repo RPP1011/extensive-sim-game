@@ -447,7 +447,17 @@ pub struct VerbAction {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ScoringDecl {
     pub annotations: Vec<Annotation>,
+    /// Standard per-agent rows: `Head = expression`. Each entry scores
+    /// one (agent, action) pair.
     pub entries: Vec<ScoringEntry>,
+    /// `row <name> per_ability { guard: ..., score: ..., target: ... }`
+    /// rows. The scoring kernel iterates each agent's ability slots and
+    /// produces one score per (agent, ability) pair. Added 2026-04-23
+    /// (GPU ability evaluation Phase 2). Kept as a sibling list rather
+    /// than folded into `entries` so legacy emitters that walk `entries`
+    /// stay untouched — Phase 3 wires a dedicated CPU lowering for the
+    /// `PerAbilityRow` shape.
+    pub per_ability_rows: Vec<PerAbilityRow>,
     pub span: Span,
 }
 
@@ -455,6 +465,29 @@ pub struct ScoringDecl {
 pub struct ScoringEntry {
     pub head: ActionHead,
     pub expr: Expr,
+    pub span: Span,
+}
+
+/// A `per_ability` scoring row: `row <name> per_ability { ... }`.
+///
+/// The row's three clauses:
+/// * `guard:` — boolean predicate evaluated per (agent, ability). When
+///   the guard is false the ability is skipped (does not compete for
+///   argmax). Optional; default is `true`.
+/// * `score:` — f32 scoring expression. The argmax over every ability
+///   whose guard passes is the ability the agent casts this tick.
+/// * `target:` — agent-id expression resolving to the cast target for
+///   the selected ability. Optional at parse time; Phase 3 may require
+///   it when lowering.
+///
+/// See `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`
+/// §Architecture.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PerAbilityRow {
+    pub name: String,
+    pub guard: Option<Expr>,
+    pub score: Expr,
+    pub target: Option<Expr>,
     pub span: Span,
 }
 

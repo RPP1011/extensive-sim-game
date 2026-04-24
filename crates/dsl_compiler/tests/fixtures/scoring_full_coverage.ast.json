@@ -663,6 +663,7 @@
             }
           }
         ],
+        "per_ability_rows": [],
         "span": {
           "start": 435,
           "end": 1043

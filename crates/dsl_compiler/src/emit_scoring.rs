@@ -1453,6 +1453,7 @@ mod tests {
                     span: span(),
                 },
             ],
+            per_ability_rows: vec![],
             annotations: vec![],
             span: span(),
         };

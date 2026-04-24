@@ -1964,7 +1964,20 @@ fn collect_locals_in_expr(
         | IrExpr::Namespace(_)
         | IrExpr::NamespaceField { .. }
         | IrExpr::EnumVariant { .. }
+        // GPU ability evaluation Phase 2 — scoring-only primitives.
+        // View fold bodies never see them (the fold-body walker above
+        // rejects them first), but the walker lists every variant
+        // explicitly so adding a new one forces a compile-time
+        // decision here.
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
         | IrExpr::Raw(_) => {}
+        // `AbilityOnCooldown` carries a nested slot expression; walk
+        // it to stay consistent with the walker's exhaustive contract
+        // even though fold bodies would reject it upstream.
+        IrExpr::AbilityOnCooldown(slot) => collect_locals_in_expr(slot, out),
     }
 }
 
