@@ -851,6 +851,10 @@ impl GpuBackend {
         self.snapshot.snapshot_chronicle_ring_read = 0;
 
         let agent_cap = state.agent_cap();
+        // Stage B.1 — capture the iter_cap used on the final tick so
+        // the end-of-batch sanity check can compare the last tick's
+        // per-iter counts against it. `None` iff n_ticks == 0.
+        let mut last_iter_cap_used: Option<u32> = None;
         for _ in 0..n_ticks {
             // Split-borrow: need `&` to `resident_agents_buf` plus
             // `&mut` to `fused_unpack_kernel` (and later `&mut` to
@@ -1081,6 +1085,10 @@ impl GpuBackend {
                 }
                 None => iter_cap_from_batch,
             };
+            // Remember for the end-of-batch sanity check so we can
+            // compare the final tick's per-iter counts against the cap
+            // that was actually recorded.
+            last_iter_cap_used = Some(iter_cap);
             let sim_cfg_ref = sim_cfg_buf
                 .as_ref()
                 .expect("sim_cfg_buf ensured by ensure_resident_init");
@@ -1158,23 +1166,24 @@ impl GpuBackend {
                     let observed = crate::cascade_resident::CascadeResidentCtx
                         ::observed_last_active_iter(&counts);
                     resident_ctx.batch_observed_max_iters = observed;
-                    // Final-iter sanity: counts[MAX] is the write slot
-                    // of the last iter's epilogue. If the cap matched
-                    // `observed` exactly (i.e. we truncated at the
-                    // boundary) that's fine; but if the cap bottomed
-                    // out at a low value AND the last recorded iter
-                    // still had substantial pending events, log.
+                    // Truncation sanity: counts[cap] is the write slot
+                    // of iter (cap-1)'s epilogue. If the cascade
+                    // genuinely needed MORE iters than the cap, that
+                    // slot will have a nonzero event count (events the
+                    // next — un-recorded — iter would have read).
+                    // Log (not panic) so operators catch workload
+                    // shifts that warrant a larger `+2` margin.
                     const DROP_WARN_THRESHOLD: u32 = 10;
-                    let cap_idx = counts.len().saturating_sub(1);
-                    if let Some(&tail_ct) = counts.get(cap_idx) {
-                        if tail_ct >= DROP_WARN_THRESHOLD
-                            && observed == crate::cascade::MAX_CASCADE_ITERATIONS
-                        {
-                            eprintln!(
-                                "engine_gpu::step_batch: final iter num_events={tail_ct} \
-                                 (cascade may have needed >{} iters)",
-                                crate::cascade::MAX_CASCADE_ITERATIONS
-                            );
+                    if let Some(cap) = last_iter_cap_used {
+                        let cap_idx = cap as usize;
+                        if let Some(&tail_ct) = counts.get(cap_idx) {
+                            if tail_ct >= DROP_WARN_THRESHOLD {
+                                eprintln!(
+                                    "engine_gpu::step_batch: cascade truncated — \
+                                     iter_cap={cap} but num_events[{cap_idx}]={tail_ct} \
+                                     (>= {DROP_WARN_THRESHOLD}); observed_for_next_batch={observed}"
+                                );
+                            }
                         }
                     }
                 }
