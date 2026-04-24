@@ -1499,6 +1499,15 @@ fn lower_namespace_call(
         | (NamespaceId::Group, "can_afford_from_treasury") => Err(EmitError::Unsupported(format!(
             "groups primitive `group::{method}` pending runtime impl"
         ))),
+        // ----------------------------------------------------------------
+        // Roadmap §12 — Quests (grammar stub). GPU mirror pending until
+        // the runtime lands. See `docs/superpowers/roadmap.md:811-872`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Quest, "can_accept")
+        | (NamespaceId::Quest, "is_target")
+        | (NamespaceId::Quest, "party_near_destination") => Err(EmitError::Unsupported(format!(
+            "quests primitive `quest::{method}` pending runtime impl"
+        ))),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics WGSL emission",
             ns.name()

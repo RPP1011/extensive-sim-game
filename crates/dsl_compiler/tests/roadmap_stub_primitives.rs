@@ -414,3 +414,70 @@ fn subsystem_7_groups_emit_returns_unsupported_cpu_and_gpu() {
         "GPU emit error msg should cite the groups primitive stub; got: {msg}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Subsystem §12 — Quests (roadmap.md:811-872)
+// ---------------------------------------------------------------------------
+
+const SUBSYSTEM_12_SRC: &str = r#"
+// Stub pattern event carrying bindings for the quest predicates.
+event QuestStubPattern { agent: AgentId, q: QuestId }
+event QuestStubFired { agent: AgentId, q: QuestId }
+
+// `can_accept(agent, q)` + `is_target(agent, q)` compose the
+// intake-gate predicate: agent is both eligible to accept the posting
+// AND listed as the posting's own target entity (a pathological
+// self-quest case, but the 1a grammar doesn't care — all we're
+// testing is that both primitives lift cleanly).
+physics quest_grammar_stub @phase(event) {
+  on QuestStubPattern { agent: a, q: qq } {
+    if quest::can_accept(a, qq) && quest::is_target(a, qq) {
+      emit QuestStubFired { agent: a, q: qq }
+    }
+  }
+}
+"#;
+
+#[test]
+fn subsystem_12_quests_parses_and_resolves_with_ns_call_ir() {
+    let comp = dsl_compiler::compile(SUBSYSTEM_12_SRC)
+        .expect("quest:: primitives must parse + resolve cleanly");
+    assert_methods_resolved(
+        &comp,
+        "quest_grammar_stub",
+        NamespaceId::Quest,
+        &["can_accept", "is_target"],
+    );
+}
+
+#[test]
+fn subsystem_12_quests_emit_returns_unsupported_cpu_and_gpu() {
+    let comp = dsl_compiler::compile(SUBSYSTEM_12_SRC).expect("compile OK");
+    let p = comp
+        .physics
+        .iter()
+        .find(|p| p.name == "quest_grammar_stub")
+        .unwrap();
+
+    let cpu_ctx = CpuCtx { events: &comp.events, event_tags: &comp.event_tags };
+    let cpu = emit_physics(p, None, &cpu_ctx);
+    let msg = match cpu {
+        Err(CpuErr::Unsupported(s)) => s,
+        other => panic!("expected CpuErr::Unsupported, got {other:?}"),
+    };
+    assert!(
+        msg.contains("quests primitive `quest::"),
+        "CPU emit error msg should cite the quests primitive stub; got: {msg}"
+    );
+
+    let gpu_ctx = GpuCtx { events: &comp.events, event_tags: &comp.event_tags };
+    let gpu = emit_physics_wgsl(p, &gpu_ctx);
+    let msg = match gpu {
+        Err(GpuErr::Unsupported(s)) => s,
+        other => panic!("expected GpuErr::Unsupported, got {other:?}"),
+    };
+    assert!(
+        msg.contains("quests primitive `quest::"),
+        "GPU emit error msg should cite the quests primitive stub; got: {msg}"
+    );
+}

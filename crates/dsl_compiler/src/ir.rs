@@ -762,6 +762,15 @@ pub enum NamespaceId {
     /// pre-existing plural `groups` namespace (legacy collection accessor)
     /// is unchanged and continues to resolve independently.
     Group,
+    /// `quest::*` — Subsystem §12 (roadmap.md:811-872). Predicates on the
+    /// `AggregatePool<Quest>` pool. Methods are `can_accept`, `is_target`,
+    /// `party_near_destination`. All return bool. Grammar stub only —
+    /// emitters return `EmitError::Unsupported` until the quests runtime
+    /// lands (Pod shape shipped by Plan 1 T16; instance data pending).
+    ///
+    /// Singular `quest` is distinct from the pre-existing plural
+    /// `quests` (legacy collection accessor).
+    Quest,
 }
 
 impl NamespaceId {
@@ -788,6 +797,7 @@ impl NamespaceId {
             NamespaceId::Relationship => "relationship",
             NamespaceId::TheoryOfMind => "theory_of_mind",
             NamespaceId::Group => "group",
+            NamespaceId::Quest => "quest",
         }
     }
 }

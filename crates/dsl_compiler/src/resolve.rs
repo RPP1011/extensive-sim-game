@@ -124,6 +124,11 @@ mod stdlib {
             // — distinct from the legacy collection accessor `groups`.
             // See `docs/superpowers/roadmap.md:510-574`.
             ("group", NamespaceId::Group),
+            // Roadmap §12 — Quests. Grammar stub (Pod shape exists from
+            // Plan 1 T16; instance data pending). Singular `quest` —
+            // distinct from the legacy collection accessor `quests`.
+            // See `docs/superpowers/roadmap.md:811-872`.
+            ("quest", NamespaceId::Quest),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -467,6 +472,22 @@ mod stdlib {
             (NamespaceId::Group, "has_leader") => Some((1, IrType::Bool)),
             // `can_afford_from_treasury(g, cost)` — `treasury >= cost`.
             (NamespaceId::Group, "can_afford_from_treasury") => Some((2, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Roadmap §12 — Quests. Predicates on the `AggregatePool<Quest>`.
+            // All return bool. `is_target(entity, q)` takes an `AnyId` —
+            // the entity can be an `AgentId` (Hunt kill-target) or a
+            // settlement / location (Escort / Deliver). 1a falls back to
+            // `IrType::Unknown` for the entity arg; TODO: tighten once
+            // Subsystem §12 fixes the entity-kind taxonomy.
+            // See `docs/superpowers/roadmap.md:843-845`.
+            // -------------------------------------------------------------
+            // `can_accept(agent, q)` — checks party capacity + eligibility.
+            (NamespaceId::Quest, "can_accept") => Some((2, IrType::Bool)),
+            // `is_target(entity, q)` — entity is AnyId per above.
+            (NamespaceId::Quest, "is_target") => Some((2, IrType::Bool)),
+            // `party_near_destination(party, q)` — spatial gate on the
+            // party's centroid vs `quest.destination`.
+            (NamespaceId::Quest, "party_near_destination") => Some((2, IrType::Bool)),
             _ => None,
         }
     }
