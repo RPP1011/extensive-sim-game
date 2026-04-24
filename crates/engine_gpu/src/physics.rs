@@ -1200,7 +1200,30 @@ pub struct PhysicsKernel {
 struct ResidentBufferPool {
     agent_cap: u32,
     cfg_buf: wgpu::Buffer,
-    resident_cfg_buf: wgpu::Buffer,
+    /// Per-iteration uniform buffers for `ResidentPhysicsCfg`.
+    /// One buffer per iteration slot (indexed by `read_slot`), with
+    /// its contents written ONCE at pool-creation time and stable
+    /// across every tick in the batch.
+    ///
+    /// **Why one buffer per iteration (not one buffer written N times
+    /// with per-iter offsets or `queue.write_buffer`):** the prior
+    /// implementation wrote a single `resident_cfg_buf` via
+    /// `queue.write_buffer(..., 0, ...)` once per cascade iteration,
+    /// each call with a different `{read_slot, write_slot}` pair.
+    /// `queue.write_buffer` writes to the same byte range COLLAPSE —
+    /// only the last write lands when the submit actually begins, so
+    /// every physics iteration ended up reading the FINAL iteration's
+    /// uniform. That meant iter 0 saw `read_slot=N-1` and read
+    /// `num_events_buf[N-1]` (which is 0), skipping the AgentAttacked
+    /// records at slot 0 and leaving the chronicle ring untouched.
+    /// See `fix(engine_gpu): step_batch chronicle emit — resident_cfg
+    /// uniform queue.write_buffer collapse` for the full diagnosis.
+    ///
+    /// With one buffer per iteration, each iter's bind group
+    /// references a distinct buffer identity — no queue collapse,
+    /// no per-iter uploads either (contents are static because
+    /// `read_slot = iter` and `write_slot = iter + 1`).
+    resident_cfg_bufs: Vec<wgpu::Buffer>,
     /// Last cfg uploaded via `queue.write_buffer(&cfg_buf, ...)`. The
     /// driver calls `run_batch_resident` 8× per tick (cascade
     /// iterations) with the same cfg each time; deduping saves 7 of
@@ -1232,6 +1255,9 @@ struct ResidentBgKey {
     chronicle_tail: wgpu::Buffer,
     indirect_args: wgpu::Buffer,
     num_events: wgpu::Buffer,
+    /// Per-iteration resident_cfg uniform handle — keys the BG cache
+    /// by iteration so iter N doesn't alias iter (N-1)'s cached BG.
+    resident_cfg: wgpu::Buffer,
     /// Task 2.8 — caller-supplied shared `SimCfg` buffer. The backend
     /// holds one resident handle per `GpuBackend`, so this key is
     /// stable across every cascade iteration in a batch (the cache
@@ -1989,20 +2015,52 @@ impl PhysicsKernel {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let resident_cfg_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("engine_gpu::physics::resident::resident_cfg"),
-            size: std::mem::size_of::<ResidentPhysicsCfg>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        // One resident_cfg uniform per iteration slot, pre-populated
+        // with `{read_slot: iter, write_slot: iter + 1}`. Contents are
+        // static across all ticks so we write them once via
+        // `mapped_at_creation` (no queue.write_buffer needed, no
+        // collapse risk). See `ResidentBufferPool::resident_cfg_bufs`
+        // docs for why we can't share a single buffer.
+        let num_slots =
+            (crate::cascade::MAX_CASCADE_ITERATIONS + 1) as usize;
+        let mut resident_cfg_bufs: Vec<wgpu::Buffer> =
+            Vec::with_capacity(num_slots);
+        for iter in 0..num_slots {
+            let cfg = ResidentPhysicsCfg {
+                read_slot: iter as u32,
+                // write_slot is one past read_slot. For the final iter
+                // (read_slot = MAX_CASCADE_ITERATIONS) write_slot would
+                // overflow the num_events / indirect_args buffers if
+                // actually dispatched — but the cascade loop caps at
+                // `iter < max_iters <= MAX_CASCADE_ITERATIONS`, so the
+                // (read_slot = MAX) uniform is never bound. Still, we
+                // allocate the slot so indexing by `read_slot = iter`
+                // is uniform across the loop bounds.
+                write_slot: (iter as u32).saturating_add(1),
+                _pad0: 0,
+                _pad1: 0,
+            };
+            let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu::physics::resident::resident_cfg[i]"),
+                size: std::mem::size_of::<ResidentPhysicsCfg>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: true,
+            });
+            {
+                let mut view = buf.slice(..).get_mapped_range_mut();
+                view.copy_from_slice(bytemuck::bytes_of(&cfg));
+            }
+            buf.unmap();
+            resident_cfg_bufs.push(buf);
+        }
         self.pool_resident = Some(ResidentBufferPool {
             agent_cap: want_agent_cap,
             cfg_buf,
-            resident_cfg_buf,
+            resident_cfg_bufs,
             last_cfg: None,
         });
         // Pool rebuilt — cached resident BGs reference the *old*
-        // pool.cfg_buf / pool.resident_cfg_buf, so drop them.
+        // pool.cfg_buf / pool.resident_cfg_bufs, so drop them.
         // Repopulated lazily on next run_batch_resident call.
         self.resident_bg_cache.clear();
     }
@@ -2100,21 +2158,31 @@ impl PhysicsKernel {
                 pool_mut.last_cfg = Some(cfg);
             }
         }
-        let resident_cfg = ResidentPhysicsCfg {
-            read_slot,
-            write_slot,
-            _pad0: 0,
-            _pad1: 0,
-        };
         let pool = self
             .pool_resident
             .as_ref()
             .expect("resident pool ensured");
-        queue.write_buffer(
-            &pool.resident_cfg_buf,
-            0,
-            bytemuck::bytes_of(&resident_cfg),
+        // Sanity: write_slot must be read_slot + 1 — the pool
+        // pre-populated `resident_cfg_bufs[i]` with
+        // `{read_slot: i, write_slot: i+1}`, so off-by-one callers
+        // would silently bind the wrong iter's uniform.
+        debug_assert_eq!(
+            write_slot,
+            read_slot.saturating_add(1),
+            "run_batch_resident: write_slot must equal read_slot+1; got \
+             read_slot={read_slot} write_slot={write_slot}"
         );
+        let resident_cfg_buf = pool
+            .resident_cfg_bufs
+            .get(read_slot as usize)
+            .ok_or_else(|| {
+                PhysicsError::Dispatch(format!(
+                    "read_slot {} exceeds pre-allocated resident_cfg_bufs slots ({})",
+                    read_slot,
+                    pool.resident_cfg_bufs.len()
+                ))
+            })?
+            .clone();
 
         // Cache the bind group. Across 8 cascade iterations per tick
         // the caller drives us with at most 3 distinct buffer tuples
@@ -2140,6 +2208,11 @@ impl PhysicsKernel {
             num_events: num_events_buf.clone(),
             sim_cfg: sim_cfg_buf.clone(),
             gold_buf: gold_buf.clone(),
+            // Per-iteration resident_cfg uniform — distinct identity
+            // per iter so each iter gets its own cached BG rather than
+            // aliasing the previous iter's (which would silently bind
+            // the wrong read_slot).
+            resident_cfg: resident_cfg_buf.clone(),
         };
         let bind_group: &wgpu::BindGroup = self.resident_bg_cache.entry(key).or_insert_with(|| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2208,7 +2281,7 @@ impl PhysicsKernel {
                     },
                     wgpu::BindGroupEntry {
                         binding: 15,
-                        resource: pool.resident_cfg_buf.as_entire_binding(),
+                        resource: resident_cfg_buf.as_entire_binding(),
                     },
                     // Task 2.8 — caller-supplied shared SimCfg buffer.
                     wgpu::BindGroupEntry {

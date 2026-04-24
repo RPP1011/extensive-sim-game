@@ -1530,6 +1530,138 @@ impl GpuBackend {
     pub fn snapshot_event_ring_read_for_test(&self) -> u64 {
         self.snapshot.snapshot_event_ring_read
     }
+
+    /// Test-only accessor: read the resident chronicle ring tail (u32).
+    /// Submits a one-off readback; blocks until mapped. Returns 0 if
+    /// the resident cascade context hasn't been initialised yet.
+    #[doc(hidden)]
+    pub fn chronicle_tail_for_test(&self) -> u32 {
+        let Some(ctx) = self.resident.resident_cascade_ctx.as_ref() else {
+            return 0;
+        };
+        let v: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
+            &self.device,
+            &self.queue,
+            ctx.chronicle_ring().tail_buffer(),
+            4,
+        )
+        .unwrap_or_default();
+        v.first().copied().unwrap_or(0)
+    }
+
+    /// Test-only accessor: read the first `n_records` of the apply event
+    /// ring. Returns the tail value and the records in a tuple.
+    #[doc(hidden)]
+    pub fn apply_event_ring_debug_for_test(
+        &self,
+        n_records: u32,
+    ) -> (u32, Vec<crate::event_ring::EventRecord>) {
+        let Some(cctx) = self.sync.cascade_ctx.as_ref() else {
+            return (0, Vec::new());
+        };
+        let ring = &cctx.apply_event_ring;
+        let tail_v: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
+            &self.device,
+            &self.queue,
+            ring.tail_buffer(),
+            4,
+        )
+        .unwrap_or_default();
+        let tail = tail_v.first().copied().unwrap_or(0);
+        let take = n_records.min(ring.capacity());
+        let bytes = (take as usize) * std::mem::size_of::<crate::event_ring::EventRecord>();
+        let records: Vec<crate::event_ring::EventRecord> = if bytes == 0 {
+            Vec::new()
+        } else {
+            crate::gpu_util::readback::readback_typed::<crate::event_ring::EventRecord>(
+                &self.device,
+                &self.queue,
+                ring.records_buffer(),
+                bytes,
+            )
+            .unwrap_or_default()
+        };
+        (tail, records)
+    }
+
+    /// Test-only accessor: read the first few slots of `num_events_buf`
+    /// from the resident cascade context. Returns `[0; 0]` if the
+    /// resident ctx isn't initialised.
+    #[doc(hidden)]
+    pub fn num_events_buf_for_test(&self, n_slots: u32) -> Vec<u32> {
+        let Some(ctx) = self.resident.resident_cascade_ctx.as_ref() else {
+            return Vec::new();
+        };
+        let bytes = (n_slots as usize) * 4;
+        if bytes == 0 {
+            return Vec::new();
+        }
+        crate::gpu_util::readback::readback_typed::<u32>(
+            &self.device,
+            &self.queue,
+            ctx.num_events_buf_for_test(),
+            bytes,
+        )
+        .unwrap_or_default()
+    }
+
+    /// Test-only accessor: read the first few slots of `indirect_args`.
+    #[doc(hidden)]
+    pub fn indirect_args_for_test(
+        &self,
+        n_slots: u32,
+    ) -> Vec<crate::gpu_util::indirect::IndirectArgs> {
+        let Some(args) = self.resident.resident_indirect_args.as_ref() else {
+            return Vec::new();
+        };
+        let bytes =
+            (n_slots as usize) * std::mem::size_of::<crate::gpu_util::indirect::IndirectArgs>();
+        if bytes == 0 {
+            return Vec::new();
+        }
+        crate::gpu_util::readback::readback_typed::<crate::gpu_util::indirect::IndirectArgs>(
+            &self.device,
+            &self.queue,
+            args.buffer(),
+            bytes,
+        )
+        .unwrap_or_default()
+    }
+
+    /// Test-only accessor: read the first `n_records` of the resident
+    /// chronicle ring's records buffer. Returns (tail, records).
+    #[doc(hidden)]
+    pub fn chronicle_ring_debug_for_test(
+        &self,
+        n_records: u32,
+    ) -> (u32, Vec<crate::snapshot::ChronicleRecord>) {
+        let Some(ctx) = self.resident.resident_cascade_ctx.as_ref() else {
+            return (0, Vec::new());
+        };
+        let ring = ctx.chronicle_ring();
+        let tail_v: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
+            &self.device,
+            &self.queue,
+            ring.tail_buffer(),
+            4,
+        )
+        .unwrap_or_default();
+        let tail = tail_v.first().copied().unwrap_or(0);
+        let take = n_records.min(ring.capacity());
+        let bytes = (take as usize) * std::mem::size_of::<crate::snapshot::ChronicleRecord>();
+        let records: Vec<crate::snapshot::ChronicleRecord> = if bytes == 0 {
+            Vec::new()
+        } else {
+            crate::gpu_util::readback::readback_typed::<crate::snapshot::ChronicleRecord>(
+                &self.device,
+                &self.queue,
+                ring.records_buffer(),
+                bytes,
+            )
+            .unwrap_or_default()
+        };
+        (tail, records)
+    }
 }
 
 #[cfg(feature = "gpu")]

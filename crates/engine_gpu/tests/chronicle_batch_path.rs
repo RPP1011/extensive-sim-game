@@ -8,37 +8,18 @@
 //! ring is copied into `GpuSnapshot::chronicle_since_last` with a
 //! watermark advanced across snapshot calls.
 //!
-//! **Currently `#[ignore]`d** (2026-04-23): these tests uncovered a
-//! pre-existing bug in the `step_batch` event-flow. The resident physics
-//! kernel does not emit chronicle records when run through the full
-//! `GpuBackend::step_batch` path, even though:
-//!
-//!   * The WGSL emitter correctly includes chronicle rules in
-//!     `physics_dispatch` for both sync + resident shaders (Task 2.1 audit).
-//!   * The isolated
-//!     `physics_run_batch_resident_smoke::run_batch_resident_nonzero_input_publishes_next_slot`
-//!     test — when a local harness seeds events_in + num_events and
-//!     directly invokes `PhysicsKernel::run_batch_resident` — DOES emit
-//!     a chronicle_attack record (verified 2026-04-23 via ad-hoc drain).
-//!   * During `step_batch` the cascade's per-tick flow is:
-//!     apply_actions.run_resident → append_events → seed_kernel → physics
-//!     iter 0..N. Empirically, after `step_batch(5)` with Human+Wolf
-//!     producing 8 AgentAttacked events (visible in batch_events_ring)
-//!     plus seed kernel setting num_events[0]=1 + indirect_args[0]=(1,1,1),
-//!     the resident chronicle_ring tail stays 0 and records[0..4]
-//!     are all zeros.
-//!
-//! The diagnostic rules out: bind-group wrong buffer (verified the
-//! physics kernel DOES write to the caller-supplied chronicle_ring in
-//! isolation); sim_cfg.tick staleness (GPU tick advances 1→6 correctly);
-//! cascade falling back to sync (sync chronicle tail stays at warmup's
-//! 2 across step_batch); bind-group layout mismatch (pipeline creation
-//! passes validation scope). The bug is SOMEWHERE in the apply_event_ring →
-//! events_in binding flow specifically on the resident/batch path.
-//!
-//! Re-enable these tests once the underlying step_batch physics emit
-//! bug is root-caused and fixed. They are kept in-tree as a regression
-//! guard and canary for when that fix lands.
+//! **History (2026-04-23):** these tests caught a queue.write_buffer
+//! aliasing bug on the resident path. `PhysicsKernel::run_batch_resident`
+//! was writing the per-iteration `ResidentPhysicsCfg` uniform via
+//! `queue.write_buffer(&pool.resident_cfg_buf, 0, ...)` once per
+//! cascade iteration, each call at the same byte range. wgpu collapses
+//! back-to-back `queue.write_buffer` calls on the same region before
+//! submit: only the final write survives. Every physics iteration
+//! therefore saw `resident_cfg = {read_slot: max_iters-1, ...}`,
+//! indexed `num_events_buf[max_iters-1]` (which is 0), and skipped
+//! `physics_dispatch(...)` → no chronicle emits. Fix: allocate one
+//! `resident_cfg` uniform buffer per iteration slot, pre-populated
+//! at pool creation time. Bound by `read_slot` in `run_batch_resident`.
 
 #![cfg(feature = "gpu")]
 
@@ -83,7 +64,6 @@ fn build_fight_state() -> SimState {
 /// surface as a `ChronicleRecord { template_id = 2, .. }` in the
 /// observer's `chronicle_since_last` slice.
 #[test]
-#[ignore = "pending fix for step_batch physics chronicle-emit bug — see file-level doc"]
 fn chronicle_attack_fires_on_batch_path() {
     let mut gpu = GpuBackend::new().expect("gpu init");
     let mut state = build_fight_state();
@@ -187,7 +167,6 @@ fn chronicle_attack_fires_on_batch_path() {
 /// Shape mirrors the existing
 /// `snapshots_do_not_drop_or_duplicate_events` test for the event ring.
 #[test]
-#[ignore = "pending fix for step_batch physics chronicle-emit bug — see file-level doc"]
 fn chronicle_watermark_advances_across_snapshots() {
     let mut gpu = GpuBackend::new().expect("gpu init");
     let mut state = build_fight_state();
