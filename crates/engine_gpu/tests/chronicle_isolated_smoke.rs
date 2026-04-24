@@ -194,6 +194,18 @@ fn run_batch_resident_emits_chronicle_on_attacked() {
         mapped_at_creation: false,
     });
 
+    // Alive bitmap: all alive.
+    let alive_bitmap_buf =
+        engine_gpu::alive_bitmap::create_alive_bitmap_buffer(&device, agent_cap);
+    {
+        let words = engine_gpu::alive_bitmap::alive_bitmap_words(agent_cap) as usize;
+        let mut packed = vec![0u32; words.max(1)];
+        for slot in 0..agent_cap as usize {
+            packed[slot >> 5] |= 1u32 << (slot & 31);
+        }
+        queue.write_buffer(&alive_bitmap_buf, 0, bytemuck::cast_slice(&packed));
+    }
+
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("probe::encoder"),
     });
@@ -205,6 +217,7 @@ fn run_batch_resident_emits_chronicle_on_attacked() {
         &indirect, &num_events_buf, &sim_cfg_buf, &gold_buf,
         &standing_records_buf, &standing_counts_buf,
         &memory_records_buf, &memory_cursors_buf,
+        &alive_bitmap_buf,
         0, 1, cfg,
     ).expect("run_batch_resident");
     queue.submit(Some(encoder.finish()));

@@ -166,6 +166,14 @@ pub mod snapshot;
 #[cfg(feature = "gpu")]
 pub mod gpu_profiling;
 
+/// Per-tick alive bitmap — packed `array<u32>` with one bit per agent
+/// slot. Written once at the top of each batch tick by the pack kernel;
+/// read by mask / scoring / physics kernels at binding slot 22 to avoid
+/// the 64-byte cacheline read that a direct `agents[x].alive` field
+/// access costs. See `alive_bitmap::ALIVE_BITMAP_BINDING`.
+#[cfg(feature = "gpu")]
+pub mod alive_bitmap;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
@@ -275,6 +283,8 @@ pub enum GpuInitError {
     /// Phase 6d view storage init failed — fold shader compile / buffer
     /// allocation.
     ViewStorage(view_storage::ViewStorageError),
+    /// Alive-bitmap pack kernel init failed — WGSL compile.
+    AliveBitmap(alive_bitmap::AliveBitmapError),
 }
 
 #[cfg(feature = "gpu")]
@@ -286,6 +296,7 @@ impl std::fmt::Display for GpuInitError {
             GpuInitError::Kernel(e) => write!(f, "kernel init: {e}"),
             GpuInitError::Scoring(e) => write!(f, "scoring init: {e}"),
             GpuInitError::ViewStorage(e) => write!(f, "view_storage init: {e}"),
+            GpuInitError::AliveBitmap(e) => write!(f, "alive_bitmap init: {e}"),
         }
     }
 }
@@ -311,6 +322,13 @@ impl From<scoring::ScoringError> for GpuInitError {
 impl From<view_storage::ViewStorageError> for GpuInitError {
     fn from(e: view_storage::ViewStorageError) -> Self {
         GpuInitError::ViewStorage(e)
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl From<alive_bitmap::AliveBitmapError> for GpuInitError {
+    fn from(e: alive_bitmap::AliveBitmapError) -> Self {
+        GpuInitError::AliveBitmap(e)
     }
 }
 
@@ -484,6 +502,7 @@ impl GpuBackend {
         let mask_unpack_kernel = mask::MaskUnpackKernel::new(&device)?;
         let scoring_unpack_kernel = scoring::ScoringUnpackKernel::new(&device)?;
         let fused_unpack_kernel = mask::FusedAgentUnpackKernel::new(&device)?;
+        let alive_pack_kernel = alive_bitmap::AlivePackKernel::new(&device)?;
 
         let sync = crate::backend::SyncPathContext::new(
             mask_kernel,
@@ -496,6 +515,7 @@ impl GpuBackend {
             mask_unpack_kernel,
             scoring_unpack_kernel,
             fused_unpack_kernel,
+            alive_pack_kernel,
         );
         // Perf Stage A.1 — allocate the timestamp profiler up front.
         // Disabled-mode profiler (no QuerySet alloc) when the adapter
@@ -969,6 +989,8 @@ impl GpuBackend {
                 gold_buf,
                 standing_storage,
                 memory_storage,
+                alive_bitmap_buf,
+                alive_pack_kernel,
                 fused_unpack_kernel,
                 profiler,
                 ..
@@ -1003,6 +1025,25 @@ impl GpuBackend {
                     agent_cap,
                 )
                 .expect("fused unpack dispatch");
+
+            // 1b. Alive bitmap pack: one thread per u32 word scans 32
+            //     agent slots' `alive` fields and writes the packed
+            //     word. Dispatched before mask/scoring so every
+            //     downstream reader (bound at BGL slot 22) sees the
+            //     tick-start alive state. Non-atomic writes — each
+            //     thread owns its output word.
+            let alive_bitmap_ref = alive_bitmap_buf
+                .as_ref()
+                .expect("alive_bitmap_buf ensured by ensure_resident_init");
+            alive_pack_kernel.encode_pack(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                agents_buf,
+                alive_bitmap_ref,
+                agent_cap,
+            );
+
             let mask_sim_cfg_ref = sim_cfg_buf
                 .as_ref()
                 .expect("sim_cfg_buf ensured by ensure_resident_init");
@@ -1015,7 +1056,10 @@ impl GpuBackend {
             // kernel. When the var is set the mask kernel splits into
             // 3 sub-dispatches each bookended by a profiler mark,
             // letting the perf test attribute GPU-µs to self-only /
-            // MoveToward / Attack sub-phases.
+            // MoveToward / Attack sub-phases. NOTE: the split path
+            // uses its own hardcoded SPLIT_MASK_WGSL and does NOT
+            // bind alive_bitmap — it's measurement-only and doesn't
+            // need to reflect the bitmap optimization.
             let split_mask = split_mask_measure_enabled();
             if split_mask {
                 self.sync
@@ -1039,6 +1083,7 @@ impl GpuBackend {
                         &mut encoder,
                         agents_buf,
                         mask_sim_cfg_ref,
+                        alive_bitmap_ref,
                         agent_cap,
                     )
                     .expect("mask resident dispatch");
@@ -1060,6 +1105,7 @@ impl GpuBackend {
                     agents_buf,
                     self.sync.mask_kernel.mask_bitmaps_buf(),
                     mask_sim_cfg_ref,
+                    alive_bitmap_ref,
                     agent_cap,
                 )
                 .expect("scoring resident dispatch");
@@ -1258,6 +1304,7 @@ impl GpuBackend {
                 &standing_ref.counts_buf,
                 &memory_ref.records_buf,
                 &memory_ref.cursors_buf,
+                alive_bitmap_ref,
                 iter_cap,
                 profiler.as_mut(),
             )
@@ -1563,6 +1610,23 @@ impl GpuBackend {
             });
             self.resident.memory_storage = Some(storage);
             self.resident.memory_storage_cap = agent_cap;
+        }
+
+        // --- Alive bitmap (per-tick packed alive array) -------------------
+        // One bit per agent slot, packed into `ceil(agent_cap / 32)` u32
+        // words. Written once at the top of each `step_batch` tick by
+        // `alive_pack_kernel`; read by mask / scoring / physics kernels
+        // at binding slot 22. Allocated on first call + grown when
+        // `agent_cap` grows. Zero-initialised by wgpu — the pack kernel
+        // overwrites every word before any consumer runs.
+        let need_alive_alloc = match &self.resident.alive_bitmap_buf {
+            Some(_) => self.resident.alive_bitmap_cap < agent_cap,
+            None => true,
+        };
+        if need_alive_alloc {
+            let buf = crate::alive_bitmap::create_alive_bitmap_buffer(&self.device, agent_cap);
+            self.resident.alive_bitmap_buf = Some(buf);
+            self.resident.alive_bitmap_cap = agent_cap;
         }
 
         // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`

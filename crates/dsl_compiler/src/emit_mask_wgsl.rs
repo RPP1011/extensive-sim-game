@@ -683,8 +683,16 @@ fn lower_namespace_call(
                     "agents.alive expects 1 arg".into(),
                 ));
             }
-            // `alive[id]` — stored as u32 { 0, 1 }. Compare to 1u.
-            Ok(format!("(agent_alive[{}] != 0u)", lowered[0]))
+            // Alive-bitmap lowering — `alive_bit(slot)` reads a single
+            // bit from the per-tick bitmap at binding slot 22 instead
+            // of the 4 B `agent_alive[slot]` SoA load. Same asymptotic
+            // cost here (both L1-resident u32 reads), but stays
+            // consistent with the physics emitter's lowering. The
+            // hardcoded self / target alive checks in the fused
+            // kernel's prelude + candidate loop are left as direct
+            // `agent_alive[...]` reads per the task's "keep changes
+            // localized" constraint.
+            Ok(format!("alive_bit({})", lowered[0]))
         }
         _ => Err(EmitError::Unsupported(format!(
             "Phase 1 WGSL: stdlib call `{}.{method}` not supported",
@@ -966,6 +974,25 @@ fn emit_masks_wgsl_fused_result(masks: &[MaskIR]) -> Result<FusedMaskModule, Emi
     let sim_cfg_binding = config_binding + 1;
     emit_sim_cfg_struct_wgsl(&mut out, sim_cfg_binding);
 
+    // Per-tick alive bitmap at slot 22 (matches physics + scoring
+    // BGLs). Used by the DSL-lowered `agents.alive(x)` call via
+    // `alive_bit(slot)`. The hardcoded self / target alive gates in
+    // the fused kernel's prelude + candidate loops continue to read
+    // `agent_alive[...]` directly — the bitmap binding is here so
+    // any DSL-level `agents.alive` call in a predicate has a working
+    // lookup helper.
+    writeln!(
+        out,
+        "@group(0) @binding(22) var<storage, read> alive_bitmap: array<u32>;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "fn alive_bit(slot: u32) -> bool {{ return ((alive_bitmap[slot >> 5u] >> (slot & 31u)) & 1u) != 0u; }}"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
+
     // Helpers — identical to the per-mask module.
     emit_helpers(&mut out);
 
@@ -986,14 +1013,85 @@ fn emit_masks_wgsl_fused_result(masks: &[MaskIR]) -> Result<FusedMaskModule, Emi
     writeln!(out, "    let bit_shift = self_id % 32u;").unwrap();
     writeln!(out).unwrap();
 
-    // Emit one nested block per mask — each block computes its own
-    // `found` and writes into its own bitmap. The shared prelude
-    // (self_pos, self_ct, word_idx) is hoisted once.
+    // Emit per-mask bodies. Self-only + lone target-bound masks keep
+    // the per-mask shape (loop-each or self-only) that the single-kernel
+    // emitter produces. Target-bound masks that share a spatial query
+    // source (currently `agents.pos(self)` — the only pos source the v1
+    // emitter accepts) fuse into one candidate iteration: the emitter
+    // walks the wider radius exactly once and writes each mask's bit
+    // inline. Attack's 2 m candidate set is a subset of MoveToward's
+    // 20 m list, so the Attack probe no longer re-walks hash cells that
+    // MoveToward already touched — the shared loop produces both bits.
+    //
+    // Grouping is keyed by `spatial_source_key` — any future per-mask
+    // `from` variant (e.g. `pos(other)` as the probe origin) automatically
+    // stays in its own group and falls back to the per-mask shape.
     let wgsl_target_name = "wgsl_target".to_string();
-    for (idx, (mask_idx, shape)) in classified.iter().enumerate() {
+
+    // Partition target-bound masks by spatial source. Self-only masks
+    // never fuse (no candidate loop to share), so they go straight to
+    // the per-mask path below. A fused group emerges when ≥ 2
+    // target-bound masks land in the same source bucket.
+    let mut target_groups: Vec<(SpatialSourceKey, Vec<usize>)> = Vec::new();
+    for (pos_in_classified, (_mask_idx, shape)) in classified.iter().enumerate() {
+        if let MaskShape::AgentTarget { .. } = shape {
+            let key = SpatialSourceKey::SelfNearbyAgents;
+            if let Some(slot) = target_groups.iter_mut().find(|(k, _)| *k == key) {
+                slot.1.push(pos_in_classified);
+            } else {
+                target_groups.push((key, vec![pos_in_classified]));
+            }
+        }
+    }
+
+    // Pre-compute which classified positions are in a fused group of ≥ 2.
+    // Singletons (group of 1) fall back to the old per-mask emission so
+    // the byte-output stays identical for callers that pass only one
+    // target-bound mask.
+    let mut fused_positions: std::collections::BTreeSet<usize> = Default::default();
+    for (_key, members) in &target_groups {
+        if members.len() >= 2 {
+            for p in members {
+                fused_positions.insert(*p);
+            }
+        }
+    }
+
+    // Walk classified in order so the per-mask comment/emission order
+    // matches the binding order (index in `bindings`). For fused
+    // positions we emit the fused group block on the first occurrence
+    // and skip the others.
+    let mut emitted_groups: std::collections::BTreeSet<SpatialSourceKey> = Default::default();
+    for (pos_in_classified, (mask_idx, shape)) in classified.iter().enumerate() {
         let mask = &masks[*mask_idx];
         let snake = snake_case(&mask.head.name);
-        writeln!(out, "    // ---- mask {} (#{}) ----", mask.head.name, idx).unwrap();
+
+        if fused_positions.contains(&pos_in_classified) {
+            // Emit the fused group exactly once, at the first member's
+            // position — preserves binding-order stability while letting
+            // later group members skip their per-mask block.
+            let key = SpatialSourceKey::SelfNearbyAgents;
+            if emitted_groups.contains(&key) {
+                continue;
+            }
+            let group_members: &[usize] = target_groups
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.as_slice())
+                .expect("fused group must exist");
+
+            emit_fused_target_group(
+                &mut out,
+                masks,
+                &classified,
+                group_members,
+                &wgsl_target_name,
+            )?;
+            emitted_groups.insert(key);
+            continue;
+        }
+
+        writeln!(out, "    // ---- mask {} (#{}) ----", mask.head.name, pos_in_classified).unwrap();
         writeln!(out, "    {{").unwrap();
 
         // Indent everything emit_predicate_body writes by 4 spaces.
@@ -1031,6 +1129,241 @@ fn emit_masks_wgsl_fused_result(masks: &[MaskIR]) -> Result<FusedMaskModule, Emi
         config_binding,
         sim_cfg_binding,
     })
+}
+
+/// Identifies the spatial-query source a target-bound mask enumerates
+/// candidates from. Two masks share a source when their `from`-clause
+/// probes the same origin + species universe — the radii can differ
+/// (Attack's 2 m ⊂ MoveToward's 20 m) but the hash walk + per-candidate
+/// work is identical.
+///
+/// The v1 DSL only accepts `from query.nearby_agents(agents.pos(self), <r>)`
+/// for mask `from`-clauses, so every AgentTarget mask maps to the same
+/// variant (`SelfNearbyAgents`). The enum is written with room for
+/// future variants (e.g. `OtherNearbyAgents` keyed on a different
+/// origin, or `Kin`-restricted queries) — grouping stays automatic as
+/// long as the key is derived from the IR rather than hand-listed here.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum SpatialSourceKey {
+    /// `query.nearby_agents(agents.pos(self), <radius>)` with no
+    /// per-candidate species/team restriction beyond the predicate.
+    SelfNearbyAgents,
+}
+
+/// Emit one fused candidate-iteration block covering every mask in
+/// `group_members`. Walks the max radius across the group exactly once
+/// per `self_id` and, per candidate, evaluates each mask's conjunction
+/// inline — writing each mask's bit into its own bitmap. Per-mask
+/// guards:
+///
+///   * Skip a mask if the candidate is outside that mask's own radius
+///     (so Attack's 2 m gate still fires inside the 20 m loop).
+///   * Skip a mask that's already found a match (`found_<snake>`)
+///     — saves redundant predicate work but preserves correctness.
+///
+/// Breaks out of the loop once every mask in the group has matched.
+/// The outer-loop prefilter writes one `let dist = ...` per iteration
+/// so the per-mask radius compares reuse it without re-squaring the
+/// components.
+fn emit_fused_target_group(
+    out: &mut String,
+    masks: &[MaskIR],
+    classified: &[(usize, MaskShape)],
+    group_members: &[usize],
+    wgsl_target_name: &str,
+) -> Result<(), EmitError> {
+    if group_members.is_empty() {
+        return Ok(());
+    }
+
+    // Resolve each group member's (mask, snake, radius_symbol, dsl_target_name).
+    struct GroupMember<'a> {
+        mask: &'a MaskIR,
+        snake: String,
+        radius_sym: &'static str,
+        dsl_target_name: &'a str,
+    }
+    let mut members: Vec<GroupMember<'_>> = Vec::with_capacity(group_members.len());
+    for pos in group_members {
+        let (mask_idx, shape) = &classified[*pos];
+        let mask = &masks[*mask_idx];
+        let dsl_name = match shape {
+            MaskShape::AgentTarget { dsl_name } => dsl_name.as_str(),
+            MaskShape::SelfOnly => {
+                // Unreachable in practice — grouping only admits
+                // AgentTarget. Surface loudly if the invariant drifts.
+                return Err(EmitError::Unsupported(
+                    "emit_fused_target_group: unexpected self-only mask in group".into(),
+                ));
+            }
+        };
+        let radius_sym = mask_radius_symbol(&mask.head.name)?;
+        members.push(GroupMember {
+            mask,
+            snake: snake_case(&mask.head.name),
+            radius_sym,
+            dsl_target_name: dsl_name,
+        });
+    }
+
+    // Header comment naming every mask in the group — makes the fused
+    // WGSL grep-friendly when tracking parity bugs.
+    write!(out, "    // ---- fused target-bound group:").unwrap();
+    for m in &members {
+        write!(out, " {}", m.mask.head.name).unwrap();
+    }
+    writeln!(out, " ----").unwrap();
+    writeln!(out, "    {{").unwrap();
+
+    // Per-mask `found` flags — all-zero initial. The outer loop exits
+    // early once every flag is set.
+    for m in &members {
+        writeln!(
+            out,
+            "        var found_{snake}: bool = false;",
+            snake = m.snake
+        )
+        .unwrap();
+    }
+
+    // Max radius across the group — the loop prefilter reads this.
+    // `max()` is WGSL builtin on f32.
+    write!(out, "        let fused_max_radius = ").unwrap();
+    if members.len() == 1 {
+        writeln!(out, "{};", members[0].radius_sym).unwrap();
+    } else {
+        // Left-fold over max() — emits `max(max(r0, r1), r2)` etc.
+        let mut expr = members[0].radius_sym.to_string();
+        for m in &members[1..] {
+            expr = format!("max({}, {})", expr, m.radius_sym);
+        }
+        writeln!(out, "{expr};").unwrap();
+    }
+
+    // Walk every candidate once. Cell of a spatial hash or linear
+    // scan — the shape is the same. The per-mask radius compare below
+    // re-gates for the narrower masks.
+    writeln!(
+        out,
+        "        for (var {t}: u32 = 0u; {t} < n; {t} = {t} + 1u) {{",
+        t = wgsl_target_name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            if ({t} == self_id) {{ continue; }}",
+        t = wgsl_target_name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            if (agent_alive[{t}] == 0u) {{ continue; }}",
+        t = wgsl_target_name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let {t}_pos = agent_pos[{t}];",
+        t = wgsl_target_name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let {t}_ct = agent_creature_type[{t}];",
+        t = wgsl_target_name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            let fused_dist = vec3_distance(self_pos, {t}_pos);",
+        t = wgsl_target_name
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            if (fused_dist > fused_max_radius) {{ continue; }}"
+    )
+    .unwrap();
+
+    // Per-mask inner branches. Each evaluates its own conjunction and
+    // sets its `found_<snake>` flag. Ordering inside the loop matches
+    // the order masks appear in `group_members` so the fused output is
+    // deterministic w.r.t. the caller's input list.
+    let hoisted = Vec::<String>::new();
+    for m in &members {
+        writeln!(out).unwrap();
+        writeln!(
+            out,
+            "            // mask {} — per-candidate predicate",
+            m.mask.head.name
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            if (!found_{snake} && fused_dist <= {r}) {{",
+            snake = m.snake,
+            r = m.radius_sym
+        )
+        .unwrap();
+        let mut clauses: Vec<&IrExprNode> = Vec::new();
+        flatten_and(&m.mask.predicate, &mut clauses);
+        let ctx = LowerCtx {
+            dsl_target_name: m.dsl_target_name,
+            wgsl_target_name,
+        };
+        writeln!(out, "                let gate_ok = (true").unwrap();
+        for clause in &clauses {
+            let cond = lower_expr(clause, &hoisted, ctx)?;
+            writeln!(out, "                    && ({cond})").unwrap();
+        }
+        writeln!(out, "                );").unwrap();
+        writeln!(
+            out,
+            "                if (gate_ok) {{ found_{snake} = true; }}",
+            snake = m.snake
+        )
+        .unwrap();
+        writeln!(out, "            }}").unwrap();
+    }
+
+    // Early-exit once all masks in the group have found a match. Keeps
+    // the loop cost bounded even when the world has many candidates
+    // and every mask has a satisfying target early on.
+    if members.len() >= 2 {
+        write!(out, "            if (").unwrap();
+        let mut first = true;
+        for m in &members {
+            if !first {
+                write!(out, " && ").unwrap();
+            }
+            first = false;
+            write!(out, "found_{}", m.snake).unwrap();
+        }
+        writeln!(out, ") {{ break; }}").unwrap();
+    }
+
+    writeln!(out, "        }}").unwrap();
+
+    // Per-mask bit-pack epilogue.
+    for m in &members {
+        writeln!(
+            out,
+            "        if (found_{snake}) {{",
+            snake = m.snake
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "            atomicOr(&bitmap_{snake}[word_idx], 1u << bit_shift);",
+            snake = m.snake
+        )
+        .unwrap();
+        writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1326,6 +1659,159 @@ mod tests {
         // Only one `fn cs_...` — the fused one.
         let fn_count = wgsl.matches("fn cs_").count();
         assert_eq!(fn_count, 1, "unexpected kernel fn count:\n{wgsl}");
+    }
+
+    /// Matches the DSL-level shape of `mask MoveToward(target)` — same
+    /// single-Agent target as Attack, no inner distance check, radius
+    /// knob wired to `cfg.movement_max_move_radius`.
+    fn move_toward_mask_ir() -> MaskIR {
+        let self_local = local("self", 0);
+        let target_local = local("target", 1);
+
+        let alive = ns_call(NamespaceId::Agents, "alive", vec![target_local.clone()]);
+        let ne = binop(BinOp::NotEq, target_local, self_local);
+        let predicate = binop(BinOp::And, alive, ne);
+
+        MaskIR {
+            head: IrActionHead {
+                name: "MoveToward".into(),
+                shape: IrActionHeadShape::Positional(vec![(
+                    "target".into(),
+                    LocalRef(1),
+                    IrType::AgentId,
+                )]),
+                span: span(),
+            },
+            candidate_source: None,
+            predicate,
+            annotations: vec![],
+            span: span(),
+        }
+    }
+
+    /// Two target-bound masks sharing a spatial source (Attack's 2 m
+    /// probe is a subset of MoveToward's 20 m) must fuse into a single
+    /// candidate iteration. The emitter is free to rename helpers and
+    /// move comments, but two invariants MUST hold:
+    ///
+    ///   1. Exactly one `for (var wgsl_target` header — Attack no
+    ///      longer re-walks a hash the wider MoveToward query already
+    ///      touched.
+    ///   2. Both bitmaps still get written — `atomicOr(&bitmap_attack` +
+    ///      `atomicOr(&bitmap_move_toward` both appear in the emitted
+    ///      source.
+    ///
+    /// The loop's outer radius is MoveToward's (`max(2 m, 20 m) = 20 m`),
+    /// with Attack's narrower gate enforced per-candidate inline.
+    #[test]
+    fn fused_emitter_shares_candidate_loop_across_attack_and_movetoward() {
+        let attack = attack_mask_ir();
+        let move_toward = move_toward_mask_ir();
+
+        let module = emit_masks_wgsl_fused(&[attack, move_toward]).expect("fused emit");
+        let wgsl = &module.wgsl;
+
+        // Invariant 1: exactly one candidate-iteration loop — the whole
+        // point of the fusion. Before the fix two headers would appear
+        // (one per mask).
+        let loop_header_count = wgsl.matches("for (var wgsl_target").count();
+        assert_eq!(
+            loop_header_count, 1,
+            "fused emitter must produce exactly one candidate loop \
+             across Attack + MoveToward (got {loop_header_count})\n--- WGSL ---\n{wgsl}"
+        );
+
+        // Invariant 2: both bitmaps get atomicOr'd.
+        assert!(
+            wgsl.contains("atomicOr(&bitmap_attack[word_idx]"),
+            "attack bitmap write missing:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("atomicOr(&bitmap_move_toward[word_idx]"),
+            "move_toward bitmap write missing:\n{wgsl}"
+        );
+
+        // The outer radius is the max across the group — MoveToward's
+        // 20 m knob. `sim_cfg.attack_range` (Attack's radius) only
+        // shows up as the inner gate now, not the outer one.
+        assert!(
+            wgsl.contains("fused_max_radius"),
+            "missing fused_max_radius helper in:\n{wgsl}"
+        );
+        // Per-mask found flags — lets Attack skip redundant work once
+        // a hostile is found and MoveToward skip once any neighbour is
+        // found, while still letting the loop keep running for the
+        // other mask.
+        assert!(
+            wgsl.contains("var found_attack"),
+            "per-mask found_attack flag missing:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("var found_move_toward"),
+            "per-mask found_move_toward flag missing:\n{wgsl}"
+        );
+
+        // All-found break clause — once both masks have matched we
+        // stop walking the hash.
+        assert!(
+            wgsl.contains("if (found_attack && found_move_toward)"),
+            "fused all-found break clause missing:\n{wgsl}"
+        );
+
+        // Binding order preserved: Attack stays at index 0 (emitted
+        // first), MoveToward at index 1 — the backend's binding-wire
+        // order depends on this.
+        assert_eq!(module.bindings[0].mask_name, "Attack");
+        assert_eq!(module.bindings[1].mask_name, "MoveToward");
+
+        // Exactly one @compute entry — fusion is inline, not a new
+        // kernel.
+        let compute_count = wgsl.matches("@compute").count();
+        assert_eq!(
+            compute_count, 1,
+            "fused module should have one @compute entry; got {compute_count}\n{wgsl}"
+        );
+    }
+
+    /// The fused emitter must only fuse when ≥ 2 masks share a spatial
+    /// source. A single AgentTarget mask (Attack alone, or Attack +
+    /// self-only siblings) keeps the per-mask loop shape so the
+    /// byte-output stays identical to pre-fusion for non-sharing
+    /// input lists — this protects golden-snapshot readers + the
+    /// single-mask `cs_attack` naga parse tests.
+    #[test]
+    fn fused_emitter_does_not_fuse_singleton_target_mask() {
+        let attack = attack_mask_ir();
+        let hold = {
+            let self_local = local("self", 0);
+            let alive_self = ns_call(NamespaceId::Agents, "alive", vec![self_local]);
+            MaskIR {
+                head: IrActionHead {
+                    name: "Hold".into(),
+                    shape: IrActionHeadShape::None,
+                    span: span(),
+                },
+                candidate_source: None,
+                predicate: alive_self,
+                annotations: vec![],
+                span: span(),
+            }
+        };
+        let module = emit_masks_wgsl_fused(&[attack, hold]).expect("singleton fused emit");
+        let wgsl = &module.wgsl;
+
+        // Singleton Attack keeps its per-mask `let radius = ...` prefix
+        // — the fused group path doesn't fire.
+        assert!(
+            wgsl.contains("let radius = sim_cfg.attack_range"),
+            "singleton Attack should keep the per-mask `let radius` \
+             prefix (the fused group path should not fire here):\n{wgsl}"
+        );
+        // And no `fused_max_radius` helper — that's fusion-specific.
+        assert!(
+            !wgsl.contains("fused_max_radius"),
+            "singleton Attack should not emit the fused group helper:\n{wgsl}"
+        );
     }
 
     /// Feeding the fused emitter a Cast-shaped mask surfaces the same

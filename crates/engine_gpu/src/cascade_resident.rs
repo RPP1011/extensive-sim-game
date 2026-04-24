@@ -1124,6 +1124,7 @@ pub fn run_cascade_resident(
     standing_counts_buf: &wgpu::Buffer,
     memory_records_buf: &wgpu::Buffer,
     memory_cursors_buf: &wgpu::Buffer,
+    alive_bitmap_buf: &wgpu::Buffer,
 ) -> Result<(), CascadeResidentError> {
     run_cascade_resident_with_iter_cap(
         device,
@@ -1141,6 +1142,7 @@ pub fn run_cascade_resident(
         standing_counts_buf,
         memory_records_buf,
         memory_cursors_buf,
+        alive_bitmap_buf,
         MAX_CASCADE_ITERATIONS,
         None,
     )
@@ -1172,6 +1174,7 @@ pub fn run_cascade_resident_with_iter_cap(
     standing_counts_buf: &wgpu::Buffer,
     memory_records_buf: &wgpu::Buffer,
     memory_cursors_buf: &wgpu::Buffer,
+    alive_bitmap_buf: &wgpu::Buffer,
     max_iters: u32,
     // Perf Stage A.1 — optional GPU timestamp profiler. `None` means
     // no timestamps are emitted (original behaviour). When `Some`, the
@@ -1346,6 +1349,7 @@ pub fn run_cascade_resident_with_iter_cap(
             standing_counts_buf,
             memory_records_buf,
             memory_cursors_buf,
+            alive_bitmap_buf,
             iter,       // read_slot
             iter + 1,   // write_slot
             cfg_template,

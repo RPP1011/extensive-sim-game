@@ -513,6 +513,20 @@ fn emit_bindings(out: &mut String) {
         "@group(0) @binding(4) var<uniform> cfg: ConfigUniform;"
     )
     .unwrap();
+    // Per-tick alive bitmap — binding 22 matches the physics BGL
+    // and the pack kernel's output. Enables the target-loop's
+    // alive check below to skip the 64-byte `agent_data[t]`
+    // cacheline read and read a single bit instead.
+    writeln!(
+        out,
+        "@group(0) @binding(22) var<storage, read> alive_bitmap: array<u32>;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "fn alive_bit(slot: u32) -> bool {{ return ((alive_bitmap[slot >> 5u] >> (slot & 31u)) & 1u) != 0u; }}"
+    )
+    .unwrap();
     writeln!(out).unwrap();
 }
 
@@ -1631,7 +1645,7 @@ fn emit_kernel(out: &mut String) {
     // Dead slot — write a sentinel Hold action (same failsafe as CPU's
     // fallthrough when no mask is set; the backend's readback doesn't
     // care about dead slots).
-    writeln!(out, "    if (agent_data[agent_slot].alive == 0u) {{").unwrap();
+    writeln!(out, "    if (!alive_bit(agent_slot)) {{").unwrap();
     writeln!(out, "        scoring_out[agent_slot].chosen_action = 0u;").unwrap();
     writeln!(
         out,
@@ -1684,9 +1698,12 @@ fn emit_kernel(out: &mut String) {
     )
     .unwrap();
     writeln!(out, "                if (t == agent_slot) {{ continue; }}").unwrap();
+    // Alive bitmap lookup (4 B from L1-resident bitmap) replaces
+    // the 64 B `agent_data[t]` cacheline read the pre-bitmap
+    // version needed for this check.
     writeln!(
         out,
-        "                if (agent_data[t].alive == 0u) {{ continue; }}"
+        "                if (!alive_bit(t)) {{ continue; }}"
     )
     .unwrap();
     // Radius gate — both Attack and MoveToward have a `from` radius
