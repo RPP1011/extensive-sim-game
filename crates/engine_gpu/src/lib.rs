@@ -558,6 +558,22 @@ impl GpuBackend {
             .unwrap_or(false)
     }
 
+    /// Perf Stage A.2 — running `(hits, misses)` totals for the
+    /// resident physics bind-group cache. `None` before the cascade
+    /// context is initialized (no step has run).
+    ///
+    /// The cache is expected to converge to 100% hit rate after the
+    /// first batch tick populates its ≤3 unique key tuples; runaway
+    /// misses (e.g. hits=0 after 400 lookups) signal that one of the
+    /// key fields is drifting per-iteration.
+    #[doc(hidden)]
+    pub fn physics_resident_bg_cache_stats(&self) -> Option<(u64, u64)> {
+        self.sync
+            .cascade_ctx
+            .as_ref()
+            .map(|ctx| ctx.physics.resident_bg_cache_stats())
+    }
+
     /// Task 203 — drain the GPU chronicle ring into the CPU event
     /// ring. The chronicle ring is written to by physics every tick
     /// (via `emit ChronicleEntry` rules) but is NOT drained by the
