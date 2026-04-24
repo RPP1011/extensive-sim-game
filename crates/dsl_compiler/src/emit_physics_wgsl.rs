@@ -207,23 +207,6 @@ pub fn emit_physics_wgsl(
     physics: &PhysicsIR,
     ctx: &EmitContext<'_>,
 ) -> Result<String, EmitError> {
-    emit_physics_wgsl_with_counter(physics, ctx, None)
-}
-
-/// Variant of [`emit_physics_wgsl`] that optionally inserts a per-rule
-/// `atomicAdd(&per_rule_counter[rule_idx], 1u)` call at the top of the
-/// rule body (after the kind guard). Used by the per-rule attribution
-/// research harness (`ENGINE_GPU_CASCADE_RULE_COUNT=1`). `None` is the
-/// production path: zero-overhead, identical byte output.
-///
-/// The atomicAdd lands AFTER the `kind != EVENT_KIND_*` early-return,
-/// so the counter reflects the number of times the rule body was
-/// actually entered (not dispatch attempts filtered by the kind guard).
-pub fn emit_physics_wgsl_with_counter(
-    physics: &PhysicsIR,
-    ctx: &EmitContext<'_>,
-    rule_idx: Option<u32>,
-) -> Result<String, EmitError> {
     // `@cpu_only` rules have no WGSL representation. The CPU handler
     // (emitted separately in `emit_physics.rs`) runs the body; the GPU
     // event-kind dispatcher (below, via `applicable_rules`) also skips
@@ -268,19 +251,6 @@ pub fn emit_physics_wgsl_with_counter(
     let (kind_const, destructure) = emit_event_destructure(handler, ctx)?;
     writeln!(out, "    let ev_rec = events_in[event_idx];").unwrap();
     writeln!(out, "    if (ev_rec.kind != {kind_const}) {{ return; }}").unwrap();
-    // Per-rule attribution counter (2026-04-24 research harness). Lands
-    // AFTER the kind guard so the count reflects actual rule body
-    // entries, not dispatcher fan-out (kind_const mismatches return
-    // early). The counter buffer + binding are declared by the host
-    // (`physics.rs` shader builder) when the feature is enabled; the
-    // emitter just references `per_rule_counter` by name.
-    if let Some(idx) = rule_idx {
-        writeln!(
-            out,
-            "    atomicAdd(&per_rule_counter[{idx}u], 1u);"
-        )
-        .unwrap();
-    }
     for line in &destructure {
         writeln!(out, "    {line}").unwrap();
     }

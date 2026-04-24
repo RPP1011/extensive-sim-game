@@ -1143,7 +1143,6 @@ pub fn run_cascade_resident(
         memory_records_buf,
         memory_cursors_buf,
         alive_bitmap_buf,
-        None,
         MAX_CASCADE_ITERATIONS,
         None,
     )
@@ -1176,11 +1175,6 @@ pub fn run_cascade_resident_with_iter_cap(
     memory_records_buf: &wgpu::Buffer,
     memory_cursors_buf: &wgpu::Buffer,
     alive_bitmap_buf: &wgpu::Buffer,
-    // Research mode (2026-04-24): per-rule counter storage buffer bound
-    // at BGL slot 23. `None` when `ENGINE_GPU_CASCADE_RULE_COUNT` is
-    // unset (production path is unchanged). When `Some`, every physics
-    // dispatch in the cascade bumps per-rule counts via atomicAdd.
-    per_rule_counter_buf: Option<&wgpu::Buffer>,
     max_iters: u32,
     // Perf Stage A.1 — optional GPU timestamp profiler. `None` means
     // no timestamps are emitted (original behaviour). When `Some`, the
@@ -1369,7 +1363,6 @@ pub fn run_cascade_resident_with_iter_cap(
             memory_records_buf,
             memory_cursors_buf,
             alive_bitmap_buf,
-            per_rule_counter_buf,
             iter,       // read_slot
             iter + 1,   // write_slot
             cfg_template,

@@ -267,7 +267,6 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
             &memory_records_buf,
             &memory_cursors_buf,
             &alive_bitmap_buf,
-            None, // per_rule_counter_buf (research mode only)
             0, // read_slot
             1, // write_slot
             cfg,
@@ -433,7 +432,6 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
             &memory_records_buf,
             &memory_cursors_buf,
             &alive_bitmap_buf,
-            None, // per_rule_counter_buf (research mode only)
             0, // read_slot
             1, // write_slot
             cfg,

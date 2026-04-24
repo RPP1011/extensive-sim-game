@@ -110,25 +110,6 @@ pub struct ResidentPathContext {
     /// batch's tick count in the test harness to print a mean.
     /// Empty when the profiler is disabled or `step_batch` hasn't run.
     pub last_batch_phase_us: Vec<(&'static str, u64)>,
-
-    /// Research mode (2026-04-24) — per-rule invocation counter storage
-    /// buffer. `None` in the production path (env var unset); allocated
-    /// lazily on first `step_batch` when `ENGINE_GPU_CASCADE_RULE_COUNT`
-    /// is set. Sized `num_rules * 4` bytes, one `atomic<u32>` slot per
-    /// non-`@cpu_only` physics rule. Cleared at top of `step_batch`,
-    /// read back at end.
-    pub per_rule_counter_buf: Option<wgpu::Buffer>,
-    /// Research mode — staging readback buffer, same size as the
-    /// counter buffer. Lazy-allocated alongside `per_rule_counter_buf`.
-    pub per_rule_counter_staging: Option<wgpu::Buffer>,
-    /// Ordered rule names, index into `per_rule_counter_buf` slots.
-    /// Populated at resident-init time to mirror the shader-side indices
-    /// assigned by `physics::ordered_rule_names`.
-    pub per_rule_names: Vec<String>,
-    /// Last-readback per-rule invocation counts from the most recent
-    /// `step_batch`. Aligned with `per_rule_names` by index. Empty when
-    /// research mode is off or no batch has run yet.
-    pub last_per_rule_counts: Vec<u32>,
 }
 
 impl ResidentPathContext {
@@ -158,10 +139,6 @@ impl ResidentPathContext {
             sim_cfg_buf:            None,
             profiler:               None,
             last_batch_phase_us:    Vec::new(),
-            per_rule_counter_buf:   None,
-            per_rule_counter_staging: None,
-            per_rule_names:         Vec::new(),
-            last_per_rule_counts:   Vec::new(),
         }
     }
 }
