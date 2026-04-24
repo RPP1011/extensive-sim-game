@@ -388,6 +388,31 @@ pub fn test_device() -> Result<(wgpu::Device, wgpu::Queue), GpuInitError> {
     })
 }
 
+/// Research-mode switch: dispatch the mask kernel as three separate
+/// sub-kernels (self-only / MoveToward / Attack) with profiler marks
+/// between them, so Stage A's GPU timestamps can attribute µs/tick to
+/// each sub-phase. Read once at first use and cached.
+///
+/// Toggle via `ENGINE_GPU_SPLIT_MASK_MEASURE=1`. Default off; the
+/// production path keeps using the fused dispatch. See
+/// `docs/superpowers/research/2026-04-24-mask-kernel-subphase-measurement.md`.
+#[cfg(feature = "gpu")]
+fn split_mask_measure_enabled() -> bool {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static CACHED: AtomicU8 = AtomicU8::new(2); // 0 = off, 1 = on, 2 = uninit
+    match CACHED.load(Ordering::Relaxed) {
+        0 => false,
+        1 => true,
+        _ => {
+            let on = std::env::var("ENGINE_GPU_SPLIT_MASK_MEASURE")
+                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes"))
+                .unwrap_or(false);
+            CACHED.store(if on { 1 } else { 0 }, Ordering::Relaxed);
+            on
+        }
+    }
+}
+
 #[cfg(feature = "gpu")]
 impl GpuBackend {
     /// Spin up a wgpu instance, request an adapter + device, and
@@ -984,17 +1009,40 @@ impl GpuBackend {
             if let Some(p) = profiler.as_mut() {
                 p.mark(&mut encoder, "mask+scoring");
             }
-            self.sync
-                .mask_kernel
-                .run_resident(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    agents_buf,
-                    mask_sim_cfg_ref,
-                    agent_cap,
-                )
-                .expect("mask resident dispatch");
+            // Intra-kernel sub-phase measurement (research-mode,
+            // 2026-04-24-mask-kernel-subphase-measurement.md). Gated
+            // on an env var so production dispatches the single fused
+            // kernel. When the var is set the mask kernel splits into
+            // 3 sub-dispatches each bookended by a profiler mark,
+            // letting the perf test attribute GPU-µs to self-only /
+            // MoveToward / Attack sub-phases.
+            let split_mask = split_mask_measure_enabled();
+            if split_mask {
+                self.sync
+                    .mask_kernel
+                    .run_resident_split(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        agents_buf,
+                        mask_sim_cfg_ref,
+                        agent_cap,
+                        profiler.as_mut(),
+                    )
+                    .expect("mask resident split dispatch");
+            } else {
+                self.sync
+                    .mask_kernel
+                    .run_resident(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        agents_buf,
+                        mask_sim_cfg_ref,
+                        agent_cap,
+                    )
+                    .expect("mask resident dispatch");
+            }
 
             // 2. Scoring: reads mask_bitmaps + agent_data (both
             //    populated above). Task 2.5 of the GPU sim-state

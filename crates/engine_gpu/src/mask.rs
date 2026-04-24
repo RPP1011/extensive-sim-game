@@ -102,6 +102,188 @@ struct GpuConfig {
     _pad2: f32,
 }
 
+/// Research-mode: hand-authored WGSL that splits the fused mask kernel
+/// into three sub-dispatches so each can be bookended by the Stage A
+/// GPU timestamp profiler. Binding layout is byte-compatible with the
+/// generated fused kernel — same bind-group layout, so the resident
+/// path's cached bind group can be re-used verbatim.
+///
+/// Entry points:
+///   * `cs_mask_self_only`      — 5 self-only masks
+///                                (Hold/Flee/Eat/Drink/Rest)
+///   * `cs_mask_movetoward`     — MoveToward candidate loop
+///                                (radius = `cfg.movement_max_move_radius`)
+///   * `cs_mask_attack`         — Attack candidate loop + pairwise
+///                                is_hostile check
+///                                (radius = `sim_cfg.attack_range`)
+///
+/// This WGSL is **measurement-only** — used when the
+/// `ENGINE_GPU_SPLIT_MASK_MEASURE=1` env var is set. The production
+/// path keeps dispatching the single fused kernel.
+///
+/// Keep the predicate bodies semantically identical to
+/// `emit_masks_wgsl_fused`'s output so byte-parity tests pass
+/// regardless of which path runs. In particular:
+///   * self-only masks collapse to `alive(self)` → bit always set for
+///     alive agents (the fused kernel's top-level `if (agent_alive[self_id] == 0u) { return; }` already short-circuits dead agents).
+///   * MoveToward: `alive(target) && target != self` + radius prefilter.
+///   * Attack: `alive(target) && is_hostile(self_ct, target_ct) && dist < 2.0` + radius prefilter (attack_range).
+const SPLIT_MASK_WGSL: &str = r#"
+// MEASUREMENT-ONLY split of the fused mask kernel.
+// Do not ship — used for intra-kernel sub-phase timestamp attribution.
+
+struct Vec3f32 { x: f32, y: f32, z: f32 };
+
+@group(0) @binding(0) var<storage, read>       agent_pos:           array<Vec3f32>;
+@group(0) @binding(1) var<storage, read>       agent_alive:         array<u32>;
+@group(0) @binding(2) var<storage, read>       agent_creature_type: array<u32>;
+
+@group(0) @binding(3) var<storage, read_write> bitmap_attack:       array<atomic<u32>>;
+@group(0) @binding(4) var<storage, read_write> bitmap_move_toward:  array<atomic<u32>>;
+@group(0) @binding(5) var<storage, read_write> bitmap_hold:         array<atomic<u32>>;
+@group(0) @binding(6) var<storage, read_write> bitmap_flee:         array<atomic<u32>>;
+@group(0) @binding(7) var<storage, read_write> bitmap_eat:          array<atomic<u32>>;
+@group(0) @binding(8) var<storage, read_write> bitmap_drink:        array<atomic<u32>>;
+@group(0) @binding(9) var<storage, read_write> bitmap_rest:         array<atomic<u32>>;
+
+struct ConfigUniform {
+    movement_max_move_radius: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+};
+@group(0) @binding(10) var<uniform> cfg: ConfigUniform;
+
+struct SimCfg {
+    tick:                          u32,
+    world_seed_lo:                 u32,
+    world_seed_hi:                 u32,
+    _sim_cfg_pad0:                 u32,
+    engagement_range:              f32,
+    attack_damage:                 f32,
+    attack_range:                  f32,
+    move_speed:                    f32,
+    move_speed_mult:               f32,
+    kin_radius:                    f32,
+    cascade_max_iterations:        u32,
+    rules_registry_generation:     u32,
+    abilities_registry_generation: u32,
+    _sim_cfg_reserved0:            u32,
+    _sim_cfg_reserved1:            u32,
+    _sim_cfg_reserved2:            u32,
+};
+@group(0) @binding(11) var<storage, read> sim_cfg: SimCfg;
+
+fn is_hostile(a: u32, b: u32) -> bool {
+    if (a == 0u && b == 1u) { return true; }
+    if (a == 1u && b == 0u) { return true; }
+    if (a == 0u && b == 3u) { return true; }
+    if (a == 3u && b == 0u) { return true; }
+    if (a == 1u && b == 2u) { return true; }
+    if (a == 2u && b == 1u) { return true; }
+    if (a == 1u && b == 3u) { return true; }
+    if (a == 3u && b == 1u) { return true; }
+    if (a == 2u && b == 3u) { return true; }
+    if (a == 3u && b == 2u) { return true; }
+    return false;
+}
+
+fn vec3_distance(a: Vec3f32, b: Vec3f32) -> f32 {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    let dz = a.z - b.z;
+    return sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+// ---------------------------------------------------------------------
+// Sub-phase 1: self-only masks (Hold / Flee / Eat / Drink / Rest).
+// Each predicate is `alive(self)` — for every alive self, set the bit
+// in all 5 bitmaps. No candidate loop, no radius check — pure write
+// bandwidth to five atomic<u32> arrays.
+// ---------------------------------------------------------------------
+@compute @workgroup_size(64)
+fn cs_mask_self_only(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let self_id = gid.x;
+    let n = arrayLength(&agent_alive);
+    if (self_id >= n) { return; }
+    if (agent_alive[self_id] == 0u) { return; }
+    let word_idx  = self_id / 32u;
+    let bit_shift = self_id % 32u;
+    let bit = 1u << bit_shift;
+    atomicOr(&bitmap_hold[word_idx],  bit);
+    atomicOr(&bitmap_flee[word_idx],  bit);
+    atomicOr(&bitmap_eat[word_idx],   bit);
+    atomicOr(&bitmap_drink[word_idx], bit);
+    atomicOr(&bitmap_rest[word_idx],  bit);
+}
+
+// ---------------------------------------------------------------------
+// Sub-phase 2: MoveToward candidate loop.
+// Naive O(N) loop over every other agent; break on first hit within
+// `cfg.movement_max_move_radius`. Matches the generated fused kernel's
+// MoveToward block (alive(target) && target != self + radius prefilter).
+// ---------------------------------------------------------------------
+@compute @workgroup_size(64)
+fn cs_mask_movetoward(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let self_id = gid.x;
+    let n = arrayLength(&agent_alive);
+    if (self_id >= n) { return; }
+    if (agent_alive[self_id] == 0u) { return; }
+    let self_pos = agent_pos[self_id];
+    let word_idx  = self_id / 32u;
+    let bit_shift = self_id % 32u;
+
+    let radius = cfg.movement_max_move_radius;
+    var found: bool = false;
+    for (var wgsl_target: u32 = 0u; wgsl_target < n; wgsl_target = wgsl_target + 1u) {
+        if (wgsl_target == self_id) { continue; }
+        if (agent_alive[wgsl_target] == 0u) { continue; }
+        let wgsl_target_pos = agent_pos[wgsl_target];
+        if (vec3_distance(self_pos, wgsl_target_pos) > radius) { continue; }
+        // `alive && target != self` — both already gated above.
+        found = true;
+        break;
+    }
+    if (found) {
+        atomicOr(&bitmap_move_toward[word_idx], 1u << bit_shift);
+    }
+}
+
+// ---------------------------------------------------------------------
+// Sub-phase 3: Attack candidate loop + is_hostile pairwise check.
+// Predicate: alive(target) && is_hostile(self_ct, target_ct) && dist<2.
+// Prefilter radius: sim_cfg.attack_range (typically 2.0).
+// ---------------------------------------------------------------------
+@compute @workgroup_size(64)
+fn cs_mask_attack(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let self_id = gid.x;
+    let n = arrayLength(&agent_alive);
+    if (self_id >= n) { return; }
+    if (agent_alive[self_id] == 0u) { return; }
+    let self_pos = agent_pos[self_id];
+    let self_ct  = agent_creature_type[self_id];
+    let word_idx  = self_id / 32u;
+    let bit_shift = self_id % 32u;
+
+    let radius = sim_cfg.attack_range;
+    var found: bool = false;
+    for (var wgsl_target: u32 = 0u; wgsl_target < n; wgsl_target = wgsl_target + 1u) {
+        if (wgsl_target == self_id) { continue; }
+        if (agent_alive[wgsl_target] == 0u) { continue; }
+        let wgsl_target_pos = agent_pos[wgsl_target];
+        let wgsl_target_ct  = agent_creature_type[wgsl_target];
+        if (vec3_distance(self_pos, wgsl_target_pos) > radius) { continue; }
+        if (!is_hostile(self_ct, wgsl_target_ct)) { continue; }
+        if (!(vec3_distance(self_pos, wgsl_target_pos) < 2.0)) { continue; }
+        found = true;
+        break;
+    }
+    if (found) {
+        atomicOr(&bitmap_attack[word_idx], 1u << bit_shift);
+    }
+}
+"#;
+
 /// Error surface for fused-kernel init + dispatch.
 #[derive(Debug)]
 pub enum KernelError {
@@ -310,6 +492,21 @@ pub struct FusedMaskKernel {
     /// `sim_cfg_buf` here; the sync path binds the pool-owned fallback.
     sim_cfg_binding: u32,
     pool: Option<BufferPool>,
+    /// Measurement-mode split pipelines (self-only / movetoward /
+    /// attack), built against the same bind-group layout as `pipeline`.
+    /// Populated unconditionally on `new` — the extra compile cost is
+    /// one-shot at backend init. Consumed by [`Self::run_resident_split`]
+    /// only when the caller opts into intra-kernel sub-phase timestamps.
+    split_pipelines: SplitPipelines,
+}
+
+/// Three compute pipelines that sub-divide the fused mask kernel's
+/// work across three separate dispatches so Stage A's GPU profiler can
+/// attribute µs to each sub-phase. See [`SPLIT_MASK_WGSL`] for the WGSL.
+struct SplitPipelines {
+    self_only:   wgpu::ComputePipeline,
+    movetoward:  wgpu::ComputePipeline,
+    attack:      wgpu::ComputePipeline,
 }
 
 struct BufferPool {
@@ -459,6 +656,40 @@ impl FusedMaskKernel {
             cache: None,
         });
 
+        // --- Measurement-mode split pipelines -----------------------
+        // Compile three standalone entry points over the same bind-
+        // group layout. `run_resident_split` dispatches them in
+        // sequence when the caller wants sub-phase timestamps; the
+        // default path keeps using the fused `pipeline` above.
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let split_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("engine_gpu::fused_mask::split_wgsl"),
+            source: wgpu::ShaderSource::Wgsl(SPLIT_MASK_WGSL.into()),
+        });
+        if let Some(err) = pollster::block_on(device.pop_error_scope()) {
+            return Err(KernelError::ShaderCompile(format!(
+                "{err}\n--- SPLIT WGSL source ---\n{SPLIT_MASK_WGSL}"
+            )));
+        }
+        let make_split_pipeline = |entry: &'static str, label: &'static str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                module: &split_shader,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+        let split_pipelines = SplitPipelines {
+            self_only:  make_split_pipeline("cs_mask_self_only",
+                                            "engine_gpu::fused_mask::split_self_only_cp"),
+            movetoward: make_split_pipeline("cs_mask_movetoward",
+                                            "engine_gpu::fused_mask::split_movetoward_cp"),
+            attack:     make_split_pipeline("cs_mask_attack",
+                                            "engine_gpu::fused_mask::split_attack_cp"),
+        };
+
         let FusedMaskModule {
             wgsl: _,
             bindings,
@@ -472,6 +703,7 @@ impl FusedMaskKernel {
             bindings,
             sim_cfg_binding,
             pool: None,
+            split_pipelines,
         })
     }
 
@@ -841,6 +1073,178 @@ impl FusedMaskKernel {
         // resident path exposes. Downstream kernels (scoring) expect
         // a single flat layout `[mask_0_words, mask_1_words, ...]`
         // matching `pack_mask_bitmaps`'s contract.
+        let mask_bytes = (pool.mask_words as u64) * 4;
+        for (i, storage) in pool.bitmap_bufs.iter().enumerate() {
+            let dst_offset = (i as u64) * mask_bytes;
+            encoder.copy_buffer_to_buffer(
+                storage,
+                0,
+                &pool.bitmaps_concat_buf,
+                dst_offset,
+                mask_bytes,
+            );
+        }
+
+        Ok(())
+    }
+
+    /// **Measurement-mode** sibling of [`Self::run_resident`] — splits
+    /// the fused kernel's work into three separate dispatches (self-
+    /// only / MoveToward candidate loop / Attack candidate loop + is_
+    /// hostile) so a caller-supplied [`crate::gpu_profiling::GpuProfiler`]
+    /// can place a timestamp mark between each sub-phase.
+    ///
+    /// Semantically equivalent to `run_resident`: the output bitmaps
+    /// land in the same per-mask buffers + the same `bitmaps_concat_buf`
+    /// in the same order. Byte-parity against the fused kernel holds
+    /// because the predicate bodies in [`SPLIT_MASK_WGSL`] are an exact
+    /// transcription of what `emit_masks_wgsl_fused` generates for the
+    /// same IRs.
+    ///
+    /// ### Cost vs `run_resident`
+    ///
+    /// Three compute passes instead of one — adds ~3× dispatch + pass
+    /// begin/end overhead and loses whatever cache-coalescing the fused
+    /// kernel gained by co-locating the three sub-phases in a single
+    /// workgroup's lifetime. The reviewer's rough model at N=100k on a
+    /// 4090 says that overhead is 10-30 µs/tick — order of magnitude
+    /// smaller than the 37 ms/tick the fused kernel spends, so the
+    /// measurement is accurate to ~0.1%.
+    ///
+    /// Only used when opt-in by env var (see `step_batch` in `lib.rs`).
+    /// Production path stays on [`Self::run_resident`] — revert the
+    /// split after the measurement doc is written.
+    pub fn run_resident_split(
+        &mut self,
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        agents_buf: &wgpu::Buffer,
+        sim_cfg_buf: &wgpu::Buffer,
+        agent_cap: u32,
+        profiler: Option<&mut crate::gpu_profiling::GpuProfiler>,
+    ) -> Result<(), KernelError> {
+        let _ = agents_buf;
+
+        self.ensure_pool(device, agent_cap);
+
+        // Reuse the same resident bind group as the fused path — the
+        // split pipelines were built against the identical bind-group
+        // layout.
+        let sim_cfg_binding = self.sim_cfg_binding;
+        let bind_group_layout = &self.bind_group_layout;
+        let pool = self.pool.as_mut().expect("pool ensured");
+        debug_assert_eq!(
+            pool.agent_cap, agent_cap,
+            "ensure_pool must size the pool to the requested agent_cap",
+        );
+        let needs_rebuild = match &pool.resident_bind_group {
+            Some((cached_buf, _)) => cached_buf != sim_cfg_buf,
+            None => true,
+        };
+        if needs_rebuild {
+            let mut bg_entries: Vec<wgpu::BindGroupEntry<'_>> =
+                Vec::with_capacity(3 + pool.bitmap_bufs.len() + 2);
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: 0,
+                resource: pool.pos_buf.as_entire_binding(),
+            });
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: 1,
+                resource: pool.alive_buf.as_entire_binding(),
+            });
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: 2,
+                resource: pool.creature_type_buf.as_entire_binding(),
+            });
+            for (i, buf) in pool.bitmap_bufs.iter().enumerate() {
+                bg_entries.push(wgpu::BindGroupEntry {
+                    binding: FUSED_BITMAP_BINDING_BASE + i as u32,
+                    resource: buf.as_entire_binding(),
+                });
+            }
+            let cfg_binding = FUSED_BITMAP_BINDING_BASE + pool.bitmap_bufs.len() as u32;
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: cfg_binding,
+                resource: pool.cfg_buf.as_entire_binding(),
+            });
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: sim_cfg_binding,
+                resource: sim_cfg_buf.as_entire_binding(),
+            });
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("engine_gpu::fused_mask::resident_bg"),
+                layout: bind_group_layout,
+                entries: &bg_entries,
+            });
+            pool.resident_bind_group = Some((sim_cfg_buf.clone(), bg));
+        }
+        let resident_bg = &pool
+            .resident_bind_group
+            .as_ref()
+            .expect("resident_bind_group just built")
+            .1;
+
+        let groups = agent_cap.div_ceil(WORKGROUP_SIZE).max(1);
+
+        // Optionally drop in a pre-phase mark so the first delta is
+        // self-only begin. The caller's outer "mask+scoring" mark
+        // brackets the whole region; these inner marks bracket each
+        // sub-phase. Enforcing `Option` at the type level keeps this
+        // fn usable even when the adapter lacks timestamp support.
+        let mut prof = profiler;
+
+        // --- Sub-phase 1: self-only masks -----------------------
+        if let Some(p) = prof.as_deref_mut() {
+            p.mark(encoder, "mask_split_self_only");
+        }
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::fused_mask::cpass_split_self_only"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.split_pipelines.self_only);
+            cpass.set_bind_group(0, resident_bg, &[]);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
+
+        // --- Sub-phase 2: MoveToward candidate loop -------------
+        if let Some(p) = prof.as_deref_mut() {
+            p.mark(encoder, "mask_split_movetoward");
+        }
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::fused_mask::cpass_split_movetoward"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.split_pipelines.movetoward);
+            cpass.set_bind_group(0, resident_bg, &[]);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
+
+        // --- Sub-phase 3: Attack candidate loop + is_hostile ----
+        if let Some(p) = prof.as_deref_mut() {
+            p.mark(encoder, "mask_split_attack");
+        }
+        {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("engine_gpu::fused_mask::cpass_split_attack"),
+                timestamp_writes: None,
+            });
+            cpass.set_pipeline(&self.split_pipelines.attack);
+            cpass.set_bind_group(0, resident_bg, &[]);
+            cpass.dispatch_workgroups(groups, 1, 1);
+        }
+
+        // Closing mark so the last sub-phase's delta resolves. The
+        // caller's next top-level mark ("scoring" or similar) would
+        // also close it, but an explicit sentinel makes the readback
+        // output easier to parse.
+        if let Some(p) = prof.as_deref_mut() {
+            p.mark(encoder, "mask_split_end");
+        }
+
+        // Concat copy — identical to the fused path.
         let mask_bytes = (pool.mask_words as u64) * 4;
         for (i, storage) in pool.bitmap_bufs.iter().enumerate() {
             let dst_offset = (i as u64) * mask_bytes;
