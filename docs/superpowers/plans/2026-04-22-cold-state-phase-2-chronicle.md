@@ -33,9 +33,9 @@
 
 ---
 
-## Task 2.1: Audit `@phase(post)` GPU execution — DONE (classification A)
+## Task 2.1: Audit `@phase(post)` GPU execution — DONE (classification A at the WGSL level; batch-path runtime bug surfaced in Task 2.4)
 
-**Result:** All `@phase(post)` rules already run on both sync and batch paths, interleaved with event-phase rules.
+**Result:** All `@phase(post)` rules are correctly *emitted* into the physics WGSL dispatcher for both sync and resident shaders. The audit's paper-classification is (A). However, Task 2.4's end-to-end integration test later surfaced a runtime bug: the resident physics kernel does not emit chronicle records when dispatched through `GpuBackend::step_batch`'s full flow, despite emitting correctly when driven by a local harness (see `tests/physics_run_batch_resident_smoke.rs` which confirms `run_batch_resident` writes chronicle records from a seeded AgentAttacked event). Task 2.4's two ignored tests guard this bug; root-causing it is tracked in the task list under "step_batch chronicle-emit bug".
 
 **Evidence:**
 - `crates/dsl_compiler/src/parser.rs:804` — parser accepts `@phase(event)` / `@phase(post)` annotations.
@@ -207,7 +207,11 @@ End-to-end test: run `step_batch(n)` with a fixture that provokes at least one c
 
 ---
 
-## Task 2.5: Phase 2 closeout
+## Task 2.5: Phase 2 closeout — PARTIAL (blocked on step_batch chronicle-emit bug)
+
+Task 2.3 (snapshot wiring) is complete and regression-clean. Task 2.4 landed two ignored end-to-end tests that will start passing once the step_batch physics chronicle-emit bug is root-caused and fixed (tracked separately). Phase 2 is best-considered "snapshot plumbing done; end-to-end flow requires upstream engine fix."
+
+### Original Task 2.5 scope (no longer gating Phase 2)
 
 - [ ] **Step 1:** Full regression:
    ```
