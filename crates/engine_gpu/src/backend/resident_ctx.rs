@@ -3,6 +3,7 @@
 
 #![cfg(feature = "gpu")]
 
+use crate::alive_bitmap::AlivePackKernel;
 use crate::cascade_resident::CascadeResidentCtx;
 use crate::gpu_profiling::GpuProfiler;
 use crate::gpu_util::indirect::IndirectArgsBuffer;
@@ -42,6 +43,22 @@ pub struct ResidentPathContext {
     /// BGL at slots 20 / 21 (PR-4); read back on `snapshot()` (PR-6).
     pub memory_storage:     Option<ViewStoragePerEntityRing>,
     pub memory_storage_cap: u32,
+
+    /// Per-tick alive bitmap — packed `array<u32>` with one bit per
+    /// agent slot. Written once at the top of each batch tick by the
+    /// pack kernel; read by mask / scoring / physics kernels at
+    /// binding slot 22. Reduces the per-tick `agents[x].alive`
+    /// cacheline reads from O(agents × alive-calls × 64 B) to
+    /// O(agents × alive-calls × 4 B bit lookups against an L1-resident
+    /// buffer).
+    pub alive_bitmap_buf:   Option<wgpu::Buffer>,
+    pub alive_bitmap_cap:   u32,
+
+    /// Pack kernel that reads `agents[i].alive` and packs one bit per
+    /// slot into `alive_bitmap_buf`. Dispatched at the TOP of every
+    /// batch tick — after the fused unpack wrote SoA fields but before
+    /// mask / scoring / physics run.
+    pub alive_pack_kernel:  AlivePackKernel,
 
     /// Phase D — indirect dispatch args for the resident cascade.
     /// MAX_CASCADE_ITERATIONS + 1 slots. Lazy-initialised in step_batch.
@@ -100,6 +117,7 @@ impl ResidentPathContext {
         mask_unpack_kernel:    MaskUnpackKernel,
         scoring_unpack_kernel: ScoringUnpackKernel,
         fused_unpack_kernel:   FusedAgentUnpackKernel,
+        alive_pack_kernel:     AlivePackKernel,
     ) -> Self {
         Self {
             resident_agents_buf:    None,
@@ -110,6 +128,9 @@ impl ResidentPathContext {
             standing_storage_cap:   0,
             memory_storage:         None,
             memory_storage_cap:     0,
+            alive_bitmap_buf:       None,
+            alive_bitmap_cap:       0,
+            alive_pack_kernel,
             resident_indirect_args: None,
             resident_cascade_ctx:   None,
             mask_unpack_kernel,
