@@ -1216,6 +1216,32 @@ impl GpuBackend {
             self.resident.standing_storage_cap = agent_cap;
         }
 
+        // --- Subsystem 2 Phase 4 PR-3: memory view storage -----------------
+        // Per-agent [MemoryEventGpu; K=64] rings + per-owner monotonic
+        // u32 cursors. Sized `agent_cap * 64 * 24` B (records) +
+        // `agent_cap * 4` B (cursors). Uploaded from `state.cold_memory`
+        // on allocate + on agent_cap grow. PR-4 binds this into the
+        // resident physics BGL at slots 20 / 21; PR-6 reads back in
+        // snapshot().
+        let need_memory_alloc = match &self.resident.memory_storage {
+            Some(_) => self.resident.memory_storage_cap < agent_cap,
+            None => true,
+        };
+        if need_memory_alloc {
+            let k = crate::view_storage_per_entity_ring::MEMORY_K;
+            let storage = crate::view_storage_per_entity_ring::ViewStoragePerEntityRing::new(
+                &self.device,
+                agent_cap,
+                k,
+            );
+            let mem = state.cold_memory();
+            storage.upload_from_cpu(&self.queue, |slot| {
+                mem.get(slot).map(|row| row.as_slice().to_vec())
+            });
+            self.resident.memory_storage = Some(storage);
+            self.resident.memory_storage_cap = agent_cap;
+        }
+
         // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`
         // slots (seed + one per cascade iter).
         if self.resident.resident_indirect_args.is_none() {
