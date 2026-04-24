@@ -174,6 +174,11 @@ pub mod gpu_profiling;
 #[cfg(feature = "gpu")]
 pub mod alive_bitmap;
 
+/// Research instrumentation — per-view scoring-kernel read counters.
+/// Opt-in via `ENGINE_GPU_SCORING_VIEW_COUNT=1`; production paths do not
+/// allocate or bind anything from this module.
+pub mod view_read_counter;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
@@ -636,6 +641,19 @@ impl GpuBackend {
             .unwrap_or(false)
     }
 
+    /// Research instrumentation — per-view atomic read counts from the
+    /// most recent `step_batch` call. Each entry is `(view_name, count)`;
+    /// the count is the number of times the scoring kernel invoked a
+    /// view read helper for that view across the entire batch.
+    ///
+    /// Returns an empty slice when `ENGINE_GPU_SCORING_VIEW_COUNT=1`
+    /// was not set, or before the first `step_batch` has run. Matches
+    /// `dsl_compiler::emit_scoring_wgsl::scoring_view_binding_order`'s
+    /// alphabetical ordering.
+    pub fn last_batch_view_read_counts(&self) -> &[(String, u32)] {
+        &self.resident.last_batch_view_read_counts
+    }
+
     /// Perf Stage A.2 — running `(hits, misses)` totals for the
     /// resident physics bind-group cache. `None` before the cascade
     /// context is initialized (no step has run).
@@ -1003,6 +1021,14 @@ impl GpuBackend {
         self.snapshot.snapshot_event_ring_read = 0;
         self.snapshot.snapshot_chronicle_ring_read = 0;
 
+        // Research instrumentation: zero the per-view read counter
+        // buffer at the START of the batch so reads attribute to *this*
+        // batch only. Buffer is bound by the scoring kernel at slot 24
+        // (see `scoring::build_resident_bind_group`).
+        if let Some(counter_buf) = self.resident.view_read_counter_buf.as_ref() {
+            encoder.clear_buffer(counter_buf, 0, None);
+        }
+
         let agent_cap = state.agent_cap();
         // Stage B.1 — capture the iter_cap used on the final tick so
         // the end-of-batch sanity check can compare the last tick's
@@ -1041,6 +1067,7 @@ impl GpuBackend {
                 alive_pack_kernel,
                 fused_unpack_kernel,
                 profiler,
+                view_read_counter_buf,
                 ..
             } = &mut self.resident;
             let agents_buf = resident_agents_buf
@@ -1181,6 +1208,11 @@ impl GpuBackend {
                     self.sync.mask_kernel.mask_bitmaps_buf(),
                     mask_sim_cfg_ref,
                     alive_bitmap_ref,
+                    // Research instrumentation (ENGINE_GPU_SCORING_VIEW_COUNT=1):
+                    // pass the per-view counter buffer when enabled so
+                    // `atomicAdd` writes land in a bound buffer. `None`
+                    // when disabled — matches the BGL layout.
+                    view_read_counter_buf.as_ref(),
                     agent_cap,
                 )
                 .expect("scoring resident dispatch");
@@ -1466,8 +1498,50 @@ impl GpuBackend {
             resident_ctx.encode_num_events_readback(&mut encoder);
         }
 
+        // Research instrumentation: copy the scoring view-read counter
+        // buffer into its readback companion so the post-submit poll
+        // can map + read the u32 counts. No-op when counting disabled.
+        if let (Some(storage), Some(readback)) = (
+            self.resident.view_read_counter_buf.as_ref(),
+            self.resident.view_read_counter_readback_buf.as_ref(),
+        ) {
+            let bytes = storage.size();
+            encoder.copy_buffer_to_buffer(storage, 0, readback, 0, bytes);
+        }
+
         self.queue.submit(Some(encoder.finish()));
         let _ = self.device.poll(wgpu::PollType::Wait);
+
+        // Research instrumentation: map the counter readback buffer +
+        // fold the u32 slots into per-view (name, count) pairs on
+        // `self.resident.last_batch_view_read_counts`. The perf test
+        // dumps this vector after step_batch.
+        if crate::view_read_counter::enabled() {
+            if let Some(readback) = self.resident.view_read_counter_readback_buf.as_ref() {
+                let specs = crate::view_storage::build_all_specs();
+                let names = crate::view_read_counter::view_names(&specs);
+                let slice = readback.slice(..);
+                let (tx, rx) = std::sync::mpsc::channel();
+                slice.map_async(wgpu::MapMode::Read, move |res| {
+                    let _ = tx.send(res);
+                });
+                // Poll to drive the map callback to completion. Matches
+                // the pattern used by `scoring_out_readback` in
+                // run_and_readback.
+                let _ = self.device.poll(wgpu::PollType::Wait);
+                rx.recv()
+                    .expect("view_read_counter readback channel closed")
+                    .expect("view_read_counter map_async failed");
+                let data = slice.get_mapped_range();
+                let counts: Vec<u32> = bytemuck::cast_slice::<u8, u32>(&data).to_vec();
+                drop(data);
+                readback.unmap();
+                self.resident.last_batch_view_read_counts = names
+                    .into_iter()
+                    .zip(counts.into_iter())
+                    .collect();
+            }
+        }
 
         // Perf Stage A.1 — after the submit/poll, map the readback
         // buffer + convert u64 timestamps to per-phase µs. Accumulate
@@ -1756,6 +1830,20 @@ impl GpuBackend {
             let buf = crate::alive_bitmap::create_alive_bitmap_buffer(&self.device, agent_cap);
             self.resident.alive_bitmap_buf = Some(buf);
             self.resident.alive_bitmap_cap = agent_cap;
+        }
+
+        // --- Research instrumentation: per-view read counter -------------
+        // Allocate the slot-24 scoring counter buffer iff
+        // `ENGINE_GPU_SCORING_VIEW_COUNT=1`. See
+        // `crates/engine_gpu/src/view_read_counter.rs` for layout.
+        // Sized from the same `build_all_specs` list the scoring kernel
+        // uses, so the slot count + ordering match the emitted WGSL.
+        if crate::view_read_counter::enabled() && self.resident.view_read_counter_buf.is_none() {
+            let specs = crate::view_storage::build_all_specs();
+            let storage = crate::view_read_counter::create_buffer(&self.device, &specs);
+            let readback = crate::view_read_counter::create_readback(&self.device, &specs);
+            self.resident.view_read_counter_buf = Some(storage);
+            self.resident.view_read_counter_readback_buf = Some(readback);
         }
 
         // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`

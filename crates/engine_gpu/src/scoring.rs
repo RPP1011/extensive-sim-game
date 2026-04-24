@@ -478,6 +478,12 @@ struct ScoringPool {
     /// used by sync.
     sync_alive_bitmap_buf: wgpu::Buffer,
 
+    /// Research instrumentation: sync-path per-view read counter
+    /// buffer. `Some` iff `ENGINE_GPU_SCORING_VIEW_COUNT=1` — matches
+    /// the BGL slot-24 gate. Bound by the sync BG at
+    /// [`crate::view_read_counter::BINDING`].
+    sync_view_read_counter_buf: Option<wgpu::Buffer>,
+
     /// Cached resident-path bind group keyed by the pair of
     /// caller-supplied buffers it references — `mask_bitmaps_buf` +
     /// `sim_cfg_buf`. All other bindings (agent_data, scoring_table,
@@ -717,6 +723,24 @@ impl ScoringKernel {
             count: None,
         });
 
+        // Research instrumentation (ENGINE_GPU_SCORING_VIEW_COUNT=1):
+        // add the per-view atomic counter buffer at slot 24. Must match
+        // the WGSL emitter's `scoring_view_count_enabled` gate — both
+        // sides read the same env var. Revert-friendly: env unset =>
+        // no BGL entry, no WGSL binding, no buffer.
+        if crate::view_read_counter::enabled() {
+            bgl_entries.push(wgpu::BindGroupLayoutEntry {
+                binding: crate::view_read_counter::BINDING,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            });
+        }
+
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::scoring::bgl"),
             entries: &bgl_entries,
@@ -829,6 +853,22 @@ impl ScoringKernel {
         let sync_alive_bitmap_buf =
             crate::alive_bitmap::create_alive_bitmap_buffer(device, agent_cap);
 
+        // Research instrumentation: sync-path view read counter buffer.
+        // Only populated when `ENGINE_GPU_SCORING_VIEW_COUNT=1` — matches
+        // the BGL slot-24 gate in `ScoringKernel::new`. Counts are
+        // accumulated across every sync dispatch but not normally read
+        // back (the perf instrumentation runs through the resident
+        // path in `step_batch`; sync is only exercised by tests +
+        // warmup, where the counts are uninteresting).
+        let sync_view_read_counter_buf = if crate::view_read_counter::enabled() {
+            Some(crate::view_read_counter::create_buffer(
+                device,
+                &self.view_specs,
+            ))
+        } else {
+            None
+        };
+
         // Phase 6d: view buffers now live in `ViewStorage` and are
         // bound per-run in `run_and_readback`. No local view_bufs.
 
@@ -848,6 +888,7 @@ impl ScoringKernel {
             cached_view_agent_cap: 0,
             sync_sim_cfg_buf,
             sync_alive_bitmap_buf,
+            sync_view_read_counter_buf,
             cached_resident_bg: None,
         });
     }
@@ -1158,6 +1199,17 @@ impl ScoringKernel {
             binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
             resource: pool.sync_alive_bitmap_buf.as_entire_binding(),
         });
+        // Research instrumentation: sync-path view read counter — same
+        // slot-24 gate as the BGL in `ScoringKernel::new`.
+        if crate::view_read_counter::enabled() {
+            let buf = pool.sync_view_read_counter_buf.as_ref().expect(
+                "sync_view_read_counter_buf ensured when ENGINE_GPU_SCORING_VIEW_COUNT=1",
+            );
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: crate::view_read_counter::BINDING,
+                resource: buf.as_entire_binding(),
+            });
+        }
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg"),
             layout: &self.bind_group_layout,
@@ -1380,6 +1432,12 @@ impl ScoringKernel {
         mask_bitmaps_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
         alive_bitmap_buf: &wgpu::Buffer,
+        // Research instrumentation (opt-in): per-view read counter buffer.
+        // `Some` iff `ENGINE_GPU_SCORING_VIEW_COUNT=1` was set at
+        // backend init — the BGL contains slot 24 in that case. Caller
+        // (step_batch) passes `None` when the env var was unset so BGL
+        // stays at its 25-slot layout.
+        view_read_counter_buf: Option<&wgpu::Buffer>,
         agent_cap: u32,
     ) -> Result<(), ScoringError> {
         // Silence unused-param lint without sacrificing the stable
@@ -1422,6 +1480,7 @@ impl ScoringKernel {
                 mask_bitmaps_buf,
                 sim_cfg_buf,
                 alive_bitmap_buf,
+                view_read_counter_buf,
             )?;
             let pool_mut = self.pool.as_mut().expect("pool ensured");
             pool_mut.cached_resident_bg =
@@ -1462,6 +1521,7 @@ impl ScoringKernel {
         mask_bitmaps_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
         alive_bitmap_buf: &wgpu::Buffer,
+        view_read_counter_buf: Option<&wgpu::Buffer>,
     ) -> Result<wgpu::BindGroup, ScoringError> {
         let sorted = scoring_view_binding_order(&self.view_specs);
         let total_view_bindings: usize = sorted.iter().map(|s| view_binding_count(s)).sum();
@@ -1583,6 +1643,25 @@ impl ScoringKernel {
             binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
             resource: alive_bitmap_buf.as_entire_binding(),
         });
+        // Research instrumentation (ENGINE_GPU_SCORING_VIEW_COUNT=1):
+        // per-view read counter at slot 24. Must be present iff the BGL
+        // was built with the counter entry (see `ScoringKernel::new`).
+        // Panic-on-mismatch: a buffer without BGL entry would be silently
+        // dropped; a BGL entry without a buffer is a hard validation error.
+        if crate::view_read_counter::enabled() {
+            let buf = view_read_counter_buf.ok_or_else(|| {
+                ScoringError::Dispatch(
+                    "scoring::build_resident_bind_group: ENGINE_GPU_SCORING_VIEW_COUNT=1 but \
+                     caller did not supply a view_read_counter buffer — step_batch should \
+                     allocate one in `ensure_resident_init`."
+                        .to_string(),
+                )
+            })?;
+            bg_entries.push(wgpu::BindGroupEntry {
+                binding: crate::view_read_counter::BINDING,
+                resource: buf.as_entire_binding(),
+            });
+        }
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg_resident"),
             layout: &self.bind_group_layout,
