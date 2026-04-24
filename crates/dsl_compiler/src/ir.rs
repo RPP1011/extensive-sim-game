@@ -937,6 +937,45 @@ pub enum NamespaceId {
     /// lifted into the DSL in a follow-up once a concrete scoring /
     /// mask row needs them.
     Terrain,
+    /// `membership::*` — Subsystem §1 (roadmap.md:161-211). Predicates on
+    /// per-agent `cold_memberships` SmallVec. Methods are `is_group_member`,
+    /// `is_group_leader`, `can_join_group`, `is_outcast`. All return bool.
+    /// Grammar stub only — emitters return `EmitError::Unsupported` until
+    /// the memberships runtime lands.
+    Membership,
+    /// `relationship::*` — Subsystem §3 (roadmap.md:279-311). Predicates on
+    /// per-agent `cold_relationships` SmallVec. Methods are `is_hostile`,
+    /// `is_friendly`, `knows_well`. All return bool. Grammar stub only —
+    /// emitters return `EmitError::Unsupported` until the relationships
+    /// runtime lands (replaces Combat Foundation's stub `is_hostile_to`
+    /// with valence-based friendship / hostility thresholds).
+    Relationship,
+    /// `theory_of_mind::*` — Subsystem §6 (roadmap.md:447-506). Predicates
+    /// over `Relationship.believed_knowledge: Bitset<32>`. Methods are
+    /// `believes_knows`, `can_deceive`, `is_surprised_by`. All return bool.
+    /// Grammar stub only — emitters return `EmitError::Unsupported` until
+    /// the theory-of-mind runtime lands (gossip / belief-tracking fold).
+    TheoryOfMind,
+    /// `group::*` — Subsystem §7 (roadmap.md:510-574). Predicates on the
+    /// `AggregatePool<Group>` pool. Methods are `exists`, `is_active`,
+    /// `has_leader`, `can_afford_from_treasury`. All return bool.
+    /// Grammar stub only — emitters return `EmitError::Unsupported` until
+    /// the groups runtime lands (Plan 1 T16 shipped the Pod shape; this
+    /// subsystem populates the instance data).
+    ///
+    /// Singular name `group` chosen to match the roadmap spelling; the
+    /// pre-existing plural `groups` namespace (legacy collection accessor)
+    /// is unchanged and continues to resolve independently.
+    Group,
+    /// `quest::*` — Subsystem §12 (roadmap.md:811-872). Predicates on the
+    /// `AggregatePool<Quest>` pool. Methods are `can_accept`, `is_target`,
+    /// `party_near_destination`. All return bool. Grammar stub only —
+    /// emitters return `EmitError::Unsupported` until the quests runtime
+    /// lands (Pod shape shipped by Plan 1 T16; instance data pending).
+    ///
+    /// Singular `quest` is distinct from the pre-existing plural
+    /// `quests` (legacy collection accessor).
+    Quest,
 }
 
 impl NamespaceId {
@@ -960,6 +999,11 @@ impl NamespaceId {
             NamespaceId::Tick => "tick",
             NamespaceId::Abilities => "abilities",
             NamespaceId::Terrain => "terrain",
+            NamespaceId::Membership => "membership",
+            NamespaceId::Relationship => "relationship",
+            NamespaceId::TheoryOfMind => "theory_of_mind",
+            NamespaceId::Group => "group",
+            NamespaceId::Quest => "quest",
         }
     }
 }

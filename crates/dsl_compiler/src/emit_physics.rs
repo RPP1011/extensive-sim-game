@@ -1207,6 +1207,69 @@ fn lower_namespace_call(
                 tick       = lowered[4],
             ))
         }
+        // ----------------------------------------------------------------
+        // Roadmap §1 — Memberships (grammar stub). Parser + resolver accept
+        // these; the physics emitter refuses to lower them because the
+        // per-agent `cold_memberships: SmallVec<[Membership; 4]>` runtime
+        // state doesn't exist yet. Subsystem §1 implementation will
+        // replace each `Unsupported` arm below with a real lowering.
+        // See `docs/superpowers/roadmap.md:161-211`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Membership, "is_group_member")
+        | (NamespaceId::Membership, "is_group_leader")
+        | (NamespaceId::Membership, "can_join_group")
+        | (NamespaceId::Membership, "is_outcast") => Err(EmitError::Unsupported(format!(
+            "memberships primitive `membership::{method}` pending runtime impl"
+        ))),
+        // ----------------------------------------------------------------
+        // Roadmap §3 — Relationships (grammar stub). The per-agent
+        // `cold_relationships: SmallVec<[Relationship; 8]>` slab doesn't
+        // exist yet; Subsystem §3 implementation replaces each arm with
+        // a real lowering. See `docs/superpowers/roadmap.md:279-311`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Relationship, "is_hostile")
+        | (NamespaceId::Relationship, "is_friendly")
+        | (NamespaceId::Relationship, "knows_well") => Err(EmitError::Unsupported(format!(
+            "relationships primitive `relationship::{method}` pending runtime impl"
+        ))),
+        // ----------------------------------------------------------------
+        // Roadmap §6 — Theory-of-mind (grammar stub). Needs the
+        // `Relationship.believed_knowledge: Bitset<32>` slot + the
+        // DomainId / FactId enums; none of those exist yet. Subsystem §6
+        // implementation lowers each arm to a bit-read against the
+        // observer's relationship slot. See
+        // `docs/superpowers/roadmap.md:447-506`.
+        // ----------------------------------------------------------------
+        (NamespaceId::TheoryOfMind, "believes_knows")
+        | (NamespaceId::TheoryOfMind, "can_deceive")
+        | (NamespaceId::TheoryOfMind, "is_surprised_by") => Err(EmitError::Unsupported(format!(
+            "theory_of_mind primitive `theory_of_mind::{method}` pending runtime impl"
+        ))),
+        // ----------------------------------------------------------------
+        // Roadmap §7 — Groups (grammar stub). Plan 1 T16 shipped the
+        // `AggregatePool<Group>` Pod shape; instance data (members,
+        // leader_id, treasury, etc.) lands with Subsystem §7. Until then
+        // the emitter refuses to lower these predicates.
+        // See `docs/superpowers/roadmap.md:510-574`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Group, "exists")
+        | (NamespaceId::Group, "is_active")
+        | (NamespaceId::Group, "has_leader")
+        | (NamespaceId::Group, "can_afford_from_treasury") => Err(EmitError::Unsupported(format!(
+            "groups primitive `group::{method}` pending runtime impl"
+        ))),
+        // ----------------------------------------------------------------
+        // Roadmap §12 — Quests (grammar stub). Plan 1 T16 shipped the
+        // `AggregatePool<Quest>` Pod shape; instance data (party_member_ids,
+        // destination, progress, status, ...) lands with Subsystem §12.
+        // Until then the emitter refuses to lower these predicates.
+        // See `docs/superpowers/roadmap.md:811-872`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Quest, "can_accept")
+        | (NamespaceId::Quest, "is_target")
+        | (NamespaceId::Quest, "party_near_destination") => Err(EmitError::Unsupported(format!(
+            "quests primitive `quest::{method}` pending runtime impl"
+        ))),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics emission",
             ns.name()

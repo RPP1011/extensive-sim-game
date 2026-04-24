@@ -1459,6 +1459,55 @@ fn lower_namespace_call(
              not as a scalar expression"
                 .into(),
         )),
+        // ----------------------------------------------------------------
+        // Roadmap §1 — Memberships (grammar stub). Grammar-only: the GPU
+        // physics emitter refuses these until Subsystem §1 lands a GPU-
+        // visible mirror of the per-agent memberships slab.
+        // See `docs/superpowers/roadmap.md:161-211`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Membership, "is_group_member")
+        | (NamespaceId::Membership, "is_group_leader")
+        | (NamespaceId::Membership, "can_join_group")
+        | (NamespaceId::Membership, "is_outcast") => Err(EmitError::Unsupported(format!(
+            "memberships primitive `membership::{method}` pending runtime impl"
+        ))),
+        // ----------------------------------------------------------------
+        // Roadmap §3 — Relationships (grammar stub). GPU mirror pending
+        // until the runtime lands. See `docs/superpowers/roadmap.md:279-311`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Relationship, "is_hostile")
+        | (NamespaceId::Relationship, "is_friendly")
+        | (NamespaceId::Relationship, "knows_well") => Err(EmitError::Unsupported(format!(
+            "relationships primitive `relationship::{method}` pending runtime impl"
+        ))),
+        // ----------------------------------------------------------------
+        // Roadmap §6 — Theory-of-mind (grammar stub). GPU mirror pending
+        // until the runtime lands. See `docs/superpowers/roadmap.md:447-506`.
+        // ----------------------------------------------------------------
+        (NamespaceId::TheoryOfMind, "believes_knows")
+        | (NamespaceId::TheoryOfMind, "can_deceive")
+        | (NamespaceId::TheoryOfMind, "is_surprised_by") => Err(EmitError::Unsupported(format!(
+            "theory_of_mind primitive `theory_of_mind::{method}` pending runtime impl"
+        ))),
+        // ----------------------------------------------------------------
+        // Roadmap §7 — Groups (grammar stub). GPU mirror pending until
+        // the runtime lands. See `docs/superpowers/roadmap.md:510-574`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Group, "exists")
+        | (NamespaceId::Group, "is_active")
+        | (NamespaceId::Group, "has_leader")
+        | (NamespaceId::Group, "can_afford_from_treasury") => Err(EmitError::Unsupported(format!(
+            "groups primitive `group::{method}` pending runtime impl"
+        ))),
+        // ----------------------------------------------------------------
+        // Roadmap §12 — Quests (grammar stub). GPU mirror pending until
+        // the runtime lands. See `docs/superpowers/roadmap.md:811-872`.
+        // ----------------------------------------------------------------
+        (NamespaceId::Quest, "can_accept")
+        | (NamespaceId::Quest, "is_target")
+        | (NamespaceId::Quest, "party_near_destination") => Err(EmitError::Unsupported(format!(
+            "quests primitive `quest::{method}` pending runtime impl"
+        ))),
         _ => Err(EmitError::Unsupported(format!(
             "stdlib call `{}.{method}` not supported in physics WGSL emission",
             ns.name()

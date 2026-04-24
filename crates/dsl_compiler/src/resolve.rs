@@ -116,6 +116,26 @@ mod stdlib {
             // physics path unchanged; examples and future mask rows
             // opt in by reading through this namespace.
             ("terrain", NamespaceId::Terrain),
+            // Roadmap §1 — Memberships. Grammar stub (no runtime state
+            // yet); predicates return bool and emitters return
+            // `Unsupported`. See `docs/superpowers/roadmap.md:161-211`.
+            ("membership", NamespaceId::Membership),
+            // Roadmap §3 — Relationships. Grammar stub (no runtime state
+            // yet). See `docs/superpowers/roadmap.md:279-311`.
+            ("relationship", NamespaceId::Relationship),
+            // Roadmap §6 — Theory-of-mind. Grammar stub (no runtime state
+            // yet). See `docs/superpowers/roadmap.md:447-506`.
+            ("theory_of_mind", NamespaceId::TheoryOfMind),
+            // Roadmap §7 — Groups. Grammar stub (Pod shape exists from
+            // Plan 1 T16; instance data pending). Singular `group`
+            // — distinct from the legacy collection accessor `groups`.
+            // See `docs/superpowers/roadmap.md:510-574`.
+            ("group", NamespaceId::Group),
+            // Roadmap §12 — Quests. Grammar stub (Pod shape exists from
+            // Plan 1 T16; instance data pending). Singular `quest` —
+            // distinct from the legacy collection accessor `quests`.
+            // See `docs/superpowers/roadmap.md:811-872`.
+            ("quest", NamespaceId::Quest),
         ] {
             symbols.stdlib_namespaces.insert(name.to_string(), id);
         }
@@ -395,6 +415,94 @@ mod stdlib {
             (NamespaceId::Query, "nearby_kin") => {
                 Some((2, IrType::List(Box::new(IrType::AgentId))))
             }
+            // -------------------------------------------------------------
+            // Roadmap §1 — Memberships. Predicates on `cold_memberships`.
+            // All return bool. The `kind` arg of `is_group_member` would
+            // ideally type to a `GroupKind` enum, but that enum doesn't
+            // exist in the IR yet — fall back to `Unknown` and let
+            // whoever implements Subsystem §1 pick the concrete ID type.
+            // See `docs/superpowers/roadmap.md:180-182`.
+            // -------------------------------------------------------------
+            // `is_group_member(agent, kind)` — `kind` is a `GroupKind`
+            // discriminator (Family/Religion/Faction/...); TODO: resolve
+            // to `IrType::Named("GroupKind")` once the kind enum lands.
+            (NamespaceId::Membership, "is_group_member") => Some((2, IrType::Bool)),
+            // `is_group_leader(agent)` — true iff agent holds any
+            // leader role across its memberships.
+            (NamespaceId::Membership, "is_group_leader") => Some((1, IrType::Bool)),
+            // `can_join_group(agent, group)` — evaluates
+            // `group.eligibility_predicate` against `agent`.
+            (NamespaceId::Membership, "can_join_group") => Some((2, IrType::Bool)),
+            // `is_outcast(agent, group)` — state.md:69 "outcasts cannot
+            // vote"; semantically `standing_q8 < OUTCAST_THRESHOLD`.
+            (NamespaceId::Membership, "is_outcast") => Some((2, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Roadmap §3 — Relationships. Predicates on `cold_relationships`.
+            // All return bool. Per the roadmap these replace Combat
+            // Foundation's stub `is_hostile_to` once the relationship
+            // runtime lands — the grammar stub keeps the two surface
+            // forms coexisting until the cutover.
+            // See `docs/superpowers/roadmap.md:306-309`.
+            // -------------------------------------------------------------
+            // `is_hostile(a, b)` — valence_q8 < HOSTILE_THRESHOLD.
+            (NamespaceId::Relationship, "is_hostile") => Some((2, IrType::Bool)),
+            // `is_friendly(a, b)` — valence_q8 > FRIENDLY_THRESHOLD.
+            (NamespaceId::Relationship, "is_friendly") => Some((2, IrType::Bool)),
+            // `knows_well(a, b)` — familiarity > 0.5 (roadmap.md:309).
+            (NamespaceId::Relationship, "knows_well") => Some((2, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Roadmap §6 — Theory-of-mind. Predicates on the 32-bit
+            // `Relationship.believed_knowledge` domain bitset. All return
+            // bool. The `domain` / `fact` args would ideally type to
+            // `DomainId` / `FactId` enums, but those don't exist in the
+            // IR yet — fall back to `Unknown`. TODO: once Subsystem §6
+            // introduces the DomainId / FactId enums, tighten the
+            // argument types by name (similar to how `EventKindId` is
+            // referenced via `IrType::Named`).
+            // See `docs/superpowers/roadmap.md:471-475`.
+            // -------------------------------------------------------------
+            // `believes_knows(observer, subject, domain)` — primary
+            // bit-read against `Relationship{self→subject}.believed_knowledge`.
+            (NamespaceId::TheoryOfMind, "believes_knows") => Some((3, IrType::Bool)),
+            // `can_deceive(observer, subject, fact)` — sugar for
+            // `!believes_knows(subject, fact)` (roadmap.md:473).
+            (NamespaceId::TheoryOfMind, "can_deceive") => Some((3, IrType::Bool)),
+            // `is_surprised_by(observer, subject, domain)` — fires when
+            // an observed action contradicts the domain bit.
+            (NamespaceId::TheoryOfMind, "is_surprised_by") => Some((3, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Roadmap §7 — Groups. Predicates on the `AggregatePool<Group>`.
+            // All return bool. The `cost` arg of `can_afford_from_treasury`
+            // is scalar gold (state.md:1134 treasury is an `i64`); argument
+            // type enforcement lands when Subsystem §7 wires the real
+            // method_sig (1a is arity-only).
+            // See `docs/superpowers/roadmap.md:545-546`.
+            // -------------------------------------------------------------
+            // `exists(id)` — is this GroupId slot populated?
+            (NamespaceId::Group, "exists") => Some((1, IrType::Bool)),
+            // `is_active(id)` — populated AND `dissolved_tick.is_none()`
+            // (state.md:1107).
+            (NamespaceId::Group, "is_active") => Some((1, IrType::Bool)),
+            // `has_leader(id)` — `leader_id.is_some()` (state.md:1116).
+            (NamespaceId::Group, "has_leader") => Some((1, IrType::Bool)),
+            // `can_afford_from_treasury(g, cost)` — `treasury >= cost`.
+            (NamespaceId::Group, "can_afford_from_treasury") => Some((2, IrType::Bool)),
+            // -------------------------------------------------------------
+            // Roadmap §12 — Quests. Predicates on the `AggregatePool<Quest>`.
+            // All return bool. `is_target(entity, q)` takes an `AnyId` —
+            // the entity can be an `AgentId` (Hunt kill-target) or a
+            // settlement / location (Escort / Deliver). 1a falls back to
+            // `IrType::Unknown` for the entity arg; TODO: tighten once
+            // Subsystem §12 fixes the entity-kind taxonomy.
+            // See `docs/superpowers/roadmap.md:843-845`.
+            // -------------------------------------------------------------
+            // `can_accept(agent, q)` — checks party capacity + eligibility.
+            (NamespaceId::Quest, "can_accept") => Some((2, IrType::Bool)),
+            // `is_target(entity, q)` — entity is AnyId per above.
+            (NamespaceId::Quest, "is_target") => Some((2, IrType::Bool)),
+            // `party_near_destination(party, q)` — spatial gate on the
+            // party's centroid vs `quest.destination`.
+            (NamespaceId::Quest, "party_near_destination") => Some((2, IrType::Bool)),
             _ => None,
         }
     }
@@ -2029,6 +2137,25 @@ fn resolve_call(
         if let Some(tail) = name.strip_prefix("view::") {
             if let Some(view_ref) = symbols.views.get(tail) {
                 return Ok(IrExpr::ViewCall(*view_ref, ir_args));
+            }
+        }
+        // Generic `<ns>::<method>(...)` routing — the parser-flattened
+        // sibling of the `<ns>.<method>(...)` dotted path handled above.
+        // If `<ns>` is a registered stdlib namespace, lift the call into
+        // a structured `NamespaceCall` so the resolver's type inference
+        // (and the emitter's per-namespace dispatch) treats the two
+        // surface forms interchangeably. Exact mirror of the dotted
+        // branch: arity is informational at 1a; 1b enforces it.
+        if let Some((ns_name, method)) = name.split_once("::") {
+            if scope.lookup(ns_name).is_none() {
+                if let Some(ns) = symbols.stdlib_namespaces.get(ns_name) {
+                    let _ = stdlib::method_sig(*ns, method);
+                    return Ok(IrExpr::NamespaceCall {
+                        ns: *ns,
+                        method: method.to_string(),
+                        args: ir_args,
+                    });
+                }
             }
         }
         if let Some(r) = symbols.views.get(name) {
