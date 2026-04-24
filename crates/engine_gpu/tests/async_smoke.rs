@@ -61,7 +61,7 @@ fn step_batch_then_snapshot() {
     let tick_after_warmup = state.tick;
 
     // First snapshot — returns empty (no step_batch has run).
-    let empty = gpu.snapshot().expect("first snapshot");
+    let empty = gpu.snapshot(&mut state).expect("first snapshot");
     assert!(empty.agents.is_empty(), "first snapshot (pre-step_batch) should be empty");
 
     // Run the batch.
@@ -69,10 +69,10 @@ fn step_batch_then_snapshot() {
 
     // Second snapshot — front buffer is still empty at this point
     // because step_batch doesn't call snapshot internally.
-    let _ = gpu.snapshot();
+    let _ = gpu.snapshot(&mut state);
 
     // Third snapshot — now returns the batch state.
-    let snap = gpu.snapshot().expect("third snapshot");
+    let snap = gpu.snapshot(&mut state).expect("third snapshot");
     // After step_batch, CPU state.tick stays stale; GPU sim_cfg.tick is
     // authoritative. Observer reads current tick via snapshot.
     assert_eq!(

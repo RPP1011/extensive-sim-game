@@ -1122,6 +1122,15 @@ impl SimState {
         &self.cold_inventory
     }
 
+    /// Mutable inventory bulk slice. Used by the GPU backend's
+    /// `snapshot()` to merge back `gold_buf` readback into the CPU
+    /// SimState (Phase 3 Task 3.5 — observers reading post-batch gold
+    /// values via `state.cold_inventory`). Sibling to the read-only
+    /// `cold_inventory` accessor.
+    pub fn cold_inventory_mut(&mut self) -> &mut [Inventory] {
+        &mut self.cold_inventory
+    }
+
     // Memory bulk slice (Task I).
     pub fn cold_memory(&self) -> &[SmallVec<[MemoryEvent; 64]>] {
         &self.cold_memory

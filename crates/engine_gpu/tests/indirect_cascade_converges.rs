@@ -46,7 +46,7 @@ fn cascade_resident_converges_in_two_iters() {
     // step_batch records the resident cascade; one tick is enough.
     gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, 1);
 
-    let snap = gpu.snapshot().expect("snapshot");
+    let snap = gpu.snapshot(&mut state).expect("snapshot");
 
     // last_cascade_iterations() reports the number of slots whose
     // workgroup count was > 0 at the end of the batch. The original

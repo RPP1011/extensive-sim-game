@@ -36,24 +36,24 @@ fn snapshots_do_not_drop_or_duplicate_events() {
     gpu.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
 
     // Empty snapshot (first call, no batch yet).
-    let _empty = gpu.snapshot().unwrap();
+    let _empty = gpu.snapshot(&mut state).unwrap();
 
     // Run a batch, snapshot. This snapshot is the "swap" — front is
     // still empty (nothing was kicked into it before). The returned
     // snap is the previous-call's empty.
     gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, 10);
-    let _swap = gpu.snapshot().unwrap();
+    let _swap = gpu.snapshot(&mut state).unwrap();
 
     // Run another batch. This call takes the snapshot that was
     // kicked during the previous snapshot() call — so snap_a
     // reflects tick state right after the FIRST batch.
     gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, 10);
-    let snap_a = gpu.snapshot().unwrap();
+    let snap_a = gpu.snapshot(&mut state).unwrap();
 
     // Run a third batch + snapshot — snap_b reflects state right
     // after the SECOND batch.
     gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, 10);
-    let snap_b = gpu.snapshot().unwrap();
+    let snap_b = gpu.snapshot(&mut state).unwrap();
 
     // Ticks must be monotonic.
     assert!(
@@ -134,6 +134,64 @@ fn snapshot_events_cover_multiple_ticks() {
     );
 }
 
+/// Phase 3 Task 3.5 regression: `snapshot()` reads `gold_buf` back into
+/// `SimState.cold_inventory`. With no gold-transfer events firing during
+/// the batch, the round-trip (upload on resident init → atomic kernel
+/// writes that never fire → readback → merge) must preserve the initial
+/// gold value exactly.
+///
+/// Task 3.6 covers the mutation case (EffectGoldTransfer end-to-end). If
+/// this test fails, the readback wire-up or the `cold_inventory_mut`
+/// merge is broken, not the atomic kernels.
+#[test]
+fn snapshot_merges_gold_into_state() {
+    use engine::ids::AgentId;
+
+    let mut gpu = GpuBackend::new().expect("gpu init");
+    let mut state = SimState::new(4, 0xD0_CA);
+    state
+        .spawn_agent(AgentSpawn {
+            creature_type: CreatureType::Human,
+            pos: Vec3::new(0.0, 0.0, 0.0),
+            hp: 100.0,
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Seed CPU-side gold BEFORE ensure_resident_init uploads
+    // cold_inventory into gold_buf.
+    let id = AgentId::new(1).unwrap();
+    let mut inv = state.agent_inventory(id).unwrap_or_default();
+    inv.gold = 100;
+    state.set_agent_inventory(id, inv);
+
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(256);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    // Warmup — cold_inventory uploaded to gold_buf on first
+    // ensure_resident_init.
+    gpu.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+    // Batch with no gold-transfer events — gold_buf should round-trip
+    // the initial 100 unchanged.
+    gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, 3);
+
+    // Triple-snapshot dance (matches the existing tests in this file:
+    // first call returns empty, second kicks, third returns the batch).
+    let _ = gpu.snapshot(&mut state).unwrap();
+    let _ = gpu.snapshot(&mut state).unwrap();
+    let _ = gpu.snapshot(&mut state).unwrap();
+
+    // gold_buf is read back into state.cold_inventory — observer sees
+    // unchanged 100.
+    let cur = state.agent_inventory(id).unwrap();
+    assert_eq!(
+        cur.gold, 100,
+        "gold should round-trip through gold_buf unchanged when no \
+         EffectGoldTransfer event fires during the batch"
+    );
+}
+
 fn run_fight_and_snapshot(n_ticks: u32) -> usize {
     let mut gpu = GpuBackend::new().expect("gpu init");
     let mut state = SimState::new(8, 0xC1_F1_A8);
@@ -168,12 +226,12 @@ fn run_fight_and_snapshot(n_ticks: u32) -> usize {
     // after `step_batch(n)` returns the front buffer (still empty)
     // and kicks the copy into the back buffer.
     gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, n_ticks);
-    let _prime = gpu.snapshot().unwrap();
+    let _prime = gpu.snapshot(&mut state).unwrap();
 
     // Second batch + snapshot — this snapshot's `events_since_last`
     // reflects the batch ring tail captured during the previous
     // snapshot call, which was taken after the first n_ticks batch.
     gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, n_ticks);
-    let snap = gpu.snapshot().unwrap();
+    let snap = gpu.snapshot(&mut state).unwrap();
     snap.events_since_last.len()
 }

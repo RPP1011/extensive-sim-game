@@ -258,8 +258,8 @@ fn step_batch_advances_tick() {
     );
     // After step_batch, CPU state.tick stays stale; GPU sim_cfg.tick is
     // authoritative. Observer reads current tick via snapshot.
-    let _e = gpu_backend.snapshot().expect("empty");
-    let _k = gpu_backend.snapshot().expect("kick");
-    let snap = gpu_backend.snapshot().expect("read");
+    let _e = gpu_backend.snapshot(&mut state).expect("empty");
+    let _k = gpu_backend.snapshot(&mut state).expect("kick");
+    let snap = gpu_backend.snapshot(&mut state).expect("read");
     assert_eq!(snap.tick, tick_before + 5, "snapshot.tick should advance by n_ticks");
 }

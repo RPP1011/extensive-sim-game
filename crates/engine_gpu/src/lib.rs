@@ -1283,6 +1283,7 @@ impl GpuBackend {
     /// single batch yield disjoint event slices.
     pub fn snapshot(
         &mut self,
+        state: &mut SimState,
     ) -> Result<crate::snapshot::GpuSnapshot, crate::snapshot::SnapshotError> {
         // Case 1: `step_batch` hasn't allocated the resident agents
         // buffer yet. Nothing to snapshot — return empty.
@@ -1472,6 +1473,45 @@ impl GpuBackend {
         self.snapshot.snapshot_event_ring_read = end;
         // Same for the chronicle ring watermark.
         self.snapshot.snapshot_chronicle_ring_read = chronicle_end;
+
+        // Phase 3 Task 3.5 — gold_buf readback → SimState.cold_inventory.
+        //
+        // Reads the full i32 array (one entry per agent slot, sized to
+        // `resident.gold_buf_cap` which tracks the resident agent cap)
+        // and merges into `state.cold_inventory[slot].gold`. The resident
+        // physics kernel is the only writer of `gold_buf` (Task 3.4
+        // wired `state_add_agent_gold` / `state_set_agent_gold` to the
+        // binding-17 atomics); the sync path keeps CPU-side gold in
+        // `cold_state_replay` and never touches `gold_buf`. Reading
+        // back after step_batch gives observers the post-batch values
+        // via the same `SimState.cold_inventory()` surface the sync
+        // path already writes through.
+        //
+        // `readback_typed` allocates a throwaway staging buffer and
+        // does its own submit + `poll(Wait)`, so this is O(one extra
+        // roundtrip) on top of the existing snapshot work. Acceptable
+        // for the observer path per Task 3.5's Option (a). A future
+        // optimisation could batch this into the existing snapshot
+        // staging copy, but correctness first.
+        if let Some(gold_buf) = self.resident.gold_buf.as_ref() {
+            let cap = self.resident.gold_buf_cap as usize;
+            if cap > 0 {
+                let bytes = cap * std::mem::size_of::<i32>();
+                let gold_vec: Vec<i32> = crate::gpu_util::readback::readback_typed::<i32>(
+                    &self.device,
+                    &self.queue,
+                    gold_buf,
+                    bytes,
+                )
+                .map_err(crate::snapshot::SnapshotError::Ring)?;
+
+                let inv = state.cold_inventory_mut();
+                let n = gold_vec.len().min(inv.len());
+                for slot in 0..n {
+                    inv[slot].gold = gold_vec[slot];
+                }
+            }
+        }
 
         // 4. Swap front / back — next call takes the one we just
         //    filled, and fills the one we just took from.

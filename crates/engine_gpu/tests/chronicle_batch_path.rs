@@ -103,7 +103,7 @@ fn chronicle_attack_fires_on_batch_path() {
 
     // Prime the double-buffered snapshot: first call returns empty
     // (no batch yet), just kicks the copy into the back buffer.
-    let _empty = gpu.snapshot().unwrap();
+    let _empty = gpu.snapshot(&mut state).unwrap();
 
     // First batch: runs multiple ticks; combat produces AgentAttacked
     // -> chronicle_attack emits ChronicleEntry into the chronicle ring.
@@ -117,7 +117,7 @@ fn chronicle_attack_fires_on_batch_path() {
     );
     // This snapshot is the "swap" — returns the pre-batch empty and
     // kicks a copy of the post-batch state into the back buffer.
-    let _swap = gpu.snapshot().unwrap();
+    let _swap = gpu.snapshot(&mut state).unwrap();
 
     // Second batch + snapshot: `snap` reflects the state that was
     // kicked during the previous snapshot() call — i.e. the chronicle
@@ -130,7 +130,7 @@ fn chronicle_attack_fires_on_batch_path() {
         &cascade,
         5,
     );
-    let snap = gpu.snapshot().unwrap();
+    let snap = gpu.snapshot(&mut state).unwrap();
 
     // Dump observed event kinds so a regression makes the diagnosis
     // obvious (e.g. "combat didn't fire" vs "combat fired but chronicle
@@ -204,7 +204,7 @@ fn chronicle_watermark_advances_across_snapshots() {
     );
 
     // Prime.
-    let _empty = gpu.snapshot().unwrap();
+    let _empty = gpu.snapshot(&mut state).unwrap();
 
     // Three batches separated by snapshots. snap_a covers batch 1,
     // snap_b covers batch 2, snap_c covers batch 3 (the "swap" dance
@@ -218,7 +218,7 @@ fn chronicle_watermark_advances_across_snapshots() {
         &cascade,
         5,
     );
-    let _swap = gpu.snapshot().unwrap();
+    let _swap = gpu.snapshot(&mut state).unwrap();
 
     gpu.step_batch(
         &mut state,
@@ -228,7 +228,7 @@ fn chronicle_watermark_advances_across_snapshots() {
         &cascade,
         5,
     );
-    let snap_a = gpu.snapshot().unwrap();
+    let snap_a = gpu.snapshot(&mut state).unwrap();
 
     gpu.step_batch(
         &mut state,
@@ -238,7 +238,7 @@ fn chronicle_watermark_advances_across_snapshots() {
         &cascade,
         5,
     );
-    let snap_b = gpu.snapshot().unwrap();
+    let snap_b = gpu.snapshot(&mut state).unwrap();
 
     gpu.step_batch(
         &mut state,
@@ -248,7 +248,7 @@ fn chronicle_watermark_advances_across_snapshots() {
         &cascade,
         5,
     );
-    let snap_c = gpu.snapshot().unwrap();
+    let snap_c = gpu.snapshot(&mut state).unwrap();
 
     // Sanity — precondition for the duplicate check to be meaningful:
     // at least one of the three snapshots carried chronicle records.

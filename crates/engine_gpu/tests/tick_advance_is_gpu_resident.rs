@@ -112,9 +112,9 @@ fn snapshot_tick_reflects_gpu_advance() {
     // Snapshot double-buffering: first call returns empty (no kicked
     // copy yet), second call kicks the copy, third call returns the
     // batch state. The watermark advances between calls.
-    let _empty = gpu.snapshot().expect("first snapshot (empty)");
-    let _kick = gpu.snapshot().expect("kick snapshot");
-    let snap = gpu.snapshot().expect("third snapshot");
+    let _empty = gpu.snapshot(&mut state).expect("first snapshot (empty)");
+    let _kick = gpu.snapshot(&mut state).expect("kick snapshot");
+    let snap = gpu.snapshot(&mut state).expect("third snapshot");
     assert_eq!(
         snap.tick,
         tick_after_sync_warmup + 10,
