@@ -192,6 +192,78 @@ fn snapshot_merges_gold_into_state() {
     );
 }
 
+/// Task #79 SP-5 regression: `snapshot()` reads standing_storage back
+/// into `state.views.standing`. With no EffectStandingDelta events
+/// firing during the batch, the round-trip (upload on resident init →
+/// real fold body that never fires → readback → merge) must preserve
+/// the initial standing value exactly.
+///
+/// SP-6 covers the mutation case end-to-end. If this test fails, the
+/// snapshot readback wire-up (SP-5) or upload_from_cpu / readback_into_cpu
+/// (SP-2) is broken, not the find-or-evict fold body (SP-4).
+#[test]
+fn snapshot_merges_standing_into_state() {
+    use engine::ids::AgentId;
+
+    let mut gpu = GpuBackend::new().expect("gpu init");
+    let mut state = SimState::new(8, 0xD0_CA);
+    for i in 0..4 {
+        state
+            .spawn_agent(AgentSpawn {
+                creature_type: CreatureType::Human,
+                pos: Vec3::new(i as f32, 0.0, 0.0),
+                hp: 100.0,
+                ..Default::default()
+            })
+            .unwrap();
+    }
+
+    // Seed CPU-side standing BEFORE ensure_resident_init uploads
+    // state.views.standing into standing_records_buf / counts.
+    let a = AgentId::new(1).unwrap();
+    let b = AgentId::new(2).unwrap();
+    state.views.standing.adjust(a, b, 50, 0);
+
+    // Sanity: CPU adjust landed.
+    assert_eq!(state.views.standing.get(a, b), 50);
+
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::with_cap(256);
+    let cascade = CascadeRegistry::with_engine_builtins();
+
+    // Warmup — state.views.standing uploaded to GPU on first
+    // ensure_resident_init.
+    gpu.step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
+
+    // Batch with no standing-delta events — round-trip should
+    // preserve the initial 50 unchanged. The humans at the seeded
+    // positions may produce incidental combat events, but nothing
+    // emits EffectStandingDelta in base physics.sim (modify_standing
+    // is emitted only by gameplay code; no wolves in this fixture
+    // so no death events to trigger it either).
+    gpu.step_batch(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade, 3);
+
+    // Triple-snapshot dance.
+    let _ = gpu.snapshot(&mut state).unwrap();
+    let _ = gpu.snapshot(&mut state).unwrap();
+    let _ = gpu.snapshot(&mut state).unwrap();
+
+    // state.views.standing is rehydrated from the GPU — observer sees
+    // unchanged 50.
+    assert_eq!(
+        state.views.standing.get(a, b),
+        50,
+        "standing should round-trip through standing_storage unchanged \
+         when no EffectStandingDelta event fires during the batch",
+    );
+    // Symmetry preserved after round-trip.
+    assert_eq!(
+        state.views.standing.get(b, a),
+        50,
+        "symmetry: get(b,a) == get(a,b) after readback",
+    );
+}
+
 fn run_fight_and_snapshot(n_ticks: u32) -> usize {
     let mut gpu = GpuBackend::new().expect("gpu init");
     let mut state = SimState::new(8, 0xC1_F1_A8);

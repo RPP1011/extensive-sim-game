@@ -1549,6 +1549,28 @@ impl GpuBackend {
             }
         }
 
+        // Task #79 SP-5 — standing_storage readback → state.views.standing.
+        //
+        // Mirrors the gold_buf readback pattern above. The resident
+        // physics kernel is the only writer of standing_records_buf /
+        // standing_counts_buf (SP-4's real state_adjust_standing body);
+        // the sync path leaves them untouched and standing flows
+        // through CPU cold_state_replay. Reading back after step_batch
+        // rehydrates state.views.standing so observers see post-batch
+        // standing values via the CPU view's normal get() / adjust()
+        // surface.
+        //
+        // O(agent_cap²) on upload (get_cpu_row scans potential partners)
+        // + two blocking readback_typed calls here. Both one-shot per
+        // snapshot, acceptable per plan Option (a). A future
+        // optimisation could fold this into the existing double-buffered
+        // snapshot staging copy alongside agents / events / chronicle.
+        if let Some(storage) = self.resident.standing_storage.as_ref() {
+            storage
+                .readback_into_cpu(&self.device, &self.queue, &mut state.views.standing)
+                .map_err(crate::snapshot::SnapshotError::Ring)?;
+        }
+
         // 4. Swap front / back — next call takes the one we just
         //    filled, and fills the one we just took from.
         std::mem::swap(
