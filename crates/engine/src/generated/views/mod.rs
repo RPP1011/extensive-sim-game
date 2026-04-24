@@ -5,6 +5,7 @@ pub mod engaged_with;
 pub mod is_hostile;
 pub mod is_stunned;
 pub mod kin_fear;
+pub mod memory;
 pub mod my_enemies;
 pub mod pack_focus;
 pub mod rally_boost;
@@ -16,6 +17,7 @@ pub use engaged_with::EngagedWith;
 pub use is_hostile::is_hostile;
 pub use is_stunned::is_stunned;
 pub use kin_fear::KinFear;
+pub use memory::Memory;
 pub use my_enemies::MyEnemies;
 pub use pack_focus::PackFocus;
 pub use rally_boost::RallyBoost;
@@ -30,6 +32,7 @@ pub use threat_level::ThreatLevel;
 pub struct ViewRegistry {
     pub engaged_with: engaged_with::EngagedWith,
     pub kin_fear: kin_fear::KinFear,
+    pub memory: memory::Memory,
     pub my_enemies: my_enemies::MyEnemies,
     pub pack_focus: pack_focus::PackFocus,
     pub rally_boost: rally_boost::RallyBoost,
@@ -53,6 +56,7 @@ impl ViewRegistry {
         for e in events.iter_since(events_before) {
             self.engaged_with.fold_event(e, tick);
             self.kin_fear.fold_event(e, tick);
+            self.memory.fold_event(e, tick);
             self.my_enemies.fold_event(e, tick);
             self.pack_focus.fold_event(e, tick);
             self.rally_boost.fold_event(e, tick);

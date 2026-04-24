@@ -213,6 +213,20 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    // Subsystem 2 Phase 4 PR-4 — memory view storage. Unused by this
+    // smoke test (no RecordMemory events) — just satisfies the BGL.
+    let memory_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::memory_records"),
+        size: (agent_cap as u64 * 64 * 24).max(24),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let memory_cursors_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::memory_cursors"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("smoke::encoder"),
@@ -238,6 +252,8 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
             &gold_buf,
             &standing_records_buf,
             &standing_counts_buf,
+            &memory_records_buf,
+            &memory_cursors_buf,
             0, // read_slot
             1, // write_slot
             cfg,
@@ -350,6 +366,19 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    // Subsystem 2 Phase 4 PR-4 — memory view storage.
+    let memory_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::memory_records"),
+        size: (agent_cap as u64 * 64 * 24).max(24),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let memory_cursors_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::memory_cursors"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("smoke::encoder"),
@@ -375,6 +404,8 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
             &gold_buf,
             &standing_records_buf,
             &standing_counts_buf,
+            &memory_records_buf,
+            &memory_cursors_buf,
             0, // read_slot
             1, // write_slot
             cfg,

@@ -85,6 +85,16 @@ pub mod view_storage;
 #[cfg(feature = "gpu")]
 pub mod view_storage_symmetric_pair;
 
+/// Subsystem 2 Phase 4 — GPU resident-path storage for
+/// `@per_entity_ring` views (the `memory` view). Owns per-agent
+/// `[MemoryEventGpu; K=64]` ring buffers + monotonic u32 write
+/// cursors. Uploaded from the CPU memory ring on
+/// `ensure_resident_init`, read back in `snapshot()`. Bound into the
+/// resident physics BGL at slots 20 / 21. See
+/// `docs/superpowers/plans/2026-04-23-gpu-per-entity-ring-driver-memory.md`.
+#[cfg(feature = "gpu")]
+pub mod view_storage_per_entity_ring;
+
 /// Phase 5 — GPU spatial hash + nearest-hostile / nearby-kin queries.
 /// Not yet consumed by the backend's step loop; the scoring / physics
 /// kernels will call into `spatial_gpu::SPATIAL_WGSL` helpers.
@@ -854,6 +864,7 @@ impl GpuBackend {
                 sim_cfg_buf,
                 gold_buf,
                 standing_storage,
+                memory_storage,
                 fused_unpack_kernel,
                 ..
             } = &mut self.resident;
@@ -1058,6 +1069,9 @@ impl GpuBackend {
             let standing_ref = standing_storage
                 .as_ref()
                 .expect("standing_storage ensured by ensure_resident_init");
+            let memory_ref = memory_storage
+                .as_ref()
+                .expect("memory_storage ensured by ensure_resident_init");
             crate::cascade_resident::run_cascade_resident_with_iter_cap(
                 &self.device,
                 &self.queue,
@@ -1072,6 +1086,8 @@ impl GpuBackend {
                 gold_buf_ref,
                 &standing_ref.records_buf,
                 &standing_ref.counts_buf,
+                &memory_ref.records_buf,
+                &memory_ref.cursors_buf,
                 iter_cap,
             )
             .expect("cascade_resident dispatch");
@@ -1204,6 +1220,68 @@ impl GpuBackend {
             storage.upload_from_cpu(&self.queue, &state.views.standing);
             self.resident.standing_storage = Some(storage);
             self.resident.standing_storage_cap = agent_cap;
+        }
+
+        // --- Subsystem 2 Phase 4 PR-3: memory view storage -----------------
+        // Per-agent [MemoryEventGpu; K=64] rings + per-owner monotonic
+        // u32 cursors. Sized `agent_cap * 64 * 24` B (records) +
+        // `agent_cap * 4` B (cursors). Uploaded from
+        // `state.views.memory` on allocate + on agent_cap grow (PR-5
+        // retired the old `state.cold_memory` smallvec; the view is now
+        // the source of truth). PR-4 binds this into the resident
+        // physics BGL at slots 20 / 21; PR-6 reads back in snapshot().
+        let need_memory_alloc = match &self.resident.memory_storage {
+            Some(_) => self.resident.memory_storage_cap < agent_cap,
+            None => true,
+        };
+        if need_memory_alloc {
+            let k = crate::view_storage_per_entity_ring::MEMORY_K;
+            let storage = crate::view_storage_per_entity_ring::ViewStoragePerEntityRing::new(
+                &self.device,
+                agent_cap,
+                k,
+            );
+            // Derive a throwaway `Vec<MemoryEvent>` per owner from the
+            // view's raw ring slice + cursor. The view stores the v1
+            // minimal shape `{source, value=1.0, anchor_tick=tick}`;
+            // project the event fields back so the GPU struct lands
+            // with the matching partial data (`kind=0`, `payload=0`,
+            // `confidence_q8=0`). Upload is a cold path (init /
+            // agent_cap grow only) so the per-owner scan is fine.
+            let view = &state.views.memory;
+            let k_usize = k as usize;
+            storage.upload_from_cpu(&self.queue, |slot| {
+                let raw_id = (slot as u32).saturating_add(1);
+                let Some(owner_id) = engine::ids::AgentId::new(raw_id) else {
+                    return None;
+                };
+                let cursor = view.cursor(owner_id);
+                if cursor == 0 {
+                    return Some(Vec::new());
+                }
+                let row = view.entries(owner_id)?;
+                let writes = (cursor as usize).min(k_usize);
+                let start_abs = (cursor as usize).saturating_sub(writes);
+                let mut out: Vec<engine::state::agent_types::MemoryEvent> =
+                    Vec::with_capacity(writes);
+                for i in 0..writes {
+                    let abs = start_abs + i;
+                    let entry = row[abs % k_usize];
+                    let Some(src) = engine::ids::AgentId::new(entry.source) else {
+                        continue;
+                    };
+                    out.push(engine::state::agent_types::MemoryEvent {
+                        source: src,
+                        kind: 0,
+                        payload: 0,
+                        confidence_q8: 0,
+                        tick: entry.anchor_tick,
+                    });
+                }
+                Some(out)
+            });
+            self.resident.memory_storage = Some(storage);
+            self.resident.memory_storage_cap = agent_cap;
         }
 
         // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`
@@ -1569,6 +1647,60 @@ impl GpuBackend {
             storage
                 .readback_into_cpu(&self.device, &self.queue, &mut state.views.standing)
                 .map_err(crate::snapshot::SnapshotError::Ring)?;
+        }
+
+        // Subsystem 2 Phase 4 PR-6 — memory_storage readback →
+        // state.views.memory.
+        //
+        // Mirrors the gold + standing readback pattern. The resident
+        // physics kernel is the sole writer of `memory_records_buf` /
+        // `memory_cursors_buf` (PR-4's real `state_push_agent_memory`
+        // body); the sync path leaves them untouched and `RecordMemory`
+        // events flow through CPU `cold_state_replay` + `fold_all`.
+        // Reading back after `step_batch` rehydrates
+        // `state.views.memory` so observers see post-batch memory ring
+        // state via the same `state.views.memory.entries(...)` surface
+        // the sync path already writes through.
+        //
+        // O(agent_cap * K) on upload (PR-3) + two blocking
+        // `readback_typed` calls here — all one-shot per snapshot.
+        // Acceptable per the plan's §4b cost budget (Option (a) —
+        // consistent with gold + standing; a future batched readback
+        // into the double-buffered snapshot staging is tracked as a
+        // cross-cutting follow-up).
+        if let Some(storage) = self.resident.memory_storage.as_ref() {
+            let rehydrated = storage
+                .readback_into_cpu(&self.device, &self.queue)
+                .map_err(crate::snapshot::SnapshotError::Ring)?;
+            // Replace `state.views.memory` with a fresh struct reflecting
+            // the GPU state. `Memory` has no `clear()` helper, so we
+            // rebuild it by pushing each entry in chronological order —
+            // same convention the view's `fold_event` uses on the CPU
+            // path. `Memory::push` grows the ring + cursor vectors on
+            // demand, so owners with no GPU activity stay at cursor=0
+            // and are not resized.
+            let mut new_memory = engine::generated::views::memory::Memory::new();
+            for (owner_slot, row) in rehydrated.iter().enumerate() {
+                if row.is_empty() {
+                    continue;
+                }
+                let Some(owner_id) = engine::ids::AgentId::new(
+                    (owner_slot as u32).saturating_add(1),
+                ) else {
+                    continue;
+                };
+                for ev in row.iter() {
+                    let entry = engine::generated::views::memory::MemoryEntry {
+                        source: ev.source.raw(),
+                        // v1 minimal projection — the CPU fold writes
+                        // 1.0 on every event, so we mirror here.
+                        value: 1.0,
+                        anchor_tick: ev.tick,
+                    };
+                    new_memory.push(owner_id.raw(), entry);
+                }
+            }
+            state.views.memory = new_memory;
         }
 
         // 4. Swap front / back — next call takes the one we just

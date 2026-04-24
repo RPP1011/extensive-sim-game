@@ -7,6 +7,7 @@ use crate::cascade_resident::CascadeResidentCtx;
 use crate::gpu_util::indirect::IndirectArgsBuffer;
 use crate::mask::{FusedAgentUnpackKernel, MaskUnpackKernel};
 use crate::scoring::ScoringUnpackKernel;
+use crate::view_storage_per_entity_ring::ViewStoragePerEntityRing;
 use crate::view_storage_symmetric_pair::ViewStorageSymmetricPair;
 
 pub struct ResidentPathContext {
@@ -31,6 +32,15 @@ pub struct ResidentPathContext {
     /// `state.views.standing` on `snapshot()` (SP-5).
     pub standing_storage:     Option<ViewStorageSymmetricPair>,
     pub standing_storage_cap: u32,
+
+    /// Subsystem 2 Phase 4 — resident storage for the
+    /// `@per_entity_ring(K=64)` `memory` view. Per-agent
+    /// `[MemoryEventGpu; K=64]` rings + per-owner monotonic u32
+    /// cursors. Uploaded from the CPU memory ring at
+    /// `ensure_resident_init` (PR-3); bound into the resident physics
+    /// BGL at slots 20 / 21 (PR-4); read back on `snapshot()` (PR-6).
+    pub memory_storage:     Option<ViewStoragePerEntityRing>,
+    pub memory_storage_cap: u32,
 
     /// Phase D — indirect dispatch args for the resident cascade.
     /// MAX_CASCADE_ITERATIONS + 1 slots. Lazy-initialised in step_batch.
@@ -83,6 +93,8 @@ impl ResidentPathContext {
             gold_buf_cap:           0,
             standing_storage:       None,
             standing_storage_cap:   0,
+            memory_storage:         None,
+            memory_storage_cap:     0,
             resident_indirect_args: None,
             resident_cascade_ctx:   None,
             mask_unpack_kernel,

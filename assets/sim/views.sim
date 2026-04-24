@@ -295,3 +295,34 @@ view standing(a: Agent, b: Agent) -> i32 {
   on EffectStandingDelta { a: a, b: b, delta: delta } { self += delta }
   clamp: [-1000, 1000],
 }
+
+// -----------------------------------------------------------------------
+// @materialized view memory(observer, source) → f32 — per-agent FIFO ring
+// -----------------------------------------------------------------------
+// Per-agent ring of recent hearsay — what who told me, when. Replaces the
+// hand-rolled `cold_memory: Vec<SmallVec<[MemoryEvent; 64]>>` retired by
+// Subsystem 2 Phase 4. Folds on `RecordMemory { observer, source, ... }`
+// events — the emitter passes the non-owner `source` binding through as
+// the ring entry's `source` field; `fact_payload` / `confidence` are
+// written through the GPU-side `state_push_agent_memory` stub (see
+// `crates/engine_gpu/src/physics.rs`), not through the view's CPU fold
+// arm, so the v1 CPU projection is `source` + `value = 1.0` + tick.
+//
+// Storage: `@per_entity_ring(K = 64)` — a monotonic-cursor FIFO with K=64
+// slots per owner. Cursor is a u32 counter; the write slot is
+// `cursor % K` and the oldest entry is evicted implicitly on overflow.
+// No clamp (ring entries aren't accumulated), no `@decay` (FIFO, not
+// anchor-pattern).
+//
+// GPU driver: `crates/engine_gpu/src/view_storage_per_entity_ring.rs`
+// (bindings 20 / 21 on the resident physics BGL); snapshot readback
+// mirrors the gold + standing pattern.
+//
+// Reference: Subsystem 2 Phase 4 plan,
+// `docs/superpowers/plans/2026-04-23-gpu-per-entity-ring-driver-memory.md`.
+@materialized(on_event = [RecordMemory])
+@per_entity_ring(K = 64)
+view memory(observer: Agent, source: Agent) -> f32 {
+  initial: 0.0,
+  on RecordMemory { observer: observer, source: source } { self += 1.0 }
+}

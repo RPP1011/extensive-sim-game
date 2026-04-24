@@ -10,7 +10,7 @@ use crate::spatial::SpatialHash;
 use crate::terrain::{FlatPlane, TerrainQuery};
 pub use agent::{AgentSpawn, MovementMode};
 use agent_types::{
-    ClassSlot, Creditor, Inventory, MemoryEvent, Membership, Relationship, StatusEffect,
+    ClassSlot, Creditor, Inventory, Membership, Relationship, StatusEffect,
 };
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
@@ -113,10 +113,12 @@ pub struct SimState {
     cold_memberships:    Vec<SmallVec<[Membership; 4]>>,
     // Inventory (state.md §Inventory) — one per agent.
     cold_inventory:      Vec<Inventory>,
-    // Memory (state.md §Memory) — per-agent event ring. state.md caps at
-    // 20; the stub uses 64-slot SmallVec inline to leave headroom and to
-    // stay Pod-friendly; real ring semantics land with the memory plan.
-    cold_memory:         Vec<SmallVec<[MemoryEvent; 64]>>,
+    // Memory retired 2026-04-23 by Subsystem 2 Phase 4 — see
+    // `state.views.memory` (`@per_entity_ring(K=64)` view). The DSL
+    // `agents.record_memory(...)` stdlib call lowers directly to
+    // `state.views.memory.push(...)`. GPU driver at
+    // `crates/engine_gpu/src/view_storage_per_entity_ring.rs` owns
+    // the resident-path mirror; readback rehydrates `state.views.memory`.
     // Relationships (state.md §Relationship) — capped at 8 (state.md caps
     // at 20; the stub uses 8 inline as a smaller default; eviction is a
     // later plan's concern).
@@ -272,7 +274,6 @@ impl SimState {
             cold_status_effects: (0..cap).map(|_| SmallVec::new()).collect(),
             cold_memberships:    (0..cap).map(|_| SmallVec::new()).collect(),
             cold_inventory:      vec![Inventory::default(); cap],
-            cold_memory:         (0..cap).map(|_| SmallVec::new()).collect(),
             cold_relationships:  (0..cap).map(|_| SmallVec::new()).collect(),
             cold_class_definitions: vec![[ClassSlot::default(); 4]; cap],
             cold_creditor_ledger:   (0..cap).map(|_| SmallVec::new()).collect(),
@@ -374,7 +375,6 @@ impl SimState {
         self.cold_status_effects[slot].clear();
         self.cold_memberships[slot].clear();
         self.cold_inventory[slot] = Inventory::default();
-        self.cold_memory[slot].clear();
         self.cold_relationships[slot].clear();
         self.cold_class_definitions[slot] = [ClassSlot::default(); 4];
         self.cold_creditor_ledger[slot].clear();
@@ -814,22 +814,10 @@ impl SimState {
         }
     }
 
-    // Memory (Task I).
-    pub fn agent_memory(&self, id: AgentId) -> Option<&[MemoryEvent]> {
-        self.cold_memory
-            .get(AgentSlotPool::slot_of_agent(id))
-            .map(|v| v.as_slice())
-    }
-    pub fn push_agent_memory(&mut self, id: AgentId, ev: MemoryEvent) {
-        if let Some(v) = self.cold_memory.get_mut(AgentSlotPool::slot_of_agent(id)) {
-            v.push(ev);
-        }
-    }
-    pub fn clear_agent_memory(&mut self, id: AgentId) {
-        if let Some(v) = self.cold_memory.get_mut(AgentSlotPool::slot_of_agent(id)) {
-            v.clear();
-        }
-    }
+    // Memory (Task I) retired 2026-04-23 by Subsystem 2 Phase 4.
+    // Read/mutate via the `@per_entity_ring(K=64)` `memory` view:
+    // `state.views.memory.push(observer.raw(), MemoryEntry { .. })`
+    // and `state.views.memory.entries(observer)`.
 
     // Relationships (Task J).
     pub fn agent_relationships(&self, id: AgentId) -> Option<&[Relationship]> {
@@ -1165,10 +1153,8 @@ impl SimState {
         &mut self.cold_inventory
     }
 
-    // Memory bulk slice (Task I).
-    pub fn cold_memory(&self) -> &[SmallVec<[MemoryEvent; 64]>] {
-        &self.cold_memory
-    }
+    // Memory bulk slice retired 2026-04-23 (see the accessor comment
+    // block above). Callers iterate through `state.views.memory` now.
 
     // Relationships bulk slice (Task J).
     pub fn cold_relationships(&self) -> &[SmallVec<[Relationship; 8]>] {

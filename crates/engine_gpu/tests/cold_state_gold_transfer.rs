@@ -269,6 +269,20 @@ fn transfer_gold_fires_on_resident_kernel() {
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    // Subsystem 2 Phase 4 PR-4 — memory view storage. Unused by this
+    // test but the resident BGL requires it.
+    let memory_records_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("gold::memory_records"),
+        size: (agent_cap as u64 * 64 * 24).max(24),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let memory_cursors_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("gold::memory_cursors"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
 
     // Baseline readback (sanity: initial values reached the device
     // before dispatch).
@@ -300,6 +314,8 @@ fn transfer_gold_fires_on_resident_kernel() {
             &gold_buf,
             &standing_records_buf,
             &standing_counts_buf,
+            &memory_records_buf,
+            &memory_cursors_buf,
             0, // read_slot
             1, // write_slot
             cfg,

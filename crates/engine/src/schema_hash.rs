@@ -22,7 +22,7 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"};cold{");
     h.update(b"creature_type=u8,channels=smallvec4,spawn_tick=u32,");
     h.update(b"grid_id=Option<u32>,local_pos=Option<vec3>,move_target=Option<vec3>,");
-    h.update(b"status_effects=smallvec8<StatusEffect>,memberships=smallvec4<Membership>,inventory=Inventory,memory=smallvec64<MemoryEvent>,relationships=smallvec8<Relationship>,");
+    h.update(b"status_effects=smallvec8<StatusEffect>,memberships=smallvec4<Membership>,inventory=Inventory,memory=views::Memory{per_entity_ring(K=64)},relationships=smallvec8<Relationship>,");
     h.update(b"class_definitions=[ClassSlot;4],creditor_ledger=smallvec16<Creditor>,mentor_lineage=[Option<AgentId>;8]");
     h.update(b"}");
     h.update(b"StatusEffect{kind=u8,source=AgentId,remaining_ticks=u32,payload_q8=i16}");

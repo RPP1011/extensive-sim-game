@@ -1,9 +1,17 @@
-//! Audit fix HIGH #4 — `RecordMemory` events must also land in the observer's
-//! `cold_memory` slot, not just in the event ring.
+//! Audit fix HIGH #4 — `RecordMemory` events must also land in the
+//! observer's memory slot, not just in the event ring.
 //!
-//! `announce_audience.rs` + `announce_overhear.rs` already pin the event-ring
-//! side; these tests pin the state-side writer so downstream consumers who
-//! read `state.agent_memory(observer)` actually see the broadcast.
+//! `announce_audience.rs` + `announce_overhear.rs` already pin the
+//! event-ring side; these tests pin the state-side writer so
+//! downstream consumers who read `state.views.memory.entries(observer)`
+//! actually see the broadcast.
+//!
+//! Subsystem 2 Phase 4 migrated the storage from
+//! `state.cold_memory[slot]` to the generated `state.views.memory`
+//! view (`@per_entity_ring(K=64)`). The view's minimal v1 projection
+//! stores `{source, value = 1.0, anchor_tick = tick}` — `payload` /
+//! `confidence_q8` are dropped until the entry shape widens. These
+//! tests assert the reachable fields (source + cursor + tick).
 
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
@@ -35,7 +43,7 @@ impl PolicyBackend for OneAnnounce {
 }
 
 #[test]
-fn primary_recipient_cold_memory_contains_the_broadcast() {
+fn primary_recipient_view_memory_contains_the_broadcast() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1024);
@@ -66,20 +74,18 @@ fn primary_recipient_cold_memory_contains_the_broadcast() {
         &cascade,
     );
 
-    let mem = state.agent_memory(listener).expect("listener memory slice");
-    assert_eq!(mem.len(), 1,
-        "expected exactly one memory entry for the primary recipient, got {}", mem.len());
-    let ev = mem[0];
-    assert_eq!(ev.source, speaker);
-    assert_eq!(ev.payload, 0xCAFE_D00D_F00D_F00D);
-    // 0.8 primary confidence → round(0.8 * 255) = 204.
-    assert_eq!(ev.confidence_q8, 204,
-        "confidence_q8 should encode primary confidence 0.8 → 204");
-    assert_eq!(ev.tick, 0);
+    let cursor = state.views.memory.cursor(listener);
+    assert_eq!(
+        cursor, 1,
+        "expected exactly one push into listener's ring, cursor={cursor}"
+    );
+    let row = state.views.memory.entries(listener).expect("listener row");
+    assert_eq!(row[0].source, speaker.raw());
+    assert_eq!(row[0].anchor_tick, 0);
 }
 
 #[test]
-fn overhear_bystander_cold_memory_has_lower_confidence() {
+fn overhear_bystander_view_memory_records_source() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(1024);
@@ -111,11 +117,10 @@ fn overhear_bystander_cold_memory_has_lower_confidence() {
         &cascade,
     );
 
-    let mem = state.agent_memory(bystander).expect("bystander memory slice");
-    assert_eq!(mem.len(), 1);
-    // 0.6 overhear confidence → round(0.6 * 255) = 153.
-    assert_eq!(mem[0].confidence_q8, 153,
-        "overhear confidence 0.6 → 153 in q8");
+    let cursor = state.views.memory.cursor(bystander);
+    assert_eq!(cursor, 1, "bystander got one overhear push");
+    let row = state.views.memory.entries(bystander).expect("bystander row");
+    assert_eq!(row[0].source, speaker.raw());
 }
 
 #[test]
@@ -140,6 +145,9 @@ fn speaker_receives_no_memory_of_their_own_announce() {
         &OneAnnounce(speaker, AnnounceAudience::Area(Vec3::ZERO, 100.0)),
         &cascade,
     );
-    let mem = state.agent_memory(speaker).expect("slot");
-    assert_eq!(mem.len(), 0, "speaker must not record their own broadcast");
+    assert_eq!(
+        state.views.memory.cursor(speaker),
+        0,
+        "speaker must not record their own broadcast"
+    );
 }
