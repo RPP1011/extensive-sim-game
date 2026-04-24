@@ -423,6 +423,7 @@ pub fn build_physics_shader(
         ctx,
         event_ring_capacity,
         DEFAULT_CHRONICLE_CAPACITY,
+        false, // sync path: no gold_buf binding, gold stubs stay no-op
     )
 }
 
@@ -436,6 +437,7 @@ pub fn build_physics_shader_with_chronicle(
     ctx: &EmitContext<'_>,
     event_ring_capacity: u32,
     chronicle_ring_capacity: u32,
+    has_gold_buf: bool,
 ) -> Result<String, PhysicsError> {
     let mut out = String::new();
     out.push_str(&wgsl_prefix(event_ring_capacity));
@@ -599,12 +601,24 @@ pub fn build_physics_shader_with_chronicle(
     out.push_str(CHRONICLE_RING_WGSL);
     out.push_str("\n");
 
+    // Phase 3 Task 3.4 — gold ledger side buffer (resident path only).
+    // Declared before `state_stub_fns` emits its atomic bodies so the
+    // `gold_buf` identifier is in scope when the stubs reference it.
+    // Sync path skips this declaration and emits no-op stub bodies,
+    // keeping the sync shader's binding set unchanged (0..12 + 16).
+    if has_gold_buf {
+        out.push_str(
+            "\n// ---- Phase 3 Task 3.4 — gold ledger side buffer ----\n\
+             @group(0) @binding(17) var<storage, read_write> gold_buf: array<atomic<i32>>;\n\n",
+        );
+    }
+
     // ---- State stub fns ----
     //
     // Every stub writes/reads exactly one field of the `agents` buffer.
     // Stubs that the CPU side doesn't have a GPU-side source for (gold,
     // standing, memory) are no-ops documented as such.
-    out.push_str(&state_stub_fns());
+    out.push_str(&state_stub_fns(has_gold_buf));
 
     // ---- `cfg` namespace-field lookups ----
     //
@@ -729,8 +743,18 @@ pub fn build_physics_shader_resident(
     // base 0..12 bindings verbatim. This keeps the two shaders in
     // lockstep — any new stub / const / struct added for sync flows
     // into resident automatically.
-    let mut out =
-        build_physics_shader_with_chronicle(physics, ctx, event_ring_capacity, chronicle_ring_capacity)?;
+    //
+    // Phase 3 Task 3.4: pass `has_gold_buf = true` so the gold-stub
+    // section in `state_stub_fns` emits atomic bodies against the
+    // binding-17 `gold_buf` declaration we append below. The sync
+    // source passes `false` and keeps its no-op stubs.
+    let mut out = build_physics_shader_with_chronicle(
+        physics,
+        ctx,
+        event_ring_capacity,
+        chronicle_ring_capacity,
+        true,
+    )?;
 
     // Append the resident-only bindings. These are additive — the sync
     // pipeline doesn't include them in its bind-group layout, but WGSL
@@ -896,14 +920,23 @@ fn event_kind_consts() -> String {
 }
 
 /// Emit the state-stub fns the physics emitter references.
-fn state_stub_fns() -> String {
+///
+/// Phase 3 Task 3.4 — `has_gold_buf` selects whether the
+/// `state_add_agent_gold` / `state_set_agent_gold` bodies are no-ops
+/// (sync path — gold still runs via CPU `cold_state_replay`) or real
+/// atomic mutations against the resident `gold_buf` side buffer
+/// (resident batch path — CPU cold_inventory is rehydrated from GPU
+/// on `snapshot()` after Task 3.5). The resident shader declares
+/// binding 17 for `gold_buf` before including this prelude so the
+/// real bodies compile.
+fn state_stub_fns(has_gold_buf: bool) -> String {
     // The emitter lists every stub name in the module doc. All scalar
     // getters/setters project into a single field of `agents[id - 1]`
     // (ids are 1-based; slot 0 is unused).
     //
     // `id` is bounds-checked — out-of-range ids return sentinel / are
     // no-ops so a malformed event can't corrupt state.
-    r#"
+    let src = r#"
 fn slot_of(id: u32) -> u32 {
     // AgentId is 1-based NonZeroU32. Dead slots / unspawned ids both
     // resolve to a slot whose `alive == 0`, so the caller's guard
@@ -1005,11 +1038,7 @@ fn state_set_agent_slow_factor_q8(id: u32, v: i32) {
     if (s == 0xFFFFFFFFu) { return; }
     agents[s].slow_factor_q8 = bitcast<u32>(v) & 0xFFFFu;
 }
-// Gold mutations: no-op on GPU. The ModifyStanding / gold transfer
-// rules still fire on the CPU side; the GPU path preserves state by
-// leaving the (absent) gold buffer untouched.
-fn state_set_agent_gold(id: u32, v: i32) { }
-fn state_add_agent_gold(id: u32, delta: i32) { }
+// ---- GOLD_STUBS_PLACEHOLDER ----
 fn state_adjust_standing(a: u32, b: u32, delta: i32) { }
 fn state_set_agent_cooldown_next_ready(id: u32, v: u32) {
     let s = slot_of(id);
@@ -1044,7 +1073,37 @@ fn state_kill_agent(id: u32) {
 // phase wants GPU memory, provision a ring buffer + atomic tail and
 // replace this no-op.
 fn state_push_agent_memory(observer: u32, source: u32, payload: u32, confidence: f32, t: u32) { }
-"#.to_string()
+"#;
+
+    // Substitute the gold-stub placeholder with either no-op bodies
+    // (sync path — gold still runs via CPU `cold_state_replay`) or
+    // real atomic bodies (resident path — Phase 3 Task 3.4).
+    let gold_bodies = if has_gold_buf {
+        "// Phase 3 Task 3.4 — real gold mutations against the resident\n\
+         // `gold_buf` side buffer (binding 17, one atomic<i32> per slot).\n\
+         // Sync path keeps the no-op bodies below; only the resident\n\
+         // shader builder (`build_physics_shader_resident`) passes\n\
+         // `has_gold_buf = true` so these atomic calls compile.\n\
+         fn state_add_agent_gold(id: u32, delta: i32) {\n\
+         \x20   let s = slot_of(id);\n\
+         \x20   if (s == 0xFFFFFFFFu) { return; }\n\
+         \x20   atomicAdd(&gold_buf[s], delta);\n\
+         }\n\
+         fn state_set_agent_gold(id: u32, v: i32) {\n\
+         \x20   let s = slot_of(id);\n\
+         \x20   if (s == 0xFFFFFFFFu) { return; }\n\
+         \x20   atomicStore(&gold_buf[s], v);\n\
+         }\n"
+    } else {
+        "// Gold mutations: no-op on GPU for the sync path. The\n\
+         // transfer_gold / ModifyStanding rules still fire on the CPU\n\
+         // side (via `cold_state_replay`); the GPU path preserves state\n\
+         // by leaving the (absent) gold buffer untouched. The resident\n\
+         // batch path emits the real atomic bodies against binding 17.\n\
+         fn state_set_agent_gold(id: u32, v: i32) { }\n\
+         fn state_add_agent_gold(id: u32, delta: i32) { }\n"
+    };
+    src.replace("// ---- GOLD_STUBS_PLACEHOLDER ----", gold_bodies)
 }
 
 /// Emit spatial-query wrapper fns. The emitter calls
@@ -1178,6 +1237,11 @@ struct ResidentBgKey {
     /// stable across every cascade iteration in a batch (the cache
     /// still hits 100% after iter 0).
     sim_cfg: wgpu::Buffer,
+    /// Phase 3 Task 3.4 — resident gold ledger side buffer. Like
+    /// `sim_cfg`, stable across every cascade iteration in a batch
+    /// (single handle on the backend, re-allocated only when
+    /// `agent_cap` grows), so this key is cache-friendly.
+    gold_buf: wgpu::Buffer,
 }
 
 struct BufferPool {
@@ -1248,6 +1312,7 @@ impl PhysicsKernel {
             ctx,
             event_ring_capacity,
             chronicle_ring_capacity,
+            false, // sync pipeline: no gold_buf binding
         )?;
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -1377,6 +1442,11 @@ impl PhysicsKernel {
             // index as the sync BGL so both WGSL entry points reference
             // the identical `@binding(SIM_CFG_BINDING)` declaration.
             storage_ro(SIM_CFG_BINDING),
+            // Phase 3 Task 3.4 — gold ledger side buffer, one
+            // atomic<i32> per agent slot. transfer_gold DSL rules mutate
+            // this via `state_add_agent_gold` / `state_set_agent_gold`
+            // on the resident path.
+            storage_rw(17),
         ];
         let bind_group_layout_resident =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -2006,6 +2076,7 @@ impl PhysicsKernel {
         indirect_args: &crate::gpu_util::indirect::IndirectArgsBuffer,
         num_events_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
+        gold_buf: &wgpu::Buffer,
         read_slot: u32,
         write_slot: u32,
         cfg: PhysicsCfg,
@@ -2068,6 +2139,7 @@ impl PhysicsKernel {
             indirect_args: indirect_args.buffer().clone(),
             num_events: num_events_buf.clone(),
             sim_cfg: sim_cfg_buf.clone(),
+            gold_buf: gold_buf.clone(),
         };
         let bind_group: &wgpu::BindGroup = self.resident_bg_cache.entry(key).or_insert_with(|| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2142,6 +2214,11 @@ impl PhysicsKernel {
                     wgpu::BindGroupEntry {
                         binding: SIM_CFG_BINDING,
                         resource: sim_cfg_buf.as_entire_binding(),
+                    },
+                    // Phase 3 Task 3.4 — gold ledger side buffer.
+                    wgpu::BindGroupEntry {
+                        binding: 17,
+                        resource: gold_buf.as_entire_binding(),
                     },
                 ],
             })

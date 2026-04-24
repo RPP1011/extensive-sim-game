@@ -985,6 +985,7 @@ pub fn run_cascade_resident(
     apply_event_ring: &GpuEventRing,
     indirect_args: &IndirectArgsBuffer,
     sim_cfg_buf: &wgpu::Buffer,
+    gold_buf: &wgpu::Buffer,
 ) -> Result<(), CascadeResidentError> {
     run_cascade_resident_with_iter_cap(
         device,
@@ -997,6 +998,7 @@ pub fn run_cascade_resident(
         apply_event_ring,
         indirect_args,
         sim_cfg_buf,
+        gold_buf,
         MAX_CASCADE_ITERATIONS,
     )
 }
@@ -1022,6 +1024,7 @@ pub fn run_cascade_resident_with_iter_cap(
     apply_event_ring: &GpuEventRing,
     indirect_args: &IndirectArgsBuffer,
     sim_cfg_buf: &wgpu::Buffer,
+    gold_buf: &wgpu::Buffer,
     max_iters: u32,
 ) -> Result<(), CascadeResidentError> {
     let max_iters = max_iters.clamp(1, MAX_CASCADE_ITERATIONS);
@@ -1159,6 +1162,7 @@ pub fn run_cascade_resident_with_iter_cap(
             indirect_args,
             &resident_ctx.num_events_buf,
             sim_cfg_buf,
+            gold_buf,
             iter,       // read_slot
             iter + 1,   // write_slot
             cfg_template,

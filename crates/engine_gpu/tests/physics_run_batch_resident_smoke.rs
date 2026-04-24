@@ -187,6 +187,16 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
     let sim_cfg_buf = engine_gpu::sim_cfg::create_sim_cfg_buffer(&device);
     engine_gpu::sim_cfg::upload_sim_cfg(&queue, &sim_cfg_buf, &sim_cfg_snapshot);
 
+    // Phase 3 Task 3.4 — gold ledger side buffer. Sized to `agent_cap`
+    // i32s (one atomic<i32> per slot). Contents unused by this test
+    // (no transfer_gold events) — just satisfies the binding.
+    let gold_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::gold_buf"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("smoke::encoder"),
     });
@@ -208,6 +218,7 @@ fn run_batch_resident_zero_input_writes_noop_slot() {
             &indirect,
             &num_events_buf,
             &sim_cfg_buf,
+            &gold_buf,
             0, // read_slot
             1, // write_slot
             cfg,
@@ -300,6 +311,14 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
     let sim_cfg_buf = engine_gpu::sim_cfg::create_sim_cfg_buffer(&device);
     engine_gpu::sim_cfg::upload_sim_cfg(&queue, &sim_cfg_buf, &sim_cfg_snapshot);
 
+    // Phase 3 Task 3.4 — gold ledger side buffer.
+    let gold_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("smoke::gold_buf"),
+        size: (agent_cap as u64 * 4).max(4),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("smoke::encoder"),
     });
@@ -321,6 +340,7 @@ fn run_batch_resident_nonzero_input_publishes_next_slot() {
             &indirect,
             &num_events_buf,
             &sim_cfg_buf,
+            &gold_buf,
             0, // read_slot
             1, // write_slot
             cfg,
