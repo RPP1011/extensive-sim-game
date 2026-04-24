@@ -159,6 +159,13 @@ pub mod cascade_resident;
 #[cfg(feature = "gpu")]
 pub mod snapshot;
 
+/// Perf Stage A — GPU-resident timestamp instrumentation for
+/// `step_batch`. Enabled only when the adapter advertises
+/// `TIMESTAMP_QUERY` + `TIMESTAMP_QUERY_INSIDE_ENCODERS`; otherwise a
+/// cheap no-op so CI on software adapters still works.
+#[cfg(feature = "gpu")]
+pub mod gpu_profiling;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
