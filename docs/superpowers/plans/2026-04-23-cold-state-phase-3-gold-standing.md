@@ -692,9 +692,16 @@ git commit -m "test(engine_gpu): modify_standing via @symmetric_pair_topk view (
 
 ---
 
-## Task 3.8: Remove GOLD (only) from `cold_state_replay` — standing deferred
+## Task 3.8: Update `cold_state_replay` with a load-bearing-arm note — no removal
 
-**Scope narrowed per Task 3.7's finding:** standing-arm removal is deferred until the GPU view-storage driver for `@symmetric_pair_topk` lands. Removing it now would silently no-op `modify_standing` on the batch path (GPU stub is no-op + no CPU fallback). Gold is safe to remove because Tasks 3.3-3.5 provide a real GPU path.
+**Scope collapsed to a comment-only change.** Investigation during implementation revealed both arms are load-bearing for the SYNC `GpuBackend::step` path:
+
+- **Gold arm**: Task 3.4 only wired `gold_buf` into the RESIDENT/batch pipeline (`has_gold_buf=true` flag). The SYNC shader still has no-op `state_add_agent_gold` stubs, so sync gold transfers rely entirely on `cold_state_replay`'s `EffectGoldTransfer` arm. Removing it would silently drop gold on every sync-path tick.
+- **Standing arm**: deferred per Task 3.7 — the GPU view-storage driver for `@symmetric_pair_topk` doesn't exist yet.
+
+`step_batch` does NOT call `cold_state_replay` (events stay in `batch_events_ring`), so the batch path correctly uses `gold_buf` atomics exclusively for gold + the CPU view fold for standing. No double-apply concern.
+
+Task 3.8 therefore shipped as a doc-only change: expand the inline comment on the gold arm to explain WHY it stays. Full removal follows either (a) sync path also binding `gold_buf` (would require Task 3.4-style wiring on the sync BGL) or (b) the GPU view-storage driver for standing completing the migration story. Tracked as follow-up in the task list.
 
 **Files:**
 - Modify: `crates/engine_gpu/src/cascade.rs:cold_state_replay` (around line 604)

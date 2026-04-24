@@ -637,7 +637,21 @@ pub fn cold_state_replay(
             } => {
                 chronicle_rally::chronicle_rally(observer, wounded_kin, state, events);
             }
-            // --- EffectGoldTransfer: transfer_gold (mutates inventory) ---
+            // --- EffectGoldTransfer: transfer_gold (mutates inventory)
+            // Stays here because `cold_state_replay` is called from
+            // the SYNC `GpuBackend::step` path, where the physics
+            // kernel's `state_add_agent_gold` WGSL stub is still
+            // no-op (Task 3.4's `has_gold_buf=true` only applies to
+            // the resident/batch path). The BATCH `step_batch` flow
+            // does NOT call `cold_state_replay` — gold_buf's atomic
+            // adds (Task 3.4) + `snapshot()` readback (Task 3.5) are
+            // the sole path there. Removing this arm would silently
+            // drop gold transfers on every sync-path tick.
+            //
+            // Can be removed once sync also binds gold_buf + emits
+            // real gold stubs — tracked alongside the GPU
+            // view-storage driver follow-up (see
+            // `crates/engine_gpu/tests/cold_state_standing.rs`).
             Event::EffectGoldTransfer {
                 from, to, amount, ..
             } => {
