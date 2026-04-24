@@ -24,6 +24,7 @@ pub mod schema_hash;
 pub mod spatial;
 pub mod state;
 pub mod step;
+pub mod terrain;
 pub mod telemetry;
 pub mod trajectory;
 pub mod view;
