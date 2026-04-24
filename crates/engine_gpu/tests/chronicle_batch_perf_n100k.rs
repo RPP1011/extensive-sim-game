@@ -187,6 +187,32 @@ fn chronicle_batch_perf_n100k() {
         None => eprintln!("  submit_granularity: default (1 submit per step_batch)"),
     }
 
+    // Research mode (2026-04-24): per-physics-rule invocation counts.
+    // Gated on `ENGINE_GPU_CASCADE_RULE_COUNT=1` at init time; when
+    // unset the vec is empty and this block prints nothing.
+    let rule_counts = gpu.last_per_rule_counts();
+    if !rule_counts.is_empty() {
+        let total_invocations: u64 = rule_counts.iter().map(|(_, c)| *c as u64).sum();
+        eprintln!(
+            "  --- per-rule invocation counts ({TICKS} ticks, total={total_invocations}) ---"
+        );
+        // Sort by count descending so the dominating rules surface at
+        // the top of the table.
+        let mut sorted = rule_counts.clone();
+        sorted.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+        for (name, count) in &sorted {
+            let per_tick = *count as u64 / TICKS as u64;
+            let pct = if total_invocations > 0 {
+                (*count as f64 / total_invocations as f64) * 100.0
+            } else {
+                0.0
+            };
+            eprintln!(
+                "    {name:32}: count={count:>12} ({pct:5.1}%) per_tick={per_tick}"
+            );
+        }
+    }
+
     // Perf Stage A.2 — bind-group cache stats.
     if let Some((hits_after, misses_after)) =
         gpu.physics_resident_bg_cache_stats()

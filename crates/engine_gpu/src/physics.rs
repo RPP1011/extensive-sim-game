@@ -94,7 +94,9 @@
 use std::fmt;
 
 use bytemuck::{Pod, Zeroable};
-use dsl_compiler::emit_physics_wgsl::{emit_physics_dispatcher_wgsl, emit_physics_wgsl, EmitContext};
+use dsl_compiler::emit_physics_wgsl::{
+    emit_physics_dispatcher_wgsl, emit_physics_wgsl_with_counter, EmitContext,
+};
 use dsl_compiler::ir::PhysicsIR;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
@@ -578,6 +580,7 @@ pub fn build_physics_shader(
         false, // sync path: no standing_storage, adjust_standing stays no-op
         false, // sync path: no memory_storage, push_agent_memory stays no-op
         true,  // both sync + resident bind the alive_bitmap at slot 22
+        false, // sync path: no per-rule counter binding
     )
 }
 
@@ -595,6 +598,7 @@ pub fn build_physics_shader_with_chronicle(
     has_standing_storage: bool,
     has_memory_storage: bool,
     has_alive_bitmap: bool,
+    has_per_rule_counter: bool,
 ) -> Result<String, PhysicsError> {
     let mut out = String::new();
     out.push_str(&wgsl_prefix(event_ring_capacity));
@@ -836,6 +840,24 @@ pub fn build_physics_shader_with_chronicle(
         );
     }
 
+    // ---- Per-rule invocation counter (binding 23, research-only) ----
+    //
+    // 2026-04-24 physics-cascade rule decomposition. Gated behind the
+    // `has_per_rule_counter` flag (lit by the resident shader builder
+    // when `ENGINE_GPU_CASCADE_RULE_COUNT=1`). One `atomic<u32>` per
+    // non-`@cpu_only` rule, indexed by `ordered_rule_names()` position.
+    // Each rule body prepends `atomicAdd(&per_rule_counter[idx], 1u)`
+    // after its kind guard (see `emit_physics_wgsl_with_counter`).
+    //
+    // Production path (env var unset): binding absent from the BGL, no
+    // shader reference, zero overhead.
+    if has_per_rule_counter {
+        out.push_str(
+            "\n// ---- Per-rule invocation counter (research) ----\n\
+             @group(0) @binding(23) var<storage, read_write> per_rule_counter: array<atomic<u32>>;\n\n",
+        );
+    }
+
     // ---- State stub fns ----
     //
     // Every stub writes/reads exactly one field of the `agents` buffer.
@@ -906,8 +928,28 @@ pub fn build_physics_shader_with_chronicle(
     );
 
     // ---- Emit every physics rule ----
+    //
+    // Per-rule attribution (research mode, 2026-04-24): when
+    // `has_per_rule_counter` is on, the ordered rule-name list assigns
+    // each rule a stable u32 index. The emitter prepends
+    // `atomicAdd(&per_rule_counter[idx], 1u)` after the kind guard.
+    // The index must match `ordered_rule_names(physics)` so the host
+    // side's readback-to-name mapping is consistent.
+    let ordered_names = if has_per_rule_counter {
+        ordered_rule_names(physics)
+    } else {
+        Vec::new()
+    };
     for rule in physics {
-        match emit_physics_wgsl(rule, ctx) {
+        let rule_idx = if has_per_rule_counter {
+            ordered_names
+                .iter()
+                .position(|n| n == &rule.name)
+                .map(|p| p as u32)
+        } else {
+            None
+        };
+        match emit_physics_wgsl_with_counter(rule, ctx, rule_idx) {
             Ok(wgsl) => {
                 out.push_str(&wrap_rule_with_tick_alias(&wgsl));
                 out.push('\n');
@@ -959,6 +1001,21 @@ pub fn build_physics_shader_with_chronicle(
 /// into the sync pipeline and break `run_batch`'s byte-identical
 /// behaviour. Sharing the WGSL body text via this dedicated builder
 /// keeps both shaders in lockstep without touching `dsl_compiler`.
+/// Return the sorted list of non-`@cpu_only` physics rule names. The
+/// index into this list is the per-rule counter slot used by the
+/// research-mode `ENGINE_GPU_CASCADE_RULE_COUNT=1` path (both the
+/// shader-side `atomicAdd(&per_rule_counter[idx], 1u)` and the host's
+/// readback-to-name mapping). Deterministic across runs.
+pub fn ordered_rule_names(physics: &[PhysicsIR]) -> Vec<String> {
+    let mut names: Vec<String> = physics
+        .iter()
+        .filter(|p| !p.cpu_only)
+        .map(|p| p.name.clone())
+        .collect();
+    names.sort();
+    names
+}
+
 pub fn build_physics_shader_resident(
     physics: &[PhysicsIR],
     ctx: &EmitContext<'_>,
@@ -994,6 +1051,11 @@ pub fn build_physics_shader_resident(
         true,
         true,
         true,
+        // Research mode (2026-04-24): per-rule invocation counters at
+        // BGL slot 23. Gated on `ENGINE_GPU_CASCADE_RULE_COUNT=1`. When
+        // off, the shader emits byte-identical output to pre-research
+        // builds (no binding, no atomicAdd calls).
+        crate::rule_counter::rule_count_enabled(),
     )?;
 
     // Append the resident-only bindings. These are additive — the sync
@@ -1686,6 +1748,11 @@ struct ResidentBgKey {
     /// Per-tick alive bitmap — single handle per `GpuBackend`, stable
     /// across every cascade iteration in a batch.
     alive_bitmap: wgpu::Buffer,
+    /// Research mode (2026-04-24): per-rule counter storage buffer.
+    /// `None` when `ENGINE_GPU_CASCADE_RULE_COUNT` is unset — the BGL
+    /// also omits slot 23 in that case, so caching by `Option` keeps
+    /// the cached BG valid whether or not the counter is bound.
+    per_rule_counter: Option<wgpu::Buffer>,
 }
 
 struct BufferPool {
@@ -1765,6 +1832,7 @@ impl PhysicsKernel {
             false, // sync pipeline: no standing_storage binding
             false, // sync pipeline: no memory_storage binding
             true,  // sync + resident: alive_bitmap at slot 22 (host-packed on sync path)
+            false, // sync pipeline: no per-rule counter (resident-only research)
         )?;
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -1877,7 +1945,7 @@ impl PhysicsKernel {
                 "resident: {err}\n--- WGSL source ---\n{resident_wgsl}"
             )));
         }
-        let bgl_entries_resident = [
+        let mut bgl_entries_resident: Vec<wgpu::BindGroupLayoutEntry> = vec![
             storage_rw(0),  // agents
             storage_ro(1),  // abilities_known
             storage_ro(2),  // abilities_cooldown
@@ -1922,6 +1990,16 @@ impl PhysicsKernel {
             // tick; read by every `agents.alive(x)` lowering site.
             storage_ro(crate::alive_bitmap::ALIVE_BITMAP_BINDING),
         ];
+        // Research mode (2026-04-24): per-rule invocation counter at
+        // slot 23. Included in the BGL iff the shader was built with
+        // `has_per_rule_counter = true`, otherwise the shader has no
+        // reference to the binding and wgpu would reject an unused
+        // entry. Production path (env var unset) stays unchanged.
+        if crate::rule_counter::rule_count_enabled() {
+            bgl_entries_resident.push(storage_rw(
+                crate::rule_counter::PER_RULE_COUNTER_BINDING,
+            ));
+        }
         let bind_group_layout_resident =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("engine_gpu::physics::bgl_resident"),
@@ -2610,6 +2688,7 @@ impl PhysicsKernel {
     /// * `indirect_args` has at least `write_slot+1` slots.
     /// * `num_events_buf_size_u32 >= write_slot+1`.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn run_batch_resident(
         &mut self,
         device: &wgpu::Device,
@@ -2634,6 +2713,11 @@ impl PhysicsKernel {
         memory_records_buf: &wgpu::Buffer,
         memory_cursors_buf: &wgpu::Buffer,
         alive_bitmap_buf: &wgpu::Buffer,
+        // Research mode (2026-04-24): per-rule counter buffer. `None`
+        // when `ENGINE_GPU_CASCADE_RULE_COUNT` is unset (production). The
+        // shader + BGL omit slot 23 in that case, so we must not bind
+        // anything there. When `Some`, slot 23 is required.
+        per_rule_counter_buf: Option<&wgpu::Buffer>,
         read_slot: u32,
         write_slot: u32,
         cfg: PhysicsCfg,
@@ -2722,6 +2806,11 @@ impl PhysicsKernel {
             // Per-tick alive bitmap (resident path: packed by
             // `alive_pack_kernel` at the top of each tick).
             alive_bitmap: alive_bitmap_buf.clone(),
+            // Research mode (2026-04-24): per-rule counter handle. The
+            // presence/absence of this key entry matches the BGL's
+            // presence/absence of slot 23, so cache lookups stay
+            // partitioned by the two modes correctly.
+            per_rule_counter: per_rule_counter_buf.cloned(),
         };
         // Perf Stage A.2 — probe-before-insert so the hit/miss
         // counters track actual cache behaviour. `HashMap::entry`
@@ -2734,15 +2823,13 @@ impl PhysicsKernel {
         } else {
             self.resident_bg_cache_misses = self.resident_bg_cache_misses.saturating_add(1);
         }
+        let per_rule_counter_for_bg = per_rule_counter_buf.cloned();
         let bind_group: &wgpu::BindGroup = self.resident_bg_cache.entry(key).or_insert_with(|| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("engine_gpu::physics::bg_resident"),
-                layout: &self.bind_group_layout_resident,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: agents_buf.as_entire_binding(),
-                    },
+            let mut entries: Vec<wgpu::BindGroupEntry<'_>> = vec![
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: agents_buf.as_entire_binding(),
+                },
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: abilities_known_buf.as_entire_binding(),
@@ -2837,7 +2924,25 @@ impl PhysicsKernel {
                         binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
                         resource: alive_bitmap_buf.as_entire_binding(),
                     },
-                ],
+            ];
+            // Research mode (2026-04-24): per-rule counter at slot 23.
+            // The buffer handle is cloned into a closure-owned local
+            // (`per_rule_counter_for_bg`) so we can call
+            // `.as_entire_binding()` on it — `BindGroupEntry` takes a
+            // reference whose lifetime must outlive the descriptor, and
+            // the input `Option<&wgpu::Buffer>` doesn't extend into the
+            // closure. Skipping this slot entirely when the env var is
+            // unset matches the BGL.
+            if let Some(counter_buf) = &per_rule_counter_for_bg {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: crate::rule_counter::PER_RULE_COUNTER_BINDING,
+                    resource: counter_buf.as_entire_binding(),
+                });
+            }
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("engine_gpu::physics::bg_resident"),
+                layout: &self.bind_group_layout_resident,
+                entries: &entries,
             })
         });
 

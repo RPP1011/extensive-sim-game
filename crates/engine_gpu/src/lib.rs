@@ -174,6 +174,12 @@ pub mod gpu_profiling;
 #[cfg(feature = "gpu")]
 pub mod alive_bitmap;
 
+/// Per-physics-rule invocation counter — research-mode attribution for
+/// the resident cascade (`ENGINE_GPU_CASCADE_RULE_COUNT=1`). Gates on
+/// an env var; production path is unchanged.
+#[cfg(feature = "gpu")]
+pub mod rule_counter;
+
 /// Phase 1 GPU backend.
 ///
 /// With `feature = "gpu"` this owns a `wgpu::Device`/`wgpu::Queue` pair
@@ -652,6 +658,22 @@ impl GpuBackend {
             .map(|ctx| ctx.physics.resident_bg_cache_stats())
     }
 
+    /// Research mode (2026-04-24) — per-physics-rule invocation count
+    /// accumulated over the most recent `step_batch` call. Returns one
+    /// `(rule_name, count)` entry per non-`@cpu_only` physics rule, in
+    /// the same stable-sorted order the shader's `per_rule_counter`
+    /// slots were assigned. Empty unless `ENGINE_GPU_CASCADE_RULE_COUNT`
+    /// was set when the backend was constructed.
+    #[doc(hidden)]
+    pub fn last_per_rule_counts(&self) -> Vec<(String, u32)> {
+        self.resident
+            .per_rule_names
+            .iter()
+            .zip(self.resident.last_per_rule_counts.iter())
+            .map(|(n, c)| (n.clone(), *c))
+            .collect()
+    }
+
     /// Task 203 — drain the GPU chronicle ring into the CPU event
     /// ring. The chronicle ring is written to by physics every tick
     /// (via `emit ChronicleEntry` rules) but is NOT drained by the
@@ -1003,6 +1025,16 @@ impl GpuBackend {
         self.snapshot.snapshot_event_ring_read = 0;
         self.snapshot.snapshot_chronicle_ring_read = 0;
 
+        // Research mode (2026-04-24): zero the per-rule counter buffer
+        // once at top-of-batch so the end-of-batch readback reflects
+        // aggregate invocation counts over the whole step_batch.
+        // Ordered inside the encoder so the clear lands before any
+        // physics dispatch reads/writes to the counter. No-op when the
+        // env var isn't set (buffer is None).
+        if let Some(counter_buf) = self.resident.per_rule_counter_buf.as_ref() {
+            encoder.clear_buffer(counter_buf, 0, None);
+        }
+
         let agent_cap = state.agent_cap();
         // Stage B.1 — capture the iter_cap used on the final tick so
         // the end-of-batch sanity check can compare the last tick's
@@ -1041,6 +1073,10 @@ impl GpuBackend {
                 alive_pack_kernel,
                 fused_unpack_kernel,
                 profiler,
+                // Research mode (2026-04-24): per-rule counter handle
+                // destructured out so we can pass it by `&Buffer` to the
+                // cascade driver alongside the other resident bindings.
+                per_rule_counter_buf,
                 ..
             } = &mut self.resident;
             let agents_buf = resident_agents_buf
@@ -1410,6 +1446,7 @@ impl GpuBackend {
                 &memory_ref.records_buf,
                 &memory_ref.cursors_buf,
                 alive_bitmap_ref,
+                per_rule_counter_buf.as_ref(),
                 iter_cap,
                 profiler.as_mut(),
             )
@@ -1466,8 +1503,36 @@ impl GpuBackend {
             resident_ctx.encode_num_events_readback(&mut encoder);
         }
 
+        // Research mode (2026-04-24): encode a copy from the per-rule
+        // counter buffer into its staging buffer. Cheap (≤ a few dozen
+        // u32s). Lands before the submit so the post-submit map sees a
+        // stable snapshot. No-op when the counter buffer is None.
+        if let (Some(counter_buf), Some(staging)) = (
+            self.resident.per_rule_counter_buf.as_ref(),
+            self.resident.per_rule_counter_staging.as_ref(),
+        ) {
+            let bytes =
+                crate::rule_counter::counter_bytes(self.resident.per_rule_names.len() as u32);
+            encoder.copy_buffer_to_buffer(counter_buf, 0, staging, 0, bytes);
+        }
+
         self.queue.submit(Some(encoder.finish()));
         let _ = self.device.poll(wgpu::PollType::Wait);
+
+        // Research mode: read back the per-rule counts and store them
+        // on `last_per_rule_counts`. The benchmark harness prints them
+        // alongside the per-phase GPU-µs table.
+        if let Some(staging) = self.resident.per_rule_counter_staging.as_ref() {
+            let num_rules = self.resident.per_rule_names.len() as u32;
+            if num_rules > 0 {
+                let counts = crate::rule_counter::read_counters(
+                    &self.device,
+                    staging,
+                    num_rules,
+                );
+                self.resident.last_per_rule_counts = counts;
+            }
+        }
 
         // Perf Stage A.1 — after the submit/poll, map the readback
         // buffer + convert u64 timestamps to per-phase µs. Accumulate
@@ -1774,6 +1839,31 @@ impl GpuBackend {
             let ctx = crate::cascade_resident::CascadeResidentCtx::new(&self.device)
                 .map_err(|e| format!("CascadeResidentCtx::new: {e}"))?;
             self.resident.resident_cascade_ctx = Some(ctx);
+        }
+
+        // --- Research mode: per-rule counter buffer (2026-04-24) ------------
+        // Gated on `ENGINE_GPU_CASCADE_RULE_COUNT=1`. Sized to the
+        // number of non-`@cpu_only` rules in the DSL compilation
+        // (populated at cascade-ctx load time). Allocated once on first
+        // enable; the shader + BGL were built with matching
+        // `has_per_rule_counter = true` iff the env var was set when
+        // `PhysicsKernel::new` ran (above, via
+        // `build_physics_shader_resident`).
+        if crate::rule_counter::rule_count_enabled()
+            && self.resident.per_rule_counter_buf.is_none()
+        {
+            let sync_ctx = self.sync.cascade_ctx.as_ref().expect(
+                "sync.cascade_ctx must exist by the time ensure_resident_init runs",
+            );
+            let names = crate::physics::ordered_rule_names(&sync_ctx.comp.physics);
+            let num_rules = names.len() as u32;
+            let counter_buf =
+                crate::rule_counter::create_counter_buffer(&self.device, num_rules);
+            let staging =
+                crate::rule_counter::create_counter_staging(&self.device, num_rules);
+            self.resident.per_rule_counter_buf = Some(counter_buf);
+            self.resident.per_rule_counter_staging = Some(staging);
+            self.resident.per_rule_names = names;
         }
 
         // Phase E: seed the kernel-internal buffers the batch path no

@@ -314,6 +314,7 @@ fn dispatch_one_event(
             &memory_records_buf,
             &memory_cursors_buf,
             &alive_bitmap_buf,
+            None, // per_rule_counter_buf (research mode only)
             0, // read_slot
             1, // write_slot
             cfg,
