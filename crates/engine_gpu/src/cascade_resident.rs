@@ -1269,6 +1269,11 @@ pub fn run_cascade_resident_with_iter_cap(
     // + query + ability-registry upload so their GPU time is credited
     // to `spatial+abilities` rather than leaking into `seed_kernel`.
     if let Some(p) = prof.as_deref_mut() {
+        // Between append_events and seed_kernel (spatial_done boundary).
+        p.write_between_pass_timestamp(
+            encoder,
+            crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[6],
+        );
         p.mark(encoder, "seed_kernel");
     }
 
@@ -1284,6 +1289,14 @@ pub fn run_cascade_resident_with_iter_cap(
         sim_cfg_buf,
         agent_cap,
     );
+
+    // Between seed_kernel and cascade iter 0.
+    if let Some(p) = prof.as_deref_mut() {
+        p.write_between_pass_timestamp(
+            encoder,
+            crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[7],
+        );
+    }
 
     // ---- 4. Encode N physics iterations ---------------------------------
     // Task 2.8 — world-scalars (`tick`, `combat_engagement_range`,
@@ -1371,6 +1384,19 @@ pub fn run_cascade_resident_with_iter_cap(
                 &resident_ctx.physics_ring_b
             };
             encoder.clear_buffer(next_next_out.tail_buffer(), 0, None);
+        }
+
+        // Per-dispatch attribution: emit a between-pass mark right after
+        // this iter's physics dispatch (and the ping-pong ring clear).
+        // Paired with the NEXT iter's begin mark, the delta isolates the
+        // inter-iter barrier + pipeline-swap cost from the iter's own
+        // compute time.
+        if let Some(p) = prof.as_deref_mut() {
+            let label = crate::gpu_profiling::BETWEEN_CASCADE_LABELS
+                .get(iter as usize)
+                .copied()
+                .unwrap_or("gap:cascade_iter_N_done");
+            p.write_between_pass_timestamp(encoder, label);
         }
     }
 

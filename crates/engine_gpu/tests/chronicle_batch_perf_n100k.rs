@@ -146,19 +146,45 @@ fn chronicle_batch_perf_n100k() {
 
     // Perf Stage A.1 — per-phase GPU µs breakdown. Empty on adapters
     // without TIMESTAMP_QUERY; non-empty output on a real discrete GPU.
+    //
+    // Per-dispatch attribution (2026-04-24): labels prefixed "gap:"
+    // mark between-pass boundaries; the delta between consecutive
+    // marks attributes GPU-µs to the bracketed work (dispatch +
+    // barrier + pipeline swap). Legacy per-phase labels (no prefix)
+    // ride alongside for regression continuity with Stage A.
     if gpu.gpu_profiler_enabled() {
         let phases = gpu.last_batch_phase_us();
         if phases.is_empty() {
             eprintln!("  gpu timestamps: profiler enabled but no samples produced");
         } else {
             eprintln!("  gpu timestamps (µs/tick, mean over {TICKS} ticks):");
+            // Print gap: marks first (per-dispatch attribution table),
+            // then legacy per-phase marks, so the research doc picks up
+            // the gap table cleanly at the top of the output.
+            eprintln!("    --- per-dispatch gap table ---");
             for (label, total_us) in phases {
-                let per_tick = *total_us / TICKS as u64;
-                eprintln!("    {label:20}: {per_tick}");
+                if label.starts_with("gap:") {
+                    let per_tick = *total_us / TICKS as u64;
+                    eprintln!("    {label:40}: {per_tick}");
+                }
+            }
+            eprintln!("    --- legacy per-phase marks ---");
+            for (label, total_us) in phases {
+                if !label.starts_with("gap:") {
+                    let per_tick = *total_us / TICKS as u64;
+                    eprintln!("    {label:40}: {per_tick}");
+                }
             }
         }
     } else {
         eprintln!("  gpu timestamps: TIMESTAMP_QUERY unavailable on this adapter (CPU wall-clock only)");
+    }
+
+    // Submit-granularity sweep mode: echo the active granularity so
+    // the research doc can tie the output block to a specific K.
+    match std::env::var("ENGINE_GPU_SUBMIT_GRANULARITY").ok() {
+        Some(k) => eprintln!("  submit_granularity: K={k} (sub-batches of K ticks each)"),
+        None => eprintln!("  submit_granularity: default (1 submit per step_batch)"),
     }
 
     // Perf Stage A.2 — bind-group cache stats.

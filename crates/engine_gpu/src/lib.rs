@@ -431,6 +431,39 @@ fn split_mask_measure_enabled() -> bool {
     }
 }
 
+/// Opt-in: read `ENGINE_GPU_SUBMIT_GRANULARITY=K` from the environment and
+/// split `step_batch(N)` into `ceil(N/K)` sub-submits of up to K ticks
+/// each. Returns `None` when the env var is absent / malformed / `0`, in
+/// which case `step_batch` uses the default single-submit path (one
+/// encoder, one `queue.submit`, one `device.poll(Wait)`).
+///
+/// Cached so the `std::env::var` lookup happens once per process — the
+/// sweep harness sets the var before spawning the test binary, so it's
+/// stable for the duration.
+///
+/// Part of the per-dispatch attribution research task
+/// (2026-04-24-gpu-per-dispatch-attribution.md). Production paths do NOT
+/// set this var, so behaviour is unchanged.
+#[cfg(feature = "gpu")]
+fn submit_granularity() -> Option<u32> {
+    use std::sync::atomic::{AtomicI32, Ordering};
+    // i32: -1 = uninit, 0 = disabled, >0 = K.
+    static CACHED: AtomicI32 = AtomicI32::new(-1);
+    match CACHED.load(Ordering::Relaxed) {
+        -1 => {
+            let parsed = std::env::var("ENGINE_GPU_SUBMIT_GRANULARITY")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .filter(|&k| k > 0);
+            let cached_val = parsed.map(|k| k as i32).unwrap_or(0);
+            CACHED.store(cached_val, Ordering::Relaxed);
+            parsed
+        }
+        0 => None,
+        k => Some(k as u32),
+    }
+}
+
 #[cfg(feature = "gpu")]
 impl GpuBackend {
     /// Spin up a wgpu instance, request an adapter + device, and
@@ -975,7 +1008,22 @@ impl GpuBackend {
         // the end-of-batch sanity check can compare the last tick's
         // per-iter counts against it. `None` iff n_ticks == 0.
         let mut last_iter_cap_used: Option<u32> = None;
-        for _ in 0..n_ticks {
+
+        // Per-dispatch attribution research mode (2026-04-24): when
+        // ENGINE_GPU_SUBMIT_GRANULARITY=K is set, submit+poll every K
+        // ticks instead of once per step_batch. `chunk_size == 0` is
+        // treated as "no sweep" (single-submit path) — the Option
+        // plumbing from `submit_granularity()` already filters that out.
+        //
+        // Correctness: the batch-scoped rings (batch_events_ring,
+        // chronicle_ring) are reset once at the start of the batch and
+        // then append-only across every tick. Submits are just GPU
+        // fence points — the rings' device-side state survives them.
+        // So splitting submits does NOT affect the data any snapshot
+        // observes post-batch.
+        let chunk_size = submit_granularity().unwrap_or(u32::MAX);
+        let mut ticks_since_submit = 0u32;
+        for tick_idx in 0..n_ticks {
             // Split-borrow: need `&` to `resident_agents_buf` plus
             // `&mut` to `fused_unpack_kernel` (and later `&mut` to
             // `resident_cascade_ctx` + `&` to `resident_indirect_args`)
@@ -1001,7 +1049,21 @@ impl GpuBackend {
 
             // Perf Stage A.1 — bookend each phase with a timestamp so
             // the test harness can surface GPU-µs/tick per phase.
+            //
+            // Per-dispatch attribution (2026-04-24): in addition to the
+            // legacy per-phase marks ("fused_unpack", "mask+scoring",
+            // …) we also emit "gap:*" marks at every between-pass
+            // boundary so the harness can attribute any GPU-µs that
+            // lives outside a compute-pass scope (barriers, pipeline
+            // swaps, memory-bandwidth contention, driver JIT). The two
+            // schedules are interleaved — a legacy mark and a gap mark
+            // that coincide at the same encoder position record a
+            // near-zero delta, which is harmless.
             if let Some(p) = profiler.as_mut() {
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[0],
+                );
                 p.mark(&mut encoder, "fused_unpack");
             }
 
@@ -1048,6 +1110,11 @@ impl GpuBackend {
                 .as_ref()
                 .expect("sim_cfg_buf ensured by ensure_resident_init");
             if let Some(p) = profiler.as_mut() {
+                // Between fused_unpack and mask_resident.
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[1],
+                );
                 p.mark(&mut encoder, "mask+scoring");
             }
             // Intra-kernel sub-phase measurement (research-mode,
@@ -1089,6 +1156,14 @@ impl GpuBackend {
                     .expect("mask resident dispatch");
             }
 
+            // Between mask_resident and scoring_resident.
+            if let Some(p) = profiler.as_mut() {
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[2],
+                );
+            }
+
             // 2. Scoring: reads mask_bitmaps + agent_data (both
             //    populated above). Task 2.5 of the GPU sim-state
             //    refactor retired the per-tick `refresh_tick_cfg_for_resident`:
@@ -1111,6 +1186,11 @@ impl GpuBackend {
                 .expect("scoring resident dispatch");
 
             if let Some(p) = profiler.as_mut() {
+                // Between scoring_resident and apply_actions.run_resident.
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[3],
+                );
                 p.mark(&mut encoder, "apply+movement");
             }
 
@@ -1160,6 +1240,14 @@ impl GpuBackend {
                 )
                 .expect("apply_actions resident dispatch");
 
+            // Between apply_actions and movement.
+            if let Some(p) = profiler.as_mut() {
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[4],
+                );
+            }
+
             cascade_ctx
                 .movement
                 .run_resident(
@@ -1175,6 +1263,11 @@ impl GpuBackend {
                 .expect("movement resident dispatch");
 
             if let Some(p) = profiler.as_mut() {
+                // Between movement and append_events.
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[5],
+                );
                 p.mark(&mut encoder, "append_events");
             }
 
@@ -1201,6 +1294,18 @@ impl GpuBackend {
                     &mut encoder,
                     &cascade_ctx.apply_event_ring,
                     agent_cap,
+                );
+            }
+
+            // Between append_events and the cascade driver (which starts
+            // with spatial_rebuild / spatial_query / seed_kernel / iter 0).
+            // The cascade driver adds its own "gap:append_events->seed_kernel"
+            // boundary between spatial_done and seed_kernel, and between
+            // seed and iter 0, plus inter-iter marks.
+            if let Some(p) = profiler.as_mut() {
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[6],
                 );
             }
 
@@ -1314,6 +1419,30 @@ impl GpuBackend {
             // into sim_cfg.tick). CPU state.tick stays stale during the
             // batch; snapshot() reads sim_cfg.tick to expose the current
             // value (Task 2.11).
+
+            // Per-dispatch attribution research mode: if
+            // `ENGINE_GPU_SUBMIT_GRANULARITY=K` partitions this batch
+            // into chunks of K ticks, submit+poll at the chunk boundary
+            // and start a fresh encoder. Skip on the VERY last tick —
+            // the tail (finish_frame, num_events_readback, final submit)
+            // outside this loop handles the remainder in its own encoder.
+            ticks_since_submit += 1;
+            let is_last_tick = tick_idx + 1 == n_ticks;
+            if !is_last_tick && ticks_since_submit >= chunk_size {
+                // Flush this sub-batch: submit the encoder, wait for the
+                // GPU to drain, then create a fresh encoder for the next
+                // chunk. The batch-scoped rings' device-side state
+                // persists across submits, so ring accumulators keep
+                // growing as expected.
+                self.queue.submit(Some(encoder.finish()));
+                let _ = self.device.poll(wgpu::PollType::Wait);
+                encoder = self
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("engine_gpu::step_batch::enc::chunk"),
+                    });
+                ticks_since_submit = 0;
+            }
         }
 
         // Perf Stage A.1 — resolve + copy-to-readback the timestamp

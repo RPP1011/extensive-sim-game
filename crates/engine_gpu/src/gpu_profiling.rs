@@ -32,10 +32,16 @@
 #![cfg(feature = "gpu")]
 
 /// Max number of timestamps a single batch call can record. Sized for
-/// 8 cascade iters × 2 stamps/iter + 6 phase bookends × 2 stamps = 28,
-/// rounded up to the nearest multiple of `QUERY_RESOLVE_BUFFER_ALIGNMENT`
-/// with headroom.
-const MAX_TIMESTAMPS: u32 = 64;
+/// the per-dispatch-attribution research mode at N=100k / 50 ticks:
+///   - ~16 between-pass timestamps per tick × 50 ticks = 800
+///   - ~15 legacy per-phase marks per tick × 50 ticks = 750
+///   - Headroom for future sub-phase marks.
+///
+/// `QUERY_SET_MAX_QUERIES` (wgpu-types) caps this at 4096. 2048 is well
+/// within budget and covers the current instrumentation schedule.
+/// Resolve/readback buffer sizing is `MAX_TIMESTAMPS × 8 B` = 16 KiB —
+/// still trivially small.
+const MAX_TIMESTAMPS: u32 = 2048;
 
 /// Size in bytes of one u64 timestamp slot — matches `wgpu::QUERY_SIZE`.
 const TIMESTAMP_BYTES: u64 = 8;
@@ -174,6 +180,36 @@ impl GpuProfiler {
         self.next_index += 1;
     }
 
+    /// Per-dispatch attribution helper: writes a timestamp at the current
+    /// encoder recording position, specifically intended to sit BETWEEN
+    /// two compute passes (rather than attached to a pass's
+    /// `timestamp_writes`). The delta to the NEXT mark captures the full
+    /// time from this boundary to the next — inclusive of any hazard /
+    /// memory barrier wgpu inserts between the adjacent passes, plus
+    /// pipeline state swaps, plus the NEXT pass's own compute work.
+    ///
+    /// Labels are prefixed with `"gap:"` verbatim so the test harness can
+    /// filter between-pass gaps from the legacy per-phase labels without
+    /// a separate data structure. Pass the `PREFIX + <static suffix>` as
+    /// a single `&'static str` — no runtime formatting here.
+    ///
+    /// Semantically identical to `mark()` under the hood; the split API
+    /// exists purely to document intent at call sites and to make the
+    /// output legend obvious in `read_phase_us`.
+    pub fn write_between_pass_timestamp(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        label: &'static str,
+    ) {
+        // Shares the same `write_timestamp` mechanics as `mark()` — the
+        // wgpu API makes no distinction between "inside a pass" and
+        // "between passes", it's just where in the encoder stream the
+        // call lands. We keep `mark()` for legacy per-phase bookends
+        // and expose this as the canonical name for the new
+        // gap-attribution use case.
+        self.mark(encoder, label);
+    }
+
     /// Encode the resolve + copy-to-readback commands for the frame's
     /// recorded timestamps. Must be the LAST calls into the encoder
     /// before `finish()` so every `mark()` above lands in the readback.
@@ -284,5 +320,43 @@ pub const CASCADE_ITER_END_LABELS: [&str; 8] = [
     "cascade iter 5 end",
     "cascade iter 6 end",
     "cascade iter 7 end",
+];
+
+/// Per-dispatch attribution labels. Each pair of adjacent marks delimits
+/// one GPU-side phase boundary — the delta attributes the GPU-µs spent
+/// in the bracketed work (inclusive of any inter-pass barriers /
+/// pipeline swaps the driver inserts before the dispatch starts).
+///
+/// Schedule walks the `step_batch` tick body top-to-bottom: mask/scoring
+/// block, apply+movement block, append_events, cascade (spatial rebuild
+/// / seed / 8 physics iters), cascade_end.
+///
+/// The `gap:` prefix is a filter hint for the test harness — legacy
+/// per-phase marks are printed alongside these and share the same
+/// BTreeMap, so we dedupe by label at read-back.
+pub const BETWEEN_PASS_LABELS_PRE_CASCADE: [&str; 8] = [
+    "gap:before_fused_unpack",
+    "gap:fused_unpack->mask",
+    "gap:mask->scoring",
+    "gap:scoring->apply_actions",
+    "gap:apply_actions->movement",
+    "gap:movement->append_events",
+    "gap:append_events->seed_kernel",
+    "gap:seed_kernel->cascade_iter_0",
+];
+
+/// Per-cascade-iter between-pass labels. `BETWEEN_CASCADE_LABELS[i]` is
+/// the mark that lands between iter `i` and iter `i+1`. The last entry
+/// (`gap:cascade_iter_7->end`) pairs with the profiler's `finish_frame`
+/// to give iter 7 its own GPU-µs total.
+pub const BETWEEN_CASCADE_LABELS: [&str; 8] = [
+    "gap:cascade_iter_0->1",
+    "gap:cascade_iter_1->2",
+    "gap:cascade_iter_2->3",
+    "gap:cascade_iter_3->4",
+    "gap:cascade_iter_4->5",
+    "gap:cascade_iter_5->6",
+    "gap:cascade_iter_6->7",
+    "gap:cascade_iter_7->end",
 ];
 
