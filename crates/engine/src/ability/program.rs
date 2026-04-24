@@ -113,8 +113,8 @@ pub enum EffectOp {
     /// Narrowed from i64 on 2026-04-22 for GPU atomic compatibility.
     TransferGold { amount: i32 } = 5,
 
-    /// Adjust symmetric `cold_standing` between caster and target by `delta`.
-    /// Clamped to `[-1000, 1000]` inside the handler.
+    /// Adjust the symmetric `state.views.standing` edge between caster and
+    /// target by `delta`. Clamped to `[-1000, 1000]` inside the view.
     ModifyStanding { delta: i16 } = 6,
 
     // --- Meta (1) ---

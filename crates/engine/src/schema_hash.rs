@@ -23,9 +23,8 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"creature_type=u8,channels=smallvec4,spawn_tick=u32,");
     h.update(b"grid_id=Option<u32>,local_pos=Option<vec3>,move_target=Option<vec3>,");
     h.update(b"status_effects=smallvec8<StatusEffect>,memberships=smallvec4<Membership>,inventory=Inventory,memory=smallvec64<MemoryEvent>,relationships=smallvec8<Relationship>,");
-    h.update(b"class_definitions=[ClassSlot;4],creditor_ledger=smallvec16<Creditor>,mentor_lineage=[Option<AgentId>;8],standing=SparseStandings");
+    h.update(b"class_definitions=[ClassSlot;4],creditor_ledger=smallvec16<Creditor>,mentor_lineage=[Option<AgentId>;8]");
     h.update(b"}");
-    h.update(b"SparseStandings{key=(min(a,b),max(a,b)),value=i16_clamped[-1000,1000]}");
     h.update(b"StatusEffect{kind=u8,source=AgentId,remaining_ticks=u32,payload_q8=i16}");
     h.update(b"StatusEffectKind:Stun=0,Slow=1,Root=2,Silence=3,Dot=4,Hot=5,Buff=6,Debuff=7");
     h.update(b"Membership{group=GroupId,role=u8,joined_tick=u32,standing_q8=i16}");

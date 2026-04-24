@@ -15,6 +15,11 @@ pub fn modify_standing(
     events: &mut EventRing,
 ) {
     if (delta != 0) {
-        state.adjust_standing(a, b, delta);
+        {
+            let _ = state
+                .views
+                .standing
+                .adjust(a, b, (delta) as i32, state.tick);
+        };
     }
 }

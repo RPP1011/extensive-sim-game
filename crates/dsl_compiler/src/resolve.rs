@@ -265,7 +265,8 @@ mod stdlib {
             // two sides of a transfer each use the legacy wrapping op.
             (NamespaceId::Agents, "sub_gold") => Some((2, IrType::Unknown)),
             // Standing (symmetric pair storage, clamped [-1000, 1000] by
-            // `SparseStandings::adjust`).
+            // the `@materialized` `standing` view — lowering targets
+            // `state.views.standing.adjust(...)`).
             (NamespaceId::Agents, "adjust_standing") => Some((3, IrType::Unknown)),
             (NamespaceId::Agents, "hunger") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "thirst") => Some((1, IrType::F32)),

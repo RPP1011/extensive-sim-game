@@ -1,4 +1,4 @@
-//! Engagement SoA field + `cold_standing` + `CreatureType::is_hostile_to`.
+//! Engagement SoA field + `state.views.standing` + `CreatureType::is_hostile_to`.
 //!
 //! Combat Foundation Task 1. Storage-only; bidirectional invariant
 //! enforcement lives in Task 3 (`ability::expire::tick_start`).
@@ -81,8 +81,8 @@ fn standing_defaults_zero() {
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn::default()).unwrap();
     let b = state.spawn_agent(AgentSpawn::default()).unwrap();
-    assert_eq!(state.standing(a, b), 0);
-    assert_eq!(state.standing(b, a), 0);
+    assert_eq!(state.views.standing.get(a, b), 0);
+    assert_eq!(state.views.standing.get(b, a), 0);
 }
 
 #[test]
@@ -91,15 +91,18 @@ fn standing_adjust_is_symmetric_and_clamped() {
     let a = state.spawn_agent(AgentSpawn::default()).unwrap();
     let b = state.spawn_agent(AgentSpawn::default()).unwrap();
 
-    assert_eq!(state.adjust_standing(a, b, 50), 50);
+    let tick = state.tick;
+    assert_eq!(state.views.standing.adjust(a, b, 50, tick), 50);
     // Reading with swapped order returns same value — pairing is symmetric.
-    assert_eq!(state.standing(b, a), 50);
+    assert_eq!(state.views.standing.get(b, a), 50);
 
     // Saturation at upper bound.
-    assert_eq!(state.adjust_standing(a, b, 2000), 1000);
-    assert_eq!(state.standing(a, b), 1000);
+    let tick = state.tick;
+    assert_eq!(state.views.standing.adjust(a, b, 2000, tick), 1000);
+    assert_eq!(state.views.standing.get(a, b), 1000);
 
     // Saturation at lower bound.
-    assert_eq!(state.adjust_standing(a, b, -5000), -1000);
-    assert_eq!(state.standing(b, a), -1000);
+    let tick = state.tick;
+    assert_eq!(state.views.standing.adjust(a, b, -5000, tick), -1000);
+    assert_eq!(state.views.standing.get(b, a), -1000);
 }

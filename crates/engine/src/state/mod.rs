@@ -9,8 +9,7 @@ use crate::ids::AgentId;
 use crate::spatial::SpatialHash;
 pub use agent::{AgentSpawn, MovementMode};
 use agent_types::{
-    ClassSlot, Creditor, Inventory, MemoryEvent, Membership, Relationship, SparseStandings,
-    StatusEffect,
+    ClassSlot, Creditor, Inventory, MemoryEvent, Membership, Relationship, StatusEffect,
 };
 use entity_pool::{AgentPoolOps, AgentSlotPool};
 use glam::Vec3;
@@ -137,9 +136,8 @@ pub struct SimState {
     /// Read only on cast-gate evaluation, so grouped with the cold
     /// SoA fields.
     pub ability_cooldowns: Vec<[u32; MAX_ABILITIES]>,
-    // Per-pair standing (Combat Foundation Task 1). Symmetric (keyed by
-    // ordered tuple), i16 clamped to [-1000, 1000] by `adjust_standing`.
-    cold_standing:          SparseStandings,
+    // Per-pair standing retired 2026-04-23 — see `state.views.standing`
+    // (Task 3.1 `@materialized` view, K=8 symmetric pair top-k).
 
     // Spatial index — incremental uniform-grid hash. Mutators
     // (`spawn_agent`, `kill_agent`, `set_agent_pos`,
@@ -250,7 +248,6 @@ impl SimState {
             cold_creditor_ledger:   (0..cap).map(|_| SmallVec::new()).collect(),
             cold_mentor_lineage:    vec![[None; 8]; cap],
             ability_cooldowns:      vec![[0u32; MAX_ABILITIES]; cap],
-            cold_standing:          SparseStandings::new(),
             // Incremental spatial hash — sized for `cap` agent slots.
             // Mutators push O(1) deltas; no per-mutation rebuild.
             spatial:                SpatialHash::new(agent_cap),
@@ -744,16 +741,9 @@ impl SimState {
         }
     }
 
-    // Per-pair standing (Combat Foundation Task 1).
-    pub fn standing(&self, a: AgentId, b: AgentId) -> i16 {
-        self.cold_standing.get(a, b)
-    }
-    pub fn set_standing(&mut self, a: AgentId, b: AgentId, v: i16) {
-        self.cold_standing.set(a, b, v);
-    }
-    pub fn adjust_standing(&mut self, a: AgentId, b: AgentId, delta: i16) -> i16 {
-        self.cold_standing.adjust(a, b, delta)
-    }
+    // Per-pair standing retired 2026-04-23 — read / mutate via the
+    // `@materialized` `standing` view: `state.views.standing.get(a, b)`
+    // and `state.views.standing.adjust(a, b, delta, tick)`.
 
     // Memberships (Task G).
     pub fn agent_memberships(&self, id: AgentId) -> Option<&[Membership]> {
@@ -1170,10 +1160,5 @@ impl SimState {
     }
     pub fn hot_cooldown_next_ready_tick(&self) -> &[u32] {
         &self.hot_cooldown_next_ready_tick
-    }
-
-    // Standing ledger (Combat Foundation Task 1).
-    pub fn cold_standing(&self) -> &SparseStandings {
-        &self.cold_standing
     }
 }

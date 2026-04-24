@@ -1038,8 +1038,12 @@ fn lower_namespace_call(
         }
         (NamespaceId::Agents, "adjust_standing") => {
             expect_arity(args, 3, "agents.adjust_standing")?;
+            // Task 3.2: route directly to the @materialized `standing` view.
+            // The DSL `delta` is typed i16 at callsites (EffectStandingDelta);
+            // widen to the view's i32 storage. `state.tick` is in scope
+            // inside every generated physics handler.
             Ok(format!(
-                "state.adjust_standing({}, {}, {})",
+                "{{ let _ = state.views.standing.adjust({}, {}, ({}) as i32, state.tick); }}",
                 lowered[0], lowered[1], lowered[2]
             ))
         }
