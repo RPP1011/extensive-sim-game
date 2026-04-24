@@ -901,6 +901,14 @@ impl CascadeResidentCtx {
         &self.chronicle_ring
     }
 
+    /// Test-only accessor for `num_events_buf` so parent-crate test
+    /// harnesses can read back the per-iter event counts the cascade
+    /// writes. Not part of a stable public API.
+    #[doc(hidden)]
+    pub(crate) fn num_events_buf_for_test(&self) -> &wgpu::Buffer {
+        &self.num_events_buf
+    }
+
     fn ensure_spatial(&mut self, device: &wgpu::Device, agent_cap: u32) {
         let need = !matches!(
             &self.spatial_bufs,
