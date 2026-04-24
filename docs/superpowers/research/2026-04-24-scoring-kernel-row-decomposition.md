@@ -4,7 +4,7 @@
 **Date:** 2026-04-24
 **Branch:** `scoring-kernel-row-decomposition` (based on `world-sim-bench`)
 **Split commit:** `27b7fd34 feat(engine_gpu): opt-in per-row split scoring kernel for sub-phase measurement`
-**Revert commit:** _see end of doc_
+**Revert commit:** `99ad37ab revert(engine_gpu): per-row split scoring kernel (measurement-only)`
 **Predecessor:** `docs/superpowers/research/2026-04-24-mask-kernel-subphase-measurement.md`
 
 ---
