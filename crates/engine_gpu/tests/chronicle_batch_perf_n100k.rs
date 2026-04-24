@@ -187,33 +187,6 @@ fn chronicle_batch_perf_n100k() {
         None => eprintln!("  submit_granularity: default (1 submit per step_batch)"),
     }
 
-    // Research instrumentation: per-view scoring read counters. Dumped
-    // only when ENGINE_GPU_SCORING_VIEW_COUNT=1 was set at backend
-    // init; empty slice otherwise.
-    let view_counts = gpu.last_batch_view_read_counts();
-    if !view_counts.is_empty() {
-        let total: u64 = view_counts.iter().map(|(_, c)| *c as u64).sum();
-        eprintln!(
-            "  scoring view-read counts (ENGINE_GPU_SCORING_VIEW_COUNT=1, total {total} reads over {TICKS} ticks):"
-        );
-        // Sort by count descending so the dominant view leads the dump.
-        let mut sorted: Vec<&(String, u32)> = view_counts.iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
-        for entry in &sorted {
-            let name = &entry.0;
-            let count = entry.1;
-            let per_tick = count as u64 / TICKS as u64;
-            let pct = if total == 0 {
-                0.0
-            } else {
-                (count as f64 / total as f64) * 100.0
-            };
-            eprintln!(
-                "    {name:16}: total={count:>12}  per_tick={per_tick:>10}  ({pct:>5.1}%)"
-            );
-        }
-    }
-
     // Perf Stage A.2 — bind-group cache stats.
     if let Some((hits_after, misses_after)) =
         gpu.physics_resident_bg_cache_stats()
