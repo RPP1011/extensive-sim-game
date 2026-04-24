@@ -180,6 +180,77 @@ pub struct GpuEffectOp {
     pub _pad: u32,
 }
 
+impl GpuEffectOp {
+    /// Pack a CPU `engine::ability::EffectOp` into its GPU wire form.
+    ///
+    /// Discriminants match the `EFFECT_OP_KIND_*` constants emitted into
+    /// the physics shader (see `build_physics_shader_with_chronicle`).
+    /// Payload words are laid out per-variant:
+    ///
+    /// * `Damage / Heal / Shield` — `p0` = f32 amount bits, `p1` = 0.
+    /// * `Stun` — `p0` = duration_ticks, `p1` = 0.
+    /// * `Slow` — `p0` = duration_ticks, `p1` = i16 factor_q8 zero-extended.
+    /// * `TransferGold` — `p0` = i32 amount bit pattern, `p1` = 0.
+    /// * `ModifyStanding` — `p0` = i16 delta bit pattern, `p1` = 0.
+    /// * `CastAbility` — `p0` = AbilityId raw, `p1` = TargetSelector disc.
+    ///
+    /// Reorganising the layout requires lockstep updates to the
+    /// `EFFECT_OP_KIND_*` consts and the dispatcher's `match op` arms.
+    pub fn from_effect_op(op: &engine::ability::EffectOp) -> Self {
+        use engine::ability::EffectOp;
+        match *op {
+            EffectOp::Damage { amount } => GpuEffectOp {
+                kind: 0,
+                p0: amount.to_bits(),
+                p1: 0,
+                _pad: 0,
+            },
+            EffectOp::Heal { amount } => GpuEffectOp {
+                kind: 1,
+                p0: amount.to_bits(),
+                p1: 0,
+                _pad: 0,
+            },
+            EffectOp::Shield { amount } => GpuEffectOp {
+                kind: 2,
+                p0: amount.to_bits(),
+                p1: 0,
+                _pad: 0,
+            },
+            EffectOp::Stun { duration_ticks } => GpuEffectOp {
+                kind: 3,
+                p0: duration_ticks,
+                p1: 0,
+                _pad: 0,
+            },
+            EffectOp::Slow { duration_ticks, factor_q8 } => GpuEffectOp {
+                kind: 4,
+                p0: duration_ticks,
+                p1: (factor_q8 as u16) as u32,
+                _pad: 0,
+            },
+            EffectOp::TransferGold { amount } => GpuEffectOp {
+                kind: 5,
+                p0: amount as u32,
+                p1: 0,
+                _pad: 0,
+            },
+            EffectOp::ModifyStanding { delta } => GpuEffectOp {
+                kind: 6,
+                p0: (delta as u16) as u32,
+                p1: 0,
+                _pad: 0,
+            },
+            EffectOp::CastAbility { ability, selector } => GpuEffectOp {
+                kind: 7,
+                p0: ability.raw(),
+                p1: selector as u32,
+                _pad: 0,
+            },
+        }
+    }
+}
+
 /// Pre-computed per-slot kin list — matches `GpuQueryResult`'s ids
 /// layout but kept as a separate struct so the physics kernel can be
 /// loaded without depending on spatial_gpu's types verbatim. We wrap
@@ -375,13 +446,43 @@ pub fn unpack_agent_slots(state: &mut SimState, slots: &[GpuAgentSlot]) {
 // Ability registry pack
 // ---------------------------------------------------------------------------
 
+/// Sentinel written into `PackedAbilityRegistry::hints` when the
+/// ability has no `hint:` field. Chosen so any legal
+/// `AbilityHint::discriminant()` (0..=3 today) stays distinguishable.
+///
+/// WGSL consumers (Phase 4) will compare against this constant before
+/// dispatching a hint-specific branch; `HINT_NONE_SENTINEL` is not a
+/// valid discriminant.
+pub const HINT_NONE_SENTINEL: u32 = 0xFFu32;
+
 /// Flat ability registry ready for upload.
+///
+/// The `hints` and `tag_values` fields are the Phase 1 addition of the
+/// GPU ability-evaluation subsystem (see
+/// `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`).
+/// They carry the scoring surface that Phase 4 will bind and read; no
+/// physics kernel consumes them today. `empty()` initialises both to
+/// their "no data" defaults so existing tests that skip
+/// `CastAbility` / ability scoring keep passing unchanged.
 pub struct PackedAbilityRegistry {
     pub known: Vec<u32>,
     pub cooldown: Vec<u32>,
     pub effects_count: Vec<u32>,
     /// `effects[ab * MAX_EFFECTS + effect_idx]`.
     pub effects: Vec<GpuEffectOp>,
+    /// `hints[ab]` — coarse category hint per ability, encoded as
+    /// `AbilityHint::discriminant() as u32`. `HINT_NONE_SENTINEL`
+    /// marks abilities whose DSL source omits the `hint:` field.
+    ///
+    /// Unbound in Phase 1 — Phase 4 wires this into `pick_ability.wgsl`.
+    pub hints: Vec<u32>,
+    /// Per-ability-per-tag power rating. Flat layout
+    /// `tag_values[ab * NUM_ABILITY_TAGS + tag_idx]`, stride
+    /// `AbilityTag::COUNT`. Missing tags read as `0.0f32`, matching the
+    /// DSL contract of `ability::tag(UNKNOWN) == 0`.
+    ///
+    /// Unbound in Phase 1 — Phase 4 wires this into `pick_ability.wgsl`.
+    pub tag_values: Vec<f32>,
 }
 
 impl PackedAbilityRegistry {
@@ -393,7 +494,57 @@ impl PackedAbilityRegistry {
             cooldown: vec![0u32; MAX_ABILITIES],
             effects_count: vec![0u32; MAX_ABILITIES],
             effects: vec![GpuEffectOp::default(); MAX_ABILITIES * MAX_EFFECTS],
+            hints: vec![HINT_NONE_SENTINEL; MAX_ABILITIES],
+            tag_values: vec![0.0f32; MAX_ABILITIES * engine::ability::AbilityTag::COUNT],
         }
+    }
+
+    /// Pack a CPU `AbilityRegistry` into upload-ready flat buffers.
+    ///
+    /// Extracts the full ability surface exposed to GPU scoring:
+    /// `known` / `cooldown` / `effects_count` / `effects` (existing
+    /// cascade-cast inputs) plus `hints` / `tag_values` (Phase 1
+    /// addition for the forthcoming `pick_ability.wgsl`).
+    ///
+    /// Registries with more than `MAX_ABILITIES` entries are truncated;
+    /// overflow is a configuration bug, not a runtime error, and slots
+    /// past the budget are dropped. Known programs with more than
+    /// `MAX_EFFECTS` effects are also truncated — `effects_count`
+    /// reports the truncated count so the kernel's per-ability loop
+    /// stays in bounds.
+    pub fn pack(registry: &engine::ability::AbilityRegistry) -> Self {
+        use engine::ability::{AbilityId, AbilityTag};
+
+        let mut out = Self::empty();
+        let n = registry.len().min(MAX_ABILITIES);
+        for slot in 0..n {
+            // AbilityId is 1-based; slot 0 => id 1.
+            let id = match AbilityId::new((slot as u32) + 1) {
+                Some(id) => id,
+                None => continue,
+            };
+            let Some(program) = registry.get(id) else { continue };
+
+            out.known[slot] = 1;
+            out.cooldown[slot] = program.gate.cooldown_ticks;
+
+            let effect_count = program.effects.len().min(MAX_EFFECTS);
+            out.effects_count[slot] = effect_count as u32;
+            for (i, op) in program.effects.iter().take(effect_count).enumerate() {
+                out.effects[slot * MAX_EFFECTS + i] = GpuEffectOp::from_effect_op(op);
+            }
+
+            out.hints[slot] = program
+                .hint
+                .map(|h| h.discriminant() as u32)
+                .unwrap_or(HINT_NONE_SENTINEL);
+
+            let stride = AbilityTag::COUNT;
+            for &(tag, value) in program.tags.iter() {
+                out.tag_values[slot * stride + tag.index()] = value;
+            }
+        }
+        out
     }
 }
 
@@ -2497,5 +2648,187 @@ mod tests {
         assert_eq!(slots[0].engaged_with, GpuAgentSlot::ENGAGED_NONE);
         // Unspawned slots
         assert_eq!(slots[1].alive, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // PackedAbilityRegistry — Phase 1 tag surface (GPU ability-evaluation)
+    //
+    // The tag surface is unbound in Phase 1; these tests pin the packer's
+    // wire shape so Phase 4's WGSL binding can assume `hints` /
+    // `tag_values` are well-formed.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn packed_ability_registry_empty_shape_includes_tag_surface() {
+        let packed = PackedAbilityRegistry::empty();
+        assert_eq!(packed.known.len(), MAX_ABILITIES);
+        assert_eq!(packed.cooldown.len(), MAX_ABILITIES);
+        assert_eq!(packed.effects_count.len(), MAX_ABILITIES);
+        assert_eq!(packed.effects.len(), MAX_ABILITIES * MAX_EFFECTS);
+
+        // Phase 1 additions: hint sentinel per slot + tag row per slot.
+        assert_eq!(packed.hints.len(), MAX_ABILITIES);
+        assert!(
+            packed.hints.iter().all(|h| *h == HINT_NONE_SENTINEL),
+            "empty() must mark every slot as HINT_NONE_SENTINEL"
+        );
+        assert_eq!(
+            packed.tag_values.len(),
+            MAX_ABILITIES * engine::ability::AbilityTag::COUNT,
+        );
+        assert!(
+            packed.tag_values.iter().all(|v| *v == 0.0),
+            "empty() must zero every tag entry"
+        );
+    }
+
+    #[test]
+    fn pack_carries_hint_and_tag_values_through_lowering() {
+        use engine::ability::{
+            AbilityHint, AbilityProgram, AbilityRegistryBuilder, AbilityTag, EffectOp, Gate,
+        };
+
+        let mut b = AbilityRegistryBuilder::new();
+
+        // Slot 0 — damage hint + mixed tag vector.
+        let a0 = AbilityProgram::new_single_target(
+            6.0,
+            Gate { cooldown_ticks: 40, hostile_only: true, line_of_sight: false },
+            [EffectOp::Damage { amount: 50.0 }],
+        )
+        .with_hint(AbilityHint::Damage)
+        .with_tags([
+            (AbilityTag::Physical, 80.0),
+            (AbilityTag::CrowdControl, 10.0),
+        ]);
+        let _id_a = b.register(a0);
+
+        // Slot 1 — no hint, single tag.
+        let a1 = AbilityProgram::new_single_target(
+            4.0,
+            Gate { cooldown_ticks: 20, hostile_only: false, line_of_sight: false },
+            [EffectOp::Heal { amount: 25.0 }],
+        )
+        .with_tags([(AbilityTag::Heal, 60.0)]);
+        let _id_b = b.register(a1);
+
+        // Slot 2 — defense hint, no tags (tag reads default to 0).
+        let a2 = AbilityProgram::new_single_target(
+            1.0,
+            Gate { cooldown_ticks: 100, hostile_only: false, line_of_sight: false },
+            [EffectOp::Shield { amount: 30.0 }],
+        )
+        .with_hint(AbilityHint::Defense);
+        let _id_c = b.register(a2);
+
+        let registry = b.build();
+        let packed = PackedAbilityRegistry::pack(&registry);
+
+        // Shape preserved.
+        assert_eq!(packed.hints.len(), MAX_ABILITIES);
+        assert_eq!(
+            packed.tag_values.len(),
+            MAX_ABILITIES * AbilityTag::COUNT,
+        );
+
+        // Slot 0: damage hint, PHYSICAL=80 + CROWD_CONTROL=10.
+        assert_eq!(packed.known[0], 1);
+        assert_eq!(packed.cooldown[0], 40);
+        assert_eq!(packed.effects_count[0], 1);
+        assert_eq!(packed.hints[0], AbilityHint::Damage.discriminant() as u32);
+        let stride = AbilityTag::COUNT;
+        assert_eq!(packed.tag_values[0 * stride + AbilityTag::Physical.index()], 80.0);
+        assert_eq!(
+            packed.tag_values[0 * stride + AbilityTag::CrowdControl.index()],
+            10.0,
+        );
+        assert_eq!(packed.tag_values[0 * stride + AbilityTag::Heal.index()], 0.0);
+
+        // Slot 1: no hint → sentinel; HEAL=60.
+        assert_eq!(packed.known[1], 1);
+        assert_eq!(packed.hints[1], HINT_NONE_SENTINEL);
+        assert_eq!(packed.tag_values[1 * stride + AbilityTag::Heal.index()], 60.0);
+        assert_eq!(
+            packed.tag_values[1 * stride + AbilityTag::Physical.index()],
+            0.0,
+        );
+
+        // Slot 2: defense hint, all tag values zero.
+        assert_eq!(packed.known[2], 1);
+        assert_eq!(packed.hints[2], AbilityHint::Defense.discriminant() as u32);
+        for t in AbilityTag::all() {
+            assert_eq!(
+                packed.tag_values[2 * stride + t.index()],
+                0.0,
+                "slot 2 tag {:?} should be 0",
+                t,
+            );
+        }
+
+        // Slot 3+ unset → sentinel + zeros.
+        assert_eq!(packed.known[3], 0);
+        assert_eq!(packed.hints[3], HINT_NONE_SENTINEL);
+    }
+
+    #[test]
+    fn packer_truncates_beyond_max_abilities() {
+        // If someone registers more than MAX_ABILITIES programs, the
+        // packer drops the overflow rather than panicking. Documented
+        // in `PackedAbilityRegistry::pack`.
+        use engine::ability::{AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
+
+        let mut b = AbilityRegistryBuilder::new();
+        // Register MAX_ABILITIES + 2 programs.
+        for _ in 0..(MAX_ABILITIES + 2) {
+            b.register(AbilityProgram::new_single_target(
+                1.0,
+                Gate { cooldown_ticks: 1, hostile_only: false, line_of_sight: false },
+                [EffectOp::Damage { amount: 1.0 }],
+            ));
+        }
+        let registry = b.build();
+        let packed = PackedAbilityRegistry::pack(&registry);
+
+        // Every budgeted slot is populated.
+        assert_eq!(packed.known.len(), MAX_ABILITIES);
+        assert!(packed.known.iter().all(|k| *k == 1));
+        // Overflow slots simply don't exist in the packed buffer.
+    }
+
+    #[test]
+    fn packer_preserves_effects_up_to_cpu_cap() {
+        use engine::ability::{AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
+
+        // The CPU cap `MAX_EFFECTS_PER_PROGRAM` (4) is always `<=` the
+        // GPU cap `MAX_EFFECTS` (8), so a fully-packed CPU program
+        // round-trips without truncation. This pins that relationship
+        // — if the CPU cap is ever raised past MAX_EFFECTS the packer
+        // loop's `.take(MAX_EFFECTS)` becomes load-bearing.
+        let effects: Vec<EffectOp> = (0..engine::ability::MAX_EFFECTS_PER_PROGRAM)
+            .map(|_| EffectOp::Damage { amount: 1.0 })
+            .collect();
+
+        let mut b = AbilityRegistryBuilder::new();
+        b.register(AbilityProgram::new_single_target(
+            1.0,
+            Gate { cooldown_ticks: 1, hostile_only: false, line_of_sight: false },
+            effects,
+        ));
+        let registry = b.build();
+        let packed = PackedAbilityRegistry::pack(&registry);
+
+        assert!(
+            engine::ability::MAX_EFFECTS_PER_PROGRAM <= MAX_EFFECTS,
+            "MAX_EFFECTS_PER_PROGRAM ({}) must fit in GPU MAX_EFFECTS ({})",
+            engine::ability::MAX_EFFECTS_PER_PROGRAM,
+            MAX_EFFECTS,
+        );
+        assert_eq!(
+            packed.effects_count[0] as usize,
+            engine::ability::MAX_EFFECTS_PER_PROGRAM,
+        );
+        for i in 0..engine::ability::MAX_EFFECTS_PER_PROGRAM {
+            assert_eq!(packed.effects[i].kind, 0, "slot 0 eff {} kind", i);
+        }
     }
 }
