@@ -85,6 +85,16 @@ pub mod view_storage;
 #[cfg(feature = "gpu")]
 pub mod view_storage_symmetric_pair;
 
+/// Subsystem 2 Phase 4 — GPU resident-path storage for
+/// `@per_entity_ring` views (the `memory` view). Owns per-agent
+/// `[MemoryEventGpu; K=64]` ring buffers + monotonic u32 write
+/// cursors. Uploaded from the CPU memory ring on
+/// `ensure_resident_init`, read back in `snapshot()`. Bound into the
+/// resident physics BGL at slots 20 / 21. See
+/// `docs/superpowers/plans/2026-04-23-gpu-per-entity-ring-driver-memory.md`.
+#[cfg(feature = "gpu")]
+pub mod view_storage_per_entity_ring;
+
 /// Phase 5 — GPU spatial hash + nearest-hostile / nearby-kin queries.
 /// Not yet consumed by the backend's step loop; the scoring / physics
 /// kernels will call into `spatial_gpu::SPATIAL_WGSL` helpers.
