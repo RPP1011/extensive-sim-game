@@ -926,6 +926,10 @@ impl GpuBackend {
         self.snapshot.snapshot_chronicle_ring_read = 0;
 
         let agent_cap = state.agent_cap();
+        // Stage B.1 — capture the iter_cap used on the final tick so
+        // the end-of-batch sanity check can compare the last tick's
+        // per-iter counts against it. `None` iff n_ticks == 0.
+        let mut last_iter_cap_used: Option<u32> = None;
         for _ in 0..n_ticks {
             // Split-borrow: need `&` to `resident_agents_buf` plus
             // `&mut` to `fused_unpack_kernel` (and later `&mut` to
@@ -1140,19 +1144,44 @@ impl GpuBackend {
                 &cascade_ctx.apply_event_ring;
             let apply_ring_ref: &crate::event_ring::GpuEventRing =
                 unsafe { &*apply_ring_ptr };
-            // Heuristic cap: if a recent sync tick observed cascade
-            // convergence at N iterations, record only N+2 dispatches
-            // this tick — saves the per-iter encode cost for the 6+
-            // no-op iters typical on low-convergence workloads. When
-            // `last_cascade_iterations` is `None` (no prior sync tick,
-            // or cascade failed) fall back to the full
-            // MAX_CASCADE_ITERATIONS for safety. The +2 margin
-            // tolerates modest run-to-run variance; workloads with
-            // deeper cascades pay the same cost as today.
+            // Heuristic cap (Stage B.1): prefer the batch-path's own
+            // observed convergence over the sync path's — the sync
+            // path's `last_cascade_iterations` is only ever updated
+            // by non-batch calls and can go stale across long batches.
+            // `resident_ctx.batch_observed_max_iters` is refreshed at
+            // end-of-batch from a staging readback of num_events_buf.
+            //
+            // First batch observes `MAX_CASCADE_ITERATIONS` (the
+            // bootstrap value `CascadeResidentCtx::new` seeds) unless
+            // the sync path happens to have observed tighter
+            // convergence already — in which case we use the lower of
+            // the two for a faster warmup. Subsequent batches narrow
+            // down to whatever the last tick of the previous batch
+            // actually needed. The `+2` margin absorbs run-to-run
+            // variance; workloads with deeper cascades pay the same
+            // cost as today.
+            //
+            // Note: this uses a single iter_cap for every tick in the
+            // current batch. Observing convergence *during* the batch
+            // would require a mid-batch submit+poll, which defeats the
+            // batch path's one-submit-per-N-ticks property. The
+            // staleness cost is small — combat workloads don't change
+            // cascade depth tick-to-tick by more than a couple of
+            // iterations, absorbed by the `+2` margin.
+            let batch_observed = resident_ctx.batch_observed_max_iters;
+            let iter_cap_from_batch =
+                (batch_observed + 2).min(crate::cascade::MAX_CASCADE_ITERATIONS);
             let iter_cap = match last_cascade_iterations_copy {
-                Some(n) => (n + 2).min(crate::cascade::MAX_CASCADE_ITERATIONS),
-                None => crate::cascade::MAX_CASCADE_ITERATIONS,
+                Some(n) => {
+                    let sync_cap = (n + 2).min(crate::cascade::MAX_CASCADE_ITERATIONS);
+                    sync_cap.min(iter_cap_from_batch)
+                }
+                None => iter_cap_from_batch,
             };
+            // Remember for the end-of-batch sanity check so we can
+            // compare the final tick's per-iter counts against the cap
+            // that was actually recorded.
+            last_iter_cap_used = Some(iter_cap);
             let sim_cfg_ref = sim_cfg_buf
                 .as_ref()
                 .expect("sim_cfg_buf ensured by ensure_resident_init");
@@ -1199,6 +1228,20 @@ impl GpuBackend {
             p.finish_frame(&mut encoder);
         }
 
+        // Stage B.1 — encode a copy from num_events_buf into the
+        // persistent staging buffer so the post-submit readback can
+        // observe the final tick's convergence. Cheap (~36 B copy,
+        // one transfer op); landed before the submit so it runs on
+        // the same command buffer as the ticks.
+        {
+            let resident_ctx = self
+                .resident
+                .resident_cascade_ctx
+                .as_ref()
+                .expect("resident_cascade_ctx ensured by ensure_resident_init");
+            resident_ctx.encode_num_events_readback(&mut encoder);
+        }
+
         self.queue.submit(Some(encoder.finish()));
         let _ = self.device.poll(wgpu::PollType::Wait);
 
@@ -1234,6 +1277,61 @@ impl GpuBackend {
                 .collect();
         } else {
             self.resident.last_batch_phase_us.clear();
+        }
+
+        // Stage B.1 — read the final tick's per-iter event counts off
+        // the staging buffer and update `batch_observed_max_iters` for
+        // the NEXT batch. The submit+poll above ensured the copy landed,
+        // so `read_num_events_blocking` just maps + copies the 36 B
+        // staging back to CPU. No re-fencing of batch compute work.
+        //
+        // Sanity-check: if the final iter's num_events > threshold,
+        // the cap was too tight — log a warning (not a panic). A tight
+        // cap silently drops downstream propagation; the warning helps
+        // operators catch workload shifts (e.g. denser combat) that
+        // warrant a larger `+2` margin or a cap bump.
+        {
+            let resident_ctx = self
+                .resident
+                .resident_cascade_ctx
+                .as_mut()
+                .expect("resident_cascade_ctx ensured by ensure_resident_init");
+            match resident_ctx.read_num_events_blocking(&self.device) {
+                Ok(counts) => {
+                    let observed = crate::cascade_resident::CascadeResidentCtx
+                        ::observed_last_active_iter(&counts);
+                    resident_ctx.batch_observed_max_iters = observed;
+                    // Truncation sanity: counts[cap] is the write slot
+                    // of iter (cap-1)'s epilogue. If the cascade
+                    // genuinely needed MORE iters than the cap, that
+                    // slot will have a nonzero event count (events the
+                    // next — un-recorded — iter would have read).
+                    // Log (not panic) so operators catch workload
+                    // shifts that warrant a larger `+2` margin.
+                    const DROP_WARN_THRESHOLD: u32 = 10;
+                    if let Some(cap) = last_iter_cap_used {
+                        let cap_idx = cap as usize;
+                        if let Some(&tail_ct) = counts.get(cap_idx) {
+                            if tail_ct >= DROP_WARN_THRESHOLD {
+                                eprintln!(
+                                    "engine_gpu::step_batch: cascade truncated — \
+                                     iter_cap={cap} but num_events[{cap_idx}]={tail_ct} \
+                                     (>= {DROP_WARN_THRESHOLD}); observed_for_next_batch={observed}"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Don't panic — the next batch will default to the
+                    // bootstrap value and keep running.
+                    eprintln!(
+                        "engine_gpu::step_batch: num_events readback failed ({e}); \
+                         next batch uses previous observed={}",
+                        resident_ctx.batch_observed_max_iters
+                    );
+                }
+            }
         }
     }
 
@@ -1907,6 +2005,20 @@ impl GpuBackend {
             .unwrap_or_default()
         };
         (tail, records)
+    }
+
+    /// Test-only accessor: current value of
+    /// `CascadeResidentCtx::batch_observed_max_iters` — the cascade
+    /// iteration count observed on the final tick of the most recent
+    /// `step_batch` submit. Returns `None` if the resident ctx isn't
+    /// initialised (no batch yet). Used by Stage B.1 tests to verify
+    /// the convergence-observation loop updates across batches.
+    #[doc(hidden)]
+    pub fn batch_observed_max_iters_for_test(&self) -> Option<u32> {
+        self.resident
+            .resident_cascade_ctx
+            .as_ref()
+            .map(|ctx| ctx.batch_observed_max_iters)
     }
 
     /// Test-only accessor: read the first few slots of `num_events_buf`

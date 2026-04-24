@@ -791,6 +791,27 @@ pub struct CascadeResidentCtx {
     /// before the cascade seed runs, so `snapshot()` can observe the
     /// full N-tick batch. Reset at the start of each `step_batch` call.
     pub(crate) batch_events_ring: GpuEventRing,
+    /// Persistent staging buffer for num_events readback, sized for
+    /// `MAX_CASCADE_ITERATIONS + 1` u32 slots. Used by
+    /// [`Self::encode_num_events_readback`] + [`Self::read_num_events_blocking`]
+    /// to observe cascade convergence at end-of-batch without paying a
+    /// per-tick fence. See [`Self::batch_observed_max_iters`] and
+    /// `lib.rs::step_batch`'s iter-cap heuristic for consumers.
+    num_events_staging: wgpu::Buffer,
+    /// Cascade convergence observed on the final tick of the previous
+    /// `step_batch` submit. Used to cap the number of physics
+    /// iterations recorded per tick on subsequent batches — workloads
+    /// that converge at iter 1-2 save 5-6 per-iter encodes each tick
+    /// (each costs ~50-200 µs of CPU compute-pass + bind-group cost,
+    /// even when the indirect dispatch args are `(x=0, y=1, z=1)` no-ops).
+    ///
+    /// Initialised to `MAX_CASCADE_ITERATIONS` (the conservative
+    /// bootstrap cap) on construction. Updated after each batch submit
+    /// by `GpuBackend::step_batch` via
+    /// [`Self::read_num_events_blocking`]. Next batch reads this
+    /// field + a `+2` margin and passes the clamped value as
+    /// `run_cascade_resident_with_iter_cap`'s `max_iters` param.
+    pub(crate) batch_observed_max_iters: u32,
     /// `agent_cap` the resident physics ability buffers + agent-cap
     /// dependent buffers were last sized for.
     last_agent_cap: u32,
@@ -824,6 +845,16 @@ impl CascadeResidentCtx {
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        // Persistent staging buffer for per-batch convergence readback
+        // (Stage B.1). Sized for `MAX_CASCADE_ITERATIONS + 1` u32 slots
+        // (36 B). MAP_READ | COPY_DST usage so we can copy num_events
+        // into it at end-of-batch and map_async after submit+poll.
+        let num_events_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cascade_resident::num_events_staging"),
+            size: num_events_slots * 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
         let chronicle_ring = crate::event_ring::GpuChronicleRing::new(
             device,
             crate::event_ring::DEFAULT_CHRONICLE_CAPACITY,
@@ -843,6 +874,11 @@ impl CascadeResidentCtx {
             num_events_buf,
             chronicle_ring,
             batch_events_ring,
+            num_events_staging,
+            // Conservative bootstrap: first batch must record the full
+            // `MAX_CASCADE_ITERATIONS` dispatches. Subsequent batches
+            // narrow this based on observed convergence.
+            batch_observed_max_iters: MAX_CASCADE_ITERATIONS,
             last_agent_cap: 0,
         })
     }
@@ -892,6 +928,96 @@ impl CascadeResidentCtx {
     /// its tail is cleared per-tick for cascade-seed correctness).
     pub(crate) fn batch_events_ring(&self) -> &GpuEventRing {
         &self.batch_events_ring
+    }
+
+    /// Stage B.1 — encode a `copy_buffer_to_buffer` from `num_events_buf`
+    /// into the persistent `num_events_staging` buffer. Called by
+    /// `step_batch` after the final tick's cascade is encoded, before
+    /// `queue.submit`. Does NOT poll, does NOT map — caller owns the
+    /// fence via the step_batch submit+poll that already runs at
+    /// end-of-batch.
+    ///
+    /// The staging buffer holds the final tick's per-iter event counts:
+    /// slot `i` = count of events the iter-`i` physics dispatch read.
+    /// `slot[k] == 0` implies iter `k-1` converged (emitted no events).
+    /// [`Self::read_num_events_blocking`] reads the mapped range once
+    /// the submit's poll has returned.
+    pub(crate) fn encode_num_events_readback(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let byte_len = (MAX_CASCADE_ITERATIONS as u64 + 1) * 4;
+        encoder.copy_buffer_to_buffer(
+            &self.num_events_buf,
+            0,
+            &self.num_events_staging,
+            0,
+            byte_len,
+        );
+    }
+
+    /// Stage B.1 — map + read + unmap the `num_events_staging` buffer,
+    /// returning the `MAX_CASCADE_ITERATIONS + 1` per-iter event counts
+    /// from the LAST tick of the most recent submit.
+    ///
+    /// **Precondition:** the caller has already run `queue.submit` +
+    /// `device.poll(Wait)` AFTER [`Self::encode_num_events_readback`]
+    /// was invoked on the submitted encoder. Calling before the poll
+    /// returns a `map_async` error; calling without a prior encode
+    /// returns stale data (or zeros if this is the first invocation).
+    ///
+    /// Uses `map_async` + a blocking `device.poll(Wait)` to flush the
+    /// map operation itself. The `Wait` here is cheap (no compute
+    /// work in flight once the batch submit has poll-completed), so
+    /// this does NOT re-fence the batch path's non-fence property.
+    pub(crate) fn read_num_events_blocking(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<Vec<u32>, String> {
+        let slice = self.num_events_staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        // The flush poll is required for map_async to complete on
+        // wgpu backends that don't auto-drive the mapping queue.
+        // This does NOT block on compute work — the batch submit's
+        // poll already returned before we called this.
+        let _ = device.poll(wgpu::PollType::Wait);
+        rx.recv()
+            .map_err(|e| format!("num_events_staging channel closed: {e}"))?
+            .map_err(|e| format!("num_events_staging map_async: {e:?}"))?;
+        let data = slice.get_mapped_range();
+        let out: Vec<u32> = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        self.num_events_staging.unmap();
+        Ok(out)
+    }
+
+    /// Stage B.1 — from a per-iter num_events readback, compute the
+    /// highest iter index that actually processed events (i.e. read a
+    /// non-zero `num_events[i]` and thus was not a GPU-side no-op).
+    /// Returns `0` if all iters were no-ops (nothing to cascade).
+    ///
+    /// `num_events[0]` is the seed-kernel write (always the
+    /// apply_event_ring tail). `num_events[i]` for `i >= 1` is written
+    /// by iter-`(i-1)`'s physics epilogue and read by iter-`i`'s
+    /// dispatch. So if `num_events[i] > 0`, iter `i` ran real work.
+    ///
+    /// The caller adds a `+2` margin (for run-to-run variance) and
+    /// clamps to `MAX_CASCADE_ITERATIONS` before using as
+    /// `run_cascade_resident_with_iter_cap`'s `max_iters`.
+    pub(crate) fn observed_last_active_iter(counts: &[u32]) -> u32 {
+        let mut last_active: u32 = 0;
+        // counts[i] drives iter i; i in 0..MAX. counts[MAX] is the
+        // final iter's epilogue-write (an exhaustion counter).
+        let max_probe = counts.len().min(MAX_CASCADE_ITERATIONS as usize) as u32;
+        for i in 0..max_probe {
+            if counts[i as usize] > 0 {
+                last_active = i + 1;
+            }
+        }
+        last_active
     }
 
     /// Read-only handle to the dedicated chronicle ring.
@@ -1258,4 +1384,66 @@ pub fn run_cascade_resident_with_iter_cap(
     let _ = std::mem::size_of::<GpuKinList>();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Stage B.1 — pure-decode tests for `observed_last_active_iter`.
+    // Guards the convergence-detection logic so a one-off GPU-readback
+    // regression can't silently mis-classify a converged tick.
+
+    #[test]
+    fn observed_last_active_iter_all_zeros_reports_zero() {
+        let counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 0);
+    }
+
+    #[test]
+    fn observed_last_active_iter_only_slot_0_reports_one() {
+        let mut counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        counts[0] = 42;
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 1);
+    }
+
+    #[test]
+    fn observed_last_active_iter_contiguous_range_reports_last() {
+        // counts[0..=2] nonzero, counts[3..] zero: iter 2 was the last
+        // one that read a nonzero event count, so last_active is 3.
+        let mut counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        counts[0] = 100;
+        counts[1] = 20;
+        counts[2] = 3;
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 3);
+    }
+
+    #[test]
+    fn observed_last_active_iter_sparse_tail_reports_deepest_active() {
+        // A gap in the middle should not hide a deeper active iter.
+        let mut counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        counts[0] = 5;
+        counts[1] = 0; // physically can't happen — seed always positive
+        counts[3] = 7; // but be robust to degenerate readbacks
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 4);
+    }
+
+    #[test]
+    fn observed_last_active_iter_ignores_trailing_epilogue_write() {
+        // counts[MAX] is the exhaustion epilogue write — the decoder
+        // should not treat it as an "active iter" (it's one PAST the
+        // last iter that actually ran).
+        let mut counts = vec![0u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        counts[MAX_CASCADE_ITERATIONS as usize] = 999;
+        assert_eq!(CascadeResidentCtx::observed_last_active_iter(&counts), 0);
+    }
+
+    #[test]
+    fn observed_last_active_iter_full_cascade_reports_max() {
+        let counts = vec![1u32; (MAX_CASCADE_ITERATIONS + 1) as usize];
+        assert_eq!(
+            CascadeResidentCtx::observed_last_active_iter(&counts),
+            MAX_CASCADE_ITERATIONS
+        );
+    }
 }
