@@ -402,3 +402,160 @@ scoring {
         "error should mention arity; got: {msg}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// PER-AB-5: composite — the spec's full pick_ability row parses + resolves
+// ---------------------------------------------------------------------------
+//
+// Exercises every Phase 2 primitive in one row:
+//   * `row ... per_ability { ... }` (PER-AB-1)
+//   * `ability::tag(PHYSICAL)` / tag(CROWD_CONTROL) / tag(DEFENSE) (PER-AB-2)
+//   * `ability::on_cooldown(ability)` (PER-AB-4)
+//   * `ability::range` (PER-AB-4)
+//
+// The target clause uses an unresolved wrapper (`nearest_hostile_in_range`)
+// since the Phase 2 scope doesn't include target-query primitives — the
+// resolver keeps the call as `IrExpr::UnresolvedCall` for a later pass
+// (or a future stdlib addition) without failing. The scope also seeds
+// `engaged_with_hostile` as an unresolved ident (a view call or local
+// the spec fixture cites without declaring); `validate_scoring_body`
+// tolerates it for the same reason.
+
+// Stub `engaged_with_hostile` view so the spec fixture's expression
+// `if engaged_with_hostile { 0.5 } else { 0.0 }` resolves cleanly.
+// The body is a constant — this fixture exists only to prove the
+// `per_ability` parser + resolver accept the spec's composite shape,
+// not to exercise realistic view semantics. The view declaration
+// takes a `(self: Agent)` parameter because `view <name>(...)` is
+// the required grammar.
+const SPEC_FIXTURE: &str = r#"
+view engaged_with_hostile(a: Agent) -> bool { false }
+
+scoring {
+  row pick_ability per_ability {
+    guard:  !ability::on_cooldown(ability)
+    score:  ability::tag(PHYSICAL) * (1 - target.hp_frac)
+          + ability::tag(CROWD_CONTROL) * (if engaged_with_hostile(self) { 0.5 } else { 0.0 })
+          + ability::tag(DEFENSE) * (if self.hp_frac < 0.3 { 1.0 } else { 0.0 })
+    target: nearest_hostile_in_range(ability::range)
+  }
+}
+"#;
+
+#[test]
+fn spec_pick_ability_row_parses_end_to_end() {
+    let program = parse(SPEC_FIXTURE).expect("parse should succeed");
+    let scoring = program
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            Decl::Scoring(s) => Some(s),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(scoring.per_ability_rows.len(), 1);
+    assert_eq!(scoring.entries.len(), 0);
+    let row = &scoring.per_ability_rows[0];
+    assert_eq!(row.name, "pick_ability");
+    assert!(row.guard.is_some());
+    assert!(row.target.is_some());
+}
+
+#[test]
+fn spec_pick_ability_row_resolves_end_to_end() {
+    let comp = compile(SPEC_FIXTURE).expect("compile should succeed");
+    let row = &comp.scoring[0].per_ability_rows[0];
+
+    // Guard: `!ability::on_cooldown(ability)`.
+    let guard = row.guard.as_ref().expect("guard present");
+    let IrExpr::Unary(_, inner) = &guard.kind else {
+        panic!("guard should be Unary(Not, ...); got {:?}", guard.kind);
+    };
+    assert!(
+        matches!(inner.kind, IrExpr::AbilityOnCooldown(_)),
+        "guard inner should be AbilityOnCooldown; got {:?}",
+        inner.kind
+    );
+
+    // Score: sum of three tag-weighted terms. Walk left-associatively
+    // to confirm each tag is present.
+    let mut tags_seen: Vec<AbilityTag> = Vec::new();
+    fn collect_tags(e: &IrExpr, out: &mut Vec<AbilityTag>) {
+        match e {
+            IrExpr::AbilityTag { tag } => out.push(*tag),
+            IrExpr::Binary(_, lhs, rhs) => {
+                collect_tags(&lhs.kind, out);
+                collect_tags(&rhs.kind, out);
+            }
+            IrExpr::Unary(_, inner) => collect_tags(&inner.kind, out),
+            IrExpr::If { cond, then_expr, else_expr } => {
+                collect_tags(&cond.kind, out);
+                collect_tags(&then_expr.kind, out);
+                if let Some(e) = else_expr {
+                    collect_tags(&e.kind, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    collect_tags(&row.score.kind, &mut tags_seen);
+    tags_seen.sort_by_key(|t| *t as u8);
+    let mut expected = vec![
+        AbilityTag::Physical,
+        AbilityTag::CrowdControl,
+        AbilityTag::Defense,
+    ];
+    expected.sort_by_key(|t| *t as u8);
+    assert_eq!(
+        tags_seen, expected,
+        "score should mention PHYSICAL + CROWD_CONTROL + DEFENSE"
+    );
+
+    // Target: `nearest_hostile_in_range(ability::range)` — the inner
+    // `ability::range` should have lowered. The outer call resolves
+    // as an `UnresolvedCall` (the wrapper isn't a declared stdlib
+    // method) whose lone argument is `IrExpr::AbilityRange`.
+    let target = row.target.as_ref().expect("target present");
+    match &target.kind {
+        IrExpr::UnresolvedCall(name, args) => {
+            assert_eq!(name, "nearest_hostile_in_range");
+            assert_eq!(args.len(), 1);
+            assert!(
+                matches!(args[0].value.kind, IrExpr::AbilityRange),
+                "target arg should be AbilityRange; got {:?}",
+                args[0].value.kind
+            );
+        }
+        other => panic!("expected UnresolvedCall for target; got {other:?}"),
+    }
+}
+
+/// The composite fixture, when stored as the whole row, should not
+/// disturb any other row (a regression guard — a later change that
+/// accidentally drains `entries` or mis-associates rows would tank
+/// this).
+#[test]
+fn spec_pick_ability_row_coexists_with_standard_rows() {
+    const SRC: &str = r#"
+scoring {
+  Attack(t) = 1.0
+  row pick_ability per_ability {
+    score: ability::tag(PHYSICAL)
+  }
+  Hold = 0.1
+}
+"#;
+    let comp = compile(SRC).expect("compile should succeed");
+    let scoring = &comp.scoring[0];
+    assert_eq!(
+        scoring.entries.len(),
+        2,
+        "two standard rows (Attack, Hold) should survive"
+    );
+    assert_eq!(
+        scoring.per_ability_rows.len(),
+        1,
+        "one per_ability row should land on its own list"
+    );
+    assert_eq!(scoring.per_ability_rows[0].name, "pick_ability");
+}

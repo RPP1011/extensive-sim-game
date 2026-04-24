@@ -1011,6 +1011,13 @@ fn resolve_bodies(
                         // Phase 3 lowers this into the per-iteration slot
                         // index; at Phase 2 it's just a stand-in.
                         scope.bind("ability", IrType::AbilityId);
+                        // Seed `target` as the ability's cast target
+                        // (see spec's `pick_ability` fixture:
+                        // `target.hp_frac`). Phase 3 resolves it via
+                        // the row's `target:` clause; at Phase 2 it
+                        // stays a typed stand-in so per_ability bodies
+                        // referencing the cast target resolve cleanly.
+                        scope.bind("target", IrType::AgentId);
                         let guard = match &r.guard {
                             Some(g) => Some(resolve_expr(g, &mut scope, symbols)?),
                             None => None,
