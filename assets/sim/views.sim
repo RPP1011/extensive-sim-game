@@ -255,3 +255,43 @@ view rally_boost(observer: Agent, wounded_kin: Agent) -> f32 {
   on RallyCall { observer: observer, wounded_kin: wounded_kin } { self += 1.0 }
   clamp: [0.0, 10.0],
 }
+
+// -----------------------------------------------------------------------
+// @materialized view standing(a, b) → i32 — symmetric pair ledger.
+// -----------------------------------------------------------------------
+// Symmetric per-pair mutual standing between two agents. Replaces the
+// hand-written `SparseStandings` struct (retired by Phase 3 task 3.2);
+// this is the declarative source of truth going forward. Folds on
+// `EffectStandingDelta { a, b, delta }` events — the event field
+// `delta: i16` is widened to the view's `i32` return at the fold site
+// via the symmetric_pair_topk emitter's bound-local widening pass
+// (landed in commit 5fbdb71a).
+//
+// Storage: `@symmetric_pair_topk(K = 8)` — each agent keeps its top-8
+// most-significant pair edges, keyed by unordered `(a, b)` so both
+// participants see the same scalar. On K-overflow the slot with the
+// lowest `|value|` is evicted; "lightest-weight" edges are forgotten
+// first while strong grudges / loyalties persist. The symmetric fold
+// runs the same update on `(a, b)` and `(b, a)` views under the hood
+// (see dsl_compiler's `emit_symmetric_pair_topk_fold_wgsl` for GPU
+// parity).
+//
+// Clamp: `[-1000, 1000]` preserves the magnitude envelope of the
+// retired `SparseStandings::adjust` path. No `@decay` — standing is
+// persistent memory; it only changes when another `EffectStandingDelta`
+// is folded.
+//
+// Integer-returning view: emitter threads `delta: i16` through an
+// `as i32` cast local before the `adjust(*a, *b, delta, tick)` call
+// (verified by the `symmetric_pair_topk_widening_from_i16_to_i32`
+// dsl_compiler test).
+//
+// Reference: Phase 3 Task 3.1 of
+// `docs/superpowers/plans/2026-04-23-cold-state-phase-3-gold-standing.md`.
+@materialized(on_event = [EffectStandingDelta])
+@symmetric_pair_topk(K = 8)
+view standing(a: Agent, b: Agent) -> i32 {
+  initial: 0,
+  on EffectStandingDelta { a: a, b: b, delta: delta } { self += delta }
+  clamp: [-1000, 1000],
+}

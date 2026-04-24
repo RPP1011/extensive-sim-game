@@ -9,6 +9,7 @@ pub mod my_enemies;
 pub mod pack_focus;
 pub mod rally_boost;
 pub mod slow_factor;
+pub mod standing;
 pub mod threat_level;
 
 pub use engaged_with::EngagedWith;
@@ -19,6 +20,7 @@ pub use my_enemies::MyEnemies;
 pub use pack_focus::PackFocus;
 pub use rally_boost::RallyBoost;
 pub use slow_factor::slow_factor;
+pub use standing::Standing;
 pub use threat_level::ThreatLevel;
 
 /// Compiler-emitted view registry — one field per `@materialized` view.
@@ -31,6 +33,7 @@ pub struct ViewRegistry {
     pub my_enemies: my_enemies::MyEnemies,
     pub pack_focus: pack_focus::PackFocus,
     pub rally_boost: rally_boost::RallyBoost,
+    pub standing: standing::Standing,
     pub threat_level: threat_level::ThreatLevel,
 }
 
@@ -53,6 +56,7 @@ impl ViewRegistry {
             self.my_enemies.fold_event(e, tick);
             self.pack_focus.fold_event(e, tick);
             self.rally_boost.fold_event(e, tick);
+            self.standing.fold_event(e, tick);
             self.threat_level.fold_event(e, tick);
         }
     }
