@@ -335,6 +335,21 @@ pub enum IrExpr {
     /// promotes a bare lowercase ident to `AbilityHintLit` when the
     /// opposite side of the `==` is `AbilityHint`.
     AbilityHintLit(AbilityHint),
+    /// `ability::range` — reads the currently-scored ability's
+    /// `Area::SingleTarget { range }` as f32. Naked accessor (no
+    /// `()` suffix); only meaningful inside a `per_ability` row.
+    AbilityRange,
+    /// `ability::on_cooldown(<slot_expr>)` — returns `true` when the
+    /// given ability slot is still on cooldown for the scoring
+    /// agent. Inside a `per_ability` row the slot expression is
+    /// typically the implicit `ability` local (the row's iterator).
+    ///
+    /// Kept as a distinct variant (rather than a generic namespace
+    /// call) so Phase 3's CPU / Phase 4's GPU emitters can dispatch
+    /// directly onto the per-(agent, slot) cooldown buffer from the
+    /// ability-cooldowns micro-subsystem without re-shaping through
+    /// the `NamespaceCall` path.
+    AbilityOnCooldown(Box<IrExprNode>),
     /// Retained original AST shape for anything we can't lower meaningfully.
     Raw(Box<ast::Expr>),
 }

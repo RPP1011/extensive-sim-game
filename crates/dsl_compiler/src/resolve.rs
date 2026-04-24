@@ -1889,12 +1889,16 @@ fn resolve_ident(
     }
     // GPU ability evaluation Phase 2 primitives that parse as a
     // flattened namespaced identifier WITHOUT a `(...)` suffix.
-    // `ability::tag(...)` takes an arg and routes through
-    // `resolve_ability_eval_call`; the naked forms are handled here.
+    // `ability::tag(...)` and `ability::on_cooldown(...)` take args
+    // and route through `resolve_ability_eval_call`; the naked forms
+    // (`ability::hint`, `ability::range`) are handled here.
     // See `docs/superpowers/specs/2026-04-22-gpu-ability-evaluation-design.md`
     // §Architecture.
     if name == "ability::hint" || name == "abilities::hint" {
         return Ok(IrExpr::AbilityHint);
+    }
+    if name == "ability::range" || name == "abilities::range" {
+        return Ok(IrExpr::AbilityRange);
     }
     // `EnumName::Variant` — recognise the two-segment form and validate
     // against the declared enum.
@@ -1949,7 +1953,7 @@ fn resolve_call(
     // `Call(Ident("ability::tag"), [Ident("PHYSICAL")])`; the name
     // is a single string with `::` preserved.
     if let ExprKind::Ident(name) = &callee.kind {
-        if let Some(expr) = resolve_ability_eval_call(name, args, span)? {
+        if let Some(expr) = resolve_ability_eval_call(name, args, span, scope, symbols)? {
             return Ok(expr);
         }
     }
@@ -2150,6 +2154,8 @@ fn resolve_ability_eval_call(
     name: &str,
     args: &[ast::CallArg],
     span: Span,
+    scope: &mut LocalScope,
+    symbols: &SymbolTable,
 ) -> Result<Option<IrExpr>, ResolveError> {
     // `ability::tag(TAG_NAME)` — reads the current ability's tag
     // value. The argument must be a bare identifier from the
@@ -2186,7 +2192,7 @@ fn resolve_ability_eval_call(
                 });
             }
         };
-        match AbilityTag::parse_ident(&tag_ident) {
+        return match AbilityTag::parse_ident(&tag_ident) {
             Some(tag) => Ok(Some(IrExpr::AbilityTag { tag })),
             None => Err(ResolveError::UnknownIdent {
                 name: format!(
@@ -2200,10 +2206,38 @@ fn resolve_ability_eval_call(
                     "DEFENSE".into(),
                 ],
             }),
-        }
-    } else {
-        Ok(None)
+        };
     }
+    // `ability::on_cooldown(<slot_expr>)` — returns a boolean telling
+    // whether the given ability slot is still on cooldown for the
+    // scoring agent. Takes one positional argument (typically the
+    // implicit `ability` local inside a per_ability row; a literal
+    // slot index also works).
+    if name == "ability::on_cooldown" || name == "abilities::on_cooldown" {
+        if args.len() != 1 {
+            return Err(ResolveError::UnknownIdent {
+                name: format!(
+                    "{name} takes exactly one argument (a slot expression), got {}",
+                    args.len()
+                ),
+                span,
+                suggestions: vec![],
+            });
+        }
+        let arg = &args[0];
+        if arg.name.is_some() {
+            return Err(ResolveError::UnknownIdent {
+                name: format!(
+                    "{name}: slot argument must be positional (no `key:` form)"
+                ),
+                span,
+                suggestions: vec![],
+            });
+        }
+        let slot_expr = resolve_expr(&arg.value, scope, symbols)?;
+        return Ok(Some(IrExpr::AbilityOnCooldown(Box::new(slot_expr))));
+    }
+    Ok(None)
 }
 
 fn resolve_assert(
@@ -2988,10 +3022,13 @@ fn validate_fold_expr(view_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
         // is meaningless.
         IrExpr::AbilityTag { .. }
         | IrExpr::AbilityHint
-        | IrExpr::AbilityHintLit(_) => Err(ResolveError::UdfInViewFoldBody {
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
+        | IrExpr::AbilityOnCooldown(_) => Err(ResolveError::UdfInViewFoldBody {
             view_name: view_name.to_string(),
             offending_construct:
-                "ability-evaluation primitive (`ability::tag(...)`, `ability::hint`, ...) — scoring-only surface"
+                "ability-evaluation primitive (`ability::tag(...)`, `ability::hint`, \
+                 `ability::range`, `ability::on_cooldown(...)`) — scoring-only surface"
                     .into(),
             span: e.span,
         }),
@@ -3351,7 +3388,9 @@ fn validate_physics_expr(physics_name: &str, e: &IrExprNode) -> Result<(), Resol
         // surface; a physics body has no currently-scored ability.
         IrExpr::AbilityTag { .. }
         | IrExpr::AbilityHint
-        | IrExpr::AbilityHintLit(_) => Err(ResolveError::NotGpuEmittable {
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
+        | IrExpr::AbilityOnCooldown(_) => Err(ResolveError::NotGpuEmittable {
             physics_name: physics_name.to_string(),
             construct: "ability-evaluation primitive in physics body".into(),
             reason:
@@ -3451,7 +3490,9 @@ fn validate_physics_iter_source(
         | IrExpr::PerUnit { .. }
         | IrExpr::AbilityTag { .. }
         | IrExpr::AbilityHint
-        | IrExpr::AbilityHintLit(_) => Err(ResolveError::NotGpuEmittable {
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
+        | IrExpr::AbilityOnCooldown(_) => Err(ResolveError::NotGpuEmittable {
             physics_name: physics_name.to_string(),
             construct: "for-loop over non-iterable / unbounded expression".into(),
             reason:
@@ -3822,11 +3863,14 @@ fn validate_mask_body(mask_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
         // slot; masks run before scoring. Reject.
         IrExpr::AbilityTag { .. }
         | IrExpr::AbilityHint
-        | IrExpr::AbilityHintLit(_) => Err(ResolveError::UdfInMaskBody {
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
+        | IrExpr::AbilityOnCooldown(_) => Err(ResolveError::UdfInMaskBody {
             mask_name: mask_name.to_string(),
             offending_construct:
-                "ability-evaluation primitive (`ability::tag(...)`, `ability::hint`, ...) — \
-                 scoring-only surface; not visible to mask predicates"
+                "ability-evaluation primitive (`ability::tag(...)`, `ability::hint`, \
+                 `ability::range`, `ability::on_cooldown(...)`) — scoring-only surface; \
+                 not visible to mask predicates"
                     .into(),
             span: e.span,
         }),
@@ -3946,9 +3990,15 @@ fn validate_scoring_body(e: &IrExprNode) -> Result<(), ResolveError> {
         // stage — Phase 3's CPU emitter decides which row shape it's
         // in and errors if misused — so the DSL-compiler-level
         // validator stays permissive for Phase 2.
+        //
+        // `AbilityOnCooldown` carries a nested slot expression; walk
+        // it too so an illegal subexpression (e.g. a `match`) inside
+        // the slot argument still surfaces.
         IrExpr::AbilityTag { .. }
         | IrExpr::AbilityHint
-        | IrExpr::AbilityHintLit(_) => Ok(()),
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange => Ok(()),
+        IrExpr::AbilityOnCooldown(slot) => validate_scoring_body(slot),
 
         IrExpr::Raw(_) => Ok(()),
     }

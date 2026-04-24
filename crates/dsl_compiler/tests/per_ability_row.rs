@@ -301,3 +301,104 @@ scoring {
         other => panic!("expected flattened Ident(`ability::hint`); got {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// PER-AB-4: `ability::range` + `ability::on_cooldown(ability)`
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ability_range_lowers_to_ir_variant() {
+    const SRC: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    score: ability::range
+  }
+}
+"#;
+    let comp = compile(SRC).expect("compile should succeed");
+    let row = &comp.scoring[0].per_ability_rows[0];
+    match &row.score.kind {
+        IrExpr::AbilityRange => {}
+        other => panic!("expected IrExpr::AbilityRange; got {other:?}"),
+    }
+}
+
+#[test]
+fn ability_on_cooldown_lowers_to_ir_variant() {
+    // `ability::on_cooldown(ability)` — the inner `ability` refers to
+    // the row's implicit slot binder. Phase 2 resolves it as a bare
+    // local reference; Phase 3 lowers the whole variant against the
+    // per-(agent, slot) cooldown buffer.
+    const SRC: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    guard: !ability::on_cooldown(ability)
+    score: 1.0
+  }
+}
+"#;
+    let comp = compile(SRC).expect("compile should succeed");
+    let row = &comp.scoring[0].per_ability_rows[0];
+    let guard = row.guard.as_ref().expect("guard should be present");
+    // Guard is `!ability::on_cooldown(ability)` — Unary(Not, ...).
+    let IrExpr::Unary(_, inner) = &guard.kind else {
+        panic!("expected Unary(Not, ...) at top of guard; got {:?}", guard.kind);
+    };
+    match &inner.kind {
+        IrExpr::AbilityOnCooldown(slot) => {
+            // The slot expression should resolve the implicit `ability`
+            // local seeded on the per_ability scope.
+            match &slot.kind {
+                IrExpr::Local(_, name) => assert_eq!(name, "ability"),
+                other => panic!(
+                    "expected the inner arg to resolve to Local(ability); got {other:?}"
+                ),
+            }
+        }
+        other => panic!("expected IrExpr::AbilityOnCooldown(...); got {other:?}"),
+    }
+}
+
+#[test]
+fn ability_on_cooldown_accepts_literal_slot_index() {
+    // Alternative shape: a literal slot index. Should also lower.
+    const SRC: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    guard: !ability::on_cooldown(0)
+    score: 1.0
+  }
+}
+"#;
+    let comp = compile(SRC).expect("compile should succeed");
+    let row = &comp.scoring[0].per_ability_rows[0];
+    let guard = row.guard.as_ref().unwrap();
+    let IrExpr::Unary(_, inner) = &guard.kind else {
+        panic!("expected Unary guard");
+    };
+    let IrExpr::AbilityOnCooldown(slot) = &inner.kind else {
+        panic!("expected AbilityOnCooldown");
+    };
+    match &slot.kind {
+        IrExpr::LitInt(n) => assert_eq!(*n, 0),
+        other => panic!("expected LitInt(0); got {other:?}"),
+    }
+}
+
+#[test]
+fn ability_on_cooldown_rejects_wrong_arity() {
+    const SRC: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    guard: ability::on_cooldown()
+    score: 1.0
+  }
+}
+"#;
+    let err = compile(SRC).expect_err("zero-arg `ability::on_cooldown` should be rejected");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("on_cooldown") || msg.contains("argument"),
+        "error should mention arity; got: {msg}"
+    );
+}

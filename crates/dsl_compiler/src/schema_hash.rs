@@ -679,6 +679,13 @@ fn hash_expr_kind(h: &mut Sha256, kind: &IrExpr) {
             h.update([0x42u8]);
             h.update([*hint as u8]);
         }
+        IrExpr::AbilityRange => {
+            h.update([0x43u8]);
+        }
+        IrExpr::AbilityOnCooldown(slot) => {
+            h.update([0x44u8]);
+            hash_expr(h, slot);
+        }
         IrExpr::Raw(_) => {
             // Raw fallthrough (e.g. an expression the resolver couldn't lower)
             // — fold a stable tag so two `Raw` exprs with different contents
