@@ -431,6 +431,32 @@ fn split_mask_measure_enabled() -> bool {
     }
 }
 
+/// Research-mode switch: dispatch the scoring kernel as N separate
+/// sub-kernels (one prefill + one per `SCORING_TABLE` row) with
+/// profiler marks between them, so Stage A's GPU timestamps can
+/// attribute µs/tick to each row's scoring cost. Read once at first
+/// use and cached.
+///
+/// Toggle via `ENGINE_GPU_SPLIT_SCORING_MEASURE=1`. Default off; the
+/// production path keeps using the fused dispatch. See
+/// `docs/superpowers/research/2026-04-24-scoring-kernel-row-decomposition.md`.
+#[cfg(feature = "gpu")]
+fn split_scoring_measure_enabled() -> bool {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    static CACHED: AtomicU8 = AtomicU8::new(2); // 0 = off, 1 = on, 2 = uninit
+    match CACHED.load(Ordering::Relaxed) {
+        0 => false,
+        1 => true,
+        _ => {
+            let on = std::env::var("ENGINE_GPU_SPLIT_SCORING_MEASURE")
+                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes"))
+                .unwrap_or(false);
+            CACHED.store(if on { 1 } else { 0 }, Ordering::Relaxed);
+            on
+        }
+    }
+}
+
 /// Opt-in: read `ENGINE_GPU_SUBMIT_GRANULARITY=K` from the environment and
 /// split `step_batch(N)` into `ceil(N/K)` sub-submits of up to K ticks
 /// each. Returns `None` when the env var is absent / malformed / `0`, in
@@ -1171,19 +1197,45 @@ impl GpuBackend {
             //    two tick-varying scalars (`attack_range`, `tick`) now
             //    live in `sim_cfg_buf`, which the seed-indirect kernel
             //    mutates on-GPU.
-            self.sync
-                .scoring_kernel
-                .run_resident(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    agents_buf,
-                    self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_sim_cfg_ref,
-                    alive_bitmap_ref,
-                    agent_cap,
-                )
-                .expect("scoring resident dispatch");
+            //
+            // Intra-kernel per-row measurement (research-mode,
+            // 2026-04-24-scoring-kernel-row-decomposition.md). Gated on
+            // an env var so production dispatches the single fused
+            // kernel. When the var is set, scoring splits into one
+            // prefill + 7 per-row sub-dispatches, each bookended by a
+            // profiler mark, so the perf test attributes GPU-µs to
+            // every row in `SCORING_TABLE`.
+            let split_scoring = split_scoring_measure_enabled();
+            if split_scoring {
+                self.sync
+                    .scoring_kernel
+                    .run_resident_split(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        agents_buf,
+                        self.sync.mask_kernel.mask_bitmaps_buf(),
+                        mask_sim_cfg_ref,
+                        alive_bitmap_ref,
+                        agent_cap,
+                        profiler.as_mut(),
+                    )
+                    .expect("scoring resident split dispatch");
+            } else {
+                self.sync
+                    .scoring_kernel
+                    .run_resident(
+                        &self.device,
+                        &self.queue,
+                        &mut encoder,
+                        agents_buf,
+                        self.sync.mask_kernel.mask_bitmaps_buf(),
+                        mask_sim_cfg_ref,
+                        alive_bitmap_ref,
+                        agent_cap,
+                    )
+                    .expect("scoring resident dispatch");
+            }
 
             if let Some(p) = profiler.as_mut() {
                 // Between scoring_resident and apply_actions.run_resident.

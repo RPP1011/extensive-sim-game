@@ -219,6 +219,65 @@ pub fn emit_scoring_wgsl_atomic_views(specs: &[ViewStorageSpec]) -> String {
     emit_scoring_wgsl_inner(specs, ViewBindingMode::AtomicStorage)
 }
 
+// ---------------------------------------------------------------------
+// Research-mode: per-row split scoring WGSL (task 2026-04-24,
+// "scoring kernel row decomposition"). Companion to the fused kernel;
+// emits the same bindings + helpers but replaces `cs_scoring` with:
+//   * `cs_scoring_prefill`     — one thread per slot; writes the
+//                                "no prior winner" sentinel
+//                                (chosen_action=0, chosen_target=NO_TARGET,
+//                                best_score_bits=0, debug=0) for every
+//                                slot so subsequent row dispatches can
+//                                merge against a known baseline.
+//   * `cs_scoring_row_<name>`  — one entry point per mask-backed row in
+//                                SCORING_TABLE (Hold, MoveToward, Flee,
+//                                Attack, Eat, Drink, Rest). Each runs
+//                                the same per-row scoring logic as the
+//                                fused kernel restricted to entry_idx
+//                                == ENTRY_IDX, merging into the existing
+//                                scoring_out slot via "strictly greater"
+//                                replacement. Uses `debug != 0` as the
+//                                found_any flag so rows can commute
+//                                across sub-dispatches.
+//
+// Byte-parity against the fused kernel: rows are dispatched in
+// SCORING_TABLE order; each row's argmax preserves lower-entry-idx +
+// lower-target-slot tie-break; the prefill seeds an "unset" state.
+//
+// **Measurement-only**. Gated on `ENGINE_GPU_SPLIT_SCORING_MEASURE=1`
+// from the backend side. The production path keeps dispatching the
+// single fused `cs_scoring` kernel. See
+// `docs/superpowers/research/2026-04-24-scoring-kernel-row-decomposition.md`.
+// ---------------------------------------------------------------------
+
+/// Mask-backed rows in `SCORING_TABLE` — the only rows the fused kernel
+/// processes past the `mask_idx == 0xFFFFu` early-skip. Used by the
+/// split-scoring backend to enumerate the sub-dispatch set. Order
+/// matches `SCORING_TABLE` authoring order so byte-parity of tie-breaks
+/// against the fused kernel is trivial.
+pub const SPLIT_SCORING_ROWS: &[(u32, &str)] = &[
+    (0, "hold"),
+    (1, "move_toward"),
+    (2, "flee"),
+    (3, "attack"),
+    (7, "eat"),
+    (8, "drink"),
+    (9, "rest"),
+];
+
+/// Emit the per-row split scoring WGSL (research mode). Same bindings +
+/// helpers as [`emit_scoring_wgsl_atomic_views`] but with:
+///   * the fused `cs_scoring` entry point REPLACED by one prefill entry
+///     (`cs_scoring_prefill`) and one per-row entry per mask-backed row
+///     (`cs_scoring_row_<name>`). See [`SPLIT_SCORING_ROWS`].
+///
+/// Bind-group layout is identical to the fused kernel's — one shader
+/// module, multiple entry points, one pipeline per entry sharing the
+/// same BGL + layout.
+pub fn emit_scoring_wgsl_atomic_views_split(specs: &[ViewStorageSpec]) -> String {
+    emit_scoring_wgsl_inner(specs, ViewBindingMode::AtomicStorageSplit)
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum ViewBindingMode {
     /// Pair views as `array<f32>` / `array<DecayCell>`. CPU uploads the
@@ -227,6 +286,21 @@ enum ViewBindingMode {
     /// Pair views as `array<atomic<u32>>` (+ parallel anchors for decay).
     /// Matches `engine_gpu::view_storage` buffer layout — GPU-native.
     AtomicStorage,
+    /// Like [`AtomicStorage`] but emits per-row split kernels instead
+    /// of the fused `cs_scoring`. Research-mode only; see
+    /// [`emit_scoring_wgsl_atomic_views_split`].
+    AtomicStorageSplit,
+}
+
+impl ViewBindingMode {
+    /// True iff the mode uses atomic-storage view bindings (same BGL as
+    /// `AtomicStorage`). `AtomicStorageSplit` reuses the atomic layout.
+    fn is_atomic(self) -> bool {
+        matches!(
+            self,
+            ViewBindingMode::AtomicStorage | ViewBindingMode::AtomicStorageSplit
+        )
+    }
 }
 
 fn emit_scoring_wgsl_inner(specs: &[ViewStorageSpec], mode: ViewBindingMode) -> String {
@@ -240,15 +314,18 @@ fn emit_scoring_wgsl_inner(specs: &[ViewStorageSpec], mode: ViewBindingMode) -> 
     // binding; the scoring kernel reads `sim_cfg.attack_range` (promoted
     // from per-kernel `cfg.combat_attack_range`) and `sim_cfg.tick`
     // (promoted from `cfg.tick`) from this shared buffer.
-    let atomic = matches!(mode, ViewBindingMode::AtomicStorage);
-    emit_sim_cfg_struct_wgsl(&mut out, scoring_sim_cfg_binding(specs, atomic));
+    emit_sim_cfg_struct_wgsl(&mut out, scoring_sim_cfg_binding(specs, mode.is_atomic()));
     emit_view_read_snippets_for_mode(&mut out, specs, mode);
     emit_helpers(&mut out);
     emit_read_field(&mut out);
     emit_eval_view_call(&mut out, specs, mode);
     emit_eval_predicate(&mut out);
     emit_score_entry(&mut out);
-    emit_kernel(&mut out);
+    if matches!(mode, ViewBindingMode::AtomicStorageSplit) {
+        emit_split_kernels(&mut out);
+    } else {
+        emit_kernel(&mut out);
+    }
     out
 }
 
@@ -574,7 +651,8 @@ fn emit_view_bindings_for_mode(
                 .unwrap();
                 next_binding += 1;
             }
-            (ViewShape::PairMapScalar, ViewBindingMode::AtomicStorage) => {
+            (ViewShape::PairMapScalar, ViewBindingMode::AtomicStorage)
+            | (ViewShape::PairMapScalar, ViewBindingMode::AtomicStorageSplit) => {
                 let comment = format!(
                     "pair_map<f32> storage for `{}` (atomic<u32> mode, matches view_storage layout)",
                     spec.view_name
@@ -624,7 +702,8 @@ fn emit_view_bindings_for_mode(
                 .unwrap();
                 next_binding += 1;
             }
-            (ViewShape::PairMapDecay { rate }, ViewBindingMode::AtomicStorage) => {
+            (ViewShape::PairMapDecay { rate }, ViewBindingMode::AtomicStorage)
+            | (ViewShape::PairMapDecay { rate }, ViewBindingMode::AtomicStorageSplit) => {
                 // Atomic-mode decay views: split into two parallel
                 // `array<atomic<u32>>` — values (f32 bits) + anchor
                 // ticks. Matches view_storage's PairMapDecay layout.
@@ -1007,7 +1086,7 @@ fn emit_view_read_snippets_for_mode(
     // In AtomicStorage mode we emit our own read functions against
     // the atomic<u32> bindings directly (see emit_atomic_view_read).
     // PlainArrays mode delegates to emit_view_wgsl as before.
-    if mode == ViewBindingMode::AtomicStorage {
+    if mode.is_atomic() {
         for spec in scoring_view_binding_order(specs) {
             emit_atomic_view_read(out, spec);
             writeln!(out).unwrap();
@@ -1395,7 +1474,7 @@ fn emit_eval_view_call(out: &mut String, specs: &[ViewStorageSpec], mode: ViewBi
         // buffers. Plain mode falls back to the outer t-loop (which
         // also reads dense cells; it's an already-broken legacy path
         // post-task 196 for topk views but keeps the WGSL naga-parsable).
-        let is_topk = spec.topk.is_some() && mode == ViewBindingMode::AtomicStorage;
+        let is_topk = spec.topk.is_some() && mode.is_atomic();
         writeln!(out, "        case {vid}u: {{").unwrap();
         writeln!(out, "            // VIEW `{name}`").unwrap();
         match &spec.shape {
@@ -1815,6 +1894,187 @@ fn emit_kernel(out: &mut String) {
          }}"
     )
     .unwrap();
+}
+
+/// Research-mode (task 2026-04-24): emit the per-row split scoring
+/// kernels in place of the fused `cs_scoring`. Produces:
+///
+///   * `cs_scoring_prefill` — one thread per slot; writes the "no prior
+///     winner" sentinel `(chosen_action=0, chosen_target=NO_TARGET,
+///     best_score_bits=0, debug=0)` for every alive + dead slot. Leaves
+///     scoring_out in a known baseline state for the row kernels to
+///     merge against. Must be dispatched once at the start of the split
+///     pass, before any `cs_scoring_row_*`.
+///
+///   * `cs_scoring_row_<name>` — one entry point per mask-backed row
+///     (see [`SPLIT_SCORING_ROWS`]). Each runs the same per-row argmax
+///     as the fused kernel body, but restricted to its own
+///     `ENTRY_IDX`. Merges into the existing scoring_out slot using
+///     `debug != 0` as the found_any flag + "strictly greater"
+///     replacement. Byte-parity against the fused kernel is preserved
+///     as long as the row-order matches SCORING_TABLE order.
+///
+/// All entry points share the same bind-group layout as the fused
+/// kernel — they read/write the same bindings and there is no per-row
+/// additional binding. The backend builds one compute pipeline per
+/// entry point sharing one shader module.
+fn emit_split_kernels(out: &mut String) {
+    emit_split_prefill_kernel(out);
+    for (entry_idx, row_name) in SPLIT_SCORING_ROWS {
+        emit_split_row_kernel(out, *entry_idx, row_name);
+    }
+
+    // Shared helper: inline hostility table, same closure as the fused
+    // kernel. Emitted once per module regardless of which row entries
+    // land in it. Identical body to `emit_kernel`'s version so the
+    // behaviour is byte-exact against the fused kernel.
+    writeln!(
+        out,
+        "fn is_hostile_ct(a: u32, b: u32) -> bool {{\n\
+         \x20   // Human<->Wolf, Human<->Dragon, Wolf<->Deer, Wolf<->Dragon, Deer<->Dragon.\n\
+         \x20   if (a == 0u && b == 1u) {{ return true; }}\n\
+         \x20   if (a == 1u && b == 0u) {{ return true; }}\n\
+         \x20   if (a == 0u && b == 3u) {{ return true; }}\n\
+         \x20   if (a == 3u && b == 0u) {{ return true; }}\n\
+         \x20   if (a == 1u && b == 2u) {{ return true; }}\n\
+         \x20   if (a == 2u && b == 1u) {{ return true; }}\n\
+         \x20   if (a == 1u && b == 3u) {{ return true; }}\n\
+         \x20   if (a == 3u && b == 1u) {{ return true; }}\n\
+         \x20   if (a == 2u && b == 3u) {{ return true; }}\n\
+         \x20   if (a == 3u && b == 2u) {{ return true; }}\n\
+         \x20   return false;\n\
+         }}"
+    )
+    .unwrap();
+}
+
+/// Prefill kernel: writes the "no prior winner" sentinel for every
+/// slot. `debug = 0` signals to subsequent row kernels that no prior
+/// row has committed.
+fn emit_split_prefill_kernel(out: &mut String) {
+    writeln!(out, "@compute @workgroup_size({WORKGROUP_SIZE})").unwrap();
+    writeln!(
+        out,
+        "fn cs_scoring_prefill(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+    )
+    .unwrap();
+    writeln!(out, "    let agent_slot = gid.x;").unwrap();
+    writeln!(out, "    let n = arrayLength(&agent_data);").unwrap();
+    writeln!(out, "    if (agent_slot >= n) {{ return; }}").unwrap();
+    writeln!(out, "    scoring_out[agent_slot].chosen_action = 0u;").unwrap();
+    writeln!(out, "    scoring_out[agent_slot].chosen_target = NO_TARGET;").unwrap();
+    writeln!(out, "    scoring_out[agent_slot].best_score_bits = 0u;").unwrap();
+    writeln!(out, "    scoring_out[agent_slot].debug = 0u;").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+}
+
+/// Per-row scoring kernel: same argmax logic as the fused `cs_scoring`
+/// but restricted to `ENTRY_IDX = entry_idx` (hardcoded via a WGSL
+/// `const`). Reads the current scoring_out slot, merges if the row's
+/// best score is strictly greater (or if `debug == 0`, meaning no
+/// prior row has committed).
+fn emit_split_row_kernel(out: &mut String, entry_idx: u32, row_name: &str) {
+    writeln!(out, "@compute @workgroup_size({WORKGROUP_SIZE})").unwrap();
+    writeln!(
+        out,
+        "fn cs_scoring_row_{row_name}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+    )
+    .unwrap();
+    writeln!(out, "    let agent_slot = gid.x;").unwrap();
+    writeln!(out, "    let n = arrayLength(&agent_data);").unwrap();
+    writeln!(out, "    if (agent_slot >= n) {{ return; }}").unwrap();
+    // Dead slot — write the same dead-slot default the fused kernel
+    // writes and early-return. Idempotent across sub-dispatches.
+    writeln!(out, "    if (!alive_bit(agent_slot)) {{").unwrap();
+    writeln!(out, "        scoring_out[agent_slot].chosen_action = 0u;").unwrap();
+    writeln!(
+        out,
+        "        scoring_out[agent_slot].chosen_target = NO_TARGET;"
+    )
+    .unwrap();
+    writeln!(out, "        scoring_out[agent_slot].best_score_bits = 0u;").unwrap();
+    writeln!(out, "        return;").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    // Load prior state. `debug != 0` ⇔ some earlier row has committed.
+    writeln!(out, "    let prior = scoring_out[agent_slot];").unwrap();
+    writeln!(out, "    var best_score: f32 = bitcast<f32>(prior.best_score_bits);").unwrap();
+    writeln!(out, "    var best_action: u32 = prior.chosen_action;").unwrap();
+    writeln!(out, "    var best_target: u32 = prior.chosen_target;").unwrap();
+    writeln!(out, "    var found_any: bool = prior.debug != 0u;").unwrap();
+    writeln!(out).unwrap();
+    // Inlined per-row body. Mirrors emit_kernel's inner-loop body for
+    // one entry index. Mask-bit gate first (action_head_to_mask_idx is
+    // in scope from emit_helpers; we hardcode ENTRY_IDX so the lookup
+    // is a constant).
+    writeln!(out, "    let e_idx: u32 = {entry_idx}u;").unwrap();
+    writeln!(out, "    let action_head = scoring_table[e_idx].action_head;").unwrap();
+    writeln!(out, "    let mask_idx = action_head_to_mask_idx(action_head);").unwrap();
+    // Same `mask_idx == 0xFFFFu` skip + mask_bit gate as the fused.
+    writeln!(out, "    if (mask_idx == 0xFFFFu) {{").unwrap();
+    writeln!(out, "        // This entry has no mask (shouldn't happen for split rows).").unwrap();
+    writeln!(out, "        return;").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "    if (!mask_bit(mask_idx, agent_slot)) {{").unwrap();
+    writeln!(out, "        // Row gated out for this agent — preserve prior state.").unwrap();
+    writeln!(out, "        return;").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    if (action_head_is_target_bound(action_head)) {{").unwrap();
+    writeln!(out, "        for (var t: u32 = 0u; t < n; t = t + 1u) {{").unwrap();
+    writeln!(out, "            if (t == agent_slot) {{ continue; }}").unwrap();
+    writeln!(out, "            if (!alive_bit(t)) {{ continue; }}").unwrap();
+    writeln!(out, "            let radius = select(").unwrap();
+    writeln!(out, "                cfg.movement_max_move_radius,").unwrap();
+    writeln!(out, "                sim_cfg.attack_range,").unwrap();
+    writeln!(out, "                action_head == 3u").unwrap();
+    writeln!(out, "            );").unwrap();
+    writeln!(
+        out,
+        "            let d = vec3_distance(agent_data[agent_slot].pos, agent_data[t].pos);"
+    )
+    .unwrap();
+    writeln!(out, "            if (d > radius) {{ continue; }}").unwrap();
+    writeln!(out, "            if (action_head == 3u) {{").unwrap();
+    writeln!(out, "                let self_ct = agent_data[agent_slot].creature_type;").unwrap();
+    writeln!(out, "                let tgt_ct = agent_data[t].creature_type;").unwrap();
+    writeln!(out, "                if (!is_hostile_ct(self_ct, tgt_ct)) {{ continue; }}").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "            let s = score_entry(e_idx, agent_slot, t);").unwrap();
+    writeln!(out, "            if (!found_any || s > best_score) {{").unwrap();
+    writeln!(out, "                best_score = s;").unwrap();
+    writeln!(out, "                best_action = action_head;").unwrap();
+    writeln!(out, "                best_target = t;").unwrap();
+    writeln!(out, "                found_any = true;").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }} else {{").unwrap();
+    writeln!(out, "        let s = score_entry(e_idx, agent_slot, NO_TARGET);").unwrap();
+    writeln!(out, "        if (!found_any || s > best_score) {{").unwrap();
+    writeln!(out, "            best_score = s;").unwrap();
+    writeln!(out, "            best_action = action_head;").unwrap();
+    writeln!(out, "            best_target = NO_TARGET;").unwrap();
+    writeln!(out, "            found_any = true;").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    // Commit updated state. `found_any` may be true from a prior row
+    // even if this row produced no hit — in that case we re-write the
+    // same state, which is idempotent. `debug = 1` marks "some row has
+    // committed" for the next sub-dispatch's merge.
+    writeln!(out, "    if (found_any) {{").unwrap();
+    writeln!(out, "        scoring_out[agent_slot].chosen_action = best_action;").unwrap();
+    writeln!(out, "        scoring_out[agent_slot].chosen_target = best_target;").unwrap();
+    writeln!(
+        out,
+        "        scoring_out[agent_slot].best_score_bits = bitcast<u32>(best_score);"
+    )
+    .unwrap();
+    writeln!(out, "        scoring_out[agent_slot].debug = 1u;").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
 }
 
 // ---------------------------------------------------------------------------
