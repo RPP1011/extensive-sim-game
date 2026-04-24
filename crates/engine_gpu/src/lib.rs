@@ -979,7 +979,21 @@ impl GpuBackend {
 
             // Perf Stage A.1 — bookend each phase with a timestamp so
             // the test harness can surface GPU-µs/tick per phase.
+            //
+            // Per-dispatch attribution (2026-04-24): in addition to the
+            // legacy per-phase marks ("fused_unpack", "mask+scoring",
+            // …) we also emit "gap:*" marks at every between-pass
+            // boundary so the harness can attribute any GPU-µs that
+            // lives outside a compute-pass scope (barriers, pipeline
+            // swaps, memory-bandwidth contention, driver JIT). The two
+            // schedules are interleaved — a legacy mark and a gap mark
+            // that coincide at the same encoder position record a
+            // near-zero delta, which is harmless.
             if let Some(p) = profiler.as_mut() {
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[0],
+                );
                 p.mark(&mut encoder, "fused_unpack");
             }
 
@@ -1007,6 +1021,11 @@ impl GpuBackend {
                 .as_ref()
                 .expect("sim_cfg_buf ensured by ensure_resident_init");
             if let Some(p) = profiler.as_mut() {
+                // Between fused_unpack and mask_resident.
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[1],
+                );
                 p.mark(&mut encoder, "mask+scoring");
             }
             // Intra-kernel sub-phase measurement (research-mode,
@@ -1044,6 +1063,14 @@ impl GpuBackend {
                     .expect("mask resident dispatch");
             }
 
+            // Between mask_resident and scoring_resident.
+            if let Some(p) = profiler.as_mut() {
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[2],
+                );
+            }
+
             // 2. Scoring: reads mask_bitmaps + agent_data (both
             //    populated above). Task 2.5 of the GPU sim-state
             //    refactor retired the per-tick `refresh_tick_cfg_for_resident`:
@@ -1065,6 +1092,11 @@ impl GpuBackend {
                 .expect("scoring resident dispatch");
 
             if let Some(p) = profiler.as_mut() {
+                // Between scoring_resident and apply_actions.run_resident.
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[3],
+                );
                 p.mark(&mut encoder, "apply+movement");
             }
 
@@ -1114,6 +1146,14 @@ impl GpuBackend {
                 )
                 .expect("apply_actions resident dispatch");
 
+            // Between apply_actions and movement.
+            if let Some(p) = profiler.as_mut() {
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[4],
+                );
+            }
+
             cascade_ctx
                 .movement
                 .run_resident(
@@ -1129,6 +1169,11 @@ impl GpuBackend {
                 .expect("movement resident dispatch");
 
             if let Some(p) = profiler.as_mut() {
+                // Between movement and append_events.
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[5],
+                );
                 p.mark(&mut encoder, "append_events");
             }
 
@@ -1155,6 +1200,18 @@ impl GpuBackend {
                     &mut encoder,
                     &cascade_ctx.apply_event_ring,
                     agent_cap,
+                );
+            }
+
+            // Between append_events and the cascade driver (which starts
+            // with spatial_rebuild / spatial_query / seed_kernel / iter 0).
+            // The cascade driver adds its own "gap:append_events->seed_kernel"
+            // boundary between spatial_done and seed_kernel, and between
+            // seed and iter 0, plus inter-iter marks.
+            if let Some(p) = profiler.as_mut() {
+                p.write_between_pass_timestamp(
+                    &mut encoder,
+                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[6],
                 );
             }
 
