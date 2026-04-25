@@ -152,12 +152,10 @@ pub struct SimState {
     // regression at N=500.
     spatial: SpatialHash,
 
-    /// Compiler-emitted view registry — one field per `@materialized` view.
-    /// The `fold_all` call from `step_full` is DELETED (Plan B1' Task 11);
-    /// this field is kept on `SimState` so the ~13 `#[ignore]`d tests that
-    /// call `state.views.*` still compile. The field moves to `engine_rules`
-    /// in Task 5; at that point, delete this field and update those tests.
-    pub views: crate::generated::views::ViewRegistry,
+    // `views: ViewRegistry` field deleted along with engine/src/generated/.
+    // Callers now thread `&mut ViewRegistry` separately as a `step` parameter.
+    // Tests that referenced `state.views.*` are #[ignore]d until Task 11 emits
+    // the new view-as-parameter handler signatures into engine_rules.
 
     /// Ability program registry — append-only table of compiled ability
     /// programs, looked up by `AbilityId` during cast dispatch and mask
@@ -282,9 +280,6 @@ impl SimState {
             // Incremental spatial hash — sized for `cap` agent slots.
             // Mutators push O(1) deltas; no per-mutation rebuild.
             spatial:                SpatialHash::new(agent_cap),
-            // ViewRegistry retained for test compilation; fold_all() call
-            // deleted from step_full (Plan B1' Task 11). Remove field in Task 5.
-            views:                  crate::generated::views::ViewRegistry::new(),
             // Empty ability registry by default. Tests / production code
             // that need specific abilities do `state.ability_registry =
             // builder.build()` after construction.

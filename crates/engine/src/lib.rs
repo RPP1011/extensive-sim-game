@@ -8,11 +8,6 @@ pub mod cascade;
 pub mod channel;
 pub mod creature;
 pub mod event;
-/// Compiler-emitted modules (DSL → Rust). Files under `generated/`
-/// are owned by `dsl_compiler`; regenerate with
-/// `cargo run --bin xtask -- compile-dsl`. Do not hand-edit.
-/// DELETED in Task 3 (moves to engine_rules).
-pub mod generated;
 pub mod ids;
 pub mod invariant;
 pub mod mask;

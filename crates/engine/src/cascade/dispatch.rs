@@ -138,15 +138,6 @@ impl<E: EventLike> Default for CascadeRegistry<E> {
     fn default() -> Self { Self::new() }
 }
 
-// TRANSITION (Task 1): Concrete helper retained for existing tests that use
-// the `Event` type. Will be removed in Task 4 when `step.rs` is replaced.
-impl CascadeRegistry<engine_data::events::Event> {
-    /// Build a registry pre-populated with all compiler-emitted physics
-    /// handlers. In the final split (Task 4), callers will instead call
-    /// `engine_rules::register_physics(&mut registry)`.
-    pub fn with_engine_builtins() -> Self {
-        let mut reg = Self::new();
-        crate::generated::physics::register(&mut reg);
-        reg
-    }
-}
+// `with_engine_builtins` was deleted along with engine/src/generated/. The
+// replacement is compiler-emitted into engine_rules/src/cascade.rs (Task 11
+// of Plan B1').
