@@ -2309,7 +2309,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "engine_generated"
+name = "engine_data"
 version = "0.1.0"
 dependencies = [
  "glam",
@@ -2337,7 +2337,7 @@ dependencies = [
 name = "engine_rules"
 version = "0.1.0"
 dependencies = [
- "engine_generated",
+ "engine_data",
  "tempfile",
 ]
 

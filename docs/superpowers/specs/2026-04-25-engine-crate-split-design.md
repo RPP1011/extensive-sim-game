@@ -30,7 +30,7 @@
 
 ```
 crates/
-  engine_data/         — was engine_generated. Renamed for clarity.
+  engine_data/         — was engine_data. Renamed for clarity.
                           Data shapes only: config, entities, enums, events,
                           ids, schema, scoring, types, engagement-constants.
                           Zero engine deps.
@@ -50,7 +50,7 @@ crates/
 
 | From | To |
 |---|---|
-| `crates/engine_generated/` | `crates/engine_data/` (rename) |
+| `crates/engine_data/` | `crates/engine_data/` (rename) |
 | `crates/engine/src/generated/mask/` | `crates/engine_rules/src/mask/` |
 | `crates/engine/src/generated/physics/` | `crates/engine_rules/src/physics/` |
 | `crates/engine/src/generated/views/` | `crates/engine_rules/src/views/` |
@@ -321,7 +321,7 @@ This existing test compares `engine::schema_hash::schema_hash()` to the baseline
 
 ### §8.1 Crate renames + moves (mechanical)
 
-1. `git mv crates/engine_generated crates/engine_data`
+1. `git mv crates/engine_data crates/engine_data`
 2. `git mv crates/engine/src/generated/* crates/engine_rules/src/`
 3. Delete `crates/engine_rules/src/lib.rs` (empty shim) and rewrite based on emitter output.
 4. Update `Cargo.toml` workspace members.
@@ -354,7 +354,7 @@ Expected scope: tens of thousands of lines deleted. User flagged this as "purely
 
 Tight ordering because moves cascade through imports:
 
-1. Crate restructure: rename `engine_generated` → `engine_data`; create `engine_rules` content; move `generated/*` into it. Update workspace + dependencies + emitter destinations. Run `cargo test` — green.
+1. Crate restructure: rename `engine_data` → `engine_data`; create `engine_rules` content; move `generated/*` into it. Update workspace + dependencies + emitter destinations. Run `cargo test` — green.
 2. chronicle.rs + engagement.rs migration. Update DSL source + regen. Run `cargo test` — green.
 3. Trait sealing: add `__sealed` module + `GeneratedRule` blanket impl. Update emitted rule structs to declare `impl GeneratedRule`. Run `cargo test` — green.
 4. Compile-fail test for the seal. Run `cargo test --test sealed_cascade_handler` — green (the failing case fails as expected).
@@ -367,7 +367,7 @@ Each step is an independent commit; the sequencing matters because build/test gr
 
 ## §10 Decision log
 
-- **D1.** Rename `engine_generated` → `engine_data` (clarity: "data" describes content; "generated" describes process).
+- **D1.** Rename `engine_data` → `engine_data` (clarity: "data" describes content; "generated" describes process).
 - **D2.** New crate is `engine_rules` (repurposing the existing empty shim).
 - **D3.** Sealing pattern: private supertrait + `GeneratedRule` marker + blanket impl in `engine_rules`. Belt-and-suspenders with ast-grep + build sentinel.
 - **D4.** `chronicle.rs` is rule logic, not a primitive. P1 settles it; no question.

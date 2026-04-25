@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land the structural-impossibility scaffolding from Spec B §3 / §4 / §5 / §6 / §7: rename `engine_generated` → `engine_data`, move `crates/engine/src/generated/{mask,physics,views}` to `crates/engine_rules/src/`, seal `CascadeHandler` + the three view traits behind a private `Sealed` supertrait gated by a `GeneratedRule` marker that only `engine_rules` blanket-impls, add `build.rs` sentinels (engine_rules + engine_data require `// GENERATED` headers; engine has a primitives-only allowlist and rejects `// GENERATED` markers), add a `trybuild` compile-fail test for the seal, add an ast-grep CI rule rejecting `impl CascadeHandler` outside `engine_rules`, add `cargo run --bin xtask -- compile-dsl --check`, and extend `.githooks/pre-commit` to enforce the header rule + run `compile-dsl --check` when DSL source is staged.
+**Goal:** Land the structural-impossibility scaffolding from Spec B §3 / §4 / §5 / §6 / §7: rename `engine_data` → `engine_data`, move `crates/engine/src/generated/{mask,physics,views}` to `crates/engine_rules/src/`, seal `CascadeHandler` + the three view traits behind a private `Sealed` supertrait gated by a `GeneratedRule` marker that only `engine_rules` blanket-impls, add `build.rs` sentinels (engine_rules + engine_data require `// GENERATED` headers; engine has a primitives-only allowlist and rejects `// GENERATED` markers), add a `trybuild` compile-fail test for the seal, add an ast-grep CI rule rejecting `impl CascadeHandler` outside `engine_rules`, add `cargo run --bin xtask -- compile-dsl --check`, and extend `.githooks/pre-commit` to enforce the header rule + run `compile-dsl --check` when DSL source is staged.
 
 **Architecture:** Pure Rust restructure + emitter-target updates + build.rs panics + thin xtask flag + pre-commit bash. No new runtime behaviour. Direction of dependencies after this plan: `engine_data` (data shapes) → `engine` (primitives) → `engine_rules` (emitted rule logic). Each generated crate enforces its own `// GENERATED` header at build time; `engine` enforces a primitives-only allowlist + rejects `// GENERATED`. The seal is belt-and-suspenders: private supertrait + ast-grep CI rule + build sentinel.
 
@@ -16,25 +16,25 @@
 ## Architectural Impact Statement
 
 - **Existing primitives searched:**
-  - `engine_generated` crate at `crates/engine_generated/{Cargo.toml,src/lib.rs}` (data shapes; emit target #1)
-  - `engine_rules` shim at `crates/engine_rules/{Cargo.toml,src/lib.rs}` (8-line `pub use engine_generated::*`)
+  - `engine_data` crate at `crates/engine_data/{Cargo.toml,src/lib.rs}` (data shapes; emit target #1)
+  - `engine_rules` shim at `crates/engine_rules/{Cargo.toml,src/lib.rs}` (8-line `pub use engine_data::*`)
   - `engine/src/generated/{mask,physics,views}` (35 emitted .rs files)
   - `pub trait CascadeHandler` at `crates/engine/src/cascade/handler.rs:91`
   - `pub trait MaterializedView` at `crates/engine/src/view/materialized.rs`
   - `pub trait LazyView: Send + Sync` at `crates/engine/src/view/lazy.rs`
   - `pub trait TopKView: Send + Sync` at `crates/engine/src/view/topk.rs`
-  - dsl_compiler emit destinations: hard-coded defaults in `src/bin/xtask/cli/mod.rs` (`out_physics`, `out_mask`, `out_views`, `out_scoring`, `out_entity`, `out_config_rust`, `out_enum`, plus `engine_generated/src/events/`)
+  - dsl_compiler emit destinations: hard-coded defaults in `src/bin/xtask/cli/mod.rs` (`out_physics`, `out_mask`, `out_views`, `out_scoring`, `out_entity`, `out_config_rust`, `out_enum`, plus `engine_data/src/events/`)
   - 32 cross-crate imports of `engine::generated::*` across workspace (counted via `rg "engine::generated::"`)
   - 23 files importing `engine_rules::*` (counted via `rg "use engine_rules::"`)
   - Test/demo trait impls: `crates/engine/src/view/{materialized,lazy,topk}.rs` (`DamageTaken`, `NearestEnemyLazy`, `MostHostileTopK`); `crates/engine/tests/{cascade_bounded,cascade_register_dispatch,cascade_lanes,proptest_cascade_bound}.rs` (test-only `impl CascadeHandler`)
   Search method: `rg` + direct `Read`.
 
-- **Decision:** restructure existing crates (no new crates introduced; `engine_rules` shim is repurposed, `engine_generated` is renamed). Emitter destinations updated to point at the renamed crates; emitted code remains the source of truth for rule logic.
+- **Decision:** restructure existing crates (no new crates introduced; `engine_rules` shim is repurposed, `engine_data` is renamed). Emitter destinations updated to point at the renamed crates; emitted code remains the source of truth for rule logic.
 
 - **Rule-compiler touchpoints:**
   - DSL inputs edited: none (chronicle/engagement migration deferred to B2).
   - Generated outputs re-emitted: every file under `engine_rules/src/{mask,physics,views}` and `engine_data/src/{config,entities,enums,events,ids,scoring,types}` after the path rewrites land — full regeneration validates the new emit-paths and the `crate::` → `engine::` import rewrite required for relocated rule files.
-  - Emit-path changes in `dsl_compiler`/xtask: physics + mask + views move from `crates/engine/src/generated/{physics,mask,views}` to `crates/engine_rules/src/{physics,mask,views}`; scoring + entity + config + enum + events + schema + ids move from `crates/engine_generated/src/...` to `crates/engine_data/src/...`; cross-references in emitted code rewrite `crate::event::*` / `crate::state::*` / `crate::ids::*` / `crate::mask::*` / `crate::cascade::*` to `engine::event::*` / `engine::state::*` / `engine::ids::*` / `engine::mask::*` / `engine::cascade::*` because the generated files are no longer inside the `engine` crate.
+  - Emit-path changes in `dsl_compiler`/xtask: physics + mask + views move from `crates/engine/src/generated/{physics,mask,views}` to `crates/engine_rules/src/{physics,mask,views}`; scoring + entity + config + enum + events + schema + ids move from `crates/engine_data/src/...` to `crates/engine_data/src/...`; cross-references in emitted code rewrite `crate::event::*` / `crate::state::*` / `crate::ids::*` / `crate::mask::*` / `crate::cascade::*` to `engine::event::*` / `engine::state::*` / `engine::ids::*` / `engine::mask::*` / `engine::cascade::*` because the generated files are no longer inside the `engine` crate.
 
 - **Hand-written downstream code:**
   - `crates/engine/build.rs`: NEW — primitives-only allowlist sentinel. Justification: this is the structural rule that makes Approach-2 hand-written behavior modules impossible to compile; it has no DSL representation because it constrains what *isn't* emitted.
@@ -67,7 +67,7 @@
 
 ```
 crates/
-  engine_data/            — RENAMED from engine_generated.
+  engine_data/            — RENAMED from engine_data.
                             Contains: config/, entities/, enums/, events/,
                             ids.rs, schema.rs, scoring/, types.rs,
                             id_serde.rs.
@@ -88,7 +88,7 @@ crates/
       cascade_bounded.rs / cascade_register_dispatch.rs / cascade_lanes.rs / proptest_cascade_bound.rs
                                    — MODIFIED: add `#[cfg(test)] impl engine_rules::GeneratedRule for ...` for test handlers.
   engine_rules/
-    Cargo.toml            — MODIFIED: drop dep on engine_generated; add dep on engine + engine_data.
+    Cargo.toml            — MODIFIED: drop dep on engine_data; add dep on engine + engine_data.
     build.rs              — NEW: every-file-must-be-generated sentinel.
     src/
       lib.rs              — REPLACED: emitted from dsl_compiler. Declares `GeneratedRule` marker + `impl<T: GeneratedRule> engine::cascade::handler::__sealed::Sealed for T` blanket. Re-exports `mask`, `physics`, `views` modules.
@@ -97,7 +97,7 @@ crates/
       views/              — MOVED from engine/src/generated/views/. Imports rewritten crate:: → engine::.
   engine_data/
     build.rs              — NEW: every-file-must-be-generated sentinel.
-    src/...               — same files as old engine_generated/, headers added on regen.
+    src/...               — same files as old engine_data/, headers added on regen.
 
 dsl_compiler/
   src/emit_*.rs           — MODIFIED: any file currently emitting `use crate::*` references when target is engine_rules/* now emits `use engine::*`. lib.rs doc strings updated.
@@ -117,18 +117,18 @@ src/bin/xtask/
     no-lazy-view-impl-outside-engine-rules.yml         — NEW.
     no-topk-view-impl-outside-engine-rules.yml         — NEW.
 
-Cargo.toml (root)         — MODIFIED: workspace `members` updated (engine_generated → engine_data).
+Cargo.toml (root)         — MODIFIED: workspace `members` updated (engine_data → engine_data).
 ```
 
 ---
 
-### Task 1: Rename `engine_generated` → `engine_data` (mechanical, structural)
+### Task 1: Rename `engine_data` → `engine_data` (mechanical, structural)
 
 **Files:**
 - Modify: `Cargo.toml` (root)
-- Move: `crates/engine_generated/` → `crates/engine_data/`
+- Move: `crates/engine_data/` → `crates/engine_data/`
 - Modify: `crates/engine_data/Cargo.toml` (package name)
-- Modify: `crates/engine/Cargo.toml` (transitive dep — see Task 2; touched here only if engine has a direct path-dep on engine_generated, which it does not currently — leave for Task 2).
+- Modify: `crates/engine/Cargo.toml` (transitive dep — see Task 2; touched here only if engine has a direct path-dep on engine_data, which it does not currently — leave for Task 2).
 
 - [ ] **Step 1: Create branch + worktree (if not already in one).** This plan should run in `.worktrees/engine-crate-restructure` per `superpowers:using-git-worktrees`. Skip if already there.
 
@@ -144,7 +144,7 @@ Expected: clean build.
 - [ ] **Step 2: Rename the crate directory with `git mv`.**
 
 ```bash
-git mv crates/engine_generated crates/engine_data
+git mv crates/engine_data crates/engine_data
 ```
 
 - [ ] **Step 3: Update the package name in the renamed Cargo.toml.**
@@ -154,7 +154,7 @@ Edit `crates/engine_data/Cargo.toml`:
 Old:
 ```toml
 [package]
-name = "engine_generated"
+name = "engine_data"
 ```
 
 New:
@@ -167,7 +167,7 @@ name = "engine_data"
 
 Old:
 ```toml
-members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_generated", "crates/engine_rules", "crates/engine_gpu", "crates/viz", "crates/dsl_compiler"]
+members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_data", "crates/engine_rules", "crates/engine_gpu", "crates/viz", "crates/dsl_compiler"]
 ```
 
 New:
@@ -175,15 +175,15 @@ New:
 members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_data", "crates/engine_rules", "crates/engine_gpu", "crates/viz", "crates/dsl_compiler"]
 ```
 
-- [ ] **Step 5: Sed all `engine_generated` references across the workspace.**
+- [ ] **Step 5: Sed all `engine_data` references across the workspace.**
 
 ```bash
-git grep -l 'engine_generated' | xargs sed -i 's/engine_generated/engine_data/g'
+git grep -l 'engine_data' | xargs sed -i 's/engine_data/engine_data/g'
 ```
 
 This rewrites:
-- `Cargo.toml` `path = "../engine_generated"` deps (in `crates/engine_rules/Cargo.toml`)
-- `use engine_generated::*` re-exports
+- `Cargo.toml` `path = "../engine_data"` deps (in `crates/engine_rules/Cargo.toml`)
+- `use engine_data::*` re-exports
 - doc strings + comments
 
 - [ ] **Step 6: Build to confirm rename is clean.**
@@ -206,7 +206,7 @@ Expected: all green. The shim `engine_rules::pub use engine_data::*` is unchange
 
 ```bash
 git add -A
-git commit -m "refactor: rename engine_generated → engine_data (Spec B §3.1)"
+git commit -m "refactor: rename engine_data → engine_data (Spec B §3.1)"
 ```
 
 ---
@@ -272,7 +272,7 @@ git commit -m "refactor(engine): depend directly on engine_data (Spec B §3.1)"
 
 ### Task 3: Repoint `engine_rules` shim to depend on `engine_data` (transitional)
 
-**Why:** Other workspace crates (`engine_gpu`, root `bevy_game`/`game`, `viz`, `tactical_sim`, tests) still import via the `engine_rules::` shim. Until they're cut over (Task 5), the shim must continue to compile. Today it `pub use engine_generated::*`; after Task 1's rename, sed turned that into `pub use engine_data::*`, which already works — but the `Cargo.toml` `path = "../engine_data"` line was also rewritten by sed in Task 1, so engine_rules already points at engine_data via the renamed dep. This task verifies the transitional state.
+**Why:** Other workspace crates (`engine_gpu`, root `bevy_game`/`game`, `viz`, `tactical_sim`, tests) still import via the `engine_rules::` shim. Until they're cut over (Task 5), the shim must continue to compile. Today it `pub use engine_data::*`; after Task 1's rename, sed turned that into `pub use engine_data::*`, which already works — but the `Cargo.toml` `path = "../engine_data"` line was also rewritten by sed in Task 1, so engine_rules already points at engine_data via the renamed dep. This task verifies the transitional state.
 
 **Files:**
 - Verify: `crates/engine_rules/Cargo.toml`
@@ -682,13 +682,13 @@ For each of these `#[arg(long, default_value = "<old>")]` lines, swap:
 | `out_physics` | `crates/engine/src/generated/physics` | `crates/engine_rules/src/physics` |
 | `out_mask` | `crates/engine/src/generated/mask` | `crates/engine_rules/src/mask` |
 | `out_views` | `crates/engine/src/generated/views` | `crates/engine_rules/src/views` |
-| `out_scoring` | `crates/engine_generated/src/scoring` | `crates/engine_data/src/scoring` |
-| `out_entity` | `crates/engine_generated/src/entities` | `crates/engine_data/src/entities` |
-| `out_config_rust` | `crates/engine_generated/src/config` | `crates/engine_data/src/config` |
-| `out_enum` | `crates/engine_generated/src/enums` | `crates/engine_data/src/enums` |
-| `out_rust` (events + schema + ids; whole src tree) | `crates/engine_generated/src` | `crates/engine_data/src` |
+| `out_scoring` | `crates/engine_data/src/scoring` | `crates/engine_data/src/scoring` |
+| `out_entity` | `crates/engine_data/src/entities` | `crates/engine_data/src/entities` |
+| `out_config_rust` | `crates/engine_data/src/config` | `crates/engine_data/src/config` |
+| `out_enum` | `crates/engine_data/src/enums` | `crates/engine_data/src/enums` |
+| `out_rust` (events + schema + ids; whole src tree) | `crates/engine_data/src` | `crates/engine_data/src` |
 
-After Task 1's sed pass, `out_rust`'s default value already reads `crates/engine_data/src` (the rename rewrote the literal). Confirm by `grep -E 'out_events|out_rust|engine_generated|engine/src/generated' src/bin/xtask/cli/mod.rs` — the only remaining `engine/src/generated` references should be `out_physics` / `out_mask` / `out_views`, which this step rewrites.
+After Task 1's sed pass, `out_rust`'s default value already reads `crates/engine_data/src` (the rename rewrote the literal). Confirm by `grep -E 'out_events|out_rust|engine_data|engine/src/generated' src/bin/xtask/cli/mod.rs` — the only remaining `engine/src/generated` references should be `out_physics` / `out_mask` / `out_views`, which this step rewrites.
 
 - [ ] **Step 2: Update emitted-code import paths in dsl_compiler.**
 
@@ -726,11 +726,11 @@ For each match's struct, ensure the emitter writes the `GeneratedRule` impl. Han
 - [ ] **Step 5: Update doc comments in `crates/dsl_compiler/src/lib.rs`.**
 
 Old paths (multiple occurrences):
-- `crates/engine_generated/src/...` → `crates/engine_data/src/...`
+- `crates/engine_data/src/...` → `crates/engine_data/src/...`
 - `crates/engine/src/generated/...` → `crates/engine_rules/src/...`
 
 ```bash
-sed -i 's|crates/engine_generated/src|crates/engine_data/src|g; s|crates/engine/src/generated|crates/engine_rules/src|g' crates/dsl_compiler/src/lib.rs
+sed -i 's|crates/engine_data/src|crates/engine_data/src|g; s|crates/engine/src/generated|crates/engine_rules/src|g' crates/dsl_compiler/src/lib.rs
 ```
 
 - [ ] **Step 6: Run `compile-dsl` to regenerate everything from DSL source.**
@@ -1787,7 +1787,7 @@ git commit -m "chore: tick AIS post-design checkbox + scope note for Plan B1"
 
 | Task | What | Depends on |
 |---|---|---|
-| 1  | Rename `engine_generated` → `engine_data` | — |
+| 1  | Rename `engine_data` → `engine_data` | — |
 | 2  | Engine deps `engine_data` directly | 1 |
 | 3  | Verify engine_rules transitional state | 1, 2 |
 | 4  | Move `engine/src/generated/{mask,physics,views}` → `engine_rules/src/` | 1-3 |

@@ -172,7 +172,7 @@ pub struct CompileDslArgs {
     pub src: PathBuf,
     /// Destination root for generated shared Rust output. Files are written
     /// under `<out-rust>/events/` and `<out-rust>/schema.rs`.
-    #[arg(long, default_value = "crates/engine_generated/src")]
+    #[arg(long, default_value = "crates/engine_data/src")]
     pub out_rust: PathBuf,
     /// Destination root for emitted physics handlers. Files are written
     /// under `<out-physics>/` (per-rule modules + `mod.rs`). Defaults into
@@ -189,18 +189,18 @@ pub struct CompileDslArgs {
     pub out_mask: PathBuf,
     /// Destination root for emitted scoring tables. Scoring rows are POD
     /// data shared between CPU scorer and GPU kernel, so they live in
-    /// `engine_generated` with the other shared-data emissions.
-    #[arg(long, default_value = "crates/engine_generated/src/scoring")]
+    /// `engine_data` with the other shared-data emissions.
+    #[arg(long, default_value = "crates/engine_data/src/scoring")]
     pub out_scoring: PathBuf,
     /// Destination root for emitted entity data (CreatureType enum,
     /// capability structs, hostility matrix). Pure data; lives in
-    /// `engine_generated` next to events.
-    #[arg(long, default_value = "crates/engine_generated/src/entities")]
+    /// `engine_data` next to events.
+    #[arg(long, default_value = "crates/engine_data/src/entities")]
     pub out_entity: PathBuf,
     /// Destination root for emitted config structs (per-block Rust files
     /// plus the aggregator `mod.rs`). Pure data with a TOML loader; lives
-    /// in `engine_generated` alongside the other shared-data emissions.
-    #[arg(long, default_value = "crates/engine_generated/src/config")]
+    /// in `engine_data` alongside the other shared-data emissions.
+    #[arg(long, default_value = "crates/engine_data/src/config")]
     pub out_config_rust: PathBuf,
     /// Destination directory for the authored TOML default file. The
     /// compiler writes `<out-config-toml>/default.toml`; runtime callers
@@ -209,7 +209,7 @@ pub struct CompileDslArgs {
     pub out_config_toml: PathBuf,
     /// Destination root for emitted enum declarations (per-enum Rust
     /// files + aggregator `mod.rs`). Pure data, no engine dependency.
-    #[arg(long, default_value = "crates/engine_generated/src/enums")]
+    #[arg(long, default_value = "crates/engine_data/src/enums")]
     pub out_enum: PathBuf,
     /// Destination root for emitted view modules (`@lazy` inline fns +
     /// `@materialized` fold-storage structs + aggregator `ViewRegistry`).

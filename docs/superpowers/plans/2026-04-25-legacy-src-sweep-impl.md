@@ -275,7 +275,7 @@ Old `members`:
 members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_data", "crates/engine_rules", "crates/engine_gpu", "crates/viz", "crates/dsl_compiler"]
 ```
 
-(Or whatever the post-B1 list is. If running B3 before B1 lands, substitute `engine_generated` for `engine_data`.)
+(Or whatever the post-B1 list is. If running B3 before B1 lands, substitute `engine_data` for `engine_data`.)
 
 New:
 ```toml
