@@ -437,13 +437,56 @@ git rm -r crates/engine/src/generated
 
 Hand-edit (or `sed -i '/^pub mod generated;$/d' crates/engine/src/lib.rs`) — also remove any nearby comment block solely about the generated tree.
 
-- [ ] **Step 9: Sed-rewrite the 32 hand-written callers.**
+- [ ] **Step 8a: Move the convenience registration constructors out of `engine` (rules-aware code shouldn't live in primitives).**
 
-These are hand-written code (engine_gpu sources, integration tests, root `src/`) that imported `engine::generated::*`. They are NOT generated; sed is the right tool here.
+`engine/src/cascade/dispatch.rs` currently has:
+
+```rust
+impl CascadeRegistry {
+    pub fn with_engine_builtins() -> Self { ... }       // line 54
+    pub fn register_engine_builtins(&mut self) { ... }  // line 64
+        // body: `crate::generated::physics::register(self);`
+}
+```
+
+After Task 4's move, `crate::generated::physics::register` lives in `engine_rules::physics::register` — `engine` can't call it without a cycle. Resolution: **the constructors live where the rules live**. Emit them from `dsl_compiler` into the generated `physics/mod.rs` so they're produced as part of the regen, not hand-written.
+
+  - Delete `with_engine_builtins` and `register_engine_builtins` from `crates/engine/src/cascade/dispatch.rs` (the impl block keeps `new`, `register`, `dispatch` etc.; only those two methods are removed).
+  - Update `crates/dsl_compiler/src/emit_physics.rs` to also emit two free functions into the generated `engine_rules/src/physics/mod.rs`:
+
+    ```rust
+    /// Build a `CascadeRegistry` pre-registered with every DSL-emitted
+    /// physics handler. Compiler-emitted; mirrors what was once
+    /// `engine::cascade::CascadeRegistry::with_engine_builtins`.
+    pub fn with_engine_builtins() -> engine::cascade::CascadeRegistry {
+        let mut reg = engine::cascade::CascadeRegistry::new();
+        register(&mut reg);
+        reg
+    }
+    ```
+
+    (The emitter already emits `pub fn register(reg: &mut engine::cascade::CascadeRegistry)`; adding `with_engine_builtins` is one extra `writeln!` block at the top of the same emit pass.)
+
+  - Re-run regen to surface the new functions.
+
+- [ ] **Step 9: Sed-rewrite the hand-written callers (`engine::generated::*` AND the constructor sites).**
+
+Two patterns:
 
 ```bash
+# Path 1: 32 callers of engine::generated::*
 git grep -l 'engine::generated::' | xargs sed -i 's|engine::generated::|engine_rules::|g'
+
+# Path 2: 14 callers of CascadeRegistry::with_engine_builtins() — move them to engine_rules.
+git grep -l 'CascadeRegistry::with_engine_builtins\|\.register_engine_builtins(' \
+  | xargs sed -i 's|CascadeRegistry::with_engine_builtins()|engine_rules::physics::with_engine_builtins()|g; s|\.register_engine_builtins()|; engine_rules::physics::register(\&mut cascade)|g'
 ```
+
+The second sed is approximate — `register_engine_builtins` was rare (search before sed: `git grep 'register_engine_builtins' -- ':!crates/engine/'`); if it appears more than 1-2 times, hand-edit those callers using the pattern shown.
+
+After this step, every caller of the old constructor uses the engine_rules-side one. Affected files (audit first to confirm): `crates/engine_gpu/tests/{async_smoke,chronicle_batch_path,batch_iter_cap_convergence,cascade_parity,chronicle_batch_probe,indirect_cascade_converges,parity_with_cpu}.rs` and any others surfaced by the grep.
+
+Callers must `use engine_rules;` (or fully-qualify). If a caller is currently `use engine::cascade::CascadeRegistry; let r = CascadeRegistry::with_engine_builtins();`, the post-sed line becomes `let r = engine_rules::physics::with_engine_builtins();` — engine_rules must be in their `Cargo.toml` deps. Most engine_gpu tests already have `engine_rules = { path = "../engine_rules" }` (the shim path); confirm via `grep engine_rules crates/engine_gpu/Cargo.toml`.
 
 - [ ] **Step 10: Workspace build + test.**
 
