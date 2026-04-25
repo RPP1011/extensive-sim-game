@@ -10,6 +10,7 @@ pub mod format;
 pub mod migrate;
 
 pub use format::{
-    SnapshotError, SnapshotHeader, FORMAT_VERSION, HEADER_BYTES, MAGIC,
+    load_from_bytes, load_snapshot, save_snapshot, SnapshotError, SnapshotHeader,
+    FORMAT_VERSION, HEADER_BYTES, MAGIC,
 };
 pub use migrate::{MigrationFn, MigrationRegistry};
