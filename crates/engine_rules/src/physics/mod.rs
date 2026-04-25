@@ -25,14 +25,12 @@ pub mod slow;
 pub mod stun;
 pub mod transfer_gold;
 
-use engine::cascade::{CascadeRegistry, EventKindId};
-use engine::event::EventRing;
-use engine_data::events::Event;
-use engine::state::SimState;
-use crate::views::ViewRegistry;
+use crate::cascade::{CascadeRegistry, EventKindId};
+use crate::event::{Event, EventRing};
+use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn dispatch_agent_attacked(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_agent_attacked(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::AgentAttacked {
         actor,
         target,
@@ -48,7 +46,7 @@ pub fn dispatch_agent_attacked(event: &Event, state: &mut SimState, views: &mut 
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_agent_cast(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_agent_cast(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::AgentCast {
         actor,
         ability,
@@ -63,7 +61,7 @@ pub fn dispatch_agent_cast(event: &Event, state: &mut SimState, views: &mut View
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_agent_died(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_agent_died(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::AgentDied { agent_id, tick } = *event else {
         return;
     };
@@ -73,7 +71,7 @@ pub fn dispatch_agent_died(event: &Event, state: &mut SimState, views: &mut View
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_agent_fled(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_agent_fled(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::AgentFled {
         agent_id,
         from,
@@ -87,7 +85,7 @@ pub fn dispatch_agent_fled(event: &Event, state: &mut SimState, views: &mut View
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_agent_moved(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_agent_moved(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::AgentMoved {
         actor,
         from,
@@ -101,7 +99,7 @@ pub fn dispatch_agent_moved(event: &Event, state: &mut SimState, views: &mut Vie
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_effect_damage_applied(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_effect_damage_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectDamageApplied {
         actor,
         target,
@@ -115,7 +113,7 @@ pub fn dispatch_effect_damage_applied(event: &Event, state: &mut SimState, views
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_effect_gold_transfer(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_effect_gold_transfer(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectGoldTransfer {
         from,
         to,
@@ -129,7 +127,7 @@ pub fn dispatch_effect_gold_transfer(event: &Event, state: &mut SimState, views:
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_effect_heal_applied(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_effect_heal_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectHealApplied {
         actor,
         target,
@@ -143,7 +141,7 @@ pub fn dispatch_effect_heal_applied(event: &Event, state: &mut SimState, views: 
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_effect_shield_applied(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_effect_shield_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectShieldApplied {
         actor,
         target,
@@ -157,7 +155,7 @@ pub fn dispatch_effect_shield_applied(event: &Event, state: &mut SimState, views
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_effect_slow_applied(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_effect_slow_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectSlowApplied {
         actor,
         target,
@@ -172,15 +170,15 @@ pub fn dispatch_effect_slow_applied(event: &Event, state: &mut SimState, views: 
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_effect_standing_delta(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_effect_standing_delta(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectStandingDelta { a, b, delta, tick } = *event else {
         return;
     };
-    modify_standing::modify_standing(a, b, delta, state, views, events);
+    modify_standing::modify_standing(a, b, delta, state, events);
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EffectStunApplied {
         actor,
         target,
@@ -194,7 +192,7 @@ pub fn dispatch_effect_stun_applied(event: &Event, state: &mut SimState, views: 
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_engagement_broken(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_engagement_broken(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EngagementBroken {
         actor,
         former_target,
@@ -208,7 +206,7 @@ pub fn dispatch_engagement_broken(event: &Event, state: &mut SimState, views: &m
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_engagement_committed(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_engagement_committed(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::EngagementCommitted {
         actor,
         target,
@@ -222,7 +220,7 @@ pub fn dispatch_engagement_committed(event: &Event, state: &mut SimState, views:
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_fear_spread(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_fear_spread(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::FearSpread {
         observer,
         dead_kin,
@@ -238,8 +236,7 @@ pub fn dispatch_fear_spread(event: &Event, state: &mut SimState, views: &mut Vie
 pub fn dispatch_opportunity_attack_triggered(
     event: &Event,
     state: &mut SimState,
-    views: &mut ViewRegistry,
-    events: &mut EventRing<Event>,
+    events: &mut EventRing,
 ) {
     let Event::OpportunityAttackTriggered {
         actor,
@@ -253,7 +250,7 @@ pub fn dispatch_opportunity_attack_triggered(
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_rally_call(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_rally_call(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::RallyCall {
         observer,
         wounded_kin,
@@ -266,7 +263,7 @@ pub fn dispatch_rally_call(event: &Event, state: &mut SimState, views: &mut View
 }
 
 #[allow(unused_variables)]
-pub fn dispatch_record_memory(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {
+pub fn dispatch_record_memory(event: &Event, state: &mut SimState, events: &mut EventRing) {
     let Event::RecordMemory {
         observer,
         source,
@@ -284,15 +281,15 @@ pub fn dispatch_record_memory(event: &Event, state: &mut SimState, views: &mut V
         confidence,
         tick,
         state,
-        views,
         events,
     );
 }
 
 /// Install every compiler-emitted physics dispatcher on `registry`.
-/// Called from `with_engine_builtins` so the engine's built-in handler set
-/// picks up DSL-owned rules without the engine knowing about each handler by name.
-pub fn register(registry: &mut CascadeRegistry<Event, ViewRegistry>) {
+/// Called from `CascadeRegistry::register_engine_builtins` so the
+/// engine's built-in handler set picks up DSL-owned rules without
+/// the engine knowing about each handler by name.
+pub fn register(registry: &mut CascadeRegistry) {
     registry.install_kind(EventKindId::AgentAttacked, dispatch_agent_attacked);
     registry.install_kind(EventKindId::AgentCast, dispatch_agent_cast);
     registry.install_kind(EventKindId::AgentDied, dispatch_agent_died);

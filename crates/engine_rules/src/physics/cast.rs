@@ -2,8 +2,7 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::EventRing;
-use engine_data::events::Event;
+use crate::event::{Event, EventRing};
 use crate::ids::{AbilityId, AgentId};
 use crate::state::SimState;
 
@@ -15,7 +14,7 @@ pub fn cast(
     depth: u8,
     t: u32,
     state: &mut SimState,
-    events: &mut EventRing<Event>,
+    events: &mut EventRing,
 ) {
     if state.ability_registry.get(ab).is_some() {
         for op in {

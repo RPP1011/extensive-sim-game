@@ -60,6 +60,10 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
     let config_toml_path = config_toml_dir.join("default.toml");
     let enum_dir = args.out_enum.clone();
     let views_dir = args.out_views.clone();
+    let step_file = args.out_step.clone();
+    let backend_file = args.out_backend.clone();
+    let mask_fill_file = args.out_mask_fill.clone();
+    let cascade_reg_file = args.out_cascade_reg.clone();
 
     if args.check {
         let mut mismatches = Vec::new();
@@ -126,6 +130,29 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             &mut mismatches,
         );
 
+        // engine_rules single-file outputs (step, backend, mask_fill, cascade_reg).
+        // These are static (almost entirely DSL-independent) but compiler-owned so
+        // that future DSL-driven phases can grow into them.
+        let step_content = dsl_compiler::emit_step::emit_step(sources.physics.as_deref());
+        let step_fmt = rustfmt_string(&step_content).unwrap_or(step_content);
+        check_file(&step_file, &step_fmt, &mut mismatches);
+
+        let backend_content = dsl_compiler::emit_backend::emit_backend(sources.physics.as_deref());
+        let backend_fmt = rustfmt_string(&backend_content).unwrap_or(backend_content);
+        check_file(&backend_file, &backend_fmt, &mut mismatches);
+
+        let mask_fill_content = dsl_compiler::emit_mask_fill::emit_mask_fill(
+            &combined.masks,
+            sources.masks.as_deref(),
+        );
+        let mask_fill_fmt = rustfmt_string(&mask_fill_content).unwrap_or(mask_fill_content);
+        check_file(&mask_fill_file, &mask_fill_fmt, &mut mismatches);
+
+        let cascade_reg_content =
+            dsl_compiler::emit_cascade_register::emit_cascade_register(sources.physics.as_deref());
+        let cascade_reg_fmt = rustfmt_string(&cascade_reg_content).unwrap_or(cascade_reg_content);
+        check_file(&cascade_reg_file, &cascade_reg_fmt, &mut mismatches);
+
         // Stale file detection: committed Rust files not in the new emission.
         check_stale(&rust_events_dir, &artefacts.rust_event_structs, "rs", &mut mismatches);
         check_stale(&physics_dir, &artefacts.rust_physics_modules, "rs", &mut mismatches);
@@ -181,6 +208,19 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
         if let Err(e) = write_views_output(&views_dir, &artefacts) {
+            eprintln!("compile-dsl: {e}");
+            return ExitCode::FAILURE;
+        }
+
+        // Write the engine_rules single-file outputs (step, backend, mask_fill, cascade_reg).
+        if let Err(e) = write_engine_rules_singles(
+            &step_file,
+            &backend_file,
+            &mask_fill_file,
+            &cascade_reg_file,
+            &sources,
+            &combined,
+        ) {
             eprintln!("compile-dsl: {e}");
             return ExitCode::FAILURE;
         }
@@ -267,6 +307,11 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         );
         rustfmt_targets.push(entity_dir.join("mod.rs"));
         rustfmt_targets.push(args.out_engine_event_like_impl.clone());
+        // engine_rules single-file outputs.
+        rustfmt_targets.push(step_file.clone());
+        rustfmt_targets.push(backend_file.clone());
+        rustfmt_targets.push(mask_fill_file.clone());
+        rustfmt_targets.push(cascade_reg_file.clone());
         if let Err(e) = rustfmt(&rustfmt_targets) {
             eprintln!("compile-dsl: rustfmt failed: {e}");
             return ExitCode::FAILURE;
@@ -727,6 +772,45 @@ fn write_views_output(
         fs::write(views_dir.join(name), content)?;
     }
     fs::write(views_dir.join("mod.rs"), &artefacts.rust_view_mod)?;
+    Ok(())
+}
+
+/// Write the four static-ish single-file engine_rules outputs:
+/// `step.rs`, `backend.rs`, `mask_fill.rs`, `cascade_reg.rs`.
+/// These are kept as compiler-owned emissions so DSL-driven phases
+/// (invariant checks, future step extensions) can grow into them.
+fn write_engine_rules_singles(
+    step_path: &Path,
+    backend_path: &Path,
+    mask_fill_path: &Path,
+    cascade_reg_path: &Path,
+    sources: &PerKindSources,
+    combined: &dsl_compiler::ir::Compilation,
+) -> std::io::Result<()> {
+    for p in [step_path, backend_path, mask_fill_path, cascade_reg_path] {
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    fs::write(
+        step_path,
+        dsl_compiler::emit_step::emit_step(sources.physics.as_deref()),
+    )?;
+    fs::write(
+        backend_path,
+        dsl_compiler::emit_backend::emit_backend(sources.physics.as_deref()),
+    )?;
+    fs::write(
+        mask_fill_path,
+        dsl_compiler::emit_mask_fill::emit_mask_fill(
+            &combined.masks,
+            sources.masks.as_deref(),
+        ),
+    )?;
+    fs::write(
+        cascade_reg_path,
+        dsl_compiler::emit_cascade_register::emit_cascade_register(sources.physics.as_deref()),
+    )?;
     Ok(())
 }
 

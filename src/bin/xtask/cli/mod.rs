@@ -63,17 +63,13 @@ pub struct CompileDslArgs {
     #[arg(long, default_value = "crates/engine_data/src")]
     pub out_rust: PathBuf,
     /// Destination root for emitted physics handlers. Files are written
-    /// under `<out-physics>/` (per-rule modules + `mod.rs`). Defaults into
-    /// the engine crate because emitted handlers reference
-    /// `engine::cascade::*` and `engine::state::SimState`; emitting them
-    /// into `engine_rules` would invert the existing dep direction
-    /// (`engine` depends on `engine_rules`, not the other way around).
-    /// Documented in `docs/game/feature_flow.md`.
-    #[arg(long, default_value = "crates/engine/src/generated/physics")]
+    /// under `<out-physics>/` (per-rule modules + `mod.rs`). Lives in
+    /// `engine_rules` because Task 11 (B1') moved the generated tree there.
+    #[arg(long, default_value = "crates/engine_rules/src/physics")]
     pub out_physics: PathBuf,
-    /// Destination root for emitted mask predicates. Same dep rationale
-    /// as physics — masks reference `engine::state::SimState`.
-    #[arg(long, default_value = "crates/engine/src/generated/mask")]
+    /// Destination root for emitted mask predicates. Lives in
+    /// `engine_rules` alongside the other engine_rules generated files.
+    #[arg(long, default_value = "crates/engine_rules/src/mask")]
     pub out_mask: PathBuf,
     /// Destination root for emitted scoring tables. Scoring rows are POD
     /// data shared between CPU scorer and GPU kernel, so they live in
@@ -101,10 +97,27 @@ pub struct CompileDslArgs {
     pub out_enum: PathBuf,
     /// Destination root for emitted view modules (`@lazy` inline fns +
     /// `@materialized` fold-storage structs + aggregator `ViewRegistry`).
-    /// Lives under the engine crate because materialized views hold
-    /// `HashMap<(AgentId, …), …>` storage that `SimState` owns.
-    #[arg(long, default_value = "crates/engine/src/generated/views")]
+    /// Lives in `engine_rules` alongside the other engine_rules generated
+    /// files (Task 11 B1' moved the tree from engine/src/generated/).
+    #[arg(long, default_value = "crates/engine_rules/src/views")]
     pub out_views: PathBuf,
+    /// Destination file for the emitted canonical serial tick pipeline
+    /// (`engine_rules/src/step.rs`). Almost entirely static; kept as a
+    /// compiler-owned emission so DSL-driven phases can grow into it.
+    #[arg(long, default_value = "crates/engine_rules/src/step.rs")]
+    pub out_step: PathBuf,
+    /// Destination file for the emitted `SerialBackend` struct
+    /// (`engine_rules/src/backend.rs`).
+    #[arg(long, default_value = "crates/engine_rules/src/backend.rs")]
+    pub out_backend: PathBuf,
+    /// Destination file for the emitted `fill_all` mask-fill function
+    /// (`engine_rules/src/mask_fill.rs`).
+    #[arg(long, default_value = "crates/engine_rules/src/mask_fill.rs")]
+    pub out_mask_fill: PathBuf,
+    /// Destination file for the emitted `with_engine_builtins` cascade
+    /// registry factory (`engine_rules/src/cascade_reg.rs`).
+    #[arg(long, default_value = "crates/engine_rules/src/cascade_reg.rs")]
+    pub out_cascade_reg: PathBuf,
     /// Destination root for Python output. Files are written under
     /// `<out-python>/events/`.
     #[arg(long, default_value = "generated/python")]

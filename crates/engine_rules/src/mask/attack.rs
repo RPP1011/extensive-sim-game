@@ -2,9 +2,9 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use engine::ids::AgentId;
-use engine::mask::TargetMask;
-use engine::state::SimState;
+use crate::ids::AgentId;
+use crate::mask::TargetMask;
+use crate::state::SimState;
 
 /// Predicate: can `self_id` issue this mask's action head against the given target?
 /// Lowered from `mask Attack` in `assets/sim/masks.sim`.
@@ -14,7 +14,7 @@ pub fn mask_attack(state: &SimState, self_id: AgentId, target: AgentId) -> bool 
     if !(state.agent_alive(target)) {
         return false;
     }
-    if !(crate::views::is_hostile(state, self_id, target)) {
+    if !(crate::generated::views::is_hostile(state, self_id, target)) {
         return false;
     }
     if !(self_pos.distance(target_pos) < 2.0) {
@@ -23,7 +23,8 @@ pub fn mask_attack(state: &SimState, self_id: AgentId, target: AgentId) -> bool 
     true
 }
 
-/// Candidate enumerator.
+/// Candidate enumerator: walk `from query.nearby_agents(...)` and push every agent that
+/// satisfies the mask predicate into `out`. Task 138.
 pub fn mask_attack_candidates(state: &SimState, self_id: AgentId, out: &mut TargetMask) {
     let self_pos = state.agent_pos(self_id).unwrap_or(glam::Vec3::ZERO);
     let pos = self_pos;
@@ -36,6 +37,6 @@ pub fn mask_attack_candidates(state: &SimState, self_id: AgentId, out: &mut Targ
         if !mask_attack(state, self_id, target) {
             continue;
         }
-        out.push(self_id, engine::mask::MicroKind::Attack, target);
+        out.push(self_id, crate::mask::MicroKind::Attack, target);
     }
 }

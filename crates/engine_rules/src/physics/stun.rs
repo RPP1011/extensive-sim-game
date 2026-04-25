@@ -3,12 +3,11 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
-use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn stun(c: AgentId, t: AgentId, e: u32, state: &mut SimState, events: &mut EventRing<Event>) {
+pub fn stun(c: AgentId, t: AgentId, e: u32, state: &mut SimState, events: &mut EventRing) {
     if state.agent_alive(t) {
         let cur = state.agent_stun_expires_at(t).unwrap_or(0);
         if (e > cur) {

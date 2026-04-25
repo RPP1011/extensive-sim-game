@@ -2,13 +2,12 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::EventRing;
-use engine_data::events::Event;
+use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn chronicle_flee(a: AgentId, state: &mut SimState, events: &mut EventRing<Event>) {
+pub fn chronicle_flee(a: AgentId, state: &mut SimState, events: &mut EventRing) {
     events.push(Event::ChronicleEntry {
         template_id: 7,
         agent: a,

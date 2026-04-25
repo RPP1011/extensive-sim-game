@@ -2,29 +2,40 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use engine_data::events::Event;
-use engine::ids::AgentId;
+use crate::event::Event;
+use crate::ids::AgentId;
 
 /// @materialized view `standing` — `storage = symmetric_pair_topk(K=8)`.
+/// Pair-keyed symmetric storage: an edge `(a, b)` is stored once,
+/// on the lower-id endpoint's slot array. Reads canonicalise the query pair so
+/// `get(a, b) == get(b, a)`. Fold: find-or-insert-else-evict-weakest-|v|.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StandingEdge {
+    /// Raw AgentId of the higher-id endpoint. 0 means empty.
     pub other: u32,
+    /// Stored value for the symmetric pair.
     pub value: i32,
+    /// Tick when `value` was last written. Reserved for future decay.
     pub anchor_tick: u32,
 }
 
 #[derive(Debug, Default)]
 pub struct Standing {
+    /// One array of 8 slots per owner agent. `Vec::len()` grows on demand
+    /// as `fold_event` sees higher agent ids. Edges live on the lower-id side.
     slots: Vec<[StandingEdge; 8]>,
 }
 
 impl Standing {
+    /// Slot count per owner — the `K` from `symmetric_pair_topk(K=8)`.
     pub const K: usize = 8;
 
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Number of owner slots currently provisioned. `fold_event` grows this
+    /// on demand up to `max_id + 1`.
     pub fn len(&self) -> usize {
         self.slots.len()
     }
@@ -32,6 +43,8 @@ impl Standing {
         self.slots.is_empty()
     }
 
+    /// Canonicalise a pair: the lower-id endpoint owns the slot,
+    /// the higher-id endpoint is the `other` field.
     fn canonical_pair(a: AgentId, b: AgentId) -> (AgentId, AgentId) {
         if a.raw() <= b.raw() {
             (a, b)
@@ -40,6 +53,9 @@ impl Standing {
         }
     }
 
+    /// Current value for the symmetric pair `(a, b)`. Pair order
+    /// is canonicalised so `get(x, y) == get(y, x)`. Returns `initial` when the
+    /// pair isn't in the owner's top-8.
     pub fn get(&self, a: AgentId, b: AgentId) -> i32 {
         let (owner, other) = Self::canonical_pair(a, b);
         if owner.raw() == 0 || other.raw() == 0 {
@@ -66,6 +82,9 @@ impl Standing {
         &mut self.slots[owner_slot]
     }
 
+    /// Add `delta` to the symmetric edge `(a, b)` and return the
+    /// resulting value. Upserts on canonical (min, max) order; evicts the
+    /// weakest-|value| slot when full, iff `|delta|` beats the weakest.
     pub fn adjust(&mut self, a: AgentId, b: AgentId, delta: i32, tick: u32) -> i32 {
         let (owner, other) = Self::canonical_pair(a, b);
         if owner.raw() == 0 || other.raw() == 0 {
@@ -94,6 +113,8 @@ impl Standing {
                 return v;
             }
         }
+        // Full row — evict the slot with the smallest |value| if `|delta|`
+        // beats it, else drop the fold (too weak to displace).
         let mut min_i: usize = 0;
         let mut min_mag: i32 = row[0].value.abs();
         for i in 1..8 {
@@ -115,6 +136,7 @@ impl Standing {
         0
     }
 
+    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase.
     pub fn fold_event(&mut self, event: &Event, tick: u32) {
         match event {
             Event::EffectStandingDelta { a, b, delta, .. } => {

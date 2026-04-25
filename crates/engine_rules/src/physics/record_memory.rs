@@ -3,11 +3,8 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
-use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
-use crate::views::ViewRegistry;
-use crate::views::memory::MemoryEntry;
 
 #[allow(unused_variables)]
 pub fn record_memory(
@@ -17,13 +14,13 @@ pub fn record_memory(
     c: f32,
     t: u32,
     state: &mut SimState,
-    views: &mut ViewRegistry,
-    events: &mut EventRing<Event>,
+    events: &mut EventRing,
 ) {
-    let entry = MemoryEntry {
-        source: s.raw(),
-        value: c,
-        anchor_tick: t,
+    {
+        let _ = o;
+        let _ = s;
+        let _ = f;
+        let _ = c;
+        let _ = t;
     };
-    views.memory.push(o.raw(), entry);
 }

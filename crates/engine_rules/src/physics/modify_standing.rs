@@ -3,10 +3,8 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
-use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
-use crate::views::ViewRegistry;
 
 #[allow(unused_variables)]
 pub fn modify_standing(
@@ -14,8 +12,14 @@ pub fn modify_standing(
     b: AgentId,
     delta: i16,
     state: &mut SimState,
-    views: &mut ViewRegistry,
-    events: &mut EventRing<Event>,
+    events: &mut EventRing,
 ) {
-    views.standing.adjust(a, b, delta as i32, state.tick);
+    if (delta != 0) {
+        {
+            let _ = state
+                .views
+                .standing
+                .adjust(a, b, (delta) as i32, state.tick);
+        };
+    }
 }

@@ -2,30 +2,43 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use engine_data::events::Event;
-use engine::ids::AgentId;
+use crate::event::Event;
+use crate::ids::AgentId;
 
 /// @materialized view `memory` — `storage = per_entity_ring(K=64)`.
+/// Per-owner FIFO ring of fixed capacity 64. Writes append at
+/// `cursor % K` and bump the cursor; the oldest entry is evicted
+/// implicitly on overflow. Reads iterate the ring in most-recent-first order.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct MemoryEntry {
+    /// Raw AgentId of the "other" endpoint (the event's non-owner field).
+    /// 0 means empty / never written.
     pub source: u32,
+    /// Stored value for this ring entry.
     pub value: f32,
+    /// Tick when this entry was written.
     pub anchor_tick: u32,
 }
 
 #[derive(Debug, Default)]
 pub struct Memory {
+    /// One ring of 64 slots per owner agent. `Vec::len()` grows on
+    /// demand as `fold_event` sees higher owner ids.
     rings: Vec<[MemoryEntry; 64]>,
+    /// Monotonic write cursor per owner. Slot index = `cursor % K`.
     cursors: Vec<u32>,
 }
 
 impl Memory {
+    /// Ring capacity per owner — the `K` from `per_entity_ring(K=64)`.
     pub const K: usize = 64;
 
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Number of owner rings currently provisioned. `fold_event` grows
+    /// this on demand up to `max_owner + 1`.
     pub fn len(&self) -> usize {
         self.rings.len()
     }
@@ -44,6 +57,10 @@ impl Memory {
         &mut self.rings[owner_slot]
     }
 
+    /// Append `entry` to the ring owned by `observer_raw` (raw AgentId,
+    /// 1-based). Writes at `cursor % K` and increments the cursor. A full
+    /// ring silently evicts the oldest entry (FIFO). `observer_raw == 0`
+    /// is a no-op.
     pub fn push(&mut self, observer_raw: u32, entry: MemoryEntry) {
         if observer_raw == 0 {
             return;
@@ -59,6 +76,8 @@ impl Memory {
         self.cursors[owner_slot] = cursor.wrapping_add(1);
     }
 
+    /// Current write cursor for `observer` (0 if the ring was never written).
+    /// Monotonic; wraps on u32 overflow.
     pub fn cursor(&self, observer: AgentId) -> u32 {
         if observer.raw() == 0 {
             return 0;
@@ -67,6 +86,8 @@ impl Memory {
         self.cursors.get(owner_slot).copied().unwrap_or(0)
     }
 
+    /// Most recently written `value` for `observer`'s ring, or `initial`
+    /// when the ring has never been written.
     pub fn get(&self, observer: AgentId) -> f32 {
         if observer.raw() == 0 {
             return 0.0;
@@ -83,6 +104,8 @@ impl Memory {
         row[slot].value
     }
 
+    /// Raw ring slice for `observer` in slot order. Returns `None` when
+    /// the ring has not yet been provisioned.
     pub fn entries(&self, observer: AgentId) -> Option<&[MemoryEntry; 64]> {
         if observer.raw() == 0 {
             return None;
@@ -91,6 +114,7 @@ impl Memory {
         self.rings.get(owner_slot)
     }
 
+    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase.
     pub fn fold_event(&mut self, event: &Event, tick: u32) {
         match event {
             Event::RecordMemory {
@@ -98,7 +122,7 @@ impl Memory {
             } => {
                 let entry = MemoryEntry {
                     source: source.raw(),
-                    value: 1.0_f32,
+                    value: 1.0 as f32,
                     anchor_tick: tick,
                 };
                 self.push(observer.raw(), entry);

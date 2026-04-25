@@ -4,10 +4,13 @@
 
 use std::collections::HashMap;
 
-use engine_data::events::Event;
-use engine::ids::AgentId;
+use crate::event::Event;
+use crate::ids::AgentId;
 
-/// @materialized view `engaged_with` — `storage = per_entity_topk(K=1)`.
+/// @materialized view `engaged_with` — `storage = per_entity_topk(K=1)` over `HashMap<AgentId, AgentId>`.
+/// Single-slot per key; insert/remove driven by paired `*Committed` / `*Broken`
+/// events (task 139). See `dsl_compiler::emit_view::emit_per_entity_topk1_struct`
+/// for the fold convention.
 #[derive(Debug, Default)]
 pub struct EngagedWith {
     value: HashMap<AgentId, AgentId>,
@@ -25,10 +28,14 @@ impl EngagedWith {
         self.value.is_empty()
     }
 
+    /// Current slot for `a`, if any. `None` when the key has no partner.
     pub fn get(&self, a: AgentId) -> Option<AgentId> {
         self.value.get(&a).copied()
     }
 
+    /// Direct slot setter. Used by the engine's back-compat `set_*`
+    /// wrappers; game logic should prefer emitting the paired commit /
+    /// break events and letting the fold place the slot.
     pub fn set(&mut self, a: AgentId, v: Option<AgentId>) {
         match v {
             Some(val) => {
@@ -40,6 +47,7 @@ impl EngagedWith {
         }
     }
 
+    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase.
     pub fn fold_event(&mut self, event: &Event, tick: u32) {
         let _ = tick;
         match event {

@@ -2,31 +2,44 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use engine_data::events::Event;
-use engine::ids::AgentId;
+use crate::event::Event;
+use crate::ids::AgentId;
 
 /// @materialized view `kin_fear` — `storage = per_entity_topk(K=8)`.
-/// @decay(rate = 0.891, per = tick)
+/// @decay(rate = 0.891, per = tick) — anchor-pattern decay applied on read.
+/// Storage: one `[TopkSlot; 8]` per observer slot in a `Vec`. Total footprint
+/// is O(N·K) — at K=8 and N=200k that's 18 MB vs the dense pair_map's
+/// O(N²·4) ≈ 160 GB. Fold semantics: find-or-evict-else-drop (task 196).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TopkSlot {
+    /// Raw AgentId (1-based). 0 means empty.
     pub id: u32,
+    /// Stored value; decay (if configured) applies on read.
     pub value: f32,
+    /// Tick when `value` was last written (@decay anchor).
     pub anchor_tick: u32,
 }
 
 #[derive(Debug, Default)]
 pub struct KinFear {
+    /// One array of 8 slots per observer. `Vec::len()` grows on demand
+    /// as `fold_event` sees higher observer ids.
     slots: Vec<[TopkSlot; 8]>,
 }
 
 impl KinFear {
+    /// Slot count per observer — the `K` from `per_entity_topk(K=8)`.
     pub const K: usize = 8;
+
+    /// Decay rate per tick — compile-time constant from `@decay(rate = 0.891)`.
     pub const RATE: f32 = 0.891_f32;
 
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Number of observer slots currently provisioned. `fold_event` grows
+    /// this on demand up to `max_observer + 1`.
     pub fn len(&self) -> usize {
         self.slots.len()
     }
@@ -34,6 +47,8 @@ impl KinFear {
         self.slots.is_empty()
     }
 
+    /// Current value for `dead_kin` as observed by `observer`,
+    /// decayed from its anchor tick. Returns `initial` when the pair isn't in observer's top-8.
     pub fn get(&self, observer: AgentId, dead_kin: AgentId, tick: u32) -> f32 {
         let obs_slot = (observer.raw() - 1) as usize;
         let atk_id = dead_kin.raw();
@@ -50,6 +65,8 @@ impl KinFear {
         0.0
     }
 
+    /// Σ get(observer, x, tick) over `observer`'s top-8 slots.
+    /// Semantic drift vs dense pair_map: sum is over the top-K attackers, not every recorded pair.
     pub fn sum_for_first(&self, observer: AgentId, tick: u32) -> f32 {
         let obs_slot = (observer.raw() - 1) as usize;
         let Some(row) = self.slots.get(obs_slot) else {
@@ -74,6 +91,8 @@ impl KinFear {
         &mut self.slots[obs_slot]
     }
 
+    /// Fold `delta` into the (observer, attacker) slot. See the
+    /// module docstring above for find-or-evict-else-drop semantics.
     fn fold_one(&mut self, observer: u32, attacker: u32, delta: f32, tick: u32) {
         if observer == 0 || attacker == 0 {
             return;
@@ -102,6 +121,8 @@ impl KinFear {
                 return;
             }
         }
+        // Full row — compute each slot's decayed value, evict the smallest
+        // if `delta` can outweigh it; otherwise drop the fold.
         let mut min_i: usize = 0;
         let mut min_v: f32 = {
             let dt = tick.saturating_sub(row[0].anchor_tick);
@@ -125,6 +146,7 @@ impl KinFear {
         }
     }
 
+    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase.
     pub fn fold_event(&mut self, event: &Event, tick: u32) {
         match event {
             Event::FearSpread {

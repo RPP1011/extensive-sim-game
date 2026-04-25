@@ -124,11 +124,11 @@ pub fn emit_events_mod(events: &[EventIR]) -> String {
     emit_event_impl(&mut out, &sorted);
     writeln!(out).unwrap();
 
-    // `impl engine::event::EventLike for Event` — the trait bridge that
-    // lets engine's generic containers (`EventRing<E>`, `CascadeRegistry<E>`,
-    // etc.) work with this event enum. Emitting it here (inside engine_data)
-    // satisfies the orphan rule now that engine_data depends on engine.
-    emit_event_like_impl(&mut out, &sorted);
+    // NOTE: `impl engine::event::EventLike for Event` is NOT emitted here.
+    // It lives in `engine/src/event/event_like_impl.rs` (included via
+    // `pub mod event_like_impl;`) because engine_data does NOT depend on
+    // engine, so the orphan rule is satisfied from the engine side.
+    // See `dsl_compiler::lib::EmittedArtifacts::engine_event_like_impl`.
 
     out
 }
