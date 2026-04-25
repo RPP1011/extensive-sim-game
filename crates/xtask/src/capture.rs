@@ -1,7 +1,7 @@
 use std::process::Command as ProcessCommand;
 use std::process::ExitCode;
 
-use super::cli::{CaptureDedupeArgs, CaptureWindowsArgs};
+use crate::cli::{CaptureDedupeArgs, CaptureWindowsArgs};
 
 pub fn run_capture_windows(args: CaptureWindowsArgs) -> ExitCode {
     let steps = args.steps.to_string();

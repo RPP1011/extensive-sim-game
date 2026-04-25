@@ -11,7 +11,7 @@ use std::process::{Command, ExitCode};
 use dsl_compiler::ast::{Decl, Program};
 use dsl_compiler::ir::Compilation;
 
-use super::cli::CompileDslArgs;
+use crate::cli::CompileDslArgs;
 
 pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
     let sim_files = match discover_sim_files(&args.src) {
