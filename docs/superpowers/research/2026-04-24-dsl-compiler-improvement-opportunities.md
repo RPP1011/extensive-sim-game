@@ -4,12 +4,7 @@
 **Date:** 2026-04-24
 **Branch:** `dsl-compiler-improvements-research` (off `world-sim-bench`)
 **Author:** synthesis of tonight's emitter-pattern wins
-**Predecessors:**
-  * `docs/superpowers/research/2026-04-24-mask-kernel-subphase-measurement.md`
-  * `docs/superpowers/research/2026-04-24-scoring-kernel-row-decomposition.md`
-  * `docs/superpowers/research/2026-04-24-scoring-view-read-decomposition.md`
-  * `docs/superpowers/research/2026-04-24-cascade-rule-decomposition.md`
-  * `docs/superpowers/research/2026-04-24-gpu-per-dispatch-attribution.md`
+**Predecessors:** Five 2026-04-24 measurement-crawl research docs (mask-kernel-subphase, scoring-kernel-row-decomposition, scoring-view-read-decomposition, cascade-rule-decomposition, gpu-per-dispatch-attribution). Their instrumentation has been reverted; numbers and conclusions are referenced inline below where load-bearing. Recover detail via `git log --diff-filter=D --all -- 'docs/superpowers/research/2026-04-24-*.md'`.
 
 ---
 
@@ -73,7 +68,7 @@ produces from. Numbers are 2026-04-24 snapshots:
 * **Hot loops (per tonight's measurement):** at N=100k, 50 ticks, RTX 4090:
   - **scoring kernel:** 16-22 ms/tick (post-alive-bitmap), dominated
     by MoveToward + Attack target-loops (~50/50 each, see
-    `2026-04-24-scoring-kernel-row-decomposition.md`).
+    the scoring-kernel row-decomposition research (archived)).
   - **scoring view reads:** 29.3M reads/tick across 100k agents;
     `threat_level` is 42% of all view reads.
   - **mask kernel:** 1.5 ms/tick (small relative to scoring).
@@ -282,7 +277,7 @@ Within-rule CSE:
   personality field-ids), but the dead branches in `read_field` are
   always emitted. Tiny.
 * `engaged_with` view is bound in scoring BGL but **never read** — see
-  `2026-04-24-scoring-view-read-decomposition.md` finding #4. DCE
+  the scoring view-read research (now archived in git history) finding #4. DCE
   could detect "view spec emitted but never referenced by any
   predicate" and skip the binding.
 
@@ -339,8 +334,7 @@ the two together cover the AgentAttacked fan-out CSE end-to-end).
 
 Today the emitter produces one structural shape per kernel kind: one
 fused mask kernel, one fused scoring kernel, one physics shader. The
-mask sub-phase measurement (`2026-04-24-mask-kernel-subphase-
-measurement.md`) found that **fusion was a 36% loss for masks** at
+mask sub-phase measurement (archived research) found that **fusion was a 36% loss for masks** at
 N=100k (split ran at 24,218 µs/tick vs fused 37,794 µs/tick). The
 scoring row decomposition found a 10× split inflation (i.e. fusion
 **won** for scoring rows). The compiler currently can't know which
@@ -580,7 +574,7 @@ detect mis-annotations and warn.
   shape-arm to `emit_view.rs` for the K=1 case (~200 LoC).
 * **Runtime population instrumentation** (for K-suggestion): medium.
   Same shape as the per-view read counter from
-  `2026-04-24-scoring-view-read-decomposition.md` — count avg + p99
+  the scoring view-read research (archived) — count avg + p99
   occupancy per slot. ~300 LoC, opt-in via env var.
 
 ### Risks

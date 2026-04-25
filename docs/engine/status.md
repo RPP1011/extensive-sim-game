@@ -24,16 +24,17 @@ files in `docs/superpowers/specs/` and the active plans in `docs/superpowers/pla
 
 | Plan | Doc | Status |
 |---|---|---|
-| GPU sim state (Subsystem 1) | `docs/superpowers/plans/2026-04-22-gpu-sim-state.md` | ⚠️ in flight |
-| GPU cold-state replay (Subsystem 2) | `docs/superpowers/plans/2026-04-22-gpu-cold-state-replay.md` | ⚠️ Phase 1 done; Phase 3 in flight |
-| Cold-state Phase 3 — gold + standing | `docs/superpowers/plans/2026-04-23-cold-state-phase-3-gold-standing.md` | ⚠️ in flight |
+| GPU megakernel | `docs/superpowers/plans/gpu_megakernel_plan.md` | ⚠️ in flight (Phase 8 perf-sweep done; perf optimization continuing) |
+| GPU cold-state replay umbrella (Subsystem 2) | `docs/superpowers/plans/2026-04-22-gpu-cold-state-replay.md` | ⚠️ Phase 1 done; Phases 2–4 are explicit future work |
 | Plan 4 — debug & trace runtime | _(to be written)_ | ❌ not yet written |
-| Ability DSL + Economic Depth implementation | _(to be planned from `docs/superpowers/specs/2026-04-24-{ability-dsl,economic-depth}-design.md`)_ | ❌ not yet planned |
+| Ability DSL implementation | _(to be planned from `docs/spec/ability.md`)_ | ❌ not yet planned |
+| Economic depth implementation | _(to be planned from `docs/spec/economy.md`)_ | ❌ not yet planned |
 
-Deferred subsystems (memberships, memory, relationships, items, groups, factions,
-buildings, settlements, regions, quests, theory-of-mind, personality utility, terrain,
-interior nav) are indexed in `docs/superpowers/roadmap.md`. Individual plans drafted
-on-demand.
+Deferred subsystems (factions, items, buildings, settlements, regions, personality
+utility, interior nav) are indexed in `docs/superpowers/roadmap.md`. Subsystems with
+DSL stub primitives partially landed (memberships, memory, relationships, groups,
+quests, theory-of-mind) and terrain (MVP `TerrainQuery` trait seam in `crates/engine/src/terrain.rs`)
+are partially in flight; full behaviour attachment is pending.
 
 ## Subsystem table
 
