@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+engine = { path = "../engine" }
 engine_data = { path = "../engine_data" }
+glam = "0.29"
+smallvec = "1.13"
 
 [dev-dependencies]
 tempfile = "3"

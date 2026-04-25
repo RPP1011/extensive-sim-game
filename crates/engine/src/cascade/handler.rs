@@ -84,9 +84,14 @@ impl Lane {
 }
 
 pub trait CascadeHandler<E: EventLike>: __sealed::Sealed + Send + Sync {
+    /// The "views" type this handler expects alongside the mutable state.
+    /// Engine-rules handlers set this to `engine_rules::ViewRegistry`.
+    /// Test-only handlers that don't use views set this to `()`.
+    type Views;
+
     fn trigger(&self) -> EventKindId;
     fn lane(&self) -> Lane { Lane::Effect }
-    fn handle(&self, event: &E, state: &mut SimState, events: &mut EventRing<E>);
+    fn handle(&self, event: &E, state: &mut SimState, views: &mut Self::Views, events: &mut EventRing<E>);
 
     /// Downcast hook so registries can look up the concrete handler type
     /// (e.g. `CastHandler`) to expose handler-specific state

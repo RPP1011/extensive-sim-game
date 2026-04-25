@@ -2297,6 +2297,7 @@ dependencies = [
  "criterion",
  "dhat",
  "engine_data",
+ "engine_rules",
  "glam",
  "hex",
  "insta",
@@ -2338,7 +2339,10 @@ dependencies = [
 name = "engine_rules"
 version = "0.1.0"
 dependencies = [
+ "engine",
  "engine_data",
+ "glam",
+ "smallvec",
  "tempfile",
 ]
 

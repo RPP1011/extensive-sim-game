@@ -1,3 +1,4 @@
+#![allow(unused_mut, unused_variables, unused_imports, dead_code)]
 //! Deer herding — task 177. A fleeing deer should bias its direction
 //! toward same-species kin so the herd clusters rather than scatters.
 //!
@@ -16,7 +17,7 @@
 //! scoring + step pipeline end-to-end, the same surface the DSL
 //! targets.
 
-use engine::cascade::CascadeRegistry;
+use engine_rules::views::ViewRegistry;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine_data::events::Event;
@@ -57,7 +58,7 @@ fn run_scenario(
 
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(1 << 14);
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
     let invariants = InvariantRegistry::<Event>::new();
     let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;

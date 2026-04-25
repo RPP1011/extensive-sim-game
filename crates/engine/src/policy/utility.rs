@@ -379,6 +379,7 @@ fn eval_view_call(
 /// Map an arg-slot code to the concrete `AgentId` the view call should
 /// receive. `None` for wildcard (handled specially by the caller) or
 /// a target slot with no target bound.
+#[allow(dead_code)]
 fn resolve_slot(slot: u8, agent: AgentId, target: Option<AgentId>) -> Option<AgentId> {
     match slot {
         PredicateDescriptor::ARG_SELF => Some(agent),

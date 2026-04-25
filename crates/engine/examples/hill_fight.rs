@@ -181,7 +181,7 @@ fn run_scenario(
     // terrain height bonus on Attack.
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::with_cap(4096);
-    let cascade = CascadeRegistry::new();
+    let cascade = CascadeRegistry::<engine_data::events::Event>::new();
     let backend = engine::policy::utility::UtilityBackend;
     for _ in 0..ticks {
         step(&mut state, &mut scratch, &mut events, &backend, &cascade);

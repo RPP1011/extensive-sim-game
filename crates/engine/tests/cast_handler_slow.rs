@@ -1,3 +1,4 @@
+#![allow(unused_mut, unused_variables)]
 //! Combat Foundation Task 14 + Task 143 — `SlowHandler` + MoveToward
 //! speed composition under timestamp-based expiry.
 //!
@@ -16,7 +17,8 @@
 //! Balance knobs are read off `Config::default()`, not a `pub const`
 //! shim — task 142 retired the shim layer.
 
-use engine::generated::physics::dispatch_effect_slow_applied;
+use engine_rules::physics::dispatch_effect_slow_applied;
+use engine_rules::views::ViewRegistry;
 use engine::cascade::CascadeRegistry;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;
@@ -45,12 +47,14 @@ impl PolicyBackend for EmitOnce {
 fn slow_writes_expiry_and_factor_from_zero() {
     let mut state = SimState::new(4, 42);
     let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
     dispatch_effect_slow_applied(
         &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 5, factor_q8: 51, tick: 0 },
         &mut state,
+        &mut views,
         &mut events,
     );
     assert_eq!(state.agent_slow_expires_at(target),  Some(5));
@@ -62,6 +66,7 @@ fn slow_writes_expiry_and_factor_from_zero() {
 fn longer_slow_overrides_when_expiry_is_later() {
     let mut state = SimState::new(4, 42);
     let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -73,6 +78,7 @@ fn longer_slow_overrides_when_expiry_is_later() {
     dispatch_effect_slow_applied(
         &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 10, factor_q8: 200, tick: 0 },
         &mut state,
+        &mut views,
         &mut events,
     );
     assert_eq!(state.agent_slow_expires_at(target),  Some(10));
@@ -84,6 +90,7 @@ fn longer_slow_overrides_when_expiry_is_later() {
 fn stronger_slow_overrides_when_factor_is_smaller() {
     let mut state = SimState::new(4, 42);
     let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -94,6 +101,7 @@ fn stronger_slow_overrides_when_factor_is_smaller() {
     dispatch_effect_slow_applied(
         &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 3, factor_q8: 51, tick: 0 },
         &mut state,
+        &mut views,
         &mut events,
     );
     assert_eq!(state.agent_slow_expires_at(target),  Some(3));
@@ -105,6 +113,7 @@ fn stronger_slow_overrides_when_factor_is_smaller() {
 fn weaker_and_shorter_slow_does_not_override() {
     let mut state = SimState::new(4, 42);
     let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -114,6 +123,7 @@ fn weaker_and_shorter_slow_does_not_override() {
     dispatch_effect_slow_applied(
         &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 3, factor_q8: 200, tick: 0 },
         &mut state,
+        &mut views,
         &mut events,
     );
     assert_eq!(state.agent_slow_expires_at(target),  Some(10));
@@ -129,6 +139,7 @@ fn move_toward_is_slowed_by_effect_slow_factor() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let cascade = CascadeRegistry::<Event>::new();  // no builtins — test isolates movement math
 
     let mover = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
@@ -198,6 +209,7 @@ fn engagement_slow_and_effect_slow_compose_multiplicatively() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let cascade = CascadeRegistry::<Event>::new();  // isolate movement math
 
     let mover = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
@@ -238,6 +250,7 @@ fn engagement_slow_and_effect_slow_compose_multiplicatively() {
 fn slow_on_dead_target_is_noop() {
     let mut state = SimState::new(4, 42);
     let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
     state.kill_agent(target);
@@ -245,6 +258,7 @@ fn slow_on_dead_target_is_noop() {
     dispatch_effect_slow_applied(
         &Event::EffectSlowApplied { actor: caster, target, expires_at_tick: 5, factor_q8: 51, tick: 0 },
         &mut state,
+        &mut views,
         &mut events,
     );
     assert_eq!(state.agent_slow_expires_at(target),  Some(0));

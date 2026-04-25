@@ -10,13 +10,13 @@
 //! — the same steady-state the `step_full` movement phase would reach
 //! naturally, minus displacement.
 
-use engine::cascade::CascadeRegistry;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use engine_data::config::Config;
+use engine_rules::views::ViewRegistry;
 use glam::Vec3;
 
 /// Emit one synthetic `AgentMoved` per alive agent at its current
@@ -24,14 +24,15 @@ use glam::Vec3;
 /// the `engagement_on_move` physics rule for every agent so pairings
 /// converge to their steady state without needing a real movement phase.
 fn run_tick_start(state: &mut SimState, events: &mut EventRing<Event>) {
-    let registry = CascadeRegistry::<Event>::with_engine_builtins();
+    let registry = engine_rules::with_engine_builtins();
+    let mut views = ViewRegistry::new();
     let tick = state.tick;
     let alive: Vec<AgentId> = state.agents_alive().collect();
     for id in alive {
         let pos = state.agent_pos(id).unwrap_or(Vec3::ZERO);
         events.push(Event::AgentMoved { actor: id, from: pos, location: pos, tick });
     }
-    registry.run_fixed_point(state, events);
+    registry.run_fixed_point(state, &mut views, events);
 }
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> engine::ids::AgentId {

@@ -17,23 +17,49 @@ pub const MAX_CASCADE_ITERATIONS: usize = 8;
 /// Type signature of a compiler-emitted per-event-kind dispatcher. The
 /// dispatcher destructures the triggering event once and fans the call
 /// out to every applicable handler (kind-specific + tag-matched).
-pub type KindDispatcher<E> = fn(&E, &mut SimState, &mut EventRing<E>);
+/// The `V` parameter is the views type threaded through all handlers.
+pub type KindDispatcher<E, V> = fn(&E, &mut SimState, &mut V, &mut EventRing<E>);
 
-pub struct CascadeRegistry<E: EventLike> {
-    table: Vec<Vec<Vec<Box<dyn CascadeHandler<E>>>>>,
+pub struct CascadeRegistry<E: EventLike, V = ()> {
+    table: Vec<Vec<Vec<Box<dyn __object_safe::DynHandler<E, V>>>>>,
     /// Compiler-emitted per-event-kind dispatcher fns. Indexed by
     /// `EventKindId as u8 as usize`; `None` means no dispatcher is
     /// installed for that kind (falls back to per-handler trait-object
     /// dispatch via `table`).
-    kind_dispatchers: Vec<Option<KindDispatcher<E>>>,
+    kind_dispatchers: Vec<Option<KindDispatcher<E, V>>>,
 }
 
-impl<E: EventLike> CascadeRegistry<E> {
+/// Object-safe wrapper trait used for the boxed handler table.
+/// Not public — internal to the dispatch machinery.
+mod __object_safe {
+    use crate::event::{EventLike, EventRing};
+    use crate::state::SimState;
+
+    pub trait DynHandler<E: EventLike, V>: Send + Sync {
+        #[allow(dead_code)]
+        fn trigger_kind(&self) -> u8;
+        #[allow(dead_code)]
+        fn lane_ord(&self) -> u8;
+        fn handle_dyn(&self, event: &E, state: &mut SimState, views: &mut V, events: &mut EventRing<E>);
+    }
+
+    impl<E: EventLike, H: super::super::handler::CascadeHandler<E>> DynHandler<E, H::Views>
+        for H
+    where
+        H: Send + Sync,
+    {
+        fn trigger_kind(&self) -> u8 { self.trigger() as u8 }
+        fn lane_ord(&self) -> u8 { self.lane() as u8 }
+        fn handle_dyn(&self, event: &E, state: &mut SimState, views: &mut H::Views, events: &mut EventRing<E>) {
+            self.handle(event, state, views, events);
+        }
+    }
+}
+
+impl<E: EventLike, V> CascadeRegistry<E, V> {
     pub fn new() -> Self {
-        let per_lane: Vec<Vec<Box<dyn CascadeHandler<E>>>> =
-            (0..KIND_SLOTS).map(|_| Vec::new()).collect();
         Self {
-            table: (0..Lane::ALL.len()).map(|_| per_lane.iter().map(|_| Vec::new()).collect()).collect(),
+            table: (0..Lane::ALL.len()).map(|_| (0..KIND_SLOTS).map(|_| Vec::new()).collect()).collect(),
             kind_dispatchers: (0..KIND_SLOTS).map(|_| None).collect(),
         }
     }
@@ -42,30 +68,30 @@ impl<E: EventLike> CascadeRegistry<E> {
     /// any previously installed dispatcher for the same kind — the DSL
     /// emitter produces one dispatcher per event kind, so reinstallation
     /// is idempotent within a single registration call.
-    pub fn install_kind(&mut self, kind: EventKindId, dispatcher: KindDispatcher<E>) {
+    pub fn install_kind(&mut self, kind: EventKindId, dispatcher: KindDispatcher<E, V>) {
         let idx = kind as u8 as usize;
         self.kind_dispatchers[idx] = Some(dispatcher);
     }
 
-    pub fn register<H: CascadeHandler<E> + 'static>(&mut self, h: H) {
+    pub fn register<H: CascadeHandler<E, Views = V> + 'static>(&mut self, h: H) {
         let lane = h.lane() as usize;
         let kind = h.trigger() as u8 as usize;
         self.table[lane][kind].push(Box::new(h));
     }
 
-    pub fn dispatch(&self, event: &E, state: &mut SimState, events: &mut EventRing<E>) {
+    pub fn dispatch(&self, event: &E, state: &mut SimState, views: &mut V, events: &mut EventRing<E>) {
         let kind = event.kind() as u8 as usize;
         // Prefer the compiler-emitted per-kind dispatcher when installed.
         // It fans out to every applicable handler (kind-specific +
         // tag-matched) inline — no runtime handler-list walk.
         if let Some(dispatcher) = self.kind_dispatchers[kind] {
-            dispatcher(event, state, events);
+            dispatcher(event, state, views, events);
         }
         // Legacy trait-object handlers still register via `register`;
         // walk them in lane order after the flat dispatcher.
         for lane in Lane::ALL {
             for handler in &self.table[*lane as usize][kind] {
-                handler.handle(event, state, events);
+                handler.handle_dyn(event, state, views, events);
             }
         }
     }
@@ -82,8 +108,8 @@ impl<E: EventLike> CascadeRegistry<E> {
     ///
     /// Back-compat wrapper over [`run_fixed_point_tel`] for call sites that
     /// don't have a telemetry sink (typically tests).
-    pub fn run_fixed_point(&self, state: &mut SimState, events: &mut EventRing<E>) {
-        self.run_fixed_point_tel(state, events, &crate::telemetry::NullSink);
+    pub fn run_fixed_point(&self, state: &mut SimState, views: &mut V, events: &mut EventRing<E>) {
+        self.run_fixed_point_tel(state, views, events, &crate::telemetry::NullSink);
     }
 
     /// Like [`run_fixed_point`] but also emits the
@@ -93,6 +119,7 @@ impl<E: EventLike> CascadeRegistry<E> {
     pub fn run_fixed_point_tel(
         &self,
         state:     &mut SimState,
+        views:     &mut V,
         events:    &mut EventRing<E>,
         telemetry: &dyn TelemetrySink,
     ) {
@@ -108,7 +135,7 @@ impl<E: EventLike> CascadeRegistry<E> {
             iterations = iter + 1;
             for idx in processed..snapshot {
                 if let Some(e) = events.get_pushed(idx) {
-                    self.dispatch(&e, state, events);
+                    self.dispatch(&e, state, views, events);
                 }
             }
             processed = snapshot;
@@ -134,7 +161,7 @@ impl<E: EventLike> CascadeRegistry<E> {
     }
 }
 
-impl<E: EventLike> Default for CascadeRegistry<E> {
+impl<E: EventLike, V> Default for CascadeRegistry<E, V> {
     fn default() -> Self { Self::new() }
 }
 

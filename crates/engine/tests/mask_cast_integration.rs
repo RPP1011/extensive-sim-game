@@ -12,7 +12,6 @@
 use engine::ability::{
     AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate,
 };
-use engine::cascade::CascadeRegistry;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine_data::events::Event;
@@ -44,7 +43,7 @@ impl PolicyBackend for InertBackend {
 }
 
 fn setup(registry_build: impl FnOnce(&mut AbilityRegistryBuilder)) -> (
-    SimState, SimScratch, EventRing<Event>, CascadeRegistry<Event>, InvariantRegistry<Event>,
+    SimState, SimScratch, EventRing<Event>, engine_rules::SimCascadeRegistry, InvariantRegistry<Event>,
 ) {
     let mut state = SimState::new(8, 42);
     let scratch = SimScratch::new(state.agent_cap() as usize);
@@ -55,7 +54,7 @@ fn setup(registry_build: impl FnOnce(&mut AbilityRegistryBuilder)) -> (
     // `with_engine_builtins()` registers the stateless CastHandler alongside
     // the DSL-emitted effect handlers. The handler reads programs off
     // `state.ability_registry`.
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
     let invariants = InvariantRegistry::<Event>::new();
     (state, scratch, events, cascade, invariants)
 }
@@ -64,7 +63,7 @@ fn run_one_tick(
     state: &mut SimState,
     scratch: &mut SimScratch,
     events: &mut EventRing<Event>,
-    cascade: &CascadeRegistry<Event>,
+    cascade: &engine_rules::SimCascadeRegistry,
     invariants: &InvariantRegistry<Event>,
 ) {
     step_full(
@@ -181,7 +180,7 @@ fn cast_bit_permissive_when_registry_is_empty() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(1024);
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
     let invariants = InvariantRegistry::<Event>::new();
     let caster = state
         .spawn_agent(AgentSpawn {

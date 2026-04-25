@@ -126,9 +126,8 @@ fn _unused_imports_anchor() {
 /// UtilityBackend (which moves them toward each other, emitting
 /// `AgentMoved`), then assert the view is stale. Today the view remains
 /// fresh because nothing invalidates it automatically.
-    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
+    #[ignore = "LazyView not wired into step_full yet (audit MEDIUM #11)"]
 #[test]
-#[ignore = "LazyView not wired into step_full yet (audit MEDIUM #11)"]
 fn lazy_view_wired_into_step_full() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);

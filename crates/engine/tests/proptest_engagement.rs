@@ -1,7 +1,7 @@
 //! Combat Foundation Task 5 — engagement symmetry + range + determinism
 //! proptest. Covers acceptance criterion (5) in the plan header.
 
-use engine::cascade::CascadeRegistry;
+use engine_rules::views::ViewRegistry;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine_data::events::Event;
@@ -62,14 +62,15 @@ fn run_tick_start(state: &mut SimState) {
 /// `step_full`'s movement phase would normally emit so the engagement
 /// physics rule fires once per agent and converges to steady state.
 fn drain_initial_engagements(state: &mut SimState, events: &mut EventRing<Event>) {
-    let registry = CascadeRegistry::<Event>::with_engine_builtins();
+    let registry = engine_rules::with_engine_builtins();
+    let mut views = ViewRegistry::new();
     let tick = state.tick;
     let alive: Vec<AgentId> = state.agents_alive().collect();
     for id in alive {
         let pos = state.agent_pos(id).unwrap_or(Vec3::ZERO);
         events.push(Event::AgentMoved { actor: id, from: pos, location: pos, tick });
     }
-    registry.run_fixed_point(state, events);
+    registry.run_fixed_point(state, &mut views, events);
 }
 
 proptest! {

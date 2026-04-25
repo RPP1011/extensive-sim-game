@@ -23,9 +23,10 @@ struct CountingHandler {
 
 impl engine::cascade::__sealed::Sealed for CountingHandler {}
 impl CascadeHandler<Event> for CountingHandler {
+    type Views = ();
     fn trigger(&self) -> EventKindId { self.trigger }
     fn lane(&self)    -> Lane        { self.lane }
-    fn handle(&self, _event: &Event, _state: &mut SimState, events: &mut EventRing<Event>) {
+    fn handle(&self, _event: &Event, _state: &mut SimState, _views: &mut (), events: &mut EventRing<Event>) {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         for _ in 0..self.emit_times {
             // Re-emit as a simple AgentDied event; the reemit_kind field is
@@ -120,7 +121,7 @@ proptest! {
         // would panic are skipped via cfg.
         #[cfg(not(debug_assertions))]
         {
-            reg.run_fixed_point(&mut state, &mut events);
+            reg.run_fixed_point(&mut state, &mut (), &mut events);
             let _calls = counter.load(Ordering::SeqCst);
             // Core termination invariant: run_fixed_point returns within
             // MAX_CASCADE_ITERATIONS passes and advances the dispatched cursor
@@ -159,7 +160,7 @@ proptest! {
             });
         }
         let before = events.total_pushed();
-        reg.run_fixed_point(&mut state, &mut events);
+        reg.run_fixed_point(&mut state, &mut (), &mut events);
         prop_assert_eq!(events.total_pushed(), before,
             "no handlers → no new events");
         prop_assert_eq!(events.dispatched(), before,

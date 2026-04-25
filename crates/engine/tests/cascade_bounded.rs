@@ -11,9 +11,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 struct Amplifier(Arc<AtomicUsize>);
 impl engine::cascade::__sealed::Sealed for Amplifier {}
 impl CascadeHandler<Event> for Amplifier {
+    type Views = ();
     fn trigger(&self) -> EventKindId { EventKindId::AgentAttacked }
     fn lane(&self) -> Lane { Lane::Effect }
-    fn handle(&self, event: &Event, _: &mut SimState, events: &mut EventRing<Event>) {
+    fn handle(&self, event: &Event, _: &mut SimState, _views: &mut (), events: &mut EventRing<Event>) {
         self.0.fetch_add(1, Ordering::Relaxed);
         if let Event::AgentAttacked { actor, target, damage, tick } = event {
             events.push(Event::AgentAttacked {
@@ -39,7 +40,7 @@ fn release_dispatch_truncates_at_max_cascade_iterations() {
     let mut ring = EventRing::<Event>::with_cap(1024);
 
     ring.push(Event::AgentAttacked { actor: a, target: a, damage: 1.0, tick: 0 });
-    reg.run_fixed_point(&mut state, &mut ring);
+    reg.run_fixed_point(&mut state, &mut (), &mut ring);
 
     let n = hits.load(Ordering::Relaxed);
     // MAX_CASCADE_ITERATIONS=8: the primary dispatch happens inside the first
@@ -65,7 +66,7 @@ fn debug_dispatch_panics_on_non_convergence() {
     }).unwrap();
     let mut ring = EventRing::<Event>::with_cap(1024);
     ring.push(Event::AgentAttacked { actor: a, target: a, damage: 1.0, tick: 0 });
-    reg.run_fixed_point(&mut state, &mut ring);
+    reg.run_fixed_point(&mut state, &mut (), &mut ring);
 }
 
 #[test]
@@ -74,8 +75,9 @@ fn converging_cascade_terminates_early() {
     struct Once(Arc<AtomicUsize>);
     impl engine::cascade::__sealed::Sealed for Once {}
     impl CascadeHandler<Event> for Once {
+        type Views = ();
         fn trigger(&self) -> EventKindId { EventKindId::AgentDied }
-        fn handle(&self, _: &Event, _: &mut SimState, _: &mut EventRing<Event>) {
+        fn handle(&self, _: &Event, _: &mut SimState, _: &mut (), _: &mut EventRing<Event>) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -89,6 +91,6 @@ fn converging_cascade_terminates_early() {
     let mut ring = EventRing::<Event>::with_cap(16);
 
     ring.push(Event::AgentDied { agent_id: a, tick: 0 });
-    reg.run_fixed_point(&mut state, &mut ring);
+    reg.run_fixed_point(&mut state, &mut (), &mut ring);
     assert_eq!(hits.load(Ordering::Relaxed), 1);
 }

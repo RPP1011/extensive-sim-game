@@ -25,11 +25,10 @@
 //! action → no AgentCast event, regardless of mask permissiveness.
 
 use engine::ability::{AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
-use engine::cascade::CascadeRegistry;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine_data::events::Event;
-use engine::generated::mask::mask_cast;
+use engine_rules::mask::mask_cast;
 use engine::ids::AgentId;
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
@@ -106,7 +105,7 @@ fn cooldown_blocks_recast_until_next_ready_tick() {
     // `with_engine_builtins()` registers the (now stateless) CastHandler
     // alongside every other effect handler — no explicit
     // `register_cast_handler` call needed.
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
 
     let backend = GatedCastBackend { caster, target, ability };
 
@@ -171,7 +170,7 @@ fn zero_cooldown_ability_can_recast_every_tick() {
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(2.0, 0.0, 0.0));
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(512);
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
 
     let backend = GatedCastBackend { caster, target, ability };
 

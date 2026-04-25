@@ -90,7 +90,7 @@ fn cast_action_triggers_effect_damage_when_handler_registered() {
     state.ability_registry = reg;
     // `with_engine_builtins()` installs the stateless CastHandler; the
     // registry on `state` drives program lookup.
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
@@ -121,7 +121,7 @@ fn cast_handler_starts_cooldown() {
 
     let (reg, ability) = build_one_damage_ability();
     state.ability_registry = reg;
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
@@ -161,7 +161,7 @@ fn cast_of_unknown_ability_id_is_a_no_op() {
 
     // Empty registry on state — every ability id is unknown.
     state.ability_registry = AbilityRegistry::new();
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));

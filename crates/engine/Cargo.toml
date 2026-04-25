@@ -18,6 +18,7 @@ contracts = "0.6"
 
 [dev-dependencies]
 engine_data = { path = "../engine_data" }
+engine_rules = { path = "../engine_rules" }
 insta = { version = "1.41", features = ["yaml"] }
 proptest = "1.5"
 dhat = "0.3"

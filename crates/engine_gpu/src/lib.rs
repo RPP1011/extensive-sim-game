@@ -349,14 +349,18 @@ impl GpuBackend {
 
 #[cfg(not(feature = "gpu"))]
 impl SimBackend for GpuBackend {
+    type Event = engine_data::events::Event;
+    type Views = ();
+
     #[inline]
     fn step<B: PolicyBackend>(
         &mut self,
         state: &mut SimState,
         scratch: &mut SimScratch,
-        events: &mut EventRing,
+        events: &mut EventRing<Self::Event>,
+        _views: &mut Self::Views,
         policy: &B,
-        cascade: &CascadeRegistry,
+        cascade: &CascadeRegistry<Self::Event, Self::Views>,
     ) {
         engine::step::step(state, scratch, events, policy, cascade);
     }
@@ -2394,13 +2398,17 @@ impl GpuBackend {
 
 #[cfg(feature = "gpu")]
 impl SimBackend for GpuBackend {
+    type Event = Event;
+    type Views = ();
+
     fn step<B: PolicyBackend>(
         &mut self,
         state: &mut SimState,
         scratch: &mut SimScratch,
-        events: &mut EventRing,
+        events: &mut EventRing<Self::Event>,
+        _views: &mut Self::Views,
         policy: &B,
-        cascade: &CascadeRegistry,
+        cascade: &CascadeRegistry<Self::Event, Self::Views>,
     ) {
         // Task 197 — eliminate the dominant N=1000 cost (CPU mask build
         // + policy evaluate, 170-700 ms/tick per task 195's

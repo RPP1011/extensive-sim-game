@@ -11,12 +11,12 @@
 //! local cursor is still zero. Once the GCD elapses, B clears.
 
 use engine::ability::{AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
-use engine::cascade::CascadeRegistry;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
+use engine_rules::views::ViewRegistry;
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
@@ -74,7 +74,8 @@ fn global_gate_blocks_other_slot_until_gcd_elapses() {
     // Cast A at tick 0 by pushing AgentCast directly — the cascade runs
     // the physics cast rule, which writes both cursors via
     // `record_cast_cooldowns(caster, ability_a, 0)`.
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
+    let mut views = ViewRegistry::new();
     let mut events = EventRing::<Event>::with_cap(512);
     events.push(Event::AgentCast {
         actor: caster,
@@ -83,7 +84,7 @@ fn global_gate_blocks_other_slot_until_gcd_elapses() {
         depth: 0,
         tick: 0,
     });
-    cascade.run_fixed_point(&mut state, &mut events);
+    cascade.run_fixed_point(&mut state, &mut views, &mut events);
 
     // Post-cast: global cursor at GCD, A's local cursor at 30.
     assert_eq!(state.agent_cooldown_next_ready(caster), Some(gcd));

@@ -22,12 +22,12 @@ use engine_data::events::Event;
 
 /// DELETED — Plan B1' Task 11. `unimplemented!()` stub for test compilation.
 /// Re-enable after B1' Task 11 emits engine_rules::step::step.
-pub fn step<B: PolicyBackend>(
+pub fn step<B: PolicyBackend, V>(
     _state:   &mut SimState,
     _scratch: &mut SimScratch,
     _events:  &mut EventRing<Event>,
     _backend: &B,
-    _cascade: &CascadeRegistry<Event>,
+    _cascade: &CascadeRegistry<Event, V>,
 ) {
     unimplemented!(
         "engine::step::step is DELETED (Plan B1' Task 11). \
@@ -37,12 +37,12 @@ pub fn step<B: PolicyBackend>(
 
 /// DELETED — Plan B1' Task 11. `unimplemented!()` stub for test compilation.
 #[allow(clippy::too_many_arguments)]
-pub fn step_full<B: PolicyBackend>(
+pub fn step_full<B: PolicyBackend, V>(
     _state:      &mut SimState,
     _scratch:    &mut SimScratch,
     _events:     &mut EventRing<Event>,
     _backend:    &B,
-    _cascade:    &CascadeRegistry<Event>,
+    _cascade:    &CascadeRegistry<Event, V>,
     _views:      &mut [&mut dyn MaterializedView<Event>],
     _invariants: &InvariantRegistry<Event>,
     _telemetry:  &dyn TelemetrySink,

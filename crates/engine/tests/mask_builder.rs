@@ -1,3 +1,4 @@
+#![allow(unused_mut, unused_variables, unused_imports, dead_code)]
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::state::{SimState, AgentSpawn};
 use engine_data::entities::CreatureType;
@@ -35,7 +36,7 @@ fn mark_hold_sets_only_hold_bit_per_alive_agent() {
             ..Default::default()
         });
     }
-    let mut mask = MaskBuffer::new(state.agent_cap() as usize);
+    let mask = MaskBuffer::new(state.agent_cap() as usize);
     // mark_hold_allowed deleted — Plan B1' Task 11.
     let _ = &state; unimplemented!("mark_hold_allowed deleted — B1' Task 11");
     #[allow(unreachable_code)]

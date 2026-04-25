@@ -11,9 +11,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 struct Counting(Arc<AtomicUsize>);
 impl engine::cascade::__sealed::Sealed for Counting {}
 impl CascadeHandler<Event> for Counting {
+    type Views = ();
     fn trigger(&self) -> EventKindId { EventKindId::AgentAttacked }
     fn lane(&self) -> Lane { Lane::Effect }
-    fn handle(&self, _e: &Event, _s: &mut SimState, _r: &mut EventRing<Event>) {
+    fn handle(&self, _e: &Event, _s: &mut SimState, _views: &mut (), _r: &mut EventRing<Event>) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -32,7 +33,7 @@ fn registered_handler_fires_on_matching_event() {
     let mut ring = EventRing::<Event>::with_cap(16);
     let evt = Event::AgentAttacked { actor: a, target: a, damage: 0.0, tick: 0 };
 
-    reg.dispatch(&evt, &mut state, &mut ring);
+    reg.dispatch(&evt, &mut state, &mut (), &mut ring);
     assert_eq!(hits.load(Ordering::Relaxed), 1);
 }
 
@@ -49,7 +50,7 @@ fn handler_not_fired_for_non_matching_kind() {
     }).unwrap();
     let mut ring = EventRing::<Event>::with_cap(16);
 
-    reg.dispatch(&Event::AgentDied { agent_id: a, tick: 0 }, &mut state, &mut ring);
+    reg.dispatch(&Event::AgentDied { agent_id: a, tick: 0 }, &mut state, &mut (), &mut ring);
     assert_eq!(hits.load(Ordering::Relaxed), 0);
 }
 
@@ -66,7 +67,7 @@ fn multiple_handlers_same_kind_all_fire() {
     let mut ring = EventRing::<Event>::with_cap(16);
     reg.dispatch(
         &Event::AgentAttacked { actor: a, target: a, damage: 0.0, tick: 0 },
-        &mut state, &mut ring
+        &mut state, &mut (), &mut ring
     );
     assert_eq!(hits.load(Ordering::Relaxed), 3);
 }

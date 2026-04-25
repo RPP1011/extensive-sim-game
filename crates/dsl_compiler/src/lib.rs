@@ -9,10 +9,13 @@
 //! `compile-dsl` subcommand.
 
 pub mod ast;
+pub mod emit_backend;
+pub mod emit_cascade_register;
 pub mod emit_config;
 pub mod emit_entity;
 pub mod emit_enum;
 pub mod emit_mask;
+pub mod emit_mask_fill;
 pub mod emit_mask_wgsl;
 pub mod emit_physics;
 pub mod emit_physics_wgsl;
@@ -21,6 +24,7 @@ pub mod emit_rust;
 pub mod emit_scoring;
 pub mod emit_scoring_wgsl;
 pub mod emit_sim_cfg;
+pub mod emit_step;
 pub mod emit_view;
 pub mod emit_view_wgsl;
 pub mod error;

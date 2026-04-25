@@ -30,12 +30,19 @@ use crate::state::SimState;
 /// NOTE: `CpuBackend` is deleted (Plan B1' Task 11). `engine_rules` will emit
 /// `SerialBackend` implementing this trait once Task 11 lands.
 pub trait SimBackend {
-    fn step<E: EventLike, B: PolicyBackend>(
+    /// The event type this backend drives (e.g. `engine_data::events::Event`).
+    type Event: EventLike;
+    /// The views type threaded through cascade handlers
+    /// (e.g. `engine_rules::ViewRegistry`).
+    type Views;
+
+    fn step<B: PolicyBackend>(
         &mut self,
         state:   &mut SimState,
         scratch: &mut SimScratch,
-        events:  &mut EventRing<E>,
+        events:  &mut EventRing<Self::Event>,
+        views:   &mut Self::Views,
         policy:  &B,
-        cascade: &CascadeRegistry<E>,
+        cascade: &CascadeRegistry<Self::Event, Self::Views>,
     );
 }

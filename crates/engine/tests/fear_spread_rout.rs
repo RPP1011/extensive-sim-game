@@ -1,3 +1,4 @@
+#![allow(unused_mut, unused_variables, unused_imports, dead_code)]
 //! Task 167 — fear-spread rout mechanic (retuned in task 173).
 //!
 //! When an agent dies, the `fear_spread_on_death` DSL physics rule emits
@@ -27,6 +28,7 @@ use engine_data::scoring::{
     PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE,
 };
 use engine::mask::MicroKind;
+use engine_rules::views::ViewRegistry;
 use glam::Vec3;
 
 // ---------------------------------------------------------------------------
@@ -78,6 +80,7 @@ fn spawn_pack_fixture() -> (SimState, [AgentId; 3], [AgentId; 2]) {
 fn score_row_for(
     entry: &ScoringEntry,
     state: &SimState,
+    views: &ViewRegistry,
     agent: AgentId,
     target: Option<AgentId>,
 ) -> f32 {
@@ -98,7 +101,7 @@ fn score_row_for(
                 }
             }
             PredicateDescriptor::KIND_VIEW_SCALAR_COMPARE => {
-                let lhs = eval_view(state, agent, target, pred);
+                let lhs = eval_view(state, views, agent, target, pred);
                 let mut tb = [0u8; 4];
                 tb.copy_from_slice(&pred.payload[0..4]);
                 let rhs = f32::from_le_bytes(tb);
@@ -107,7 +110,7 @@ fn score_row_for(
                 }
             }
             PredicateDescriptor::KIND_VIEW_GRADIENT => {
-                let v = eval_view(state, agent, target, pred);
+                let v = eval_view(state, views, agent, target, pred);
                 if v.is_finite() {
                     score += v * row.delta;
                 }
@@ -152,6 +155,7 @@ fn read_field_scalar(
 
 fn eval_view(
     state: &SimState,
+    views: &ViewRegistry,
     agent: AgentId,
     target: Option<AgentId>,
     pred: &PredicateDescriptor,
@@ -169,24 +173,24 @@ fn eval_view(
         PredicateDescriptor::VIEW_ID_THREAT_LEVEL => {
             let a = resolve(slot0).unwrap_or(agent);
             if slot1 == PredicateDescriptor::ARG_WILDCARD {
-                state.views.threat_level.sum_for_first(a, state.tick)
+                views.threat_level.sum_for_first(a, state.tick)
             } else {
                 let b = resolve(slot1).unwrap_or(agent);
-                state.views.threat_level.get(a, b, state.tick)
+                views.threat_level.get(a, b, state.tick)
             }
         }
         PredicateDescriptor::VIEW_ID_MY_ENEMIES => {
             let a = resolve(slot0).unwrap_or(agent);
             let b = resolve(slot1).unwrap_or(agent);
-            state.views.my_enemies.get(a, b)
+            views.my_enemies.get(a, b)
         }
         PredicateDescriptor::VIEW_ID_KIN_FEAR => {
             let a = resolve(slot0).unwrap_or(agent);
             if slot1 == PredicateDescriptor::ARG_WILDCARD {
-                state.views.kin_fear.sum_for_first(a, state.tick)
+                views.kin_fear.sum_for_first(a, state.tick)
             } else {
                 let b = resolve(slot1).unwrap_or(agent);
-                state.views.kin_fear.get(a, b, state.tick)
+                views.kin_fear.get(a, b, state.tick)
             }
         }
         _ => f32::NAN,
@@ -224,13 +228,13 @@ fn attack_entry() -> &'static ScoringEntry {
 
 /// Drive the `kin_fear` view's fold directly, bypassing the physics rule
 /// but matching its emit shape. One call = one `FearSpread` event folded.
-fn prime_kin_fear(state: &mut SimState, observer: AgentId, dead_kin: AgentId) {
+fn prime_kin_fear(state: &SimState, views: &mut ViewRegistry, observer: AgentId, dead_kin: AgentId) {
     let ev = Event::FearSpread {
         observer,
         dead_kin,
         tick: state.tick,
     };
-    state.views.kin_fear.fold_event(&ev, state.tick);
+    views.kin_fear.fold_event(&ev, state.tick);
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +289,7 @@ fn spatial_kin_empty_when_alone() {
 #[test]
 fn spatial_kin_dead_center_still_finds_kin() {
     let (mut state, wolves, _humans) = spawn_pack_fixture();
+    let mut views = ViewRegistry::new();
     let [w1, w2, w3] = wolves;
     state.kill_agent(w1);
     let kin = engine::spatial::nearby_kin(&state, w1, 12.0);
@@ -300,18 +305,19 @@ fn spatial_kin_dead_center_still_finds_kin() {
 #[test]
 fn one_fear_spread_crosses_threshold() {
     let (mut state, wolves, _humans) = spawn_pack_fixture();
+    let mut views = ViewRegistry::new();
     let [w1, w2, _w3] = wolves;
 
     // Baseline: no fear recorded.
     assert_eq!(
-        state.views.kin_fear.sum_for_first(w2, state.tick),
+        views.kin_fear.sum_for_first(w2, state.tick),
         0.0,
         "baseline kin_fear should be 0",
     );
 
     // One packmate death → one fold → value = +1.0, above 0.5 gate.
-    prime_kin_fear(&mut state, w2, w1);
-    let total = state.views.kin_fear.sum_for_first(w2, state.tick);
+    prime_kin_fear(&state, &mut views, w2, w1);
+    let total = views.kin_fear.sum_for_first(w2, state.tick);
     assert!(
         total > 0.5,
         "kin_fear {} should cross 0.5 gate after one death",
@@ -337,17 +343,18 @@ fn one_fear_spread_crosses_threshold() {
 #[test]
 fn flee_score_gains_kin_fear_bonus() {
     let (mut state, wolves, _humans) = spawn_pack_fixture();
+    let mut views = ViewRegistry::new();
     let [w1, w2, _w3] = wolves;
     let entry = flee_entry();
 
     // Baseline Flee score — hp_pct=1.0, hp=80 — no hp gates fire, no
     // threat, no kin_fear. Base = 0.0.
-    let s0 = score_row_for(entry, &state, w2, None);
+    let s0 = score_row_for(entry, &state, &views, w2, None);
     assert!(s0.abs() < 1e-4, "baseline Flee = {s0}, expected ≈0.0");
 
     // Prime kin_fear: one dead packmate → sum = 1.0 > 0.5 → +0.4.
-    prime_kin_fear(&mut state, w2, w1);
-    let s1 = score_row_for(entry, &state, w2, None);
+    prime_kin_fear(&state, &mut views, w2, w1);
+    let s1 = score_row_for(entry, &state, &views, w2, None);
     assert!(
         s1 > s0 + 0.3,
         "Flee should gain ≥+0.3 from kin_fear modifier (+0.4 expected, some epsilon); got {s0} → {s1}",
@@ -368,6 +375,7 @@ fn flee_score_gains_kin_fear_bonus() {
 #[test]
 fn wolves_rout_when_packmate_dies() {
     let (mut state, wolves, humans) = spawn_pack_fixture();
+    let mut views = ViewRegistry::new();
     let [w1, w2, _w3] = wolves;
     let [h1, _h2] = humans;
 
@@ -377,8 +385,8 @@ fn wolves_rout_when_packmate_dies() {
     // Pre-death: no kin_fear, w2 at full hp, h1 at full hp. Flee row
     // has no gates firing; Attack has the `self.hp_pct >= 0.8` gate
     // (+0.5) so Attack >> Flee.
-    let flee_pre = score_row_for(flee, &state, w2, None);
-    let attack_pre = score_row_for(attack, &state, w2, Some(h1));
+    let flee_pre = score_row_for(flee, &state, &views, w2, None);
+    let attack_pre = score_row_for(attack, &state, &views, w2, Some(h1));
     assert!(
         attack_pre > flee_pre,
         "pre-death: Attack ({attack_pre}) should beat Flee ({flee_pre}) — a fresh \
@@ -399,13 +407,13 @@ fn wolves_rout_when_packmate_dies() {
     // the same thing via the cascade; this test exercises the fold +
     // scoring layer without needing a full step pipeline).
     state.kill_agent(w1);
-    prime_kin_fear(&mut state, w2, w1);
+    prime_kin_fear(&state, &mut views, w2, w1);
 
     // Post-death: kin_fear > 0.5, Flee gains +0.4. Plus the hp<50 gate
     // contributes +0.4. Flee ≈ 0.8; Attack on fresh h1 drops to 0.0
     // (fresh-self gate no longer fires at hp_pct=0.56). Flee >> Attack.
-    let flee_post = score_row_for(flee, &state, w2, None);
-    let attack_post = score_row_for(attack, &state, w2, Some(h1));
+    let flee_post = score_row_for(flee, &state, &views, w2, None);
+    let attack_post = score_row_for(attack, &state, &views, w2, Some(h1));
     assert!(
         flee_post > attack_post,
         "post-death: Flee ({flee_post}) should beat Attack ({attack_post}) — \
@@ -426,17 +434,18 @@ fn wolves_rout_when_packmate_dies() {
 #[test]
 fn kin_fear_decays_below_threshold() {
     let (mut state, wolves, _humans) = spawn_pack_fixture();
+    let mut views = ViewRegistry::new();
     let [w1, w2, _w3] = wolves;
 
-    prime_kin_fear(&mut state, w2, w1);
-    let immediate = state.views.kin_fear.sum_for_first(w2, state.tick);
+    prime_kin_fear(&state, &mut views, w2, w1);
+    let immediate = views.kin_fear.sum_for_first(w2, state.tick);
     assert!(immediate > 0.5, "immediate kin_fear {immediate} should be > 0.5");
 
     // Advance the observer's observed tick. @decay is `rate=0.891`, so
     // 12 ticks gives 0.891^12 ≈ 0.247 — below the 0.5 gate. 20 ticks
     // gives 0.891^20 ≈ 0.100 — well below. We check at 20 to have
     // margin against tick-boundary math.
-    let decayed = state.views.kin_fear.sum_for_first(w2, state.tick + 20);
+    let decayed = views.kin_fear.sum_for_first(w2, state.tick + 20);
     assert!(
         decayed < 0.5,
         "after 20 ticks kin_fear {decayed} should decay below 0.5 (rout window elapsed)",
@@ -449,7 +458,7 @@ fn kin_fear_decays_below_threshold() {
     // forward on the state itself).
     state.tick += 20;
     let flee = flee_entry();
-    let s = score_row_for(flee, &state, w2, None);
+    let s = score_row_for(flee, &state, &views, w2, None);
     assert!(
         s < 0.1,
         "Flee at decayed tick = {s}; with all gates off it should be ≈0.0",
@@ -465,21 +474,22 @@ fn kin_fear_decays_below_threshold() {
 #[test]
 fn humans_rout_when_packmate_dies_same_mechanic() {
     let (mut state, _wolves, humans) = spawn_pack_fixture();
+    let mut views = ViewRegistry::new();
     let [h1, h2] = humans;
 
     // Kill h1, emit FearSpread at h2 (the one observer). Same shape as
     // the wolf case — proves the mechanic is symmetric.
     state.kill_agent(h1);
-    prime_kin_fear(&mut state, h2, h1);
+    prime_kin_fear(&state, &mut views, h2, h1);
 
-    let total = state.views.kin_fear.sum_for_first(h2, state.tick);
+    let total = views.kin_fear.sum_for_first(h2, state.tick);
     assert!(
         total > 0.5,
         "human kin_fear {total} should cross 0.5 gate",
     );
 
     let flee = flee_entry();
-    let s = score_row_for(flee, &state, h2, None);
+    let s = score_row_for(flee, &state, &views, h2, None);
     assert!(
         (s - 0.4).abs() < 1e-3,
         "human Flee post-death = {s}, expected ≈0.4 (same +0.4 as wolves)",
@@ -500,13 +510,14 @@ fn humans_rout_when_packmate_dies_same_mechanic() {
 #[test]
 fn pipeline_death_triggers_fear() {
     let (mut state, wolves, _humans) = spawn_pack_fixture();
+    let mut views = ViewRegistry::new();
     let [w1, w2, w3] = wolves;
     let mut events = EventRing::<Event>::with_cap(64);
 
     // Call the generated physics fn directly. Same signature the
     // dispatcher uses; simulates what happens on an `AgentDied { agent_id: w1 }`.
     state.kill_agent(w1);
-    engine::generated::physics::fear_spread_on_death::fear_spread_on_death(
+    engine_rules::physics::fear_spread_on_death::fear_spread_on_death(
         w1,
         &mut state,
         &mut events,

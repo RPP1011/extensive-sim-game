@@ -4,9 +4,9 @@
 //! Tests bypass `step_full` and drive the `apply_actions` + cascade path
 //! directly by manually setting `agent_engaged_with` on the SoA SoT,
 //! emitting a `MoveToward` / `Flee` action, and running the cascade with
-//! `CascadeRegistry::<Event>::with_engine_builtins()` to get the OA damage cascade.
+//! `engine_rules::with_engine_builtins()` to get the OA damage cascade.
 
-use engine::cascade::{CascadeRegistry, MAX_CASCADE_ITERATIONS};
+use engine::cascade::MAX_CASCADE_ITERATIONS;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine_data::events::Event;
@@ -71,7 +71,7 @@ fn engaged_move_away_from_engager_is_slowed() {
     };
 
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(256);
 
@@ -115,7 +115,7 @@ fn engaged_move_toward_engager_is_full_speed() {
     };
 
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(256);
     let before = state.agent_pos(a).unwrap();
@@ -155,7 +155,7 @@ fn flee_while_engaged_triggers_opportunity_attack() {
         },
     };
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(256);
 
@@ -196,7 +196,7 @@ fn opportunity_attack_can_kill_and_cascade_emits_agentdied() {
         },
     };
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(256);
 
@@ -233,7 +233,7 @@ fn unengaged_move_away_is_full_speed_and_no_oa() {
     };
 
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     let mut events = EventRing::<Event>::with_cap(256);
     let before = state.agent_pos(a).unwrap();
@@ -250,6 +250,6 @@ fn unengaged_move_away_is_full_speed_and_no_oa() {
     let oa_count = events.iter().filter(|e| matches!(e, Event::OpportunityAttackTriggered { .. })).count();
     assert_eq!(oa_count, 0);
     // The opportunity_attack dispatcher is registered by
-    // `CascadeRegistry::<Event>::with_engine_builtins()` even though it never fires
+    // `engine_rules::with_engine_builtins()` even though it never fires
     // here — the mask path is separately covered by `per_agent_combat_stats.rs`.
 }

@@ -15,7 +15,7 @@ fn utility_picks_hold_when_only_hold_allowed() {
             ..Default::default()
         });
     }
-    let mut mask = MaskBuffer::new(state.agent_cap() as usize);
+    let mask = MaskBuffer::new(state.agent_cap() as usize);
     // mark_hold_allowed deleted — Plan B1' Task 11.
     let _ = &mask; unimplemented!("mark_hold_allowed deleted — B1' Task 11");
     #[allow(unreachable_code)]
