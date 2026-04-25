@@ -21,6 +21,7 @@ pub mod policy;
 pub mod pool;
 pub mod rng;
 pub mod schema_hash;
+pub mod snapshot;
 pub mod spatial;
 pub mod state;
 pub mod step;
