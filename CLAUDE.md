@@ -43,6 +43,7 @@ cargo run --bin xtask -- scenario generate dataset/scenarios/
 - The constitution states each principle once. Other docs do not paraphrase or redirect.
 - Every new plan needs an AIS preamble (P8). Skipping it is a process violation.
 - Historical content (executed plans, resolved audits, design rationale) lives in **git history**, not active docs.
+- Critic skills (`.claude/skills/critic-*/SKILL.md`) gate engine extensions. Invoke via Skill tool for in-context review or via Agent dispatch (paste skill body into prompt) for fresh-context independent verdicts. The `engine/build.rs` allowlist gate requires two parallel Agent invocations — see `docs/superpowers/specs/2026-04-25-engine-crate-split-design.md` §5.2.
 
 ## Tooling caveats
 
