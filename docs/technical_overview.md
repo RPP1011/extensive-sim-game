@@ -181,7 +181,7 @@ Perf envelope (llvmpipe fallback, N-ladder 8..2048, 200 timed ticks):
 
 At N ≤ 128 the batch path halves per-tick wall clock by amortising dispatch overhead across the batch. At N = 2048 the cascade work itself dominates, and batch-mode-specific overhead (double spatial rebuild per tick for kin + engagement radii, per-call bind-group construction, always-dispatch-8-iters pattern) pushes batch ~25% slower than sync. The batch path is a correctness-preserving observation primitive today; driving N=2048 below the sync curve requires cascade-level optimisations that are out of scope for the batch API itself.
 
-Design + plan: `docs/superpowers/specs/2026-04-22-gpu-resident-cascade-design.md`, `docs/superpowers/plans/2026-04-22-gpu-resident-cascade.md`.
+Design: `docs/superpowers/specs/2026-04-22-gpu-resident-cascade-design.md`. The plan is executed (in git history).
 
 ## 11. What isn't yet right
 

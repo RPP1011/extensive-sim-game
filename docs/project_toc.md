@@ -6,9 +6,7 @@
 >
 > Cross-refs (don't reproduce): `README.md`, `docs/engine/spec.md`,
 > `docs/engine/status.md`, `docs/compiler/spec.md`,
-> `docs/superpowers/roadmap.md`, `docs/superpowers/plans/`,
-> `docs/audit_2026-04-19.md`,
-> `docs/engine/{verification,stub}_audit_2026-04-19.md`.
+> `docs/superpowers/roadmap.md`, `docs/superpowers/plans/`.
 
 ---
 
@@ -495,4 +493,4 @@ Last updated **2026-04-19**. Update after every major plan's execution. Cross-re
 - §6 — flip ⚠️ / ❌ → ✅ rows as plans land.
 - §3.2–§3.7 — drop rows from "needed-but-not-written" as plan files get drafted.
 
-When this doc needs rewriting from scratch (e.g., after a major architecture pivot), source-of-truth order is: `README.md` → `docs/engine/spec.md` → `docs/engine/status.md` → `docs/superpowers/roadmap.md` → `docs/superpowers/plans/*.md` → `docs/audit_2026-04-19.md` and the two engine audits.
+When this doc needs rewriting from scratch (e.g., after a major architecture pivot), source-of-truth order is: `README.md` → `docs/engine/spec.md` → `docs/engine/status.md` → `docs/superpowers/roadmap.md` → `docs/superpowers/plans/*.md`. Historical audits live in git history (search for `audit_2026-04-19.md` etc.) — their findings are folded into `docs/engine/status.md`.

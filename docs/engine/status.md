@@ -1,52 +1,39 @@
-# Engine Status (as of 2026-04-19)
+# Engine Status (as of 2026-04-24)
 
 > The single source of truth for what's built, what to verify, and what to worry about.
 > Design lives in `spec.md`. Implementation intent lives in `docs/superpowers/plans/`.
 > This doc is the user's jump-off point: "Is section X trustworthy? What would prove it's not?"
 
-After MVP + Plans 1, 2, 2.75 (verification infra), 3.0 (viz): **169 green tests release**
-(171 debug) + 10 viz tests + 2 cargo-fuzz targets (compile-verified). All engine subsystems
-below are Serial-only; no GPU backend yet. Cross-backend parity lands with Plan 5+. The
-2026-04-19 verification audit (HIGH + MEDIUM) is fully resolved; see
-`docs/engine/verification_audit_2026-04-19.md`. Plan 2.75 then added proptest adversarial
-input generation + `contracts::{invariant, requires, ensures}` on load-bearing types to
-resist the "sentinel value hides bugs" failure mode the audit surfaced.
+The Serial engine spec (§§1–24) is feature-complete: state, events, mask, policy,
+cascade, six-phase tick pipeline, materialized/lazy/topk views, aggregates, save/load
+(Plan 3, commit `73c12108`), observation packer (Plan 3), probe harness (Plan 3),
+abilities + engagement + 8 EffectOps + recursion (Combat Foundation, commit range
+`babb8ec0..a379f3df`). **442 green tests** (release + debug). Schema-hash baseline at
+`090f374dcc…`. The 2026-04-19 verification + stub audits are fully resolved (their
+detail lives in git history; remaining open items are now line-items here).
 
-The 2026-04-19 **stub audit**
-(`docs/engine/stub_audit_2026-04-19.md`) is also fully resolved: 3
-CRITICAL + 5 HIGH + 3 MEDIUM + 6 LOW findings, all landed. Rollback
-deferred to a future plan if explicit rewind machinery ever lands —
-`FailureMode::Rollback` has been removed from the schema (baseline
-bumped to `7bf05a9f…`). Post-audit test count: **334 debug / 333 release**.
+GPU backend work is in flight as a parallel track via `engine_gpu` — see the GPU spec
+files in `docs/superpowers/specs/` and the active plans in `docs/superpowers/plans/`.
 
 ## Legend
 
 - **Status**: ❌ not started / ⚠️ partial / ✅ implemented (tests green) / 🔍 eyeball-verified / 🎯 externally-verified
 - **Visual check**: what someone running `cargo run -p viz` should see that would catch bugs.
-  Viz harness itself is not yet written (awaiting Plan 3.0 viz draft); visual checks in
-  this doc are the acceptance criteria that harness has to satisfy.
 
-## Plans index
+## Plans index (active only — executed plans live in git history)
 
 | Plan | Doc | Status |
 |---|---|---|
-| MVP | `docs/superpowers/plans/2026-04-19-world-sim-engine-mvp.md` | ✅ complete |
-| Plan 1 — action space & cascade | `docs/superpowers/plans/2026-04-19-engine-plan-1-action-space.md` | ✅ executed (Tasks 1–18) |
-| Plan 2 — pipeline + cross-cutting traits | `docs/superpowers/plans/2026-04-19-engine-plan-2-pipeline-traits.md` | ✅ executed |
-| Plan 3 — persistence + obs packer + probes | `docs/superpowers/plans/2026-04-19-engine-plan-3-persistence-obs-probes.md` | ⚠️ draft — awaiting execution |
-| Plan 3.0 viz harness | `docs/superpowers/plans/2026-04-19-engine-plan-3_0-viz-harness.md` | ✅ executed (Tasks 1–5) + 3.1 fixups |
-| Plan 2.75 verification infra | `docs/superpowers/plans/2026-04-19-engine-plan-2_75-verification-infra.md` | ✅ executed (proptest + contracts + fuzz) |
-| State port | `docs/superpowers/plans/2026-04-19-engine-plan-state-port.md` | ✅ executed (13 commits, +41 tests) |
-| Combat Foundation — abilities + engagement + world effects + recursion | `docs/superpowers/plans/2026-04-19-combat-foundation.md` | ⚠️ drafted — awaiting execution (24 tasks) |
+| GPU sim state (Subsystem 1) | `docs/superpowers/plans/2026-04-22-gpu-sim-state.md` | ⚠️ in flight |
+| GPU cold-state replay (Subsystem 2) | `docs/superpowers/plans/2026-04-22-gpu-cold-state-replay.md` | ⚠️ Phase 1 done; Phase 3 in flight |
+| Cold-state Phase 3 — gold + standing | `docs/superpowers/plans/2026-04-23-cold-state-phase-3-gold-standing.md` | ⚠️ in flight |
 | Plan 4 — debug & trace runtime | _(to be written)_ | ❌ not yet written |
-| Plan 5 — `ComputeBackend` trait extraction | _(to be written)_ | ❌ not yet written |
-| Plan 6 — `GpuBackend` foundation | _(to be written)_ | ❌ not yet written |
-| Plan 7+ — per-kernel GPU porting | _(to be written)_ | ❌ not yet written |
+| Ability DSL + Economic Depth implementation | _(to be planned from `docs/ability_econ_dsl/`)_ | ❌ not yet planned |
 
-Post-Combat-Foundation-and-Plan-3 deferred subsystems (14 of them — memberships,
-memory, relationships, items, groups, factions, buildings, settlements, regions,
-quests, theory-of-mind, personality utility, terrain, interior nav) are
-indexed in `docs/superpowers/roadmap.md`. Individual plans drafted on-demand.
+Deferred subsystems (memberships, memory, relationships, items, groups, factions,
+buildings, settlements, regions, quests, theory-of-mind, personality utility, terrain,
+interior nav) are indexed in `docs/superpowers/roadmap.md`. Individual plans drafted
+on-demand.
 
 ## Subsystem table
 
@@ -77,20 +64,18 @@ short SHAs from `git log --oneline 64675559..HEAD -- crates/engine/`.
 | §15 | `TopKView` trait + `MostHostileTopK` (cumulative-damage heap) | ✅ | P2 T2 (`aee396a5`) | `src/view/topk.rs` | `tests/view_topk.rs` | `topk_bounded_keeps_highest_scoring_attackers` asserts top[0]=60, top[3]=30 (K=4, 6 attackers with damage 10/20/30/40/50/60). Boundary between top-4 (30) and out (20) is 10 apart — a bug using `<` vs `<=` on the eviction threshold wouldn't fire here. | N/A. |
 | §16 | `AggregatePool<T>` + `Quest` / `Group` Pod-compatible shapes | ✅ | P1 T16 (`c438f249`) | `src/aggregate/` | `tests/aggregate_pool.rs` | `kill_then_alloc_reuses_slot_and_clears_contents` (in `aggregate_pool.rs`) — same single-reuse issue as Pool. Also no test registers a cascade handler that writes to `AggregatePool` and reads it back on the next iteration. | N/A (no visual for aggregates). |
 | §17 | Trajectory emission (safetensors; N-tick windowing) | ✅ | MVP | `src/trajectory.rs` | `tests/trajectory_roundtrip.rs` | Python roundtrip test compares only `n_agents` and `n_ticks` — doesn't compare per-tick position/hp data. A silent trajectory corruption that preserves shape would pass. | N/A. |
-| §18 | Save / load | ❌ | P3 | — | — | Not started. | N/A. |
+| §18 | Save / load | ✅ | P3 (`73c12108`) | `src/snapshot/{format,migrate}.rs` | `tests/snapshot_{header,roundtrip,schema_mismatch,migration}.rs`, `tests/acceptance_plan3.rs` | Coverage gaps documented inline in `format.rs`: cold_channels, EventRing entries (metadata only), views/registry/terrain/config (rebuilt or caller-supplied). Acceptance test asserts state equality (not event-hash equality) post save+reload. | N/A. |
 | §19 | `Invariant` trait + `Violation` + `FailureMode` | ✅ | P2 T3 (`f8c23715`) | `src/invariant/trait_.rs` | `tests/invariant_trait.rs`, `tests/invariant_dispatch_modes.rs` | — | N/A. |
 | §19 | `InvariantRegistry::check_all` + dispatch by failure mode | ✅ | P2 T3 (`21537e11`) | `src/invariant/registry.rs` | `tests/invariant_dispatch_modes.rs` | — | N/A. |
 | §19 | Built-in invariants: `MaskValidityInvariant`, `PoolNonOverlapInvariant` | ✅ 🎯 | P2 T3 (`6c0ac879`), audit fix `bc6fac31` | `src/invariant/builtins.rs` | `tests/invariant_mask_validity.rs`, `tests/invariant_pool_non_overlap.rs` | **`PoolNonOverlapInvariant::check` is now real** — `Pool<T>::is_non_overlapping` walks `alive` + `freelist` to flag both overlap AND freelist duplicates. Two new fault-injection tests prove the check fires (would fail if body were reverted to `None`). `MaskValidityInvariant::check` (trait impl) still returns `None`; real check is `check_with_scratch`, invoked by `step_full`. Separate documented design, not a regression. | N/A. |
-| §18 | Probe harness | ❌ | P3 | — | — | Not started. | N/A. |
+| §18 | Probe harness | ✅ | P3 (`73c12108`) | `src/probe/mod.rs` | `tests/probe_harness.rs`, `tests/probe_determinism.rs` | Probe is a struct (name + seed + spawn fn + ticks + assert fn). Same-seed determinism asserted via `replayable_sha256`. | N/A. |
 | §20 | Schema hash (`sha2` over layout fingerprint + `.schema_hash` baseline file) | ✅ | MVP + P1 T4 + P2 T4 | `src/schema_hash.rs`, `.schema_hash` | `tests/schema_hash.rs` | Baseline-comparison test catches any hash drift but doesn't prove the fingerprint string covers every layout-relevant type (e.g., nothing asserts `ResourceRef` or `ItemId` sizes flow into the hash). | N/A. |
-| §21 | Observation packer | ❌ | P3 | — | — | Not started. | N/A. |
+| §21 | Observation packer | ✅ | P3 (`73c12108`) | `src/obs/{packer,sources}.rs` | `tests/obs_packer.rs`, `tests/obs_sources_{vitals,position,neighbors}.rs` | `FeatureSource` trait + 3 built-ins (Vitals dim 4, Position dim 7, Neighbor<K> dim 6K). Per-tick alloc in NeighborSource — zero-alloc variant deferred to a SimScratch slot in a later plan. | N/A. |
 | §22 | `TelemetrySink` trait + `NullSink` / `VecSink` / `FileSink` + built-in metric name consts | ✅ | P2 T4 (`9be3ebff`, `da1018e9`) | `src/telemetry/` | `tests/telemetry_sink_trait.rs`, `tests/telemetry_vec_sink.rs`, `tests/telemetry_file_sink.rs` | `file_sink_writes_json_lines` checks `lines.len() == 3` and substring `"metric":"foo"`. A JSON serializer bug that swaps two keys or emits malformed UTF-8 still containing the substring would pass. No schema validation. | Run a 1000-tick scenario with FileSink; open the JSONL in `jq` — every row should be valid JSON with `tick`, `metric`, `value` fields. |
 | §23 | Debug & trace runtime | ❌ | P4 | — | — | Not started. | — |
 | §24 | `ComputeBackend` trait / `SerialBackend` / `GpuBackend` | ❌ | P5, P6 | — | — | Not started. Currently everything is implicitly "Serial" — no trait abstraction. | — |
 
 ## Top weak-test risks (prioritized)
-
-Updated 2026-04-19 after audit resolution (HIGH + MEDIUM done).
 
 1. **`Announce` uses 3D distance (`Vec3::distance`), spec is silent.** All announce tests still place observers on the same z-plane as the speaker, so 3D vs planar is indistinguishable. Distance *constants* are now all pinned (HIGH #1/#2/#4 fixed), so a value change would fail — but a 3D→planar refactor of the same constant would not. If the intended semantics are planar (because announcements are "heard in town") then the impl is wrong; if 3D is intended, the spec should say so.
 
@@ -99,11 +84,6 @@ Updated 2026-04-19 after audit resolution (HIGH + MEDIUM done).
 3. **`MaskValidityInvariant::check` (trait impl) still returns `None`.** The real check is `check_with_scratch`, invoked by `step_full`. Documented-by-design but a registering caller who expected `check` to fire would be surprised.
 
 4. **Phase-5 view-fold skip not asserted.** `pipeline_six_phases` value assertions now catch constant-zero / out-of-range telemetry, but no test proves that a `MaterializedView::fold` was actually invoked during the tick (as distinct from the pre-step compute). Would need a view that mutates visibly on a known-frequency event.
-
-**Resolved (previously in this list):**
-- ~~PoolNonOverlapInvariant stub~~ — real implementation in `bc6fac31`.
-- ~~Boundary untested for distances/damage/restore~~ — all HIGH + MEDIUM findings resolved.
-- ~~Movement tests only check sign~~ — MOVE_SPEED_MPS=1.0 pinned in both flee + move.
 
 ## Open verification questions
 

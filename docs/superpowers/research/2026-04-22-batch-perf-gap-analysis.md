@@ -430,9 +430,8 @@ cargo run --release --features gpu --bin xtask -- chronicle --perf-sweep --use-b
 cargo run --release --features gpu --bin xtask -- chronicle --perf-sweep --use-batch --batch-ticks 10
 ```
 
-**Result: blocked.** The worktree is compile-broken — an in-flight
-independent refactor (the gold-i32-narrowing agent per
-`docs/superpowers/research/2026-04-22-gold-i32-narrowing.md`) has left
+**Result: blocked.** At the time of writing, the worktree was compile-broken —
+an independent gold-narrowing refactor (later landed in `d78c565a`) had left
 generated files in an inconsistent state:
 
 ```

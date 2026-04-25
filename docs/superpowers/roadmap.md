@@ -13,12 +13,12 @@
 > - `docs/engine/spec.md` — runtime contract sections §§1–26.
 > - `docs/dsl/state.md` — authoritative state catalog. Every scope
 >   statement below cites a section of this file.
-> - `docs/audit_2026-04-19.md` — audit of what state.md commits to vs.
->   what the engine + drafts have.
-> - `docs/superpowers/plans/2026-04-19-engine-plan-state-port.md` — enumerates
->   the **storage-only stubs already in `SimState`** (cold_memberships,
->   cold_inventory, cold_memory, cold_relationships, etc.) that these
->   subsystems light up with behaviour.
+> - The 2026-04-19 state-port plan enumerated the storage-only stubs
+>   already in `SimState` (cold_memberships, cold_inventory, cold_memory,
+>   cold_relationships, etc.) that these subsystems light up with
+>   behaviour. State port is now executed (its plan file lives in git
+>   history); the stubs are present and behaviour-attachment is the
+>   work below.
 
 ---
 
@@ -33,13 +33,13 @@ them" backlog.
 
 Out of scope for this document (covered by other plans or explicitly
 punted, see §4):
-- Combat Foundation — drafted at
-  `docs/superpowers/plans/2026-04-19-combat-foundation.md` (24 tasks).
-- Plan 3 persistence / obs packer / probes — drafted at
-  `docs/superpowers/plans/2026-04-19-engine-plan-3-persistence-obs-probes.md`.
-- Plan 4+ — debug & trace runtime, `ComputeBackend` extraction, `GpuBackend`
-  foundation, per-kernel GPU porting. All listed in `status.md:34-37` as
-  "to be written."
+- Combat Foundation — executed (commit range `babb8ec0..a379f3df`); see
+  `docs/engine/status.md`.
+- Plan 3 persistence / obs packer / probes — executed (commit `73c12108`).
+- GPU backend (Subsystems 1/2) — designs in `docs/superpowers/specs/`,
+  active plans in `docs/superpowers/plans/`.
+- Plan 4 (debug & trace runtime) and other future engine plans — listed
+  in `docs/engine/status.md` "Plans index" as not-yet-written.
 
 ---
 
@@ -1002,7 +1002,7 @@ Explicitly outside:
 | Plan 5 `ComputeBackend` trait extraction | `status.md:35`. | Future plan. |
 | Plan 6 GpuBackend foundation | `status.md:36`. | Future plan. |
 | Plan 7+ per-kernel GPU porting | `status.md:37`. Every subsystem here gets a "GPU counterpart" task in this plan family. | Future plan family. |
-| Observation packer | Plan 3 item; already drafted, not part of this roadmap. | `docs/superpowers/plans/2026-04-19-engine-plan-3-persistence-obs-probes.md`. |
+| Observation packer | Plan 3 (executed in `73c12108`). `crates/engine/src/obs/`. | — |
 | Probe harness | Same — Plan 3. | Same. |
 | 5-personality dims → training encoder changes | Training-side; engine just exposes the fields. | Downstream Python; see MEMORY.md notes on encoder training. |
 
@@ -1172,14 +1172,9 @@ the bias, Groups is the high-leverage pick.
 - `docs/dsl/state.md` — authoritative state catalog.
 - `docs/dsl/systems.md` — system inventory (essential vs emergent).
 - `docs/dsl/stories.md` — user-story investigations.
-- `docs/audit_2026-04-19.md` — consolidation audit; §Deferred + §3
-  state catalog audit.
-- `docs/superpowers/plans/2026-04-19-engine-plan-state-port.md` —
-  what's already stubbed; "Deferred fields" section enumerates
-  AgentData / Emotions / Aspiration / Goal / BuildingData / Room /
-  Settlement / RegionState / TileRef / RoomRef /
-  known_voxel_resources / believed_knowledge as deferred.
-- `docs/superpowers/plans/2026-04-19-combat-foundation.md` —
-  prerequisite (24 tasks).
-- `docs/superpowers/plans/2026-04-19-engine-plan-3-persistence-obs-probes.md` —
-  prerequisite.
+- The 2026-04-19 state-port plan (executed; in git history) enumerated
+  what's already stubbed; deferred fields include AgentData / Emotions /
+  Aspiration / Goal / BuildingData / Room / Settlement / RegionState /
+  TileRef / RoomRef / known_voxel_resources / believed_knowledge.
+- Combat Foundation and Plan 3 (both executed; in git history) were
+  prerequisites for the work below.
