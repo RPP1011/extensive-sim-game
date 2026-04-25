@@ -1,9 +1,12 @@
-# Engine Crate Split + Sealed Rule Trait — Design Spec
+# Engine Crate Split + Sealed Rule Trait — Design Spec (v1, SUPERSEDED)
 
-> **Status:** Design (2026-04-25). Spec B from the four-layer
-> architectural-enforcement framework. Makes P1 (Compiler-First) and
-> related principles structurally impossible to violate at compile
-> time, build time, commit time, and CI time.
+> **Status:** SUPERSEDED 2026-04-25 by `2026-04-25-engine-crate-split-design-v2.md`.
+>
+> Brainstorming surfaced two structural errors in this v1: dep direction was
+> inverted (v2 has `engine ← engine_data ← engine_rules`, not the other way),
+> and `step_full` was wrongly listed as a non-goal (v2 emits `step_full` from
+> the DSL compiler so LLVM can specialize per rule set). Read v2 instead.
+> v1 is preserved for the decision history.
 
 ## §1 Goals
 
