@@ -1,4 +1,14 @@
-# Engine Crate Restructure (Plan B1) — Implementation Plan
+# Engine Crate Restructure (Plan B1, SUPERSEDED) — Implementation Plan
+
+> **Status:** SUPERSEDED 2026-04-25 by `2026-04-25-engine-crate-split-impl-v2.md` (Plan B1').
+>
+> Spec B (the design this plan implemented) was rewritten as Spec B' after
+> brainstorming surfaced two structural errors: dep direction was inverted
+> (B' has `engine ← engine_data ← engine_rules`), and `step_full` was wrongly
+> kept in engine (B' emits it from the DSL compiler so LLVM can specialize).
+> Tasks 1–2 of this v1 plan landed (`d4d06390`, `da008ac3`) and remain valid;
+> Tasks 3+ are replaced by Plan B1'. This file is preserved for the
+> decision history.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
