@@ -146,3 +146,19 @@
 - Manual: code review on `unwrap()` in hot paths.
 
 **Source.** `docs/spec/runtime.md` §14.
+
+---
+
+## P11 — Reduction Determinism
+
+**Statement.** All commutative-but-not-associative operations (float reductions, atomic-append events, RNG cross-backend reads) use sort-then-fold or pinned constants so the result is bit-exact across both backends and across runs.
+
+**Rationale.** Float associativity and atomic append-order are nondeterministic by default; without explicit ordering, parity fails silently and replay diverges. This is a distinct concern from P5 (keyed PCG — pure-function RNG inputs) and P3 (parity — the contract); P11 is the *mechanism* that makes parity hold under reductions.
+
+**Enforcement.**
+- Compile-time: emitter generates `sort_by(target_id)` before `atomic_*` reductions on materialized views; per-tick `seq` ordering injected into GPU atomic-append events.
+- CI: `tests/parity_*.rs` exercises reduction-heavy fixtures (DamageTaken view, threat_level fold) on both backends and asserts byte-equal output.
+- CI: `tests/rng_cross_backend.rs` asserts host `per_agent_u32` and shader `per_agent_u32_glsl` produce identical streams on shared inputs (RNG golden test).
+- Manual: code review on any new atomic-reduction kernel.
+
+**Source.** `docs/spec/runtime.md` §2, §15; `docs/spec/compiler.md` §1.2 (kept for archaeology only — readers do not follow pointers).
