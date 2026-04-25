@@ -89,7 +89,7 @@ short SHAs from `git log --oneline 64675559..HEAD -- crates/engine/`.
 
 Concrete ambiguities that code review can't resolve — audit one at a time.
 
-1. **Does Announce audience use 3D or planar distance?** `step.rs:473` calls `op.distance(center)` which is 3D. Spec §10 doesn't specify. Intended?
+1. **Does Announce audience use 3D or planar distance?** Announce dispatches through `spatial.within_radius(state, center, radius)` (`step.rs` Announce arm, post-2026-04-23 refactor) which is 3D. Spec §10 doesn't specify. Intended?
 
 2. **Does Attack emit an event when the attacker is dead?** `step.rs:268-290` only guards `if !state.agent_alive(tgt)` (target), not attacker. Can a just-killed attacker's queued Attack action still fire (within the same tick's shuffle order)?
 
