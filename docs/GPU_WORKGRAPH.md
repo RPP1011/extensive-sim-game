@@ -1,6 +1,6 @@
 # GPU Workgraph Reference — Wolves & Humans Simulation Engine
 
-**Audience:** GPU-compute-literate engineers joining the project who have read `docs/technical_overview.md` but lack project-specific knowledge of the GPU paths.
+**Audience:** GPU-compute-literate engineers joining the project who have read `docs/overview.md` but lack project-specific knowledge of the GPU paths.
 
 **Date:** 2026-04-23
 
@@ -385,7 +385,7 @@ Same as sync, plus:
 
 ### Performance Gaps
 
-- **Per-event fold dispatch (N=100k, heavy combat):** View fold kernels dispatch once per event, not once per view. Batching via segmented-reduction would 8–10× speedup. See `docs/technical_overview.md:156`.
+- **Per-event fold dispatch (N=100k, heavy combat):** View fold kernels dispatch once per event, not once per view. Batching via segmented-reduction would 8–10× speedup. See `docs/superpowers/notes/2026-04-23-sync-cascade-regression-bisect.md` for the corrected per-phase decomposition.
 - **Resident fold kernels:** Task D4 deferred. Currently only the sync path folds; resident cascade assumes views stay stale across batch ticks. Wiring fold kernels into the resident path requires careful binding-group re-architecture (fold kernels currently bind view_storage read_write, and the physics kernel also needs write access during the same iteration).
 
 ---
@@ -459,4 +459,4 @@ Same as sync, plus:
 
 ---
 
-**Next reading:** See `docs/technical_overview.md` sections 8–10 for determinism guarantees, cascade semantics, and performance decomposition. For DSL → WGSL specifics, consult `dsl_compiler/src/emit_*.rs`.
+**Next reading:** See `docs/spec/runtime.md §2` (determinism contract), `§11` (cascade), and `§14` (tick pipeline) for cascade semantics; the per-phase performance decomposition lives in `docs/superpowers/notes/2026-04-23-sync-cascade-regression-bisect.md`. For DSL → WGSL specifics, consult `dsl_compiler/src/emit_*.rs`.

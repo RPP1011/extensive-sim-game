@@ -1,8 +1,9 @@
 # Sync-Path GPU Cascade Regression Bisect (N=100k, RTX 4090)
 
 > Investigation into the apparent 193 ms → 4,549 ms regression in the
-> `gpu_cascade` phase between `docs/technical_overview.md`'s baseline
-> (commit `494c7b69`, 2026-04-22) and HEAD (`856fe171`, 2026-04-23).
+> `gpu_cascade` phase between the historical `docs/technical_overview.md`
+> baseline (now superseded by `docs/overview.md`; commit `494c7b69`,
+> 2026-04-22) and HEAD (`856fe171`, 2026-04-23).
 
 ## TL;DR
 
@@ -110,10 +111,11 @@ cannot be the first offender:
 
 This is a **reporting bug, not a fix-me bug**:
 
-1. `docs/technical_overview.md:138-147` should be corrected. The
-   "193 ms GPU cascade" figure describes the CPU fallback, not the
-   GPU cascade. The real decomposition at N=100k on this GPU is
-   something like:
+1. The "193 ms GPU cascade" figure (originally in
+   `docs/technical_overview.md:138-147`, now removed in the
+   `docs/overview.md` rewrite) was wrong. It describes the CPU
+   fallback, not the GPU cascade. The real decomposition at N=100k
+   on this GPU is something like:
    - GPU mask + scoring: ~290 ms (unchanged)
    - GPU cascade: ~4,500 ms (was silently CPU-fallback 193 ms)
    - GPU seed fold: ~1,100 ms (was silently CPU-fallback 893 ms)
@@ -148,4 +150,4 @@ This is a **reporting bug, not a fix-me bug**:
 - `/home/ricky/Projects/game/.worktrees/world-sim-bench/crates/engine_gpu/src/cascade.rs` (APPLY_EVENT_RING_CAPACITY const)
 - `/home/ricky/Projects/game/.worktrees/world-sim-bench/crates/engine_gpu/src/event_ring.rs` (DEFAULT_CAPACITY const)
 - `/home/ricky/Projects/game/.worktrees/world-sim-bench/crates/engine_gpu/tests/perf_n100.rs` (measurement harness)
-- `/home/ricky/Projects/game/.worktrees/world-sim-bench/docs/technical_overview.md` (lines 138-147, stale perf claim)
+- `/home/ricky/Projects/game/.worktrees/world-sim-bench/docs/technical_overview.md` (lines 138-147 in worktree snapshot; replaced by `docs/overview.md` on `main` — stale perf claim was removed in the rewrite)

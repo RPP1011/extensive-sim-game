@@ -3,7 +3,7 @@
 **Status:** research (2026-04-22 baseline + 2026-04-24 refresh)
 **Date:** 2026-04-22 (original) / 2026-04-24 (refresh)
 **Branch:** `world-sim-bench` / `perf-stage-a`
-**Predecessor:** `docs/technical_overview.md` §10.1; `docs/superpowers/specs/2026-04-22-gpu-resident-cascade-design.md`
+**Predecessor:** `docs/overview.md` (replaced `docs/technical_overview.md` §10.1); `docs/superpowers/specs/2026-04-22-gpu-resident-cascade-design.md`
 
 > **Note:** the original analysis below was written against pre-Task-#68
 > code at N=2048 on llvmpipe. The **2026-04-24 refresh** section at the
@@ -457,7 +457,7 @@ alternatives.
   consistent with suspects B/C/F.3.
 - Drops with batch size → init/submit/poll cost dominates.
 
-The technical_overview.md 8114 µs figure uses batch-ticks=200, so
+The historical technical_overview.md 8114 µs figure (now superseded; see `docs/overview.md`) uses batch-ticks=200, so
 init/submit/poll is already amortised. Running with `--batch-ticks 1`
 measures the init+submit+poll cost in isolation; `--batch-ticks 500`
 confirms flatness.

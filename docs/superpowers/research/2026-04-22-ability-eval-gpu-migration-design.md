@@ -165,7 +165,8 @@ path. That is the correctness gap to close.
 
 ### B.4 DSL emitter constraints
 
-Per `docs/technical_overview.md:42`, the GPU-emittability validator
+Per `docs/overview.md` §2 (replacing the historical
+`docs/technical_overview.md:42`), the GPU-emittability validator
 rejects: heap allocation, recursion, dynamic dispatch, parse-time-
 unbounded loops. Ability scoring runs afoul of:
 

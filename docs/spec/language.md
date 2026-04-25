@@ -1,10 +1,8 @@
 # World Sim DSL Specification
 
-Canonical specification for the ECS DSL. Supersedes `spec.md`, `spec.md`, and `spec.md` (all folded into this doc). §9 lists the 29 settled design decisions; per-decision rationale is extracted into `decisions.md`.
+Canonical specification for the world-sim DSL. §9 records settled design decisions (numbering reflects history; gaps are retired items). Appendix A contains the detailed universal-mechanisms reference (PostQuest/AcceptQuest/Bid/Announce).
 
-Appendix A contains the detailed universal-mechanisms reference (PostQuest/AcceptQuest/Bid/Announce).
-
-For compiler-layer concerns (codegen, lowering, schema emission), see `docs/spec/compiler.md`.
+For compiler-layer concerns (codegen, lowering, schema emission), see `docs/spec/compiler.md`. For runtime contract, see `docs/spec/runtime.md`.
 
 ---
 
@@ -14,18 +12,18 @@ The DSL declares a closed-world simulation: typed state, typed events, declarati
 
 Machine learning — policy architecture, training algorithm, curriculum, reward shaping, observation packing — is **not** in the DSL. The compiler emits Python dataclasses + a pytorch `Dataset` over the trace format so that external training scripts consume a typed API. The in-engine NPC backend is a utility backend (ships permanently as bootstrap + regression baseline); `scoring` declarations drive utility scoring and are also written into traces so Python training jobs can reshape them into rewards externally.
 
-- **`entity`** — parameterization of one of the three predefined root kinds (Agent, Item, Group). Authors cannot introduce new root kinds; they declare `creature_type`, `ItemKind`, or `GroupKind` variants with default stats, capabilities, eligibility, and starting memberships. (`stories.md` §1, §10, §11)
-- **`event`** — typed, append-only records. The universal state-mutation channel. Annotations mark replayability, high-volume classification, trace visibility. (`stories.md` §2; `stories.md` §15; `stories.md` §60)
-- **`view`** — pure or event-folded derivations. Eager (`@materialized`) or lazy; first-class spatial and non-spatial queries. (`stories.md` §3, §5; `stories.md` §26)
-- **`physics`** cascade rule — phase-tagged transforms from events to events with compile-time cycle detection, race detection, and schema-drift guards. (`stories.md` §4; `stories.md` §27)
-- **`mask`** — per-action validity predicates. Emits both a Rust predicate fn and a SPIR-V kernel so the legality contract is identical on both backends. (`stories.md` §8)
-- **`verb`** — composition sugar that bundles mask + cascade + scoring into a named gameplay action without extending the categorical action vocabulary. (`stories.md` §7)
+- **`entity`** — parameterization of one of the three predefined root kinds (Agent, Item, Group). Authors cannot introduce new root kinds; they declare `creature_type`, `ItemKind`, or `GroupKind` variants with default stats, capabilities, eligibility, and starting memberships.
+- **`event`** — typed, append-only records. The universal state-mutation channel. Annotations mark replayability, high-volume classification, trace visibility.
+- **`view`** — pure or event-folded derivations. Eager (`@materialized`) or lazy; first-class spatial and non-spatial queries.
+- **`physics`** cascade rule — phase-tagged transforms from events to events with compile-time cycle detection, race detection, and schema-drift guards.
+- **`mask`** — per-action validity predicates. Emits both a Rust predicate fn and a SPIR-V kernel so the legality contract is identical on both backends.
+- **`verb`** — composition sugar that bundles mask + cascade + scoring into a named gameplay action without extending the categorical action vocabulary.
 - **`scoring`** — per-action personality-weighted utility table consumed by the utility backend. Also written to traces so external ML training scripts can reshape them into rewards.
-- **`invariant`** — static, runtime, or debug-only predicates over state, checked at the phase boundary they describe. (`stories.md` §6)
+- **`invariant`** — static, runtime, or debug-only predicates over state, checked at the phase boundary they describe.
 - **`probe`** — named scenario + behavioral assertion, evaluated against seeded trajectories. CI regression surface.
 - **`metric`** — runtime observability declaration: per-tick counters, histograms, gauges with optional alert thresholds. No coupling to training.
 
-At runtime the tick pipeline is fixed: pre-phase rules → event emission → materialized-view updates → mask build → utility-backend scoring → action selection → action application → cascade fixed-point → post-phase rules → metric emission. Determinism flows through a single per-world RNG; text generation sits outside the deterministic fold. (`stories.md` §27, §29; `stories.md` §60)
+At runtime the tick pipeline is fixed: pre-phase rules → event emission → materialized-view updates → mask build → utility-backend scoring → action selection → action application → cascade fixed-point → post-phase rules → metric emission. Determinism flows through a single per-world RNG; text generation sits outside the deterministic fold.
 
 ---
 
@@ -140,7 +138,7 @@ The compiler emits:
 - An entry in the trace-format event-vocabulary table (if `@traced`), plus an emitted Python `@dataclass` mirroring the event's fields.
 - A pattern-match kernel for use in cascade, scoring, and probe blocks.
 
-String payloads are permitted only on `@non_replayable` events; the compiler rejects `String` fields on replayable events (`stories.md` §60). All load-bearing references are `AgentId`, `GroupId`, `ItemId`, `QuestId`, or `AuctionId` — no text. This forces `class_tags: Vec<String>` and `archetype: String` on legacy agent fields to migrate to `TagId` / `ArchetypeId` (`stories.md` §60 cross-cutting).
+String payloads are permitted only on `@non_replayable` events; the compiler rejects `String` fields on replayable events. All load-bearing references are `AgentId`, `GroupId`, `ItemId`, `QuestId`, or `AuctionId` — no text. This forces `class_tags: Vec<String>` and `archetype: String` on legacy agent fields to migrate to `TagId` / `ArchetypeId`.
 
 ### 2.3 `view` declaration
 
@@ -174,12 +172,12 @@ sort_by distance(self, _) limit K { ... }
 @indexed_on(field)             // forces a sorted or hashed index on `field`
 @top_k(K)                      // bounded output size
 @backend(cpu | gpu)            // override auto-selection
-@fidelity(>= Medium)           // skip evaluation at lower fidelity (§2.3 of this doc; stories.md §E.31)
+@fidelity(>= Medium)           // skip evaluation at lower fidelity (§2.3 of this doc)
 ```
 
 The compiler emits:
 
-- For `@materialized`: a field on the corresponding entity + an event-dispatch table mapping each `on_event` to the update body. GPU-amenable materializations sort events by target before commutative reduction to preserve determinism (`stories.md` §29 GPU-determinism traps).
+- For `@materialized`: a field on the corresponding entity + an event-dispatch table mapping each `on_event` to the update body. GPU-amenable materializations sort events by target before commutative reduction to preserve determinism.
 - For `@lazy`: an inline function referenced from mask predicates, scoring expressions, and cascade bodies.
 - For `@spatial`: routing to the appropriate spatial index — `voxel_engine::ai::spatial` on GPU, or a CPU uniform-grid fallback.
 - For `@top_k`: a fixed-cap partial-sort that writes into a `SimScratch` buffer.
@@ -265,9 +263,9 @@ physics auction_item_resolved @phase(event) {
 
 Annotations:
 
-- `@phase(pre | event | post)` — fixed three-phase ordering (`stories.md` §27). `pre` runs before event emission (read-only state access). `event` runs during the fixed-point event fold. `post` runs after all events quiesce for the tick.
+- `@phase(pre | event | post)` — fixed three-phase ordering. `pre` runs before event emission (read-only state access). `event` runs during the fixed-point event fold. `post` runs after all events quiesce for the tick.
 - `@before(OtherRule)` / `@after(OtherRule)` — explicit ordering between rules in the same phase.
-- `@terminating_in(N)` — asserts the cascade converges within N hops when self-emission is possible (`stories.md` §4).
+- `@terminating_in(N)` — asserts the cascade converges within N hops when self-emission is possible.
 
 Compile-time validation:
 
@@ -314,11 +312,11 @@ Compilation:
 
 - Per-action validity buffers `categorical_mask[N × NUM_KINDS]`, `target_mask[N × NUM_SLOTS]`, etc., consumed by the utility backend when filtering scoring candidates.
 - Mask predicates that reference only intrinsic scalar fields compile to SPIR-V compute shaders; cross-entity predicates (`t in quest.eligible_acceptors`, `at_war(self.faction, f)`) are CPU-patched into the same boolean buffer before scoring evaluation.
-- Every predicate node has a stable AST ID; an explanation kernel reruns the predicate against a captured state snapshot for `trace_mask(agent, action, tick)` (`stories.md` §34).
+- Every predicate node has a stable AST ID; an explanation kernel reruns the predicate against a captured state snapshot for `trace_mask(agent, action, tick)`.
 
 ### 2.6 `verb` (composition sugar)
 
-`verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and scoring entries. It does NOT add to the closed categorical action vocabulary. (`stories.md` §7)
+`verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and scoring entries. It does NOT add to the closed categorical action vocabulary.
 
 ```
 verb Pray(self, shrine: Structure) =
@@ -336,8 +334,6 @@ The compiler expands a `verb` into:
 3. A scoring entry appended to the scoring table (§3.4).
 
 Adding a `verb` does not bump the schema hash. Adding a new micro primitive does (see §4).
-
-### 2.7 `policy` declaration — REMOVED: ML out of DSL scope, see compiler trace-emission
 
 ### 2.8 `invariant` declaration
 
@@ -368,7 +364,7 @@ Schema invariants are separate from state invariants: the append-only-trace-sche
 
 ### 2.9 `probe` declaration
 
-Named CI regression assertions: fixture scenario → seeded event trajectory → behavioural check against the utility backend. Probes live in `probes/` alongside their seed scenarios. (`stories.md` §18)
+Named CI regression assertions: fixture scenario → seeded event trajectory → behavioural check against the utility backend. Probes live in `probes/` alongside their seed scenarios.
 
 ```
 probe <Name> {
@@ -417,8 +413,6 @@ probe NoSpouseAttacks {
 
 Probes compile to trajectory queries over the trace ring-buffer format. Schema-hash mismatch between a probe's reference fields and the current DSL is a hard error (fail-loud, §4).
 
-### 2.10 `curriculum` declaration — REMOVED: ML out of DSL scope, see compiler trace-emission
-
 ### 2.11 `metric` declaration
 
 ```
@@ -450,8 +444,6 @@ Alerts emit structured log records to the engine telemetry sink. Metrics are sim
 ---
 
 ## 3. Action vocabulary
-
-### 3.1 Observation declaration — REMOVED: ML out of DSL scope, see compiler trace-emission
 
 ### 3.2 Action heads
 
@@ -523,14 +515,14 @@ Four macro mechanisms + thirteen micro primitives.
 
 Enums carried as parameter heads:
 
-- `QuestType` — Hunt, Escort, Deliver, Explore, Defend, Gather, Rescue, Assassinate, Custom, Conquest, MutualDefense, Submit, Found, Charter, Diplomacy, Marriage, Pilgrimage, Service, Heist, Trade, FulfillProphecy, **Claim**, **Peace**, **Raid**, **HaveChild**. (Claim/Peace/Raid extensions from `stories.md` §46, §51; HaveChild from `stories.md` §52.)
+- `QuestType` — Hunt, Escort, Deliver, Explore, Defend, Gather, Rescue, Assassinate, Custom, Conquest, MutualDefense, Submit, Found, Charter, Diplomacy, Marriage, Pilgrimage, Service, Heist, Trade, FulfillProphecy, **Claim**, **Peace**, **Raid**, **HaveChild**. (Claim/Peace/Raid extensions from ; HaveChild from .)
 - `PartyScope` — `Individual(AgentId)`, `Group(GroupId)`, `Settlement(SettlementId)`, `Anyone`, `Role(RoleTag)`.
 - `QuestTarget` — `Agent`, `Group`, `Location`, `Structure`, `CreatureType`, `Pair(Target, Target)`, `Predicate`, `Item`, `Region`, **`Role(RoleTag)`** (for Claim quests).
 - `RewardKind` — `Gold`, `Xp`, `Items`, `Reputation`, `Faith`, `Spoils`, `Charter`, `Union`, `Reciprocal`, `Protection`, `Glory`, `Promise`, `Combination`.
 - `PaymentKind` — `Gold`, `Commodity`, `Item`, `Service`, `Reputation`, `Combination`.
 - `GroupKind` — for `InviteToGroup`: Faction, Family, Guild, Religion, Pack, Party, Settlement, Court, Cabal, Alliance, Coven, Other.
 
-Invite and auction coverage (`stories.md` §63, `stories.md` §54):
+Invite and auction coverage:
 
 | Invite / auction usage       | `macro_kind`        | Parameters                                                         |
 |------------------------------|---------------------|--------------------------------------------------------------------|
@@ -605,8 +597,6 @@ Constraints:
 
 Adding a `scoring` entry does not bump the schema hash's state / event / rules components — only the `scoring_hash` sub-hash (§4). External training code that depends on a specific scoring shape is responsible for recomputing from the current DSL.
 
-### 3.5 Backend — REMOVED: ML out of DSL scope, see compiler trace-emission. The NPC backend is the utility backend (permanent); see `docs/spec/compiler.md` §Decisions #24.
-
 ---
 
 ## 4. Schema versioning
@@ -618,7 +608,7 @@ The schema hash is a content-addressed fingerprint over:
 3. **`rules_hash`** — physics cascades, mask predicates, and verb declarations.
 4. **`scoring_hash`** — scoring-table expressions and their input dependencies.
 
-The combined schema hash is `sha256(state_hash || event_hash || rules_hash || scoring_hash)`. Loading a trace whose combined hash differs from the current DSL is a hard error (`stories.md` §15, `stories.md` §23, `stories.md` §64). Traces emitted under a different schema must be consumed by an engine version that matches, or re-emitted from the current DSL.
+The combined schema hash is `sha256(state_hash || event_hash || rules_hash || scoring_hash)`. Loading a trace whose combined hash differs from the current DSL is a hard error. Traces emitted under a different schema must be consumed by an engine version that matches, or re-emitted from the current DSL.
 
 There are no `@since` annotations. There are no padded-zero migration tables. There are no v1/v2/v3 schemas in the codebase — git holds history. Two branches with different schemas produce mutually incompatible traces, which is correct.
 
@@ -661,7 +651,7 @@ Enum:      Source (Witnessed / TalkedWith / Overheard / Rumor / Announced /
 
 ### 5.2 Forbidden types
 
-`String` is forbidden on `@replayable` events, on `@primary` state fields, and on any field referenced by a mask or reward predicate. Strings are permitted only on `@non_replayable` events, the `chronicle_prose` side channel, and at display time. All load-bearing references are IDs (`stories.md` §60). `class_tags` and `archetype` agent fields carry `TagId` / `ArchetypeId` with a compile-time string table.
+`String` is forbidden on `@replayable` events, on `@primary` state fields, and on any field referenced by a mask or reward predicate. Strings are permitted only on `@non_replayable` events, the `chronicle_prose` side channel, and at display time. All load-bearing references are IDs. `class_tags` and `archetype` agent fields carry `TagId` / `ArchetypeId` with a compile-time string table.
 
 Unbounded `Vec<T>` is forbidden on `entity`, `event`, and in-world struct declarations. Only `SimScratch` pools and world-level ring buffers may hold `Vec`. The compiler rejects:
 
@@ -797,7 +787,7 @@ Tests in `src/ai/core/tests/determinism.rs` (runtime) and the compiler's invaria
 
 ### 7.3 Replay scope
 
-Practical replay window is the bug-report scope (~1000 ticks, ~25 GB uncompressed, 2–5 GB compressed via zstd) (`stories.md` §33). Full-run replay at 200K agents (~5 TB/hour raw event volume) is not a goal.
+Practical replay window is the bug-report scope (~1000 ticks, ~25 GB uncompressed, 2–5 GB compressed via zstd). Full-run replay at 200K agents (~5 TB/hour raw event volume) is not a goal.
 
 Event-log storage policy (§9 #14): (a) filter to the replayable event-type subset only, (c) snapshot cadence **N=500 ticks** for rollback granularity, (d) zstd compression on both snapshot and event-log segments. Dev-only per-save rollback lets time-travel debugging jump to any 500-tick boundary inside the current bug-report window.
 
@@ -979,7 +969,7 @@ The entire cascade is 4 events (`InvitePosted`, `AcceptInvite` trigger, `Marriag
 
 ## 9. Settled decisions
 
-All 29 open questions from the prior revision have been resolved through design interviews. Entries record the decision and one-line rationale; authoritative detail lives in the cross-referenced schema sections.
+Each entry records the decision and one-line rationale; authoritative detail lives in the cross-referenced schema sections.
 
 ### 9.1 Action / quest mechanics
 
@@ -1025,8 +1015,6 @@ All 29 open questions from the prior revision have been resolved through design 
 16. **Mod event-handler conflict resolution** — → see `docs/spec/compiler.md` §Decisions.
 
 ---
-
-A standing decision log () carries rationale and reversal criteria in more detail; §9 summarises the current-state view.
 
 ---
 
