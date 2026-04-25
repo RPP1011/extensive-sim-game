@@ -1,30 +1,49 @@
-# Docs — reading order
+# Docs
 
-Start at **`game/overview.md`** to understand the project. Everything else is reference material pulled in on demand.
+Start at **[`overview.md`](overview.md)** for a 5-minute project intro.
+Then dive into the spec, status, or roadmap depending on what you need.
 
 ## Layout
 
 ```
 docs/
-  game/        — what we're building and how the pieces fit (START HERE)
-  engine/      — runtime spec: cascade, SoA, spatial, events, determinism
-  dsl/         — language spec: declaration kinds, grammar, semantics
-  compiler/    — emission spec: DSL → Rust + Python + SPIR-V
-  superpowers/ — planning + roadmap (plans, decisions, process)
-  project_toc.md — cross-layer plan inventory
-  audit_*.md   — periodic audit reports
+  README.md      — this file
+  overview.md    — 5-minute project intro (architecture, tick, worked example)
+  ROADMAP.md     — comprehensive index of future work (active / drafted / deferred)
+
+  spec/          — canonical specification (the contract)
+    README.md    — spec index, reading order, cross-ref convention
+    language.md  — world-sim DSL grammar + semantics
+    state.md     — field catalog (every SoA field, who reads, who writes)
+    stdlib.md    — pinned built-ins
+    scoring_fields.md — `field_id` ABI table
+    runtime.md   — engine runtime contract §§1–26
+    compiler.md  — DSL → Rust + SPIR-V + Python lowering
+    gpu.md       — GPU backend contract (resident cascade, sim-state, cold-state, ability eval, pipeline)
+    ability.md   — `.ability` DSL — ability definitions + IR
+    economy.md   — economic system (recipes, contracts, labor, market)
+
+  engine/
+    status.md    — live per-subsystem implementation status (✅/⚠️/❌)
+
+  game/          — player-facing layer (overview, feature flow, fixtures)
+  superpowers/   — process artefacts: plans + brainstorms + research + notes
+                   (skill output target — leave directory shape alone)
 ```
 
-## The split at a glance
+## Reading paths
 
-- **Engine** = primitives only. Cascade runtime, SoA state containers, spatial index, event ring, RNG, tick orchestration, schema hashing. No game rules.
-- **DSL** = all game logic. Entities, events, views, physics cascades, masks, verbs, scoring, invariants, probes, metrics.
-- **Compiler** = bridge. DSL source → Rust handlers (engine's `SerialBackend`) + Python dataclasses (external ML training) + SPIR-V kernels (engine's `GpuBackend`).
+**New contributor (15 min):**
+`overview.md` → `engine/status.md` → `spec/README.md` → `ROADMAP.md`
 
-If a change is about *how the sim runs* (determinism, performance, data layout), it's an engine change. If it's about *what the sim does* (a creature hates another, an action heals, a quest pays gold), it's a DSL change.
+**Engineer adding a feature:**
+`game/feature_flow.md` → `spec/<relevant>.md` → `engine/status.md` for current scaffolding
 
-## Where the game currently lives
+**Reviewer / planner:**
+`ROADMAP.md` → `engine/status.md` → relevant `superpowers/plans/<active>.md`
 
-Today the game rules are hand-written Rust in the engine crate — legacy tech debt. The plan is **compiler-first**: grow the DSL compiler incrementally, and retire the legacy code one slice at a time as each compiler milestone lands. No parallel hand-written bootstrap crate.
+## Conventions
 
-See `game/compiler_progress.md` for the live milestone tracker and `game/feature_flow.md` for how to add features (and extend the compiler when needed).
+- The **spec** locks contract. Live status lives in `engine/status.md`.
+- The **roadmap** lists future work; in-flight plans live in `superpowers/plans/`.
+- Historical content (executed plans, resolved audits, design rationale) lives in **git history**, not in active docs.
