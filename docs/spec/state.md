@@ -1,11 +1,11 @@
 # World Sim State Catalog
 
-Unified field-level inventory across agent, aggregate, and world state. Structure is per-domain; each subsection preserves the authoring of its source doc.
+Schema-of-record: every SoA field engine code touches, with semantics, writers, and readers.
 
 ## Contents
-- [Agent state](#agent-state) — (formerly `state.md`)
-- [Aggregate state](#aggregate-state) — (formerly `state.md`)
-- [World state](#world-state) — (formerly `state.md`)
+- [Agent state](#agent-state)
+- [Aggregate state](#aggregate-state)
+- [World state](#world-state)
 
 ---
 
@@ -13,7 +13,7 @@ Unified field-level inventory across agent, aggregate, and world state. Structur
 
 ### Agent (top-level)
 
-Universal entity for any agentic actor — humans, wolves, dragons, goblins. The same struct, distinguished by `creature_type` and configuration.
+Universal entity for any agentic actor (humans, wolves, dragons, goblins). Same struct, distinguished by `creature_type`.
 
 #### Identity & Lifecycle
 | Field | Type | Meaning | Updated by | Read by |
@@ -33,7 +33,7 @@ Universal entity for any agentic actor — humans, wolves, dragons, goblins. The
 | move_speed | f32 | Base units/tick | template init, item bonuses, status effects | movement speed calc, action duration |
 | move_speed_mult | f32 | Multiplier (default 1.0) | status effects (stun/slow) | effective movement calc |
 
-**Ground-locked vs volumetric creature_types.** Ground-locked types (Human, Elf, Dwarf, Wolf, Goblin) carry a post-movement constraint: a `@phase(post)` cascade rule keyed on `MovementApplied` snaps `pos.z = surface_height(pos.xy) + creature_height/2` outdoors, or `floor_height(pos, building) + creature_height/2` when `inside_building_id` is set. The constraint is applied automatically based on `creature_type` config. Volumetric types (Dragon, Fish, Bat) skip the snap and retain free z motion. `creature_height` is a derived field from `creature_type` config.
+**Ground-locked vs volumetric.** Ground-locked types (Human, Elf, Dwarf, Wolf, Goblin) get a post-movement `@phase(post)` cascade snapping `pos.z = surface_height(pos.xy) + creature_height/2` outdoors or `floor_height(pos, building) + creature_height/2` when `inside_building_id` is set. Volumetric types (Dragon, Fish, Bat) skip the snap. `creature_height` derived from `creature_type` config.
 
 #### Combat/Vitality
 | Field | Type | Meaning | Updated by | Read by |
@@ -52,25 +52,23 @@ Universal entity for any agentic actor — humans, wolves, dragons, goblins. The
 |---|---|---|---|---|
 | data | AgentData | Agent state (see AgentData section below) | agent_inner, action_eval, social/economic systems | all behavioral systems |
 | inventory | Inventory | Commodity + gold storage (every agent has one) | work (production), trade, eating, looting | action_eval (resource availability), trader intent |
-| memberships | Vec<Membership> | Groups this agent belongs to (faction, family, guild, religion, party, pack, settlement). Multi-membership produces emergent loyalty conflicts. | JoinGroup / LeaveGroup actions; spawn-time defaults | mask predicates (group-gated actions), observation features (memberships slot), `is_hostile` / `is_friendly` views |
-| capabilities | Capabilities | `channels: SortedVec<CommunicationChannel, 4>` (§9 D30) — first-class enum over `{Speech, PackSignal, Pheromone, Song, Telepathy, Testimony}`; replaces prior `can_speak` / `can_hear` / `hearing_range` booleans. Plus `languages`, `can_fly`, `can_build`, `can_trade`, `can_climb`, `can_tunnel`, `can_marry`, `max_spouses`. `channels` drive `PostQuest` / `Communicate` / `Announce` / overhear eligibility; cross-species communication requires a shared channel. `can_fly` gates z-separation combat predicates. Per-channel ranges in `spec.md` §7.1. | template init (from `creature_type` config) | pathfinding obstruction, construction defense, mask predicates (`PostQuest`, `Communicate`, `Announce`, overhear), observation features |
+| memberships | Vec<Membership> | Groups this agent belongs to (faction, family, guild, religion, party, pack, settlement) | JoinGroup/LeaveGroup, spawn defaults | mask predicates, observation features, `is_hostile`/`is_friendly` views |
+| capabilities | Capabilities | `channels: SortedVec<CommunicationChannel, 4>` over `{Speech, PackSignal, Pheromone, Song, Telepathy, Testimony}`; plus `languages`, `can_fly`, `can_build`, `can_trade`, `can_climb`, `can_tunnel`, `can_marry`, `max_spouses`. Channels drive `PostQuest`/`Communicate`/`Announce`/overhear eligibility; cross-species comms require a shared channel. `can_fly` gates z-separation combat predicates. | template init | pathfinding, construction defense, mask predicates, observation features |
 
-Items the agent has equipped are referenced by ID from `data.equipped_items`. The Item entities themselves are catalogued in this doc's Item section.
+Equipped items referenced by ID from `data.equipped_items`.
 
 ---
 
 ### Membership
 
-A single membership relating an agent to a group (faction, family, guild, religion, party, pack, settlement, etc.).
+Agent → group association.
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | group_id | GroupId | Which group | JoinGroup event | mask predicates, observation features |
-| role | GroupRole | Member, Officer, Leader, Founder, Apprentice, Outcast | JoinGroup, PromoteEvent | mask predicates (leader-gated actions), reputation calculations |
-| joined_tick | u64 | When joined | JoinGroup event | tenure calculation, observation feature |
-| standing | f32 | -1..1 reputation within the group | various social events involving the group | mask predicates (Outcast cannot vote, etc.) |
-
-`Group` itself (with leadership chain, treasury, standing relations to other groups, internal rules) is documented in `state.md`.
+| role | GroupRole | Member, Officer, Leader, Founder, Apprentice, Outcast | JoinGroup, PromoteEvent | mask predicates, reputation calc |
+| joined_tick | u64 | When joined | JoinGroup event | tenure calc, observation feature |
+| standing | f32 | -1..1 reputation within the group | social events involving the group | mask predicates (Outcast cannot vote, etc.) |
 
 ---
 
@@ -86,15 +84,9 @@ Temporary state modifier on an entity.
 
 ---
 
-### Needs (6-dimensional)
+### Needs (8-dimensional)
 
-Maslow-inspired primary drives. Range 0–100. Higher = more satisfied.
-
-> **Engine note.** The runtime engine (`crates/engine/src/state/`) carries
-> the Maslow-5 (`safety/shelter/social/purpose/esteem`) *plus* three
-> physiological needs (`hunger/thirst/rest_timer`) that Plan 1
-> Eat/Drink/Rest actions read — 8 needs total. `hunger` is shared between
-> the two groups. See `2026-04-19-engine-plan-state-port.md`.
+Maslow-inspired primary drives. Range 0–100. Higher = more satisfied. Engine carries Maslow-5 (`safety/shelter/social/purpose/esteem`) plus 3 physiological (`hunger/thirst/rest_timer`); `hunger` is shared.
 
 #### Need Dimensions
 | Field | Type | Meaning | Updated by | Read by |
@@ -110,70 +102,68 @@ Maslow-inspired primary drives. Range 0–100. Higher = more satisfied.
 
 ---
 
-### Personality (5-dimensional)
+### Personality (5D)
 
-Experience-shaped behavioral profile. Range 0–1. Set at spawn, drifts via events.
+Experience-shaped behavioral profile, 0–1. Set at spawn, drifts via events.
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| risk_tolerance | f32 | Willingness to engage danger | combat win +0.02, combat loss -0.02, near death -0.05 | action selection (riskier options higher), flee threshold variance |
-| social_drive | f32 | Preference for interaction | socializing event +0.01, isolation -0.01, trade completion +0.01 | goal selection bias (Socialize priority), relationship maintenance |
-| ambition | f32 | Drive for status/achievement | quest completion +0.02, goal failure -0.02, witnessing promotion +0.01 | goal selection (higher ambition → more Work/Build), competitive behavior |
-| altruism | f32 | Empathy, healing/helping bias (was `compassion` in prior drafts; renamed to match engine `hot_altruism` 2026-04-19) | healing others +0.02, witnessing suffering +0.03, cruelty -0.05 | healing/rescue goal frequency, relationship trust modifier |
-| curiosity | f32 | Information-seeking, exploration | learning skill +0.02, discovery of new location +0.01, repetitive work -0.01 | exploration goal frequency, trade diversity preference |
+| risk_tolerance | f32 | Engage-danger willingness | combat win +0.02, loss -0.02, near-death -0.05 | action selection, flee threshold |
+| social_drive | f32 | Interaction preference | socializing +0.01, isolation -0.01, trade +0.01 | Socialize goal priority, relationship maintenance |
+| ambition | f32 | Status/achievement drive | quest +0.02, goal failure -0.02, promotion witness +0.01 | Work/Build goal selection, competitive behavior |
+| altruism | f32 | Empathy, healing/helping bias | healing +0.02, witnessing suffering +0.03, cruelty -0.05 | healing/rescue goal frequency, trust modifier |
+| curiosity | f32 | Exploration drive | skill +0.02, discovery +0.01, repetitive work -0.01 | exploration frequency, trade diversity |
 
-**Emergent?** Primary input (formed by events), but can derive behavior urgencies from it. Not reconstructible from others.
+**Emergent?** Primary input (formed by events); not reconstructible from others.
 
 ---
 
-### Emotions (6-dimensional, Transient)
+### Emotions (6D, Transient)
 
-Short-term emotional state. Range 0–1, decays each tick (rate ≈0.01–0.05 depending on event).
+Short-term state, 0–1, decays per tick (≈0.01–0.05 depending on event).
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| joy | f32 | Happiness spike (goal completion +0.3, good trade +0.2) | agent_inner decay (-0.02/tick), events (positive outcomes) | action urgency (joy increases morale & productivity) |
-| anger | f32 | Rage/aggression (betrayal +0.4, theft +0.3, insult +0.2) | agent_inner decay (-0.02/tick), social conflict | combat preference, hostile action likelihood |
-| fear | f32 | Dread/anxiety (near death +0.5, threat sighting +0.3) | agent_inner decay (-0.01/tick → slower decay), safety increase -0.1 | flee urgency, risk aversion, action caution |
-| grief | f32 | Sorrow (ally death +0.6, home loss +0.4) | agent_inner decay (-0.01/tick), time passage | isolation preference, productivity penalty |
-| pride | f32 | Self-regard (achievement +0.3, public recognition +0.2) | agent_inner decay (-0.03/tick), esteem events | social dominance in interaction, ambition boost |
-| anxiety | f32 | Worry/uncertainty (resource shortage +0.2, goal failure +0.1) | agent_inner decay (-0.02/tick), aspiration drift | goal hesitation, conservative decisions |
+| joy | f32 | Happiness (goal complete +0.3, good trade +0.2) | decay -0.02/tick | morale, productivity |
+| anger | f32 | Rage (betrayal +0.4, theft +0.3, insult +0.2) | decay -0.02/tick | combat preference, hostility |
+| fear | f32 | Dread (near-death +0.5, threat +0.3) | decay -0.01/tick, safety -0.1 | flee urgency, risk aversion |
+| grief | f32 | Sorrow (ally death +0.6, home loss +0.4) | decay -0.01/tick | isolation, productivity penalty |
+| pride | f32 | Self-regard (achievement +0.3, recognition +0.2) | decay -0.03/tick | social dominance, ambition |
+| anxiety | f32 | Worry (shortage +0.2, goal fail +0.1) | decay -0.02/tick | goal hesitation, conservatism |
 
 ---
 
-### Aspiration (Phase B: Medium-term Orientation)
+### Aspiration
 
-Personality-weighted need gap vector. Recomputed every 500 ticks. Provides 100-tick horizon behavioral bias.
+Personality-weighted need-gap vector, 100-tick horizon bias. Recomputed every 500 ticks.
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| need_vector | [f32; 6] | Weighted gap (100 - need[i]) × personality[i], normalized | agent_inner (recompute every 500 ticks from needs + personality) | action_eval (action bias scoring), goal_eval (priority weighting) |
-| vector_formed_at | u64 | Tick when last recomputed | agent_inner (formed tick) | recompute interval check (500 tick delta) |
-| crystal | Option<Crystal> | Concrete target (Entity/Class/Building/Location/Resource) bound to a need dimension | salient events (quest, discovery, relationship), failure resets | action goals (concrete pursue path vs. need balancing) |
-| crystal_progress | f32 | Completion toward crystal (0.0–1.0) | systems progressing crystal goal (work toward building, gather resource) | crystal_last_advanced tick check, UI display |
-| crystal_last_advanced | u64 | Last tick crystal_progress increased | crystal progress events | stall detection (no progress → abandon crystal) |
+| need_vector | [f32; 6] | Normalized (100 - need[i]) × personality[i] | agent_inner (500-tick recompute) | action_eval bias, goal_eval priority |
+| vector_formed_at | u64 | Last recompute tick | agent_inner | recompute interval check |
+| crystal | Option<Crystal> | Concrete target (Entity/Class/Building/Location/Resource) bound to a need dim | salient events (quest, discovery, relationship); failure resets | concrete pursue vs. need balancing |
+| crystal_progress | f32 | [0,1] completion toward crystal | systems progressing crystal goal | stall check, UI |
+| crystal_last_advanced | u64 | Last tick progress increased | crystal progress events | stall detection (abandon crystal) |
 
 ---
 
 ### Memory
 
-Event log + semantic beliefs formed from experience.
+Event log + semantic beliefs.
 
-#### Memory.events (Ring Buffer)
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| events | VecDeque<MemoryEvent> | Capped at 20 entries (oldest discarded) | event recording (memory.record_event) | belief formation, narrative, relationship updates |
+#### Memory.events
+`events: VecDeque<MemoryEvent>` capped at 20. Updated by `memory.record_event`; read by belief formation, narrative, relationships.
 
 #### MemoryEvent
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| tick | u64 | When event occurred | event recorder | temporal reasoning, forgetting rate |
-| event_type | MemEventType | Variant: WasAttacked, AttackedEnemy, FriendDied, WonFight, CompletedQuest, LearnedSkill, WasHealed, WasBetrayedBy, TradedWith, BuiltSomething, LostHome, WasRescuedBy, Starved, FoundShelter, MadeNewFriend, BecameApprentice, etc. | event system (combat, death, quest, learning) | belief update, reputation effect |
-| location | vec3 | Where event occurred | event recorder | location-based belief (place dangerous/safe), pathfinding fear |
-| entity_ids | Vec<u32> | Entities involved (attacker, victim, rescuer, etc.) | event recorder | relationship update, grudge formation |
-| emotional_impact | f32 | -1.0 to +1.0 intensity | event recorder | emotion boost, memory weight |
-| source | Source | Provenance of the event record (see Source enum below) | event recorder (Witnessed) / Communicate cascade / Announce cascade / Read cascade / rumor propagation | confidence derivation, mask predicates (`knows_*`, `confident_about`), observation `info_source_one_hot`, relationship trust |
-| confidence | f32 ∈ [0, 1] | Derived from `source` by default (Witnessed=1.0, TalkedWith/Announced=0.8, Overheard=0.6, Rumor{hops}=0.8^hops, Testimony=doc trust_score); may be set explicitly | event recorder | mask predicates (`confident_about`), action weighting, decay |
+| Field | Type | Meaning |
+|---|---|---|
+| tick | u64 | When event occurred |
+| event_type | MemEventType | WasAttacked, AttackedEnemy, FriendDied, WonFight, CompletedQuest, LearnedSkill, WasHealed, WasBetrayedBy, TradedWith, BuiltSomething, LostHome, WasRescuedBy, Starved, FoundShelter, MadeNewFriend, BecameApprentice, ... |
+| location | vec3 | Where it occurred (drives location-based beliefs, pathfinding fear) |
+| entity_ids | Vec<u32> | Involved entities (relationship updates, grudge formation) |
+| emotional_impact | f32 | [-1, 1] intensity (emotion boost, memory weight) |
+| source | Source | Provenance (see Source enum) — drives confidence + observation `info_source_one_hot` |
+| confidence | f32 ∈ [0,1] | Default from source: Witnessed=1.0, TalkedWith/Announced=0.8, Overheard=0.6, Rumor{hops}=0.8^hops, Testimony=doc trust_score |
 
 ---
 
@@ -183,16 +173,16 @@ Provenance tag for a `MemoryEvent`. Determines default confidence and observatio
 
 ```rust
 enum Source {
-    Witnessed,              // saw it directly; confidence = 1.0
-    TalkedWith(AgentId),    // told by an agent; confidence = 0.8
-    Overheard(AgentId),     // caught someone else's Communicate/Announce; confidence = 0.6
-    Rumor { hops: u8 },     // N-hop propagation; confidence = 0.8^hops
-    Announced(GroupId),     // broadcast from a group; confidence = 0.8
-    Testimony(ItemId),      // written record (Document); confidence = document.trust_score
+    Witnessed,              // confidence = 1.0
+    TalkedWith(AgentId),    // confidence = 0.8
+    Overheard(AgentId),     // confidence = 0.6
+    Rumor { hops: u8 },     // confidence = 0.8^hops
+    Announced(GroupId),     // confidence = 0.8
+    Testimony(ItemId),      // confidence = document.trust_score
 }
 ```
 
-`Source` is observation-visible: the per-actor slot feature `info_source_one_hot[5]` (Witnessed / TalkedWith / Overheard / Rumor / NeverMet) projects this enum down to a 5-way one-hot.
+Observation-visible via `info_source_one_hot[5]` (Witnessed/TalkedWith/Overheard/Rumor/NeverMet).
 
 #### Memory.beliefs (Semantic Layer)
 | Field | Type | Meaning | Updated by | Read by |
@@ -209,11 +199,11 @@ Directional relationship from one NPC toward another (asymmetric).
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| trust | f32 | [-1.0, 1.0]. Positive = friendly, negative = hostile. Starts 0.0 | interaction events (trade +0.1, combat -0.3, betrayal -0.5, rescue +0.3), time passage (slow decay) | action_eval (trade partner preference, combat targeting), marriage likelihood |
-| familiarity | f32 | [0.0, 1.0]. Grows with proximity and interaction | co-location, trade, work, socializing (+0.02–0.05/interaction) | relationship influence weight, interaction frequency |
-| last_interaction | u64 | Tick of last trade/combat/work together | interaction events | relationship weight decay, "forgotten" threshold |
-| perceived_personality | PerceivedPersonality | Mental model of other's traits (see section below) | observe_action method (from witnessed NPC behavior) | compatibility check, collaboration prediction, gossip basis |
-| believed_knowledge | Bitset<32> | Theory-of-mind: bits self believes the other agent knows, indexed by knowledge domain (Combat, Trade, Family, Politics, Religion, Craft, ...). Same bit layout as `self.knowledge_domain_bits`. | set when self witnesses or is told about the other's domain-tagged actions ("saw them fight → Combat bit"); slow decay without reinforcement | mask predicates (e.g. `Deceive(t) when ¬believed_knowledge(t, Fact::X)`), observation features, gossip targeting |
+| trust | f32 | [-1.0, 1.0]. Positive = friendly, negative = hostile. Starts 0.0 | trade +0.1, combat -0.3, betrayal -0.5, rescue +0.3, slow decay | action_eval (trade partner, combat targeting), marriage likelihood |
+| familiarity | f32 | [0.0, 1.0]. Grows with proximity and interaction | co-location, trade, work, socializing (+0.02–0.05/interaction) | relationship weight, interaction frequency |
+| last_interaction | u64 | Tick of last trade/combat/work together | interaction events | weight decay, "forgotten" threshold |
+| perceived_personality | PerceivedPersonality | Mental model of other's traits | observe_action (from witnessed NPC behavior) | compatibility, collaboration prediction, gossip basis |
+| believed_knowledge | Bitset<32> | Theory-of-mind: bits self believes other knows, indexed by knowledge domain (Combat, Trade, Family, Politics, Religion, Craft, ...) | set when self witnesses/is told about domain-tagged actions; slow decay | mask predicates (e.g. `Deceive(t) when ¬believed_knowledge(t, Fact::X)`), observation, gossip targeting |
 
 **Capped at 20 relationships per NPC** (evict lowest familiarity if over 20).
 
@@ -229,71 +219,59 @@ Directional relationship from one NPC toward another (asymmetric).
 
 ---
 
-### Needs-Driven Behavioral State
-
-#### Personality-Weighted Need Gap
-**Emergent.** Aspiration.need_vector = personality-weighted normalization of (100 - needs[i]).
-
----
-
 ### Goal & Action Execution
 
-#### Goal (Priority-Sorted Stack)
+#### Goal
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| kind | GoalKind | Enum: Idle, Work, Eat, Trade{settlement}, Fight, Socialize, Rest, Quest{id,pos}, Flee{from}, Build{id}, Haul{commodity,amount,dest}, Relocate{settlement}, Gather{commodity,amount} | goal_eval system (interrupt/assign based on needs + personality) | action system (dispatches per goal), movement pathfinding |
-| priority | u8 | Urgency level (0–95). Flee=95, EatCritical=90, Fight=80, Work=50, Rest=20, Idle=0 | goal_eval (computed from needs urgency) | goal stack sorting (higher priority preempts) |
-| started_tick | u64 | When this goal was pushed | goal_eval (push) | timeout detection, goal age for stall detection |
-| progress | f32 | [0.0, 1.0] completion | action execution (work/haul/build incrementally advance) | UI display, adaptive urgency (goals regain priority if progress stalls) |
-| target_pos | Option<vec3> | Movement destination for this goal | goal_eval (from location urgency), movement (arrival clears) | movement system (pathfinding goal) |
-| target_entity | Option<u32> | Building/NPC/item/resource entity ID | goal_eval (from entity availability scans) | work assignment (building ID), interaction (NPC ID) |
-| plan | Vec<PlannedStep> | Multi-step decomposition (e.g., Travel → Work → Carry → Rest) | plan generation (action_eval or GOAP-style planner) | action dispatch (per-step state machine) |
-| plan_index | u16 | Current active step | step completion (advance_plan) | current_step() accessor for action dispatch |
+| kind | GoalKind | Idle, Work, Eat, Trade{sid}, Fight, Socialize, Rest, Quest{id,pos}, Flee{from}, Build{id}, Haul{commodity,amount,dest}, Relocate{sid}, Gather{commodity,amount} | goal_eval (needs + personality) | action dispatch, movement |
+| priority | u8 | Urgency 0–95 (Flee=95, EatCritical=90, Fight=80, Work=50, Rest=20, Idle=0) | goal_eval (from needs urgency) | stack sorting (higher preempts) |
+| started_tick | u64 | When pushed | goal_eval push | timeout, stall detection |
+| progress | f32 | [0,1] completion | action execution | UI, adaptive urgency on stall |
+| target_pos | Option<vec3> | Movement destination | goal_eval, movement (clear on arrival) | pathfinding goal |
+| target_entity | Option<u32> | Building/NPC/item/resource ID | goal_eval | work assignment, interaction |
+| plan | Vec<PlannedStep> | Multi-step (e.g., Travel → Work → Carry → Rest) | plan generation (action_eval / GOAP) | per-step state machine |
+| plan_index | u16 | Active step | step completion (advance_plan) | current_step() for dispatch |
 
-#### GoalStack (Interrupt/Resume Mechanism)
-
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| goals | Vec<Goal> | Priority-sorted (descending), cap 8 | push (dedup + re-sort), pop (completion), remove_kind (override) | current() accessor (top goal drives agent), interrupt check (new high-priority goal preempts) |
-
-**Behavior:** Goals are processed by priority. Eating/fleeing can interrupt work. On interrupt completion, the previous goal resumes (hysteresis).
+#### GoalStack
+`goals: Vec<Goal>` priority-sorted descending, cap 8. Push (dedup+re-sort), pop (completion), remove_kind (override). High-priority goals preempt; on interrupt completion previous resumes (hysteresis).
 
 ---
 
 ### AgentData
 
-Container for all agent-specific state — needs, emotions, personality, relationships, classes, equipment, work state, social ties, learned biases. Carried by every Agent regardless of `creature_type`.
+Container for all agent-specific state. Carried by every Agent.
 
 #### Identity & Metadata
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| name | String | Generated from entity_id + seed deterministically | name generation (spawn) | UI display, speech, quest text |
-| adventurer_id | u32 | Campaign Adventurer link (0 if unlinked) | party entry, class assignment | party queries, campaign persistence |
-| creature_type | CreatureType | Enum: Citizen (default), PackPredator, Territorial, Raider, Megabeast | constructor (template.kind), monster spawn | personality preset, ability unlock, action gating |
+| name | String | Generated from entity_id + seed deterministically | spawn | UI, speech, quest text |
+| adventurer_id | u32 | Campaign Adventurer link (0 if unlinked) | party entry, class assignment | party queries, persistence |
+| creature_type | CreatureType | Citizen (default), PackPredator, Territorial, Raider, Megabeast | constructor, monster spawn | personality preset, ability unlock, gating |
 
 #### Economic & Trade
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| gold | i64 | Liquid currency (signed so debt is representable as negative — reconciled 2026-04-19 across state.md / engine Inventory / Ability Plan 1 TransferGold) | trade (earn/spend), work (wages accumulate), looting | trade purchasing power, debt payment, bribe ability |
-| debt | f32 | Gold owed to creditor | loans system, trade deficit | work motivation (debt priority), bankruptcy check |
-| creditor_id | Option<u32> | Entity ID of creditor | loans system (loan grant) | debt collection events, relationship penalty |
-| income_rate | f32 | EMA of gold earned per work cycle (alpha=0.1) | work completion (update_ema), production bonus | income belief for credit decision, wage negotiation |
-| credit_history | u8 | [0, 255] reliability score | contract completion (+10 on success, -5 on default), repayment | bid weight in service contracts, loan availability |
-| economic_intent | EconomicIntent | Enum: Produce{commodity,rate}, Trade, Idle, Loot, Haul, Work | goal_eval (derived from needs + personality) | action dispatch, work building assignment, trader routing |
-| price_knowledge | Vec<PriceReport> | Commodity prices heard via gossip (settlement_id, price_estimate) | trade gossip updates | trade margin calculation, speculation intent |
-| trade_route_id | Option<usize> | Index into WorldState.trade_routes (if assigned) | trade system (route assignment) | repeatable trade path, route profit tracking |
-| trade_history | Vec<(u32, u32)> | (destination_settlement_id, success_count) | trade completion (record profit) | repeat trade tendency, exploration bias |
+| gold | i64 | Liquid currency (signed; debt = negative) | trade, work wages, looting | purchasing power, debt, bribe |
+| debt | f32 | Gold owed to creditor | loans, trade deficit | work motivation, bankruptcy |
+| creditor_id | Option<u32> | Entity ID of creditor | loans (grant) | collection events, relationship penalty |
+| income_rate | f32 | EMA of gold/work cycle (α=0.1) | work completion | credit decision, wage negotiation |
+| credit_history | u8 | [0, 255] reliability score | contract success +10, default -5, repayment | bid weight, loan availability |
+| economic_intent | EconomicIntent | Produce{commodity,rate}, Trade, Idle, Loot, Haul, Work | goal_eval | action dispatch, building assignment, routing |
+| price_knowledge | Vec<PriceReport> | Commodity prices heard via gossip | trade gossip | margin calc, speculation |
+| trade_route_id | Option<usize> | Index into WorldState.trade_routes | trade system | repeatable path, profit tracking |
+| trade_history | Vec<(u32, u32)> | (destination_sid, success_count) | trade completion | repeat tendency, exploration |
 
 #### Location & Settlement Affiliation
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| home_settlement_id | Option<u32> | Settlement where NPC is "based" for economics | settlement residence, movement | work assignment building location, trade route origin, relocation trigger |
-| home_building_id | Option<u32> | Primary residence (where Rest goal leads) | settlement housing, family founding | rest location, shelter need satisfaction |
-| work_building_id | Option<u32> | Assigned workplace (building entity ID) | work assignment system | work goal target, work_state machine |
-| inside_building_id | Option<u32> | Currently inside building (entity ID) | movement (enter/exit interiors) | interior navigation, room access, shelter provision |
-| current_room | Option<u8> | Room index within building.rooms | interiors system (room occupation) | room-based AI (separate grid), visual location |
-| home_den | Option<vec3> | Lair position for monsters (Territorial/PackPredator) | constructor (spawn position) | monster return-home behavior, territorial defense |
+| home_settlement_id | Option<u32> | Where NPC is "based" for economics | residence, movement | work location, trade origin, relocation |
+| home_building_id | Option<u32> | Primary residence (Rest goal target) | housing, family founding | rest location, shelter |
+| work_building_id | Option<u32> | Assigned workplace | work assignment | work goal target, state machine |
+| inside_building_id | Option<u32> | Currently inside | movement (enter/exit) | interior nav, room access, shelter |
+| current_room | Option<u8> | Room index within building.rooms | interiors | room-based AI, visual location |
+| home_den | Option<vec3> | Lair (Territorial/PackPredator monsters) | constructor (spawn) | return-home, territorial defense |
 
 #### Movement & Pathfinding Cache
 | Field | Type | Meaning | Updated by | Read by |
@@ -316,53 +294,53 @@ Container for all agent-specific state — needs, emotions, personality, relatio
 | classes | Vec<ClassSlot> | Acquired classes with levels and XP | progression (level-up from XP), class grant | ability unlock threshold, stat bonus (HP/armor/damage), behavior tag generation |
 | behavior_profile | Vec<(u32, f32)> | Sorted tag_hash → accumulated_weight pairs | accumulate_tags per action (all systems), periodic xp_grant (class xp += behavior_profile[tag]) | passive effect calc, action bias weighting, tag lookup (binary search) |
 
-#### Relationships & Social (Phase C/D)
+#### Relationships & Social
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| relationships | HashMap<u32, Relationship> | Per-pair directional relationships | interaction events (modify_relationship), capped at 20 | action_eval (trust-based decisions), collaboration preference |
-| spouse_id | Option<u32> | Married-to entity ID | family system (marriage event) | family mechanics, shared housing, co-parenthood |
-| children | Vec<u32> | Child entity IDs | family system (birth) | family tree, inheritance, legacy |
-| parents | Vec<u32> | Parent entity IDs | family system (birth parent link), succession | lineage, inherited skills, family duty |
-| mentor_lineage | Vec<u32> | Mentor chain (most recent first) | apprenticeship (mentee links back to mentor) | skill inheritance, teaching bonus, apprenticeship completion |
+| relationships | HashMap<u32, Relationship> | Per-pair directional, capped at 20 | interaction events (modify_relationship) | action_eval (trust), collaboration |
+| spouse_id | Option<u32> | Married-to entity ID | family system | family mechanics, shared housing |
+| children | Vec<u32> | Child entity IDs | family birth | family tree, inheritance |
+| parents | Vec<u32> | Parent entity IDs | family birth, succession | lineage, inherited skills |
+| mentor_lineage | Vec<u32> | Mentor chain (most recent first) | apprenticeship | skill inheritance, teaching bonus |
 | apprentice_of | Option<u32> | Current mentor entity ID | apprenticeship start | skill acceleration, teaching reputation |
-| apprentices | Vec<u32> | Mentee entity IDs | apprenticeship (apprentice links forward) | teaching labor, succession planning, legacy |
-| pack_leader_id | Option<u32> | Leader entity ID (for PackPredator monsters) | pack formation system | regrouping behavior, combat coordination, pack morale |
+| apprentices | Vec<u32> | Mentee entity IDs | apprenticeship | teaching labor, succession |
+| pack_leader_id | Option<u32> | Leader entity ID (PackPredator) | pack formation | regrouping, coordination, morale |
 
 #### Perception & Resource Knowledge
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| known_resources | HashMap<u32, ResourceKnowledge> | Discovered resource entities (position, type, observation_tick) | exploration (scan for resources nearby), gossip (hear of resource), stale >2000 ticks | gatherer targeting, trade route planning, known good source preference |
-| known_voxel_resources | Vec<VoxelResourceKnowledge> | Ore veins, stone, etc. (voxel coordinates) | voxel exploration, mining gossip | miner targeting, mining site navigation |
-| harvest_target | Option<(i32, i32, i32)> | Currently-being-mined voxel (chunk x, y, z) | harvesting system (voxel mining) | harvest progress tracking, harvest completion |
+| known_resources | HashMap<u32, ResourceKnowledge> | Discovered resource entities (pos, type, observation_tick); stale >2000 ticks | exploration scan, gossip | gatherer targeting, trade route planning |
+| known_voxel_resources | Vec<VoxelResourceKnowledge> | Ore veins, stone (voxel coords) | voxel exploration, mining gossip | miner targeting, navigation |
+| harvest_target | Option<(i32, i32, i32)> | Currently-being-mined voxel (chunk x,y,z) | harvesting system | harvest progress, completion |
 
 #### Psychological & Emotional
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| needs | Needs | 6D Maslow vector (see Needs section) | agent_inner (tick drift, event bumps) | goal_eval (urgency), aspiration, action bias |
-| memory | Memory | Event log + beliefs (see Memory section) | event recording, belief formation | belief-based decisions, relationship updates, reputation effects |
-| personality | Personality | 5D trait vector (see Personality section) | event-driven drift (small deltas) | aspiration weight, action selection bias, relationship compatibility |
-| emotions | Emotions | 6D transient state (see Emotions section) | events, decay per tick | action urgency, goal preemption, mood-based behavior |
-| aspiration | Aspiration | Medium-term orientation with optional concrete crystal (see Aspiration section) | agent_inner recompute (500 ticks), salient events (form crystal) | action bias scoring, goal selection, concrete pursue objective |
-| action_outcomes | HashMap<(u8, u32), OutcomeEMA> | Adaptive learning: (action_type, target_type_hash) → EMA of outcomes | apply action result (reward/penalty EMA update) | action_eval (adaptive urgency interrupt, policy learning) |
-| price_beliefs | [PriceBelief; NUM_COMMODITIES] | Per-commodity estimated value + confidence | trade experience (direct/trade/secondhand update), decay | trade margin calc, speculation decision, price gossip |
-| cultural_bias | [f32; 12] | Per-action-type conformity bias [-0.3, 0.3] | social_gathering (from peer actions), goal success (party influence) | action utility weighting, decision smoothing toward party norms |
+| needs | Needs | 8D vector | agent_inner drift, event bumps | goal_eval, aspiration, action bias |
+| memory | Memory | Event log + beliefs | event recording, belief formation | belief-based decisions, relationships, reputation |
+| personality | Personality | 5D trait vector | event-driven drift | aspiration weight, action bias, compatibility |
+| emotions | Emotions | 6D transient state | events, per-tick decay | action urgency, goal preemption, mood |
+| aspiration | Aspiration | Medium-term orientation + optional crystal | agent_inner (500-tick recompute), salient events | action bias, goal selection, concrete pursuit |
+| action_outcomes | HashMap<(u8, u32), OutcomeEMA> | Adaptive learning: (action_type, target_type_hash) → EMA | action result (reward/penalty EMA) | action_eval, policy learning |
+| price_beliefs | [PriceBelief; NUM_COMMODITIES] | Per-commodity estimated value + confidence | trade experience, decay | trade margin, speculation, gossip |
+| cultural_bias | [f32; 12] | Per-action-type conformity bias [-0.3, 0.3] | social_gathering, goal success | action utility weighting |
 
-#### Campaign System Fields (Migrated)
+#### Campaign System Fields
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| morale | f32 | [0, 100] combat morale | combat events, settlements (aura), quest completion | combat action urgency, retreat threshold |
-| stress | f32 | [0, 100] psychological stress | combat damage, near-death, failing quests | focus penalty (morale × (1 - stress/100)), mental state |
-| fatigue | f32 | [0, 100] physical fatigue | work, travel, combat | action speed penalty, rest need urgency |
-| loyalty | f32 | [0, 100] faction/guild loyalty | faction events, betrayal, party failure | faction quest difficulty, party behavior gating |
-| injury | f32 | [0, 100] incapacity level (≥90 incapacitated) | combat damage, healing, rest recovery | action capability (injury ≥90 → only idle), combat penalty |
-| resolve | f32 | [0, 100] willpower under pressure | fear events, morale pool, leadership aura | flee threshold modifier, action commitment |
-| archetype | String | Hero class name ("knight", "ranger", "mage", etc.) | constructor (template.archetype) | ability unlock, stat scaling, action gating |
-| party_id | Option<u32> | Party membership | party formation, expedition | party AI coordination, shared objectives, culture drift |
-| faction_id | Option<u32> | Faction/guild membership | faction recruitment, succession | faction quests, faction goal priority, relationship modifier |
-| mood | u8 | Current mood discriminant (0=neutral) | mood system (events shift mood) | action preference weighting, social openness |
-| fears | Vec<u8> | Active fear type indices | phobia system (trigger fear) | fear-induced behavior (avoidance), anxiety emotion |
-| deeds | Vec<u8> | Legendary deed types earned | deed system (achievement event) | reputation boost, pride emotion, story arc |
-| guild_relationship | f32 | [-100, 100] reputation with guild | guild quests (complete +10, fail -5), betrayal | guild benefits access, quest assignment priority |
+| morale | f32 | [0, 100] combat morale | combat events, settlement aura, quest completion | combat urgency, retreat threshold |
+| stress | f32 | [0, 100] psychological stress | combat damage, near-death, quest failures | focus penalty (morale × (1 - stress/100)) |
+| fatigue | f32 | [0, 100] physical fatigue | work, travel, combat | action speed penalty, rest urgency |
+| loyalty | f32 | [0, 100] faction/guild loyalty | faction events, betrayal, party failure | faction quest difficulty, behavior gating |
+| injury | f32 | [0, 100] incapacity (≥90 → idle only) | combat damage, healing, rest recovery | action capability, combat penalty |
+| resolve | f32 | [0, 100] willpower under pressure | fear events, morale pool, leadership aura | flee threshold, action commitment |
+| archetype | String | Hero class ("knight", "ranger", "mage", ...) | constructor (template.archetype) | ability unlock, stat scaling |
+| party_id | Option<u32> | Party membership | party formation, expedition | party AI, shared objectives, culture drift |
+| faction_id | Option<u32> | Faction/guild membership | faction recruitment, succession | faction quests, goals, relationship modifier |
+| mood | u8 | Mood discriminant (0=neutral) | mood system | action preference, social openness |
+| fears | Vec<u8> | Active fear type indices | phobia system | avoidance behavior, anxiety |
+| deeds | Vec<u8> | Legendary deed types earned | deed system | reputation, pride, story arc |
+| guild_relationship | f32 | [-100, 100] reputation with guild | guild quests, betrayal | guild benefits, quest priority |
 
 #### Current Action & Intention
 | Field | Type | Meaning | Updated by | Read by |
@@ -386,722 +364,364 @@ Container for all agent-specific state — needs, emotions, personality, relatio
 
 ### BuildingData
 
-Structure definitions for player-placed buildings.
-
-#### Identity & Type
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| building_type | BuildingType | Enum: Shelter, Farmhouse, Mine, Laboratory, etc. (20+ types) | constructor (building placement) | function determination, capability unlock |
-| settlement_id | Option<u32> | Owning settlement | constructor (placement), settlement system | economic integration, NPC affiliation |
-| name | String | Display name | constructor (type default), renaming system | UI, narrative, identity |
-
-#### Spatial & Structure
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| grid_col, grid_row | u16 | Position on settlement 128×128 grid | constructor | room/workspace layout, collision, interior navigation |
-| footprint_w, footprint_h | u16 | Size in grid cells | constructor (type-dependent) | building extent, placement collision check |
-| rooms | Vec<Room> | Interior room definitions (floor plan) | construction growth (room addition) | NPC room occupation, function distribution |
-| tier | u8 | Upgrade level | construction (tier advancement) | capacity scaling, stat scaling |
-
-#### Occupancy & Workforce
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| resident_ids | Vec<u32> | NPC residents (for Shelter-type buildings) | housing assignment system | resident count, social interaction location |
-| worker_ids | Vec<u32> | NPC workers assigned to this building | work assignment system | production efficiency, wage payment, work location |
-| residential_capacity | u32 | Max residents | type default, upgrades | housing scarcity, population pressure |
-| work_capacity | u32 | Max workers | type default, upgrades | labor bottleneck, staffing urgency |
-| worker_class_ticks | Vec<...> | Per-class worker tick counts (for class-specific production) | work system (time logged by class) | production quality calc, class-specific yields |
-
-#### Production & Storage
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| storage | [f32; NUM_COMMODITIES] | Commodity inventory | production (accumulate), trade (buy/sell), haul (receive) | inventory cap check, supply for trade, haul source |
-| storage_capacity | f32 | Total commodity cap | type default, upgrades | inventory overflow management, trade limiting |
-
-#### Construction & Status
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| construction_progress | f32 | [0.0, 1.0] completion | construction system (work ticks += progress) | building capability (functions at >0.5), visual display |
-| built_tick | u64 | When completed (progress == 1.0) | construction system (record on completion) | age-based bonuses (ancient buildings), decay start |
-| builder_id | Option<u32> | Primary builder entity ID | construction system (record who completed) | builder reputation, inheritance after death |
-| builder_modifiers | Vec<...> | Quality modifiers from builder (tag-based bonuses) | construction (apply builder class tags) | production yield buff, special effects |
-| owner_modifiers | Vec<...> | Quality modifiers from owner (tag-based bonuses) | ownership system | production buff, special mechanics |
-| temporary | bool | If true, building expires at TTL | temporary building system (build seed) | expiry check, building permanence |
-| ttl_ticks | Option<u64> | Time-to-live (if temporary) | temporary system (set at build), decrement per tick | expiry event trigger |
-| specialization_tag | Option<u32> | FNV-1a hash of specialized production tag (e.g., tag(b"farming")) | specialization system (set by producer) | production yield bonus, economic focus |
-| specialization_strength | f32 | Strength of specialization bonus [0.0, 2.0] | specialization system (increase with successful production) | multiplicative yield boost, economic development |
+| building_type | BuildingType | Shelter, Farmhouse, Mine, Laboratory, ... (20+ types) | constructor | function, capability unlock |
+| settlement_id | Option<u32> | Owning settlement | constructor, settlement system | economic integration, affiliation |
+| name | String | Display name | constructor, renaming | UI, narrative |
+| grid_col, grid_row | u16 | Position on settlement 128×128 grid | constructor | layout, collision, interior nav |
+| footprint_w, footprint_h | u16 | Size in grid cells | constructor | extent, placement collision |
+| rooms | Vec<Room> | Interior room definitions | construction growth | NPC occupation, function distribution |
+| tier | u8 | Upgrade level | construction tier advancement | capacity/stat scaling |
+| resident_ids | Vec<u32> | NPC residents (Shelter type) | housing assignment | count, social location |
+| worker_ids | Vec<u32> | NPC workers assigned | work assignment | production, wages, location |
+| residential_capacity | u32 | Max residents | type default, upgrades | housing scarcity |
+| work_capacity | u32 | Max workers | type default, upgrades | labor bottleneck |
+| worker_class_ticks | Vec<...> | Per-class worker tick counts | work system | quality calc, class yields |
+| storage | [f32; NUM_COMMODITIES] | Commodity inventory | production, trade, haul | cap check, supply, source |
+| storage_capacity | f32 | Total commodity cap | type default, upgrades | overflow, trade limits |
+| construction_progress | f32 | [0,1] completion (functional at >0.5) | construction (work ticks += progress) | capability, display |
+| built_tick | u64 | When completed | construction completion | age bonuses, decay start |
+| builder_id | Option<u32> | Primary builder | construction | reputation, inheritance |
+| builder_modifiers | Vec<...> | Builder quality modifiers (tag-based) | construction | production buff, effects |
+| owner_modifiers | Vec<...> | Owner quality modifiers (tag-based) | ownership | production buff |
+| temporary | bool | Expires at TTL | temporary building system | expiry, permanence |
+| ttl_ticks | Option<u64> | Time-to-live (if temporary) | temporary system | expiry trigger |
+| specialization_tag | Option<u32> | FNV-1a hash of specialization tag | specialization system | yield bonus, focus |
+| specialization_strength | f32 | Bonus strength [0, 2] | specialization | multiplicative yield |
 
 ---
 
 ### Room (Interior Floor Plan)
 
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| id | u8 | Unique room ID within building | building construction | room occupation, room-specific queries |
-| kind | RoomKind | Enum: Bedroom, Workshop, Storage, Gathering, Shrine, etc. | constructor (floor plan generation) | function assignment, NPC role in room |
-| interior_x, interior_y | u16 | Position within building grid | layout generation | room boundary, navigation within interior |
-| interior_w, interior_h | u16 | Size | layout generation | room extent, capacity calculation |
-| occupants | Vec<u32> | NPC entity IDs currently in room | interiors system (room entry/exit) | social gathering location, social need satisfaction |
-| furnishing_level | u8 | Comfort/quality (0–100) | construction upgrades, furniture placement | shelter need bonus, social gathering success |
-| blessing | Option<...> | Special effect (e.g., fertility for bedrooms) | ritual system | gameplay bonus, thematic benefit |
+| Field | Type | Meaning |
+|---|---|---|
+| id | u8 | Unique room ID within building |
+| kind | RoomKind | Bedroom, Workshop, Storage, Gathering, Shrine, ... |
+| interior_x, interior_y | u16 | Position within building grid |
+| interior_w, interior_h | u16 | Size |
+| occupants | Vec<u32> | NPCs in room |
+| furnishing_level | u8 | Comfort/quality (0–100) |
+| blessing | Option<...> | Special effect (e.g., fertility for bedrooms) |
 
 ---
 
 ### Inventory (Portable Commodity Storage)
 
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| commodities | [f32; NUM_COMMODITIES] | Per-commodity quantity | work (produce), eating (consume), trade (transfer), haul (load) | trader intent (have/want calc), action_eval (resource availability) |
-| gold | f32 | Currency | trade (cost transfer), wage payment, looting | purchasing power, loan eligibility |
-| capacity | f32 | Total weight cap | constructor (NPC 50.0, building 500.0) | encumbrance check, overflow prevention |
-
-**Updated by:** Nearly all economic/production systems.
+| Field | Type | Meaning |
+|---|---|---|
+| commodities | [f32; NUM_COMMODITIES] | Per-commodity quantity (work, eat, trade, haul) |
+| gold | f32 | Currency (trade, wages, loot) |
+| capacity | f32 | Weight cap (NPC 50.0, building 500.0) |
 
 ---
 
 ### Derivation Graph
 
-Showing which fields are primary inputs vs. derived/reactive:
-
 ```
-PRIMARY INPUTS (Sources of Truth):
-├─ Entity.alive ← death events, resource depletion
-├─ Entity.pos (vec3) ← movement system (post-snap for ground-locked creature_types)
-├─ Entity.hp ← combat damage, healing, work eating
-├─ Entity.status_effects ← ability application, cooldown decay
-├─ Needs ← agent_inner drift, event bumps
-├─ Personality ← event-driven trait deltas
-├─ Emotions ← events, decay per tick
-└─ Memory.events ← event recording (combat, death, quest, etc.)
-
-SECONDARY (Computed/Emergent):
-├─ Aspiration.need_vector ← personality-weighted needs (recomputed 500-tick)
-├─ Aspiration.crystal ← salient event (quest, discovery, interaction)
-├─ Relationship.perceived_personality ← observe_action from behavior
-├─ Emotions (derived from needs) ← [safety → fear], [purpose fail → grief], [combat win → joy]
-├─ Morale ← personality + needs average, quest reward
-├─ Behavior_profile ← accumulate_tags (all action tags), class xp grants
-├─ Goal_stack.current_priority ← urgency(needs, personality, threat)
-└─ PassiveEffects ← compute(behavior_profile) on class upgrade
-
-INFRASTRUCTURE (Caches/State):
-├─ Entity.entity_index ← rebuild_entity_cache (O(1) ID lookup)
-├─ Entity.group_index ← rebuild_group_index (settlement grouping)
-├─ NpcData.cached_path ← pathfinding result
-├─ NpcData.price_knowledge ← trade gossip snapshot
-└─ SimScratch pools ← pooled buffer reuse
+PRIMARY: alive, pos, hp, status_effects, needs, personality, emotions, memory.events
+SECONDARY (emergent): aspiration.need_vector (recompute 500t), aspiration.crystal,
+  perceived_personality, behavior_profile (accumulate_tags), goal_stack priority, PassiveEffects
+INFRASTRUCTURE: entity_index, group_index, cached_path, price_knowledge, SimScratch
 
 TRANSFORMATIONS:
-- Focus = (avg_needs / 100).clamp(0.5, 1.5) ← Needs average
-- Urgency(need) = (100 - need) / 100 * personality[dim] ← Needs + Personality
-- Effective Quality = base * rarity_multiplier * durability_fraction ← ItemData
+- Focus = (avg_needs / 100).clamp(0.5, 1.5)
+- Urgency(need) = (100 - need) / 100 * personality[dim]
+- Effective Quality = base * rarity_multiplier * durability_fraction
 - Action Utility = goal_priority + aspiration_bias + cultural_bias[action] + action_outcomes EMA
 ```
 
 ---
 
-### Update Frequency Summary
-
-| Pattern | Frequency | Systems Involved |
-|---|---|---|
-| Needs drift (hunger, safety, etc.) | Every tick | agent_inner, entity_drift |
-| Emotions decay | Every tick | agent_inner |
-| Aspiration recompute | Every 500 ticks | agent_inner |
-| Status effect cooldown | Every tick | cooldown system |
-| Work production | Every tick (in work state) | work system |
-| Goal interrupt/assign | Every tick (if idle or need urgency spikes) | goal_eval, agent_inner |
-| Relationship interaction | When trade/combat/co-work happens | interaction systems |
-| Memory event record | When significant event happens | event systems |
-| Belief update | When memory event recorded or trade gossip heard | belief_formation system |
-| Behavior profile accumulate | When action completes | action system |
-| Class XP grant | When action matches class tag | progression system |
-| Price belief update | When trade completes or gossip heard | trade/social systems |
-| Passive effects compute | On class level-up | progression system |
-
----
-
 ### Notes on Determinism & Serialization
 
-- **hot/cold split**: `Entity` is unpacked into `HotEntity` (cache-line scalars) and `ColdEntity` (heap-heavy refs) for iteration performance. Both are serialized via entity.split() / Entity::from_parts().
-- **Scratch buffers (SimScratch)**: #[serde(skip)] — ephemeral per-tick, regenerated on demand. Not serialized.
-- **entity_index, group_index**: #[serde(skip)] — rebuilt on load via rebuild_all_indices().
-- **Determinism**: All entity randomness via entity_hash(id, tick, salt) — never thread_rng(). Same (id, tick) always gives same result.
-- **Tag hashing**: Compile-time FNV-1a hash(tag_name) for tag_hash constants — used for personality trait matching, class lookup, behavior_profile binary search.
+- **hot/cold split**: `Entity` unpacked into `HotEntity` (cache-line scalars) + `ColdEntity` (heap refs); serialized via entity.split() / Entity::from_parts().
+- **SimScratch / entity_index / group_index**: `#[serde(skip)]`, rebuilt on load via `rebuild_all_indices()`.
+- **Determinism**: all entity randomness via `entity_hash(id, tick, salt)`; never `thread_rng()`.
+- **Tag hashing**: compile-time FNV-1a `hash(tag_name)` for tag_hash constants.
 
 ---
 
 ## Aggregate state
 
-`Group` is the universal social-collective primitive. Every settlement, faction, family, guild, religion, hunting pack, criminal cabal, adventuring party, court, league, or monastery is a `Group` distinguished by its `kind` discriminator. The `Group` section at the end of this doc gives the canonical shape; the per-kind sections that follow describe the additional fields each kind carries.
+`Group` is the universal social-collective primitive. Settlements, factions, families, guilds, religions, packs, cabals, parties, courts, leagues, monasteries are all `Group` discriminated by `kind`. The Group section at the end gives the canonical shape; per-kind sections describe additional fields.
 
 ### Settlement (Group with `kind=Settlement`)
-Political, economic, and structural hub for agents. Carries stockpiles, prices, treasury, population, group affiliations, and a fixed location with facilities.
+Political/economic/structural hub. Carries stockpiles, prices, treasury, population, group affiliations, fixed location with facilities.
 
-#### Identity & Metadata
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | id | u32 | Unique settlement ID | spawn/init | all settlement-aware systems |
 | name | String | Display name | init | UI, chronicle, logs |
-| pos | vec3 | World-space position. 2D footprint center; `pos.z` derived as `surface_height(pos.xy)` at init. [OPEN] whether multi-level settlements (underground + aboveground) warrant storing a per-layer z. | init | all systems using settlement location |
+| pos | vec3 | 2D footprint center; `pos.z = surface_height(pos.xy)` | init | all systems using location |
 | grid_id | Option<u32> | NavGrid this settlement owns | init | navigation, pathfinding |
-| specialty | SettlementSpecialty | Production/npc focus (Mining, Trade, Farming, Military, Scholar, Port, Crafting) | init | production, npc_spawn, resource nodes |
-
-#### Economy
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| treasury | f32 | Gold reserves in coffers | taxes, economy, contracts, looting, theft, conquest, betrayal | economy, contracts, warfare, bankruptcy |
-| stockpile | [f32; 8] | Commodity reserves (FOOD, WOOD, IRON, COPPER, HERBS, CRYSTAL, HIDE, MEDICINE, EQUIPMENT) | production, consumption, trade, looting | economy, npc_decisions, trade, production |
-| prices | [f32; 8] | Local market prices per commodity | trade_goods, price_controls, seasons, commodity_futures, currency_debasement | economy, trades, npc_decisions, arbitrage |
-
-#### Population & Morale
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| population | u32 | Count of alive NPCs with home_settlement_id == id | npc birth/death, migration | economy scaling, resource consumption, threat assessment |
-
-#### Politics & Security
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| faction_id | Option<u32> | Owning faction, if controlled | conquest, civil_war, diplomacy | faction_ai, warfare, diplomacy, taxes |
-| threat_level | f32 | Danger score (0–1) from nearby monsters, recent losses | monster_density (regional), quest_posting, attacks, threat_scaling | quest_posting urgency, recruitment, building upgrades |
-| infrastructure_level | f32 | Building/defense tier (0–5) | construction, upgrades | defense strength, garrison capacity, building work |
-
-#### Organization
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| context_tags | Vec<(u32, f32)> | Contextual action modifiers (e.g., plague, festival, war) | events (crisis, seasons, diplomacy) | action_system, skill resolution |
+| specialty | SettlementSpecialty | Production/npc focus | init | production, npc_spawn, resource nodes |
+| treasury | f32 | Gold reserves | taxes, economy, contracts, looting, conquest | economy, contracts, warfare, bankruptcy |
+| stockpile | [f32; 8] | Commodity reserves (FOOD, WOOD, IRON, COPPER, HERBS, CRYSTAL, HIDE, MEDICINE, EQUIPMENT) | production, consumption, trade, looting | economy, npc_decisions, trade |
+| prices | [f32; 8] | Local market prices per commodity | trade_goods, price_controls, seasons, debasement | economy, trades, npc_decisions, arbitrage |
+| population | u32 | Count of alive NPCs with home_settlement_id == id | npc birth/death, migration | economy scaling, consumption, threat |
+| faction_id | Option<u32> | Owning faction, if controlled | conquest, civil_war, diplomacy | faction_ai, warfare, taxes |
+| threat_level | f32 | Danger score (0–1) | monster_density, quest_posting, attacks | quest urgency, recruitment, upgrades |
+| infrastructure_level | f32 | Building/defense tier (0–5) | construction, upgrades | defense, garrison capacity |
+| context_tags | Vec<(u32, f32)> | Contextual action modifiers (plague, festival, war) | events (crisis, seasons, diplomacy) | action_system, skill resolution |
 | treasury_building_id | Option<u32> | Entity ID of Treasury building | init (ensure_treasury_buildings) | resource movement, gold transfers |
-| service_contracts | Vec<ServiceContract> | Active contracts posted by settlement NPCs | npc_decisions, contract_lifecycle | npc_decisions, contract resolution |
-| construction_memory | ConstructionMemory | Per-settlement building event history (short/medium/long-term) | building_ai event logging | building_ai pattern learning |
+| service_contracts | Vec<ServiceContract> | Active contracts | npc_decisions, contract_lifecycle | contract resolution |
+| construction_memory | ConstructionMemory | Per-settlement building event history | building_ai event logging | building_ai pattern learning |
 
 ---
 
 ### RegionState
-Territorial and environmental layer. Represents large map areas with terrain type, monster populations, faction control, and dungeon sites.
+Large map areas with terrain, monster populations, faction control, dungeon sites.
 
-#### Identity & Geographic
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | id | u32 | Unique region ID | spawn | all systems referencing regions |
 | name | String | Display name | spawn | UI, chronicle |
-| pos | vec3 | World-space center. Synthesized at init from the sin/cos layout formula with `z = sea_level` (regions don't have an interior). | spawn | region queries, travel distance |
-| terrain | Terrain | Biome type (Plains, Forest, Mountains, Coast, Swamp, Desert, Tundra, Volcano, DeepOcean, Jungle, Glacier, Caverns, Badlands, FlyingIslands, DeathZone, AncientRuins, CoralReef) | spawn | resource spawning, threat, travel speed |
-| sub_biome | SubBiome | Terrain variant (Standard, LightForest, DenseForest, AncientForest, SandDunes, RockyDesert, HotSprings, GlowingMarsh, TempleJungle, NaturalCave, LavaTubes, FrozenCavern, MushroomGrove, CrystalVein, Aquifer, BoneOssuary) | spawn | resource yields, threat mods, travel speed |
-| elevation | u8 | Terrain height tier (0–4: sea level, foothills, highlands, peaks, summit/sky) | spawn | resource rarity, threat, travel, building placement |
-
-#### Ecology
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| monster_density | f32 | Local monster spawn rate multiplier | random_events, monster_spawning, threat_scaling | encounter generation, threat_level calc |
-| threat_level | f32 | Current aggregate danger (0–1, accounting for monster density, elevation, recent battles) | monster density, battles, time decay | threat_reports, quest_posting, npc decisions |
-| has_river | bool | Whether a river flows through this region | spawn | river_travel, trade_route generation |
-| has_lake | bool | Whether a lake exists here | spawn | water-dependent resources, water travel |
-| is_coastal | bool | Whether region borders ocean (map edge or adjacent DeepOcean) | spawn | coastal trade, sea creature encounters |
-
-#### Dungeon Sites
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| dungeon_sites | Vec<DungeonSite> | Entrances to procedural dungeons (pos, name, explored_depth, max_depth, is_cleared, last_explored_tick, threat_mult) | dungeon_discovery, exploration | quest_posting, adventuring |
-
-#### Connectivity
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| neighbors | Vec<u32> | Region IDs of 4-connected grid neighbors | spawn | travel, npc_movement, region_graphs |
-| river_connections | Vec<u32> | Region IDs connected by river | spawn | river_travel, trade routes |
-| is_chokepoint | bool | True if only 1–2 passable neighbors (strategic) | spawn | warfare, blockade tactics, npc_pathing |
-| is_floating | bool | True if FlyingIslands terrain (requires special access) | spawn | access control, encounter generation |
-
-#### Politics & Conflict
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| faction_id | Option<u32> | Controlling faction, if any | conquest, civil_war | faction_ai, warfare, taxes, recruitment |
+| pos | vec3 | World-space center; `z = sea_level` | spawn | region queries, travel distance |
+| terrain | Terrain | Biome type (see Terrain Enum) | spawn | resource spawning, threat, travel |
+| sub_biome | SubBiome | Variant (see SubBiome Enum) | spawn | resource yields, threat mods, travel |
+| elevation | u8 | Height tier (0–4: sea, foothills, highlands, peaks, sky) | spawn | resource rarity, threat, building placement |
+| monster_density | f32 | Local spawn rate multiplier | random_events, spawning, scaling | encounter gen, threat_level calc |
+| threat_level | f32 | Aggregate danger (0–1) | monster density, battles, decay | threat_reports, quest_posting, npc decisions |
+| has_river | bool | River flows through | spawn | river_travel, trade routes |
+| has_lake | bool | Lake exists | spawn | water resources, water travel |
+| is_coastal | bool | Borders ocean | spawn | coastal trade, sea encounters |
+| dungeon_sites | Vec<DungeonSite> | Procedural dungeon entrances | dungeon_discovery, exploration | quest_posting, adventuring |
+| neighbors | Vec<u32> | 4-connected grid neighbor IDs | spawn | travel, movement, region_graphs |
+| river_connections | Vec<u32> | River-connected region IDs | spawn | river_travel, trade routes |
+| is_chokepoint | bool | Only 1–2 passable neighbors | spawn | warfare, blockade tactics |
+| is_floating | bool | FlyingIslands terrain | spawn | access control, encounters |
+| faction_id | Option<u32> | Controlling faction | conquest, civil_war | faction_ai, warfare, taxes |
 | control | f32 | Faction control strength (0–1) | diplomacy, conquest, unrest | faction power assessment |
-| unrest | f32 | Civil unrest (0–1, fuels rebellion) | diplomacy, oppression, riots | civil_war triggers, faction loyalty |
+| unrest | f32 | Civil unrest (0–1) | diplomacy, oppression, riots | civil_war triggers, loyalty |
 
 ---
 
 ### Faction (Group with `kind=Faction`)
-Macro-political collective representing governments, military powers, organized cults. Carries military_strength + standings to other groups + tech_level + governance.
+Macro-political collective (governments, military powers, organized cults). Carries military_strength, standings, tech_level, governance.
 
-#### Identity & Relationships
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | id | u32 | Unique faction ID | spawn | all faction-aware systems |
-| name | String | Faction name | init | UI, chronicle, logs |
-| relationship_to_guild | f32 | Relationship to player guild (-100 to 100) | diplomacy, quest_completion, betrayals | quest_board filtering, npc morale, diplomacy |
-| at_war_with | Vec<u32> | List of faction IDs in open warfare | civil_war, diplomacy | warfare, settlement conquest, movement restrictions |
-
-#### Military
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| military_strength | f32 | Current fighting capacity (troops, equipment, morale) | recruitment, training, losses, desertion | conquest, diplomacy, battle strength |
-| max_military_strength | f32 | Theoretical max capacity from population | population growth, tech_level | scaling, recruitment limits |
-
-#### Territory & Resources
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| territory_size | u32 | Count of regions/settlements controlled | conquest, loss_of_control | power assessment, tax base, recruitment |
-| treasury | f32 | Faction gold reserves | taxes (from settlements), wars (looting), quests, reparations | military building, mercenary recruitment, diplomacy |
-
-#### Politics & Stability
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| diplomatic_stance | DiplomaticStance | Toward another faction (Friendly, Neutral, Hostile, AtWar, Coalition) | diplomacy system | npc decisions, interaction modifiers |
-| coup_risk | f32 | Stability metric (0–1, higher = more likely internal upheaval) | oppression, morale, succession events | faction_ai decisions, succession crisis triggers |
-| escalation_level | u32 | Conflict intensity (0–5, caps NPC conflict actions) | warfare, diplomacy escalation | warfare intensity cap, treaty enforcement |
-| tech_level | u32 | Research/development tier | research system, quests | military bonus, production speeds, ability unlock |
-| recent_actions | Vec<String> | Bounded log of recent faction events | all major systems | narrative, NPC knowledge, diplomacy memory |
+| name | String | Faction name | init | UI, chronicle |
+| relationship_to_guild | f32 | Player-guild relation (-100..100) | diplomacy, quest_completion, betrayals | quest_board filtering, npc morale |
+| at_war_with | Vec<u32> | Faction IDs in open warfare | civil_war, diplomacy | warfare, conquest, movement |
+| military_strength | f32 | Current fighting capacity | recruitment, training, losses, desertion | conquest, diplomacy, battle strength |
+| max_military_strength | f32 | Theoretical max from population | population growth, tech_level | scaling, recruitment limits |
+| territory_size | u32 | Regions/settlements controlled | conquest, loss_of_control | power, tax base, recruitment |
+| treasury | f32 | Gold reserves | taxes, war loot, quests, reparations | military, mercenary, diplomacy |
+| diplomatic_stance | DiplomaticStance | Friendly/Neutral/Hostile/AtWar/Coalition | diplomacy system | npc decisions, interaction modifiers |
+| coup_risk | f32 | Stability (0–1, higher = upheaval risk) | oppression, morale, succession | faction_ai decisions, succession crises |
+| escalation_level | u32 | Conflict intensity (0–5) | warfare, diplomacy escalation | warfare intensity cap, treaty enforcement |
+| tech_level | u32 | Research tier | research, quests | military bonus, production, ability unlock |
+| recent_actions | Vec<String> | Bounded log of recent events | all major systems | narrative, NPC knowledge, diplomacy memory |
 
 ---
 
 ### GuildState
-Player faction state — independent from NPC factions.
+Player faction state (independent from NPC factions).
 
-#### Resources
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| gold | f32 | Guild treasury | quest_rewards, missions, expenses | quest_board filtering, upgrades, expenses |
-| supplies | f32 | Supply reserve (used for missions) | production, usage, looting | mission readiness, supply checks |
-
-#### Reputation & Capacity
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
+| gold | f32 | Guild treasury | quest_rewards, missions, expenses | quest_board filtering, upgrades |
+| supplies | f32 | Supply reserve | production, usage, looting | mission readiness |
 | reputation | f32 | Fame/standing (0–100) | quests, battles, diplomacy | quest_board filtering, npc_recruitment, prices |
-| tier | u32 | Guild level (0–5, unlocks features) | reputation milestones | mission generation, capacity unlocks |
-| credit_rating | f32 | Borrowing capacity (0–100) | loans, repayment | loan eligibility, interest rates |
-| active_quest_capacity | u32 | Max simultaneous active quests | tier unlocks | quest acceptance checks |
+| tier | u32 | Guild level (0–5, unlocks features) | reputation milestones | mission gen, capacity |
+| credit_rating | f32 | Borrowing capacity (0–100) | loans, repayment | loan eligibility, interest |
+| active_quest_capacity | u32 | Max simultaneous active quests | tier unlocks | quest acceptance |
 
 ---
 
 ### Quest & Quest Lifecycle
 
 #### Quest (Active)
-Active quest being pursued by party.
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| id | u32 | Unique quest ID | quest_board->quests | party, quest_lifecycle |
+| id | u32 | Unique quest ID | quest_board acceptance | party, quest_lifecycle |
 | name | String | Quest title | posted | UI |
-| quest_type | QuestType | Hunt, Escort, Deliver, Explore, Defend, Gather, Rescue, Assassinate, Diplomacy, Custom | posted | party decisions, threat calc |
+| quest_type | QuestType | See QuestType enum | posted | party decisions, threat calc |
 | party_member_ids | Vec<u32> | Assigned party entity IDs | acceptance, deaths, replacements | party_ai, completion checks |
-| destination | vec3 | Objective location | posted | pathfinding, progress calc |
-| progress | f32 | Completion ratio (0–1) | quest_lifecycle (tick updates) | UI, completion determination |
-| status | QuestStatus | Traveling, InProgress, Completed, Failed, Returning | quest_lifecycle state machine | quest_lifecycle transitions, rewards |
-| accepted_tick | u64 | When party accepted | acceptance | deadline calc, duration tracking |
-| deadline_tick | u64 | Tick deadline (0 = none) | posted (urgency-driven) | failure condition, reward scaling |
-| threat_level | f32 | Quest difficulty (0–1) | posted (from threat_reports) | party composition, reward scaling, npc recruitment |
-| reward_gold | f32 | Gold upon completion | posted (from settlement treasury scaling) | party motivation, quest_board display |
-| reward_xp | u32 | Experience upon completion | posted | party leveling |
+| destination | vec3 | Objective location | posted | pathfinding, progress |
+| progress | f32 | Completion ratio (0–1) | quest_lifecycle | UI, completion |
+| status | QuestStatus | See QuestStatus enum | quest_lifecycle | transitions, rewards |
+| accepted_tick | u64 | When accepted | acceptance | deadline, duration |
+| deadline_tick | u64 | Tick deadline (0 = none) | posted | failure condition, reward scaling |
+| threat_level | f32 | Difficulty (0–1) | posted | party composition, reward scaling |
+| reward_gold | f32 | Gold on completion | posted | motivation, board display |
+| reward_xp | u32 | XP on completion | posted | party leveling |
 
-#### QuestType Enum
-`Hunt`, `Escort`, `Deliver`, `Explore`, `Defend`, `Gather`, `Rescue`, `Assassinate`, `Diplomacy`, `Custom` — tag for behavior mechanics.
-
-#### QuestStatus Enum
-- `Traveling`: party moving to destination
-- `InProgress`: at location, pursuing objective
-- `Completed`: objective achieved
-- `Failed`: party wiped or deadline passed
-- `Returning`: returning to home settlement
+#### QuestType / QuestStatus
+`QuestType`: `Hunt`, `Escort`, `Deliver`, `Explore`, `Defend`, `Gather`, `Rescue`, `Assassinate`, `Diplomacy`, `Custom`.
+`QuestStatus`: `Traveling`, `InProgress`, `Completed`, `Failed`, `Returning`.
 
 #### QuestPosting (Board)
-Unapplied quest available for guild to accept.
-
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| id | u32 | Unique posting ID | spawn/generation | quest_board filtering |
-| name | String | Title | generated | UI |
-| quest_type | QuestType | Category | generated | NPC decisions |
-| settlement_id | u32 | Posting settlement | generated | settlement queries, faction affiliation |
-| destination | vec3 | Objective | generated | party routing |
-| threat_level | f32 | Difficulty | threat_reports | party selection, reward scaling |
-| reward_gold | f32 | Bounty | settlement treasury, threat | guild motivation |
-| reward_xp | u32 | Experience | threat scaling | party motivation |
-| expires_tick | u64 | When posting removed | settlement urgency | quest_board cleanup |
-
----
-
-### FidelityZone
-Proximity bubble controlling simulation fidelity level (rich NPC detail vs. statistical abstraction).
-
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| id | u32 | Unique zone ID | spawn | fidelity_control system |
-| fidelity | Fidelity | Richness level enum (High, Medium, Low) | fidelity_control | entity update frequency, detail depth |
-| center | vec3 | Zone center (usually settlement pos) | fidelity_control, settlement movement | zone queries |
-| radius | f32 | Zone extent in world units | fidelity_control, threat radius | proximity checks |
-| entity_ids | Vec<u32> | Entities currently in this zone | entity_movement, spawn/despawn | fidelity state sync |
+| Field | Type | Meaning |
+|---|---|---|
+| id | u32 | Unique posting ID |
+| name | String | Title |
+| quest_type | QuestType | Category |
+| settlement_id | u32 | Posting settlement |
+| destination | vec3 | Objective |
+| threat_level | f32 | Difficulty |
+| reward_gold | f32 | Bounty |
+| reward_xp | u32 | Experience |
+| expires_tick | u64 | When posting removed |
 
 ---
 
 ### TradeRoute
-Emergent trade connection established by repeated profitable NPC trading.
+Emergent trade connection from repeated profitable NPC trading.
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| settlement_a | u32 | First settlement | npc_trade establishment | trade_logic, route strength decay |
-| settlement_b | u32 | Second settlement | npc_trade establishment | trade_logic, route strength decay |
-| established_tick | u64 | When route was created | npc_trade | historical tracking |
-| total_profit | f32 | Cumulative gold profited | npc_trade | route viability assessment |
-| trade_count | u32 | Number of successful trades | npc_trade | route activity metric |
-| strength | f32 | Route health (0–1, decays without activity, abandoned < 0.1) | npc_trade, time decay | npc_decisions, route discovery |
+| settlement_a, settlement_b | u32 | Endpoints | npc_trade | trade_logic, decay |
+| established_tick | u64 | When created | npc_trade | history |
+| total_profit | f32 | Cumulative gold profited | npc_trade | route viability |
+| trade_count | u32 | Successful trades | npc_trade | route activity |
+| strength | f32 | Health (0–1, decays without activity, abandoned < 0.1) | npc_trade, decay | npc_decisions, discovery |
 
 ---
 
 ### ServiceContract
-NPC service request posted by settlement NPCs (build, gather, craft, heal, guard, haul, teach, barter).
+NPC service request (build, gather, craft, heal, guard, haul, teach, barter).
 
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | requester_id | u32 | NPC posting the contract | npc_decisions | contract_lifecycle |
-| service | ServiceType | Type of work (Build(BuildingType), Gather(commodity, amount), Craft, Heal, Guard(target_id), Haul(commodity, amount, dest), Teach(npc_id), Barter{offer, want}) | npc_decisions | contractor capability matching |
-| max_payment | Payment | Max NPC will pay (gold + commodities) | npc_decisions, morale | bid filtering |
-| payment | f32 | Actual agreed payment (set on resolution) | contract_resolution | contractor reward |
-| provider_id | Option<u32> | NPC accepting the contract | acceptance | contract_lifecycle, reputation |
-| posted_tick | u64 | When posted | posting | contract age for cleanup |
-| completed | bool | Whether work is done | contract_resolution | archive |
-| bidding_deadline | u64 | Tick bidding closes (urgency-driven: critical +5, high +15, medium +30, low +100) | posted from urgency | bid window end |
-| bids | Vec<ContractBid> | Offers from interested NPCs (bidder_id, bid_amount, skill_value, credit_history) | npc_decisions | winner selection |
-| accepted_bid | Option<usize> | Index into bids of accepted offer | contract_resolution | payment disbursement |
+| service | ServiceType | Work type (see ServiceType enum) | npc_decisions | contractor matching |
+| max_payment | Payment | Max NPC will pay | npc_decisions, morale | bid filtering |
+| payment | f32 | Agreed payment (resolution) | contract_resolution | contractor reward |
+| provider_id | Option<u32> | Accepting NPC | acceptance | contract_lifecycle, reputation |
+| posted_tick | u64 | When posted | posting | age for cleanup |
+| completed | bool | Done | contract_resolution | archive |
+| bidding_deadline | u64 | Tick bidding closes (urgency-driven: crit +5, high +15, med +30, low +100) | posting | bid window |
+| bids | Vec<ContractBid> | Offers (bidder_id, bid_amount, skill_value, credit_history) | npc_decisions | winner selection |
+| accepted_bid | Option<usize> | Index of accepted offer | contract_resolution | payment |
 
 ---
 
 ### PriceReport
-Historical price snapshot for arbitrage and market analysis.
-
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| settlement_id | u32 | Which settlement | price_discovery | npc_trade arbitrage |
-| prices | [f32; 8] | Prices at snapshot time | settlement price state | npc_trade profit calc |
-| tick_observed | u64 | When recorded | price_discovery | stale check, trend calc |
+`settlement_id: u32`, `prices: [f32; 8]`, `tick_observed: u64`. Snapshot for arbitrage / trend.
 
 ---
 
 ### SettlementSpecialty Enum
-Production focus for settlement NPCs and economy:
-- `General`: baseline (no bonuses)
-- `MiningTown`: +2.0 iron, +1.5 crystal production
-- `TradeHub`: price discovery, merchant NPCs
-- `MilitaryOutpost`: +1.3 iron, +0.5 equipment; warrior NPCs, threat reduction
-- `FarmingVillage`: +2.0 food, +1.5 hide
-- `ScholarCity`: +1.0 herbs, +0.5 medicine; research XP bonus
-- `PortTown`: +1.5 food, +1.0 wood; coastal trade
-- `CraftingGuild`: +2.0 equipment, +1.5 medicine
+`General`, `MiningTown` (iron/crystal), `TradeHub` (price discovery), `MilitaryOutpost` (iron/equipment), `FarmingVillage` (food/hide), `ScholarCity` (herbs/medicine, XP bonus), `PortTown` (food/wood, coastal), `CraftingGuild` (equipment/medicine).
 
 ---
 
 ### DungeonSite
-Procedural dungeon entrance in a region.
-
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| pos | vec3 | World-space entrance location | spawn/discovery | quest routing, encounter gen |
-| name | String | Procedural name (e.g., "Sunken Halls") | spawn | UI, quest descriptions |
-| explored_depth | u8 | Current deepest level reached (0 = entrance only) | exploration_system | loot tier, discovery progress |
-| max_depth | u8 | Total levels in dungeon | spawn | loot tier upper bound |
-| is_cleared | bool | Whether fully cleared (no respawn) | exploration_system | encounter generation, loot refresh |
-| last_explored_tick | u64 | When last entered | exploration_system | respawn timer, activity tracking |
-| threat_mult | f32 | Danger modifier from terrain + depth | spawn | encounter difficulty |
+| Field | Type | Meaning |
+|---|---|---|
+| pos | vec3 | Entrance location |
+| name | String | Procedural name |
+| explored_depth | u8 | Deepest level reached (0 = entrance only) |
+| max_depth | u8 | Total levels |
+| is_cleared | bool | Fully cleared (no respawn) |
+| last_explored_tick | u64 | When last entered |
+| threat_mult | f32 | Danger modifier from terrain + depth |
 
 ---
 
 ### DiplomaticStance Enum
-- `Friendly`: +morale, trade bonuses
-- `Neutral`: standard interactions
-- `Hostile`: -morale, embargo possible
-- `AtWar`: open conflict, unit restrictions
-- `Coalition`: shared military benefits
+`Friendly` (+morale, trade bonuses), `Neutral`, `Hostile` (-morale, embargo possible), `AtWar` (open conflict), `Coalition` (shared military).
 
 ---
 
 ### Terrain Enum (17 types)
-Biome type with resource yields, threat, travel speed, elevation tier:
-- `Plains`: food 1.5x, hide 1.0x; threat 1.0x
-- `Forest`: wood 1.5x, herbs 1.0x; threat 1.2x, travel 0.7x
-- `Mountains`: iron 1.5x, crystal 1.0x; threat 1.5x, travel 0.5x, elevation 3
-- `Coast`: food 1.2x, wood 0.8x; threat 0.8x, unsettleable
-- `Swamp`: herbs 1.5x, medicine 1.0x; threat 1.3x, travel 0.4x
-- `Desert`: crystal 1.2x; threat 1.4x, travel 0.6x
-- `Tundra`: hide 1.2x; threat 1.3x, travel 0.6x
-- `Volcano`: iron 2.0x, crystal 2.0x; threat 3.0x, travel 0.3x, elevation 3, unsettleable
-- `DeepOcean`: food 0.5x (fishing); threat 2.5x, travel 0.0 (impassable), elevation 0, unsettleable
-- `Jungle`: food 1.8x, herbs 1.5x, wood 1.0x; threat 1.8x, travel 0.4x
-- `Glacier`: crystal 1.5x; threat 2.0x, travel 0.3x, elevation 3
-- `Caverns`: iron 2.0x, crystal 1.5x; threat 2.0x, travel 0.5x, underground
-- `Badlands`: iron 0.8x; threat 1.6x, travel 0.7x
-- `FlyingIslands`: crystal 3.0x; threat 1.5x, travel 0.0 (special access), elevation 4, unsettleable, floating
-- `DeathZone`: crystal 2.0x, medicine 1.5x; threat 5.0x, travel 0.5x, elevation 2, unsettleable, 5x threat multiplier
-- `AncientRuins`: crystal 1.0x (artifacts); threat 2.5x, travel 0.6x, has dungeons
-- `CoralReef`: food 1.5x, crystal 0.8x; threat 1.0x, travel 0.0 (underwater), unsettleable
+Biome type carrying resource yields, threat, travel speed, elevation tier: `Plains`, `Forest`, `Mountains`, `Coast`, `Swamp`, `Desert`, `Tundra`, `Volcano`, `DeepOcean`, `Jungle`, `Glacier`, `Caverns`, `Badlands`, `FlyingIslands`, `DeathZone`, `AncientRuins`, `CoralReef`. Per-variant multipliers in `terrain.rs`.
 
 ---
 
 ### SubBiome Enum (16 types)
-Terrain variant for detail within biome category:
-- `Standard`: no variant
-- `LightForest`: +1.2 travel, 0.6x wood (sparse)
-- `DenseForest`: 0.5x travel, 1.8x wood, +1.5 threat (monsters ambush)
-- `AncientForest`: 0.7x travel, 1.2x wood, 2.0x herbs, +1.3 threat
-- `SandDunes`: 0.4x travel, +1.2 threat (exhausting)
-- `RockyDesert`: standard travel, exposed ore
-- `HotSprings`: 1.8x herbs (near heat)
-- `GlowingMarsh`: 0.6x travel, 2.5x herbs (fungi), +1.4 threat
-- `TempleJungle`: 0.5x travel, 1.5x herbs, +1.6 threat (hidden temples)
-- `NaturalCave`: standard cave
-- `LavaTubes`: basalt walls, lava pools (volcanic)
-- `FrozenCavern`: ice walls, frozen lakes
-- `MushroomGrove`: bioluminescent (organic caves)
-- `CrystalVein`: crystal clusters, high ore (+1.5 ore mult)
-- `Aquifer`: flooded chambers (underwater caves)
-- `BoneOssuary`: ancient remains (death theme)
+Variants within biome: `Standard`, `LightForest`, `DenseForest`, `AncientForest`, `SandDunes`, `RockyDesert`, `HotSprings`, `GlowingMarsh`, `TempleJungle`, `NaturalCave`, `LavaTubes`, `FrozenCavern`, `MushroomGrove`, `CrystalVein`, `Aquifer`, `BoneOssuary`. Multipliers stack with parent terrain.
 
 ---
 
 ### EconomyState
-Global economic aggregate.
-
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| total_gold_supply | f32 | Sum of all gold (guild + factions + settlements) | economy system | inflation, market sentiment |
-| total_commodities | [f32; 8] | Total supply of each commodity | production, consumption, trades | resource scarcity calc, price scaling |
+`total_gold_supply: f32` (sum of all gold), `total_commodities: [f32; 8]` (supply per commodity). Drives inflation, scarcity, price scaling.
 
 ---
 
-### ChronicleEntry
-Narrative log entry for historical record.
+### ChronicleEntry & WorldEvent
 
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| tick | u64 | When event occurred | event logging | timeline, quest narratives |
-| category | ChronicleCategory | Event type (Battle, Quest, Diplomacy, Economy, Death, Discovery, Crisis, Achievement, Narrative) | event logging | filtering, narrative theming |
-| text | String | Human-readable description | event logging | UI, lore |
-| entity_ids | Vec<u32> | Involved entity IDs | event logging | relationship tracking |
+`ChronicleEntry { tick, category, text, entity_ids }` — bounded narrative log. Categories: Battle, Quest, Diplomacy, Economy, Death, Discovery, Crisis, Achievement, Narrative.
+
+`WorldEvent` (13 variants): `Generic{category,text}`, `EntityDied`, `QuestChanged`, `FactionRelationChanged`, `RegionOwnerChanged`, `BondGrief`, `SeasonChanged`, `BattleStarted`, `BattleEnded`, `QuestPosted`, `QuestAccepted`, `QuestCompleted`, `SettlementConquered`.
 
 ---
 
-### WorldEvent Enum (13 variants)
-Immediate game events processed during tick:
-- `Generic { category, text }`: catch-all
-- `EntityDied { entity_id, cause }`: npc/monster death
-- `QuestChanged { quest_id, new_status }`: quest state machine
-- `FactionRelationChanged { faction_id, old, new }`: diplomatic shift
-- `RegionOwnerChanged { region_id, old_owner, new_owner }`: territorial control
-- `BondGrief { entity_id, dead_id, bond_strength }`: emotional reaction to death
-- `SeasonChanged { new_season }`: annual cycle
-- `BattleStarted { grid_id, participants }`: encounter begin
-- `BattleEnded { grid_id, victor_team }`: encounter resolution
-- `QuestPosted { settlement_id, threat_level, reward_gold }`: new opportunity
-- `QuestAccepted { entity_id, quest_id }`: npc/guild accepts
-- `QuestCompleted { entity_id, quest_id, reward_gold }`: quest reward
-- `SettlementConquered { settlement_id, new_faction_id }`: faction conquest
+### WorldState Top-Level Collections
 
----
+Spatial/cache fields (`tick`, `rng_state`, indices, `tiles`, `voxel_world`, `nav_grids`, `surface_cache`, `surface_grid`, `cell_census`, `sim_scratch`, `build_seeds`, `structural_events`, `region_plan`, `chronicle`, `world_events`, `fidelity_zones`) are documented in the World state section below.
 
-### WorldState Top-Level Fields (not covered by per-entity docs)
-
-#### Time & RNG
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| tick | u64 | Current simulation tick | time system | all systems (time-based logic) |
-| rng_state | u64 | Deterministic RNG seed state | next_rand_u32() | all probabilistic systems |
-
-#### Indexes & Caches
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| entity_index | Vec<u32> | entity_id → index into entities/hot/cold (rebuilt) | rebuild_entity_cache() | O(1) entity lookups |
-| max_entity_id | u32 | Highest entity ID seen (sizes entity_index) | rebuild_entity_cache() | index allocation |
-| next_id | u32 | Monotonic entity ID counter | next_entity_id() | entity creation |
-| group_index | GroupIndex | Contiguous ranges by (settlement_id, party_id) for batch iteration | rebuild_group_index() | settlement-scoped loops |
-| settlement_index | Vec<u32> | settlement_id → index into settlements (rebuilt) | rebuild_settlement_index() | O(1) settlement lookups |
-
-#### Spatial
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| tiles | HashMap<TilePos, Tile> | Sparse tile modifications (walls, floors, ditches, farmland) | building/construction systems | pathfinding, rendering, collision |
-| surface_cache | SurfaceCache | Cached surface height results (vx, vy) → height; lazily populated | exploration system | npc_decisions, resource scanning |
-| surface_grid | FlatSurfaceGrid | Dense grid of surface heights (fallback cache for perf) | warm_surface_cache() | npc resource cell census, fast height lookups |
-| cell_census | CellCensus | Per-resource-cell material counts (populated by NPC scans) | npc scanning, exploration | resource node discovery, NPC targeting |
-| voxel_world | VoxelWorld | 3D chunked terrain (materials, elevation source of truth) | terrain generation, voxel destruction | navigation grid generation, building placement |
-| nav_grids | Vec<NavGrid> | Walkable surfaces per settlement (derived from voxel_world) | voxel_world changes | npc pathfinding, building AI |
-
-#### Memory & Scratch
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| sim_scratch | SimScratch | Pooled buffers (Vec/HashMap) reused across systems to reduce allocs | all systems | all systems (borrowed, cleared per tick) |
-
-#### Collections
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| fidelity_zones | Vec<FidelityZone> | Proximity bubbles controlling detail level | fidelity_control | entity update frequency, detail depth |
 | regions | Vec<RegionState> | Regional population, faction control, terrain | spawn | all region-aware systems |
-| groups | Vec<Group> | All social-collective state — settlements, factions, families, guilds, religions, parties, packs (discriminated by `kind`) | spawn, JoinGroup/LeaveGroup, FoundGroup, DissolveGroup, conquest, diplomacy events | every group-aware system; queryable by kind via index |
+| groups | Vec<Group> | All social-collective state, kind-discriminated | spawn, JoinGroup/LeaveGroup, FoundGroup, DissolveGroup, conquest, diplomacy | every group-aware system |
 | quests | Vec<Quest> | Active quests being pursued | quest_board acceptance | quest_lifecycle, party_ai |
 | quest_board | Vec<QuestPosting> | Available quests not yet accepted | settlement/threat posting | guild quest selection, expiration cleanup |
 | trade_routes | Vec<TradeRoute> | Emergent trading paths (strength decays) | npc_trade | npc_decisions, trade analysis |
 | economy | EconomyState | Global totals (gold supply, commodity sum) | all economic systems | inflation, scarcity calc |
-| adventurer_bonds | HashMap<(u32, u32), f32> | NPC-to-NPC bond strength (0–100) | relationships, quests, deaths | morale, party cohesion, grief events |
-| guild | GuildState | Player faction state (gold, reputation, tier, capacity) | quest completion, events | quest board filtering, upgrades |
-| relations | HashMap<(u32, u32, u8), f32> | Entity-to-entity relations by kind (relationship, bond, romance, rivalry, grudge, mentorship) | interaction, events | npc decisions, morale, romance events |
-| chronicle | Vec<ChronicleEntry> | Narrative log (bounded ring buffer) | all major systems | UI history, lore, prophecy checking |
-| prophecies | Vec<Prophecy> | Generated at init, fulfilled by world events | init, prophecy system | narrative hooks, prophecy fulfillment |
-| world_events | Vec<WorldEvent> | Recent events (bounded, cleared/pushed per tick) | all systems emitting events | event-driven systems, prophecy matching |
-
-#### Metadata
-| Field | Type | Meaning | Updated by | Read by |
-|---|---|---|---|---|
-| build_seeds | Vec<BuildSeed> | Room automaton queue waiting for processing | building_ai | room_growth, building construction |
-| structural_events | Vec<StructuralEvent> | Collapses, fractures logged this tick (cleared at tick start) | building/structural systems | event cascade, building damage |
-| registry | Option<Arc<Registry>> | Data-driven entity/ability/item definitions (loaded from dataset/) | init | entity spawning, ability execution |
-| region_plan | Option<RegionPlan> | Continental terrain plan (stored for post-init chunk generation) | init | chunk generation reference |
-| skip_resource_init | bool | Flag to skip resource node spawning (for building AI scenarios) | init | resource_nodes system |
+| adventurer_bonds | HashMap<(u32, u32), f32> | NPC-to-NPC bond strength (0–100) | relationships, quests, deaths | morale, party cohesion, grief |
+| guild | GuildState | Player faction state | quest completion, events | quest board filtering, upgrades |
+| relations | HashMap<(u32, u32, u8), f32> | Entity-to-entity relations by kind (relationship, bond, romance, rivalry, grudge, mentorship) | interactions, events | npc decisions, morale, romance |
+| prophecies | Vec<Prophecy> | Generated at init, fulfilled by events | init, prophecy system | narrative hooks |
+| registry | Option<Arc<Registry>> | Data-driven entity/ability/item definitions | init | entity spawning, ability execution |
+| skip_resource_init | bool | Skip resource node spawning (building-AI scenarios) | init | resource_nodes system |
 
 ---
 
 ### Derivation Graph
 
-Fields that are derived (computable on-demand from entity state) vs. cached:
-
 ```
--- Derivable from entity state, currently cached:
-population[sid] 
-  ← count(entities where home_settlement_id == sid && alive)
-  ** Could be recomputed each tick in O(n_entities) **
+DERIVABLE FROM ENTITY STATE (cached for perf):
+- population[sid]            ← count(entities where home_settlement_id == sid && alive)
+- threat_level[region]       ← (monster_density * count + recent_attacks + recent_deaths) / (1 + time_since_crisis)
+- threat_level[settlement]   ← from region.threat + local entity queries
+- is_at_war[a,b]             ← faction.at_war_with list (vs O(n²) relation scan)
 
-threat_level[region] 
-  ← (monster_density * monster_count_in_region + recent_attack_count + recent_death_count) / (1 + time_since_crisis)
-  ** Could be recomputed from entity positions + region history **
+EMERGENT (require history):
+- prices                     ← base / (1 + stockpile / (pop * halflife))
+- strength[trade_route]      ← exponential decay without activity, abandoned < 0.1
+- trade_count, total_profit  ← accumulated by npc_trade
 
-threat_level[settlement]
-  ← 0–1 score from nearby (region.threat, monster_density, recent_losses, attacks)
-  ** Could be recomputed from region.threat_level + local entity queries **
-
--- Emergent (require history to compute, not just current state):
-prices[settlement, commodity]
-  ← base_price / (1 + stockpile[c] / (population * price_halflife))
-  ** Supply-demand feedback. Requires stockpile + population (emergent from entity count) **
-
-strength[trade_route]
-  ← 1.0 exponentially decays toward 0 without activity, abandoned < 0.1
-  ** Requires temporal tracking; could be recomputed if trade_count + last_trade_tick stored **
-
-trade_count, total_profit
-  ← accumulated by npc_trade decisions over time
-  ** Purely emergent, no on-demand recomputation path **
-
-is_at_war[faction_a, faction_b]
-  ← faction_a.at_war_with.contains(faction_b)
-  ** Cached list; could iterate all factions each time (O(n²)) **
-
--- Cached for perf but stateless:
-region_plan (continental terrain layout)
-  ← generated at world init, stored for chunk reference
-  ** Stateless; could be regenerated from seed if forgotten, but expensive **
-
-surface_cache (height field lookups)
-  ← lazily computed from voxel_world
-  ** Pure function of (vx, vy, region_plan, seed); safe to recompute **
-
-cell_census (material counts per resource cell)
-  ← populated by NPC scans
-  ** Could be recomputed by scanning all resource nodes, but expensive (~10-20ms per full rescan) **
-
-nav_grids (walkable surfaces)
-  ← derived from voxel_world
-  ** Pure function of voxel_world; safe to recompute if voxel_world changes **
-
-entity_index, settlement_index, group_index
-  ← indices for O(1) lookups
-  ** Pure functions of entities/settlements; must be rebuilt when those change **
-
--- Immutable (truly stored):
-id, name, pos, terrain, sub_biome (all per-region/settlement/faction)
-  ← set at spawn, never change
-  ** Safe to store permanently **
-
-treasury, stockpile (settlement/faction gold & goods)
-  ← modified by economic systems
-  ** Requires history; cannot derive without transaction log **
-
-faction.at_war_with (war list)
-  ← set by diplomacy/conquest systems
-  ** Could be queried from relation graph, but cached for O(1) war checks **
+CACHED, REGENERABLE (pure funcs):
+- region_plan                ← seed
+- surface_cache, surface_grid← (vx, vy, region_plan, seed)
+- nav_grids                  ← voxel_world
+- cell_census                ← chunk contents in cell band
+- entity_index/settlement_index/group_index ← rebuilt from entities/settlements
 ```
-
-#### Candidates for On-Demand Recomputation
-
-1. **population** — Currently stored; could be recomputed in O(n_entities) per tick. Trade-off: 10–50 cycle loop vs. one integer field. **Keep cached** (too frequent queries).
-
-2. **threat_level** (region & settlement) — Computable from monster_density + recent events + decay. **Keep cached** (used in quest posting hot loop).
-
-3. **surface_cache** — Pure function of voxel_world; safe to invalidate and regenerate on demand, but expensive. **Keep cached** (used 16K+ times per cell scan).
-
-4. **nav_grids** — Pure function of voxel_world; safe to regenerate when voxel changes. **Keep cached** (pathfinding is hot).
-
-5. **cell_census** — Could be recomputed by iterating all resource nodes; takes 10–20ms per full rescan. **Keep cached** (used for target discovery, not latency-sensitive).
-
-6. **trade_route.strength** — Decay is time-based; could be recomputed if last_activity_tick tracked. **Consider: store last_activity_tick, recompute strength on access**.
-
-7. **is_at_war[faction_a, faction_b]** — Currently list lookup; could query relations graph. **Keep list** (hot path in movement, O(1) vs. O(n)).
 
 ---
 
-### ConstructionMemory (Building AI Integration)
+### ConstructionMemory
 
-Per-settlement construction event log with three tiers:
+Three-tier per-settlement construction event log. Updated by building_ai event logging; read by pattern learning.
 
-| Tier | Field | Meaning | Capacity | Decay |
-|---|---|---|---|---|
-| Short-term | short_term: RingBuffer<ConstructionEvent> | Raw events (all types) | 64 entries | None (circular overwrite) |
-| Medium-term | medium_term: RingBuffer<AggregatedPattern> | Patterns with importance > 0.3 | 256 entries | Halves every 500 ticks |
-| Long-term | long_term: RingBuffer<StructuralLesson> | Structural lessons, importance > 0.7 | 64 entries | Permanent until contradicted |
-
-Updated by: building_ai event logging system  
-Read by: building_ai pattern learning (decide build strategies based on past successes/failures)
+| Tier | Field | Capacity | Decay |
+|---|---|---|---|
+| short_term | RingBuffer<ConstructionEvent> | 64 | None (circular) |
+| medium_term | RingBuffer<AggregatedPattern> (importance > 0.3) | 256 | Halves every 500 ticks |
+| long_term | RingBuffer<StructuralLesson> (importance > 0.7) | 64 | Permanent until contradicted |
 
 ---
 
 ### Payment, ContractBid, ServiceType
 
-**Payment**: Represents gold + commodities in a single transaction.
-- `gold: f32` — gold amount
-- `commodities: Vec<(u8, f32)>` — (commodity_index, amount) pairs
-- Methods: `gold_only()`, `commodity()`, `estimated_value()`, `is_empty()`
+**Payment**: `gold: f32`, `commodities: Vec<(u8, f32)>`. Methods: `gold_only()`, `commodity()`, `estimated_value()`, `is_empty()`.
 
-**ContractBid**: An NPC's offer to perform a ServiceContract.
-- `bidder_id: u32` — offering NPC
-- `bid_amount: f32` — gold they'll accept
-- `skill_value: f32` — skill at time of bid
-- `credit_history: u8` — trust score (0–100)
+**ContractBid**: `bidder_id`, `bid_amount: f32`, `skill_value: f32`, `credit_history: u8 (0–100)`.
 
-**ServiceType** Enum: Work category for contracts.
-- `Build(BuildingType)` — construction
-- `Gather(commodity_idx, amount)` — resource collection
-- `Craft` — manufacturing
-- `Heal` — medical care
-- `Guard(target_entity_id)` — protection
-- `Haul(commodity_idx, amount, (x, y))` — transport goods
-- `Teach(npc_id)` — education/training
-- `Barter { offer: (idx, amt), want: (idx, amt) }` — commodity swap
-
----
-
-### Summary: Which Fields Are Emergent vs. Stored
-
-| Category | Field | Type | Emergent? | Updaters |
-|---|---|---|---|---|
-| Settlement pop. | population | u32 | **YES** (count alive at sid) | npc birth/death events |
-| Threat | threat_level | f32 | Quasi (derived + cached) | monster_density, attacks, time |
-| Prices | prices | [f32; 8] | Derived (supply-demand model) | trade_goods, seasons, price controls |
-| Resources | stockpile | [f32; 8] | State (not derivable) | production, consumption, trade, looting |
-| Treasury | treasury | f32 | State (not derivable) | taxes, maintenance, contracts, warfare |
-| Faction war | at_war_with | Vec<u32> | Cached (queryable from relations) | diplomacy, civil_war |
-| Quest progress | progress | f32 | Derived (from quest_lifecycle) | quest_lifecycle tick updates |
-| Trade strength | strength | f32 | Derived (exponential decay) | npc_trade activity, time |
-| Entity index | entity_index | Vec<u32> | **YES** (rebuild from entities) | rebuild_entity_cache() |
+**ServiceType**: `Build(BuildingType)`, `Gather(commodity_idx, amount)`, `Craft`, `Heal`, `Guard(target_id)`, `Haul(commodity_idx, amount, (x,y))`, `Teach(npc_id)`, `Barter { offer, want }`.
 
 ---
 
 ### Group (universal)
 
-The social-collective primitive. A Group represents any collection of agents with shared identity and group-level state: factions, families, guilds, religions, hunting packs, criminal cabals, adventuring parties, settlements, leagues, monasteries, courts. The `kind` discriminator + presence/absence of optional fields differentiates them.
+Social-collective primitive — any collection of agents with shared identity. Kind + optional field presence differentiates factions, families, guilds, religions, packs, cabals, parties, settlements, leagues, monasteries, courts.
 
 #### Identity & Membership
 | Field | Type | Meaning | Updated by | Read by |
@@ -1133,7 +753,7 @@ The social-collective primitive. A Group represents any collection of agents wit
 #### Standings (relations to other groups)
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| standings | Map<GroupId, Standing> | Per-other-group disposition: Allied / Neutral / Tense / AtWar / Vassal / Suzerain / Excommunicate. **Replaces faction.at_war_with + diplomatic_stance.** | diplomacy events (AllianceFormed, WarDeclared, VassalSworn, ...) | mask predicates (can-attack-other-group, eligible for trade with), observation features, is_hostile derivation |
+| standings | Map<GroupId, Standing> | Per-other-group disposition: Allied/Neutral/Tense/AtWar/Vassal/Suzerain/Excommunicate | diplomacy events (AllianceFormed, WarDeclared, VassalSworn, ...) | mask predicates (can-attack-other-group, trade-with), observation, is_hostile derivation |
 | standing_history | Vec<StandingEvent> | Bounded history of standing changes | diplomacy events | narrative, AI memory |
 
 #### Recruitment & Eligibility
@@ -1149,147 +769,112 @@ The social-collective primitive. A Group represents any collection of agents wit
 | active_quests | Vec<QuestId> | Quests this group has Posted or Accepted as a party | PostQuest / AcceptQuest cascade | quest lifecycle, observation |
 | recent_activity | Vec<EventRef> | Bounded log of recent group-level events | various | narrative, observation, AI memory |
 
-#### What's NOT on Group (derived views)
-
-- `population` (use `members.len()`)
-- `is_at_war(other)` — read from `standings[other]`
-- `is_allied(other)` — read from `standings[other]`
-- `wealth_per_member` — `treasury / members.len()`
-- `cultural_descriptor` — derived from members' aggregate behavior_profiles
-- `reputation_among(other_group)` — derived from cross-group event history
+**Derived views (not stored):** `population` (`members.len()`), `is_at_war(other)` / `is_allied(other)` (read `standings[other]`), `wealth_per_member` (`treasury / members.len()`), `cultural_descriptor` (aggregate behavior_profiles), `reputation_among(other_group)` (cross-group event history).
 
 #### Per-kind shapes
-
-| Kind | Typical fields populated |
+| Kind | Typical fields |
 |---|---|
-| `Faction` | `military_strength`, `standings`, `governance`, `tech_level`, recruitment_open |
-| `Settlement` | `facilities`, `charter`, `stockpile`, `treasury`, paired with a spatial record holding `pos`, `grid_id`, `region_id` |
-| `Guild` | `treasury`, `recruitment_open`, `dues`, eligibility_predicate, often a settlement-bound charter |
-| `Family` | `leader_id` (head of household), `members` derived from kin events |
-| `Party` | `leader_id`, `founded_tick`, `dissolved_tick` set at quest completion or disbandment |
-| `Religion` | `charter` holding scripture / pantheon, eligibility_predicate, leadership chain |
-| `Pack` | `leader_id` is the alpha, eligibility_predicate keyed on `creature_type` |
-| `Cabal` | `recruitment_open=false`, restrictive eligibility, secret standings |
-| `Court` | `governance`, `leadership_chain` for ministerial succession |
-| `League` | flat governance, `standings` heavy with member-group relations |
+| Faction | `military_strength`, `standings`, `governance`, `tech_level`, recruitment_open |
+| Settlement | `facilities`, `charter`, `stockpile`, `treasury`; paired with spatial record (`pos`, `grid_id`, `region_id`) |
+| Guild | `treasury`, `recruitment_open`, `dues`, `eligibility_predicate`, settlement-bound charter |
+| Family | `leader_id` (household head), `members` from kin events |
+| Party | `leader_id`, `founded_tick`, `dissolved_tick` |
+| Religion | `charter` (scripture/pantheon), `eligibility_predicate`, leadership chain |
+| Pack | `leader_id` (alpha), `eligibility_predicate` keyed on `creature_type` |
+| Cabal | `recruitment_open=false`, restrictive eligibility, secret standings |
+| Court | `governance`, `leadership_chain` |
+| League | flat governance, `standings` heavy |
 
 ---
 
 ## World state
 
-The environment layer: data defining terrain, structural tiles, voxels, spatial indices, and shared caches. Not per-entity, not per-settlement/faction.
-
-Primary files:
-- `src/world_sim/state.rs` — `WorldState`, `Tile`, `FidelityZone`, `BuildSeed`, `SimScratch`, `GroupIndex`, `StructuralEvent`
-- `src/world_sim/voxel.rs` — `VoxelWorld`, `Chunk`, `Voxel`, `VoxelMaterial`
-- `src/world_sim/terrain/region_plan.rs` — `RegionPlan`, `RegionCell`, `SettlementPlan`, `DungeonPlan`, `RiverPath`, `RoadSegment`
-- `src/world_sim/systems/exploration.rs` — `FlatSurfaceGrid`, `SurfaceCache`, `CellCensus`
-- `src/world_sim/nav_grid.rs` — `NavGrid`, `NavNode`
-- `src/world_sim/constants.rs` — grid/voxel constants
+Environment layer: terrain, tiles, voxels, spatial indices, shared caches. Not per-entity, not per-settlement.
 
 ---
 
 ### WorldState top-level fields (world/spatial only)
 
-Per-entity and per-settlement/faction fields are documented in the other two docs. This section covers the rest.
+#### Scalar / identity (Primary)
+| Field | Type | Meaning |
+|---|---|---|
+| tick | u64 | Monotonic tick counter (incremented by `WorldSim::tick`) |
+| rng_state | u64 | PCG-style RNG state; sole randomness source (`next_rand_u32`) |
+| next_id | u32 | Monotonic entity ID counter |
+| max_entity_id | u32 | Highest ID seen (sizes `entity_index`); derived from rebuild |
 
-#### Scalar / identity
+#### Derived indices (`#[serde(skip)]`, rebuilt on load)
+| Field | Type | Purpose |
+|---|---|---|
+| entity_index | `Vec<u32>` | `id → idx` into entities/hot/cold (size `max_entity_id+1`, sentinel `u32::MAX`) |
+| group_index | `GroupIndex` | Contiguous per-settlement + per-party entity ranges |
+| settlement_index | `Vec<u32>` | `settlement_id → idx` into settlements |
 
-| Field | Type | Meaning | Persistence | Updated by | Read by |
-|---|---|---|---|---|---|
-| tick | u64 | Monotonic tick counter | Primary | `WorldSim::tick` (once per step) | all time-gated systems |
-| rng_state | u64 | PCG-style RNG state; sole randomness source | Primary | `next_rand_u32` / `next_rand` | all stochastic systems |
-| next_id | u32 | Monotonic entity ID counter | Primary | `next_entity_id()` | entity spawn |
-| max_entity_id | u32 | Highest ID seen (sizes `entity_index`) | Derived (cache sizing) | `rebuild_entity_cache`, `rebuild_group_index` | indexed lookups |
+All derived from `entities`/`settlements`; avoid linear scans.
 
-#### Derived indices (all `#[serde(skip)]` — rebuilt on load)
-
-| Field | Type | Purpose | Rebuilt by | Read by |
-|---|---|---|---|---|
-| entity_index | `Vec<u32>` | `id → idx` into `entities/hot/cold`. Size = `max_entity_id+1`. Sentinel `u32::MAX` | `rebuild_entity_cache`, `rebuild_group_index` | `entity()`, `entity_mut()`, `hot_entity()`, `cold_entity()` |
-| group_index | `GroupIndex` | Contiguous per-settlement + per-party entity ranges (see below) | `rebuild_group_index` | system dispatch (runtime, exploration, supply) |
-| settlement_index | `Vec<u32>` | `settlement_id → idx` into `settlements` vec | `rebuild_settlement_index` | `settlement()`, `settlement_mut()` |
-
-Note: all three are strictly **derived** from primary state and re-buildable from `entities`/`settlements`. They exist to avoid linear scans.
-
-#### Spatial / terrain state
-
-| Field | Type | Persistence | Purpose |
-|---|---|---|---|
-| tiles | `HashMap<TilePos, Tile, ahash>` | Primary | Sparse 2D tile grid |
-| fidelity_zones | `Vec<FidelityZone>` | Primary (entity_ids membership is derived, re-computed each tick) | Sim-fidelity bubbles |
-| build_seeds | `Vec<BuildSeed>` | Primary | Pending room-growth seeds |
-| voxel_world | `VoxelWorld` | Primary | 3D chunked voxel world (physical truth) |
-| nav_grids | `Vec<NavGrid>` | Derived cache | Baked 2D walkable surfaces per settlement |
-| region_plan | `Option<Arc<RegionPlan>>` (`#[serde(skip)]`) | Primary (regen from seed) | Biome/elevation plan driving terrain generation |
-| structural_events | `Vec<StructuralEvent>` | Per-tick buffer | Collapse/fracture events this tick |
-| chronicle | `Vec<ChronicleEntry>` | Primary (bounded ring) | Narrative log |
-| world_events | `Vec<WorldEvent>` | Primary (bounded) | Recent events for system queries |
+#### Spatial / terrain state (Primary unless noted)
+| Field | Type | Purpose |
+|---|---|---|
+| tiles | `HashMap<TilePos, Tile, ahash>` | Sparse 2D tile grid |
+| fidelity_zones | `Vec<FidelityZone>` | Sim-fidelity bubbles (entity_ids membership recomputed each tick) |
+| build_seeds | `Vec<BuildSeed>` | Pending room-growth seeds |
+| voxel_world | `VoxelWorld` | 3D chunked voxel world (physical truth) |
+| nav_grids | `Vec<NavGrid>` | Baked 2D walkable surfaces (derived cache) |
+| region_plan | `Option<Arc<RegionPlan>>` | Biome/elevation plan; `#[serde(skip)]`, regen from seed |
+| structural_events | `Vec<StructuralEvent>` | Per-tick collapse/fracture buffer |
+| chronicle | `Vec<ChronicleEntry>` | Narrative log (bounded ring) |
+| world_events | `Vec<WorldEvent>` | Recent events (bounded) |
 
 #### Cache fields (all `#[serde(skip)]`)
-
-| Field | Type | Rebuilt by | Purpose |
-|---|---|---|---|
-| surface_cache | `SurfaceCache` (HashMap<u64, i32>) | `scan_voxel_resources_cached` (lazy) | Fallback analytical surface-height cache |
-| surface_grid | `FlatSurfaceGrid` | `warm_surface_cache` | Dense per-settlement surface-height tiles |
-| cell_census | `CellCensus` (HashMap<(i32,i32),[u32;6]>) | `scan_voxel_resources_cached` (lazy) | Per-cell target-material counts for NPC discovery |
-| sim_scratch | `SimScratch` | Caller clears before each use | Pooled scratch buffers, NOT persistent |
+| Field | Type | Rebuilt by |
+|---|---|---|
+| surface_cache | `HashMap<u64, i32>` | `scan_voxel_resources_cached` (lazy) |
+| surface_grid | `FlatSurfaceGrid` | `warm_surface_cache` |
+| cell_census | `HashMap<(i32,i32),[u32;6]>` | `scan_voxel_resources_cached` (lazy) |
+| sim_scratch | `SimScratch` | Caller clears before each use (NOT persistent) |
 
 ---
 
 ### WorldState.tiles
 
-**Type:** `HashMap<TilePos, Tile, ahash::RandomState>` (state.rs:505)
-**Purpose:** Sparse 2D grid of placed tiles — floors, walls, doors, furniture, farmland, workspaces, ditches. Only modified tiles stored; unmodified positions are empty. 2.0 world units per tile.
+**Type:** `HashMap<TilePos, Tile, ahash::RandomState>`
+**Purpose:** Sparse 2D grid of placed tiles (floors, walls, doors, furniture, farmland, workspaces, ditches). Only modified tiles stored. 2.0 world units per tile.
 
 #### Tile fields
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| tile_type | TileType | What kind of tile | `construction.rs:71,125,143` (wall/door placement), `action_eval.rs` (PlaceTile action) | flood_fill, interiors, buildings, pathing, movement_cost lookups |
-| placed_by | Option\<u32\> | Entity that placed it (attribution) | construction, action_eval | rarely queried |
-| placed_tick | u64 | Tick placed | construction | sometimes used for decay/age checks |
-| floor_level | u8 | Floor index within a multi-story building (0 = ground level, 1 = second floor, etc.). Outdoor tiles use 0. Multi-story buildings occupy one `Tile` entry per (TilePos, floor_level). | construction (per-floor placement) | interior navigation (`floor_height(pos, building)`), rendering, mask predicates (overhear: same building → any floor; planar_distance + z_separation apply across floors) |
+| tile_type | TileType | What kind of tile | construction (wall/door placement), action_eval (PlaceTile) | flood_fill, interiors, buildings, pathing, movement_cost |
+| placed_by | Option\<u32\> | Entity that placed it | construction, action_eval | rarely queried |
+| placed_tick | u64 | Tick placed | construction | decay/age checks |
+| floor_level | u8 | Floor index in multi-story building (0=ground, outdoor=0). Multi-story buildings store one `Tile` per (TilePos, floor_level) | construction (per-floor) | interior nav (`floor_height(pos, building)`), rendering, mask predicates (overhear: same building → any floor) |
 
-Tiles remain 2D per-floor: the `HashMap<TilePos, Tile>` keys are still `TilePos { x, y }`, but the stored `Tile` carries `floor_level`. Multi-story buildings store one `Tile` entry per occupied (x, y, floor) triple via distinct map insertions keyed on a `(TilePos, floor_level)` tuple (implementation detail; logical schema above treats `floor_level` as a `Tile` field).
-
-#### TileType variants (state.rs:205)
-Exhaustive list:
+#### TileType variants
 - **Terrain:** `Dirt`, `Stone`, `Water`
 - **Structural:** `Floor(TileMaterial)`, `Wall(TileMaterial)`, `Door`, `Window`
 - **Infrastructure:** `Path`, `Bridge`, `Fence` (blocks monsters only)
 - **Agricultural:** `Farmland`
-- **Furniture (in-room):** `Workspace(WorkspaceType)`, `Bed`, `Altar`, `Bookshelf`, `StorageContainer`, `MarketStall`, `WeaponRack`, `TrainingDummy`, `Hearth`
+- **Furniture:** `Workspace(WorkspaceType)`, `Bed`, `Altar`, `Bookshelf`, `StorageContainer`, `MarketStall`, `WeaponRack`, `TrainingDummy`, `Hearth`
 - **Defensive:** `Moat`, `TowerBase`, `GateHouse`, `ArcherPosition`, `Trap`
 
-Per-variant gameplay role is encoded in `movement_cost()`, `is_solid()`, `is_wall()`, `is_floor()`, `is_furniture()`, `blocks_monsters_only()` on `TileType`.
+Per-variant role via `movement_cost()`, `is_solid()`, `is_wall()`, `is_floor()`, `is_furniture()`, `blocks_monsters_only()`.
 
-#### TileMaterial variants (state.rs:246)
-`Wood`, `Stone`, `Iron`. Used to parametrise wall/floor types.
-
-#### WorkspaceType variants (state.rs:254)
-`Forge`, `Anvil`, `Loom`, `AlchemyBench`, `Kitchen`, `Sawbench`.
-
-#### BuildingFunction enum (state.rs:316)
-`Shelter`, `Production`, `Worship`, `Knowledge`, `Defense`, `Trade`, `Storage`. Used by `BuildSeed.intended_function` and to compute `minimum_interior()` requirements. Not stored in `Tile` directly — a property of planned rooms.
+#### TileMaterial: `Wood`, `Stone`, `Iron`.
+#### WorkspaceType: `Forge`, `Anvil`, `Loom`, `AlchemyBench`, `Kitchen`, `Sawbench`.
+#### BuildingFunction: `Shelter`, `Production`, `Worship`, `Knowledge`, `Defense`, `Trade`, `Storage`. Used by `BuildSeed.intended_function` and `minimum_interior()`.
 
 #### Characteristics
-- **Update frequency:** incremental, sparse writes. Only when NPCs `PlaceTile`/construction runs room-growth. Rarely removed (door placement rewrites single tiles).
-- **GPU-friendliness:** hostile — HashMap lookup per neighbor in flood_fill. `is_enclosed`, `has_door`, `find_door_position` all do 4/8-connected scans via HashMap.
-- **Derived?** No — primary state.
-- **Candidates for flat-grid conversion:** yes. Spatially dense within settlements; currently paying hash cost per neighbor lookup. A chunked flat grid keyed by TilePos would be faster.
+- Sparse writes (PlaceTile / construction room-growth). Primary state.
+- GPU-hostile: HashMap lookup per neighbor in flood_fill. Candidate for flat-grid conversion.
 
-#### TilePos helpers (state.rs:156)
-- `TilePos { x: i32, y: i32 }` with hand-packed `Hash` (pack to u64, single `write_u64` — ~2× faster than derive(Hash)).
-- `TilePos::from_world(wx, wy) → (wx/2).floor()`
-- `TilePos::to_world()` — returns tile center
-- `neighbors8()`, `neighbors4()`
+#### TilePos
+`TilePos { x: i32, y: i32 }` with hand-packed `Hash` (single `write_u64`). Helpers: `from_world`, `to_world`, `neighbors8()`, `neighbors4()`.
 
 ---
 
 ### WorldState.voxel_world (VoxelWorld)
 
-**Type:** `VoxelWorld` (voxel.rs:443)
-**Purpose:** 3D chunked voxel world — physical source of truth. Sparse; only loaded chunks stored.
+**Type:** `VoxelWorld`
+**Purpose:** 3D chunked voxel world — physical source of truth. Sparse, only loaded chunks stored.
 
 #### VoxelWorld fields
 | Field | Type | Meaning | Updated by | Read by |
@@ -1308,21 +893,17 @@ Per-variant gameplay role is encoded in `movement_cost()`, `is_solid()`, `is_wal
 | `SEA_LEVEL` | 350 | Default water level in voxel-z |
 | `MEGA` | (chunks-per-mega-axis) | Mega-chunk grouping (rendering) |
 
-#### ChunkPos (voxel.rs:31)
-| Field | Type | Meaning |
-|---|---|---|
-| x, y, z | i32 | Chunk-space coord (each chunk covers CHUNK_SIZE³ voxels) |
+#### ChunkPos
+`{ x, y, z: i32 }` — chunk-space coord (each chunk covers CHUNK_SIZE³ voxels). Uses derive-Hash + ahash.
 
-Derive-Hash is used (3× write_i32) — not hand-optimised like TilePos, but `ahash` mitigates.
-
-#### Chunk (voxel.rs:385)
+#### Chunk
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | voxels | `Vec<Voxel>` (len = CHUNK_VOLUME = 262,144) | Dense voxel array, row-major `(z·CS + y)·CS + x` | `Chunk::set`, VoxelWorld mutations | renderer, structural_tick, scans |
 | pos | ChunkPos | Identity | Constructor | mesh gen |
-| dirty | bool | Any voxel changed — regen SDF/mesh | `set`, `set_voxel`, `damage_voxel`, `mine_voxel`, filled by structural_tick to `false` after processing | mesh regen, structural_tick (picks dirty chunks) |
+| dirty | bool | Any voxel changed — regen SDF/mesh | mutations; cleared by structural_tick | mesh regen, structural_tick |
 
-#### Voxel (voxel.rs:326)
+#### Voxel
 `#[repr(C)]`, ~16 bytes/voxel.
 | Field | Type | Meaning |
 |---|---|---|
@@ -1334,40 +915,40 @@ Derive-Hash is used (3× write_i32) — not hand-optimised like TilePos, but `ah
 | building_id | Option\<u32\> | Building this voxel belongs to, if any |
 | zone | VoxelZone | Residential/Commercial/Industrial/Military/Agricultural/Sacred/Underground/None |
 
-Structural health + support are per-voxel: `effective_hp() = integrity * material.properties().hp_multiplier`. `damage_voxel` at ≤0 HP sets integrity=0 (load-bearing) or replaces with Air, then triggers `cascade_collapse` upward.
+`effective_hp() = integrity * material.properties().hp_multiplier`. `damage_voxel` at ≤0 HP sets integrity=0 (load-bearing) or replaces with Air, then triggers `cascade_collapse` upward.
 
-#### VoxelMaterial variants (voxel.rs:90)
-~45 variants: Air, natural terrain (Dirt/Stone/Granite/Sand/Clay/Gravel/Grass), fluids (Water/Lava/Ice/Snow), ores (IronOre/CopperOre/GoldOre/Coal/Crystal), placed materials (WoodLog/WoodPlanks/StoneBlock/StoneBrick/Thatch/Iron/Glass), agricultural (Farmland/Crop), additional (Basalt/Sandstone/Marble/Bone/Brick/CutStone/Concrete/Ceramic/Steel/Bronze/Obsidian), biome surfaces (JungleMoss/MudGrass/RedSand/Peat/TallGrass/Leaves), entity markers (NpcIdle/Walking/Working/Fighting/MonsterMarker — non-solid, rendering only).
+#### VoxelMaterial variants
+~45 variants: Air, natural terrain (Dirt/Stone/Granite/Sand/Clay/Gravel/Grass), fluids (Water/Lava/Ice/Snow), ores (IronOre/CopperOre/GoldOre/Coal/Crystal), placed (WoodLog/WoodPlanks/StoneBlock/StoneBrick/Thatch/Iron/Glass), agricultural (Farmland/Crop), additional (Basalt/Sandstone/Marble/Bone/Brick/CutStone/Concrete/Ceramic/Steel/Bronze/Obsidian), biome surfaces (JungleMoss/MudGrass/RedSand/Peat/TallGrass/Leaves), entity markers (non-solid, rendering only).
 
-Each material has: `is_solid()`, `is_fluid()`, `is_transparent()`, `hardness() → u32`, `mine_yield() → Option<(commodity_idx,f32)>`, `properties() → MaterialProperties` (hp_multiplier, fire_resistance, load_bearing, weight, rubble_move_cost, construction_cost, blast_resistance).
+Each material: `is_solid()`, `is_fluid()`, `is_transparent()`, `hardness()`, `mine_yield()`, `properties()` (hp_multiplier, fire_resistance, load_bearing, weight, rubble_move_cost, construction_cost, blast_resistance).
 
-#### VoxelZone (voxel.rs:307)
-`None`, `Residential`, `Commercial`, `Industrial`, `Military`, `Agricultural`, `Sacred`, `Underground`. For building zone tracking.
+#### VoxelZone
+`None`, `Residential`, `Commercial`, `Industrial`, `Military`, `Agricultural`, `Sacred`, `Underground`.
 
 #### Surface-height paths
 
-Signature: `surface_height: vec2 → f32` (outdoor only). Returns world-space z of the topmost solid voxel surface at planar coordinate `(vx, vy)`. Interior navigation uses `floor_height: (vec3, building_id) → f32` instead, derived from the tile `floor_level` layer the agent is on.
+`surface_height: vec2 → f32` (outdoor): topmost solid voxel surface z. Interior nav uses `floor_height: (vec3, building_id) → f32`.
 
-Three code paths, in priority order:
-1. **Analytical fbm path** (`terrain::materialize::surface_height_at(vx, vy, plan, seed)`, voxel.rs:492) — used when `region_plan` is `Some`. Pure function of (vx, vy, plan, seed); **zero chunk lookups**. Vastly cheaper than chunk-walking (flamegraph: was 72% of program time pre-optimisation).
-2. **Chunk-walking fallback** (`surface_height_from_chunks`, voxel.rs:503) — used when no region_plan. Walks chunk-z-slices top-down; one HashMap lookup per chunk-z. Returns `sea_level` if no solid found.
-3. **Cached paths** (`surface_grid` dense tile → `surface_cache` sparse HashMap) — used by exploration scans to avoid recomputing even the analytical path ~16K times per cell.
+Three code paths, priority order:
+1. **Analytical fbm** (`surface_height_at(vx, vy, plan, seed)`) — when `region_plan` is `Some`. Pure function; zero chunk lookups.
+2. **Chunk-walking fallback** (`surface_height_from_chunks`) — walks chunk-z-slices top-down; returns `sea_level` if no solid.
+3. **Cached** (`surface_grid` dense → `surface_cache` sparse) — used by exploration scans.
 
-The ground-snap cascade rule (see `spec.md` §7) reads `surface_height(pos.xy)` for outdoor agents and `floor_height(pos, building_id)` for indoor agents, then sets `pos.z = h + creature_height/2`.
+The ground-snap cascade reads `surface_height(pos.xy)` outdoor or `floor_height(pos, building_id)` indoor, then sets `pos.z = h + creature_height/2`.
 
 #### Characteristics
-- **Update frequency:** chunks added lazily (`generate_chunk` / `ensure_loaded_around`). Voxels mutated by harvest, construction, structural_tick, damage.
-- **GPU-friendliness:** chunks are inherently chunked (already the right shape). HashMap wrapper is hostile; indexed/pool-allocated chunks would be GPU-friendly. Dense `Vec<Voxel>` per chunk is GPU-upload-ready (16 bytes/voxel, 4 MB/chunk).
-- **Derived?** No — primary state. `region_plan` + seed regenerates chunks, but once voxels are edited, those edits are primary.
+- Chunks added lazily (`generate_chunk`/`ensure_loaded_around`). Voxels mutated by harvest, construction, structural_tick, damage.
+- GPU: chunks are inherently chunked; HashMap wrapper is hostile. Dense `Vec<Voxel>` per chunk is GPU-upload-ready (16 B/voxel, 4 MB/chunk).
+- Primary state.
 
-**Role for 3D agent positions.** `Agent.pos: vec3` is authoritative. Agents with volumetric `creature_type` (Dragon, Fish, Bat) can be placed anywhere inside the voxel chunk grid — inside caverns, underwater, in a flying island, inside a dungeon chamber — without a separate indoor/outdoor state flag. Ground-locked agents resolve their `pos.z` via the snap cascade (outdoor `surface_height` or indoor `floor_height` per `inside_building_id`). Spatial queries (`query::nearby_agents`) chunk against the voxel grid in 3D by default. [OPEN] whether the spatial hash is 3D-chunked across full voxel space, or 2D-grid keyed on chunk-column with per-cell z-range buckets — pick one per `spec.md` §9.
+**3D agent positions.** `Agent.pos: vec3` is authoritative. Volumetric `creature_type` (Dragon, Fish, Bat) place anywhere in voxel grid without indoor/outdoor flag. Ground-locked resolve `pos.z` via snap cascade.
 
 ---
 
 ### WorldState.region_plan (RegionPlan)
 
-**Type:** `Option<RegionPlan>` in WorldState (region_plan.rs:67). Also stored by value in `VoxelWorld.region_plan`.
-**Purpose:** Continental-scale biome plan — grid of `RegionCell`s classifying terrain, settlements, dungeons, plus polyline rivers and road segments. Stored so chunk generation can reference the same plan after world creation.
+**Type:** `Option<RegionPlan>` in WorldState; also stored by value in `VoxelWorld.region_plan`.
+**Purpose:** Continental-scale biome plan — grid of `RegionCell`s + polyline rivers + road segments. Referenced by chunk generation.
 
 #### RegionPlan fields
 | Field | Type | Meaning |
@@ -1411,17 +992,14 @@ The ground-snap cascade rule (see `spec.md` §7) reads `surface_height(pos.xy)` 
 #### RoadSegment (region_plan.rs:42)
 Straight-line segment: `from`, `to` as `(f32, f32)` in voxel-space.
 
-#### Characteristics
-- **Update frequency:** static after init. `#[serde(skip)]` on WorldState — regenerated from seed on load.
-- **GPU-friendliness:** friendly. Cells are a flat `Vec`, rivers/roads can flatten via `to_gpu_cells()`, `to_gpu_rivers()` (already implemented for `feature="app"`).
-- **Derived?** Deterministic function of seed — effectively primary (source of all terrain gen), but regenerable.
+Static after init. `#[serde(skip)]` — regenerated from seed on load. Cells flat `Vec`, rivers/roads flattenable via `to_gpu_cells()`/`to_gpu_rivers()`. Deterministic function of seed.
 
 ---
 
 ### WorldState.nav_grids
 
-**Type:** `Vec<NavGrid>` (state.rs:545, nav_grid.rs:15)
-**Purpose:** Baked 2D walkable surfaces derived from `VoxelWorld`. One per settlement area. Pathfinding (A*, flow fields) operates on NavGrid, not on VoxelWorld.
+**Type:** `Vec<NavGrid>`
+**Purpose:** Baked 2D walkable surfaces derived from `VoxelWorld`, one per settlement area. Pathfinding (A*, flow fields) operates on NavGrid.
 
 #### NavGrid fields
 | Field | Type | Meaning |
@@ -1437,114 +1015,78 @@ Straight-line segment: `from`, `to` as `(f32, f32)` in voxel-space.
 | surface_z | i32 | Z of walkable surface |
 | move_cost | f32 | Material-based cost; 0 for non-walkable |
 
-#### Characteristics
-- **Update frequency:** rebuilt when `VoxelWorld` has structural changes in the area. `buildings.rs:rebake_nav_grids` walks the column from max_z down for each (x,y) in the footprint. Called after construction completes and when test setups add buildings.
-- **Writers:** `buildings.rs:212,213` (push new nav), `buildings.rs:960,961` (test path), `buildings.rs:197` (iterate-and-rebake).
-- **GPU-friendliness:** friendly — flat `Vec<NavNode>` row-major.
-- **Derived?** **Yes — pure function of `voxel_world` contents.** Can be rebuilt at any time via `NavGrid::bake(world, origin, w, h, max_z)`. Serialized for convenience.
+Rebuilt when `VoxelWorld` has structural changes; `buildings.rs:rebake_nav_grids` walks columns top-down. GPU-friendly (flat row-major). Pure function of `voxel_world`; rebuildable via `NavGrid::bake`.
 
 ---
 
 ### FidelityZone
 
-**Type:** `FidelityZone` (state.rs:4009), stored in `WorldState.fidelity_zones: Vec<FidelityZone>`
-**Purpose:** Proximity bubble controlling simulation fidelity around a point. Entities inside the zone run at its fidelity level (High/Medium/Low/Background).
+**Type:** `FidelityZone` in `WorldState.fidelity_zones: Vec<FidelityZone>`
+**Purpose:** Proximity bubble controlling sim fidelity. Entities inside run at zone level (High/Medium/Low/Background).
 
-#### Fields
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
-| id | u32 | Unique zone ID | spawn (`tick.rs:366,384,405`, `compute_high.rs:168`, `world_sim_cmd.rs:2907`) | grid/zone lookups |
-| fidelity | Fidelity | `High` / `Medium` / `Low` / `Background` | `exploration::compute_exploration_for_settlement` (EscalateFidelity delta), threat systems | tick fidelity dispatch (`runtime.rs:hot_entity_fidelity`) |
-| center | vec3 | World-space center | spawn | `update_grid_membership` (proximity test; radius is 3D Euclidean) |
+| id | u32 | Unique zone ID | spawn | grid/zone lookups |
+| fidelity | Fidelity | `High`/`Medium`/`Low`/`Background` | exploration EscalateFidelity, threat systems | tick fidelity dispatch |
+| center | vec3 | World-space center | spawn | `update_grid_membership` (proximity, 3D Euclidean) |
 | radius | f32 | Zone radius | spawn | membership |
-| entity_ids | `Vec<u32>` | Entity IDs currently inside | `runtime::update_grid_membership` (rewritten each tick) | `has_hostiles`, `has_friendlies` queries |
+| entity_ids | `Vec<u32>` | Entity IDs inside (recomputed each tick) | `update_grid_membership` | `has_hostiles`, `has_friendlies` |
 
-#### Characteristics
-- **Update frequency:** `entity_ids` re-populated every tick in `update_grid_membership`. Zones themselves added at init or on escalation.
-- **GPU-friendliness:** mixed — scalar fields are friendly; `entity_ids` is a `Vec<u32>` per zone. Acceptable.
-- **Derived?** `entity_ids` is **derived** (recomputed from entity positions + zone center/radius each tick). The zone definition (id/fidelity/center/radius) is primary.
+`entity_ids` is derived; rest is primary.
 
 ---
 
 ### BuildSeed
 
-**Type:** `BuildSeed` (state.rs:399), stored in `WorldState.build_seeds: Vec<BuildSeed>`
-**Purpose:** A placed room-growth seed. NPC sets a seed, the room-growth automaton (construction.rs) enlarges outward until enclosed.
+**Type:** `BuildSeed` in `WorldState.build_seeds: Vec<BuildSeed>`
+**Purpose:** Placed room-growth seed. NPC sets a seed; automaton enlarges outward until enclosed.
 
-#### Fields
 | Field | Type | Meaning |
 |---|---|---|
 | pos | TilePos | Seed tile position |
-| intended_function | BuildingFunction | What room function this targets (drives `minimum_interior`) |
+| intended_function | BuildingFunction | Room function (drives `minimum_interior`) |
 | minimum_interior | u32 | Required interior tile count for completion |
-| placed_by | u32 | Entity ID that set the seed |
+| placed_by | u32 | Entity that set the seed |
 | tick | u64 | Tick placed |
-| complete | bool | Marked true when grown successfully, OR when stalled past `MAX_SEED_ATTEMPTS` |
-| attempts | u16 | Room-growth attempts performed — stall detection |
-| last_interior_size | u16 | Last observed interior size; if unchanged across attempts, seed is stalled |
+| complete | bool | True when grown OR stalled past `MAX_SEED_ATTEMPTS` |
+| attempts | u16 | Room-growth attempts (stall detection) |
+| last_interior_size | u16 | Last observed interior size for stall detection |
 
-#### Characteristics
-- **Update frequency:** added by `action_eval.rs:1178` (NPC PlaceBuildSeed action). Mutated by `construction.rs` room-growth (attempts, last_interior_size, complete). Pruned when `complete=true`.
-- **GPU-friendliness:** tiny — flat `Vec<BuildSeed>`, ~40 bytes each, easily GPU-shaped.
-- **Derived?** Primary state — must persist.
+Added by NPC PlaceBuildSeed action; mutated by construction room-growth; pruned when complete. Primary state.
 
 ---
 
 ### StructuralEvent
 
-**Type:** `StructuralEvent` (state.rs:436), stored in `WorldState.structural_events: Vec<StructuralEvent>`
-**Purpose:** Per-tick events emitted by voxel collapse/fracture. **Cleared at tick start** (`runtime.rs:1540`) — ephemeral.
+**Type:** `StructuralEvent` in `WorldState.structural_events: Vec<StructuralEvent>`
+**Purpose:** Per-tick events from voxel collapse/fracture. **Cleared at tick start** — ephemeral.
 
 #### Variants
 - `FragmentCollapse { chunk_x, chunk_y, chunk_z, fragment_voxel_count: u32, cause: CollapseCase }`
 - `StressFracture { chunk_x, chunk_y, chunk_z, cluster_mass: f32, material_strength: f32 }`
 
-#### CollapseCase enum (state.rs:428)
-- `NpcHarvest` — caused by voxel_harvest (tree felling, mining)
-- `NpcConstruction` — placed a voxel that destabilised neighbours
+#### CollapseCase
+- `NpcHarvest` — voxel_harvest (tree felling, mining)
+- `NpcConstruction` — placed voxel destabilised neighbours
 - `Natural` — organic collapse from structural_tick
-
-#### Characteristics
-- **Update frequency:** per-tick buffer. Cleared at start of each tick (`runtime::tick`). Appended by `structural_tick.rs:71`.
-- **GPU-friendliness:** small — tagged union. OK.
-- **Derived?** Consumed same tick; technically a per-tick output buffer, not persistent state.
 
 ---
 
 ### SimScratch (NOT persistent state)
 
-**Type:** `SimScratch` (state.rs:344)
-**Purpose:** Pooled scratch buffers reused across tick systems. **Not persistent. Cleared + refilled within a single function call.** Avoids per-tick Vec/HashMap allocations (pre-pooling: ~55 page faults per tick, 220KB/tick allocator churn).
-
-`Clone` returns `Default` intentionally — cloning a WorldState shouldn't duplicate scratch allocations.
+**Type:** `SimScratch`. Pooled scratch buffers reused across tick systems. Cleared + refilled within a single function call. `Clone` returns `Default` (don't duplicate allocations).
 
 #### Sub-buffer ownership
-| Buffer | Owner | Purpose |
-|---|---|---|
-| snaps | `action_eval::evaluate_and_act` | Read-only entity snapshots for scoring |
-| snap_grid | `action_eval` | Snap indices by spatial cell |
-| snap_grids_typed | `action_eval` | Kind-typed spatial grids (resources/buildings/combatants) |
-| deferred | `action_eval` | Deferred action decisions |
-| npc_indices | `exploration::scan_all_npc_resources` | NPC indices to scan |
-| npc_pos_voxel | `exploration` | NPC voxel positions cached for step 3 |
-| visible_cells | `exploration` | Visible cell set |
-| flood_visited | `construction::flood_fill_with_boundary` | Generational visited tag (128×128 flat grid, u16 gen) |
-| flood_current_gen | `construction` | Current generation tag |
-| flood_queue | `construction` | BFS queue |
-| flood_interior | `construction` | BFS result interior |
-| flood_boundary | `construction` | BFS result boundary |
-
-#### Characteristics
-- **Update frequency:** cleared + filled within one function call each.
-- **GPU-friendliness:** N/A — CPU-side pools.
-- **Derived?** Ephemeral. Never read across boundaries.
+- `action_eval`: `snaps` (entity snapshots), `snap_grid` (indices by cell), `snap_grids_typed` (kind-typed grids), `deferred` (action decisions)
+- `exploration`: `npc_indices` (scan list), `npc_pos_voxel` (cached positions), `visible_cells`
+- `construction::flood_fill_with_boundary`: `flood_visited` (128×128 generational), `flood_current_gen`, `flood_queue`, `flood_interior`, `flood_boundary`
 
 ---
 
 ### GroupIndex
 
-**Type:** `GroupIndex` (state.rs:1032)
-**Purpose:** Contiguous per-settlement / per-party entity ranges. After `rebuild_group_index()`, entities are sorted by `(settlement_id, party_id)` so settlement members are adjacent. Systems iterate a slice instead of scanning all entities.
+**Type:** `GroupIndex`
+**Purpose:** Contiguous per-settlement/per-party entity ranges. After `rebuild_group_index()`, entities sorted by `(settlement_id, party_id)`; systems iterate a slice.
 
 #### Fields
 | Field | Type | Meaning |
@@ -1557,28 +1099,19 @@ Straight-line segment: `from`, `to` as `(f32, f32)` in voxel-space.
 | unaffiliated_range | (u32,u32) | Entities not assigned to any settlement |
 
 #### Accessors
-`settlement_entities(sid)`, `settlement_npcs(sid)`, `settlement_buildings(sid)`, `settlement_monsters(sid)`, `party_entities(pid)`, `unaffiliated_entities()` — all return `Range<usize>`.
+`settlement_entities(sid)`, `settlement_npcs(sid)`, `settlement_buildings(sid)`, `settlement_monsters(sid)`, `party_entities(pid)`, `unaffiliated_entities()` → `Range<usize>`.
 
-#### Characteristics
-- **Update frequency:** rebuilt by `rebuild_group_index()` after structural entity changes. Called in `rebuild_all_indices` after spawn/despawn. Runtime invokes when `entities.len() != hot.len()` (runtime.rs:1764).
-- **GPU-friendliness:** friendly — flat `Vec<(u32,u32)>` arrays.
-- **Derived?** **Yes — purely derived from `entities` + `settlement_id`/`party_id` membership.** `#[serde(skip)]`-able (currently serialised with Default).
+Rebuilt by `rebuild_group_index()` after structural entity changes. Derived from `entities` + `settlement_id`/`party_id`.
 
 ---
 
-### SurfaceCache (exploration.rs:222)
+### SurfaceCache
 
-**Type:** `pub type SurfaceCache = HashMap<u64, i32, ahash::RandomState>`
-**Key:** packed `(vx as u32) << 32 | vy as u32` via `pack_xy`.
-**Value:** surface z-height.
+**Type:** `HashMap<u64, i32, ahash::RandomState>` keyed by packed `(vx, vy)`.
 
-- Populated lazily by `scan_voxel_resources_cached` on HashMap miss.
-- Fallback for positions outside any FlatSurfaceTile in `surface_grid`.
-- Persistent across ticks (world is mostly static; valid as long as region_plan + seed unchanged).
-- **Derived — pure function of (vx, vy, region_plan, seed).** Regenerates on demand.
-- `#[serde(skip)]`.
+Lazily populated by `scan_voxel_resources_cached` on miss. Fallback for positions outside `surface_grid`. Pure function of `(vx, vy, region_plan, seed)`; `#[serde(skip)]`.
 
-### FlatSurfaceGrid / FlatSurfaceTile (exploration.rs:229, 253)
+### FlatSurfaceGrid / FlatSurfaceTile
 
 #### FlatSurfaceTile
 | Field | Type | Meaning |
@@ -1588,73 +1121,44 @@ Straight-line segment: `from`, `to` as `(f32, f32)` in voxel-space.
 | heights | `Vec<i16>` | Row-major `(dy·width + dx)` surface z-heights |
 
 #### FlatSurfaceGrid
-| Field | Type | Meaning |
-|---|---|---|
-| tiles | `Vec<FlatSurfaceTile>` | One tile per settlement region |
+`tiles: Vec<FlatSurfaceTile>` — one tile per settlement region.
 
-- Populated by `warm_surface_cache` per settlement (exploration.rs:497).
-- `FlatSurfaceGrid::get(vx,vy)` linearly scans tiles — fine for small N (1–10 settlements).
-- **30× faster than HashMap lookup** and 10× less memory; on-cache-hit path for per-cell census.
-- **Derived** — rebuilt from analytical path.
-- **GPU-friendly** — flat `Vec<i16>` row-major.
-- `#[serde(skip)]`.
+Populated by `warm_surface_cache` per settlement. `get(vx,vy)` linearly scans tiles. ~30× faster than HashMap lookup, 10× less memory. `#[serde(skip)]`. Derived, GPU-friendly.
 
-### CellCensus (exploration.rs:203)
+### CellCensus
 
-**Type:** `pub type CellCensus = HashMap<(i32,i32), [u32; 6], ahash::RandomState>`
-**Key:** `(cell_x, cell_y)` where each cell spans `RESOURCE_CELL_SIZE = 128` voxels.
-**Value:** `[count_wood, count_iron, count_copper, count_gold, count_coal, count_crystal]` — 6 target materials.
+**Type:** `HashMap<(i32,i32), [u32; 6], ahash::RandomState>` keyed by `(cell_x, cell_y)` where each cell spans `RESOURCE_CELL_SIZE = 128` voxels.
+**Value:** `[count_wood, count_iron, count_copper, count_gold, count_coal, count_crystal]`.
 
-- Populated lazily when any NPC can see the cell (`scan_voxel_resources_cached`, exploration.rs:705).
-- Persistent for the run. Invalidation on voxel edits is a known tech-debt refinement; resources change slowly and NPCs reconfirm on harvest.
-- **Derived** — pure function of chunk contents in cell's surface band. Rebuildable.
-- **GPU-friendliness:** hostile (HashMap). Could migrate to a flat grid since cells align to 2×CHUNK_SIZE.
-- `#[serde(skip)]`.
+Lazily populated when an NPC sees the cell. Persistent for the run; invalidation on voxel edits is tech debt (resources change slowly). Derived, `#[serde(skip)]`. GPU-hostile (HashMap); flat-grid candidate.
 
 ---
 
-### WorldState.chronicle (narrative log)
+### WorldState.chronicle
 
-**Type:** `Vec<ChronicleEntry>` (state.rs:571; entry at state.rs:4893)
-**Purpose:** Bounded ring buffer of narrative events — what happened in the world. Human-readable.
+**Type:** `Vec<ChronicleEntry>` — bounded ring of narrative events, human-readable.
 
 #### ChronicleEntry
 | Field | Type | Meaning |
 |---|---|---|
 | tick | u64 | When it happened |
-| category | ChronicleCategory | Battle / Quest / Diplomacy / Economy / Death / Discovery / Crisis / Achievement / Narrative |
+| category | ChronicleCategory | Battle/Quest/Diplomacy/Economy/Death/Discovery/Crisis/Achievement/Narrative |
 | text | String | Human-readable text |
 | entity_ids | `Vec<u32>` | Entities involved |
 
-#### Characteristics
-- **Update frequency:** appended by ~20 systems (battles, quests, legends, family, death, warfare, settlement_founding, prophecy, oaths, outlaws, sea_travel, etc.).
-- **GPU-friendliness:** hostile — contains `String`.
-- **Derived?** Primary (lore state; append-only), bounded.
+Appended by ~20 systems. GPU-hostile (`String`).
 
 ### WorldState.world_events
 
-**Type:** `Vec<WorldEvent>` (state.rs:579; enum at state.rs:4919)
-**Purpose:** Recent events for system queries (bounded).
+**Type:** `Vec<WorldEvent>` — recent events for system queries (bounded).
 
-#### WorldEvent variants
-`Generic{category,text}`, `EntityDied{entity_id,cause}`, `QuestChanged{quest_id,new_status}`, `FactionRelationChanged`, `RegionOwnerChanged`, `BondGrief`, `SeasonChanged`, `BattleStarted`, `BattleEnded`, `QuestPosted`, `QuestAccepted`, `QuestCompleted`, `SettlementConquered`.
-
-#### Characteristics
-- **Update frequency:** appended by relevant systems, bounded.
-- **GPU-friendliness:** hostile — some variants contain `String` (`Generic`, `EntityDied`).
-- **Derived?** Primary (event log).
+#### Variants
+`Generic{category,text}`, `EntityDied{entity_id,cause}`, `QuestChanged`, `FactionRelationChanged`, `RegionOwnerChanged`, `BondGrief`, `SeasonChanged`, `BattleStarted`, `BattleEnded`, `QuestPosted`, `QuestAccepted`, `QuestCompleted`, `SettlementConquered`.
 
 ---
 
 ### Summary
 
-- **Primary state** (irreplaceable): `tick`, `rng_state`, `next_id`, `tiles`, `voxel_world.chunks`, `voxel_world.sea_level`, `region_plan` (regenerable from seed), `build_seeds`, `chronicle`, `world_events`, `fidelity_zones` (zone definitions — id/fidelity/center/radius), `structural_events` (per-tick buffer).
-- **Derived state** (rebuildable from primary): `entity_index`, `group_index`, `settlement_index`, `surface_cache`, `surface_grid`, `cell_census`, `nav_grids`, `max_entity_id`, `fidelity_zones[].entity_ids` (recomputed every tick in `update_grid_membership`).
-- **Scratch state** (ephemeral, pooled, NOT persistent): `SimScratch` and all sub-buffers — cleared + filled + consumed within one function call.
-- **GPU-hostile shapes:** `HashMap<TilePos, Tile>`, `HashMap<ChunkPos, Chunk>`, `HashMap<u64, i32>` (surface_cache), `HashMap<(i32,i32),[u32;6]>` (cell_census), `Vec<ChronicleEntry>`/`Vec<WorldEvent>` (contain `String`), `VecDeque<TilePos>` (flood_queue).
-- **GPU-friendly shapes already in place:** `Chunk.voxels: Vec<Voxel>` (dense, 16B/voxel), `NavGrid.nodes: Vec<NavNode>` (row-major), `FlatSurfaceTile.heights: Vec<i16>` (row-major), `RegionPlan.cells: Vec<RegionCell>` (flat, with `to_gpu_cells()` already implemented), `RiverPath.points: Vec<(f32,f32)>` with `to_gpu_rivers()`, `GroupIndex` range arrays.
-- **Candidates for flat-grid conversion:**
-  - `tiles` (spatially dense within settlements; currently hashing per neighbor in flood_fill / is_enclosed / has_door).
-  - `voxel_world.chunks` (inherently chunked — just needs indexed/slab-pooled chunk storage rather than HashMap).
-  - `cell_census` (cells align to 2×CHUNK_SIZE; a flat grid keyed by cell coord would be GPU-friendly).
-  - `surface_cache` is already superseded by `surface_grid` on the hot path.
+- **Primary state** (irreplaceable): `tick`, `rng_state`, `next_id`, `tiles`, `voxel_world.chunks`, `voxel_world.sea_level`, `region_plan` (regenerable from seed), `build_seeds`, `chronicle`, `world_events`, `fidelity_zones` (zone defs), `structural_events` (per-tick).
+- **Derived state**: `entity_index`, `group_index`, `settlement_index`, `surface_cache`, `surface_grid`, `cell_census`, `nav_grids`, `max_entity_id`, `fidelity_zones[].entity_ids`.
+- **Scratch (ephemeral)**: `SimScratch` + sub-buffers.
