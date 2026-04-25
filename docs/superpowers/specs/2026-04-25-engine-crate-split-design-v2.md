@@ -331,3 +331,82 @@ Plan B1 (written against v1) was mid-execution when v2 was drafted. State at dra
 2. Salvage the committed work (Tasks 1, 2; rename + dep-direction-fix).
 3. Write Plan B1' against v2: tasks for the three migrations (`step_full` → engine_rules, `mark_*_allowed` → engine_rules, `views` field → caller-owned), the `SimBackend::Views` associated type, the §4.4 Q1 resolution, the seal + sentinels (carried from v1 unchanged), and the trybuild test.
 4. Plan B2 (chronicle + engagement migration) and Plan B3 (legacy `src/` sweep) carry forward with no change.
+
+> **Further refinement during Plan B1' brainstorming (2026-04-25):** while writing the plan, we recognized that several "shape" decisions in v2 were too conservative. The architecture's true end-state has:
+>
+> 1. **`SimState` itself is an emitted artifact**, not a hand-written engine type. The DSL declares the agent fields; the compiler emits the SoA struct into `engine_data`. Engine never references SimState; backends in engine_rules + engine_gpu work over the emitted shape.
+>
+> 2. **Rule-level shape types** (`CreatureType`, `Capabilities`, `ChannelSet`, `LanguageId`, `QuestCategory`, `Resolution`, `MicroKind`, `EventKindId`) **live in engine_data** as emitted enums + constants. Engine stores raw ordinals/bitmasks (`u16`, `u64`); the named meaning is rule-data.
+>
+> 3. **`chronicle.rs` and `engagement.rs` migrate as part of B1'**, not deferred to B2. They reference the concrete `Event` enum + the named creature types — both of which become rule-data. Once those move, chronicle.rs has no reason to live in engine. (Plan B2 collapses into B1'.)
+>
+> 4. **`AgentId`, `EntityId`, `AbilityId`, `EventId`** keep their newtype wrappers in engine — they distinguish *kinds of identifier* and the type-safety has runtime value.
+>
+> Plan B1' captures these refinements; the v2 spec body above is consistent with the refinements but doesn't enumerate every rule-level type. Read Plan B1' for the operational contract.
+
+## §12 Optimization opportunities — what the architecture buys us beyond cleanliness
+
+The "rules at emit time" property gives the compiler whole-program access patterns no generic runtime can match. Listed here so future plans don't accidentally regress these affordances. Each is a candidate for a follow-up plan; none are required for B1' to land.
+
+### §12.1 Codegen specialization
+
+- **Direct-call cascade dispatch.** Locked by D14 (emitted `step` body). `cascade.dispatch(event)` becomes a literal `match event.kind() { 0 => DamageHandler.handle(...), 1 => ..., }` with each arm inlined by LLVM. No vtable indirection.
+- **Const-fold immutable per-creature fields.** `attack_range`, `attack_power`, `speed` are set once at spawn-time from `CREATURE_DEFAULTS` and never change. Emitter can detect this (per-field `@stable` annotation or flow analysis) and replace per-agent SoA lookups with `CREATURE_DEFAULTS[creature_type as usize].attack_range` — single load from a `static` const table.
+- **Branch elimination on empty handler chains.** If a rule set has no handlers on `KinDied`, the compiler emits no match arm for that kind. Empty cases vanish entirely.
+
+### §12.2 Memory layout specialization
+
+- **Hot/cold/volatile field split.** Per-phase access analysis: `mask-fill` reads `alive + position + creature_type + attack_range`; `cascade-dispatch` writes `hp + alive`. Compiler emits cache-line-grouped sub-structs:
+
+  ```rust
+  pub struct SimState {
+      hot:      HotFields,       // touched every phase
+      warm:     WarmFields,      // mask-fill + scoring
+      volatile: VolatileFields,  // mutated by cascade
+  }
+  ```
+
+  Fewer L1 misses on the hot path.
+
+- **AOS/SOA hybrid for co-accessed fields.** Pack always-co-accessed fields (e.g. `position + speed + creature_type`) as AOS; keep independently-accessed fields (e.g. `hp`, mutated by cascade only) as SOA.
+
+- **Per-creature-type spatial indices.** Hostility tables are typically sparse: wolves only query deer positions, not other wolves. Compiler emits one spatial index per creature-type-that's-queried instead of one global. Reduces candidate set per query proportional to type fraction.
+
+- **Branchless hostility table packed in const memory.** For `N` creature types with `N×N ≤ 64`, the entire table fits in a `u64`:
+  ```rust
+  const HOSTILITY_PACKED: u64 = 0b00100000;  // bit pattern from DSL hostility map
+  fn is_hostile(a: u16, b: u16) -> bool { (HOSTILITY_PACKED >> (a * N + b)) & 1 != 0 }
+  ```
+  Single shift + mask, no cache thrash, no branch.
+
+### §12.3 Algorithmic specialization
+
+- **Static-sized event ring.** Compiler computes max-events-per-tick from rule analysis (each handler's max push count × cascade depth). Emit fixed-size ring instead of `Vec<Event>`. Allocator-free steady state.
+- **View-fold fusion.** Multiple views fold over the same event ring. Naive code traverses the ring once per view; fused code emits one loop with all view `fold_event` calls inlined. N traversals → 1.
+- **Per-phase dirty-bit tracking.** If only a small fraction of agents change per tick, compiler-emitted dirty-tracking lets mask-fill skip clean ones. Decided per-rule-set via dependency analysis.
+- **Replayable hash incrementality.** `replayable_sha256` updates incrementally on event push (only for variants marked `@replayable`), not from scratch each tick.
+
+### §12.4 Phase parallelism / SIMD
+
+- **Mask-fill SIMD.** Self-only mask predicates (Hold, Flee) iterate independently per agent. DSL can mark predicates as "vectorizable" (no early-out, fixed iteration); emitter produces SIMD-vectorized inner loops with `u16x8` / `f32x8` reads.
+- **Argmax over score table SIMD.** Action selection is argmax over a fixed-size action vector per agent. SIMD-friendly.
+- **Cascade dispatch in independent-handler bundles.** Compiler analyzes data-flow between handlers; emits parallel dispatch (Rayon-friendly partitions) where handlers don't share mutated state.
+
+### §12.5 Replayability + snapshot specialization
+
+- **Delta-encoded snapshots.** Track per-field write activity per tick; snapshot stores only deltas; restore replays. Compiler emits per-field write-tracking (zero-cost via `mut` access pattern analysis).
+- **Replayable-only snapshot.** Non-replayable fields (UI hint flags, scratch buffers) excluded from snapshot. Compiler partitions SimState into "replayable" + "scratch" based on `@replayable` DSL annotations.
+
+### §12.6 Generalizing across DSL versions
+
+The architecture lets us ship the same engine binary against arbitrary DSL contents. A different `.sim` (e.g., starships-with-weapons instead of wolf-deer) recompiles `engine_data` + `engine_rules` + `engine_gpu` to new shapes; engine itself is untouched. **The engine becomes a reusable framework, not a project-specific runtime.**
+
+Future plan candidates (none required for B1'):
+
+- **Plan B4: Per-creature-type spatial indices** — DSL hostility-graph drives index sharding.
+- **Plan B5: Hot/cold/volatile SoA layout** based on access-pattern analysis.
+- **Plan B6: Static-sized event ring + alloc-free steady state.**
+- **Plan B7: SIMD mask-fill + scoring codegen.**
+- **Plan B8: Delta-encoded snapshot + replayable partition.**
+
+Each is independently scopable; none affect B1's structural moves.
