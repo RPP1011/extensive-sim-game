@@ -437,7 +437,7 @@ TRANSFORMATIONS:
 
 - **hot/cold split**: `Entity` unpacked into `HotEntity` (cache-line scalars) + `ColdEntity` (heap refs); serialized via entity.split() / Entity::from_parts().
 - **SimScratch / entity_index / group_index**: `#[serde(skip)]`, rebuilt on load via `rebuild_all_indices()`.
-- **Determinism**: all entity randomness via `entity_hash(id, tick, salt)`; never `thread_rng()`.
+- **Determinism**: all entity randomness via `entity_hash(id, tick, salt)`.
 - **Tag hashing**: compile-time FNV-1a `hash(tag_name)` for tag_hash constants.
 
 ---

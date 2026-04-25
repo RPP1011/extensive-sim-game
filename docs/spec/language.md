@@ -772,12 +772,10 @@ Runtime constants: `MAX_ANNOUNCE_RECIPIENTS` (default 64) bounds the per-emissio
 
 ### 7.2 Determinism contract
 
-- All randomness flows through `rng_state: u64` (PCG-style) plus per-agent derived streams (§9 #12). Per-agent RNG seeded from `hash(world_seed, agent_id, tick, purpose_tag)`; no stored per-agent RNG state. Never `thread_rng` or external RNG inside the simulation.
+- All randomness flows through `rng_state: u64` (PCG-style) plus per-agent derived streams (§9 #12). Per-agent RNG seeded from `hash(world_seed, agent_id, tick, purpose_tag)`; no stored per-agent RNG state.
 - Agent processing order is deterministically shuffled each tick via an RNG-seeded permutation.
 - Events emitted within a phase are collected in append order; handlers process them deterministically.
 - HashMap iteration seeded from `hash(world_seed ^ tick)` at world init; never re-seeded.
-- Wall-clock reads (`SystemTime`, `Instant`) are forbidden in DSL code. Only the tick counter is available.
-- GPU reductions over floats use sorted-key or fixed-point accumulation.
 - Text generation (`ChronicleEntry.text`, LLM prose) is `@non_replayable` (§9 #21): templates render eagerly at event emission, an async LLM pass may rewrite entries in flagged categories (`Legendary`, `Founding`, `Death`, `Prophecy`). Saved prose is canonical — template-library changes only affect future entries. Bug-report replay artefacts bundle the template library; casual replay uses the current library.
 
 Tests in `src/ai/core/tests/determinism.rs` (runtime) and the compiler's invariant checker verify that:

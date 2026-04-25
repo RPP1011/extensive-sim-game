@@ -389,8 +389,6 @@ chronicle_ring → snapshot.chronicle_since_last (existing watermark)
 | View fold bodies (standing, memory) | DSL-lowered |
 | Annotation processing (`@symmetric_pair_topk`, `@per_entity_ring`, `@cpu_only`) | DSL-lowered |
 
-**No hand-written game-logic WGSL.**
-
 ---
 
 ## 5. Ability evaluation on GPU
@@ -498,8 +496,6 @@ The `cast` physics rule (already GPU-native) handles the downstream effects.
 | `pick_ability.wgsl` (compiler output from `per_ability` row) | DSL-lowered |
 | CPU `pick_ability` handler (compiler output, replaces hand-tuned `evaluate_hero_ability`) | DSL-lowered |
 | Tag reads + scoring arithmetic | DSL-lowered (`scoring.sim`) |
-
-**Zero hand-written game-logic WGSL.**
 
 ### 5.9 Failure modes
 
@@ -832,4 +828,3 @@ The standing rule "engine core = hand-written; game logic = DSL" applies on GPU:
 - **Engine-core (hand-written Rust + WGSL)**: buffer allocation, bind-group layouts, dispatch driver, indirect-args plumbing, snapshot handshake, `ensure_resident_init`, `SimCfg` struct, sub-struct factoring.
 - **DSL-lowered (compiler output)**: all rule bodies, view fold bodies, `pick_ability` kernel, scoring expressions, annotation processing (`@cpu_only`, `@symmetric_pair_topk`, `@per_entity_ring`).
 
-**Zero hand-written game-logic WGSL.** If a kernel's body expresses game rules, it comes from the DSL compiler.

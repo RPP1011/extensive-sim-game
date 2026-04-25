@@ -75,7 +75,7 @@ Always host-side (regardless of engine backend):
 - Save/load serialization.
 - Trace-format emission (consumed by the Python `Dataset`).
 
-**Cascade rules with cross-entity walks** (`t in quest.eligible_acceptors`, `at_war(self, f)`): the **GpuBackend** handles these via GPU-resident `AggregatePool<T>` (with `T: Pod` discipline — see engine spec §16) and kernel-side iteration of fixed-size inline arrays. The **SerialBackend** uses `Box<dyn CascadeHandler>` closures with direct pool access. Per-tick determinism is verified by cross-backend parity. Cross-entity walks are no longer a CPU-only concern in the new framing — the compiler emits SPIR-V for them, targeting the `AggregatePool<T>` layout.
+**Cascade rules with cross-entity walks** (`t in quest.eligible_acceptors`, `at_war(self, f)`): the **GpuBackend** handles these via GPU-resident `AggregatePool<T>` (with `T: Pod` discipline — see engine spec §16) and kernel-side iteration of fixed-size inline arrays. The **SerialBackend** uses `Box<dyn CascadeHandler>` closures with direct pool access. Cross-entity walks are no longer a CPU-only concern in the new framing — the compiler emits SPIR-V for them, targeting the `AggregatePool<T>` layout.
 
 Quest-eligibility and auction-eligibility indices are cross-entity materialized views (engine spec §15) — GPU-dispatched on `GpuBackend` via sorted-key reductions; scalar on `SerialBackend`. Both backends expose the same view query API.
 
