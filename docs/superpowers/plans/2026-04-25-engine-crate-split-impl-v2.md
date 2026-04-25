@@ -155,15 +155,29 @@ Generic refactor (Task 1) MUST come first — it's the structural foundation. Af
 
 **Goal:** Add `pub trait EventLike` in engine; convert `EventRing`, `CascadeRegistry`, `CascadeHandler`, and the three view traits to be generic over `E: EventLike`. Drop the `pub use engine_data::events::Event;` re-export from `engine/src/event/mod.rs`. After this task, engine has zero regular-dep on engine_data.
 
-**Files:**
-- Modify: `crates/engine/src/event/mod.rs` — add `pub trait EventLike`, drop `pub use engine_data::events::Event`.
+**Scope reality check:** the file count is small. Adding `<E>` to a struct definition does NOT force every caller to be generic — concrete callsites pick a concrete `E` (use `engine_rules::SimEventRing` or `EventRing<engine_data::events::Event>` directly). Only files that *propagate* `EventRing`/`CascadeRegistry`/the view traits further need to thread `<E>` themselves.
+
+**Files that need `<E>` threaded (~7 + edge cases):**
+- Modify: `crates/engine/src/event/mod.rs` — add `pub trait EventLike`, drop the `Event` re-export.
 - Modify: `crates/engine/src/event/ring.rs` — `EventRing<E: EventLike>`.
-- Modify: `crates/engine/src/cascade/handler.rs` — `CascadeHandler<E: EventLike>`, add `__sealed::Sealed` supertrait.
+- Modify: `crates/engine/src/cascade/handler.rs` — `CascadeHandler<E: EventLike>` + add `__sealed::Sealed` supertrait.
 - Modify: `crates/engine/src/cascade/dispatch.rs` — `CascadeRegistry<E: EventLike>`.
-- Modify: `crates/engine/src/view/{materialized,lazy,topk}.rs` — generic over E + sealed.
-- Modify: `crates/engine/src/{probe/mod.rs, invariant/{trait_,registry,builtins}.rs, view/lazy.rs, view/topk.rs}` — thread E parameter.
-- Modify: `crates/engine/Cargo.toml` — drop `engine_data` regular-dep; add as `[dev-dependencies]` for the tests that need a concrete instantiation.
-- Modify: `crates/engine/src/state/mod.rs` — anywhere SimState references `Event`, drop the import (state no longer carries event-typed fields directly).
+- Modify: `crates/engine/src/view/{materialized,lazy,topk}.rs` — view trait declarations get `<E>` + sealed.
+- Audit + thread `<E>` through any engine-internal struct/fn that propagates `EventRing` further: likely `crates/engine/src/probe/mod.rs` and `crates/engine/src/invariant/{trait_,registry,builtins}.rs`. Each is a small file with a focused surface.
+
+**Files modified for the dep flip (no `<E>` threading needed):**
+- Modify: `crates/engine/Cargo.toml` — drop `engine_data` from `[dependencies]`; add to `[dev-dependencies]` for tests that need the concrete `Event`.
+- Modify: `crates/engine/src/state/mod.rs` — drop any `crate::event::Event` import (it no longer re-exports from engine_data); SimState's `views: ViewRegistry` field stays for now (Task 5 hoists it).
+
+**Files NOT touched in this task** (deleted by later tasks anyway, so don't sink time threading `<E>` through them now):
+- `crates/engine/src/step.rs` — DELETED in Task 4.
+- `crates/engine/src/backend.rs::CpuBackend` impl — DELETED in Task 4.
+- `crates/engine/src/mask.rs::mark_*_allowed` methods — DELETED in Task 4.
+- `crates/engine/src/generated/` — DELETED in Task 3.
+
+If the build fails inside one of these "deleted later" files because the type param doesn't propagate, **escalate** — don't spend time fixing code that's about to disappear. The intermediate-state build red between Task 1 and Task 4 is acceptable per Step 10.
+
+**External callsites** (engine_gpu, engine integration tests, xtask): each is a one-line import swap to `engine_rules::SimEventRing` or `EventRing<engine_data::events::Event>`. Bulk-handled via sed in Task 3 Step 8 once `engine_rules::SimEventRing` exists.
 
 - [ ] **Step 1: Add the `EventLike` trait + retain `EventKindId`.**
 
