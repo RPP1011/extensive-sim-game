@@ -3,6 +3,7 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
+use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -12,7 +13,7 @@ pub fn transfer_gold(
     to: AgentId,
     a: i32,
     state: &mut SimState,
-    events: &mut EventRing,
+    events: &mut EventRing<Event>,
 ) {
     if (a != 0) {
         if (from != to) {

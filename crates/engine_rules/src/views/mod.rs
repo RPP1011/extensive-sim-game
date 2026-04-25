@@ -25,9 +25,11 @@ pub use slow_factor::slow_factor;
 pub use standing::Standing;
 pub use threat_level::ThreatLevel;
 
+use engine::event::EventRing;
+use engine_data::events::Event;
+
 /// Compiler-emitted view registry — one field per `@materialized` view.
-/// `SimState` owns one of these; the tick pipeline calls `fold_all` at
-/// the view-fold phase (spec §7.1).
+/// The tick pipeline calls `fold_all` at the view-fold phase (spec §7.1).
 #[derive(Debug, Default)]
 pub struct ViewRegistry {
     pub engaged_with: engaged_with::EngagedWith,
@@ -46,13 +48,8 @@ impl ViewRegistry {
     }
 
     /// Fold every materialized view over the current tick's events.
-    /// Called from `step_full` at the view-fold phase.
-    ///
-    /// `events_before` is the value of `events.push_count()` at the TOP of
-    /// the current tick, snapshot *before* any events were pushed this tick.
-    /// The fold iterates `events.iter_since(events_before)` so each view only
-    /// sees events emitted this tick (not the whole retained ring).
-    pub fn fold_all(&mut self, events: &crate::event::EventRing, events_before: usize, tick: u32) {
+    /// `events_before` is the push_count snapshot at the top of the tick.
+    pub fn fold_all(&mut self, events: &EventRing<Event>, events_before: usize, tick: u32) {
         for e in events.iter_since(events_before) {
             self.engaged_with.fold_event(e, tick);
             self.kin_fear.fold_event(e, tick);
@@ -63,5 +60,17 @@ impl ViewRegistry {
             self.standing.fold_event(e, tick);
             self.threat_level.fold_event(e, tick);
         }
+    }
+
+    /// Fold a single event into all materialized views.
+    pub fn fold_event(&mut self, event: &Event, tick: u32) {
+        self.engaged_with.fold_event(event, tick);
+        self.kin_fear.fold_event(event, tick);
+        self.memory.fold_event(event, tick);
+        self.my_enemies.fold_event(event, tick);
+        self.pack_focus.fold_event(event, tick);
+        self.rally_boost.fold_event(event, tick);
+        self.standing.fold_event(event, tick);
+        self.threat_level.fold_event(event, tick);
     }
 }

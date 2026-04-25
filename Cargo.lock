@@ -6797,6 +6797,7 @@ dependencies = [
  "anyhow",
  "engine",
  "engine_data",
+ "engine_rules",
  "glam",
  "serde",
  "toml 0.8.23",

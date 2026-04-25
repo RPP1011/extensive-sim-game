@@ -2,12 +2,13 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
+use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn fear_spread_on_death(dead: AgentId, state: &mut SimState, events: &mut EventRing) {
+pub fn fear_spread_on_death(dead: AgentId, state: &mut SimState, events: &mut EventRing<Event>) {
     for kin in crate::spatial::nearby_kin(state, dead, 12.0) {
         events.push(Event::FearSpread {
             observer: kin,

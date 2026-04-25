@@ -55,7 +55,7 @@ impl OverlayTracker {
     /// don't carry positions.
     pub fn ingest_with_state(
         &mut self,
-        events: &engine::event::EventRing,
+        events: &engine::event::EventRing<engine_data::events::Event>,
         state:  &engine::state::SimState,
     ) {
         use engine_data::events::Event;

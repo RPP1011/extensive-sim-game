@@ -3,11 +3,12 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
+use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn shield(c: AgentId, t: AgentId, a: f32, state: &mut SimState, events: &mut EventRing) {
+pub fn shield(c: AgentId, t: AgentId, a: f32, state: &mut SimState, events: &mut EventRing<Event>) {
     if state.agent_alive(t) {
         if (a > 0.0) {
             let cur = state.agent_shield_hp(t).unwrap_or(0.0);

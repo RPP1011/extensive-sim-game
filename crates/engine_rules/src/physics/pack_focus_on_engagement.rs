@@ -2,7 +2,8 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
+use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -11,7 +12,7 @@ pub fn pack_focus_on_engagement(
     actor: AgentId,
     target: AgentId,
     state: &mut SimState,
-    events: &mut EventRing,
+    events: &mut EventRing<Event>,
 ) {
     for kin in crate::spatial::nearby_kin(state, actor, 12.0) {
         events.push(Event::PackAssist {

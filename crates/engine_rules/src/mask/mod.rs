@@ -21,9 +21,4 @@ pub use move_toward::mask_move_toward;
 pub use move_toward::mask_move_toward_candidates;
 pub use rest::mask_rest;
 
-/// Called from the engine's mask-build path. For milestone 4 this
-/// is a no-op shim — the engine imports each per-mask fn directly
-/// via the `pub use` re-exports above. `register()` is kept on the
-/// surface so SPIR-V / GPU-side mask dispatch can grow here later
-/// without adding new scaffolding.
 pub fn register() {}

@@ -2,16 +2,16 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::ids::AgentId;
-use crate::state::SimState;
+use engine::ids::AgentId;
+use engine::state::SimState;
 
 /// Predicate: can `self_id` issue this mask's action head against the given target?
 /// Lowered from `mask Cast` in `assets/sim/masks.sim`.
-pub fn mask_cast(state: &SimState, self_id: AgentId, ability: crate::ability::AbilityId) -> bool {
+pub fn mask_cast(state: &SimState, self_id: AgentId, ability: engine::ability::AbilityId) -> bool {
     if !(state.agent_alive(self_id)) {
         return false;
     }
-    if !(!crate::generated::views::is_stunned(state, self_id)) {
+    if !(!(crate::views::is_stunned(state, self_id))) {
         return false;
     }
     if !(state.ability_registry.get(ability).is_some()) {

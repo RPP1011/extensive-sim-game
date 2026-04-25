@@ -57,8 +57,8 @@ pub struct AppState {
 
     pub sim:       engine::state::SimState,
     pub scratch:   engine::step::SimScratch,
-    pub events:    engine::event::EventRing,
-    pub cascade:   engine::cascade::CascadeRegistry,
+    pub events:    engine::event::EventRing<engine_data::events::Event>,
+    pub cascade:   engine::cascade::CascadeRegistry<engine_data::events::Event, engine_rules::ViewRegistry>,
     pub backend:   engine::policy::UtilityBackend,
     #[allow(dead_code)]
     pub agent_ids: Vec<engine::ids::AgentId>,

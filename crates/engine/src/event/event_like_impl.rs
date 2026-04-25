@@ -51,45 +51,33 @@ impl crate::event::EventLike for Event {
             Event::RecordMemory { .. } => EventKindId::RecordMemory,
         }
     }
+
     fn tick(&self) -> u32 {
         Event::tick(self)
     }
+
     fn is_replayable(&self) -> bool {
         Event::is_replayable(self)
     }
+
     fn hash_replayable(&self, h: &mut sha2::Sha256) {
-        use crate::cascade::EventKindId;
         use sha2::Digest;
+        use crate::cascade::EventKindId;
         match self {
-            Event::AgentAte {
-                agent_id,
-                delta,
-                tick,
-            } => {
+            Event::AgentAte { agent_id, delta, tick } => {
                 h.update([EventKindId::AgentAte as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 h.update(delta.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentAttacked {
-                actor,
-                target,
-                damage,
-                tick,
-            } => {
+            Event::AgentAttacked { actor, target, damage, tick } => {
                 h.update([EventKindId::AgentAttacked as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(damage.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentCast {
-                actor,
-                ability,
-                target,
-                depth,
-                tick,
-            } => {
+            Event::AgentCast { actor, ability, target, depth, tick } => {
                 h.update([EventKindId::AgentCast as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(ability.raw().to_le_bytes());
@@ -97,23 +85,14 @@ impl crate::event::EventLike for Event {
                 h.update([*depth]);
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentCommunicated {
-                speaker,
-                recipient,
-                fact_ref,
-                tick,
-            } => {
+            Event::AgentCommunicated { speaker, recipient, fact_ref, tick } => {
                 h.update([EventKindId::AgentCommunicated as u8]);
                 h.update(speaker.raw().to_le_bytes());
                 h.update(recipient.raw().to_le_bytes());
                 h.update(fact_ref.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentConversed {
-                agent_id,
-                partner,
-                tick,
-            } => {
+            Event::AgentConversed { agent_id, partner, tick } => {
                 h.update([EventKindId::AgentConversed as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 h.update(partner.raw().to_le_bytes());
@@ -124,22 +103,13 @@ impl crate::event::EventLike for Event {
                 h.update(agent_id.raw().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentDrank {
-                agent_id,
-                delta,
-                tick,
-            } => {
+            Event::AgentDrank { agent_id, delta, tick } => {
                 h.update([EventKindId::AgentDrank as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 h.update(delta.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentFled {
-                agent_id,
-                from,
-                to,
-                tick,
-            } => {
+            Event::AgentFled { agent_id, from, to, tick } => {
                 h.update([EventKindId::AgentFled as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 for __v in [from.x, from.y, from.z] {
@@ -150,21 +120,13 @@ impl crate::event::EventLike for Event {
                 }
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentHarvested {
-                agent_id,
-                resource,
-                tick,
-            } => {
+            Event::AgentHarvested { agent_id, resource, tick } => {
                 h.update([EventKindId::AgentHarvested as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 h.update(resource.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentHarvestedVoxel {
-                actor,
-                location,
-                tick,
-            } => {
+            Event::AgentHarvestedVoxel { actor, location, tick } => {
                 h.update([EventKindId::AgentHarvestedVoxel as u8]);
                 h.update(actor.raw().to_le_bytes());
                 for __v in [location.x, location.y, location.z] {
@@ -172,12 +134,7 @@ impl crate::event::EventLike for Event {
                 }
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentMoved {
-                actor,
-                from,
-                location,
-                tick,
-            } => {
+            Event::AgentMoved { actor, from, location, tick } => {
                 h.update([EventKindId::AgentMoved as u8]);
                 h.update(actor.raw().to_le_bytes());
                 for __v in [from.x, from.y, from.z] {
@@ -188,12 +145,7 @@ impl crate::event::EventLike for Event {
                 }
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentPlacedTile {
-                actor,
-                location,
-                kind_tag,
-                tick,
-            } => {
+            Event::AgentPlacedTile { actor, location, kind_tag, tick } => {
                 h.update([EventKindId::AgentPlacedTile as u8]);
                 h.update(actor.raw().to_le_bytes());
                 for __v in [location.x, location.y, location.z] {
@@ -202,12 +154,7 @@ impl crate::event::EventLike for Event {
                 h.update(kind_tag.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentPlacedVoxel {
-                actor,
-                location,
-                mat_tag,
-                tick,
-            } => {
+            Event::AgentPlacedVoxel { actor, location, mat_tag, tick } => {
                 h.update([EventKindId::AgentPlacedVoxel as u8]);
                 h.update(actor.raw().to_le_bytes());
                 for __v in [location.x, location.y, location.z] {
@@ -216,138 +163,83 @@ impl crate::event::EventLike for Event {
                 h.update(mat_tag.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentRemembered {
-                agent_id,
-                subject,
-                tick,
-            } => {
+            Event::AgentRemembered { agent_id, subject, tick } => {
                 h.update([EventKindId::AgentRemembered as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 h.update(subject.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentRested {
-                agent_id,
-                delta,
-                tick,
-            } => {
+            Event::AgentRested { agent_id, delta, tick } => {
                 h.update([EventKindId::AgentRested as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 h.update(delta.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentSharedStory {
-                agent_id,
-                topic,
-                tick,
-            } => {
+            Event::AgentSharedStory { agent_id, topic, tick } => {
                 h.update([EventKindId::AgentSharedStory as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 h.update(topic.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::AgentUsedItem {
-                agent_id,
-                item_slot,
-                tick,
-            } => {
+            Event::AgentUsedItem { agent_id, item_slot, tick } => {
                 h.update([EventKindId::AgentUsedItem as u8]);
                 h.update(agent_id.raw().to_le_bytes());
                 h.update([*item_slot]);
                 h.update(tick.to_le_bytes());
             }
-            Event::AnnounceEmitted {
-                speaker,
-                audience_tag,
-                fact_payload,
-                tick,
-            } => {
+            Event::AnnounceEmitted { speaker, audience_tag, fact_payload, tick } => {
                 h.update([EventKindId::AnnounceEmitted as u8]);
                 h.update(speaker.raw().to_le_bytes());
                 h.update([*audience_tag]);
                 h.update(fact_payload.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::BidPlaced {
-                bidder,
-                auction_id,
-                amount,
-                tick,
-            } => {
+            Event::BidPlaced { bidder, auction_id, amount, tick } => {
                 h.update([EventKindId::BidPlaced as u8]);
                 h.update(bidder.raw().to_le_bytes());
                 h.update(auction_id.raw().to_le_bytes());
                 h.update(amount.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::CastDepthExceeded {
-                actor,
-                ability,
-                tick,
-            } => {
+            Event::CastDepthExceeded { actor, ability, tick } => {
                 h.update([EventKindId::CastDepthExceeded as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(ability.raw().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
             Event::ChronicleEntry { .. } => {
+                // Filtered at the call site; if we reach here, the filter is broken.
                 debug_assert!(false, "ChronicleEntry reached replayable hash path");
             }
-            Event::EffectDamageApplied {
-                actor,
-                target,
-                amount,
-                tick,
-            } => {
+            Event::EffectDamageApplied { actor, target, amount, tick } => {
                 h.update([EventKindId::EffectDamageApplied as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(amount.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::EffectGoldTransfer {
-                from,
-                to,
-                amount,
-                tick,
-            } => {
+            Event::EffectGoldTransfer { from, to, amount, tick } => {
                 h.update([EventKindId::EffectGoldTransfer as u8]);
                 h.update(from.raw().to_le_bytes());
                 h.update(to.raw().to_le_bytes());
                 h.update(amount.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::EffectHealApplied {
-                actor,
-                target,
-                amount,
-                tick,
-            } => {
+            Event::EffectHealApplied { actor, target, amount, tick } => {
                 h.update([EventKindId::EffectHealApplied as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(amount.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::EffectShieldApplied {
-                actor,
-                target,
-                amount,
-                tick,
-            } => {
+            Event::EffectShieldApplied { actor, target, amount, tick } => {
                 h.update([EventKindId::EffectShieldApplied as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(amount.to_bits().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::EffectSlowApplied {
-                actor,
-                target,
-                expires_at_tick,
-                factor_q8,
-                tick,
-            } => {
+            Event::EffectSlowApplied { actor, target, expires_at_tick, factor_q8, tick } => {
                 h.update([EventKindId::EffectSlowApplied as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
@@ -362,99 +254,58 @@ impl crate::event::EventLike for Event {
                 h.update(delta.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::EffectStunApplied {
-                actor,
-                target,
-                expires_at_tick,
-                tick,
-            } => {
+            Event::EffectStunApplied { actor, target, expires_at_tick, tick } => {
                 h.update([EventKindId::EffectStunApplied as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(expires_at_tick.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::EngagementBroken {
-                actor,
-                former_target,
-                reason,
-                tick,
-            } => {
+            Event::EngagementBroken { actor, former_target, reason, tick } => {
                 h.update([EventKindId::EngagementBroken as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(former_target.raw().to_le_bytes());
                 h.update([*reason]);
                 h.update(tick.to_le_bytes());
             }
-            Event::EngagementCommitted {
-                actor,
-                target,
-                tick,
-            } => {
+            Event::EngagementCommitted { actor, target, tick } => {
                 h.update([EventKindId::EngagementCommitted as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::FearSpread {
-                observer,
-                dead_kin,
-                tick,
-            } => {
+            Event::FearSpread { observer, dead_kin, tick } => {
                 h.update([EventKindId::FearSpread as u8]);
                 h.update(observer.raw().to_le_bytes());
                 h.update(dead_kin.raw().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::InformationRequested {
-                asker,
-                target,
-                query,
-                tick,
-            } => {
+            Event::InformationRequested { asker, target, query, tick } => {
                 h.update([EventKindId::InformationRequested as u8]);
                 h.update(asker.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(query.to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::OpportunityAttackTriggered {
-                actor,
-                target,
-                tick,
-            } => {
+            Event::OpportunityAttackTriggered { actor, target, tick } => {
                 h.update([EventKindId::OpportunityAttackTriggered as u8]);
                 h.update(actor.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::PackAssist {
-                observer,
-                target,
-                tick,
-            } => {
+            Event::PackAssist { observer, target, tick } => {
                 h.update([EventKindId::PackAssist as u8]);
                 h.update(observer.raw().to_le_bytes());
                 h.update(target.raw().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::QuestAccepted {
-                acceptor,
-                quest_id,
-                tick,
-            } => {
+            Event::QuestAccepted { acceptor, quest_id, tick } => {
                 h.update([EventKindId::QuestAccepted as u8]);
                 h.update(acceptor.raw().to_le_bytes());
                 h.update(quest_id.raw().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::QuestPosted {
-                poster,
-                quest_id,
-                category,
-                resolution,
-                tick,
-            } => {
+            Event::QuestPosted { poster, quest_id, category, resolution, tick } => {
                 h.update([EventKindId::QuestPosted as u8]);
                 h.update(poster.raw().to_le_bytes());
                 h.update(quest_id.raw().to_le_bytes());
@@ -463,31 +314,19 @@ impl crate::event::EventLike for Event {
                     engine_data::types::Resolution::HighestBid => (0u8, 0u8),
                     engine_data::types::Resolution::FirstAcceptable => (1u8, 0u8),
                     engine_data::types::Resolution::MutualAgreement => (2u8, 0u8),
-                    engine_data::types::Resolution::Coalition { min_parties } => {
-                        (3u8, *min_parties)
-                    }
+                    engine_data::types::Resolution::Coalition { min_parties } => (3u8, *min_parties),
                     engine_data::types::Resolution::Majority => (4u8, 0u8),
                 };
                 h.update([__res_tag, __min_parties]);
                 h.update(tick.to_le_bytes());
             }
-            Event::RallyCall {
-                observer,
-                wounded_kin,
-                tick,
-            } => {
+            Event::RallyCall { observer, wounded_kin, tick } => {
                 h.update([EventKindId::RallyCall as u8]);
                 h.update(observer.raw().to_le_bytes());
                 h.update(wounded_kin.raw().to_le_bytes());
                 h.update(tick.to_le_bytes());
             }
-            Event::RecordMemory {
-                observer,
-                source,
-                fact_payload,
-                confidence,
-                tick,
-            } => {
+            Event::RecordMemory { observer, source, fact_payload, confidence, tick } => {
                 h.update([EventKindId::RecordMemory as u8]);
                 h.update(observer.raw().to_le_bytes());
                 h.update(source.raw().to_le_bytes());
