@@ -1,14 +1,16 @@
-//! Niche-optimised ID newtypes, shared across `engine` and `engine_rules`.
+//! Niche-optimised ID newtypes — struct bodies live here transitionally.
 //!
-//! Moved out of `engine::ids` at the milestone-2 integration step (the flip
-//! that reversed the dep cycle: `engine` now depends on `engine_rules` so
-//! compiler-emitted event structs can carry these types without cycling
-//! back through the engine crate). `engine::ids` now re-exports from here,
-//! so every existing `use engine::ids::AgentId` call site keeps compiling.
+//! **Plan B1' Task 3 (transitional):** The canonical *public* path for these
+//! types is `engine::ids::*` (re-exported from here). Once Task 5 settles the
+//! dep direction (`engine_data → engine` as a regular Cargo dep), this file
+//! will shrink to `pub use engine::ids::*;` and the struct declarations will
+//! move permanently into `crates/engine/src/ids.rs`.
 //!
-//! Byte-for-byte parity with the old `engine::ids`: same `NonZeroU32` niche,
-//! same `raw()`/`new()` APIs. When the compiler grows entity emission in a
-//! later milestone, it will own these declarations directly.
+//! Until then: this file holds the struct bodies; `engine::ids` re-exports
+//! them; all external callers use the `engine::` path.
+//!
+//! Byte-for-byte parity with the target `engine::ids`: same `NonZeroU32`
+//! niche, same `raw()`/`new()` APIs.
 
 use std::num::NonZeroU32;
 
