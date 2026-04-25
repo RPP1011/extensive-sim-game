@@ -56,3 +56,16 @@ pub type SimEventRing = engine::event::EventRing<engine_data::events::Event>;
 pub fn with_engine_builtins() -> SimCascadeRegistry {
     cascade_reg::with_engine_builtins()
 }
+
+/// Re-export `GeneratedRule` from the engine's sealed module so emitted code
+/// in this crate can write `impl crate::GeneratedRule for Foo {}` without
+/// needing to reference the full `engine::cascade::handler::__sealed` path.
+///
+/// This marker trait is emitted by `dsl_compiler` next to every
+/// compiler-generated rule type. The blanket `impl<T: GeneratedRule> Sealed
+/// for T` lives in `engine::cascade::handler::__sealed` (same crate as
+/// `Sealed`, satisfying Rust's orphan rules), so every type marked
+/// `GeneratedRule` automatically satisfies the `Sealed` supertrait of
+/// `CascadeHandler` / `MaterializedView` / `LazyView` / `TopKView`.
+#[doc(hidden)]
+pub use engine::cascade::handler::__sealed::GeneratedRule;

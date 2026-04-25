@@ -3,6 +3,19 @@ use crate::state::SimState;
 
 pub mod __sealed {
     pub trait Sealed {}
+
+    /// Marker trait emitted by `dsl_compiler` next to every compiler-generated
+    /// rule type. Combined with the blanket `Sealed` impl below, only types
+    /// that go through the DSL compiler satisfy the `Sealed` supertrait of
+    /// `CascadeHandler` / `MaterializedView` / `LazyView` / `TopKView`.
+    ///
+    /// This lives in the same module as `Sealed` so the blanket impl
+    /// `impl<T: GeneratedRule> Sealed for T` is coherent (both traits are
+    /// local).
+    #[doc(hidden)]
+    pub trait GeneratedRule {}
+
+    impl<T: GeneratedRule> Sealed for T {}
 }
 
 /// Stable ordinal identifying an event variant. Dense so it indexes arrays
