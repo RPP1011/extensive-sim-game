@@ -117,6 +117,38 @@ impl EventRing {
     pub fn len(&self) -> usize { self.entries.len() }
     pub fn is_empty(&self) -> bool { self.entries.is_empty() }
 
+    // ---- Snapshot helpers (#[doc(hidden)]) ----
+    //
+    // The `snapshot::format` module serialises only the ring's monotonic
+    // metadata (cap + current_tick + next_seq + total_pushed + dispatched).
+    // Entry contents are intentionally NOT snapshotted in v1; see the
+    // `# Coverage gaps` section in `snapshot/format.rs`.
+
+    #[doc(hidden)]
+    pub fn cap_for_snapshot(&self) -> usize { self.cap }
+    #[doc(hidden)]
+    pub fn current_tick_for_snapshot(&self) -> u32 { self.current_tick }
+    #[doc(hidden)]
+    pub fn next_seq_for_snapshot(&self) -> u32 { self.next_seq }
+
+    /// Snapshot restore entry point. Clears any existing entries and
+    /// restores the monotonic cursors. The caller must create the ring
+    /// with `EventRing::with_cap` at the desired capacity beforehand.
+    #[doc(hidden)]
+    pub fn restore_cursors_from_parts(
+        &mut self,
+        current_tick: u32,
+        next_seq: u32,
+        total_pushed: usize,
+        dispatched: usize,
+    ) {
+        self.entries.clear();
+        self.current_tick = current_tick;
+        self.next_seq = next_seq;
+        self.total_pushed = total_pushed;
+        self.dispatched = dispatched.min(total_pushed);
+    }
+
     /// Stable hash over the replayable subset. Uses explicit byte-packing
     /// (via `f32::to_bits`) so the digest is stable across Rust/glam versions
     /// and is insensitive to Debug format drift. Schema-hash-load-bearing:

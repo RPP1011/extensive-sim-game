@@ -60,5 +60,11 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"BuiltinMetrics:tick_ms,event_count,agent_alive,cascade_iterations,mask_true_frac");
     h.update(b"BuiltinInvariants:mask_validity,pool_non_overlap");
     h.update(b"FailureMode:Panic,Log");
+    // Plan 3 surface — snapshot format, observation packer, probe harness.
+    // Bumping any of these strings invalidates older snapshot files and
+    // forces a migration registration.
+    h.update(b"SnapshotFormat:v1:WSIMSV01:hot+cold_scalars+pod_collections+ring_meta;header=64B");
+    h.update(b"FeatureSource:Vitals=4,Position=7,Neighbor<K>=6K");
+    h.update(b"ProbeHarness:v1:DEFAULT_AGENT_CAP=256,DEFAULT_EVENT_CAP=4096");
     h.finalize().into()
 }

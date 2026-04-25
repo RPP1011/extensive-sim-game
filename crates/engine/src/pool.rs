@@ -177,6 +177,24 @@ impl<T> Pool<T> {
     pub fn force_push_freelist_for_test(&mut self, raw: u32) {
         self.freelist.push(raw);
     }
+
+    /// Snapshot-restore entry point. Overwrites internal state with the
+    /// `(next_raw, alive, freelist)` triple read back from a snapshot file.
+    /// The caller is responsible for ensuring `alive.len() == self.cap` and
+    /// that the (alive, freelist) pair is consistent — `is_non_overlapping`
+    /// is invoked by the load path before returning to surface corruption
+    /// from a tampered snapshot.
+    pub fn restore_from_parts(
+        &mut self,
+        next_raw: u32,
+        alive: Vec<bool>,
+        freelist: Vec<u32>,
+    ) {
+        debug_assert_eq!(alive.len(), self.cap as usize, "pool restore: alive slice length mismatch");
+        self.next_raw = next_raw;
+        self.alive = alive;
+        self.freelist = freelist;
+    }
 }
 
 #[cfg(test)]

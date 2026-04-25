@@ -1004,6 +1004,93 @@ impl SimState {
         self.pool.alive.len() as u32
     }
 
+    // ---- Snapshot restore helpers (#[doc(hidden)]) ----
+    //
+    // The `snapshot::format::load_snapshot` path needs to write every SoA
+    // field + the pool + the spatial index. Rather than exposing each
+    // mutable slice publicly, we gate them behind `#[doc(hidden)]`. The
+    // snapshot module is the only intended caller; production code should
+    // continue to use `spawn_agent` / `set_agent_*` / `kill_agent`.
+
+    #[doc(hidden)]
+    pub fn pool_next_raw(&self) -> u32 {
+        self.pool.next_raw()
+    }
+    #[doc(hidden)]
+    pub fn pool_freelist_iter(&self) -> impl Iterator<Item = u32> + '_ {
+        self.pool.freelist_iter()
+    }
+    #[doc(hidden)]
+    pub fn restore_pool_from_parts(
+        &mut self,
+        next_raw: u32,
+        alive: Vec<bool>,
+        freelist: Vec<u32>,
+    ) {
+        self.pool.restore_from_parts(next_raw, alive, freelist);
+    }
+
+    #[doc(hidden)] pub fn hot_pos_mut_slice(&mut self) -> &mut [Vec3] { &mut self.hot_pos }
+    #[doc(hidden)] pub fn hot_hp_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_hp }
+    #[doc(hidden)] pub fn hot_max_hp_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_max_hp }
+    #[doc(hidden)] pub fn hot_alive_mut_slice(&mut self) -> &mut [bool] { &mut self.hot_alive }
+    #[doc(hidden)] pub fn hot_movement_mode_mut_slice(&mut self) -> &mut [MovementMode] { &mut self.hot_movement_mode }
+    #[doc(hidden)] pub fn hot_level_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_level }
+    #[doc(hidden)] pub fn hot_move_speed_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_move_speed }
+    #[doc(hidden)] pub fn hot_move_speed_mult_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_move_speed_mult }
+    #[doc(hidden)] pub fn hot_shield_hp_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_shield_hp }
+    #[doc(hidden)] pub fn hot_armor_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_armor }
+    #[doc(hidden)] pub fn hot_magic_resist_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_magic_resist }
+    #[doc(hidden)] pub fn hot_attack_damage_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_attack_damage }
+    #[doc(hidden)] pub fn hot_attack_range_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_attack_range }
+    #[doc(hidden)] pub fn hot_mana_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_mana }
+    #[doc(hidden)] pub fn hot_max_mana_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_max_mana }
+    #[doc(hidden)] pub fn hot_hunger_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_hunger }
+    #[doc(hidden)] pub fn hot_thirst_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_thirst }
+    #[doc(hidden)] pub fn hot_rest_timer_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_rest_timer }
+    #[doc(hidden)] pub fn hot_safety_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_safety }
+    #[doc(hidden)] pub fn hot_shelter_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_shelter }
+    #[doc(hidden)] pub fn hot_social_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_social }
+    #[doc(hidden)] pub fn hot_purpose_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_purpose }
+    #[doc(hidden)] pub fn hot_esteem_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_esteem }
+    #[doc(hidden)] pub fn hot_risk_tolerance_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_risk_tolerance }
+    #[doc(hidden)] pub fn hot_social_drive_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_social_drive }
+    #[doc(hidden)] pub fn hot_ambition_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_ambition }
+    #[doc(hidden)] pub fn hot_altruism_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_altruism }
+    #[doc(hidden)] pub fn hot_curiosity_mut_slice(&mut self) -> &mut [f32] { &mut self.hot_curiosity }
+    #[doc(hidden)] pub fn hot_engaged_with_mut_slice(&mut self) -> &mut [Option<AgentId>] { &mut self.hot_engaged_with }
+    #[doc(hidden)] pub fn hot_stun_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_stun_expires_at_tick }
+    #[doc(hidden)] pub fn hot_slow_expires_at_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_slow_expires_at_tick }
+    #[doc(hidden)] pub fn hot_slow_factor_q8_mut_slice(&mut self) -> &mut [i16] { &mut self.hot_slow_factor_q8 }
+    #[doc(hidden)] pub fn hot_cooldown_next_ready_tick_mut_slice(&mut self) -> &mut [u32] { &mut self.hot_cooldown_next_ready_tick }
+
+    #[doc(hidden)] pub fn cold_creature_type_mut_slice(&mut self) -> &mut [Option<CreatureType>] { &mut self.cold_creature_type }
+    #[doc(hidden)] pub fn cold_spawn_tick_mut_slice(&mut self) -> &mut [Option<u32>] { &mut self.cold_spawn_tick }
+    #[doc(hidden)] pub fn cold_grid_id_mut_slice(&mut self) -> &mut [Option<u32>] { &mut self.cold_grid_id }
+    #[doc(hidden)] pub fn cold_local_pos_mut_slice(&mut self) -> &mut [Option<Vec3>] { &mut self.cold_local_pos }
+    #[doc(hidden)] pub fn cold_move_target_mut_slice(&mut self) -> &mut [Option<Vec3>] { &mut self.cold_move_target }
+    #[doc(hidden)] pub fn cold_status_effects_mut_slice(&mut self) -> &mut [SmallVec<[StatusEffect; 8]>] { &mut self.cold_status_effects }
+    #[doc(hidden)] pub fn cold_memberships_mut_slice(&mut self) -> &mut [SmallVec<[Membership; 4]>] { &mut self.cold_memberships }
+    #[doc(hidden)] pub fn cold_relationships_mut_slice(&mut self) -> &mut [SmallVec<[Relationship; 8]>] { &mut self.cold_relationships }
+    #[doc(hidden)] pub fn cold_class_definitions_mut_slice(&mut self) -> &mut [[ClassSlot; 4]] { &mut self.cold_class_definitions }
+    #[doc(hidden)] pub fn cold_creditor_ledger_mut_slice(&mut self) -> &mut [SmallVec<[Creditor; 16]>] { &mut self.cold_creditor_ledger }
+    #[doc(hidden)] pub fn cold_mentor_lineage_mut_slice(&mut self) -> &mut [[Option<AgentId>; 8]] { &mut self.cold_mentor_lineage }
+
+    /// Rebuild the incremental spatial hash from `(hot_pos, hot_alive,
+    /// hot_movement_mode)`. Called by `snapshot::load_snapshot` after
+    /// restoring hot SoA; the saved snapshot intentionally doesn't
+    /// serialise the spatial index (it's fully derivable).
+    #[doc(hidden)]
+    pub fn rebuild_spatial_from_hot(&mut self) {
+        self.spatial = SpatialHash::new(self.pool.cap());
+        for slot in 0..self.pool.cap() as usize {
+            if self.hot_alive[slot] {
+                let id = AgentId::new((slot + 1) as u32).unwrap();
+                self.spatial.insert(id, self.hot_pos[slot], self.hot_movement_mode[slot]);
+            }
+        }
+    }
+
     /// Pool self-consistency predicate for `PoolNonOverlapInvariant`.
     /// Returns `true` when no slot is both alive and in the freelist and the
     /// freelist has no duplicates. See `Pool::is_non_overlapping`.
