@@ -5,9 +5,18 @@
 > surface; defers runtime cascade semantics to `assets/sim/physics.sim`
 > and broader design rationale / training pipelines to `PLAN.md`.
 >
-> Companion to: `docs/dsl/spec.md` (world-sim DSL), `PLAN.md` (ability
-> DSL design rationale), `docs/superpowers/specs/2026-04-22-theory-of-mind-design.md`
-> (Phase 1 belief state).
+> Companion to:
+> - `docs/dsl/spec.md` — world-sim DSL.
+> - `PLAN.md` — ability DSL design rationale + training pipelines.
+> - `docs/superpowers/specs/2026-04-22-theory-of-mind-design.md` — Phase 1 belief state.
+> - `docs/superpowers/specs/2026-04-24-economic-depth-design.md` — economic system design,
+>   recipes-as-abilities anchor, and the IR additions for variants 17–26
+>   (Recipe, WearTool, TransferProperty, ForcibleTransfer, CreateObligation,
+>   DischargeObligation, DefaultObligation, EstablishRoute, JoinCaravan,
+>   TransferObligation). The economic spec extends this DSL's `EffectOp`
+>   catalog and registers new entities (Tool, Component, Property, Obligation,
+>   ResourceNode), registries (Recipe, ToolKind, Skill, ComponentKind,
+>   Commodity, Route), and the `Economic` / `Financial` ability hints.
 
 ---
 
@@ -724,12 +733,25 @@ omitted.
 | `transform_voxels` | from→to, `in` shape | `EffectOp::TransformVoxels` | `planned` |
 | `place_structure` | name(args?) | `EffectOp::PlaceStructure` | `planned` |
 
-### 8.7 World — wealth
+### 8.7 World — wealth & economy
+
+See the economic depth spec (`2026-04-24-economic-depth-design.md`) for the
+full economic verb catalog, contestation semantics, and reactive-passive
+machinery. Verbs cross-listed here for completeness.
 
 | Verb | Args | IR mapping | Status |
 |---|---|---|---|
 | `transfer_gold` | amount:i32 | `EffectOp::TransferGold` | `runs-today` |
 | `modify_standing` | delta:i16 | `EffectOp::ModifyStanding` (§20 H) | `runs-today` |
+| `consume` / `produce` (within recipe) | commodity, amount, quality formula | `EffectOp::Recipe` (variant 17) | `planned` |
+| `wear_tool` | tool_kind, amount | `EffectOp::WearTool` (variant 18) | `planned` |
+| `transfer_property` | property_id, target | `EffectOp::TransferProperty` (variant 19) | `planned` |
+| `pickpocket` / `demand` | target, item, contest_kind | `EffectOp::ForcibleTransfer` (variant 20) | `planned` |
+| `create_obligation` | kind, parties, terms | `EffectOp::CreateObligation` (variant 21) | `planned` |
+| `discharge_obligation` | obligation_id | `EffectOp::DischargeObligation` (variant 22) | `planned` |
+| `establish_route` | from, to | `EffectOp::EstablishRoute` (variant 24) | `planned` |
+| `join_caravan` | caravan: GroupId | `EffectOp::JoinCaravan` (variant 25) | `planned` |
+| `transfer_obligation` | obligation_id, target | `EffectOp::TransferObligation` (variant 26) | `planned` |
 
 ### 8.8 AI-state manipulation (see §20)
 
@@ -1663,6 +1685,22 @@ Added by this spec (ordinals 8+):
 | 14 | `RefreshBelief { observer_sel, subject_sel }` | §20.2 |
 | 15 | `EmitEvent { kind: EventKindId, payload_sel: PayloadSel }` | AI-state §20.6, §20.3 |
 | 16 | `ModifyGroupStanding { group_sel, other_group, delta: i16 }` | §20.4 |
+
+Added by the economic depth spec (`2026-04-24-economic-depth-design.md`,
+ordinals 17–26):
+
+| Ordinal | Variant | Source |
+|---|---|---|
+| 17 | `Recipe { recipe: RecipeId, target_tool_sel: ToolSel }` | econ §4.1 |
+| 18 | `WearTool { tool_kind: ToolKindId, amount: f32 }` | econ §4.3 |
+| 19 | `TransferProperty { property_id, target_sel }` | econ §6.1 |
+| 20 | `ForcibleTransfer { subject, target_sel, contest_kind, detection_threshold }` | econ §6.3 |
+| 21 | `CreateObligation { kind, parties, terms }` | econ §7.1 |
+| 22 | `DischargeObligation { obligation_id }` | econ §7.5 |
+| 23 | `DefaultObligation { obligation_id }` | econ §7.5 |
+| 24 | `EstablishRoute { from, to }` | econ §5.6 |
+| 25 | `JoinCaravan { caravan: GroupId }` | econ §5.6 |
+| 26 | `TransferObligation { obligation_id, target_sel }` | econ §12.1 |
 
 Existing `ModifyStanding` evolves to carry `{ a_sel, b_sel, delta }`.
 
