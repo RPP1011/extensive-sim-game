@@ -221,6 +221,12 @@ pub struct CompileDslArgs {
     /// `<out-python>/events/`.
     #[arg(long, default_value = "generated/python")]
     pub out_python: PathBuf,
+    /// Destination file for the emitted `impl engine::event::EventLike for
+    /// engine_data::events::Event { ... }` block. Lives in the engine crate
+    /// (not engine_data) while engine retains its engine_data regular dep
+    /// (Plan B2 deferred; avoids a dep cycle).
+    #[arg(long, default_value = "crates/engine/src/event/event_like_impl.rs")]
+    pub out_engine_event_like_impl: PathBuf,
     /// Compare the emitted artefacts against the committed output. Exit 0 if
     /// identical, exit 1 with a file-level diff otherwise. No files are
     /// written when this is set.

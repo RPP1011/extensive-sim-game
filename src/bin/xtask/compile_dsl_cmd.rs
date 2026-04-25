@@ -117,6 +117,15 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             &mut mismatches,
         );
 
+        // engine-side EventLike impl.
+        let event_like_fmt = rustfmt_string(&artefacts.engine_event_like_impl)
+            .unwrap_or_else(|_| artefacts.engine_event_like_impl.clone());
+        check_file(
+            &args.out_engine_event_like_impl,
+            &event_like_fmt,
+            &mut mismatches,
+        );
+
         // Stale file detection: committed Rust files not in the new emission.
         check_stale(&rust_events_dir, &artefacts.rust_event_structs, "rs", &mut mismatches);
         check_stale(&physics_dir, &artefacts.rust_physics_modules, "rs", &mut mismatches);
@@ -172,6 +181,23 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
         if let Err(e) = write_views_output(&views_dir, &artefacts) {
+            eprintln!("compile-dsl: {e}");
+            return ExitCode::FAILURE;
+        }
+
+        // Write the engine-side `impl EventLike for Event` generated file.
+        // Lives in engine (not engine_data) to avoid a dep cycle while
+        // engine retains its engine_data regular dep (chronicle.rs, Plan B2).
+        if let Some(parent) = args.out_engine_event_like_impl.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                eprintln!("compile-dsl: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+        if let Err(e) = fs::write(
+            &args.out_engine_event_like_impl,
+            &artefacts.engine_event_like_impl,
+        ) {
             eprintln!("compile-dsl: {e}");
             return ExitCode::FAILURE;
         }
@@ -240,6 +266,7 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
                 .map(|(n, _)| entity_dir.join(n)),
         );
         rustfmt_targets.push(entity_dir.join("mod.rs"));
+        rustfmt_targets.push(args.out_engine_event_like_impl.clone());
         if let Err(e) = rustfmt(&rustfmt_targets) {
             eprintln!("compile-dsl: rustfmt failed: {e}");
             return ExitCode::FAILURE;

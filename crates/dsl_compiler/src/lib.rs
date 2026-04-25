@@ -161,6 +161,12 @@ pub struct EmittedArtifacts {
     pub combined_hash: [u8; 32],
     /// Content of `crates/engine_data/src/schema.rs`.
     pub schema_rs: String,
+    /// Content of `crates/engine/src/event/event_like_impl.rs` — the
+    /// machine-generated `impl engine::event::EventLike for Event { ... }`.
+    /// Lives in `engine` (not `engine_data`) to avoid a dep cycle while
+    /// `engine` retains its `engine_data` regular dep (Plan B2 deferred).
+    /// Included from `engine/src/event/mod.rs` via `mod event_like_impl;`.
+    pub engine_event_like_impl: String,
 }
 
 /// Emit the full artefact bundle for a resolved `Compilation`. Covers
@@ -343,6 +349,34 @@ pub fn emit_with_per_kind_sources(
         &enums_hash,
         &views_hash,
     );
+    // Emit the `impl EventLike for Event` block. Lives in engine (not
+    // engine_data) to avoid a dep cycle while engine retains its
+    // engine_data regular dep (chronicle.rs, Plan B2 deferred).
+    let engine_event_like_impl = {
+        // Reuse the same sorted+hydrated list that emit_events_mod uses.
+        let hydrated: Vec<ir::EventIR> = comp.events
+            .iter()
+            .map(|e| {
+                let mut c = e.clone();
+                let mut out = e.fields.clone();
+                if !out.iter().any(|f| f.name == "tick") {
+                    out.push(ir::EventField {
+                        name: "tick".into(),
+                        ty: ir::IrType::U32,
+                        span: ast::Span::dummy(),
+                    });
+                }
+                c.fields = out;
+                c
+            })
+            .collect();
+        let mut sorted: Vec<&ir::EventIR> = hydrated.iter().collect();
+        sorted.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut buf = String::new();
+        emit_rust::emit_event_like_impl(&mut buf, &sorted);
+        buf
+    };
+
     EmittedArtifacts {
         rust_events_mod: emit_rust::emit_events_mod(&comp.events),
         rust_event_structs,
@@ -380,6 +414,7 @@ pub fn emit_with_per_kind_sources(
             &enums_hash,
             &views_hash,
         ),
+        engine_event_like_impl,
     }
 }
 
