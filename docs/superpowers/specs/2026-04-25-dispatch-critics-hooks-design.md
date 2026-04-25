@@ -37,18 +37,21 @@
     critic-reduction-determinism/SKILL.md (existing)
     critic-allowlist-gate/SKILL.md       (existing)
     dispatch-critics/SKILL.md            (NEW; thin doc + invocation guide)
-  settings.json                    — adds 2 hook entries (PreToolUse, Stop)
+  settings.json                    — adds 2 Claude-side hook entries
   allowlist-gate-approved          — single-use flag file (created by user, deleted post-edit)
-  critic-output-<name>.txt         — per-critic stdout, transient
+  critic-output-<name>.txt         — per-critic stdout, transient (gitignored)
 
-src/bin/xtask/  (or crates/xtask/ if Spec B has landed)
-  dispatch_critics_cmd.rs          — `xtask dispatch-critics` Rust wrapper
+.githooks/
+  pre-commit                       — Git pre-commit hook; THE hard block on commit
+                                     based on critic-output-*.txt verdicts
 ```
 
-Three entry points hit the same orchestrator:
-- **`PreToolUse` hook** → fast checks, no critic spawn.
-- **`Stop` hook** → calls `dispatch-critics.sh` async if engine was touched.
-- **Manual** — `bash .claude/scripts/dispatch-critics.sh` or `xtask dispatch-critics` for explicit pre-commit review.
+Three entry points hit the same orchestrator (`dispatch-critics.sh`):
+- **`PreToolUse` Claude hook** → fast static checks, no critic spawn.
+- **`Stop` Claude hook** → calls `dispatch-critics.sh` async if engine was touched. Keeps verdict files fresh.
+- **Manual** — user runs `bash .claude/scripts/dispatch-critics.sh` for explicit pre-commit review (especially the allowlist gate workflow).
+
+The `.githooks/pre-commit` Git hook reads the verdict files at commit time and blocks if any FAIL. This is the **hard block**; the Claude-side hooks are upstream measures that keep verdicts current.
 
 ## §4 Hook scripts
 
@@ -102,7 +105,7 @@ Patterns are deliberately conservative (path-shape, not full-grammar parse). Any
 
 **Trigger:** `Stop` hook (Claude session ends).
 
-**Mechanism:** check if engine files were touched in the session's diff; if so, run `dispatch-critics.sh` on those changes; print verdict summary. ~30-90s; doesn't block (Stop fires after the session is wrapping up).
+**Mechanism:** check if engine files were touched; if so, run `dispatch-critics.sh` on those changes; verdicts written to `.claude/critic-output-<name>.txt`. ~30-90s. Per-script behavior is advisory (Stop fires post-edit), but the Git pre-commit hook (§4.4) reads these verdict files and **blocks the actual commit** if any FAIL.
 
 ```bash
 #!/usr/bin/env bash
@@ -129,12 +132,86 @@ echo "Engine files touched. Running critics..." >&2
 # Use working-tree state as the target. Critics evaluate the changes.
 bash .claude/scripts/dispatch-critics.sh --target "WORKING-TREE" --all
 
-# Always exit 0 — Stop hook is advisory, doesn't gate anything.
-# The user sees the verdicts as session-end output and can revert before commit.
+# Stop hook itself exits 0 — the pre-commit Git hook (§4.4) is the real
+# block. This script just makes sure the verdict files are fresh by the
+# time the human runs `git commit`.
 exit 0
 ```
 
-### §4.3 `settings.json` additions
+### §4.3 (existing) — settings.json — see §4.5 below for the full block.
+
+### §4.4 `.githooks/pre-commit` — the actual block
+
+**Trigger:** `git commit`. Fires before the commit-message editor.
+
+**Mechanism:** reads `.claude/critic-output-*.txt`; if any file's verdict is FAIL, aborts the commit. Verdict files are managed by `dispatch-critics.sh` (cleaned at run start, written fresh per critic), so the presence of a FAIL line means a recent critic run flagged a violation that hasn't been addressed-and-re-verified.
+
+```bash
+#!/usr/bin/env bash
+# .githooks/pre-commit — critic-verdict gate
+
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+# If no engine files in this commit's staged content, skip (saves CI on doc-only commits).
+staged=$(git diff --cached --name-only)
+if ! echo "$staged" | grep -qE '^(crates/engine|crates/engine_rules|crates/engine_data|crates/engine_gpu)/|^assets/sim/'; then
+    exit 0
+fi
+
+# Find any critic-output file with a FAIL verdict.
+fails=()
+for f in .claude/critic-output-*.txt; do
+    [[ -f "$f" ]] || continue
+    if grep -m1 '^VERDICT: FAIL' "$f" > /dev/null 2>&1; then
+        fails+=("$(basename "$f" .txt | sed 's/^critic-output-//')")
+    fi
+done
+
+if [[ ${#fails[@]} -gt 0 ]]; then
+    echo "" >&2
+    echo "=== ABORT: critic verdicts have unresolved FAILs ===" >&2
+    for c in "${fails[@]}"; do
+        verdict_line=$(grep -m1 '^VERDICT:' ".claude/critic-output-${c}.txt")
+        evidence_line=$(grep -m1 '^EVIDENCE:' ".claude/critic-output-${c}.txt")
+        echo "  critic-${c}: $verdict_line" >&2
+        echo "    $evidence_line" >&2
+    done
+    echo "" >&2
+    echo "Fix the cited issues, then re-run:" >&2
+    echo "  bash .claude/scripts/dispatch-critics.sh --target WORKING-TREE --all" >&2
+    echo "" >&2
+    echo "When all critics PASS, commit will be allowed." >&2
+    exit 1
+fi
+
+# Stale check: if engine source has been edited since the last critic run, force re-run.
+# Newest critic file mtime vs newest engine source mtime.
+newest_critic=$(stat -c %Y .claude/critic-output-*.txt 2>/dev/null | sort -n | tail -1)
+newest_engine=$(find crates/engine crates/engine_rules crates/engine_data crates/engine_gpu assets/sim -name '*.rs' -o -name '*.sim' 2>/dev/null \
+    | xargs stat -c %Y 2>/dev/null | sort -n | tail -1)
+
+if [[ -n "$newest_engine" ]] && [[ -z "$newest_critic" || "$newest_engine" -gt "$newest_critic" ]]; then
+    echo "" >&2
+    echo "=== ABORT: engine source has changed since last critic run (or critics never ran) ===" >&2
+    echo "Re-run:" >&2
+    echo "  bash .claude/scripts/dispatch-critics.sh --target WORKING-TREE --all" >&2
+    echo "" >&2
+    exit 1
+fi
+
+exit 0
+```
+
+This is the actual block. The Stop hook keeps verdicts fresh; this hook reads them at commit time and refuses to commit if any FAIL is present, OR if the engine source has changed since the last critic run (so a stale PASS doesn't cover new edits).
+
+**Setup:** `git config core.hooksPath .githooks` (one-time per clone). Spec B's plan also installs hooks via `.githooks/`; the two hooks coexist in the same directory (Spec B's pre-commit handles `// GENERATED` header checks, Spec D-amendment's pre-commit handles critic verdicts). When both Spec B and D-amendment land, the `.githooks/pre-commit` runs both checks sequentially in one script.
+
+### §4.5 `settings.json` — full hooks block
+
+**(See also §4.5 below for the consolidated settings.json hooks block.)**
+
+### §4.5b `settings.json` additions
 
 ```json
 {
@@ -351,29 +428,17 @@ Body documents:
 
 The skill is documentation; the work happens in the bash script.
 
-### §8.2 xtask command
+### §8.2 xtask command (dropped)
 
-Add `cargo run --bin xtask -- dispatch-critics [args]` (or `crates/xtask/` post-Spec-B). The xtask command is a thin Rust wrapper:
-
-```rust
-// roughly
-fn dispatch_critics(args: Vec<String>) -> Result<()> {
-    let status = std::process::Command::new("bash")
-        .arg(".claude/scripts/dispatch-critics.sh")
-        .args(args)
-        .status()?;
-    std::process::exit(status.code().unwrap_or(1));
-}
-```
-
-Convenience for users who think in `cargo run --bin xtask`.
+Initial draft included an `xtask dispatch-critics` wrapper. Dropped — adds a layer (xtask → bash) without functional benefit. The bash script is the canonical surface; users invoke it directly or via the SKILL.md doc pointer.
 
 ## §9 Decision log
 
 - **D1.** Headless `claude --print` for critic dispatch (vs Anthropic SDK or manual paste). Reuses Claude Code auth + tool surface.
 - **D2.** Three entry points (PreToolUse, Stop, manual) all hit the same orchestrator script. No logic duplication.
 - **D3.** Pre-tool hook does only fast static checks. Anything requiring agent reasoning lives in the orchestrator + critics.
-- **D4.** Stop hook is advisory, not blocking. Stop fires post-edit; user sees verdict and chooses to revert/fix before commit. Avoids false-positive blast radius from bad heuristics.
+- **D4.** Stop hook keeps critic verdicts fresh; the `.githooks/pre-commit` hook is the actual hard block on commit. Per user direction: "I am likely not in the loop unless the block has already happened." Block must happen at commit time, not be advisory.
+- **D4a.** Pre-commit also blocks when engine source has been edited since the last critic run (stale-PASS guard). Forces re-running critics after every engine edit.
 - **D5.** Allowlist gate flag is presence-only, single-use, gitignored. Forces re-gating per edit and per developer.
 - **D6.** Critic selection heuristic codified in `dispatch-critics.sh` (not in the skills themselves). Single source of truth for "which critics run when."
 - **D7.** Per-critic output to `.claude/critic-output-<name>.txt`. Transient (gitignored), regenerated per run.
@@ -384,5 +449,5 @@ Convenience for users who think in `cargo run --bin xtask`.
 - Network-dependent flows (CI integration, PR-comment automation).
 - Caching critic output (regenerated per dispatch; small enough to not matter).
 - Auto-fix suggestions from critics (Spec D explicitly out-of-scope).
-- Pre-commit Git hook (separate concern; would duplicate the Claude-side `Stop` hook).
+- xtask wrapper command (`cargo run --bin xtask -- dispatch-critics`). Adds layer without benefit; bash script is canonical.
 - Spec B integrations beyond the allowlist gate (e.g., a hook for `crates/engine/src/state/**` schema-bump warning) — defer until evidence the schema-bump test isn't enough.
