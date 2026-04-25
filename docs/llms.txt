@@ -40,3 +40,14 @@
 - [Compiler progress](docs/game/compiler_progress.md): live milestone tracker.
 - [Feature flow](docs/game/feature_flow.md): how to add a feature; when to extend the compiler.
 - [Wolves and humans](docs/game/wolves_and_humans.md): canonical fixture.
+
+## Critics
+
+Biased-against critic skills with inline few-shot examples. Use via Skill tool (in-context) or Agent dispatch (fresh context).
+
+- [critic-compiler-first](.claude/skills/critic-compiler-first/SKILL.md): biased P1 reviewer.
+- [critic-schema-bump](.claude/skills/critic-schema-bump/SKILL.md): biased P2 reviewer.
+- [critic-cross-backend-parity](.claude/skills/critic-cross-backend-parity/SKILL.md): biased P3 reviewer.
+- [critic-no-runtime-panic](.claude/skills/critic-no-runtime-panic/SKILL.md): biased P10 reviewer.
+- [critic-reduction-determinism](.claude/skills/critic-reduction-determinism/SKILL.md): biased P11 reviewer.
+- [critic-allowlist-gate](.claude/skills/critic-allowlist-gate/SKILL.md): biased gate for engine/build.rs allowlist edits.
