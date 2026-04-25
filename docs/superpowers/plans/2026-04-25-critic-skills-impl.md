@@ -26,7 +26,7 @@
   - P9: PASS — tasks will close with verified commit SHAs.
   - P10: PASS — no runtime code introduced.
   - P11: PASS — no reduction code.
-- **Re-evaluation:** [ ] AIS reviewed at design phase. [ ] AIS reviewed post-design.
+- **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — 6 SKILL.md files added (738 total ln), CLAUDE.md +1 ln, llms.txt +9 ln, .gitignore exception added. No engine code touched, no rule logic introduced. Identified follow-up: dispatch-critics wrapper skill + Stop hook for auto-dispatch on engine touches.
 
 ---
 
