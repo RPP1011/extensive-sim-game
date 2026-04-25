@@ -51,3 +51,27 @@ impl Default for MigrationRegistry {
         Self::new()
     }
 }
+
+/// Load a snapshot, applying a one-step migration if the file's schema hash
+/// doesn't match the current engine hash but a registered migration covers
+/// the gap. The migration closure is handed the **entire file bytes**
+/// (header + body) and must return a new byte buffer whose header carries
+/// the current schema hash — usually by splicing the current hash into the
+/// header while rewriting the body to match the current layout.
+///
+/// On hash match, falls through to [`crate::snapshot::load_snapshot`].
+/// On hash mismatch with no registered migration, returns the same
+/// `SchemaMismatch` error the non-migration path would.
+pub fn load_snapshot_with_migrations(
+    path: &std::path::Path,
+    reg: &MigrationRegistry,
+) -> Result<(crate::state::SimState, crate::event::EventRing), SnapshotError> {
+    let bytes = std::fs::read(path)?;
+    let header = super::format::SnapshotHeader::from_bytes(&bytes)?;
+    let current = crate::schema_hash::schema_hash();
+    if header.schema_hash == current {
+        return super::format::load_from_bytes(&bytes);
+    }
+    let migrated = reg.apply(header.schema_hash, current, &bytes)?;
+    super::format::load_from_bytes(&migrated)
+}

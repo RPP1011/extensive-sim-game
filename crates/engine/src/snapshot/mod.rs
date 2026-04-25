@@ -13,4 +13,4 @@ pub use format::{
     load_from_bytes, load_snapshot, save_snapshot, SnapshotError, SnapshotHeader,
     FORMAT_VERSION, HEADER_BYTES, MAGIC,
 };
-pub use migrate::{MigrationFn, MigrationRegistry};
+pub use migrate::{load_snapshot_with_migrations, MigrationFn, MigrationRegistry};
