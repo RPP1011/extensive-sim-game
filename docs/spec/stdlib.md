@@ -86,7 +86,7 @@ All primitive functions are pure over their arguments. None take
 `&mut SimState`. The only stdlib surface that draws randomness is the
 `rng` namespace (below); `rng` methods read and advance the per-sim
 `rng_state`, which the deterministic replay harness treats as part of
-the engine input contract (see `docs/dsl/spec.md` §7.2).
+the engine input contract (see `docs/spec/language.md` §7.2).
 
 ---
 
@@ -330,7 +330,7 @@ else is `EmitError::UnsupportedExprShape`.
 The stdlib is not a frequent-change surface. Adding a primitive or a
 namespace field requires all three of:
 
-1. An entry in `docs/dsl/spec.md` (§2, §3, or §5 as appropriate) and in
+1. An entry in `docs/spec/language.md` (§2, §3, or §5 as appropriate) and in
    this document, with a pinned signature.
 2. A `Builtin` variant or a `NamespaceId` / `stdlib::field_type` /
    `stdlib::method_sig` extension in `crates/dsl_compiler/src/`, plus a

@@ -1,6 +1,6 @@
 # World Sim Engine Specification
 
-Runtime contract for the engine the compiler targets. Companion to `../dsl/spec.md` (language reference) and `../compiler/spec.md` (text-to-engine lowering).
+Runtime contract for the engine the compiler targets. Companion to `language.md` (language reference) and `compiler.md` (text-to-engine lowering).
 
 The engine is the **unified runtime for all compiler output**. The compiler has one target; whatever it emits — scalar Rust, kernel dispatch code, SPIR-V shader source — lands in the engine. The engine ships **two first-class backends** that implement the same interface:
 
@@ -180,7 +180,7 @@ Capacity rules:
 - Serial: `with_cap(n)` — ring drops oldest on overflow.
 - GPU: pre-allocated FieldHandle sized for worst-case events-per-tick × ticks-retained; overflow is an error (logged; subsequent pushes in the overflowing tick are dropped; determinism is preserved because drop decisions are deterministic).
 
-See `../dsl/spec.md` §2.2 / §7.3. Implementation: `crates/engine/src/event/`, `crates/engine/src/backend/*/event.rs`.
+See `language.md` §2.2 / §7.3. Implementation: `crates/engine/src/event/`, `crates/engine/src/backend/*/event.rs`.
 
 ---
 
@@ -203,7 +203,7 @@ For host-side queries via the public `SpatialIndex` API (debug tools, cascade ha
 
 Insert/remove: both backends rebuild on `spawn_agent` / `kill_agent` / `set_agent_pos`. GPU rebuild is a batched kernel per tick.
 
-See `../dsl/spec.md` §9 D25. Implementation: `crates/engine/src/spatial/`.
+See `language.md` §9 D25. Implementation: `crates/engine/src/spatial/`.
 
 ---
 
@@ -230,7 +230,7 @@ Every shader that calls `per_agent_u32` reads the same constants. Shader GLSL:
 
 **Cross-backend golden test** asserts `per_agent_u32(42, AgentId(1), 100, b"action")` returns the same value when computed on host Rust AND when computed inside a test shader that returns the value via a result buffer.
 
-See `../dsl/spec.md` §9 D12. Implementation: `crates/engine/src/rng.rs`, `crates/engine/shaders/rng.glsl` (header), `crates/engine/tests/rng_cross_backend.rs`.
+See `language.md` §9 D12. Implementation: `crates/engine/src/rng.rs`, `crates/engine/shaders/rng.glsl` (header), `crates/engine/tests/rng_cross_backend.rs`.
 
 ---
 
@@ -325,7 +325,7 @@ pub enum MicroKind {
 
 The apply kernel's job is: read `scratch.actions` FieldHandle, filter by MicroKind, write mutations to state fields + emit events into the GPU event ring via atomic append. Each MicroKind gets its own parallel dispatch; actions of other kinds in the same batch are no-ops for that kernel.
 
-See `../dsl/spec.md` §3.3 and Appendix A.
+See `language.md` §3.3 and Appendix A.
 
 ---
 
@@ -691,10 +691,8 @@ See **`status.md`** — per-subsystem state (Serial vs. GPU), associated plan, t
 
 ## References
 
-- `../dsl/spec.md` — language reference (grammar, type system, worked example, settled decisions)
-- `../compiler/spec.md` — compiler contract (emission modes — CPU code vs GPU kernel dispatch — for the unified engine target)
-- `../dsl/stories.md` — per-batch user-story investigations
-- `../dsl/decisions.md` — per-decision rationale log
+- `language.md` — language reference (grammar, type system, worked example, settled decisions)
+- `compiler.md` — compiler contract (emission modes — CPU code vs GPU kernel dispatch — for the unified engine target)
 - `crates/engine/src/` — Rust implementation (Serial complete through Plan 2; GPU starting Plan 6)
 - `crates/engine/shaders/` — SPIR-V bytecode + GLSL source (landing with Plan 6+)
 - `crates/engine/tests/parity_backends.rs` — mandatory cross-backend determinism test (landing with Plan 5)

@@ -1,12 +1,12 @@
 # Economic Depth Design — Beyond X4
 
-> **Status:** Design spec (2026-04-24). Companion to `2026-04-24-ability-dsl-design.md`
+> **Status:** Design spec (2026-04-24). Companion to `spec/ability.md`
 > (the action grammar). This doc owns the *system* design — supply chains,
 > contracts, labor, market structure, macro dynamics. The ability DSL spec owns
 > the verbs and IR. Cross-references are explicit throughout.
 >
-> Companion to: `2026-04-24-ability-dsl-design.md` (ability DSL grammar +
-> IR); `docs/dsl/spec.md` (world-sim DSL + auctions/quests); existing memory
+> Companion to: `spec/ability.md` (ability DSL grammar +
+> IR); `docs/spec/language.md` (world-sim DSL + auctions/quests); existing memory
 > doc `npc_economy_plan.md` (initial NPC economy state, 2026-03-28).
 
 ---
@@ -30,7 +30,7 @@ spec owns:
 
 ### 1.2 Non-goals
 
-- **Action grammar.** Owned by `2026-04-24-ability-dsl-design.md`.
+- **Action grammar.** Owned by `spec/ability.md`.
 - **Cascade rules / event handlers.** Owned by `assets/sim/physics.sim` once
   emitted.
 - **Training pipeline implementation.** This doc references the curriculum

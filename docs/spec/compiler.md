@@ -1,10 +1,10 @@
 # World Sim DSL Compiler Specification
 
-Compiler contract. Companion to `dsl/spec.md` (language reference) and `engine/spec.md` (runtime contract). This doc specifies HOW DSL source text lowers to engine calls, not WHAT the language means.
+Compiler contract. Companion to `language.md` (language reference) and `engine/spec.md` (runtime contract). This doc specifies HOW DSL source text lowers to engine calls, not WHAT the language means.
 
 **The compiler has two consumers: the engine and external pytorch training scripts.** The engine ships two backends — `SerialBackend` (reference implementation) and `GpuBackend` — and the compiler emits Rust + SPIR-V that lands in the engine, ultimately running on whichever backend the engine has active. For external consumers the compiler also emits Python dataclasses + a pytorch `Dataset` over the trace format so training scripts see a typed API without reading engine internals. There is no "CPU vs GPU target" split at the compiler level; only **emission modes** that produce different artefacts (scalar Rust code, GPU dispatch code, SPIR-V shader source, Python trace-consumer module).
 
-Extracted from `dsl/spec.md` on 2026-04-19; reframed 2026-04-19 (same day) after the engine spec rewrite clarified that CPU + GPU are both first-class engine backends. Reframed again 2026-04-19 to pull ML concerns out of the DSL (policy architecture, training, reward shaping, observation packing all live in external pytorch code now).
+Extracted from `language.md` on 2026-04-19; reframed 2026-04-19 (same day) after the engine spec rewrite clarified that CPU + GPU are both first-class engine backends. Reframed again 2026-04-19 to pull ML concerns out of the DSL (policy architecture, training, reward shaping, observation packing all live in external pytorch code now).
 
 ---
 
@@ -26,7 +26,7 @@ For a complete DSL program, all four artefacts are produced from the same DSL so
 - SoA buffers per entity kind, with `@hot` / `@cold` field partitioning (§1.3).
 - Per-agent kernels as `fn` with `#[inline(never)]` in profiling builds for flamegraph attribution (`stories.md` §40).
 - `SimScratch` pools carry all per-tick scratch — zero steady-state allocation. Agent slot pool sized at init; ring buffers fixed-cap; event buffers use `SmallVec<[T; N]>` with CI-enforced worst-case bounds (`stories.md` §30).
-- **Spatial index is 2D-grid + per-column sorted z-list + movement-mode sidecar** (`dsl/spec.md` §9 #25). Primary structure keys `(cx, cy) → SortedVec<(z, AgentId)>` with 16m cells matching voxel-chunk edges. Planar queries walk 9 columns (3×3) and take all. Volumetric queries walk 9 columns and binary-search the z-range. Agents with `movement_mode != Walk` (Fly / Swim / Climb / Fall) live in a separate `in_transit: Vec<AgentId>` that every spatial query scans linearly (expected |in_transit| ≪ N). Slope-walkers stay in the column index — the structure exploits floor-clustering, not flat-ground assumptions.
+- **Spatial index is 2D-grid + per-column sorted z-list + movement-mode sidecar** (`language.md` §9 #25). Primary structure keys `(cx, cy) → SortedVec<(z, AgentId)>` with 16m cells matching voxel-chunk edges. Planar queries walk 9 columns (3×3) and take all. Volumetric queries walk 9 columns and binary-search the z-range. Agents with `movement_mode != Walk` (Fly / Swim / Climb / Fall) live in a separate `in_transit: Vec<AgentId>` that every spatial query scans linearly (expected |in_transit| ≪ N). Slope-walkers stay in the column index — the structure exploits floor-clustering, not flat-ground assumptions.
 - RNG: a single `rng_state: u64` per world, consumed in a fixed order (`stories.md` §29). Per-agent RNG streams seeded from `hash(world_seed, agent_id, tick, purpose)` for parallel sampling.
 
 This is the reference implementation. The `SerialBackend` runs entirely on the host; its output is the ground truth for cross-backend determinism tests.
@@ -35,7 +35,7 @@ This is the reference implementation. The `SerialBackend` runs entirely on the h
 
 For `GpuBackend`, the compiler emits SPIR-V kernels (via `shaderc` at compile time) AND Rust dispatch code that invokes them through `voxel_engine::compute::GpuHarness`. Target is voxel-engine's Vulkan/ash + gpu-allocator stack, not wgpu and not raw CUDA. (`stories.md` §28.) Precedents: `terrain_compute.rs` (1024-slot LRU chunk pool), `ai/spatial.rs` (spatial indexing).
 
-GPU emission covers the deterministic sim's rules layer — mask predicates, cascade handlers, event-folded views, spatial-hash queries. ML forward passes are NOT compiled here; ML is out of DSL scope (see `dsl/spec.md` §10).
+GPU emission covers the deterministic sim's rules layer — mask predicates, cascade handlers, event-folded views, spatial-hash queries. ML forward passes are NOT compiled here; ML is out of DSL scope (see `language.md` §10).
 
 The compiler emits dispatch code that uses engine-shipped kernel handles:
 
@@ -71,7 +71,7 @@ GPU-amenable kernels:
 Always host-side (regardless of engine backend):
 
 - Chronicle prose rendering (pure template expansion; no sim state mutation).
-- Metric sink dispatch (§2.11 of dsl/spec.md).
+- Metric sink dispatch (§2.11 of language.md).
 - Save/load serialization.
 - Trace-format emission (consumed by the Python `Dataset`).
 
@@ -119,7 +119,7 @@ Target: hot ≤ 4 KB/agent, 200K × 4 KB = 800 MB; cold paged to SSD with LRU. C
 
 ## 2. Schema emission
 
-The schema-hash rule (what the hash covers, when it must bump) lives in `dsl/spec.md` §4. This section specifies the *emission mechanism* — how the compiler stamps those hashes into generated code and how CI enforces the rule.
+The schema-hash rule (what the hash covers, when it must bump) lives in `language.md` §4. This section specifies the *emission mechanism* — how the compiler stamps those hashes into generated code and how CI enforces the rule.
 
 The compiler emits four sub-hashes and one combined hash:
 
@@ -155,7 +155,7 @@ CI guard: a commit that modifies entity fields, events, cascades/masks/verbs, or
 TBD — populate as compiler is implemented. Anticipated passes (all currently sketched only):
 
 - **Verb desugaring.** `verb` declarations bundle mask + cascade + scoring into a named gameplay action. The compiler lowers `verb` decls into the underlying mask predicate, cascade rule, and scoring-table entries without extending the categorical action vocabulary.
-- **Read → Ask lowering.** `Read(doc)` is language-surface sugar for `Ask(doc, QueryKind::AboutAll)`. The compiler rewrites every `Read(x)` expression and mask clause into the document-target branch of `Ask`; the runtime MicroKind enum carries `Ask` only. This keeps the runtime action vocabulary at 18 micros while preserving the readability of `Read` in source DSL. See `dsl/spec.md` §3.3 and Appendix A *Information as an action class*.
+- **Read → Ask lowering.** `Read(doc)` is language-surface sugar for `Ask(doc, QueryKind::AboutAll)`. The compiler rewrites every `Read(x)` expression and mask clause into the document-target branch of `Ask`; the runtime MicroKind enum carries `Ask` only. This keeps the runtime action vocabulary at 18 micros while preserving the readability of `Read` in source DSL. See `language.md` §3.3 and Appendix A *Information as an action class*.
 - **View storage-hint selection.** `@materialized(on_event=[...], storage=<hint>)` authors pick `pair_map` / `per_entity_topk(K, keyed_on=<arg>)` / `lazy_cached`. Compiler rejects infeasible combinations (e.g. `pair_map` on `(AgentId, AgentId)` at N=200K). GPU/CPU routing follows from storage hint: intrinsic scalars + per-entity-slot materializations compile to GPU; lazy + unbounded-pair predicates stay CPU.
 - **Cascade dispatch codegen.** `physics` rules lower to phase-tagged handlers with compile-time cycle detection, race detection, and schema-drift guards. Target generated code: Rust `match` on event kind, dispatched through an ordered handler table per phase.
 - **Python emission.** Every `entity`, `event`, and `@traced` view gets a matching `@dataclass` in the emitted Python module. The Dataset class wraps the trace ring-buffer format and yields typed rows (one row per tick-agent pair, with per-event sub-rows streamed alongside). The Python module is checked-in generated output, not runtime-loaded by the engine.
@@ -164,7 +164,7 @@ TBD — populate as compiler is implemented. Anticipated passes (all currently s
 
 ## Decisions
 
-Compiler-lowering decisions extracted from `dsl/spec.md` §9. Numbers match the original `§9` entries for cross-reference.
+Compiler-lowering decisions extracted from `language.md` §9. Numbers match the original `§9` entries for cross-reference.
 
 16. **Mod event-handler conflict resolution** — **C (named lanes)**: handlers declare a lane `on_event(EventKind) in lane(Validation | Effect | Reaction | Audit)`. Lanes run in order; within a lane, handlers run in lexicographic mod-id (not install order). Multiple handlers per lane coexist (additive). Destructive overrides happen via forking the DSL source, not via a replace keyword.
 
@@ -174,7 +174,7 @@ Compiler-lowering decisions extracted from `dsl/spec.md` §9. Numbers match the 
 
 ## Non-goals
 
-Compiler-layer non-goals extracted from `dsl/spec.md` §10.
+Compiler-layer non-goals extracted from `language.md` §10.
 
 - Build-system integration beyond `shaderc` SPIR-V compilation — the DSL compiler is a cargo xtask, not a full build tool.
 
@@ -182,7 +182,7 @@ Compiler-layer non-goals extracted from `dsl/spec.md` §10.
 
 ## References
 
-- `dsl/spec.md` — language reference (grammar, type system, runtime semantics, settled decisions, non-goals).
+- `language.md` — language reference (grammar, type system, runtime semantics, settled decisions, non-goals).
 - `engine/spec.md` — runtime contract (pools, determinism, event ring, mask, utility-backend trait, tick pipeline, views, trace ring, save/load, invariants, probes, metric sinks, schema hash, debug & trace runtime).
-- `dsl/decisions.md` — per-decision rationale log.
-- `dsl/stories.md` — per-batch user-story investigations that drove many of the compiler/runtime design choices.
+-  — per-decision rationale log.
+-  — per-batch user-story investigations that drove many of the compiler/runtime design choices.

@@ -4,7 +4,7 @@ Canonical specification for the ECS DSL. Supersedes `spec.md`, `spec.md`, and `s
 
 Appendix A contains the detailed universal-mechanisms reference (PostQuest/AcceptQuest/Bid/Announce).
 
-For compiler-layer concerns (codegen, lowering, schema emission), see `docs/compiler/spec.md`.
+For compiler-layer concerns (codegen, lowering, schema emission), see `docs/spec/compiler.md`.
 
 ---
 
@@ -605,7 +605,7 @@ Constraints:
 
 Adding a `scoring` entry does not bump the schema hash's state / event / rules components — only the `scoring_hash` sub-hash (§4). External training code that depends on a specific scoring shape is responsible for recomputing from the current DSL.
 
-### 3.5 Backend — REMOVED: ML out of DSL scope, see compiler trace-emission. The NPC backend is the utility backend (permanent); see `docs/compiler/spec.md` §Decisions #24.
+### 3.5 Backend — REMOVED: ML out of DSL scope, see compiler trace-emission. The NPC backend is the utility backend (permanent); see `docs/spec/compiler.md` §Decisions #24.
 
 ---
 
@@ -622,7 +622,7 @@ The combined schema hash is `sha256(state_hash || event_hash || rules_hash || sc
 
 There are no `@since` annotations. There are no padded-zero migration tables. There are no v1/v2/v3 schemas in the codebase — git holds history. Two branches with different schemas produce mutually incompatible traces, which is correct.
 
-For the emission mechanism (sub-hash layout, error-message format, CI guard) see `docs/compiler/spec.md` §2 Schema emission.
+For the emission mechanism (sub-hash layout, error-message format, CI guard) see `docs/spec/compiler.md` §2 Schema emission.
 
 This rewrites `spec.md` §4.
 
@@ -692,9 +692,9 @@ entity BadAgent : Agent { history: Vec<Event> }    // ERROR: unbounded collectio
 
 ---
 
-## 6. Compilation targets → moved to `docs/compiler/spec.md` §1
+## 6. Compilation targets → moved to `docs/spec/compiler.md` §1
 
-Native Rust (CPU) + GPU (`voxel_engine::compute::GpuHarness`) + hot/cold storage split now live in `docs/compiler/spec.md` §1. Section numbering below is preserved; §7 onwards retains its original number.
+Native Rust (CPU) + GPU (`voxel_engine::compute::GpuHarness`) + hot/cold storage split now live in `docs/spec/compiler.md` §1. Section numbering below is preserved; §7 onwards retains its original number.
 
 ---
 
@@ -999,7 +999,7 @@ All 29 open questions from the prior revision have been resolved through design 
 19. **Alliance obligation enforcement** — **C / C**: "alliance" is not a first-class concept; it is an emergent standing derived from `standing(group_a, group_b)`. `SetStanding(target, kind)` is the universal macro; "declare war" is `SetStanding(target, kind=Hostile)`; "alliance" is `standing ≥ Friendly` ∧ reciprocal. Default response to ally-under-attack is scoring-governed, not mechanism-forced.
 20. **Group-level invites vs agent-level invites** — **Agent-level only**. All invitations are agent-to-agent. Group mergers / coalitions use `PostQuest{kind: Diplomacy, resolution: Coalition{min_parties: K}}`. Removes the edge case where party-to-party agreement would tear factions apart.
 30. **Communication channels (D30)** — `Capabilities.channels: SortedVec<CommunicationChannel, 4>` replaces `can_speak` / `can_hear` / `hearing_range` booleans. Enum variants: `Speech`, `PackSignal`, `Pheromone`, `Song`, `Telepathy`, `Testimony`. `channel: CommunicationChannel` is a parameter head on `PostQuest` / `Announce` / `InviteToGroup` / `Communicate` / `Converse` / `ShareStory`. Ranges, overhear eligibility, and recipient filtering are all per-channel. Cross-species communication requires a shared channel; wolves coordinate via `PackSignal` without language. Humans/dragons use `Speech`. Telepathic factions use unbounded-range `Telepathy`. Documents propagate via `Testimony` (item transfer, not spatial).
-31. **Materialized-view storage hint (D31)** — `@materialized(on_event=[...], storage=<hint>)` lets the author pick a storage layout: `pair_map` (dense small-N × small-N, e.g. `Group × Group` standings), `per_entity_topk(K, keyed_on=<arg>)` (bounded per-entity slots, e.g. per-agent-per-membership Claim eligibility), `lazy_cached` (compute-on-demand + per-tick cache, e.g. low-cardinality derivations). Compiler rejects infeasible combinations (e.g., `pair_map` on `(AgentId, AgentId)` at N=200K). GPU/CPU routing (see `docs/compiler/spec.md` §1.2) follows from storage: intrinsic scalars + per-entity-slot materializations compile to GPU; lazy + unbounded-pair predicates stay CPU.
+31. **Materialized-view storage hint (D31)** — `@materialized(on_event=[...], storage=<hint>)` lets the author pick a storage layout: `pair_map` (dense small-N × small-N, e.g. `Group × Group` standings), `per_entity_topk(K, keyed_on=<arg>)` (bounded per-entity slots, e.g. per-agent-per-membership Claim eligibility), `lazy_cached` (compute-on-demand + per-tick cache, e.g. low-cardinality derivations). Compiler rejects infeasible combinations (e.g., `pair_map` on `(AgentId, AgentId)` at N=200K). GPU/CPU routing (see `docs/spec/compiler.md` §1.2) follows from storage: intrinsic scalars + per-entity-slot materializations compile to GPU; lazy + unbounded-pair predicates stay CPU.
 
 ### 9.2 Runtime / infrastructure
 
@@ -1010,7 +1010,7 @@ All 29 open questions from the prior revision have been resolved through design 
 21. **Chronicle prose side-channel lifecycle** — **C / X / P**: eager template rendering at event emission; async LLM rewrite pass for flagged categories (`Legendary`, `Founding`, `Death`, `Prophecy`); saved prose is canonical across template changes (player-facing history doesn't retcon); replay artefacts bundle the template library for exact reproduction in bug reports.
 22. **Probe default episode count** — **Config-definable** per world + per-probe override via `seeds [42, 43, ...]` syntax. No hard-coded default.
 23. **Training is out of DSL scope** — DSL emits Python dataclasses mirroring entities/events/`@traced` views plus a pytorch `Dataset` over the trace ring-buffer format. All training-script concerns (algorithm dispatch, importance sampling, curriculum, reward shaping, observation packing) live in external pytorch code, not DSL.
-24. **Utility backend is the production NPC backend** — the utility backend is permanent. ML training is external to the DSL; scoring tables feed utility scoring and are written to traces for external reward reshaping. See `docs/compiler/spec.md` §Decisions.
+24. **Utility backend is the production NPC backend** — the utility backend is permanent. ML training is external to the DSL; scoring tables feed utility scoring and are written to traces for external reward reshaping. See `docs/spec/compiler.md` §Decisions.
 25. **3D spatial hash structure** — **D**: 2D grid (cell=16m, voxel-chunk edge) with per-column sorted z-list, plus a `movement_mode ≠ Walk` sidecar (`Climb`, `Fly`, `Swim`, `Fall`). Slopes are Walk (they don't violate column-clustering). `movement_mode` is a primary field updated by the cascade.
 26. **Overhear confidence decay** — **B + D hybrid**: category-based base + exponential distance decay. `base[SameFloor/DiffFloor/Outdoor] = {0.75, 0.55, 0.50}`; `confidence = base * exp(-planar_distance / OVERHEAR_RANGE)`. Walls are not raycast; wall structure is captured by category.
 28. **`believed_knowledge` decay rate** — **3-tier volatility model**: `KnowledgeDomain` enum carries `volatility: {Short=500, Medium=20_000, Long=1_000_000}` ticks half-life. Reinforcement via observation-of-use, Communicate, and negative-evidence clearing. `Relationship.believed_knowledge_refreshed: [u32; 32]` stores per-bit last-refresh tick (~1 GB at 200k agents, acceptable).
@@ -1022,11 +1022,11 @@ All 29 open questions from the prior revision have been resolved through design 
 
 ### 9.4 Modding
 
-16. **Mod event-handler conflict resolution** — → see `docs/compiler/spec.md` §Decisions.
+16. **Mod event-handler conflict resolution** — → see `docs/spec/compiler.md` §Decisions.
 
 ---
 
-A standing decision log (`docs/dsl/decisions.md`) carries rationale and reversal criteria in more detail; §9 summarises the current-state view.
+A standing decision log () carries rationale and reversal criteria in more detail; §9 summarises the current-state view.
 
 ---
 
@@ -1041,7 +1041,7 @@ This DSL does not handle:
 - Networking / multiplayer synchronization — snapshot format exists but replication protocol is not specified.
 - Save-file format with asset references — snapshots carry simulation state only; asset binding is a separate layer.
 - Audio, particle effects, UI — display layers outside the sim loop.
-- Build-system integration → see `docs/compiler/spec.md` §Non-goals.
+- Build-system integration → see `docs/spec/compiler.md` §Non-goals.
 - Online learning / federated training — all training is offline over serialized replay buffers.
 - Human-in-the-loop labelling — probes are the authored-assertion surface; no runtime labelling.
 - Procedural content generation beyond `region_plan` (terrain) and cascade-driven naming — narrative generation, dungeon layout, quest chains procedurally derived from cascades are not DSL-authored.
@@ -1177,7 +1177,7 @@ These can't be reduced because they ARE the per-tick physical/social acts:
 - **Info atomic (pull)**: `Ask(target, query)` — request facts from an entity. The target type disambiguates the cascade:
   - If `target` is an `Agent`: emits `InformationRequested { asker: self, target, query }`. The target's next-tick scoring sees the pending request in its `incoming_requests` view; the utility backend may pick `Communicate(asker, fact_ref)` matching the query, or leave it unanswered. Mask: `target.can_hear ∧ planar_distance(self, target) < CONVERSE_RANGE`.
   - If `target` is a `Document` item: cascade resolves immediately — extract `target.facts` matching `query`, insert into `self.memory` with `source = Testimony(target.id)`, confidence derived per §9 D27 from `(relationship_to_author, seal_validity, known_author_biases)`. Mask: `target ∈ self.inventory.documents`.
-- **Info atomic (sugar)**: `Read(doc)` — language-surface shorthand for `Ask(doc, QueryKind::AboutAll)`. The compiler lowers `Read` to the document-target branch of `Ask`; runtime vocabulary does not carry a separate `Read` micro. See `docs/compiler/spec.md` §3.
+- **Info atomic (sugar)**: `Read(doc)` — language-surface shorthand for `Ask(doc, QueryKind::AboutAll)`. The compiler lowers `Read` to the document-target branch of `Ask`; runtime vocabulary does not carry a separate `Read` micro. See `docs/spec/compiler.md` §3.
 - **Memory atomic**: `Remember(entity, valence, kind)` (typically internal, but expose as an action so policies can choose what to record)
 
 ### Total action vocabulary

@@ -6,10 +6,10 @@
 > and broader design rationale / training pipelines to `PLAN.md`.
 >
 > Companion to:
-> - `docs/dsl/spec.md` — world-sim DSL.
+> - `docs/spec/language.md` — world-sim DSL.
 > - `PLAN.md` — ability DSL design rationale + training pipelines.
 > - `docs/superpowers/specs/2026-04-22-theory-of-mind-design.md` — Phase 1 belief state.
-> - `docs/superpowers/specs/2026-04-24-economic-depth-design.md` — economic system design,
+> - `docs/spec/economy.md` — economic system design,
 >   recipes-as-abilities anchor, and the IR additions for variants 17–26
 >   (Recipe, WearTool, TransferProperty, ForcibleTransfer, CreateObligation,
 >   DischargeObligation, DefaultObligation, EstablishRoute, JoinCaravan,
@@ -47,7 +47,7 @@ Status changes are engine-side PRs, not spec edits.
 - **Hero stats, attack stats, hero metadata.** Owned by hero `.toml`.
 - **Voxel backend implementation details.** Owned by `crates/engine_voxel/*`
   when it lands.
-- **`.sim` DSL grammar.** Owned by `docs/dsl/spec.md` and `docs/compiler/spec.md`.
+- **`.sim` DSL grammar.** Owned by `docs/spec/language.md` and `docs/spec/compiler.md`.
 
 ### 1.3 Dependencies & layering
 
@@ -735,7 +735,7 @@ omitted.
 
 ### 8.7 World — wealth & economy
 
-See the economic depth spec (`2026-04-24-economic-depth-design.md`) for the
+See the economic depth spec (`spec/economy.md`) for the
 full economic verb catalog, contestation semantics, and reactive-passive
 machinery. Verbs cross-listed here for completeness.
 
@@ -937,7 +937,7 @@ is re-applied to a target that already has it active.
 | `extend` | New duration adds to remaining | — |
 
 The IR-level rule per effect is encoded on the relevant cascade
-handler; see `docs/dsl/physics.sim`. This spec only describes the
+handler; see `assets/sim/physics.sim`. This spec only describes the
 surface contract.
 
 **Status.** `refresh` is today's default for existing `stun` / `slow`
@@ -1686,7 +1686,7 @@ Added by this spec (ordinals 8+):
 | 15 | `EmitEvent { kind: EventKindId, payload_sel: PayloadSel }` | AI-state §20.6, §20.3 |
 | 16 | `ModifyGroupStanding { group_sel, other_group, delta: i16 }` | §20.4 |
 
-Added by the economic depth spec (`2026-04-24-economic-depth-design.md`,
+Added by the economic depth spec (`spec/economy.md`,
 ordinals 17–26):
 
 | Ordinal | Variant | Source |

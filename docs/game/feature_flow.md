@@ -112,6 +112,6 @@ Reviewers: if the emitted code has helper functions, macros, or trait abstractio
 
 ## Schema-hash implications
 
-Adding an event, entity field, scoring row, or physics rule bumps the relevant schema sub-hash (see `../compiler/spec.md` §2). Non-append changes (rename, reorder, type change) block merge unless a new trace-format baseline lands at the same time.
+Adding an event, entity field, scoring row, or physics rule bumps the relevant schema sub-hash (see `compiler.md` §2). Non-append changes (rename, reorder, type change) block merge unless a new trace-format baseline lands at the same time.
 
 Schema hashes are emitted by the compiler from the DSL source. Manually tampering with the emitted hash values is a review-blocker.

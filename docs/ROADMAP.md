@@ -3,9 +3,9 @@
 > Comprehensive index of future work. Two lines per item (title + scope/reference).
 > Stable across day-to-day churn; update when items change tier (deferred → drafted → active → done) or when a new tier-2 item is identified.
 >
-> Specs live under `docs/superpowers/specs/`; plans under `docs/superpowers/plans/`.
+> Canonical specs live under `docs/spec/`; in-flight plans + brainstorms under `docs/superpowers/`.
 > Live engine status (per-subsystem ✅/⚠️/❌): `docs/engine/status.md`.
-> Project TOC (what the project IS): `docs/project_toc.md`.
+> Project overview (architectural intro): `docs/overview.md`.
 
 ---
 
@@ -21,9 +21,9 @@
 ## Drafted (spec exists, plan does not)
 
 - **Ability DSL implementation**
-  Voxel ops, control verbs (root/silence/fear/taunt), AI-state manipulation, structures, materials. `specs/2026-04-24-ability-dsl-design.md`.
+  Voxel ops, control verbs (root/silence/fear/taunt), AI-state manipulation, structures, materials. `spec/ability.md`.
 - **Economic depth implementation**
-  Recipes, contracts, labor, heterogeneity, information asymmetry, market structure, macro dynamics. 3 phases. `specs/2026-04-24-economic-depth-design.md`.
+  Recipes, contracts, labor, heterogeneity, information asymmetry, market structure, macro dynamics. 3 phases. `spec/economy.md`.
 - **GPU ability evaluation (Subsystem 3)**
   Move ability evaluator kernel from CPU to GPU. `specs/2026-04-22-gpu-ability-evaluation-design.md`.
 
@@ -59,7 +59,7 @@ Storage stubs are already in `SimState` (state-port plan, in git history); behav
 
 ## Game / UX layer (player-facing)
 
-Documented in `docs/project_toc.md`; not yet plan-decomposed. Most depend on world-sim and engine plans landing first.
+Documented at a high level in `docs/overview.md`; not yet plan-decomposed. Most depend on world-sim and engine plans landing first.
 
 - **Campaign overworld** — turn-based hero roster + flashpoint dispatch.
 - **Mission system** — multi-room dungeons / sieges / flashpoints; drops into combat sim.

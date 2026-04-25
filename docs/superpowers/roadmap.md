@@ -10,8 +10,8 @@
 > - `docs/engine/status.md` — live subsystem status; the "not started" /
 >   "❌" rows (§18 save, §20 probes, §21 obs packer, §23 debug, §24 backends)
 >   are Plan 3 / Plan 4+ and not covered here.
-> - `docs/engine/spec.md` — runtime contract sections §§1–26.
-> - `docs/dsl/state.md` — authoritative state catalog. Every scope
+> - `docs/spec/runtime.md` — runtime contract sections §§1–26.
+> - `docs/spec/state.md` — authoritative state catalog. Every scope
 >   statement below cites a section of this file.
 > - The 2026-04-19 state-port plan enumerated the storage-only stubs
 >   already in `SimState` (cold_memberships, cold_inventory, cold_memory,
@@ -480,8 +480,7 @@ relationship SoA must have been extended with it.
 
 **Blocks:** Nothing structural; adds narrative + gossip mechanics.
 Required for any "deceive / spy / intrigue" quest arcs (state.md
-mentions `intrigue`, `espionage`, `secrets` as downstream systems,
-dsl/systems.md:894).
+mentions `intrigue`, `espionage`, `secrets` as downstream systems).
 
 **Rough task count:** ~10 tasks, ~800 LoC.
 
@@ -996,7 +995,7 @@ Explicitly outside:
 | Chronicle prose rendering | Host-side text generation from events. Compiler / presentation layer. | spec.md §26 last bullet "chronicle prose templates"; a hypothetical `crates/chronicle/`. |
 | Curriculum pipelines | External training tooling. Reads trajectories but doesn't touch engine. | Downstream Python in `training/`. |
 | LLM backend | Separate downstream crate; engine exposes `PolicyBackend` trait only. | Spec.md §26 last bullet. |
-| DSL parser + codegen | Compiler concern. Engine receives emitted SPIR-V + Rust closures. | Spec.md §1 "Not owned by the engine"; `docs/compiler/spec.md`. |
+| DSL parser + codegen | Compiler concern. Engine receives emitted SPIR-V + Rust closures. | Spec.md §1 "Not owned by the engine"; `docs/spec/compiler.md`. |
 | Cascade **rules** (the DSL rule texts) | Compiler emits the kernels; engine provides the dispatch runtime. | Spec.md §26. |
 | Plan 4 debug & trace runtime | Has its own "to be written" slot in `status.md:34`. Spec.md §24. | Future plan. |
 | Plan 5 `ComputeBackend` trait extraction | `status.md:35`. | Future plan. |
@@ -1168,10 +1167,10 @@ the bias, Groups is the high-leverage pick.
 ## References
 
 - `docs/engine/status.md` — live subsystem status.
-- `docs/engine/spec.md` — runtime contract (§§1–26).
-- `docs/dsl/state.md` — authoritative state catalog.
-- `docs/dsl/systems.md` — system inventory (essential vs emergent).
-- `docs/dsl/stories.md` — user-story investigations.
+- `docs/spec/runtime.md` — runtime contract (§§1–26).
+- `docs/spec/state.md` — authoritative state catalog.
+-  — system inventory (essential vs emergent).
+-  — user-story investigations.
 - The 2026-04-19 state-port plan (executed; in git history) enumerated
   what's already stubbed; deferred fields include AgentData / Emotions /
   Aspiration / Goal / BuildingData / Room / Settlement / RegionState /

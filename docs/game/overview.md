@@ -24,7 +24,7 @@ Target scale: **20k–200k agents** on a commodity desktop, running at interacti
 │       mask predicates, SoA layouts)                              │
 │    • Python dataclasses + pytorch Dataset over trace format      │
 │    • SPIR-V kernels for GPU backend                              │
-│  Spec: ../compiler/spec.md                                       │
+│  Spec: compiler.md                                       │
 └─────────────────────────────────────────────────────────────────┘
                              │ registers with
                              ▼
@@ -33,7 +33,7 @@ Target scale: **20k–200k agents** on a commodity desktop, running at interacti
 │  Primitives only: cascade runtime, SoA state, spatial hash,      │
 │  event ring, RNG, tick orchestration, schema hashing.            │
 │  Two backends: SerialBackend (reference), GpuBackend (perf).     │
-│  Spec: ../engine/spec.md                                         │
+│  Spec: runtime.md                                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -90,5 +90,5 @@ We express this whole scenario in DSL and prove parity against the current binar
 ## What's out of scope (explicitly)
 
 - **Machine learning in the DSL.** Policy architecture, training algorithms, curriculum, reward shaping, hyperparameters — all external to the DSL. The compiler emits Python dataclasses + a pytorch `Dataset` over the trace format; training scripts live outside the DSL and consume that typed API. The in-engine NPC backend is a utility backend driven by `scoring` declarations (which are also written to traces for external reward shaping).
-- **Player UI, rendering, audio.** The sim is headless and deterministic. Visualization consumes the same trace format as training. See `../engine/spec.md` for the observability surface.
-- **Mod loading at runtime.** Mods are DSL source files compiled into the artefact at build time. Per-lane handler ordering is specified in `../dsl/spec.md` §9.
+- **Player UI, rendering, audio.** The sim is headless and deterministic. Visualization consumes the same trace format as training. See `runtime.md` for the observability surface.
+- **Mod loading at runtime.** Mods are DSL source files compiled into the artefact at build time. Per-lane handler ordering is specified in `language.md` §9.
