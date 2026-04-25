@@ -210,7 +210,15 @@ fn main() {
 }
 ```
 
-The allowlist is the load-bearing structural rule: if a contributor wants to add `engine/src/theory_of_mind/`, the build fails. The friction forces the compiler-first conversation.
+The allowlist is the load-bearing structural rule: if a contributor wants to add `engine/src/theory_of_mind/`, the build fails.
+
+**Editing the allowlist is a high-friction governance event.** It is not a routine refactor. Per user direction, adding a new entry to `ALLOWED_TOP_LEVEL` or `ALLOWED_DIRS` requires:
+
+1. **Pros/cons writeup** in the AIS preamble of the proposing plan, justifying why the new module is a primitive (not behavior) and why no existing primitive can host it.
+2. **Two independent biased-against critic agents** (Spec D infrastructure when it lands; manual via `Agent` dispatch in the meantime). Each critic is prompted with explicit bias to argue *against* the addition; both must return a `PASS` verdict for the change to advance.
+3. **User approval** (recorded as an ADR per the constitution layer).
+
+Bypassing this gate is a constitutional violation regardless of whether the build passes (the build pass means an allowlist edit was made; the question is whether the edit had the gate). Spec D will encode the critic dispatch + verdict capture; for now, this section is the contract.
 
 ### §5.3 `engine_data/build.rs` — every file generated, like engine_rules
 
@@ -330,15 +338,17 @@ Move template_id catalog and `render_entry` to `engine_rules/src/chronicle/rende
 
 ### §8.4 Legacy sweep (resolves Q-C from the failure-cases conversation)
 
-Sweep root `src/` for hand-written rule logic that's been superseded by emitted equivalents:
-- `src/ai/core/` (legacy SimState + step + damage calc) — substantially replaced by `crates/engine/`. Identify what's still used and delete the rest.
-- `src/ai/effects/` (legacy effect dispatch) — replaced by emitted physics rules.
-- `src/ai/squad/`, `src/ai/personality/`, `src/ai/control/` — high-level AI orchestrators that historically wrapped the sim. Audit each: if the orchestration is now expressed via DSL, delete; if it's still active for non-engine concerns (campaign, mission), keep.
-- `src/ai/goap/`, `src/ai/pathing/`, `src/ai/utility.rs`, `src/ai/roles.rs` — possible behavior modules in legacy. Audit.
+User direction: delete the entire `src/` folder with the exception of the window/render code. This is decisive — `src/ai/*`, `src/world_sim/*`, `src/scenario/*`, `src/mission/*`, `src/game_core/*`, `src/content/*`, `src/narrative/*`, `src/model_backend/*`, `src/ascii_gen/*` are all legacy bootstrap superseded by the engine crate tree.
 
-Approach: spawn a Haiku audit agent (similar to the constitution-implementation pattern) with a prompt of "find every file under `src/ai/` whose responsibilities are now covered by `crates/engine/` or `crates/engine_rules/`; flag for deletion." User reviews; targeted deletes via `git rm`.
+Mechanical sequence:
 
-Expected scope: thousands of lines deleted. The user has flagged this as "purely a good thing."
+1. **Move `src/bin/xtask/` to `crates/xtask/`.** xtask is the project's tooling CLI (compile-dsl, scenario runner, oracle, etc.); it must survive. Audit xtask's actual imports and bring only the modules it needs into `crates/xtask/src/` (this will be far less than `src/lib.rs`'s current re-export sprawl). Update workspace `Cargo.toml`. Update root `Cargo.toml` `[[bin]]` entry to point at the new location.
+2. **Move `src/rendering.rs` to a new `crates/window/` crate** (or keep at `src/rendering.rs` if root crate retains a binary). 15-line file; thin wrapper over `voxel_engine::scene`. The choice depends on whether the root `bevy_game` binary still has reason to exist.
+3. **Delete everything else under `src/`.** `git rm -r src/{ai,world_sim,scenario,mission,game_core,content,narrative,model_backend,ascii_gen}` plus any leftover top-level `.rs` files that aren't in the keep-list.
+4. **Trim `src/lib.rs`** to remove the re-exports of deleted modules. Likely shrinks to nothing or near-nothing — at which point the root `src/` and root `bevy_game` crate may be deletable entirely (defer that to a follow-up if it gets tangled).
+5. **Verify**: `cargo build --workspace`, `cargo test --workspace`. Resolve any reference compile errors by following the trail (every reference to a deleted module is itself dead code that goes too).
+
+Expected scope: tens of thousands of lines deleted. User flagged this as "purely a good thing." No per-file audit needed — the keep-list is `rendering` + xtask deps; everything else goes.
 
 ## §9 Sequencing
 
@@ -365,7 +375,8 @@ Each step is an independent commit; the sequencing matters because build/test gr
 - **D6.** Primitives-only allowlist on `engine/`. Adding a new primitive directory requires editing `build.rs` and a constitution check.
 - **D7.** Stale-content CI: regenerate + diff. Schema-hash bumps caught by existing test.
 - **D8.** Pre-commit hook ships in `.githooks/`; opt-in via `git config core.hooksPath .githooks` (one-time setup); automated via `xtask install-hooks`.
-- **D9.** Legacy sweep folded into Spec B (not Spec B′). Reducing code is a goal, not a tangent.
+- **D9.** Legacy sweep folded into Spec B (not Spec B′). Reducing code is a goal, not a tangent. Scope: delete everything under `src/` except window code (`src/rendering.rs`) and xtask (which moves to `crates/xtask/`).
+- **D11.** Allowlist edits in `engine/build.rs` require: written pros/cons, two biased-against critic-agent PASS verdicts, and user approval recorded as an ADR. The mechanism for automated critic dispatch is Spec D; until then, the gate is process.
 - **D10.** `channel.rs` stays as engine primitive (dispatch table over engine enum is borderline-but-defensible; keep until evidence of growth-with-rules).
 
 ## §11 Out of scope (explicit)
