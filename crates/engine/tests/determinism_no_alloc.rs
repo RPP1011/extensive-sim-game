@@ -6,8 +6,9 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 #[test]
 fn steady_state_zero_alloc_after_warmup() {
     use engine::cascade::CascadeRegistry;
-    use engine::creature::CreatureType;
-    use engine::event::{Event, EventRing};
+    use engine_data::entities::CreatureType;
+    use engine::event::EventRing;
+use engine_data::events::Event;
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};
     use engine::step::{step, SimScratch};

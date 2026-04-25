@@ -26,7 +26,8 @@ pub mod stun;
 pub mod transfer_gold;
 
 use crate::cascade::{CascadeRegistry, EventKindId};
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
+use engine_data::events::Event;
 use crate::state::SimState;
 
 #[allow(unused_variables)]

@@ -33,8 +33,9 @@
 //!   E. Chained rout cascades through pack (`chained_deaths_stack_kin_fear_on_survivors`)
 
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::mask::MicroKind;
 use engine::state::{AgentSpawn, SimState};

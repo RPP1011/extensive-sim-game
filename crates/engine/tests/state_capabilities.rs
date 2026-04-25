@@ -5,8 +5,9 @@
 //! can_tunnel, can_marry, max_spouses) already exist — this test keeps them
 //! pinned so a refactor doesn't erase them.
 
-use engine::channel::CommunicationChannel;
-use engine::creature::{Capabilities, CreatureType, LanguageId};
+use engine_data::types::CommunicationChannel;
+use engine_data::entities::{Capabilities, CreatureType};
+use engine_data::types::LanguageId;
 
 #[test]
 fn human_capabilities_include_common_language_and_marry() {

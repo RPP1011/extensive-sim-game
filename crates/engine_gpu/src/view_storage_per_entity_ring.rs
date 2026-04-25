@@ -366,7 +366,7 @@ mod tests {
     use super::*;
     use engine::generated::views::memory::MemoryEntry;
     use engine::state::{AgentSpawn, SimState};
-    use engine::creature::CreatureType;
+    use engine_data::entities::CreatureType;
     use glam::Vec3;
 
     /// Adapter — given a `SimState` reference, produce a closure that

@@ -3,7 +3,7 @@
 //! The incremental mutators (`insert`/`remove`/`update`) wired into
 //! `spawn_agent`/`kill_agent`/`set_agent_pos`/`set_agent_movement_mode` must
 //! never let the index lag behind the SoA.
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, MovementMode, SimState};
 use glam::Vec3;

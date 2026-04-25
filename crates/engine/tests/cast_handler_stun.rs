@@ -15,8 +15,9 @@
 use engine::ability::{AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
 use engine::generated::mask::mask_cast;
 use engine::generated::physics::dispatch_effect_stun_applied;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;

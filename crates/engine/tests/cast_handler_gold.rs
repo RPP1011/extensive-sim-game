@@ -10,8 +10,9 @@
 //!   isn't double-mutated.
 
 use engine::generated::physics::dispatch_effect_gold_transfer;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use engine::state::agent_types::Inventory;

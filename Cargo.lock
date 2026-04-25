@@ -2325,6 +2325,7 @@ dependencies = [
  "bytemuck",
  "dsl_compiler",
  "engine",
+ "engine_data",
  "engine_rules",
  "glam",
  "memoffset",
@@ -6754,6 +6755,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "engine",
+ "engine_data",
  "glam",
  "serde",
  "toml 0.8.23",

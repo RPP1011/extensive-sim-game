@@ -2,8 +2,9 @@
 //! suite. Any proptest file in `crates/engine/tests/` should start with
 //! `proptest_` so `cargo test -p engine proptest_` runs the whole set.
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};

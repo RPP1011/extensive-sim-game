@@ -3,9 +3,10 @@
 
 use arbitrary::{Arbitrary, Unstructured};
 use engine::ability::AbilityId;
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::{AgentId, QuestId};
-use engine::policy::{QuestCategory, Resolution};
+use engine_data::types::{QuestCategory, Resolution};
 use glam::Vec3;
 use libfuzzer_sys::fuzz_target;
 

@@ -1,4 +1,5 @@
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use glam::Vec3;
 

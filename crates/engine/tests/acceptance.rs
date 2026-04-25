@@ -2,8 +2,9 @@
 //! acceptance criteria. If this passes, the MVP is done.
 
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
@@ -78,7 +79,7 @@ fn mvp_acceptance() {
     // UtilityBackend's core responsibility (movement toward neighbors).
     let total_events = events.iter().count();
     assert!(total_events > 0, "sim produced zero events over 1000 ticks");
-    let moved_any = events.iter().any(|e| matches!(e, engine::event::Event::AgentMoved { .. }));
+    let moved_any = events.iter().any(|e| matches!(e, engine_data::events::Event::AgentMoved { .. }));
     assert!(moved_any,
         "UtilityBackend + 100 agents must produce at least one AgentMoved event");
 

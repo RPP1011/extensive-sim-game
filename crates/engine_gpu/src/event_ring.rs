@@ -3,7 +3,7 @@
 //! A fixed-capacity device-resident buffer of `EventRecord` slots plus a
 //! single `atomic<u32>` tail counter. GPU kernels emit events by atomically
 //! incrementing the tail and writing one record; the host drains the ring
-//! once per sub-dispatch, rehydrating `engine::event::Event` variants into
+//! once per sub-dispatch, rehydrating `engine_data::events::Event` variants into
 //! the CPU [`EventRing`].
 //!
 //! ## Record layout
@@ -66,7 +66,8 @@
 use std::fmt;
 
 use bytemuck::{Pod, Zeroable};
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::{AbilityId, AgentId, QuestId};
 use engine_rules::types::{QuestCategory, Resolution};
 use glam::Vec3;

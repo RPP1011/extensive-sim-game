@@ -11,8 +11,9 @@
 //! per-event-kind dispatcher directly.
 
 use engine::generated::physics::dispatch_effect_damage_applied;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;

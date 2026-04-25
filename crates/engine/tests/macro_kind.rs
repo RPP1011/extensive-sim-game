@@ -1,7 +1,8 @@
 use engine::ids::{AgentId, GroupId, QuestId};
 use engine::policy::macro_kind::{
-    AnnounceAudience, MacroAction, MacroKind, QuestCategory, Resolution,
+    AnnounceAudience, MacroAction, MacroKind,
 };
+use engine_data::types::{QuestCategory, Resolution};
 use glam::Vec3;
 
 #[test]

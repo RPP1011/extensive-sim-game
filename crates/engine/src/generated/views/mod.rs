@@ -52,7 +52,7 @@ impl ViewRegistry {
     /// the current tick, snapshot *before* any events were pushed this tick.
     /// The fold iterates `events.iter_since(events_before)` so each view only
     /// sees events emitted this tick (not the whole retained ring).
-    pub fn fold_all(&mut self, events: &crate::event::EventRing<crate::event::Event>, events_before: usize, tick: u32) {
+    pub fn fold_all(&mut self, events: &crate::event::EventRing<engine_data::events::Event>, events_before: usize, tick: u32) {
         for e in events.iter_since(events_before) {
             self.engaged_with.fold_event(e, tick);
             self.kin_fear.fold_event(e, tick);

@@ -22,8 +22,9 @@ use engine::ability::{
     AbilityProgram, AbilityRegistry, AbilityRegistryBuilder, EffectOp, Gate, TargetSelector,
 };
 use engine::cascade::{CascadeRegistry, MAX_CASCADE_ITERATIONS};
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;

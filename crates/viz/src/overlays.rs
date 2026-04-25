@@ -58,7 +58,7 @@ impl OverlayTracker {
         events: &engine::event::EventRing,
         state:  &engine::state::SimState,
     ) {
-        use engine::event::Event;
+        use engine_data::events::Event;
         let total = events.total_pushed();
         while self.next_event_idx < total {
             let Some(e) = events.get_pushed(self.next_event_idx) else {

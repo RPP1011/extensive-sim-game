@@ -2,8 +2,9 @@
 //! proptest. Covers acceptance criterion (5) in the plan header.
 
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use engine_data::config::Config;

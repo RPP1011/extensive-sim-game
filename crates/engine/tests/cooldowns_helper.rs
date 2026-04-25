@@ -1,7 +1,7 @@
 //! Unit test for `SimState::can_cast_ability` — gates cast on both
 //! global (GCD) and local (per-ability-slot) cooldowns.
 
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::state::entity_pool::AgentSlotPool;
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;

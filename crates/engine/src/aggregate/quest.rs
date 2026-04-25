@@ -1,5 +1,5 @@
 use crate::ids::AgentId;
-use crate::policy::{QuestCategory, Resolution};
+use engine_data::types::{QuestCategory, Resolution};
 use smallvec::SmallVec;
 
 #[derive(Clone, Debug, PartialEq)]

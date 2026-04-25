@@ -20,6 +20,7 @@ gpu = ["dep:wgpu", "dep:naga", "dep:pollster", "dep:dsl_compiler", "dep:bytemuck
 
 [dependencies]
 engine = { path = "../engine" }
+engine_data = { path = "../engine_data" }
 # glam is used by the Phase 1 CPU reference bitmap computation. It's
 # cheap (pure-math crate, no transitive deps of note) so we take it as
 # a non-optional dep rather than gate behind `gpu` — the CPU reference

@@ -1,4 +1,5 @@
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::invariant::{FailureMode, Invariant, InvariantRegistry, Violation};
 use engine::state::SimState;
 use std::sync::{Arc, Mutex};

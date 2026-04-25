@@ -1,8 +1,9 @@
 use engine::ids::{AgentId, QuestId};
 use engine::mask::MicroKind;
 use engine::policy::{
-    Action, ActionKind, MacroAction, MicroTarget, QueryKind, QuestCategory, Resolution,
+    Action, ActionKind, MacroAction, MicroTarget, QueryKind,
 };
+use engine_data::types::{QuestCategory, Resolution};
 use glam::Vec3;
 
 #[test]

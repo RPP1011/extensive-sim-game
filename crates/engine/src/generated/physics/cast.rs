@@ -2,7 +2,8 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
+use engine_data::events::Event;
 use crate::ids::{AbilityId, AgentId};
 use crate::state::SimState;
 

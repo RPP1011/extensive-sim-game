@@ -9,9 +9,9 @@ use crate::mask::{MaskBuffer, MicroKind, TargetMask};
 use crate::state::SimState;
 use glam::Vec3;
 
-pub use macro_kind::{
-    AnnounceAudience, MacroAction, MacroKind, QuestCategory, Resolution,
-};
+pub use macro_kind::{AnnounceAudience, MacroAction, MacroKind};
+// QuestCategory and Resolution dropped from engine::policy surface (Task 4, Plan B1').
+// Import them directly from engine_data::types.
 pub use query::{EntityQueryRef, MemoryKind, QueryKind};
 pub use utility::UtilityBackend;
 

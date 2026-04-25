@@ -1,10 +1,8 @@
 //! CreatureType + Capabilities — now DSL-emitted. See `assets/sim/entities.sim`.
 //!
 //! Milestone 6 (2026-04-19) moved ownership of this vocabulary to
-//! `engine_data::entities`. The engine re-exports from there so existing
-//! `use crate::creature::{CreatureType, Capabilities, LanguageId}` call sites
-//! compile unchanged — the same pattern established by milestone 2 for the
-//! `Event` enum.
-
-pub use engine_data::entities::{Capabilities, CreatureType};
-pub use engine_data::types::LanguageId;
+//! `engine_data::entities`; `LanguageId` is in `engine_data::types`.
+//! Task 4 (Plan B1') dropped the re-export shims from this module; callers
+//! now import directly from `engine_data`.
+//
+// (re-exports moved to engine_data; types live there now)

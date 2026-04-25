@@ -25,7 +25,7 @@
 
 use engine::backend::SimBackend;
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};

@@ -1,5 +1,6 @@
 use engine::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::SimState;
 use std::sync::{Arc, Mutex};

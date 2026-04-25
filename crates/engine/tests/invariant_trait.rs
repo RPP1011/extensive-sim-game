@@ -1,5 +1,6 @@
 use engine::cascade::EventKindId;
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::invariant::{FailureMode, Invariant, Violation};
 use engine::state::SimState;
 

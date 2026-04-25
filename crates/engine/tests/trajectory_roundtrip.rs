@@ -1,6 +1,7 @@
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
@@ -39,8 +40,9 @@ fn emit_and_reload_trajectory() {
 #[test]
 fn python_roundtrip_preserves_values() {
     use engine::cascade::CascadeRegistry;
-    use engine::creature::CreatureType;
-    use engine::event::{Event, EventRing};
+    use engine_data::entities::CreatureType;
+    use engine::event::EventRing;
+use engine_data::events::Event;
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};
     use engine::step::{step, SimScratch};

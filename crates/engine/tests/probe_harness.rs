@@ -1,4 +1,4 @@
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::probe::{run_probe, Probe};
 use engine::state::AgentSpawn;
 use glam::Vec3;

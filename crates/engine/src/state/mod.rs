@@ -3,8 +3,8 @@ pub mod agent_types;
 pub mod entity_pool;
 
 use crate::ability::MAX_ABILITIES;
-use crate::channel::ChannelSet;
-use crate::creature::{Capabilities, CreatureType};
+use engine_data::types::ChannelSet;
+use engine_data::entities::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 use crate::spatial::SpatialHash;
 use crate::terrain::{FlatPlane, TerrainQuery};

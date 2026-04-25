@@ -268,7 +268,7 @@ impl AppState {
         let mut alive_by_cell: HashMap<(u32, u32), Vec<(u8, u32)>> = HashMap::new();
         for id in self.sim.agents_alive() {
             let pos = match self.sim.agent_pos(id) { Some(p) => p, None => continue };
-            let ct  = self.sim.agent_creature_type(id).unwrap_or(engine::creature::CreatureType::Human);
+            let ct  = self.sim.agent_creature_type(id).unwrap_or(engine_data::entities::CreatureType::Human);
             let idx = viz::palette::creature_palette_index(ct);
             let lifted = Vec3::new(
                 pos.x,

@@ -1,5 +1,6 @@
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::snapshot::{load_snapshot, save_snapshot};
 use engine::state::{AgentSpawn, MovementMode, SimState};
 use glam::Vec3;

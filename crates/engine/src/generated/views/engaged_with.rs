@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use crate::event::Event;
+use engine_data::events::Event;
 use crate::ids::AgentId;
 
 /// @materialized view `engaged_with` — `storage = per_entity_topk(K=1)` over `HashMap<AgentId, AgentId>`.

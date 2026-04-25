@@ -2,7 +2,8 @@
 //! MAX_CASCADE_ITERATIONS and terminates without corrupting the ring.
 use engine::cascade::dispatch::MAX_CASCADE_ITERATIONS;
 use engine::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::SimState;
 use proptest::prelude::*;

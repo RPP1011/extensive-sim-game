@@ -47,7 +47,7 @@ use std::path::PathBuf;
 
 use dsl_compiler::ast::Program;
 use dsl_compiler::emit_physics_wgsl::EmitContext;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use engine_gpu::event_ring::{EventKindTag, EventRecord, GpuChronicleRing, GpuEventRing, PAYLOAD_WORDS};

@@ -13,8 +13,9 @@ use engine::ability::{
     AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate,
 };
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::invariant::InvariantRegistry;
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, PolicyBackend};

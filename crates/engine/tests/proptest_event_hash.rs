@@ -3,9 +3,10 @@
 //! Complements `tests/event_ring.rs::golden_hash_anchors_format` (single
 //! pinned sequence) by covering arbitrary random sequences.
 use engine::ability::AbilityId;
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::{AgentId, QuestId};
-use engine::policy::{QuestCategory, Resolution};
+use engine_data::types::{QuestCategory, Resolution};
 use glam::Vec3;
 use proptest::prelude::*;
 

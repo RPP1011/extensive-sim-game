@@ -40,12 +40,10 @@ impl AnnounceAudience {
     }
 }
 
-// `Resolution` and `QuestCategory` live in `engine_data::types` as of
-// milestone 2's integration step — compiler-emitted `Event::QuestPosted`
-// references these as field types, and `engine_rules` can't depend on
-// `engine`. The re-exports below keep every `use engine::policy::QuestCategory`
-// (or `Resolution`) call site compiling unchanged.
-pub use engine_data::types::{QuestCategory, Resolution};
+// `Resolution` and `QuestCategory` live in `engine_data::types`.
+// Task 4 (Plan B1') dropped the re-export shims; callers import directly
+// from `engine_data::types`.
+use engine_data::types::{QuestCategory, Resolution};
 
 /// Parameterised macro action emitted by a policy.
 #[derive(Copy, Clone, Debug, PartialEq)]

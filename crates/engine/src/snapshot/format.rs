@@ -35,7 +35,7 @@
 //! - `SimState::spatial` — rebuilt from `hot_pos` + `hot_alive` +
 //!   `hot_movement_mode` on load.
 
-use crate::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use crate::event::{EventLike, EventRing};
 use crate::ids::{AgentId, GroupId};
 use crate::state::agent_types::{

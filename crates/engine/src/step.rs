@@ -449,7 +449,7 @@ pub fn apply_actions(
                     // no species switch in the engine.
                     let herds = state
                         .agent_creature_type(action.agent)
-                        .map(|ct| crate::creature::Capabilities::for_creature(ct).herds_when_fleeing)
+                        .map(|ct| engine_data::entities::Capabilities::for_creature(ct).herds_when_fleeing)
                         .unwrap_or(false);
                     let away = if herds {
                         crate::spatial::flee_direction_with_kin_bias(

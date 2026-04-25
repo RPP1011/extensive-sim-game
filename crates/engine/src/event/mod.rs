@@ -16,11 +16,8 @@ pub mod event_like_impl;
 pub use ring::EventRing;
 pub use crate::ids::EventId;
 
-// TRANSITION re-export: engine still depends on engine_data (via chronicle.rs,
-// deferred to Plan B2). Generated/ files use `crate::event::Event` — this
-// re-export preserves backward compatibility for those files until Task 3
-// moves them to engine_rules. Drop this line in Task 3 / Plan B2.
-pub use engine_data::events::Event;
+// Task 4 (Plan B1'): re-export of engine_data::events::Event dropped.
+// Callers now import engine_data::events::Event directly.
 
 /// Trait every concrete event enum implements. Engine's runtime primitives
 /// (`EventRing`, `CascadeRegistry`, `CascadeHandler::handle`, view fold sites)

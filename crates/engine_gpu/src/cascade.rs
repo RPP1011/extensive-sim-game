@@ -69,7 +69,8 @@ use std::path::PathBuf;
 use dsl_compiler::ast::Program;
 use dsl_compiler::emit_physics_wgsl::EmitContext;
 
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::state::SimState;
 
 use crate::apply_actions::{ApplyActionsError, ApplyActionsKernel};

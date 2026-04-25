@@ -4,7 +4,7 @@
 //! Task B of engine-plan-state-port. Storage only; damage calc still uses
 //! the step.rs constants.
 
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;
 

@@ -1,6 +1,6 @@
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::state::{SimState, AgentSpawn};
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use glam::Vec3;
 
 #[test]

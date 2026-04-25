@@ -1,6 +1,7 @@
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::mask::MicroKind;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};

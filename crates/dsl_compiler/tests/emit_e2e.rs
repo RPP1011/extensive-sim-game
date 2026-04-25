@@ -4,7 +4,7 @@
 //! belongs to the xtask `--check` mode running on the committed output.
 //!
 //! At milestone 2's integration step the seed DSL was expanded from 8 to
-//! the full legacy `engine::event::Event` taxonomy (35 variants) so the
+//! the full legacy `engine_data::events::Event` taxonomy (35 variants) so the
 //! hand-written enum could be retired. The assertions below walk a
 //! representative subset of the expanded taxonomy.
 

@@ -1,7 +1,7 @@
 //! Property: for every (mask, actions) pair where some action's mask bit is
 //! false, `MaskValidityInvariant::check_with_scratch` reports a violation.
 //! Conversely, when all action bits are true, it reports none.
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::invariant::MaskValidityInvariant;
 use engine::mask::MicroKind;
 use engine::policy::{Action, ActionKind, MicroTarget};

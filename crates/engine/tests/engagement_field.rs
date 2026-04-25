@@ -3,7 +3,7 @@
 //! Combat Foundation Task 1. Storage-only; bidirectional invariant
 //! enforcement lives in Task 3 (`ability::expire::tick_start`).
 
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;
 

@@ -1,7 +1,7 @@
 use engine::mask::{MaskBuffer, MicroKind, TargetMask};
 use engine::policy::{Action, PolicyBackend, UtilityBackend};
 use engine::state::{SimState, AgentSpawn};
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use glam::Vec3;
 
 #[test]

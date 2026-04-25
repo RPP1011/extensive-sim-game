@@ -2544,7 +2544,7 @@ mod tests {
     /// (id-based instead of slot-based) would put zeros at slot 3.
     #[test]
     fn pack_agent_data_wolf_slot_has_hp_and_max_hp() {
-        use engine::creature::CreatureType;
+        use engine_data::entities::CreatureType;
         use engine::state::{AgentSpawn, SimState};
         use glam::Vec3;
         let mut state = SimState::new(8, 0xDEAD_BEEF);

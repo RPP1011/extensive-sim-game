@@ -16,8 +16,9 @@
 //! and the physics-rule emit path is smoke-tested by
 //! `pipeline_engagement_triggers_pack_assist`.
 
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use engine_data::scoring::{

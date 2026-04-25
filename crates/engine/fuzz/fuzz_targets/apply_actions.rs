@@ -3,7 +3,7 @@
 
 use arbitrary::{Arbitrary, Unstructured};
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine::ids::AgentId;
 use engine::mask::{MaskBuffer, MicroKind};

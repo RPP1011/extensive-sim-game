@@ -2,7 +2,7 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::Event;
+use engine_data::events::Event;
 use crate::ids::AgentId;
 
 /// @materialized view `standing` — `storage = symmetric_pair_topk(K=8)`.

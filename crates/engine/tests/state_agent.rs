@@ -1,5 +1,5 @@
 use engine::state::{AgentSpawn, MovementMode, SimState};
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use glam::Vec3;
 
 #[test]

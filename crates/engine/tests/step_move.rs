@@ -1,8 +1,9 @@
 use engine::cascade::CascadeRegistry;
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::policy::UtilityBackend;
 use engine::state::{SimState, AgentSpawn};
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::step::{step, SimScratch};
 use glam::Vec3;
 

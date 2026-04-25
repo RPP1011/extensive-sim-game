@@ -96,7 +96,8 @@ use std::fmt;
 use bytemuck::{Pod, Zeroable};
 use dsl_compiler::emit_physics_wgsl::{emit_physics_dispatcher_wgsl, emit_physics_wgsl, EmitContext};
 use dsl_compiler::ir::PhysicsIR;
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::SimState;
 use crate::event_ring::{
@@ -3019,7 +3020,7 @@ mod tests {
 
     #[test]
     fn pack_agent_slots_roundtrips_alive() {
-        use engine::creature::CreatureType;
+        use engine_data::entities::CreatureType;
         use engine::state::AgentSpawn;
         use glam::Vec3;
 

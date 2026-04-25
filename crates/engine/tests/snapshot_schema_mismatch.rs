@@ -1,4 +1,5 @@
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::snapshot::{load_snapshot, save_snapshot, SnapshotError};
 use engine::state::SimState;
 

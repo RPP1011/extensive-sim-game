@@ -1,6 +1,7 @@
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::invariant::{InvariantRegistry, PoolNonOverlapInvariant};
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
@@ -91,8 +92,9 @@ fn six_phase_pipeline_runs_clean() {
 #[should_panic(expected = "Pre")]
 fn step_full_panics_when_scratch_undersized() {
     use engine::cascade::CascadeRegistry;
-    use engine::creature::CreatureType;
-    use engine::event::{Event, EventRing};
+    use engine_data::entities::CreatureType;
+    use engine::event::EventRing;
+use engine_data::events::Event;
     use engine::invariant::InvariantRegistry;
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};

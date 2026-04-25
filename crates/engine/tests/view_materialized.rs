@@ -1,5 +1,6 @@
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::state::{AgentSpawn, SimState};
 use engine::view::materialized::{DamageTaken, MaterializedView};
 use glam::Vec3;

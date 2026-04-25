@@ -21,7 +21,8 @@
 
 #![cfg(feature = "gpu")]
 
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine_gpu::event_ring::{
     chronicle_wgsl_prefix, pack_event, wgsl_prefix, ChronicleRecord, DrainOutcome, EventKindTag,
     EventRecord, GpuChronicleRing, GpuEventRing, CHRONICLE_RING_WGSL, EVENT_RING_WGSL,
@@ -810,7 +811,7 @@ fn chronicle_events_route_to_chronicle_ring_not_main_ring() {
 
     use dsl_compiler::ast::Program;
     use dsl_compiler::emit_physics_wgsl::EmitContext;
-    use engine::creature::CreatureType;
+    use engine_data::entities::CreatureType;
     use engine::ids::AgentId;
     use engine::state::{AgentSpawn, SimState};
     use engine_gpu::event_ring::EventKindTag;

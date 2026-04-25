@@ -30,7 +30,7 @@
 //! *scoring signal* is the visible mechanic.
 
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine::ids::AgentId;
 use engine::policy::utility::{terrain_height_bonus, TERRAIN_HEIGHT_BONUS};

@@ -1,6 +1,7 @@
 //! Plan 3 Task 4: single-step migration registry.
 
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::snapshot::{
     load_snapshot, load_snapshot_with_migrations, save_snapshot, MigrationRegistry, SnapshotError,
 };

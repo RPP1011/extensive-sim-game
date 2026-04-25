@@ -7,8 +7,9 @@
 //! `CascadeRegistry::<Event>::with_engine_builtins()` to get the OA damage cascade.
 
 use engine::cascade::{CascadeRegistry, MAX_CASCADE_ITERATIONS};
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::state::{AgentSpawn, SimState};

@@ -4,8 +4,9 @@
 //! different hashes. Release build runs in ≤ 2 s.
 
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, AnnounceAudience, MacroAction,
                      MicroTarget, PolicyBackend};

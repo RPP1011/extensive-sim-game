@@ -1,9 +1,8 @@
-//! Communication channels. Type definitions moved to
-//! `engine_data::types` at milestone 6 (2026-04-19) so the compiler-emitted
-//! `Capabilities` struct can reference them without inverting the
-//! `engine → engine_rules` dependency direction. The re-exports below keep
-//! every `use engine::channel::{CommunicationChannel, ChannelSet}` call site
-//! compiling unchanged.
+//! Communication channels. Type definitions live in `engine_data::types`;
+//! `CommunicationConfig` is in `engine_data::config`.
+//!
+//! Task 4 (Plan B1') dropped the `ChannelSet`/`CommunicationChannel` re-export
+//! shims from this module; callers now import directly from `engine_data::types`.
 //!
 //! `channel_range` is the per-channel effective-range formula. Task 142
 //! migrated the per-channel base distances (speech, pack, pheromone,
@@ -14,7 +13,7 @@
 //! an engine enum, not a balance knob.
 
 use engine_data::config::CommunicationConfig;
-pub use engine_data::types::{ChannelSet, CommunicationChannel};
+use engine_data::types::CommunicationChannel;
 
 pub fn channel_range(
     channel: CommunicationChannel,

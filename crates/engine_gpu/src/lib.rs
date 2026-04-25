@@ -50,7 +50,7 @@ use engine::{
     step::SimScratch,
 };
 #[cfg(feature = "gpu")]
-use engine::event::Event;
+use engine_data::events::Event;
 
 #[cfg(feature = "gpu")]
 pub mod backend;

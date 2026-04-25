@@ -86,7 +86,7 @@ pub fn emit_events_mod(events: &[EventIR]) -> String {
     emit_imports(&mut out, &events_owned);
 
     // Copy on the enum requires Copy on every variant's every field. This
-    // matches the pre-milestone hand-written `engine::event::Event`, which
+    // matches the pre-milestone hand-written `engine_data::events::Event`, which
     // was `#[derive(Copy, Clone, Debug, PartialEq)]`. The engine's ring
     // buffer depends on `Event: Copy` (it returns owned copies via
     // `EventRing::get_pushed`). If a future declaration adds a non-Copy
