@@ -17,7 +17,7 @@
 - **Constitution check:**
   - P1: PASS — no engine extension; no rule logic introduced.
   - P2–P11: PASS — no engine code, layout, RNG, events, or runtime touched.
-- **Re-evaluation:** [ ] AIS reviewed at design phase. [ ] AIS reviewed post-design.
+- **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — 3 bash scripts (~200 ln), 1 Git hook (~75 ln, extends existing cargo-check pre-commit), 1 thin SKILL.md (~60 ln), settings.json + .gitignore + CLAUDE.md + docs/llms.txt updated. No engine code touched, no rule logic introduced. Smoke tests: pre-tool hook 4/4 blocking patterns work; Stop hook no-engine no-op exits 0. Pre-commit smoke surfaced pre-existing cargo check errors in src/bin/xtask/chronicle_cmd.rs (out of scope; users will need `--no-verify` for unrelated commits until those are fixed).
 
 ---
 
