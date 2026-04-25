@@ -528,6 +528,31 @@ fn emit_bindings(out: &mut String) {
     )
     .unwrap();
     writeln!(out).unwrap();
+
+    // Per-tick spatial-within result buffer — binding 25 matches
+    // `engine_gpu::scoring::SCORING_SPATIAL_WITHIN_BINDING` and is
+    // populated each tick by `cascade_resident::run_spatial_resident_pre_scoring`
+    // at `max_move_radius` (the largest scoring action radius).
+    // Each per-agent `QueryResult` stores up to K=32 candidate raw
+    // AgentIds in ascending order — the scoring kernel iterates this
+    // in place of the previous `for t in 0..agent_cap` walk.
+    //
+    // Layout matches `crate::spatial_gpu::GpuQueryResult`: count + truncated
+    // + 2 pad words + ids[K=32].
+    writeln!(out, "const SCORING_SPATIAL_K: u32 = 32u;").unwrap();
+    writeln!(out, "struct SpatialQueryResult {{").unwrap();
+    writeln!(out, "    count: u32,").unwrap();
+    writeln!(out, "    truncated: u32,").unwrap();
+    writeln!(out, "    _pad0: u32,").unwrap();
+    writeln!(out, "    _pad1: u32,").unwrap();
+    writeln!(out, "    ids: array<u32, SCORING_SPATIAL_K>,").unwrap();
+    writeln!(out, "}};").unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding(25) var<storage, read> spatial_within: array<SpatialQueryResult>;"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
 }
 
 /// Emit the per-view storage bindings, one binding per view in
@@ -1691,26 +1716,60 @@ fn emit_kernel(out: &mut String) {
         "        if (action_head_is_target_bound(action_head)) {{"
     )
     .unwrap();
-    writeln!(out, "            // Walk candidate slots in ascending order.").unwrap();
+    // Per-agent K=32 candidate iteration — replaces the previous
+    // `for t in 0..agent_cap` walk. The spatial-within buffer
+    // (binding 25, populated by `run_spatial_resident_pre_scoring`
+    // at `max_move_radius`) stores ids in raw-AgentId ascending
+    // order, matching the canonical scoring iteration the
+    // strictly-greater tie-break (`s > best_score`) relies on. The
+    // candidate set is the largest scoring action radius
+    // (MoveToward, 20 m default), so narrower radii (Attack, 2 m)
+    // re-filter via the per-iter distance check.
     writeln!(
         out,
-        "            for (var t: u32 = 0u; t < n; t = t + 1u) {{"
+        "            // Walk K=32 spatial-within candidates in ascending raw-id order."
     )
     .unwrap();
+    writeln!(
+        out,
+        "            let kin_count = spatial_within[agent_slot].count;"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "            for (var i: u32 = 0u; i < kin_count; i = i + 1u) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                let raw_id = spatial_within[agent_slot].ids[i];"
+    )
+    .unwrap();
+    // Spatial primitives store raw AgentIds (slot+1, see
+    // `engine::ids::AgentId::raw`); convert back to slot index.
+    // Drop the sentinel u32::MAX (unfilled tail of `ids[count..K]`)
+    // and 0 (sentinel for empty slot in some primitives) just in
+    // case the `count` and `ids` are ever read out-of-sync.
+    writeln!(
+        out,
+        "                if (raw_id == 0u || raw_id == 0xFFFFFFFFu) {{ continue; }}"
+    )
+    .unwrap();
+    writeln!(out, "                let t = raw_id - 1u;").unwrap();
     writeln!(out, "                if (t == agent_slot) {{ continue; }}").unwrap();
-    // Alive bitmap lookup (4 B from L1-resident bitmap) replaces
-    // the 64 B `agent_data[t]` cacheline read the pre-bitmap
-    // version needed for this check.
+    // Alive bitmap lookup. Spatial query already gates on alive at
+    // scatter time; the scoring kernel keeps the check for safety
+    // (matches the mask kernel's behavior at the same call site).
     writeln!(
         out,
         "                if (!alive_bit(t)) {{ continue; }}"
     )
     .unwrap();
-    // Radius gate — both Attack and MoveToward have a `from` radius
-    // enforced by the fused mask kernel. We re-check here because the
-    // per-agent mask bit tells us "at least one candidate exists", not
-    // "this specific target is a candidate". For Attack the radius is
-    // `combat.attack_range`; for MoveToward it's `movement.max_move_radius`.
+    // Radius gate — re-check per candidate because the spatial query
+    // uses the largest scoring radius (`max_move_radius`, 20 m); narrower
+    // actions (Attack@2m) need this filter to drop the 12-20 m bulk.
+    // For Attack the radius is `combat.attack_range`; for MoveToward
+    // it's `movement.max_move_radius`.
     writeln!(out, "                let radius = select(").unwrap();
     writeln!(out, "                    cfg.movement_max_move_radius,").unwrap();
     writeln!(out, "                    sim_cfg.attack_range,").unwrap();

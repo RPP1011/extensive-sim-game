@@ -83,9 +83,14 @@ impl From<crate::spatial_gpu::SpatialError> for CascadeResidentError {
 // Resident spatial output buffer trios
 // ---------------------------------------------------------------------------
 
-/// Two caller-owned spatial output trios kept alive across ticks. One
-/// trio per radius: `kin` (12 m — feeds `nearby_kin`) and `engagement`
-/// (2 m — feeds `nearest_hostile`). Reallocated iff `agent_cap` grows.
+/// Three caller-owned spatial output trios kept alive across ticks.
+/// One trio per radius:
+///   * `kin` (12 m — feeds `nearby_kin` for cascade physics)
+///   * `engagement` (2 m — feeds `nearest_hostile` for cascade physics)
+///   * `scoring` (`max_move_radius`, 20 m — feeds the scoring kernel's
+///     per-agent K=32 candidate iteration; replaces scoring's previous
+///     `for t in 0..agent_cap` walk).
+/// Reallocated iff `agent_cap` grows.
 struct ResidentSpatialBuffers {
     agent_cap: u32,
     // kin-radius trio
@@ -96,6 +101,17 @@ struct ResidentSpatialBuffers {
     eng_within: wgpu::Buffer,
     eng_kin: wgpu::Buffer,
     eng_nearest: wgpu::Buffer,
+    // scoring-radius (max_move_radius=20 m) trio. Only `scoring_within`
+    // is consumed downstream (the scoring kernel reads
+    // `kin_within[slot].ids[..count]`); `scoring_kin` and
+    // `scoring_nearest` are still written by the spatial query (the
+    // kernel computes all three primitives in one cell walk) but go
+    // unused. Allocating them keeps the SpatialOutputs trio complete
+    // without needing a per-output bind-group permutation in the
+    // spatial query kernel.
+    scoring_within: wgpu::Buffer,
+    scoring_kin: wgpu::Buffer,
+    scoring_nearest: wgpu::Buffer,
 }
 
 impl ResidentSpatialBuffers {
@@ -121,6 +137,9 @@ impl ResidentSpatialBuffers {
             eng_within: mk(qr_bytes, "cascade_resident::spatial::eng_within"),
             eng_kin: mk(qr_bytes, "cascade_resident::spatial::eng_kin"),
             eng_nearest: mk(nearest_bytes, "cascade_resident::spatial::eng_nearest"),
+            scoring_within: mk(qr_bytes, "cascade_resident::spatial::scoring_within"),
+            scoring_kin: mk(qr_bytes, "cascade_resident::spatial::scoring_kin"),
+            scoring_nearest: mk(nearest_bytes, "cascade_resident::spatial::scoring_nearest"),
         }
     }
 
@@ -137,6 +156,14 @@ impl ResidentSpatialBuffers {
             within: &self.eng_within,
             kin: &self.eng_kin,
             nearest: &self.eng_nearest,
+        }
+    }
+
+    fn scoring_outputs(&self) -> SpatialOutputs<'_> {
+        SpatialOutputs {
+            within: &self.scoring_within,
+            kin: &self.scoring_kin,
+            nearest: &self.scoring_nearest,
         }
     }
 }
@@ -1045,6 +1072,31 @@ impl CascadeResidentCtx {
         }
     }
 
+    /// Read-only handle to the scoring-radius `within_results` buffer.
+    /// Used by the scoring kernel to iterate per-agent K=32 candidate
+    /// slots (instead of walking 0..agent_cap). Caller must invoke
+    /// [`run_spatial_resident_pre_scoring`] earlier in the same encoder
+    /// to populate the buffer for this tick.
+    ///
+    /// Layout: `array<GpuQueryResult>` indexed by agent slot. Each
+    /// element stores `count` (number of valid ids in `ids[..count]`)
+    /// + `truncated` flag + 2 pad words + `ids[K=32]` (raw AgentIds
+    /// in ascending order, INCLUDING self — the scoring kernel's
+    /// per-iter `t == agent_slot` check excludes self).
+    ///
+    /// Sized at `max_move_radius` (20 m default) — the largest
+    /// scoring action radius — so the K=32 candidate set covers all
+    /// (Attack@2m, MoveToward@20m) target candidates without missing
+    /// any. The kin-radius (12 m) trio used by cascade physics is a
+    /// strict subset and remains separate.
+    pub fn scoring_within_buf(&self) -> &wgpu::Buffer {
+        &self
+            .spatial_bufs
+            .as_ref()
+            .expect("scoring_within_buf: spatial_bufs not initialised; call run_spatial_resident_pre_scoring first")
+            .scoring_within
+    }
+
     /// For iter `i`, returns `(events_in_records, events_out_ring)` —
     /// the input records buffer the physics kernel reads from and the
     /// output ring it appends to. `apply_event_ring_records` is the
@@ -1075,10 +1127,104 @@ impl CascadeResidentCtx {
 // Public driver entry point
 // ---------------------------------------------------------------------------
 
+/// Encode this tick's spatial pipeline into `encoder`. Hoisted out of
+/// the cascade driver so the scoring kernel (which now consumes
+/// per-agent K=32 candidate slots from the `scoring_within` output)
+/// can run AFTER the spatial query is populated. The cascade driver
+/// (called later in the same encoder) reads the same buffers without
+/// re-dispatching.
+///
+/// Encodes:
+///   1. CPU SoA pack + grid clear/count/prefix-scan/scatter/sort
+///      (radius-independent — runs once per tick).
+///   2. Three per-agent query dispatches into distinct caller-owned
+///      output trios:
+///        * `kin_radius` (12 m default) → cascade physics's
+///          `nearby_kin` consumers (fear/pack/rally rules).
+///        * `engagement_range` (2 m default) → cascade physics's
+///          `nearest_hostile` consumers.
+///        * `max_move_radius` (20 m default) → scoring kernel's
+///          per-agent K=32 candidate iteration. Sized to the largest
+///          scoring action radius so MoveToward@20m sees the full
+///          candidate set.
+///
+/// Each query call allocates a per-call `qcfg` uniform internally so
+/// the three radii don't race on a shared write.
+///
+/// Does NOT submit, does NOT poll. Caller invokes this once per tick
+/// in `step_batch` AFTER fused_unpack + alive_pack (which populate
+/// `agents_buf` + `alive_bitmap_buf`) and BEFORE mask/scoring/
+/// apply_actions. The spatial output buffers stay live across the
+/// tick — they're owned by `CascadeResidentCtx::spatial_bufs` — and
+/// the cascade driver's later read of them sees this tick's values.
+pub fn run_spatial_resident_pre_scoring(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    state: &SimState,
+    cascade_ctx: &mut CascadeCtx,
+    resident_ctx: &mut CascadeResidentCtx,
+) -> Result<(), CascadeResidentError> {
+    let agent_cap = state.agent_cap();
+
+    // Allocate spatial output buffers on first call (or when agent_cap
+    // grows). Sized at three trios + nearest scratch, all addressed by
+    // agent slot.
+    resident_ctx.ensure_spatial(device, agent_cap);
+    resident_ctx.last_agent_cap = agent_cap;
+    let spatial_bufs = resident_ctx
+        .spatial_bufs
+        .as_ref()
+        .expect("spatial_bufs ensured");
+
+    // Both radii are designer-tunable via `state.config.combat.*`
+    // (`kin_radius` was promoted from a hardcoded const on 2026-04-22;
+    // `engagement_range` has always been config-driven). SimCfg mirrors
+    // both fields, but the spatial query kernel takes the radius as a
+    // per-call parameter on its own uniform, so we read from Config
+    // directly here (batch-constant, no GPU readback needed).
+    //
+    // The scoring radius is the largest scoring action radius
+    // (`movement.max_move_radius`, 20 m default). Attack@2m and any
+    // future radii smaller than `max_move_radius` are strict subsets
+    // of this candidate set.
+    let kin_radius = state.config.combat.kin_radius;
+    let engagement_range = state.config.combat.engagement_range;
+    let scoring_radius = state.config.movement.max_move_radius;
+
+    // Split the spatial pipeline: the CPU SoA pack + clear/count/scan/
+    // scatter/sort passes are radius-independent and run exactly once
+    // per tick. Only the query kernel (which reads qcfg) runs per
+    // radius, against its own caller-owned output trio.
+    cascade_ctx.spatial.rebuild_resident(device, queue, encoder, state)?;
+    cascade_ctx.spatial.query_resident(
+        device,
+        encoder,
+        agent_cap,
+        kin_radius,
+        spatial_bufs.kin_outputs(),
+    );
+    cascade_ctx.spatial.query_resident(
+        device,
+        encoder,
+        agent_cap,
+        engagement_range,
+        spatial_bufs.engagement_outputs(),
+    );
+    cascade_ctx.spatial.query_resident(
+        device,
+        encoder,
+        agent_cap,
+        scoring_radius,
+        spatial_bufs.scoring_outputs(),
+    );
+    Ok(())
+}
+
 /// One-tick resident cascade. Encodes into `encoder`:
 ///
-///   1. Two spatial queries (kin radius + engagement range) into the
-///      driver's caller-owned output buffer trios.
+///   1. (Pre-scored — see [`run_spatial_resident_pre_scoring`]; the
+///      cascade reads spatial outputs populated earlier in the tick.)
 ///   2. Seed of `indirect_args[0]` + `num_events[0]` from
 ///      `apply_event_ring`'s atomic tail.
 ///   3. `MAX_CASCADE_ITERATIONS` indirect physics dispatches, each
@@ -1197,45 +1343,22 @@ pub fn run_cascade_resident_with_iter_cap(
     }
 
     // ---- 1. Spatial queries ---------------------------------------------
-    // Two resident dispatches into distinct caller-owned output trios
-    // so the engagement query doesn't clobber the kin query. Each call
-    // allocates a per-call `qcfg` uniform internally so the two radii
-    // don't race on a shared uniform.
-    resident_ctx.ensure_spatial(device, agent_cap);
+    // Spatial dispatch was hoisted out of the cascade driver into
+    // `step_batch`'s pre-scoring phase (see
+    // [`run_spatial_resident_pre_scoring`]). The cascade still consumes
+    // the same caller-owned `spatial_bufs` populated earlier in this
+    // tick's encoder — they're stable across the tick and physics binds
+    // them at the same offsets as before.
     resident_ctx.last_agent_cap = agent_cap;
+    debug_assert!(
+        resident_ctx.spatial_bufs.is_some(),
+        "spatial_bufs must be populated before run_cascade_resident_with_iter_cap; \
+         call run_spatial_resident_pre_scoring earlier in the same encoder"
+    );
     let spatial_bufs = resident_ctx
         .spatial_bufs
         .as_ref()
-        .expect("spatial_bufs ensured");
-
-    // Both radii are now designer-tunable via `state.config.combat.*`
-    // (`kin_radius` was promoted from a hardcoded const on 2026-04-22;
-    // `engagement_range` has always been config-driven). SimCfg mirrors
-    // both fields, but the spatial query kernel takes the radius as a
-    // per-call parameter on its own uniform, so we read from Config
-    // directly here (batch-constant, no GPU readback needed).
-    let kin_radius = state.config.combat.kin_radius;
-    let engagement_range = state.config.combat.engagement_range;
-
-    // Split the spatial pipeline: the CPU SoA pack + clear/count/scan/
-    // scatter/sort passes are radius-independent and run exactly once
-    // per tick. Only the query kernel (which reads qcfg) runs per
-    // radius, against its own caller-owned output trio.
-    cascade_ctx.spatial.rebuild_resident(device, queue, encoder, state)?;
-    cascade_ctx.spatial.query_resident(
-        device,
-        encoder,
-        agent_cap,
-        kin_radius,
-        spatial_bufs.kin_outputs(),
-    );
-    cascade_ctx.spatial.query_resident(
-        device,
-        encoder,
-        agent_cap,
-        engagement_range,
-        spatial_bufs.engagement_outputs(),
-    );
+        .expect("spatial_bufs populated by run_spatial_resident_pre_scoring");
 
     // ---- 2. Upload ability registry to resident buffers -----------------
     // Must happen before the first physics dispatch binds the buffers.
