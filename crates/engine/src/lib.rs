@@ -17,6 +17,7 @@ pub mod generated;
 pub mod ids;
 pub mod invariant;
 pub mod mask;
+pub mod obs;
 pub mod policy;
 pub mod pool;
 pub mod rng;
