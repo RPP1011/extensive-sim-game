@@ -28,7 +28,7 @@ files in `docs/superpowers/specs/` and the active plans in `docs/superpowers/pla
 | GPU cold-state replay (Subsystem 2) | `docs/superpowers/plans/2026-04-22-gpu-cold-state-replay.md` | ⚠️ Phase 1 done; Phase 3 in flight |
 | Cold-state Phase 3 — gold + standing | `docs/superpowers/plans/2026-04-23-cold-state-phase-3-gold-standing.md` | ⚠️ in flight |
 | Plan 4 — debug & trace runtime | _(to be written)_ | ❌ not yet written |
-| Ability DSL + Economic Depth implementation | _(to be planned from `docs/ability_econ_dsl/`)_ | ❌ not yet planned |
+| Ability DSL + Economic Depth implementation | _(to be planned from `docs/superpowers/specs/2026-04-24-{ability-dsl,economic-depth}-design.md`)_ | ❌ not yet planned |
 
 Deferred subsystems (memberships, memory, relationships, items, groups, factions,
 buildings, settlements, regions, quests, theory-of-mind, personality utility, terrain,
