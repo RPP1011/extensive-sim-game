@@ -43,7 +43,8 @@ cargo run --bin xtask -- scenario generate dataset/scenarios/
 - The constitution states each principle once. Other docs do not paraphrase or redirect.
 - Every new plan needs an AIS preamble (P8). Skipping it is a process violation.
 - Historical content (executed plans, resolved audits, design rationale) lives in **git history**, not active docs.
-- Critic skills (`.claude/skills/critic-*/SKILL.md`) gate engine extensions. Invoke via Skill tool for in-context review or via Agent dispatch (paste skill body into prompt) for fresh-context independent verdicts. The `engine/build.rs` allowlist gate requires two parallel Agent invocations — see `docs/superpowers/specs/2026-04-25-engine-crate-split-design.md` §5.2.
+- Critic skills (`.claude/skills/critic-*/SKILL.md`) gate engine extensions. Use `bash .claude/scripts/dispatch-critics.sh --target WORKING-TREE --all` to dispatch automatically; `.githooks/pre-commit` is the hard block at commit time. Manual invocation guide: see `.claude/skills/dispatch-critics/SKILL.md`.
+- **One-time setup after clone:** `git config core.hooksPath .githooks` enables the pre-commit critic-verdict block. Without it, the hard block doesn't engage.
 
 ## Tooling caveats
 
