@@ -24,16 +24,16 @@ For a complete DSL program, all four artefacts are produced from the same DSL so
 ### 1.1 Scalar Rust emission
 
 - SoA buffers per entity kind, with `@hot` / `@cold` field partitioning (§1.3).
-- Per-agent kernels as `fn` with `#[inline(never)]` in profiling builds for flamegraph attribution (`stories.md` §40).
-- `SimScratch` pools carry all per-tick scratch — zero steady-state allocation. Agent slot pool sized at init; ring buffers fixed-cap; event buffers use `SmallVec<[T; N]>` with CI-enforced worst-case bounds (`stories.md` §30).
+- Per-agent kernels as `fn` with `#[inline(never)]` in profiling builds for flamegraph attribution.
+- `SimScratch` pools carry all per-tick scratch — zero steady-state allocation. Agent slot pool sized at init; ring buffers fixed-cap; event buffers use `SmallVec<[T; N]>` with CI-enforced worst-case bounds.
 - **Spatial index is 2D-grid + per-column sorted z-list + movement-mode sidecar** (`language.md` §9 #25). Primary structure keys `(cx, cy) → SortedVec<(z, AgentId)>` with 16m cells matching voxel-chunk edges. Planar queries walk 9 columns (3×3) and take all. Volumetric queries walk 9 columns and binary-search the z-range. Agents with `movement_mode != Walk` (Fly / Swim / Climb / Fall) live in a separate `in_transit: Vec<AgentId>` that every spatial query scans linearly (expected |in_transit| ≪ N). Slope-walkers stay in the column index — the structure exploits floor-clustering, not flat-ground assumptions.
-- RNG: a single `rng_state: u64` per world, consumed in a fixed order (`stories.md` §29). Per-agent RNG streams seeded from `hash(world_seed, agent_id, tick, purpose)` for parallel sampling.
+- RNG: a single `rng_state: u64` per world, consumed in a fixed order. Per-agent RNG streams seeded from `hash(world_seed, agent_id, tick, purpose)` for parallel sampling.
 
 This is the reference implementation. The `SerialBackend` runs entirely on the host; its output is the ground truth for cross-backend determinism tests.
 
 ### 1.2 GPU dispatch + SPIR-V kernel emission
 
-For `GpuBackend`, the compiler emits SPIR-V kernels (via `shaderc` at compile time) AND Rust dispatch code that invokes them through `voxel_engine::compute::GpuHarness`. Target is voxel-engine's Vulkan/ash + gpu-allocator stack, not wgpu and not raw CUDA. (`stories.md` §28.) Precedents: `terrain_compute.rs` (1024-slot LRU chunk pool), `ai/spatial.rs` (spatial indexing).
+For `GpuBackend`, the compiler emits SPIR-V kernels (via `shaderc` at compile time) AND Rust dispatch code that invokes them through `voxel_engine::compute::GpuHarness`. Target is voxel-engine's Vulkan/ash + gpu-allocator stack, not wgpu and not raw CUDA.  Precedents: `terrain_compute.rs` (1024-slot LRU chunk pool), `ai/spatial.rs` (spatial indexing).
 
 GPU emission covers the deterministic sim's rules layer — mask predicates, cascade handlers, event-folded views, spatial-hash queries. ML forward passes are NOT compiled here; ML is out of DSL scope (see `language.md` §10).
 
@@ -79,7 +79,7 @@ Always host-side (regardless of engine backend):
 
 Quest-eligibility and auction-eligibility indices are cross-entity materialized views (engine spec §15) — GPU-dispatched on `GpuBackend` via sorted-key reductions; scalar on `SerialBackend`. Both backends expose the same view query API.
 
-GPU determinism constraints (`stories.md` §29):
+GPU determinism constraints:
 
 - Reductions feeding scoring decisions use integer fixed-point or sorted-key accumulation to avoid float-associativity drift.
 - Materialized views sort events by `target_id` before atomic accumulation.
@@ -88,7 +88,7 @@ GPU determinism constraints (`stories.md` §29):
 
 ### 1.3 Hot/cold storage split
 
-Mandatory at 200K scale (`stories.md` §31). Authors annotate Agent fields with `@hot` or `@cold`; the compiler emits two SoA layouts and a per-tick sync schedule.
+Mandatory at 200K scale. Authors annotate Agent fields with `@hot` or `@cold`; the compiler emits two SoA layouts and a per-tick sync schedule.
 
 ```
 entity Agent {
@@ -131,7 +131,7 @@ schema.scoring_hash  = sha256(canonicalize(scoring_tables))
 schema.combined_hash = sha256(state_hash || event_hash || rules_hash || scoring_hash)
 ```
 
-Loading a trace whose `combined_hash` differs from the current DSL is a hard error. (`stories.md` §15, `stories.md` §23, `stories.md` §64.) The error prints a diff of the four sub-hashes, a textual diff of which fields/variants changed, and a git-remediation hint:
+Loading a trace whose `combined_hash` differs from the current DSL is a hard error.  The error prints a diff of the four sub-hashes, a textual diff of which fields/variants changed, and a git-remediation hint:
 
 ```
 error: trace format mismatch

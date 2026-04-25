@@ -85,21 +85,7 @@ The only hand-written files in `crates/engine/src/` are primitives that have no 
 - **`event/`**, **`view/`**, **`invariant/`**, **`aggregate/`**, **`telemetry/`** — primitive infrastructure (ring buffer, trait surface, dispatch tables).
 - **`ability/expire.rs`** — stateless stun/slow timer decrement. The timer model itself is a scheduling primitive; migration to a timestamp-based cooldown model is a follow-up milestone unrelated to the DSL port.
 - **`channel.rs`** — per-channel range formula (dispatch table keyed on an engine enum; the per-channel base distances moved into `config.communication.*` at task 142, only the dispatch logic stays).
-- **`ability/` (cast + gate + registry)** — see "Deferred" below.
-
-### Deferred — CastHandler (cast-based abilities)
-
-Cast-based actions (magic abilities, multi-effect spells) remain hand-written in `crates/engine/src/ability/cast.rs`. The wolves+humans scenario does not exercise magic; the four entities in `entities.sim` (Human, Wolf, Deer, Dragon) have no cast-capable capability flag and no `.ability` registration, so CastHandler is dormant throughout the 100-tick fixture.
-
-`CastHandler` is stateful: it carries an `Arc<AbilityRegistry>` so multiple cascade lanes can share one registry cheaply. The physics emitter produces stateless unit-struct handlers (`impl CascadeHandler` with no fields); adding a "handler state" concept to the emitter is ~500 LOC and outside the scope of the wolves+humans DSL-port claim.
-
-Runtime contract: wolves+humans has zero cast-capable creatures → CastHandler never fires → its implementation is irrelevant for parity. When a scenario with cast-capable creatures lands, it MUST formally register a cast handler via `CascadeRegistry::register_cast_handler(Arc<AbilityRegistry>)`; parity for that scenario is a separate milestone.
-
-Tracked as a follow-up tech-debt item, not a blocker. Related files:
-
-- `crates/engine/src/ability/cast.rs` — `CastHandler` (stateful, deferred).
-- `crates/engine/src/ability/gate.rs` — `evaluate_cast_gate` (the cast-time cooldown/stun/range/hostility/engagement-lock predicate; migrates when the Cast mask does).
-- `crates/engine/src/ability/registry.rs`, `program.rs`, `id.rs`, `mod.rs` — ability registry primitive + the `AbilityId` newtype.
+- **`ability/` (registry + program + id)** — ability program registry + `AbilityId` newtype. The cast handler + gate predicate have been migrated to compiler-emitted physics rules (commits `19fe11bc` and `407a5212`, 2026-04-20); `cast.rs` and `gate.rs` no longer exist. Surviving files in `crates/engine/src/ability/`: `id.rs`, `mod.rs`, `program.rs`, `registry.rs`.
 
 ## Fixture test
 

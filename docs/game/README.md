@@ -1,6 +1,6 @@
 # Game docs
 
-How we're using the engine + DSL + compiler specs to build the actual game. Reference specs live under `../engine/`, `../dsl/`, `../compiler/`; this folder explains how they compose into a playable artefact and how to extend it.
+How we're using the engine + DSL + compiler specs to build the actual game. Reference specs live under `../spec/` (language, runtime, compiler, gpu, ability, economy) with live status under `../engine/status.md`; this folder explains how they compose into a playable artefact and how to extend it.
 
 ## Reading order
 

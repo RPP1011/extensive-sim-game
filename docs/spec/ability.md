@@ -564,19 +564,19 @@ All triggers support optional modifiers in the same parens: `range:`,
 
 | Trigger | Arguments | Semantics | Status |
 |---|---|---|---|
-| `on_damage_dealt` | `[range:, by:]` | After any `EffectDamageApplied` event | `runs-today` |
-| `on_damage_taken` | `[range:, by:]` | After damage lands on owner | `runs-today` |
+| `on_damage_dealt` | `[range:, by:]` | After any `EffectDamageApplied` event | `planned` |
+| `on_damage_taken` | `[range:, by:]` | After damage lands on owner | `planned` |
 | `on_kill` | `[range:]` | After kill event attributed to owner | `planned` |
 | `on_death` | — | Owner dies | `planned` |
 | `on_ability_used` | `[ability:]` | Any ability cast by owner | `planned` |
 | `on_ally_damaged` | `range:` required | Ally within range took damage | `planned` |
 | `on_ally_killed` | `range:` required | Ally within range died | `planned` |
-| `on_hp_below` | `<percent>` | Owner HP crossed threshold | `runs-today` |
-| `on_hp_above` | `<percent>` | Owner HP crossed threshold | `runs-today` |
+| `on_hp_below` | `<percent>` | Owner HP crossed threshold | `planned` |
+| `on_hp_above` | `<percent>` | Owner HP crossed threshold | `planned` |
 | `on_shield_broken` | — | Shield reduced to 0 | `planned` |
 | `on_stun_expire` | — | Owner exits stun | `planned` |
 | `periodic` | `<dur>` | Every `dur` while passive is active | `planned` |
-| `on_heal_received` | `[range:]` | Any `EffectHealApplied` targeting owner | `runs-today` |
+| `on_heal_received` | `[range:]` | Any `EffectHealApplied` targeting owner | `planned` |
 | `on_status_applied` | `[status:]` | Any status effect lands | `planned` |
 | `on_status_expired` | `[status:]` | Any status expires | `planned` |
 | `on_resurrect` | — | Reserved for resurrection cascade | `reserved` |
@@ -1806,7 +1806,7 @@ ticket (when opened). Construct IDs reference sections above.
 | Construct | Status |
 |---|---|
 | `ability` block | `runs-today` |
-| `passive` block | `runs-today` |
+| `passive` block | `planned` (no Trigger AST or handler in engine yet) |
 | `target: enemy` / `self` | `runs-today` |
 | `target: ally` / `self_aoe` / `ground` / `direction` | `planned` |
 | `target: vector` / `global` | `reserved` |
