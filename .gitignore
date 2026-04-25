@@ -26,6 +26,9 @@ screenshots/.claude/
 .claude/*
 !.claude/settings.json
 !.claude/skills/
+!.claude/scripts/
+.claude/critic-output-*.txt
+.claude/allowlist-gate-approved
 .codex/
 .worktrees/
 

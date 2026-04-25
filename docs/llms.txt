@@ -51,3 +51,4 @@ Biased-against critic skills with inline few-shot examples. Use via Skill tool (
 - [critic-no-runtime-panic](.claude/skills/critic-no-runtime-panic/SKILL.md): biased P10 reviewer.
 - [critic-reduction-determinism](.claude/skills/critic-reduction-determinism/SKILL.md): biased P11 reviewer.
 - [critic-allowlist-gate](.claude/skills/critic-allowlist-gate/SKILL.md): biased gate for engine/build.rs allowlist edits.
+- [dispatch-critics](.claude/skills/dispatch-critics/SKILL.md): orchestrator skill. Wraps the bash script that runs all applicable critics in parallel.
