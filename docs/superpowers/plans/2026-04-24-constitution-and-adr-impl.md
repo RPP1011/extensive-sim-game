@@ -17,7 +17,7 @@
 - **Rule-compiler touchpoints:** None. This is doc + config; the compiler is unaffected.
 - **Hand-written downstream code:** None. All artefacts are markdown, YAML, JSON.
 - **Constitution check:** N/A — this plan creates the constitution. Re-evaluation post-implementation: confirm no duplicate principles exist across spec/.
-- **Re-evaluation:** Post-implementation, run a final sweep (Task 10).
+- **Re-evaluation:** [x] Post-implementation sweep run (Task 10); no spec content beyond what was anticipated was touched.
 
 ---
 

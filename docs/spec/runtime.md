@@ -7,7 +7,7 @@ The engine is the **unified runtime for all compiler output**. The compiler has 
 - **`SerialBackend`** — host-resident state, scalar Rust execution. The **reference implementation**. Determinism oracle for every test, for every parity check against the GPU backend, for every verified-correct port.
 - **`GpuBackend`** — GPU-resident state via `voxel_engine::GpuHarness`, compiled SPIR-V kernels for gather + apply phases. Performance path for large N.
 
-An implementation is correct if and only if it satisfies §§2–26 AND **produces byte-identical `replayable_sha256()` across both backends on the same seed**. Cross-backend parity is a first-class correctness invariant, not an aspiration.
+An implementation is correct if and only if it satisfies §§2–26 AND **produces byte-identical `replayable_sha256()` across both backends on the same seed**.
 
 ---
 

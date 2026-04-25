@@ -24,6 +24,7 @@ perf.data.old
 
 screenshots/.claude/
 .claude/
+!.claude/settings.json
 .codex/
 .worktrees/
 

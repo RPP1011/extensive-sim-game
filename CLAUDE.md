@@ -1,16 +1,22 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with this repository.
 
-## Build & Test Commands
+## Project
+
+Deterministic tactical orchestration RPG built in Rust. Combat sim is a 100ms fixed-tick deterministic engine with both CPU (`SerialBackend`) and GPU (`GpuBackend`) backends. World simulation is a Dwarf-Fortress-style zero-player layer underneath. Rules-as-data: a custom DSL (`assets/sim/*.sim`, `assets/hero_templates/*.ability`) is compiled to both backends.
+
+## Constitution
+
+The architectural constitution at `docs/constitution.md` is auto-loaded into agent context on session start (see `.claude/settings.json`). Every plan must include an Architectural Impact Statement preamble per `docs/architecture/plan-template-ais.md` (P8).
+
+## Build & test
 
 ```bash
 cargo build                    # Debug build
 cargo build --release          # Release build
 cargo test                     # All tests
-cargo test ai::core::tests     # Tests in a specific module
-cargo test shield_absorbs      # Single test by name substring
-cargo test -- --nocapture      # Show println output
+cargo test -p engine           # Tests in the engine crate only
 cargo test -- --test-threads=1 # Serial execution (for determinism tests)
 ```
 
@@ -20,67 +26,26 @@ cargo test -- --test-threads=1 # Serial execution (for determinism tests)
 cargo run --bin xtask -- scenario run scenarios/basic_4v4.toml
 cargo run --bin xtask -- scenario bench scenarios/
 cargo run --bin xtask -- scenario generate dataset/scenarios/
-cargo run --bin xtask -- scenario oracle eval scenarios/
-cargo run --bin xtask -- scenario oracle transformer-rl generate scenarios/
-cargo run --bin xtask -- train-v6 dataset/scenarios/ --iters 100
-cargo run --bin xtask -- roomgen export --output generated/rooms.jsonl
 ```
 
-## Architecture
+## Where to look
 
-### Three-Layer Simulation
+- **Reading order:** start with `docs/llms.txt`, fetch the docs you need.
+- **What's built:** `docs/engine/status.md` (live per-subsystem implementation status).
+- **What's coming:** `docs/ROADMAP.md` (comprehensive future-work index).
+- **Contract:** `docs/spec/` (canonical specification, 10 files).
+- **Active plans:** `docs/superpowers/plans/`.
+- **Locked decisions:** `docs/adr/`.
 
-```
-Campaign (turn-based overworld) → Mission (multi-room dungeons) → Combat (100ms fixed-tick deterministic sim)
-```
+## Conventions
 
-The combat layer is the core of the AI/ML work. Everything runs through `step(state, intents, dt_ms) → (state, events)` in `src/ai/core/simulation.rs`.
+- The spec is the contract. Live status lives in `engine/status.md`. Don't duplicate.
+- The constitution states each principle once. Other docs do not paraphrase or redirect.
+- Every new plan needs an AIS preamble (P8). Skipping it is a process violation.
+- Historical content (executed plans, resolved audits, design rationale) lives in **git history**, not active docs.
 
-**Namespace alias:** `crate::sim` re-exports `ai::core` — the simulation engine is not AI, it's the deterministic physics/rules engine. New code should prefer `crate::sim::*`.
+## Tooling caveats
 
-### Key Module Map
-
-- **`src/ai/core/`** (aliased as `crate::sim`) — Simulation engine: `SimState`, `UnitState`, `step()`, damage calc, effect application
-- **`src/ai/effects/`** — Data-driven ability system with DSL parser (`.ability` files). Five composable dimensions: Effect (what), Area (where), Delivery (how), Trigger (when), Tags (power levels)
-- **`src/ai/effects/dsl/`** — winnow-based parser for ability DSL: `parser.rs` → `lower.rs` (AST→AbilityDef)
-- **`src/ai/core/ability_eval/`** — Neural ability evaluator (urgency interrupt layer, fires when urgency > 0.4)
-- **`src/ai/core/ability_transformer/`** — Grokking-based transformer for ability decisions, with cross-attention over entity tokens
-- **`src/ai/core/self_play/`** — RL policy learning (REINFORCE + PPO, pointer action space)
-- **`src/ai/goap/`** — GOAP (Goal-Oriented Action Planning) AI with DSL parser (`.goap` files), planner, party culture
-- **`src/ai/squad/`** — Squad-level AI: personality profiles, formation modes, intent generation
-- **`src/ai/pathing/`** — Grid navigation, pathfinding, cover
-- **`src/scenario/`** — Scenario config (TOML), runner, coverage-driven generation
-- **`src/bin/xtask/`** — CLI task runner (scenarios, oracle, training, roomgen)
-- **`src/bin/sim_bridge/`** — Headless sim for external agents via NDJSON protocol
-
-### Determinism Contract
-
-All simulation randomness flows through `SimState.rng_state` via `next_rand_u32()`. Never use `thread_rng()` or any external RNG in simulation code. Unit processing order is shuffled per tick to prevent first-mover bias. Tests in `src/ai/core/tests/determinism.rs` verify reproducibility. CI runs determinism tests in both debug and release modes.
-
-### Effect System
-
-Effects are plain data structs dispatched via pattern matching (no closures). The pipeline:
-1. `.ability` DSL file → parser (`winnow`) → AST
-2. AST → `lower.rs` → `AbilityDef` (with `Effect`, `Area`, `Delivery`, conditions)
-3. At runtime: `apply_effect.rs` / `apply_effect_ext.rs` dispatch effects onto `SimState`
-
-### AI Decision Pipeline
-
-Intent generation flows through layers, each can override:
-1. **Squad AI** (`squad/intents.rs`): team-wide personality-driven behavior
-2. **Ability Evaluator** (optional): neural urgency interrupt for ability usage
-3. **Transformer** (optional): cross-attention decision head over entity + ability tokens
-4. **GOAP** (optional): goal-oriented action planning with party culture modifiers
-5. **Control AI** (optional): hard CC timing coordination
-
-### Workspace
-
-Two crates: root (`bevy_game`) and `crates/ability_operator` (behavioral embeddings for abilities).
-
-### Hero Templates
-
-Defined in `assets/hero_templates/` as hybrid TOML (stats) + `.ability` DSL (abilities). The `.ability` files are the source of truth for ability definitions. 27 base heroes + 172 LoL hero imports in `assets/lol_heroes/`.
-
-### Test Helpers
-
-In `src/ai/core/tests/mod.rs`: `hero_unit(id, team, pos)`, `make_state(units, seed)` for creating deterministic test fixtures. Tests assert on `SimEvent` logs and unit state after `step()`.
+- This is a Rust workspace; the root `Cargo.toml` is a virtual manifest.
+- Two crates: root (`bevy_game`) and `crates/ability_operator`. Engine + GPU live under `crates/engine*`.
+- All simulation randomness MUST flow through `per_agent_u32(seed, agent_id, tick, purpose)` — see P5.

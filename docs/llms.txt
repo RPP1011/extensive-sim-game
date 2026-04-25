@@ -1,0 +1,42 @@
+# game
+
+> Deterministic tactical orchestration RPG built in Rust. Combat sim runs as a 100ms fixed-tick deterministic engine with both CPU and GPU backends; world simulation is a Dwarf-Fortress-style zero-player layer underneath. Rules-as-data via a custom DSL compiled to both backends.
+
+## Constitution
+
+- [Constitution](docs/constitution.md): numbered architectural principles (P1–P10). Auto-loaded into every agent context via SessionStart hook.
+
+## Top-level
+
+- [Overview](docs/overview.md): 5-minute architectural intro, worked example, where-to-go-next.
+- [Roadmap](docs/ROADMAP.md): comprehensive future-work index (active / drafted / partial / deferred).
+- [Engine status](docs/engine/status.md): live per-subsystem implementation status.
+
+## Specification
+
+- [Language](docs/spec/language.md): world-sim DSL grammar + semantics.
+- [Runtime](docs/spec/runtime.md): engine runtime contract (§§1–26).
+- [Compiler](docs/spec/compiler.md): DSL → Rust + SPIR-V + Python lowering.
+- [GPU](docs/spec/gpu.md): GPU backend contract (cascade, sim-state, cold-state, ability-eval, pipeline).
+- [State](docs/spec/state.md): field catalog (every SoA field, who reads, who writes).
+- [Stdlib](docs/spec/stdlib.md): pinned built-in functions and namespaces.
+- [Scoring fields](docs/spec/scoring_fields.md): `field_id` ABI table.
+- [Ability DSL](docs/spec/ability.md): `.ability` language reference + IR.
+- [Economy](docs/spec/economy.md): economic system design (recipes, contracts, market).
+
+## Process
+
+- [Architecture decision records](docs/adr/): locked decisions that come out of specs.
+- [Architecture](docs/architecture/): design framework, principles, governance.
+- [AIS template](docs/architecture/plan-template-ais.md): required preamble for new plans.
+- [Plans](docs/superpowers/plans/): in-flight implementation plans.
+- [Specs](docs/superpowers/specs/): design specs (pre-decision exploration).
+- [Research](docs/superpowers/research/): investigations + measurements feeding plans.
+- [Notes](docs/superpowers/notes/): open architectural gaps, regression bisects.
+
+## Game-layer
+
+- [Game overview](docs/game/overview.md): what we're building, layer map.
+- [Compiler progress](docs/game/compiler_progress.md): live milestone tracker.
+- [Feature flow](docs/game/feature_flow.md): how to add a feature; when to extend the compiler.
+- [Wolves and humans](docs/game/wolves_and_humans.md): canonical fixture.

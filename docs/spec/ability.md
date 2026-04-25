@@ -1704,8 +1704,7 @@ ordinals 17–26):
 
 Existing `ModifyStanding` evolves to carry `{ a_sel, b_sel, delta }`.
 
-Size budget: each variant stays ≤ 16 bytes. `VoxelMaskId`, `StructureId`,
-`MaterialId` are `NonZeroU16` / `u8` — fits.
+Proxy types: `VoxelMaskId`, `StructureId`, `MaterialId` are `NonZeroU16` / `u8`.
 
 #### Selector enums
 
