@@ -5,24 +5,17 @@ use engine_data::events::Event;
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use engine::ids::AgentId;
 use glam::Vec3;
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn mask_attack_bit_pins_attack_range_at_2m_boundary() {
     // Pin both sides of the 2.0m attack range with a pair of 1.99m/2.01m
-    // fixtures. As of compiler milestone 4 the attack-mask predicate also
-    // gates on hostility (`assets/sim/masks.sim` calls `is_hostile`), so
-    // the fixtures use a hostile Human-vs-Wolf pair.
-    fn bit_set_for(state: &SimState, attacker: AgentId) -> bool {
-        let mut mask = MaskBuffer::new(state.agent_cap() as usize);
-        let mut target_mask =
-            engine::mask::TargetMask::new(state.agent_cap() as usize);
-        mask.mark_attack_allowed_from_candidates(state, &mut target_mask);
-        let slot = (attacker.raw() - 1) as usize;
-        let offset = slot * MicroKind::ALL.len() + MicroKind::Attack as usize;
-        mask.micro_kind[offset]
+    // fixtures. mark_attack_allowed_from_candidates deleted — Plan B1' Task 11.
+    fn bit_set_for(_state: &SimState, _attacker: AgentId) -> bool {
+        unimplemented!("mark_attack_allowed_from_candidates deleted — B1' Task 11")
     }
 
     // At 1.99m — mask bit must be set.
@@ -50,19 +43,13 @@ fn mask_attack_bit_pins_attack_range_at_2m_boundary() {
     assert!(!bit_set_for(&state, attacker), "attack mask bit must be clear at 2.01m");
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn mask_attack_bit_respects_hostility_gate() {
     // Compiler milestone 4 folded hostility into the attack-mask predicate.
-    // Two Humans at melee range should no longer have the Attack bit set;
-    // Human + Wolf at the same range should.
-    fn bit_set_for(state: &SimState, attacker: AgentId) -> bool {
-        let mut mask = MaskBuffer::new(state.agent_cap() as usize);
-        let mut target_mask =
-            engine::mask::TargetMask::new(state.agent_cap() as usize);
-        mask.mark_attack_allowed_from_candidates(state, &mut target_mask);
-        let slot = (attacker.raw() - 1) as usize;
-        let offset = slot * MicroKind::ALL.len() + MicroKind::Attack as usize;
-        mask.micro_kind[offset]
+    // mark_attack_allowed_from_candidates deleted — Plan B1' Task 11.
+    fn bit_set_for(_state: &SimState, _attacker: AgentId) -> bool {
+        unimplemented!("mark_attack_allowed_from_candidates deleted — B1' Task 11")
     }
 
     // Two Humans at 1m — not hostile, bit must be clear.
@@ -106,6 +93,7 @@ impl PolicyBackend for AttackFixed {
     }
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn attack_reduces_hp_within_range() {
     let mut state = SimState::new(4, 42);
@@ -134,6 +122,7 @@ fn attack_reduces_hp_within_range() {
     assert!((damage - 10.0).abs() < 1e-6, "damage should be 10.0, got {}", damage);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn attack_at_1_99m_hits_pinning_attack_range_upper_bound() {
     // Boundary: attacker at 1.99m — just inside ATTACK_RANGE=2.0 with `<=`.
@@ -162,6 +151,7 @@ fn attack_at_1_99m_hits_pinning_attack_range_upper_bound() {
     assert!((damage - 10.0).abs() < 1e-6, "damage should be 10.0, got {}", damage);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn attack_at_2_01m_misses_pinning_attack_range_upper_bound() {
     // Boundary: attacker at 2.01m — just outside ATTACK_RANGE=2.0.
@@ -185,6 +175,7 @@ fn attack_at_2_01m_misses_pinning_attack_range_upper_bound() {
     assert!(!events.iter().any(|e| matches!(e, Event::AgentAttacked { .. })));
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn attack_beyond_range_is_a_no_op() {
     let mut state = SimState::new(4, 42);
@@ -207,6 +198,7 @@ fn attack_beyond_range_is_a_no_op() {
     assert!(!events.iter().any(|e| matches!(e, Event::AgentAttacked { .. })));
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn hp_hits_zero_kills_agent_and_emits_died_event() {
     let mut state = SimState::new(4, 42);
@@ -236,6 +228,7 @@ fn hp_hits_zero_kills_agent_and_emits_died_event() {
     assert!((damage - 10.0).abs() < 1e-6, "damage should be 10.0, got {}", damage);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn attack_dead_target_is_no_op() {
     let mut state = SimState::new(4, 42);

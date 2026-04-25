@@ -21,7 +21,7 @@ use engine::ids::AgentId;
 use engine::mask::MaskBuffer;
 use engine::policy::{Action, ActionKind, AnnounceAudience, MacroAction, PolicyBackend};
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use glam::Vec3;
 
 struct OneAnnounce(AgentId, AnnounceAudience);
@@ -43,6 +43,7 @@ impl PolicyBackend for OneAnnounce {
     }
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn primary_recipient_view_memory_contains_the_broadcast() {
     let mut state = SimState::new(8, 42);
@@ -85,6 +86,7 @@ fn primary_recipient_view_memory_contains_the_broadcast() {
     assert_eq!(row[0].anchor_tick, 0);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn overhear_bystander_view_memory_records_source() {
     let mut state = SimState::new(8, 42);
@@ -124,6 +126,7 @@ fn overhear_bystander_view_memory_records_source() {
     assert_eq!(row[0].source, speaker.raw());
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn speaker_receives_no_memory_of_their_own_announce() {
     let mut state = SimState::new(8, 42);

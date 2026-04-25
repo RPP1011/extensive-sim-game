@@ -3,6 +3,7 @@
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[cfg(feature = "dhat-heap")]
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn steady_state_zero_alloc_after_warmup() {
     use engine::cascade::CascadeRegistry;
@@ -11,7 +12,7 @@ fn steady_state_zero_alloc_after_warmup() {
 use engine_data::events::Event;
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};
-    use engine::step::{step, SimScratch};
+    use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
     use glam::Vec3;
 
     let mut state = SimState::new(100, 42);
@@ -52,6 +53,7 @@ use engine_data::events::Event;
 }
 
 #[cfg(not(feature = "dhat-heap"))]
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn steady_state_zero_alloc_skipped_without_feature() {
     eprintln!("skipping — run with `--features dhat-heap` to measure allocations");

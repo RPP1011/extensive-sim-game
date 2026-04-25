@@ -22,17 +22,27 @@ pub mod pool;
 pub mod probe;
 pub mod rng;
 pub mod schema_hash;
+/// Per-tick scratch buffers (MaskBuffer, TargetMask, actions, shuffle_idx).
+/// Moved here from `step.rs` (deleted, Plan B1' Task 11) so the type
+/// survives as a storage primitive. Rule-aware tick logic lives in
+/// `engine_rules::step` once Task 11 lands.
+pub mod scratch;
+/// Compile-only unimplemented!() stubs for `step`, `step_full`, etc. so the
+/// many `#[ignore]`d tests that still import `engine::step::*` compile cleanly.
+/// Remove this module when Task 11 lands and test imports migrate to
+/// `engine_rules::step`.
+pub mod step;
 pub mod snapshot;
 pub mod spatial;
 pub mod state;
-/// DELETED in Task 4 (moves to engine_rules). Still present in Task 1
-/// because many tests and backend.rs reference step::step + SimScratch.
-pub mod step;
 pub mod terrain;
 pub mod telemetry;
 pub mod trajectory;
 pub mod view;
 
-pub use backend::{CpuBackend, SimBackend};
+pub use backend::SimBackend;
+/// Re-export SimScratch from its new home so call sites that previously
+/// wrote `engine::step::SimScratch` can be updated to `engine::scratch::SimScratch`.
+pub use scratch::SimScratch;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

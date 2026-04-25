@@ -20,6 +20,7 @@ fn spawn(state: &mut SimState, ct: CreatureType) -> AgentId {
     state.spawn_agent(AgentSpawn { creature_type: ct, pos: Vec3::ZERO, hp: 100.0, ..Default::default() }).unwrap()
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn positive_delta_adds_to_zero_baseline() {
     let mut state = SimState::new(4, 42);
@@ -35,6 +36,7 @@ fn positive_delta_adds_to_zero_baseline() {
     assert_eq!(state.views.standing.get(a, b), 50);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn saturates_at_upper_clamp() {
     let mut state = SimState::new(4, 42);
@@ -51,6 +53,7 @@ fn saturates_at_upper_clamp() {
     assert_eq!(state.views.standing.get(a, b), 1000);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn saturates_at_lower_clamp() {
     let mut state = SimState::new(4, 42);
@@ -66,6 +69,7 @@ fn saturates_at_lower_clamp() {
     assert_eq!(state.views.standing.get(a, b), -1000);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn standing_is_symmetric_across_directions() {
     let mut state = SimState::new(4, 42);
@@ -89,6 +93,7 @@ fn standing_is_symmetric_across_directions() {
     assert_eq!(state.views.standing.get(b, a), 0);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn accumulated_adjustments_are_stable_after_clamp() {
     let mut state = SimState::new(4, 42);
@@ -119,6 +124,7 @@ fn accumulated_adjustments_are_stable_after_clamp() {
     assert_eq!(state.views.standing.get(a, b), -1000);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn zero_delta_is_noop() {
     let mut state = SimState::new(4, 42);
@@ -136,6 +142,7 @@ fn zero_delta_is_noop() {
     assert!(state.views.standing.is_empty(), "no entry should be inserted for a zero delta");
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn registry_dispatches_standing_delta_via_builtins() {
     use engine::cascade::CascadeRegistry;

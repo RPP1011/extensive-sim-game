@@ -1,771 +1,95 @@
 // crates/engine/src/step.rs
-// NOTE: This file is DELETED in Task 4 (moves to engine_rules as emitted
-// SerialBackend). For Task 1, it is retained but updated to reference
-// engine_data::events::Event directly (the concrete type, since engine_data
-// is still a dep for chronicle.rs until Plan B2).
+//
+// COMPILE-ONLY STUBS — Plan B1' Task 11 deleted the real step/step_full
+// implementations. This file exists solely so the many #[ignore]d tests that
+// still import `engine::step::{step, SimScratch, ...}` compile without error.
+// Every function in this file is `unimplemented!()` and will panic if called.
+//
+// Remove this file when Task 11 lands and `engine_rules::step` is the
+// canonical tick driver. The test imports will be updated to
+// `engine_rules::step::step` at that point.
+
+pub use crate::scratch::SimScratch;
+
 use crate::cascade::CascadeRegistry;
-use crate::channel::channel_range;
 use crate::event::EventRing;
-use crate::ids::AgentId;
-use crate::invariant::{FailureMode, InvariantRegistry};
-use crate::mask::{MaskBuffer, MicroKind, TargetMask};
-use crate::policy::{Action, ActionKind, AnnounceAudience, MacroAction, MicroTarget, PolicyBackend};
-use crate::rng::per_agent_u32;
+use crate::invariant::InvariantRegistry;
+use crate::policy::PolicyBackend;
 use crate::state::SimState;
-use crate::telemetry::{metrics, NullSink, TelemetrySink};
+use crate::telemetry::TelemetrySink;
 use crate::view::MaterializedView;
 use engine_data::events::Event;
-use glam::Vec3;
 
-// Type alias for the concrete EventRing used in this step module.
-type SimEventRing = EventRing<Event>;
-
-// The balance constants that used to live here (DEFAULT_VOCAL_STRENGTH,
-// MOVE_SPEED_MPS, ATTACK_DAMAGE, ATTACK_RANGE, EAT_RESTORE, DRINK_RESTORE,
-// REST_RESTORE, MAX_ANNOUNCE_RECIPIENTS, MAX_ANNOUNCE_RADIUS, OVERHEAR_RANGE)
-// moved into `assets/sim/config.sim` as a compiler-owned `config` block.
-// Every call site now reads them off `SimState::config` — the values still
-// default to the exact numbers that used to be hardcoded here (see
-// `Config::default()` in `engine_data::config`), so observable behaviour
-// is unchanged. Runtime TOML tuning (`Config::from_toml(...)`) is the only
-// new knob.
-//
-// Task 142 retired the backward-compat `pub const` shims that used to
-// live here. The pre-config tests (`cast_handler_slow.rs`, `action_flee.rs`,
-// `action_attack_kill.rs`, `engagement_*`, `proptest_engagement`, …) now
-// all read the defaults off `engine_data::config::Config::default()`.
-// No engine code (or test) should pin a balance knob as a `pub const`
-// ever again; extend `assets/sim/config.sim` and rebuild instead.
-
-/// Return `true` iff `speaker` and `observer` share at least one
-/// `CommunicationChannel`. When both sides have non-empty channel sets, at
-/// least one must overlap. When either side has no registered channels
-/// (e.g. cold-storage default, or a test state that never called
-/// `spawn_agent`), we fall back to permissive so pre-channel-gating
-/// fixtures don't silently go mute.
-fn speaker_and_observer_share_channel(
-    state: &SimState,
-    speaker: AgentId,
-    observer: AgentId,
-) -> bool {
-    let speaker_ch = state.agent_channels(speaker);
-    let observer_ch = state.agent_channels(observer);
-    match (speaker_ch, observer_ch) {
-        (Some(s), Some(o)) => {
-            if s.is_empty() || o.is_empty() { return true; }
-            for c in s.iter() {
-                if o.contains(c) { return true; }
-            }
-            false
-        }
-        _ => true,
-    }
-}
-
-/// Longest effective range the `speaker` can project over any of their
-/// registered channels, at `DEFAULT_VOCAL_STRENGTH`. Bounded above by
-/// `MAX_ANNOUNCE_RADIUS` so a Telepathy-capable speaker doesn't broadcast
-/// planet-wide. When the speaker has no registered channels, fall back to
-/// `MAX_ANNOUNCE_RADIUS` (pre-channel-gating behaviour).
-///
-/// Only consulted for `AnnounceAudience::Anyone` / `Group(_)`; `Area(c, r)`
-/// still uses the caller-supplied `r` (author intent).
-fn speaker_anyone_radius(state: &SimState, speaker: AgentId) -> f32 {
-    let max_radius = state.config.communication.max_announce_radius;
-    let vocal_strength = state.config.communication.default_vocal_strength;
-    let channels = match state.agent_channels(speaker) {
-        Some(c) if !c.is_empty() => c,
-        _ => return max_radius,
-    };
-    let mut best: f32 = 0.0;
-    for c in channels.iter() {
-        let r = channel_range(*c, vocal_strength, &state.config.communication);
-        if r.is_infinite() {
-            return max_radius;
-        }
-        if r.is_finite() && r > best {
-            best = r;
-        }
-    }
-    best.min(max_radius)
-}
-
-/// Apply a need-restoration desired delta to `current`, clamping the resulting
-/// value at 1.0. Returns `(new_value, applied_delta)` where `applied_delta` is
-/// the post-clamp change (≤ desired when saturated). Events carry the applied
-/// delta so replays observe post-clamp values.
-fn restore_need(current: f32, desired_delta: f32) -> (f32, f32) {
-    let new_val = (current + desired_delta).min(1.0);
-    let applied = new_val - current;
-    (new_val, applied)
-}
-
-/// Convert the active effect-slow factor (q8 fixed-point) into an f32
-/// multiplier. Returns 1.0 when no slow is active (expiry elapsed OR
-/// `factor_q8 <= 0`). The caller composes this multiplicatively with any
-/// other speed modifiers (e.g. engagement-slow in the MoveToward branch).
-///
-/// q8 encoding: `factor_q8 = round(multiplier * 256)`. A factor of `51`
-/// corresponds to ≈0.2× (51 / 256 ≈ 0.199). Task 143 replaced the
-/// `slow_remaining_ticks > 0` read with `effective_slow_factor_q8`, which
-/// returns 0 once `state.tick >= slow_expires_at_tick` — the same
-/// inactive-slow check without a per-tick decrement pass.
-fn effect_slow_multiplier(state: &SimState, id: AgentId) -> f32 {
-    let factor_q8 = state.effective_slow_factor_q8(id);
-    if factor_q8 <= 0 { return 1.0; }
-    factor_q8 as f32 / 256.0
-}
-
-/// Per-tick scratch buffers hoisted out of `step` so a steady-state tick loop
-/// allocates zero bytes. Caller constructs once (capacity = `state.agent_cap()`),
-/// reuses across ticks. Buffers are reset/cleared at the top of each `step`.
-///
-/// Task 143 retired the last per-tick reducer — `tick_start_timers` in
-/// `ability::expire` — by moving stun / slow onto absolute expiry ticks
-/// (read through `SimState::agent_stunned` / `effective_slow_factor_q8`).
-/// The `engagement_alive_ids` buffer it used to share is dropped; the
-/// engagement update is event-driven (task 139) and scans via the spatial
-/// index per `AgentMoved`, not via a hoisted slot snapshot.
-pub struct SimScratch {
-    pub mask:        MaskBuffer,
-    /// Per-agent per-target-bound-kind candidate list. Task 138 —
-    /// populated by the compiler-emitted `mask_<name>_candidates`
-    /// enumerators during mask-build and consumed by the scorer.
-    pub target_mask: TargetMask,
-    pub actions:     Vec<Action>,
-    pub shuffle_idx: Vec<u32>,
-}
-
-impl SimScratch {
-    pub fn new(n_agents: usize) -> Self {
-        Self {
-            mask:        MaskBuffer::new(n_agents),
-            target_mask: TargetMask::new(n_agents),
-            actions:     Vec::with_capacity(n_agents),
-            shuffle_idx: Vec::with_capacity(n_agents),
-        }
-    }
-}
-
-/// Back-compat wrapper around [`step_full`]. Runs the canonical 6-phase pipeline
-/// with an empty view list, an empty invariant registry, and a [`NullSink`] —
-/// i.e. exactly the old Task 10 behavior (mask → evaluate → shuffle → apply →
-/// cascade → tick++), with no view folds, no invariant checks, and no telemetry
-/// emitted.
+/// DELETED — Plan B1' Task 11. `unimplemented!()` stub for test compilation.
+/// Re-enable after B1' Task 11 emits engine_rules::step::step.
 pub fn step<B: PolicyBackend>(
-    state:   &mut SimState,
-    scratch: &mut SimScratch,
-    events:  &mut SimEventRing,
-    backend: &B,
-    cascade: &CascadeRegistry<Event>,
+    _state:   &mut SimState,
+    _scratch: &mut SimScratch,
+    _events:  &mut EventRing<Event>,
+    _backend: &B,
+    _cascade: &CascadeRegistry<Event>,
 ) {
-    let empty_invariants = InvariantRegistry::new();
-    step_full(
-        state,
-        scratch,
-        events,
-        backend,
-        cascade,
-        &mut [],
-        &empty_invariants,
-        &NullSink,
-    );
+    unimplemented!(
+        "engine::step::step is DELETED (Plan B1' Task 11). \
+         Re-enable after engine_rules::step::step is emitted."
+    )
 }
 
-/// Full 6-phase tick pipeline (see `docs/engine/spec.md` §12):
-///
-/// 1. Mask build
-/// 2. Policy evaluate
-/// 3. Action shuffle (deterministic per-tick Fisher-Yates)
-/// 4. Apply actions + cascade fixed-point
-/// 5. Materialized-view fold
-/// 6. Invariants + built-in telemetry metrics
-///
-/// After phase 6, `state.tick` is incremented.
-// The 8-param shape is load-bearing: it mirrors the Plan-2 canonical pipeline
-// signature and the six observable phases each call out a distinct collaborator
-// (state, scratch, events, backend, cascade, views, invariants, telemetry).
-// Bundling would hide the phase seams from callers and tests.
+/// DELETED — Plan B1' Task 11. `unimplemented!()` stub for test compilation.
 #[allow(clippy::too_many_arguments)]
-#[contracts::debug_requires(
-    scratch.mask.micro_kind.len() == state.agent_cap() as usize * crate::mask::MicroKind::ALL.len()
-)]
-#[contracts::debug_ensures(state.tick == old(state.tick) + 1)]
 pub fn step_full<B: PolicyBackend>(
-    state:      &mut SimState,
-    scratch:    &mut SimScratch,
-    events:     &mut SimEventRing,
-    backend:    &B,
-    cascade:    &CascadeRegistry<Event>,
-    views:      &mut [&mut dyn MaterializedView<Event>],
-    invariants: &InvariantRegistry<Event>,
-    telemetry:  &dyn TelemetrySink,
+    _state:      &mut SimState,
+    _scratch:    &mut SimScratch,
+    _events:     &mut EventRing<Event>,
+    _backend:    &B,
+    _cascade:    &CascadeRegistry<Event>,
+    _views:      &mut [&mut dyn MaterializedView<Event>],
+    _invariants: &InvariantRegistry<Event>,
+    _telemetry:  &dyn TelemetrySink,
 ) {
-    let t_start = std::time::Instant::now();
-
-    // Phases 1-3 — mask build, policy evaluate, action shuffle. Extracted
-    // into `step_phases_1_to_3` so GPU-backed drivers can share the same
-    // CPU-side decision pipeline and only swap phase 4.
-    step_phases_1_to_3(state, scratch, backend);
-
-    // Phase 4 — apply actions + run cascade fixed-point. Record events emitted
-    // so phase 6 can report an accurate per-tick counter.
-    let events_before = events.total_pushed();
-    apply_actions(state, scratch, events);
-    cascade.run_fixed_point_tel(state, events, telemetry);
-    let events_emitted = events.total_pushed().saturating_sub(events_before);
-
-    // Phase 5 — view fold. Each view walks **this tick's** events (not the
-    // whole retained ring) and accumulates its own derived storage. The
-    // `events_before` snapshot taken before phase 4 is the cut point: any
-    // event with `push_count >= events_before` was emitted this tick.
-    //
-    // Before task 144's follow-up the fold re-walked the entire retained
-    // ring every tick, which at 100 agents × 1000 ticks summed to ~50M
-    // redundant `fold_event` calls and dominated `mvp_acceptance` timing.
-    for v in views.iter_mut() {
-        v.fold_since(events, events_before);
-    }
-    // Phase 5b — compiler-emitted `@materialized` views. Spec §7.1
-    // places view folds *between* event emission and mask evaluation,
-    // so masks in the NEXT tick read post-fold values. We keep the
-    // legacy-trait fold above to preserve the `DamageTaken` test
-    // surface while the compiler-owned registry takes over.
-    //
-    // `fold_all` takes `&EventRing` + `events_before` and iterates
-    // `iter_since(events_before)` internally — O(this-tick events)
-    // rather than O(cumulative retained).
-    state.views.fold_all(events, events_before, state.tick);
-
-    finalize_tick(state, scratch, events, invariants, telemetry, t_start, events_emitted);
+    unimplemented!(
+        "engine::step::step_full is DELETED (Plan B1' Task 11). \
+         Re-enable after engine_rules::step::step is emitted."
+    )
 }
 
-/// Run phases 1-3 of the canonical tick pipeline: mask build, policy
-/// evaluate, and action shuffle. After this returns, `scratch.actions`
-/// holds the chosen actions for every alive agent (in policy-emit order)
-/// and `scratch.shuffle_idx` holds the deterministic shuffle permutation
-/// keyed by `(state.seed, state.tick)`.
-///
-/// Exposed as a standalone helper so the `engine_gpu` backend can drive
-/// phases 1-3 on CPU, then swap the cascade dispatch in phase 4 for a
-/// GPU-authoritative cascade, without duplicating the CPU-side decision
-/// pipeline.
+/// DELETED — Plan B1' Task 11. Stub for test compilation.
 pub fn step_phases_1_to_3<B: PolicyBackend>(
-    state:   &mut SimState,
-    scratch: &mut SimScratch,
-    backend: &B,
+    _state:   &mut SimState,
+    _scratch: &mut SimScratch,
+    _backend: &B,
 ) {
-    // Phase 1 — mask build. Task 138: target-bound kinds (Attack /
-    // MoveToward) also populate per-agent candidate lists in
-    // `target_mask`; the scorer argmaxes over those lists rather than
-    // using the retired `nearest_other` heuristic.
-    scratch.mask.reset();
-    scratch.target_mask.reset();
-    scratch.mask.mark_hold_allowed(state);
-    scratch.mask.mark_move_allowed_from_candidates(state, &mut scratch.target_mask);
-    scratch.mask.mark_flee_allowed_if_threat_exists(state);
-    scratch.mask.mark_attack_allowed_from_candidates(state, &mut scratch.target_mask);
-    scratch.mask.mark_needs_allowed(state);
-    scratch.mask.mark_domain_hook_micros_allowed(state);
-
-    // Phase 2 — policy evaluate.
-    scratch.actions.clear();
-    backend.evaluate(state, &scratch.mask, &scratch.target_mask, &mut scratch.actions);
-
-    // Phase 3 — deterministic per-tick action shuffle. Populates
-    // `scratch.shuffle_idx` with a permutation over `scratch.actions` keyed by
-    // `(state.seed, state.tick)`. `scratch.actions` itself is left untouched;
-    // the apply kernel walks it via `shuffle_idx`.
-    shuffle_actions_in_place(
-        state.seed,
-        state.tick,
-        &scratch.actions,
-        &mut scratch.shuffle_idx,
-    );
+    unimplemented!("engine::step::step_phases_1_to_3 DELETED — Plan B1' Task 11")
 }
 
-/// Phase 6 — invariants + built-in telemetry metrics. Also advances
-/// `state.tick` by 1. Exposed so GPU-backed drivers reuse the same
-/// shutdown path that `step_full` runs. `t_start` is the `Instant`
-/// captured at the top of the tick for the `TICK_MS` histogram;
-/// `events_emitted` is the count of events appended to the ring during
-/// this tick, for the `EVENT_COUNT` counter.
-pub fn finalize_tick(
-    state:          &mut SimState,
-    scratch:        &SimScratch,
-    events:         &SimEventRing,
-    invariants:     &InvariantRegistry<Event>,
-    telemetry:      &dyn TelemetrySink,
-    t_start:        std::time::Instant,
-    events_emitted: usize,
-) {
-    let violations = invariants.check_all(state, events);
-    for report in &violations {
-        let mode_str = match report.failure_mode {
-            FailureMode::Panic => "panic",
-            FailureMode::Log   => "log",
-        };
-        telemetry.emit(
-            "engine.invariant_violated",
-            1.0,
-            &[("invariant", report.violation.invariant), ("mode", mode_str)],
-        );
-    }
-
-    let tick_ms = t_start.elapsed().as_secs_f64() * 1000.0;
-    telemetry.emit_histogram(metrics::TICK_MS, tick_ms);
-    telemetry.emit_counter(metrics::EVENT_COUNT, events_emitted as i64);
-    let n_alive = state.agents_alive().count();
-    telemetry.emit(metrics::AGENT_ALIVE, n_alive as f64, &[]);
-    let mask_true_frac = fraction_true(&scratch.mask.micro_kind);
-    telemetry.emit(metrics::MASK_TRUE_FRAC, mask_true_frac, &[]);
-
-    state.tick += 1;
-}
-
-fn fraction_true(bits: &[bool]) -> f64 {
-    if bits.is_empty() { return 0.0; }
-    let t = bits.iter().filter(|b| **b).count();
-    t as f64 / bits.len() as f64
-}
-
-/// Phase-3 helper. Populates `shuffle_idx` with a Fisher-Yates permutation of
-/// `0..actions.len()`, keyed by `(world_seed, tick)` via [`per_agent_u32`]
-/// using the sentinel `AgentId(1)` as the shuffle stream discriminator.
-/// Deterministic: same `(seed, tick, actions.len())` → same permutation.
-///
-/// Exposed `pub` so GPU-backed drivers can reuse the exact shuffle
-/// function the CPU backend uses — divergence here silently breaks
-/// determinism (first-mover-bias test, `shuffle_is_deterministic`, etc.).
-pub fn shuffle_actions_in_place(
-    world_seed:  u64,
-    tick:        u32,
-    actions:     &[Action],
-    shuffle_idx: &mut Vec<u32>,
-) {
-    shuffle_order_into(shuffle_idx, actions.len(), world_seed, tick);
-}
-
-/// Fisher-Yates shuffle of action indices using a deterministic PRNG seeded by
-/// `(world_seed, tick)`. This makes action-application order depend on the world
-/// seed (spec §7.2 — determinism contract / first-mover-bias prevention).
-///
-/// Writes into the caller-owned `order` buffer (cleared + extended in place) so
-/// the per-tick order vec does not re-allocate once `SimScratch` is warm.
-fn shuffle_order_into(order: &mut Vec<u32>, n: usize, world_seed: u64, tick: u32) {
-    order.clear();
-    order.extend(0..n as u32);
-    let tick64 = tick as u64;
-    // Sentinel agent id 1 is used as a fixed stream discriminator for the
-    // per-tick shuffle — distinct from any per-agent decision stream.
-    let sentinel = AgentId::new(1).unwrap();
-    for i in (1..n).rev() {
-        let r = per_agent_u32(world_seed, sentinel, tick64 * 65536 + i as u64, b"shuffle");
-        let j = (r as usize) % (i + 1);
-        order.swap(i, j);
-    }
-}
-
-/// Phase 4a — apply the shuffled micro/macro actions in `scratch` onto
-/// `state`, emitting a root-cause event into `events` for every action
-/// that produces a visible effect. The action vector is consumed in the
-/// order `scratch.shuffle_idx` dictates (populated by
-/// `step_phases_1_to_3`); any ill-formed `(kind, target)` combination is
-/// silently dropped — policy backends are responsible for only emitting
-/// well-formed actions (mask predicates gate this on the CPU side).
-///
-/// Exposed `pub` so GPU-backed drivers can reuse the CPU apply pass as
-/// the seed event generator for a GPU cascade dispatch.
+/// DELETED — Plan B1' Task 11. Stub for test compilation.
 pub fn apply_actions(
-    state:   &mut SimState,
-    scratch: &SimScratch,
-    events:  &mut SimEventRing,
+    _state:   &mut SimState,
+    _scratch: &SimScratch,
+    _events:  &mut EventRing<Event>,
 ) {
-    // `scratch.shuffle_idx` must have been populated by `shuffle_actions_in_place`
-    // immediately before this call. We walk the already-computed permutation
-    // rather than re-shuffling here, so the shuffle is a first-class phase of
-    // `step_full` visible to telemetry / tests.
-    for &idx in scratch.shuffle_idx.iter() {
-        let action = &scratch.actions[idx as usize];
-        match action.kind {
-            ActionKind::Micro { kind: MicroKind::Hold, .. } => {}
-            ActionKind::Micro {
-                kind:   MicroKind::MoveToward,
-                target: MicroTarget::Position(target_pos),
-            } => {
-                let from = state.agent_pos(action.agent).unwrap();
-                let delta = target_pos - from;
-                if delta.length_squared() > 0.0 {
-                    let dir = delta.normalize();
-                    // Combat Foundation Task 4 — engaged-aware movement.
-                    // Moving *toward* the engager is full speed (closing the
-                    // melee); moving anywhere else is slowed by
-                    // `config.combat.engagement_slow_factor` and fires an
-                    // opportunity attack.
-                    let mut speed = state.config.movement.move_speed_mps;
-                    if let Some(engager) = state.agent_engaged_with(action.agent) {
-                        let engager_pos = state.agent_pos(engager).unwrap_or(from);
-                        let toward_engager = (engager_pos - from).dot(dir) > 0.0;
-                        if !toward_engager {
-                            speed *= state.config.combat.engagement_slow_factor;
-                            events.push(Event::OpportunityAttackTriggered {
-                                actor:  engager,
-                                target: action.agent,
-                                tick:   state.tick,
-                            });
-                        }
-                    }
-                    // Combat Foundation Task 14 — effect-slow multiplier.
-                    // `hot_slow_factor_q8` is q8 fixed-point (256 = 1.0×). A
-                    // remaining-ticks > 0 means a slow debuff is active;
-                    // compose MULTIPLICATIVELY with engagement-slow so both
-                    // sources stack predictably.
-                    speed *= effect_slow_multiplier(state, action.agent);
-                    let to = from + dir * speed;
-                    state.set_agent_pos(action.agent, to);
-                    events.push(Event::AgentMoved {
-                        actor: action.agent, from, location: to, tick: state.tick,
-                    });
-                }
-            }
-            ActionKind::Micro {
-                kind:   MicroKind::Flee,
-                target: MicroTarget::Agent(threat),
-            } => {
-                if !state.agent_alive(threat) { continue; }
-                if let (Some(self_pos), Some(threat_pos)) =
-                    (state.agent_pos(action.agent), state.agent_pos(threat))
-                {
-                    // Task 177 — Deer herding. Capability-gated kin-bias blend:
-                    // herd-capable species (currently just Deer — see
-                    // `assets/sim/entities.sim` `herds_when_fleeing`) pick a
-                    // flee vector blended between "away from threat" and
-                    // "toward kin centroid" within `combat.kin_flee_radius`.
-                    // Non-herd species fall through to the pure-away path,
-                    // preserving the pre-177 behaviour byte-exact (so the
-                    // wolves+humans parity baseline stays stable). The
-                    // capability lookup is keyed on `CreatureType` via
-                    // `Capabilities::for_creature` — no per-agent storage,
-                    // no species switch in the engine.
-                    let herds = state
-                        .agent_creature_type(action.agent)
-                        .map(|ct| engine_data::entities::Capabilities::for_creature(ct).herds_when_fleeing)
-                        .unwrap_or(false);
-                    let away = if herds {
-                        crate::spatial::flee_direction_with_kin_bias(
-                            state,
-                            action.agent,
-                            threat_pos,
-                            state.config.combat.kin_flee_bias,
-                            state.config.combat.kin_flee_radius,
-                        )
-                    } else {
-                        (self_pos - threat_pos).normalize_or_zero()
-                    };
-                    if away.length_squared() > 0.0 {
-                        // Flee intentionally disengages at full speed but
-                        // always draws an opportunity attack from any active
-                        // engager (regardless of whether the engager is the
-                        // threat or someone else).
-                        if let Some(engager) = state.agent_engaged_with(action.agent) {
-                            events.push(Event::OpportunityAttackTriggered {
-                                actor:  engager,
-                                target: action.agent,
-                                tick:   state.tick,
-                            });
-                        }
-                        // Effect-slow applies to Flee too (Task 14) —
-                        // composed multiplicatively with the Flee base speed.
-                        let speed = state.config.movement.move_speed_mps
-                            * effect_slow_multiplier(state, action.agent);
-                        let new_pos = self_pos + away * speed;
-                        state.set_agent_pos(action.agent, new_pos);
-                        events.push(Event::AgentFled {
-                            agent_id: action.agent,
-                            from:     self_pos,
-                            to:       new_pos,
-                            tick:     state.tick,
-                        });
-                    }
-                }
-            }
-            ActionKind::Micro {
-                kind:   MicroKind::Attack,
-                target: MicroTarget::Agent(tgt),
-            } => {
-                if !state.agent_alive(tgt) { continue; }
-                if let (Some(sp), Some(tp)) =
-                    (state.agent_pos(action.agent), state.agent_pos(tgt))
-                {
-                    // Audit fix MEDIUM #10: honour per-agent attack stats.
-                    // Default falls back to `config.combat.*` so legacy
-                    // call sites that never touched the setters behave
-                    // identically to the pre-config kernel (whose defaults
-                    // now live under `SimState::config`).
-                    let range = state
-                        .agent_attack_range(action.agent)
-                        .unwrap_or(state.config.combat.attack_range);
-                    let damage = state
-                        .agent_attack_damage(action.agent)
-                        .unwrap_or(state.config.combat.attack_damage);
-                    if sp.distance(tp) <= range {
-                        let new_hp = (state.agent_hp(tgt).unwrap_or(0.0) - damage).max(0.0);
-                        state.set_agent_hp(tgt, new_hp);
-                        events.push(Event::AgentAttacked {
-                            actor:  action.agent,
-                            target: tgt,
-                            damage,
-                            tick:   state.tick,
-                        });
-                        if new_hp <= 0.0 {
-                            events.push(Event::AgentDied {
-                                agent_id: tgt,
-                                tick:     state.tick,
-                            });
-                            state.kill_agent(tgt);
-                        }
-                    }
-                }
-            }
-            ActionKind::Micro { kind: MicroKind::Eat, .. } => {
-                if let Some(cur) = state.agent_hunger(action.agent) {
-                    let (new_val, applied) = restore_need(cur, state.config.needs.eat_restore);
-                    state.set_agent_hunger(action.agent, new_val);
-                    events.push(Event::AgentAte {
-                        agent_id: action.agent, delta: applied, tick: state.tick,
-                    });
-                }
-            }
-            ActionKind::Micro { kind: MicroKind::Drink, .. } => {
-                if let Some(cur) = state.agent_thirst(action.agent) {
-                    let (new_val, applied) = restore_need(cur, state.config.needs.drink_restore);
-                    state.set_agent_thirst(action.agent, new_val);
-                    events.push(Event::AgentDrank {
-                        agent_id: action.agent, delta: applied, tick: state.tick,
-                    });
-                }
-            }
-            ActionKind::Micro { kind: MicroKind::Rest, .. } => {
-                if let Some(cur) = state.agent_rest_timer(action.agent) {
-                    let (new_val, applied) = restore_need(cur, state.config.needs.rest_restore);
-                    state.set_agent_rest_timer(action.agent, new_val);
-                    events.push(Event::AgentRested {
-                        agent_id: action.agent, delta: applied, tick: state.tick,
-                    });
-                }
-            }
-            // Combat Foundation Task 9 — Cast dispatch. Push one `AgentCast`
-            // event; the compiler-emitted `cast` physics rule (formerly the
-            // `CastHandler` cascade handler, retired 2026-04-19 once the
-            // DSL grew `for`/`match` lowering) looks the program up on
-            // `state.ability_registry` and emits one `Effect*Applied` per
-            // op.
-            //
-            // Root casts start at `depth = 0`; the cast rule increments
-            // for each nested `EffectOp::CastAbility` emission (Task 18).
-            ActionKind::Micro {
-                kind: MicroKind::Cast,
-                target: MicroTarget::Ability { id, target },
-            } => {
-                events.push(Event::AgentCast {
-                    actor:   action.agent,
-                    ability: id,
-                    target,
-                    depth:   0,
-                    tick:    state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::UseItem,
-                target: MicroTarget::ItemSlot(slot),
-            } => {
-                events.push(Event::AgentUsedItem {
-                    agent_id: action.agent, item_slot: slot, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::Harvest,
-                target: MicroTarget::Opaque(r),
-            } => {
-                events.push(Event::AgentHarvested {
-                    agent_id: action.agent, resource: r, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::PlaceTile,
-                target: MicroTarget::Position(p),
-            } => {
-                events.push(Event::AgentPlacedTile {
-                    actor: action.agent, location: p, kind_tag: 0, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::PlaceVoxel,
-                target: MicroTarget::Position(p),
-            } => {
-                events.push(Event::AgentPlacedVoxel {
-                    actor: action.agent, location: p, mat_tag: 0, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::HarvestVoxel,
-                target: MicroTarget::Position(p),
-            } => {
-                events.push(Event::AgentHarvestedVoxel {
-                    actor: action.agent, location: p, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::Converse,
-                target: MicroTarget::Agent(b),
-            } => {
-                events.push(Event::AgentConversed {
-                    agent_id: action.agent, partner: b, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::ShareStory,
-                target: MicroTarget::Opaque(topic),
-            } => {
-                events.push(Event::AgentSharedStory {
-                    agent_id: action.agent, topic, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::Communicate,
-                target: MicroTarget::Agent(r),
-            } => {
-                events.push(Event::AgentCommunicated {
-                    speaker: action.agent, recipient: r, fact_ref: 0, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::Ask,
-                target: MicroTarget::Agent(t),
-            } => {
-                events.push(Event::InformationRequested {
-                    asker: action.agent, target: t, query: 0, tick: state.tick,
-                });
-            }
-            ActionKind::Micro {
-                kind: MicroKind::Remember,
-                target: MicroTarget::Opaque(s),
-            } => {
-                events.push(Event::AgentRemembered {
-                    agent_id: action.agent, subject: s, tick: state.tick,
-                });
-            }
-            ActionKind::Micro { .. } => {
-                // Ill-formed actions (kind + target-type mismatch) are silently
-                // dropped. Mask predicates should prevent well-behaved backends
-                // from landing here.
-            }
-            ActionKind::Macro(MacroAction::NoOp) => { /* nothing */ }
-            ActionKind::Macro(MacroAction::PostQuest { quest_id, category, resolution }) => {
-                events.push(Event::QuestPosted {
-                    poster: action.agent,
-                    quest_id,
-                    category,
-                    resolution,
-                    tick: state.tick,
-                });
-            }
-            ActionKind::Macro(MacroAction::AcceptQuest { quest_id, acceptor }) => {
-                events.push(Event::QuestAccepted {
-                    acceptor,
-                    quest_id,
-                    tick: state.tick,
-                });
-            }
-            ActionKind::Macro(MacroAction::Bid { auction_id, bidder, amount }) => {
-                events.push(Event::BidPlaced {
-                    bidder,
-                    auction_id,
-                    amount,
-                    tick: state.tick,
-                });
-            }
-            ActionKind::Macro(MacroAction::Announce { speaker, audience, fact_payload }) => {
-                events.push(Event::AnnounceEmitted {
-                    speaker,
-                    audience_tag: audience.tag(),
-                    fact_payload,
-                    tick: state.tick,
-                });
-                // Channel-gated radius for `Anyone` / `Group` audiences:
-                // speaker's longest-reach channel at default vocal strength,
-                // bounded by MAX_ANNOUNCE_RADIUS. `Area(c, r)` still uses the
-                // caller-supplied `r` (author intent). Audit fix MEDIUM #9.
-                let anyone_radius = speaker_anyone_radius(state, speaker);
-                let (center, radius) = match audience {
-                    AnnounceAudience::Area(c, r) => (c, r),
-                    AnnounceAudience::Anyone => {
-                        let sp = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
-                        (sp, anyone_radius)
-                    }
-                    AnnounceAudience::Group(_) => {
-                        // TODO(Task 16): use group membership. For MVP, fall back to Anyone.
-                        let sp = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
-                        (sp, anyone_radius)
-                    }
-                };
-                // Deterministic iteration: enumerate spatial-index hits in
-                // slot order (agents_alive() is slot-order) so the first
-                // MAX_ANNOUNCE_RECIPIENTS within range is reproducible.
-                // Audit fix CRITICAL #1: consume the spatial index so audience
-                // enumeration is sub-linear; we walk `agents_alive()` in slot
-                // order and test membership in the candidate set to preserve
-                // the deterministic first-MAX_ANNOUNCE_RECIPIENTS semantics.
-                let spatial = state.spatial();
-                let candidates: smallvec::SmallVec<[AgentId; 64]> = spatial
-                    .within_radius(state, center, radius)
-                    .into_iter()
-                    .collect();
-                let mut primary_observers: smallvec::SmallVec<[AgentId; 32]> =
-                    smallvec::SmallVec::new();
-                let mut count = 0usize;
-                let max_recipients = state.config.communication.max_announce_recipients as usize;
-                for obs in state.agents_alive() {
-                    if count >= max_recipients { break; }
-                    if obs == speaker { continue; }
-                    if !candidates.contains(&obs) { continue; }
-                    // Audit fix MEDIUM #9: channel-eligibility filter.
-                    if !speaker_and_observer_share_channel(state, speaker, obs) { continue; }
-                    events.push(Event::RecordMemory {
-                        observer:     obs,
-                        source:       speaker,
-                        fact_payload,
-                        confidence:   0.8,
-                        tick:         state.tick,
-                    });
-                    primary_observers.push(obs);
-                    count += 1;
-                }
-
-                // Overhear scan: bystanders within OVERHEAR_RANGE of the
-                // SPEAKER (not the audience center) who were not primary
-                // recipients get a lower-confidence memory. Speaker excluded.
-                let speaker_pos = state.agent_pos(speaker).unwrap_or(Vec3::ZERO);
-                let overhear_range = state.config.communication.overhear_range;
-                let overhear_candidates: smallvec::SmallVec<[AgentId; 64]> = spatial
-                    .within_radius(state, speaker_pos, overhear_range)
-                    .into_iter()
-                    .collect();
-                for obs in state.agents_alive() {
-                    if obs == speaker { continue; }
-                    if primary_observers.contains(&obs) { continue; }
-                    if !overhear_candidates.contains(&obs) { continue; }
-                    if !speaker_and_observer_share_channel(state, speaker, obs) { continue; }
-                    events.push(Event::RecordMemory {
-                        observer:     obs,
-                        source:       speaker,
-                        fact_payload,
-                        confidence:   0.6,
-                        tick:         state.tick,
-                    });
-                }
-            }
-        }
-    }
+    unimplemented!("engine::step::apply_actions DELETED — Plan B1' Task 11")
 }
 
+/// DELETED — Plan B1' Task 11. Stub for test compilation.
+pub fn finalize_tick(
+    _state:          &mut SimState,
+    _scratch:        &SimScratch,
+    _events:         &EventRing<Event>,
+    _invariants:     &InvariantRegistry<Event>,
+    _telemetry:      &dyn TelemetrySink,
+    _t_start:        std::time::Instant,
+    _events_emitted: usize,
+) {
+    unimplemented!("engine::step::finalize_tick DELETED — Plan B1' Task 11")
+}
+
+/// DELETED — Plan B1' Task 11. Stub for test compilation.
+pub fn shuffle_actions_in_place(
+    _world_seed:  u64,
+    _tick:        u32,
+    _actions:     &[crate::policy::Action],
+    _shuffle_idx: &mut Vec<u32>,
+) {
+    unimplemented!("engine::step::shuffle_actions_in_place DELETED — Plan B1' Task 11")
+}

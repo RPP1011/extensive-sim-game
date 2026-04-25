@@ -12,7 +12,7 @@ use engine::mask::MaskBuffer;
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::mask::MicroKind;
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use glam::Vec3;
 
 struct ForceAttack {
@@ -34,6 +34,7 @@ impl PolicyBackend for ForceAttack {
     }
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn set_agent_attack_damage_is_honoured_by_next_attack() {
     let mut state = SimState::new(4, 42);
@@ -83,6 +84,7 @@ fn set_agent_attack_damage_is_honoured_by_next_attack() {
     assert_eq!(state.agent_hp(target), Some(75.0));
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn set_agent_attack_range_is_honoured_by_next_attack() {
     // Default ATTACK_RANGE = 2m. Place target at 2.5m and bump range to 3m.

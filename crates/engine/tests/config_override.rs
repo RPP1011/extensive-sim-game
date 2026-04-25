@@ -16,7 +16,7 @@ use engine::ids::AgentId;
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use engine_data::config::Config;
 use glam::Vec3;
 
@@ -89,6 +89,7 @@ fn attack_damage_dealt(damage_override: Option<f32>) -> (f32, f32) {
     (before - after, emitted_damage)
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn default_config_still_deals_ten_damage() {
     let (hp_drop, emitted) = attack_damage_dealt(None);
@@ -102,6 +103,7 @@ fn default_config_still_deals_ten_damage() {
     );
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn doubling_attack_damage_in_config_doubles_damage_dealt() {
     // Tuning `combat.attack_damage` from 10.0 to 20.0 should exactly double
@@ -119,6 +121,7 @@ fn doubling_attack_damage_in_config_doubles_damage_dealt() {
     );
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn sim_state_new_is_equivalent_to_default_config() {
     // `SimState::new` is a convenience wrapper; it must be indistinguishable

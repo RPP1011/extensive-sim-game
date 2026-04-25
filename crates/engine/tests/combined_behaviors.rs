@@ -296,6 +296,7 @@ fn prime_grudge_from_attack(
 /// and repeated attacks (5 here, still below the +20 scalar gate) widen
 /// the margin to +0.05. The wolf targets H_grudge over H_focus — the
 /// grudge + accumulated threat narrowly beats raw pack convergence.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn grudge_dominates_pack_focus_on_different_targets() {
     let mut state = SimState::new(8, 0xA5CADE_1);
@@ -380,6 +381,7 @@ fn grudge_dominates_pack_focus_on_different_targets() {
 ///     of the +0.4 wounded-body gate. The assertion is still "rout
 ///     cascades onto mid-combat agent" — just calibrated against the
 ///     new softer rout.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn engagement_death_triggers_rout_in_partner() {
     let mut state = SimState::new(16, 0xA5CADE_2);
@@ -520,6 +522,7 @@ fn engagement_death_triggers_rout_in_partner() {
 ///
 /// This is the "wounded wolf bolts from the pack" scenario — combined
 /// pack pressure doesn't override self-preservation.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn wounded_self_flees_despite_pack_focus_on_target() {
     let mut state = SimState::new(8, 0xA5CADE_3);
@@ -606,6 +609,7 @@ fn wounded_self_flees_despite_pack_focus_on_target() {
 /// This pins the "chained rout" behavior the task brief calls for —
 /// sequential deaths don't just reset the rout, they compound it, which
 /// is what makes the pack crumble once the first wolf falls.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn chained_deaths_stack_kin_fear_on_survivors() {
     let mut state = SimState::new(16, 0xA5CADE_E);

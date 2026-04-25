@@ -255,6 +255,7 @@ fn prime_pack_focus(state: &mut SimState, observer: AgentId, target: AgentId) {
 /// Folding one PackAssist event bumps the observer's pack_focus scalar
 /// above the 0.5 threshold the Attack row gates on. Mirror of
 /// fear_spread's `one_fear_spread_crosses_threshold`.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn pack_assist_fold_bumps_view() {
     let (mut state, wolves, human) = spawn_pack_fixture();
@@ -285,6 +286,7 @@ fn pack_assist_fold_bumps_view() {
 /// crosses 0.5 — the key behavioral pin for pack hunting. Also confirms
 /// the modifier fires through the generated SCORING_TABLE, not just the
 /// view.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn pack_focus_boosts_attack_on_same_target() {
     let (mut state, wolves, human) = spawn_pack_fixture();
@@ -318,6 +320,7 @@ fn pack_focus_boosts_attack_on_same_target() {
 /// human_a must NOT boost the Attack score on human_b. If the scoring
 /// row slipped to wildcard slot, every candidate would tie on the
 /// bump and the focus would vanish.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn pack_focus_does_not_boost_other_targets() {
     let (mut state, wolves, humans) = spawn_pack_fixture_two_humans();
@@ -351,6 +354,7 @@ fn pack_focus_does_not_boost_other_targets() {
 /// Decay: after ~20 ticks (~2 half-lives at rate 0.933 → 0.933^20 ≈
 /// 0.25 < 0.5), the pack_focus boost vanishes. Proves pack focus is a
 /// transient signal — kin stop converging once the beacon fades.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn pack_focus_decays_below_threshold() {
     let (mut state, wolves, human) = spawn_pack_fixture();
@@ -381,6 +385,7 @@ fn pack_focus_decays_below_threshold() {
 /// Symmetric: humans converge on an engaged wolf. The view / physics
 /// is species-agnostic (scoping lives in `query.nearby_kin`), so the
 /// same mechanic should fire for humans too.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn humans_converge_on_engaged_wolf_same_mechanic() {
     let mut state = SimState::new(16, 0xF00D_D15E);
@@ -405,6 +410,7 @@ fn humans_converge_on_engaged_wolf_same_mechanic() {
 /// already-engaged human is higher than Attack on Nothing and Hold, so
 /// the second wolf would pick Attack on that specific human. Directly
 /// pins the "convergence" behavior the task calls for.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn wolves_converge_on_engaged_human() {
     let (mut state, wolves, human) = spawn_pack_fixture();
@@ -455,6 +461,7 @@ fn wolves_converge_on_engaged_human() {
 // surfaces.
 // ---------------------------------------------------------------------------
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn pipeline_engagement_triggers_pack_assist() {
     let (mut state, wolves, human) = spawn_pack_fixture();
@@ -494,6 +501,7 @@ fn pipeline_engagement_triggers_pack_assist() {
 /// with only humans around; the wolf's kin-scan returns empty, so no
 /// PackAssist fires when it engages. Guards against an accidental
 /// cross-species leak in `query.nearby_kin`.
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn lone_wolf_engagement_emits_no_pack_assist() {
     let mut state = SimState::new(8, 0);

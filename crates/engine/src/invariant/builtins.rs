@@ -3,7 +3,7 @@ use crate::event::{EventLike, EventRing};
 use crate::mask::MicroKind;
 use crate::policy::ActionKind;
 use crate::state::SimState;
-use crate::step::SimScratch;
+use crate::scratch::SimScratch;
 
 /// Every action emitted by a policy must have a `true` bit in the mask that
 /// was passed to its `evaluate` call. Regression guard against mask/policy
