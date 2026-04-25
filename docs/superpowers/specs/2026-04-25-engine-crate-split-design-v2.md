@@ -89,18 +89,31 @@ pub trait SimBackend {
         &mut self,
         state:   &mut SimState,
         scratch: &mut SimScratch,
-        events:  &mut EventRing,
+        events:  &mut EventRing<engine_data::Event>,
         views:   &mut Self::Views,
         policy:  &B,
-        cascade: &CascadeRegistry,
+        cascade: &CascadeRegistry<engine_data::Event>,
     );
 }
 ```
 
-- `engine_rules::SerialBackend`: `type Views = ViewRegistry; fn step(...) { /* phase orchestration over engine primitives + emitted rules */ }`
-- `engine_gpu::GpuBackend`: `type Views = GpuViews; fn step(...) { /* WGSL kernel dispatch */ }`
+- `engine_rules::SerialBackend`: `type Views = ViewRegistry; fn step(...) { /* phase orchestration over engine primitives + emitted rules */ }` — body is **compiler-emitted** (§3.5).
+- `engine_gpu::GpuBackend`: `type Views = GpuViews; fn step(...) { /* WGSL kernel dispatch */ }` — body is also compiler-emitted into the WGSL form.
 
-The associated `Views` type lets each backend pick its representation: CPU uses pointer-chasing structs (`ViewRegistry { engaged_with: EngagedWith, kin_fear: KinFear, ... }`); GPU likely uses SoA buffers + readback. The trait is generic over `B: PolicyBackend` (existing pattern from Phase 0); the method is not object-safe (callers hold concrete backends).
+The associated `Views` type lets each backend pick its representation: CPU uses pointer-chasing structs (`ViewRegistry { engaged_with: EngagedWith, kin_fear: KinFear, ... }`); GPU uses SoA buffers + readback. The trait is generic over `B: PolicyBackend` (existing pattern from Phase 0); the method is not object-safe (callers hold concrete backends).
+
+### §3.5 `SerialBackend::step` is compiler-emitted (locked)
+
+The phase ordering inside `step` is fixed (view-fold → mask-fill → score → action-select → cascade-dispatch). The *content* of each phase varies with the rule set: which views to fold, which masks to fill, which handlers register on the cascade. So the body is data-derivable from DSL declarations, and the compiler emits it.
+
+Why emit instead of hand-write:
+
+1. **Specialization unlocks LLVM optimization.** A hand-written generic `step` with trait-dispatch through `cascade.dispatch()` and `view_registry.fold_all()` looks like indirect calls to LLVM. An emitted `step` with literal `engine_rules::physics::damage(...)`, `engine_rules::physics::heal(...)`, `views.engaged_with.fold_event(...)`, `views.kin_fear.fold_event(...)` etc. is direct calls. LLVM inlines them, fuses adjacent loops, eliminates dead branches per known-at-emit-time literals (e.g., empty handler chains for unused event kinds become no-ops at compile time).
+2. **Caching aligns with the rule set.** A given DSL source produces a deterministic `step` body; the compilation cache hits as long as the source doesn't change. Hand-written generic code re-monomorphizes on every callsite touch.
+3. **Dead-rule elimination at emit time.** If a rule set doesn't use the standing view, no `fold_event` call for it appears in the emitted `step`. The cost of unused features is zero (vs. "iterate the registry, find the empty handler list, no-op" with hand-written code).
+4. **GPU + CPU stay in lockstep.** The same emitter walks the rule set twice — once for Rust (`engine_rules`), once for WGSL (`engine_gpu`). Phase ordering is identical by construction.
+
+Plan B1' adds an `emit_step.rs` module to `dsl_compiler/` that walks the resolved IR and emits the phase body. Hand-written orchestration disappears entirely; the only `step`-shaped code in the workspace is what the compiler produces.
 
 Application driver loop:
 
@@ -147,13 +160,11 @@ After all moves, `engine/src/`:
 
 This is the `engine/build.rs` allowlist's target state. Files added or removed shift the allowlist in lockstep.
 
-### §4.4 What `Event` looks like under the new direction
+### §4.4 What `Event` looks like under the new direction (Option A — locked)
 
 `Event` enum lives in **engine_data** (emitted from DSL `event` declarations). `EventKindId` (the dense u8 ordinal — needed by `EventRing` and `CascadeRegistry` to index by kind without knowing variants) lives in **engine**.
 
-Engine's `EventRing` and `CascadeRegistry` need to operate on `Event` values (push, pop, iterate, dispatch on kind). Three options for resolving the resulting cross-dep:
-
-**Option A — Generic primitives (recommended).** Engine's containers are generic over the event type:
+Engine's containers are *generic* over the event type, so engine has zero dep on engine_data:
 
 ```rust
 // engine
@@ -169,15 +180,11 @@ impl engine::EventLike for Event { fn kind(&self) -> EventKindId { /* match arms
 pub type SimEventRing = engine::EventRing<engine_data::Event>;
 ```
 
-Engine has zero dep on engine_data; the concrete instantiation happens in engine_rules + engine_gpu. Cleanest layering. Cost: one type parameter on every container that touches `Event`.
+Concrete instantiation happens in engine_rules + engine_gpu. Application driver code that previously constructed `engine::EventRing::new(...)` constructs `engine_rules::SimEventRing::new(...)` (or a re-export). The genericity cost is bounded — one type parameter per container — and the optimizer monomorphizes everything at the instantiation point, so the runtime cost is zero.
 
-**Option B — Host `Event` in engine via a `// GENERATED` allowlist exception.** The compiler emits `engine/src/generated_event.rs` carrying the `Event` enum. The `engine/build.rs` allowlist gets one named exception (with a comment explaining why). Engine references `crate::generated_event::Event` directly. Pragmatic; avoids generics; breaks the "no `// GENERATED` in engine" invariant for one file.
-
-**Option C — Hand-write a fixed `Event` enum in engine.** The compiler validates that DSL `event` declarations match existing variants. New variants require a hand-edit + an ADR. Most rigid; loses the "events are emitted" property.
-
-**Recommendation: A.** Generic primitives align best with the principle "engine has no rules." The genericity cost is bounded (one type parameter per container), and instantiation happens once per backend.
-
-Engine_rules's `EventRing<engine_data::Event>` becomes the runtime type used everywhere in the application. Application driver code that constructs `engine::EventRing::new(...)` becomes `engine_rules::SimEventRing::new(...)` (or a re-export).
+Considered and rejected:
+- **Option B** (host `Event` in engine via a `// GENERATED` allowlist exception): would break the "no `// GENERATED` in engine" invariant for one file. Pragmatic but corrosive — once one exception lands, others get justified by analogy.
+- **Option C** (hand-written `Event` in engine validated by the compiler): loses the "events are emitted" property; new variants would require hand-edits + ADRs, defeating the rules-as-data goal.
 
 Option A: `EventRing<E>` and `CascadeRegistry<E>` both generic; engine declares the bounds, engine_rules instantiates `EventRing<engine_data::Event>`. Engine has no concrete Event dep.
 
@@ -287,15 +294,16 @@ This admits demo impls for tests without opening the seal in production. (Test f
 - **D10.** `chronicle.rs` and `engagement.rs` migrations deferred to follow-up plan (same as v1).
 - **D11.** Allowlist edits require pros/cons + 2 biased critic PASSes + user approval recorded as ADR (carried from v1).
 - **D12.** Source consolidation: abilities migrate from `assets/hero_templates/*.ability` into `assets/sim/*.sim` long-term. Out of scope for this spec but acknowledged as the target source layout.
-- **D13.** **Open: §4.4 option A vs B vs C** for `Event`-enum hosting. v2 recommends option A (generic `EventRing<E>` and `CascadeRegistry<E>`); to be settled in plan-writing.
+- **D13.** §4.4 Option A locked: generic `EventRing<E: EventLike>` and `CascadeRegistry<E: EventLike>` in engine; `Event` enum emitted into engine_data; `engine_rules::SimEventRing = EventRing<engine_data::Event>` is the runtime instantiation. Engine has zero dep on engine_data.
+- **D14.** `SerialBackend::step` body is compiler-emitted (§3.5). Rationale: enables LLVM specialization (direct calls instead of trait-dispatch), aligns caching with the rule set, dead-rule elimination at emit time, keeps the CPU + GPU phase ordering in lockstep by construction. Plan B1' adds `dsl_compiler/src/emit_step.rs`.
 
 ## §9 Open questions for plan-writing
 
 These are detail-level questions the spec doesn't pin down; the plan resolves them.
 
-1. **Q1.** Do `EventRing` and `CascadeRegistry` become generic over the event type, or does `Event` get a `// GENERATED` allowlist exception inside engine? (D13.)
+1. **Q1.** ~~Generic primitives vs allowlist exception for `Event`.~~ **Resolved: D13 (generic primitives).**
 2. **Q2.** `SimBackend::step`'s `views: &mut Self::Views` parameter — is `Views` strictly the CPU-side `ViewRegistry`, or is there a shared trait both `ViewRegistry` and `GpuViews` implement? (Probably no shared trait initially — each backend's step uses its own concrete type internally.)
-3. **Q3.** Does `with_engine_builtins` live as a free function in `engine_rules::cascade` (hand-written, allowlisted), or is it compiler-emitted into `engine_rules/src/physics/mod.rs`? (Currently planned to be emitted; this is an implementation detail.)
+3. **Q3.** ~~`with_engine_builtins` hand-written-allowlisted vs compiler-emitted.~~ **Resolved: emitted.** With the §3.5 step-emitter, the registry-population call sequence is part of what the compiler emits anyway; `with_engine_builtins` becomes one helper inside the emitted `engine_rules::cascade` module.
 4. **Q4.** Test fixtures in `crates/engine/tests/` that need `engine_rules::GeneratedRule` — does engine's `[dev-dependencies]` carry an `engine_rules` path-dep (creating a dev-only cycle, which Cargo allows), or do those fixtures move to `crates/engine_rules/tests/`? (v1's plan went with the dev-dep approach; v2 keeps it.)
 5. **Q5.** When the existing engine `test_helpers` or similar utilities reach into rule-aware code, do they migrate to engine_rules's test surface? (Audit during plan-writing.)
 
