@@ -20,6 +20,7 @@ pub mod mask;
 pub mod obs;
 pub mod policy;
 pub mod pool;
+pub mod probe;
 pub mod rng;
 pub mod schema_hash;
 pub mod snapshot;
