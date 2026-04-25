@@ -1106,6 +1106,46 @@ impl GpuBackend {
                 agent_cap,
             );
 
+            // 1c. Spatial pre-scoring: hoisted out of the cascade driver
+            //     so the scoring kernel can iterate per-agent K=32
+            //     candidate slots (instead of walking 0..agent_cap).
+            //     Encodes:
+            //       * grid rebuild (CPU SoA pack + clear/count/scan/
+            //         scatter/sort)
+            //       * 3 per-agent query dispatches at kin_radius (12 m,
+            //         feeds cascade physics's nearby_kin), engagement_
+            //         range (2 m, feeds nearest_hostile), and
+            //         max_move_radius (20 m, feeds the scoring kernel's
+            //         per-agent candidate set).
+            //
+            //     Spatial output buffers are owned by
+            //     `CascadeResidentCtx::spatial_bufs` and stable across
+            //     the tick — the cascade driver later in this same
+            //     encoder reads them without re-dispatching. Encoded
+            //     between alive_pack (which populates `agents_buf` +
+            //     `alive_bitmap_buf` for the spatial query's reads) and
+            //     mask (which the spatial output isn't yet consumed by;
+            //     it's first read by scoring further down).
+            {
+                let resident_ctx_pre = resident_cascade_ctx
+                    .as_mut()
+                    .expect("resident_cascade_ctx ensured by ensure_resident_init");
+                let sync_cascade_ctx_pre = self
+                    .sync
+                    .cascade_ctx
+                    .as_mut()
+                    .expect("cascade_ctx ensured by ensure_resident_init");
+                crate::cascade_resident::run_spatial_resident_pre_scoring(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    state,
+                    sync_cascade_ctx_pre,
+                    resident_ctx_pre,
+                )
+                .expect("spatial pre-scoring dispatch");
+            }
+
             let mask_sim_cfg_ref = sim_cfg_buf
                 .as_ref()
                 .expect("sim_cfg_buf ensured by ensure_resident_init");
