@@ -17,6 +17,7 @@ sha2 = "0.10"
 contracts = "0.6"
 
 [dev-dependencies]
+trybuild = "1"
 engine_data = { path = "../engine_data" }
 engine_rules = { path = "../engine_rules" }
 insta = { version = "1.41", features = ["yaml"] }
