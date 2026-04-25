@@ -316,53 +316,53 @@ git commit -m "chore(engine_rules): verify shim points at engine_data (transitio
 
 ---
 
-### Task 4: Move `engine/src/generated/{mask,physics,views}` → `engine_rules/src/`
+### Task 4: Repoint emitter destinations + regenerate `engine_rules/src/{mask,physics,views}`
 
 **Files:**
-- Move: `crates/engine/src/generated/mask/` → `crates/engine_rules/src/mask/`
-- Move: `crates/engine/src/generated/physics/` → `crates/engine_rules/src/physics/`
-- Move: `crates/engine/src/generated/views/` → `crates/engine_rules/src/views/`
-- Delete: `crates/engine/src/generated/mod.rs` and the empty `crates/engine/src/generated/` directory.
+- Modify: `src/bin/xtask/cli/mod.rs` — flip `out_physics` / `out_mask` / `out_views` defaults from `crates/engine/src/generated/...` to `crates/engine_rules/src/...`.
+- Modify: `crates/dsl_compiler/src/{emit_physics.rs, emit_mask.rs, emit_view.rs, emit_mask_wgsl.rs?, emit_physics_wgsl.rs?}` — change every emitted `"use crate::"` literal to `"use engine::"`. (The Wgsl emitters target shader code, not Rust; usually unaffected — verify.)
+- Modify: `crates/engine_rules/Cargo.toml` — add `engine = { path = "../engine" }` to `[dependencies]` (keep `engine_data`).
+- Modify: `crates/engine_rules/src/lib.rs` — explicit `pub mod {mask, physics, views};` + transitional `pub use engine_data::*;`.
+- Run regen — produces fresh files at the new locations with the new imports.
+- Delete: `crates/engine/src/generated/` (entire dir, including `mod.rs`).
 - Modify: `crates/engine/src/lib.rs` — drop `pub mod generated;`.
-- Modify: `crates/engine_rules/src/lib.rs` — replace transitional re-export with explicit `pub mod {mask, physics, views};` + the marker trait + the blanket Sealed impl (sketched here, finalised in Task 6 after sealing lands).
-- Modify: `crates/engine_rules/Cargo.toml` — add deps on `engine` (path) and keep `engine_data` (path).
+- Modify: 32 hand-written callers of `engine::generated::*` (engine_gpu, tests, root src/) to use `engine_rules::*`. Hand-written code → sed is fine here.
 
-- [ ] **Step 1: `git mv` the three subdirs.**
+**Discipline note:** Do NOT `git mv` files from `engine/src/generated/` to `engine_rules/src/` and then sed their contents. Those files are emitter output; modifying them directly violates P1 (Compiler-First). The right pattern is "change emitter destination + emitted content → regenerate → delete old output."
 
-```bash
-git mv crates/engine/src/generated/mask    crates/engine_rules/src/mask
-git mv crates/engine/src/generated/physics crates/engine_rules/src/physics
-git mv crates/engine/src/generated/views   crates/engine_rules/src/views
-git rm crates/engine/src/generated/mod.rs
-rmdir crates/engine/src/generated
-```
+- [ ] **Step 1: Flip emit destinations in `src/bin/xtask/cli/mod.rs`.**
 
-- [ ] **Step 2: Sed-rewrite `crate::` → `engine::` in the moved files.**
+Edit the `default_value` strings on the three `pub out_physics`, `pub out_mask`, `pub out_views` fields:
 
-These files live in a different crate now; their `use crate::event::Event;` must become `use engine::event::Event;`.
+| field | old | new |
+|---|---|---|
+| `out_physics` | `crates/engine/src/generated/physics` | `crates/engine_rules/src/physics` |
+| `out_mask` | `crates/engine/src/generated/mask` | `crates/engine_rules/src/mask` |
+| `out_views` | `crates/engine/src/generated/views` | `crates/engine_rules/src/views` |
 
-```bash
-for d in crates/engine_rules/src/mask crates/engine_rules/src/physics crates/engine_rules/src/views; do
-    grep -rl '^use crate::' "$d" | xargs sed -i 's|^use crate::|use engine::|g'
-done
-```
+(Other emit destinations — scoring, entity, config_rust, enum, out_rust — already point at `crates/engine_data/...` after Task 1's sed pass. Verify with `grep -E 'engine_(generated|/src/generated)' src/bin/xtask/cli/mod.rs` — should be empty after this step.)
 
-Patterns rewritten (verify after sed):
-- `use crate::event::{Event, EventRing};` → `use engine::event::{Event, EventRing};`
-- `use crate::ids::AgentId;` → `use engine::ids::AgentId;`
-- `use crate::state::SimState;` → `use engine::state::SimState;`
-- `use crate::mask::TargetMask;` → `use engine::mask::TargetMask;`
-- `use crate::cascade::{CascadeRegistry, EventKindId};` → `use engine::cascade::{CascadeRegistry, EventKindId};` (in physics/mod.rs)
+- [ ] **Step 2: Update emitted `use crate::*` literals to `use engine::*` in dsl_compiler.**
 
-- [ ] **Step 3: Drop `pub mod generated;` from `crates/engine/src/lib.rs`.**
+The emitters write Rust source for files that will live under `engine_rules/src/{mask,physics,views}/`. Inside those files, `crate::*` resolves to the host crate (formerly `engine`, now `engine_rules`). Once they live in `engine_rules/`, `crate::event::*` would resolve to `engine_rules::event::*` — which doesn't exist. The fix: emit `engine::event::*` literally.
+
+Audit:
 
 ```bash
-sed -i '/^pub mod generated;$/d' crates/engine/src/lib.rs
+grep -nE '"use crate::|writeln!\(.*"use crate::' crates/dsl_compiler/src/emit_physics.rs crates/dsl_compiler/src/emit_mask.rs crates/dsl_compiler/src/emit_view.rs
 ```
 
-(Or hand-edit if there's a comment near the line worth preserving.)
+For each match, change the literal `"use crate::"` → `"use engine::"`. Also check for non-`use` references to `crate::`:
 
-- [ ] **Step 4: Update `crates/engine_rules/Cargo.toml`.**
+```bash
+grep -nE '"\s*crate::|writeln!\(.*"crate::|format!\(.*"crate::' crates/dsl_compiler/src/emit_*.rs
+```
+
+If any match writes a `crate::path::Symbol` reference (not in a `use` statement) into the emitted code, it must also become `engine::path::Symbol`. The emitted files reference engine internals only via `crate::` paths, so any literal `crate::` in the writeout becomes `engine::`.
+
+(WGSL emitters — `emit_mask_wgsl.rs`, `emit_physics_wgsl.rs`, `emit_scoring_wgsl.rs`, `emit_view_wgsl.rs` — emit shader source, not Rust. Their output doesn't have `use crate::` lines. Skip them unless the audit says otherwise.)
+
+- [ ] **Step 3: Update `crates/engine_rules/Cargo.toml`.**
 
 Old:
 ```toml
@@ -377,7 +377,7 @@ engine = { path = "../engine" }
 engine_data = { path = "../engine_data" }
 ```
 
-- [ ] **Step 5: Replace `crates/engine_rules/src/lib.rs` with the explicit module surface (transitional — finalised in Task 6).**
+- [ ] **Step 4: Replace `crates/engine_rules/src/lib.rs` with the explicit module surface.**
 
 ```rust
 //! engine_rules — emitted rule logic.
@@ -392,44 +392,85 @@ pub mod mask;
 pub mod physics;
 pub mod views;
 
-// Backward-compat shim for the data-only re-export path. Phased out by Task 5.
+// Transitional: data callers still import via engine_rules::*. Phased out by Task 5.
 pub use engine_data::*;
 ```
 
-This file is `lib.rs` and is on the `engine_rules/build.rs` allowlist (Task 8 §5.1) so it does not need a `// GENERATED` header. Task 6 finalises it with the `GeneratedRule` marker + Sealed blanket impl.
+This `lib.rs` is exempt from the build.rs `// GENERATED` rule (Task 8 puts it on the allowlist). Task 6 will further extend it with the `GeneratedRule` marker + Sealed blanket impl.
 
-- [ ] **Step 6: Sed-rewrite cross-crate imports for engine + engine_gpu + tests.**
+- [ ] **Step 5: Run `compile-dsl` to regenerate.**
 
-The 32 callers of `engine::generated::*` must rewrite to `engine_rules::*`. This includes:
-- `engine_gpu/src/{cascade.rs, mask.rs, scoring.rs, view_storage_per_entity_ring.rs, view_storage_symmetric_pair.rs}`
-- `engine_gpu/tests/{snapshot_double_buffer.rs, view_parity.rs, topk_view_parity.rs}`
-- `engine/tests/{state_memory.rs, cast_handler_stun.rs}` and other engine tests touching generated/*
-- root `src/...` files (handled by Plan B3 — but they exist *now* and must keep compiling).
+```bash
+cargo run --bin xtask -- compile-dsl
+```
+
+Expected: SUCCESS. Files appear at `crates/engine_rules/src/{mask,physics,views}/` with `// GENERATED` headers and `use engine::*` imports.
+
+If the regen errors out (e.g. dsl_compiler refuses to write into a non-pre-existing dir, or `mod.rs` conflicts), inspect the failure. Common issues:
+- Output dir doesn't exist: `mkdir -p crates/engine_rules/src/{mask,physics,views}` before regen.
+- `mod.rs` already declared by `lib.rs`: that's fine — the emitter writes its own `mod.rs` files inside each subdir; `lib.rs`'s `pub mod {mask,physics,views};` reaches into them.
+
+- [ ] **Step 6: Verify regen output looks right.**
+
+```bash
+ls crates/engine_rules/src/physics crates/engine_rules/src/mask crates/engine_rules/src/views
+# Expect: same file lists that used to be under engine/src/generated/{physics,mask,views}/
+
+head -10 crates/engine_rules/src/physics/damage.rs
+# Expect: starts with `// GENERATED by dsl_compiler...` and then `use engine::event::*`, NOT `use crate::event::*`.
+
+grep -rE '^use crate::' crates/engine_rules/src/{mask,physics,views}
+# Expect: empty (every emitted file uses `engine::`, not `crate::`).
+```
+
+If any emitted file still says `use crate::`, Step 2 missed an emit-site. Fix that emitter, regen, and re-verify.
+
+- [ ] **Step 7: Delete the old `engine/src/generated/` tree.**
+
+```bash
+git rm -r crates/engine/src/generated
+```
+
+(`git rm -r` removes the dir, all files in it, and the now-empty `mod.rs`.)
+
+- [ ] **Step 8: Drop `pub mod generated;` from `crates/engine/src/lib.rs`.**
+
+Hand-edit (or `sed -i '/^pub mod generated;$/d' crates/engine/src/lib.rs`) — also remove any nearby comment block solely about the generated tree.
+
+- [ ] **Step 9: Sed-rewrite the 32 hand-written callers.**
+
+These are hand-written code (engine_gpu sources, integration tests, root `src/`) that imported `engine::generated::*`. They are NOT generated; sed is the right tool here.
 
 ```bash
 git grep -l 'engine::generated::' | xargs sed -i 's|engine::generated::|engine_rules::|g'
 ```
 
-- [ ] **Step 7: Workspace build + test.**
+- [ ] **Step 10: Workspace build + test.**
 
 ```bash
-cargo build --workspace 2>&1 | tee /tmp/b1-task4-build.log
-cargo test --workspace 2>&1 | tee /tmp/b1-task4-test.log
+cargo build --workspace 2>&1 | tail -5
+cargo test --workspace 2>&1 | tail -10
 ```
 
-Expected: SUCCESS. Common failure: a `crate::` import inside a moved file was missed by sed (e.g. inside a doc comment used in a `compile_fail` doctest). Grep for `crate::` in `crates/engine_rules/src/{mask,physics,views}` and fix.
+Expected: SUCCESS. Common failure modes:
+
+- A caller still references `engine::generated` in a way Step 9 didn't catch (e.g., a `mod` declaration, or a doc-test inside a docstring): grep `git grep 'engine::generated' :^crates/dsl_compiler` and fix.
+- A regenerated file references a symbol that doesn't exist on `engine::` because the emitter still wrote `engine_rules::` (or vice versa): inspect the emitter, fix, regen.
+
+- [ ] **Step 11: Verify regen idempotence.**
 
 ```bash
-grep -rE 'crate::' crates/engine_rules/src/{mask,physics,views} | grep -v 'GENERATED\|^//'
+cargo run --bin xtask -- compile-dsl
+git diff --stat crates/engine_rules/ crates/engine_data/
 ```
 
-Expected: empty output.
+Expected: empty diff. The output dirs are the regenerator's source of truth; running twice in a row should produce the same files.
 
-- [ ] **Step 8: Commit.**
+- [ ] **Step 12: Commit.**
 
 ```bash
 git add -A
-git commit -m "refactor: move engine/src/generated/{mask,physics,views} to engine_rules/src/ (Spec B §3.2)"
+git commit -m "refactor(dsl_compiler): emit physics/mask/views to engine_rules/src/; delete engine/src/generated/ (Spec B §3.2)"
 ```
 
 ---
@@ -525,13 +566,18 @@ git commit -m "refactor: route data-path imports through engine_data; engine_rul
 
 ---
 
-### Task 6: Seal `CascadeHandler` via `__sealed::Sealed` + `GeneratedRule` marker
+### Task 6: Seal `CascadeHandler` + view traits via `__sealed::Sealed` + `GeneratedRule` marker, AND emit markers from `dsl_compiler`
+
+**Why combined:** sealing the traits and emitting the markers must land in one commit. If sealing lands first, no emitted rule satisfies `Sealed` and the build breaks. If emitter changes land first, `impl crate::GeneratedRule for X {}` references an undeclared trait. Both pieces are one logical change: "seal traits + teach emitter to emit the marker that satisfies the seal."
 
 **Files:**
-- Modify: `crates/engine/src/cascade/handler.rs`
-- Modify: `crates/engine_rules/src/lib.rs` — add `GeneratedRule` marker + blanket Sealed impl.
-- Modify: every emitted `impl CascadeHandler for FooHandler` in `crates/engine_rules/src/physics/*.rs` — add `impl GeneratedRule for FooHandler {}` (this is done by re-emitting via dsl_compiler in Task 7 — for Task 6 we hand-add to the moved files and let regen confirm the emitter does the right thing).
-- Modify: test/demo impls in `crates/engine/tests/{cascade_bounded.rs, cascade_register_dispatch.rs, cascade_lanes.rs, proptest_cascade_bound.rs}` — add `#[cfg(test)] impl engine_rules::GeneratedRule for {handler}`.
+- Modify: `crates/engine/src/cascade/handler.rs` — add `pub mod __sealed { pub trait Sealed {} }`; change `pub trait CascadeHandler: Send + Sync` → `pub trait CascadeHandler: __sealed::Sealed + Send + Sync`.
+- Modify: `crates/engine/src/view/{materialized,lazy,topk}.rs` — same supertrait addition for each view trait.
+- Modify: `crates/engine_rules/src/lib.rs` — add `pub trait GeneratedRule {}` + `impl<T: GeneratedRule> engine::cascade::handler::__sealed::Sealed for T {}` blanket impl (and equivalents reaching into the three view module sealing private supertraits — see Step 1 substructure).
+- Modify: `crates/dsl_compiler/src/emit_physics.rs` (and `emit_view.rs` if it emits trait impls) — add a sibling `writeln!(out, "impl crate::GeneratedRule for {} {{}}", handler_name)?;` after every emitted `impl CascadeHandler/MaterializedView/LazyView/TopKView` block.
+- Modify: test/demo impls in `crates/engine/tests/{cascade_bounded.rs, cascade_register_dispatch.rs, cascade_lanes.rs, proptest_cascade_bound.rs}` — add `#[cfg(test)] impl engine_rules::GeneratedRule for {handler} {}`.
+- Modify: in-engine demo impls (`crates/engine/src/view/{materialized,lazy,topk}.rs`'s `DamageTaken`, `NearestEnemyLazy`, `MostHostileTopK`) — add `#[cfg(test)] impl engine_rules::GeneratedRule for {Demo} {}`.
+- Modify: `crates/engine/Cargo.toml` `[dev-dependencies]` — add `engine_rules = { path = "../engine_rules" }`.
 
 - [ ] **Step 1: Add the private supertrait module to `crates/engine/src/cascade/handler.rs`.**
 
@@ -602,22 +648,41 @@ pub trait GeneratedRule {}
 impl<T: GeneratedRule> engine::cascade::handler::__sealed::Sealed for T {}
 ```
 
-- [ ] **Step 4: Add `impl GeneratedRule` next to every emitted `impl CascadeHandler`.**
+- [ ] **Step 4: Update `dsl_compiler` emitters to emit `impl crate::GeneratedRule for X {}` next to every emitted trait impl.**
 
-Currently the moved physics files contain `impl CascadeHandler for FooHandler { ... }` blocks (or function-style emit; check the actual files). For each `pub struct FooHandler` that implements `CascadeHandler`, add:
+DO NOT hand-edit files under `crates/engine_rules/src/{mask,physics,views}/`. Those are emitted output. The right path is to teach the emitter, then regen.
+
+Audit the emit-sites:
+
+```bash
+grep -nE '"impl (CascadeHandler|MaterializedView|LazyView|TopKView)' crates/dsl_compiler/src/emit_*.rs
+```
+
+For each match, locate the `writeln!(out, ...)` block that emits `impl Trait for FooHandler { ... }`. Add a sibling write-out immediately after:
 
 ```rust
-impl crate::GeneratedRule for FooHandler {}
+writeln!(out, "impl crate::GeneratedRule for {} {{}}", handler_name)?;
 ```
 
-immediately after the struct declaration. Do this by hand for now — Task 7 verifies the emitter does it correctly on regen. (If the current emit pattern is functions, not handler structs, this step is a no-op for those files; the ones that do emit handler structs need the marker.)
+(The exact variable name `handler_name` matches whatever the surrounding emit-block uses for the type name — `physics_decl.name`, `handler.ident`, etc.)
 
-Search:
+If the current emit pattern is `pub fn handle_foo(...)` (function-style, no struct), there's no `impl Trait for X` to seal — skip those emit-sites. The trait-impl emit-sites are the only ones that need the marker.
+
+After updating the emitters, regenerate:
+
 ```bash
-grep -rE 'impl (engine|crate)::cascade::CascadeHandler' crates/engine_rules/src/physics/
+cargo run --bin xtask -- compile-dsl
 ```
 
-For each match, hand-add `impl crate::GeneratedRule for {handler_name} {}` directly above or below the `impl CascadeHandler` block. (Path is `crate::GeneratedRule` because we're inside `engine_rules`.)
+Verify markers landed:
+
+```bash
+grep -rE 'impl crate::GeneratedRule' crates/engine_rules/src/{physics,views,mask}/ | wc -l
+```
+
+Expected: ≥ 1 per emitted struct that implements one of the four sealed traits.
+
+If the count is 0 but the audit in Step 4 found emit-sites, the writeln addition was wrong — re-inspect and re-regen.
 
 - [ ] **Step 5: Add `#[cfg(test)] impl GeneratedRule` shims for test handlers.**
 
@@ -665,89 +730,37 @@ git commit -m "refactor(engine): seal CascadeHandler via __sealed::Sealed + Gene
 
 ---
 
-### Task 7: Update `dsl_compiler` to emit to new paths and emit `impl GeneratedRule` markers
+### Task 7: Clean up `dsl_compiler/src/lib.rs` doc comments + verify regen idempotence
+
+**Why:** Tasks 4 + 6 already moved the emit destinations and added the `GeneratedRule` emission. This task is small mop-up: stale doc-comment paths in `dsl_compiler/src/lib.rs`, and a final idempotence check on the regenerator.
 
 **Files:**
-- Modify: `src/bin/xtask/cli/mod.rs` — update default `out_*` paths.
-- Modify: `crates/dsl_compiler/src/emit_physics.rs`, `emit_mask.rs`, `emit_view.rs` — emit `use engine::*` (was `use crate::*`); emit `impl GeneratedRule for FooHandler {}` next to each emitted handler struct.
-- Modify: `crates/dsl_compiler/src/lib.rs` — update doc-comments referencing old paths.
-- Modify: `src/bin/xtask/compile_dsl_cmd.rs` — confirm rustfmt target list still resolves.
+- Modify: `crates/dsl_compiler/src/lib.rs` — doc comments only.
 
-- [ ] **Step 1: Update default paths in `src/bin/xtask/cli/mod.rs`.**
-
-For each of these `#[arg(long, default_value = "<old>")]` lines, swap:
-
-| arg | old | new |
-|---|---|---|
-| `out_physics` | `crates/engine/src/generated/physics` | `crates/engine_rules/src/physics` |
-| `out_mask` | `crates/engine/src/generated/mask` | `crates/engine_rules/src/mask` |
-| `out_views` | `crates/engine/src/generated/views` | `crates/engine_rules/src/views` |
-| `out_scoring` | `crates/engine_generated/src/scoring` | `crates/engine_data/src/scoring` |
-| `out_entity` | `crates/engine_generated/src/entities` | `crates/engine_data/src/entities` |
-| `out_config_rust` | `crates/engine_generated/src/config` | `crates/engine_data/src/config` |
-| `out_enum` | `crates/engine_generated/src/enums` | `crates/engine_data/src/enums` |
-| `out_rust` (events + schema + ids; whole src tree) | `crates/engine_generated/src` | `crates/engine_data/src` |
-
-After Task 1's sed pass, `out_rust`'s default value already reads `crates/engine_data/src` (the rename rewrote the literal). Confirm by `grep -E 'out_events|out_rust|engine_generated|engine/src/generated' src/bin/xtask/cli/mod.rs` — the only remaining `engine/src/generated` references should be `out_physics` / `out_mask` / `out_views`, which this step rewrites.
-
-- [ ] **Step 2: Update emitted-code import paths in dsl_compiler.**
-
-In `crates/dsl_compiler/src/emit_physics.rs`, `emit_mask.rs`, `emit_view.rs`: every emitted `use crate::event::Event;` (or any `crate::` path) must become `use engine::*` because the emitted file now lives in `engine_rules/`, not `engine/`.
-
-Search:
-```bash
-grep -rE '"use crate::|writeln!\(.*"use crate::' crates/dsl_compiler/src/emit_*.rs
-```
-
-For each emit-site, change the literal `"use crate::"` → `"use engine::"`.
-
-- [ ] **Step 3: Emit `impl GeneratedRule for FooHandler {}` from the physics emitter.**
-
-In `crates/dsl_compiler/src/emit_physics.rs`, find the per-rule struct emit block. Add a sibling write-out:
-
-```rust
-writeln!(out, "impl crate::GeneratedRule for {} {{}}", handler_name)?;
-```
-
-(Inside `engine_rules`, the emitted file references `crate::GeneratedRule`.)
-
-If the current emit pattern emits `pub fn handle_foo(...)` rather than `impl CascadeHandler for FooHandler`, no marker is needed for those rules — the marker only matters for trait impls. Confirm by searching `grep -E 'impl.*CascadeHandler' crates/engine_rules/src/physics/*.rs`. If none exist (i.e. all physics handlers are plain functions), Step 3 is a no-op.
-
-- [ ] **Step 4: Same for `emit_view.rs` if any view emit produces `impl MaterializedView | LazyView | TopKView`.**
-
-Per Spec §4.2, all three view traits also seal via `GeneratedRule`. The view emitter must emit a `impl crate::GeneratedRule for FooView {}` next to each emitted view impl. Audit:
+- [ ] **Step 1: Audit doc-comment path references in `dsl_compiler/src/lib.rs`.**
 
 ```bash
-grep -E 'impl (MaterializedView|LazyView|TopKView)' crates/engine_rules/src/views/*.rs
+grep -nE 'crates/engine/src/generated|crates/engine_generated' crates/dsl_compiler/src/lib.rs
 ```
 
-For each match's struct, ensure the emitter writes the `GeneratedRule` impl. Hand-add now; emitter change confirms in Step 6.
+For each match, swap to the new location:
+- `crates/engine/src/generated/physics` → `crates/engine_rules/src/physics`
+- `crates/engine/src/generated/mask`    → `crates/engine_rules/src/mask`
+- `crates/engine/src/generated/views`   → `crates/engine_rules/src/views`
+- `crates/engine_generated/...` → `crates/engine_data/...` (Task 1's sed should have caught these; verify)
 
-- [ ] **Step 5: Update doc comments in `crates/dsl_compiler/src/lib.rs`.**
+Use `Edit` per match to preserve surrounding prose. Don't blanket-sed.
 
-Old paths (multiple occurrences):
-- `crates/engine_generated/src/...` → `crates/engine_data/src/...`
-- `crates/engine/src/generated/...` → `crates/engine_rules/src/...`
-
-```bash
-sed -i 's|crates/engine_generated/src|crates/engine_data/src|g; s|crates/engine/src/generated|crates/engine_rules/src|g' crates/dsl_compiler/src/lib.rs
-```
-
-- [ ] **Step 6: Run `compile-dsl` to regenerate everything from DSL source.**
+- [ ] **Step 2: Run regen + assert idempotence.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
+git diff --stat crates/engine_rules crates/engine_data
 ```
 
-Expected: SUCCESS. Then check the diff:
+Expected: empty diff. If non-empty, the emitter still drifts from the committed output — investigate before continuing.
 
-```bash
-git diff --stat crates/engine_rules/src/{mask,physics,views} crates/engine_data/src
-```
-
-Expected: small or empty diff (we hand-applied most changes in Tasks 4 + 6). Any remaining diff is the emitter doing what hand-edit didn't catch, which is fine.
-
-- [ ] **Step 7: Workspace build + test.**
+- [ ] **Step 3: Workspace build + test.**
 
 ```bash
 cargo build --workspace
@@ -756,11 +769,11 @@ cargo test --workspace
 
 Expected: SUCCESS.
 
-- [ ] **Step 8: Commit.**
+- [ ] **Step 4: Commit (skip if Step 1 found nothing to change).**
 
 ```bash
 git add -A
-git commit -m "refactor(dsl_compiler): emit physics/mask/views to engine_rules; data to engine_data; emit GeneratedRule marker (Spec B §3.2)"
+git commit -m "chore(dsl_compiler): refresh doc-comment paths to match new emit destinations"
 ```
 
 ---
