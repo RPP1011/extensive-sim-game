@@ -2296,7 +2296,7 @@ dependencies = [
  "contracts",
  "criterion",
  "dhat",
- "engine_rules",
+ "engine_data",
  "glam",
  "hex",
  "insta",

@@ -30,7 +30,7 @@ use engine::step::{step_full, SimScratch};
 use engine::telemetry::NullSink;
 use engine::view::MaterializedView;
 use engine::mask::MicroKind;
-use engine_rules::scoring::{
+use engine_data::scoring::{
     PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE,
 };
 use glam::Vec3;

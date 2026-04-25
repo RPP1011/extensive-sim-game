@@ -41,7 +41,7 @@ pub struct SimState {
     /// `crates/engine/src/step.rs` / `mask.rs` / `ability/expire.rs` is now
     /// a field on this struct; see `docs/game/compiler_progress.md` for the
     /// config-milestone row.
-    pub config: engine_rules::config::Config,
+    pub config: engine_data::config::Config,
     pool:     AgentSlotPool,
 
     // --- Hot SoA — read/written every tick by observation / mask / step ---
@@ -205,7 +205,7 @@ impl SimState {
     /// Preserves the pre-config constructor signature so every existing test
     /// (there are many) keeps compiling without edits.
     pub fn new(agent_cap: u32, seed: u64) -> Self {
-        Self::new_with_config(agent_cap, seed, engine_rules::config::Config::default())
+        Self::new_with_config(agent_cap, seed, engine_data::config::Config::default())
     }
 
     /// Build a `SimState` with a caller-supplied `Config`. This is the
@@ -216,7 +216,7 @@ impl SimState {
     pub fn new_with_config(
         agent_cap: u32,
         seed: u64,
-        config: engine_rules::config::Config,
+        config: engine_data::config::Config,
     ) -> Self {
         let cap = agent_cap as usize;
         // Per-slot attack stats inherit the config defaults so runtime

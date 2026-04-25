@@ -4,7 +4,7 @@
 //!
 //! See `crates/engine_rules/src/ids.rs` for the canonical definitions.
 
-pub use engine_rules::ids::{
+pub use engine_data::ids::{
     AbilityId, AgentId, AuctionId, EventId, GroupId, InviteId, ItemId, QuestId, SettlementId,
 };
 

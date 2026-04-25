@@ -18,14 +18,14 @@ use glam::Vec3;
 // moved into `assets/sim/config.sim` as a compiler-owned `config` block.
 // Every call site now reads them off `SimState::config` — the values still
 // default to the exact numbers that used to be hardcoded here (see
-// `Config::default()` in `engine_rules::config`), so observable behaviour
+// `Config::default()` in `engine_data::config`), so observable behaviour
 // is unchanged. Runtime TOML tuning (`Config::from_toml(...)`) is the only
 // new knob.
 //
 // Task 142 retired the backward-compat `pub const` shims that used to
 // live here. The pre-config tests (`cast_handler_slow.rs`, `action_flee.rs`,
 // `action_attack_kill.rs`, `engagement_*`, `proptest_engagement`, …) now
-// all read the defaults off `engine_rules::config::Config::default()`.
+// all read the defaults off `engine_data::config::Config::default()`.
 // No engine code (or test) should pin a balance knob as a `pub const`
 // ever again; extend `assets/sim/config.sim` and rebuild instead.
 

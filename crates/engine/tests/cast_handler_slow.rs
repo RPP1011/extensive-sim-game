@@ -25,7 +25,7 @@ use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
-use engine_rules::config::Config;
+use engine_data::config::Config;
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {

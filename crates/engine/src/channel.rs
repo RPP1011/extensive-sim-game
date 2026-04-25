@@ -1,5 +1,5 @@
 //! Communication channels. Type definitions moved to
-//! `engine_rules::types` at milestone 6 (2026-04-19) so the compiler-emitted
+//! `engine_data::types` at milestone 6 (2026-04-19) so the compiler-emitted
 //! `Capabilities` struct can reference them without inverting the
 //! `engine → engine_rules` dependency direction. The re-exports below keep
 //! every `use engine::channel::{CommunicationChannel, ChannelSet}` call site
@@ -13,8 +13,8 @@
 //! silent) stays engine-primitive because it's a dispatch table keyed on
 //! an engine enum, not a balance knob.
 
-use engine_rules::config::CommunicationConfig;
-pub use engine_rules::types::{ChannelSet, CommunicationChannel};
+use engine_data::config::CommunicationConfig;
+pub use engine_data::types::{ChannelSet, CommunicationChannel};
 
 pub fn channel_range(
     channel: CommunicationChannel,

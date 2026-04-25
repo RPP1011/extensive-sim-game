@@ -1001,7 +1001,7 @@ fn wounded_wolves_flee_from_humans() {
     // views are never primed so their rows contribute zero.
     {
         use engine::mask::MicroKind;
-        use engine_rules::scoring::{
+        use engine_data::scoring::{
             PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE,
         };
 
@@ -1202,7 +1202,7 @@ mod threat_level_scoring {
     use super::*;
     use engine::mask::MicroKind;
     use engine::state::AgentSpawn;
-    use engine_rules::scoring::{
+    use engine_data::scoring::{
         PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE,
     };
 

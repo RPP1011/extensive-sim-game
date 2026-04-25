@@ -29,7 +29,7 @@ use super::{Action, ActionKind, MicroTarget, PolicyBackend};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind, TargetMask};
 use crate::state::SimState;
-use engine_rules::scoring::{PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE};
+use engine_data::scoring::{PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE};
 
 pub struct UtilityBackend;
 
@@ -336,7 +336,7 @@ fn eval_predicate(
 
 /// Evaluate a `@materialized` view call referenced by a scoring
 /// predicate. `pred.field_id` carries the VIEW_ID (one of the
-/// compile-time `VIEW_ID_*` constants in `engine_rules::scoring`);
+/// compile-time `VIEW_ID_*` constants in `engine_data::scoring`);
 /// `pred.payload[4]` / `[5]` are arg-slot codes:
 ///
 /// - `ARG_SELF = 0` → the scorer's current agent.

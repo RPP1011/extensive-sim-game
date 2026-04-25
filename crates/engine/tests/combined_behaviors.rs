@@ -38,7 +38,7 @@ use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
 use engine::mask::MicroKind;
 use engine::state::{AgentSpawn, SimState};
-use engine_rules::scoring::{
+use engine_data::scoring::{
     PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE,
 };
 use glam::Vec3;

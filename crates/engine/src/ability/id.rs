@@ -1,11 +1,11 @@
-//! `AbilityId` — re-exported from `engine_rules::ids` as of milestone 2's
-//! integration step (ID types moved to engine_rules to break the old dep
+//! `AbilityId` — re-exported from `engine_data::ids` as of milestone 2's
+//! integration step (ID types moved to engine_data to break the old dep
 //! cycle). Kept here as a shim so `use engine::ability::AbilityId` call
 //! sites keep compiling.
 //!
-//! Canonical definition: `engine_rules::ids::AbilityId`.
+//! Canonical definition: `engine_data::ids::AbilityId`.
 
-pub use engine_rules::ids::AbilityId;
+pub use engine_data::ids::AbilityId;
 
 #[cfg(test)]
 mod tests {

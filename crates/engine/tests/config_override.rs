@@ -16,7 +16,7 @@ use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
-use engine_rules::config::Config;
+use engine_data::config::Config;
 use glam::Vec3;
 
 /// Policy backend that makes slot 1 (the first spawned agent, by `AgentId`

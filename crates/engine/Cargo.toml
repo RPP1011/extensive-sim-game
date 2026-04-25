@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-engine_rules = { path = "../engine_rules" }
+engine_data = { path = "../engine_data" }
 glam = "0.29"
 smallvec = "1.13"
 ahash = "0.8"

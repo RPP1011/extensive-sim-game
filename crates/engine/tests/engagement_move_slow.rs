@@ -13,7 +13,7 @@ use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step_full, SimScratch};
-use engine_rules::config::Config;
+use engine_data::config::Config;
 use glam::Vec3;
 
 /// Policy backend that scripts a single predetermined action per tick.

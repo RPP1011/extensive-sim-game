@@ -6,7 +6,7 @@ use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
-use engine_rules::config::Config;
+use engine_data::config::Config;
 use glam::Vec3;
 use proptest::prelude::*;
 

@@ -22,7 +22,7 @@ use engine::creature::CreatureType;
 use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
-use engine_rules::scoring::{
+use engine_data::scoring::{
     PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE,
 };
 use engine::mask::MicroKind;
