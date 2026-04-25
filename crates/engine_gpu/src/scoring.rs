@@ -98,11 +98,23 @@ use engine_rules::scoring::{ModifierRow, PredicateDescriptor, ScoringEntry, MAX_
 use wgpu::util::DeviceExt;
 
 use crate::mask::{FusedMaskKernel, KernelError};
+use crate::spatial_gpu::{GpuQueryResult, K as SPATIAL_K};
 use crate::view_storage::{build_all_specs, ViewStorage};
 
 /// Sentinel for "no target" in a `ScoreOutput`. Mirrors the WGSL
 /// `NO_TARGET` constant.
 pub const NO_TARGET: u32 = 0xFFFF_FFFFu32;
+
+/// Binding slot the scoring kernel's `kin_within: array<QueryResult>`
+/// storage buffer occupies. Sits past `ALIVE_BITMAP_BINDING` (=22) and
+/// is wired by `step_batch` to
+/// `CascadeResidentCtx::scoring_within_buf()` — the per-agent K=32
+/// candidate set produced by `run_spatial_resident_pre_scoring` at
+/// `max_move_radius` (20 m default).
+///
+/// Mirrors the `@binding(25)` declaration the WGSL emitter writes (see
+/// `dsl_compiler::emit_scoring_wgsl::emit_view_bindings_for_mode`).
+pub const SCORING_SPATIAL_WITHIN_BINDING: u32 = 25;
 
 /// Packed per-agent struct the scoring kernel reads. Matches the WGSL
 /// `AgentData` in [`emit_scoring_wgsl`]. 64 bytes = 16 f32s; alignment
@@ -478,6 +490,21 @@ struct ScoringPool {
     /// used by sync.
     sync_alive_bitmap_buf: wgpu::Buffer,
 
+    /// Sync-path spatial-within buffer (binding 25). The resident
+    /// scoring path consumes
+    /// `CascadeResidentCtx::scoring_within_buf()` populated by
+    /// `run_spatial_resident_pre_scoring`; the sync path doesn't run
+    /// the spatial pipeline at all and instead populates a CPU-built
+    /// equivalent here on every `run_and_readback` call. Layout
+    /// matches `GpuQueryResult`: per-agent `count + truncated + 2 pads
+    /// + ids[K=32]` with raw AgentIds in ascending order.
+    ///
+    /// CPU build is correctness-only — `verify_scoring_on_gpu` runs
+    /// at small N (≤ 16 in the parity fixtures), so the O(N²)
+    /// candidate-walk overhead is negligible. Stays dormant on the
+    /// resident path.
+    sync_spatial_within_buf: wgpu::Buffer,
+
     /// Cached resident-path bind group keyed by the pair of
     /// caller-supplied buffers it references — `mask_bitmaps_buf` +
     /// `sim_cfg_buf`. All other bindings (agent_data, scoring_table,
@@ -717,6 +744,24 @@ impl ScoringKernel {
             count: None,
         });
 
+        // Spatial-within candidate buffer at slot 25 — populated by
+        // `cascade_resident::run_spatial_resident_pre_scoring` at
+        // `max_move_radius` (20 m default). Each element is a
+        // `GpuQueryResult` (count + truncated + 2 pads + ids[K=32])
+        // indexed by agent slot. Replaces the kernel's previous
+        // `for t in 0..agent_cap` walk with a per-agent K=32
+        // candidate iteration. See [`SCORING_SPATIAL_WITHIN_BINDING`].
+        bgl_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: SCORING_SPATIAL_WITHIN_BINDING,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        });
+
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu::scoring::bgl"),
             entries: &bgl_entries,
@@ -829,6 +874,18 @@ impl ScoringKernel {
         let sync_alive_bitmap_buf =
             crate::alive_bitmap::create_alive_bitmap_buffer(device, agent_cap);
 
+        // Sync-path spatial-within buffer. Populated CPU-side every
+        // `run_and_readback` call (correctness-only path used by
+        // verify_scoring_on_gpu and the parity tests at small N).
+        let sync_spatial_within_bytes =
+            (agent_cap as u64) * (std::mem::size_of::<GpuQueryResult>() as u64);
+        let sync_spatial_within_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("engine_gpu::scoring::sync_spatial_within"),
+            size: sync_spatial_within_bytes.max(std::mem::size_of::<GpuQueryResult>() as u64),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // Phase 6d: view buffers now live in `ViewStorage` and are
         // bound per-run in `run_and_readback`. No local view_bufs.
 
@@ -848,6 +905,7 @@ impl ScoringKernel {
             cached_view_agent_cap: 0,
             sync_sim_cfg_buf,
             sync_alive_bitmap_buf,
+            sync_spatial_within_buf,
             cached_resident_bg: None,
         });
     }
@@ -930,6 +988,83 @@ impl ScoringKernel {
             }
             queue.write_buffer(
                 &pool.sync_alive_bitmap_buf,
+                0,
+                bytemuck::cast_slice(&packed),
+            );
+        }
+
+        // Pack + upload the sync-path spatial-within buffer (binding 25).
+        // CPU equivalent of the scoring-radius spatial query the resident
+        // path runs in `run_spatial_resident_pre_scoring`. For each
+        // alive agent we list every alive slot within
+        // `max_move_radius` (the largest scoring action radius) sorted
+        // by raw AgentId ascending — the same iteration order the
+        // kernel's per-agent K=32 walk relies on. Self IS included
+        // (matches the GPU within_radius primitive); the kernel's
+        // `t == agent_slot` check excludes it.
+        //
+        // K_CAP truncation matches the GPU `sorted_insert_topk`'s
+        // top-K-by-lowest-id behavior — drop new ids whose raw id is
+        // greater than the current max once the buffer is full.
+        {
+            let scoring_radius = state.config.movement.max_move_radius;
+            let r2 = scoring_radius * scoring_radius;
+            let k_cap = SPATIAL_K as usize;
+            let mut packed: Vec<GpuQueryResult> =
+                vec![GpuQueryResult::default(); agent_cap as usize];
+            for slot in 0..agent_cap as usize {
+                let self_d = &agent_data[slot];
+                if self_d.alive == 0 {
+                    continue;
+                }
+                let mut count: usize = 0;
+                let mut truncated: u32 = 0;
+                let mut ids = [u32::MAX; SPATIAL_K as usize];
+                for other in 0..agent_cap as usize {
+                    let other_d = &agent_data[other];
+                    if other_d.alive == 0 {
+                        continue;
+                    }
+                    let dx = other_d.pos_x - self_d.pos_x;
+                    let dy = other_d.pos_y - self_d.pos_y;
+                    let dz = other_d.pos_z - self_d.pos_z;
+                    let d2 = dx * dx + dy * dy + dz * dz;
+                    if d2 > r2 {
+                        continue;
+                    }
+                    let other_id = (other as u32) + 1;
+                    // Insertion-sort top-K-by-lowest-id, mirroring
+                    // `sorted_insert_topk` in spatial_gpu's WGSL.
+                    if count < k_cap {
+                        let mut j: i32 = count as i32 - 1;
+                        while j >= 0 && ids[j as usize] > other_id {
+                            ids[(j + 1) as usize] = ids[j as usize];
+                            j -= 1;
+                        }
+                        ids[(j + 1) as usize] = other_id;
+                        count += 1;
+                    } else if other_id < ids[k_cap - 1] {
+                        let mut j: i32 = (k_cap as i32) - 2;
+                        while j >= 0 && ids[j as usize] > other_id {
+                            ids[(j + 1) as usize] = ids[j as usize];
+                            j -= 1;
+                        }
+                        ids[(j + 1) as usize] = other_id;
+                        truncated = 1;
+                    } else {
+                        truncated = 1;
+                    }
+                }
+                packed[slot] = GpuQueryResult {
+                    count: count as u32,
+                    truncated,
+                    _pad0: 0,
+                    _pad1: 0,
+                    ids,
+                };
+            }
+            queue.write_buffer(
+                &pool.sync_spatial_within_buf,
                 0,
                 bytemuck::cast_slice(&packed),
             );
@@ -1158,6 +1293,14 @@ impl ScoringKernel {
             binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
             resource: pool.sync_alive_bitmap_buf.as_entire_binding(),
         });
+        // Spatial-within (binding 25) — sync path: host-built into
+        // `pool.sync_spatial_within_buf` by `run_and_readback` before
+        // the dispatch. Resident path binds the GPU-populated
+        // `CascadeResidentCtx::scoring_within_buf()` instead.
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: SCORING_SPATIAL_WITHIN_BINDING,
+            resource: pool.sync_spatial_within_buf.as_entire_binding(),
+        });
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg"),
             layout: &self.bind_group_layout,
@@ -1380,6 +1523,7 @@ impl ScoringKernel {
         mask_bitmaps_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
         alive_bitmap_buf: &wgpu::Buffer,
+        spatial_within_buf: &wgpu::Buffer,
         agent_cap: u32,
     ) -> Result<(), ScoringError> {
         // Silence unused-param lint without sacrificing the stable
@@ -1405,11 +1549,12 @@ impl ScoringKernel {
 
         // Cache the resident BG keyed by the caller-supplied buffers
         // it references — `mask_bitmaps_buf` + `sim_cfg_buf` +
-        // `alive_bitmap_buf`. All other bindings come from the pool
-        // which, once sized, is stable across the batch — pool
-        // rebuild drops the cache. All three keys are typically
-        // stable across a batch (the backend holds resident handles),
-        // so this amortises to one BG build per batch.
+        // `alive_bitmap_buf` + `spatial_within_buf`. All other
+        // bindings come from the pool which, once sized, is stable
+        // across the batch — pool rebuild drops the cache. All four
+        // keys are typically stable across a batch (the backend holds
+        // resident handles), so this amortises to one BG build per
+        // batch.
         let need_rebuild = match &self.pool.as_ref().unwrap().cached_resident_bg {
             Some((mb, sc, _)) => mb != mask_bitmaps_buf || sc != sim_cfg_buf,
             None => true,
@@ -1422,6 +1567,7 @@ impl ScoringKernel {
                 mask_bitmaps_buf,
                 sim_cfg_buf,
                 alive_bitmap_buf,
+                spatial_within_buf,
             )?;
             let pool_mut = self.pool.as_mut().expect("pool ensured");
             pool_mut.cached_resident_bg =
@@ -1462,6 +1608,7 @@ impl ScoringKernel {
         mask_bitmaps_buf: &wgpu::Buffer,
         sim_cfg_buf: &wgpu::Buffer,
         alive_bitmap_buf: &wgpu::Buffer,
+        spatial_within_buf: &wgpu::Buffer,
     ) -> Result<wgpu::BindGroup, ScoringError> {
         let sorted = scoring_view_binding_order(&self.view_specs);
         let total_view_bindings: usize = sorted.iter().map(|s| view_binding_count(s)).sum();
@@ -1582,6 +1729,15 @@ impl ScoringKernel {
         bg_entries.push(wgpu::BindGroupEntry {
             binding: crate::alive_bitmap::ALIVE_BITMAP_BINDING,
             resource: alive_bitmap_buf.as_entire_binding(),
+        });
+        // Spatial-within (binding 25) — caller-supplied, populated by
+        // `cascade_resident::run_spatial_resident_pre_scoring` at the
+        // start of each tick. Per-agent K=32 candidate slots within
+        // `max_move_radius` (20 m default) — replaces the kernel's
+        // previous `for t in 0..agent_cap` walk.
+        bg_entries.push(wgpu::BindGroupEntry {
+            binding: SCORING_SPATIAL_WITHIN_BINDING,
+            resource: spatial_within_buf.as_entire_binding(),
         });
         Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu::scoring::bg_resident"),

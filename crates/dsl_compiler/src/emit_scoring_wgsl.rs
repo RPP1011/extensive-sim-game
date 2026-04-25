@@ -528,6 +528,31 @@ fn emit_bindings(out: &mut String) {
     )
     .unwrap();
     writeln!(out).unwrap();
+
+    // Per-tick spatial-within result buffer — binding 25 matches
+    // `engine_gpu::scoring::SCORING_SPATIAL_WITHIN_BINDING` and is
+    // populated each tick by `cascade_resident::run_spatial_resident_pre_scoring`
+    // at `max_move_radius` (the largest scoring action radius).
+    // Each per-agent `QueryResult` stores up to K=32 candidate raw
+    // AgentIds in ascending order — the scoring kernel iterates this
+    // in place of the previous `for t in 0..agent_cap` walk.
+    //
+    // Layout matches `crate::spatial_gpu::GpuQueryResult`: count + truncated
+    // + 2 pad words + ids[K=32].
+    writeln!(out, "const SCORING_SPATIAL_K: u32 = 32u;").unwrap();
+    writeln!(out, "struct SpatialQueryResult {{").unwrap();
+    writeln!(out, "    count: u32,").unwrap();
+    writeln!(out, "    truncated: u32,").unwrap();
+    writeln!(out, "    _pad0: u32,").unwrap();
+    writeln!(out, "    _pad1: u32,").unwrap();
+    writeln!(out, "    ids: array<u32, SCORING_SPATIAL_K>,").unwrap();
+    writeln!(out, "}};").unwrap();
+    writeln!(
+        out,
+        "@group(0) @binding(25) var<storage, read> spatial_within: array<SpatialQueryResult>;"
+    )
+    .unwrap();
+    writeln!(out).unwrap();
 }
 
 /// Emit the per-view storage bindings, one binding per view in

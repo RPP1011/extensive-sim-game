@@ -1211,6 +1211,15 @@ impl GpuBackend {
             //    two tick-varying scalars (`attack_range`, `tick`) now
             //    live in `sim_cfg_buf`, which the seed-indirect kernel
             //    mutates on-GPU.
+            // Spatial-within buffer was populated above by
+            // `run_spatial_resident_pre_scoring`; the scoring kernel
+            // iterates per-agent K=32 candidate slots from this buffer
+            // instead of walking 0..agent_cap.
+            let spatial_within_buf = resident_cascade_ctx
+                .as_ref()
+                .expect("resident_cascade_ctx ensured by ensure_resident_init")
+                .scoring_within_buf()
+                .clone();
             self.sync
                 .scoring_kernel
                 .run_resident(
@@ -1221,6 +1230,7 @@ impl GpuBackend {
                     self.sync.mask_kernel.mask_bitmaps_buf(),
                     mask_sim_cfg_ref,
                     alive_bitmap_ref,
+                    &spatial_within_buf,
                     agent_cap,
                 )
                 .expect("scoring resident dispatch");
