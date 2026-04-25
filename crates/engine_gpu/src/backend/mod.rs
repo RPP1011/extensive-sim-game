@@ -1,6 +1,6 @@
 //! GpuBackend composite structure. The public `GpuBackend` type
 //! delegates to `sync`, `resident`, and `snapshot` sub-contexts —
-//! see `docs/superpowers/specs/2026-04-22-gpu-sim-state-design.md`
+//! see `docs/spec/gpu.md (§3)`
 //! for rationale.
 
 #![cfg(feature = "gpu")]

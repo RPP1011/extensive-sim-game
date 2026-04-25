@@ -88,8 +88,7 @@ If you want the contract — read the spec:
 If you want to know what's built right now — read live status:
 
 - `engine/status.md` — per-subsystem ✅/⚠️/❌ truth, currently-known issues, what would falsify each claim.
-- `superpowers/specs/2026-04-22-gpu-resident-cascade-design.md` — GPU-resident cascade design (the document the future `spec/gpu.md` will be carved from).
-- `GPU_WORKGRAPH.md` — GPU-internals primer for compute-literate engineers.
+- `spec/gpu.md` — GPU backend contract (resident cascade, sim-state, cold-state replay, ability eval, kernel reference).
 
 If you want to know what's coming — read planning:
 

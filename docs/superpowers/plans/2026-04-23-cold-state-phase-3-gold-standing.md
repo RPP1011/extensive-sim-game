@@ -8,7 +8,7 @@
 
 **Tech Stack:** `crates/dsl_compiler` (Phase 1 scaffolding — already landed), `crates/engine` (state refactor + schema hash), `crates/engine_gpu` (gold side buffer + WGSL stubs + snapshot handshake), `assets/sim/views.sim` (new standing view decl), `assets/sim/physics.sim` (unchanged — existing rules now have a real GPU path).
 
-**Spec reference:** `docs/superpowers/specs/2026-04-22-gpu-cold-state-replay-design.md` §Phase 3.
+**Spec reference:** `docs/spec/gpu.md` §4 (cold-state replay).
 
 ---
 

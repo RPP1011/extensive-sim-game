@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, wgpu 0.20+, WGSL, `bytemuck` for Pod structs, existing `engine_gpu` + `dsl_compiler` crates.
 
-**Spec reference:** `docs/superpowers/specs/2026-04-22-gpu-sim-state-design.md`
+**Spec reference:** `docs/spec/gpu.md` §3 (sim state on GPU).
 
 ---
 
@@ -125,8 +125,7 @@ impl SnapshotContext {
 ```rust
 //! GpuBackend composite structure. The public `GpuBackend` type
 //! delegates to `sync`, `resident`, and `snapshot` sub-contexts —
-//! see `docs/superpowers/specs/2026-04-22-gpu-sim-state-design.md`
-//! for rationale.
+//! see `docs/spec/gpu.md` §3 for rationale.
 
 #![cfg(feature = "gpu")]
 

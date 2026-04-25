@@ -25,7 +25,7 @@
 - **Economic depth implementation**
   Recipes, contracts, labor, heterogeneity, information asymmetry, market structure, macro dynamics. 3 phases. `spec/economy.md`.
 - **GPU ability evaluation (Subsystem 3)**
-  Move ability evaluator kernel from CPU to GPU. `specs/2026-04-22-gpu-ability-evaluation-design.md`.
+  Move ability evaluator kernel from CPU to GPU. `spec/gpu.md` §5.
 
 ## Engine plans not yet written
 

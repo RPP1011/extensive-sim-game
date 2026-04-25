@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, WGSL, `crates/dsl_compiler` (parser, IR, emit_physics, emit_physics_wgsl, emit_view, emit_view_wgsl), `crates/engine` (state, schema_hash), `crates/engine_gpu` (cascade_resident, lib), existing `@materialized` view infrastructure.
 
-**Spec reference:** `docs/superpowers/specs/2026-04-22-gpu-cold-state-replay-design.md`
+**Spec reference:** `docs/spec/gpu.md` §4 (cold-state replay).
 
 ---
 

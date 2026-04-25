@@ -3,7 +3,7 @@
 **Status:** research (2026-04-22 baseline + 2026-04-24 refresh)
 **Date:** 2026-04-22 (original) / 2026-04-24 (refresh)
 **Branch:** `world-sim-bench` / `perf-stage-a`
-**Predecessor:** `docs/overview.md` (replaced `docs/technical_overview.md` §10.1); `docs/superpowers/specs/2026-04-22-gpu-resident-cascade-design.md`
+**Predecessor:** `docs/overview.md` (replaced `docs/technical_overview.md` §10.1); `docs/spec/gpu.md` §2 (resident cascade)
 
 > **Note:** the original analysis below was written against pre-Task-#68
 > code at N=2048 on llvmpipe. The **2026-04-24 refresh** section at the
