@@ -36,8 +36,8 @@ fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
     // to 30m ± 0.2m and blocks silent halving (to 15) or doubling (to 60).
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {
@@ -96,8 +96,8 @@ fn bystander_within_overhear_range_gets_recordmemory_at_0_6_confidence() {
 fn agent_beyond_overhear_range_gets_nothing() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {
@@ -135,8 +135,8 @@ fn primary_recipient_not_also_added_as_overhear_bystander() {
     // They should get ONE RecordMemory at 0.8 (primary), not a second at 0.6.
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {

@@ -57,13 +57,13 @@ fn three_link_chain_fires_three_damage_events_no_depth_exceeded() {
 
     // `with_engine_builtins()` already registers the stateless CastHandler;
     // the ability registry rides on `state` now.
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let mut state = SimState::new(8, 42);
     state.ability_registry = registry;
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf, Vec3::new(3.0, 0.0, 0.0));
-    let mut events = EventRing::with_cap(1024);
+    let mut events = EventRing::<Event>::with_cap(1024);
 
     // Seed a root cast of A at depth 0. CastHandler will fan it out through
     // B and C via nested AgentCast events.
@@ -121,13 +121,13 @@ fn self_targeted_recursive_link_uses_caster_selector() {
     ));
     let registry = b.build();
 
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let mut state = SimState::new(4, 42);
     state.ability_registry = registry;
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf, Vec3::new(3.0, 0.0, 0.0));
-    let mut events = EventRing::with_cap(256);
+    let mut events = EventRing::<Event>::with_cap(256);
 
     events.push(Event::AgentCast {
         actor: caster, ability: a_id, target, depth: 0, tick: 0,

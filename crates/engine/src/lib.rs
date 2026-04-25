@@ -13,6 +13,7 @@ pub mod event;
 /// Compiler-emitted modules (DSL → Rust). Files under `generated/`
 /// are owned by `dsl_compiler`; regenerate with
 /// `cargo run --bin xtask -- compile-dsl`. Do not hand-edit.
+/// DELETED in Task 3 (moves to engine_rules).
 pub mod generated;
 pub mod ids;
 pub mod invariant;
@@ -26,6 +27,8 @@ pub mod schema_hash;
 pub mod snapshot;
 pub mod spatial;
 pub mod state;
+/// DELETED in Task 4 (moves to engine_rules). Still present in Task 1
+/// because many tests and backend.rs reference step::step + SimScratch.
 pub mod step;
 pub mod terrain;
 pub mod telemetry;

@@ -46,11 +46,11 @@ fn build_one_damage_ability() -> (AbilityRegistry, engine::ability::AbilityId) {
 fn cast_action_emits_agentcast_event() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    // Plain `CascadeRegistry::new()` does NOT register the cast handler,
+    let mut events = EventRing::<Event>::with_cap(1024);
+    // Plain `CascadeRegistry::<Event>::new()` does NOT register the cast handler,
     // so AgentCast fires with no effects even though the state's
     // ability_registry has an entry.
-    let cascade = CascadeRegistry::new();
+    let cascade = CascadeRegistry::<Event>::new();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
@@ -81,13 +81,13 @@ fn cast_action_emits_agentcast_event() {
 fn cast_action_triggers_effect_damage_when_handler_registered() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
+    let mut events = EventRing::<Event>::with_cap(1024);
 
     let (reg, ability) = build_one_damage_ability();
     state.ability_registry = reg;
     // `with_engine_builtins()` installs the stateless CastHandler; the
     // registry on `state` drives program lookup.
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
@@ -113,11 +113,11 @@ fn cast_action_triggers_effect_damage_when_handler_registered() {
 fn cast_handler_starts_cooldown() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
+    let mut events = EventRing::<Event>::with_cap(1024);
 
     let (reg, ability) = build_one_damage_ability();
     state.ability_registry = reg;
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
@@ -152,11 +152,11 @@ fn cast_handler_starts_cooldown() {
 fn cast_of_unknown_ability_id_is_a_no_op() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
+    let mut events = EventRing::<Event>::with_cap(1024);
 
     // Empty registry on state — every ability id is unknown.
     state.ability_registry = AbilityRegistry::new();
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let a = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));

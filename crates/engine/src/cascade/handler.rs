@@ -1,5 +1,9 @@
-use crate::event::{Event, EventRing};
+use crate::event::{EventLike, EventRing};
 use crate::state::SimState;
+
+pub mod __sealed {
+    pub trait Sealed {}
+}
 
 /// Stable ordinal identifying an event variant. Dense so it indexes arrays
 /// cheaply. Adding a variant appends; reordering is a schema-hash bump.
@@ -61,50 +65,6 @@ pub enum EventKindId {
     ChronicleEntry       = 128,
 }
 
-impl EventKindId {
-    pub fn from_event(e: &Event) -> EventKindId {
-        match e {
-            Event::AgentMoved           { .. } => EventKindId::AgentMoved,
-            Event::AgentAttacked        { .. } => EventKindId::AgentAttacked,
-            Event::AgentDied            { .. } => EventKindId::AgentDied,
-            Event::AgentFled            { .. } => EventKindId::AgentFled,
-            Event::AgentAte             { .. } => EventKindId::AgentAte,
-            Event::AgentDrank           { .. } => EventKindId::AgentDrank,
-            Event::AgentRested          { .. } => EventKindId::AgentRested,
-            Event::AgentCast            { .. } => EventKindId::AgentCast,
-            Event::AgentUsedItem        { .. } => EventKindId::AgentUsedItem,
-            Event::AgentHarvested       { .. } => EventKindId::AgentHarvested,
-            Event::AgentPlacedTile      { .. } => EventKindId::AgentPlacedTile,
-            Event::AgentPlacedVoxel     { .. } => EventKindId::AgentPlacedVoxel,
-            Event::AgentHarvestedVoxel  { .. } => EventKindId::AgentHarvestedVoxel,
-            Event::AgentConversed       { .. } => EventKindId::AgentConversed,
-            Event::AgentSharedStory     { .. } => EventKindId::AgentSharedStory,
-            Event::AgentCommunicated    { .. } => EventKindId::AgentCommunicated,
-            Event::InformationRequested { .. } => EventKindId::InformationRequested,
-            Event::AgentRemembered      { .. } => EventKindId::AgentRemembered,
-            Event::QuestPosted          { .. } => EventKindId::QuestPosted,
-            Event::QuestAccepted        { .. } => EventKindId::QuestAccepted,
-            Event::BidPlaced            { .. } => EventKindId::BidPlaced,
-            Event::AnnounceEmitted      { .. } => EventKindId::AnnounceEmitted,
-            Event::RecordMemory         { .. } => EventKindId::RecordMemory,
-            Event::OpportunityAttackTriggered { .. } => EventKindId::OpportunityAttackTriggered,
-            Event::EffectDamageApplied  { .. } => EventKindId::EffectDamageApplied,
-            Event::EffectHealApplied    { .. } => EventKindId::EffectHealApplied,
-            Event::EffectShieldApplied  { .. } => EventKindId::EffectShieldApplied,
-            Event::EffectStunApplied    { .. } => EventKindId::EffectStunApplied,
-            Event::EffectSlowApplied    { .. } => EventKindId::EffectSlowApplied,
-            Event::EffectGoldTransfer   { .. } => EventKindId::EffectGoldTransfer,
-            Event::EffectStandingDelta  { .. } => EventKindId::EffectStandingDelta,
-            Event::CastDepthExceeded    { .. } => EventKindId::CastDepthExceeded,
-            Event::EngagementCommitted  { .. } => EventKindId::EngagementCommitted,
-            Event::EngagementBroken     { .. } => EventKindId::EngagementBroken,
-            Event::FearSpread           { .. } => EventKindId::FearSpread,
-            Event::PackAssist           { .. } => EventKindId::PackAssist,
-            Event::RallyCall            { .. } => EventKindId::RallyCall,
-            Event::ChronicleEntry       { .. } => EventKindId::ChronicleEntry,
-        }
-    }
-}
 
 /// Lane discipline — handlers within a lane run in registration order;
 /// lanes run in the order listed here.
@@ -123,10 +83,10 @@ impl Lane {
     ];
 }
 
-pub trait CascadeHandler: Send + Sync {
+pub trait CascadeHandler<E: EventLike>: __sealed::Sealed + Send + Sync {
     fn trigger(&self) -> EventKindId;
     fn lane(&self) -> Lane { Lane::Effect }
-    fn handle(&self, event: &Event, state: &mut SimState, events: &mut EventRing);
+    fn handle(&self, event: &E, state: &mut SimState, events: &mut EventRing<E>);
 
     /// Downcast hook so registries can look up the concrete handler type
     /// (e.g. `CastHandler`) to expose handler-specific state

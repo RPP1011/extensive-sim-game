@@ -28,7 +28,7 @@ fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
 #[test]
 fn stun_writes_expiry_when_later() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -43,7 +43,7 @@ fn stun_writes_expiry_when_later() {
 #[test]
 fn longer_stun_overrides_shorter_existing() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -59,7 +59,7 @@ fn longer_stun_overrides_shorter_existing() {
 #[test]
 fn shorter_stun_does_not_override_longer_existing() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -75,7 +75,7 @@ fn shorter_stun_does_not_override_longer_existing() {
 #[test]
 fn stun_on_dead_target_is_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
     state.kill_agent(target);
@@ -96,7 +96,7 @@ fn stun_gates_caster_until_tick_reaches_expiry() {
     // tick 10. No per-tick decrement; the view just reads the absolute
     // tick.
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(128);
+    let mut events = EventRing::<Event>::with_cap(128);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 

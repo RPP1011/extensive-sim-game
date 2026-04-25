@@ -3,11 +3,11 @@
 //! when any of those kinds lands in the event ring.
 
 use crate::cascade::EventKindId;
-use crate::event::EventRing;
+use crate::event::{EventLike, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
 
-pub trait LazyView: Send + Sync {
+pub trait LazyView<E: EventLike>: crate::cascade::handler::__sealed::Sealed + Send + Sync {
     /// Event kinds whose emission invalidates the cached value.
     fn invalidated_by(&self) -> &[EventKindId];
 
@@ -19,13 +19,13 @@ pub trait LazyView: Send + Sync {
 
     /// Called by the tick pipeline after events are emitted. Default impl
     /// checks every event in the ring against `invalidated_by()`.
-    fn invalidate_on_events(&mut self, events: &EventRing) {
+    fn invalidate_on_events(&mut self, events: &EventRing<E>) {
         let kinds = self.invalidated_by();
         if kinds.is_empty() {
             return;
         }
         for e in events.iter() {
-            let k = EventKindId::from_event(e);
+            let k = e.kind();
             if kinds.contains(&k) {
                 self.mark_stale();
                 return;
@@ -71,7 +71,12 @@ impl NearestEnemyLazy {
     }
 }
 
-impl LazyView for NearestEnemyLazy {
+// The Sealed + LazyView impls for NearestEnemyLazy use the concrete
+// engine_data::Event type. engine_data is a regular dep (chronicle.rs
+// retains the dep until Plan B2).
+impl crate::cascade::handler::__sealed::Sealed for NearestEnemyLazy {}
+
+impl LazyView<engine_data::events::Event> for NearestEnemyLazy {
     fn invalidated_by(&self) -> &[EventKindId] {
         NEAREST_ENEMY_INVALIDATED_BY
     }

@@ -7,7 +7,7 @@ use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn engagement_on_death(dead: AgentId, state: &mut SimState, events: &mut EventRing) {
+pub fn engagement_on_death(dead: AgentId, state: &mut SimState, events: &mut EventRing<Event>) {
     let partner = state.agent_engaged_with(dead).unwrap_or(dead);
     if (partner != dead) {
         state.set_agent_engaged_with(dead, None);

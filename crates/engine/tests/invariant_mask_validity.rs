@@ -1,6 +1,6 @@
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::invariant::MaskValidityInvariant;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
@@ -11,8 +11,8 @@ use glam::Vec3;
 fn mask_validity_never_flags_a_clean_utility_run() {
     let mut state = SimState::new(10, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..6 {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,

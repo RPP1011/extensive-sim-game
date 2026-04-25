@@ -7,7 +7,7 @@ use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn chronicle_engagement(a: AgentId, t: AgentId, state: &mut SimState, events: &mut EventRing) {
+pub fn chronicle_engagement(a: AgentId, t: AgentId, state: &mut SimState, events: &mut EventRing<Event>) {
     events.push(Event::ChronicleEntry {
         template_id: 3,
         agent: a,

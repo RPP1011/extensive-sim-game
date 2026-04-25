@@ -60,8 +60,8 @@ fn local_cooldowns_are_independent_across_slots() {
     let slot_a = ability_a.slot() as u8;
     let slot_b = ability_b.slot() as u8;
 
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let mut events = EventRing::with_cap(512);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(512);
 
     // Step 1: cast A at tick 0.
     events.push(Event::AgentCast {

@@ -23,7 +23,7 @@ fn spawn_hp(state: &mut SimState, ct: CreatureType, hp: f32) -> AgentId {
 #[test]
 fn shields_stack_additively() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn_hp(&mut state, CreatureType::Human, 100.0);
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
 
@@ -46,7 +46,7 @@ fn shields_stack_additively() {
 #[test]
 fn damage_below_shield_consumes_shield_only() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn_hp(&mut state, CreatureType::Human, 100.0);
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
 
@@ -69,7 +69,7 @@ fn damage_below_shield_consumes_shield_only() {
 #[test]
 fn damage_through_overflow_hits_hp_on_second_strike() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn_hp(&mut state, CreatureType::Human, 100.0);
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
 
@@ -108,7 +108,7 @@ fn damage_through_overflow_hits_hp_on_second_strike() {
 #[test]
 fn non_positive_shield_is_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn_hp(&mut state, CreatureType::Human, 100.0);
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
 

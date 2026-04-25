@@ -34,7 +34,7 @@ fn gold_of(state: &SimState, id: AgentId) -> i32 {
 #[test]
 fn transfer_moves_positive_amount_from_caster_to_target() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let alice = spawn(&mut state, CreatureType::Human);
     let bob   = spawn(&mut state, CreatureType::Human);
     set_gold(&mut state, alice, 100);
@@ -53,7 +53,7 @@ fn transfer_moves_positive_amount_from_caster_to_target() {
 #[test]
 fn negative_amount_allows_debt_on_sender() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let alice = spawn(&mut state, CreatureType::Human);
     let bob   = spawn(&mut state, CreatureType::Human);
     set_gold(&mut state, alice, 100);
@@ -75,7 +75,7 @@ fn negative_amount_allows_debt_on_sender() {
 #[test]
 fn conservation_sum_is_invariant_under_arbitrary_transfers() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let alice = spawn(&mut state, CreatureType::Human);
     let bob   = spawn(&mut state, CreatureType::Human);
     // Seed asymmetric starting balances and run several transfers.
@@ -100,7 +100,7 @@ fn conservation_sum_is_invariant_under_arbitrary_transfers() {
 #[test]
 fn zero_amount_is_a_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let alice = spawn(&mut state, CreatureType::Human);
     let bob   = spawn(&mut state, CreatureType::Human);
     set_gold(&mut state, alice, 100);
@@ -119,7 +119,7 @@ fn zero_amount_is_a_noop() {
 #[test]
 fn self_transfer_is_a_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let alice = spawn(&mut state, CreatureType::Human);
     set_gold(&mut state, alice, 100);
 
@@ -140,8 +140,8 @@ fn registry_dispatches_gold_transfer_via_builtins() {
     // it to verify the builtins registration lands the TransferGoldHandler.
     use engine::cascade::CascadeRegistry;
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(64);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
     let alice = spawn(&mut state, CreatureType::Human);
     let bob   = spawn(&mut state, CreatureType::Human);
     set_gold(&mut state, alice, 200);
@@ -158,7 +158,7 @@ fn registry_dispatches_gold_transfer_via_builtins() {
 fn transfer_preserves_commodity_slots() {
     // Verify only the `gold` field changes — commodity array is untouched.
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let alice = spawn(&mut state, CreatureType::Human);
     let bob   = spawn(&mut state, CreatureType::Human);
     let inv_a = Inventory { gold: 100, commodities: [1, 2, 3, 4, 5, 6, 7, 8] };

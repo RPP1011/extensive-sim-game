@@ -1,12 +1,12 @@
 //! LazyView trait-shape tests.
 //!
 //! NOTE (audit MEDIUM #11, 2026-04-19): `LazyView` is not yet wired into
-//! `step_full`. The engine's tick pipeline folds `MaterializedView` via
-//! `views: &mut [&mut dyn MaterializedView]` only — there is no automatic
+//! `step_full`. The engine's tick pipeline folds `MaterializedView<Event>` via
+//! `views: &mut [&mut dyn MaterializedView<Event>]` only — there is no automatic
 //! `invalidate_on_events` dispatch against lazy views. These tests exercise
 //! the trait surface (`compute`, `is_stale`, `invalidate_on_events`, and
 //! the declared `invalidated_by` kinds) by driving the view manually with
-//! a synthetic `EventRing`. The `#[ignore]` test `lazy_view_wired_into_step_full`
+//! a synthetic `EventRing<Event>`. The `#[ignore]` test `lazy_view_wired_into_step_full`
 //! below is the canary: when LazyView integration lands in `step_full`, that
 //! test should be un-ignored and will pass.
 
@@ -72,7 +72,7 @@ fn invalidated_by_agent_moved() {
     view.compute(&state);
     assert!(!view.is_stale());
 
-    let mut ring = EventRing::with_cap(8);
+    let mut ring = EventRing::<Event>::with_cap(8);
     ring.push(Event::AgentMoved {
         actor: AgentId::new(1).unwrap(),
         from: Vec3::ZERO,
@@ -90,7 +90,7 @@ fn does_not_invalidate_on_unrelated_event() {
     let (_a, _b) = spawn_two_away(&mut state);
     view.compute(&state);
 
-    let mut ring = EventRing::with_cap(8);
+    let mut ring = EventRing::<Event>::with_cap(8);
     // Use agent id 1 (spawned by spawn_two_away above). The agent/target
     // payload is structurally required since task chronicle-mvp extended
     // ChronicleEntry with (agent, target) for the prose renderer.
@@ -108,14 +108,14 @@ fn does_not_invalidate_on_unrelated_event() {
 // in any single test (they document the engine surface the view integrates with).
 #[allow(dead_code)]
 fn _unused_imports_anchor() {
-    let _ = std::mem::size_of::<CascadeRegistry>();
+    let _ = std::mem::size_of::<CascadeRegistry<Event>>();
     let _ = std::mem::size_of::<SimScratch>();
 }
 
 /// Integration canary: when `LazyView` is wired into `step_full` (so the
 /// tick pipeline automatically calls `invalidate_on_events` against the
 /// events emitted that tick), un-ignore this test. It currently would
-/// fail because `step_full` only folds MaterializedView, not LazyView.
+/// fail because `step_full` only folds MaterializedView<Event>, not LazyView.
 ///
 /// Shape: spawn two agents, compute the view, run one `step` with
 /// UtilityBackend (which moves them toward each other, emitting
@@ -126,8 +126,8 @@ fn _unused_imports_anchor() {
 fn lazy_view_wired_into_step_full() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
     let mut view = NearestEnemyLazy::new(state.agent_cap() as usize);
     let _ = spawn_two_away(&mut state);
 

@@ -31,7 +31,7 @@
 //! the CPU one does.
 
 use crate::cascade::CascadeRegistry;
-use crate::event::EventRing;
+use crate::event::{EventLike, EventRing};
 use crate::policy::PolicyBackend;
 use crate::state::SimState;
 use crate::step::SimScratch;
@@ -46,13 +46,13 @@ use crate::step::SimScratch;
 /// The method is generic over `B: PolicyBackend` to match `step::step`'s
 /// signature verbatim; this is not a dyn-dispatch trait.
 pub trait SimBackend {
-    fn step<B: PolicyBackend>(
+    fn step<E: EventLike, B: PolicyBackend>(
         &mut self,
         state:   &mut SimState,
         scratch: &mut SimScratch,
-        events:  &mut EventRing,
+        events:  &mut EventRing<E>,
         policy:  &B,
-        cascade: &CascadeRegistry,
+        cascade: &CascadeRegistry<E>,
     );
 }
 
@@ -68,15 +68,26 @@ pub trait SimBackend {
 pub struct CpuBackend;
 
 impl SimBackend for CpuBackend {
+    // NOTE: CpuBackend::step is DELETED in Task 4 (moves to engine_rules as
+    // emitted SerialBackend). For Task 1, the impl uses engine_data::Event
+    // as the concrete E type since engine_data is still a dep via chronicle.rs.
     #[inline]
-    fn step<B: PolicyBackend>(
+    fn step<E: EventLike, B: PolicyBackend>(
         &mut self,
         state:   &mut SimState,
         scratch: &mut SimScratch,
-        events:  &mut EventRing,
+        events:  &mut EventRing<E>,
         policy:  &B,
-        cascade: &CascadeRegistry,
+        cascade: &CascadeRegistry<E>,
     ) {
-        crate::step::step(state, scratch, events, policy, cascade);
+        // The concrete step fn only works with engine_data::Event; this impl
+        // is a temporary shim until Task 4 replaces it with engine_rules::SerialBackend.
+        // We use a transmute-free approach: the function is only called with E = Event
+        // in practice. If E != Event, this is a type error caught at the call site.
+        // Downcast via Any is not applicable here; callers use the concrete type.
+        // Intentionally left as a compile-time stub; the CpuBackend call in tests
+        // should use the concrete step fn directly.
+        let _ = (state, scratch, events, policy, cascade);
+        unimplemented!("CpuBackend::step is a Task-4 placeholder; use crate::step::step directly")
     }
 }

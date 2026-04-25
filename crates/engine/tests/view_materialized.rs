@@ -7,7 +7,7 @@ use glam::Vec3;
 #[test]
 fn damage_taken_accumulates_from_agent_attacked_events() {
     let mut state = SimState::new(10, 42);
-    let mut events = EventRing::with_cap(100);
+    let mut events = EventRing::<Event>::with_cap(100);
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::ZERO,

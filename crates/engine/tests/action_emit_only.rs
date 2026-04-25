@@ -9,11 +9,11 @@ use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
 use glam::Vec3;
 
-fn make() -> (SimState, SimScratch, EventRing, CascadeRegistry, AgentId) {
+fn make() -> (SimState, SimScratch, EventRing<Event>, CascadeRegistry<Event>, AgentId) {
     let mut state = SimState::new(8, 42);
     let scratch = SimScratch::new(state.agent_cap() as usize);
-    let events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
     let a = state
         .spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,

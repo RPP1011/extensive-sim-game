@@ -5,7 +5,7 @@
 
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, AnnounceAudience, MacroAction,
                      MicroTarget, PolicyBackend};
@@ -95,8 +95,8 @@ impl PolicyBackend for MixedPolicy {
 fn run(seed: u64) -> [u8; 32] {
     let mut state = SimState::new(110, seed);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1_000_000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1_000_000);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..100u32 {
         let angle = (i as f32 / 100.0) * std::f32::consts::TAU;
         state.spawn_agent(AgentSpawn {

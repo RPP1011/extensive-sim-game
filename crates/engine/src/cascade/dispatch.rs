@@ -1,5 +1,5 @@
 use super::handler::{CascadeHandler, EventKindId, Lane};
-use crate::event::{Event, EventRing};
+use crate::event::{EventLike, EventRing};
 use crate::state::SimState;
 use crate::telemetry::{metrics, TelemetrySink};
 
@@ -17,20 +17,20 @@ pub const MAX_CASCADE_ITERATIONS: usize = 8;
 /// Type signature of a compiler-emitted per-event-kind dispatcher. The
 /// dispatcher destructures the triggering event once and fans the call
 /// out to every applicable handler (kind-specific + tag-matched).
-pub type KindDispatcher = fn(&Event, &mut SimState, &mut EventRing);
+pub type KindDispatcher<E> = fn(&E, &mut SimState, &mut EventRing<E>);
 
-pub struct CascadeRegistry {
-    table: Vec<Vec<Vec<Box<dyn CascadeHandler>>>>,
+pub struct CascadeRegistry<E: EventLike> {
+    table: Vec<Vec<Vec<Box<dyn CascadeHandler<E>>>>>,
     /// Compiler-emitted per-event-kind dispatcher fns. Indexed by
     /// `EventKindId as u8 as usize`; `None` means no dispatcher is
     /// installed for that kind (falls back to per-handler trait-object
     /// dispatch via `table`).
-    kind_dispatchers: Vec<Option<KindDispatcher>>,
+    kind_dispatchers: Vec<Option<KindDispatcher<E>>>,
 }
 
-impl CascadeRegistry {
+impl<E: EventLike> CascadeRegistry<E> {
     pub fn new() -> Self {
-        let per_lane: Vec<Vec<Box<dyn CascadeHandler>>> =
+        let per_lane: Vec<Vec<Box<dyn CascadeHandler<E>>>> =
             (0..KIND_SLOTS).map(|_| Vec::new()).collect();
         Self {
             table: (0..Lane::ALL.len()).map(|_| per_lane.iter().map(|_| Vec::new()).collect()).collect(),
@@ -41,61 +41,28 @@ impl CascadeRegistry {
     /// Install a compiler-emitted per-event-kind dispatcher. Overwrites
     /// any previously installed dispatcher for the same kind — the DSL
     /// emitter produces one dispatcher per event kind, so reinstallation
-    /// is idempotent within a single `register_engine_builtins` call.
-    pub fn install_kind(&mut self, kind: EventKindId, dispatcher: KindDispatcher) {
+    /// is idempotent within a single registration call.
+    pub fn install_kind(&mut self, kind: EventKindId, dispatcher: KindDispatcher<E>) {
         let idx = kind as u8 as usize;
         self.kind_dispatchers[idx] = Some(dispatcher);
     }
 
-    /// Convenience constructor that pre-registers engine-defined baseline
-    /// handlers (e.g. the opportunity-attack cascade for engagement disengage
-    /// from Combat Foundation Task 4). Tests that need a fully empty registry
-    /// for isolation should use [`CascadeRegistry::new`].
-    pub fn with_engine_builtins() -> Self {
-        let mut reg = Self::new();
-        reg.register_engine_builtins();
-        reg
-    }
-
-    /// Register the engine's baseline cascade handlers on an existing registry.
-    /// Idempotent only in the sense that calling it twice registers the
-    /// handler twice — callers should invoke once, typically via
-    /// [`CascadeRegistry::with_engine_builtins`].
-    pub fn register_engine_builtins(&mut self) {
-        // Compiler-emitted physics handlers (DSL-owned). Covers damage, heal,
-        // shield, stun, slow, transfer_gold, modify_standing,
-        // opportunity_attack, record_memory, cast, and the three chronicle
-        // rules. 2026-04-19: `CastHandler` migrated — the `emit_physics`
-        // compiler now lowers `for ... in abilities.effects(...)` loops
-        // and `match` over `EffectOp` variants. 2026-04-20 (task 163):
-        // the last two hand-written dispatchers (`dispatch_agent_moved`
-        // / `dispatch_agent_died` for engagement) migrated too, powered
-        // by the `query.nearest_hostile_to` + `agents.{set,clear,
-        // engaged_with_or}` primitives added to the stdlib. The ability
-        // registry continues to live on `SimState`; the DSL `physics
-        // cast` rule reaches it through the `abilities.*` namespace.
-        //
-        // At this point the engine installs zero hand-written dispatchers
-        // — every one comes from `generated/physics/mod.rs`.
-        crate::generated::physics::register(self);
-    }
-
-    pub fn register<H: CascadeHandler + 'static>(&mut self, h: H) {
+    pub fn register<H: CascadeHandler<E> + 'static>(&mut self, h: H) {
         let lane = h.lane() as usize;
         let kind = h.trigger() as u8 as usize;
         self.table[lane][kind].push(Box::new(h));
     }
 
-    pub fn dispatch(&self, event: &Event, state: &mut SimState, events: &mut EventRing) {
-        let kind = EventKindId::from_event(event) as u8 as usize;
+    pub fn dispatch(&self, event: &E, state: &mut SimState, events: &mut EventRing<E>) {
+        let kind = event.kind() as u8 as usize;
         // Prefer the compiler-emitted per-kind dispatcher when installed.
         // It fans out to every applicable handler (kind-specific +
         // tag-matched) inline — no runtime handler-list walk.
         if let Some(dispatcher) = self.kind_dispatchers[kind] {
             dispatcher(event, state, events);
         }
-        // Legacy trait-object handlers (`CastHandler`) still register via
-        // `register`; walk them in lane order after the flat dispatcher.
+        // Legacy trait-object handlers still register via `register`;
+        // walk them in lane order after the flat dispatcher.
         for lane in Lane::ALL {
             for handler in &self.table[*lane as usize][kind] {
                 handler.handle(event, state, events);
@@ -115,7 +82,7 @@ impl CascadeRegistry {
     ///
     /// Back-compat wrapper over [`run_fixed_point_tel`] for call sites that
     /// don't have a telemetry sink (typically tests).
-    pub fn run_fixed_point(&self, state: &mut SimState, events: &mut EventRing) {
+    pub fn run_fixed_point(&self, state: &mut SimState, events: &mut EventRing<E>) {
         self.run_fixed_point_tel(state, events, &crate::telemetry::NullSink);
     }
 
@@ -126,7 +93,7 @@ impl CascadeRegistry {
     pub fn run_fixed_point_tel(
         &self,
         state:     &mut SimState,
-        events:    &mut EventRing,
+        events:    &mut EventRing<E>,
         telemetry: &dyn TelemetrySink,
     ) {
         let mut processed = events.dispatched();
@@ -167,6 +134,19 @@ impl CascadeRegistry {
     }
 }
 
-impl Default for CascadeRegistry {
+impl<E: EventLike> Default for CascadeRegistry<E> {
     fn default() -> Self { Self::new() }
+}
+
+// TRANSITION (Task 1): Concrete helper retained for existing tests that use
+// the `Event` type. Will be removed in Task 4 when `step.rs` is replaced.
+impl CascadeRegistry<engine_data::events::Event> {
+    /// Build a registry pre-populated with all compiler-emitted physics
+    /// handlers. In the final split (Task 4), callers will instead call
+    /// `engine_rules::register_physics(&mut registry)`.
+    pub fn with_engine_builtins() -> Self {
+        let mut reg = Self::new();
+        crate::generated::physics::register(&mut reg);
+        reg
+    }
 }

@@ -1,6 +1,6 @@
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
@@ -11,8 +11,8 @@ use glam::Vec3;
 fn emit_and_reload_trajectory() {
     let mut state = SimState::new(20, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(10_000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(10_000);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..5 {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
@@ -40,7 +40,7 @@ fn emit_and_reload_trajectory() {
 fn python_roundtrip_preserves_values() {
     use engine::cascade::CascadeRegistry;
     use engine::creature::CreatureType;
-    use engine::event::EventRing;
+    use engine::event::{Event, EventRing};
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};
     use engine::step::{step, SimScratch};
@@ -49,8 +49,8 @@ fn python_roundtrip_preserves_values() {
 
     let mut state = SimState::new(10, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1000);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..3 {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,

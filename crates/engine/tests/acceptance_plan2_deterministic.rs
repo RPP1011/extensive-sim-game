@@ -4,7 +4,7 @@
 
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::invariant::{InvariantRegistry, PoolNonOverlapInvariant};
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
@@ -16,9 +16,9 @@ use glam::Vec3;
 fn run(seed: u64) -> [u8; 32] {
     let mut state = SimState::new(110, seed);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1_000_000);
-    let cascade = CascadeRegistry::new();
-    let mut invariants = InvariantRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1_000_000);
+    let cascade = CascadeRegistry::<Event>::new();
+    let mut invariants = InvariantRegistry::<Event>::new();
     invariants.register(Box::new(PoolNonOverlapInvariant));
     let telemetry = NullSink;
     let mut dmg = DamageTaken::new(state.agent_cap() as usize);
@@ -33,7 +33,7 @@ fn run(seed: u64) -> [u8; 32] {
         });
     }
     for _ in 0..1000 {
-        let mut views: Vec<&mut dyn MaterializedView> = vec![&mut dmg];
+        let mut views: Vec<&mut dyn MaterializedView<Event>> = vec![&mut dmg];
         step_full(
             &mut state, &mut scratch, &mut events, &UtilityBackend, &cascade,
             &mut views[..], &invariants, &telemetry,

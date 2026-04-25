@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Amplifier(Arc<AtomicUsize>);
-impl CascadeHandler for Amplifier {
+impl engine::cascade::__sealed::Sealed for Amplifier {}
+impl CascadeHandler<Event> for Amplifier {
     fn trigger(&self) -> EventKindId { EventKindId::AgentAttacked }
     fn lane(&self) -> Lane { Lane::Effect }
-    fn handle(&self, event: &Event, _: &mut SimState, events: &mut EventRing) {
+    fn handle(&self, event: &Event, _: &mut SimState, events: &mut EventRing<Event>) {
         self.0.fetch_add(1, Ordering::Relaxed);
         if let Event::AgentAttacked { actor, target, damage, tick } = event {
             events.push(Event::AgentAttacked {
@@ -25,7 +26,7 @@ impl CascadeHandler for Amplifier {
 #[test]
 #[cfg(not(debug_assertions))]  // in debug, this panics (see next test)
 fn release_dispatch_truncates_at_max_cascade_iterations() {
-    let mut reg = CascadeRegistry::new();
+    let mut reg = CascadeRegistry::<Event>::new();
     let hits = Arc::new(AtomicUsize::new(0));
     reg.register(Amplifier(hits.clone()));
 
@@ -34,7 +35,7 @@ fn release_dispatch_truncates_at_max_cascade_iterations() {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
         ..Default::default()
     }).unwrap();
-    let mut ring = EventRing::with_cap(1024);
+    let mut ring = EventRing::<Event>::with_cap(1024);
 
     ring.push(Event::AgentAttacked { actor: a, target: a, damage: 1.0, tick: 0 });
     reg.run_fixed_point(&mut state, &mut ring);
@@ -53,7 +54,7 @@ fn release_dispatch_truncates_at_max_cascade_iterations() {
 #[cfg(debug_assertions)]
 #[should_panic(expected = "cascade did not converge")]
 fn debug_dispatch_panics_on_non_convergence() {
-    let mut reg = CascadeRegistry::new();
+    let mut reg = CascadeRegistry::<Event>::new();
     reg.register(Amplifier(Arc::new(AtomicUsize::new(0))));
 
     let mut state = SimState::new(4, 42);
@@ -61,7 +62,7 @@ fn debug_dispatch_panics_on_non_convergence() {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
         ..Default::default()
     }).unwrap();
-    let mut ring = EventRing::with_cap(1024);
+    let mut ring = EventRing::<Event>::with_cap(1024);
     ring.push(Event::AgentAttacked { actor: a, target: a, damage: 1.0, tick: 0 });
     reg.run_fixed_point(&mut state, &mut ring);
 }
@@ -70,20 +71,21 @@ fn debug_dispatch_panics_on_non_convergence() {
 fn converging_cascade_terminates_early() {
     // Handler that doesn't re-emit. Should fire exactly once per triggering event.
     struct Once(Arc<AtomicUsize>);
-    impl CascadeHandler for Once {
+    impl engine::cascade::__sealed::Sealed for Once {}
+    impl CascadeHandler<Event> for Once {
         fn trigger(&self) -> EventKindId { EventKindId::AgentDied }
-        fn handle(&self, _: &Event, _: &mut SimState, _: &mut EventRing) {
+        fn handle(&self, _: &Event, _: &mut SimState, _: &mut EventRing<Event>) {
             self.0.fetch_add(1, Ordering::Relaxed);
         }
     }
 
-    let mut reg = CascadeRegistry::new();
+    let mut reg = CascadeRegistry::<Event>::new();
     let hits = Arc::new(AtomicUsize::new(0));
     reg.register(Once(hits.clone()));
 
     let mut state = SimState::new(2, 42);
     let a = AgentId::new(1).unwrap();
-    let mut ring = EventRing::with_cap(16);
+    let mut ring = EventRing::<Event>::with_cap(16);
 
     ring.push(Event::AgentDied { agent_id: a, tick: 0 });
     reg.run_fixed_point(&mut state, &mut ring);

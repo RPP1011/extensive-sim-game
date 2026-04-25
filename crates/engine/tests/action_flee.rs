@@ -29,8 +29,8 @@ impl PolicyBackend for FleeFromFirst {
 fn flee_moves_in_opposite_direction_from_threat() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     // Same z-plane so the away-vector is purely +x.
     let _threat = state.spawn_agent(AgentSpawn {
@@ -70,8 +70,8 @@ fn flee_with_threat_at_same_position_no_move_no_event() {
     // and NOT emit AgentFled (matches MoveToward zero-delta behavior).
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let _threat = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,

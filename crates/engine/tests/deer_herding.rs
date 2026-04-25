@@ -55,10 +55,10 @@ fn run_scenario(
     }
 
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1 << 14);
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let invariants = InvariantRegistry::new();
-    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let mut events = EventRing::<Event>::with_cap(1 << 14);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let invariants = InvariantRegistry::<Event>::new();
+    let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;
 
     for _ in 0..ticks {

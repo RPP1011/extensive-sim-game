@@ -5,15 +5,24 @@
 //! A probe is a plain `struct`; [`run_probe`] spins up a fresh
 //! `SimState` at the seed, runs `p.spawn` to populate agents, ticks the
 //! pipeline `p.ticks` times via [`crate::step::step`], then calls
-//! `p.assert` with the final `(&SimState, &EventRing)`.
+//! `p.assert` with the final `(&SimState, &EventRing<E>)`.
 //!
 //! See `docs/engine/spec.md` §18.
+//!
+//! NOTE: For Task 1, Probe is concrete over engine_data::Event since step.rs
+//! still uses the concrete Event type. The generic Probe<E> will be restored
+//! when step.rs is replaced by the emitted SerialBackend in Task 4.
 
 use crate::cascade::CascadeRegistry;
 use crate::event::EventRing;
 use crate::policy::UtilityBackend;
 use crate::state::SimState;
 use crate::step::{step, SimScratch};
+
+// Use the concrete Event type from engine_data (engine still depends on it
+// via chronicle.rs until Plan B2).
+use engine_data::events::Event;
+type SimEventRing = EventRing<Event>;
 
 /// A scripted probe. Fields are public so callers can construct one
 /// inline in a test function.
@@ -27,7 +36,7 @@ pub struct Probe {
     /// Number of ticks to run through the pipeline.
     pub ticks: u32,
     /// Assertion callback. Return `Ok(())` to pass, `Err(msg)` to fail.
-    pub assert: fn(&SimState, &EventRing) -> Result<(), String>,
+    pub assert: fn(&SimState, &SimEventRing) -> Result<(), String>,
 }
 
 /// Default agent-cap for probes. Chosen to leave headroom for announce
@@ -43,8 +52,8 @@ pub const DEFAULT_EVENT_CAP: usize = 4096;
 pub fn run_probe(p: &Probe) -> Result<(), String> {
     let mut state = SimState::new(DEFAULT_AGENT_CAP, p.seed);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(DEFAULT_EVENT_CAP);
-    let cascade = CascadeRegistry::new();
+    let mut events: SimEventRing = EventRing::with_cap(DEFAULT_EVENT_CAP);
+    let cascade: CascadeRegistry<Event> = CascadeRegistry::new();
 
     (p.spawn)(&mut state);
     for _ in 0..p.ticks {

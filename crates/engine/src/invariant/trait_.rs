@@ -1,10 +1,10 @@
-use crate::event::EventRing;
+use crate::event::{EventLike, EventRing};
 use crate::state::SimState;
 
-pub trait Invariant: Send + Sync {
+pub trait Invariant<E: EventLike>: Send + Sync {
     fn name(&self) -> &'static str;
     fn failure_mode(&self) -> FailureMode { FailureMode::Log }
-    fn check(&self, state: &SimState, events: &EventRing) -> Option<Violation>;
+    fn check(&self, state: &SimState, events: &EventRing<E>) -> Option<Violation>;
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

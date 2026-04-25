@@ -109,8 +109,8 @@ impl PolicyBackend for AttackFixed {
 fn attack_reduces_hp_within_range() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
@@ -139,8 +139,8 @@ fn attack_at_1_99m_hits_pinning_attack_range_upper_bound() {
     // If an impl rounded the range down to 1.5 this would fail.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
@@ -167,8 +167,8 @@ fn attack_at_2_01m_misses_pinning_attack_range_upper_bound() {
     // If an impl bumped the range up to 5.0 this would fail.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
@@ -188,8 +188,8 @@ fn attack_at_2_01m_misses_pinning_attack_range_upper_bound() {
 fn attack_beyond_range_is_a_no_op() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 100.0,
@@ -210,8 +210,8 @@ fn attack_beyond_range_is_a_no_op() {
 fn hp_hits_zero_kills_agent_and_emits_died_event() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 10.0,  // one-shot,
@@ -239,8 +239,8 @@ fn hp_hits_zero_kills_agent_and_emits_died_event() {
 fn attack_dead_target_is_no_op() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let victim = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human, pos: Vec3::ZERO, hp: 5.0,

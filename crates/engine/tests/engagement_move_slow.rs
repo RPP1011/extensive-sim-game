@@ -4,7 +4,7 @@
 //! Tests bypass `step_full` and drive the `apply_actions` + cascade path
 //! directly by manually setting `agent_engaged_with` on the SoA SoT,
 //! emitting a `MoveToward` / `Flee` action, and running the cascade with
-//! `CascadeRegistry::with_engine_builtins()` to get the OA damage cascade.
+//! `CascadeRegistry::<Event>::with_engine_builtins()` to get the OA damage cascade.
 
 use engine::cascade::{CascadeRegistry, MAX_CASCADE_ITERATIONS};
 use engine::creature::CreatureType;
@@ -69,14 +69,14 @@ fn engaged_move_away_from_engager_is_slowed() {
     };
 
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
+    let mut events = EventRing::<Event>::with_cap(256);
 
     let before = state.agent_pos(a).unwrap();
     step_full(
         &mut state, &mut scratch, &mut events,
-        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::new(),
+        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::<Event>::new(),
         &engine::telemetry::NullSink,
     );
     // After step_full, tick_start has re-run engagement update. Since A has
@@ -112,13 +112,13 @@ fn engaged_move_toward_engager_is_full_speed() {
     };
 
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
+    let mut events = EventRing::<Event>::with_cap(256);
     let before = state.agent_pos(a).unwrap();
     step_full(
         &mut state, &mut scratch, &mut events,
-        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::new(),
+        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::<Event>::new(),
         &engine::telemetry::NullSink,
     );
     let after = state.agent_pos(a).unwrap();
@@ -151,13 +151,13 @@ fn flee_while_engaged_triggers_opportunity_attack() {
         },
     };
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
+    let mut events = EventRing::<Event>::with_cap(256);
 
     step_full(
         &mut state, &mut scratch, &mut events,
-        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::new(),
+        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::<Event>::new(),
         &engine::telemetry::NullSink,
     );
 
@@ -191,13 +191,13 @@ fn opportunity_attack_can_kill_and_cascade_emits_agentdied() {
         },
     };
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
+    let mut events = EventRing::<Event>::with_cap(256);
 
     step_full(
         &mut state, &mut scratch, &mut events,
-        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::new(),
+        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::<Event>::new(),
         &engine::telemetry::NullSink,
     );
 
@@ -227,13 +227,13 @@ fn unengaged_move_away_is_full_speed_and_no_oa() {
     };
 
     let backend = ScriptedBackend::new(action);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
+    let mut events = EventRing::<Event>::with_cap(256);
     let before = state.agent_pos(a).unwrap();
     step_full(
         &mut state, &mut scratch, &mut events,
-        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::new(),
+        &backend, &cascade, &mut [], &engine::invariant::InvariantRegistry::<Event>::new(),
         &engine::telemetry::NullSink,
     );
     let after = state.agent_pos(a).unwrap();
@@ -244,6 +244,6 @@ fn unengaged_move_away_is_full_speed_and_no_oa() {
     let oa_count = events.iter().filter(|e| matches!(e, Event::OpportunityAttackTriggered { .. })).count();
     assert_eq!(oa_count, 0);
     // The opportunity_attack dispatcher is registered by
-    // `CascadeRegistry::with_engine_builtins()` even though it never fires
+    // `CascadeRegistry::<Event>::with_engine_builtins()` even though it never fires
     // here — the mask path is separately covered by `per_agent_combat_stats.rs`.
 }

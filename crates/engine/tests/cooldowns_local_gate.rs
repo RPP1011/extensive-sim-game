@@ -56,8 +56,8 @@ fn local_gate_blocks_same_slot_after_global_clears() {
     let slot_b = ability_b.slot() as u8;
 
     // Cast A at tick 0 through the full cascade.
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let mut events = EventRing::with_cap(512);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(512);
     events.push(Event::AgentCast {
         actor: caster,
         ability: ability_a,

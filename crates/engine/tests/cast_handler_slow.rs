@@ -42,7 +42,7 @@ impl PolicyBackend for EmitOnce {
 #[test]
 fn slow_writes_expiry_and_factor_from_zero() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -58,7 +58,7 @@ fn slow_writes_expiry_and_factor_from_zero() {
 #[test]
 fn longer_slow_overrides_when_expiry_is_later() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -79,7 +79,7 @@ fn longer_slow_overrides_when_expiry_is_later() {
 #[test]
 fn stronger_slow_overrides_when_factor_is_smaller() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -99,7 +99,7 @@ fn stronger_slow_overrides_when_factor_is_smaller() {
 #[test]
 fn weaker_and_shorter_slow_does_not_override() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
 
@@ -122,8 +122,8 @@ fn move_toward_is_slowed_by_effect_slow_factor() {
     // displacement should be (51/256) * move_speed_mps.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(64);
-    let cascade = CascadeRegistry::new();  // no builtins — test isolates movement math
+    let mut events = EventRing::<Event>::with_cap(64);
+    let cascade = CascadeRegistry::<Event>::new();  // no builtins — test isolates movement math
 
     let mover = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     // Second agent so the mask allows MoveToward.
@@ -189,8 +189,8 @@ fn engagement_slow_and_effect_slow_compose_multiplicatively() {
     // heuristic.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(64);
-    let cascade = CascadeRegistry::new();  // isolate movement math
+    let mut events = EventRing::<Event>::with_cap(64);
+    let cascade = CascadeRegistry::<Event>::new();  // isolate movement math
 
     let mover = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let engager = spawn(&mut state, CreatureType::Wolf, Vec3::new(-1.0, 0.0, 0.0));
@@ -228,7 +228,7 @@ fn engagement_slow_and_effect_slow_compose_multiplicatively() {
 #[test]
 fn slow_on_dead_target_is_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
     state.kill_agent(target);

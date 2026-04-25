@@ -1,4 +1,4 @@
-use crate::event::{Event, EventRing};
+use crate::event::{EventLike, EventRing};
 use crate::ids::AgentId;
 
 /// Trait implemented by views that want to be rebuilt/updated by folding over an
@@ -10,16 +10,16 @@ use crate::ids::AgentId;
 /// retained ring and is kept for test fixtures that rebuild a view after the
 /// fact (e.g. `acceptance.rs` post-run aggregation). Default implementations
 /// express the equivalence: `fold` is `fold_since(events, 0)`.
-pub trait MaterializedView {
+pub trait MaterializedView<E: EventLike>: crate::cascade::handler::__sealed::Sealed {
     /// Fold events with push index `>= events_before`. Called from
     /// `step_full` phase 5 once per tick with the ring's `push_count()`
     /// at the top of the tick.
-    fn fold_since(&mut self, events: &EventRing, events_before: usize);
+    fn fold_since(&mut self, events: &EventRing<E>, events_before: usize);
 
     /// Fold the whole retained ring. Equivalent to `fold_since(events, 0)`.
     /// Kept for post-run aggregation (tests, trajectory export) where a
     /// per-tick fold was never wired.
-    fn fold(&mut self, events: &EventRing) {
+    fn fold(&mut self, events: &EventRing<E>) {
         self.fold_since(events, 0);
     }
 }
@@ -48,10 +48,15 @@ impl DamageTaken {
     }
 }
 
-impl MaterializedView for DamageTaken {
-    fn fold_since(&mut self, events: &EventRing, events_before: usize) {
+// The Sealed + MaterializedView impls for DamageTaken use the concrete
+// engine_data::Event type. engine_data is a regular dep (chronicle.rs
+// retains the dep until Plan B2), so no cfg(test) gate is needed.
+impl crate::cascade::handler::__sealed::Sealed for DamageTaken {}
+
+impl MaterializedView<engine_data::events::Event> for DamageTaken {
+    fn fold_since(&mut self, events: &EventRing<engine_data::events::Event>, events_before: usize) {
         for e in events.iter_since(events_before) {
-            if let Event::AgentAttacked { target, damage, .. } = e {
+            if let engine_data::events::Event::AgentAttacked { target, damage, .. } = e {
                 let slot = (target.raw() - 1) as usize;
                 if let Some(v) = self.per_agent.get_mut(slot) {
                     *v += *damage;

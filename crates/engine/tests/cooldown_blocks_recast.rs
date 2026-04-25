@@ -100,11 +100,11 @@ fn cooldown_blocks_recast_until_next_ready_tick() {
 
     // Tick 0 cast.
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(512);
+    let mut events = EventRing::<Event>::with_cap(512);
     // `with_engine_builtins()` registers the (now stateless) CastHandler
     // alongside every other effect handler — no explicit
     // `register_cast_handler` call needed.
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let backend = GatedCastBackend { caster, target, ability };
 
@@ -167,8 +167,8 @@ fn zero_cooldown_ability_can_recast_every_tick() {
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(2.0, 0.0, 0.0));
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(512);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(512);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let backend = GatedCastBackend { caster, target, ability };
 

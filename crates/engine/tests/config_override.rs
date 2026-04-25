@@ -70,8 +70,8 @@ fn attack_damage_dealt(damage_override: Option<f32>) -> (f32, f32) {
     }
     let mut state = SimState::new_with_config(4, 42, cfg);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let victim = spawn_hostile_pair(&mut state);
     let before = state.agent_hp(victim).unwrap();
@@ -130,8 +130,8 @@ fn sim_state_new_is_equivalent_to_default_config() {
     let (hp_b, _) = {
         let mut state = SimState::new_with_config(4, 42, cfg);
         let mut scratch = SimScratch::new(state.agent_cap() as usize);
-        let mut events = EventRing::with_cap(1024);
-        let cascade = CascadeRegistry::new();
+        let mut events = EventRing::<Event>::with_cap(1024);
+        let cascade = CascadeRegistry::<Event>::new();
         let victim = spawn_hostile_pair(&mut state);
         let before = state.agent_hp(victim).unwrap();
         step(&mut state, &mut scratch, &mut events, &AttackFixed(victim), &cascade);

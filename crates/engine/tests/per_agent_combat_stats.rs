@@ -37,8 +37,8 @@ impl PolicyBackend for ForceAttack {
 fn set_agent_attack_damage_is_honoured_by_next_attack() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let attacker = state
         .spawn_agent(AgentSpawn {
@@ -87,8 +87,8 @@ fn set_agent_attack_range_is_honoured_by_next_attack() {
     // Default ATTACK_RANGE = 2m. Place target at 2.5m and bump range to 3m.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let attacker = state
         .spawn_agent(AgentSpawn {

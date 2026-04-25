@@ -10,8 +10,8 @@ use glam::Vec3;
 fn agent_moves_toward_nearest_other() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(100);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(100);
+    let cascade = CascadeRegistry::<Event>::new();
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
@@ -42,8 +42,8 @@ fn agent_moves_toward_nearest_other() {
 fn no_move_when_alone() {
     let mut state = SimState::new(2, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(100);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(100);
+    let cascade = CascadeRegistry::<Event>::new();
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
@@ -59,8 +59,8 @@ fn no_move_when_alone() {
 fn colocated_agents_do_not_emit_agentmoved() {
     let mut state = SimState::new(3, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(100);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(100);
+    let cascade = CascadeRegistry::<Event>::new();
     let a = state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(5.0, 5.0, 10.0), hp: 100.0,

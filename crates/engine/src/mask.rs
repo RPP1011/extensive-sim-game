@@ -1,7 +1,10 @@
 // crates/engine/src/mask.rs
+// NOTE: The mark_*_allowed methods below call generated mask functions.
+// DELETED in Task 4 (moves to engine_rules). Retained in Task 1 since
+// generated/ is still compiled (Task 3 moves it to engine_rules).
 use crate::generated::mask::{
-    mask_attack_candidates, mask_cast, mask_drink, mask_eat, mask_flee, mask_hold,
-    mask_move_toward_candidates, mask_rest,
+    mask_attack_candidates, mask_cast, mask_drink, mask_eat, mask_flee,
+    mask_hold, mask_move_toward_candidates, mask_rest,
 };
 use crate::ids::AgentId;
 use crate::state::SimState;

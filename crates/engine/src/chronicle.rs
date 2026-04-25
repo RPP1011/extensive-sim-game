@@ -18,7 +18,9 @@
 //! + the raw agent id. If the agent has been killed + its slot recycled
 //! by the time rendering runs, we fall back to "Agent #<id>".
 
-use crate::event::Event;
+// chronicle.rs retains a direct engine_data dep until Plan B2 migrates
+// chronicle to compiler-emitted DSL (Spec B' §4.2, deferred).
+use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
 

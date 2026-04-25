@@ -1,4 +1,4 @@
-//! Property: `CascadeRegistry::run_fixed_point` is bounded by
+//! Property: `CascadeRegistry::<Event>::run_fixed_point` is bounded by
 //! MAX_CASCADE_ITERATIONS and terminates without corrupting the ring.
 use engine::cascade::dispatch::MAX_CASCADE_ITERATIONS;
 use engine::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
@@ -20,10 +20,11 @@ struct CountingHandler {
     reemit_kind: EventKindId,
 }
 
-impl CascadeHandler for CountingHandler {
+impl engine::cascade::__sealed::Sealed for CountingHandler {}
+impl CascadeHandler<Event> for CountingHandler {
     fn trigger(&self) -> EventKindId { self.trigger }
     fn lane(&self)    -> Lane        { self.lane }
-    fn handle(&self, _event: &Event, _state: &mut SimState, events: &mut EventRing) {
+    fn handle(&self, _event: &Event, _state: &mut SimState, events: &mut EventRing<Event>) {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         for _ in 0..self.emit_times {
             // Re-emit as a simple AgentDied event; the reemit_kind field is
@@ -82,7 +83,7 @@ proptest! {
         n_initial in 1u32..=5,
         initial_kind in arb_event_kind(),
     ) {
-        let mut reg = CascadeRegistry::new();
+        let mut reg = CascadeRegistry::<Event>::new();
         let counter = Arc::new(AtomicUsize::new(0));
         for (trigger, lane, emit_times, reemit_kind) in handler_defs {
             reg.register(CountingHandler {
@@ -96,7 +97,7 @@ proptest! {
 
         #[allow(unused_mut)] // mutated only in release-build cfg branch below
         let mut state = SimState::new(4, 42);
-        let mut events = EventRing::with_cap(16_384);
+        let mut events = EventRing::<Event>::with_cap(16_384);
         // Seed `n_initial` initial events.
         for _ in 0..n_initial {
             if initial_kind == EventKindId::AgentDied {
@@ -147,9 +148,9 @@ proptest! {
     fn empty_registry_does_not_emit(
         n_initial in 1u32..=10,
     ) {
-        let reg = CascadeRegistry::new();
+        let reg = CascadeRegistry::<Event>::new();
         let mut state = SimState::new(4, 42);
-        let mut events = EventRing::with_cap(128);
+        let mut events = EventRing::<Event>::with_cap(128);
         for _ in 0..n_initial {
             events.push(Event::AgentDied {
                 agent_id: AgentId::new(1).unwrap(),

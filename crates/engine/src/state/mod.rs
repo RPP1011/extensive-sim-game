@@ -156,7 +156,7 @@ pub struct SimState {
     /// view. Populated at the view-fold phase of `step_full` via
     /// `state.views.fold_all(&tick_events, state.tick)`; masks / scoring
     /// read values through `state.views.<name>.get(args...)`.
-    /// Spec §2.3 + §7.1.
+    /// Spec §2.3 + §7.1. DELETED in Task 5 (moves to engine_rules).
     pub views: crate::generated::views::ViewRegistry,
 
     /// Ability program registry — append-only table of compiled ability
@@ -284,7 +284,7 @@ impl SimState {
             spatial:                SpatialHash::new(agent_cap),
             // Compiler-emitted `ViewRegistry` — default-constructs one
             // (empty) storage field per `@materialized` view. Populated
-            // at the view-fold phase each tick.
+            // at the view-fold phase each tick. DELETED in Task 5.
             views:                  crate::generated::views::ViewRegistry::new(),
             // Empty ability registry by default. Tests / production code
             // that need specific abilities do `state.ability_registry =

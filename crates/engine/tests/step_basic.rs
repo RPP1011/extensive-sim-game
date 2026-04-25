@@ -1,5 +1,5 @@
 use engine::cascade::CascadeRegistry;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::policy::UtilityBackend;
 use engine::state::{SimState, AgentSpawn};
 use engine::creature::CreatureType;
@@ -10,8 +10,8 @@ use glam::Vec3;
 fn step_advances_tick_and_emits_no_events_for_hold() {
     let mut state = SimState::new(5, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(100);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(100);
+    let cascade = CascadeRegistry::<Event>::new();
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,
         pos: Vec3::new(0.0, 0.0, 10.0), hp: 100.0,
@@ -31,8 +31,8 @@ fn step_is_reproducible_for_same_seed() {
     fn trace(seed: u64) -> [u8; 32] {
         let mut state = SimState::new(10, seed);
         let mut scratch = SimScratch::new(state.agent_cap() as usize);
-        let mut events = EventRing::with_cap(1000);
-        let cascade = CascadeRegistry::new();
+        let mut events = EventRing::<Event>::with_cap(1000);
+        let cascade = CascadeRegistry::<Event>::new();
         for i in 0..5 {
             state.spawn_agent(AgentSpawn {
                 creature_type: CreatureType::Human,

@@ -19,7 +19,7 @@ fn spawn_hp(state: &mut SimState, ct: CreatureType, hp: f32) -> AgentId {
 #[test]
 fn heal_under_cap_applies_full_amount() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn_hp(&mut state, CreatureType::Human, 100.0);
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
     // Drop target to 40/100.
@@ -37,7 +37,7 @@ fn heal_under_cap_applies_full_amount() {
 #[test]
 fn heal_clamps_to_max_hp_when_saturated() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn_hp(&mut state, CreatureType::Human, 100.0);
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
     state.set_agent_hp(target, 95.0);  // 5 hp of headroom
@@ -56,7 +56,7 @@ fn heal_clamps_to_max_hp_when_saturated() {
 #[test]
 fn heal_on_dead_target_is_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn_hp(&mut state, CreatureType::Human, 100.0);
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
     state.set_agent_hp(target, 0.0);
@@ -76,7 +76,7 @@ fn heal_on_dead_target_is_noop() {
 #[test]
 fn heal_non_positive_amount_is_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let caster = spawn_hp(&mut state, CreatureType::Human, 100.0);
     let target = spawn_hp(&mut state, CreatureType::Human, 100.0);
     state.set_agent_hp(target, 40.0);

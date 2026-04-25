@@ -491,7 +491,7 @@ fn humans_rout_when_packmate_dies_same_mechanic() {
 fn pipeline_death_triggers_fear() {
     let (mut state, wolves, _humans) = spawn_pack_fixture();
     let [w1, w2, w3] = wolves;
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
 
     // Call the generated physics fn directly. Same signature the
     // dispatcher uses; simulates what happens on an `AgentDied { agent_id: w1 }`.

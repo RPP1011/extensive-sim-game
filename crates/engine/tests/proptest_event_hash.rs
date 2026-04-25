@@ -1,4 +1,4 @@
-//! Property: `EventRing::replayable_sha256()` is a pure function of
+//! Property: `EventRing::<Event>::replayable_sha256()` is a pure function of
 //! `(cap, sequence_of_pushed_events)` — running twice gives the same bytes.
 //! Complements `tests/event_ring.rs::golden_hash_anchors_format` (single
 //! pinned sequence) by covering arbitrary random sequences.
@@ -64,7 +64,7 @@ fn arb_event() -> impl Strategy<Value = Event> {
 }
 
 fn push_all(cap: usize, events: &[Event]) -> [u8; 32] {
-    let mut ring = EventRing::with_cap(cap);
+    let mut ring = EventRing::<Event>::with_cap(cap);
     for e in events {
         ring.push(*e);
     }

@@ -7,7 +7,7 @@ use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn rally_on_wound(a: AgentId, t: AgentId, state: &mut SimState, events: &mut EventRing) {
+pub fn rally_on_wound(a: AgentId, t: AgentId, state: &mut SimState, events: &mut EventRing<Event>) {
     if state.agent_alive(t) {
         let cur_hp = state.agent_hp(t).unwrap_or(0.0);
         let max_hp = state.agent_max_hp(t).unwrap_or(0.0);

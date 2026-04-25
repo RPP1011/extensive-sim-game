@@ -52,7 +52,7 @@ fn run_tick_start(state: &mut SimState) {
     // position so the `engagement_on_move` physics rule (see
     // `assets/sim/physics.sim`) recomputes nearest-hostile pairings via
     // the cascade, then run the registry to fixed point.
-    let mut ring = EventRing::with_cap(256);
+    let mut ring = EventRing::<Event>::with_cap(256);
     drain_initial_engagements(state, &mut ring);
 }
 
@@ -60,8 +60,8 @@ fn run_tick_start(state: &mut SimState) {
 /// then run the engine cascade to fixed point. This plays the moves that
 /// `step_full`'s movement phase would normally emit so the engagement
 /// physics rule fires once per agent and converges to steady state.
-fn drain_initial_engagements(state: &mut SimState, events: &mut EventRing) {
-    let registry = CascadeRegistry::with_engine_builtins();
+fn drain_initial_engagements(state: &mut SimState, events: &mut EventRing<Event>) {
+    let registry = CascadeRegistry::<Event>::with_engine_builtins();
     let tick = state.tick;
     let alive: Vec<AgentId> = state.agents_alive().collect();
     for id in alive {

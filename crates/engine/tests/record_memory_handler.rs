@@ -15,7 +15,7 @@
 
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
 use engine::mask::MaskBuffer;
 use engine::policy::{Action, ActionKind, AnnounceAudience, MacroAction, PolicyBackend};
@@ -46,8 +46,8 @@ impl PolicyBackend for OneAnnounce {
 fn primary_recipient_view_memory_contains_the_broadcast() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let speaker = state
         .spawn_agent(AgentSpawn {
@@ -88,8 +88,8 @@ fn primary_recipient_view_memory_contains_the_broadcast() {
 fn overhear_bystander_view_memory_records_source() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let speaker = state
         .spawn_agent(AgentSpawn {
@@ -127,8 +127,8 @@ fn overhear_bystander_view_memory_records_source() {
 fn speaker_receives_no_memory_of_their_own_announce() {
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let speaker = state
         .spawn_agent(AgentSpawn {

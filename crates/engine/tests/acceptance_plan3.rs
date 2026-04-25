@@ -15,7 +15,7 @@
 
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::ids::AgentId;
 use engine::policy::UtilityBackend;
 use engine::snapshot::{load_snapshot, save_snapshot};
@@ -43,8 +43,8 @@ fn spawn_layout(state: &mut SimState) {
 fn run_straight(ticks: u32) -> SimState {
     let mut state = SimState::new(AGENT_CAP, SEED);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(RING_CAP);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(RING_CAP);
+    let cascade = CascadeRegistry::<Event>::new();
     spawn_layout(&mut state);
     for _ in 0..ticks {
         step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
@@ -55,8 +55,8 @@ fn run_straight(ticks: u32) -> SimState {
 fn run_save_reload(ticks_a: u32, ticks_b: u32) -> SimState {
     let mut state = SimState::new(AGENT_CAP, SEED);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(RING_CAP);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(RING_CAP);
+    let cascade = CascadeRegistry::<Event>::new();
     spawn_layout(&mut state);
 
     for _ in 0..ticks_a {

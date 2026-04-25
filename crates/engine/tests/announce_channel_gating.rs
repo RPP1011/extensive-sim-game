@@ -36,8 +36,8 @@ impl PolicyBackend for OneAnnounce {
 fn human_speaker_wolf_listener_do_not_share_channel() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {
@@ -76,8 +76,8 @@ fn human_speaker_wolf_listener_do_not_share_channel() {
 fn human_speaker_human_listener_share_channel() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {
@@ -119,8 +119,8 @@ fn human_anyone_radius_is_speech_range_clamped() {
     // 25m IS heard; at 35m is NOT.
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {

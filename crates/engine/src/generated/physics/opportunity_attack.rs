@@ -11,7 +11,7 @@ pub fn opportunity_attack(
     attacker: AgentId,
     target: AgentId,
     state: &mut SimState,
-    events: &mut EventRing,
+    events: &mut EventRing<Event>,
 ) {
     if state.agent_alive(target) {
         let damage = state

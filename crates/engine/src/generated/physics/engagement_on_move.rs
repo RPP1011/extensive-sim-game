@@ -7,7 +7,7 @@ use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn engagement_on_move(mover: AgentId, state: &mut SimState, events: &mut EventRing) {
+pub fn engagement_on_move(mover: AgentId, state: &mut SimState, events: &mut EventRing<Event>) {
     if state.agent_alive(mover) {
         let new =
             crate::spatial::nearest_hostile_to(state, mover, state.config.combat.engagement_range)

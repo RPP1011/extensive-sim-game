@@ -458,7 +458,7 @@ fn wolves_converge_on_engaged_human() {
 fn pipeline_engagement_triggers_pack_assist() {
     let (mut state, wolves, human) = spawn_pack_fixture();
     let [w1, w2] = wolves;
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
 
     // Call the generated physics fn directly. Same signature the
     // dispatcher uses; simulates what happens on an
@@ -499,7 +499,7 @@ fn lone_wolf_engagement_emits_no_pack_assist() {
     let lone = spawn_wolf(&mut state, Vec3::ZERO);
     let h1 = spawn_human(&mut state, Vec3::new(2.0, 0.0, 0.0));
     spawn_human(&mut state, Vec3::new(4.0, 0.0, 0.0));
-    let mut events = EventRing::with_cap(16);
+    let mut events = EventRing::<Event>::with_cap(16);
 
     engine::generated::physics::pack_focus_on_engagement::pack_focus_on_engagement(
         lone,

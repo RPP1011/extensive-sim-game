@@ -427,7 +427,7 @@ fn wolves_rally_when_packmate_wounded_same_mechanic() {
 fn pipeline_wound_triggers_rally() {
     let (mut state, humans, wolf) = spawn_rally_fixture();
     let [h1, h2, h3] = humans;
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
 
     // Drop H1 to 40/100 hp — hp_pct = 0.4 < 0.5 satisfies the rule's
     // "wounded" gate.
@@ -477,7 +477,7 @@ fn pipeline_wound_triggers_rally() {
 fn rally_rule_skips_non_wounded() {
     let (mut state, humans, wolf) = spawn_rally_fixture();
     let [h1, _h2, _h3] = humans;
-    let mut events = EventRing::with_cap(16);
+    let mut events = EventRing::<Event>::with_cap(16);
 
     // H1 still at 80 hp — above the 0.5 hp_pct gate.
     state.set_agent_hp(h1, 80.0);
@@ -510,7 +510,7 @@ fn rally_rule_skips_non_wounded() {
 fn rally_rule_skips_dead_target() {
     let (mut state, humans, wolf) = spawn_rally_fixture();
     let [h1, _h2, _h3] = humans;
-    let mut events = EventRing::with_cap(16);
+    let mut events = EventRing::<Event>::with_cap(16);
 
     // Simulate the damage handler's lethal branch: it sets hp=0 then
     // calls agents.kill(h1). By the time rally_on_wound runs, h1 is
@@ -544,7 +544,7 @@ fn rally_rule_is_species_scoped() {
     let mut state = SimState::new(8, 0);
     let wolf = spawn_wolf(&mut state, Vec3::new(0.0, 0.0, 0.0));
     let human = spawn_human(&mut state, Vec3::new(2.0, 0.0, 0.0));
-    let mut events = EventRing::with_cap(16);
+    let mut events = EventRing::<Event>::with_cap(16);
 
     state.set_agent_hp(human, 40.0);
 
@@ -612,10 +612,10 @@ fn pipeline_end_to_end_emits_rally() {
         .unwrap();
 
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1 << 14);
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let invariants = InvariantRegistry::new();
-    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let mut events = EventRing::<Event>::with_cap(1 << 14);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let invariants = InvariantRegistry::<Event>::new();
+    let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;
 
     for _ in 0..6 {

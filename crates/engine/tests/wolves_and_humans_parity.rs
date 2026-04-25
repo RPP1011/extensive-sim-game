@@ -144,13 +144,13 @@ fn fmt_event(e: &Event) -> String {
 fn run_scenario_log() -> String {
     let mut state = spawn_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(EVENT_RING_CAP);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
-    let mut invariants = InvariantRegistry::new();
+    let mut invariants = InvariantRegistry::<Event>::new();
     invariants.register(Box::new(PoolNonOverlapInvariant));
 
-    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;
 
     for _ in 0..TICKS {
@@ -355,13 +355,13 @@ fn parse_kv_u32(line: &str, key: &str) -> Option<u32> {
 fn chronicle_renders_readable_text() {
     let mut state = spawn_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(EVENT_RING_CAP);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
-    let mut invariants = InvariantRegistry::new();
+    let mut invariants = InvariantRegistry::<Event>::new();
     invariants.register(Box::new(PoolNonOverlapInvariant));
 
-    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;
 
     for _ in 0..TICKS {
@@ -423,13 +423,13 @@ fn chronicle_renders_readable_text() {
 fn chronicle_has_wound_and_break_templates() {
     let mut state = spawn_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(EVENT_RING_CAP);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
-    let mut invariants = InvariantRegistry::new();
+    let mut invariants = InvariantRegistry::<Event>::new();
     invariants.register(Box::new(PoolNonOverlapInvariant));
 
-    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;
 
     for _ in 0..TICKS {
@@ -479,13 +479,13 @@ fn chronicle_has_wound_and_break_templates() {
 fn chronicle_has_rout_and_flee_templates() {
     let mut state = spawn_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(EVENT_RING_CAP);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
-    let mut invariants = InvariantRegistry::new();
+    let mut invariants = InvariantRegistry::<Event>::new();
     invariants.register(Box::new(PoolNonOverlapInvariant));
 
-    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;
 
     for _ in 0..TICKS {
@@ -535,13 +535,13 @@ fn chronicle_has_rout_and_flee_templates() {
 fn chronicle_has_rally_template() {
     let mut state = spawn_fixture();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(EVENT_RING_CAP);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(EVENT_RING_CAP);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
-    let mut invariants = InvariantRegistry::new();
+    let mut invariants = InvariantRegistry::<Event>::new();
     invariants.register(Box::new(PoolNonOverlapInvariant));
 
-    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;
 
     for _ in 0..TICKS {
@@ -649,10 +649,10 @@ fn run_behavioural_scenario(
 
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
     // Generous ring — each test is under 200 ticks × <10 events/tick.
-    let mut events = EventRing::with_cap(1 << 14);
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let invariants = InvariantRegistry::new();
-    let mut views: Vec<&mut dyn MaterializedView> = Vec::new();
+    let mut events = EventRing::<Event>::with_cap(1 << 14);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let invariants = InvariantRegistry::<Event>::new();
+    let mut views: Vec<&mut dyn MaterializedView<Event>> = Vec::new();
     let telemetry = NullSink;
 
     for _ in 0..ticks {

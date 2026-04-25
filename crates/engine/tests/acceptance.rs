@@ -3,7 +3,7 @@
 
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
@@ -19,8 +19,8 @@ fn mvp_acceptance() {
 
     let mut state = SimState::new(n_agents + 10, seed);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1_000_000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1_000_000);
+    let cascade = CascadeRegistry::<Event>::new();
     let mut dmg = DamageTaken::new(state.agent_cap() as usize);
     let mut writer = TrajectoryWriter::new(n_agents as usize, ticks as usize);
 

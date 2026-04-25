@@ -1,7 +1,11 @@
 // crates/engine/src/step.rs
+// NOTE: This file is DELETED in Task 4 (moves to engine_rules as emitted
+// SerialBackend). For Task 1, it is retained but updated to reference
+// engine_data::events::Event directly (the concrete type, since engine_data
+// is still a dep for chronicle.rs until Plan B2).
 use crate::cascade::CascadeRegistry;
 use crate::channel::channel_range;
-use crate::event::{Event, EventRing};
+use crate::event::EventRing;
 use crate::ids::AgentId;
 use crate::invariant::{FailureMode, InvariantRegistry};
 use crate::mask::{MaskBuffer, MicroKind, TargetMask};
@@ -10,7 +14,11 @@ use crate::rng::per_agent_u32;
 use crate::state::SimState;
 use crate::telemetry::{metrics, NullSink, TelemetrySink};
 use crate::view::MaterializedView;
+use engine_data::events::Event;
 use glam::Vec3;
+
+// Type alias for the concrete EventRing used in this step module.
+type SimEventRing = EventRing<Event>;
 
 // The balance constants that used to live here (DEFAULT_VOCAL_STRENGTH,
 // MOVE_SPEED_MPS, ATTACK_DAMAGE, ATTACK_RANGE, EAT_RESTORE, DRINK_RESTORE,
@@ -147,9 +155,9 @@ impl SimScratch {
 pub fn step<B: PolicyBackend>(
     state:   &mut SimState,
     scratch: &mut SimScratch,
-    events:  &mut EventRing,
+    events:  &mut SimEventRing,
     backend: &B,
-    cascade: &CascadeRegistry,
+    cascade: &CascadeRegistry<Event>,
 ) {
     let empty_invariants = InvariantRegistry::new();
     step_full(
@@ -186,11 +194,11 @@ pub fn step<B: PolicyBackend>(
 pub fn step_full<B: PolicyBackend>(
     state:      &mut SimState,
     scratch:    &mut SimScratch,
-    events:     &mut EventRing,
+    events:     &mut SimEventRing,
     backend:    &B,
-    cascade:    &CascadeRegistry,
-    views:      &mut [&mut dyn MaterializedView],
-    invariants: &InvariantRegistry,
+    cascade:    &CascadeRegistry<Event>,
+    views:      &mut [&mut dyn MaterializedView<Event>],
+    invariants: &InvariantRegistry<Event>,
     telemetry:  &dyn TelemetrySink,
 ) {
     let t_start = std::time::Instant::now();
@@ -285,8 +293,8 @@ pub fn step_phases_1_to_3<B: PolicyBackend>(
 pub fn finalize_tick(
     state:          &mut SimState,
     scratch:        &SimScratch,
-    events:         &EventRing,
-    invariants:     &InvariantRegistry,
+    events:         &SimEventRing,
+    invariants:     &InvariantRegistry<Event>,
     telemetry:      &dyn TelemetrySink,
     t_start:        std::time::Instant,
     events_emitted: usize,
@@ -371,7 +379,7 @@ fn shuffle_order_into(order: &mut Vec<u32>, n: usize, world_seed: u64, tick: u32
 pub fn apply_actions(
     state:   &mut SimState,
     scratch: &SimScratch,
-    events:  &mut EventRing,
+    events:  &mut SimEventRing,
 ) {
     // `scratch.shuffle_idx` must have been populated by `shuffle_actions_in_place`
     // immediately before this call. We walk the already-computed permutation

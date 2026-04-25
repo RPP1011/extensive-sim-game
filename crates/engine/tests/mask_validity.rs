@@ -1,6 +1,6 @@
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::mask::MicroKind;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
@@ -11,8 +11,8 @@ use glam::Vec3;
 fn all_chosen_actions_pass_their_mask() {
     let mut state = SimState::new(50, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(100_000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(100_000);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..20 {
         let angle = (i as f32 / 20.0) * std::f32::consts::TAU;
         state.spawn_agent(AgentSpawn {

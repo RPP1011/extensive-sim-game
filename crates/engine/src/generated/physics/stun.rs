@@ -2,12 +2,12 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::EventRing;
+use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
 
 #[allow(unused_variables)]
-pub fn stun(c: AgentId, t: AgentId, e: u32, state: &mut SimState, events: &mut EventRing) {
+pub fn stun(c: AgentId, t: AgentId, e: u32, state: &mut SimState, events: &mut EventRing<Event>) {
     if state.agent_alive(t) {
         let cur = state.agent_stun_expires_at(t).unwrap_or(0);
         if (e > cur) {

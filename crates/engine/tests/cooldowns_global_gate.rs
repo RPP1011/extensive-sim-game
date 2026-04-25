@@ -1,12 +1,12 @@
 //! Cooldowns Task 5 — global gate end-to-end through the real cast path.
 //!
 //! Registers two abilities A and B on different local slots, then pushes
-//! an `Event::AgentCast` for A through `CascadeRegistry::with_engine_builtins()`
+//! an `Event::AgentCast` for A through `CascadeRegistry::<Event>::with_engine_builtins()`
 //! so the DSL-emitted `physics cast` rule fires. That rule calls
 //! `record_cast_cooldowns`, which writes both the global (GCD) cursor and
 //! A's per-slot local cursor.
 //!
-//! Invariant pinned: the global cursor, written with
+//! Invariant<Event> pinned: the global cursor, written with
 //! `combat.global_cooldown_ticks` (default 5), blocks B even though B's own
 //! local cursor is still zero. Once the GCD elapses, B clears.
 
@@ -73,8 +73,8 @@ fn global_gate_blocks_other_slot_until_gcd_elapses() {
     // Cast A at tick 0 by pushing AgentCast directly — the cascade runs
     // the physics cast rule, which writes both cursors via
     // `record_cast_cooldowns(caster, ability_a, 0)`.
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let mut events = EventRing::with_cap(512);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(512);
     events.push(Event::AgentCast {
         actor: caster,
         ability: ability_a,

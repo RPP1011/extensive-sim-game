@@ -3,7 +3,7 @@
 
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::{step, SimScratch};
@@ -12,8 +12,8 @@ use glam::Vec3;
 fn hash_of_run(seed: u64, ticks: u32, ring_cap: usize) -> [u8; 32] {
     let mut state = SimState::new(64, seed);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(ring_cap);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(ring_cap);
+    let cascade = CascadeRegistry::<Event>::new();
     // Ring of 16 agents in a 20m-radius circle at z=10.
     for i in 0..16 {
         let angle = (i as f32 / 16.0) * std::f32::consts::TAU;

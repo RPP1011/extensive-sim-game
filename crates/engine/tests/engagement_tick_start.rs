@@ -22,8 +22,8 @@ use glam::Vec3;
 /// position, then run the engine cascade to fixed point. This drives
 /// the `engagement_on_move` physics rule for every agent so pairings
 /// converge to their steady state without needing a real movement phase.
-fn run_tick_start(state: &mut SimState, events: &mut EventRing) {
-    let registry = CascadeRegistry::with_engine_builtins();
+fn run_tick_start(state: &mut SimState, events: &mut EventRing<Event>) {
+    let registry = CascadeRegistry::<Event>::with_engine_builtins();
     let tick = state.tick;
     let alive: Vec<AgentId> = state.agents_alive().collect();
     for id in alive {
@@ -40,7 +40,7 @@ fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> engine::ids::Agen
 #[test]
 fn two_hostile_agents_inside_range_engage_each_other() {
     let mut state = SimState::new(8, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.5, 0.0, 0.0));
     run_tick_start(&mut state, &mut events);
@@ -51,7 +51,7 @@ fn two_hostile_agents_inside_range_engage_each_other() {
 #[test]
 fn same_species_agents_do_not_engage() {
     let mut state = SimState::new(8, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Human, Vec3::new(1.0, 0.0, 0.0));
     run_tick_start(&mut state, &mut events);
@@ -62,7 +62,7 @@ fn same_species_agents_do_not_engage() {
 #[test]
 fn agents_outside_engagement_range_do_not_engage() {
     let mut state = SimState::new(8, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 0.0));
     // Outside engagement range (default 2.0m).
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0));
@@ -76,7 +76,7 @@ fn agents_outside_engagement_range_do_not_engage() {
 #[test]
 fn engagement_clears_when_partners_separate() {
     let mut state = SimState::new(8, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human, Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Wolf,  Vec3::new(1.0, 0.0, 0.0));
     run_tick_start(&mut state, &mut events);
@@ -114,7 +114,7 @@ fn three_agent_unilateral_commit_pins_closest_pair() {
     // prefers B, which matches, so `{B↔D}` stands. End state: A
     // unengaged, B↔D engaged.
     let mut state = SimState::new(8, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human,  Vec3::new(0.0, 0.0, 0.0));
     let b = spawn(&mut state, CreatureType::Wolf,   Vec3::new(1.0, 0.0, 0.0));
     let d = spawn(&mut state, CreatureType::Dragon, Vec3::new(1.4, 0.0, 0.0));

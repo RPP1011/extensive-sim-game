@@ -2,12 +2,12 @@
 //! N. Example: `MostHostileTopK` — the K attackers with highest cumulative
 //! damage dealt to each agent.
 
-use crate::event::Event;
+use crate::event::EventLike;
 use crate::ids::AgentId;
 
-pub trait TopKView: Send + Sync {
+pub trait TopKView<E: EventLike>: crate::cascade::handler::__sealed::Sealed + Send + Sync {
     fn k(&self) -> usize;
-    fn update(&mut self, event: &Event);
+    fn update(&mut self, event: &E);
 }
 
 const DEFAULT_K: usize = 8;
@@ -41,10 +41,15 @@ impl MostHostileTopK {
     }
 }
 
-impl TopKView for MostHostileTopK {
+// The Sealed + TopKView impls for MostHostileTopK use the concrete
+// engine_data::Event type. engine_data is a regular dep (chronicle.rs
+// retains the dep until Plan B2).
+impl crate::cascade::handler::__sealed::Sealed for MostHostileTopK {}
+
+impl TopKView<engine_data::events::Event> for MostHostileTopK {
     fn k(&self) -> usize { self.k }
-    fn update(&mut self, event: &Event) {
-        if let Event::AgentAttacked { actor, target, damage, .. } = event {
+    fn update(&mut self, event: &engine_data::events::Event) {
+        if let engine_data::events::Event::AgentAttacked { actor, target, damage, .. } = event {
             self.accumulate(*actor, *target, *damage);
         }
     }

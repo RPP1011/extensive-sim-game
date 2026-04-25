@@ -22,7 +22,7 @@ fn spawn(state: &mut SimState, ct: CreatureType) -> AgentId {
 #[test]
 fn positive_delta_adds_to_zero_baseline() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
 
@@ -37,7 +37,7 @@ fn positive_delta_adds_to_zero_baseline() {
 #[test]
 fn saturates_at_upper_clamp() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
 
@@ -53,7 +53,7 @@ fn saturates_at_upper_clamp() {
 #[test]
 fn saturates_at_lower_clamp() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
 
@@ -68,7 +68,7 @@ fn saturates_at_lower_clamp() {
 #[test]
 fn standing_is_symmetric_across_directions() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
 
@@ -91,7 +91,7 @@ fn standing_is_symmetric_across_directions() {
 #[test]
 fn accumulated_adjustments_are_stable_after_clamp() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
 
@@ -121,7 +121,7 @@ fn accumulated_adjustments_are_stable_after_clamp() {
 #[test]
 fn zero_delta_is_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
     assert_eq!(state.views.standing.get(a, b), 0);
@@ -139,8 +139,8 @@ fn zero_delta_is_noop() {
 fn registry_dispatches_standing_delta_via_builtins() {
     use engine::cascade::CascadeRegistry;
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(64);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
     let a = spawn(&mut state, CreatureType::Human);
     let b = spawn(&mut state, CreatureType::Human);
 

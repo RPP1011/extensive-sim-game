@@ -428,8 +428,8 @@ fn engagement_death_triggers_rout_in_partner() {
     // emits `EngagementBroken`) and `fear_spread_on_death` (which emits
     // `FearSpread { observer: w2, dead_kin: w1 }`). The fixed-point run
     // drains the cascade until convergence.
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let mut events = EventRing::with_cap(64);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(64);
     let events_before = events.total_pushed();
     let tick = state.tick;
     state.kill_agent(w1);
@@ -615,8 +615,8 @@ fn chained_deaths_stack_kin_fear_on_survivors() {
     let w3 = spawn_wolf(&mut state, Vec3::new(4.0, 0.0, 0.0));
     let w4 = spawn_wolf(&mut state, Vec3::new(6.0, 0.0, 0.0));
 
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let mut events = EventRing::with_cap(64);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(64);
 
     // --- Phase 1: kill W1. W2/W3/W4 all within 12 m → 3 FearSpread events.
     let events_before_1 = events.total_pushed();

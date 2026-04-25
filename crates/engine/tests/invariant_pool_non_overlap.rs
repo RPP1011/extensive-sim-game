@@ -1,5 +1,5 @@
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::invariant::{Invariant, PoolNonOverlapInvariant};
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;
@@ -16,7 +16,7 @@ fn pool_non_overlap_holds_for_healthy_spawns() {
         });
     }
     let inv = PoolNonOverlapInvariant;
-    let events = EventRing::with_cap(8);
+    let events = EventRing::<Event>::with_cap(8);
     assert!(inv.check(&state, &events).is_none());
 }
 
@@ -34,7 +34,7 @@ fn pool_non_overlap_holds_after_kill_and_respawn() {
     }).unwrap();
 
     let inv = PoolNonOverlapInvariant;
-    let events = EventRing::with_cap(8);
+    let events = EventRing::<Event>::with_cap(8);
     assert!(inv.check(&state, &events).is_none());
 }
 
@@ -54,7 +54,7 @@ fn pool_non_overlap_detects_alive_slot_also_in_freelist() {
     state.pool_mut_for_test().force_push_freelist_for_test(1);
 
     let inv = PoolNonOverlapInvariant;
-    let events = EventRing::with_cap(8);
+    let events = EventRing::<Event>::with_cap(8);
     let v = inv.check(&state, &events);
     assert!(v.is_some(), "invariant must flag alive/freelist overlap");
     let v = v.unwrap();
@@ -65,7 +65,7 @@ fn pool_non_overlap_detects_alive_slot_also_in_freelist() {
 fn pool_non_overlap_detects_duplicate_freelist_entries() {
     // Fault injection: kill agent 1, then push slot 1 into the freelist
     // a SECOND time. Duplicate entries in the freelist would cause a
-    // subsequent `alloc()` to hand out the same slot twice. Invariant
+    // subsequent `alloc()` to hand out the same slot twice. Invariant<Event>
     // must fire.
     let mut state = SimState::new(4, 42);
     let a = state.spawn_agent(AgentSpawn {
@@ -76,7 +76,7 @@ fn pool_non_overlap_detects_duplicate_freelist_entries() {
     state.pool_mut_for_test().force_push_freelist_for_test(1); // duplicate
 
     let inv = PoolNonOverlapInvariant;
-    let events = EventRing::with_cap(8);
+    let events = EventRing::<Event>::with_cap(8);
     let v = inv.check(&state, &events);
     assert!(v.is_some(), "invariant must flag duplicate freelist entry");
 }

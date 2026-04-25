@@ -2,7 +2,7 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use crate::event::EventRing;
+use crate::event::{Event, EventRing};
 use crate::ids::AgentId;
 use crate::state::SimState;
 
@@ -12,7 +12,7 @@ pub fn modify_standing(
     b: AgentId,
     delta: i16,
     state: &mut SimState,
-    events: &mut EventRing,
+    events: &mut EventRing<Event>,
 ) {
     if (delta != 0) {
         {

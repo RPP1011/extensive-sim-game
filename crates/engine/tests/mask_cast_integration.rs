@@ -14,7 +14,7 @@ use engine::ability::{
 };
 use engine::cascade::CascadeRegistry;
 use engine::creature::CreatureType;
-use engine::event::EventRing;
+use engine::event::{Event, EventRing};
 use engine::invariant::InvariantRegistry;
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, PolicyBackend};
@@ -43,28 +43,28 @@ impl PolicyBackend for InertBackend {
 }
 
 fn setup(registry_build: impl FnOnce(&mut AbilityRegistryBuilder)) -> (
-    SimState, SimScratch, EventRing, CascadeRegistry, InvariantRegistry,
+    SimState, SimScratch, EventRing<Event>, CascadeRegistry<Event>, InvariantRegistry<Event>,
 ) {
     let mut state = SimState::new(8, 42);
     let scratch = SimScratch::new(state.agent_cap() as usize);
-    let events = EventRing::with_cap(1024);
+    let events = EventRing::<Event>::with_cap(1024);
     let mut b = AbilityRegistryBuilder::new();
     registry_build(&mut b);
     state.ability_registry = b.build();
     // `with_engine_builtins()` registers the stateless CastHandler alongside
     // the DSL-emitted effect handlers. The handler reads programs off
     // `state.ability_registry`.
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let invariants = InvariantRegistry::new();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let invariants = InvariantRegistry::<Event>::new();
     (state, scratch, events, cascade, invariants)
 }
 
 fn run_one_tick(
     state: &mut SimState,
     scratch: &mut SimScratch,
-    events: &mut EventRing,
-    cascade: &CascadeRegistry,
-    invariants: &InvariantRegistry,
+    events: &mut EventRing<Event>,
+    cascade: &CascadeRegistry<Event>,
+    invariants: &InvariantRegistry<Event>,
 ) {
     step_full(
         state, scratch, events, &InertBackend, cascade,
@@ -175,9 +175,9 @@ fn cast_bit_permissive_when_registry_is_empty() {
     // bit stays permissive.
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let invariants = InvariantRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
+    let invariants = InvariantRegistry::<Event>::new();
     let caster = state
         .spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,

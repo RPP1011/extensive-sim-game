@@ -11,7 +11,7 @@ pub fn pack_focus_on_engagement(
     actor: AgentId,
     target: AgentId,
     state: &mut SimState,
-    events: &mut EventRing,
+    events: &mut EventRing<Event>,
 ) {
     for kin in crate::spatial::nearby_kin(state, actor, 12.0) {
         events.push(Event::PackAssist {

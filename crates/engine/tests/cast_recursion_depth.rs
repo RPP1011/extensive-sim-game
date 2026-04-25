@@ -64,14 +64,14 @@ fn infinite_loop_caps_at_max_cascade_iterations() {
     let (registry, ability) = build_infinite_loop();
     // Stateless CastHandler is installed by `with_engine_builtins()`; the
     // registry rides on `state`.
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = CascadeRegistry::<Event>::with_engine_builtins();
 
     let mut state = SimState::new(4, 42);
     state.ability_registry = registry;
     // Large HP so non-lethal damage doesn't emit AgentDied mid-cascade.
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO, 1_000_000.0);
     let target = spawn(&mut state, CreatureType::Wolf,  Vec3::new(3.0, 0.0, 0.0), 1_000_000.0);
-    let mut events = EventRing::with_cap(4096);
+    let mut events = EventRing::<Event>::with_cap(4096);
 
     events.push(Event::AgentCast {
         actor: caster, ability, target, depth: 0, tick: 0,

@@ -1,5 +1,5 @@
 use super::{FailureMode, Invariant, Violation};
-use crate::event::EventRing;
+use crate::event::{EventLike, EventRing};
 use crate::mask::MicroKind;
 use crate::policy::ActionKind;
 use crate::state::SimState;
@@ -43,13 +43,13 @@ impl MaskValidityInvariant {
 
 impl Default for MaskValidityInvariant { fn default() -> Self { Self::new() } }
 
-impl Invariant for MaskValidityInvariant {
+impl<E: EventLike> Invariant<E> for MaskValidityInvariant {
     fn name(&self) -> &'static str { "mask_validity" }
     fn failure_mode(&self) -> FailureMode {
         #[cfg(debug_assertions)] { FailureMode::Panic }
         #[cfg(not(debug_assertions))] { FailureMode::Log }
     }
-    fn check(&self, _s: &SimState, _e: &EventRing) -> Option<Violation> { None }
+    fn check(&self, _s: &SimState, _e: &EventRing<E>) -> Option<Violation> { None }
 }
 
 /// No agent slot can be both alive and in the freelist, and the freelist
@@ -57,13 +57,13 @@ impl Invariant for MaskValidityInvariant {
 /// which walks the `Pool<T>` alive vec + freelist.
 pub struct PoolNonOverlapInvariant;
 
-impl Invariant for PoolNonOverlapInvariant {
+impl<E: EventLike> Invariant<E> for PoolNonOverlapInvariant {
     fn name(&self) -> &'static str { "pool_non_overlap" }
     fn failure_mode(&self) -> FailureMode {
         #[cfg(debug_assertions)] { FailureMode::Panic }
         #[cfg(not(debug_assertions))] { FailureMode::Log }
     }
-    fn check(&self, state: &SimState, _events: &EventRing) -> Option<Violation> {
+    fn check(&self, state: &SimState, _events: &EventRing<E>) -> Option<Violation> {
         if state.pool_is_consistent() {
             None
         } else {
