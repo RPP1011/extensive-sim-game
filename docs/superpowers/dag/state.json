@@ -393,15 +393,19 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-12"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 3,
-      "steps_done": 0,
+      "steps_done": 3,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "verification-inline",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "verified: step.rs has apply_actions_pub definition only (no direct apply_actions calls); workspace fails only on engine_gpu missing apply_and_movement (T12 closes)"
+      },
+      "started_at": "2026-04-26T22:31:08Z",
+      "completed_at": "2026-04-26T22:31:38Z",
       "retry_count": 0
     },
     {
@@ -638,9 +642,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T22:28:36Z",
-    "iterations_completed": 10,
-    "tasks_closed": 10,
+    "last_iteration_at": "2026-04-26T22:31:38Z",
+    "iterations_completed": 11,
+    "tasks_closed": 11,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

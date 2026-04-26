@@ -745,7 +745,7 @@ git commit -m "feat(dsl_compiler,engine_rules): emit SerialBackend::apply_and_mo
 **Files:**
 - Verify: `crates/engine_rules/src/step.rs` (already regenerated in Task 10)
 
-- [ ] **Step 1: Confirm step.rs no longer calls `apply_actions_pub` directly — only via `backend.apply_and_movement`.**
+- [x] **Step 1: Confirm step.rs no longer calls `apply_actions_pub` directly — only via `backend.apply_and_movement`.**
 
 ```bash
 grep "apply_actions_pub\|apply_actions(" crates/engine_rules/src/step.rs
@@ -756,7 +756,7 @@ Expected:
 - One line `backend.apply_and_movement(state, scratch, events);` in Phase 4a.
 - The function definition `pub(crate) fn apply_actions_pub(` appears once (at the bottom of the file).
 
-- [ ] **Step 2: Run all engine_rules tests.**
+- [x] **Step 2: Run all engine_rules tests.**
 
 ```bash
 cargo test -p engine_rules -- --test-threads=1 2>&1 | tail -10
@@ -764,7 +764,7 @@ cargo test -p engine_rules -- --test-threads=1 2>&1 | tail -10
 
 Expected: PASS.
 
-- [ ] **Step 3: Run full workspace tests.**
+- [x] **Step 3: Run full workspace tests.**
 
 ```bash
 cargo test --workspace -- --test-threads=1 2>&1 | tail -10
