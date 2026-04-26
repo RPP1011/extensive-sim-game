@@ -203,15 +203,23 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-5"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 6,
-      "steps_done": 0,
+      "steps_done": 6,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "4a91edc8",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS",
+          "cross-backend-parity": "PASS"
+        },
+        "note": "workspace builds clean default + engine_rules/interpreted-rules; both impl blocks updated"
+      },
+      "started_at": "2026-04-26T22:05:06Z",
+      "completed_at": "2026-04-26T22:07:40Z",
       "retry_count": 0
     },
     {
@@ -602,9 +610,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T22:03:07Z",
-    "iterations_completed": 3,
-    "tasks_closed": 3,
+    "last_iteration_at": "2026-04-26T22:07:40Z",
+    "iterations_completed": 4,
+    "tasks_closed": 4,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

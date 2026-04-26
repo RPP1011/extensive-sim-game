@@ -281,7 +281,7 @@ git commit -m "feat(dsl_compiler,engine_rules): route cascade through backend.ca
 **Files:**
 - Modify: `crates/engine_gpu/src/lib.rs`
 
-- [ ] **Step 1: Locate both `ComputeBackend for GpuBackend` impl blocks.**
+- [x] **Step 1: Locate both `ComputeBackend for GpuBackend` impl blocks.**
 
 There are two impl blocks in `lib.rs`:
 
@@ -290,7 +290,7 @@ There are two impl blocks in `lib.rs`:
 
 Both need `cascade_dispatch`.
 
-- [ ] **Step 2: Add stub to the `#[cfg(not(feature = "gpu"))]` impl (after `commit_mask` at line ~378).**
+- [x] **Step 2: Add stub to the `#[cfg(not(feature = "gpu"))]` impl (after `commit_mask` at line ~378).**
 
 ```rust
     fn cascade_dispatch(
@@ -307,7 +307,7 @@ Both need `cascade_dispatch`.
 
 Note: `Self::Views = ()` for the no-gpu impl, so `run_fixed_point` accepts `&mut ()`. Confirm `CascadeRegistry<Event, ()>::run_fixed_point` compiles — it should because `run_fixed_point` is generic over `V`.
 
-- [ ] **Step 3: Add stub to the `#[cfg(feature = "gpu")]` impl (after `commit_mask` at line ~2783).**
+- [x] **Step 3: Add stub to the `#[cfg(feature = "gpu")]` impl (after `commit_mask` at line ~2783).**
 
 ```rust
     fn cascade_dispatch(
@@ -322,7 +322,7 @@ Note: `Self::Views = ()` for the no-gpu impl, so `run_fixed_point` accepts `&mut
     }
 ```
 
-- [ ] **Step 4: Build workspace.**
+- [x] **Step 4: Build workspace.**
 
 ```bash
 cargo build --workspace 2>&1 | grep -E "^error" | head -20
@@ -330,7 +330,7 @@ cargo build --workspace 2>&1 | grep -E "^error" | head -20
 
 Expected: SUCCESS (all crates compile).
 
-- [ ] **Step 5: Run full test suite.**
+- [x] **Step 5: Run full test suite.**
 
 ```bash
 cargo test --workspace -- --test-threads=1 2>&1 | tail -20
@@ -338,7 +338,7 @@ cargo test --workspace -- --test-threads=1 2>&1 | tail -20
 
 Expected: all tests PASS. The behavior of `SerialBackend` is unchanged; `GpuBackend` stub delegates identically.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add crates/engine_gpu/src/lib.rs
