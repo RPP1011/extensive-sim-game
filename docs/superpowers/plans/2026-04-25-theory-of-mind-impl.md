@@ -49,7 +49,7 @@
   - P10 (No Runtime Panic): PASS — `BoundedMap` returns `Result`/`Option` on misses; eviction uses LRU not panic.
   - P11 (Reduction Determinism): PASS — belief decay is per-agent-independent; no cross-agent reductions.
 
-- **Re-evaluation:** [x] AIS reviewed at design phase. [ ] AIS reviewed post-design (tick after Task 14).
+- **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — final scope: 14 tasks landed. BoundedMap primitive in engine; BeliefState in engine_data (hand-written, not DSL-emitted — investigation showed SimState itself is hand-written, no struct-emit infra). cold_beliefs SoA Vec on SimState. Update cascade rule (`update_beliefs`) in physics.sim fires on AgentMoved/AgentAttacked/AgentDied. Per-tick decay phase emitted (Phase 5b). Belief-read scoring grammar lowered to static-table predicate KINDs (KIND_BELIEF_SCALAR_COMPARE, KIND_BELIEF_GRADIENT). Reference test `silent_wolf_belief.rs` demonstrates end-to-end: belief plant → score delta. Feature flag `theory-of-mind` (cascading `engine_rules/theory-of-mind`) keeps default build zero-cost. DSL-stdlib gaps surfaced: `query.agents_within`, `agents.pos(id)`, `agents.creature_type(id)` — used `query.nearby_kin` (same-species only) + `..Default::default()` workarounds. Phase 2 (second-order, terrain LOS, lying, trust) deferred per spec §2.2.
 
 ---
 
@@ -1010,7 +1010,7 @@ git -c core.hooksPath= commit -am "docs: theory-of-mind Phase 1 reference + stat
 
 ### Task 14: Final verification + AIS tick
 
-- [ ] **Step 1: Clean build + workspace test (both feature modes).**
+- [x] **Step 1: Clean build + workspace test (both feature modes).**
 
 ```bash
 unset RUSTFLAGS && cargo clean
@@ -1022,7 +1022,7 @@ unset RUSTFLAGS && cargo test --workspace --features theory-of-mind
 
 Expected: SUCCESS modulo pre-existing `spec_snippets` failure.
 
-- [ ] **Step 2: `compile-dsl --check` round-trip.**
+- [x] **Step 2: `compile-dsl --check` round-trip.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
@@ -1030,13 +1030,13 @@ unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
 
 Expected: clean.
 
-- [ ] **Step 3: trybuild seal still passes.**
+- [x] **Step 3: trybuild seal still passes.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test sealed_cascade_handler
 ```
 
-- [ ] **Step 4: Tick AIS post-design checkbox.**
+- [x] **Step 4: Tick AIS post-design checkbox.**
 
 ```
 [x] AIS reviewed post-design — final scope: 14 tasks landed. BoundedMap
@@ -1047,7 +1047,7 @@ keeps base build zero-impact. Phase 2 (second-order, terrain LOS,
 lying, trust) deferred per spec §2.2.
 ```
 
-- [ ] **Step 5: Final commit.**
+- [x] **Step 5: Final commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "chore(plan-tom): final verification + AIS tick (Plan ToM Task 14)"
