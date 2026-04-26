@@ -3485,15 +3485,19 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-14"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "8a52c99d",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "docs only: ROADMAP.md updated — ToM Phase 1 removed from active tier; partially-landed entry notes Phase 1 landed 2026-04-26. Phase 2 deferred. status.md update skipped (Theory-of-mind subsystem not in main status.md table; ROADMAP is the canonical landing-state doc per project conventions)."
+      },
+      "started_at": "2026-04-26T09:22:06Z",
+      "completed_at": "2026-04-26T09:22:47Z",
       "retry_count": 0
     },
     {
@@ -3633,9 +3637,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T09:19:46Z",
-    "iterations_completed": 38,
-    "tasks_closed": 35,
+    "last_iteration_at": "2026-04-26T09:22:47Z",
+    "iterations_completed": 39,
+    "tasks_closed": 36,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

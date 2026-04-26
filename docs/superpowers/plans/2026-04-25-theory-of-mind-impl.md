@@ -983,7 +983,7 @@ git -c core.hooksPath= commit -am "chore: parity sweep + schema baseline updates
 - Modify: `docs/spec/scoring_fields.md` (or wherever scoring-row reference lives)
 - Modify: `docs/engine/status.md` — mark theory-of-mind as Phase 1 done
 
-- [ ] **Step 1: Add belief-accessor reference.**
+- [x] **Step 1: Add belief-accessor reference.**
 
 In `docs/spec/scoring_fields.md` (or equivalent), document the three forms:
 - `beliefs(self).about(target).<field>`
@@ -992,15 +992,15 @@ In `docs/spec/scoring_fields.md` (or equivalent), document the three forms:
 
 Per spec §3.5 — "what each lowers to + default values when no belief exists".
 
-- [ ] **Step 2: Update status.**
+- [x] **Step 2: Update status.**
 
 In `docs/engine/status.md`, find the Theory-of-mind section and mark Phase 1 as ✅ landed (commit ref). Phase 2 (second-order, terrain LOS, lying, trust) stays ❌.
 
-- [ ] **Step 3: Update ROADMAP.md.**
+- [x] **Step 3: Update ROADMAP.md.**
 
 Move "Theory-of-mind" from "Partially landed (DSL stubs / MVP seam done; behaviour attachment pending)" to fully landed (delete the line, per ROADMAP.md's "leave the doc when fully merged" convention).
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "docs: theory-of-mind Phase 1 reference + status update (Plan ToM Task 13)"
