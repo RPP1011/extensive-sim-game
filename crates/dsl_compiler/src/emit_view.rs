@@ -139,7 +139,7 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
         .unwrap();
         writeln!(
             out,
-            "    pub fn fold_all(&mut self, _events: &crate::event::EventRing, _events_before: usize, _tick: u32) {{}}"
+            "    pub fn fold_all(&mut self, _events: &EventRing<Event>, _events_before: usize, _tick: u32) {{}}"
         )
         .unwrap();
         writeln!(out, "}}").unwrap();
@@ -175,9 +175,12 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
         .filter(|v| matches!(v.kind, ViewKind::Materialized(_)))
         .collect();
 
+    writeln!(out, "use engine::event::EventRing;").unwrap();
+    writeln!(out, "use engine_data::events::Event;").unwrap();
+    writeln!(out).unwrap();
+
     writeln!(out, "/// Compiler-emitted view registry — one field per `@materialized` view.").unwrap();
-    writeln!(out, "/// `SimState` owns one of these; the tick pipeline calls `fold_all` at").unwrap();
-    writeln!(out, "/// the view-fold phase (spec §7.1).").unwrap();
+    writeln!(out, "/// The tick pipeline calls `fold_all` at the view-fold phase (spec §7.1).").unwrap();
     writeln!(out, "#[derive(Debug, Default)]").unwrap();
     writeln!(out, "pub struct ViewRegistry {{").unwrap();
     for v in &materialized {
@@ -195,13 +198,8 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
     writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "    /// Fold every materialized view over the current tick's events.").unwrap();
-    writeln!(out, "    /// Called from `step_full` at the view-fold phase.").unwrap();
-    writeln!(out, "    ///").unwrap();
-    writeln!(out, "    /// `events_before` is the value of `events.push_count()` at the TOP of").unwrap();
-    writeln!(out, "    /// the current tick, snapshot *before* any events were pushed this tick.").unwrap();
-    writeln!(out, "    /// The fold iterates `events.iter_since(events_before)` so each view only").unwrap();
-    writeln!(out, "    /// sees events emitted this tick (not the whole retained ring).").unwrap();
-    writeln!(out, "    pub fn fold_all(&mut self, events: &crate::event::EventRing, events_before: usize, tick: u32) {{").unwrap();
+    writeln!(out, "    /// `events_before` is the push_count snapshot at the top of the tick.").unwrap();
+    writeln!(out, "    pub fn fold_all(&mut self, events: &EventRing<Event>, events_before: usize, tick: u32) {{").unwrap();
     if materialized.is_empty() {
         writeln!(out, "        let _ = (events, events_before, tick);").unwrap();
     } else {
@@ -211,6 +209,15 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
             writeln!(out, "            self.{field}.fold_event(e, tick);").unwrap();
         }
         writeln!(out, "        }}").unwrap();
+    }
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "    /// Fold a single event into all materialized views.").unwrap();
+    writeln!(out, "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{").unwrap();
+    for v in &materialized {
+        let field = snake_case(&v.name);
+        writeln!(out, "        self.{field}.fold_event(event, tick);").unwrap();
     }
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
@@ -237,8 +244,8 @@ fn emit_header(out: &mut String, source_file: Option<&str>) {
 }
 
 fn emit_imports_lazy(out: &mut String) {
-    writeln!(out, "use crate::ids::AgentId;").unwrap();
-    writeln!(out, "use crate::state::SimState;").unwrap();
+    writeln!(out, "use engine::ids::AgentId;").unwrap();
+    writeln!(out, "use engine::state::SimState;").unwrap();
     writeln!(out).unwrap();
 }
 
@@ -247,8 +254,8 @@ fn emit_imports_materialized(out: &mut String, uses_hashmap: bool) {
         writeln!(out, "use std::collections::HashMap;").unwrap();
         writeln!(out).unwrap();
     }
-    writeln!(out, "use crate::event::Event;").unwrap();
-    writeln!(out, "use crate::ids::AgentId;").unwrap();
+    writeln!(out, "use engine_data::events::Event;").unwrap();
+    writeln!(out, "use engine::ids::AgentId;").unwrap();
     writeln!(out).unwrap();
 }
 
@@ -279,11 +286,6 @@ fn emit_lazy_fn(out: &mut String, view: &ViewIR) -> Result<(), EmitError> {
         out,
         "/// @lazy view — lowered from `view {}(...)` in the sim DSL.",
         view.name
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "/// Pure expression body; re-evaluated on each call. Spec §2.3."
     )
     .unwrap();
     writeln!(
@@ -570,11 +572,6 @@ fn emit_pair_map_struct(
     // detect the shape at emission time.
     writeln!(
         out,
-        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
-    )
-    .unwrap();
-    writeln!(
-        out,
         "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
     )
     .unwrap();
@@ -629,21 +626,10 @@ fn emit_per_entity_topk1_struct(
 
     writeln!(
         out,
-        "/// @materialized view `{}` — `storage = per_entity_topk(K=1)` over `HashMap<{key_ty}, {val_ty}>`.",
+        "/// @materialized view `{}` — `storage = per_entity_topk(K=1)`.",
         view.name
     )
     .unwrap();
-    writeln!(
-        out,
-        "/// Single-slot per key; insert/remove driven by paired `*Committed` / `*Broken`"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "/// events (task 139). See `dsl_compiler::emit_view::emit_per_entity_topk1_struct`"
-    )
-    .unwrap();
-    writeln!(out, "/// for the fold convention.").unwrap();
     writeln!(out, "#[derive(Debug, Default)]").unwrap();
     writeln!(out, "pub struct {ty_name} {{").unwrap();
     writeln!(out, "    value: HashMap<{key_ty}, {val_ty}>,").unwrap();
@@ -661,12 +647,6 @@ fn emit_per_entity_topk1_struct(
     .unwrap();
     writeln!(out).unwrap();
 
-    // get() returns Option<Val> — a key may have no slot filled.
-    writeln!(
-        out,
-        "    /// Current slot for `{key_name}`, if any. `None` when the key has no partner."
-    )
-    .unwrap();
     writeln!(
         out,
         "    pub fn get(&self, {key_name}: {key_ty}) -> Option<{val_ty}> {{"
@@ -680,40 +660,22 @@ fn emit_per_entity_topk1_struct(
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
 
-    // Escape hatch for the engine's legacy setter (`set_agent_engaged_with`) —
-    // tests and pre-event-driven code still seed slots directly.
-    writeln!(
-        out,
-        "    /// Direct slot setter. Used by the engine's back-compat `set_*`"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// wrappers; game logic should prefer emitting the paired commit /"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// break events and letting the fold place the slot."
-    )
-    .unwrap();
     writeln!(
         out,
         "    pub fn set(&mut self, {key_name}: {key_ty}, v: Option<{val_ty}>) {{"
     )
     .unwrap();
     writeln!(out, "        match v {{").unwrap();
-    writeln!(out, "            Some(val) => {{ self.value.insert({key_name}, val); }}").unwrap();
-    writeln!(out, "            None => {{ self.value.remove(&{key_name}); }}").unwrap();
+    writeln!(out, "            Some(val) => {{").unwrap();
+    writeln!(out, "                self.value.insert({key_name}, val);").unwrap();
+    writeln!(out, "            }}").unwrap();
+    writeln!(out, "            None => {{").unwrap();
+    writeln!(out, "                self.value.remove(&{key_name});").unwrap();
+    writeln!(out, "            }}").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
 
-    writeln!(
-        out,
-        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
-    )
-    .unwrap();
     writeln!(
         out,
         "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
@@ -844,64 +806,31 @@ fn emit_per_entity_topk_k_struct(
         };
         writeln!(
             out,
-            "/// @decay(rate = {}, per = {per}) — anchor-pattern decay applied on read.",
+            "/// @decay(rate = {}, per = {per})",
             d.rate
         )
         .unwrap();
     }
-    writeln!(
-        out,
-        "/// Storage: one `[TopkSlot; {k}]` per observer slot in a `Vec`. Total footprint"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "/// is O(N·K) — at K={k} and N=200k that's {} MB vs the dense pair_map's",
-        (k * 12 * 200_000) / (1024 * 1024)
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "/// O(N²·4) ≈ 160 GB. Fold semantics: find-or-evict-else-drop (task 196)."
-    )
-    .unwrap();
 
     // Inner slot struct. Name-spaced to the view's module so callers
     // don't collide with other topk views' slot types.
     writeln!(out, "#[derive(Debug, Clone, Copy, Default)]").unwrap();
     writeln!(out, "pub struct TopkSlot {{").unwrap();
-    writeln!(out, "    /// Raw AgentId (1-based). 0 means empty.").unwrap();
     writeln!(out, "    pub id: u32,").unwrap();
-    writeln!(out, "    /// Stored value; decay (if configured) applies on read.").unwrap();
     writeln!(out, "    pub value: {val_ty},").unwrap();
-    writeln!(out, "    /// Tick when `value` was last written (@decay anchor).").unwrap();
     writeln!(out, "    pub anchor_tick: u32,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[derive(Debug, Default)]").unwrap();
     writeln!(out, "pub struct {ty_name} {{").unwrap();
-    writeln!(
-        out,
-        "    /// One array of {k} slots per observer. `Vec::len()` grows on demand"
-    )
-    .unwrap();
-    writeln!(out, "    /// as `fold_event` sees higher observer ids.").unwrap();
     writeln!(out, "    slots: Vec<[TopkSlot; {k}]>,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "impl {ty_name} {{").unwrap();
-    writeln!(out, "    /// Slot count per observer — the `K` from `per_entity_topk(K={k})`.").unwrap();
     writeln!(out, "    pub const K: usize = {k};").unwrap();
     if let Some(d) = decay {
-        writeln!(out).unwrap();
-        writeln!(
-            out,
-            "    /// Decay rate per tick — compile-time constant from `@decay(rate = {})`.",
-            d.rate
-        )
-        .unwrap();
         writeln!(
             out,
             "    pub const RATE: {val_ty} = {}_f32;",
@@ -912,12 +841,6 @@ fn emit_per_entity_topk_k_struct(
     writeln!(out).unwrap();
     writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
     writeln!(out).unwrap();
-    writeln!(
-        out,
-        "    /// Number of observer slots currently provisioned. `fold_event` grows"
-    )
-    .unwrap();
-    writeln!(out, "    /// this on demand up to `max_observer + 1`.").unwrap();
     writeln!(out, "    pub fn len(&self) -> usize {{ self.slots.len() }}").unwrap();
     writeln!(
         out,
@@ -928,16 +851,6 @@ fn emit_per_entity_topk_k_struct(
 
     // get(): signature depends on decay. Both flavours scan K slots.
     if decay.is_some() {
-        writeln!(
-            out,
-            "    /// Current value for `{b_name}` as observed by `{a_name}`,"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    /// decayed from its anchor tick. Returns `initial` when the pair isn't in {a_name}'s top-{k}."
-        )
-        .unwrap();
         writeln!(
             out,
             "    pub fn get(&self, {a_name}: {k1}, {b_name}: {k2}, tick: u32) -> {val_ty} {{"
@@ -977,16 +890,6 @@ fn emit_per_entity_topk_k_struct(
         // sum_for_first — now sums across at-most-K slots.
         writeln!(
             out,
-            "    /// Σ get({a_name}, x, tick) over `{a_name}`'s top-{k} slots."
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    /// Semantic drift vs dense pair_map: sum is over the top-K attackers, not every recorded pair."
-        )
-        .unwrap();
-        writeln!(
-            out,
             "    pub fn sum_for_first(&self, {a_name}: {k1}, tick: u32) -> {val_ty} {{"
         )
         .unwrap();
@@ -1022,16 +925,6 @@ fn emit_per_entity_topk_k_struct(
     } else {
         writeln!(
             out,
-            "    /// Current value for `{b_name}` as observed by `{a_name}`."
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    /// Returns `initial` when the pair isn't in {a_name}'s top-{k}."
-        )
-        .unwrap();
-        writeln!(
-            out,
             "    pub fn get(&self, {a_name}: {k1}, {b_name}: {k2}) -> {val_ty} {{"
         )
         .unwrap();
@@ -1051,16 +944,6 @@ fn emit_per_entity_topk_k_struct(
         // sum_for_first also useful even without decay — emit it for
         // consistency so scoring's `_` wildcard slot works across all
         // topk views.
-        writeln!(
-            out,
-            "    /// Σ get({a_name}, x) over `{a_name}`'s top-{k} slots."
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "    /// Semantic drift vs dense pair_map: sum is over top-K attackers, not every recorded pair."
-        )
-        .unwrap();
         writeln!(
             out,
             "    pub fn sum_for_first(&self, {a_name}: {k1}) -> {val_ty} {{"
@@ -1111,16 +994,6 @@ fn emit_per_entity_topk_k_struct(
     } else {
         None
     };
-    writeln!(
-        out,
-        "    /// Fold `delta` into the (observer, attacker) slot. See the"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// module docstring above for find-or-evict-else-drop semantics."
-    )
-    .unwrap();
     writeln!(
         out,
         "    fn fold_one(&mut self, observer: u32, attacker: u32, delta: {val_ty}, tick: u32) {{"
@@ -1183,8 +1056,6 @@ fn emit_per_entity_topk_k_struct(
     writeln!(out, "        }}").unwrap();
     // 3. Evict smallest-value (by current decayed value) if delta beats it.
     if decay.is_some() {
-        writeln!(out, "        // Full row — compute each slot's decayed value, evict the smallest").unwrap();
-        writeln!(out, "        // if `delta` can outweigh it; otherwise drop the fold.").unwrap();
         writeln!(out, "        let mut min_i: usize = 0;").unwrap();
         writeln!(
             out,
@@ -1212,8 +1083,6 @@ fn emit_per_entity_topk_k_struct(
         writeln!(out, "            if v < min_v {{ min_v = v; min_i = i; }}").unwrap();
         writeln!(out, "        }}").unwrap();
     } else {
-        writeln!(out, "        // Full row — evict the smallest-value slot if `delta` beats it,").unwrap();
-        writeln!(out, "        // else drop the fold (too weak to displace).").unwrap();
         writeln!(out, "        let mut min_i: usize = 0;").unwrap();
         writeln!(out, "        let mut min_v: {val_ty} = row[0].value;").unwrap();
         writeln!(out, "        for i in 1..{k} {{").unwrap();
@@ -1236,11 +1105,6 @@ fn emit_per_entity_topk_k_struct(
     writeln!(out).unwrap();
 
     // fold_event dispatch. One arm per handler.
-    writeln!(
-        out,
-        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
-    )
-    .unwrap();
     writeln!(
         out,
         "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
@@ -1365,75 +1229,28 @@ fn emit_symmetric_pair_topk_struct(
         view.name
     )
     .unwrap();
-    writeln!(
-        out,
-        "/// Pair-keyed symmetric storage: an edge `({a_name}, {b_name})` is stored once,"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "/// on the lower-id endpoint's slot array. Reads canonicalise the query pair so"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "/// `get({a_name}, {b_name}) == get({b_name}, {a_name})`. Fold: find-or-insert-else-evict-weakest-|v|."
-    )
-    .unwrap();
 
     // Per-edge slot struct. `other == 0` marks an empty slot (AgentId is
     // 1-based, matching the `per_entity_topk` convention).
     writeln!(out, "#[derive(Debug, Clone, Copy, Default)]").unwrap();
     writeln!(out, "pub struct {edge_ty} {{").unwrap();
-    writeln!(
-        out,
-        "    /// Raw AgentId of the higher-id endpoint. 0 means empty."
-    )
-    .unwrap();
     writeln!(out, "    pub other: u32,").unwrap();
-    writeln!(out, "    /// Stored value for the symmetric pair.").unwrap();
     writeln!(out, "    pub value: {val_ty},").unwrap();
-    writeln!(
-        out,
-        "    /// Tick when `value` was last written. Reserved for future decay."
-    )
-    .unwrap();
     writeln!(out, "    pub anchor_tick: u32,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[derive(Debug, Default)]").unwrap();
     writeln!(out, "pub struct {ty_name} {{").unwrap();
-    writeln!(
-        out,
-        "    /// One array of {k} slots per owner agent. `Vec::len()` grows on demand"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// as `fold_event` sees higher agent ids. Edges live on the lower-id side."
-    )
-    .unwrap();
     writeln!(out, "    slots: Vec<[{edge_ty}; {k}]>,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "impl {ty_name} {{").unwrap();
-    writeln!(
-        out,
-        "    /// Slot count per owner — the `K` from `symmetric_pair_topk(K={k})`."
-    )
-    .unwrap();
     writeln!(out, "    pub const K: usize = {k};").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
     writeln!(out).unwrap();
-    writeln!(
-        out,
-        "    /// Number of owner slots currently provisioned. `fold_event` grows this"
-    )
-    .unwrap();
-    writeln!(out, "    /// on demand up to `max_id + 1`.").unwrap();
     writeln!(out, "    pub fn len(&self) -> usize {{ self.slots.len() }}").unwrap();
     writeln!(
         out,
@@ -1443,12 +1260,6 @@ fn emit_symmetric_pair_topk_struct(
     writeln!(out).unwrap();
 
     // canonical_pair helper — min-id owns the edge, max-id is the "other".
-    writeln!(
-        out,
-        "    /// Canonicalise a pair: the lower-id endpoint owns the slot,"
-    )
-    .unwrap();
-    writeln!(out, "    /// the higher-id endpoint is the `other` field.").unwrap();
     writeln!(
         out,
         "    fn canonical_pair({a_name}: {k1}, {b_name}: {k2}) -> ({k1}, {k2}) {{"
@@ -1463,17 +1274,6 @@ fn emit_symmetric_pair_topk_struct(
     writeln!(out).unwrap();
 
     // get(): canonicalise then scan owner's slot array for `other == max_id`.
-    writeln!(
-        out,
-        "    /// Current value for the symmetric pair `({a_name}, {b_name})`. Pair order"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// is canonicalised so `get(x, y) == get(y, x)`. Returns `initial` when the"
-    )
-    .unwrap();
-    writeln!(out, "    /// pair isn't in the owner's top-{k}.").unwrap();
     writeln!(
         out,
         "    pub fn get(&self, {a_name}: {k1}, {b_name}: {k2}) -> {val_ty} {{"
@@ -1533,21 +1333,6 @@ fn emit_symmetric_pair_topk_struct(
     };
     writeln!(
         out,
-        "    /// Add `delta` to the symmetric edge `({a_name}, {b_name})` and return the"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// resulting value. Upserts on canonical (min, max) order; evicts the"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// weakest-|value| slot when full, iff `|delta|` beats the weakest."
-    )
-    .unwrap();
-    writeln!(
-        out,
         "    pub fn adjust(&mut self, {a_name}: {k1}, {b_name}: {k2}, delta: {val_ty}, tick: u32) -> {val_ty} {{"
     )
     .unwrap();
@@ -1601,16 +1386,6 @@ fn emit_symmetric_pair_topk_struct(
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }}").unwrap();
     // 3. Evict smallest-|value| if |delta| beats it.
-    writeln!(
-        out,
-        "        // Full row — evict the slot with the smallest |value| if `|delta|`"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        // beats it, else drop the fold (too weak to displace)."
-    )
-    .unwrap();
     writeln!(out, "        let mut min_i: usize = 0;").unwrap();
     writeln!(out, "        let mut min_mag: {val_ty} = row[0].value.abs();").unwrap();
     writeln!(out, "        for i in 1..{k} {{").unwrap();
@@ -1641,11 +1416,6 @@ fn emit_symmetric_pair_topk_struct(
     // fold_event dispatch. One arm per handler; each pipes the pair fields
     // into `adjust` with a constant +1.0 delta (same convention as the
     // per_entity_topk K>=2 emitter).
-    writeln!(
-        out,
-        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
-    )
-    .unwrap();
     writeln!(
         out,
         "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
@@ -2091,79 +1861,30 @@ fn emit_per_entity_ring_struct(
         view.name
     )
     .unwrap();
-    writeln!(
-        out,
-        "/// Per-owner FIFO ring of fixed capacity {k}. Writes append at"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "/// `cursor % K` and bump the cursor; the oldest entry is evicted"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "/// implicitly on overflow. Reads iterate the ring in most-recent-first order."
-    )
-    .unwrap();
 
     // Per-ring slot struct. `source == 0` marks an empty slot (AgentId is
     // 1-based, matching the `per_entity_topk` / `symmetric_pair_topk`
     // convention).
     writeln!(out, "#[derive(Debug, Clone, Copy, Default, PartialEq)]").unwrap();
     writeln!(out, "pub struct {entry_ty} {{").unwrap();
-    writeln!(
-        out,
-        "    /// Raw AgentId of the \"other\" endpoint (the event's non-owner field)."
-    )
-    .unwrap();
-    writeln!(out, "    /// 0 means empty / never written.").unwrap();
     writeln!(out, "    pub source: u32,").unwrap();
-    writeln!(out, "    /// Stored value for this ring entry.").unwrap();
     writeln!(out, "    pub value: {val_ty},").unwrap();
-    writeln!(out, "    /// Tick when this entry was written.").unwrap();
     writeln!(out, "    pub anchor_tick: u32,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[derive(Debug, Default)]").unwrap();
     writeln!(out, "pub struct {ty_name} {{").unwrap();
-    writeln!(
-        out,
-        "    /// One ring of {k} slots per owner agent. `Vec::len()` grows on"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// demand as `fold_event` sees higher owner ids."
-    )
-    .unwrap();
     writeln!(out, "    rings: Vec<[{entry_ty}; {k}]>,").unwrap();
-    writeln!(
-        out,
-        "    /// Monotonic write cursor per owner. Slot index = `cursor % K`."
-    )
-    .unwrap();
     writeln!(out, "    cursors: Vec<u32>,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "impl {ty_name} {{").unwrap();
-    writeln!(
-        out,
-        "    /// Ring capacity per owner — the `K` from `per_entity_ring(K={k})`."
-    )
-    .unwrap();
     writeln!(out, "    pub const K: usize = {k};").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
     writeln!(out).unwrap();
-    writeln!(
-        out,
-        "    /// Number of owner rings currently provisioned. `fold_event` grows"
-    )
-    .unwrap();
-    writeln!(out, "    /// this on demand up to `max_owner + 1`.").unwrap();
     writeln!(out, "    pub fn len(&self) -> usize {{ self.rings.len() }}").unwrap();
     writeln!(
         out,
@@ -2197,22 +1918,6 @@ fn emit_per_entity_ring_struct(
     // fold arm can pass `observer.raw()` without re-wrapping.
     writeln!(
         out,
-        "    /// Append `entry` to the ring owned by `observer_raw` (raw AgentId,"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// 1-based). Writes at `cursor % K` and increments the cursor. A full"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// ring silently evicts the oldest entry (FIFO). `observer_raw == 0`"
-    )
-    .unwrap();
-    writeln!(out, "    /// is a no-op.").unwrap();
-    writeln!(
-        out,
         "    pub fn push(&mut self, observer_raw: u32, entry: {entry_ty}) {{"
     )
     .unwrap();
@@ -2240,12 +1945,6 @@ fn emit_per_entity_ring_struct(
     // cursor(): inspect the write cursor for testing / replay.
     writeln!(
         out,
-        "    /// Current write cursor for `observer` (0 if the ring was never written)."
-    )
-    .unwrap();
-    writeln!(out, "    /// Monotonic; wraps on u32 overflow.").unwrap();
-    writeln!(
-        out,
         "    pub fn cursor(&self, {owner_name}: {owner_ty}) -> u32 {{"
     )
     .unwrap();
@@ -2258,16 +1957,6 @@ fn emit_per_entity_ring_struct(
     // recent(): return the most-recent entry, or the initial value when
     // the ring is empty. Mirrors the `get` accessor of the topk shapes so
     // lazy consumers have a single-value read path.
-    writeln!(
-        out,
-        "    /// Most recently written `value` for `{owner_name}`'s ring, or `initial`"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    /// when the ring has never been written."
-    )
-    .unwrap();
     writeln!(
         out,
         "    pub fn get(&self, {owner_name}: {owner_ty}) -> {val_ty} {{"
@@ -2300,12 +1989,6 @@ fn emit_per_entity_ring_struct(
     // ordering can combine with `cursor()`.
     writeln!(
         out,
-        "    /// Raw ring slice for `{owner_name}` in slot order. Returns `None` when"
-    )
-    .unwrap();
-    writeln!(out, "    /// the ring has not yet been provisioned.").unwrap();
-    writeln!(
-        out,
         "    pub fn entries(&self, {owner_name}: {owner_ty}) -> Option<&[{entry_ty}; {k}]> {{"
     )
     .unwrap();
@@ -2317,11 +2000,6 @@ fn emit_per_entity_ring_struct(
 
     // fold_event dispatch. One arm per handler; each projects the event
     // fields into an `<Name>Entry` and calls `push`.
-    writeln!(
-        out,
-        "    /// Advance / accumulate on each matching event. Spec §7.1 view-fold phase."
-    )
-    .unwrap();
     writeln!(
         out,
         "    pub fn fold_event(&mut self, event: &Event, tick: u32) {{"
@@ -2384,7 +2062,7 @@ fn emit_per_entity_ring_fold_arm(
     .unwrap();
     writeln!(
         out,
-        "                let entry = {entry_ty} {{ source: {source_field}.raw(), value: 1.0 as {val_ty}, anchor_tick: tick }};"
+        "                let entry = {entry_ty} {{ source: {source_field}.raw(), value: 1.0_{val_ty}, anchor_tick: tick }};"
     )
     .unwrap();
     writeln!(

@@ -2,9 +2,13 @@
 name = "engine_rules"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
-engine_generated = { path = "../engine_generated" }
+engine = { path = "../engine" }
+engine_data = { path = "../engine_data" }
+glam = "0.29"
+smallvec = "1.13"
 
 [dev-dependencies]
 tempfile = "3"

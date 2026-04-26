@@ -1,4 +1,4 @@
-use crate::creature::CreatureType;
+use engine_data::entities::CreatureType;
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]

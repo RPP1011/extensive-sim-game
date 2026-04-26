@@ -26,7 +26,7 @@
 
 #![cfg(feature = "gpu")]
 
-use engine::event::Event;
+use engine_data::events::Event;
 use engine::generated::views::{MyEnemies, PackFocus, RallyBoost, ThreatLevel};
 use engine::ids::AgentId;
 use engine_gpu::view_storage::{FoldInputPair, TopkReadback, ViewStorage};

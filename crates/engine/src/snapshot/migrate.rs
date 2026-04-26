@@ -62,10 +62,10 @@ impl Default for MigrationRegistry {
 /// On hash match, falls through to [`crate::snapshot::load_snapshot`].
 /// On hash mismatch with no registered migration, returns the same
 /// `SchemaMismatch` error the non-migration path would.
-pub fn load_snapshot_with_migrations(
+pub fn load_snapshot_with_migrations<E: crate::event::EventLike>(
     path: &std::path::Path,
     reg: &MigrationRegistry,
-) -> Result<(crate::state::SimState, crate::event::EventRing), SnapshotError> {
+) -> Result<(crate::state::SimState, crate::event::EventRing<E>), SnapshotError> {
     let bytes = std::fs::read(path)?;
     let header = super::format::SnapshotHeader::from_bytes(&bytes)?;
     let current = crate::schema_hash::schema_hash();

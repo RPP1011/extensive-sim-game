@@ -22,7 +22,7 @@
 
 #![cfg(feature = "gpu")]
 
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use engine_gpu::spatial_gpu::SpatialTestHarness;

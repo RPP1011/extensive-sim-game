@@ -1,12 +1,13 @@
 //! Combat Foundation Task 5 — engagement symmetry + range + determinism
 //! proptest. Covers acceptance criterion (5) in the plan header.
 
-use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_rules::views::ViewRegistry;
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
-use engine_rules::config::Config;
+use engine_data::config::Config;
 use glam::Vec3;
 use proptest::prelude::*;
 
@@ -52,7 +53,7 @@ fn run_tick_start(state: &mut SimState) {
     // position so the `engagement_on_move` physics rule (see
     // `assets/sim/physics.sim`) recomputes nearest-hostile pairings via
     // the cascade, then run the registry to fixed point.
-    let mut ring = EventRing::with_cap(256);
+    let mut ring = EventRing::<Event>::with_cap(256);
     drain_initial_engagements(state, &mut ring);
 }
 
@@ -60,15 +61,16 @@ fn run_tick_start(state: &mut SimState) {
 /// then run the engine cascade to fixed point. This plays the moves that
 /// `step_full`'s movement phase would normally emit so the engagement
 /// physics rule fires once per agent and converges to steady state.
-fn drain_initial_engagements(state: &mut SimState, events: &mut EventRing) {
-    let registry = CascadeRegistry::with_engine_builtins();
+fn drain_initial_engagements(state: &mut SimState, events: &mut EventRing<Event>) {
+    let registry = engine_rules::with_engine_builtins();
+    let mut views = ViewRegistry::new();
     let tick = state.tick;
     let alive: Vec<AgentId> = state.agents_alive().collect();
     for id in alive {
         let pos = state.agent_pos(id).unwrap_or(Vec3::ZERO);
         events.push(Event::AgentMoved { actor: id, from: pos, location: pos, tick });
     }
-    registry.run_fixed_point(state, events);
+    registry.run_fixed_point(state, &mut views, events);
 }
 
 proptest! {

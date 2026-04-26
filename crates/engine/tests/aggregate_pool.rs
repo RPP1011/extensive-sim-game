@@ -1,5 +1,5 @@
 use engine::aggregate::{AggregatePool, Group, Quest};
-use engine::policy::{QuestCategory, Resolution};
+use engine_data::types::{QuestCategory, Resolution};
 
 #[test]
 fn alloc_returns_pool_id() {

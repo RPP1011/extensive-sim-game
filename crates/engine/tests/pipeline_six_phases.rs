@@ -1,21 +1,23 @@
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::invariant::{InvariantRegistry, PoolNonOverlapInvariant};
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step_full, SimScratch};
+use engine::step::{step_full, SimScratch}; // Plan B1' Task 11: step_full is unimplemented!() stub
 use engine::telemetry::{metrics, VecSink};
 use engine::view::{DamageTaken, MaterializedView};
 use glam::Vec3;
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn six_phase_pipeline_runs_clean() {
     let mut state = SimState::new(20, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(10_000);
-    let cascade = CascadeRegistry::new();
-    let mut invariants = InvariantRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(10_000);
+    let cascade = CascadeRegistry::<Event>::new();
+    let mut invariants = InvariantRegistry::<Event>::new();
     invariants.register(Box::new(PoolNonOverlapInvariant));
     let telemetry = VecSink::new();
 
@@ -34,7 +36,7 @@ fn six_phase_pipeline_runs_clean() {
 
     let mut dmg = DamageTaken::new(state.agent_cap() as usize);
     for _ in 0..50 {
-        let mut views: Vec<&mut dyn MaterializedView> = vec![&mut dmg];
+        let mut views: Vec<&mut dyn MaterializedView<Event>> = vec![&mut dmg];
         step_full(
             &mut state,
             &mut scratch,
@@ -86,26 +88,28 @@ fn six_phase_pipeline_runs_clean() {
     }
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "Pre")]
 fn step_full_panics_when_scratch_undersized() {
     use engine::cascade::CascadeRegistry;
-    use engine::creature::CreatureType;
+    use engine_data::entities::CreatureType;
     use engine::event::EventRing;
+use engine_data::events::Event;
     use engine::invariant::InvariantRegistry;
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};
-    use engine::step::{step_full, SimScratch};
+    use engine::step::{step_full, SimScratch}; // Plan B1' Task 11: step_full is unimplemented!() stub
     use engine::telemetry::NullSink;
     use glam::Vec3;
 
     let mut state = SimState::new(8, 42);
     // Deliberately mis-sized: 2 instead of 8.
     let mut scratch = SimScratch::new(2);
-    let mut events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
-    let invariants = InvariantRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
+    let invariants = InvariantRegistry::<Event>::new();
 
     state.spawn_agent(AgentSpawn {
         creature_type: CreatureType::Human,

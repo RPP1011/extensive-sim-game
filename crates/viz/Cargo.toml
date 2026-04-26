@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 engine = { path = "../engine" }
+engine_data = { path = "../engine_data" }
+engine_rules = { path = "../engine_rules" }
 voxel_engine = { path = "/home/ricky/Projects/voxel_engine", features = ["app-harness"] }
 winit = "0.30"
 glam = "0.29"

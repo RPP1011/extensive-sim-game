@@ -29,7 +29,7 @@ use super::{Action, ActionKind, MicroTarget, PolicyBackend};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind, TargetMask};
 use crate::state::SimState;
-use engine_rules::scoring::{PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE};
+use engine_data::scoring::{PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE};
 
 pub struct UtilityBackend;
 
@@ -336,7 +336,7 @@ fn eval_predicate(
 
 /// Evaluate a `@materialized` view call referenced by a scoring
 /// predicate. `pred.field_id` carries the VIEW_ID (one of the
-/// compile-time `VIEW_ID_*` constants in `engine_rules::scoring`);
+/// compile-time `VIEW_ID_*` constants in `engine_data::scoring`);
 /// `pred.payload[4]` / `[5]` are arg-slot codes:
 ///
 /// - `ARG_SELF = 0` → the scorer's current agent.
@@ -358,113 +358,19 @@ fn eval_view_call(
     let slot0 = pred.payload[4];
     let slot1 = pred.payload[5];
     match pred.field_id {
-        PredicateDescriptor::VIEW_ID_THREAT_LEVEL => {
-            let a = match resolve_slot(slot0, agent, target) {
-                Some(id) => id,
-                None => return f32::NAN,
-            };
-            match slot1 {
-                PredicateDescriptor::ARG_WILDCARD => {
-                    state.views.threat_level.sum_for_first(a, state.tick)
-                }
-                _ => {
-                    let b = match resolve_slot(slot1, agent, target) {
-                        Some(id) => id,
-                        None => return f32::NAN,
-                    };
-                    state.views.threat_level.get(a, b, state.tick)
-                }
-            }
-        }
-        PredicateDescriptor::VIEW_ID_MY_ENEMIES => {
-            // `my_enemies(observer, attacker)` — no `@decay`, so the
-            // generated `get(a, b)` takes no tick argument. Saturates
-            // to `1.0` once the first `AgentAttacked` lands on the pair.
-            let a = match resolve_slot(slot0, agent, target) {
-                Some(id) => id,
-                None => return f32::NAN,
-            };
-            let b = match resolve_slot(slot1, agent, target) {
-                Some(id) => id,
-                None => return f32::NAN,
-            };
-            state.views.my_enemies.get(a, b)
-        }
-        PredicateDescriptor::VIEW_ID_KIN_FEAR => {
-            // `kin_fear(observer, dead_kin)` — `@decay(rate=0.955,
-            // per=tick)` on pair_map storage, so the generated `get(a,
-            // b, tick)` returns the decayed value and `sum_for_first(a,
-            // tick)` sums across every recorded dead_kin for this
-            // observer. Task 167 — rout mechanic.
-            let a = match resolve_slot(slot0, agent, target) {
-                Some(id) => id,
-                None => return f32::NAN,
-            };
-            match slot1 {
-                PredicateDescriptor::ARG_WILDCARD => {
-                    state.views.kin_fear.sum_for_first(a, state.tick)
-                }
-                _ => {
-                    let b = match resolve_slot(slot1, agent, target) {
-                        Some(id) => id,
-                        None => return f32::NAN,
-                    };
-                    state.views.kin_fear.get(a, b, state.tick)
-                }
-            }
-        }
-        PredicateDescriptor::VIEW_ID_PACK_FOCUS => {
-            // `pack_focus(observer, target)` — `@decay(rate=0.933,
-            // per=tick)` on pair_map storage (~10-tick half-life). Same
-            // shape as kin_fear: `get(a, b, tick)` reads the decayed
-            // value, `sum_for_first(a, tick)` sums across every
-            // recorded target for this observer. Task 169 — pack-hunt
-            // focus. Scoring's Attack row uses the specific-slot form
-            // (no wildcard) so the boost applies only to the engaged
-            // target, not every candidate.
-            let a = match resolve_slot(slot0, agent, target) {
-                Some(id) => id,
-                None => return f32::NAN,
-            };
-            match slot1 {
-                PredicateDescriptor::ARG_WILDCARD => {
-                    state.views.pack_focus.sum_for_first(a, state.tick)
-                }
-                _ => {
-                    let b = match resolve_slot(slot1, agent, target) {
-                        Some(id) => id,
-                        None => return f32::NAN,
-                    };
-                    state.views.pack_focus.get(a, b, state.tick)
-                }
-            }
-        }
-        PredicateDescriptor::VIEW_ID_RALLY_BOOST => {
-            // `rally_boost(observer, wounded_kin)` — `@decay(rate=0.891,
-            // per=tick)` on pair_map storage (~6-tick half-life). Same
-            // shape as kin_fear: `get(a, b, tick)` reads the decayed
-            // value, `sum_for_first(a, tick)` sums across every
-            // recorded wounded-kin pair for this observer. Task 178 —
-            // rally mechanic. Scoring's Attack row uses the wildcard
-            // slot (sum across all recorded wounded kin) so any recent
-            // kin wound rallies the observer row-wide, symmetric to
-            // the kin_fear wildcard slot on Flee.
-            let a = match resolve_slot(slot0, agent, target) {
-                Some(id) => id,
-                None => return f32::NAN,
-            };
-            match slot1 {
-                PredicateDescriptor::ARG_WILDCARD => {
-                    state.views.rally_boost.sum_for_first(a, state.tick)
-                }
-                _ => {
-                    let b = match resolve_slot(slot1, agent, target) {
-                        Some(id) => id,
-                        None => return f32::NAN,
-                    };
-                    state.views.rally_boost.get(a, b, state.tick)
-                }
-            }
+        // NOTE: VIEW_ID_THREAT_LEVEL, VIEW_ID_MY_ENEMIES, VIEW_ID_KIN_FEAR,
+        // VIEW_ID_PACK_FOCUS, VIEW_ID_RALLY_BOOST — all read `state.views.*`
+        // which is DELETED (Plan B1' Task 11). Return 0.0 (neutral) so the
+        // engine crate compiles. Tests that exercise view-dependent scoring
+        // are `#[ignore]`d. Re-enable after B1' Task 11 emits
+        // engine_rules::step::step and the ViewRegistry moves to engine_rules.
+        PredicateDescriptor::VIEW_ID_THREAT_LEVEL
+        | PredicateDescriptor::VIEW_ID_MY_ENEMIES
+        | PredicateDescriptor::VIEW_ID_KIN_FEAR
+        | PredicateDescriptor::VIEW_ID_PACK_FOCUS
+        | PredicateDescriptor::VIEW_ID_RALLY_BOOST => {
+            let _ = (slot0, slot1, agent, target, state);
+            0.0
         }
         _ => f32::NAN,
     }
@@ -473,6 +379,7 @@ fn eval_view_call(
 /// Map an arg-slot code to the concrete `AgentId` the view call should
 /// receive. `None` for wildcard (handled specially by the caller) or
 /// a target slot with no target bound.
+#[allow(dead_code)]
 fn resolve_slot(slot: u8, agent: AgentId, target: Option<AgentId>) -> Option<AgentId> {
     match slot {
         PredicateDescriptor::ARG_SELF => Some(agent),

@@ -4,7 +4,7 @@
 //! belongs to the xtask `--check` mode running on the committed output.
 //!
 //! At milestone 2's integration step the seed DSL was expanded from 8 to
-//! the full legacy `engine::event::Event` taxonomy (35 variants) so the
+//! the full legacy `engine_data::events::Event` taxonomy (35 variants) so the
 //! hand-written enum could be retired. The assertions below walk a
 //! representative subset of the expanded taxonomy.
 
@@ -252,7 +252,7 @@ fn emit_physics_damage_handler_from_seed() {
     // registration calls.
     let modrs = &artefacts.rust_physics_mod;
     assert!(modrs.contains("pub mod damage;"));
-    assert!(modrs.contains("pub fn register(registry: &mut CascadeRegistry)"));
+    assert!(modrs.contains("pub fn register(registry: &mut CascadeRegistry<Event, ViewRegistry>)"));
     assert!(modrs.contains("registry.install_kind(EventKindId::EffectDamageApplied"));
     assert!(modrs.contains("dispatch_effect_damage_applied"));
 

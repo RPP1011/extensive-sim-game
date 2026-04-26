@@ -10,9 +10,11 @@
 //! event-taxonomy rename (task 136). Tests now call the compiler-emitted
 //! per-event-kind dispatcher directly.
 
-use engine::generated::physics::dispatch_effect_damage_applied;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_rules::physics::dispatch_effect_damage_applied;
+use engine_rules::views::ViewRegistry;
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;
@@ -24,7 +26,8 @@ fn spawn_hp(state: &mut SimState, ct: CreatureType, hp: f32) -> AgentId {
 #[test]
 fn shield_absorbs_before_hp_drops() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  100.0);
     state.set_agent_shield_hp(target, 10.0);
@@ -32,6 +35,7 @@ fn shield_absorbs_before_hp_drops() {
     dispatch_effect_damage_applied(
         &Event::EffectDamageApplied { actor: caster, target, amount: 30.0, tick: 0 },
         &mut state,
+        &mut views,
         &mut events,
     );
 
@@ -46,7 +50,8 @@ fn shield_absorbs_before_hp_drops() {
 #[test]
 fn damage_bleeds_through_zero_shield_entirely_to_hp() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  100.0);
     assert_eq!(state.agent_shield_hp(target), Some(0.0));
@@ -54,6 +59,7 @@ fn damage_bleeds_through_zero_shield_entirely_to_hp() {
     dispatch_effect_damage_applied(
         &Event::EffectDamageApplied { actor: caster, target, amount: 25.0, tick: 0 },
         &mut state,
+        &mut views,
         &mut events,
     );
 
@@ -64,7 +70,8 @@ fn damage_bleeds_through_zero_shield_entirely_to_hp() {
 #[test]
 fn lethal_damage_emits_agent_died_and_kills() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  50.0);
 
@@ -75,6 +82,7 @@ fn lethal_damage_emits_agent_died_and_kills() {
     dispatch_effect_damage_applied(
         &Event::EffectDamageApplied { actor: caster, target, amount: 100.0, tick: 7 },
         &mut state,
+        &mut views,
         &mut events,
     );
 
@@ -91,7 +99,8 @@ fn lethal_damage_emits_agent_died_and_kills() {
 #[test]
 fn damage_on_dead_target_is_a_noop() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  50.0);
     state.kill_agent(target);
@@ -99,6 +108,7 @@ fn damage_on_dead_target_is_a_noop() {
     dispatch_effect_damage_applied(
         &Event::EffectDamageApplied { actor: caster, target, amount: 999.0, tick: 0 },
         &mut state,
+        &mut views,
         &mut events,
     );
 
@@ -116,7 +126,8 @@ fn damage_on_dead_target_is_a_noop() {
 #[test]
 fn cast_damage_emits_agent_attacked_like_melee() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  100.0);
 
@@ -124,6 +135,7 @@ fn cast_damage_emits_agent_attacked_like_melee() {
     dispatch_effect_damage_applied(
         &Event::EffectDamageApplied { actor: caster, target, amount: 25.0, tick: 3 },
         &mut state,
+        &mut views,
         &mut events,
     );
 
@@ -145,13 +157,15 @@ fn cast_damage_emits_agent_attacked_like_melee() {
 #[test]
 fn cast_lethal_damage_emits_attacked_then_died() {
     let mut state = SimState::new(4, 42);
-    let mut events = EventRing::with_cap(64);
+    let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::new();
     let caster = spawn_hp(&mut state, CreatureType::Human, 50.0);
     let target = spawn_hp(&mut state, CreatureType::Wolf,  50.0);
 
     dispatch_effect_damage_applied(
         &Event::EffectDamageApplied { actor: caster, target, amount: 100.0, tick: 9 },
         &mut state,
+        &mut views,
         &mut events,
     );
 

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use dsl_compiler::ast::Program;
 use dsl_compiler::emit_physics_wgsl::EmitContext;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::state::{AgentSpawn, SimState};
 use engine_gpu::event_ring::{pack_event, GpuChronicleRing, GpuEventRing};
 use engine_gpu::gpu_util::indirect::IndirectArgsBuffer;
@@ -22,7 +22,7 @@ use engine_gpu::physics::{
     pack_agent_slots, GpuEffectOp, GpuKinList, PackedAbilityRegistry, PhysicsCfg, PhysicsKernel,
     MAX_ABILITIES, MAX_EFFECTS,
 };
-use engine::event::Event;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use glam::Vec3;
 use wgpu::util::DeviceExt;

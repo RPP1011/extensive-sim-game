@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine::mask::{MaskBuffer, MicroKind, TargetMask};
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend, UtilityBackend};

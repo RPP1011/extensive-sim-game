@@ -3,8 +3,8 @@ pub mod agent_types;
 pub mod entity_pool;
 
 use crate::ability::MAX_ABILITIES;
-use crate::channel::ChannelSet;
-use crate::creature::{Capabilities, CreatureType};
+use engine_data::types::ChannelSet;
+use engine_data::entities::{Capabilities, CreatureType};
 use crate::ids::AgentId;
 use crate::spatial::SpatialHash;
 use crate::terrain::{FlatPlane, TerrainQuery};
@@ -41,7 +41,7 @@ pub struct SimState {
     /// `crates/engine/src/step.rs` / `mask.rs` / `ability/expire.rs` is now
     /// a field on this struct; see `docs/game/compiler_progress.md` for the
     /// config-milestone row.
-    pub config: engine_rules::config::Config,
+    pub config: engine_data::config::Config,
     pool:     AgentSlotPool,
 
     // --- Hot SoA — read/written every tick by observation / mask / step ---
@@ -152,12 +152,10 @@ pub struct SimState {
     // regression at N=500.
     spatial: SpatialHash,
 
-    /// Compiler-emitted view registry — one field per `@materialized`
-    /// view. Populated at the view-fold phase of `step_full` via
-    /// `state.views.fold_all(&tick_events, state.tick)`; masks / scoring
-    /// read values through `state.views.<name>.get(args...)`.
-    /// Spec §2.3 + §7.1.
-    pub views: crate::generated::views::ViewRegistry,
+    // `views: ViewRegistry` field deleted along with engine/src/generated/.
+    // Callers now thread `&mut ViewRegistry` separately as a `step` parameter.
+    // Tests that referenced `state.views.*` are #[ignore]d until Task 11 emits
+    // the new view-as-parameter handler signatures into engine_rules.
 
     /// Ability program registry — append-only table of compiled ability
     /// programs, looked up by `AbilityId` during cast dispatch and mask
@@ -205,7 +203,7 @@ impl SimState {
     /// Preserves the pre-config constructor signature so every existing test
     /// (there are many) keeps compiling without edits.
     pub fn new(agent_cap: u32, seed: u64) -> Self {
-        Self::new_with_config(agent_cap, seed, engine_rules::config::Config::default())
+        Self::new_with_config(agent_cap, seed, engine_data::config::Config::default())
     }
 
     /// Build a `SimState` with a caller-supplied `Config`. This is the
@@ -216,7 +214,7 @@ impl SimState {
     pub fn new_with_config(
         agent_cap: u32,
         seed: u64,
-        config: engine_rules::config::Config,
+        config: engine_data::config::Config,
     ) -> Self {
         let cap = agent_cap as usize;
         // Per-slot attack stats inherit the config defaults so runtime
@@ -282,10 +280,6 @@ impl SimState {
             // Incremental spatial hash — sized for `cap` agent slots.
             // Mutators push O(1) deltas; no per-mutation rebuild.
             spatial:                SpatialHash::new(agent_cap),
-            // Compiler-emitted `ViewRegistry` — default-constructs one
-            // (empty) storage field per `@materialized` view. Populated
-            // at the view-fold phase each tick.
-            views:                  crate::generated::views::ViewRegistry::new(),
             // Empty ability registry by default. Tests / production code
             // that need specific abilities do `state.ability_registry =
             // builder.build()` after construction.

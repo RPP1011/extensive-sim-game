@@ -13,7 +13,7 @@
 //! the bonus to activate. This is the wolves+humans parity story: the
 //! seam is in place, runtime-inert for existing content.
 
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::policy::utility::{
     terrain_height_bonus, TERRAIN_HEIGHT_BONUS, TERRAIN_HEIGHT_THRESHOLD_M,
 };

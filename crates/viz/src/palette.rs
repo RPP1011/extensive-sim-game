@@ -25,8 +25,8 @@ pub fn build_palette_rgba() -> [[u8; 4]; 256] {
     p
 }
 
-pub fn creature_palette_index(ct: engine::creature::CreatureType) -> u8 {
-    use engine::creature::CreatureType as CT;
+pub fn creature_palette_index(ct: engine_data::entities::CreatureType) -> u8 {
+    use engine_data::entities::CreatureType as CT;
     match ct {
         CT::Human  => PAL_HUMAN,
         CT::Wolf   => PAL_WOLF,

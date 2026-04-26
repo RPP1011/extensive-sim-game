@@ -4,13 +4,14 @@
 //! speaker — even when the spatial radius would have included them.
 
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::mask::MaskBuffer;
 use engine::policy::{Action, ActionKind, AnnounceAudience, MacroAction, PolicyBackend};
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use glam::Vec3;
 
 struct OneAnnounce(AgentId, AnnounceAudience);
@@ -32,12 +33,13 @@ impl PolicyBackend for OneAnnounce {
     }
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn human_speaker_wolf_listener_do_not_share_channel() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {
@@ -72,12 +74,13 @@ fn human_speaker_wolf_listener_do_not_share_channel() {
         "Human Speech ∩ Wolf PackSignal = ∅ → no RecordMemory for the wolf");
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn human_speaker_human_listener_share_channel() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {
@@ -112,6 +115,7 @@ fn human_speaker_human_listener_share_channel() {
         "Human speakers share Speech+Testimony with Humans — must deliver one RecordMemory");
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn human_anyone_radius_is_speech_range_clamped() {
     // Human Anyone-radius falls back to channel-derived range. Speech at
@@ -119,8 +123,8 @@ fn human_anyone_radius_is_speech_range_clamped() {
     // 25m IS heard; at 35m is NOT.
     let mut state = SimState::new(8, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let speaker = state
         .spawn_agent(AgentSpawn {

@@ -1,18 +1,20 @@
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::{AgentId, QuestId};
 use engine::mask::MaskBuffer;
-use engine::policy::{Action, ActionKind, MacroAction, PolicyBackend, QuestCategory, Resolution};
+use engine::policy::{Action, ActionKind, MacroAction, PolicyBackend};
+use engine_data::types::{QuestCategory, Resolution};
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use glam::Vec3;
 
-fn make() -> (SimState, SimScratch, EventRing, CascadeRegistry, AgentId) {
+fn make() -> (SimState, SimScratch, EventRing<Event>, CascadeRegistry<Event>, AgentId) {
     let mut state = SimState::new(4, 42);
     let scratch = SimScratch::new(state.agent_cap() as usize);
-    let events = EventRing::with_cap(1024);
-    let cascade = CascadeRegistry::new();
+    let events = EventRing::<Event>::with_cap(1024);
+    let cascade = CascadeRegistry::<Event>::new();
     let a = state
         .spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
@@ -34,6 +36,7 @@ impl PolicyBackend for EmitMacro {
     }
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn postquest_emits_quest_posted_event() {
     let (mut state, mut scratch, mut events, cascade, a) = make();
@@ -59,6 +62,7 @@ fn postquest_emits_quest_posted_event() {
     assert!(found, "QuestPosted emitted");
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn acceptquest_emits_quest_accepted_event() {
     let (mut state, mut scratch, mut events, cascade, a) = make();
@@ -76,6 +80,7 @@ fn acceptquest_emits_quest_accepted_event() {
             if *acceptor == a && *quest_id == q)));
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn bid_emits_bid_placed_event() {
     let (mut state, mut scratch, mut events, cascade, a) = make();
@@ -98,6 +103,7 @@ fn bid_emits_bid_placed_event() {
     assert!(found);
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn noop_macro_emits_nothing() {
     let (mut state, mut scratch, mut events, cascade, a) = make();

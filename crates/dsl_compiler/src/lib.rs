@@ -9,10 +9,13 @@
 //! `compile-dsl` subcommand.
 
 pub mod ast;
+pub mod emit_backend;
+pub mod emit_cascade_register;
 pub mod emit_config;
 pub mod emit_entity;
 pub mod emit_enum;
 pub mod emit_mask;
+pub mod emit_mask_fill;
 pub mod emit_mask_wgsl;
 pub mod emit_physics;
 pub mod emit_physics_wgsl;
@@ -21,6 +24,7 @@ pub mod emit_rust;
 pub mod emit_scoring;
 pub mod emit_scoring_wgsl;
 pub mod emit_sim_cfg;
+pub mod emit_step;
 pub mod emit_view;
 pub mod emit_view_wgsl;
 pub mod error;
@@ -78,7 +82,7 @@ impl std::error::Error for CompileError {}
 /// extension and parent directory to use.
 #[derive(Debug, Clone)]
 pub struct EmittedArtifacts {
-    /// Content of the events-mod file (`crates/engine_generated/src/events/mod.rs`).
+    /// Content of the events-mod file (`crates/engine_data/src/events/mod.rs`).
     pub rust_events_mod: String,
     /// `(filename_without_dir, content)` pairs, one per event.
     pub rust_event_structs: Vec<(String, String)>,
@@ -99,28 +103,28 @@ pub struct EmittedArtifacts {
     /// Content of `crates/engine/src/generated/mask/mod.rs`.
     pub rust_mask_mod: String,
     /// Scoring-table modules (milestone 4). One file per `scoring`
-    /// declaration; target `crates/engine_generated/src/scoring/`. Scoring rows
+    /// declaration; target `crates/engine_data/src/scoring/`. Scoring rows
     /// are POD `#[repr(C)]` so CPU + GPU backends read the same layout.
     pub rust_scoring_modules: Vec<(String, String)>,
-    /// Content of `crates/engine_generated/src/scoring/mod.rs`.
+    /// Content of `crates/engine_data/src/scoring/mod.rs`.
     pub rust_scoring_mod: String,
     /// Entity modules (milestone 5). One file per `entity` declaration;
-    /// target `crates/engine_generated/src/entities/`.
+    /// target `crates/engine_data/src/entities/`.
     pub rust_entity_modules: Vec<(String, String)>,
-    /// Content of `crates/engine_generated/src/entities/mod.rs`.
+    /// Content of `crates/engine_data/src/entities/mod.rs`.
     pub rust_entity_mod: String,
     /// Config modules. One file per `config` declaration; target
-    /// `crates/engine_generated/src/config/`. Pure data, no engine dependency.
+    /// `crates/engine_data/src/config/`. Pure data, no engine dependency.
     pub rust_config_modules: Vec<(String, String)>,
-    /// Content of `crates/engine_generated/src/config/mod.rs` — aggregate
+    /// Content of `crates/engine_data/src/config/mod.rs` — aggregate
     /// `Config` struct, per-block re-exports, TOML loader.
     pub rust_config_mod: String,
     /// TOML-encoded defaults — written to `assets/config/default.toml`.
     pub config_default_toml: String,
     /// Enum modules. One file per `enum` declaration; target
-    /// `crates/engine_generated/src/enums/`.
+    /// `crates/engine_data/src/enums/`.
     pub rust_enum_modules: Vec<(String, String)>,
-    /// Content of `crates/engine_generated/src/enums/mod.rs`.
+    /// Content of `crates/engine_data/src/enums/mod.rs`.
     pub rust_enum_mod: String,
     /// View modules. One file per `view` declaration; target
     /// `crates/engine/src/generated/views/`. `@lazy` views become inline
@@ -159,8 +163,14 @@ pub struct EmittedArtifacts {
     /// Combined hash per `docs/compiler/spec.md` §2 — rolls every
     /// sub-hash together with a stable canonical ordering.
     pub combined_hash: [u8; 32],
-    /// Content of `crates/engine_generated/src/schema.rs`.
+    /// Content of `crates/engine_data/src/schema.rs`.
     pub schema_rs: String,
+    /// Content of `crates/engine/src/event/event_like_impl.rs` — the
+    /// machine-generated `impl engine::event::EventLike for Event { ... }`.
+    /// Lives in `engine` (not `engine_data`) to avoid a dep cycle while
+    /// `engine` retains its `engine_data` regular dep (Plan B2 deferred).
+    /// Included from `engine/src/event/mod.rs` via `mod event_like_impl;`.
+    pub engine_event_like_impl: String,
 }
 
 /// Emit the full artefact bundle for a resolved `Compilation`. Covers
@@ -343,6 +353,34 @@ pub fn emit_with_per_kind_sources(
         &enums_hash,
         &views_hash,
     );
+    // Emit the `impl EventLike for Event` block. Lives in engine (not
+    // engine_data) to avoid a dep cycle while engine retains its
+    // engine_data regular dep (chronicle.rs, Plan B2 deferred).
+    let engine_event_like_impl = {
+        // Reuse the same sorted+hydrated list that emit_events_mod uses.
+        let hydrated: Vec<ir::EventIR> = comp.events
+            .iter()
+            .map(|e| {
+                let mut c = e.clone();
+                let mut out = e.fields.clone();
+                if !out.iter().any(|f| f.name == "tick") {
+                    out.push(ir::EventField {
+                        name: "tick".into(),
+                        ty: ir::IrType::U32,
+                        span: ast::Span::dummy(),
+                    });
+                }
+                c.fields = out;
+                c
+            })
+            .collect();
+        let mut sorted: Vec<&ir::EventIR> = hydrated.iter().collect();
+        sorted.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut buf = String::new();
+        emit_rust::emit_event_like_impl(&mut buf, &sorted);
+        buf
+    };
+
     EmittedArtifacts {
         rust_events_mod: emit_rust::emit_events_mod(&comp.events),
         rust_event_structs,
@@ -380,6 +418,7 @@ pub fn emit_with_per_kind_sources(
             &enums_hash,
             &views_hash,
         ),
+        engine_event_like_impl,
     }
 }
 

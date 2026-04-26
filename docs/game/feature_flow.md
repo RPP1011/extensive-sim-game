@@ -71,7 +71,7 @@ If a feature spans multiple declaration kinds (an event + a physics rule + a mas
 | `event` | `crates/engine_rules/src/events/` | Pure data; no engine deps. Engine re-exports the enum. |
 | `physics` | `crates/engine/src/generated/physics/` | Handlers reference `engine::cascade::CascadeHandler`, `engine::state::SimState`, `engine::event::EventRing`. Putting them in `engine_rules` would invert the dep direction (engine already depends on engine_rules); putting them in `engine` keeps the cycle clean. The aggregator `register(registry)` is called from `CascadeRegistry::register_engine_builtins`. |
 | `mask` | `crates/engine/src/generated/mask/` | Same dep argument as physics. |
-| `scoring` | `crates/engine_generated/src/scoring/` | Split out of `engine_rules` (commit `4137f02b`, 2026-04-22) into a dedicated generated-only crate so engine compile times stay fast. |
+| `scoring` | `crates/engine_data/src/scoring/` | Split out of `engine_rules` (commit `4137f02b`, 2026-04-22) into a dedicated generated-only crate so engine compile times stay fast. |
 
 ## Shape contract for emitted code
 

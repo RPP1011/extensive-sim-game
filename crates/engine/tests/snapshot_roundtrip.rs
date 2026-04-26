@@ -1,5 +1,6 @@
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::snapshot::{load_snapshot, save_snapshot};
 use engine::state::{AgentSpawn, MovementMode, SimState};
 use glam::Vec3;
@@ -16,7 +17,7 @@ fn tmp_path(name: &str) -> std::path::PathBuf {
 #[test]
 fn save_then_load_produces_identical_state() {
     let mut state = SimState::new(8, 42);
-    let events = EventRing::with_cap(64);
+    let events = EventRing::<Event>::with_cap(64);
 
     let a = state
         .spawn_agent(AgentSpawn {
@@ -42,7 +43,7 @@ fn save_then_load_produces_identical_state() {
 
     let path = tmp_path("rt");
     save_snapshot(&state, &events, &path).unwrap();
-    let (state2, _events2) = load_snapshot(&path).unwrap();
+    let (state2, _events2) = load_snapshot::<Event>(&path).unwrap();
 
     assert_eq!(state2.tick, 100);
     assert_eq!(state2.seed, 42);
@@ -75,10 +76,10 @@ fn save_then_load_preserves_freelist_reuse() {
         .unwrap();
     state.kill_agent(a);
 
-    let events = EventRing::with_cap(16);
+    let events = EventRing::<Event>::with_cap(16);
     let path = tmp_path("fl");
     save_snapshot(&state, &events, &path).unwrap();
-    let (mut state2, _) = load_snapshot(&path).unwrap();
+    let (mut state2, _) = load_snapshot::<Event>(&path).unwrap();
 
     // After load, next spawn should reuse slot 1 — proving freelist survived.
     let b = state2
@@ -114,10 +115,10 @@ fn save_then_load_preserves_spatial_index() {
         })
         .unwrap();
 
-    let events = EventRing::with_cap(16);
+    let events = EventRing::<Event>::with_cap(16);
     let path = tmp_path("sp");
     save_snapshot(&state, &events, &path).unwrap();
-    let (state2, _) = load_snapshot(&path).unwrap();
+    let (state2, _) = load_snapshot::<Event>(&path).unwrap();
 
     // Spatial index was rebuilt on load; querying within 5m of agent a
     // should find agent a (distance 0) AND agent b (distance 3).

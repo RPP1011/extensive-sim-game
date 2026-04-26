@@ -1,0 +1,16 @@
+id: no-materialized-view-impl-outside-engine-rules
+language: rust
+severity: error
+message: |
+  `impl MaterializedView` must live in crates/engine_rules/. Hand-written
+  view implementations violate P1 (Compiler-First). Edit assets/sim/*.sim
+  and let dsl_compiler emit the view.
+rule:
+  any:
+    - pattern: impl MaterializedView<$_> for $T { $$$ }
+    - pattern: impl $$$::MaterializedView<$_> for $T { $$$ }
+ignores:
+  - "crates/engine_rules/**"
+  - "crates/engine/tests/**"
+  - "crates/engine/src/view/materialized.rs"
+  - "crates/engine/src/view/**"

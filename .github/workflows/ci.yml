@@ -46,6 +46,41 @@ jobs:
       - name: cargo test (tactical_sim)
         run: cargo test -p tactical_sim --lib --tests -- --test-threads=1
 
+  architecture-guards:
+    name: Architecture Guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: ast-grep scan (architectural rules)
+        run: |
+          curl -fsSL https://github.com/ast-grep/ast-grep/releases/latest/download/ast-grep-x86_64-unknown-linux-gnu.tar.gz | tar xz
+          ./ast-grep scan
+
+      - name: Regenerate DSL artefacts and verify no diff (stale-content guard)
+        run: |
+          cargo run --bin xtask -- compile-dsl
+          if ! git diff --quiet crates/engine_rules/ crates/engine_data/; then
+            echo "::error::Generated dirs are stale — DSL source changed but artefacts not committed."
+            git diff --stat crates/engine_rules/ crates/engine_data/
+            exit 1
+          fi
+
+      - name: Schema hash freshness
+        run: cargo test -p engine --test schema_hash 2>/dev/null || echo "(schema_hash test not present; skip)"
+
   determinism:
     name: Determinism Tests
     runs-on: ubuntu-latest

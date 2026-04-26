@@ -1,0 +1,16 @@
+id: no-topk-view-impl-outside-engine-rules
+language: rust
+severity: error
+message: |
+  `impl TopKView` must live in crates/engine_rules/. Hand-written
+  view implementations violate P1 (Compiler-First). Edit assets/sim/*.sim
+  and let dsl_compiler emit the view.
+rule:
+  any:
+    - pattern: impl TopKView<$_> for $T { $$$ }
+    - pattern: impl $$$::TopKView<$_> for $T { $$$ }
+ignores:
+  - "crates/engine_rules/**"
+  - "crates/engine/tests/**"
+  - "crates/engine/src/view/topk.rs"
+  - "crates/engine/src/view/**"

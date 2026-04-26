@@ -1,5 +1,5 @@
 //! Smoke test for the compiler-emitted `Event` enum. Verifies that the
-//! milestone-2 integration step (cutover of `engine::event::Event` to the
+//! milestone-2 integration step (cutover of `engine_data::events::Event` to the
 //! DSL-emitted `engine_rules::events::Event`) preserves the hand-written
 //! struct-variant shape every engine call site relies on.
 

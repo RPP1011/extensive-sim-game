@@ -1,4 +1,4 @@
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, MovementMode, SimState};
 use glam::Vec3;

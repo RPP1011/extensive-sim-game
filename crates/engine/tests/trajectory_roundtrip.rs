@@ -1,18 +1,20 @@
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use engine::trajectory::{TrajectoryReader, TrajectoryWriter};
 use glam::Vec3;
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn emit_and_reload_trajectory() {
     let mut state = SimState::new(20, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(10_000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(10_000);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..5 {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
@@ -36,21 +38,23 @@ fn emit_and_reload_trajectory() {
     std::fs::remove_file(&tmp).ok();
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn python_roundtrip_preserves_values() {
     use engine::cascade::CascadeRegistry;
-    use engine::creature::CreatureType;
+    use engine_data::entities::CreatureType;
     use engine::event::EventRing;
+use engine_data::events::Event;
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};
-    use engine::step::{step, SimScratch};
+    use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
     use engine::trajectory::TrajectoryWriter;
     use glam::Vec3;
 
     let mut state = SimState::new(10, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1000);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..3 {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,

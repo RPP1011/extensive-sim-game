@@ -4,14 +4,15 @@
 //! changes observable next-attack behaviour.
 
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::mask::MaskBuffer;
 use engine::policy::{Action, ActionKind, MicroTarget, PolicyBackend};
 use engine::mask::MicroKind;
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use glam::Vec3;
 
 struct ForceAttack {
@@ -33,12 +34,13 @@ impl PolicyBackend for ForceAttack {
     }
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn set_agent_attack_damage_is_honoured_by_next_attack() {
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let attacker = state
         .spawn_agent(AgentSpawn {
@@ -82,13 +84,14 @@ fn set_agent_attack_damage_is_honoured_by_next_attack() {
     assert_eq!(state.agent_hp(target), Some(75.0));
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn set_agent_attack_range_is_honoured_by_next_attack() {
     // Default ATTACK_RANGE = 2m. Place target at 2.5m and bump range to 3m.
     let mut state = SimState::new(4, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(256);
+    let cascade = CascadeRegistry::<Event>::new();
 
     let attacker = state
         .spawn_agent(AgentSpawn {

@@ -2,9 +2,12 @@
 name = "engine"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
-engine_rules = { path = "../engine_rules" }
+# engine_data retained as a regular dep ONLY for chronicle.rs until Plan B2
+# migrates chronicle to emitted DSL (Spec B' §4.2). Drop this line in Task B2.
+engine_data = { path = "../engine_data" }
 glam = "0.29"
 smallvec = "1.13"
 ahash = "0.8"
@@ -15,6 +18,9 @@ sha2 = "0.10"
 contracts = "0.6"
 
 [dev-dependencies]
+trybuild = "1"
+engine_data = { path = "../engine_data" }
+engine_rules = { path = "../engine_rules" }
 insta = { version = "1.41", features = ["yaml"] }
 proptest = "1.5"
 dhat = "0.3"

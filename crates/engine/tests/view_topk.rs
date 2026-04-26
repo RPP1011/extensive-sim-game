@@ -1,4 +1,4 @@
-use engine::event::Event;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::view::{MostHostileTopK, TopKView};
 

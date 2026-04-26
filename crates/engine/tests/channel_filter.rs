@@ -1,6 +1,7 @@
-use engine::channel::{channel_range, CommunicationChannel};
-use engine::creature::{Capabilities, CreatureType};
-use engine_rules::config::CommunicationConfig;
+use engine::channel::channel_range;
+use engine_data::types::CommunicationChannel;
+use engine_data::entities::{Capabilities, CreatureType};
+use engine_data::config::CommunicationConfig;
 
 #[test]
 fn wolves_share_packsignal_not_speech() {

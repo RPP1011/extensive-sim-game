@@ -1,10 +1,11 @@
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use glam::Vec3;
 
 #[test]
 fn ring_preserves_order_and_wraps() {
-    let mut ring = EventRing::with_cap(4);
+    let mut ring = EventRing::<Event>::with_cap(4);
     let a = AgentId::new(1).unwrap();
     for i in 0..6 {
         ring.push(Event::AgentMoved {
@@ -18,7 +19,7 @@ fn ring_preserves_order_and_wraps() {
 
 #[test]
 fn replayable_subset_hashes_stably() {
-    let mut ring = EventRing::with_cap(64);
+    let mut ring = EventRing::<Event>::with_cap(64);
     let a = AgentId::new(1).unwrap();
     ring.push(Event::AgentMoved {
         actor: a, from: Vec3::ZERO, location: Vec3::X, tick: 10,
@@ -33,7 +34,7 @@ fn replayable_subset_hashes_stably() {
     assert_eq!(h1, h2, "same content → same hash");
 
     // Re-insert the same replayable events separately; hash matches.
-    let mut ring2 = EventRing::with_cap(64);
+    let mut ring2 = EventRing::<Event>::with_cap(64);
     ring2.push(Event::AgentMoved {
         actor: a, from: Vec3::ZERO, location: Vec3::X, tick: 10,
     });
@@ -43,7 +44,7 @@ fn replayable_subset_hashes_stably() {
 
 #[test]
 fn agent_attacked_hashes_stably_with_float_damage() {
-    let mut ring = EventRing::with_cap(8);
+    let mut ring = EventRing::<Event>::with_cap(8);
     let a = AgentId::new(1).unwrap();
     let b = AgentId::new(2).unwrap();
     ring.push(Event::AgentAttacked { actor: a, target: b, damage: 12.5, tick: 3 });
@@ -55,8 +56,8 @@ fn agent_attacked_hashes_stably_with_float_damage() {
     assert_eq!(h1, h2);
 
     // +0.0 and -0.0 must produce distinct hashes when byte-packed via to_bits().
-    let mut ring_pos = EventRing::with_cap(4);
-    let mut ring_neg = EventRing::with_cap(4);
+    let mut ring_pos = EventRing::<Event>::with_cap(4);
+    let mut ring_neg = EventRing::<Event>::with_cap(4);
     ring_pos.push(Event::AgentAttacked { actor: a, target: b, damage: 0.0, tick: 1 });
     ring_neg.push(Event::AgentAttacked { actor: a, target: b, damage: -0.0, tick: 1 });
     assert_ne!(ring_pos.replayable_sha256(), ring_neg.replayable_sha256(),
@@ -67,7 +68,7 @@ fn agent_attacked_hashes_stably_with_float_damage() {
 fn chronicle_content_does_not_affect_hash() {
     let a = AgentId::new(1).unwrap();
     let make = |chron_tid: u32| {
-        let mut ring = EventRing::with_cap(8);
+        let mut ring = EventRing::<Event>::with_cap(8);
         ring.push(Event::AgentMoved {
             actor: a, from: Vec3::ZERO, location: Vec3::X, tick: 1,
         });
@@ -86,7 +87,7 @@ fn chronicle_content_does_not_affect_hash() {
 
 #[test]
 fn push_count_is_monotonic_across_eviction() {
-    let mut ring = EventRing::with_cap(2);
+    let mut ring = EventRing::<Event>::with_cap(2);
     let a = AgentId::new(1).unwrap();
     assert_eq!(ring.push_count(), 0);
     for i in 0..5 {
@@ -102,7 +103,7 @@ fn push_count_is_monotonic_across_eviction() {
 
 #[test]
 fn iter_since_yields_only_events_after_snapshot() {
-    let mut ring = EventRing::with_cap(8);
+    let mut ring = EventRing::<Event>::with_cap(8);
     let a = AgentId::new(1).unwrap();
     ring.push(Event::AgentMoved {
         actor: a, from: Vec3::ZERO, location: Vec3::new(0.0, 0.0, 0.0), tick: 0,
@@ -139,7 +140,7 @@ fn iter_since_tolerates_eviction_before_snapshot() {
     // When events before the snapshot have been evicted, iter_since must
     // still return events with index >= start_idx; it cannot resurrect
     // evicted ones but it also must not panic or skip the wrong slice.
-    let mut ring = EventRing::with_cap(2);
+    let mut ring = EventRing::<Event>::with_cap(2);
     let a = AgentId::new(1).unwrap();
     ring.push(Event::AgentMoved { actor: a, from: Vec3::ZERO, location: Vec3::ZERO, tick: 0 });
     ring.push(Event::AgentMoved { actor: a, from: Vec3::ZERO, location: Vec3::ZERO, tick: 1 });
@@ -162,7 +163,7 @@ fn iter_since_tolerates_eviction_before_snapshot() {
 fn golden_hash_anchors_format() {
     let a = AgentId::new(1).unwrap();
     let b = AgentId::new(2).unwrap();
-    let mut ring = EventRing::with_cap(8);
+    let mut ring = EventRing::<Event>::with_cap(8);
     ring.push(Event::AgentMoved {
         actor: a, from: Vec3::ZERO, location: Vec3::new(1.0, 2.0, 3.0), tick: 10,
     });

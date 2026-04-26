@@ -1,10 +1,11 @@
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use glam::Vec3;
 
 #[test]
 fn push_assigns_sequential_event_ids_within_a_tick() {
-    let mut ring = EventRing::with_cap(16);
+    let mut ring = EventRing::<Event>::with_cap(16);
     let a = AgentId::new(1).unwrap();
     let id0 = ring.push(Event::AgentMoved {
         actor: a, from: Vec3::ZERO, location: Vec3::X, tick: 0,
@@ -20,7 +21,7 @@ fn push_assigns_sequential_event_ids_within_a_tick() {
 
 #[test]
 fn seq_resets_when_tick_advances() {
-    let mut ring = EventRing::with_cap(16);
+    let mut ring = EventRing::<Event>::with_cap(16);
     let a = AgentId::new(1).unwrap();
     let _ = ring.push(Event::AgentMoved {
         actor: a, from: Vec3::ZERO, location: Vec3::X, tick: 0,
@@ -34,7 +35,7 @@ fn seq_resets_when_tick_advances() {
 
 #[test]
 fn push_caused_by_stores_parent_in_sidecar() {
-    let mut ring = EventRing::with_cap(16);
+    let mut ring = EventRing::<Event>::with_cap(16);
     let a = AgentId::new(1).unwrap();
     let id0 = ring.push(Event::AgentAttacked {
         actor: a, target: a, damage: 10.0, tick: 0,
@@ -49,8 +50,8 @@ fn push_caused_by_stores_parent_in_sidecar() {
 
 #[test]
 fn cause_field_does_not_affect_replayable_hash() {
-    let mut r1 = EventRing::with_cap(16);
-    let mut r2 = EventRing::with_cap(16);
+    let mut r1 = EventRing::<Event>::with_cap(16);
+    let mut r2 = EventRing::<Event>::with_cap(16);
     let a = AgentId::new(1).unwrap();
     let id0 = r1.push(Event::AgentMoved {
         actor: a, from: Vec3::ZERO, location: Vec3::X, tick: 0,

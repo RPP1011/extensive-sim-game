@@ -1,8 +1,9 @@
-//! Property: `CascadeRegistry::run_fixed_point` is bounded by
+//! Property: `CascadeRegistry::<Event>::run_fixed_point` is bounded by
 //! MAX_CASCADE_ITERATIONS and terminates without corrupting the ring.
 use engine::cascade::dispatch::MAX_CASCADE_ITERATIONS;
 use engine::cascade::{CascadeHandler, CascadeRegistry, EventKindId, Lane};
-use engine::event::{Event, EventRing};
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::SimState;
 use proptest::prelude::*;
@@ -20,10 +21,12 @@ struct CountingHandler {
     reemit_kind: EventKindId,
 }
 
-impl CascadeHandler for CountingHandler {
+impl engine::cascade::__sealed::Sealed for CountingHandler {}
+impl CascadeHandler<Event> for CountingHandler {
+    type Views = ();
     fn trigger(&self) -> EventKindId { self.trigger }
     fn lane(&self)    -> Lane        { self.lane }
-    fn handle(&self, _event: &Event, _state: &mut SimState, events: &mut EventRing) {
+    fn handle(&self, _event: &Event, _state: &mut SimState, _views: &mut (), events: &mut EventRing<Event>) {
         self.call_count.fetch_add(1, Ordering::SeqCst);
         for _ in 0..self.emit_times {
             // Re-emit as a simple AgentDied event; the reemit_kind field is
@@ -82,7 +85,7 @@ proptest! {
         n_initial in 1u32..=5,
         initial_kind in arb_event_kind(),
     ) {
-        let mut reg = CascadeRegistry::new();
+        let mut reg = CascadeRegistry::<Event>::new();
         let counter = Arc::new(AtomicUsize::new(0));
         for (trigger, lane, emit_times, reemit_kind) in handler_defs {
             reg.register(CountingHandler {
@@ -96,7 +99,7 @@ proptest! {
 
         #[allow(unused_mut)] // mutated only in release-build cfg branch below
         let mut state = SimState::new(4, 42);
-        let mut events = EventRing::with_cap(16_384);
+        let mut events = EventRing::<Event>::with_cap(16_384);
         // Seed `n_initial` initial events.
         for _ in 0..n_initial {
             if initial_kind == EventKindId::AgentDied {
@@ -118,7 +121,7 @@ proptest! {
         // would panic are skipped via cfg.
         #[cfg(not(debug_assertions))]
         {
-            reg.run_fixed_point(&mut state, &mut events);
+            reg.run_fixed_point(&mut state, &mut (), &mut events);
             let _calls = counter.load(Ordering::SeqCst);
             // Core termination invariant: run_fixed_point returns within
             // MAX_CASCADE_ITERATIONS passes and advances the dispatched cursor
@@ -147,9 +150,9 @@ proptest! {
     fn empty_registry_does_not_emit(
         n_initial in 1u32..=10,
     ) {
-        let reg = CascadeRegistry::new();
+        let reg = CascadeRegistry::<Event>::new();
         let mut state = SimState::new(4, 42);
-        let mut events = EventRing::with_cap(128);
+        let mut events = EventRing::<Event>::with_cap(128);
         for _ in 0..n_initial {
             events.push(Event::AgentDied {
                 agent_id: AgentId::new(1).unwrap(),
@@ -157,7 +160,7 @@ proptest! {
             });
         }
         let before = events.total_pushed();
-        reg.run_fixed_point(&mut state, &mut events);
+        reg.run_fixed_point(&mut state, &mut (), &mut events);
         prop_assert_eq!(events.total_pushed(), before,
             "no handlers → no new events");
         prop_assert_eq!(events.dispatched(), before,

@@ -35,8 +35,8 @@
 //! - `SimState::spatial` — rebuilt from `hot_pos` + `hot_alive` +
 //!   `hot_movement_mode` on load.
 
-use crate::creature::CreatureType;
-use crate::event::EventRing;
+use engine_data::entities::CreatureType;
+use crate::event::{EventLike, EventRing};
 use crate::ids::{AgentId, GroupId};
 use crate::state::agent_types::{
     ClassSlot, Creditor, GroupRole, Inventory, Membership, Relationship,
@@ -791,7 +791,7 @@ fn agent_id_nonzero(raw: u32, what: &'static str) -> Result<AgentId, SnapshotErr
 
 // ---------- event ring metadata ----------
 
-fn write_event_ring_meta(w: &mut W, ring: &EventRing) {
+fn write_event_ring_meta<E: EventLike>(w: &mut W, ring: &EventRing<E>) {
     w.u32(ring.cap_for_snapshot() as u32);
     w.u32(ring.current_tick_for_snapshot());
     w.u32(ring.next_seq_for_snapshot());
@@ -799,7 +799,7 @@ fn write_event_ring_meta(w: &mut W, ring: &EventRing) {
     w.u64(ring.dispatched() as u64);
 }
 
-fn read_event_ring_meta(r: &mut R<'_>) -> Result<EventRing, SnapshotError> {
+fn read_event_ring_meta<E: EventLike>(r: &mut R<'_>) -> Result<EventRing<E>, SnapshotError> {
     let cap = r.u32("ring_cap")? as usize;
     let current_tick = r.u32("ring_current_tick")?;
     let next_seq = r.u32("ring_next_seq")?;
@@ -813,9 +813,9 @@ fn read_event_ring_meta(r: &mut R<'_>) -> Result<EventRing, SnapshotError> {
 
 // ---------- public save / load ----------
 
-pub fn save_snapshot(
+pub fn save_snapshot<E: EventLike>(
     state: &SimState,
-    events: &EventRing,
+    events: &EventRing<E>,
     path: &Path,
 ) -> Result<(), SnapshotError> {
     let hash = crate::schema_hash::schema_hash();
@@ -835,12 +835,12 @@ pub fn save_snapshot(
     Ok(())
 }
 
-pub fn load_snapshot(path: &Path) -> Result<(SimState, EventRing), SnapshotError> {
+pub fn load_snapshot<E: EventLike>(path: &Path) -> Result<(SimState, EventRing<E>), SnapshotError> {
     let bytes = std::fs::read(path)?;
     load_from_bytes(&bytes)
 }
 
-pub fn load_from_bytes(bytes: &[u8]) -> Result<(SimState, EventRing), SnapshotError> {
+pub fn load_from_bytes<E: EventLike>(bytes: &[u8]) -> Result<(SimState, EventRing<E>), SnapshotError> {
     let header = SnapshotHeader::from_bytes(bytes)?;
     let current = crate::schema_hash::schema_hash();
     if header.schema_hash != current {

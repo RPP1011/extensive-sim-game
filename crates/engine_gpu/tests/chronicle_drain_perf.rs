@@ -21,7 +21,7 @@ use std::time::Instant;
 
 use engine::backend::SimBackend;
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
@@ -106,7 +106,7 @@ fn chronicle_drain_perf() {
     let mut main_other_count = 0u32;
     for ev in events.iter() {
         match ev {
-            engine::event::Event::ChronicleEntry { .. } => main_chronicle_count += 1,
+            engine_data::events::Event::ChronicleEntry { .. } => main_chronicle_count += 1,
             _ => main_other_count += 1,
         }
     }

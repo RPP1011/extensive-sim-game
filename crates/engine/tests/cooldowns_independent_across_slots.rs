@@ -16,11 +16,12 @@
 //! fired, while the shared global cursor is rewritten on every cast.
 
 use engine::ability::{AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
-use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
+use engine_rules::views::ViewRegistry;
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
@@ -60,8 +61,9 @@ fn local_cooldowns_are_independent_across_slots() {
     let slot_a = ability_a.slot() as u8;
     let slot_b = ability_b.slot() as u8;
 
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let mut events = EventRing::with_cap(512);
+    let cascade = engine_rules::with_engine_builtins();
+    let mut views = ViewRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(512);
 
     // Step 1: cast A at tick 0.
     events.push(Event::AgentCast {
@@ -71,7 +73,7 @@ fn local_cooldowns_are_independent_across_slots() {
         depth: 0,
         tick: 0,
     });
-    cascade.run_fixed_point(&mut state, &mut events);
+    cascade.run_fixed_point(&mut state, &mut views, &mut events);
     assert_eq!(state.agent_cooldown_next_ready(caster), Some(gcd));
 
     // Step 2: cast B at tick GCD. Set state.tick so any emitter that
@@ -88,7 +90,7 @@ fn local_cooldowns_are_independent_across_slots() {
         depth: 0,
         tick: gcd,
     });
-    cascade.run_fixed_point(&mut state, &mut events);
+    cascade.run_fixed_point(&mut state, &mut views, &mut events);
     // B's cast bumped the global cursor to gcd + gcd = 2*GCD.
     assert_eq!(state.agent_cooldown_next_ready(caster), Some(gcd * 2));
 

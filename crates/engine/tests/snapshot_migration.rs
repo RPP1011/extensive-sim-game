@@ -1,6 +1,7 @@
 //! Plan 3 Task 4: single-step migration registry.
 
 use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::snapshot::{
     load_snapshot, load_snapshot_with_migrations, save_snapshot, MigrationRegistry, SnapshotError,
 };
@@ -36,14 +37,14 @@ fn fake_old_hash_file(path: &std::path::Path) -> [u8; 32] {
 #[test]
 fn migration_from_fake_old_hash_runs_on_load() {
     let state = SimState::new(4, 42);
-    let events = EventRing::with_cap(16);
+    let events = EventRing::<Event>::with_cap(16);
     let path = tmp_path("mig");
     save_snapshot(&state, &events, &path).unwrap();
 
     let old_hash = fake_old_hash_file(&path);
 
     // Sanity: regular load fails with SchemaMismatch.
-    match load_snapshot(&path) {
+    match load_snapshot::<Event>(&path) {
         Err(SnapshotError::SchemaMismatch { .. }) => (),
         Err(other) => panic!("expected SchemaMismatch, got {:?}", other),
         Ok(_) => panic!("expected error, got Ok"),
@@ -66,7 +67,7 @@ fn migration_from_fake_old_hash_runs_on_load() {
     });
 
     // Loading via the migration path succeeds.
-    let (state2, _ring) = load_snapshot_with_migrations(&path, &reg).unwrap();
+    let (state2, _ring) = load_snapshot_with_migrations::<Event>(&path, &reg).unwrap();
     assert!(
         called.load(Ordering::SeqCst),
         "migration closure was not invoked"
@@ -80,13 +81,13 @@ fn migration_from_fake_old_hash_runs_on_load() {
 #[test]
 fn migration_registry_returns_error_when_no_path_registered() {
     let state = SimState::new(4, 42);
-    let events = EventRing::with_cap(16);
+    let events = EventRing::<Event>::with_cap(16);
     let path = tmp_path("mig_none");
     save_snapshot(&state, &events, &path).unwrap();
     let _old_hash = fake_old_hash_file(&path);
 
     let reg = MigrationRegistry::new();
-    match load_snapshot_with_migrations(&path, &reg) {
+    match load_snapshot_with_migrations::<Event>(&path, &reg) {
         Err(SnapshotError::MigrationFailed(_)) => (),
         Err(other) => panic!("expected MigrationFailed, got {:?}", other),
         Ok(_) => panic!("expected error, got Ok"),
@@ -98,14 +99,14 @@ fn migration_registry_returns_error_when_no_path_registered() {
 #[test]
 fn matching_hash_skips_migration_registry_entirely() {
     let state = SimState::new(4, 42);
-    let events = EventRing::with_cap(16);
+    let events = EventRing::<Event>::with_cap(16);
     let path = tmp_path("mig_skip");
     save_snapshot(&state, &events, &path).unwrap();
 
     // Registry is empty — but since the hash already matches, load should
     // succeed without touching the registry.
     let reg = MigrationRegistry::new();
-    let (state2, _) = load_snapshot_with_migrations(&path, &reg).unwrap();
+    let (state2, _) = load_snapshot_with_migrations::<Event>(&path, &reg).unwrap();
     assert_eq!(state2.seed, 42);
 
     std::fs::remove_file(&path).ok();

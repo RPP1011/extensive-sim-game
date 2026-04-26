@@ -15,11 +15,12 @@
 use engine::ability::{
     AbilityId, AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate, TargetSelector,
 };
-use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
+use engine_rules::views::ViewRegistry;
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
@@ -57,20 +58,21 @@ fn three_link_chain_fires_three_damage_events_no_depth_exceeded() {
 
     // `with_engine_builtins()` already registers the stateless CastHandler;
     // the ability registry rides on `state` now.
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
+    let mut views = ViewRegistry::new();
 
     let mut state = SimState::new(8, 42);
     state.ability_registry = registry;
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf, Vec3::new(3.0, 0.0, 0.0));
-    let mut events = EventRing::with_cap(1024);
+    let mut events = EventRing::<Event>::with_cap(1024);
 
     // Seed a root cast of A at depth 0. CastHandler will fan it out through
     // B and C via nested AgentCast events.
     events.push(Event::AgentCast {
         actor: caster, ability: a_id, target, depth: 0, tick: 0,
     });
-    cascade.run_fixed_point(&mut state, &mut events);
+    cascade.run_fixed_point(&mut state, &mut views, &mut events);
 
     // Exactly three damage emissions — one per link in A → B → C.
     let n_damage = events.iter()
@@ -121,18 +123,19 @@ fn self_targeted_recursive_link_uses_caster_selector() {
     ));
     let registry = b.build();
 
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let cascade = engine_rules::with_engine_builtins();
+    let mut views = ViewRegistry::new();
 
     let mut state = SimState::new(4, 42);
     state.ability_registry = registry;
     let caster = spawn(&mut state, CreatureType::Human, Vec3::ZERO);
     let target = spawn(&mut state, CreatureType::Wolf, Vec3::new(3.0, 0.0, 0.0));
-    let mut events = EventRing::with_cap(256);
+    let mut events = EventRing::<Event>::with_cap(256);
 
     events.push(Event::AgentCast {
         actor: caster, ability: a_id, target, depth: 0, tick: 0,
     });
-    cascade.run_fixed_point(&mut state, &mut events);
+    cascade.run_fixed_point(&mut state, &mut views, &mut events);
 
     // Caster took the 5 hp self-damage from the nested B; target took only the 2.
     assert!((state.agent_hp(caster).unwrap() - 995.0).abs() < 1e-4);

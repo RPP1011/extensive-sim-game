@@ -1,10 +1,14 @@
 // crates/engine/src/mask.rs
-use crate::generated::mask::{
-    mask_attack_candidates, mask_cast, mask_drink, mask_eat, mask_flee, mask_hold,
-    mask_move_toward_candidates, mask_rest,
-};
+//
+// Storage primitives for the action mask: MicroKind enum, TargetMask, and
+// MaskBuffer. Rule-aware mask-build methods (mark_hold_allowed,
+// mark_move_allowed_from_candidates, mark_attack_allowed_from_candidates,
+// mark_flee_allowed_if_threat_exists, mark_needs_allowed,
+// mark_domain_hook_micros_allowed) and the inferred_cast_target helper are
+// DELETED in Plan B1' Task 11 — they called into generated mask functions and
+// belong to the rule layer. `engine_rules::step` (emitted in Task 11) will
+// own those calls. Only storage primitives remain here.
 use crate::ids::AgentId;
-use crate::state::SimState;
 use smallvec::SmallVec;
 
 pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 D5
@@ -153,208 +157,21 @@ impl MaskBuffer {
         self.micro_kind.iter_mut().for_each(|b| *b = false);
         self.target.iter_mut().for_each(|b| *b = false);
     }
-    /// Walk every alive agent and set the bit for `kind` to the value
-    /// returned by the DSL-emitted self-predicate `pred(state, self_id)`.
-    ///
-    /// Task 141 retired the bespoke per-kind `mark_*` bodies (Hold /
-    /// MoveToward / Flee / Eat / Drink / Rest) in favour of compiler-
-    /// emitted predicates in `crates/engine/src/generated/mask/*.rs`.
-    /// Centralising the loop keeps `step::step_full` readable — one
-    /// `mark_self_predicate` call per kind — and makes adding a new
-    /// self-only mask a one-line engine change once the DSL row lands.
-    pub fn mark_self_predicate(
-        &mut self,
-        state: &SimState,
-        kind: MicroKind,
-        pred: fn(&SimState, AgentId) -> bool,
-    ) {
-        let n_kinds = MicroKind::ALL.len();
-        for id in state.agents_alive() {
-            let slot = (id.raw() - 1) as usize;
-            let offset = slot * n_kinds + kind as usize;
-            self.micro_kind[offset] = pred(state, id);
+
+    /// Set the mask bit for `(agent_slot, kind)` directly. Used by
+    /// `engine_rules` mask-build code (Task 11) and low-level tests that
+    /// need to write a specific bit without the rule-aware mark_* helpers
+    /// (which are deleted — they called generated mask fns from engine_rules).
+    pub fn set(&mut self, agent_slot: usize, kind: MicroKind, value: bool) {
+        let offset = agent_slot * MicroKind::ALL.len() + kind as usize;
+        if let Some(b) = self.micro_kind.get_mut(offset) {
+            *b = value;
         }
     }
 
-    /// Mark `Hold` via the DSL-emitted `mask_hold` predicate.
-    pub fn mark_hold_allowed(&mut self, state: &SimState) {
-        self.mark_self_predicate(state, MicroKind::Hold, mask_hold);
+    /// Read the mask bit for `(agent_slot, kind)`.
+    pub fn get(&self, agent_slot: usize, kind: MicroKind) -> bool {
+        let offset = agent_slot * MicroKind::ALL.len() + kind as usize;
+        self.micro_kind.get(offset).copied().unwrap_or(false)
     }
-
-    /// Mark `MoveToward` as allowed for every agent whose
-    /// `mask_move_toward_candidates` enumerator produces at least one
-    /// target. Task 138 — MoveToward is now a target-bound kind with a
-    /// `from` clause in DSL; this routine populates both the categorical
-    /// bit (at least one candidate exists) and the per-agent target
-    /// candidate list in `target_mask`.
-    pub fn mark_move_allowed_from_candidates(
-        &mut self,
-        state: &SimState,
-        target_mask: &mut TargetMask,
-    ) {
-        let n_kinds = MicroKind::ALL.len();
-        for id in state.agents_alive() {
-            mask_move_toward_candidates(state, id, target_mask);
-            let has_target = !target_mask.candidates_for(id, MicroKind::MoveToward).is_empty();
-            if has_target {
-                let slot = (id.raw() - 1) as usize;
-                let offset = slot * n_kinds + MicroKind::MoveToward as usize;
-                self.micro_kind[offset] = true;
-            }
-        }
-    }
-
-    /// Mark `Flee` via the DSL-emitted `mask_flee` predicate. The DSL
-    /// predicate is permissive (allowed for any alive agent) — the real
-    /// gate (absolute-hp thresholds `self.hp < 30/50`) lives in the
-    /// `Flee` scoring row. Task 138 retired the engine-side "threat
-    /// within aggro range" quantifier; Flee stays self-only on the
-    /// mask/scoring side and `UtilityBackend::build_action` resolves
-    /// the threat (nearest hostile within `config.combat.aggro_range`)
-    /// when assembling the `Micro { Flee, Agent(threat) }` action, which
-    /// `step_full`'s Flee arm uses to move the agent AWAY from. Task 148.
-    pub fn mark_flee_allowed_if_threat_exists(&mut self, state: &SimState) {
-        self.mark_self_predicate(state, MicroKind::Flee, mask_flee);
-    }
-
-    /// Mark `Eat`, `Drink`, and `Rest` via their DSL-emitted predicates.
-    /// Each is self-only and currently unconditional on alive agents,
-    /// matching the legacy `mark_needs_allowed` permissiveness.
-    pub fn mark_needs_allowed(&mut self, state: &SimState) {
-        self.mark_self_predicate(state, MicroKind::Eat, mask_eat);
-        self.mark_self_predicate(state, MicroKind::Drink, mask_drink);
-        self.mark_self_predicate(state, MicroKind::Rest, mask_rest);
-    }
-
-    /// Mark `Attack` via the compiler-emitted candidate enumerator
-    /// `mask_attack_candidates`. Task 138 — both the categorical bit
-    /// AND the per-agent target candidate list are populated from the
-    /// DSL-declared `from query.nearby_agents(...)` source + `when`
-    /// predicate. The scorer then argmaxes over the candidate list
-    /// rather than resolving a single target via `nearest_other`.
-    pub fn mark_attack_allowed_from_candidates(
-        &mut self,
-        state: &SimState,
-        target_mask: &mut TargetMask,
-    ) {
-        let n_kinds = MicroKind::ALL.len();
-        for id in state.agents_alive() {
-            mask_attack_candidates(state, id, target_mask);
-            let has_target = !target_mask.candidates_for(id, MicroKind::Attack).is_empty();
-            if has_target {
-                let slot = (id.raw() - 1) as usize;
-                let offset = slot * n_kinds + MicroKind::Attack as usize;
-                self.micro_kind[offset] = true;
-            }
-        }
-    }
-
-    /// MVP permissiveness: unconditionally allow all 11 domain-hook event-only
-    /// micros (Cast, UseItem, Harvest, PlaceTile/Voxel, HarvestVoxel, Converse,
-    /// ShareStory, Communicate, Ask, Remember). Real preconditions (cooldowns,
-    /// inventory, LOS, memory presence, …) land alongside each domain's
-    /// compiler-registered cascade handlers in later plans.
-    ///
-    /// `state.ability_registry` drives the Cast gate: when non-empty, the
-    /// first registered ability is treated as each agent's candidate cast
-    /// and routed through the DSL-emitted `mask_cast` (task 157) +
-    /// engine-side `inferred_cast_target` (target alive, in-range,
-    /// hostility matches `gate.hostile_only`). An empty registry falls
-    /// back to permissive — matches the pre-registry-move behaviour
-    /// where no `CastHandler` was registered.
-    ///
-    /// Audit fix CRITICAL #2. Registry-on-state since the cast-handler
-    /// migration retired the `Arc<AbilityRegistry>` plumbing.
-    pub fn mark_domain_hook_micros_allowed(&mut self, state: &SimState) {
-        let n_kinds = MicroKind::ALL.len();
-        // Non-cast domain hooks remain permissive (no gate yet).
-        for id in state.agents_alive() {
-            let slot = (id.raw() - 1) as usize;
-            for k in [
-                MicroKind::UseItem,      MicroKind::Harvest,
-                MicroKind::PlaceTile,    MicroKind::PlaceVoxel,   MicroKind::HarvestVoxel,
-                MicroKind::Converse,     MicroKind::ShareStory,
-                MicroKind::Communicate,  MicroKind::Ask,          MicroKind::Remember,
-            ] {
-                self.micro_kind[slot * n_kinds + k as usize] = true;
-            }
-        }
-
-        // Cast: the DSL-emitted `mask_cast` carries the caster-only
-        // predicates (alive + un-stunned + known + cooldown-ready +
-        // not-engaged-elsewhere). The target-side filters (target
-        // alive, in-range, hostility matches) still live in
-        // `inferred_cast_target` on the engine side — the mask DSL's
-        // `from`-clause only accepts an `AgentId` source, so the
-        // (caster, target, ability) Cartesian stays here. Empty
-        // registry falls back to permissive.
-        let ability_id = if state.ability_registry.is_empty() {
-            None
-        } else {
-            crate::ability::AbilityId::new(1)
-        };
-        for id in state.agents_alive() {
-            let slot = (id.raw() - 1) as usize;
-            let cast_offset = slot * n_kinds + MicroKind::Cast as usize;
-            let allowed = match ability_id {
-                Some(ability) => {
-                    mask_cast(state, id, ability)
-                        && inferred_cast_target(state, id, ability).is_some()
-                }
-                // Empty registry → permissive.
-                None => true,
-            };
-            self.micro_kind[cast_offset] = allowed;
-        }
-    }
-}
-
-/// Pick the nearest valid cast target for `caster` firing `ability`.
-///
-/// Task 157 folded the former `evaluate_cast_gate` target-side branches
-/// into this helper:
-///   * target alive,
-///   * within the program's `Area::SingleTarget.range` (no longer the
-///     coarser `aggro_range`; the ability's own range is the authoritative
-///     bound),
-///   * hostility matches the program's `gate.hostile_only`.
-///
-/// The caster-only half of the old gate (alive + un-stunned + cooldown-
-/// ready + known + not-engaged-elsewhere) lives in the DSL-emitted
-/// `mask_cast`; mask-build calls both and ands the results. Returns
-/// `None` when no candidate passes every filter.
-fn inferred_cast_target(
-    state:   &SimState,
-    caster:  AgentId,
-    ability: crate::ability::AbilityId,
-) -> Option<AgentId> {
-    let pos = state.agent_pos(caster)?;
-    let prog = state.ability_registry.get(ability)?;
-    let range = match prog.area { crate::ability::Area::SingleTarget { range } => range };
-    let hostile_only = prog.gate.hostile_only;
-    let caster_ct = state.agent_creature_type(caster);
-    let spatial = state.spatial();
-    let mut best: Option<(AgentId, f32)> = None;
-    for other in spatial.within_radius(state, pos, state.config.combat.aggro_range) {
-        if other == caster { continue; }
-        // Target alive.
-        if !state.agent_alive(other) { continue; }
-        // Target in range of the *ability*, not just aggro range.
-        let op = match state.agent_pos(other) { Some(p) => p, None => continue };
-        let d = pos.distance(op);
-        if d > range { continue; }
-        // Hostile-only gate: require the symmetric `is_hostile_to` to
-        // allow when the program's `gate.hostile_only` is set.
-        if hostile_only {
-            let ct = match caster_ct { Some(c) => c, None => continue };
-            let oc = match state.agent_creature_type(other) { Some(c) => c, None => continue };
-            if !ct.is_hostile_to(oc) { continue; }
-        }
-        match best {
-            None => best = Some((other, d)),
-            Some((_, bd)) if d < bd => best = Some((other, d)),
-            _ => {}
-        }
-    }
-    best.map(|(id, _)| id)
 }

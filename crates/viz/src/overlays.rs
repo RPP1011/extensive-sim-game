@@ -55,10 +55,10 @@ impl OverlayTracker {
     /// don't carry positions.
     pub fn ingest_with_state(
         &mut self,
-        events: &engine::event::EventRing,
+        events: &engine::event::EventRing<engine_data::events::Event>,
         state:  &engine::state::SimState,
     ) {
-        use engine::event::Event;
+        use engine_data::events::Event;
         let total = events.total_pushed();
         while self.next_event_idx < total {
             let Some(e) = events.get_pushed(self.next_event_idx) else {

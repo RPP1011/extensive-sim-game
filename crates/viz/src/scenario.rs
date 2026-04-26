@@ -3,7 +3,7 @@ use anyhow::{bail, Context, Result};
 use glam::Vec3;
 use serde::Deserialize;
 
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 
 #[derive(Debug, Deserialize)]
 pub struct Scenario {

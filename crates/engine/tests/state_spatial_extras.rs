@@ -5,7 +5,7 @@
 //! `docs/superpowers/plans/2026-04-19-engine-plan-state-port.md`. Fields are
 //! storage-only; no movement logic reads them yet.
 
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::state::{AgentSpawn, SimState};
 use glam::Vec3;
 

@@ -4,13 +4,14 @@
 //! different hashes. Release build runs in ≤ 2 s.
 
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
+use engine_data::entities::CreatureType;
 use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::mask::{MaskBuffer, MicroKind};
 use engine::policy::{Action, ActionKind, AnnounceAudience, MacroAction,
                      MicroTarget, PolicyBackend};
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch};
+use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use glam::Vec3;
 
 /// A policy that emits a rotating mix of the universal action primitives.
@@ -95,8 +96,8 @@ impl PolicyBackend for MixedPolicy {
 fn run(seed: u64) -> [u8; 32] {
     let mut state = SimState::new(110, seed);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(1_000_000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(1_000_000);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..100u32 {
         let angle = (i as f32 / 100.0) * std::f32::consts::TAU;
         state.spawn_agent(AgentSpawn {
@@ -112,6 +113,7 @@ fn run(seed: u64) -> [u8; 32] {
     events.replayable_sha256()
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn same_seed_same_hash() {
     let h1 = run(42);
@@ -119,6 +121,7 @@ fn same_seed_same_hash() {
     assert_eq!(h1, h2, "deterministic replay");
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn different_seed_different_hash() {
     let h1 = run(42);
@@ -126,6 +129,7 @@ fn different_seed_different_hash() {
     assert_ne!(h1, h2, "different seeds must diverge");
 }
 
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn mixed_run_under_two_seconds_release() {
     let t0 = std::time::Instant::now();

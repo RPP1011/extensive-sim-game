@@ -57,8 +57,8 @@ pub struct AppState {
 
     pub sim:       engine::state::SimState,
     pub scratch:   engine::step::SimScratch,
-    pub events:    engine::event::EventRing,
-    pub cascade:   engine::cascade::CascadeRegistry,
+    pub events:    engine::event::EventRing<engine_data::events::Event>,
+    pub cascade:   engine::cascade::CascadeRegistry<engine_data::events::Event, engine_rules::ViewRegistry>,
     pub backend:   engine::policy::UtilityBackend,
     #[allow(dead_code)]
     pub agent_ids: Vec<engine::ids::AgentId>,
@@ -268,7 +268,7 @@ impl AppState {
         let mut alive_by_cell: HashMap<(u32, u32), Vec<(u8, u32)>> = HashMap::new();
         for id in self.sim.agents_alive() {
             let pos = match self.sim.agent_pos(id) { Some(p) => p, None => continue };
-            let ct  = self.sim.agent_creature_type(id).unwrap_or(engine::creature::CreatureType::Human);
+            let ct  = self.sim.agent_creature_type(id).unwrap_or(engine_data::entities::CreatureType::Human);
             let idx = viz::palette::creature_palette_index(ct);
             let lifted = Vec3::new(
                 pos.x,

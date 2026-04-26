@@ -36,8 +36,9 @@
 
 use engine::backend::{CpuBackend, SimBackend};
 use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::policy::UtilityBackend;
 use engine::state::{AgentSpawn, SimState};
 use engine::step::SimScratch;
@@ -838,7 +839,7 @@ fn gpu_scoring_with_grudges_byte_exact() {
         for &human in &humans {
             // my_enemies fold pattern: AgentAttacked { actor, target } →
             // my_enemies[target, actor] += 1.0 (clamped to [0, 1]).
-            events.push(engine::event::Event::AgentAttacked {
+            events.push(engine_data::events::Event::AgentAttacked {
                 actor: wolf,
                 target: human,
                 damage: 0.0,
@@ -927,7 +928,7 @@ fn gpu_scoring_reads_fold_kernel_output_byte_exact() {
         for &human in &humans {
             // CPU side — AgentAttacked folds into my_enemies AND
             // threat_level (see assets/sim/views.sim fold handlers).
-            events.push(engine::event::Event::AgentAttacked {
+            events.push(engine_data::events::Event::AgentAttacked {
                 actor: wolf,
                 target: human,
                 damage: 0.0,

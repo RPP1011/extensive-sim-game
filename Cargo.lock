@@ -2098,6 +2098,7 @@ dependencies = [
  "contracts",
  "criterion",
  "dhat",
+ "engine_data",
  "engine_rules",
  "glam",
  "hex",
@@ -2108,10 +2109,11 @@ dependencies = [
  "safetensors 0.4.5",
  "sha2",
  "smallvec",
+ "trybuild",
 ]
 
 [[package]]
-name = "engine_generated"
+name = "engine_data"
 version = "0.1.0"
 dependencies = [
  "glam",
@@ -2127,6 +2129,7 @@ dependencies = [
  "bytemuck",
  "dsl_compiler",
  "engine",
+ "engine_data",
  "engine_rules",
  "glam",
  "memoffset",
@@ -2139,7 +2142,10 @@ dependencies = [
 name = "engine_rules"
 version = "0.1.0"
 dependencies = [
- "engine_generated",
+ "engine",
+ "engine_data",
+ "glam",
+ "smallvec",
  "tempfile",
 ]
 
@@ -5348,6 +5354,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "target-triple"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
+
+[[package]]
 name = "tch"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5596,6 +5608,21 @@ dependencies = [
  "serde_core",
  "serde_spanned 1.0.4",
  "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow",
+]
+
+[[package]]
+name = "toml"
+version = "1.0.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbe30f93627849fa362d4a602212d41bb237dc2bd0f8ba0b2ce785012e124220"
+dependencies = [
+ "indexmap",
+ "serde_core",
+ "serde_spanned 1.0.4",
+ "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "toml_writer",
  "winnow",
@@ -5852,6 +5879,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "trybuild"
+version = "1.0.116"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47c635f0191bd3a2941013e5062667100969f8c4e9cd787c14f977265d73616e"
+dependencies = [
+ "glob",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "target-triple",
+ "termcolor",
+ "toml 1.0.1+spec-1.1.0",
+]
+
+[[package]]
 name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6018,6 +6060,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "engine",
+ "engine_data",
+ "engine_rules",
  "glam",
  "serde",
  "toml 0.8.23",

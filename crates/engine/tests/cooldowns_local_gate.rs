@@ -8,11 +8,12 @@
 //!   * At tick 20, A's local clears and A is ready again.
 
 use engine::ability::{AbilityProgram, AbilityRegistryBuilder, EffectOp, Gate};
-use engine::cascade::CascadeRegistry;
-use engine::creature::CreatureType;
-use engine::event::{Event, EventRing};
+use engine_data::entities::CreatureType;
+use engine::event::EventRing;
+use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::state::{AgentSpawn, SimState};
+use engine_rules::views::ViewRegistry;
 use glam::Vec3;
 
 fn spawn(state: &mut SimState, ct: CreatureType, pos: Vec3) -> AgentId {
@@ -56,8 +57,9 @@ fn local_gate_blocks_same_slot_after_global_clears() {
     let slot_b = ability_b.slot() as u8;
 
     // Cast A at tick 0 through the full cascade.
-    let cascade = CascadeRegistry::with_engine_builtins();
-    let mut events = EventRing::with_cap(512);
+    let cascade = engine_rules::with_engine_builtins();
+    let mut views = ViewRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(512);
     events.push(Event::AgentCast {
         actor: caster,
         ability: ability_a,
@@ -65,7 +67,7 @@ fn local_gate_blocks_same_slot_after_global_clears() {
         depth: 0,
         tick: 0,
     });
-    cascade.run_fixed_point(&mut state, &mut events);
+    cascade.run_fixed_point(&mut state, &mut views, &mut events);
 
     // Post-cast: global=GCD, A's local=20.
     assert_eq!(state.agent_cooldown_next_ready(caster), Some(gcd));

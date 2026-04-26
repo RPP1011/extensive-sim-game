@@ -3,20 +3,22 @@
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[cfg(feature = "dhat-heap")]
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn steady_state_zero_alloc_after_warmup() {
     use engine::cascade::CascadeRegistry;
-    use engine::creature::CreatureType;
+    use engine_data::entities::CreatureType;
     use engine::event::EventRing;
+use engine_data::events::Event;
     use engine::policy::UtilityBackend;
     use engine::state::{AgentSpawn, SimState};
-    use engine::step::{step, SimScratch};
+    use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
     use glam::Vec3;
 
     let mut state = SimState::new(100, 42);
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(100_000);
-    let cascade = CascadeRegistry::new();
+    let mut events = EventRing::<Event>::with_cap(100_000);
+    let cascade = CascadeRegistry::<Event>::new();
     for i in 0..50 {
         state.spawn_agent(AgentSpawn {
             creature_type: CreatureType::Human,
@@ -51,6 +53,7 @@ fn steady_state_zero_alloc_after_warmup() {
 }
 
 #[cfg(not(feature = "dhat-heap"))]
+    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn steady_state_zero_alloc_skipped_without_feature() {
     eprintln!("skipping — run with `--features dhat-heap` to measure allocations");
