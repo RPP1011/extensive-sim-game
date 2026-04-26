@@ -1,5 +1,18 @@
 # DSL Authoring Engine — Design
 
+> **Migration note (2026-04-25, post-Spec-B'):** Authored on `wsb-engine-viz`
+> pre-Spec-B'. Now: engine has zero rule-aware code; `engine/src/step.rs`
+> deleted (body emitted into `engine_rules`); sealed `CascadeHandler<E, V>`
+> + view traits; build sentinels; primitives-only allowlist on `engine/`.
+> Companion plans (P1a `dsl-ast-extraction`, P1b `ir-interpreter`) need
+> rewriting against post-B' file layout: dispatch branches under
+> `interpreted-rules` feature live in **emitted** code (`engine_rules`,
+> via feature-gated emit-passes in `dsl_compiler`), not hand-edited
+> engine source. Per (B) decision 2026-04-25, the implementations get
+> re-derived; this spec stays as a design reference. References to
+> `crates/engine_generated` should now read `crates/engine_data` (renamed
+> in Spec B' Task 1).
+
 > Spec: AI-native authoring surface that exposes the world-sim DSL,
 > interpreter-mode runtime, and visualization layer as a unified
 > "engine" product. Targets a tight edit → run → inspect loop for an

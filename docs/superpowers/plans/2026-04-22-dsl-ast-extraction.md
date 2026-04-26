@@ -1,5 +1,28 @@
 # dsl_ast Extraction Implementation Plan
 
+> **Migration note (2026-04-25, post-Spec-B'):** Authored on `wsb-engine-viz`
+> against pre-B' main. The dsl_compiler crate structure is mostly the same
+> post-B' (emit modules + parser + IR all still exist), but several
+> emit modules have new responsibilities (emit_step, emit_backend,
+> emit_mask_fill, emit_cascade_register added by Plan B1' Task 11). Plus
+> `engine_generated` was renamed to `engine_data` and the dependency
+> direction settled differently. Re-derivation passes:
+>
+> 1. The §"File Structure" `dsl_ast` crate layout still applies.
+> 2. The §"Modified files" list: include the 4 new emit modules from
+>    Plan B1' (emit_step.rs, emit_backend.rs, emit_mask_fill.rs,
+>    emit_cascade_register.rs) — they live in `dsl_compiler/src/` and
+>    consume the IR from `dsl_ast`.
+> 3. The §"Acceptance Criteria" wolves+humans parity test now uses
+>    `engine_rules::SimEventRing` + `engine_rules::SimCascadeRegistry`
+>    type aliases (Spec B' D13 — generic primitives instantiated in
+>    engine_rules).
+> 4. Any reference to `engine_generated` should read `engine_data`.
+>
+> Companion: `docs/superpowers/specs/2026-04-22-dsl-authoring-engine-design.md`
+> (parent spec) and `plans/2026-04-22-ir-interpreter.md` (P1b — depends on
+> P1a landing first).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extract the DSL frontend (AST, tokens, parser, IR, name resolution, plus the top-level `parse` / `compile` entrypoints) from `crates/dsl_compiler` into a new `crates/dsl_ast` crate. `dsl_compiler` retains only the emission layer (`emit_*.rs`, `schema_hash.rs`) and re-exports the frontend surface for backward compatibility.

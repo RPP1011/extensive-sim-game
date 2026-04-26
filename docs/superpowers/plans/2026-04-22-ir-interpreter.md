@@ -1,5 +1,27 @@
 # DSL IR Interpreter (all rule classes) — Implementation Plan
 
+> **Migration note (2026-04-25, post-Spec-B'):** Authored on `wsb-engine-viz`
+> pre-B'. Re-derivation rather than cherry-pick (decision (B), 2026-04-25).
+> Key adaptations needed in §"File Structure":
+> - `crates/engine/src/evaluator/` triggers engine/build.rs allowlist gate
+>   (Spec B' D11). Place under `engine/src/policy/evaluator.rs` to avoid,
+>   or accept the gate with critic dispatch.
+> - `crates/engine/src/step.rs` is gone (step body emitted into
+>   `engine_rules/src/step.rs` per Plan B1' Task 11). Dispatch branches
+>   under `interpreted-rules` feature live in emitted code via
+>   `dsl_compiler::emit_step` feature-gated emit-passes. Larger refactor
+>   than original plan anticipated.
+> - `crates/engine/src/mask.rs` is storage-only post-B'; `mark_*_allowed`
+>   moved to emitted `engine_rules/src/mask_fill.rs`.
+> - `Context` impls thread `EventRing<E>` + `CascadeRegistry<E, V>`
+>   (generic primitives per Spec B' D13).
+> - `wolves_and_humans_parity` baseline is post-B'.
+>
+> The `wsb-engine-viz` branch has a working implementation (~5K LoC) that
+> serves as a design reference, NOT a cherry-pick target. Per (B) decision,
+> the agent re-derives the same end-state on post-B' main. Companion:
+> `plans/2026-04-22-dsl-ast-extraction.md` (P1a — must land first).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (recommended) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Add an interpreted evaluation path for every rule-class IR type in `dsl_ast` (`MaskIR`, `ScoringIR`, `PhysicsIR`, `ViewIR`), exposed as methods on the IR types using the visitor pattern. Gate it behind a `cargo` feature `interpreted-rules` on `engine`. Prove byte-for-byte parity against the compiled path using the existing `wolves_and_humans` baseline, one rule class at a time.
