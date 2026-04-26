@@ -1655,6 +1655,13 @@ fn collect_locals_in_stmt(
                 collect_locals_in_expr(&f.value, out);
             }
         }
+        IrStmt::BeliefObserve { observer, target, fields, .. } => {
+            collect_locals_in_expr(observer, out);
+            collect_locals_in_expr(target, out);
+            for f in fields {
+                collect_locals_in_expr(&f.value, out);
+            }
+        }
     }
 }
 

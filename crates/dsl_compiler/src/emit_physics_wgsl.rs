@@ -539,6 +539,15 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
             let v = lower_expr(e)?;
             writeln!(out, "{pad}{v};").unwrap();
         }
+        IrStmt::BeliefObserve { .. } => {
+            // Belief mutations write to cold_beliefs (CPU-only SoA storage).
+            // WGSL code generation is deferred to Plan ToM Task 5.
+            return Err(EmitError::Unsupported(
+                "`beliefs().observe()` WGSL code generation not yet implemented \
+                 (deferred to Plan ToM Task 5)"
+                    .into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -1666,7 +1675,10 @@ fn scan_emits(stmts: &[IrStmt]) -> Result<(), EmitError> {
                     scan_emits(&arm.body)?;
                 }
             }
-            IrStmt::Let { .. } | IrStmt::Expr(_) | IrStmt::SelfUpdate { .. } => {}
+            IrStmt::Let { .. }
+            | IrStmt::Expr(_)
+            | IrStmt::SelfUpdate { .. }
+            | IrStmt::BeliefObserve { .. } => {}
         }
     }
     Ok(())

@@ -615,6 +615,18 @@ pub enum Stmt {
     SelfUpdate { op: String, value: Expr, span: Span },
     /// Bare expression (for fold bodies that set self).
     Expr(Expr),
+    /// `beliefs(observer).observe(target) with { field: expr, ... }` — belief
+    /// mutation primitive (Plan ToM Task 4). Mutates a single `BeliefState`
+    /// cell in `SimState::cold_beliefs` for the observer/target pair.
+    BeliefObserve(BeliefObserveStmt),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BeliefObserveStmt {
+    pub observer: String,
+    pub target: String,
+    pub fields: Vec<FieldInit>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

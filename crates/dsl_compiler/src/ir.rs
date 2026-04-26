@@ -441,6 +441,21 @@ pub enum IrStmt {
         span: Span,
     },
     Expr(IrExprNode),
+    /// `beliefs(observer).observe(target) with { field: expr, ... }` — belief
+    /// mutation primitive resolved from the DSL surface (Plan ToM Task 4).
+    ///
+    /// `observer` and `target` are local-scope references (typically event
+    /// bindings like `actor`). `fields` is the validated list of
+    /// `BeliefState` field assignments; each name has been checked against
+    /// the `BELIEF_FIELDS` allowlist in the resolver.
+    ///
+    /// Lowering to emitted Rust is deferred to T5 (emit_physics).
+    BeliefObserve {
+        observer: IrExprNode,
+        target: IrExprNode,
+        fields: Vec<IrFieldInit>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

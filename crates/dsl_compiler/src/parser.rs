@@ -1868,6 +1868,10 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
         }
         return Ok(Stmt::Match { scrutinee, arms, span: Span::new(start, c.pos) });
     }
+    // `beliefs(<ident>).observe(<ident>) with { ... }`
+    if starts_with_keyword(c, "beliefs") {
+        return Ok(Stmt::BeliefObserve(parse_belief_observe_stmt(c)?));
+    }
     if c.starts_with("self") {
         // Check for `self += / -= / *=` operators.
         let save = c.pos;
@@ -1923,6 +1927,61 @@ fn parse_emit_stmt(c: &mut Cursor) -> PResult<EmitStmt> {
         }
     }
     Ok(EmitStmt { event_name, fields, span: Span::new(start, c.pos) })
+}
+
+fn parse_belief_observe_stmt(c: &mut Cursor) -> PResult<BeliefObserveStmt> {
+    let start = c.pos;
+    expect_keyword(c, "beliefs")
+        .map_err(|e| e.with_context("parsing `beliefs(...)` statement"))?;
+    c.skip_ws();
+    expect_char(c, '(').map_err(|e| e.with_context("parsing `beliefs(` open paren"))?;
+    c.skip_ws();
+    let observer =
+        ident(c).map_err(|e| e.with_context("parsing `beliefs(observer` identifier"))?;
+    c.skip_ws();
+    expect_char(c, ')').map_err(|e| e.with_context("parsing `beliefs(...)` close paren"))?;
+    c.skip_ws();
+    expect_char(c, '.').map_err(|e| e.with_context("parsing `.` in `beliefs(...).observe`"))?;
+    expect_keyword(c, "observe")
+        .map_err(|e| e.with_context("parsing `.observe` method"))?;
+    c.skip_ws();
+    expect_char(c, '(').map_err(|e| e.with_context("parsing `observe(` open paren"))?;
+    c.skip_ws();
+    let target =
+        ident(c).map_err(|e| e.with_context("parsing `observe(target` identifier"))?;
+    c.skip_ws();
+    expect_char(c, ')').map_err(|e| e.with_context("parsing `observe(...)` close paren"))?;
+    c.skip_ws();
+    expect_keyword(c, "with")
+        .map_err(|e| e.with_context("parsing `with` keyword in belief mutation"))?;
+    c.skip_ws();
+    expect_char(c, '{').map_err(|e| e.with_context("parsing `{` in belief mutation body"))?;
+    let mut fields = Vec::new();
+    loop {
+        c.skip_ws();
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        let fstart = c.pos;
+        let name = ident(c).map_err(|e| e.with_context("parsing belief field name"))?;
+        c.skip_ws();
+        expect_char(c, ':').map_err(|e| e.with_context("parsing `:` after belief field name"))?;
+        c.skip_ws();
+        let value = parse_expr(c)?;
+        fields.push(FieldInit { name, value, span: Span::new(fstart, c.pos) });
+        c.skip_ws();
+        if c.starts_with_char(',') {
+            c.bump(1);
+            continue;
+        }
+        if c.starts_with_char('}') {
+            c.bump(1);
+            break;
+        }
+        return Err(ParseErr::at(here(c), "expected `,` or `}` in belief mutation body"));
+    }
+    Ok(BeliefObserveStmt { observer, target, fields, span: Span::new(start, c.pos) })
 }
 
 // ---------------------------------------------------------------------------

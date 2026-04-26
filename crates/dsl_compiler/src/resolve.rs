@@ -1712,6 +1712,52 @@ fn resolve_stmt(
             Ok(IrStmt::SelfUpdate { op: op.clone(), value, span: *span })
         }
         Stmt::Expr(e) => Ok(IrStmt::Expr(resolve_expr(e, scope, symbols)?)),
+        Stmt::BeliefObserve(b) => {
+            // Validate that each assigned field is a known BeliefState field.
+            const BELIEF_FIELDS: &[&str] = &[
+                "last_known_pos",
+                "last_known_hp",
+                "last_known_max_hp",
+                "last_known_creature_type",
+                "last_updated_tick",
+                "confidence",
+            ];
+            for f in &b.fields {
+                if !BELIEF_FIELDS.contains(&f.name.as_str()) {
+                    return Err(ResolveError::UnknownBeliefField {
+                        field: f.name.clone(),
+                        valid: BELIEF_FIELDS.to_vec(),
+                        span: f.span,
+                    });
+                }
+            }
+            // Resolve the observer / target as plain identifier expressions
+            // so they bind to the existing local scope (e.g. event bindings).
+            let observer_span = b.span;
+            let target_span = b.span;
+            let observer_expr = crate::ast::Expr {
+                kind: crate::ast::ExprKind::Ident(b.observer.clone()),
+                span: observer_span,
+            };
+            let target_expr = crate::ast::Expr {
+                kind: crate::ast::ExprKind::Ident(b.target.clone()),
+                span: target_span,
+            };
+            let observer = resolve_expr(&observer_expr, scope, symbols)?;
+            let target = resolve_expr(&target_expr, scope, symbols)?;
+            let fields = b
+                .fields
+                .iter()
+                .map(|f| {
+                    Ok::<_, ResolveError>(crate::ir::IrFieldInit {
+                        name: f.name.clone(),
+                        value: resolve_expr(&f.value, scope, symbols)?,
+                        span: f.span,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(IrStmt::BeliefObserve { observer, target, fields, span: b.span })
+        }
     }
 }
 
@@ -3034,6 +3080,13 @@ fn validate_fold_stmt(view_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
                 .into(),
             span: *span,
         }),
+        IrStmt::BeliefObserve { span, .. } => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct:
+                "`beliefs().observe()` inside fold body (belief mutations only valid in physics)"
+                    .into(),
+            span: *span,
+        }),
     }
 }
 
@@ -3390,6 +3443,14 @@ fn validate_physics_stmt(physics_name: &str, s: &IrStmt) -> Result<(), ResolveEr
         }
         IrStmt::SelfUpdate { value, .. } => validate_physics_expr(physics_name, value),
         IrStmt::Expr(e) => validate_physics_expr(physics_name, e),
+        IrStmt::BeliefObserve { observer, target, fields, .. } => {
+            validate_physics_expr(physics_name, observer)?;
+            validate_physics_expr(physics_name, target)?;
+            for f in fields {
+                validate_physics_expr(physics_name, &f.value)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -3690,7 +3751,10 @@ fn collect_emitted_events(body: &[IrStmt], out: &mut Vec<String>) {
                     collect_emitted_events(&arm.body, out);
                 }
             }
-            IrStmt::Let { .. } | IrStmt::SelfUpdate { .. } | IrStmt::Expr(_) => {}
+            IrStmt::Let { .. }
+            | IrStmt::SelfUpdate { .. }
+            | IrStmt::Expr(_)
+            | IrStmt::BeliefObserve { .. } => {}
         }
     }
 }
@@ -3830,6 +3894,11 @@ fn stmt_references_cascade_ceiling(s: &IrStmt) -> bool {
         }
         IrStmt::SelfUpdate { value, .. } => expr_references_cascade_ceiling(value),
         IrStmt::Expr(e) => expr_references_cascade_ceiling(e),
+        IrStmt::BeliefObserve { observer, target, fields, .. } => {
+            expr_references_cascade_ceiling(observer)
+                || expr_references_cascade_ceiling(target)
+                || fields.iter().any(|f| expr_references_cascade_ceiling(&f.value))
+        }
     }
 }
 

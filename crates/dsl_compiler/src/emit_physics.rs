@@ -485,7 +485,10 @@ fn body_emits_event(stmts: &[IrStmt]) -> bool {
                     if body_emits_event(&arm.body) { return true; }
                 }
             }
-            IrStmt::Let { .. } | IrStmt::Expr(_) | IrStmt::SelfUpdate { .. } => {}
+            IrStmt::Let { .. }
+            | IrStmt::Expr(_)
+            | IrStmt::SelfUpdate { .. }
+            | IrStmt::BeliefObserve { .. } => {}
         }
     }
     false
@@ -527,7 +530,7 @@ fn rule_body_needs_views(stmts: &[IrStmt]) -> bool {
                 IrStmt::Match { scrutinee, arms, .. } => {
                     expr_needs_views(scrutinee) || arms.iter().any(|a| stmts_need_views(&a.body))
                 }
-                IrStmt::Emit(_) => false,
+                IrStmt::Emit(_) | IrStmt::BeliefObserve { .. } => false,
             };
             if found {
                 return true;
@@ -579,7 +582,7 @@ fn body_uses_record_memory(stmts: &[IrStmt]) -> bool {
                     expr_uses_record_memory(scrutinee)
                         || arms.iter().any(|a| stmts_use_record_memory(&a.body))
                 }
-                IrStmt::Emit(_) => false,
+                IrStmt::Emit(_) | IrStmt::BeliefObserve { .. } => false,
             };
             if found {
                 return true;
@@ -610,7 +613,10 @@ fn scan_emits(stmts: &[IrStmt]) -> Result<(), EmitError> {
                     scan_emits(&arm.body)?;
                 }
             }
-            IrStmt::Let { .. } | IrStmt::Expr(_) | IrStmt::SelfUpdate { .. } => {}
+            IrStmt::Let { .. }
+            | IrStmt::Expr(_)
+            | IrStmt::SelfUpdate { .. }
+            | IrStmt::BeliefObserve { .. } => {}
         }
     }
     Ok(())
@@ -807,6 +813,15 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
                 let v = lower_expr(e)?;
                 writeln!(out, "{pad}{v};").unwrap();
             }
+        }
+        IrStmt::BeliefObserve { .. } => {
+            // Lowering to emitted Rust is deferred to T5 (emit_physics).
+            // Grammar + IR + resolver land in T4; code generation in T5.
+            return Err(EmitError::Unsupported(
+                "`beliefs().observe()` code generation not yet implemented \
+                 (deferred to Plan ToM Task 5)"
+                    .into(),
+            ));
         }
     }
     Ok(())

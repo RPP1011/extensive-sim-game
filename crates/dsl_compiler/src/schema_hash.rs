@@ -445,6 +445,17 @@ fn hash_stmt(h: &mut Sha256, s: &IrStmt) {
             h.update([0x16u8]);
             hash_expr(h, e);
         }
+        IrStmt::BeliefObserve { observer, target, fields, .. } => {
+            h.update([0x17u8]);
+            hash_expr(h, observer);
+            hash_expr(h, target);
+            h.update(&(fields.len() as u32).to_le_bytes());
+            for f in fields {
+                h.update(f.name.as_bytes());
+                h.update([0u8]);
+                hash_expr(h, &f.value);
+            }
+        }
     }
 }
 

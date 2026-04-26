@@ -101,6 +101,14 @@ pub enum ResolveError {
         detail: String,
         span: Span,
     },
+    /// A `beliefs(o).observe(t) with { <field>: … }` statement names a field
+    /// that doesn't exist on `BeliefState`. `valid` lists the known-good
+    /// names so the error message can be actionable.
+    UnknownBeliefField {
+        field: String,
+        valid: Vec<&'static str>,
+        span: Span,
+    },
     /// A `physics <name>` rule body contains a construct that can't be
     /// emitted as a SPIR-V kernel. See `compiler/spec.md` §1.2 for the
     /// GPU-emittable surface: POD discipline, bounded inline-array
@@ -214,6 +222,14 @@ impl std::fmt::Display for ResolveError {
                 f,
                 "invalid view `{view_name}` at bytes {}..{}: {detail}",
                 span.start, span.end
+            ),
+            ResolveError::UnknownBeliefField { field, valid, span } => write!(
+                f,
+                "unknown belief field `{field}` at bytes {}..{} \
+                 (valid: {})",
+                span.start,
+                span.end,
+                valid.join(", ")
             ),
             ResolveError::NotGpuEmittable {
                 physics_name,
