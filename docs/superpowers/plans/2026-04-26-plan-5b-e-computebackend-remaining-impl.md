@@ -410,7 +410,7 @@ git commit -m "feat(engine): add view_fold to ComputeBackend trait (Plan 5c Task
 - Modify: `crates/dsl_compiler/src/emit_backend.rs`
 - Regenerated: `crates/engine_rules/src/backend.rs`
 
-- [ ] **Step 1: Add view_fold emission after cascade_dispatch in emit_backend.**
+- [x] **Step 1: Add view_fold emission after cascade_dispatch in emit_backend.**
 
 In `crates/dsl_compiler/src/emit_backend.rs`, after the `cascade_dispatch` block, before the closing `}}` of the impl:
 
@@ -427,13 +427,13 @@ In `crates/dsl_compiler/src/emit_backend.rs`, after the `cascade_dispatch` block
     writeln!(out, "    }}").unwrap();
 ```
 
-- [ ] **Step 2: Regenerate.**
+- [x] **Step 2: Regenerate.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
 ```
 
-- [ ] **Step 3: Verify round-trip.**
+- [x] **Step 3: Verify round-trip.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl --check
@@ -441,7 +441,7 @@ cargo run --bin xtask -- compile-dsl --check
 
 Expected: `OK`.
 
-- [ ] **Step 4: Build engine_rules.**
+- [x] **Step 4: Build engine_rules.**
 
 ```bash
 cargo build -p engine_rules 2>&1 | grep -E "^error" | head -10
@@ -449,7 +449,7 @@ cargo build -p engine_rules 2>&1 | grep -E "^error" | head -10
 
 Expected: SUCCESS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/dsl_compiler/src/emit_backend.rs crates/engine_rules/src/backend.rs
