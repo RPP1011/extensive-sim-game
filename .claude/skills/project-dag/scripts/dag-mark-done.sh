@@ -14,7 +14,10 @@ fi
 
 TASK_ID="$1"
 COMMIT="$2"
-VERDICTS="${3:-{}}"
+VERDICTS="${3-}"
+if [[ -z "$VERDICTS" ]]; then
+    VERDICTS='{}'
+fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 STATE="$REPO_ROOT/docs/superpowers/dag/state.json"
