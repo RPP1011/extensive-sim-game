@@ -144,7 +144,7 @@ pub fn step<CB, B>(
             p.enter("cascade_dispatch");
         }
     }
-    apply_actions(state, scratch, events);
+    backend.apply_and_movement(state, scratch, events);
 
     // Phase 4b — cascade fixed-point (routed through ComputeBackend).
     backend.cascade_dispatch(cascade, state, views, events);
@@ -269,7 +269,11 @@ fn shuffle_actions_in_place(
 }
 
 /// Phase-4 helper. Walks the shuffled actions and emits root-cause events.
-fn apply_actions(state: &mut SimState, scratch: &SimScratch, events: &mut EventRing<Event>) {
+pub(crate) fn apply_actions_pub(
+    state: &mut SimState,
+    scratch: &SimScratch,
+    events: &mut EventRing<Event>,
+) {
     let effect_slow_multiplier = |state: &SimState, id: AgentId| -> f32 {
         let factor_q8 = state.effective_slow_factor_q8(id);
         if factor_q8 <= 0 {

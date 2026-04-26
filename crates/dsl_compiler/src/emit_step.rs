@@ -145,7 +145,7 @@ where
     if let Some(profile) = debug.tick_profile.as_ref() {
         if let Ok(mut p) = profile.lock() { p.enter("cascade_dispatch"); }
     }
-    apply_actions(state, scratch, events);
+    backend.apply_and_movement(state, scratch, events);
 
     // Phase 4b — cascade fixed-point (routed through ComputeBackend).
     backend.cascade_dispatch(cascade, state, views, events);
@@ -260,7 +260,7 @@ fn shuffle_actions_in_place(
 }
 
 /// Phase-4 helper. Walks the shuffled actions and emits root-cause events.
-fn apply_actions(
+pub(crate) fn apply_actions_pub(
     state:   &mut SimState,
     scratch: &SimScratch,
     events:  &mut EventRing<Event>,

@@ -75,6 +75,15 @@ pub fn emit_backend(source_file: Option<&str>) -> String {
     writeln!(out, "    ) {{").unwrap();
     writeln!(out, "        views.fold_all(events, events_before, tick);").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    fn apply_and_movement(").unwrap();
+    writeln!(out, "        &mut self,").unwrap();
+    writeln!(out, "        state:   &mut SimState,").unwrap();
+    writeln!(out, "        scratch: &engine::scratch::SimScratch,").unwrap();
+    writeln!(out, "        events:  &mut EventRing<Self::Event>,").unwrap();
+    writeln!(out, "    ) {{").unwrap();
+    writeln!(out, "        crate::step::apply_actions_pub(state, scratch, events);").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
     out
 }

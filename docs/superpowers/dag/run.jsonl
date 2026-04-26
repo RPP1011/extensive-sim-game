@@ -102,3 +102,4 @@
 {"ts":"2026-04-26T22:22:16Z","event":"task_done","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-8","commit":"03d76daa","critic_verdicts":{"compliance":"PASS","quality":"PASS","critics":{"compiler-first":"PASS","cross-backend-parity":"PASS"},"note":"Phase 5c COMPLETE; both build modes clean; workspace tests pass"}}
 {"ts":"2026-04-26T22:24:09Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-9"}
 {"ts":"2026-04-26T22:24:55Z","event":"task_done","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-9","commit":"2632aeab","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"apply_and_movement trait method added; intermediate state — T10/T12 close impls"}}
+{"ts":"2026-04-26T22:27:07Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-10"}

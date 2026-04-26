@@ -78,4 +78,13 @@ impl ComputeBackend for SerialBackend {
     ) {
         views.fold_all(events, events_before, tick);
     }
+
+    fn apply_and_movement(
+        &mut self,
+        state: &mut SimState,
+        scratch: &engine::scratch::SimScratch,
+        events: &mut EventRing<Self::Event>,
+    ) {
+        crate::step::apply_actions_pub(state, scratch, events);
+    }
 }
