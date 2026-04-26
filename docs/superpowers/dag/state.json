@@ -3278,15 +3278,24 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-7"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "530e6083",
+      "critic_verdicts": {
+        "compliance": "PARTIAL",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS",
+          "cross-backend-parity": "PASS",
+          "reduction-determinism": "PASS"
+        },
+        "note": "update_beliefs rule landed; compile-dsl --check ok (26 physics rules now). 4 DSL-surface deviations: nearby_kin instead of agents_within (same-species only), agents.pos omitted (resolver gap), creature_type defaults via Default, field reads hoisted to let-bindings (borrow checker)"
+      },
+      "started_at": "2026-04-26T08:05:05Z",
+      "completed_at": "2026-04-26T08:13:59Z",
       "retry_count": 0
     },
     {
@@ -3580,9 +3589,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T08:02:36Z",
-    "iterations_completed": 31,
-    "tasks_closed": 28,
+    "last_iteration_at": "2026-04-26T08:13:59Z",
+    "iterations_completed": 32,
+    "tasks_closed": 29,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

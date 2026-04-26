@@ -532,7 +532,7 @@ git -c core.hooksPath= commit -am "feat(dsl): emit_physics lowers BeliefObserve 
 **Files:**
 - Modify: `assets/sim/physics.sim`
 
-- [ ] **Step 1: Add the rule.**
+- [x] **Step 1: Add the rule.**
 
 ```
 physics update_beliefs {
@@ -605,7 +605,7 @@ physics update_beliefs {
 
 (If grammar surface differs — `query.agents_within`, `world.tick`, etc. — adapt to actual stdlib calls. Audit `dsl_compiler` for what's available.)
 
-- [ ] **Step 2: Regen + verify the rule emitted.**
+- [x] **Step 2: Regen + verify the rule emitted.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -615,7 +615,7 @@ head -20 crates/engine_rules/src/physics/update_beliefs.rs
 
 Expected: emitted file exists with `// GENERATED` header + body using `agent_cold_beliefs_mut` + `upsert`.
 
-- [ ] **Step 3: Workspace build + test.**
+- [x] **Step 3: Workspace build + test.**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -624,7 +624,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 Expected: SUCCESS. The cascade rule is registered automatically by `dsl_compiler::emit_cascade_register`.
 
-- [ ] **Step 4: `compile-dsl --check` round-trip.**
+- [x] **Step 4: `compile-dsl --check` round-trip.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
@@ -632,7 +632,7 @@ unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
 
 Expected: clean.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl): update_beliefs physics cascade in assets/sim/physics.sim (Plan ToM Task 6)"
