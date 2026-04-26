@@ -931,7 +931,7 @@ git commit -m "feat(engine_gpu): GPU mask methods — reset/set_mask_bit no-op, 
 
 The GPU cascade driver already exists in `cascade.rs` and is called inside `GpuBackend::step` (gpu path). The goal here is to replace the Phase 5b stub in the `#[cfg(feature = "gpu")]` impl's `cascade_dispatch` with the same GPU dispatch that `step` already uses.
 
-- [ ] **Step 1: Read the cascade dispatch block in `GpuBackend::step`.**
+- [x] **Step 1: Read the cascade dispatch block in `GpuBackend::step`.**
 
 In `lib.rs`, search for the `run_fixed_point` call within the `#[cfg(feature = "gpu")]` `step` function:
 
@@ -941,7 +941,7 @@ grep -n "run_fixed_point\|cascade_gpu\|run_batch\|cascade_dispatch" crates/engin
 
 The `step` function runs the GPU cascade via the internal `cascade_ctx` (`SyncPathContext.cascade_ctx`). The Phase 5c stub for `cascade_dispatch` calls `cascade.run_fixed_point(state, views, events)` (CPU) — this is only reached when `cascade_dispatch` is called from `SerialBackend`-style orchestration, not from `GpuBackend::step`. In fact, `GpuBackend::step` does NOT call `backend.cascade_dispatch(...)` yet — it calls the GPU cascade directly inline. This task makes the trait method authoritative.
 
-- [ ] **Step 2: Understand the current GPU cascade dispatch path inside `step`.**
+- [x] **Step 2: Understand the current GPU cascade dispatch path inside `step`.**
 
 In `crates/engine_gpu/src/lib.rs`, in the `#[cfg(feature = "gpu")]` `step` implementation, locate the Phase 4b cascade block. It calls `self.run_cascade_gpu(state, events)` or equivalent (search for the cascade-related call in step). The key is that the GPU cascade logic is encapsulated in a method on `GpuBackend` (e.g., `run_cascade_sync`). 
 
@@ -949,7 +949,7 @@ In `crates/engine_gpu/src/lib.rs`, in the `#[cfg(feature = "gpu")]` `step` imple
 grep -n "fn run_cascade\|cascade_ctx\|cascade\.run\|run_fixed_point" crates/engine_gpu/src/lib.rs | head -20
 ```
 
-- [ ] **Step 3: Implement `cascade_dispatch` (gpu feature) to call the GPU cascade path.**
+- [x] **Step 3: Implement `cascade_dispatch` (gpu feature) to call the GPU cascade path.**
 
 Replace the `#[cfg(feature = "gpu")]` `cascade_dispatch` stub with:
 
@@ -984,7 +984,7 @@ Replace the `#[cfg(feature = "gpu")]` `cascade_dispatch` stub with:
 
 Adapt the body to match the actual method name found in Step 2. If no `run_cascade_gpu` helper exists (the cascade dispatch is fully inline in `step`), extract it: create `fn run_cascade_gpu_dispatch(&mut self, state: &mut SimState, events: &mut EventRing<Event>)` containing the Phase 4b block from `step`, and call it from both `step` and `cascade_dispatch`.
 
-- [ ] **Step 4: Build + test with the `gpu` feature.**
+- [x] **Step 4: Build + test with the `gpu` feature.**
 
 ```bash
 cargo build --features engine_gpu/gpu -p engine_gpu 2>&1 | grep -E "^error" | head -20
@@ -993,7 +993,7 @@ cargo test --features engine_gpu/gpu -p engine_gpu -- --test-threads=1 2>&1 | ta
 
 Expected: SUCCESS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/engine_gpu/src/lib.rs
