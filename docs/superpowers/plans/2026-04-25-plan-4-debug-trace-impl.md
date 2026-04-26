@@ -415,7 +415,7 @@ git -c core.hooksPath= commit -am "feat(engine/debug): causal_tree presentation 
 - Modify: `crates/dsl_compiler/src/emit_step.rs` — emit per-phase callback hook
 - Run: `compile-dsl` to regen `engine_rules/src/step.rs`
 
-- [ ] **Step 1: Define `StepperHandle` + phases.**
+- [x] **Step 1: Define `StepperHandle` + phases.**
 
 ```rust
 //! Pause-and-inspect harness for the per-tick step pipeline.
@@ -463,7 +463,7 @@ impl StepperHandle {
 }
 ```
 
-- [ ] **Step 2: Update `dsl_compiler/src/emit_step.rs` to emit checkpoint calls.**
+- [x] **Step 2: Update `dsl_compiler/src/emit_step.rs` to emit checkpoint calls.**
 
 The emitted `step` body has 6 phases per spec. Each phase emit-block ends with an optional `if let Some(handle) = &debug.tick_stepper { handle.checkpoint(Phase::AfterX); }` line. Add an emit-pass that writes these conditionals.
 
@@ -480,7 +480,7 @@ writeln!(out, "    }}")?;
 
 (One block emitted after each phase. The emitter only emits these if a feature flag or compile-time const enables it; otherwise the `step` body stays clean.)
 
-- [ ] **Step 3: Add `debug: &DebugConfig` parameter to `step` signature.**
+- [x] **Step 3: Add `debug: &DebugConfig` parameter to `step` signature.**
 
 The emitted `step` signature gains:
 ```rust
@@ -497,7 +497,7 @@ pub fn step<B: PolicyBackend>(
 
 Update emit_step to write the new param + the checkpoints. Update emit_backend so `SerialBackend::step` gains a corresponding wrapper.
 
-- [ ] **Step 4: Regen.**
+- [x] **Step 4: Regen.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -509,18 +509,18 @@ Verify the new param + checkpoints landed:
 grep -n "DebugConfig\|tick_stepper::Phase" crates/engine_rules/src/step.rs | head
 ```
 
-- [ ] **Step 5: Update step callers to thread `&DebugConfig`.**
+- [x] **Step 5: Update step callers to thread `&DebugConfig`.**
 
 Likely callers: tests, xtask subcommands, `engine_rules::SerialBackend::step`. Each callsite passes `&DebugConfig::default()` for non-debug runs.
 
-- [ ] **Step 6: Workspace build + test.**
+- [x] **Step 6: Workspace build + test.**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
 unset RUSTFLAGS && cargo test --workspace
 ```
 
-- [ ] **Step 7: Test the stepper itself.**
+- [x] **Step 7: Test the stepper itself.**
 
 `crates/engine/tests/debug_tick_stepper.rs`:
 
@@ -553,7 +553,7 @@ fn stepper_checkpoints_each_phase() {
 }
 ```
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(engine/debug): tick_stepper per-phase pause harness; emit_step.rs hooks (Plan 4 Task 4)"
