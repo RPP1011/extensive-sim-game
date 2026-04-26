@@ -176,25 +176,25 @@ Compiler-emitted `impl engine::event::EventLike for engine_data::events::Event`.
 - Modify: `crates/dsl_compiler/src/emit_*.rs` — anywhere they emit `pub use engine_data::ids::*` or reference `engine_data::ids::AgentId`, change to `engine::AgentId`.
 - Sed-update: callers across the workspace using `engine_data::ids::*` to use `engine::*`.
 
-- [ ] **Step 1:** Read current `engine_data/src/ids.rs`. Copy struct definitions verbatim. (They should be plain `pub struct AgentId(pub u32);` etc. with derives.)
+- [x] **Step 1:** Read current `engine_data/src/ids.rs`. Copy struct definitions verbatim. (They should be plain `pub struct AgentId(pub u32);` etc. with derives.)
 
-- [ ] **Step 2:** Replace `crates/engine/src/ids.rs` content with the struct definitions, dropping the `pub use engine_data::ids::*` line.
+- [x] **Step 2:** Replace `crates/engine/src/ids.rs` content with the struct definitions, dropping the `pub use engine_data::ids::*` line.
 
-- [ ] **Step 3:** Delete `crates/engine_data/src/ids.rs` (or leave a thin `pub use engine::*` re-export for transition; cleaner: delete and update emit-site references).
+- [x] **Step 3:** Delete `crates/engine_data/src/ids.rs` (or leave a thin `pub use engine::*` re-export for transition; cleaner: delete and update emit-site references).
 
-- [ ] **Step 4:** Sed callers:
+- [x] **Step 4:** Sed callers:
 
 ```bash
 git grep -l 'engine_data::ids' | xargs sed -i 's|engine_data::ids|engine|g'
 ```
 
-- [ ] **Step 5:** If `dsl_compiler` emits `pub use engine_data::ids::*` into any output, change the emit to point at engine. Audit:
+- [x] **Step 5:** If `dsl_compiler` emits `pub use engine_data::ids::*` into any output, change the emit to point at engine. Audit:
 
 ```bash
 grep -rE '"use engine_data::ids|engine_data::ids' crates/dsl_compiler/src/
 ```
 
-- [ ] **Step 6:** Build + test.
+- [x] **Step 6:** Build + test.
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -203,7 +203,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 Expected: SUCCESS (modulo pre-existing rng-golden failure + intermediate-state engine_gpu issues from prior tasks).
 
-- [ ] **Step 7:** Commit.
+- [x] **Step 7:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "refactor(engine): lift AgentId/EntityId/AbilityId/EventId newtypes from engine_data into engine"
@@ -221,7 +221,7 @@ git -c core.hooksPath= commit -am "refactor(engine): lift AgentId/EntityId/Abili
 - `crates/engine/src/policy/macro_kind.rs` — drops `pub use engine_data::types::{QuestCategory, Resolution}`. The macro_kind dispatch logic moves to engine_rules (it's rule-data) OR stays as raw u8 storage in engine.
 - `crates/engine/src/view/{lazy,topk}.rs` — the demo impls reference concrete `engine_data::events::Event`. Either they're already cfg(test)-only seal impls (Task 1 made the impls generic), or we keep them as test-only helpers in `engine_data` instead.
 
-- [ ] **Step 1:** Audit each file:
+- [x] **Step 1:** Audit each file:
 
 ```bash
 for f in crates/engine/src/creature.rs crates/engine/src/channel.rs crates/engine/src/policy/macro_kind.rs; do
@@ -230,13 +230,13 @@ for f in crates/engine/src/creature.rs crates/engine/src/channel.rs crates/engin
 done
 ```
 
-- [ ] **Step 2:** For each file, decide: drop the import + remove dependent code, OR move the dependent code to engine_rules. Walk through:
+- [x] **Step 2:** For each file, decide: drop the import + remove dependent code, OR move the dependent code to engine_rules. Walk through:
 
   - **`creature.rs`:** if it's mostly type re-exports, replace with a thin storage module (`pub fn agent_creature_type_ordinal(state, agent) -> u16`). The named type lives in engine_data.
   - **`channel.rs`:** keep as raw `u64` bitmask storage primitive. The bit names are engine_data.
   - **`policy/macro_kind.rs`:** if it's just type aliases, delete; if it has dispatch logic, move to engine_rules.
 
-- [ ] **Step 3:** Update callers across the workspace. The pattern: anywhere code did `engine::CreatureType` (via re-export), it now does `engine_data::entities::CreatureType` directly.
+- [x] **Step 3:** Update callers across the workspace. The pattern: anywhere code did `engine::CreatureType` (via re-export), it now does `engine_data::entities::CreatureType` directly.
 
 ```bash
 git grep -E 'engine::(CreatureType|Capabilities|LanguageId|ChannelSet|CommunicationChannel|QuestCategory|Resolution)' \
@@ -246,7 +246,7 @@ wc -l /tmp/b1pp-task4-callers.txt
 
 For each entry, sed-rewrite to use the engine_data path. Surface area is small (~20-50 lines of callers).
 
-- [ ] **Step 4:** Build + test.
+- [x] **Step 4:** Build + test.
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -255,7 +255,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 If a workspace crate fails because it accessed `engine::CreatureType` and the import path no longer resolves, fix it by switching to `engine_data::entities::CreatureType`.
 
-- [ ] **Step 5:** Commit.
+- [x] **Step 5:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "refactor(engine): drop engine_data re-exports of rule-level shape types"
@@ -272,7 +272,7 @@ git -c core.hooksPath= commit -am "refactor(engine): drop engine_data re-exports
 - Modify: `dsl_compiler` emit destination for `impl EventLike` → `crates/engine_data/src/events/mod.rs` (or wherever the Event enum is emitted).
 - Delete: `crates/engine/src/event/event_like_impl.rs`.
 
-- [ ] **Step 1:** Add engine dep to engine_data:
+- [x] **Step 1:** Add engine dep to engine_data:
 
 ```toml
 # crates/engine_data/Cargo.toml
@@ -284,35 +284,35 @@ smallvec = "1.13"
 toml = "0.8"
 ```
 
-- [ ] **Step 2:** Update the `dsl_compiler::emit_event_like_impl` (created by Task 2) emit destination. The xtask `--out-engine-event-like-impl` arg's default flips from `crates/engine/src/event/event_like_impl.rs` to be appended into `crates/engine_data/src/events/mod.rs` (or split into a sibling file `crates/engine_data/src/events/event_like.rs`).
+- [x] **Step 2:** Update the `dsl_compiler::emit_event_like_impl` (created by Task 2) emit destination. The xtask `--out-engine-event-like-impl` arg's default flips from `crates/engine/src/event/event_like_impl.rs` to be appended into `crates/engine_data/src/events/mod.rs` (or split into a sibling file `crates/engine_data/src/events/event_like.rs`).
 
-- [ ] **Step 3:** Regen.
+- [x] **Step 3:** Regen.
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
 ```
 
-- [ ] **Step 4:** Verify the impl appears in engine_data:
+- [x] **Step 4:** Verify the impl appears in engine_data:
 
 ```bash
 grep -rE 'impl engine::event::EventLike for Event' crates/engine_data/src/
 ```
 
-- [ ] **Step 5:** Delete the workaround file:
+- [x] **Step 5:** Delete the workaround file:
 
 ```bash
 git rm crates/engine/src/event/event_like_impl.rs
 sed -i '/^pub mod event_like_impl;$/d' crates/engine/src/event/mod.rs
 ```
 
-- [ ] **Step 6:** Build + test.
+- [x] **Step 6:** Build + test.
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
 unset RUSTFLAGS && cargo test --workspace
 ```
 
-- [ ] **Step 7:** Commit.
+- [x] **Step 7:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "refactor: move impl EventLike for Event from engine to engine_data (clean dep direction)"
@@ -331,11 +331,11 @@ git -c core.hooksPath= commit -am "refactor: move impl EventLike for Event from 
 - Modify: `src/bin/xtask/cli/mod.rs` — add `out_sim_state` + `out_sim_scratch` arg defaults pointing at `crates/engine_data/src/`.
 - Modify: `src/bin/xtask/compile_dsl_cmd.rs` — drive the new emits.
 
-- [ ] **Step 1:** Read the existing `crates/engine/src/state/mod.rs` to inventory what `SimState` currently contains: `agent_alive`, `agent_hp`, `agent_position`, `agent_creature_type`, etc. + `tick`, RNG seed, spatial index handle, ability registry, `views: ViewRegistry` field.
+- [x] **Step 1:** Read the existing `crates/engine/src/state/mod.rs` to inventory what `SimState` currently contains: `agent_alive`, `agent_hp`, `agent_position`, `agent_creature_type`, etc. + `tick`, RNG seed, spatial index handle, ability registry, `views: ViewRegistry` field.
 
-- [ ] **Step 2:** Map each field to its DSL declaration. Engine-universal fields (tick, RNG seed) stay; rule-derived fields (creature-type, attack-range, etc.) come from DSL agent declarations.
+- [x] **Step 2:** Map each field to its DSL declaration. Engine-universal fields (tick, RNG seed) stay; rule-derived fields (creature-type, attack-range, etc.) come from DSL agent declarations.
 
-- [ ] **Step 3:** Write `dsl_compiler/src/emit_sim_state.rs`:
+- [x] **Step 3:** Write `dsl_compiler/src/emit_sim_state.rs`:
 
 ```rust
 use crate::ir::Compilation;
@@ -380,11 +380,11 @@ pub fn emit_sim_state<W: Write>(out: &mut W, comp: &Compilation) -> io::Result<(
 
 (Adapt to the actual IR field names — `comp.agent_fields`, `field.snake_name`, etc. — read `dsl_compiler/src/ir.rs` to confirm.)
 
-- [ ] **Step 4:** Write `emit_sim_scratch.rs` analogously. SimScratch contains `mask: MaskBuffer`, `target_mask: TargetMask`, `actions: SoaSlot<u8>`, etc.
+- [x] **Step 4:** Write `emit_sim_scratch.rs` analogously. SimScratch contains `mask: MaskBuffer`, `target_mask: TargetMask`, `actions: SoaSlot<u8>`, etc.
 
-- [ ] **Step 5:** Wire into `dsl_compiler/src/lib.rs` and `src/bin/xtask/cli/mod.rs`. Add `out_sim_state: PathBuf` + `out_sim_scratch: PathBuf` defaults at `crates/engine_data/src/sim_state.rs` + `sim_scratch.rs`.
+- [x] **Step 5:** Wire into `dsl_compiler/src/lib.rs` and `src/bin/xtask/cli/mod.rs`. Add `out_sim_state: PathBuf` + `out_sim_scratch: PathBuf` defaults at `crates/engine_data/src/sim_state.rs` + `sim_scratch.rs`.
 
-- [ ] **Step 6:** Run regen.
+- [x] **Step 6:** Run regen.
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -397,9 +397,9 @@ ls crates/engine_data/src/sim_state.rs crates/engine_data/src/sim_scratch.rs
 head -30 crates/engine_data/src/sim_state.rs
 ```
 
-- [ ] **Step 7:** Don't yet delete `crates/engine/src/state/mod.rs` — Task 7 cuts callers over.
+- [x] **Step 7:** Don't yet delete `crates/engine/src/state/mod.rs` — Task 7 cuts callers over.
 
-- [ ] **Step 8:** Commit.
+- [x] **Step 8:** Commit.
 
 ```bash
 git add -A
@@ -412,7 +412,7 @@ git -c core.hooksPath= commit -m "feat(dsl_compiler): emit SimState + SimScratch
 
 **Goal:** Every caller of `engine::state::SimState` and `engine::SimState` switches to `engine_data::sim_state::SimState`. Engine's `state/mod.rs` becomes deletable.
 
-- [ ] **Step 1:** Inventory callers.
+- [x] **Step 1:** Inventory callers.
 
 ```bash
 git grep -E 'engine::state::SimState|engine::SimState|crate::state::SimState' \
@@ -420,7 +420,7 @@ git grep -E 'engine::state::SimState|engine::SimState|crate::state::SimState' \
 wc -l /tmp/b1pp-task7-callers.txt
 ```
 
-- [ ] **Step 2:** Sed-update callers:
+- [x] **Step 2:** Sed-update callers:
 
 ```bash
 git grep -l 'engine::state::SimState\|engine::SimState' \
@@ -428,16 +428,16 @@ git grep -l 'engine::state::SimState\|engine::SimState' \
   | xargs sed -i 's|engine::state::SimState|engine_data::sim_state::SimState|g; s|engine::SimState|engine_data::sim_state::SimState|g'
 ```
 
-- [ ] **Step 3:** Add `engine_data` to `Cargo.toml` `[dev-dependencies]` (or `[dependencies]`) on every crate that needs the new path. Most crates already depend on engine_data; verify.
+- [x] **Step 3:** Add `engine_data` to `Cargo.toml` `[dev-dependencies]` (or `[dependencies]`) on every crate that needs the new path. Most crates already depend on engine_data; verify.
 
-- [ ] **Step 4:** Delete `crates/engine/src/state/`.
+- [x] **Step 4:** Delete `crates/engine/src/state/`.
 
 ```bash
 git rm -r crates/engine/src/state
 sed -i '/^pub mod state;$/d' crates/engine/src/lib.rs
 ```
 
-- [ ] **Step 5:** Build + test.
+- [x] **Step 5:** Build + test.
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -446,7 +446,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 Expected: SUCCESS or fail on rule-aware code that referenced `state.views` (closed by Task 13). If failure is in `step.rs` / `mark_*_allowed` (deleted in Task 11/12), that's expected intermediate state.
 
-- [ ] **Step 6:** Commit.
+- [x] **Step 6:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "refactor: move SimState callers to engine_data; delete engine/src/state/"
@@ -460,15 +460,15 @@ git -c core.hooksPath= commit -am "refactor: move SimState callers to engine_dat
 
 (Same steps as the old Plan B1' Task 3 — see prior version for detail. Compressed here:)
 
-- [ ] **Step 1:** Update xtask `out_physics`, `out_mask`, `out_views` defaults.
-- [ ] **Step 2:** Update `dsl_compiler::emit_{physics,mask,view}` to emit `use engine::*` and `use engine_data::sim_state::SimState; use engine_data::events::Event;` etc.
-- [ ] **Step 3:** Update `crates/engine_rules/Cargo.toml` to dep both engine + engine_data.
-- [ ] **Step 4:** Replace `engine_rules/src/lib.rs` with module declarations + `SimEventRing` / `SimCascadeRegistry` type aliases (see prior plan for body).
-- [ ] **Step 5:** Regen.
-- [ ] **Step 6:** Delete `engine/src/generated/` + drop `pub mod generated;`.
-- [ ] **Step 7:** Sed callers `engine::generated::*` → `engine_rules::*`.
-- [ ] **Step 8:** Workspace build + test.
-- [ ] **Step 9:** Commit.
+- [x] **Step 1:** Update xtask `out_physics`, `out_mask`, `out_views` defaults.
+- [x] **Step 2:** Update `dsl_compiler::emit_{physics,mask,view}` to emit `use engine::*` and `use engine_data::sim_state::SimState; use engine_data::events::Event;` etc.
+- [x] **Step 3:** Update `crates/engine_rules/Cargo.toml` to dep both engine + engine_data.
+- [x] **Step 4:** Replace `engine_rules/src/lib.rs` with module declarations + `SimEventRing` / `SimCascadeRegistry` type aliases (see prior plan for body).
+- [x] **Step 5:** Regen.
+- [x] **Step 6:** Delete `engine/src/generated/` + drop `pub mod generated;`.
+- [x] **Step 7:** Sed callers `engine::generated::*` → `engine_rules::*`.
+- [x] **Step 8:** Workspace build + test.
+- [x] **Step 9:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "refactor: emit physics/mask/views to engine_rules; delete engine/src/generated/"
@@ -489,7 +489,7 @@ git -c core.hooksPath= commit -am "refactor: emit physics/mask/views to engine_r
 - Delete: `crates/engine/src/chronicle.rs`.
 - Modify: callers — `xtask chronicle_cmd.rs`, `engine/tests/wolves_and_humans_parity.rs`, etc. — switch from `engine::chronicle::*` to `engine_rules::chronicle::*`.
 
-- [ ] **Step 1:** Audit DSL grammar: does it support string-literal declarations + format-string interpolation?
+- [x] **Step 1:** Audit DSL grammar: does it support string-literal declarations + format-string interpolation?
 
 ```bash
 grep -nE 'template|chronicle|string' crates/dsl_compiler/src/parser.rs | head
@@ -497,7 +497,7 @@ grep -nE 'template|chronicle|string' crates/dsl_compiler/src/parser.rs | head
 
 If yes → skip to Step 3. If no → Step 2 adds minimal grammar.
 
-- [ ] **Step 2:** **(Conditional)** Extend DSL grammar with a `chronicle` block. Minimal form:
+- [x] **Step 2:** **(Conditional)** Extend DSL grammar with a `chronicle` block. Minimal form:
 
 ```sim
 chronicle AGENT_DIED {
@@ -508,15 +508,15 @@ chronicle AGENT_DIED {
 
 The format-string fields `{agent}` etc. resolve to `state.agent_*` lookups at emit time. If this grammar work is non-trivial, escalate — it might warrant its own sub-spec.
 
-- [ ] **Step 3:** Write the chronicle catalog in `assets/sim/chronicle.sim` mirroring the constants in the current `engine/src/chronicle.rs::templates` module.
+- [x] **Step 3:** Write the chronicle catalog in `assets/sim/chronicle.sim` mirroring the constants in the current `engine/src/chronicle.rs::templates` module.
 
-- [ ] **Step 4:** Write `dsl_compiler/src/emit_chronicle.rs` — emits `engine_rules/src/chronicle.rs` containing `pub fn render_entry(state: &SimState, entry: &Event) -> String { ... }` with a match over template IDs. Each arm formats per the DSL template strings.
+- [x] **Step 4:** Write `dsl_compiler/src/emit_chronicle.rs` — emits `engine_rules/src/chronicle.rs` containing `pub fn render_entry(state: &SimState, entry: &Event) -> String { ... }` with a match over template IDs. Each arm formats per the DSL template strings.
 
-- [ ] **Step 5:** Add `out_chronicle: PathBuf` arg in xtask cli/mod.rs default `crates/engine_rules/src/chronicle.rs`. Wire emit pass.
+- [x] **Step 5:** Add `out_chronicle: PathBuf` arg in xtask cli/mod.rs default `crates/engine_rules/src/chronicle.rs`. Wire emit pass.
 
-- [ ] **Step 6:** Regen.
+- [x] **Step 6:** Regen.
 
-- [ ] **Step 7:** Delete `crates/engine/src/chronicle.rs` and update callers:
+- [x] **Step 7:** Delete `crates/engine/src/chronicle.rs` and update callers:
 
 ```bash
 git rm crates/engine/src/chronicle.rs
@@ -524,9 +524,9 @@ sed -i '/^pub mod chronicle;$/d' crates/engine/src/lib.rs
 git grep -l 'engine::chronicle' | xargs sed -i 's|engine::chronicle|engine_rules::chronicle|g'
 ```
 
-- [ ] **Step 8:** Build + test.
+- [x] **Step 8:** Build + test.
 
-- [ ] **Step 9:** Commit.
+- [x] **Step 9:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "feat: migrate chronicle to DSL-emitted engine_rules::chronicle"
@@ -538,7 +538,7 @@ git -c core.hooksPath= commit -am "feat: migrate chronicle to DSL-emitted engine
 
 **Goal:** The `break_reason` u8 constants (SWITCH=0, OUT_OF_RANGE=1, PARTNER_DIED=2) live in DSL events declarations + emit into engine_data. The hand-written file disappears.
 
-- [ ] **Step 1:** Add the constants to `assets/sim/events.sim` alongside the engagement events:
+- [x] **Step 1:** Add the constants to `assets/sim/events.sim` alongside the engagement events:
 
 ```sim
 event EngagementBroken {
@@ -555,11 +555,11 @@ event_constants EngagementBroken::break_reason {
 
 (Adapt to actual DSL grammar — may be a small grammar extension if `event_constants` doesn't exist.)
 
-- [ ] **Step 2:** Update `dsl_compiler` to emit these into `engine_data/src/engagement.rs` (or alongside the events in `engine_data/src/events/`).
+- [x] **Step 2:** Update `dsl_compiler` to emit these into `engine_data/src/engagement.rs` (or alongside the events in `engine_data/src/events/`).
 
-- [ ] **Step 3:** Regen + verify the constants appear in engine_data.
+- [x] **Step 3:** Regen + verify the constants appear in engine_data.
 
-- [ ] **Step 4:** Delete `crates/engine/src/engagement.rs`. Update callers:
+- [x] **Step 4:** Delete `crates/engine/src/engagement.rs`. Update callers:
 
 ```bash
 git rm crates/engine/src/engagement.rs
@@ -567,9 +567,9 @@ sed -i '/^pub mod engagement;$/d' crates/engine/src/lib.rs
 git grep -l 'engine::engagement' | xargs sed -i 's|engine::engagement|engine_data::engagement|g'
 ```
 
-- [ ] **Step 5:** Build + test.
+- [x] **Step 5:** Build + test.
 
-- [ ] **Step 6:** Commit.
+- [x] **Step 6:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "feat: migrate engagement break_reason constants to engine_data emitted"
@@ -583,9 +583,9 @@ git -c core.hooksPath= commit -am "feat: migrate engagement break_reason constan
 
 **Files:** new `dsl_compiler/src/{emit_step,emit_backend,emit_mask_fill,emit_cascade_register}.rs`. Wire into `lib.rs` + xtask.
 
-- [ ] **Step 1:** Inventory the current `engine/src/step.rs` body for the phase ordering template (view-fold → mask-fill → policy/scoring → action-select → cascade-dispatch → tick-end).
+- [x] **Step 1:** Inventory the current `engine/src/step.rs` body for the phase ordering template (view-fold → mask-fill → policy/scoring → action-select → cascade-dispatch → tick-end).
 
-- [ ] **Step 2:** Write `emit_step.rs` walking the IR + emitting literal calls per phase. Body shape:
+- [x] **Step 2:** Write `emit_step.rs` walking the IR + emitting literal calls per phase. Body shape:
 
 ```rust
 pub fn emit_step<W: Write>(out: &mut W, comp: &Compilation) -> io::Result<()> {
@@ -619,15 +619,15 @@ pub fn emit_step<W: Write>(out: &mut W, comp: &Compilation) -> io::Result<()> {
 
 (Adapt method names to the actual existing `engine/src/step.rs` body.)
 
-- [ ] **Step 3:** Write `emit_backend.rs` — emits `engine_rules/src/backend.rs` with `pub struct SerialBackend; impl SimBackend for SerialBackend { ... }` calling `crate::step::step`.
+- [x] **Step 3:** Write `emit_backend.rs` — emits `engine_rules/src/backend.rs` with `pub struct SerialBackend; impl SimBackend for SerialBackend { ... }` calling `crate::step::step`.
 
-- [ ] **Step 4:** Write `emit_mask_fill.rs` — emits `engine_rules/src/mask_fill.rs` with `pub fn fill_all(buf, targets, state)` calling each emitted mask predicate (one literal call per mask declaration).
+- [x] **Step 4:** Write `emit_mask_fill.rs` — emits `engine_rules/src/mask_fill.rs` with `pub fn fill_all(buf, targets, state)` calling each emitted mask predicate (one literal call per mask declaration).
 
-- [ ] **Step 5:** Write `emit_cascade_register.rs` — emits `engine_rules/src/cascade.rs` with `pub fn with_engine_builtins() -> CascadeRegistry<Event> { let mut reg = CascadeRegistry::new(); reg.register(DamageHandler); ... reg }`.
+- [x] **Step 5:** Write `emit_cascade_register.rs` — emits `engine_rules/src/cascade.rs` with `pub fn with_engine_builtins() -> CascadeRegistry<Event> { let mut reg = CascadeRegistry::new(); reg.register(DamageHandler); ... reg }`.
 
-- [ ] **Step 6:** Wire into `dsl_compiler/src/lib.rs` + xtask defaults.
+- [x] **Step 6:** Wire into `dsl_compiler/src/lib.rs` + xtask defaults.
 
-- [ ] **Step 7:** Add `Self::Event` associated type to `SimBackend` trait in `engine/src/backend.rs`. Delete the existing `pub struct CpuBackend` + impl from engine.
+- [x] **Step 7:** Add `Self::Event` associated type to `SimBackend` trait in `engine/src/backend.rs`. Delete the existing `pub struct CpuBackend` + impl from engine.
 
 ```rust
 pub trait SimBackend {
@@ -647,15 +647,15 @@ pub trait SimBackend {
 
 (Note: this re-introduces engine→engine_data dep for the trait signature. If we want engine truly zero-dep on engine_data, the trait must be generic over `S: SimulationStateLike` too — but that adds machinery. For B1', accept the engine→engine_data dep at the trait declaration; it's narrow. Or alternatively drop `SimBackend` entirely and let `engine_rules::SerialBackend` and `engine_gpu::GpuBackend` be free types. Decide here. Recommendation: drop the trait — backends are concrete types, callers pick one at compile time.)
 
-- [ ] **Step 8:** Regen. Verify the four new files exist with `// GENERATED` headers.
+- [x] **Step 8:** Regen. Verify the four new files exist with `// GENERATED` headers.
 
-- [ ] **Step 9:** Delete `engine/src/step.rs` + `engine/src/backend.rs`'s `CpuBackend`. If keeping `SimBackend` trait, leave `backend.rs` with just the trait declaration; if dropping, delete `backend.rs` entirely.
+- [x] **Step 9:** Delete `engine/src/step.rs` + `engine/src/backend.rs`'s `CpuBackend`. If keeping `SimBackend` trait, leave `backend.rs` with just the trait declaration; if dropping, delete `backend.rs` entirely.
 
-- [ ] **Step 10:** Update callers from `engine::step::step` / `CpuBackend` → `engine_rules::step::step` / `engine_rules::SerialBackend`.
+- [x] **Step 10:** Update callers from `engine::step::step` / `CpuBackend` → `engine_rules::step::step` / `engine_rules::SerialBackend`.
 
-- [ ] **Step 11:** Build + test.
+- [x] **Step 11:** Build + test.
 
-- [ ] **Step 12:** Commit.
+- [x] **Step 12:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl_compiler): emit step + backend + mask_fill + cascade-register into engine_rules"
@@ -667,13 +667,13 @@ git -c core.hooksPath= commit -am "feat(dsl_compiler): emit step + backend + mas
 
 **Goal:** Already covered by Task 11's `emit_mask_fill`. This task is the cleanup: delete `mark_*_allowed` methods from `engine/src/mask.rs`. `MaskBuffer` storage + raw bit ops stay.
 
-- [ ] **Step 1:** In `engine/src/mask.rs`, hand-delete every `pub fn mark_*_allowed` method. Keep `MaskBuffer::new`, `reset`, `set`, `get`, `mark_self_predicate` (the primitive-shape mark op).
+- [x] **Step 1:** In `engine/src/mask.rs`, hand-delete every `pub fn mark_*_allowed` method. Keep `MaskBuffer::new`, `reset`, `set`, `get`, `mark_self_predicate` (the primitive-shape mark op).
 
-- [ ] **Step 2:** Drop the `use engine_rules::mask::{...}` import (those imports were the rule-aware predicates pulled in by the deleted methods).
+- [x] **Step 2:** Drop the `use engine_rules::mask::{...}` import (those imports were the rule-aware predicates pulled in by the deleted methods).
 
-- [ ] **Step 3:** Build + test.
+- [x] **Step 3:** Build + test.
 
-- [ ] **Step 4:** Commit.
+- [x] **Step 4:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "refactor(engine): drop mark_*_allowed methods from MaskBuffer (now emitted)"
@@ -685,17 +685,17 @@ git -c core.hooksPath= commit -am "refactor(engine): drop mark_*_allowed methods
 
 **Goal:** SimState (now in engine_data) cannot reference `engine_rules::ViewRegistry` (engine_data sits below engine_rules). The field is removed; `ViewRegistry` is constructed by callers + threaded through `step` as a parameter.
 
-- [ ] **Step 1:** Modify the emitted `SimState` struct (Task 6's `emit_sim_state`) to NOT include the `views` field. The emitter's IR drives this — the agent_fields list excludes `views`.
+- [x] **Step 1:** Modify the emitted `SimState` struct (Task 6's `emit_sim_state`) to NOT include the `views` field. The emitter's IR drives this — the agent_fields list excludes `views`.
 
-- [ ] **Step 2:** Update emitted `step` (Task 11) to take `views: &mut ViewRegistry` as a separate parameter (already does this per the signature in Task 11 Step 2).
+- [x] **Step 2:** Update emitted `step` (Task 11) to take `views: &mut ViewRegistry` as a separate parameter (already does this per the signature in Task 11 Step 2).
 
-- [ ] **Step 3:** Update callers: every place that constructs `SimState` no longer initializes `state.views`. Each caller separately constructs `let mut views = engine_rules::ViewRegistry::new();` and threads it through.
+- [x] **Step 3:** Update callers: every place that constructs `SimState` no longer initializes `state.views`. Each caller separately constructs `let mut views = engine_rules::ViewRegistry::new();` and threads it through.
 
-- [ ] **Step 4:** Regen + sed-update callers.
+- [x] **Step 4:** Regen + sed-update callers.
 
-- [ ] **Step 5:** Build + test.
+- [x] **Step 5:** Build + test.
 
-- [ ] **Step 6:** Commit.
+- [x] **Step 6:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "refactor: drop views field from SimState; thread ViewRegistry as parameter"
@@ -709,7 +709,7 @@ git -c core.hooksPath= commit -am "refactor: drop views field from SimState; thr
 
 (Carries from old Plan B1' Task 6 — see prior version for full detail.)
 
-- [ ] **Step 1:** Update `engine_rules/src/lib.rs`:
+- [x] **Step 1:** Update `engine_rules/src/lib.rs`:
 
 ```rust
 #![allow(clippy::all)]
@@ -736,20 +736,20 @@ pub trait GeneratedRule {}
 impl<T: GeneratedRule> engine::cascade::handler::__sealed::Sealed for T {}
 ```
 
-- [ ] **Step 2:** Update `dsl_compiler/src/{emit_physics,emit_view}.rs` to write `impl crate::GeneratedRule for X {}` after every emitted trait impl. (See prior plan for code sketch.)
+- [x] **Step 2:** Update `dsl_compiler/src/{emit_physics,emit_view}.rs` to write `impl crate::GeneratedRule for X {}` after every emitted trait impl. (See prior plan for code sketch.)
 
-- [ ] **Step 3:** Add `#[cfg(test)]` direct seal impls in `crates/engine/src/view/{materialized,lazy,topk}.rs` for the demo types (`DamageTaken`, `NearestEnemyLazy`, `MostHostileTopK`):
+- [x] **Step 3:** Add `#[cfg(test)]` direct seal impls in `crates/engine/src/view/{materialized,lazy,topk}.rs` for the demo types (`DamageTaken`, `NearestEnemyLazy`, `MostHostileTopK`):
 
 ```rust
 #[cfg(test)]
 impl crate::cascade::handler::__sealed::Sealed for DamageTaken {}
 ```
 
-- [ ] **Step 4:** Add `engine_rules` to engine's `[dev-dependencies]`. Update test handlers in `crates/engine/tests/cascade_*.rs` to add `impl engine_rules::GeneratedRule for {Test} {}`.
+- [x] **Step 4:** Add `engine_rules` to engine's `[dev-dependencies]`. Update test handlers in `crates/engine/tests/cascade_*.rs` to add `impl engine_rules::GeneratedRule for {Test} {}`.
 
-- [ ] **Step 5:** Regen + build + test.
+- [x] **Step 5:** Regen + build + test.
 
-- [ ] **Step 6:** Commit.
+- [x] **Step 6:** Commit.
 
 ```bash
 git -c core.hooksPath= commit -am "feat: seal CascadeHandler + view traits via GeneratedRule blanket impl"
@@ -761,12 +761,12 @@ git -c core.hooksPath= commit -am "feat: seal CascadeHandler + view traits via G
 
 (Carries unchanged from old Plan B1' Task 7. See prior version.)
 
-- [ ] **Step 1:** Add `trybuild = "1"` to engine's `[dev-dependencies]`.
-- [ ] **Step 2:** Write `crates/engine/tests/sealed_cascade_handler.rs` driver.
-- [ ] **Step 3:** Write `crates/engine/tests/ui/external_impl_rejected.rs` fixture (concrete `impl CascadeHandler<Event>` for an external type that lacks Sealed).
-- [ ] **Step 4:** `TRYBUILD=overwrite` to populate stderr.
-- [ ] **Step 5:** Run normally; verify PASS.
-- [ ] **Step 6:** Commit.
+- [x] **Step 1:** Add `trybuild = "1"` to engine's `[dev-dependencies]`.
+- [x] **Step 2:** Write `crates/engine/tests/sealed_cascade_handler.rs` driver.
+- [x] **Step 3:** Write `crates/engine/tests/ui/external_impl_rejected.rs` fixture (concrete `impl CascadeHandler<Event>` for an external type that lacks Sealed).
+- [x] **Step 4:** `TRYBUILD=overwrite` to populate stderr.
+- [x] **Step 5:** Run normally; verify PASS.
+- [x] **Step 6:** Commit.
 
 ---
 
@@ -774,11 +774,11 @@ git -c core.hooksPath= commit -am "feat: seal CascadeHandler + view traits via G
 
 (Carries unchanged from old Plan B1' Task 8.)
 
-- [ ] **Step 1:** Write `engine_rules/build.rs` — every non-lib.rs file requires `// GENERATED` header.
-- [ ] **Step 2:** Same for `engine_data/build.rs`.
-- [ ] **Step 3:** Add `build = "build.rs"` to both Cargo.tomls.
-- [ ] **Step 4:** Clean rebuild + negative test (inject hand-edited file, confirm panic).
-- [ ] **Step 5:** Commit.
+- [x] **Step 1:** Write `engine_rules/build.rs` — every non-lib.rs file requires `// GENERATED` header.
+- [x] **Step 2:** Same for `engine_data/build.rs`.
+- [x] **Step 3:** Add `build = "build.rs"` to both Cargo.tomls.
+- [x] **Step 4:** Clean rebuild + negative test (inject hand-edited file, confirm panic).
+- [x] **Step 5:** Commit.
 
 ---
 
@@ -788,7 +788,7 @@ git -c core.hooksPath= commit -am "feat: seal CascadeHandler + view traits via G
 
 ⚠️ **Allowlist gate (Spec B' D11).** Both biased-against critics (compiler-first + allowlist-gate) must return PASS. AIS preamble + this commit-message are the writeup.
 
-- [ ] **Step 1:** Confirm engine/src/ post-Tasks 7+9+10+12 is exactly:
+- [x] **Step 1:** Confirm engine/src/ post-Tasks 7+9+10+12 is exactly:
   - top-level: `lib.rs`, `backend.rs`, `channel.rs`, `creature.rs`, `ids.rs`, `mask.rs`, `pool.rs`, `rng.rs`, `schema_hash.rs`, `spatial.rs`, `terrain.rs`, `trajectory.rs`. (NO `step.rs`, NO `chronicle.rs`, NO `engagement.rs`, NO `state/`, NO `event_like_impl.rs`.)
   - subdirs: `ability/`, `aggregate/`, `cascade/`, `event/`, `invariant/`, `obs/`, `policy/`, `pool/`, `probe/`, `snapshot/`, `telemetry/`, `view/`. (NO `state/`, NO `generated/`.)
 
@@ -798,7 +798,7 @@ ls crates/engine/src/
 
 If anything unexpected is present, escalate.
 
-- [ ] **Step 2:** Write `crates/engine/build.rs` (full allowlist body — see old Plan B1' Task 9 for shape; remove the `chronicle.rs` + `engagement.rs` entries):
+- [x] **Step 2:** Write `crates/engine/build.rs` (full allowlist body — see old Plan B1' Task 9 for shape; remove the `chronicle.rs` + `engagement.rs` entries):
 
 ```rust
 const ALLOWED_TOP_LEVEL: &[&str] = &[
@@ -815,9 +815,9 @@ const ALLOWED_DIRS: &[&str] = &[
 
 Plus the reject-`// GENERATED` walker (carries from old plan).
 
-- [ ] **Step 3:** Negative tests (allowlist + GENERATED rejection both fire).
+- [x] **Step 3:** Negative tests (allowlist + GENERATED rejection both fire).
 
-- [ ] **Step 4:** Commit (subject to allowlist-gate critic).
+- [x] **Step 4:** Commit (subject to allowlist-gate critic).
 
 ```bash
 git -c core.hooksPath= commit -am "feat(engine): primitives-only build.rs allowlist; no exceptions (Spec B' §5)"
@@ -829,11 +829,11 @@ git -c core.hooksPath= commit -am "feat(engine): primitives-only build.rs allowl
 
 (Carries unchanged from old Plan B1' Task 10/11. Add the new emit-target diff entries — sim_state.rs, sim_scratch.rs, step.rs, backend.rs, mask_fill.rs, cascade.rs, chronicle.rs, engagement.rs.)
 
-- [ ] **Step 1:** Add `--check` flag to `CompileDslArgs`.
-- [ ] **Step 2:** Implement `run_compile_dsl_check` — regens to tempdir, diffs against working tree, reports drift.
-- [ ] **Step 3:** Add new emit destinations to the diff pairs table.
-- [ ] **Step 4:** Negative test (inject drift, confirm exit 1).
-- [ ] **Step 5:** Commit.
+- [x] **Step 1:** Add `--check` flag to `CompileDslArgs`.
+- [x] **Step 2:** Implement `run_compile_dsl_check` — regens to tempdir, diffs against working tree, reports drift.
+- [x] **Step 3:** Add new emit destinations to the diff pairs table.
+- [x] **Step 4:** Negative test (inject drift, confirm exit 1).
+- [x] **Step 5:** Commit.
 
 ---
 
@@ -841,8 +841,8 @@ git -c core.hooksPath= commit -am "feat(engine): primitives-only build.rs allowl
 
 (Carries unchanged from old Plan B1' Task 11/12.)
 
-- [ ] **Steps:** see prior plan. Smoke-test header rule + inverse rule + regen-on-DSL-change.
-- [ ] **Step N:** Commit.
+- [x] **Steps:** see prior plan. Smoke-test header rule + inverse rule + regen-on-DSL-change.
+- [x] **Step N:** Commit.
 
 ---
 
@@ -850,27 +850,27 @@ git -c core.hooksPath= commit -am "feat(engine): primitives-only build.rs allowl
 
 (Carries unchanged from old Plan B1' Task 12+13.)
 
-- [ ] Four ast-grep rules restricting `impl CascadeHandler` / `impl MaterializedView` / `impl LazyView` / `impl TopKView` to `crates/engine_rules/src/` (with cfg-test exclusions for engine's tests + view demo files).
-- [ ] CI step: regen + assert no diff.
-- [ ] CI step: schema-hash freshness.
-- [ ] Commit.
+- [x] Four ast-grep rules restricting `impl CascadeHandler` / `impl MaterializedView` / `impl LazyView` / `impl TopKView` to `crates/engine_rules/src/` (with cfg-test exclusions for engine's tests + view demo files).
+- [x] CI step: regen + assert no diff.
+- [x] CI step: schema-hash freshness.
+- [x] Commit.
 
 ---
 
 ### Task 21: Final verification + AIS tick
 
-- [ ] **Step 1:** `cargo clean && cargo build --workspace && cargo test --workspace`.
-- [ ] **Step 2:** `cargo run --bin xtask -- compile-dsl --check` clean.
-- [ ] **Step 3:** Pre-commit clean on no-op stage.
-- [ ] **Step 4:** trybuild test passes.
-- [ ] **Step 5:** Audit:
+- [x] **Step 1:** `cargo clean && cargo build --workspace && cargo test --workspace`.
+- [x] **Step 2:** `cargo run --bin xtask -- compile-dsl --check` clean.
+- [x] **Step 3:** Pre-commit clean on no-op stage.
+- [x] **Step 4:** trybuild test passes.
+- [x] **Step 5:** Audit:
   - `grep -rE "// GENERATED" crates/engine/src/` → empty
   - `find crates/engine_rules/src crates/engine_data/src -name '*.rs' -not -name 'lib.rs' | xargs -I{} sh -c 'head -5 {} | grep -q "// GENERATED" || echo "MISSING: {}"'` → empty
   - `git grep 'crate::generated\|engine::generated'` → empty
   - `git grep 'engine::SimState\|engine::state::SimState'` → empty (all callers use engine_data)
   - `git grep 'engine::chronicle\|engine::engagement'` → empty
-- [ ] **Step 6:** Tick AIS post-design checkbox in plan file.
-- [ ] **Step 7:** Final commit.
+- [x] **Step 6:** Tick AIS post-design checkbox in plan file.
+- [x] **Step 7:** Final commit.
 
 ---
 

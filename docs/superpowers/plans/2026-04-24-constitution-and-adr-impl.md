@@ -28,7 +28,7 @@
 **Files:**
 - Create: `docs/architecture/.principle-inventory.md` (working doc, deleted at end of plan)
 
-- [ ] **Step 1: Read source specs section-by-section, capturing rule-shaped statements**
+- [x] **Step 1: Read source specs section-by-section, capturing rule-shaped statements**
 
 Read in order:
 - `docs/spec/runtime.md` (~700 ln) — focus on §§14, 22, 23, 24 (tick pipeline, schema hash, debug, backends).
@@ -45,7 +45,7 @@ For each rule-shaped statement, jot it in the working doc with format:
 
 A rule-shaped statement governs *behavior* (what may/must/must-not happen). NOT principle-shaped: implementation specifics (e.g., "AgentId is NonZeroU32"), data layouts (e.g., "spatial index uses 16m cells"), test coverage notes.
 
-- [ ] **Step 2: Write working doc**
+- [x] **Step 2: Write working doc**
 
 ```bash
 mkdir -p docs/architecture
@@ -60,11 +60,11 @@ EOF
 
 Then append entries as you read. Aim for 15-25 candidates; you'll filter to ~10.
 
-- [ ] **Step 3: De-duplicate + categorize**
+- [x] **Step 3: De-duplicate + categorize**
 
 Group candidates by theme: compilation/emission, determinism, schema/ABI, layering/scope, lifecycle/governance. Mark candidates that overlap. Pick the load-bearing ~10.
 
-- [ ] **Step 4: Commit working doc**
+- [x] **Step 4: Commit working doc**
 
 ```bash
 git add docs/architecture/.principle-inventory.md
@@ -78,7 +78,7 @@ git commit -m "wip(constitution): inventory principle-shaped statements from exi
 **Files:**
 - Create: `docs/constitution.md`
 
-- [ ] **Step 1: Write the file with header + per-principle template applied to each surviving candidate**
+- [x] **Step 1: Write the file with header + per-principle template applied to each surviving candidate**
 
 Use exactly the schema from the spec §3.1:
 
@@ -235,7 +235,7 @@ Use exactly the schema from the spec §3.1:
 
 Final principle list lands during this step; the above is the seed. Adjust per Task 1's inventory.
 
-- [ ] **Step 2: Validate every principle has all 4 sections**
+- [x] **Step 2: Validate every principle has all 4 sections**
 
 ```bash
 # Each P-N must have Statement, Rationale, Enforcement, Source.
@@ -248,7 +248,7 @@ done
 
 Expect: zero output.
 
-- [ ] **Step 3: Verify line count is reasonable** (≤200 lines for ~10 principles)
+- [x] **Step 3: Verify line count is reasonable** (≤200 lines for ~10 principles)
 
 ```bash
 wc -l docs/constitution.md
@@ -256,7 +256,7 @@ wc -l docs/constitution.md
 
 Expect: 100-200 lines.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/constitution.md
@@ -272,7 +272,7 @@ git commit -m "feat(constitution): hand-curated initial principle catalog (P1–
 **Files:**
 - (no new files; agent dispatch + manual edits to `docs/constitution.md` if gaps found)
 
-- [ ] **Step 1: Spawn Haiku agent**
+- [x] **Step 1: Spawn Haiku agent**
 
 Use the `Agent` tool with `model: haiku`, `subagent_type: general-purpose`, prompt:
 
@@ -297,18 +297,18 @@ Output format:
 Report under 600 words. Don't fix anything; just report.
 ```
 
-- [ ] **Step 2: Review the agent's report**
+- [x] **Step 2: Review the agent's report**
 
 For each "missing" candidate the agent flags, decide:
 - Genuine gap → add as P11+ (with full schema).
 - Implementation specific (not a principle) → ignore.
 - Already covered under a different P-N name → confirm and ignore.
 
-- [ ] **Step 3: Apply gap-fill (if any)**
+- [x] **Step 3: Apply gap-fill (if any)**
 
 Edit `docs/constitution.md` adding new P-N entries with the full schema. Re-run Step 2's section-completeness check from Task 2.
 
-- [ ] **Step 4: Commit (only if changes made)**
+- [x] **Step 4: Commit (only if changes made)**
 
 ```bash
 git add docs/constitution.md
@@ -324,7 +324,7 @@ If no gaps, no commit.
 **Files:**
 - Create: `docs/adr/README.md`
 
-- [ ] **Step 1: Create the directory and README**
+- [x] **Step 1: Create the directory and README**
 
 ```bash
 mkdir -p docs/adr
@@ -391,7 +391,7 @@ Internal implementation choices stay in specs/plans, not ADRs.
 (Hand-maintained; one line per ADR.)
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/adr/README.md
@@ -405,7 +405,7 @@ git commit -m "feat(adr): convention + template + index doc"
 **Files:**
 - Create: `docs/architecture/plan-template-ais.md`
 
-- [ ] **Step 1: Write the template**
+- [x] **Step 1: Write the template**
 
 ```markdown
 # Architectural Impact Statement (plan preamble)
@@ -452,7 +452,7 @@ The Constitution check uses `PASS` / `FAIL` / `N/A`. `FAIL` requires a remediati
 The "Re-evaluation" checkboxes are part of the plan execution: tick the post-design box only after the task list and design have stabilised, not at initial draft.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/architecture/plan-template-ais.md
@@ -466,13 +466,13 @@ git commit -m "feat(architecture): AIS plan-template (P8 template)"
 **Files:**
 - Create: `docs/llms.txt`
 
-- [ ] **Step 1: Inventory existing docs**
+- [x] **Step 1: Inventory existing docs**
 
 ```bash
 find docs -maxdepth 2 -type f -name "*.md" | sort
 ```
 
-- [ ] **Step 2: Write the index** in [llmstxt.org](https://llmstxt.org/) format
+- [x] **Step 2: Write the index** in [llmstxt.org](https://llmstxt.org/) format
 
 ```markdown
 # game
@@ -519,7 +519,7 @@ find docs -maxdepth 2 -type f -name "*.md" | sort
 - [Wolves and humans](docs/game/wolves_and_humans.md): canonical fixture.
 ```
 
-- [ ] **Step 3: Verify every linked file exists**
+- [x] **Step 3: Verify every linked file exists**
 
 ```bash
 grep -oE '\(docs/[^)]*\.md\)' docs/llms.txt | tr -d '()' | sort -u | while read f; do
@@ -529,7 +529,7 @@ done
 
 Expect: zero output. Fix any missing files before committing.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/llms.txt
@@ -543,7 +543,7 @@ git commit -m "feat(docs): llms.txt index per llmstxt.org convention"
 **Files:**
 - Modify or create: `.claude/settings.json`
 
-- [ ] **Step 1: Inspect current settings**
+- [x] **Step 1: Inspect current settings**
 
 ```bash
 cat .claude/settings.json 2>/dev/null || echo "No settings.json yet"
@@ -551,7 +551,7 @@ cat .claude/settings.json 2>/dev/null || echo "No settings.json yet"
 
 If the file exists, read it and identify the `hooks` section (if any). If it doesn't exist, you'll create it.
 
-- [ ] **Step 2: Write the SessionStart hook entry**
+- [x] **Step 2: Write the SessionStart hook entry**
 
 If `.claude/settings.json` does not exist, create it:
 
@@ -592,7 +592,7 @@ tmp=$(mktemp)
 jq '.hooks.SessionStart += [{"type":"command","command":"cat docs/constitution.md"}]' .claude/settings.json > "$tmp" && mv "$tmp" .claude/settings.json
 ```
 
-- [ ] **Step 3: Verify JSON is valid**
+- [x] **Step 3: Verify JSON is valid**
 
 ```bash
 jq . .claude/settings.json > /dev/null && echo OK
@@ -600,7 +600,7 @@ jq . .claude/settings.json > /dev/null && echo OK
 
 Expect: `OK`.
 
-- [ ] **Step 4: Verify the hook command runs cleanly**
+- [x] **Step 4: Verify the hook command runs cleanly**
 
 ```bash
 bash -c "cat docs/constitution.md" | head -5
@@ -608,7 +608,7 @@ bash -c "cat docs/constitution.md" | head -5
 
 Expect: first 5 lines of the constitution.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .claude/settings.json
@@ -624,7 +624,7 @@ git commit -m "feat(hooks): SessionStart auto-loads constitution into agent cont
 **Files:**
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1: Read the current file**
+- [x] **Step 1: Read the current file**
 
 ```bash
 wc -l CLAUDE.md
@@ -632,7 +632,7 @@ wc -l CLAUDE.md
 
 (Expect ~80 lines today; the trim is mostly *removing* the module-map + AI-pipeline narrative, not adding.)
 
-- [ ] **Step 2: Replace the file with the trimmed version**
+- [x] **Step 2: Replace the file with the trimmed version**
 
 Target structure (one section per block; ≤100 lines total):
 
@@ -696,7 +696,7 @@ Replace the file:
 # (use the Write tool with the content above)
 ```
 
-- [ ] **Step 3: Verify line count**
+- [x] **Step 3: Verify line count**
 
 ```bash
 wc -l CLAUDE.md
@@ -704,7 +704,7 @@ wc -l CLAUDE.md
 
 Expect: ≤100. If over, trim further (drop the bullet under "Tooling caveats" first).
 
-- [ ] **Step 4: Verify no principle text duplicates the constitution**
+- [x] **Step 4: Verify no principle text duplicates the constitution**
 
 ```bash
 # Sanity: no P-N restatements or paraphrases
@@ -713,7 +713,7 @@ grep -E '\bP[0-9]+\b' CLAUDE.md
 
 Expect: only references in the "Constitution" + "Conventions" sections (mentioning P5 / P8 by number is OK; restating the principle text is not).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add CLAUDE.md
@@ -732,7 +732,7 @@ git commit -m "feat(claude-md): trim to ≤100 lines; constitution loaded via Se
 - Modify: `docs/spec/language.md`
 - Modify: `docs/spec/ability.md`
 
-- [ ] **Step 1: Per-principle migration**
+- [x] **Step 1: Per-principle migration**
 
 For each P-N in the constitution, sweep `docs/spec/*.md` for the principle's statement and delete the principle-flavored sentence(s). Keep implementation specifics (concrete API, file paths, layout details).
 
@@ -770,7 +770,7 @@ sed -n '1,30p' docs/spec/compiler.md     # inspect
 
 For each, use `Edit` tool with explicit `old_string` + `new_string` (not regex sed); the deletions are surgical.
 
-- [ ] **Step 2: Audit `docs/spec/language.md` §9**
+- [x] **Step 2: Audit `docs/spec/language.md` §9**
 
 §9 contains 30 settled-decision entries; many are principle-flavored. For each entry:
 - If the entry states a behavioral rule already in the constitution → delete the entry (renumber-not-required; gaps are fine, see existing convention).
@@ -782,7 +782,7 @@ grep -nE '^[0-9]+\.' docs/spec/language.md | head -30
 
 Walk each entry; remove the principle-flavored ones. Expected delete count: 4–8 entries.
 
-- [ ] **Step 3: Sanity grep — no spec restates a constitution principle**
+- [x] **Step 3: Sanity grep — no spec restates a constitution principle**
 
 ```bash
 # For each principle's "headline phrase", confirm it doesn't appear in spec/
@@ -803,11 +803,11 @@ done
 
 Expect: zero or near-zero hits in spec/. Constitution-style restatements indicate incomplete migration.
 
-- [ ] **Step 4: Verify spec/ still reads coherently**
+- [x] **Step 4: Verify spec/ still reads coherently**
 
 Open each modified spec file. Make sure surviving content reads without the deleted sentences (no orphaned references to a now-deleted prior sentence).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/spec/
@@ -821,7 +821,7 @@ git commit -m "docs(spec): migrate principle-flavored content to constitution (d
 **Files:**
 - Delete: `docs/architecture/.principle-inventory.md` (working doc from T1)
 
-- [ ] **Step 1: Verify all spec docs in llms.txt still exist**
+- [x] **Step 1: Verify all spec docs in llms.txt still exist**
 
 ```bash
 grep -oE '\(docs/[^)]*\.md\)' docs/llms.txt | tr -d '()' | sort -u | while read f; do
@@ -831,11 +831,11 @@ done
 
 Expect: zero output.
 
-- [ ] **Step 2: Verify constitution is loaded by hook**
+- [x] **Step 2: Verify constitution is loaded by hook**
 
 Open a new Claude Code session (or simulate via the `cat` command run by the hook) and confirm the constitution is in the agent's first context window. (Manual.)
 
-- [ ] **Step 3: Cross-spec scan for stragglers**
+- [x] **Step 3: Cross-spec scan for stragglers**
 
 ```bash
 # Find any "P[0-9]+" references; they should only appear in:
@@ -847,19 +847,19 @@ grep -rnE '\bP[0-9]+\b' docs/ CLAUDE.md | grep -v "docs/constitution.md\|plan-te
 
 Expect: empty (or only the docs/superpowers/specs/2026-04-24-constitution-and-adr-design.md spec doc, which is allowed since it's the design doc).
 
-- [ ] **Step 4: Delete the working inventory doc**
+- [x] **Step 4: Delete the working inventory doc**
 
 ```bash
 git rm docs/architecture/.principle-inventory.md
 ```
 
-- [ ] **Step 5: Commit cleanup**
+- [x] **Step 5: Commit cleanup**
 
 ```bash
 git commit -m "chore(constitution): drop principle-inventory working doc; landing complete"
 ```
 
-- [ ] **Step 6: Final sanity test — run cargo test**
+- [x] **Step 6: Final sanity test — run cargo test**
 
 ```bash
 cargo test -p engine 2>&1 | grep -E "^test result" | awk '{ p+=$4; f+=$6 } END { print "passed:", p, "failed:", f }'
@@ -867,7 +867,7 @@ cargo test -p engine 2>&1 | grep -E "^test result" | awk '{ p+=$4; f+=$6 } END {
 
 Expect: same pass count as before this plan (no test impact from doc-only changes).
 
-- [ ] **Step 7: Self-applied AIS re-evaluation**
+- [x] **Step 7: Self-applied AIS re-evaluation**
 
 Tick the second checkbox in this plan's AIS preamble:
 - [x] AIS reviewed at design phase

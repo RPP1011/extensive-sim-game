@@ -60,13 +60,13 @@ Verification:
 **Files:**
 - Create: `.claude/skills/critic-compiler-first/SKILL.md`
 
-- [ ] **Step 1: Create the directory**
+- [x] **Step 1: Create the directory**
 
 ```bash
 mkdir -p .claude/skills/critic-compiler-first
 ```
 
-- [ ] **Step 2: Write SKILL.md**
+- [x] **Step 2: Write SKILL.md**
 
 Open `docs/superpowers/specs/2026-04-25-critic-skills-design.md`. Locate §4.1 (`critic-compiler-first` (P1)). Copy the markdown body INSIDE the outer code fence (i.e., starting from the line `---` (frontmatter open) through the final `If TOOLS RUN is empty → automatic FAIL.` line and the closing `---` if present). Paste verbatim into `.claude/skills/critic-compiler-first/SKILL.md`.
 
@@ -86,7 +86,7 @@ description: Use when reviewing changes that add or modify behavior in crates/en
 
 The body matches §4.1 exactly. Don't paraphrase, don't summarize.
 
-- [ ] **Step 3: Verify frontmatter and required sections**
+- [x] **Step 3: Verify frontmatter and required sections**
 
 ```bash
 head -5 .claude/skills/critic-compiler-first/SKILL.md
@@ -106,7 +106,7 @@ grep -c "^### Example [0-9]*: " .claude/skills/critic-compiler-first/SKILL.md
 
 Expect: ≥4 (at least 3 BAD + 1 GOOD).
 
-- [ ] **Step 4: Verify file is valid markdown (no broken fences)**
+- [x] **Step 4: Verify file is valid markdown (no broken fences)**
 
 ```bash
 awk '/^```/ { count++ } END { if (count % 2 != 0) print "ODD count"; else print "PAIRED" }' .claude/skills/critic-compiler-first/SKILL.md
@@ -114,7 +114,7 @@ awk '/^```/ { count++ } END { if (count % 2 != 0) print "ODD count"; else print 
 
 Expect: `PAIRED` (every code fence has a closing fence).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .claude/skills/critic-compiler-first/SKILL.md
@@ -128,13 +128,13 @@ git commit -m "feat(skills): critic-compiler-first — biased P1 reviewer with f
 **Files:**
 - Create: `.claude/skills/critic-schema-bump/SKILL.md`
 
-- [ ] **Step 1: Create the directory**
+- [x] **Step 1: Create the directory**
 
 ```bash
 mkdir -p .claude/skills/critic-schema-bump
 ```
 
-- [ ] **Step 2: Write SKILL.md**
+- [x] **Step 2: Write SKILL.md**
 
 From `docs/superpowers/specs/2026-04-25-critic-skills-design.md` §4.2, copy the inner markdown body verbatim into `.claude/skills/critic-schema-bump/SKILL.md`. Frontmatter:
 
@@ -150,7 +150,7 @@ description: Use when reviewing changes that touch SimState SoA fields, event va
 
 Body matches §4.2 exactly.
 
-- [ ] **Step 3: Verify frontmatter and structure**
+- [x] **Step 3: Verify frontmatter and structure**
 
 ```bash
 head -5 .claude/skills/critic-schema-bump/SKILL.md
@@ -161,7 +161,7 @@ awk '/^```/ { count++ } END { if (count % 2 != 0) print "ODD"; else print "PAIRE
 
 Expect: name/description present; 6 sections; ≥4 examples; PAIRED fences.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/skills/critic-schema-bump/SKILL.md
@@ -175,13 +175,13 @@ git commit -m "feat(skills): critic-schema-bump — biased P2 reviewer with few-
 **Files:**
 - Create: `.claude/skills/critic-cross-backend-parity/SKILL.md`
 
-- [ ] **Step 1: Create the directory**
+- [x] **Step 1: Create the directory**
 
 ```bash
 mkdir -p .claude/skills/critic-cross-backend-parity
 ```
 
-- [ ] **Step 2: Write SKILL.md**
+- [x] **Step 2: Write SKILL.md**
 
 From spec §4.3, copy inner markdown body verbatim. Frontmatter:
 
@@ -194,7 +194,7 @@ description: Use when reviewing new engine behavior, physics rules, view folds, 
 
 Body matches §4.3 exactly.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 head -5 .claude/skills/critic-cross-backend-parity/SKILL.md
@@ -205,7 +205,7 @@ awk '/^```/ { count++ } END { if (count % 2 != 0) print "ODD"; else print "PAIRE
 
 Expect: name/desc; 6 sections; ≥4 examples; PAIRED.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/skills/critic-cross-backend-parity/SKILL.md
@@ -219,13 +219,13 @@ git commit -m "feat(skills): critic-cross-backend-parity — biased P3 reviewer 
 **Files:**
 - Create: `.claude/skills/critic-no-runtime-panic/SKILL.md`
 
-- [ ] **Step 1: Create the directory**
+- [x] **Step 1: Create the directory**
 
 ```bash
 mkdir -p .claude/skills/critic-no-runtime-panic
 ```
 
-- [ ] **Step 2: Write SKILL.md**
+- [x] **Step 2: Write SKILL.md**
 
 From spec §4.4, copy verbatim. Frontmatter:
 
@@ -238,7 +238,7 @@ description: Use when reviewing changes to crates/engine/src/step.rs, kernels in
 
 Body matches §4.4 exactly.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 head -5 .claude/skills/critic-no-runtime-panic/SKILL.md
@@ -249,7 +249,7 @@ awk '/^```/ { count++ } END { if (count % 2 != 0) print "ODD"; else print "PAIRE
 
 Expect: name/desc; 6 sections; ≥4 examples; PAIRED.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/skills/critic-no-runtime-panic/SKILL.md
@@ -263,13 +263,13 @@ git commit -m "feat(skills): critic-no-runtime-panic — biased P10 reviewer wit
 **Files:**
 - Create: `.claude/skills/critic-reduction-determinism/SKILL.md`
 
-- [ ] **Step 1: Create the directory**
+- [x] **Step 1: Create the directory**
 
 ```bash
 mkdir -p .claude/skills/critic-reduction-determinism
 ```
 
-- [ ] **Step 2: Write SKILL.md**
+- [x] **Step 2: Write SKILL.md**
 
 From spec §4.5, copy verbatim. Frontmatter:
 
@@ -282,7 +282,7 @@ description: Use when reviewing changes to view folds, atomic-append paths, or R
 
 Body matches §4.5 exactly.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 head -5 .claude/skills/critic-reduction-determinism/SKILL.md
@@ -293,7 +293,7 @@ awk '/^```/ { count++ } END { if (count % 2 != 0) print "ODD"; else print "PAIRE
 
 Expect: name/desc; 6 sections; ≥4 examples; PAIRED.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/skills/critic-reduction-determinism/SKILL.md
@@ -307,13 +307,13 @@ git commit -m "feat(skills): critic-reduction-determinism — biased P11 reviewe
 **Files:**
 - Create: `.claude/skills/critic-allowlist-gate/SKILL.md`
 
-- [ ] **Step 1: Create the directory**
+- [x] **Step 1: Create the directory**
 
 ```bash
 mkdir -p .claude/skills/critic-allowlist-gate
 ```
 
-- [ ] **Step 2: Write SKILL.md**
+- [x] **Step 2: Write SKILL.md**
 
 From spec §4.6, copy verbatim. Frontmatter:
 
@@ -326,7 +326,7 @@ description: Use when reviewing edits to crates/engine/build.rs ALLOWED_TOP_LEVE
 
 Body matches §4.6 exactly. Note this critic's BAD examples have section names like "Adding `theory_of_mind` because it's 'infrastructure'" rather than "Example 1:" — the structural check (≥3 BAD examples) still applies but the heading style varies. Make sure the file has at least 3 H3-level BAD example sections and at least 1 GOOD.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 head -5 .claude/skills/critic-allowlist-gate/SKILL.md
@@ -354,7 +354,7 @@ awk '/^```/ { count++ } END { if (count % 2 != 0) print "ODD"; else print "PAIRE
 
 Expect: PAIRED.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/skills/critic-allowlist-gate/SKILL.md
@@ -370,7 +370,7 @@ git commit -m "feat(skills): critic-allowlist-gate — biased reviewer for engin
 **Files:**
 - (no new files; smoke test only)
 
-- [ ] **Step 1: Manually invoke `critic-compiler-first` via the Skill tool**
+- [x] **Step 1: Manually invoke `critic-compiler-first` via the Skill tool**
 
 This is a manual verification (the test runner can't directly invoke a skill). The implementer should:
 
@@ -383,7 +383,7 @@ This is a manual verification (the test runner can't directly invoke a skill). T
 
 Document the verification in the commit message of the next task (Task 8). No file changes here.
 
-- [ ] **Step 2: (Optional) Dispatch a fresh-context Agent invocation as independence test**
+- [x] **Step 2: (Optional) Dispatch a fresh-context Agent invocation as independence test**
 
 Equivalent to a real allowlist-gate dispatch, but on a no-op target. The implementer dispatches:
 
@@ -405,7 +405,7 @@ Agent tool:
 
 The subagent should produce output in the rigid format. The verdict will probably be PASS (HEAD~5..HEAD doesn't introduce engine extensions); the point is verifying the format renders.
 
-- [ ] **Step 3: No commit (smoke test only). Record findings in Task 8's commit message.**
+- [x] **Step 3: No commit (smoke test only). Record findings in Task 8's commit message.**
 
 ---
 
@@ -415,7 +415,7 @@ The subagent should produce output in the rigid format. The verdict will probabl
 - Modify: `CLAUDE.md`
 - Modify: `docs/llms.txt`
 
-- [ ] **Step 1: Add a "Critics" line to `CLAUDE.md` Conventions section**
+- [x] **Step 1: Add a "Critics" line to `CLAUDE.md` Conventions section**
 
 Read current `CLAUDE.md` ("## Conventions" section, ~line 40). Add a single bullet:
 
@@ -431,7 +431,7 @@ wc -l CLAUDE.md
 
 If over, the constitution-section bullet about the SessionStart hook is a candidate for tightening but DO NOT TRIM without justification. If at exactly 100 lines, leave alone.
 
-- [ ] **Step 2: Add a "Critics" subsection to `docs/llms.txt`**
+- [x] **Step 2: Add a "Critics" subsection to `docs/llms.txt`**
 
 Read current `docs/llms.txt`. Under the existing structure (after the "Process" section), add:
 
@@ -446,7 +446,7 @@ Read current `docs/llms.txt`. Under the existing structure (after the "Process" 
 - [critic-allowlist-gate](.claude/skills/critic-allowlist-gate/SKILL.md): biased gate for engine/build.rs allowlist edits.
 ```
 
-- [ ] **Step 3: Verify links**
+- [x] **Step 3: Verify links**
 
 ```bash
 grep -oE '\(\.claude/skills/[^)]*\)' docs/llms.txt | tr -d '()' | sort -u | while read f; do
@@ -456,7 +456,7 @@ done
 
 Expect: zero output (all 6 skill files exist).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add CLAUDE.md docs/llms.txt
@@ -475,7 +475,7 @@ output in rigid VERDICT/EVIDENCE/REASONING/TOOLS-RUN format."
 **Files:**
 - Modify: this plan file (`docs/superpowers/plans/2026-04-25-critic-skills-impl.md`)
 
-- [ ] **Step 1: Tick the "post-design" checkbox**
+- [x] **Step 1: Tick the "post-design" checkbox**
 
 Edit the AIS preamble in this plan file. Change:
 
@@ -489,7 +489,7 @@ To:
 - **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — 8 SKILL.md files added, 2 docs updated, no engine code touched, no rule logic introduced. P1–P11 PASS confirmed.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-04-25-critic-skills-impl.md

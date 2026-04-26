@@ -130,7 +130,7 @@ Cargo.toml (root)         — MODIFIED: workspace `members` updated (engine_data
 - Modify: `crates/engine_data/Cargo.toml` (package name)
 - Modify: `crates/engine/Cargo.toml` (transitive dep — see Task 2; touched here only if engine has a direct path-dep on engine_data, which it does not currently — leave for Task 2).
 
-- [ ] **Step 1: Create branch + worktree (if not already in one).** This plan should run in `.worktrees/engine-crate-restructure` per `superpowers:using-git-worktrees`. Skip if already there.
+- [x] **Step 1: Create branch + worktree (if not already in one).** This plan should run in `.worktrees/engine-crate-restructure` per `superpowers:using-git-worktrees`. Skip if already there.
 
 ```bash
 git worktree add .worktrees/engine-crate-restructure -b engine-crate-restructure
@@ -141,13 +141,13 @@ cargo test --workspace --no-run   # warm cache so post-rename failures are obvio
 
 Expected: clean build.
 
-- [ ] **Step 2: Rename the crate directory with `git mv`.**
+- [x] **Step 2: Rename the crate directory with `git mv`.**
 
 ```bash
 git mv crates/engine_data crates/engine_data
 ```
 
-- [ ] **Step 3: Update the package name in the renamed Cargo.toml.**
+- [x] **Step 3: Update the package name in the renamed Cargo.toml.**
 
 Edit `crates/engine_data/Cargo.toml`:
 
@@ -163,7 +163,7 @@ New:
 name = "engine_data"
 ```
 
-- [ ] **Step 4: Update workspace members in root `Cargo.toml`.**
+- [x] **Step 4: Update workspace members in root `Cargo.toml`.**
 
 Old:
 ```toml
@@ -175,7 +175,7 @@ New:
 members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_data", "crates/engine_rules", "crates/engine_gpu", "crates/viz", "crates/dsl_compiler"]
 ```
 
-- [ ] **Step 5: Sed all `engine_data` references across the workspace.**
+- [x] **Step 5: Sed all `engine_data` references across the workspace.**
 
 ```bash
 git grep -l 'engine_data' | xargs sed -i 's/engine_data/engine_data/g'
@@ -186,7 +186,7 @@ This rewrites:
 - `use engine_data::*` re-exports
 - doc strings + comments
 
-- [ ] **Step 6: Build to confirm rename is clean.**
+- [x] **Step 6: Build to confirm rename is clean.**
 
 ```bash
 cargo build --workspace
@@ -194,7 +194,7 @@ cargo build --workspace
 
 Expected: SUCCESS (no behaviour changes; pure rename).
 
-- [ ] **Step 7: Run tests.**
+- [x] **Step 7: Run tests.**
 
 ```bash
 cargo test --workspace
@@ -202,7 +202,7 @@ cargo test --workspace
 
 Expected: all green. The shim `engine_rules::pub use engine_data::*` is unchanged structurally; this is a path-only rename.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add -A
@@ -221,7 +221,7 @@ git commit -m "refactor: rename engine_data → engine_data (Spec B §3.1)"
 - Modify: every test in `crates/engine/tests/*` that references `engine_rules::*` for data types.
 - Modify: callers in other crates that pass through engine — handled in Task 5.
 
-- [ ] **Step 1: Update `engine` Cargo.toml dependency.**
+- [x] **Step 1: Update `engine` Cargo.toml dependency.**
 
 In `crates/engine/Cargo.toml`:
 
@@ -237,7 +237,7 @@ New:
 engine_data = { path = "../engine_data" }
 ```
 
-- [ ] **Step 2: Sed-rewrite `engine_rules::` → `engine_data::` inside `crates/engine/`.**
+- [x] **Step 2: Sed-rewrite `engine_rules::` → `engine_data::` inside `crates/engine/`.**
 
 ```bash
 git grep -l 'engine_rules' crates/engine/ | xargs sed -i 's/engine_rules::/engine_data::/g; s/engine_rules /engine_data /g'
@@ -245,7 +245,7 @@ git grep -l 'engine_rules' crates/engine/ | xargs sed -i 's/engine_rules::/engin
 
 Two patterns covered: `engine_rules::path::Type` and the bare `engine_rules` token (rare; only in doc/comment edge cases).
 
-- [ ] **Step 3: Build the engine crate alone.**
+- [x] **Step 3: Build the engine crate alone.**
 
 ```bash
 cargo build -p engine
@@ -253,7 +253,7 @@ cargo build -p engine
 
 Expected: SUCCESS. If a test or src file referenced `engine_rules::SOMETHING_NOT_IN_engine_data`, the compiler will say so — Step 4 lists the only file group where that could happen (none today, since engine_rules is a pure re-export shim).
 
-- [ ] **Step 4: Run engine-only tests (other crates still depend on the shim).**
+- [x] **Step 4: Run engine-only tests (other crates still depend on the shim).**
 
 ```bash
 cargo test -p engine
@@ -261,7 +261,7 @@ cargo test -p engine
 
 Expected: SUCCESS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add -A
@@ -278,7 +278,7 @@ git commit -m "refactor(engine): depend directly on engine_data (Spec B §3.1)"
 - Verify: `crates/engine_rules/Cargo.toml`
 - Verify: `crates/engine_rules/src/lib.rs`
 
-- [ ] **Step 1: Verify engine_rules Cargo.toml deps.**
+- [x] **Step 1: Verify engine_rules Cargo.toml deps.**
 
 ```bash
 cat crates/engine_rules/Cargo.toml
@@ -290,7 +290,7 @@ Expected dep section:
 engine_data = { path = "../engine_data" }
 ```
 
-- [ ] **Step 2: Verify engine_rules lib.rs is the transitional re-export.**
+- [x] **Step 2: Verify engine_rules lib.rs is the transitional re-export.**
 
 ```bash
 cat crates/engine_rules/src/lib.rs
@@ -298,7 +298,7 @@ cat crates/engine_rules/src/lib.rs
 
 Expected (post-sed): `pub use engine_data::*;`. Anything else means Task 1's sed missed something — fix and re-run.
 
-- [ ] **Step 3: Workspace build.**
+- [x] **Step 3: Workspace build.**
 
 ```bash
 cargo build --workspace
@@ -307,7 +307,7 @@ cargo test --workspace
 
 Expected: all green. (Engine now depends on engine_data; engine_rules shim still re-exports engine_data; downstream crates that import via `engine_rules::*` keep working through the shim.)
 
-- [ ] **Step 4: Commit (only if any drift was fixed; otherwise skip).**
+- [x] **Step 4: Commit (only if any drift was fixed; otherwise skip).**
 
 ```bash
 git add -A
@@ -327,7 +327,7 @@ git commit -m "chore(engine_rules): verify shim points at engine_data (transitio
 - Modify: `crates/engine_rules/src/lib.rs` — replace transitional re-export with explicit `pub mod {mask, physics, views};` + the marker trait + the blanket Sealed impl (sketched here, finalised in Task 6 after sealing lands).
 - Modify: `crates/engine_rules/Cargo.toml` — add deps on `engine` (path) and keep `engine_data` (path).
 
-- [ ] **Step 1: `git mv` the three subdirs.**
+- [x] **Step 1: `git mv` the three subdirs.**
 
 ```bash
 git mv crates/engine/src/generated/mask    crates/engine_rules/src/mask
@@ -337,7 +337,7 @@ git rm crates/engine/src/generated/mod.rs
 rmdir crates/engine/src/generated
 ```
 
-- [ ] **Step 2: Sed-rewrite `crate::` → `engine::` in the moved files.**
+- [x] **Step 2: Sed-rewrite `crate::` → `engine::` in the moved files.**
 
 These files live in a different crate now; their `use crate::event::Event;` must become `use engine::event::Event;`.
 
@@ -354,7 +354,7 @@ Patterns rewritten (verify after sed):
 - `use crate::mask::TargetMask;` → `use engine::mask::TargetMask;`
 - `use crate::cascade::{CascadeRegistry, EventKindId};` → `use engine::cascade::{CascadeRegistry, EventKindId};` (in physics/mod.rs)
 
-- [ ] **Step 3: Drop `pub mod generated;` from `crates/engine/src/lib.rs`.**
+- [x] **Step 3: Drop `pub mod generated;` from `crates/engine/src/lib.rs`.**
 
 ```bash
 sed -i '/^pub mod generated;$/d' crates/engine/src/lib.rs
@@ -362,7 +362,7 @@ sed -i '/^pub mod generated;$/d' crates/engine/src/lib.rs
 
 (Or hand-edit if there's a comment near the line worth preserving.)
 
-- [ ] **Step 4: Update `crates/engine_rules/Cargo.toml`.**
+- [x] **Step 4: Update `crates/engine_rules/Cargo.toml`.**
 
 Old:
 ```toml
@@ -377,7 +377,7 @@ engine = { path = "../engine" }
 engine_data = { path = "../engine_data" }
 ```
 
-- [ ] **Step 5: Replace `crates/engine_rules/src/lib.rs` with the explicit module surface (transitional — finalised in Task 6).**
+- [x] **Step 5: Replace `crates/engine_rules/src/lib.rs` with the explicit module surface (transitional — finalised in Task 6).**
 
 ```rust
 //! engine_rules — emitted rule logic.
@@ -398,7 +398,7 @@ pub use engine_data::*;
 
 This file is `lib.rs` and is on the `engine_rules/build.rs` allowlist (Task 8 §5.1) so it does not need a `// GENERATED` header. Task 6 finalises it with the `GeneratedRule` marker + Sealed blanket impl.
 
-- [ ] **Step 6: Sed-rewrite cross-crate imports for engine + engine_gpu + tests.**
+- [x] **Step 6: Sed-rewrite cross-crate imports for engine + engine_gpu + tests.**
 
 The 32 callers of `engine::generated::*` must rewrite to `engine_rules::*`. This includes:
 - `engine_gpu/src/{cascade.rs, mask.rs, scoring.rs, view_storage_per_entity_ring.rs, view_storage_symmetric_pair.rs}`
@@ -410,7 +410,7 @@ The 32 callers of `engine::generated::*` must rewrite to `engine_rules::*`. This
 git grep -l 'engine::generated::' | xargs sed -i 's|engine::generated::|engine_rules::|g'
 ```
 
-- [ ] **Step 7: Workspace build + test.**
+- [x] **Step 7: Workspace build + test.**
 
 ```bash
 cargo build --workspace 2>&1 | tee /tmp/b1-task4-build.log
@@ -425,7 +425,7 @@ grep -rE 'crate::' crates/engine_rules/src/{mask,physics,views} | grep -v 'GENER
 
 Expected: empty output.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add -A
@@ -442,7 +442,7 @@ git commit -m "refactor: move engine/src/generated/{mask,physics,views} to engin
 - Modify: every caller of `engine_rules::{ids, config, types, scoring, entities, events, schema, id_serde}` outside `engine_rules/`.
 - Modify: `crates/engine_rules/src/lib.rs` — remove `pub use engine_data::*;` once the last data caller is cut over.
 
-- [ ] **Step 1: Identify all `use engine_rules::{data-path}` imports.**
+- [x] **Step 1: Identify all `use engine_rules::{data-path}` imports.**
 
 ```bash
 git grep -E 'engine_rules::(ids|config|types|scoring|entities|events|schema|id_serde)' \
@@ -451,7 +451,7 @@ git grep -E 'engine_rules::(ids|config|types|scoring|entities|events|schema|id_s
 wc -l /tmp/b1-task5-data-callers.txt
 ```
 
-- [ ] **Step 2: Sed-rewrite the listed paths to `engine_data::`.**
+- [x] **Step 2: Sed-rewrite the listed paths to `engine_data::`.**
 
 ```bash
 for sub in ids config types scoring entities events schema id_serde; do
@@ -461,7 +461,7 @@ for sub in ids config types scoring entities events schema id_serde; do
 done
 ```
 
-- [ ] **Step 3: For crates that imported via engine_rules (and don't yet have a Cargo dep on engine_data), add the dep.**
+- [x] **Step 3: For crates that imported via engine_rules (and don't yet have a Cargo dep on engine_data), add the dep.**
 
 Inspect each affected crate's Cargo.toml:
 
@@ -473,7 +473,7 @@ done
 
 For any crate marked `NEEDS:`, add `engine_data = { path = "../engine_data" }` to `[dependencies]` (or `[dev-dependencies]` if only tests use it).
 
-- [ ] **Step 4: Workspace build.**
+- [x] **Step 4: Workspace build.**
 
 ```bash
 cargo build --workspace
@@ -482,7 +482,7 @@ cargo test --workspace
 
 Expected: SUCCESS.
 
-- [ ] **Step 5: Drop the transitional `pub use engine_data::*;` from engine_rules/lib.rs.**
+- [x] **Step 5: Drop the transitional `pub use engine_data::*;` from engine_rules/lib.rs.**
 
 Edit `crates/engine_rules/src/lib.rs`:
 
@@ -507,7 +507,7 @@ pub mod physics;
 pub mod views;
 ```
 
-- [ ] **Step 6: Final workspace build to confirm no caller still relies on the shim.**
+- [x] **Step 6: Final workspace build to confirm no caller still relies on the shim.**
 
 ```bash
 cargo build --workspace
@@ -516,7 +516,7 @@ cargo test --workspace
 
 Expected: SUCCESS. If any failure says `unresolved import engine_rules::ids` (or similar data path), that file was missed in Step 2 — fix and re-run.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add -A
@@ -533,7 +533,7 @@ git commit -m "refactor: route data-path imports through engine_data; engine_rul
 - Modify: every emitted `impl CascadeHandler for FooHandler` in `crates/engine_rules/src/physics/*.rs` — add `impl GeneratedRule for FooHandler {}` (this is done by re-emitting via dsl_compiler in Task 7 — for Task 6 we hand-add to the moved files and let regen confirm the emitter does the right thing).
 - Modify: test/demo impls in `crates/engine/tests/{cascade_bounded.rs, cascade_register_dispatch.rs, cascade_lanes.rs, proptest_cascade_bound.rs}` — add `#[cfg(test)] impl engine_rules::GeneratedRule for {handler}`.
 
-- [ ] **Step 1: Add the private supertrait module to `crates/engine/src/cascade/handler.rs`.**
+- [x] **Step 1: Add the private supertrait module to `crates/engine/src/cascade/handler.rs`.**
 
 Insert near the top (after the existing `use` statements, before `pub enum EventKindId`):
 
@@ -552,7 +552,7 @@ pub mod __sealed {
 }
 ```
 
-- [ ] **Step 2: Add the supertrait to `CascadeHandler`.**
+- [x] **Step 2: Add the supertrait to `CascadeHandler`.**
 
 Old:
 ```rust
@@ -570,7 +570,7 @@ pub trait CascadeHandler: __sealed::Sealed + Send + Sync {
 
 (Use the actual `fn handle(...)` signature already in the file; only the supertrait list changes.)
 
-- [ ] **Step 3: Add the marker + blanket impl to `crates/engine_rules/src/lib.rs`.**
+- [x] **Step 3: Add the marker + blanket impl to `crates/engine_rules/src/lib.rs`.**
 
 Replace the file contents with (lib.rs is exempt from the build.rs `// GENERATED` header rule via the `lib.rs` allowlist in Task 8):
 
@@ -602,7 +602,7 @@ pub trait GeneratedRule {}
 impl<T: GeneratedRule> engine::cascade::handler::__sealed::Sealed for T {}
 ```
 
-- [ ] **Step 4: Add `impl GeneratedRule` next to every emitted `impl CascadeHandler`.**
+- [x] **Step 4: Add `impl GeneratedRule` next to every emitted `impl CascadeHandler`.**
 
 Currently the moved physics files contain `impl CascadeHandler for FooHandler { ... }` blocks (or function-style emit; check the actual files). For each `pub struct FooHandler` that implements `CascadeHandler`, add:
 
@@ -619,7 +619,7 @@ grep -rE 'impl (engine|crate)::cascade::CascadeHandler' crates/engine_rules/src/
 
 For each match, hand-add `impl crate::GeneratedRule for {handler_name} {}` directly above or below the `impl CascadeHandler` block. (Path is `crate::GeneratedRule` because we're inside `engine_rules`.)
 
-- [ ] **Step 5: Add `#[cfg(test)] impl GeneratedRule` shims for test handlers.**
+- [x] **Step 5: Add `#[cfg(test)] impl GeneratedRule` shims for test handlers.**
 
 In `crates/engine/tests/cascade_bounded.rs` (and the three sibling test files with `impl CascadeHandler for {test_handler}`), find each `impl CascadeHandler for {Test}` and add immediately above:
 
@@ -647,7 +647,7 @@ engine_rules = { path = "../engine_rules" }
 
 (Note: this creates an `engine_rules → engine → engine_rules` *dev-only* cycle. Cargo allows dev-dep cycles. If a regular-dep cycle complaint surfaces, the cycle is the wrong shape — but as a dev-dep it's clean.)
 
-- [ ] **Step 6: Workspace build + test.**
+- [x] **Step 6: Workspace build + test.**
 
 ```bash
 cargo build --workspace
@@ -656,7 +656,7 @@ cargo test --workspace
 
 Expected: SUCCESS. The seal is now active; every existing rule + test rule is admitted via `GeneratedRule`.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add -A
@@ -673,7 +673,7 @@ git commit -m "refactor(engine): seal CascadeHandler via __sealed::Sealed + Gene
 - Modify: `crates/dsl_compiler/src/lib.rs` — update doc-comments referencing old paths.
 - Modify: `src/bin/xtask/compile_dsl_cmd.rs` — confirm rustfmt target list still resolves.
 
-- [ ] **Step 1: Update default paths in `src/bin/xtask/cli/mod.rs`.**
+- [x] **Step 1: Update default paths in `src/bin/xtask/cli/mod.rs`.**
 
 For each of these `#[arg(long, default_value = "<old>")]` lines, swap:
 
@@ -690,7 +690,7 @@ For each of these `#[arg(long, default_value = "<old>")]` lines, swap:
 
 After Task 1's sed pass, `out_rust`'s default value already reads `crates/engine_data/src` (the rename rewrote the literal). Confirm by `grep -E 'out_events|out_rust|engine_data|engine/src/generated' src/bin/xtask/cli/mod.rs` — the only remaining `engine/src/generated` references should be `out_physics` / `out_mask` / `out_views`, which this step rewrites.
 
-- [ ] **Step 2: Update emitted-code import paths in dsl_compiler.**
+- [x] **Step 2: Update emitted-code import paths in dsl_compiler.**
 
 In `crates/dsl_compiler/src/emit_physics.rs`, `emit_mask.rs`, `emit_view.rs`: every emitted `use crate::event::Event;` (or any `crate::` path) must become `use engine::*` because the emitted file now lives in `engine_rules/`, not `engine/`.
 
@@ -701,7 +701,7 @@ grep -rE '"use crate::|writeln!\(.*"use crate::' crates/dsl_compiler/src/emit_*.
 
 For each emit-site, change the literal `"use crate::"` → `"use engine::"`.
 
-- [ ] **Step 3: Emit `impl GeneratedRule for FooHandler {}` from the physics emitter.**
+- [x] **Step 3: Emit `impl GeneratedRule for FooHandler {}` from the physics emitter.**
 
 In `crates/dsl_compiler/src/emit_physics.rs`, find the per-rule struct emit block. Add a sibling write-out:
 
@@ -713,7 +713,7 @@ writeln!(out, "impl crate::GeneratedRule for {} {{}}", handler_name)?;
 
 If the current emit pattern emits `pub fn handle_foo(...)` rather than `impl CascadeHandler for FooHandler`, no marker is needed for those rules — the marker only matters for trait impls. Confirm by searching `grep -E 'impl.*CascadeHandler' crates/engine_rules/src/physics/*.rs`. If none exist (i.e. all physics handlers are plain functions), Step 3 is a no-op.
 
-- [ ] **Step 4: Same for `emit_view.rs` if any view emit produces `impl MaterializedView | LazyView | TopKView`.**
+- [x] **Step 4: Same for `emit_view.rs` if any view emit produces `impl MaterializedView | LazyView | TopKView`.**
 
 Per Spec §4.2, all three view traits also seal via `GeneratedRule`. The view emitter must emit a `impl crate::GeneratedRule for FooView {}` next to each emitted view impl. Audit:
 
@@ -723,7 +723,7 @@ grep -E 'impl (MaterializedView|LazyView|TopKView)' crates/engine_rules/src/view
 
 For each match's struct, ensure the emitter writes the `GeneratedRule` impl. Hand-add now; emitter change confirms in Step 6.
 
-- [ ] **Step 5: Update doc comments in `crates/dsl_compiler/src/lib.rs`.**
+- [x] **Step 5: Update doc comments in `crates/dsl_compiler/src/lib.rs`.**
 
 Old paths (multiple occurrences):
 - `crates/engine_data/src/...` → `crates/engine_data/src/...`
@@ -733,7 +733,7 @@ Old paths (multiple occurrences):
 sed -i 's|crates/engine_data/src|crates/engine_data/src|g; s|crates/engine/src/generated|crates/engine_rules/src|g' crates/dsl_compiler/src/lib.rs
 ```
 
-- [ ] **Step 6: Run `compile-dsl` to regenerate everything from DSL source.**
+- [x] **Step 6: Run `compile-dsl` to regenerate everything from DSL source.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
@@ -747,7 +747,7 @@ git diff --stat crates/engine_rules/src/{mask,physics,views} crates/engine_data/
 
 Expected: small or empty diff (we hand-applied most changes in Tasks 4 + 6). Any remaining diff is the emitter doing what hand-edit didn't catch, which is fine.
 
-- [ ] **Step 7: Workspace build + test.**
+- [x] **Step 7: Workspace build + test.**
 
 ```bash
 cargo build --workspace
@@ -756,7 +756,7 @@ cargo test --workspace
 
 Expected: SUCCESS.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add -A
@@ -773,7 +773,7 @@ git commit -m "refactor(dsl_compiler): emit physics/mask/views to engine_rules; 
 - Modify: `crates/engine_rules/Cargo.toml` — add `build = "build.rs"`.
 - Modify: `crates/engine_data/Cargo.toml` — add `build = "build.rs"`.
 
-- [ ] **Step 1: Write `crates/engine_rules/build.rs`.**
+- [x] **Step 1: Write `crates/engine_rules/build.rs`.**
 
 ```rust
 //! engine_rules build sentinel.
@@ -822,7 +822,7 @@ fn walk(dir: &Path) {
 }
 ```
 
-- [ ] **Step 2: Add `build = "build.rs"` to `crates/engine_rules/Cargo.toml`.**
+- [x] **Step 2: Add `build = "build.rs"` to `crates/engine_rules/Cargo.toml`.**
 
 Old `[package]` block:
 ```toml
@@ -841,7 +841,7 @@ edition = "2021"
 build = "build.rs"
 ```
 
-- [ ] **Step 3: Write `crates/engine_data/build.rs` (same body, swap crate name in the panic).**
+- [x] **Step 3: Write `crates/engine_data/build.rs` (same body, swap crate name in the panic).**
 
 ```rust
 //! engine_data build sentinel.
@@ -889,11 +889,11 @@ fn walk(dir: &Path) {
 }
 ```
 
-- [ ] **Step 4: Add `build = "build.rs"` to `crates/engine_data/Cargo.toml`.**
+- [x] **Step 4: Add `build = "build.rs"` to `crates/engine_data/Cargo.toml`.**
 
 (Same edit as Step 2 — append `build = "build.rs"` to the `[package]` block.)
 
-- [ ] **Step 5: Run a clean build to verify both sentinels accept the freshly-emitted code.**
+- [x] **Step 5: Run a clean build to verify both sentinels accept the freshly-emitted code.**
 
 ```bash
 cargo clean -p engine_rules -p engine_data
@@ -902,7 +902,7 @@ cargo build -p engine_rules -p engine_data
 
 Expected: SUCCESS. If a file is missing the header, the build panics with a path + the fix instruction. Run `cargo run --bin xtask -- compile-dsl` to regen, then retry.
 
-- [ ] **Step 6: Negative test — confirm the sentinel actually fails.**
+- [x] **Step 6: Negative test — confirm the sentinel actually fails.**
 
 Inject a hand-edited file and confirm the panic:
 
@@ -915,7 +915,7 @@ cargo build -p engine_rules
 
 Expected: first build panics with the helpful message; second build (after removing the file) succeeds.
 
-- [ ] **Step 7: Workspace test pass.**
+- [x] **Step 7: Workspace test pass.**
 
 ```bash
 cargo test --workspace
@@ -923,7 +923,7 @@ cargo test --workspace
 
 Expected: SUCCESS.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add -A
@@ -938,7 +938,7 @@ git commit -m "feat: add build.rs sentinels enforcing // GENERATED header on eng
 - Create: `crates/engine/build.rs`
 - Modify: `crates/engine/Cargo.toml` — add `build = "build.rs"`.
 
-- [ ] **Step 1: Inventory current engine top-level files + dirs to seed the allowlist.**
+- [x] **Step 1: Inventory current engine top-level files + dirs to seed the allowlist.**
 
 ```bash
 ls crates/engine/src/
@@ -950,7 +950,7 @@ Expected current set:
 
 Note: `chronicle.rs` and `engagement.rs` are on the allowlist as documented exceptions (deferred to Plan B2 per the Out-of-scope section). When B2 lands, both are removed from the allowlist; their absence becomes a structural rule.
 
-- [ ] **Step 2: Write `crates/engine/build.rs`.**
+- [x] **Step 2: Write `crates/engine/build.rs`.**
 
 ```rust
 //! engine build sentinel.
@@ -1057,11 +1057,11 @@ fn walk_for_pattern(dir: &Path, pat: &str) {
 }
 ```
 
-- [ ] **Step 2: Add `build = "build.rs"` to `crates/engine/Cargo.toml`.**
+- [x] **Step 2: Add `build = "build.rs"` to `crates/engine/Cargo.toml`.**
 
 (Same pattern as Task 8 Step 2.)
 
-- [ ] **Step 3: Clean build to confirm allowlist accepts current engine layout.**
+- [x] **Step 3: Clean build to confirm allowlist accepts current engine layout.**
 
 ```bash
 cargo clean -p engine
@@ -1070,7 +1070,7 @@ cargo build -p engine
 
 Expected: SUCCESS.
 
-- [ ] **Step 4: Negative tests — confirm both rules fire.**
+- [x] **Step 4: Negative tests — confirm both rules fire.**
 
 ```bash
 # Rule 1: unknown top-level file
@@ -1093,7 +1093,7 @@ cargo build -p engine
 
 Expected: both rules fire with their respective panic messages; clean build at the end.
 
-- [ ] **Step 5: Workspace test pass.**
+- [x] **Step 5: Workspace test pass.**
 
 ```bash
 cargo test --workspace
@@ -1101,7 +1101,7 @@ cargo test --workspace
 
 Expected: SUCCESS.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add -A
@@ -1118,7 +1118,7 @@ git commit -m "feat(engine): primitives-only build.rs allowlist + reject // GENE
 - Create: `crates/engine/tests/ui/external_impl_rejected.rs`
 - Create: `crates/engine/tests/ui/external_impl_rejected.stderr` (after first run; trybuild can populate via `TRYBUILD=overwrite`).
 
-- [ ] **Step 1: Add `trybuild` dev-dep in `crates/engine/Cargo.toml`.**
+- [x] **Step 1: Add `trybuild` dev-dep in `crates/engine/Cargo.toml`.**
 
 ```toml
 [dev-dependencies]
@@ -1126,7 +1126,7 @@ git commit -m "feat(engine): primitives-only build.rs allowlist + reject // GENE
 trybuild = "1"
 ```
 
-- [ ] **Step 2: Write the test driver `crates/engine/tests/sealed_cascade_handler.rs`.**
+- [x] **Step 2: Write the test driver `crates/engine/tests/sealed_cascade_handler.rs`.**
 
 ```rust
 //! Compile-fail test: external types must NOT be able to `impl CascadeHandler`.
@@ -1142,7 +1142,7 @@ fn external_cascade_handler_impl_rejected() {
 }
 ```
 
-- [ ] **Step 3: Write the compile-fail fixture `crates/engine/tests/ui/external_impl_rejected.rs`.**
+- [x] **Step 3: Write the compile-fail fixture `crates/engine/tests/ui/external_impl_rejected.rs`.**
 
 ```rust
 //! This fixture must FAIL to compile. The error is that __sealed::Sealed
@@ -1172,7 +1172,7 @@ fn main() {}
 
 (If the actual `fn handle` signature on `CascadeHandler` differs, mirror it from `crates/engine/src/cascade/handler.rs`. The point is: a syntactically well-formed `impl CascadeHandler for MyHandler` that fails *only* because `Sealed` is unsatisfied.)
 
-- [ ] **Step 4: Run the test once to populate the expected stderr.**
+- [x] **Step 4: Run the test once to populate the expected stderr.**
 
 ```bash
 TRYBUILD=overwrite cargo test -p engine --test sealed_cascade_handler
@@ -1180,7 +1180,7 @@ TRYBUILD=overwrite cargo test -p engine --test sealed_cascade_handler
 
 This writes `crates/engine/tests/ui/external_impl_rejected.stderr` with the actual compiler diagnostic.
 
-- [ ] **Step 5: Inspect the captured stderr.**
+- [x] **Step 5: Inspect the captured stderr.**
 
 ```bash
 cat crates/engine/tests/ui/external_impl_rejected.stderr
@@ -1188,7 +1188,7 @@ cat crates/engine/tests/ui/external_impl_rejected.stderr
 
 Expected: contains a line referencing `the trait bound .*Sealed.* is not satisfied` (or equivalent rustc phrasing). If it instead complains about a missing function or a syntax error, the fixture is wrong — fix the fixture and re-run with `TRYBUILD=overwrite`.
 
-- [ ] **Step 6: Run normally to confirm the test passes (i.e., stderr matches).**
+- [x] **Step 6: Run normally to confirm the test passes (i.e., stderr matches).**
 
 ```bash
 cargo test -p engine --test sealed_cascade_handler
@@ -1196,7 +1196,7 @@ cargo test -p engine --test sealed_cascade_handler
 
 Expected: PASS (the fixture fails to compile with the expected error).
 
-- [ ] **Step 7: Negative test — confirm the test catches a broken seal.**
+- [x] **Step 7: Negative test — confirm the test catches a broken seal.**
 
 ```bash
 # Temporarily relax the seal: drop __sealed::Sealed from the supertrait list.
@@ -1214,7 +1214,7 @@ cargo test -p engine --test sealed_cascade_handler
 
 Expected: under the broken seal, trybuild reports the fixture compiles when it shouldn't, and the test fails. Restoring the seal restores green.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add -A
@@ -1229,7 +1229,7 @@ git commit -m "test(engine): trybuild compile-fail test asserting CascadeHandler
 - Modify: `src/bin/xtask/cli/mod.rs` — add `--check` flag to `CompileDslArgs`.
 - Modify: `src/bin/xtask/compile_dsl_cmd.rs` — branch on `args.check`.
 
-- [ ] **Step 1: Add `--check` flag to the args struct.**
+- [x] **Step 1: Add `--check` flag to the args struct.**
 
 In `src/bin/xtask/cli/mod.rs`, find `pub struct CompileDslArgs`. Add:
 
@@ -1241,7 +1241,7 @@ In `src/bin/xtask/cli/mod.rs`, find `pub struct CompileDslArgs`. Add:
     pub check: bool,
 ```
 
-- [ ] **Step 2: Implement `--check` in `compile_dsl_cmd.rs`.**
+- [x] **Step 2: Implement `--check` in `compile_dsl_cmd.rs`.**
 
 Add at the top of `run_compile_dsl(args: CompileDslArgs)` (or wherever the dispatch sits):
 
@@ -1371,7 +1371,7 @@ fn run_compile_dsl_check(args: &CompileDslArgs) -> ExitCode {
 
 (The function refactoring `run_compile_dsl_inner` extracts the existing body of `run_compile_dsl` so `--check` can drive it without recursing through the args branch.)
 
-- [ ] **Step 3: Add `tempfile` to xtask dev/runtime deps if not present.**
+- [x] **Step 3: Add `tempfile` to xtask dev/runtime deps if not present.**
 
 Check root `Cargo.toml`:
 
@@ -1385,7 +1385,7 @@ If absent, add to `[dependencies]` (xtask binary lives in the root crate):
 tempfile = "3"
 ```
 
-- [ ] **Step 4: Build + test the new flag.**
+- [x] **Step 4: Build + test the new flag.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl --check
@@ -1393,7 +1393,7 @@ cargo run --bin xtask -- compile-dsl --check
 
 Expected: prints "generated dirs match DSL source." and exits 0 — generated dirs were just regenerated in Task 7's commit, so they match.
 
-- [ ] **Step 5: Negative test.**
+- [x] **Step 5: Negative test.**
 
 ```bash
 # Mutate one generated file to inject drift.
@@ -1406,7 +1406,7 @@ cargo run --bin xtask -- compile-dsl --check
 # Expected: exit 0
 ```
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add -A
@@ -1422,13 +1422,13 @@ git commit -m "feat(xtask): add compile-dsl --check (regen + diff against workin
 
 This extends the already-landed pre-commit hook (which currently runs `cargo check` + the dispatch-critics gate per Spec D-amendment). The new logic appends two checks: header rule, and `compile-dsl --check` when DSL source is staged.
 
-- [ ] **Step 1: Read current state of `.githooks/pre-commit`.**
+- [x] **Step 1: Read current state of `.githooks/pre-commit`.**
 
 ```bash
 cat .githooks/pre-commit
 ```
 
-- [ ] **Step 2: Append the header-rule + regen-on-DSL-change blocks.**
+- [x] **Step 2: Append the header-rule + regen-on-DSL-change blocks.**
 
 Add after the existing checks but before the final `exit 0` (or wherever the success exit lives). Use the `Edit` tool to insert this block immediately before the `exit 0` line:
 
@@ -1466,7 +1466,7 @@ if git diff --cached --name-only | grep -qE '^assets/(sim|hero_templates)/'; the
 fi
 ```
 
-- [ ] **Step 3: Verify the hook parses cleanly.**
+- [x] **Step 3: Verify the hook parses cleanly.**
 
 ```bash
 bash -n .githooks/pre-commit && echo OK
@@ -1474,7 +1474,7 @@ bash -n .githooks/pre-commit && echo OK
 
 Expected: `OK`.
 
-- [ ] **Step 4: Smoke-test the header rule (dry run via the hook script directly).**
+- [x] **Step 4: Smoke-test the header rule (dry run via the hook script directly).**
 
 ```bash
 # Stage a hand-edit to a generated file (without the marker).
@@ -1488,7 +1488,7 @@ git restore --staged crates/engine_rules/src/physics/heal.rs
 mv /tmp/heal.bak crates/engine_rules/src/physics/heal.rs
 ```
 
-- [ ] **Step 5: Smoke-test the inverse rule.**
+- [x] **Step 5: Smoke-test the inverse rule.**
 
 ```bash
 echo '// GENERATED by dsl_compiler' >> crates/engine/src/lib.rs
@@ -1500,7 +1500,7 @@ git restore --staged crates/engine/src/lib.rs
 git checkout crates/engine/src/lib.rs
 ```
 
-- [ ] **Step 6: Smoke-test the regen-on-DSL-change rule.**
+- [x] **Step 6: Smoke-test the regen-on-DSL-change rule.**
 
 ```bash
 # Stage a no-op DSL edit (touch + git add) — the regen should report no drift.
@@ -1512,7 +1512,7 @@ echo "exit: $?"
 git restore --staged assets/sim/physics.sim
 ```
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add .githooks/pre-commit
@@ -1530,7 +1530,7 @@ git commit -m "feat(githooks): pre-commit enforces // GENERATED header + DSL reg
 - Create: `.ast-grep/rules/no-topk-view-impl-outside-engine-rules.yml`
 - Modify: existing CI workflow (one of `.github/workflows/*.yml`) — add `ast-grep scan` step.
 
-- [ ] **Step 1: Confirm or set up `.ast-grep/` config dir.**
+- [x] **Step 1: Confirm or set up `.ast-grep/` config dir.**
 
 ```bash
 ls .ast-grep/ 2>/dev/null || mkdir -p .ast-grep/rules
@@ -1545,7 +1545,7 @@ ruleDirs:
   - .ast-grep/rules
 ```
 
-- [ ] **Step 2: Write the cascade rule.**
+- [x] **Step 2: Write the cascade rule.**
 
 `.ast-grep/rules/no-cascade-handler-impl-outside-engine-rules.yml`:
 
@@ -1574,7 +1574,7 @@ message: |
   it under crates/engine/tests/ where the cfg(test) GeneratedRule shim lives.
 ```
 
-- [ ] **Step 3: Write the three view rules (same shape, different trait name).**
+- [x] **Step 3: Write the three view rules (same shape, different trait name).**
 
 `no-materialized-view-impl-outside-engine-rules.yml`:
 
@@ -1603,7 +1603,7 @@ message: |
 
 `no-lazy-view-impl-outside-engine-rules.yml` and `no-topk-view-impl-outside-engine-rules.yml`: identical shape, swap `LazyView` and `TopKView` for the trait name and `lazy.rs`/`topk.rs` for the demo-impl exclusion path.
 
-- [ ] **Step 4: Run ast-grep scan locally.**
+- [x] **Step 4: Run ast-grep scan locally.**
 
 ```bash
 # If ast-grep isn't installed:
@@ -1613,7 +1613,7 @@ ast-grep scan
 
 Expected: zero violations (the seal + the demo-impl exclusions cover the current state).
 
-- [ ] **Step 5: Negative test — inject a violation, confirm it's caught.**
+- [x] **Step 5: Negative test — inject a violation, confirm it's caught.**
 
 ```bash
 cat >> crates/engine/src/lib.rs <<EOF
@@ -1628,7 +1628,7 @@ git checkout crates/engine/src/lib.rs
 
 (Note: this test will also fail the engine `build.rs` allowlist + the seal — that's fine; we're checking ast-grep specifically catches the trait impl.)
 
-- [ ] **Step 6: Add ast-grep step to CI.**
+- [x] **Step 6: Add ast-grep step to CI.**
 
 Find existing CI workflow:
 
@@ -1647,7 +1647,7 @@ If a Rust CI workflow exists (typically `.github/workflows/ci.yml` or similar), 
 
 If no CI workflow exists yet, this step is a follow-up (note in commit message). The local enforcement still works via the pre-commit hook + build sentinels.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git add .ast-grep/ sgconfig.yml .github/workflows/*.yml 2>/dev/null
@@ -1661,7 +1661,7 @@ git commit -m "feat(ci): ast-grep rules restricting CascadeHandler/View impls to
 **Files:**
 - Modify: existing CI workflow under `.github/workflows/` (or create `.github/workflows/architecture.yml` if no Rust workflow exists yet).
 
-- [ ] **Step 1: Find current Rust CI workflow.**
+- [x] **Step 1: Find current Rust CI workflow.**
 
 ```bash
 ls .github/workflows/ 2>/dev/null
@@ -1669,7 +1669,7 @@ ls .github/workflows/ 2>/dev/null
 
 If found: pick the file that already runs `cargo test` (e.g. `ci.yml`). If absent: create `.github/workflows/architecture.yml` with a Rust toolchain setup and the steps below.
 
-- [ ] **Step 2: Add a "regen + diff" step.**
+- [x] **Step 2: Add a "regen + diff" step.**
 
 After the existing `cargo build` / `cargo test` step:
 
@@ -1684,7 +1684,7 @@ After the existing `cargo build` / `cargo test` step:
           fi
 ```
 
-- [ ] **Step 3: Add a "schema-hash freshness" step.**
+- [x] **Step 3: Add a "schema-hash freshness" step.**
 
 ```yaml
       - name: Schema hash freshness
@@ -1693,7 +1693,7 @@ After the existing `cargo build` / `cargo test` step:
 
 (If `crates/engine/tests/schema_hash.rs` doesn't exist, this step is a no-op and we either find the actual schema-hash test name or defer this guard. Confirm by `ls crates/engine/tests/schema_hash*`.)
 
-- [ ] **Step 4: Local dry-run.**
+- [x] **Step 4: Local dry-run.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
@@ -1701,7 +1701,7 @@ git diff --quiet crates/engine_rules/ crates/engine_data/ && echo "OK: no drift"
 cargo test -p engine --test schema_hash 2>/dev/null || echo "(schema_hash test not present; skip)"
 ```
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add .github/workflows/
@@ -1714,7 +1714,7 @@ git commit -m "feat(ci): stale-content + schema-hash freshness guards (Spec B §
 
 **Files:** none (validation only).
 
-- [ ] **Step 1: Clean build from scratch.**
+- [x] **Step 1: Clean build from scratch.**
 
 ```bash
 cargo clean
@@ -1723,7 +1723,7 @@ cargo build --workspace
 
 Expected: SUCCESS. Watch for any allowlist / sentinel panics — those mean Tasks 8-9 have a bug.
 
-- [ ] **Step 2: Full test pass.**
+- [x] **Step 2: Full test pass.**
 
 ```bash
 cargo test --workspace
@@ -1731,7 +1731,7 @@ cargo test --workspace
 
 Expected: SUCCESS, including `crates/engine/tests/sealed_cascade_handler.rs` (Task 10).
 
-- [ ] **Step 3: Confirm `compile-dsl --check` is green.**
+- [x] **Step 3: Confirm `compile-dsl --check` is green.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl --check
@@ -1739,7 +1739,7 @@ cargo run --bin xtask -- compile-dsl --check
 
 Expected: "generated dirs match DSL source."
 
-- [ ] **Step 4: Confirm pre-commit hook runs cleanly on a no-op stage.**
+- [x] **Step 4: Confirm pre-commit hook runs cleanly on a no-op stage.**
 
 ```bash
 git config --local core.hooksPath .githooks
@@ -1749,7 +1749,7 @@ git add -N .  # no-op stage
 
 Expected: `OK`.
 
-- [ ] **Step 5: Confirm the seal end-to-end.**
+- [x] **Step 5: Confirm the seal end-to-end.**
 
 ```bash
 cargo test -p engine --test sealed_cascade_handler
@@ -1757,7 +1757,7 @@ cargo test -p engine --test sealed_cascade_handler
 
 Expected: PASS (the compile-fail fixture fails to compile with the expected `Sealed not satisfied` error).
 
-- [ ] **Step 6: Confirm engine has no `// GENERATED` markers and engine_rules + engine_data have them on every non-lib.rs file.**
+- [x] **Step 6: Confirm engine has no `// GENERATED` markers and engine_rules + engine_data have them on every non-lib.rs file.**
 
 ```bash
 # Should be empty:
@@ -1770,11 +1770,11 @@ find crates/engine_rules/src crates/engine_data/src -name '*.rs' -not -name 'lib
 
 Expected: empty output for both checks.
 
-- [ ] **Step 7: Tick the AIS post-design re-evaluation checkbox in this plan file.**
+- [x] **Step 7: Tick the AIS post-design re-evaluation checkbox in this plan file.**
 
 In this plan's Architectural Impact Statement (top), change `[ ] AIS reviewed post-design` → `[x] AIS reviewed post-design`. Add a one-line note: "Final scope: 15 tasks landed; chronicle/engagement migration deferred to B2; legacy `src/` sweep deferred to B3."
 
-- [ ] **Step 8: Final commit.**
+- [x] **Step 8: Final commit.**
 
 ```bash
 git add -A

@@ -85,6 +85,19 @@ Halt the loop (do NOT call `ScheduleWakeup`) on any of:
 
 On hard-stop: post detailed escalation to chat including the failing critic / blocker / commit hash.
 
+## What is NOT a hard-stop (handle inline, don't escalate)
+
+Per (D) tiered autonomy, bookkeeping and reconciliation are **implementer territory**. The agent fixes these without asking:
+
+- **Stale plan checkboxes.** Plan was already executed in git history but `- [ ]` was never flipped. Action: `sed -i 's/^- \[ \]/- [x]/g' <plan-file>` and re-bootstrap. Or, if many plans, force-mark via a single `jq` update on `state.json`. No escalation.
+- **Missing prerequisite (e.g. dependent crate doesn't exist).** Don't dispatch a doomed implementer subagent. Defer the entire dependent plan: mark its tasks `deferred` in `state.json`. No escalation. The deferred plan will not block the dependents-of-its-tasks (per status enum semantics).
+- **Cross-plan deps not declared.** If task X clearly depends on plan Y (per migration notes, prerequisites, or obvious file references) but no `Depends on:` line exists, add one to plan X's header and re-bootstrap. No escalation.
+- **State drift.** `state.json` and plan-file checkboxes can drift due to manual edits. Re-bootstrap reconciles. No escalation.
+
+**Rule of thumb:** if the fix is a `sed`, `jq`, or 3-line bash script and it produces a verifiable end-state (counts change as expected), it's bookkeeping — JUST DO IT.
+
+Escalate only when **a real architectural choice or design tradeoff** surfaces that the agent shouldn't make alone.
+
 ## Daily synthesis
 
 Every ~6-8 hours of wall-clock time, post a synthesis (template at `docs/superpowers/dag/templates/daily-synthesis.md`). Track via `run.jsonl` event count or wall-clock since last `daily_synthesis_posted` event.

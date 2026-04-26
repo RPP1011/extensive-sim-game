@@ -94,14 +94,14 @@ Audit confirmation: no other workspace crate (`engine`, `engine_data`, `engine_r
 
 **Files:** none (validation + setup).
 
-- [ ] **Step 1: Create branch + worktree.**
+- [x] **Step 1: Create branch + worktree.**
 
 ```bash
 git worktree add .worktrees/legacy-src-sweep -b legacy-src-sweep
 cd .worktrees/legacy-src-sweep
 ```
 
-- [ ] **Step 2: Confirm clean baseline build + test.**
+- [x] **Step 2: Confirm clean baseline build + test.**
 
 ```bash
 cargo build --workspace
@@ -112,7 +112,7 @@ Expected: SUCCESS. If anything fails, fix or abort — we need a green baseline 
 
 If `cargo check` shows pre-existing errors in `src/bin/xtask/chronicle_cmd.rs` (per the prior dispatch-critics-hooks smoke-test note), this plan removes those errors *if* `chronicle_cmd.rs` survives the move — verify by reading the file. If the errors are in code that's about to be deleted (legacy module deps), they vanish in Tasks 3-4 and the baseline-test failure is acceptable as long as it's documented.
 
-- [ ] **Step 3: Inventory exact survivor + casualty subcommands.**
+- [x] **Step 3: Inventory exact survivor + casualty subcommands.**
 
 ```bash
 # Survivors: depend ONLY on engine crate tree (engine, engine_data, engine_rules, dsl_compiler) + std/clap.
@@ -141,7 +141,7 @@ echo "(all DELETE; this dir is the RL oracle pipeline using game::ai::*)"
 
 Expected output: 5 KEEPs, 0 DROPs, 9 DELETEs + the oracle_cmd directory. If any KEEP turns into DROP because of a hidden dep, fix the inventory and update the plan inline before proceeding.
 
-- [ ] **Step 4: Commit a no-op breadcrumb so the rebase point is unambiguous.**
+- [x] **Step 4: Commit a no-op breadcrumb so the rebase point is unambiguous.**
 
 ```bash
 git commit --allow-empty -m "chore: legacy-src-sweep worktree baseline (Plan B3 Task 1)"
@@ -158,7 +158,7 @@ git commit --allow-empty -m "chore: legacy-src-sweep worktree baseline (Plan B3 
 - Modify: `crates/xtask/src/cli/mod.rs` (and submodules) — strip clap subcommand variants for casualties.
 - Modify: root `Cargo.toml` — add `crates/xtask` to workspace `members`; remove `[[bin]] xtask` block; remove deps used only by deleted xtask subcommands.
 
-- [ ] **Step 1: Create `crates/xtask/Cargo.toml`.**
+- [x] **Step 1: Create `crates/xtask/Cargo.toml`.**
 
 Audit which dependencies the surviving subcommands actually need:
 
@@ -197,13 +197,13 @@ crossterm = "0.27"
 
 Add only the deps that the audit confirms. Don't speculatively add deps "just in case."
 
-- [ ] **Step 2: Make the directory.**
+- [x] **Step 2: Make the directory.**
 
 ```bash
 mkdir -p crates/xtask/src
 ```
 
-- [ ] **Step 3: Move the survivor files using `git mv` (preserves history).**
+- [x] **Step 3: Move the survivor files using `git mv` (preserves history).**
 
 ```bash
 git mv src/bin/xtask/main.rs           crates/xtask/src/main.rs
@@ -215,7 +215,7 @@ git mv src/bin/xtask/map.rs             crates/xtask/src/map.rs
 git mv src/bin/xtask/capture.rs         crates/xtask/src/capture.rs
 ```
 
-- [ ] **Step 4: Strip dispatch arms for casualties from `crates/xtask/src/main.rs`.**
+- [x] **Step 4: Strip dispatch arms for casualties from `crates/xtask/src/main.rs`.**
 
 The current `main.rs` (read it) has arms for every subcommand. Use `Edit` to remove arms that reference deleted commands. The surviving `match args.command { ... }` should look approximately like:
 
@@ -240,7 +240,7 @@ match args.command {
 
 Also drop the inline `game::world_sim::ability_gen::dump_synthetic(count, seed, dsl);` call (`SynthAbilities` arm) — it imports `game::*`.
 
-- [ ] **Step 5: Strip casualty variants from `crates/xtask/src/cli/`.**
+- [x] **Step 5: Strip casualty variants from `crates/xtask/src/cli/`.**
 
 The clap arg structs in `cli/mod.rs` (and possibly `cli/scenario.rs`, `cli/oracle.rs` etc.) define each subcommand's args. Variants for casualty subcommands must go too — otherwise clap still parses them and fails on the missing dispatch.
 
@@ -267,7 +267,7 @@ git rm crates/xtask/src/cli/model.rs          2>/dev/null || true
 
 Then in `cli/mod.rs`, remove `pub mod {scenario,oracle,roomgen,...}` declarations and remove their entries from the `enum TaskCommand` variants. Surviving variants are `Map`, `Capture`, `TrainV6`, `Chronicle`, `CompileDsl`.
 
-- [ ] **Step 6: Update root `Cargo.toml`.**
+- [x] **Step 6: Update root `Cargo.toml`.**
 
 In `Cargo.toml` at the workspace root:
 
@@ -296,7 +296,7 @@ path = "src/bin/xtask/main.rs"
 
 Don't touch the root `[dependencies]` section yet — Task 4 prunes it after the legacy module deletion confirms which deps are dead.
 
-- [ ] **Step 7: Build the new xtask crate.**
+- [x] **Step 7: Build the new xtask crate.**
 
 ```bash
 cargo build -p xtask
@@ -308,7 +308,7 @@ Common follow-up fixes:
 - A moved file might `use game::SOMETHING` from a now-deleted module. If so, that subcommand should have been on the casualty list — re-classify it: either delete it from the survivor set (and update Step 4 + Step 5), or rewrite the import to use a non-legacy path.
 - `train_v6.rs` only spawns Python via `Command::new`; verify it has no `game::*` imports.
 
-- [ ] **Step 8: Run xtask --help to verify clap surface.**
+- [x] **Step 8: Run xtask --help to verify clap surface.**
 
 ```bash
 cargo run --bin xtask -- --help
@@ -316,7 +316,7 @@ cargo run --bin xtask -- --help
 
 Expected: shows only the surviving subcommands.
 
-- [ ] **Step 9: Run the engine-touching subcommands as smoke tests.**
+- [x] **Step 9: Run the engine-touching subcommands as smoke tests.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl --check
@@ -325,7 +325,7 @@ cargo run --bin xtask -- chronicle --help  # or any equivalent --help that doesn
 
 Expected: SUCCESS (or graceful "no chronicle args" message).
 
-- [ ] **Step 10: Workspace test pass.**
+- [x] **Step 10: Workspace test pass.**
 
 ```bash
 cargo build --workspace
@@ -336,7 +336,7 @@ Expected: SUCCESS *for crates currently passing*. The root `bevy_game/game` crat
 
 Until Task 3 deletes the legacy modules, `cargo build` for the root `game` crate should still succeed (the modules are still there, just unused). If it fails, the cause is likely an old xtask dispatch arm we missed in Step 4 — re-audit.
 
-- [ ] **Step 11: Commit.**
+- [x] **Step 11: Commit.**
 
 ```bash
 git add -A
@@ -351,7 +351,7 @@ git commit -m "refactor: move xtask to crates/xtask/; drop legacy-dependent subc
 - Delete: `src/ai/`, `src/world_sim/`, `src/scenario/`, `src/mission/`, `src/game_core/`, `src/content/`, `src/narrative/`, `src/model_backend/`, `src/ascii_gen/`
 - Delete: `src/bin/` (xtask moved out in Task 2; nothing left).
 
-- [ ] **Step 1: Delete the legacy module trees.**
+- [x] **Step 1: Delete the legacy module trees.**
 
 ```bash
 git rm -r src/ai
@@ -365,13 +365,13 @@ git rm -r src/model_backend
 git rm -r src/ascii_gen
 ```
 
-- [ ] **Step 2: Delete the now-empty `src/bin/` directory.**
+- [x] **Step 2: Delete the now-empty `src/bin/` directory.**
 
 ```bash
 git rm -r src/bin   # was just src/bin/xtask/, all moved
 ```
 
-- [ ] **Step 3: Confirm what remains in `src/`.**
+- [x] **Step 3: Confirm what remains in `src/`.**
 
 ```bash
 find src/ -type f
@@ -379,7 +379,7 @@ find src/ -type f
 
 Expected: only `src/lib.rs` and `src/rendering.rs`.
 
-- [ ] **Step 4: Try a build to surface every reference into deleted code.**
+- [x] **Step 4: Try a build to surface every reference into deleted code.**
 
 ```bash
 cargo build --workspace 2>&1 | tee /tmp/b3-task3-build.log
@@ -391,7 +391,7 @@ Expected failures (these are the dependency-trail items the user flagged as "eve
 
 If a *workspace crate* (engine, engine_data, engine_rules, engine_gpu, dsl_compiler, tactical_sim, viz) fails because it referenced legacy code: that's a finding the AIS missed. **Stop and ask** — the crate either has a hidden dep on the legacy tree (re-classify it), or there's a re-export path that needs fixing. Do NOT delete from a workspace crate to make the build pass; investigate first.
 
-- [ ] **Step 5: Audit `src/rendering.rs` for legacy refs.**
+- [x] **Step 5: Audit `src/rendering.rs` for legacy refs.**
 
 ```bash
 grep -E "(use|mod) (crate|self|super)::(ai|world_sim|scenario|mission|game_core|content|narrative|model_backend|ascii_gen|effects|sim|squad|goap|control|personality|roles|utility|phase|advanced|student|tooling)" src/rendering.rs
@@ -399,7 +399,7 @@ grep -E "(use|mod) (crate|self|super)::(ai|world_sim|scenario|mission|game_core|
 
 Expected: no matches. If any, the file referenced legacy via `crate::*` re-exports — rewrite to use `tactical_sim::*` directly (or, if the dep is structural, ask the user).
 
-- [ ] **Step 6: Commit (build still failing is OK at this point — Task 4 trims lib.rs).**
+- [x] **Step 6: Commit (build still failing is OK at this point — Task 4 trims lib.rs).**
 
 ```bash
 git commit -m "chore: delete legacy src/{ai,world_sim,scenario,mission,game_core,content,narrative,model_backend,ascii_gen} (Spec B §8.4 Step 2)"
@@ -415,7 +415,7 @@ git commit -m "chore: delete legacy src/{ai,world_sim,scenario,mission,game_core
 - Modify: `src/lib.rs`
 - Modify: root `Cargo.toml`
 
-- [ ] **Step 1: Replace `src/lib.rs` with the minimal surviving surface.**
+- [x] **Step 1: Replace `src/lib.rs` with the minimal surviving surface.**
 
 If `rendering.rs` is the only surviving file: replace contents with a single line:
 
@@ -425,7 +425,7 @@ pub mod rendering;
 
 (Drop the `#![allow(dead_code)]` if rendering itself doesn't trip the lint; restore if it does. Drop every `pub use` re-export of the deleted modules — they all reference dead paths now.)
 
-- [ ] **Step 2: Build the root crate to confirm `lib.rs` is clean.**
+- [x] **Step 2: Build the root crate to confirm `lib.rs` is clean.**
 
 ```bash
 cargo build -p game
@@ -433,7 +433,7 @@ cargo build -p game
 
 Expected: SUCCESS. If `rendering.rs` references a deleted module (caught in Task 3 Step 5), the failure is here — fix in `rendering.rs` per that finding.
 
-- [ ] **Step 3: Audit root `Cargo.toml` `[dependencies]` for orphans.**
+- [x] **Step 3: Audit root `Cargo.toml` `[dependencies]` for orphans.**
 
 ```bash
 # Show every dep listed in root Cargo.toml.
@@ -454,7 +454,7 @@ For each ORPHAN, remove the dep line from `[dependencies]`. Common candidates: `
 
 Conservative approach: leave deps that *might* still be referenced by `[features]` hooks (`gpu = [...]`, `app = [...]`); aggressive approach: delete everything that isn't grepped for. Default to conservative — orphan deps cost some compile time but don't break anything.
 
-- [ ] **Step 4: Optional — delete `[features]` blocks that reference deleted deps.**
+- [x] **Step 4: Optional — delete `[features]` blocks that reference deleted deps.**
 
 If a feature flag like `gpu = ["dep:engine_gpu", "engine_gpu/gpu"]` only made sense for the deleted xtask subcommands (e.g., `--gpu` on `xtask chronicle`), it may still be valid (`xtask chronicle` survives in `crates/xtask/`). Check:
 
@@ -464,7 +464,7 @@ grep -E 'feature\s*=' crates/xtask/src/chronicle_cmd.rs
 
 If chronicle uses the `gpu` feature, the feature block stays; the deps it gates may need to move to `crates/xtask/Cargo.toml`. If chronicle doesn't use it, the feature block can go.
 
-- [ ] **Step 5: Workspace build + test.**
+- [x] **Step 5: Workspace build + test.**
 
 ```bash
 cargo clean
@@ -474,7 +474,7 @@ cargo test --workspace
 
 Expected: SUCCESS. If a test fails because it references a deleted module — that test was inside the deleted module tree and got `git rm`'d in Task 3, so this scenario shouldn't fire. If it does, investigate; do not paper over.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add -A
@@ -487,7 +487,7 @@ git commit -m "chore: trim src/lib.rs to rendering only; drop orphaned root deps
 
 **Files:** none (validation + bookkeeping).
 
-- [ ] **Step 1: Clean rebuild.**
+- [x] **Step 1: Clean rebuild.**
 
 ```bash
 cargo clean
@@ -496,7 +496,7 @@ cargo build --workspace
 
 Expected: SUCCESS, no warnings about dead code in deleted modules (they're gone).
 
-- [ ] **Step 2: Full test pass.**
+- [x] **Step 2: Full test pass.**
 
 ```bash
 cargo test --workspace
@@ -504,7 +504,7 @@ cargo test --workspace
 
 Expected: SUCCESS.
 
-- [ ] **Step 3: Lines-of-code measurement (sanity check).**
+- [x] **Step 3: Lines-of-code measurement (sanity check).**
 
 ```bash
 echo "remaining root src/:"
@@ -517,7 +517,7 @@ git diff --stat HEAD~5 -- src/ crates/xtask/ Cargo.toml | tail -3
 
 Expected: src/ is small (only rendering + lib.rs); crates/xtask is small (only the survivors); the diff stat shows tens of thousands of lines deleted.
 
-- [ ] **Step 4: Run the surviving xtask subcommands as smoke tests.**
+- [x] **Step 4: Run the surviving xtask subcommands as smoke tests.**
 
 ```bash
 cargo run --bin xtask -- --help
@@ -527,7 +527,7 @@ cargo run --bin xtask -- chronicle --help    # or another no-arg variant
 
 Expected: clap shows only survivor subcommands; `compile-dsl --check` reports "match" (assuming Plan B1's `--check` flag has landed; if not, that's a B1 dep — note in commit message and verify when B1 merges).
 
-- [ ] **Step 5: Confirm no dispatch-critics surprise.**
+- [x] **Step 5: Confirm no dispatch-critics surprise.**
 
 The Spec D-amendment dispatch-critics gate runs on engine-directory edits. This plan touches `src/` (deleting) and `crates/xtask/` (creating) — neither is `crates/engine*`. The pre-commit gate should be a no-op for these commits.
 
@@ -539,11 +539,11 @@ Expected: OK.
 
 If the gate fires unexpectedly (e.g., because deleting `src/world_sim` triggers something), read the message and address. Don't `--no-verify`.
 
-- [ ] **Step 6: Tick AIS post-design checkbox.**
+- [x] **Step 6: Tick AIS post-design checkbox.**
 
 Edit this plan file: `[ ] AIS reviewed post-design` → `[x] AIS reviewed post-design`. Append a one-line scope note: "Final scope: ~85K lines deleted from src/; xtask shrunk to 5 surviving subcommands in crates/xtask/."
 
-- [ ] **Step 7: Final commit.**
+- [x] **Step 7: Final commit.**
 
 ```bash
 git add -A

@@ -50,7 +50,7 @@ Verification per task: each script runs without errors on a no-op input; the bas
 **Files:**
 - Modify: `.gitignore`
 
-- [ ] **Step 1: Read current state**
+- [x] **Step 1: Read current state**
 
 ```bash
 grep -n "\.claude" .gitignore
@@ -58,7 +58,7 @@ grep -n "\.claude" .gitignore
 
 Expected: existing rules `.claude/*`, `!.claude/settings.json`, `!.claude/skills/`.
 
-- [ ] **Step 2: Add exceptions for `scripts/` and explicit ignores for transient files**
+- [x] **Step 2: Add exceptions for `scripts/` and explicit ignores for transient files**
 
 Use the `Edit` tool to replace the existing block:
 
@@ -79,7 +79,7 @@ New:
 .claude/allowlist-gate-approved
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 git check-ignore -v .claude/scripts/dispatch-critics.sh 2>&1 ; echo "(should be empty/exit-1 — file not ignored)"
@@ -89,7 +89,7 @@ git check-ignore -v .claude/allowlist-gate-approved 2>&1 | head -1
 
 The first should print nothing (path not ignored). The second and third should print a `.gitignore:N` line (path ignored).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .gitignore
@@ -103,7 +103,7 @@ git commit -m "chore(gitignore): allow .claude/scripts/; ignore critic-output an
 **Files:**
 - Create: `.claude/scripts/dispatch-critics.sh`
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 Use the `Write` tool. Content (verbatim from spec §5):
 
@@ -245,7 +245,7 @@ else
 fi
 ```
 
-- [ ] **Step 2: Make executable + bash-syntax check**
+- [x] **Step 2: Make executable + bash-syntax check**
 
 ```bash
 chmod +x .claude/scripts/dispatch-critics.sh
@@ -254,7 +254,7 @@ bash -n .claude/scripts/dispatch-critics.sh && echo "syntax OK"
 
 Expected: `syntax OK`.
 
-- [ ] **Step 3: Smoke test — run with `--critic compiler-first --target HEAD~1..HEAD`**
+- [x] **Step 3: Smoke test — run with `--critic compiler-first --target HEAD~1..HEAD`**
 
 ```bash
 bash .claude/scripts/dispatch-critics.sh --critic compiler-first --target HEAD~1..HEAD 2>&1 | head -20
@@ -264,7 +264,7 @@ Expected: prints "Dispatching 1 critic(s)..." line; spawns `claude --print`; eve
 
 If `claude --print` is not on PATH in this environment, smoke fails — fine for this task; document in commit message.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/scripts/dispatch-critics.sh
@@ -278,7 +278,7 @@ git commit -m "feat(scripts): dispatch-critics.sh orchestrator with parallel cla
 **Files:**
 - Create: `.claude/scripts/pre-tool-engine-edit.sh`
 
-- [ ] **Step 1: Write the script** (verbatim from spec §4.1)
+- [x] **Step 1: Write the script** (verbatim from spec §4.1)
 
 ```bash
 #!/usr/bin/env bash
@@ -322,14 +322,14 @@ fi
 exit 0
 ```
 
-- [ ] **Step 2: Executable + syntax check**
+- [x] **Step 2: Executable + syntax check**
 
 ```bash
 chmod +x .claude/scripts/pre-tool-engine-edit.sh
 bash -n .claude/scripts/pre-tool-engine-edit.sh && echo "syntax OK"
 ```
 
-- [ ] **Step 3: Smoke test — feed a no-op JSON**
+- [x] **Step 3: Smoke test — feed a no-op JSON**
 
 ```bash
 echo '{"tool_input":{"file_path":"docs/foo.md","new_string":"hello"}}' | bash .claude/scripts/pre-tool-engine-edit.sh ; echo "exit: $?"
@@ -337,7 +337,7 @@ echo '{"tool_input":{"file_path":"docs/foo.md","new_string":"hello"}}' | bash .c
 
 Expected: `exit: 0` (no block; doc edit is unrelated to engine).
 
-- [ ] **Step 4: Smoke test — feed a `engine_rules/src/X.rs` edit (should block)**
+- [x] **Step 4: Smoke test — feed a `engine_rules/src/X.rs` edit (should block)**
 
 ```bash
 echo '{"tool_input":{"file_path":"crates/engine_rules/src/physics/foo.rs","new_string":"// edit"}}' | bash .claude/scripts/pre-tool-engine-edit.sh 2>&1 ; echo "exit: $?"
@@ -345,7 +345,7 @@ echo '{"tool_input":{"file_path":"crates/engine_rules/src/physics/foo.rs","new_s
 
 Expected: `BLOCK: crates/engine_rules/src/physics/foo.rs is in engine_rules/...` and `exit: 2`.
 
-- [ ] **Step 5: Smoke test — feed a `lib.rs` in engine_rules (should NOT block)**
+- [x] **Step 5: Smoke test — feed a `lib.rs` in engine_rules (should NOT block)**
 
 ```bash
 echo '{"tool_input":{"file_path":"crates/engine_rules/src/lib.rs","new_string":"// edit"}}' | bash .claude/scripts/pre-tool-engine-edit.sh ; echo "exit: $?"
@@ -353,7 +353,7 @@ echo '{"tool_input":{"file_path":"crates/engine_rules/src/lib.rs","new_string":"
 
 Expected: `exit: 0` (lib.rs is the carve-out).
 
-- [ ] **Step 6: Smoke test — `impl CascadeHandler` in engine/src/ should block**
+- [x] **Step 6: Smoke test — `impl CascadeHandler` in engine/src/ should block**
 
 ```bash
 echo '{"tool_input":{"file_path":"crates/engine/src/foo.rs","new_string":"impl CascadeHandler for Foo {}"}}' | bash .claude/scripts/pre-tool-engine-edit.sh 2>&1 ; echo "exit: $?"
@@ -361,7 +361,7 @@ echo '{"tool_input":{"file_path":"crates/engine/src/foo.rs","new_string":"impl C
 
 Expected: `BLOCK: impl CascadeHandler outside crates/engine_rules/. Violates P1.` and `exit: 2`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add .claude/scripts/pre-tool-engine-edit.sh
@@ -375,7 +375,7 @@ git commit -m "feat(scripts): pre-tool-engine-edit.sh fast static blocks for P1 
 **Files:**
 - Create: `.claude/scripts/session-end-engine-review.sh`
 
-- [ ] **Step 1: Write the script** (verbatim from spec §4.2)
+- [x] **Step 1: Write the script** (verbatim from spec §4.2)
 
 ```bash
 #!/usr/bin/env bash
@@ -406,14 +406,14 @@ bash .claude/scripts/dispatch-critics.sh --target "WORKING-TREE" --all || true
 exit 0
 ```
 
-- [ ] **Step 2: Executable + syntax check**
+- [x] **Step 2: Executable + syntax check**
 
 ```bash
 chmod +x .claude/scripts/session-end-engine-review.sh
 bash -n .claude/scripts/session-end-engine-review.sh && echo "syntax OK"
 ```
 
-- [ ] **Step 3: Smoke test — run with no engine files touched (should exit 0 immediately)**
+- [x] **Step 3: Smoke test — run with no engine files touched (should exit 0 immediately)**
 
 ```bash
 bash .claude/scripts/session-end-engine-review.sh ; echo "exit: $?"
@@ -421,7 +421,7 @@ bash .claude/scripts/session-end-engine-review.sh ; echo "exit: $?"
 
 Expected: `exit: 0` (assuming the working tree has no engine changes — verify by `git status -s` showing no `crates/engine*` paths).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/scripts/session-end-engine-review.sh
@@ -435,13 +435,13 @@ git commit -m "feat(scripts): session-end-engine-review.sh — Stop hook keeps v
 **Files:**
 - Create: `.githooks/pre-commit`
 
-- [ ] **Step 1: Create directory**
+- [x] **Step 1: Create directory**
 
 ```bash
 mkdir -p .githooks
 ```
 
-- [ ] **Step 2: Write the hook** (verbatim from spec §4.4)
+- [x] **Step 2: Write the hook** (verbatim from spec §4.4)
 
 ```bash
 #!/usr/bin/env bash
@@ -513,14 +513,14 @@ fi
 exit 0
 ```
 
-- [ ] **Step 3: Executable + syntax check**
+- [x] **Step 3: Executable + syntax check**
 
 ```bash
 chmod +x .githooks/pre-commit
 bash -n .githooks/pre-commit && echo "syntax OK"
 ```
 
-- [ ] **Step 4: Smoke test — run with no engine staged content (should exit 0)**
+- [x] **Step 4: Smoke test — run with no engine staged content (should exit 0)**
 
 ```bash
 bash .githooks/pre-commit ; echo "exit: $?"
@@ -528,7 +528,7 @@ bash .githooks/pre-commit ; echo "exit: $?"
 
 Expected: `exit: 0` (no engine files staged → no checks).
 
-- [ ] **Step 5: Smoke test — fake a FAIL verdict file, run with engine staged**
+- [x] **Step 5: Smoke test — fake a FAIL verdict file, run with engine staged**
 
 ```bash
 # Set up:
@@ -554,7 +554,7 @@ rm -f .claude/critic-output-compiler-first.txt
 
 Expected: `=== ABORT: critic verdicts have unresolved FAILs ===` printed; `exit: 1`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .githooks/pre-commit
@@ -568,13 +568,13 @@ git commit -m "feat(githooks): pre-commit critic-verdict gate (hard block on FAI
 **Files:**
 - Create: `.claude/skills/dispatch-critics/SKILL.md`
 
-- [ ] **Step 1: Make directory**
+- [x] **Step 1: Make directory**
 
 ```bash
 mkdir -p .claude/skills/dispatch-critics
 ```
 
-- [ ] **Step 2: Write SKILL.md**
+- [x] **Step 2: Write SKILL.md**
 
 ```markdown
 ---
@@ -638,7 +638,7 @@ git config core.hooksPath .githooks
 Without this, the `.githooks/pre-commit` hook won't fire and the hard block doesn't engage.
 ```
 
-- [ ] **Step 3: Verify frontmatter**
+- [x] **Step 3: Verify frontmatter**
 
 ```bash
 head -4 .claude/skills/dispatch-critics/SKILL.md
@@ -646,7 +646,7 @@ head -4 .claude/skills/dispatch-critics/SKILL.md
 
 Expected: `---`, `name: dispatch-critics`, `description: ...`, `---`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/skills/dispatch-critics/SKILL.md
@@ -660,7 +660,7 @@ git commit -m "docs(skills): dispatch-critics SKILL.md — thin doc wrapper for 
 **Files:**
 - Modify: `.claude/settings.json`
 
-- [ ] **Step 1: Read current state**
+- [x] **Step 1: Read current state**
 
 ```bash
 cat .claude/settings.json
@@ -678,7 +678,7 @@ Expected current content (from prior constitution work):
 }
 ```
 
-- [ ] **Step 2: Add `PreToolUse` and `Stop` entries via `jq`**
+- [x] **Step 2: Add `PreToolUse` and `Stop` entries via `jq`**
 
 ```bash
 tmp=$(mktemp)
@@ -697,7 +697,7 @@ jq '.hooks += {
 }' .claude/settings.json > "$tmp" && mv "$tmp" .claude/settings.json
 ```
 
-- [ ] **Step 3: Verify JSON is valid + has all three hook types**
+- [x] **Step 3: Verify JSON is valid + has all three hook types**
 
 ```bash
 jq '.hooks | keys' .claude/settings.json
@@ -713,7 +713,7 @@ Expected:
 ]
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/settings.json
@@ -728,7 +728,7 @@ git commit -m "feat(hooks): wire PreToolUse + Stop to dispatch-critics scripts"
 - Modify: `CLAUDE.md`
 - Modify: `docs/llms.txt`
 
-- [ ] **Step 1: Add a one-time-setup note + critics-system bullet to `CLAUDE.md`**
+- [x] **Step 1: Add a one-time-setup note + critics-system bullet to `CLAUDE.md`**
 
 Use `Edit` to update the "Conventions" section. Find:
 
@@ -743,7 +743,7 @@ Replace with:
 - **One-time setup after clone:** `git config core.hooksPath .githooks` enables the pre-commit critic-verdict block. Without it, the hard block doesn't engage.
 ```
 
-- [ ] **Step 2: Verify CLAUDE.md line count**
+- [x] **Step 2: Verify CLAUDE.md line count**
 
 ```bash
 wc -l CLAUDE.md
@@ -751,7 +751,7 @@ wc -l CLAUDE.md
 
 Expected: ≤105 (we have a ~52 line baseline; adding 2 bullets keeps us well under).
 
-- [ ] **Step 3: Add `dispatch-critics` to `docs/llms.txt` Critics section**
+- [x] **Step 3: Add `dispatch-critics` to `docs/llms.txt` Critics section**
 
 Find the existing "## Critics" section and add:
 
@@ -769,7 +769,7 @@ done
 
 Expected: zero output.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add CLAUDE.md docs/llms.txt
@@ -783,7 +783,7 @@ git commit -m "docs: register dispatch-critics + one-time hook setup in CLAUDE.m
 **Files:**
 - (no file changes; one-time `git config` for this clone)
 
-- [ ] **Step 1: Configure `core.hooksPath`**
+- [x] **Step 1: Configure `core.hooksPath`**
 
 ```bash
 git config core.hooksPath .githooks
@@ -791,7 +791,7 @@ git config core.hooksPath .githooks
 
 This is per-clone, NOT committed. Each developer (and each fresh clone) runs this once. CLAUDE.md (Task 8) documents it.
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 ```bash
 git config --get core.hooksPath
@@ -799,7 +799,7 @@ git config --get core.hooksPath
 
 Expected: `.githooks`.
 
-- [ ] **Step 3: Smoke test the hook chain — make a no-op commit**
+- [x] **Step 3: Smoke test the hook chain — make a no-op commit**
 
 ```bash
 echo "# test" >> docs/.tmp-hook-test.md
@@ -814,7 +814,7 @@ git reset HEAD~1
 rm docs/.tmp-hook-test.md
 ```
 
-- [ ] **Step 4: No commit needed; this step modifies clone-local config only.** Verify by running `git config --get core.hooksPath` and confirming `.githooks` is reported.
+- [x] **Step 4: No commit needed; this step modifies clone-local config only.** Verify by running `git config --get core.hooksPath` and confirming `.githooks` is reported.
 
 ---
 
@@ -823,7 +823,7 @@ rm docs/.tmp-hook-test.md
 **Files:**
 - Modify: this plan file (`docs/superpowers/plans/2026-04-25-dispatch-critics-hooks-impl.md`) — AIS post-design re-eval
 
-- [ ] **Step 1: Tick the "post-design" checkbox**
+- [x] **Step 1: Tick the "post-design" checkbox**
 
 Use `Edit` on this plan file. Find:
 
@@ -837,7 +837,7 @@ Replace with:
 - **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — 3 bash scripts (~200 lines), 1 Git hook (~50 lines), 1 thin SKILL.md, settings.json + .gitignore + CLAUDE.md + llms.txt updates. No engine code touched, no rule logic introduced. Hook chain smoke-tested.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-04-25-dispatch-critics-hooks-impl.md
