@@ -419,15 +419,23 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-13"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "841672bd",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS",
+          "cross-backend-parity": "PASS"
+        },
+        "note": "Phase 5d COMPLETE; engine_gpu Cargo.toml: promoted engine_rules from optional to always-on (needed for cross-crate apply_actions_pub call)"
+      },
+      "started_at": "2026-04-26T22:34:06Z",
+      "completed_at": "2026-04-26T22:38:16Z",
       "retry_count": 0
     },
     {
@@ -642,9 +650,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T22:31:38Z",
-    "iterations_completed": 11,
-    "tasks_closed": 11,
+    "last_iteration_at": "2026-04-26T22:38:16Z",
+    "iterations_completed": 12,
+    "tasks_closed": 12,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

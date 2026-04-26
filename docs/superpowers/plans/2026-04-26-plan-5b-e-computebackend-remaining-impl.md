@@ -779,7 +779,7 @@ Expected: PASS (engine_gpu still uses CPU stubs but behavior unchanged).
 **Files:**
 - Modify: `crates/engine_gpu/src/lib.rs`
 
-- [ ] **Step 1: Add stub to `#[cfg(not(feature = "gpu"))]` impl.**
+- [x] **Step 1: Add stub to `#[cfg(not(feature = "gpu"))]` impl.**
 
 ```rust
     fn apply_and_movement(
@@ -802,7 +802,7 @@ Expected: PASS (engine_gpu still uses CPU stubs but behavior unchanged).
 cargo run --bin xtask -- compile-dsl
 ```
 
-- [ ] **Step 2: Add stub to `#[cfg(feature = "gpu")]` impl.**
+- [x] **Step 2: Add stub to `#[cfg(feature = "gpu")]` impl.**
 
 ```rust
     fn apply_and_movement(
@@ -816,7 +816,7 @@ cargo run --bin xtask -- compile-dsl
     }
 ```
 
-- [ ] **Step 3: Build workspace.**
+- [x] **Step 3: Build workspace.**
 
 ```bash
 cargo build --workspace 2>&1 | grep -E "^error" | head -20
@@ -824,7 +824,7 @@ cargo build --workspace 2>&1 | grep -E "^error" | head -20
 
 Expected: SUCCESS.
 
-- [ ] **Step 4: Run full workspace tests.**
+- [x] **Step 4: Run full workspace tests.**
 
 ```bash
 cargo test --workspace -- --test-threads=1 2>&1 | tail -10
@@ -832,7 +832,7 @@ cargo test --workspace -- --test-threads=1 2>&1 | tail -10
 
 Expected: PASS. All behavior is unchanged — stubs delegate to the same CPU functions that ran before.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/engine_gpu/src/lib.rs crates/dsl_compiler/src/emit_step.rs crates/engine_rules/src/step.rs
