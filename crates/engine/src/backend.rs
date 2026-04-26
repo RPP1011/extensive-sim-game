@@ -14,6 +14,7 @@
 
 use crate::cascade::CascadeRegistry;
 use crate::event::{EventLike, EventRing};
+use crate::mask::{MaskBuffer, MicroKind};
 use crate::policy::PolicyBackend;
 use crate::scratch::SimScratch;
 use crate::state::SimState;
@@ -45,4 +46,17 @@ pub trait ComputeBackend {
         policy:  &B,
         cascade: &CascadeRegistry<Self::Event, Self::Views>,
     );
+
+    /// Reset every bit in the mask buffer. SerialBackend implementation
+    /// is `buf.reset()`; GpuBackend dispatches a clear kernel.
+    fn reset_mask(&mut self, buf: &mut MaskBuffer);
+
+    /// Set a single mask bit. SerialBackend: `buf.set(slot, kind, true)`.
+    /// GpuBackend: enqueues a per-bit write into the buffer's GPU mirror;
+    /// Phase 5d batches these into kernel dispatches.
+    fn set_mask_bit(&mut self, buf: &mut MaskBuffer, slot: usize, kind: MicroKind);
+
+    /// Sync any pending mask writes. Serial: no-op. GPU: flushes the
+    /// per-bit-set queue into the buffer mirror.
+    fn commit_mask(&mut self, buf: &mut MaskBuffer);
 }
