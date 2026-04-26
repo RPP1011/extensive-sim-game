@@ -482,7 +482,7 @@ git -c core.hooksPath= commit -am "feat(dsl): grammar — beliefs(observer).obse
 **Files:**
 - Modify: `crates/dsl_compiler/src/emit_physics.rs`
 
-- [ ] **Step 1: Add lowering.**
+- [x] **Step 1: Add lowering.**
 
 In the per-statement lowering switch, handle `IrPhysicsStmt::BeliefObserve`:
 
@@ -502,7 +502,7 @@ IrPhysicsStmt::BeliefObserve { observer, target, fields } => {
 }
 ```
 
-- [ ] **Step 2: Test lowering produces valid Rust.**
+- [x] **Step 2: Test lowering produces valid Rust.**
 
 `crates/dsl_compiler/src/emit_physics.rs` `#[cfg(test)] mod tests`:
 
@@ -518,7 +518,7 @@ fn belief_observe_emits_upsert() {
 }
 ```
 
-- [ ] **Step 3: Run + commit.**
+- [x] **Step 3: Run + commit.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p dsl_compiler emit_physics::tests::belief_observe_emits_upsert

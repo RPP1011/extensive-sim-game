@@ -3249,15 +3249,22 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-6"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 3,
-      "steps_done": 0,
+      "steps_done": 3,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "33b98f17",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS"
+        },
+        "note": "emit_physics lowers BeliefObserve to agent_cold_beliefs_mut + upsert BeliefState. ..Default::default() spread allows partial field init. WGSL emitter still Unsupported (T6 handles via @cpu_only). 1 new test PASS."
+      },
+      "started_at": "2026-04-26T07:59:08Z",
+      "completed_at": "2026-04-26T08:02:36Z",
       "retry_count": 0
     },
     {
@@ -3573,9 +3580,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T07:56:51Z",
-    "iterations_completed": 30,
-    "tasks_closed": 27,
+    "last_iteration_at": "2026-04-26T08:02:36Z",
+    "iterations_completed": 31,
+    "tasks_closed": 28,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
