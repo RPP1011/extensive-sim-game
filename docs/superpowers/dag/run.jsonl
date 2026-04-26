@@ -97,3 +97,4 @@
 {"ts":"2026-04-26T22:13:07Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-6"}
 {"ts":"2026-04-26T22:14:11Z","event":"task_done","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-6","commit":"b38dc5c0","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"SerialBackend::view_fold emitted; engine_rules builds; engine_gpu still missing T8 stub"}}
 {"ts":"2026-04-26T22:16:06Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-7"}
+{"ts":"2026-04-26T22:17:09Z","event":"task_done","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-7","commit":"57211a8d","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"view_fold routed via backend; interpreted-rules path preserved direct; engine_gpu still missing T8 stub"}}

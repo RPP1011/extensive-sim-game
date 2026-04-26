@@ -285,15 +285,19 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-8"
       ],
-      "status": "in_progress",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
+      "completed_commit": "57211a8d",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "view_fold routed via backend; interpreted-rules path preserved direct; engine_gpu still missing T8 stub"
+      },
       "started_at": "2026-04-26T22:16:06Z",
-      "completed_at": null,
+      "completed_at": "2026-04-26T22:17:09Z",
       "retry_count": 0
     },
     {
@@ -618,9 +622,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T22:16:06Z",
+    "last_iteration_at": "2026-04-26T22:17:09Z",
     "iterations_completed": 7,
-    "tasks_closed": 6,
+    "tasks_closed": 7,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

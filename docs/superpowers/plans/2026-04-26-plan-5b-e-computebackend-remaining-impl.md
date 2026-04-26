@@ -464,7 +464,7 @@ git commit -m "feat(dsl_compiler,engine_rules): emit SerialBackend::view_fold (P
 - Modify: `crates/dsl_compiler/src/emit_step.rs`
 - Regenerated: `crates/engine_rules/src/step.rs`
 
-- [ ] **Step 1: Locate the view fold calls in the emitted string.**
+- [x] **Step 1: Locate the view fold calls in the emitted string.**
 
 In `emit_step.rs` raw string, around lines 183–190, there are two branches:
 
@@ -479,7 +479,7 @@ Both paths need to route through `backend.view_fold`. The `interpreted-rules` pa
 
 However, `interpreted-rules` is a CPU-only feature that bypasses `fold_all`. The cleanest approach: keep the `interpreted-rules` cfg block as a `SerialBackend` internal detail. Route only the `#[cfg(not(feature = "interpreted-rules"))]` non-interpreted path through `backend.view_fold`. For the interpreted path, keep the direct call (it's feature-gated and only ever runs on `SerialBackend`).
 
-- [ ] **Step 2: Replace the view fold block in the raw string.**
+- [x] **Step 2: Replace the view fold block in the raw string.**
 
 Change:
 
@@ -513,14 +513,14 @@ to:
     }
 ```
 
-- [ ] **Step 3: Regenerate + check.**
+- [x] **Step 3: Regenerate + check.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
 cargo run --bin xtask -- compile-dsl --check
 ```
 
-- [ ] **Step 4: Build + test engine_rules.**
+- [x] **Step 4: Build + test engine_rules.**
 
 ```bash
 cargo build -p engine_rules && cargo test -p engine_rules -- --test-threads=1 2>&1 | tail -5
@@ -528,7 +528,7 @@ cargo build -p engine_rules && cargo test -p engine_rules -- --test-threads=1 2>
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/dsl_compiler/src/emit_step.rs crates/engine_rules/src/step.rs
