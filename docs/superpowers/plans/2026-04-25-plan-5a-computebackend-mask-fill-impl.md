@@ -327,7 +327,7 @@ git -c core.hooksPath= commit -am "feat(dsl_compiler): emit_mask_fill threads Co
 **Files:**
 - Modify: `crates/dsl_compiler/src/emit_step.rs`
 
-- [ ] **Step 1: Update the emit_step body.**
+- [x] **Step 1: Update the emit_step body.**
 
 Find the line that emits the call to `fill_all`. Currently:
 
@@ -348,7 +348,7 @@ The emitted `step` already has `backend: &mut Self::Backend` or similar — veri
 
 (The trait method `step` already takes `&mut self` — that's the backend. So inside the emitted body, `self` IS the backend. The emit can use `self`. But since `fill_all` is in a different module, the body needs the backend passed by name. Adapt accordingly.)
 
-- [ ] **Step 2: Regen + build.**
+- [x] **Step 2: Regen + build.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -357,7 +357,7 @@ unset RUSTFLAGS && cargo build -p engine_rules
 
 Expected: SUCCESS — backend is now properly threaded.
 
-- [ ] **Step 3: Workspace build.**
+- [x] **Step 3: Workspace build.**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -365,7 +365,7 @@ unset RUSTFLAGS && cargo build --workspace
 
 Expected: still fails on engine_gpu (Task 7 closes).
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl_compiler): emit_step threads ComputeBackend to fill_all (Plan 5a Task 5)"
