@@ -2835,8 +2835,17 @@ impl ComputeBackend for GpuBackend {
         views:   &mut Self::Views,
         events:  &mut EventRing<Self::Event>,
     ) {
-        // Phase 5b stub: CPU pass-through. Plan 5e wires GPU cascade kernel.
-        cascade.run_fixed_point(state, views, events);
+        // GPU cascade dispatch via cs_physics_resident kernel chain.
+        // Falls back to CPU on init failure, matching GpuBackend::step error handling.
+        if let Err(e) = self.ensure_cascade_initialized() {
+            self.sync.last_cascade_error = Some(format!("cascade_dispatch init: {e}"));
+            cascade.run_fixed_point(state, views, events);
+            return;
+        }
+        // `events.dispatched()` is the watermark before apply_and_movement ran —
+        // the seed events live in the range dispatched()..total_pushed().
+        let events_before = events.dispatched();
+        self.run_cascade_gpu(state, events, events_before, cascade, views);
     }
 
     fn view_fold(
@@ -3008,6 +3017,104 @@ impl GpuBackend {
             Err(_e) => {
                 last_mask_bitmaps.clear();
                 last_scoring_outputs.clear();
+            }
+        }
+    }
+
+    /// Task 14 (Plan 5e) — GPU cascade kernel dispatch, extracted from the
+    /// inline block in `GpuBackend::step` so both `step` and `cascade_dispatch`
+    /// can call it without duplicating logic.
+    ///
+    /// `events_before` is the `EventRing::total_pushed()` (or `dispatched()`)
+    /// watermark captured just before `apply_and_movement` ran — the seed
+    /// events fed into the cascade are exactly the slice
+    /// `events_before..events.total_pushed()`.
+    ///
+    /// On success the GPU-mutated agent SoA is committed to `state`, GPU-emitted
+    /// events are drained into `events`, and cold-state replay runs over seed +
+    /// GPU events. On cascade kernel failure, falls back to the CPU cascade
+    /// (`cascade.run_fixed_point`) so state stays correct.
+    fn run_cascade_gpu(
+        &mut self,
+        state:        &mut SimState,
+        events:       &mut EventRing<Event>,
+        events_before: usize,
+        cascade:      &CascadeRegistry<Event, ()>,
+        views:        &mut (),
+    ) {
+        let events_after_apply = events.total_pushed();
+        let seed_events: Vec<Event> = (events_before..events_after_apply)
+            .filter_map(|i| events.get_pushed(i))
+            .collect();
+        let initial_records = cascade::pack_initial_events(&seed_events);
+
+        let t_cascade = std::time::Instant::now();
+        let cascade_out = {
+            let crate::backend::SyncPathContext {
+                cascade_ctx: sync_cascade_ctx_opt,
+                view_storage: sync_view_storage,
+                ..
+            } = &mut self.sync;
+            let cascade_ctx = sync_cascade_ctx_opt
+                .as_mut()
+                .expect("cascade_ctx ensured before run_cascade_gpu");
+            let emit_ctx = dsl_compiler::emit_physics_wgsl::EmitContext {
+                events: &cascade_ctx.comp.events,
+                event_tags: &cascade_ctx.comp.event_tags,
+            };
+            cascade::run_cascade(
+                &self.device,
+                &self.queue,
+                state,
+                &mut cascade_ctx.physics,
+                sync_view_storage,
+                &mut cascade_ctx.spatial,
+                &cascade_ctx.abilities,
+                &initial_records,
+                state.config.combat.kin_radius,
+                &emit_ctx,
+            )
+        };
+        self.sync.last_phase_us.gpu_cascade_us = t_cascade.elapsed().as_micros() as u64;
+
+        // Fold seed events into view_storage — the cascade driver folds only
+        // what its own kernel emits; the apply-phase events also carry view
+        // updates that the next tick's scoring needs.
+        let t_seed_fold = std::time::Instant::now();
+        if let Err(e) = cascade::fold_iteration_events(
+            &self.device,
+            &self.queue,
+            &mut self.sync.view_storage,
+            &initial_records,
+        ) {
+            eprintln!("engine_gpu: seed-fold failed: {e}");
+        }
+        self.sync.last_phase_us.gpu_seed_fold_us = t_seed_fold.elapsed().as_micros() as u64;
+
+        match cascade_out {
+            Ok(out) => {
+                self.sync.last_cascade_iterations = Some(out.iterations);
+                self.sync.last_cascade_error = None;
+
+                cascade::apply_final_slots(state, &out.final_agent_slots);
+                cascade::events_into_ring(&out.all_emitted_events, events);
+
+                let gpu_events: Vec<Event> = out
+                    .all_emitted_events
+                    .iter()
+                    .filter_map(crate::event_ring::unpack_record)
+                    .collect();
+
+                let t_cold = std::time::Instant::now();
+                cascade::cold_state_replay(state, events, &seed_events);
+                cascade::cold_state_replay(state, events, &gpu_events);
+                self.sync.last_phase_us.cpu_cold_state_us = t_cold.elapsed().as_micros() as u64;
+            }
+            Err(e) => {
+                self.sync.last_cascade_error = Some(format!("cascade_dispatch: {e}"));
+                self.sync.last_cascade_iterations = None;
+                eprintln!("engine_gpu: GPU cascade failed in cascade_dispatch, falling back to CPU cascade: {e}");
+                cascade.run_fixed_point(state, views, events);
             }
         }
     }
