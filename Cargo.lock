@@ -2108,6 +2108,7 @@ dependencies = [
  "dhat",
  "dsl_ast",
  "engine_data",
+ "engine_gpu",
  "engine_rules",
  "glam",
  "hex",

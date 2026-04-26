@@ -23,6 +23,7 @@ dsl_ast = { path = "../dsl_ast", optional = true }
 trybuild = "1"
 engine_data = { path = "../engine_data" }
 engine_rules = { path = "../engine_rules" }
+engine_gpu = { path = "../engine_gpu" }
 insta = { version = "1.41", features = ["yaml"] }
 proptest = "1.5"
 dhat = "0.3"

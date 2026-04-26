@@ -59,6 +59,7 @@ pub type SimEventRing = engine::event::EventRing<engine_data::events::Event>;
 /// routes physics through the DSL IR interpreter instead of the
 /// compiler-emitted `kind_dispatchers`.
 pub fn with_engine_builtins() -> SimCascadeRegistry {
+    #[allow(unused_mut)]
     let mut reg = cascade_reg::with_engine_builtins();
     #[cfg(feature = "interpreted-rules")]
     reg.set_interp_dispatch(engine::cascade::dispatch::interp_dispatch_hook);
