@@ -798,7 +798,7 @@ git -c core.hooksPath= commit -am "feat(dsl): emit_scoring lowers belief accesso
 - Modify: `assets/sim/scoring.sim` — opt-in belief-read row for the Flee score
 - Create: `crates/engine/tests/silent_wolf_belief.rs`
 
-- [ ] **Step 1: Update Flee scoring with belief reads.**
+- [x] **Step 1: Update Flee scoring with belief reads.**
 
 In `scoring.sim`:
 
@@ -811,7 +811,7 @@ Flee = 0.0
 
 (Or the simpler Phase 1 row that exercises `beliefs(self).about(...)` only — choose what cleanly demonstrates the silent-wolf scenario.)
 
-- [ ] **Step 2: Write the reference test.**
+- [x] **Step 2: Write the reference test.**
 
 `crates/engine/tests/silent_wolf_belief.rs`:
 
@@ -868,7 +868,7 @@ fn human_flees_when_wolf_enters_observation_range() {
 }
 ```
 
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test silent_wolf_belief
@@ -876,7 +876,7 @@ unset RUSTFLAGS && cargo test -p engine --test silent_wolf_belief
 
 Expected: PASS for both.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "test(engine): silent_wolf_belief reference scenario (Plan ToM Task 10)"

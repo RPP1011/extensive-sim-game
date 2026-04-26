@@ -3395,15 +3395,25 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-11"
       ],
-      "status": "in_progress",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
+      "completed_commit": "45930703",
+      "critic_verdicts": {
+        "compliance": "PARTIAL",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS",
+          "cross-backend-parity": "PASS",
+          "reduction-determinism": "PASS",
+          "schema-bump": "PASS"
+        },
+        "note": "DEVIATION: belief predicate placed on Attack (has target binding) not Flee (self-only). Wired KIND_BELIEF_SCALAR_COMPARE into utility eval_predicate; eval_belief_scalar reads via agent_cold_beliefs(). MAX_MODIFIERS bumped 8->16 (Attack at cap). 3 tests PASS (manual belief inject, no-belief baseline, full physics cascade observation)."
+      },
       "started_at": "2026-04-26T08:52:05Z",
-      "completed_at": null,
+      "completed_at": "2026-04-26T09:06:14Z",
       "retry_count": 0
     },
     {
@@ -3609,9 +3619,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T08:52:05Z",
+    "last_iteration_at": "2026-04-26T09:06:14Z",
     "iterations_completed": 36,
-    "tasks_closed": 32,
+    "tasks_closed": 33,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
