@@ -10,6 +10,48 @@
 > theory-of-mind", `docs/dsl/state.md` (believed_knowledge + MemoryEvent
 > sections), `docs/superpowers/notes/2026-04-22-engine-expressiveness-gaps.md`
 > §8 (line-of-sight), `docs/superpowers/notes/2026-04-22-terrain-integration-gap.md`.
+>
+> **Migration note (2026-04-25, post-Spec-B'):** This spec was authored
+> against the pre-Spec-B' architecture. After Spec B' landed, engine has
+> zero rule-aware code: chronicle, engagement, step body, mark_*_allowed,
+> ViewRegistry field, with_engine_builtins helper, and `engine/src/generated/`
+> all moved out (some deleted, some emitted into engine_rules from the DSL).
+> Reading this spec for an implementation plan, account for these mappings:
+>
+> - **§3.1 `crates/engine/src/belief/mod.rs`** — adding to engine triggers
+>   the `engine/build.rs` allowlist gate (Spec B' D11). Two paths:
+>   (a) `belief/` is genuinely a primitive (just `BoundedMap` storage with no
+>   per-tick rule logic) → allowlist edit + critic gate; (b) it's rule-aware
+>   (the update cascade lives there) → it goes to `engine_rules` as emitted.
+>   Recommendation: split. `BoundedMap<T, K>` lives in engine as a primitive
+>   (under `pool/` or new `bounded_map/`); the `BeliefState` shape lives in
+>   engine_data (emitted from DSL); the update cascade handler is emitted
+>   from `assets/sim/physics.sim` into `engine_rules/src/physics/`.
+>
+> - **§3.2 update cascade "initially hand-written in
+>   `engine/src/cascade/update_beliefs.rs`; migrate to DSL-generated once
+>   Phase 1 stabilizes"** — skip the hand-written stage. Engine refuses
+>   hand-written cascade handlers (`__sealed::Sealed` + ast-grep CI rule).
+>   Author the cascade rule directly in `assets/sim/physics.sim`; the DSL
+>   may need a small grammar extension if "update belief slot K of agent A
+>   given event E" isn't expressible.
+>
+> - **§3.5 grammar extension `beliefs(self).about(target).<field>`** — fits
+>   the existing scoring grammar pattern; resolver/IR work goes in
+>   `crates/dsl_compiler/`. Plan accounts for this as Phase-1 grammar work.
+>
+> - **`SimState.cold_beliefs` SoA field** — needs to be added via DSL agent
+>   declaration (engine_data emits SimState fields per Plan B1' D14
+>   approach). NOT hand-edited in `engine/src/state/mod.rs`.
+>
+> - **`CascadeRegistry::with_engine_builtins`** — moved to
+>   `engine_rules/src/cascade_reg.rs` (compiler-emitted from
+>   `dsl_compiler::emit_cascade_register`). The "wire into builtins" step
+>   becomes "emit `reg.register(BeliefUpdateHandler)` from
+>   `emit_cascade_register`."
+>
+> The companion plan (`plans/2026-04-25-theory-of-mind-impl.md`) translates
+> the §9 build sequence to the new architecture.
 
 ---
 
