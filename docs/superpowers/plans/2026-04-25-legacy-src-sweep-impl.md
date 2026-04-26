@@ -49,7 +49,7 @@
   - P10 (No Runtime Panic): PASS — net effect is *fewer* runtime paths; no new panics introduced.
   - P11 (Reduction Determinism): N/A.
 
-- **Re-evaluation:** [x] AIS reviewed at design phase (initial fill). [ ] AIS reviewed post-design (tick after Task 5 lands).
+- **Re-evaluation:** [x] AIS reviewed at design phase (initial fill). [x] AIS reviewed post-design — final scope: ~99,893 lines deleted from src/; xtask moved to crates/xtask/ with 4 surviving subcommands (map, capture, train-v6, compile-dsl); 21 root deps + 4 features pruned; 11 root integration tests deleted; src/lib.rs now `pub mod rendering;` only.
 
 ---
 

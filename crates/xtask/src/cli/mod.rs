@@ -1,0 +1,152 @@
+pub mod map;
+
+pub use map::*;
+
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
+#[derive(Debug, Parser)]
+#[command(about = "Project development tasks")]
+pub struct Args {
+    #[command(subcommand)]
+    pub command: TaskCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TaskCommand {
+    Map(MapCommand),
+    Capture(CaptureCommand),
+    /// Build with burn-gpu and run IMPALA V6 training (auto-detects libtorch)
+    TrainV6(TrainV6Args),
+    /// Compile DSL sources (`assets/sim/*.sim`) into Rust + Python artefacts.
+    CompileDsl(CompileDslArgs),
+}
+
+#[derive(Debug, Parser)]
+#[command(
+    about = "IMPALA V6 training (auto-configures libtorch env, builds burn-gpu, runs training)"
+)]
+pub struct TrainV6Args {
+    /// Path(s) to scenario .toml file(s) or directory(ies)
+    #[arg(default_value = "dataset/scenarios/hvh")]
+    pub path: Vec<PathBuf>,
+    /// Output directory for checkpoints and logs
+    #[arg(long, default_value = "generated/impala_v6")]
+    pub output_dir: PathBuf,
+    /// Resume from Burn checkpoint
+    #[arg(long)]
+    pub checkpoint: Option<PathBuf>,
+    /// Path to embedding registry JSON
+    #[arg(long)]
+    pub embedding_registry: Option<PathBuf>,
+    /// Number of training iterations
+    #[arg(long, default_value_t = 100)]
+    pub iters: usize,
+    /// Episodes per scenario per iteration
+    #[arg(long, default_value_t = 2)]
+    pub episodes: usize,
+    /// Threads for episode generation
+    #[arg(long, default_value_t = 32)]
+    pub threads: usize,
+    /// Sims per thread during episode generation
+    #[arg(long, default_value_t = 64)]
+    pub sims_per_thread: usize,
+    /// Training batch size
+    #[arg(long, default_value_t = 512)]
+    pub batch_size: usize,
+    /// Training steps per iteration
+    #[arg(long, default_value_t = 50)]
+    pub train_steps: usize,
+    /// Learning rate
+    #[arg(long, default_value_t = 5e-4)]
+    pub lr: f64,
+    /// Exploration temperature
+    #[arg(long, default_value_t = 1.0)]
+    pub temperature: f32,
+    /// Step recording interval (every N ticks)
+    #[arg(long, default_value_t = 3)]
+    pub step_interval: u64,
+    /// Entropy coefficient
+    #[arg(long, default_value_t = 0.01)]
+    pub entropy_coef: f32,
+    /// Value loss coefficient
+    #[arg(long, default_value_t = 0.5)]
+    pub value_coef: f32,
+    /// Enable Grokfast EMA gradient filter
+    #[arg(long)]
+    pub grokfast: bool,
+    /// Self-play: GPU inference for enemy units too
+    #[arg(long)]
+    pub self_play: bool,
+    /// Behavioral cloning mode: pure supervised imitation of squad AI
+    #[arg(long)]
+    pub bc: bool,
+    /// Skip build step (assume binary is already built with burn-gpu)
+    #[arg(long)]
+    pub no_build: bool,
+}
+
+#[derive(Debug, Parser)]
+#[command(about = "Compile DSL sources to Rust + Python + schema hash")]
+pub struct CompileDslArgs {
+    /// Source directory holding `*.sim` files (recursively walked).
+    #[arg(long, default_value = "assets/sim")]
+    pub src: PathBuf,
+    /// Destination root for generated shared Rust output. Files are written
+    /// under `<out-rust>/events/` and `<out-rust>/schema.rs`.
+    #[arg(long, default_value = "crates/engine_generated/src")]
+    pub out_rust: PathBuf,
+    /// Destination root for emitted physics handlers. Files are written
+    /// under `<out-physics>/` (per-rule modules + `mod.rs`). Defaults into
+    /// the engine crate because emitted handlers reference
+    /// `engine::cascade::*` and `engine::state::SimState`; emitting them
+    /// into `engine_rules` would invert the existing dep direction
+    /// (`engine` depends on `engine_rules`, not the other way around).
+    /// Documented in `docs/game/feature_flow.md`.
+    #[arg(long, default_value = "crates/engine/src/generated/physics")]
+    pub out_physics: PathBuf,
+    /// Destination root for emitted mask predicates. Same dep rationale
+    /// as physics — masks reference `engine::state::SimState`.
+    #[arg(long, default_value = "crates/engine/src/generated/mask")]
+    pub out_mask: PathBuf,
+    /// Destination root for emitted scoring tables. Scoring rows are POD
+    /// data shared between CPU scorer and GPU kernel, so they live in
+    /// `engine_generated` with the other shared-data emissions.
+    #[arg(long, default_value = "crates/engine_generated/src/scoring")]
+    pub out_scoring: PathBuf,
+    /// Destination root for emitted entity data (CreatureType enum,
+    /// capability structs, hostility matrix). Pure data; lives in
+    /// `engine_generated` next to events.
+    #[arg(long, default_value = "crates/engine_generated/src/entities")]
+    pub out_entity: PathBuf,
+    /// Destination root for emitted config structs (per-block Rust files
+    /// plus the aggregator `mod.rs`). Pure data with a TOML loader; lives
+    /// in `engine_generated` alongside the other shared-data emissions.
+    #[arg(long, default_value = "crates/engine_generated/src/config")]
+    pub out_config_rust: PathBuf,
+    /// Destination directory for the authored TOML default file. The
+    /// compiler writes `<out-config-toml>/default.toml`; runtime callers
+    /// load it via `engine_rules::config::Config::from_toml`.
+    #[arg(long, default_value = "assets/config")]
+    pub out_config_toml: PathBuf,
+    /// Destination root for emitted enum declarations (per-enum Rust
+    /// files + aggregator `mod.rs`). Pure data, no engine dependency.
+    #[arg(long, default_value = "crates/engine_generated/src/enums")]
+    pub out_enum: PathBuf,
+    /// Destination root for emitted view modules (`@lazy` inline fns +
+    /// `@materialized` fold-storage structs + aggregator `ViewRegistry`).
+    /// Lives under the engine crate because materialized views hold
+    /// `HashMap<(AgentId, …), …>` storage that `SimState` owns.
+    #[arg(long, default_value = "crates/engine/src/generated/views")]
+    pub out_views: PathBuf,
+    /// Destination root for Python output. Files are written under
+    /// `<out-python>/events/`.
+    #[arg(long, default_value = "generated/python")]
+    pub out_python: PathBuf,
+    /// Compare the emitted artefacts against the committed output. Exit 0 if
+    /// identical, exit 1 with a file-level diff otherwise. No files are
+    /// written when this is set.
+    #[arg(long)]
+    pub check: bool,
+}
