@@ -136,6 +136,35 @@ impl ScoringIR {
             .map(|entry| eval_entry(entry, ctx, agent, target, views))
             .sum()
     }
+
+    /// Evaluate only the entry whose action head name matches `head_name`.
+    ///
+    /// Used by the per-kind scoring dispatch in the engine's interpreted-rules
+    /// path (Task 9): the compiled path has one `ScoringEntry` per `MicroKind`;
+    /// the interpreter mirrors that by evaluating one `ScoringEntryIR` at a
+    /// time, selected by head name (e.g. `"Hold"`, `"Attack"`, `"Flee"`).
+    ///
+    /// Returns `0.0` if no entry with the given head name exists in this
+    /// scoring block (matching the compiled path's "unknown head → zero base"
+    /// behaviour).
+    ///
+    /// `target` for self-only heads is typically the same as `agent`; the
+    /// entry's `head.shape` drives whether the target binding slot is
+    /// populated.
+    pub fn eval_for_head<C: ReadContext>(
+        &self,
+        head_name: &str,
+        ctx: &C,
+        agent: AgentId,
+        target: AgentId,
+        views: &[ViewIR],
+    ) -> f32 {
+        self.entries
+            .iter()
+            .find(|e| e.head.name == head_name)
+            .map(|entry| eval_entry(entry, ctx, agent, target, views))
+            .unwrap_or(0.0)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +258,18 @@ fn eval_kind<C: ReadContext>(
             let d = eval_expr(delta, ctx, agent, locals, views);
             v * d
         }
+
+        // ---- Theory-of-Mind belief accessors (Plan ToM T8) -------------------
+        // Return 0.0 for all belief reads. The wolves+humans parity test runs
+        // without belief state (agents have no `cold_beliefs` populated), so
+        // returning 0.0 matches the "no belief entry → 0.0" convention from
+        // the compiled path's `eval_belief_scalar`. The scoring row that
+        // references `beliefs(self).about(target).confidence > 0.5` evaluates
+        // to `false` (0.0 < 0.5), which is the expected baseline behaviour
+        // for agents without belief history.
+        IrExpr::BeliefsAccessor { .. }
+        | IrExpr::BeliefsConfidence { .. }
+        | IrExpr::BeliefsView { .. } => 0.0,
 
         // ---- out-of-survey variants -----------------------------------------
         other => unimplemented!(
@@ -620,7 +661,7 @@ mod tests {
     }
 
     fn make_scoring(entries: Vec<ScoringEntryIR>) -> ScoringIR {
-        ScoringIR { entries, annotations: vec![], span: span() }
+        ScoringIR { entries, per_ability_rows: vec![], annotations: vec![], span: span() }
     }
 
     fn make_entry(head: IrActionHead, expr: IrExprNode) -> ScoringEntryIR {

@@ -1382,6 +1382,7 @@ mod tests {
                 span: span(),
             }],
             annotations: vec![],
+            cpu_only: false,
             span: span(),
         }
     }

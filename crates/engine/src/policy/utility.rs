@@ -29,6 +29,10 @@ use super::{Action, ActionKind, MicroTarget, PolicyBackend};
 use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, MicroKind, TargetMask};
 use crate::state::SimState;
+// The compiled-path scoring table + predicate types. Not needed under the
+// interpreter feature — gated to suppress "unused import" errors under
+// `-D warnings` when the interpreted path is active.
+#[cfg(not(feature = "interpreted-rules"))]
 use engine_data::scoring::{PredicateDescriptor, ScoringEntry, MAX_MODIFIERS, SCORING_TABLE};
 
 pub struct UtilityBackend;
@@ -36,6 +40,136 @@ pub struct UtilityBackend;
 impl PolicyBackend for UtilityBackend {
     fn evaluate(
         &self,
+        state: &SimState,
+        mask: &MaskBuffer,
+        target_mask: &TargetMask,
+        out: &mut Vec<Action>,
+    ) {
+        // ---------------------------------------------------------------------------
+        // Interpreted-rules dispatch (Task 9)
+        //
+        // When the `interpreted-rules` feature is active, scoring evaluation routes
+        // through `dsl_ast::eval::scoring::ScoringIR::eval_for_head` instead of the
+        // compiler-emitted `SCORING_TABLE`. The Compilation is loaded once per
+        // test-binary run via the `OnceLock` in `crate::mask`'s `interp` submodule;
+        // we re-use that same parsed compilation here.
+        //
+        // Dispatch shape mirrors the compiled path exactly:
+        //   - For each `ScoringEntryIR` in the single scoring block, resolve its
+        //     head name to a `MicroKind`, check the mask, then score.
+        //   - Target-bound kinds (head has `Positional` shape) iterate
+        //     `target_mask.candidates_for(agent, kind)` and argmax.
+        //   - Self-only kinds (head shape is `None` or non-Positional) score once
+        //     with `target == agent` (the interpreter ignores the target slot when
+        //     no positional binding is declared).
+        // ---------------------------------------------------------------------------
+        #[cfg(feature = "interpreted-rules")]
+        UtilityBackend::evaluate_interpreted(state, mask, target_mask, out);
+
+        #[cfg(not(feature = "interpreted-rules"))]
+        UtilityBackend::evaluate_compiled(state, mask, target_mask, out);
+    }
+}
+
+#[cfg(feature = "interpreted-rules")]
+impl UtilityBackend {
+    fn evaluate_interpreted(
+        state: &SimState,
+        mask: &MaskBuffer,
+        target_mask: &TargetMask,
+        out: &mut Vec<Action>,
+    ) {
+        use crate::evaluator::context::EngineReadCtx;
+
+        let comp = crate::mask::interp::compilation();
+        // The DSL emits exactly one `scoring { ... }` block; index [0].
+        let scoring_ir = comp.scoring.first()
+            .expect("interpreted-rules: no scoring block in DSL compilation");
+        let views = comp.views.as_slice();
+
+        for id in state.agents_alive() {
+            let slot = (id.raw() - 1) as usize;
+            let row_start = slot * MicroKind::ALL.len();
+            let mut best: Option<(MicroKind, Option<AgentId>, f32)> = None;
+            let ctx = EngineReadCtx::new(state);
+
+            let dsl_agent = dsl_ast::eval::AgentId::new(id.raw())
+                .expect("engine AgentId raw is always non-zero");
+
+            for entry in &scoring_ir.entries {
+                let kind = match micro_kind_from_str(&entry.head.name) {
+                    Some(k) => k,
+                    None => continue,
+                };
+                // Mask gate.
+                if !mask.micro_kind[row_start + kind as usize] {
+                    continue;
+                }
+
+                // Target-bound-ness is determined by the engine's `MicroKind`
+                // semantics (whether it needs a candidate target list), NOT by
+                // the DSL scoring head shape. The DSL scoring row for MoveToward
+                // is declared as `MoveToward = 0.3` (no `(target)` parameter)
+                // because the score doesn't depend on the specific target — but
+                // the engine still argmaxes over candidate targets to pick the
+                // best one. Mirroring the compiled path: use `kind.target_slot()`
+                // as the authoritative target-bound flag.
+                let is_target_bound = kind.target_slot().is_some();
+
+                if is_target_bound {
+                    // Argmax over candidate targets.
+                    for &target_eid in target_mask.candidates_for(id, kind) {
+                        let dsl_tgt = match dsl_ast::eval::AgentId::new(target_eid.raw()) {
+                            Some(t) => t,
+                            None => continue,
+                        };
+                        let score = scoring_ir.eval_for_head(
+                            &entry.head.name,
+                            &ctx,
+                            dsl_agent,
+                            dsl_tgt,
+                            views,
+                        );
+                        match best {
+                            None => best = Some((kind, Some(target_eid), score)),
+                            Some((_, _, bs)) if score > bs => {
+                                best = Some((kind, Some(target_eid), score));
+                            }
+                            _ => {}
+                        }
+                    }
+                } else {
+                    // Self-only: pass `agent` as both agent and target.
+                    // The interpreter won't bind the target slot for heads
+                    // with `IrActionHeadShape::None`.
+                    let score = scoring_ir.eval_for_head(
+                        &entry.head.name,
+                        &ctx,
+                        dsl_agent,
+                        dsl_agent,
+                        views,
+                    );
+                    match best {
+                        None => best = Some((kind, None, score)),
+                        Some((_, _, bs)) if score > bs => {
+                            best = Some((kind, None, score));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            match best {
+                Some((kind, target, _)) => out.push(build_action(kind, id, target, state)),
+                None => out.push(Action::hold(id)),
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "interpreted-rules"))]
+impl UtilityBackend {
+    fn evaluate_compiled(
         state: &SimState,
         mask: &MaskBuffer,
         target_mask: &TargetMask,
@@ -101,6 +235,7 @@ impl PolicyBackend for UtilityBackend {
     }
 }
 
+#[cfg(not(feature = "interpreted-rules"))]
 /// Score one table row against the current agent / candidate target.
 /// `base` always applies; each modifier's predicate is evaluated in turn
 /// and the delta added when the predicate passes. Modifiers beyond
@@ -227,6 +362,7 @@ pub fn terrain_height_bonus(state: &SimState, agent: AgentId, target: AgentId) -
     }
 }
 
+#[cfg(not(feature = "interpreted-rules"))]
 /// Read a scalar field referenced by the scoring table. `field_id` is
 /// owned by the compiler — see `docs/dsl/scoring_fields.md`. Any drift
 /// between the compiler's emission and this dispatch is a schema bug
@@ -302,6 +438,7 @@ fn read_field(
     }
 }
 
+#[cfg(not(feature = "interpreted-rules"))]
 /// Placeholder personality vector. Returns zeros for every agent at
 /// milestone 5; revisits when the personality SoA lands. Keeping the
 /// function signature stable means the scorer's call site doesn't move.
@@ -309,6 +446,7 @@ fn read_personality(_state: &SimState, _agent: AgentId) -> [f32; 5] {
     [0.0; 5]
 }
 
+#[cfg(not(feature = "interpreted-rules"))]
 /// Evaluate a predicate descriptor. Unknown kinds return `false` — the
 /// row contributes nothing, matching the "fail closed" convention for
 /// unrecognised predicate shapes.
@@ -349,6 +487,7 @@ fn eval_predicate(
     }
 }
 
+#[cfg(not(feature = "interpreted-rules"))]
 /// Evaluate a `@materialized` view call referenced by a scoring
 /// predicate. `pred.field_id` carries the VIEW_ID (one of the
 /// compile-time `VIEW_ID_*` constants in `engine_data::scoring`);
@@ -449,6 +588,7 @@ fn eval_belief_scalar(
 /// Map an arg-slot code to the concrete `AgentId` the view call should
 /// receive. `None` for wildcard (handled specially by the caller) or
 /// a target slot with no target bound.
+#[cfg(not(feature = "interpreted-rules"))]
 #[allow(dead_code)]
 fn resolve_slot(slot: u8, agent: AgentId, target: Option<AgentId>) -> Option<AgentId> {
     match slot {
@@ -458,6 +598,7 @@ fn resolve_slot(slot: u8, agent: AgentId, target: Option<AgentId>) -> Option<Age
     }
 }
 
+#[cfg(not(feature = "interpreted-rules"))]
 fn compare_scalar(op: u8, lhs: f32, rhs: f32) -> bool {
     // NaN short-circuits to false (consistent with IEEE comparisons), which
     // matches how an unknown `field_id` surfaces — no score change.
@@ -475,9 +616,40 @@ fn compare_scalar(op: u8, lhs: f32, rhs: f32) -> bool {
     }
 }
 
+/// Map a DSL action-head name to a `MicroKind`. Used by the interpreted-rules
+/// scoring dispatch (Task 9) where each `ScoringEntryIR` carries `head.name`
+/// as a string. `None` for names the engine doesn't recognise — same
+/// "drop unknown rows" behaviour as `micro_kind_from_u16`.
+#[cfg(feature = "interpreted-rules")]
+fn micro_kind_from_str(name: &str) -> Option<MicroKind> {
+    let k = match name {
+        "Hold"          => MicroKind::Hold,
+        "MoveToward"    => MicroKind::MoveToward,
+        "Flee"          => MicroKind::Flee,
+        "Attack"        => MicroKind::Attack,
+        "Cast"          => MicroKind::Cast,
+        "UseItem"       => MicroKind::UseItem,
+        "Harvest"       => MicroKind::Harvest,
+        "Eat"           => MicroKind::Eat,
+        "Drink"         => MicroKind::Drink,
+        "Rest"          => MicroKind::Rest,
+        "PlaceTile"     => MicroKind::PlaceTile,
+        "PlaceVoxel"    => MicroKind::PlaceVoxel,
+        "HarvestVoxel"  => MicroKind::HarvestVoxel,
+        "Converse"      => MicroKind::Converse,
+        "ShareStory"    => MicroKind::ShareStory,
+        "Communicate"   => MicroKind::Communicate,
+        "Ask"           => MicroKind::Ask,
+        "Remember"      => MicroKind::Remember,
+        _ => return None,
+    };
+    Some(k)
+}
+
 /// Map a `u16` action-head tag back to a `MicroKind`. `None` for heads
 /// the engine doesn't know — the scorer drops those rows, which is the
 /// right behaviour once macro actions start appearing in the table.
+#[cfg(not(feature = "interpreted-rules"))]
 fn micro_kind_from_u16(v: u16) -> Option<MicroKind> {
     // Keep the match exhaustive so a future MicroKind addition forces a
     // review here. We match `as u16` of the discriminant so this stays in
