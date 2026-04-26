@@ -6,6 +6,10 @@
 //!   - `ids.rs` — transitional ID newtype defs (B1' Task 3 deferred)
 //!   - `types.rs` — hand-written shared enum vocabulary
 //!   - `id_serde.rs` — hand-written serde glue for niche IDs
+//!   - `belief.rs` — Theory-of-Mind BeliefState shape (Plan ToM Task 3);
+//!                    hand-written because SimState itself is hand-written
+//!                    (same deviation discovered in Task 2 — DSL struct emitter
+//!                    path was not the right route for types consumed by engine)
 
 use std::fs;
 use std::path::Path;
@@ -15,6 +19,7 @@ const HAND_WRITTEN_ALLOWLIST: &[&str] = &[
     "ids.rs",
     "types.rs",
     "id_serde.rs",
+    "belief.rs",
 ];
 
 fn main() {

@@ -5,6 +5,7 @@
 //! dedicated crate narrows rebuild scope when `compile-dsl` rewrites the
 //! emitted files.
 
+pub mod belief;
 pub mod config;
 pub mod entities;
 pub mod enums;
