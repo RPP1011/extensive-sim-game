@@ -109,6 +109,8 @@ When `dag-tick.sh` returns `TERMINAL: HUMAN_BLOCKED`:
 - Append fresh sections for newly-encountered `plan-writer` / `spec-needed` tasks (one per remaining pending non-implementer task)
 - Post a chat summary listing what's queued + how user resolves each
 
+**File hygiene:** `pending-decisions.md` only contains genuinely-pending entries. When a decision is resolved (user picks an option, agent executes the resolution), **remove the entry entirely** in the same commit that closes the decision — git history retains the deliberation. Do NOT leave `RESOLVED` markers; the file is a TODO list, not an audit log. The doc's preamble documents this convention.
+
 ## Reference
 
 - Spec: `docs/superpowers/specs/2026-04-25-project-dag-v2-design.md`
