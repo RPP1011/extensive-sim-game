@@ -598,7 +598,7 @@ git commit -m "feat(engine_gpu): GpuBackend::view_fold stub (Plan 5c Task 8)"
 **Files:**
 - Modify: `crates/engine/src/backend.rs`
 
-- [ ] **Step 1: Understand the current Phase 4a + 4b split in step.rs.**
+- [x] **Step 1: Understand the current Phase 4a + 4b split in step.rs.**
 
 In `crates/engine_rules/src/step.rs`:
 
@@ -609,7 +609,7 @@ Movement (Phase 4 movement component) is handled inside `apply_actions` via the 
 
 The new trait method wraps Phase 4a (apply_actions) since it is the remaining un-routed direct call. It does NOT wrap cascade_dispatch (already done) or the internal movement logic (not a separate call site).
 
-- [ ] **Step 2: Add `apply_and_movement` signature to the trait.**
+- [x] **Step 2: Add `apply_and_movement` signature to the trait.**
 
 In `crates/engine/src/backend.rs`, after `view_fold`, add:
 
@@ -640,7 +640,7 @@ use crate::scratch::SimScratch;
 
 (It is already imported at line 19.)
 
-- [ ] **Step 3: Build engine crate.**
+- [x] **Step 3: Build engine crate.**
 
 ```bash
 cargo build -p engine 2>&1 | grep -E "^error" | head -10
@@ -648,7 +648,7 @@ cargo build -p engine 2>&1 | grep -E "^error" | head -10
 
 Expected: SUCCESS.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add crates/engine/src/backend.rs

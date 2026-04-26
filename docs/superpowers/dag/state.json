@@ -341,15 +341,19 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-10"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "2632aeab",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "apply_and_movement trait method added; intermediate state — T10/T12 close impls"
+      },
+      "started_at": "2026-04-26T22:24:09Z",
+      "completed_at": "2026-04-26T22:24:55Z",
       "retry_count": 0
     },
     {
@@ -630,9 +634,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T22:22:16Z",
-    "iterations_completed": 8,
-    "tasks_closed": 8,
+    "last_iteration_at": "2026-04-26T22:24:55Z",
+    "iterations_completed": 9,
+    "tasks_closed": 9,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
