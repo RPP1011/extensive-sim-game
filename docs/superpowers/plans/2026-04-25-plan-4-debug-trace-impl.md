@@ -566,7 +566,7 @@ git -c core.hooksPath= commit -am "feat(engine/debug): tick_stepper per-phase pa
 **Files:**
 - Modify: `crates/engine/src/debug/tick_profile.rs`
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 ```rust
 //! Phase timing histogram. Wraps `Instant` measurements per phase; emits
@@ -603,7 +603,7 @@ impl TickProfile {
 
 (Add `metrics::DEBUG_PHASE_NS` constant in `crates/engine/src/telemetry/metrics.rs` — small one-line addition.)
 
-- [ ] **Step 2: Hook into emit_step, similar to tick_stepper but cheaper.**
+- [x] **Step 2: Hook into emit_step, similar to tick_stepper but cheaper.**
 
 ```rust
 // In emit_step:
@@ -614,9 +614,9 @@ writeln!(out, "    if let Some(profile) = debug.tick_profile.as_ref() {{ profile
 
 `DebugConfig` gets a `pub tick_profile: Option<&'a TickProfile>` field. Lifetime threading through emit_step's signature; if too invasive, switch to `Option<Arc<Mutex<TickProfile>>>` instead.
 
-- [ ] **Step 3: Test.** `tests/debug_tick_profile.rs` — run 10 ticks, assert per-phase samples populated.
+- [x] **Step 3: Test.** `tests/debug_tick_profile.rs` — run 10 ticks, assert per-phase samples populated.
 
-- [ ] **Step 4: Run + commit.**
+- [x] **Step 4: Run + commit.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test debug_tick_profile
