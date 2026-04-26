@@ -2855,7 +2855,12 @@ impl ComputeBackend for GpuBackend {
         _events_before: usize,
         _tick:          u32,
     ) {
-        // Phase 5c stub: no-op. Plan 5e dispatches GPU fold kernels via view_storage.
+        // GPU: view_storage folds are managed inside GpuBackend::step and the
+        // GPU cascade driver. When phases are called individually (not via step),
+        // the caller is responsible for invoking GpuBackend::view_storage_mut()
+        // and running the fold kernels directly. This trait method is a no-op
+        // because GpuBackend::Views = () — there is no CPU ViewRegistry to fold.
+        // Phase 5e: if a resident-fold kernel path is needed here, add it then.
     }
 
     fn apply_and_movement(
