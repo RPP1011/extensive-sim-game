@@ -1476,3 +1476,66 @@ mod threat_level_scoring {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Interpreted-rules parity gate (Tasks 8-9)
+//
+// When the `interpreted-rules` feature is on, mask and scoring evaluation
+// routes through `dsl_ast::eval::mask::MaskIR::eval` and
+// `dsl_ast::eval::scoring::ScoringIR::eval_for_head` instead of the
+// compiler-emitted generated functions.  This test runs the identical
+// wolves+humans fixture (same seed, same 100 ticks, same UtilityBackend +
+// CascadeRegistry) and asserts byte-for-byte identity with the committed
+// baseline.
+//
+// A failure here means the interpreter and the compiled path disagree on at
+// least one mask predicate or scoring row, which is a regression in the
+// interpreter.  The fix always belongs in `crates/dsl_ast/src/eval/mask.rs`
+// or `crates/dsl_ast/src/eval/scoring.rs` (or a context impl in
+// `crates/engine/src/evaluator/context.rs`), never in the baseline.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "interpreted-rules")]
+#[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step (same as parity_log_is_byte_identical_to_baseline).
+#[test]
+fn wolves_and_humans_parity_interpreted() {
+    // Identical fixture to `parity_log_is_byte_identical_to_baseline`.
+    // When the `interpreted-rules` feature is active, BOTH mask and scoring
+    // dispatch route through the interpreter:
+    //   - Mask: `engine::mask::MaskBuffer::mark_*` calls `MaskIR::eval`
+    //     (Task 8 cutover).
+    //   - Scoring: `engine::policy::UtilityBackend::evaluate` iterates
+    //     `ScoringEntryIR` and calls `ScoringIR::eval_for_head` (Task 9
+    //     cutover).
+    // Cascade and view-fold remain on the compiled path; full cutover
+    // follows in Tasks 10-11.
+    let actual = run_scenario_log();
+
+    let expected = std::fs::read_to_string(std::path::Path::new(BASELINE_PATH))
+        .expect("read committed baseline at tests/wolves_and_humans_baseline.txt");
+
+    if actual != expected {
+        let actual_lines: Vec<&str> = actual.lines().collect();
+        let expected_lines: Vec<&str> = expected.lines().collect();
+        let max = actual_lines.len().max(expected_lines.len());
+        let mut shown = 0;
+        for i in 0..max {
+            let a = actual_lines.get(i).copied().unwrap_or("<missing>");
+            let e = expected_lines.get(i).copied().unwrap_or("<missing>");
+            if a != e {
+                eprintln!("[interpreted] line {}: expected {:?}\n                              actual   {:?}", i + 1, e, a);
+                shown += 1;
+                if shown >= 20 { eprintln!("... (truncated)"); break; }
+            }
+        }
+        panic!(
+            "wolves+humans interpreted log diverged from compiled baseline \
+             ({} actual lines, {} expected lines). \
+             Fix the interpreter in crates/dsl_ast/src/eval/mask.rs or \
+             crates/dsl_ast/src/eval/scoring.rs — \
+             never regenerate the baseline to match interpreter output.",
+            actual_lines.len(),
+            expected_lines.len(),
+        );
+    }
+}

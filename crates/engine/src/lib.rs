@@ -5,6 +5,10 @@ pub mod ability;
 pub mod aggregate;
 pub mod backend;
 pub mod cascade;
+/// DSL IR interpreter context implementations. Gated on `interpreted-rules`
+/// feature — compiles to nothing in the default build.
+#[cfg(feature = "interpreted-rules")]
+pub mod evaluator;
 pub mod debug;
 pub mod channel;
 pub mod creature;

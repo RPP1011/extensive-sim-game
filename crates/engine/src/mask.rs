@@ -8,8 +8,244 @@
 // DELETED in Plan B1' Task 11 — they called into generated mask functions and
 // belong to the rule layer. `engine_rules::step` (emitted in Task 11) will
 // own those calls. Only storage primitives remain here.
+//
+// Interpreter dispatch helpers live in `mod interp` below (feature-gated on
+// `interpreted-rules`). They are called from `engine_rules::mask_fill` (the
+// generated fill_all function) when the feature is on.
 use crate::ids::AgentId;
 use smallvec::SmallVec;
+
+// ---------------------------------------------------------------------------
+// Interpreted-rules dispatch helpers (feature = "interpreted-rules")
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "interpreted-rules")]
+pub(crate) mod interp {
+    use crate::ids::AgentId;
+    use crate::mask::{MicroKind, TargetMask};
+    use crate::state::SimState;
+    use dsl_ast::eval::mask::LocalParam;
+    use dsl_ast::ir::MaskIR;
+
+    /// Lazily parse and cache the DSL compilation from `assets/sim/*.sim`.
+    ///
+    /// Uses `std::sync::OnceLock` so the parse happens once per test-binary
+    /// run. Path is resolved relative to `CARGO_MANIFEST_DIR` so the test
+    /// binary can find the asset files regardless of the working directory.
+    pub fn compilation() -> &'static dsl_ast::Compilation {
+        static COMP: std::sync::OnceLock<dsl_ast::Compilation> = std::sync::OnceLock::new();
+        COMP.get_or_init(|| {
+            // Path: crates/engine/  →  repo root  →  assets/sim/
+            let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+            let read = |name: &str| {
+                let path = format!("{root}/assets/sim/{name}");
+                std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("interpreted-rules: failed to read {path}: {e}"))
+            };
+            let events        = read("events.sim");
+            let entities      = read("entities.sim");
+            let enums         = read("enums.sim");
+            let views         = read("views.sim");
+            let masks         = read("masks.sim");
+            let scoring       = read("scoring.sim");
+            let physics       = read("physics.sim");
+            let config        = read("config.sim");
+            let full = format!(
+                "{events}\n{entities}\n{enums}\n{views}\n{masks}\n{scoring}\n{physics}\n{config}"
+            );
+            dsl_ast::compile(&full)
+                .unwrap_or_else(|e| panic!("interpreted-rules: DSL compile error: {e}"))
+        })
+    }
+
+    /// Build and cache a `Config` from the parsed DSL Compilation.
+    ///
+    /// Walking `compilation().configs` and extracting `ConfigDefault` literals
+    /// means every `config.*.*` read in interpreted mode reflects the current
+    /// `assets/sim/config.sim` — without requiring a `cargo build` or a
+    /// `state.config` mutation.
+    ///
+    /// Unknown block / field names are silently skipped; minor DSL/struct
+    /// drift will not panic.
+    pub fn interp_config() -> &'static engine_data::config::Config {
+        use dsl_ast::ast::ConfigDefault;
+        use engine_data::config::{
+            BeliefConfig, CombatConfig, CommunicationConfig, Config, MovementConfig, NeedsConfig,
+        };
+
+        static CFG: std::sync::OnceLock<Config> = std::sync::OnceLock::new();
+        CFG.get_or_init(|| {
+            let comp = compilation();
+            let mut combat        = CombatConfig::default();
+            let mut movement      = MovementConfig::default();
+            let mut needs         = NeedsConfig::default();
+            let mut communication = CommunicationConfig::default();
+
+            for block in &comp.configs {
+                match block.name.as_str() {
+                    "combat" => {
+                        for f in &block.fields {
+                            match f.name.as_str() {
+                                "attack_damage"          => { if let ConfigDefault::Float(v) = f.default { combat.attack_damage = v as f32; } }
+                                "attack_range"           => { if let ConfigDefault::Float(v) = f.default { combat.attack_range = v as f32; } }
+                                "aggro_range"            => { if let ConfigDefault::Float(v) = f.default { combat.aggro_range = v as f32; } }
+                                "engagement_range"       => { if let ConfigDefault::Float(v) = f.default { combat.engagement_range = v as f32; } }
+                                "engagement_slow_factor" => { if let ConfigDefault::Float(v) = f.default { combat.engagement_slow_factor = v as f32; } }
+                                "kin_flee_bias"          => { if let ConfigDefault::Float(v) = f.default { combat.kin_flee_bias = v as f32; } }
+                                "kin_flee_radius"        => { if let ConfigDefault::Float(v) = f.default { combat.kin_flee_radius = v as f32; } }
+                                _ => { eprintln!("interpreted-rules: unknown combat config field `{}`", f.name); }
+                            }
+                        }
+                    }
+                    "movement" => {
+                        for f in &block.fields {
+                            match f.name.as_str() {
+                                "move_speed_mps"  => { if let ConfigDefault::Float(v) = f.default { movement.move_speed_mps = v as f32; } }
+                                "max_move_radius" => { if let ConfigDefault::Float(v) = f.default { movement.max_move_radius = v as f32; } }
+                                _ => { eprintln!("interpreted-rules: unknown movement config field `{}`", f.name); }
+                            }
+                        }
+                    }
+                    "needs" => {
+                        for f in &block.fields {
+                            match f.name.as_str() {
+                                "eat_restore"   => { if let ConfigDefault::Float(v) = f.default { needs.eat_restore = v as f32; } }
+                                "drink_restore" => { if let ConfigDefault::Float(v) = f.default { needs.drink_restore = v as f32; } }
+                                "rest_restore"  => { if let ConfigDefault::Float(v) = f.default { needs.rest_restore = v as f32; } }
+                                _ => { eprintln!("interpreted-rules: unknown needs config field `{}`", f.name); }
+                            }
+                        }
+                    }
+                    "communication" => {
+                        for f in &block.fields {
+                            match f.name.as_str() {
+                                "max_announce_recipients"  => { if let ConfigDefault::Uint(v)  = f.default { communication.max_announce_recipients = v as u32; } }
+                                "max_announce_radius"      => { if let ConfigDefault::Float(v) = f.default { communication.max_announce_radius = v as f32; } }
+                                "overhear_range"           => { if let ConfigDefault::Float(v) = f.default { communication.overhear_range = v as f32; } }
+                                "default_vocal_strength"   => { if let ConfigDefault::Float(v) = f.default { communication.default_vocal_strength = v as f32; } }
+                                "channel_speech_range"     => { if let ConfigDefault::Float(v) = f.default { communication.channel_speech_range = v as f32; } }
+                                "channel_pack_range"       => { if let ConfigDefault::Float(v) = f.default { communication.channel_pack_range = v as f32; } }
+                                "channel_pheromone_range"  => { if let ConfigDefault::Float(v) = f.default { communication.channel_pheromone_range = v as f32; } }
+                                "channel_long_range_vocal" => { if let ConfigDefault::Float(v) = f.default { communication.channel_long_range_vocal = v as f32; } }
+                                _ => { eprintln!("interpreted-rules: unknown communication config field `{}`", f.name); }
+                            }
+                        }
+                    }
+                    _ => {
+                        eprintln!("interpreted-rules: unknown config block `{}`", block.name);
+                    }
+                }
+            }
+
+            Config { combat, movement, needs, communication, belief: BeliefConfig::default() }
+        })
+    }
+
+    /// Look up a `MaskIR` by head name, e.g. `"Hold"`, `"Attack"`.
+    pub fn mask_ir(name: &str) -> &'static MaskIR {
+        compilation()
+            .masks
+            .iter()
+            .find(|m| m.head.name == name)
+            .unwrap_or_else(|| panic!("interpreted-rules: no MaskIR with name `{name}`"))
+    }
+
+    /// Walk the self-only mask predicate for all alive agents and set the
+    /// corresponding `micro_kind` bit. Mirrors `MaskBuffer::mark_self_predicate`
+    /// but routes through the interpreter.
+    pub fn mark_self_interp(
+        mask_buf: &mut crate::mask::MaskBuffer,
+        state: &SimState,
+        kind: MicroKind,
+        mask_name: &str,
+    ) {
+        use crate::evaluator::context::EngineReadCtx;
+        let ir = mask_ir(mask_name);
+        let ctx = EngineReadCtx::new(state);
+        let n_kinds = MicroKind::ALL.len();
+        for id in state.agents_alive() {
+            let dsl_id = dsl_ast::eval::AgentId::new(id.raw())
+                .expect("AgentId raw must be non-zero");
+            let allowed = ir.eval(&ctx, dsl_id, &[]);
+            let slot = (id.raw() - 1) as usize;
+            let offset = slot * n_kinds + kind as usize;
+            mask_buf.micro_kind[offset] = allowed;
+        }
+    }
+
+    /// Walk the Attack candidate_source and call the interpreter predicate for
+    /// each candidate. Mirrors `mask_attack_candidates` but routes through
+    /// the interpreter.
+    pub fn mark_attack_candidates_interp(
+        state: &SimState,
+        self_id: AgentId,
+        out: &mut TargetMask,
+    ) {
+        use crate::evaluator::context::EngineReadCtx;
+        let ir = mask_ir("Attack");
+        let ctx = EngineReadCtx::new(state);
+        let radius = interp_config().combat.attack_range;
+        let pos = state.agent_pos(self_id).unwrap_or(glam::Vec3::ZERO);
+        let dsl_self = dsl_ast::eval::AgentId::new(self_id.raw())
+            .expect("AgentId raw must be non-zero");
+        let spatial = state.spatial();
+        for target in spatial.within_radius(state, pos, radius) {
+            if target == self_id { continue; }
+            let dsl_tgt = match dsl_ast::eval::AgentId::new(target.raw()) {
+                Some(id) => id,
+                None => continue,
+            };
+            if ir.eval(&ctx, dsl_self, &[LocalParam::Agent(dsl_tgt)]) {
+                out.push(self_id, MicroKind::Attack, target);
+            }
+        }
+    }
+
+    /// Walk the MoveToward candidate_source and call the interpreter predicate
+    /// for each candidate. Mirrors `mask_move_toward_candidates` but routes
+    /// through the interpreter.
+    pub fn mark_move_toward_candidates_interp(
+        state: &SimState,
+        self_id: AgentId,
+        out: &mut TargetMask,
+    ) {
+        use crate::evaluator::context::EngineReadCtx;
+        let ir = mask_ir("MoveToward");
+        let ctx = EngineReadCtx::new(state);
+        let radius = interp_config().movement.max_move_radius;
+        let pos = state.agent_pos(self_id).unwrap_or(glam::Vec3::ZERO);
+        let dsl_self = dsl_ast::eval::AgentId::new(self_id.raw())
+            .expect("AgentId raw must be non-zero");
+        let spatial = state.spatial();
+        for target in spatial.within_radius(state, pos, radius) {
+            if target == self_id { continue; }
+            let dsl_tgt = match dsl_ast::eval::AgentId::new(target.raw()) {
+                Some(id) => id,
+                None => continue,
+            };
+            if ir.eval(&ctx, dsl_self, &[LocalParam::Agent(dsl_tgt)]) {
+                out.push(self_id, MicroKind::MoveToward, target);
+            }
+        }
+    }
+
+    /// Evaluate the Cast mask for a given caster + ability via the interpreter.
+    /// Returns `true` iff the caster passes all caster-side predicates.
+    pub fn mask_cast_interp(
+        state: &SimState,
+        self_id: AgentId,
+        ability: crate::ability::AbilityId,
+    ) -> bool {
+        use crate::evaluator::context::EngineReadCtx;
+        let ir = mask_ir("Cast");
+        let ctx = EngineReadCtx::new(state);
+        let dsl_self = dsl_ast::eval::AgentId::new(self_id.raw())
+            .expect("AgentId raw must be non-zero");
+        let dsl_ab = dsl_ast::eval::AbilityId::new(ability.raw())
+            .expect("AbilityId raw must be non-zero");
+        ir.eval(&ctx, dsl_self, &[LocalParam::Ability(dsl_ab)])
+    }
+}
 
 pub const TARGET_SLOTS: usize = 12;  // matches nearby_actors K=12 per spec §9 D5
 

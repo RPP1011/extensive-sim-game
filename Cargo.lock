@@ -2106,6 +2106,7 @@ dependencies = [
  "contracts",
  "criterion",
  "dhat",
+ "dsl_ast",
  "engine_data",
  "engine_rules",
  "glam",
@@ -2150,6 +2151,7 @@ dependencies = [
 name = "engine_rules"
 version = "0.1.0"
 dependencies = [
+ "dsl_ast",
  "engine",
  "engine_data",
  "glam",

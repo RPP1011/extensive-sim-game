@@ -40,6 +40,12 @@ const ALLOWED_DIRS: &[&str] = &[
     "aggregate",
     "cascade",
     "debug",                  // NEW: Plan 4 — debug+trace runtime per spec/engine.md §13
+    // evaluator/: SimState-backed ReadContext/CascadeContext impls for the DSL
+    // IR interpreter. Gated entirely on `#[cfg(feature = "interpreted-rules")]` —
+    // zero cost when the feature is off. Lives in engine (not engine_rules) because
+    // engine has no dep on engine_rules; engine_rules can't provide the context impls
+    // without a circular dep. ADR pending (P1b port, 2026-04-25).
+    "evaluator",
     "event",
     "invariant",
     "obs",

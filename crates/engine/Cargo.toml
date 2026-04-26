@@ -16,6 +16,8 @@ safetensors = "0.4"
 rayon = "1.10"
 sha2 = "0.10"
 contracts = "0.6"
+# DSL IR interpreter — optional; only pulled in under `interpreted-rules`.
+dsl_ast = { path = "../dsl_ast", optional = true }
 
 [dev-dependencies]
 trybuild = "1"
@@ -43,3 +45,10 @@ theory-of-mind = []
 # When this feature is on, the engine behaves as if compiled in release mode
 # w.r.t. contract checks.
 no-contracts = ["contracts/disable_contracts"]
+# Route mask, scoring, cascade, and view-fold dispatch through the DSL IR
+# interpreter (dsl_ast) instead of the compiler-emitted generated code.
+# Default build uses the compiled path as before; this feature enables the
+# dev-loop promise of "edit .sim, see result without cargo rebuild."
+# Parity gate: `cargo test -p engine --features interpreted-rules` must
+# produce byte-identical replayable_sha256 against the committed baseline.
+interpreted-rules = ["dep:dsl_ast"]
