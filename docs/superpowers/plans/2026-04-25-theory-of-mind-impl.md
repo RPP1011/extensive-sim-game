@@ -745,7 +745,7 @@ git -c core.hooksPath= commit -am "feat(dsl): grammar — beliefs(self).about/vi
 **Files:**
 - Modify: `crates/dsl_compiler/src/emit_scoring.rs`
 
-- [ ] **Step 1: Add lowering.**
+- [x] **Step 1: Add lowering.**
 
 ```rust
 IrExpr::BeliefsAccessor { observer, target, field } => {
@@ -777,14 +777,14 @@ IrExpr::BeliefsView { observer, view_name } => {
 }
 ```
 
-- [ ] **Step 2: Regen + workspace test.**
+- [x] **Step 2: Regen + workspace test.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
 unset RUSTFLAGS && cargo test --workspace
 ```
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl): emit_scoring lowers belief accessors (Plan ToM Task 9)"

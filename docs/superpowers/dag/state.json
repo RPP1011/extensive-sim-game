@@ -3369,15 +3369,19 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-10"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 3,
-      "steps_done": 0,
+      "steps_done": 3,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "a19f7035",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "DEVIATION: emit_scoring is a static-table emitter not code-gen. Added KIND_BELIEF_SCALAR_COMPARE/GRADIENT + helpers; runtime evaluator interprets them. BeliefsView still UnsupportedExprShape (deferred to T10). WGSL eval_predicate default arm handles unknown KIND honestly."
+      },
+      "started_at": "2026-04-26T08:35:05Z",
+      "completed_at": "2026-04-26T08:49:29Z",
       "retry_count": 0
     },
     {
@@ -3605,9 +3609,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T08:32:36Z",
-    "iterations_completed": 34,
-    "tasks_closed": 31,
+    "last_iteration_at": "2026-04-26T08:49:29Z",
+    "iterations_completed": 35,
+    "tasks_closed": 32,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
