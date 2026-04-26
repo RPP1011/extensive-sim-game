@@ -663,7 +663,7 @@ git commit -m "feat(engine): add apply_and_movement to ComputeBackend trait (Pla
 - Modify: `crates/dsl_compiler/src/emit_backend.rs`
 - Regenerated: `crates/engine_rules/src/backend.rs`
 
-- [ ] **Step 1: Add apply_and_movement emission after view_fold in emit_backend.**
+- [x] **Step 1: Add apply_and_movement emission after view_fold in emit_backend.**
 
 ```rust
     writeln!(out).unwrap();
@@ -679,7 +679,7 @@ git commit -m "feat(engine): add apply_and_movement to ComputeBackend trait (Pla
 
 Note: `apply_actions` in `step.rs` is currently a private `fn`. It must be made `pub(crate)` (or `pub`) so `SerialBackend::apply_and_movement` can call it. The next step handles this.
 
-- [ ] **Step 2: Expose `apply_actions` as `pub(crate) fn apply_actions_pub` in `emit_step.rs`.**
+- [x] **Step 2: Expose `apply_actions` as `pub(crate) fn apply_actions_pub` in `emit_step.rs`.**
 
 In `crates/dsl_compiler/src/emit_step.rs`, in the raw string, rename the internal helper `apply_actions` → `apply_actions_pub` and change `fn apply_actions` → `pub(crate) fn apply_actions_pub`. Update the call site in Phase 4a accordingly.
 
@@ -715,14 +715,14 @@ pub(crate) fn apply_actions_pub(
 ) {
 ```
 
-- [ ] **Step 3: Regenerate.**
+- [x] **Step 3: Regenerate.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
 cargo run --bin xtask -- compile-dsl --check
 ```
 
-- [ ] **Step 4: Build engine_rules.**
+- [x] **Step 4: Build engine_rules.**
 
 ```bash
 cargo build -p engine_rules 2>&1 | grep -E "^error" | head -10
@@ -730,7 +730,7 @@ cargo build -p engine_rules 2>&1 | grep -E "^error" | head -10
 
 Expected: SUCCESS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/dsl_compiler/src/emit_backend.rs crates/dsl_compiler/src/emit_step.rs \

@@ -367,15 +367,19 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-11"
       ],
-      "status": "in_progress",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
+      "completed_commit": "943aaa91",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "SerialBackend::apply_and_movement emitted + apply_actions exposed as apply_actions_pub + call site routes through backend; engine_rules builds + tests pass; engine_gpu still missing T12 stub"
+      },
       "started_at": "2026-04-26T22:27:07Z",
-      "completed_at": null,
+      "completed_at": "2026-04-26T22:28:36Z",
       "retry_count": 0
     },
     {
@@ -634,9 +638,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T22:27:07Z",
+    "last_iteration_at": "2026-04-26T22:28:36Z",
     "iterations_completed": 10,
-    "tasks_closed": 9,
+    "tasks_closed": 10,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
