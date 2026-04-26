@@ -117,7 +117,7 @@ Three sequential phases:
 - Create: `crates/engine/src/pool/bounded_map.rs`
 - Modify: `crates/engine/src/pool/mod.rs`
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
 `crates/engine/tests/bounded_map.rs`:
 
@@ -160,7 +160,7 @@ fn retain_drops_filtered_entries() {
 }
 ```
 
-- [ ] **Step 2: Verify the test fails.**
+- [x] **Step 2: Verify the test fails.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test bounded_map
@@ -168,7 +168,7 @@ unset RUSTFLAGS && cargo test -p engine --test bounded_map
 
 Expected: `unresolved import engine::pool::BoundedMap`.
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 `crates/engine/src/pool/bounded_map.rs`:
 
@@ -230,14 +230,14 @@ impl<K: Eq + Copy, V, const N: usize> Default for BoundedMap<K, V, N> {
 }
 ```
 
-- [ ] **Step 4: Wire into `engine/src/pool/mod.rs`.**
+- [x] **Step 4: Wire into `engine/src/pool/mod.rs`.**
 
 ```rust
 pub mod bounded_map;
 pub use bounded_map::BoundedMap;
 ```
 
-- [ ] **Step 5: Run tests.**
+- [x] **Step 5: Run tests.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test bounded_map
@@ -245,7 +245,7 @@ unset RUSTFLAGS && cargo test -p engine --test bounded_map
 
 Expected: 3 PASS.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(engine/pool): BoundedMap<K, V, const N> primitive (Plan ToM Task 1)"
