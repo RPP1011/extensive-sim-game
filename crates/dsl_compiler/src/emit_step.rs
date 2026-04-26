@@ -62,7 +62,7 @@ use crate::views::ViewRegistry;
 /// `debug` is passed by the caller; `DebugConfig::default()` (all collectors
 /// disabled) is a zero-cost no-op path — all stepper checkpoints are guarded
 /// by `if let Some(stepper) = debug.tick_stepper.as_ref()`.
-pub fn step<CB: ComputeBackend, B: PolicyBackend>(
+pub fn step<CB, B>(
     backend: &mut CB,
     state:   &mut SimState,
     scratch: &mut SimScratch,
@@ -71,7 +71,11 @@ pub fn step<CB: ComputeBackend, B: PolicyBackend>(
     policy:  &B,
     cascade: &CascadeRegistry<Event, ViewRegistry>,
     debug:   &DebugConfig,
-) {
+)
+where
+    CB: ComputeBackend<Event = Event, Views = ViewRegistry>,
+    B: PolicyBackend,
+{
     // Checkpoint: BeforeViewFold (entry — before mask build begins).
     if let Some(stepper) = debug.tick_stepper.as_ref() {
         match stepper.checkpoint(engine::debug::tick_stepper::Phase::BeforeViewFold) {
@@ -143,8 +147,8 @@ pub fn step<CB: ComputeBackend, B: PolicyBackend>(
     }
     apply_actions(state, scratch, events);
 
-    // Phase 4b — cascade fixed-point.
-    cascade.run_fixed_point(state, views, events);
+    // Phase 4b — cascade fixed-point (routed through ComputeBackend).
+    backend.cascade_dispatch(cascade, state, views, events);
     let _ = events_before; // reserved for future telemetry
     if let Some(profile) = debug.tick_profile.as_ref() {
         if let Ok(mut p) = profile.lock() { p.exit_with_null(); }

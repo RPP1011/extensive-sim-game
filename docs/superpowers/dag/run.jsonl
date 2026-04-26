@@ -88,3 +88,4 @@
 {"ts":"2026-04-26T21:55:49Z","event":"task_done","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-1","commit":"4c0f264","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"trait extended; intermediate state — engine_rules + engine_gpu missing impls (T2/T4 close)"}}
 {"ts":"2026-04-26T21:58:06Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-2"}
 {"ts":"2026-04-26T21:59:10Z","event":"task_done","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-2","commit":"147f3c0e","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"SerialBackend::cascade_dispatch emitted; engine_rules builds clean; engine_gpu still missing impl (T4 closes)"}}
+{"ts":"2026-04-26T22:01:05Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-3"}
