@@ -59,4 +59,17 @@ pub trait ComputeBackend {
     /// Sync any pending mask writes. Serial: no-op. GPU: flushes the
     /// per-bit-set queue into the buffer mirror.
     fn commit_mask(&mut self, buf: &mut MaskBuffer);
+
+    /// Run the cascade fixed-point for this tick.
+    ///
+    /// SerialBackend: delegates to `cascade.run_fixed_point(state, views, events)`.
+    /// GpuBackend: dispatches the GPU cascade driver (`cascade_gpu` in
+    /// `engine_gpu::cascade`). Phase 5b stub forwards to Serial-equivalent.
+    fn cascade_dispatch(
+        &mut self,
+        cascade: &CascadeRegistry<Self::Event, Self::Views>,
+        state:   &mut SimState,
+        views:   &mut Self::Views,
+        events:  &mut EventRing<Self::Event>,
+    );
 }
