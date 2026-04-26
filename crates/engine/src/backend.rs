@@ -89,4 +89,21 @@ pub trait ComputeBackend {
         events_before: usize,
         tick:          u32,
     );
+
+    /// Execute Phase 4a — walk the shuffled action list and emit root-cause
+    /// events (AgentAttacked, AgentMoved, AgentFled, AgentAte, AgentDied, …).
+    ///
+    /// SerialBackend: calls the internal `step::apply_actions` helper which
+    /// iterates `scratch.shuffle_idx`, matches on `ActionKind`, mutates `state`,
+    /// and pushes events into `events`.
+    ///
+    /// GpuBackend: dispatches `cs_apply_actions` + `cs_movement` kernels,
+    /// drains the GPU event ring into `events`, and commits the mutated agent
+    /// SoA onto `state`. Phase 5d stub delegates to the CPU helper.
+    fn apply_and_movement(
+        &mut self,
+        state:   &mut SimState,
+        scratch: &SimScratch,
+        events:  &mut EventRing<Self::Event>,
+    );
 }
