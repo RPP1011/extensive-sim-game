@@ -593,15 +593,19 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-19"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "790c814b",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "Verification-only task; gpu-feature path knowingly red per c1d1436d, out of Plan 5b-e scope; serial parity test passes; no Plan 5b-e regressions; pre-existing failures (rng golden, spec_snippets path, probe_harness tombstone) flagged as separate work"
+      },
+      "started_at": "2026-04-26T23:31:13Z",
+      "completed_at": "2026-04-26T23:38:19Z",
       "retry_count": 0
     },
     {
@@ -684,9 +688,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T23:28:22Z",
-    "iterations_completed": 17,
-    "tasks_closed": 17,
+    "last_iteration_at": "2026-04-26T23:38:19Z",
+    "iterations_completed": 18,
+    "tasks_closed": 18,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
