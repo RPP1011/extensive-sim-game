@@ -354,7 +354,7 @@ git commit -m "feat(engine_gpu): GpuBackend::cascade_dispatch stub (Plan 5b Task
 **Files:**
 - Modify: `crates/engine/src/backend.rs`
 
-- [ ] **Step 1: Review the current `fold_all` call in `step.rs` to understand the signature.**
+- [x] **Step 1: Review the current `fold_all` call in `step.rs` to understand the signature.**
 
 In `crates/engine_rules/src/step.rs` (line ~190):
 
@@ -364,7 +364,7 @@ views.fold_all(events, events_before, state.tick);
 
 `ViewRegistry::fold_all` takes `(&mut self, events: &EventRing<Event>, events_before: usize, tick: u32)`. The trait method must be generic enough to work for both `SerialBackend` (where `Views = ViewRegistry`) and `GpuBackend` (where `Views = ()`). Since `()` doesn't have `fold_all`, the SerialBackend impl will do the actual call; GpuBackend gets a stub.
 
-- [ ] **Step 2: Add `view_fold` method signature to the trait in `crates/engine/src/backend.rs`.**
+- [x] **Step 2: Add `view_fold` method signature to the trait in `crates/engine/src/backend.rs`.**
 
 After `cascade_dispatch`, add:
 
@@ -387,7 +387,7 @@ After `cascade_dispatch`, add:
     );
 ```
 
-- [ ] **Step 3: Build engine crate.**
+- [x] **Step 3: Build engine crate.**
 
 ```bash
 cargo build -p engine 2>&1 | grep -E "^error" | head -10
@@ -395,7 +395,7 @@ cargo build -p engine 2>&1 | grep -E "^error" | head -10
 
 Expected: SUCCESS (`engine` itself compiles; downstream may fail).
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add crates/engine/src/backend.rs

@@ -233,15 +233,19 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-6"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "e9fd724f",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "view_fold trait method added; intermediate state — T6/T8 close impls"
+      },
+      "started_at": "2026-04-26T22:10:07Z",
+      "completed_at": "2026-04-26T22:10:53Z",
       "retry_count": 0
     },
     {
@@ -610,9 +614,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T22:07:40Z",
-    "iterations_completed": 4,
-    "tasks_closed": 4,
+    "last_iteration_at": "2026-04-26T22:10:53Z",
+    "iterations_completed": 5,
+    "tasks_closed": 5,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
