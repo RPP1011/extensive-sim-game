@@ -1125,13 +1125,13 @@ git commit -m "feat(engine_gpu): GpuBackend::view_fold documented no-op on GPU p
 
 This test runs 10 ticks of the wolves+humans fixture through both `SerialBackend` and `GpuBackend` (stub path, no-gpu feature), then asserts identical final `SimState` hashes. It models the shape of `backend_mask_parity.rs`.
 
-- [ ] **Step 1: Create the test file.**
+- [x] **Step 1: Create the test file.**
 
 ```bash
 touch crates/engine/tests/backend_full_tick_parity.rs
 ```
 
-- [ ] **Step 2: Write the test body.**
+- [x] **Step 2: Write the test body.**
 
 ```rust
 //! Cross-backend parity for the full tick pipeline (Plan 5e Task 17).
@@ -1262,7 +1262,7 @@ grep -rn "pub fn build_cascade\|pub fn with_engine_builtins" crates/engine_rules
 
 If `build_cascade` doesn't exist but `with_engine_builtins` does, use that. Adapt the test body to match the actual public API for constructing a cascade registry.
 
-- [ ] **Step 3: Run the test (it will fail to compile first — fix the API as needed).**
+- [x] **Step 3: Run the test (it will fail to compile first — fix the API as needed).**
 
 ```bash
 cargo test -p engine --test backend_full_tick_parity 2>&1 | head -40
@@ -1270,7 +1270,7 @@ cargo test -p engine --test backend_full_tick_parity 2>&1 | head -40
 
 Fix any compilation errors by adapting to the actual API (cascade construction, etc.).
 
-- [ ] **Step 4: Run again to confirm both tests pass.**
+- [x] **Step 4: Run again to confirm both tests pass.**
 
 ```bash
 cargo test -p engine --test backend_full_tick_parity 2>&1 | tail -10
@@ -1278,7 +1278,7 @@ cargo test -p engine --test backend_full_tick_parity 2>&1 | tail -10
 
 Expected: both `serial_backend_full_tick_deterministic` and `gpu_stub_matches_serial_full_tick` PASS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/engine/tests/backend_full_tick_parity.rs
