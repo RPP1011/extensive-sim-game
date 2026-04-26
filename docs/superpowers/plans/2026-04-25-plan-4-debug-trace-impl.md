@@ -630,7 +630,7 @@ git -c core.hooksPath= commit -am "feat(engine/debug): tick_profile phase timing
 **Files:**
 - Modify: `crates/engine/src/debug/agent_history.rs`
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 ```rust
 //! Per-agent state delta tracker.
@@ -701,11 +701,11 @@ impl AgentHistory {
 }
 ```
 
-- [ ] **Step 2: Add SimState accessor methods if missing** — `agents_alive() -> impl Iterator<Item = AgentId>` etc. should already exist.
+- [x] **Step 2: Add SimState accessor methods if missing** — `agents_alive() -> impl Iterator<Item = AgentId>` etc. should already exist.
 
-- [ ] **Step 3: Hook from emit_step similarly.** Optional `debug.agent_history` triggers `record(state.tick, state)` at TickEnd phase.
+- [x] **Step 3: Hook from emit_step similarly.** Optional `debug.agent_history` triggers `record(state.tick, state)` at TickEnd phase.
 
-- [ ] **Step 4: Test, run, commit.**
+- [x] **Step 4: Test, run, commit.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test debug_agent_history
