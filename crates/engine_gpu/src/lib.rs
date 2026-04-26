@@ -397,6 +397,16 @@ impl ComputeBackend for GpuBackend {
     ) {
         // Phase 5c stub: no-op. Plan 5e dispatches GPU fold kernels via view_storage.
     }
+
+    fn apply_and_movement(
+        &mut self,
+        state:   &mut SimState,
+        scratch: &engine::scratch::SimScratch,
+        events:  &mut EventRing<Self::Event>,
+    ) {
+        // Phase 5d stub: CPU pass-through. Plan 5e dispatches cs_apply_actions + cs_movement.
+        engine_rules::step::apply_actions_pub(state, scratch, events);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -2824,6 +2834,16 @@ impl ComputeBackend for GpuBackend {
         _tick:          u32,
     ) {
         // Phase 5c stub: no-op. Plan 5e dispatches GPU fold kernels via view_storage.
+    }
+
+    fn apply_and_movement(
+        &mut self,
+        state:   &mut SimState,
+        scratch: &engine::scratch::SimScratch,
+        events:  &mut EventRing<Self::Event>,
+    ) {
+        // Phase 5d stub: CPU pass-through. Plan 5e dispatches cs_apply_actions + cs_movement.
+        engine_rules::step::apply_actions_pub(state, scratch, events);
     }
 }
 

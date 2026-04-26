@@ -269,7 +269,7 @@ fn shuffle_actions_in_place(
 }
 
 /// Phase-4 helper. Walks the shuffled actions and emits root-cause events.
-pub(crate) fn apply_actions_pub(
+pub fn apply_actions_pub(
     state: &mut SimState,
     scratch: &SimScratch,
     events: &mut EventRing<Event>,
