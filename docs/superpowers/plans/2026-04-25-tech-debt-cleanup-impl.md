@@ -280,13 +280,13 @@ No code; agent skips.
 - Modify: `crates/engine/src/spatial.rs` — `NeighborSource<K>` API takes `&mut Vec<AgentId>` from caller.
 - Modify: callers (probably in `engine_rules` emitted code) thread the scratch.
 
-- [ ] **Step 1: Locate the alloc site.**
+- [x] **Step 1: Locate the alloc site.**
 
 ```bash
 grep -nE "NeighborSource|fn neighbors|Vec::with_capacity" crates/engine/src/spatial.rs | head
 ```
 
-- [ ] **Step 2: Add `neighbors_scratch` to SimScratch.**
+- [x] **Step 2: Add `neighbors_scratch` to SimScratch.**
 
 ```rust
 // crates/engine/src/scratch.rs
@@ -305,7 +305,7 @@ impl SimScratch {
 }
 ```
 
-- [ ] **Step 3: Update `NeighborSource` API.**
+- [x] **Step 3: Update `NeighborSource` API.**
 
 Switch from "I allocate my own Vec" to "you pass me a Vec to fill":
 
@@ -318,7 +318,7 @@ impl NeighborSource {
 }
 ```
 
-- [ ] **Step 4: Update callers.**
+- [x] **Step 4: Update callers.**
 
 Find every callsite of the old `NeighborSource` API:
 
@@ -328,7 +328,7 @@ git grep -E 'NeighborSource\.|neighbors\(|::neighbors\(' | head
 
 Each caller threads `&mut state.scratch.neighbors_scratch` (or similar) through. If callsite is in emitted code (engine_rules), update emit_mask / emit_physics to emit the new API.
 
-- [ ] **Step 5: Build + test + bench.**
+- [x] **Step 5: Build + test + bench.**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -338,7 +338,7 @@ unset RUSTFLAGS && cargo bench -p engine -- spatial 2>&1 | head
 
 Expected: SUCCESS. Bench shows reduced allocator pressure (specific number depends on existing baseline).
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "perf(engine/spatial): NeighborSource fills caller's scratch — eliminate per-tick alloc (Tech-Debt Task 5)"
