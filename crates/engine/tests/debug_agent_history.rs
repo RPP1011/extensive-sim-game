@@ -60,6 +60,7 @@ fn agent_history_records_snapshots_for_alive_agents() {
 
     for _ in 0..TICK_COUNT {
         engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
             &mut state,
             &mut scratch,
             &mut events,
@@ -144,6 +145,7 @@ fn agent_history_ring_buffer_trims_at_max_ticks() {
 
     for _ in 0..run_ticks {
         engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
             &mut state,
             &mut scratch,
             &mut events,
@@ -221,6 +223,7 @@ fn agent_history_filter_limits_to_specified_agents() {
 
     for _ in 0..5 {
         engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
             &mut state,
             &mut scratch,
             &mut events,
@@ -259,6 +262,7 @@ fn agent_history_not_installed_is_zero_cost_no_op() {
     let cfg = DebugConfig::default(); // agent_history = None
 
     engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
         &mut state,
         &mut scratch,
         &mut events,

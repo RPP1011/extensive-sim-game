@@ -53,6 +53,7 @@ fn profile_records_all_phases_for_n_ticks() {
 
     for _ in 0..TICK_COUNT {
         engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
             &mut state,
             &mut scratch,
             &mut events,
@@ -116,6 +117,7 @@ fn profile_not_installed_is_zero_cost_no_op() {
     let cfg = DebugConfig::default();
 
     engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
         &mut state,
         &mut scratch,
         &mut events,

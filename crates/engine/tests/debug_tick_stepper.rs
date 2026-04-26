@@ -47,6 +47,7 @@ fn stepper_checkpoints_each_phase() {
     // We move the engine state into the thread; it's single-threaded inside.
     let driver = thread::spawn(move || {
         engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
             &mut state,
             &mut scratch,
             &mut events,
@@ -124,6 +125,7 @@ fn abort_on_second_phase_stops_tick() {
 
     let driver = thread::spawn(move || {
         engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
             &mut state,
             &mut scratch,
             &mut events,
