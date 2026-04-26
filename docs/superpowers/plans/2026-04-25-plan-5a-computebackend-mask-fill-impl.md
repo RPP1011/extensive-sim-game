@@ -108,7 +108,7 @@ Each task lands a single conceptual change with its own verification.
 - Modify: `crates/engine/src/lib.rs` — re-export.
 - Sed-update: workspace callers of `SimBackend`.
 
-- [ ] **Step 1: Audit current SimBackend references.**
+- [x] **Step 1: Audit current SimBackend references.**
 
 ```bash
 git grep -E '\bSimBackend\b' | wc -l
@@ -117,7 +117,7 @@ git grep -lE '\bSimBackend\b' | head
 
 Expected: ~10-20 files (the trait def + impls in engine_rules + engine_gpu + a few tests).
 
-- [ ] **Step 2: Rename in engine.**
+- [x] **Step 2: Rename in engine.**
 
 In `crates/engine/src/backend.rs`:
 
@@ -131,7 +131,7 @@ pub trait ComputeBackend {                  // was: SimBackend
 
 Update doc comments (// SimBackend → // ComputeBackend; references to spec).
 
-- [ ] **Step 3: Sed-rewrite workspace.**
+- [x] **Step 3: Sed-rewrite workspace.**
 
 ```bash
 git grep -l '\bSimBackend\b' | xargs sed -i 's|\bSimBackend\b|ComputeBackend|g'
@@ -139,7 +139,7 @@ git grep -l '\bSimBackend\b' | xargs sed -i 's|\bSimBackend\b|ComputeBackend|g'
 
 This catches the trait name + every `impl SimBackend for X` + every `dyn SimBackend` reference. Manual review of the diff afterwards to make sure no false positives (no string literal mentions or doc-only references that should preserve historical context).
 
-- [ ] **Step 4: Build + test.**
+- [x] **Step 4: Build + test.**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -148,7 +148,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 Expected: SUCCESS — pure rename; no semantic changes.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "refactor(engine): rename SimBackend → ComputeBackend (matches spec/runtime.md) (Plan 5a Task 1)"
