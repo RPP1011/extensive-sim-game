@@ -2864,8 +2864,13 @@ impl ComputeBackend for GpuBackend {
         scratch: &engine::scratch::SimScratch,
         events:  &mut EventRing<Self::Event>,
     ) {
-        // Phase 5d stub: CPU pass-through. Plan 5e dispatches cs_apply_actions + cs_movement.
-        engine_rules::step::apply_actions_pub(state, scratch, events);
+        // GPU: dispatch cs_apply_actions + cs_movement via the existing helper.
+        // Falls back to CPU apply_actions_pub if the GPU dispatch returns false
+        // (init failure, kernel error, or stale resident state).
+        let ok = self.run_gpu_apply_and_movement(state, events);
+        if !ok {
+            engine_rules::step::apply_actions_pub(state, scratch, events);
+        }
     }
 }
 
