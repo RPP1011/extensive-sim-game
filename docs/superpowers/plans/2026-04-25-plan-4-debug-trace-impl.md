@@ -324,7 +324,7 @@ git -c core.hooksPath= commit -am "feat(engine/debug): trace_mask collector (Pla
 **Files:**
 - Modify: `crates/engine/src/debug/causal_tree.rs`
 
-- [ ] **Step 1: Implement.** Wraps existing `EventRing<E>::cause_of()` data into a navigable tree presentation.
+- [x] **Step 1: Implement.** Wraps existing `EventRing<E>::cause_of()` data into a navigable tree presentation.
 
 ```rust
 //! Causal tree presentation over EventRing.
@@ -369,7 +369,7 @@ impl<'a, E: EventLike> CausalTree<'a, E> {
 
 (Method names — `iter_with_meta`, `get_by_id` — must match what `EventRing<E>` actually exposes. Check first; add accessors if missing.)
 
-- [ ] **Step 2: Add minimal accessors on `EventRing<E>` if needed.**
+- [x] **Step 2: Add minimal accessors on `EventRing<E>` if needed.**
 
 ```bash
 grep -nE "pub fn iter|pub fn get|pub fn cause_of|pub fn iter_with_meta" crates/engine/src/event/ring.rs | head
@@ -377,7 +377,7 @@ grep -nE "pub fn iter|pub fn get|pub fn cause_of|pub fn iter_with_meta" crates/e
 
 Add `iter_with_meta() -> impl Iterator<Item = &Entry<E>>` if not present (returns Entry refs with id + cause + event).
 
-- [ ] **Step 3: Test.**
+- [x] **Step 3: Test.**
 
 `crates/engine/tests/debug_causal_tree.rs`:
 
@@ -399,7 +399,7 @@ fn tree_groups_caused_events_under_root() {
 }
 ```
 
-- [ ] **Step 4: Run + commit.**
+- [x] **Step 4: Run + commit.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test debug_causal_tree
