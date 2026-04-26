@@ -1065,19 +1065,19 @@ git commit -m "feat(engine_gpu): GpuBackend::apply_and_movement wires cs_apply_a
 
 The `view_storage` fold API (`cs_fold_*`) exists. `GpuBackend::step` performs CPU view-fold in Phase 5 (it calls the CPU `views.fold_all` equivalent after committing GPU state). The GPU fold kernels are already invoked on the resident cascade path but not through the trait surface.
 
-- [ ] **Step 1: Find where GpuBackend::step does the view fold.**
+- [x] **Step 1: Find where GpuBackend::step does the view fold.**
 
 ```bash
 grep -n "fold_all\|view_fold\|fold_iteration\|fold_views" crates/engine_gpu/src/lib.rs | head -15
 ```
 
-- [ ] **Step 2: Understand the `ViewStorage` fold API.**
+- [x] **Step 2: Understand the `ViewStorage` fold API.**
 
 ```bash
 grep -n "pub fn fold\|fn dispatch_fold\|fn fold_event" crates/engine_gpu/src/view_storage.rs | head -10
 ```
 
-- [ ] **Step 3: Implement `view_fold` (gpu feature) to call GPU fold kernels.**
+- [x] **Step 3: Implement `view_fold` (gpu feature) to call GPU fold kernels.**
 
 The `view_fold` trait method is a no-op stub on the GPU path because `GpuBackend`'s view state (`view_storage`) is maintained internally by the cascade driver. The CPU `ViewRegistry` (which `SerialBackend::view_fold` updates) is a parallel structure; on the GPU path, the caller passes `&mut ()` for views (since `GpuBackend::Views = ()`), and the real fold work happens inside `step`'s Phase 5 block.
 
@@ -1100,7 +1100,7 @@ Therefore the correct implementation is the same as the stub (no-op) with docume
     }
 ```
 
-- [ ] **Step 4: Build + test.**
+- [x] **Step 4: Build + test.**
 
 ```bash
 cargo build --workspace 2>&1 | grep -E "^error" | head -10
@@ -1109,7 +1109,7 @@ cargo test --workspace -- --test-threads=1 2>&1 | tail -10
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/engine_gpu/src/lib.rs

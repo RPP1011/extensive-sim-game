@@ -540,15 +540,19 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-17"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "967daf4f",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "GPU view_fold documented no-op (matches design — GpuBackend::Views = () so nothing to fold; real folds happen inside step via cascade driver)"
+      },
+      "started_at": "2026-04-26T23:16:07Z",
+      "completed_at": "2026-04-26T23:17:36Z",
       "retry_count": 0
     },
     {
@@ -675,9 +679,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T23:14:11Z",
-    "iterations_completed": 15,
-    "tasks_closed": 15,
+    "last_iteration_at": "2026-04-26T23:17:36Z",
+    "iterations_completed": 16,
+    "tasks_closed": 16,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
