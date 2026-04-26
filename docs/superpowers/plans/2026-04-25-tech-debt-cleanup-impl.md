@@ -354,7 +354,7 @@ git -c core.hooksPath= commit -am "perf(engine/spatial): NeighborSource fills ca
 - Modify: `crates/engine/src/policy/utility.rs` (or wherever evaluate() lives).
 - Modify: `crates/engine/src/scratch.rs` — add scratch slots as needed.
 
-- [ ] **Step 1: Audit current allocations.**
+- [x] **Step 1: Audit current allocations.**
 
 ```bash
 grep -nE "Vec::|::with_capacity|HashMap::|HashSet::|alloc" crates/engine/src/policy/*.rs | head
@@ -362,27 +362,27 @@ grep -nE "Vec::|::with_capacity|HashMap::|HashSet::|alloc" crates/engine/src/pol
 
 Each match is a candidate. Some may be one-time at construction (fine); we want to eliminate the per-call ones.
 
-- [ ] **Step 2: Use a `dhat`-instrumented test or `--release` allocation count.**
+- [x] **Step 2: Use a `dhat`-instrumented test or `--release` allocation count.**
 
 Run `cargo test --features dhat-heap -p engine` (existing dhat feature gate) on a 100-tick fixture; capture allocation counts. Target: drop from ≤16/call to 0/call.
 
-- [ ] **Step 3: For each Vec::new / Vec::with_capacity in the hot path:**
+- [x] **Step 3: For each Vec::new / Vec::with_capacity in the hot path:**
 
   - If the size is bounded (≤32) → switch to `SmallVec<[T; 32]>` or `[T; 32]` array + len.
   - If size is unbounded but ≤max_agents → move to a `SimScratch` slot.
   - If it's a one-time scratch in a single function → `let mut buf = state.scratch.policy_buf.clear(); ... do work using buf;`.
 
-- [ ] **Step 4: Re-run dhat.**
+- [x] **Step 4: Re-run dhat.**
 
 Expected: 0 allocations in the per-tick policy path.
 
-- [ ] **Step 5: Workspace test.**
+- [x] **Step 5: Workspace test.**
 
 ```bash
 unset RUSTFLAGS && cargo test --workspace
 ```
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "perf(engine/policy): evaluate() zero-alloc — move scratch to SimScratch + SmallVec (Tech-Debt Task 6)"
