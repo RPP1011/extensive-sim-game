@@ -16,6 +16,16 @@
   Single-dispatch tick path; perf-sweep done at N=200k, optimization ongoing. `plans/gpu_megakernel_plan.md`, `plans/gpu_megakernel_perf.md`.
 - **GPU cold-state replay (Subsystem 2) — Phases 2–4**
   Phase 1 (DSL-compiler view annotations) done; Phase 2 (chronicle) done; Phase 3 (gold + standing) done; Phases 2–4 umbrella plan kept for future per-phase plans. `plans/2026-04-22-gpu-cold-state-replay.md`.
+- **Plan 4 — debug & trace runtime (§23)**
+  `trace_mask`, `causal_tree`, `tick_stepper`, `tick_profile`, `agent_history`, snapshot repro bundle. `plans/2026-04-25-plan-4-debug-trace-impl.md`.
+- **Plan 5a — `ComputeBackend` trait + mask-fill threading (Phase 1 of 5)**
+  Renames `SimBackend` → `ComputeBackend`, extends with mask-fill methods, threads through emit_step. `plans/2026-04-25-plan-5a-computebackend-mask-fill-impl.md`. Phases 5b-e (GPU impl, policy backend, full kernel-dispatch surface) pending.
+- **DSL Authoring Engine — IR interpreter (P1b)**
+  Visitor-pattern interpreter on top of `dsl_ast`; `interpreted-rules` cargo feature for parity gate. `plans/2026-04-22-dsl-ast-extraction.md`, `plans/2026-04-22-ir-interpreter.md`.
+- **Theory-of-mind Phase 1 (full belief state)**
+  `BeliefState` + `BoundedMap<K, V, N>` SoA, belief-update cascade, per-tick decay, `beliefs(self).about(target).<field>` scoring grammar. `plans/2026-04-25-theory-of-mind-impl.md`.
+- **Combined tech-debt cleanup (~8 items)**
+  Combat fixtures, LazyView wiring, NeighborSource alloc, PolicyBackend zero-alloc, plus 3 escalation items. `plans/2026-04-25-tech-debt-cleanup-impl.md`.
 
 ## Drafted (spec exists, plan does not)
 
@@ -28,12 +38,10 @@
 
 ## Engine plans not yet written
 
-- **Plan 4 — debug & trace runtime (§23)**
-  `trace_mask`, `causal_tree`, `tick_stepper`, `tick_profile`, `agent_history`, snapshot repro bundle.
-- **Plan 5 — `ComputeBackend` trait extraction (§24)**
-  Abstract Serial vs GPU under one trait; cross-backend parity-test infrastructure.
+- **Plan 5b–e — Remaining ComputeBackend phases**
+  Phase 2: GPU impl bodies. Phase 3: PolicyBackend extraction. Phase 4-5: full kernel-dispatch surface + cross-backend parity tests. Prerequisite: Plan 5a complete.
 - **Plan 6 — `GpuBackend` foundation**
-  Bridge from `ComputeBackend` trait to `engine_gpu` primitives. Prerequisite: Plan 5.
+  Bridge from `ComputeBackend` trait to `engine_gpu` primitives. Prerequisite: Plan 5 complete.
 - **Plan 7+ — per-kernel GPU porting under the trait**
   Each kernel migrates with parity tests against `SerialBackend` reference.
 

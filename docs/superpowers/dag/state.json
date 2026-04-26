@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-04-26T03:59:56Z",
+  "generated_at": "2026-04-26T04:03:14Z",
   "roadmap": [
     {
       "id": "roadmap-gpu-megakernel",
@@ -15,11 +15,62 @@
     },
     {
       "id": "roadmap-gpu-cold-state-replay-subsystem-2-phases-24",
-      "title": "GPU cold-state replay (Subsystem 2) — Phases 2–4",
+      "title": "GPU cold-state replay (Subsystem 2) \u2014 Phases 2\u20134",
       "tier": "active",
       "spec_ref": null,
       "plans": [
         "2026-04-22-gpu-cold-state-replay"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "roadmap-plan-4-debug-trace-runtime-23",
+      "title": "Plan 4 \u2014 debug & trace runtime (\u00a723)",
+      "tier": "active",
+      "spec_ref": null,
+      "plans": [
+        "2026-04-25-plan-4-debug-trace-impl"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "roadmap-plan-5a-computebackend-trait-mask-fill-threading-phase-1-of-5",
+      "title": "Plan 5a \u2014 `ComputeBackend` trait + mask-fill threading (Phase 1 of 5)",
+      "tier": "active",
+      "spec_ref": null,
+      "plans": [
+        "2026-04-25-plan-5a-computebackend-mask-fill-impl"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "roadmap-dsl-authoring-engine-ir-interpreter-p1b",
+      "title": "DSL Authoring Engine \u2014 IR interpreter (P1b)",
+      "tier": "active",
+      "spec_ref": null,
+      "plans": [
+        "2026-04-22-dsl-ast-extraction",
+        "2026-04-22-ir-interpreter"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "roadmap-theory-of-mind-phase-1-full-belief-state",
+      "title": "Theory-of-mind Phase 1 (full belief state)",
+      "tier": "active",
+      "spec_ref": null,
+      "plans": [
+        "2026-04-25-theory-of-mind-impl"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "roadmap-combined-tech-debt-cleanup-8-items",
+      "title": "Combined tech-debt cleanup (~8 items)",
+      "tier": "active",
+      "spec_ref": null,
+      "plans": [
+        "2026-04-25-tech-debt-cleanup-impl"
       ],
       "status": "pending"
     },
@@ -48,16 +99,8 @@
       "status": "pending"
     },
     {
-      "id": "roadmap-plan-4-debug-trace-runtime-23",
-      "title": "Plan 4 — debug & trace runtime (§23)",
-      "tier": "engine-plans-not-yet-written",
-      "spec_ref": null,
-      "plans": [],
-      "status": "pending"
-    },
-    {
-      "id": "roadmap-plan-5-computebackend-trait-extraction-24",
-      "title": "Plan 5 — `ComputeBackend` trait extraction (§24)",
+      "id": "roadmap-plan-5be-remaining-computebackend-phases",
+      "title": "Plan 5b\u2013e \u2014 Remaining ComputeBackend phases",
       "tier": "engine-plans-not-yet-written",
       "spec_ref": null,
       "plans": [],
@@ -65,7 +108,7 @@
     },
     {
       "id": "roadmap-plan-6-gpubackend-foundation",
-      "title": "Plan 6 — `GpuBackend` foundation",
+      "title": "Plan 6 \u2014 `GpuBackend` foundation",
       "tier": "engine-plans-not-yet-written",
       "spec_ref": null,
       "plans": [],
@@ -73,7 +116,7 @@
     },
     {
       "id": "roadmap-plan-7-per-kernel-gpu-porting-under-the-trait",
-      "title": "Plan 7+ — per-kernel GPU porting under the trait",
+      "title": "Plan 7+ \u2014 per-kernel GPU porting under the trait",
       "tier": "engine-plans-not-yet-written",
       "spec_ref": null,
       "plans": [],
@@ -102,11 +145,11 @@
     {
       "id": "2026-04-22-ir-interpreter",
       "file": "docs/superpowers/plans/2026-04-22-ir-interpreter.md",
-      "title": "DSL IR Interpreter (all rule classes) — Implementation Plan",
+      "title": "DSL IR Interpreter (all rule classes) \u2014 Implementation Plan",
       "depends_on": [],
-      "status": "in_progress",
+      "status": "pending",
       "tasks_total": 12,
-      "tasks_done": 1
+      "tasks_done": 0
     },
     {
       "id": "2026-04-24-constitution-and-adr-impl",
@@ -138,7 +181,7 @@
     {
       "id": "2026-04-25-engine-crate-restructure-impl",
       "file": "docs/superpowers/plans/2026-04-25-engine-crate-restructure-impl.md",
-      "title": "Engine Crate Restructure (Plan B1) — Implementation Plan",
+      "title": "Engine Crate Restructure (Plan B1) \u2014 Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 15,
@@ -147,7 +190,7 @@
     {
       "id": "2026-04-25-engine-crate-split-impl-v2",
       "file": "docs/superpowers/plans/2026-04-25-engine-crate-split-impl-v2.md",
-      "title": "Engine Crate Split (Plan B1') — Implementation Plan",
+      "title": "Engine Crate Split (Plan B1') \u2014 Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 21,
@@ -156,7 +199,7 @@
     {
       "id": "2026-04-25-legacy-src-sweep-impl",
       "file": "docs/superpowers/plans/2026-04-25-legacy-src-sweep-impl.md",
-      "title": "Legacy `src/` Sweep + xtask Move (Plan B3) — Implementation Plan",
+      "title": "Legacy `src/` Sweep + xtask Move (Plan B3) \u2014 Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 5,
@@ -165,7 +208,7 @@
     {
       "id": "2026-04-25-plan-4-debug-trace-impl",
       "file": "docs/superpowers/plans/2026-04-25-plan-4-debug-trace-impl.md",
-      "title": "Plan 4 — Debug & Trace Runtime Implementation Plan",
+      "title": "Plan 4 \u2014 Debug & Trace Runtime Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 9,
@@ -174,7 +217,7 @@
     {
       "id": "2026-04-25-plan-5a-computebackend-mask-fill-impl",
       "file": "docs/superpowers/plans/2026-04-25-plan-5a-computebackend-mask-fill-impl.md",
-      "title": "Plan 5a — ComputeBackend Trait + Mask-Fill Threading Implementation Plan",
+      "title": "Plan 5a \u2014 ComputeBackend Trait + Mask-Fill Threading Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 9,
@@ -183,7 +226,7 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl",
       "file": "docs/superpowers/plans/2026-04-25-spec-c-v2-bootstrap-impl.md",
-      "title": "Spec C v2 — Project DAG Bootstrap Implementation Plan",
+      "title": "Spec C v2 \u2014 Project DAG Bootstrap Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 14,
@@ -210,7 +253,7 @@
     {
       "id": "gpu_megakernel_perf",
       "file": "docs/superpowers/plans/gpu_megakernel_perf.md",
-      "title": "GPU Megakernel Phase 8 — Perf Sweep + Crossover Measurement",
+      "title": "GPU Megakernel Phase 8 \u2014 Perf Sweep + Crossover Measurement",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 0,
@@ -642,7 +685,7 @@
     {
       "id": "2026-04-24-constitution-and-adr-impl.task-8",
       "plan": "2026-04-24-constitution-and-adr-impl",
-      "title": "Task 8: Trim `CLAUDE.md` to ≤100 lines",
+      "title": "Task 8: Trim `CLAUDE.md` to \u2264100 lines",
       "checkbox_line": 622,
       "deps": [
         "2026-04-24-constitution-and-adr-impl.task-7"
@@ -664,7 +707,7 @@
     {
       "id": "2026-04-24-constitution-and-adr-impl.task-9",
       "plan": "2026-04-24-constitution-and-adr-impl",
-      "title": "Task 9: Migrate spec/ — delete duplicate principle content",
+      "title": "Task 9: Migrate spec/ \u2014 delete duplicate principle content",
       "checkbox_line": 725,
       "deps": [
         "2026-04-24-constitution-and-adr-impl.task-8"
@@ -1096,7 +1139,7 @@
     {
       "id": "2026-04-25-dispatch-critics-hooks-impl.task-10",
       "plan": "2026-04-25-dispatch-critics-hooks-impl",
-      "title": "Task 10: Documentation freshness — `dispatch-critics` invocation in CLAUDE.md verified",
+      "title": "Task 10: Documentation freshness \u2014 `dispatch-critics` invocation in CLAUDE.md verified",
       "checkbox_line": 821,
       "deps": [
         "2026-04-25-dispatch-critics-hooks-impl.task-9"
@@ -1116,7 +1159,7 @@
     {
       "id": "2026-04-25-engine-crate-restructure-impl.task-1",
       "plan": "2026-04-25-engine-crate-restructure-impl",
-      "title": "Task 1: Rename `engine_data` → `engine_data` (mechanical, structural)",
+      "title": "Task 1: Rename `engine_data` \u2192 `engine_data` (mechanical, structural)",
       "checkbox_line": 125,
       "deps": [],
       "blocks": [
@@ -1180,7 +1223,7 @@
     {
       "id": "2026-04-25-engine-crate-restructure-impl.task-4",
       "plan": "2026-04-25-engine-crate-restructure-impl",
-      "title": "Task 4: Move `engine/src/generated/{mask,physics,views}` → `engine_rules/src/`",
+      "title": "Task 4: Move `engine/src/generated/{mask,physics,views}` \u2192 `engine_rules/src/`",
       "checkbox_line": 319,
       "deps": [
         "2026-04-25-engine-crate-restructure-impl.task-3"
@@ -1268,7 +1311,7 @@
     {
       "id": "2026-04-25-engine-crate-restructure-impl.task-8",
       "plan": "2026-04-25-engine-crate-restructure-impl",
-      "title": "Task 8: `engine_rules/build.rs` + `engine_data/build.rs` — every-file-must-be-generated sentinel",
+      "title": "Task 8: `engine_rules/build.rs` + `engine_data/build.rs` \u2014 every-file-must-be-generated sentinel",
       "checkbox_line": 768,
       "deps": [
         "2026-04-25-engine-crate-restructure-impl.task-7"
@@ -1290,7 +1333,7 @@
     {
       "id": "2026-04-25-engine-crate-restructure-impl.task-9",
       "plan": "2026-04-25-engine-crate-restructure-impl",
-      "title": "Task 9: `engine/build.rs` — primitives-only allowlist + reject-`// GENERATED` sentinel",
+      "title": "Task 9: `engine/build.rs` \u2014 primitives-only allowlist + reject-`// GENERATED` sentinel",
       "checkbox_line": 935,
       "deps": [
         "2026-04-25-engine-crate-restructure-impl.task-8"
@@ -1378,7 +1421,7 @@
     {
       "id": "2026-04-25-engine-crate-restructure-impl.task-13",
       "plan": "2026-04-25-engine-crate-restructure-impl",
-      "title": "Task 13: ast-grep CI rules — `impl CascadeHandler` etc. only allowed in `engine_rules/`",
+      "title": "Task 13: ast-grep CI rules \u2014 `impl CascadeHandler` etc. only allowed in `engine_rules/`",
       "checkbox_line": 1524,
       "deps": [
         "2026-04-25-engine-crate-restructure-impl.task-12"
@@ -1442,7 +1485,7 @@
     {
       "id": "2026-04-25-engine-crate-split-impl-v2.task-1",
       "plan": "2026-04-25-engine-crate-split-impl-v2",
-      "title": "Task 1: Generic primitives in engine ✓ LANDED (`e60619c6`)",
+      "title": "Task 1: Generic primitives in engine \u2713 LANDED (`e60619c6`)",
       "checkbox_line": 160,
       "deps": [],
       "blocks": [
@@ -1462,7 +1505,7 @@
     {
       "id": "2026-04-25-engine-crate-split-impl-v2.task-2",
       "plan": "2026-04-25-engine-crate-split-impl-v2",
-      "title": "Task 2: Emit `impl EventLike for Event` ✓ LANDED (`33e73ceb`)",
+      "title": "Task 2: Emit `impl EventLike for Event` \u2713 LANDED (`33e73ceb`)",
       "checkbox_line": 164,
       "deps": [
         "2026-04-25-engine-crate-split-impl-v2.task-1"
@@ -1550,7 +1593,7 @@
     {
       "id": "2026-04-25-engine-crate-split-impl-v2.task-6",
       "plan": "2026-04-25-engine-crate-split-impl-v2",
-      "title": "Task 6: Add `dsl_compiler::emit_sim_state` — emit `SimState` + `SimScratch` from DSL agent declarations",
+      "title": "Task 6: Add `dsl_compiler::emit_sim_state` \u2014 emit `SimState` + `SimScratch` from DSL agent declarations",
       "checkbox_line": 323,
       "deps": [
         "2026-04-25-engine-crate-split-impl-v2.task-5"
@@ -1594,7 +1637,7 @@
     {
       "id": "2026-04-25-engine-crate-split-impl-v2.task-8",
       "plan": "2026-04-25-engine-crate-split-impl-v2",
-      "title": "Task 8: Move `engine/src/generated/{mask,physics,views}` → `engine_rules/src/`",
+      "title": "Task 8: Move `engine/src/generated/{mask,physics,views}` \u2192 `engine_rules/src/`",
       "checkbox_line": 457,
       "deps": [
         "2026-04-25-engine-crate-split-impl-v2.task-7"
@@ -1638,7 +1681,7 @@
     {
       "id": "2026-04-25-engine-crate-split-impl-v2.task-10",
       "plan": "2026-04-25-engine-crate-split-impl-v2",
-      "title": "Task 10: Migrate `engagement.rs` `break_reason` constants → emitted `engine_data/src/engagement.rs`",
+      "title": "Task 10: Migrate `engagement.rs` `break_reason` constants \u2192 emitted `engine_data/src/engagement.rs`",
       "checkbox_line": 537,
       "deps": [
         "2026-04-25-engine-crate-split-impl-v2.task-9"
@@ -1792,7 +1835,7 @@
     {
       "id": "2026-04-25-engine-crate-split-impl-v2.task-17",
       "plan": "2026-04-25-engine-crate-split-impl-v2",
-      "title": "Task 17: `engine/build.rs` primitives-only allowlist (STRICT — no exceptions)",
+      "title": "Task 17: `engine/build.rs` primitives-only allowlist (STRICT \u2014 no exceptions)",
       "checkbox_line": 785,
       "deps": [
         "2026-04-25-engine-crate-split-impl-v2.task-16"
@@ -1836,7 +1879,7 @@
     {
       "id": "2026-04-25-engine-crate-split-impl-v2.task-19",
       "plan": "2026-04-25-engine-crate-split-impl-v2",
-      "title": "Task 19: `.githooks/pre-commit` — header rule + regen-on-DSL-change",
+      "title": "Task 19: `.githooks/pre-commit` \u2014 header rule + regen-on-DSL-change",
       "checkbox_line": 840,
       "deps": [
         "2026-04-25-engine-crate-split-impl-v2.task-18"
@@ -2136,7 +2179,7 @@
     {
       "id": "2026-04-25-plan-4-debug-trace-impl.task-7",
       "plan": "2026-04-25-plan-4-debug-trace-impl",
-      "title": "Task 7: `repro_bundle` — package snapshot + causal_tree + N-tick trace",
+      "title": "Task 7: `repro_bundle` \u2014 package snapshot + causal_tree + N-tick trace",
       "checkbox_line": 717,
       "deps": [
         "2026-04-25-plan-4-debug-trace-impl.task-6"
@@ -2158,7 +2201,7 @@
     {
       "id": "2026-04-25-plan-4-debug-trace-impl.task-8",
       "plan": "2026-04-25-plan-4-debug-trace-impl",
-      "title": "Task 8: xtask integration — `debug` / `trace` / `profile` / `repro` subcommands",
+      "title": "Task 8: xtask integration \u2014 `debug` / `trace` / `profile` / `repro` subcommands",
       "checkbox_line": 796,
       "deps": [
         "2026-04-25-plan-4-debug-trace-impl.task-7"
@@ -2200,7 +2243,7 @@
     {
       "id": "2026-04-25-plan-5a-computebackend-mask-fill-impl.task-1",
       "plan": "2026-04-25-plan-5a-computebackend-mask-fill-impl",
-      "title": "Task 1: Rename `SimBackend` → `ComputeBackend`",
+      "title": "Task 1: Rename `SimBackend` \u2192 `ComputeBackend`",
       "checkbox_line": 104,
       "deps": [],
       "blocks": [
@@ -2395,7 +2438,7 @@
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-1",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
       "title": "Task 1: Directory scaffolding + `.gitignore` policy",
-      "checkbox_line": 48,
+      "checkbox_line": 53,
       "deps": [],
       "blocks": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-2"
@@ -2414,8 +2457,8 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-2",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
-      "title": "Task 2: `bootstrap.py` — parse ROADMAP.md tier sections",
-      "checkbox_line": 83,
+      "title": "Task 2: `bootstrap.py` \u2014 parse ROADMAP.md tier sections",
+      "checkbox_line": 88,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-1"
       ],
@@ -2436,8 +2479,8 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-3",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
-      "title": "Task 3: `bootstrap.py` — parse plan files (header + checkboxes)",
-      "checkbox_line": 180,
+      "title": "Task 3: `bootstrap.py` \u2014 parse plan files (header + checkboxes)",
+      "checkbox_line": 185,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-2"
       ],
@@ -2458,8 +2501,8 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-4",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
-      "title": "Task 4: `bootstrap.py` — owner-class classification",
-      "checkbox_line": 298,
+      "title": "Task 4: `bootstrap.py` \u2014 owner-class classification",
+      "checkbox_line": 303,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-3"
       ],
@@ -2480,8 +2523,8 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-5",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
-      "title": "Task 5: `bootstrap.py` — emit `state.json` + reconcile prior",
-      "checkbox_line": 403,
+      "title": "Task 5: `bootstrap.py` \u2014 emit `state.json` + reconcile prior",
+      "checkbox_line": 408,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-4"
       ],
@@ -2503,7 +2546,7 @@
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-6",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
       "title": "Task 6: `dag-bootstrap.sh` wrapper",
-      "checkbox_line": 536,
+      "checkbox_line": 541,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-5"
       ],
@@ -2524,8 +2567,8 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-7",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
-      "title": "Task 7: `dag-status.sh` — ad-hoc state query",
-      "checkbox_line": 572,
+      "title": "Task 7: `dag-status.sh` \u2014 ad-hoc state query",
+      "checkbox_line": 577,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-6"
       ],
@@ -2547,7 +2590,7 @@
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-8",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
       "title": "Task 8: `dag-mark-done.sh` + `dag-mark-blocked.sh`",
-      "checkbox_line": 638,
+      "checkbox_line": 643,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-7"
       ],
@@ -2568,8 +2611,8 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-9",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
-      "title": "Task 9: `dag-terminal.sh` — terminal condition detection",
-      "checkbox_line": 762,
+      "title": "Task 9: `dag-terminal.sh` \u2014 terminal condition detection",
+      "checkbox_line": 767,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-8"
       ],
@@ -2590,8 +2633,8 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-10",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
-      "title": "Task 10: `dag-tick.sh` — single-iteration agent shell",
-      "checkbox_line": 846,
+      "title": "Task 10: `dag-tick.sh` \u2014 single-iteration agent shell",
+      "checkbox_line": 851,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-9"
       ],
@@ -2612,8 +2655,8 @@
     {
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-11",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
-      "title": "Task 11: `SKILL.md` — agent invocation pattern",
-      "checkbox_line": 934,
+      "title": "Task 11: `SKILL.md` \u2014 agent invocation pattern",
+      "checkbox_line": 939,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-10"
       ],
@@ -2635,7 +2678,7 @@
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-12",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
       "title": "Task 12: Synthesis + escalation templates + pending-decisions scaffold",
-      "checkbox_line": 1066,
+      "checkbox_line": 1071,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-11"
       ],
@@ -2657,7 +2700,7 @@
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-13",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
       "title": "Task 13: End-to-end smoke test",
-      "checkbox_line": 1145,
+      "checkbox_line": 1150,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-12"
       ],
@@ -2679,7 +2722,7 @@
       "id": "2026-04-25-spec-c-v2-bootstrap-impl.task-14",
       "plan": "2026-04-25-spec-c-v2-bootstrap-impl",
       "title": "Task 14: Final verification + AIS post-design tick",
-      "checkbox_line": 1203,
+      "checkbox_line": 1208,
       "deps": [
         "2026-04-25-spec-c-v2-bootstrap-impl.task-13"
       ],
@@ -2740,7 +2783,7 @@
     {
       "id": "2026-04-25-tech-debt-cleanup-impl.task-3",
       "plan": "2026-04-25-tech-debt-cleanup-impl",
-      "title": "Task 3: Collision detection — escalate to user via `pending-decisions.md`",
+      "title": "Task 3: Collision detection \u2014 escalate to user via `pending-decisions.md`",
       "checkbox_line": 209,
       "deps": [
         "2026-04-25-tech-debt-cleanup-impl.task-2"
@@ -2762,7 +2805,7 @@
     {
       "id": "2026-04-25-tech-debt-cleanup-impl.task-4",
       "plan": "2026-04-25-tech-debt-cleanup-impl",
-      "title": "Task 4: Announce 3D vs planar distance — escalate to user",
+      "title": "Task 4: Announce 3D vs planar distance \u2014 escalate to user",
       "checkbox_line": 242,
       "deps": [
         "2026-04-25-tech-debt-cleanup-impl.task-3"
@@ -2784,7 +2827,7 @@
     {
       "id": "2026-04-25-tech-debt-cleanup-impl.task-5",
       "plan": "2026-04-25-tech-debt-cleanup-impl",
-      "title": "Task 5: Per-tick alloc in `NeighborSource<K>` — add SimScratch slot",
+      "title": "Task 5: Per-tick alloc in `NeighborSource<K>` \u2014 add SimScratch slot",
       "checkbox_line": 274,
       "deps": [
         "2026-04-25-tech-debt-cleanup-impl.task-4"
@@ -2828,7 +2871,7 @@
     {
       "id": "2026-04-25-tech-debt-cleanup-impl.task-7",
       "plan": "2026-04-25-tech-debt-cleanup-impl",
-      "title": "Task 7: Passive triggers spec mismatch — escalate to user via `pending-decisions.md`",
+      "title": "Task 7: Passive triggers spec mismatch \u2014 escalate to user via `pending-decisions.md`",
       "checkbox_line": 393,
       "deps": [
         "2026-04-25-tech-debt-cleanup-impl.task-6"
@@ -2934,7 +2977,7 @@
     {
       "id": "2026-04-25-theory-of-mind-impl.task-4",
       "plan": "2026-04-25-theory-of-mind-impl",
-      "title": "Task 4: DSL grammar extension — `beliefs(observer).observe(target) with { ... }` mutation primitive",
+      "title": "Task 4: DSL grammar extension \u2014 `beliefs(observer).observe(target) with { ... }` mutation primitive",
       "checkbox_line": 400,
       "deps": [
         "2026-04-25-theory-of-mind-impl.task-3"
@@ -3022,7 +3065,7 @@
     {
       "id": "2026-04-25-theory-of-mind-impl.task-8",
       "plan": "2026-04-25-theory-of-mind-impl",
-      "title": "Task 8: DSL grammar — `beliefs(self).about(target).<field>` + variants",
+      "title": "Task 8: DSL grammar \u2014 `beliefs(self).about(target).<field>` + variants",
       "checkbox_line": 690,
       "deps": [
         "2026-04-25-theory-of-mind-impl.task-7"
@@ -3110,7 +3153,7 @@
     {
       "id": "2026-04-25-theory-of-mind-impl.task-12",
       "plan": "2026-04-25-theory-of-mind-impl",
-      "title": "Task 12: Parity sweep — confirm canonical fixture unaffected",
+      "title": "Task 12: Parity sweep \u2014 confirm canonical fixture unaffected",
       "checkbox_line": 936,
       "deps": [
         "2026-04-25-theory-of-mind-impl.task-11"
@@ -3229,29 +3272,10 @@
       "retry_count": 0
     },
     {
-      "id": "roadmap-plan-4-debug-trace-runtime-23.plan_writer",
+      "id": "roadmap-plan-5be-remaining-computebackend-phases.plan_writer",
       "plan": null,
-      "roadmap_parent": "roadmap-plan-4-debug-trace-runtime-23",
-      "title": "Write plan for: Plan 4 — debug & trace runtime (§23)",
-      "checkbox_line": null,
-      "deps": [],
-      "blocks": [],
-      "status": "pending",
-      "steps_total": 0,
-      "steps_done": 0,
-      "owner_class": "plan-writer",
-      "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
-      "retry_count": 0
-    },
-    {
-      "id": "roadmap-plan-5-computebackend-trait-extraction-24.plan_writer",
-      "plan": null,
-      "roadmap_parent": "roadmap-plan-5-computebackend-trait-extraction-24",
-      "title": "Write plan for: Plan 5 — `ComputeBackend` trait extraction (§24)",
+      "roadmap_parent": "roadmap-plan-5be-remaining-computebackend-phases",
+      "title": "Write plan for: Plan 5b\u2013e \u2014 Remaining ComputeBackend phases",
       "checkbox_line": null,
       "deps": [],
       "blocks": [],
@@ -3270,7 +3294,7 @@
       "id": "roadmap-plan-6-gpubackend-foundation.plan_writer",
       "plan": null,
       "roadmap_parent": "roadmap-plan-6-gpubackend-foundation",
-      "title": "Write plan for: Plan 6 — `GpuBackend` foundation",
+      "title": "Write plan for: Plan 6 \u2014 `GpuBackend` foundation",
       "checkbox_line": null,
       "deps": [],
       "blocks": [],
@@ -3289,7 +3313,7 @@
       "id": "roadmap-plan-7-per-kernel-gpu-porting-under-the-trait.plan_writer",
       "plan": null,
       "roadmap_parent": "roadmap-plan-7-per-kernel-gpu-porting-under-the-trait",
-      "title": "Write plan for: Plan 7+ — per-kernel GPU porting under the trait",
+      "title": "Write plan for: Plan 7+ \u2014 per-kernel GPU porting under the trait",
       "checkbox_line": null,
       "deps": [],
       "blocks": [],
