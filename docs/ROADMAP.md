@@ -22,8 +22,6 @@
   Renames `SimBackend` → `ComputeBackend`, extends with mask-fill methods, threads through emit_step. `plans/2026-04-25-plan-5a-computebackend-mask-fill-impl.md`. Phases 5b-e (GPU impl, policy backend, full kernel-dispatch surface) pending.
 - **DSL Authoring Engine — IR interpreter (P1b)**
   Visitor-pattern interpreter on top of `dsl_ast`; `interpreted-rules` cargo feature for parity gate. `plans/2026-04-22-dsl-ast-extraction.md`, `plans/2026-04-22-ir-interpreter.md`.
-- **Theory-of-mind Phase 1 (full belief state)**
-  `BeliefState` + `BoundedMap<K, V, N>` SoA, belief-update cascade, per-tick decay, `beliefs(self).about(target).<field>` scoring grammar. `plans/2026-04-25-theory-of-mind-impl.md`.
 - **Combined tech-debt cleanup (~8 items)**
   Combat fixtures, LazyView wiring, NeighborSource alloc, PolicyBackend zero-alloc, plus 3 escalation items. `plans/2026-04-25-tech-debt-cleanup-impl.md`.
 
@@ -54,7 +52,7 @@ Subsystems where parser/resolver/storage scaffolding has landed but cascade rule
 - **Relationships** — DSL stubs landed (commit `76dcdbdc`); pair-wise sentiment + decay pending.
 - **Groups** — DSL stubs landed (commit `2b882c59`); aggregate pool + standing view pending.
 - **Quests** — DSL stubs landed (commit `16a857ae`); `AggregatePool<Quest>` + lifecycle handlers pending.
-- **Theory-of-mind** — DSL stubs landed (commit `63fa6b64`); `believed_knowledge` + per-bit volatility pending.
+- **Theory-of-mind** — DSL stubs landed (commit `63fa6b64`); Phase 1 (full belief state) landed 2026-04-26 across plan `plans/2026-04-25-theory-of-mind-impl.md`; Phase 2 (second-order, terrain LOS, lying, trust) deferred.
 - **Terrain** — MVP `TerrainQuery` trait seam in `crates/engine/src/terrain.rs` (commit `856fe171`); voxel adapter + 3D walkability pending.
 
 ## Deferred world-sim subsystems (no work yet)
