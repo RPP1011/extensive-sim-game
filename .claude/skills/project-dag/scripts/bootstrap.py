@@ -103,7 +103,7 @@ def parse_plan(path: Path) -> dict:
     tasks: list[dict] = []
     current_task: dict | None = None
     current_steps: list[bool] = []  # collected for current_task
-    task_header_re = re.compile(r"^### Task (\d+):\s*(.+?)\s*$")
+    task_header_re = re.compile(r"^### Task ([A-Za-z]?\d+):\s*(.+?)\s*$")
     step_re = re.compile(r"^- \[([ x])\] \*\*(?:Step|Task) \d+:\s*(.+?)\*\*\s*$")
 
     def finalize(task: dict | None, steps: list[bool]) -> None:
@@ -125,7 +125,7 @@ def parse_plan(path: Path) -> dict:
             finalize(current_task, current_steps)
             current_steps = []
             current_task = {
-                "id": f"{plan_id}.task-{int(h.group(1))}",
+                "id": f"{plan_id}.task-{h.group(1)}",
                 "plan": plan_id,
                 "title": f"Task {h.group(1)}: {h.group(2).strip()}",
                 "checkbox_line": lineno,

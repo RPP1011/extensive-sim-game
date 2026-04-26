@@ -16,8 +16,6 @@
   Single-dispatch tick path; perf-sweep done at N=200k, optimization ongoing. `plans/gpu_megakernel_plan.md`, `plans/gpu_megakernel_perf.md`.
 - **GPU cold-state replay (Subsystem 2) — Phases 2–4**
   Phase 1 (DSL-compiler view annotations) done; Phase 2 (chronicle) done; Phase 3 (gold + standing) done; Phases 2–4 umbrella plan kept for future per-phase plans. `plans/2026-04-22-gpu-cold-state-replay.md`.
-- **Plan 5b–e — Remaining ComputeBackend phases**
-  Cascade dispatch + view fold + scoring/apply through backend, plus real GPU kernel dispatch. Successor to Plan 5a (landed). `plans/2026-04-26-plan-5b-e-computebackend-remaining-impl.md`.
 - **Subsystem 3 — GPU ability evaluation**
   `pick_ability` kernel + `ability::tag(TAG)` scoring grammar + `per_ability` row type per `spec/engine.md` §11. The one genuinely-missing GPU kernel per the 2026-04-26 audit. `plans/2026-04-26-subsystem-3-ability-eval-impl.md`.
 
@@ -31,7 +29,7 @@
 ## Engine plans not yet written
 
 - **Plan 6 — `GpuBackend` foundation**
-  Bridge from `ComputeBackend` trait to `engine_gpu` primitives. Prerequisite: Plan 5b–e complete.
+  Bridge from `ComputeBackend` trait to `engine_gpu` primitives. Prerequisite: Plan 5b–e (landed 2026-04-26).
 
 ## Partially landed (DSL stubs / MVP seam done; behaviour attachment pending)
 
