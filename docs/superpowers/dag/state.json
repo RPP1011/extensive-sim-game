@@ -3220,15 +3220,22 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-5"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 6,
-      "steps_done": 0,
+      "steps_done": 6,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "6920520d",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS"
+        },
+        "note": "Grammar landed across AST/parser/IR/resolver. 4 tests PASS (basic, single-field, all-fields, unknown-field-rejection). Emitters return Unsupported for now — T5 scope. UnknownBeliefField error includes valid field list."
+      },
+      "started_at": "2026-04-26T07:49:05Z",
+      "completed_at": "2026-04-26T07:56:51Z",
       "retry_count": 0
     },
     {
@@ -3566,9 +3573,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T07:46:58Z",
-    "iterations_completed": 29,
-    "tasks_closed": 26,
+    "last_iteration_at": "2026-04-26T07:56:51Z",
+    "iterations_completed": 30,
+    "tasks_closed": 27,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

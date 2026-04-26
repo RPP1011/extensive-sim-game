@@ -404,7 +404,7 @@ git -c core.hooksPath= commit -am "feat(dsl): emit BeliefState shape + belief co
 - Modify: `crates/dsl_compiler/src/ir.rs` — new IR node `IrBeliefObserve`
 - Modify: `crates/dsl_compiler/src/resolve.rs` — resolve target/field references
 
-- [ ] **Step 1: Extend lexer with `beliefs` keyword + `observe` method.**
+- [x] **Step 1: Extend lexer with `beliefs` keyword + `observe` method.**
 
 ```bash
 grep -n "keyword\|reserved" crates/dsl_compiler/src/parser.rs | head
@@ -412,7 +412,7 @@ grep -n "keyword\|reserved" crates/dsl_compiler/src/parser.rs | head
 
 Add `beliefs` to the keyword list. (Method names like `observe`, `about`, `confidence` are typically free identifiers.)
 
-- [ ] **Step 2: Add grammar productions.**
+- [x] **Step 2: Add grammar productions.**
 
 In `parser.rs`:
 
@@ -425,7 +425,7 @@ field_assign := identifier ":" expr
 
 This is a statement form (returns no value); it goes in physics-rule body grammar, not expression grammar.
 
-- [ ] **Step 3: Add IR node.**
+- [x] **Step 3: Add IR node.**
 
 ```rust
 // in ir.rs
@@ -439,11 +439,11 @@ pub enum IrPhysicsStmt {
 }
 ```
 
-- [ ] **Step 4: Add resolver pass.**
+- [x] **Step 4: Add resolver pass.**
 
 In `resolve.rs`: each field assignment must match a field on `BeliefState` declared in DSL. Cross-reference + error on misspellings.
 
-- [ ] **Step 5: Unit-test the grammar.**
+- [x] **Step 5: Unit-test the grammar.**
 
 `crates/dsl_compiler/tests/parser_belief.rs`:
 
@@ -468,7 +468,7 @@ fn parses_belief_mutation() {
 }
 ```
 
-- [ ] **Step 6: Run + commit.**
+- [x] **Step 6: Run + commit.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p dsl_compiler --test parser_belief
