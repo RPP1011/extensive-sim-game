@@ -68,4 +68,14 @@ impl ComputeBackend for SerialBackend {
     ) {
         cascade.run_fixed_point(state, views, events);
     }
+
+    fn view_fold(
+        &mut self,
+        views: &mut Self::Views,
+        events: &EventRing<Self::Event>,
+        events_before: usize,
+        tick: u32,
+    ) {
+        views.fold_all(events, events_before, tick);
+    }
 }

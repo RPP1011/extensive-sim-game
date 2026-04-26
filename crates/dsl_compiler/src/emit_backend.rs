@@ -65,6 +65,16 @@ pub fn emit_backend(source_file: Option<&str>) -> String {
     writeln!(out, "    ) {{").unwrap();
     writeln!(out, "        cascade.run_fixed_point(state, views, events);").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    fn view_fold(").unwrap();
+    writeln!(out, "        &mut self,").unwrap();
+    writeln!(out, "        views:         &mut Self::Views,").unwrap();
+    writeln!(out, "        events:        &EventRing<Self::Event>,").unwrap();
+    writeln!(out, "        events_before: usize,").unwrap();
+    writeln!(out, "        tick:          u32,").unwrap();
+    writeln!(out, "    ) {{").unwrap();
+    writeln!(out, "        views.fold_all(events, events_before, tick);").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
     out
 }
