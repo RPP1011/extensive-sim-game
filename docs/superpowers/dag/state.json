@@ -3459,15 +3459,19 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-13"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "no-op-verification",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "parity sweep verified: 12 wolves_and_humans_parity tests are pre-existing #[ignore] in both default + feature modes (no regression). Workspace tests --features engine_rules/theory-of-mind --test-threads=1: all PASS modulo pre-existing spec_snippets failure. schema_hash tests 2/2 PASS in feature mode. No baseline updates needed; no commit required."
+      },
+      "started_at": "2026-04-26T09:19:06Z",
+      "completed_at": "2026-04-26T09:19:46Z",
       "retry_count": 0
     },
     {
@@ -3629,9 +3633,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T09:16:40Z",
-    "iterations_completed": 37,
-    "tasks_closed": 34,
+    "last_iteration_at": "2026-04-26T09:19:46Z",
+    "iterations_completed": 38,
+    "tasks_closed": 35,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

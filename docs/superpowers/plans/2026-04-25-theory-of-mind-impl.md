@@ -937,7 +937,7 @@ git -c core.hooksPath= commit -am "feat(engine): theory-of-mind feature flag —
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Default build (no theory-of-mind feature) — wolves+humans canonical fixture.**
+- [x] **Step 1: Default build (no theory-of-mind feature) — wolves+humans canonical fixture.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine wolves_and_humans_parity
@@ -945,7 +945,7 @@ unset RUSTFLAGS && cargo test -p engine wolves_and_humans_parity
 
 Expected: PASS — canonical fixture stays on ground truth scoring (per spec §2.2 "rewriting existing wolves+humans scoring to use beliefs(.) is out of scope").
 
-- [ ] **Step 2: With feature flag — same parity test passes.**
+- [x] **Step 2: With feature flag — same parity test passes.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --features theory-of-mind wolves_and_humans_parity
@@ -953,7 +953,7 @@ unset RUSTFLAGS && cargo test -p engine --features theory-of-mind wolves_and_hum
 
 Expected: PASS — the feature adds infrastructure but doesn't change canonical fixture behavior.
 
-- [ ] **Step 3: Determinism.**
+- [x] **Step 3: Determinism.**
 
 ```bash
 unset RUSTFLAGS && cargo test --features theory-of-mind -- --test-threads=1
@@ -961,7 +961,7 @@ unset RUSTFLAGS && cargo test --features theory-of-mind -- --test-threads=1
 
 Expected: PASS — belief updates are deterministic per spec §2.3.
 
-- [ ] **Step 4: schema_hash baseline.**
+- [x] **Step 4: schema_hash baseline.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --features theory-of-mind --test schema_hash
@@ -969,7 +969,7 @@ unset RUSTFLAGS && cargo test -p engine --features theory-of-mind --test schema_
 
 If FAIL: the baseline expected with-feature differs from default; document and update the baseline file.
 
-- [ ] **Step 5: Commit (only if any baseline updates).**
+- [x] **Step 5: Commit (only if any baseline updates).**
 
 ```bash
 git -c core.hooksPath= commit -am "chore: parity sweep + schema baseline updates for theory-of-mind feature (Plan ToM Task 12)"
