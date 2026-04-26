@@ -214,7 +214,7 @@ git commit -m "feat(dsl_compiler,engine_rules): emit SerialBackend::cascade_disp
 - Modify: `crates/dsl_compiler/src/emit_step.rs`
 - Regenerated: `crates/engine_rules/src/step.rs`
 
-- [ ] **Step 1: Locate the direct `cascade.run_fixed_point` call in the emitted string.**
+- [x] **Step 1: Locate the direct `cascade.run_fixed_point` call in the emitted string.**
 
 In `crates/dsl_compiler/src/emit_step.rs`, the raw string literal around line 147 contains:
 
@@ -222,7 +222,7 @@ In `crates/dsl_compiler/src/emit_step.rs`, the raw string literal around line 14
     cascade.run_fixed_point(state, views, events);
 ```
 
-- [ ] **Step 2: Replace the direct call with backend routing.**
+- [x] **Step 2: Replace the direct call with backend routing.**
 
 In the raw string literal inside `emit_step`, change:
 
@@ -244,13 +244,13 @@ to:
     let _ = events_before; // reserved for future telemetry
 ```
 
-- [ ] **Step 3: Regenerate step.rs.**
+- [x] **Step 3: Regenerate step.rs.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
 ```
 
-- [ ] **Step 4: Run compile-dsl --check to confirm round-trip idempotence.**
+- [x] **Step 4: Run compile-dsl --check to confirm round-trip idempotence.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl --check
@@ -258,7 +258,7 @@ cargo run --bin xtask -- compile-dsl --check
 
 Expected: `OK — all generated files up to date`.
 
-- [ ] **Step 5: Build + test (engine_rules only; engine_gpu will still fail).**
+- [x] **Step 5: Build + test (engine_rules only; engine_gpu will still fail).**
 
 ```bash
 cargo build -p engine_rules 2>&1 | grep -E "^error" | head -10
@@ -267,7 +267,7 @@ cargo test -p engine_rules 2>&1 | tail -5
 
 Expected: build SUCCESS, tests PASS.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add crates/dsl_compiler/src/emit_step.rs crates/engine_rules/src/step.rs
