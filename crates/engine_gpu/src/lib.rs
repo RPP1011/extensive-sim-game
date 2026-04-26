@@ -387,6 +387,16 @@ impl ComputeBackend for GpuBackend {
         // Phase 5b stub: CPU pass-through. Plan 5e wires GPU cascade kernel.
         cascade.run_fixed_point(state, views, events);
     }
+
+    fn view_fold(
+        &mut self,
+        _views:         &mut Self::Views,
+        _events:        &EventRing<Self::Event>,
+        _events_before: usize,
+        _tick:          u32,
+    ) {
+        // Phase 5c stub: no-op. Plan 5e dispatches GPU fold kernels via view_storage.
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -2804,6 +2814,16 @@ impl ComputeBackend for GpuBackend {
     ) {
         // Phase 5b stub: CPU pass-through. Plan 5e wires GPU cascade kernel.
         cascade.run_fixed_point(state, views, events);
+    }
+
+    fn view_fold(
+        &mut self,
+        _views:         &mut Self::Views,
+        _events:        &EventRing<Self::Event>,
+        _events_before: usize,
+        _tick:          u32,
+    ) {
+        // Phase 5c stub: no-op. Plan 5e dispatches GPU fold kernels via view_storage.
     }
 }
 
