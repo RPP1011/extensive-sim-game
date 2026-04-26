@@ -467,7 +467,7 @@ git -c core.hooksPath= commit -am "feat(engine_gpu): GpuBackend stub mask-method
 **Files:**
 - Create: `crates/engine/tests/backend_mask_parity.rs`
 
-- [ ] **Step 1: Write the test.**
+- [x] **Step 1: Write the test.**
 
 ```rust
 //! Cross-backend parity for mask-fill. Phase 1 of Plan 5a establishes the
@@ -533,7 +533,7 @@ fn gpu_stub_matches_serial_mask_fill() {
 }
 ```
 
-- [ ] **Step 2: Run.**
+- [x] **Step 2: Run.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test backend_mask_parity
@@ -542,7 +542,7 @@ unset RUSTFLAGS && cargo test -p engine --features gpu --test backend_mask_parit
 
 Expected: all PASS.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "test(engine): backend mask-fill parity (Serial == GpuBackend stub) (Plan 5a Task 8)"
