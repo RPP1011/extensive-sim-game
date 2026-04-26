@@ -222,7 +222,7 @@ If a critic returns FAIL, **stop and report**. Don't bypass.
 **Files:**
 - Modify: `crates/engine/src/debug/trace_mask.rs`
 
-- [ ] **Step 1: Implement `TraceMaskCollector`.**
+- [x] **Step 1: Implement `TraceMaskCollector`.**
 
 ```rust
 //! Per-tick mask buffer snapshot collector.
@@ -278,11 +278,11 @@ impl TraceMaskCollector {
 }
 ```
 
-- [ ] **Step 2: Add accessor methods on `MaskBuffer` if missing.**
+- [x] **Step 2: Add accessor methods on `MaskBuffer` if missing.**
 
 Check `crates/engine/src/mask.rs` for `pub fn bits(&self) -> &[bool]`, `n_agents()`, `n_kinds()`. If missing, add minimal accessors (don't change storage shape — read-only views over existing fields).
 
-- [ ] **Step 3: Write unit test.**
+- [x] **Step 3: Write unit test.**
 
 `crates/engine/tests/debug_trace_mask.rs`:
 
@@ -303,7 +303,7 @@ fn collector_rings_at_max_ticks() {
 }
 ```
 
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test debug_trace_mask
@@ -311,7 +311,7 @@ unset RUSTFLAGS && cargo test -p engine --test debug_trace_mask
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(engine/debug): trace_mask collector (Plan 4 Task 2)"
