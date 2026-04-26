@@ -19,7 +19,7 @@
 
 use std::time::Instant;
 
-use engine::backend::SimBackend;
+use engine::backend::ComputeBackend;
 use engine::cascade::CascadeRegistry;
 use engine_data::entities::CreatureType;
 use engine::event::EventRing;

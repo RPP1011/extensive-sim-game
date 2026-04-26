@@ -36,7 +36,7 @@ pub mod telemetry;
 pub mod trajectory;
 pub mod view;
 
-pub use backend::SimBackend;
+pub use backend::ComputeBackend;
 /// Re-export SimScratch from its new home so call sites that previously
 /// wrote `engine::step::SimScratch` can be updated to `engine::scratch::SimScratch`.
 pub use scratch::SimScratch;

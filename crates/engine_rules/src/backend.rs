@@ -2,7 +2,7 @@
 // Regenerate with `cargo run --bin xtask -- compile-dsl`.
 
 use crate::views::ViewRegistry;
-use engine::backend::SimBackend;
+use engine::backend::ComputeBackend;
 use engine::cascade::CascadeRegistry;
 use engine::debug::DebugConfig;
 use engine::event::EventRing;
@@ -11,13 +11,13 @@ use engine::scratch::SimScratch;
 use engine::state::SimState;
 use engine_data::events::Event;
 
-/// Serial (CPU) backend — thin `SimBackend` wrapper around
+/// Serial (CPU) backend — thin `ComputeBackend` wrapper around
 /// `engine_rules::step::step`. Constructed once and held for the duration
 /// of a combat tick loop; stateless beyond the `Copy`/`Default` marker.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SerialBackend;
 
-impl SimBackend for SerialBackend {
+impl ComputeBackend for SerialBackend {
     type Event = Event;
     type Views = ViewRegistry;
 

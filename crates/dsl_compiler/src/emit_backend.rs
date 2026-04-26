@@ -1,5 +1,5 @@
 //! Emission of `engine_rules/src/backend.rs` — the `SerialBackend` type that
-//! implements `engine::backend::SimBackend` by delegating to
+//! implements `engine::backend::ComputeBackend` by delegating to
 //! `engine_rules::step::step`.
 //!
 //! This file is almost entirely static; it exists as a compiler-owned
@@ -12,7 +12,7 @@ use std::fmt::Write;
 pub fn emit_backend(source_file: Option<&str>) -> String {
     let mut out = String::new();
     emit_header(&mut out, source_file);
-    writeln!(out, "use engine::backend::SimBackend;").unwrap();
+    writeln!(out, "use engine::backend::ComputeBackend;").unwrap();
     writeln!(out, "use engine::cascade::CascadeRegistry;").unwrap();
     writeln!(out, "use engine::debug::DebugConfig;").unwrap();
     writeln!(out, "use engine::event::EventRing;").unwrap();
@@ -22,13 +22,13 @@ pub fn emit_backend(source_file: Option<&str>) -> String {
     writeln!(out, "use engine_data::events::Event;").unwrap();
     writeln!(out, "use crate::views::ViewRegistry;").unwrap();
     writeln!(out).unwrap();
-    writeln!(out, "/// Serial (CPU) backend — thin `SimBackend` wrapper around").unwrap();
+    writeln!(out, "/// Serial (CPU) backend — thin `ComputeBackend` wrapper around").unwrap();
     writeln!(out, "/// `engine_rules::step::step`. Constructed once and held for the duration").unwrap();
     writeln!(out, "/// of a combat tick loop; stateless beyond the `Copy`/`Default` marker.").unwrap();
     writeln!(out, "#[derive(Debug, Default, Clone, Copy)]").unwrap();
     writeln!(out, "pub struct SerialBackend;").unwrap();
     writeln!(out).unwrap();
-    writeln!(out, "impl SimBackend for SerialBackend {{").unwrap();
+    writeln!(out, "impl ComputeBackend for SerialBackend {{").unwrap();
     writeln!(out, "    type Event = Event;").unwrap();
     writeln!(out, "    type Views = ViewRegistry;").unwrap();
     writeln!(out).unwrap();

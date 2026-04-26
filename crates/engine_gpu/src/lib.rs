@@ -42,7 +42,7 @@
 //! fail on headless CI without a GPU.
 
 use engine::{
-    backend::SimBackend,
+    backend::ComputeBackend,
     cascade::CascadeRegistry,
     event::EventRing,
     policy::PolicyBackend,
@@ -192,7 +192,7 @@ pub struct GpuBackend {
     queue: wgpu::Queue,
 
     /// Sync-path state: kernels + view storage + diagnostic fields used
-    /// exclusively by `SimBackend::step`. See
+    /// exclusively by `ComputeBackend::step`. See
     /// `backend::sync_ctx::SyncPathContext`.
     pub sync: crate::backend::SyncPathContext,
 
@@ -348,7 +348,7 @@ impl GpuBackend {
 }
 
 #[cfg(not(feature = "gpu"))]
-impl SimBackend for GpuBackend {
+impl ComputeBackend for GpuBackend {
     type Event = engine_data::events::Event;
     type Views = ();
 
@@ -710,7 +710,7 @@ impl GpuBackend {
 
     /// Set iff the most recent `step` fell back to the CPU cascade
     /// (init or dispatch error). The backend records the error string
-    /// rather than returning it so the `SimBackend::step` signature
+    /// rather than returning it so the `ComputeBackend::step` signature
     /// stays byte-for-byte compatible with `CpuBackend`.
     pub fn last_cascade_error(&self) -> Option<&str> {
         self.sync.last_cascade_error.as_deref()
@@ -887,7 +887,7 @@ impl GpuBackend {
 
     /// Phase 9 (task 195) — batched step API. Runs `n_ticks` ticks in
     /// a row without any CPU-side work between them beyond what
-    /// `SimBackend::step` already does per tick. The API exists to
+    /// `ComputeBackend::step` already does per tick. The API exists to
     /// give callers a single entry point for "just advance the sim N
     /// ticks"; the per-tick pipeline still submits + waits on GPU work
     /// individually.
@@ -927,7 +927,7 @@ impl GpuBackend {
     /// ### Unused parameters (batch path)
     ///
     /// * `scratch` — kept for signature compatibility with the sync
-    ///   `SimBackend::step` trait. The resident kernels don't use the
+    ///   `ComputeBackend::step` trait. The resident kernels don't use the
     ///   CPU scratch buffers.
     /// * `events` — the batch path does NOT push to the CPU event ring
     ///   per-tick. GPU-emitted events stay resident in the physics
@@ -942,7 +942,7 @@ impl GpuBackend {
     ///
     /// If resident init fails (GPU allocation error, cascade DSL load
     /// failure, etc.) the batch path falls back to calling the sync
-    /// `SimBackend::step` N times so the tick loop still advances.
+    /// `ComputeBackend::step` N times so the tick loop still advances.
     /// Mid-batch kernel failures panic via `expect(...)` — the batch
     /// path is committed once init succeeds.
     pub fn step_batch<B: PolicyBackend>(
@@ -959,7 +959,7 @@ impl GpuBackend {
                 "engine_gpu::step_batch: resident init failed ({e}), falling back to sync loop"
             );
             for _ in 0..n_ticks {
-                <Self as SimBackend>::step(self, state, scratch, events, policy, cascade);
+                <Self as ComputeBackend>::step(self, state, scratch, events, policy, cascade);
             }
             return;
         }
@@ -2397,7 +2397,7 @@ impl GpuBackend {
 }
 
 #[cfg(feature = "gpu")]
-impl SimBackend for GpuBackend {
+impl ComputeBackend for GpuBackend {
     type Event = Event;
     type Views = ();
 

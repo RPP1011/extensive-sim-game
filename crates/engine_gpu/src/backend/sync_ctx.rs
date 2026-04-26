@@ -1,5 +1,5 @@
 //! Sync-path state on the GPU backend — kernels and buffers used
-//! exclusively by `SimBackend::step()`.
+//! exclusively by `ComputeBackend::step()`.
 
 #![cfg(feature = "gpu")]
 
