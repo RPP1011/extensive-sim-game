@@ -235,12 +235,100 @@ def emit_meta_tasks(roadmap: list[dict], plans: list[dict]) -> list[dict]:
     return meta
 
 
+def merge_prior_state(tasks: list[dict], prior_path: Path) -> list[dict]:
+    """Reconcile current task list with prior state.json, preserving runtime fields."""
+    if not prior_path.exists():
+        return tasks
+    try:
+        prior = json.loads(prior_path.read_text())
+    except json.JSONDecodeError:
+        return tasks
+    prior_tasks = {t["id"]: t for t in prior.get("tasks", [])}
+    for t in tasks:
+        old = prior_tasks.get(t["id"])
+        if old:
+            for field in ("completed_commit", "critic_verdicts", "started_at", "completed_at", "retry_count"):
+                if old.get(field):
+                    t[field] = old[field]
+            # If plan-file says done and prior also done, keep commit hash
+            if old.get("status") == "done" and t["status"] == "pending":
+                # Plan file regressed (unlikely) — trust state.json
+                t["status"] = "done"
+    return tasks
+
+
+def write_state(roadmap, plans, all_tasks, out: Path):
+    """Write state.json with derived rollup status for plans and roadmap."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    state = {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "roadmap": [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "tier": r["tier"],
+                "spec_ref": r["spec_ref"],
+                "plans": [p["id"] for p in plans if any(ref in p["file"] for ref in r["plan_refs"])],
+                "status": "pending",  # derived below
+            }
+            for r in roadmap
+        ],
+        "plans": [
+            {k: v for k, v in p.items() if k != "tasks"}
+            for p in plans
+        ],
+        "tasks": all_tasks,
+        "run": {
+            "started_at": None,
+            "last_iteration_at": None,
+            "iterations_completed": 0,
+            "tasks_closed": 0,
+            "tasks_blocked": 0,
+            "current_phase": "idle",
+            "next_wake_scheduled": None,
+        },
+    }
+    # Derive plan + roadmap status (idempotent rollup)
+    by_plan: dict[str, list[dict]] = {}
+    for t in all_tasks:
+        by_plan.setdefault(t.get("plan") or "_meta", []).append(t)
+    for p in state["plans"]:
+        plan_tasks = by_plan.get(p["id"], [])
+        done = sum(1 for t in plan_tasks if t["status"] in ("done", "deferred", "skipped"))
+        p["tasks_done"] = done
+        if plan_tasks and done == len(plan_tasks):
+            p["status"] = "done"
+        elif any(t["status"] == "blocked" for t in plan_tasks):
+            p["status"] = "blocked"
+        elif done > 0 or any(t["status"] == "in_progress" for t in plan_tasks):
+            p["status"] = "in_progress"
+        else:
+            p["status"] = "pending"
+
+    out.write_text(json.dumps(state, indent=2) + "\n")
+    return state
+
+
 if __name__ == "__main__":
     roadmap = parse_roadmap(ROADMAP)
     plans = parse_all_plans(PLANS_DIR)
     meta = emit_meta_tasks(roadmap, plans)
-    print(f"Roadmap items: {len(roadmap)}")
-    print(f"Plans: {len(plans)}")
-    print(f"Meta-tasks (plan-writer/spec-needed): {len(meta)}")
-    for m in meta:
-        print(f"  {m['id']} ({m['owner_class']}): {m['title']}")
+
+    all_tasks: list[dict] = []
+    for p in plans:
+        all_tasks.extend(p["tasks"])
+    all_tasks.extend(meta)
+
+    all_tasks = merge_prior_state(all_tasks, STATE_FILE)
+    state = write_state(roadmap, plans, all_tasks, STATE_FILE)
+
+    print(f"Wrote {STATE_FILE}")
+    print(f"  roadmap items: {len(state['roadmap'])}")
+    print(f"  plans: {len(state['plans'])}")
+    print(f"  tasks: {len(state['tasks'])}")
+    by_owner: dict[str, int] = {}
+    for t in state["tasks"]:
+        by_owner[t["owner_class"]] = by_owner.get(t["owner_class"], 0) + 1
+    for k, v in sorted(by_owner.items()):
+        print(f"    {k}: {v}")
