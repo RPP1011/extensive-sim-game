@@ -5,6 +5,7 @@ pub mod ability;
 pub mod aggregate;
 pub mod backend;
 pub mod cascade;
+pub mod debug;
 pub mod channel;
 pub mod creature;
 pub mod event;

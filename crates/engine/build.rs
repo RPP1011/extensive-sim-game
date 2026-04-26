@@ -39,6 +39,7 @@ const ALLOWED_DIRS: &[&str] = &[
     "ability",
     "aggregate",
     "cascade",
+    "debug",                  // NEW: Plan 4 — debug+trace runtime per spec/runtime.md §24
     "event",
     "invariant",
     "obs",
