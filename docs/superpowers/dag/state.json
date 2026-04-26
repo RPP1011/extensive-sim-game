@@ -2991,14 +2991,14 @@
       "blocks": [
         "2026-04-25-tech-debt-cleanup-impl.task-4"
       ],
-      "status": "pending",
+      "status": "deferred",
       "steps_total": 0,
       "steps_done": 0,
       "owner_class": "implementer",
-      "blocked_reason": null,
+      "blocked_reason": "spec-needed: collision detection design decision; escalated to pending-decisions.md",
       "completed_commit": null,
       "critic_verdicts": {},
-      "started_at": null,
+      "started_at": "2026-04-26T07:06:10Z",
       "completed_at": null,
       "retry_count": 0
     },
@@ -3531,8 +3531,8 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T07:00:54Z",
-    "iterations_completed": 20,
+    "last_iteration_at": "2026-04-26T07:06:10Z",
+    "iterations_completed": 21,
     "tasks_closed": 20,
     "tasks_blocked": 0,
     "current_phase": "dispatching",

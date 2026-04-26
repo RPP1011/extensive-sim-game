@@ -50,3 +50,21 @@ If `/loop /dag-tick` continues, it will dispatch sonnet subagents to "implement"
 ---
 
 <!-- entries appended below by the agent -->
+
+## 2026-04-26 — spec-needed: Collision detection (Tech-Debt T3)
+
+**Roadmap source:** `docs/engine/status.md` open question #11
+
+**Current state:** Agents can co-occupy a `Vec3`. Visualization works around via vertical voxel stacking (1 unit elevated per co-located agent).
+
+**Decision required:**
+- (a) Add collision detection as a real engine primitive (movement
+  resolution rejects moves that would collide; emits `MoveBlocked` event).
+  Cost: spatial-index queries on every movement; new event variant; non-trivial.
+- (b) Keep co-occupancy semantics; document as intentional. Agents are
+  point particles; collision is a rendering/visualization concern only.
+- (c) Hybrid: collision detection only for specific kinds (e.g., NPCs
+  collide with structures but not other NPCs).
+
+**Status:** awaiting user
+**To proceed:** add `**APPROVED:** [option]` to this section.
