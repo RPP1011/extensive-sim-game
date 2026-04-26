@@ -109,7 +109,7 @@ Phases are strictly serial (each builds on the previous). Within a phase, steps 
 **Files:**
 - Modify: `crates/engine/src/backend.rs`
 
-- [ ] **Step 1: Read the current trait to confirm the import set.**
+- [x] **Step 1: Read the current trait to confirm the import set.**
 
 ```bash
 cat crates/engine/src/backend.rs
@@ -117,7 +117,7 @@ cat crates/engine/src/backend.rs
 
 Confirm imports include `CascadeRegistry`, `EventRing`, `SimState`. They already do (line 15–18).
 
-- [ ] **Step 2: Add the `cascade_dispatch` method signature after `commit_mask`.**
+- [x] **Step 2: Add the `cascade_dispatch` method signature after `commit_mask`.**
 
 In `crates/engine/src/backend.rs`, after the `commit_mask` method (line 61), add:
 
@@ -136,7 +136,7 @@ In `crates/engine/src/backend.rs`, after the `commit_mask` method (line 61), add
     );
 ```
 
-- [ ] **Step 3: Build engine crate only to confirm the trait compiles.**
+- [x] **Step 3: Build engine crate only to confirm the trait compiles.**
 
 ```bash
 cargo build -p engine 2>&1 | grep -E "^error" | head -20
@@ -144,7 +144,7 @@ cargo build -p engine 2>&1 | grep -E "^error" | head -20
 
 Expected: errors only in downstream crates (`engine_rules`, `engine_gpu`) that must now impl the new method — NOT in `engine` itself.
 
-- [ ] **Step 4: Commit the trait extension.**
+- [x] **Step 4: Commit the trait extension.**
 
 ```bash
 git add crates/engine/src/backend.rs

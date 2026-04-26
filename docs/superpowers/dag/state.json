@@ -15,7 +15,7 @@
     },
     {
       "id": "roadmap-gpu-cold-state-replay-subsystem-2-phases-24",
-      "title": "GPU cold-state replay (Subsystem 2) \u2014 Phases 2\u20134",
+      "title": "GPU cold-state replay (Subsystem 2) — Phases 2–4",
       "tier": "active",
       "spec_ref": null,
       "plans": [
@@ -25,7 +25,7 @@
     },
     {
       "id": "roadmap-plan-5be-remaining-computebackend-phases",
-      "title": "Plan 5b\u2013e \u2014 Remaining ComputeBackend phases",
+      "title": "Plan 5b–e — Remaining ComputeBackend phases",
       "tier": "active",
       "spec_ref": null,
       "plans": [
@@ -35,7 +35,7 @@
     },
     {
       "id": "roadmap-subsystem-3-gpu-ability-evaluation",
-      "title": "Subsystem 3 \u2014 GPU ability evaluation",
+      "title": "Subsystem 3 — GPU ability evaluation",
       "tier": "active",
       "spec_ref": "engine.md",
       "plans": [
@@ -61,7 +61,7 @@
     },
     {
       "id": "roadmap-plan-6-gpubackend-foundation",
-      "title": "Plan 6 \u2014 `GpuBackend` foundation",
+      "title": "Plan 6 — `GpuBackend` foundation",
       "tier": "engine-plans-not-yet-written",
       "spec_ref": null,
       "plans": [],
@@ -81,7 +81,7 @@
     {
       "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
       "file": "docs/superpowers/plans/2026-04-26-plan-5b-e-computebackend-remaining-impl.md",
-      "title": "Plan 5b\u2013e (combined): Remaining ComputeBackend Phases \u2014 Implementation Plan",
+      "title": "Plan 5b–e (combined): Remaining ComputeBackend Phases — Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 19,
@@ -90,7 +90,7 @@
     {
       "id": "2026-04-26-subsystem-3-ability-eval-impl",
       "file": "docs/superpowers/plans/2026-04-26-subsystem-3-ability-eval-impl.md",
-      "title": "Subsystem 3 \u2014 GPU Ability Evaluation Implementation Plan",
+      "title": "Subsystem 3 — GPU Ability Evaluation Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 0,
@@ -99,7 +99,7 @@
     {
       "id": "gpu_megakernel_perf",
       "file": "docs/superpowers/plans/gpu_megakernel_perf.md",
-      "title": "GPU Megakernel Phase 8 \u2014 Perf Sweep + Crossover Measurement",
+      "title": "GPU Megakernel Phase 8 — Perf Sweep + Crossover Measurement",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 0,
@@ -125,15 +125,19 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-2"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "4c0f264",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "trait extended; intermediate state — engine_rules + engine_gpu missing impls (T2/T4 close)"
+      },
+      "started_at": "2026-04-26T21:55:08Z",
+      "completed_at": "2026-04-26T21:55:49Z",
       "retry_count": 0
     },
     {
@@ -572,7 +576,7 @@
       "id": "roadmap-plan-6-gpubackend-foundation.plan_writer",
       "plan": null,
       "roadmap_parent": "roadmap-plan-6-gpubackend-foundation",
-      "title": "Write plan for: Plan 6 \u2014 `GpuBackend` foundation",
+      "title": "Write plan for: Plan 6 — `GpuBackend` foundation",
       "checkbox_line": null,
       "deps": [],
       "blocks": [],
@@ -590,11 +594,11 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": null,
-    "iterations_completed": 0,
-    "tasks_closed": 0,
+    "last_iteration_at": "2026-04-26T21:55:49Z",
+    "iterations_completed": 1,
+    "tasks_closed": 1,
     "tasks_blocked": 0,
-    "current_phase": "idle",
+    "current_phase": "dispatching",
     "next_wake_scheduled": null
   }
 }
