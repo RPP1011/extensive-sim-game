@@ -191,6 +191,15 @@ pub fn step<B: PolicyBackend>(
             engine::debug::tick_stepper::Step::Abort => return,
         }
     }
+
+    // Agent history — record at TickEnd. The tick counter was already
+    // incremented in Phase 6, so we pass `state.tick.wrapping_sub(1)` to
+    // label the snapshot with the tick that just completed.
+    if let Some(history) = debug.agent_history.as_ref() {
+        if let Ok(mut h) = history.lock() {
+            h.record(state.tick.wrapping_sub(1), state);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,10 @@ pub struct DebugConfig {
     /// wrapper allows the caller to inspect samples after `step()` returns
     /// without holding a borrow across the tick boundary.
     pub tick_profile: Option<std::sync::Arc<std::sync::Mutex<tick_profile::TickProfile>>>,
-    pub agent_history: Option<agent_history::Filter>,
+    /// Per-agent state delta tracker. When `Some`, the `TickEnd` phase calls
+    /// `AgentHistory::record` inside the lock, capturing every alive agent's
+    /// observable state. The `Arc<Mutex<>>` wrapper lets the caller inspect
+    /// snapshots after `step()` returns without holding a borrow across ticks.
+    pub agent_history: Option<std::sync::Arc<std::sync::Mutex<agent_history::AgentHistory>>>,
     pub repro_bundle: Option<std::path::PathBuf>,
 }
