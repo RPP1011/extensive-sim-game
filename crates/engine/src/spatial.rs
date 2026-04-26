@@ -173,19 +173,27 @@ impl SpatialHash {
         }
     }
 
-    /// 3-D Euclidean radius query. Walk agents are gathered from cells in the
+    /// 3-D Euclidean radius query — fills `out` (cleared first) instead of
+    /// allocating. Walk agents are gathered from cells in the
     /// `cell_reach_for_radius`-sized neighbourhood around `center`; non-walk
     /// agents from the linear sidecar scan. Distance is checked against the
     /// agent's *current* `state.agent_pos` (the index records cells, not raw
-    /// positions). Returned `Vec<AgentId>` is sorted by `AgentId::raw()`
-    /// ascending so callers observe a bit-identical result regardless of
-    /// bucket-internal ordering.
-    pub fn within_radius(&self, state: &SimState, center: Vec3, radius: f32) -> Vec<AgentId> {
+    /// positions). `out` is sorted by `AgentId::raw()` ascending so callers
+    /// observe a bit-identical result regardless of bucket-internal ordering.
+    ///
+    /// Callers that own a `SimScratch` should pass `&mut scratch.neighbors_scratch`
+    /// to avoid a per-call heap allocation.
+    pub fn within_radius_into(
+        &self,
+        state: &SimState,
+        center: Vec3,
+        radius: f32,
+        out: &mut Vec<AgentId>,
+    ) {
+        out.clear();
         let r2 = radius * radius;
         let (cx, cy) = cell(center.x, center.y);
         let cell_reach = cell_reach_for_radius(radius);
-
-        let mut hits: Vec<AgentId> = Vec::new();
 
         // Cell-rect scan. Nested loops emit no per-cell-key Vec.
         for dx in -cell_reach..=cell_reach {
@@ -195,7 +203,7 @@ impl SpatialHash {
                     for &id in bucket.iter() {
                         if let Some(p) = state.agent_pos(id) {
                             if (p - center).length_squared() <= r2 {
-                                hits.push(id);
+                                out.push(id);
                             }
                         }
                     }
@@ -206,24 +214,48 @@ impl SpatialHash {
         for &id in &self.sidecar {
             if let Some(p) = state.agent_pos(id) {
                 if (p - center).length_squared() <= r2 {
-                    hits.push(id);
+                    out.push(id);
                 }
             }
         }
 
-        hits.sort_unstable_by_key(|id| id.raw());
+        out.sort_unstable_by_key(|id| id.raw());
+    }
+
+    /// 3-D Euclidean radius query. Walk agents are gathered from cells in the
+    /// `cell_reach_for_radius`-sized neighbourhood around `center`; non-walk
+    /// agents from the linear sidecar scan. Distance is checked against the
+    /// agent's *current* `state.agent_pos` (the index records cells, not raw
+    /// positions). Returned `Vec<AgentId>` is sorted by `AgentId::raw()`
+    /// ascending so callers observe a bit-identical result regardless of
+    /// bucket-internal ordering.
+    ///
+    /// Prefer `within_radius_into` when a reusable scratch buffer is available
+    /// to avoid a per-call heap allocation.
+    pub fn within_radius(&self, state: &SimState, center: Vec3, radius: f32) -> Vec<AgentId> {
+        let mut hits = Vec::new();
+        self.within_radius_into(state, center, radius, &mut hits);
         hits
     }
 
-    /// XY-only radius query. Z is ignored for both walkers and sidecar agents
-    /// — useful for area-of-effect logic that should apply across elevations
-    /// within an XY footprint.
-    pub fn within_planar(&self, state: &SimState, center: Vec3, radius: f32) -> Vec<AgentId> {
+    /// XY-only radius query — fills `out` (cleared first) instead of
+    /// allocating. Z is ignored for both walkers and sidecar agents — useful
+    /// for area-of-effect logic that should apply across elevations within an
+    /// XY footprint.
+    ///
+    /// Callers that own a `SimScratch` should pass `&mut scratch.neighbors_scratch`
+    /// to avoid a per-call heap allocation.
+    pub fn within_planar_into(
+        &self,
+        state: &SimState,
+        center: Vec3,
+        radius: f32,
+        out: &mut Vec<AgentId>,
+    ) {
+        out.clear();
         let r2 = radius * radius;
         let (cx, cy) = cell(center.x, center.y);
         let cell_reach = cell_reach_for_radius(radius);
-
-        let mut hits: Vec<AgentId> = Vec::new();
 
         for dx in -cell_reach..=cell_reach {
             for dy in -cell_reach..=cell_reach {
@@ -234,7 +266,7 @@ impl SpatialHash {
                             let ex = p.x - center.x;
                             let ey = p.y - center.y;
                             if ex * ex + ey * ey <= r2 {
-                                hits.push(id);
+                                out.push(id);
                             }
                         }
                     }
@@ -247,12 +279,23 @@ impl SpatialHash {
                 let ex = p.x - center.x;
                 let ey = p.y - center.y;
                 if ex * ex + ey * ey <= r2 {
-                    hits.push(id);
+                    out.push(id);
                 }
             }
         }
 
-        hits.sort_unstable_by_key(|id| id.raw());
+        out.sort_unstable_by_key(|id| id.raw());
+    }
+
+    /// XY-only radius query. Z is ignored for both walkers and sidecar agents
+    /// — useful for area-of-effect logic that should apply across elevations
+    /// within an XY footprint.
+    ///
+    /// Prefer `within_planar_into` when a reusable scratch buffer is available
+    /// to avoid a per-call heap allocation.
+    pub fn within_planar(&self, state: &SimState, center: Vec3, radius: f32) -> Vec<AgentId> {
+        let mut hits = Vec::new();
+        self.within_planar_into(state, center, radius, &mut hits);
         hits
     }
 

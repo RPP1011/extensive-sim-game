@@ -9,6 +9,7 @@
 // in `engine_rules::step::step` once Task 11 lands. Until then, callers that
 // previously drove `engine::step::step` are `#[ignore]`d (see test files).
 
+use crate::ids::AgentId;
 use crate::mask::{MaskBuffer, TargetMask};
 use crate::policy::Action;
 
@@ -28,15 +29,20 @@ pub struct SimScratch {
     pub target_mask: TargetMask,
     pub actions:     Vec<Action>,
     pub shuffle_idx: Vec<u32>,
+    /// Reusable scratch buffer for spatial neighbor queries. Callers pass
+    /// `&mut scratch.neighbors_scratch` to `SpatialHash::within_radius_into` /
+    /// `within_planar_into` to avoid a per-call heap allocation.
+    pub neighbors_scratch: Vec<AgentId>,
 }
 
 impl SimScratch {
     pub fn new(n_agents: usize) -> Self {
         Self {
-            mask:        MaskBuffer::new(n_agents),
-            target_mask: TargetMask::new(n_agents),
-            actions:     Vec::with_capacity(n_agents),
-            shuffle_idx: Vec::with_capacity(n_agents),
+            mask:              MaskBuffer::new(n_agents),
+            target_mask:       TargetMask::new(n_agents),
+            actions:           Vec::with_capacity(n_agents),
+            shuffle_idx:       Vec::with_capacity(n_agents),
+            neighbors_scratch: Vec::with_capacity(n_agents),
         }
     }
 }
