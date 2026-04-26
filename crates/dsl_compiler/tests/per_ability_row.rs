@@ -559,3 +559,27 @@ scoring {
     );
     assert_eq!(scoring.per_ability_rows[0].name, "pick_ability");
 }
+
+// ---------------------------------------------------------------------------
+// EMIT-CPU-1: emit_pick_ability_cpu produces valid Rust source for a minimal row
+// ---------------------------------------------------------------------------
+
+#[test]
+fn emit_pick_ability_cpu_produces_rust_for_minimal_row() {
+    const SRC: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    guard:  !ability::on_cooldown(ability)
+    score:  ability::tag(PHYSICAL)
+    target: nearest_hostile_in_range(ability::range)
+  }
+}
+"#;
+    let comp = dsl_compiler::compile(SRC).expect("compile ok");
+    let out = dsl_compiler::emit_scoring::emit_pick_ability_cpu(&comp.scoring[0])
+        .expect("emit should succeed");
+    assert!(out.contains("fn pick_ability"), "output should define pick_ability fn");
+    assert!(out.contains("ability_cooldowns"), "guard lowers to cooldown check");
+    assert!(out.contains("tag_value"), "score lowers to tag_value read");
+    assert!(out.contains("nearest_hostile_in_range"), "target clause present");
+}
