@@ -260,7 +260,7 @@ git -c core.hooksPath= commit -am "feat(engine/pool): BoundedMap<K, V, const N> 
 - Modify: `crates/dsl_compiler/src/emit_sim_state.rs` — handle `BoundedMap<K, V, N>` field type
 - Run: `cargo run --bin xtask -- compile-dsl`
 
-- [ ] **Step 1: Locate the DSL agent declaration.**
+- [x] **Step 1: Locate the DSL agent declaration.**
 
 ```bash
 grep -nE "^agent\s*\{|fields:|^\s*hp:|^\s*alive:" assets/sim/*.sim 2>/dev/null | head
@@ -268,7 +268,7 @@ grep -nE "^agent\s*\{|fields:|^\s*hp:|^\s*alive:" assets/sim/*.sim 2>/dev/null |
 
 Expected: a top-level `agent { fields: ... }` block, or per-creature-type field unions.
 
-- [ ] **Step 2: Add `cold_beliefs` field declaration.**
+- [x] **Step 2: Add `cold_beliefs` field declaration.**
 
 In the agent declaration:
 
@@ -282,7 +282,7 @@ agent {
 
 The `BoundedMap` and `BeliefState` types must be importable by the compiler. `BoundedMap` is a primitive (engine), `BeliefState` is an emitted shape (engine_data, see Task 3).
 
-- [ ] **Step 3: Update `emit_sim_state.rs` to handle the new field type.**
+- [x] **Step 3: Update `emit_sim_state.rs` to handle the new field type.**
 
 The emitter currently writes simple types like `SoaSlot<f32>` or `SoaSlot<bool>`. `BoundedMap<K, V, N>` is a const-generic type; emit:
 
@@ -292,11 +292,11 @@ pub cold_beliefs: SoaSlot<engine::pool::BoundedMap<engine::ids::AgentId, engine_
 
 Add a small recogniser for the `BoundedMap<K, V, N>` IR shape in the emitter; emit the corresponding Rust type.
 
-- [ ] **Step 4: Add `agent_cold_beliefs` accessor to emitted SimState.**
+- [x] **Step 4: Add `agent_cold_beliefs` accessor to emitted SimState.**
 
 The emitter already adds per-field accessors (e.g., `pub fn agent_hp(&self, a: AgentId) -> Option<f32>`). Same pattern for `agent_cold_beliefs(&self, a: AgentId) -> Option<&BoundedMap<...>>` and `agent_cold_beliefs_mut(&mut self, a: AgentId) -> Option<&mut BoundedMap<...>>`.
 
-- [ ] **Step 5: Regen + verify.**
+- [x] **Step 5: Regen + verify.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -305,7 +305,7 @@ grep -nE "cold_beliefs" crates/engine_data/src/sim_state.rs | head
 
 Expected: field declaration + accessors emitted.
 
-- [ ] **Step 6: Build.**
+- [x] **Step 6: Build.**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -315,7 +315,7 @@ Expected: SUCCESS. The `BeliefState` type doesn't exist yet (Task 3) so the buil
 
 If you'd rather avoid the broken intermediate state, swap Tasks 2 + 3 — declare BeliefState first (Task 3), then the field (Task 2). The plan keeps Task 2 first because the field declaration drives the BeliefState shape; the brief broken-build interval is acceptable per Spec B'.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl): cold_beliefs SoA field via DSL agent declaration (Plan ToM Task 2)"

@@ -3165,15 +3165,19 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-3"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 7,
-      "steps_done": 0,
+      "steps_done": 7,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "7072553a",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "DEVIATION: SimState is hand-written in engine/src/state/mod.rs (not DSL-emitted as plan assumed); field added directly there. cold_beliefs Vec + accessors landed; respawn clears on slot reuse. Build intentionally broken until T3 lands BeliefState type"
+      },
+      "started_at": "2026-04-26T07:38:05Z",
+      "completed_at": "2026-04-26T07:41:38Z",
       "retry_count": 0
     },
     {
@@ -3555,9 +3559,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T07:35:39Z",
-    "iterations_completed": 27,
-    "tasks_closed": 24,
+    "last_iteration_at": "2026-04-26T07:41:38Z",
+    "iterations_completed": 28,
+    "tasks_closed": 25,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
