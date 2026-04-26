@@ -19,6 +19,10 @@ Schema-of-record: every SoA field engine code touches, with semantics, writers, 
 Universal entity for any agentic actor (humans, wolves, dragons, goblins). Same struct, distinguished by `creature_type`.
 
 #### Identity & Lifecycle
+
+> ⚠️ **Audit 2026-04-26:** `creature_type` exists but `CreatureType` enum only covers Human/Wolf/Deer/Dragon — **Elf, Dwarf, and Goblin are absent** from the engine enum.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | id | AgentId | Unique agent ID, stable across ticks | spawn | all systems (lookups) |
@@ -51,6 +55,10 @@ Universal entity for any agentic actor (humans, wolves, dragons, goblins). Same 
 | status_effects | Vec<StatusEffect> | Active temporary effects (stun, slow, dot, buff, debuff) | apply_flat (effect application), cooldown system | status check, status decay, movement/action penalties |
 
 #### Sub-structures
+
+> ⚠️ **Audit 2026-04-26:** `data` (AgentData) does not exist as a sub-struct. `inventory` is partial (see §Inventory). `capabilities` stores only `cold_channels` (ChannelSet) — `can_fly`, `can_build`, `can_trade`, etc. are reconstructed from `creature_type` at runtime, not stored per-agent.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | data | AgentData | Agent state (see AgentData section below) | agent_inner, action_eval, social/economic systems | all behavioral systems |
@@ -147,6 +155,9 @@ Short-term state, 0–1, decays per tick (≈0.01–0.05 depending on event).
 
 ### Aspiration
 
+> ❌ **Audit 2026-04-26:** `Aspiration` is **not implemented** in `SimState` or any sub-module. `need_vector`, `vector_formed_at`, `crystal`, `crystal_progress`, `crystal_last_advanced` are all absent.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Personality-weighted need-gap vector, 100-tick horizon bias. Recomputed every 500 ticks.
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -184,6 +195,9 @@ Event log + semantic beliefs.
 
 ### Source (enum)
 
+> ❌ **Audit 2026-04-26:** `Source` enum is **not implemented** in any engine or engine_data file. Provenance tagging (Witnessed/TalkedWith/Overheard/Rumor/Announced/Testimony) is absent.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Provenance tag for a `MemoryEvent`. Determines default confidence and observation feature.
 
 ```rust
@@ -210,6 +224,9 @@ Observation-visible via `info_source_one_hot[5]` (Witnessed/TalkedWith/Overheard
 
 ### Relationship (Per-pair, NPC → NPC)
 
+> ⚠️ **Audit 2026-04-26:** MVP shell only — `trust` (as opaque `valence_q8: i16`), `tenure_ticks`, `other: AgentId` exist. Missing: `familiarity`, `last_interaction` (tenure_ticks is tenure, not last interaction), `perceived_personality`, `believed_knowledge`. Cap is 8 (spec says 20).
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Directional relationship from one NPC toward another (asymmetric).
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -224,6 +241,9 @@ Directional relationship from one NPC toward another (asymmetric).
 
 #### PerceivedPersonality (Theory of Mind)
 
+> ⚠️ **Audit 2026-04-26:** Feature-gated stub (`#[cfg(feature = "theory-of-mind")]`). `BeliefState` in `engine_data/src/belief.rs` stores observation data (`last_known_pos`, `last_known_hp`, etc.) — **not** the theory-of-mind personality model. Spec's `traits [f32;5]`, `confidence [f32;5]`, and `observation_count` are absent.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | traits | [f32; 5] | Estimated [risk_tol, social, ambition, altruism, curiosity] | observe_action (action→trait signal, alpha learning) | compatibility calc with own personality, behavior prediction |
@@ -235,6 +255,9 @@ Directional relationship from one NPC toward another (asymmetric).
 ---
 
 ### Goal & Action Execution
+
+> ❌ **Audit 2026-04-26:** `GoalStack` and `Goal` struct are **not implemented** in the engine SoA. `crates/tactical_sim` has a GOAP `Goal` but it is the tactical planner, not the world-sim goal stack with push/pop priority preemption.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 #### Goal
 
@@ -382,6 +405,9 @@ Container for all agent-specific state. Carried by every Agent.
 
 ### BuildingData
 
+> ❌ **Audit 2026-04-26:** `BuildingData` struct is **not implemented** in the engine crate.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 | Field | Type | Meaning | Updated by | Read by |
 |---|---|---|---|---|
 | building_type | BuildingType | Shelter, Farmhouse, Mine, Laboratory, ... (20+ types) | constructor | function, capability unlock |
@@ -411,6 +437,9 @@ Container for all agent-specific state. Carried by every Agent.
 ---
 
 ### Room (Interior Floor Plan)
+
+> ❌ **Audit 2026-04-26:** `Room` struct is **not implemented** in the engine crate.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -471,6 +500,10 @@ TRANSFORMATIONS:
 `Group` is the universal social-collective primitive. Settlements, factions, families, guilds, religions, packs, cabals, parties, courts, leagues, monasteries are all `Group` discriminated by `kind`. The Group section at the end gives the canonical shape; per-kind sections describe additional fields.
 
 ### Settlement (Group with `kind=Settlement`)
+
+> ❌ **Audit 2026-04-26:** `Settlement` is **not implemented** in the canonical engine crate. Only found in a legacy worktree (`agent-aa2db99f`), not in `crates/engine`.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Political/economic/structural hub. Carries stockpiles, prices, treasury, population, group affiliations, fixed location with facilities.
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -495,6 +528,10 @@ Political/economic/structural hub. Carries stockpiles, prices, treasury, populat
 ---
 
 ### RegionState
+
+> ❌ **Audit 2026-04-26:** `RegionState` is **not implemented** in the engine crate.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Large map areas with terrain, monster populations, faction control, dungeon sites.
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -522,6 +559,10 @@ Large map areas with terrain, monster populations, faction control, dungeon site
 ---
 
 ### Faction (Group with `kind=Faction`)
+
+> ❌ **Audit 2026-04-26:** `Faction` is **not implemented** in the engine crate.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Macro-political collective (governments, military powers, organized cults). Carries military_strength, standings, tech_level, governance.
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -543,6 +584,10 @@ Macro-political collective (governments, military powers, organized cults). Carr
 ---
 
 ### GuildState
+
+> ❌ **Audit 2026-04-26:** `GuildState` is **not implemented** in the engine crate.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Player faction state (independent from NPC factions).
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -557,6 +602,9 @@ Player faction state (independent from NPC factions).
 ---
 
 ### Quest & Quest Lifecycle
+
+> ⚠️ **Audit 2026-04-26:** `Quest` is partial — engine has 6 fields (`seq`, `poster`, `category`, `resolution`, `acceptors`, `posted_tick`) vs spec's 13. Missing: name, destination, progress, status, accepted_tick, deadline_tick, threat_level, reward_gold, reward_xp. `QuestPosting` is entirely absent. `QuestCategory` is a 5-bucket enum vs spec's 10-type `QuestType`.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 #### Quest (Active)
 
@@ -595,6 +643,10 @@ Player faction state (independent from NPC factions).
 ---
 
 ### TradeRoute
+
+> ❌ **Audit 2026-04-26:** `TradeRoute` is **not implemented** in the engine crate.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Emergent trade connection from repeated profitable NPC trading.
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -608,6 +660,10 @@ Emergent trade connection from repeated profitable NPC trading.
 ---
 
 ### ServiceContract
+
+> ❌ **Audit 2026-04-26:** `ServiceContract` is **not implemented** in the engine crate.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 NPC service request (build, gather, craft, heal, guard, haul, teach, barter).
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -664,11 +720,18 @@ Variants within biome: `Standard`, `LightForest`, `DenseForest`, `AncientForest`
 ---
 
 ### EconomyState
+
+> ❌ **Audit 2026-04-26:** `EconomyState` is **not implemented** in the engine crate.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 `total_gold_supply: f32` (sum of all gold), `total_commodities: [f32; 8]` (supply per commodity). Drives inflation, scarcity, price scaling.
 
 ---
 
 ### ChronicleEntry & WorldEvent
+
+> ⚠️ **Audit 2026-04-26:** DSL-emitted `ChronicleEntry` has only 4 fields (`template_id, agent, target, tick`) — missing `category`, `text` (human-readable narrative), `entity_ids`. `WorldEvent` exists as ~30 fine-grained individual event structs in `engine_data/src/events/` but **no unified `WorldEvent` enum** with 13 variants.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 `ChronicleEntry { tick, category, text, entity_ids }` — bounded narrative log. Categories: Battle, Quest, Diplomacy, Economy, Death, Discovery, Crisis, Achievement, Narrative.
 
@@ -677,6 +740,9 @@ Variants within biome: `Standard`, `LightForest`, `DenseForest`, `AncientForest`
 ---
 
 ### WorldState Top-Level Collections
+
+> ⚠️ **Audit 2026-04-26:** `regions`, `groups` (3-field stub), `quests` (partial), and `quest_board` are the only partially-present collections. `trade_routes`, `economy`, `adventurer_bonds`, `guild`, `relations`, `prophecies` are **absent** from the engine crate. These collections live in the `headless_campaign`/`bevy_game` layer.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 Spatial/cache fields (`tick`, `rng_state`, indices, `tiles`, `voxel_world`, `nav_grids`, `surface_cache`, `surface_grid`, `cell_census`, `sim_scratch`, `build_seeds`, `structural_events`, `region_plan`, `chronicle`, `world_events`, `fidelity_zones`) are documented in the World state section below.
 
@@ -744,6 +810,9 @@ Three-tier per-settlement construction event log. Updated by building_ai event l
 ---
 
 ### Group (universal)
+
+> ⚠️ **Audit 2026-04-26:** MVP stub only — engine's `Group` has 3 fields (`kind_tag: u32, members: SmallVec<[AgentId;8]>, leader: Option<AgentId>`). The ~25 fields across Identity/Leadership/Resources/Standings/Recruitment/Activity documented below are **absent**.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 Social-collective primitive — any collection of agents with shared identity. Kind + optional field presence differentiates factions, families, guilds, religions, packs, cabals, parties, settlements, leagues, monasteries, courts.
 
@@ -821,6 +890,9 @@ Environment layer: terrain, tiles, voxels, spatial indices, shared caches. Not p
 ---
 
 ### WorldState top-level fields (world/spatial only)
+
+> ⚠️ **Audit 2026-04-26 (spec mismatch):** `SimState.tick` is `u32` (spec says `u64`). `rng_state` is not separately tracked — `seed: u64` is used directly. `next_id` is managed via `AgentSlotPool`, not as a named scalar field.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 #### Scalar / identity (Primary)
 | Field | Type | Meaning |
