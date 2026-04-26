@@ -84,7 +84,7 @@ The CPU picker is a Rust function emitted into `engine_rules/src/pick_ability.rs
 
 The guard expression `!ability::on_cooldown(ability)` lowers to a check of `state.ability_cooldowns[agent_slot][ability_slot] > state.tick`. The score expression `ability::tag(PHYSICAL)` lowers to `registry.tag_value(ability_id, AbilityTag::Physical)`. `ability::hint == damage` lowers to `registry.hint(ability_id) == AbilityHint::Damage`. `ability::range` lowers to `registry.range(ability_id)`.
 
-- [ ] **Step 1: Write a failing test that calls the new emit function**
+- [x] **Step 1: Write a failing test that calls the new emit function**
 
 Add to `crates/dsl_compiler/tests/per_ability_row.rs`:
 
@@ -114,7 +114,7 @@ scoring {
 Run: `cargo test -p dsl_compiler emit_pick_ability_cpu_produces_rust_for_minimal_row`
 Expected: FAIL — `emit_pick_ability_cpu` does not exist yet.
 
-- [ ] **Step 2: Implement `emit_pick_ability_cpu`**
+- [x] **Step 2: Implement `emit_pick_ability_cpu`**
 
 Add to `crates/dsl_compiler/src/emit_scoring.rs` after the existing `emit_scoring` function:
 
@@ -225,21 +225,21 @@ fn lower_ability_score_expr_cpu(expr: &IrExprNode) -> Result<String, EmitError> 
 }
 ```
 
-- [ ] **Step 3: Run the failing test to verify it passes**
+- [x] **Step 3: Run the failing test to verify it passes**
 
 ```bash
 cargo test -p dsl_compiler emit_pick_ability_cpu_produces_rust_for_minimal_row
 ```
 Expected: PASS.
 
-- [ ] **Step 4: Verify the existing `per_ability_row.rs` tests still pass**
+- [x] **Step 4: Verify the existing `per_ability_row.rs` tests still pass**
 
 ```bash
 cargo test -p dsl_compiler per_ability_row
 ```
 Expected: all existing PER-AB-* tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/dsl_compiler/src/emit_scoring.rs crates/dsl_compiler/tests/per_ability_row.rs

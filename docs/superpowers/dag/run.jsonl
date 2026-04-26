@@ -121,3 +121,5 @@
 {"ts":"2026-04-26T23:31:13Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-18"}
 {"ts":"2026-04-26T23:38:19Z","event":"task_done","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-18","commit":"790c814b","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"Verification-only task; gpu-feature path knowingly red per c1d1436d, out of Plan 5b-e scope; serial parity test passes; no Plan 5b-e regressions; pre-existing failures (rng golden, spec_snippets path, probe_harness tombstone) flagged as separate work"}}
 {"ts":"2026-04-26T23:41:03Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-19"}
+{"ts":"2026-04-26T23:46:06Z","event":"task_started","task_id":"2026-04-26-subsystem-3-ability-eval-impl.task-A1"}
+{"ts":"2026-04-26T23:50:46Z","event":"task_done","task_id":"2026-04-26-subsystem-3-ability-eval-impl.task-A1","commit":"236fd601","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"5 steps + 18 tests passing; minor plan adaptations: IrExpr::Lit→LitFloat/LitInt split, If field rename then_val→then_expr"}}

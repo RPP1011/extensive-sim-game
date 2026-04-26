@@ -15,7 +15,7 @@
     },
     {
       "id": "roadmap-gpu-cold-state-replay-subsystem-2-phases-24",
-      "title": "GPU cold-state replay (Subsystem 2) \u2014 Phases 2\u20134",
+      "title": "GPU cold-state replay (Subsystem 2) — Phases 2–4",
       "tier": "active",
       "spec_ref": null,
       "plans": [
@@ -25,7 +25,7 @@
     },
     {
       "id": "roadmap-subsystem-3-gpu-ability-evaluation",
-      "title": "Subsystem 3 \u2014 GPU ability evaluation",
+      "title": "Subsystem 3 — GPU ability evaluation",
       "tier": "active",
       "spec_ref": "engine.md",
       "plans": [
@@ -51,7 +51,7 @@
     },
     {
       "id": "roadmap-plan-6-gpubackend-foundation",
-      "title": "Plan 6 \u2014 `GpuBackend` foundation",
+      "title": "Plan 6 — `GpuBackend` foundation",
       "tier": "engine-plans-not-yet-written",
       "spec_ref": null,
       "plans": [],
@@ -71,7 +71,7 @@
     {
       "id": "2026-04-26-subsystem-3-ability-eval-impl",
       "file": "docs/superpowers/plans/2026-04-26-subsystem-3-ability-eval-impl.md",
-      "title": "Subsystem 3 \u2014 GPU Ability Evaluation Implementation Plan",
+      "title": "Subsystem 3 — GPU Ability Evaluation Implementation Plan",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 12,
@@ -80,7 +80,7 @@
     {
       "id": "gpu_megakernel_perf",
       "file": "docs/superpowers/plans/gpu_megakernel_perf.md",
-      "title": "GPU Megakernel Phase 8 \u2014 Perf Sweep + Crossover Measurement",
+      "title": "GPU Megakernel Phase 8 — Perf Sweep + Crossover Measurement",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 0,
@@ -106,21 +106,25 @@
       "blocks": [
         "2026-04-26-subsystem-3-ability-eval-impl.task-A2"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "236fd601",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "5 steps + 18 tests passing; minor plan adaptations: IrExpr::Lit→LitFloat/LitInt split, If field rename then_val→then_expr"
+      },
+      "started_at": "2026-04-26T23:46:06Z",
+      "completed_at": "2026-04-26T23:50:46Z",
       "retry_count": 0
     },
     {
       "id": "2026-04-26-subsystem-3-ability-eval-impl.task-A2",
       "plan": "2026-04-26-subsystem-3-ability-eval-impl",
-      "title": "Task A2: `emit_pick_ability_wgsl` \u2014 WGSL kernel emitter",
+      "title": "Task A2: `emit_pick_ability_wgsl` — WGSL kernel emitter",
       "checkbox_line": 251,
       "deps": [
         "2026-04-26-subsystem-3-ability-eval-impl.task-A1"
@@ -230,7 +234,7 @@
     {
       "id": "2026-04-26-subsystem-3-ability-eval-impl.task-B4",
       "plan": "2026-04-26-subsystem-3-ability-eval-impl",
-      "title": "Task B4: Verify `PackedAbilityRegistry` tag/hint data bound to nothing \u2014 confirm wiring",
+      "title": "Task B4: Verify `PackedAbilityRegistry` tag/hint data bound to nothing — confirm wiring",
       "checkbox_line": 1230,
       "deps": [
         "2026-04-26-subsystem-3-ability-eval-impl.task-B3"
@@ -318,7 +322,7 @@
     {
       "id": "2026-04-26-subsystem-3-ability-eval-impl.task-D1",
       "plan": "2026-04-26-subsystem-3-ability-eval-impl",
-      "title": "Task D1: Cross-backend parity test \u2014 Serial pick matches GPU pick",
+      "title": "Task D1: Cross-backend parity test — Serial pick matches GPU pick",
       "checkbox_line": 1694,
       "deps": [
         "2026-04-26-subsystem-3-ability-eval-impl.task-C2"
@@ -399,7 +403,7 @@
       "id": "roadmap-plan-6-gpubackend-foundation.plan_writer",
       "plan": null,
       "roadmap_parent": "roadmap-plan-6-gpubackend-foundation",
-      "title": "Write plan for: Plan 6 \u2014 `GpuBackend` foundation",
+      "title": "Write plan for: Plan 6 — `GpuBackend` foundation",
       "checkbox_line": null,
       "deps": [],
       "blocks": [],
@@ -417,11 +421,11 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": null,
-    "iterations_completed": 0,
-    "tasks_closed": 0,
+    "last_iteration_at": "2026-04-26T23:50:46Z",
+    "iterations_completed": 1,
+    "tasks_closed": 1,
     "tasks_blocked": 0,
-    "current_phase": "idle",
+    "current_phase": "dispatching",
     "next_wake_scheduled": null
   }
 }
