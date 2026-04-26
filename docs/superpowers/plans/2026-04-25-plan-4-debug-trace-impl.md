@@ -54,7 +54,7 @@
   - P10 (No Runtime Panic): PASS — debug runtime uses `Result` + `Option`; no panics on malformed traces.
   - P11 (Reduction Determinism): N/A.
 
-- **Re-evaluation:** [x] AIS reviewed at design phase. [ ] AIS reviewed post-design (tick after Task 9).
+- **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — final scope: 6 components landed (trace_mask, causal_tree, tick_stepper, tick_profile, agent_history, repro_bundle), 4 xtask subcommands (stub-mode, real SerialBackend integration deferred until xtask-engine_rules dep added), 1 allowlist edit (passed critic gate). emit_step.rs extended with optional per-phase hooks (tick_stepper checkpoints + tick_profile enter/exit + agent_history record). All host-side; GPU integration deferred to Plan 6+ when GpuBackend's download-on-demand surface lands. Side-fix in T9: xtask CLI defaults migrated from legacy `engine_generated`/`engine/src/generated/` paths to `engine_data`/`engine_rules/src/{physics,mask}` to match post-Spec-B' architecture.
 
 ---
 
@@ -861,7 +861,7 @@ git -c core.hooksPath= commit -am "feat(xtask): debug + trace + profile + repro 
 
 ### Task 9: Final verification + AIS tick
 
-- [ ] **Step 1: Clean build + workspace test.**
+- [x] **Step 1: Clean build + workspace test.**
 
 ```bash
 unset RUSTFLAGS && cargo clean
@@ -871,7 +871,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 Expected: SUCCESS modulo pre-existing `spec_snippets`.
 
-- [ ] **Step 2: `compile-dsl --check` round-trip.**
+- [x] **Step 2: `compile-dsl --check` round-trip.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
@@ -879,13 +879,13 @@ unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
 
 Expected: clean (the emit_step.rs changes for tick_stepper + tick_profile + agent_history hooks should produce the same content as committed).
 
-- [ ] **Step 3: trybuild seal still passes.**
+- [x] **Step 3: trybuild seal still passes.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test sealed_cascade_handler
 ```
 
-- [ ] **Step 4: Audit — debug runtime is host-side only.**
+- [x] **Step 4: Audit — debug runtime is host-side only.**
 
 ```bash
 grep -rE "debug::.*::cuda|debug::.*::wgpu|debug::.*::vulkan" crates/engine/src/debug/ 2>/dev/null
@@ -893,7 +893,7 @@ grep -rE "debug::.*::cuda|debug::.*::wgpu|debug::.*::vulkan" crates/engine/src/d
 
 Expected: empty. Per spec §24, debug runtime is host-side; GPU backends trigger downloads on demand from the GPU backend code, not from debug runtime.
 
-- [ ] **Step 5: Tick AIS post-design checkbox in this plan file.**
+- [x] **Step 5: Tick AIS post-design checkbox in this plan file.**
 
 ```
 [x] AIS reviewed post-design — final scope: 6 components landed (trace_mask,
@@ -903,7 +903,7 @@ extended with optional per-phase hooks. All host-side; GPU integration
 deferred to Plan 6+ when GpuBackend's download-on-demand surface lands.
 ```
 
-- [ ] **Step 6: Final commit.**
+- [x] **Step 6: Final commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "chore(plan-4): final verification + AIS tick"
