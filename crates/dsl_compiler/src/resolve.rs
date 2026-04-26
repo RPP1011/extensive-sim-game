@@ -2005,6 +2005,40 @@ fn resolve_expr(
             expr: Box::new(resolve_expr(expr, scope, symbols)?),
             delta: Box::new(resolve_expr(delta, scope, symbols)?),
         },
+        // ----------------------------------------------------------------
+        // Plan ToM Task 8 — belief read expressions
+        // ----------------------------------------------------------------
+        ExprKind::BeliefsAccessor { observer, target, field } => {
+            // Validate the field name against the known BeliefState fields.
+            const BELIEF_FIELDS: &[&str] = &[
+                "last_known_pos",
+                "last_known_hp",
+                "last_known_max_hp",
+                "last_known_creature_type",
+                "last_updated_tick",
+                "confidence",
+            ];
+            if !BELIEF_FIELDS.contains(&field.as_str()) {
+                return Err(ResolveError::UnknownBeliefField {
+                    field: field.clone(),
+                    valid: BELIEF_FIELDS.to_vec(),
+                    span,
+                });
+            }
+            IrExpr::BeliefsAccessor {
+                observer: Box::new(resolve_expr(observer, scope, symbols)?),
+                target: Box::new(resolve_expr(target, scope, symbols)?),
+                field: field.clone(),
+            }
+        }
+        ExprKind::BeliefsConfidence { observer, target } => IrExpr::BeliefsConfidence {
+            observer: Box::new(resolve_expr(observer, scope, symbols)?),
+            target: Box::new(resolve_expr(target, scope, symbols)?),
+        },
+        ExprKind::BeliefsView { observer, view_name } => IrExpr::BeliefsView {
+            observer: Box::new(resolve_expr(observer, scope, symbols)?),
+            view_name: view_name.clone(),
+        },
     };
     Ok(IrExprNode { kind, span })
 }
@@ -3234,6 +3268,22 @@ fn validate_fold_expr(view_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
                     .into(),
             span: e.span,
         }),
+
+        // Plan ToM Task 8 — belief read expressions. These carry observer/
+        // target sub-expressions; we reject them from fold bodies (belief
+        // reads need the full SimState cold_beliefs lookup that the fold
+        // body context doesn't provide). T9 closes the scoring/physics
+        // lowering path.
+        IrExpr::BeliefsAccessor { .. }
+        | IrExpr::BeliefsConfidence { .. }
+        | IrExpr::BeliefsView { .. } => Err(ResolveError::UdfInViewFoldBody {
+            view_name: view_name.to_string(),
+            offending_construct:
+                "belief-read primitive (`beliefs(...).about(...).<field>` etc.) — \
+                 not valid inside a view fold body"
+                    .into(),
+            span: e.span,
+        }),
     }
 }
 
@@ -3611,6 +3661,24 @@ fn validate_physics_expr(physics_name: &str, e: &IrExprNode) -> Result<(), Resol
                     .into(),
             span: e.span,
         }),
+
+        // Plan ToM Task 8 — belief read expressions. Physics bodies CAN
+        // legally read belief state (they know the full SimState); we allow
+        // them through here and recurse into sub-expressions so that T9's
+        // CPU lowering (emit_physics.rs) gains the surface cleanly. GPU
+        // lowering is deferred so they're still rejected by the WGSL emitter
+        // until a matching WGSL T9 lands.
+        IrExpr::BeliefsAccessor { observer, target, .. } => {
+            validate_physics_expr(physics_name, observer)?;
+            validate_physics_expr(physics_name, target)
+        }
+        IrExpr::BeliefsConfidence { observer, target } => {
+            validate_physics_expr(physics_name, observer)?;
+            validate_physics_expr(physics_name, target)
+        }
+        IrExpr::BeliefsView { observer, .. } => {
+            validate_physics_expr(physics_name, observer)
+        }
     }
 }
 
@@ -3702,7 +3770,11 @@ fn validate_physics_iter_source(
         | IrExpr::AbilityHint
         | IrExpr::AbilityHintLit(_)
         | IrExpr::AbilityRange
-        | IrExpr::AbilityOnCooldown(_) => Err(ResolveError::NotGpuEmittable {
+        | IrExpr::AbilityOnCooldown(_)
+        // Plan ToM Task 8 — belief reads aren't iterable collections.
+        | IrExpr::BeliefsAccessor { .. }
+        | IrExpr::BeliefsConfidence { .. }
+        | IrExpr::BeliefsView { .. } => Err(ResolveError::NotGpuEmittable {
             physics_name: physics_name.to_string(),
             construct: "for-loop over non-iterable / unbounded expression".into(),
             reason:
@@ -4093,6 +4165,20 @@ fn validate_mask_body(mask_name: &str, e: &IrExprNode) -> Result<(), ResolveErro
             span: e.span,
         }),
 
+        // Plan ToM Task 8 — belief reads in mask bodies. Mask predicates
+        // may legitimately read belief state (e.g. filter targets by known
+        // hp). Allow through — recurse into sub-expressions; the mask
+        // emitter's catch-all returns Unsupported until T9.
+        IrExpr::BeliefsAccessor { observer, target, .. } => {
+            validate_mask_body(mask_name, observer)?;
+            validate_mask_body(mask_name, target)
+        }
+        IrExpr::BeliefsConfidence { observer, target } => {
+            validate_mask_body(mask_name, observer)?;
+            validate_mask_body(mask_name, target)
+        }
+        IrExpr::BeliefsView { observer, .. } => validate_mask_body(mask_name, observer),
+
         IrExpr::Raw(_) => Ok(()),
     }
 }
@@ -4217,6 +4303,19 @@ fn validate_scoring_body(e: &IrExprNode) -> Result<(), ResolveError> {
         | IrExpr::AbilityHintLit(_)
         | IrExpr::AbilityRange => Ok(()),
         IrExpr::AbilityOnCooldown(slot) => validate_scoring_body(slot),
+
+        // Plan ToM Task 8 — belief reads in scoring bodies. A scoring row
+        // may legitimately condition on known enemy HP etc. Allow through;
+        // the scoring emitter's catch-all returns Unsupported until T9.
+        IrExpr::BeliefsAccessor { observer, target, .. } => {
+            validate_scoring_body(observer)?;
+            validate_scoring_body(target)
+        }
+        IrExpr::BeliefsConfidence { observer, target } => {
+            validate_scoring_body(observer)?;
+            validate_scoring_body(target)
+        }
+        IrExpr::BeliefsView { observer, .. } => validate_scoring_body(observer),
 
         IrExpr::Raw(_) => Ok(()),
     }

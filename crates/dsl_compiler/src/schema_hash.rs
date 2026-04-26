@@ -703,6 +703,23 @@ fn hash_expr_kind(h: &mut Sha256, kind: &IrExpr) {
             // still produce different bytes via downstream regeneration.
             h.update([0x3eu8]);
         }
+        // Plan ToM Task 8 — belief read expressions. Pinned ordinals 0x45-0x47.
+        IrExpr::BeliefsAccessor { observer, target, field } => {
+            h.update([0x45u8]);
+            hash_expr(h, observer);
+            hash_expr(h, target);
+            h.update(field.as_bytes());
+        }
+        IrExpr::BeliefsConfidence { observer, target } => {
+            h.update([0x46u8]);
+            hash_expr(h, observer);
+            hash_expr(h, target);
+        }
+        IrExpr::BeliefsView { observer, view_name } => {
+            h.update([0x47u8]);
+            hash_expr(h, observer);
+            h.update(view_name.as_bytes());
+        }
     }
 }
 

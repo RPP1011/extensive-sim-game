@@ -704,6 +704,17 @@ pub enum ExprKind {
     /// Semantically identical to `expr * delta` if the scoring lowering
     /// didn't promote it to a dedicated modifier kind. See spec §3.4.
     PerUnit { expr: Box<Expr>, delta: Box<Expr> },
+    /// `beliefs(observer).about(target).<field>` — read a single field from
+    /// the belief cell for an observer/target pair. `field` must be one of the
+    /// `BELIEF_FIELDS` allowlist (validated in the resolver, Plan ToM Task 8).
+    BeliefsAccessor { observer: Box<Expr>, target: Box<Expr>, field: String },
+    /// `beliefs(observer).confidence(target)` — read the `confidence` field
+    /// from the belief cell. Syntactic sugar for
+    /// `beliefs(o).about(t).confidence`.
+    BeliefsConfidence { observer: Box<Expr>, target: Box<Expr> },
+    /// `beliefs(observer).<view_name>(_)` — aggregate view over the set of
+    /// targets the observer currently believes in (Plan ToM Task 8).
+    BeliefsView { observer: Box<Expr>, view_name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

@@ -352,6 +352,28 @@ pub enum IrExpr {
     AbilityOnCooldown(Box<IrExprNode>),
     /// Retained original AST shape for anything we can't lower meaningfully.
     Raw(Box<ast::Expr>),
+    /// `beliefs(observer).about(target).<field>` — read a single field from
+    /// the belief cell for an observer/target pair. `field` is validated
+    /// against the `BELIEF_FIELDS` allowlist in the resolver (Plan ToM T8).
+    /// CPU/GPU lowering deferred to T9.
+    BeliefsAccessor {
+        observer: Box<IrExprNode>,
+        target: Box<IrExprNode>,
+        field: String,
+    },
+    /// `beliefs(observer).confidence(target)` — read the `confidence` scalar.
+    /// Syntactic sugar for `BeliefsAccessor { field: "confidence" }`.
+    /// CPU/GPU lowering deferred to T9.
+    BeliefsConfidence {
+        observer: Box<IrExprNode>,
+        target: Box<IrExprNode>,
+    },
+    /// `beliefs(observer).<view_name>(_)` — aggregate view over the believed
+    /// target set. CPU/GPU lowering deferred to T9.
+    BeliefsView {
+        observer: Box<IrExprNode>,
+        view_name: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

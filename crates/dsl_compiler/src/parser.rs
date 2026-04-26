@@ -1868,8 +1868,10 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
         }
         return Ok(Stmt::Match { scrutinee, arms, span: Span::new(start, c.pos) });
     }
-    // `beliefs(<ident>).observe(<ident>) with { ... }`
-    if starts_with_keyword(c, "beliefs") {
+    // `beliefs(<ident>).observe(<ident>) with { ... }` — statement form.
+    // `beliefs(expr).about(expr).<field>` / `.confidence(expr)` / `.<view>(_)` — expression form.
+    // Disambiguate via lookahead: scan for `.observe` after `beliefs(...)`.
+    if starts_with_keyword(c, "beliefs") && is_belief_observe_stmt(c) {
         return Ok(Stmt::BeliefObserve(parse_belief_observe_stmt(c)?));
     }
     if c.starts_with("self") {
@@ -1982,6 +1984,144 @@ fn parse_belief_observe_stmt(c: &mut Cursor) -> PResult<BeliefObserveStmt> {
         return Err(ParseErr::at(here(c), "expected `,` or `}` in belief mutation body"));
     }
     Ok(BeliefObserveStmt { observer, target, fields, span: Span::new(start, c.pos) })
+}
+
+/// Returns `true` when the cursor is positioned at `beliefs(...)` followed
+/// (after optional whitespace) by `.observe` — indicating the statement form
+/// `beliefs(o).observe(t) with { ... }`.  Returns `false` for the expression
+/// read form `beliefs(o).about(t).<field>`, `.confidence(t)`, or `.<view>(_)`.
+///
+/// Uses a probe cursor so the real cursor is never advanced.
+fn is_belief_observe_stmt(c: &Cursor) -> bool {
+    let mut probe = Cursor { src: c.src, pos: c.pos };
+    // Consume `beliefs`
+    if !starts_with_keyword(&probe, "beliefs") {
+        return false;
+    }
+    probe.bump("beliefs".len());
+    probe.skip_ws();
+    // Consume `(`
+    if !probe.starts_with_char('(') {
+        return false;
+    }
+    probe.bump(1);
+    // Scan past the argument (balanced parens) to find the closing `)`.
+    let mut depth = 1usize;
+    while depth > 0 {
+        if probe.eof() {
+            return false;
+        }
+        match probe.peek_char() {
+            Some('(') => { depth += 1; probe.bump(1); }
+            Some(')') => {
+                depth -= 1;
+                probe.bump(1);
+            }
+            Some(ch) => { probe.bump(ch.len_utf8()); }
+            None => return false,
+        }
+    }
+    probe.skip_ws();
+    // Must have a `.` next.
+    if !probe.starts_with_char('.') {
+        return false;
+    }
+    probe.bump(1);
+    probe.skip_ws();
+    // Observe-form iff the method name is `observe`.
+    starts_with_keyword(&probe, "observe")
+}
+
+/// Parse a `beliefs(observer)` expression primary and the trailing tail:
+/// - `.about(target).<field>`   → `ExprKind::BeliefsAccessor`
+/// - `.confidence(target)`      → `ExprKind::BeliefsConfidence`
+/// - `.<view_name>(_)`          → `ExprKind::BeliefsView`
+fn parse_belief_expr(
+    c: &mut Cursor,
+    stop: &dyn Fn(&Cursor) -> bool,
+) -> PResult<Expr> {
+    let start = c.pos;
+    expect_keyword(c, "beliefs")
+        .map_err(|e| e.with_context("parsing `beliefs(...)` expression"))?;
+    c.skip_ws();
+    expect_char(c, '(').map_err(|e| e.with_context("parsing `beliefs(` open paren"))?;
+    c.skip_ws();
+    let observer = parse_expr(c)?;
+    c.skip_ws();
+    expect_char(c, ')').map_err(|e| e.with_context("parsing `beliefs(...)` close paren"))?;
+    c.skip_ws();
+    expect_char(c, '.').map_err(|e| e.with_context("parsing `.` in beliefs expression"))?;
+    c.skip_ws();
+    // Peek the method/field name that follows.
+    let method = ident(c).map_err(|e| e.with_context("parsing beliefs method/field name"))?;
+    c.skip_ws();
+    match method.as_str() {
+        "about" => {
+            // `.about(target).<field>`
+            expect_char(c, '(').map_err(|e| e.with_context("parsing `about(` open paren"))?;
+            c.skip_ws();
+            let target = parse_expr(c)?;
+            c.skip_ws();
+            expect_char(c, ')').map_err(|e| e.with_context("parsing `about(...)` close paren"))?;
+            c.skip_ws();
+            expect_char(c, '.').map_err(|e| e.with_context("parsing `.` after `about(...)`"))?;
+            c.skip_ws();
+            let field = ident(c).map_err(|e| e.with_context("parsing belief field name"))?;
+            let span = Span::new(start, c.pos);
+            let expr = Expr {
+                kind: ExprKind::BeliefsAccessor {
+                    observer: Box::new(observer),
+                    target: Box::new(target),
+                    field,
+                },
+                span,
+            };
+            parse_postfix(c, expr, stop)
+        }
+        "confidence" => {
+            // `.confidence(target)`
+            expect_char(c, '(').map_err(|e| e.with_context("parsing `confidence(` open paren"))?;
+            c.skip_ws();
+            let target = parse_expr(c)?;
+            c.skip_ws();
+            expect_char(c, ')').map_err(|e| e.with_context("parsing `confidence(...)` close paren"))?;
+            let span = Span::new(start, c.pos);
+            let expr = Expr {
+                kind: ExprKind::BeliefsConfidence {
+                    observer: Box::new(observer),
+                    target: Box::new(target),
+                },
+                span,
+            };
+            parse_postfix(c, expr, stop)
+        }
+        view_name => {
+            // `.<view_name>(_)` — aggregate view form.
+            let view_name = view_name.to_string();
+            expect_char(c, '(').map_err(|e| e.with_context("parsing beliefs view `(` open paren"))?;
+            c.skip_ws();
+            // Accept `_` as the wildcard argument (required by grammar).
+            if c.starts_with_char('_') {
+                c.bump(1);
+            } else {
+                return Err(ParseErr::at(
+                    here(c),
+                    "beliefs view argument must be `_`; e.g. `beliefs(o).all_known(_)`",
+                ));
+            }
+            c.skip_ws();
+            expect_char(c, ')').map_err(|e| e.with_context("parsing beliefs view `)` close paren"))?;
+            let span = Span::new(start, c.pos);
+            let expr = Expr {
+                kind: ExprKind::BeliefsView {
+                    observer: Box::new(observer),
+                    view_name,
+                },
+                span,
+            };
+            parse_postfix(c, expr, stop)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2375,6 +2515,14 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
             c.pos = pre_kw;
             break;
         }
+    }
+    // `beliefs(observer).about(target).<field>` / `.confidence(target)` / `.<view>(_)`
+    // expression read form (Plan ToM Task 8).  The statement form
+    // `beliefs(o).observe(t) with { ... }` is handled in `parse_stmt` before
+    // we ever reach here, so when `parse_atom` sees `beliefs` it is always the
+    // expression form.
+    if starts_with_keyword(c, "beliefs") {
+        return parse_belief_expr(c, stop);
     }
     if starts_with_keyword(c, "if") {
         c.bump(2);

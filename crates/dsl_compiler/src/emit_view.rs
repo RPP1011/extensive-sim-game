@@ -1798,6 +1798,19 @@ fn collect_locals_in_expr(
         // it to stay consistent with the walker's exhaustive contract
         // even though fold bodies would reject it upstream.
         IrExpr::AbilityOnCooldown(slot) => collect_locals_in_expr(slot, out),
+        // Plan ToM Task 8 — belief read expressions. Walk sub-expressions
+        // for local-variable collection; lowering is deferred to T9.
+        IrExpr::BeliefsAccessor { observer, target, .. } => {
+            collect_locals_in_expr(observer, out);
+            collect_locals_in_expr(target, out);
+        }
+        IrExpr::BeliefsConfidence { observer, target } => {
+            collect_locals_in_expr(observer, out);
+            collect_locals_in_expr(target, out);
+        }
+        IrExpr::BeliefsView { observer, .. } => {
+            collect_locals_in_expr(observer, out);
+        }
     }
 }
 
