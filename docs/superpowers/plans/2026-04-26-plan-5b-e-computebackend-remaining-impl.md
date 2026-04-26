@@ -857,7 +857,7 @@ git commit -m "feat(engine_gpu): GpuBackend::apply_and_movement stub; pub apply_
 
 This is only correct because `fill_all` is called once per tick and always sets the mask from scratch from `state`. The CPU `MaskBuffer` is now a diagnostic-only mirror for the no-gpu branch; the real mask lives in GPU buffers.
 
-- [ ] **Step 1: Update `GpuBackend::reset_mask` (gpu feature) to no-op.**
+- [x] **Step 1: Update `GpuBackend::reset_mask` (gpu feature) to no-op.**
 
 In `crates/engine_gpu/src/lib.rs`, in the `#[cfg(feature = "gpu")]` impl, change `reset_mask`:
 
@@ -868,7 +868,7 @@ In `crates/engine_gpu/src/lib.rs`, in the `#[cfg(feature = "gpu")]` impl, change
     }
 ```
 
-- [ ] **Step 2: Update `GpuBackend::set_mask_bit` (gpu feature) to no-op.**
+- [x] **Step 2: Update `GpuBackend::set_mask_bit` (gpu feature) to no-op.**
 
 ```rust
     fn set_mask_bit(
@@ -883,7 +883,7 @@ In `crates/engine_gpu/src/lib.rs`, in the `#[cfg(feature = "gpu")]` impl, change
     }
 ```
 
-- [ ] **Step 3: Update `GpuBackend::commit_mask` (gpu feature) to dispatch the mask kernel.**
+- [x] **Step 3: Update `GpuBackend::commit_mask` (gpu feature) to dispatch the mask kernel.**
 
 ```rust
     fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
@@ -906,7 +906,7 @@ In `crates/engine_gpu/src/lib.rs`, in the `#[cfg(feature = "gpu")]` impl, change
 
 Add the inline comment so future readers understand why this is a no-op rather than a dispatch.
 
-- [ ] **Step 4: Build + test.**
+- [x] **Step 4: Build + test.**
 
 ```bash
 cargo build --workspace 2>&1 | grep -E "^error" | head -10
@@ -915,7 +915,7 @@ cargo test --workspace -- --test-threads=1 2>&1 | tail -10
 
 Expected: SUCCESS.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/engine_gpu/src/lib.rs
