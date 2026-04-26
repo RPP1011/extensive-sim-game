@@ -129,6 +129,11 @@ pub struct SimState {
     cold_creditor_ledger:   Vec<SmallVec<[Creditor; 16]>>,
     // Mentor lineage (state.md §Relationships mentor_lineage) — 8-deep chain.
     cold_mentor_lineage:    Vec<[Option<AgentId>; 8]>,
+    // Theory-of-Mind Phase 1 (Plan 2026-04-25): per-agent belief map keyed by
+    // observed AgentId.  Capacity N=8 (spec §3.1).  `BeliefState` is emitted by
+    // the DSL compiler in Task 3; this field is intentionally forward-declared
+    // here so the SoA layout is established before the type lands.
+    cold_beliefs: Vec<crate::pool::BoundedMap<AgentId, engine_data::belief::BeliefState, 8>>,
     /// Per-(agent, ability-slot) local cooldown cursor. Value = the
     /// tick when this specific ability slot next becomes ready;
     /// `0` means ready now (or never cast). Gated together with
@@ -276,6 +281,7 @@ impl SimState {
             cold_class_definitions: vec![[ClassSlot::default(); 4]; cap],
             cold_creditor_ledger:   (0..cap).map(|_| SmallVec::new()).collect(),
             cold_mentor_lineage:    vec![[None; 8]; cap],
+            cold_beliefs:           (0..cap).map(|_| crate::pool::BoundedMap::new()).collect(),
             ability_cooldowns:      vec![[0u32; MAX_ABILITIES]; cap],
             // Incremental spatial hash — sized for `cap` agent slots.
             // Mutators push O(1) deltas; no per-mutation rebuild.
@@ -373,6 +379,9 @@ impl SimState {
         self.cold_class_definitions[slot] = [ClassSlot::default(); 4];
         self.cold_creditor_ledger[slot].clear();
         self.cold_mentor_lineage[slot] = [None; 8];
+        // Theory-of-Mind Phase 1: clear belief map on (re)spawn so a recycled
+        // slot doesn't carry stale beliefs from the previous occupant.
+        self.cold_beliefs[slot]        = crate::pool::BoundedMap::new();
         self.ability_cooldowns[slot]   = [0u32; MAX_ABILITIES];
         // Incremental spatial-hash insert — O(1).
         self.spatial.insert(id, spec.pos, MovementMode::Walk);
@@ -871,6 +880,21 @@ impl SimState {
         {
             *s = lineage;
         }
+    }
+
+    // Theory-of-Mind Phase 1 (Plan 2026-04-25): belief-map accessors.
+    // `BeliefState` is defined in `engine_data::belief` (Task 3 of the plan).
+    pub fn agent_cold_beliefs(
+        &self,
+        id: AgentId,
+    ) -> Option<&crate::pool::BoundedMap<AgentId, engine_data::belief::BeliefState, 8>> {
+        self.cold_beliefs.get(AgentSlotPool::slot_of_agent(id))
+    }
+    pub fn agent_cold_beliefs_mut(
+        &mut self,
+        id: AgentId,
+    ) -> Option<&mut crate::pool::BoundedMap<AgentId, engine_data::belief::BeliefState, 8>> {
+        self.cold_beliefs.get_mut(AgentSlotPool::slot_of_agent(id))
     }
 
     // Per-agent field mutators.
