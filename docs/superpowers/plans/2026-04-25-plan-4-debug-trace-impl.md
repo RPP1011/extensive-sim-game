@@ -719,7 +719,7 @@ git -c core.hooksPath= commit -am "feat(engine/debug): agent_history per-agent s
 **Files:**
 - Modify: `crates/engine/src/debug/repro_bundle.rs`
 
-- [ ] **Step 1: Implement.**
+- [x] **Step 1: Implement.**
 
 ```rust
 //! Reproduction bundle: snapshot + causal_tree dump + N-tick trace_mask
@@ -781,11 +781,11 @@ impl ReproBundle {
 
 (Use tar + gzip via existing deps if available, else simple length-prefixed concatenation.)
 
-- [ ] **Step 2: Test round-trip.**
+- [x] **Step 2: Test round-trip.**
 
 `tests/debug_repro_bundle.rs`: capture → write → read → assert structure equality.
 
-- [ ] **Step 3: Run, commit.**
+- [x] **Step 3: Run, commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(engine/debug): repro_bundle composes snapshot + tree + traces (Plan 4 Task 7)"
