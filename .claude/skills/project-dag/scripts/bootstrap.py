@@ -95,25 +95,45 @@ def parse_plan(path: Path) -> dict:
                     depends_on.append(ref)
             break
 
-    # Tasks: "- [ ] **Step N: ..." or "- [ ] **Task N: ..."
-    tasks: list[dict] = []
+    # Tasks are h3 headers `### Task N: <title>`; their bodies contain
+    # checkbox steps `- [ ] **Step N: ...**`. A task is `done` iff every
+    # step under it is checked. Steps that appear before the first Task
+    # header (e.g. preamble, AIS) are ignored.
     plan_id = path.stem
-    task_index = 0
+    tasks: list[dict] = []
+    current_task: dict | None = None
+    current_steps: list[bool] = []  # collected for current_task
+    task_header_re = re.compile(r"^### Task (\d+):\s*(.+?)\s*$")
+    step_re = re.compile(r"^- \[([ x])\] \*\*(?:Step|Task) \d+:\s*(.+?)\*\*\s*$")
+
+    def finalize(task: dict | None, steps: list[bool]) -> None:
+        if task is None:
+            return
+        task["steps_total"] = len(steps)
+        task["steps_done"] = sum(1 for s in steps if s)
+        if steps and all(steps):
+            task["status"] = "done"
+        elif any(steps):
+            task["status"] = "in_progress"
+        else:
+            task["status"] = "pending"
+        tasks.append(task)
+
     for lineno, line in enumerate(lines, start=1):
-        m = re.match(r"^- \[([ x])\] \*\*(?:Step|Task) (\d+):\s*(.+?)\*\*\s*$", line)
-        if m:
-            done = m.group(1) == "x"
-            step_num = m.group(2)
-            step_title = m.group(3).strip()
-            task_index += 1
-            tasks.append({
-                "id": f"{plan_id}.task-{task_index}",
+        h = task_header_re.match(line)
+        if h:
+            finalize(current_task, current_steps)
+            current_steps = []
+            current_task = {
+                "id": f"{plan_id}.task-{int(h.group(1))}",
                 "plan": plan_id,
-                "title": f"Step {step_num}: {step_title}",
+                "title": f"Task {h.group(1)}: {h.group(2).strip()}",
                 "checkbox_line": lineno,
                 "deps": [],  # filled after all tasks gathered
                 "blocks": [],
-                "status": "done" if done else "pending",
+                "status": "pending",
+                "steps_total": 0,
+                "steps_done": 0,
                 "owner_class": "implementer",  # default; overridden in Task 4
                 "blocked_reason": None,
                 "completed_commit": None,
@@ -121,7 +141,14 @@ def parse_plan(path: Path) -> dict:
                 "started_at": None,
                 "completed_at": None,
                 "retry_count": 0,
-            })
+            }
+            continue
+        if current_task is None:
+            continue
+        s = step_re.match(line)
+        if s:
+            current_steps.append(s.group(1) == "x")
+    finalize(current_task, current_steps)
 
     # Sequential within-plan deps: task N depends on task N-1
     for i in range(1, len(tasks)):
