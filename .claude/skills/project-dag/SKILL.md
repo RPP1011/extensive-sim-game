@@ -111,6 +111,8 @@ When `dag-tick.sh` returns `TERMINAL: HUMAN_BLOCKED`:
 
 **File hygiene:** `pending-decisions.md` only contains genuinely-pending entries. When a decision is resolved (user picks an option, agent executes the resolution), **remove the entry entirely** in the same commit that closes the decision — git history retains the deliberation. Do NOT leave `RESOLVED` markers; the file is a TODO list, not an audit log. The doc's preamble documents this convention.
 
+**Plan-doc hygiene:** Once a plan in `docs/superpowers/plans/` is fully implemented (or implemented modulo a small number of deferred tasks that have already been folded into another doc — pending-decisions, ROADMAP partially-landed tier, or a successor plan), **delete the plan file entirely** as part of the final-verify commit. Per ROADMAP.md convention, "Items leave the doc when fully merged — git history is the record." Also remove the corresponding entry from ROADMAP.md's "Active (plan written, in flight)" tier; the work is done, no longer in flight. Re-bootstrap state.json to drop the plan from the DAG.
+
 ## Reference
 
 - Spec: `docs/superpowers/specs/2026-04-25-project-dag-v2-design.md`
