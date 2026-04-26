@@ -33,7 +33,7 @@ cargo run --bin xtask -- scenario generate dataset/scenarios/
 - **Reading order:** start with `docs/llms.txt`, fetch the docs you need.
 - **What's built:** `docs/engine/status.md` (live per-subsystem implementation status).
 - **What's coming:** `docs/ROADMAP.md` (comprehensive future-work index).
-- **Contract:** `docs/spec/` (canonical specification, 10 files).
+- **Contract:** `docs/spec/` (canonical specification, 6 files: `engine.md`, `dsl.md`, `state.md`, `ability.md`, `economy.md`, `README.md`).
 - **Active plans:** `docs/superpowers/plans/`.
 - **Locked decisions:** `docs/adr/`.
 
