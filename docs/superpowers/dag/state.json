@@ -3092,14 +3092,14 @@
       "blocks": [
         "2026-04-25-tech-debt-cleanup-impl.task-8"
       ],
-      "status": "pending",
+      "status": "deferred",
       "steps_total": 0,
       "steps_done": 0,
       "owner_class": "implementer",
-      "blocked_reason": null,
+      "blocked_reason": "human-needed: passive triggers — implement vs downgrade decision; escalated to pending-decisions.md",
       "completed_commit": null,
       "critic_verdicts": {},
-      "started_at": null,
+      "started_at": "2026-04-26T07:24:07Z",
       "completed_at": null,
       "retry_count": 0
     },
@@ -3544,8 +3544,8 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T07:21:37Z",
-    "iterations_completed": 24,
+    "last_iteration_at": "2026-04-26T07:24:07Z",
+    "iterations_completed": 25,
     "tasks_closed": 22,
     "tasks_blocked": 0,
     "current_phase": "dispatching",

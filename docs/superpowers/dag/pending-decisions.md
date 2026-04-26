@@ -82,3 +82,14 @@ If `/loop /dag-tick` continues, it will dispatch sonnet subagents to "implement"
 
 **Status:** awaiting user
 **To proceed:** add `**APPROVED:** [option]` to this section.
+
+## 2026-04-26 — human-needed: Passive triggers spec mismatch (Tech-Debt T7)
+
+**Roadmap source:** `spec/ability.md` §6 / §23.1 markers say `runs-today`; no Trigger AST node or handler exists. Spec overclaims.
+
+**Decision required:**
+- (a) **Implement** — adds an `IrPassiveTrigger` IR node, parser/resolver extension, emit_physics generates per-trigger handlers, runtime fires them on emitted events. Substantial DSL grammar work; sub-plan needed. Estimated effort: 2-3 weeks (comparable to Theory of Mind Phase 1).
+- (b) **Downgrade markers** — rewrite spec/ability.md §6 + §23.1 to mark `passive` block + listed triggers as `planned`, not `runs-today`. Removes the false claim. Future plan adds them.
+
+**Status:** awaiting user
+**To proceed:** add `**APPROVED:** [option]` to this section. If (a), agent will draft a Passive Triggers Implementation Plan as a follow-up. If (b), agent will edit spec/ability.md and commit.
