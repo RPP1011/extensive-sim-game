@@ -1294,7 +1294,7 @@ git commit -m "test(engine): full-tick cross-backend parity test (Plan 5e Task 1
 
 This task gates on having a GPU available (CI may skip it). Run locally to confirm the real `GpuBackend` produces parity output.
 
-- [ ] **Step 1: Build with the `gpu` feature.**
+- [x] **Step 1: Build with the `gpu` feature.** — SKIPPED. `gpu`-feature path of `engine_gpu` is pre-existing red per commit c1d1436d's note ("engine_gpu + viz remain red on the same Tasks-1+2 generic-param mismatches — no new errors"). 36 compile errors in `crates/engine_gpu/src/lib.rs` reference removed APIs (`SimState::views`, `engine::generated`, `engine_rules::scoring`, old `cascade.run_fixed_point_tel`/`ComputeBackend::step` signatures). NOT a Plan 5b-e regression — the gated module migration is out of scope for this plan and was acknowledged red prior to Phase 5b.
 
 ```bash
 cargo build --features engine_gpu/gpu -p engine_gpu 2>&1 | grep -E "^error" | head -10
@@ -1302,7 +1302,7 @@ cargo build --features engine_gpu/gpu -p engine_gpu 2>&1 | grep -E "^error" | he
 
 Expected: SUCCESS.
 
-- [ ] **Step 2: Run existing GPU parity tests.**
+- [x] **Step 2: Run existing GPU parity tests.** — SKIPPED (depends on Step 1).
 
 ```bash
 cargo test --features engine_gpu/gpu -p engine_gpu -- --test-threads=1 2>&1 | grep -E "PASSED|FAILED|parity" | head -20
@@ -1310,7 +1310,7 @@ cargo test --features engine_gpu/gpu -p engine_gpu -- --test-threads=1 2>&1 | gr
 
 Expected: `parity_with_cpu`, `physics_parity`, `cascade_parity` all PASS.
 
-- [ ] **Step 3: Run the new full-tick parity test with gpu feature (if gpu hardware available).**
+- [x] **Step 3: Run the new full-tick parity test with gpu feature (if gpu hardware available).** — Without `gpu` feature: serial path (`serial_backend_full_tick_deterministic`) PASSES; `gpu_stub_matches_serial_full_tick` ignored as expected (Plan B1' Task 11 tombstone). With `gpu` feature: skipped per Step 1.
 
 ```bash
 cargo test --features engine_gpu/gpu -p engine -- backend_full_tick_parity 2>&1 | tail -10
@@ -1318,7 +1318,7 @@ cargo test --features engine_gpu/gpu -p engine -- backend_full_tick_parity 2>&1 
 
 Note: `GpuBackend::Views = ()` on the gpu path, while `SerialBackend::Views = ViewRegistry`. The state digests may diverge if views affect downstream state (they don't in the current engine — views are read-only summaries). If the test fails due to view-driven state divergence, diagnose and document the delta.
 
-- [ ] **Step 4: Run the full workspace test suite.**
+- [x] **Step 4: Run the full workspace test suite.** — Three pre-existing failures, NOT Plan 5b-e regressions: (a) `dsl_compiler::spec_snippets` reads stale path `docs/dsl/spec.md` (spec reorganized to `docs/spec/dsl.md`); (b) `engine::rng::per_agent_golden_value` golden-value mismatch reproduces at the test's introduction commit bcb877da; (c) `engine::probe_harness` 3 tests panic with explicit `unimplemented!("…step::step deleted (Plan B1' Task 11)")` tombstone (matches Task 18 instructions' acknowledgment). All other ~282 engine lib tests + every other workspace test target pass.
 
 ```bash
 cargo test --workspace -- --test-threads=1 2>&1 | tail -15
@@ -1326,7 +1326,7 @@ cargo test --workspace -- --test-threads=1 2>&1 | tail -15
 
 Expected: all tests PASS (no regressions from the Phase 5b–d routing changes).
 
-- [ ] **Step 5: Commit if any fixes were needed.**
+- [x] **Step 5: Commit if any fixes were needed.** — No fix applied: failures observed are all pre-existing/acknowledged tombstones, not regressions introduced by Plan 5b-e. Plan-checkbox commit only.
 
 If Step 3 revealed a state divergence and a fix was applied, commit it now:
 
