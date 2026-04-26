@@ -40,4 +40,21 @@ impl ComputeBackend for SerialBackend {
             &DebugConfig::default(),
         );
     }
+
+    fn reset_mask(&mut self, buf: &mut engine::mask::MaskBuffer) {
+        buf.reset();
+    }
+
+    fn set_mask_bit(
+        &mut self,
+        buf: &mut engine::mask::MaskBuffer,
+        slot: usize,
+        kind: engine::mask::MicroKind,
+    ) {
+        buf.set(slot, kind, true);
+    }
+
+    fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
+        // SerialBackend: no-op; mask writes are immediate.
+    }
 }

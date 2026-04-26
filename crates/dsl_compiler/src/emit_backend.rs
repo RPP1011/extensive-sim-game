@@ -43,6 +43,18 @@ pub fn emit_backend(source_file: Option<&str>) -> String {
     writeln!(out, "    ) {{").unwrap();
     writeln!(out, "        crate::step::step(state, scratch, events, views, policy, cascade, &DebugConfig::default());").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    fn reset_mask(&mut self, buf: &mut engine::mask::MaskBuffer) {{").unwrap();
+    writeln!(out, "        buf.reset();").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    fn set_mask_bit(&mut self, buf: &mut engine::mask::MaskBuffer, slot: usize, kind: engine::mask::MicroKind) {{").unwrap();
+    writeln!(out, "        buf.set(slot, kind, true);").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {{").unwrap();
+    writeln!(out, "        // SerialBackend: no-op; mask writes are immediate.").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
     out
 }
