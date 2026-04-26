@@ -41,7 +41,12 @@
   - P10 (No Runtime Panic): N/A — Python scripts can `sys.exit(1)` on parse errors; no engine panic surface
   - P11 (Reduction Determinism): N/A
 
-- **Re-evaluation:** [x] AIS reviewed at design phase (initial fill).  [ ] AIS reviewed post-design (after task list stabilises).
+- **Re-evaluation:** [x] AIS reviewed at design phase (initial fill).  [x] AIS reviewed post-design (after task list stabilises).
+
+  **Post-design notes:**
+  1. T3 had a granularity bug: the original parser counted every `- [ ] **Step N:**` line as a separate task. Fixed in commit `40874443` to match `### Task N: <title>` headers (the actual unit of dispatch). steps_total/steps_done were added per task.
+  2. T8 dag-mark-done.sh had a bash quoting bug: `${3:-{}}` parses as `${3:-{}` + literal `}`, double-closing the JSON. Fixed in commit `65ba9477`.
+  3. emit_meta_tasks() heuristic is brittle — Plan 4 + Plan 5 are flagged as plan-writer meta-tasks even though plans `2026-04-25-plan-4-debug-trace-impl.md` and `2026-04-25-plan-5a-computebackend-mask-fill-impl.md` exist. Root cause: ROADMAP.md doesn't reference these plan files explicitly. Resolve by updating ROADMAP.md to add `plans/<file>.md` refs whenever a new plan lands. Out of scope for this plan.
 
 ---
 
