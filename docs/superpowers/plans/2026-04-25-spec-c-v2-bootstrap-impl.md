@@ -60,7 +60,7 @@
 
 **Decision:** `state.json` and `run.jsonl` are tracked (per Spec C v2 §9 D10 — "Run state in git"). `.gitignore` only excludes ephemeral test outputs.
 
-- [ ] **Step 1: Create directories with placeholder files**
+- [x] **Step 1: Create directories with placeholder files**
 
 ```bash
 mkdir -p docs/superpowers/dag .claude/skills/project-dag/scripts
@@ -69,12 +69,12 @@ touch .claude/skills/project-dag/.gitkeep
 touch .claude/skills/project-dag/scripts/.gitkeep
 ```
 
-- [ ] **Step 2: Confirm `.gitignore` does not need changes**
+- [x] **Step 2: Confirm `.gitignore` does not need changes**
 
 Run: `git check-ignore -v docs/superpowers/dag/state.json docs/superpowers/dag/run.jsonl`
 Expected: no output (files not ignored). State files are tracked per D10.
 
-- [ ] **Step 3: Commit scaffold**
+- [x] **Step 3: Commit scaffold**
 
 ```bash
 git add docs/superpowers/dag/.gitkeep .claude/skills/project-dag/.gitkeep .claude/skills/project-dag/scripts/.gitkeep
@@ -92,7 +92,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: scaffold DAG dirs (docs/superpowers
 
 **Goal:** Walk `docs/ROADMAP.md`, pull out each `## <tier heading>` and the bullet items below it. Map `tier heading` → tier slug, each bullet → `roadmap` entry.
 
-- [ ] **Step 1: Write a minimal `parse_roadmap()` function**
+- [x] **Step 1: Write a minimal `parse_roadmap()` function**
 
 ```python
 #!/usr/bin/env python3
@@ -168,12 +168,12 @@ if __name__ == "__main__":
     print(json.dumps(items, indent=2))
 ```
 
-- [ ] **Step 2: Run + verify against current ROADMAP**
+- [x] **Step 2: Run + verify against current ROADMAP**
 
 Run: `python3 .claude/skills/project-dag/scripts/bootstrap.py | head -50`
 Expected: JSON list of items, each with `id`, `title`, `tier`. First few items should include "GPU megakernel" (tier `active`) and "Ability DSL implementation" (tier `drafted`).
 
-- [ ] **Step 3: Commit parse-roadmap step**
+- [x] **Step 3: Commit parse-roadmap step**
 
 ```bash
 git add .claude/skills/project-dag/scripts/bootstrap.py
@@ -189,7 +189,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: bootstrap.py — parse ROADMAP.md t
 
 **Goal:** For each `docs/superpowers/plans/*.md`, extract plan title, "Depends on:" line if present, and one task per `- [ ]` / `- [x]` `**Step ...**` line.
 
-- [ ] **Step 1: Add `parse_plan()` and `parse_all_plans()`**
+- [x] **Step 1: Add `parse_plan()` and `parse_all_plans()`**
 
 Append to `bootstrap.py`:
 
@@ -277,7 +277,7 @@ def parse_all_plans(plans_dir: Path) -> list[dict]:
     return [parse_plan(p) for p in sorted(plans_dir.glob("*.md")) if p.is_file()]
 ```
 
-- [ ] **Step 2: Verify on real plans**
+- [x] **Step 2: Verify on real plans**
 
 Update `__main__` block to print plan summaries:
 
@@ -291,7 +291,7 @@ if __name__ == "__main__":
 Run: `python3 .claude/skills/project-dag/scripts/bootstrap.py`
 Expected output: one line per plan, e.g. `2026-04-25-plan-4-debug-trace-impl: 0/N tasks  (pending)`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .claude/skills/project-dag/scripts/bootstrap.py
@@ -307,7 +307,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: bootstrap.py — parse plan headers
 
 **Goal:** Classify tasks per Spec C v2 §6.3. Default `implementer`; flag plan-write meta-tasks for roadmap items lacking plans; flag spec-needed for items lacking specs.
 
-- [ ] **Step 1: Add `classify_owner()` and meta-task generation**
+- [x] **Step 1: Add `classify_owner()` and meta-task generation**
 
 Append to `bootstrap.py` (before `__main__`):
 
@@ -369,7 +369,7 @@ def emit_meta_tasks(roadmap: list[dict], plans: list[dict]) -> list[dict]:
     return meta
 ```
 
-- [ ] **Step 2: Wire owner-class into per-task parse**
+- [x] **Step 2: Wire owner-class into per-task parse**
 
 In `parse_plan()`, replace `"owner_class": "implementer"` with:
 
@@ -377,7 +377,7 @@ In `parse_plan()`, replace `"owner_class": "implementer"` with:
 "owner_class": classify_owner(step_title),
 ```
 
-- [ ] **Step 3: Test classification**
+- [x] **Step 3: Test classification**
 
 Update `__main__`:
 
@@ -396,7 +396,7 @@ if __name__ == "__main__":
 Run: `python3 .claude/skills/project-dag/scripts/bootstrap.py`
 Expected: meta-tasks listed for "Mission system" (spec-needed) and similar undrafted items.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/skills/project-dag/scripts/bootstrap.py
@@ -413,7 +413,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: bootstrap.py — owner-class classi
 
 **Goal:** Combine roadmap + plans + meta-tasks into the schema-v1 `state.json` per Spec C v2 §4.1. Preserve existing `completed_commit`, `critic_verdicts`, etc. when the file exists.
 
-- [ ] **Step 1: Add `merge_prior_state()` and `write_state()`**
+- [x] **Step 1: Add `merge_prior_state()` and `write_state()`**
 
 Append to `bootstrap.py`:
 
@@ -491,7 +491,7 @@ def write_state(roadmap, plans, all_tasks, out: Path):
     return state
 ```
 
-- [ ] **Step 2: Wire it together in `__main__`**
+- [x] **Step 2: Wire it together in `__main__`**
 
 Replace `__main__` with:
 
@@ -520,7 +520,7 @@ if __name__ == "__main__":
         print(f"    {k}: {v}")
 ```
 
-- [ ] **Step 3: Run + verify state.json**
+- [x] **Step 3: Run + verify state.json**
 
 Run: `python3 .claude/skills/project-dag/scripts/bootstrap.py`
 Expected: `Wrote docs/superpowers/dag/state.json` + counts. Sample inspection:
@@ -529,7 +529,7 @@ jq '.tasks | length' docs/superpowers/dag/state.json
 jq '.plans | map({id, status, tasks_done, tasks_total})' docs/superpowers/dag/state.json
 ```
 
-- [ ] **Step 4: Commit bootstrap.py + initial state.json**
+- [x] **Step 4: Commit bootstrap.py + initial state.json**
 
 ```bash
 git add .claude/skills/project-dag/scripts/bootstrap.py docs/superpowers/dag/state.json
@@ -543,7 +543,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: bootstrap.py — emit state.json; i
 **Files:**
 - Create: `.claude/skills/project-dag/scripts/dag-bootstrap.sh`
 
-- [ ] **Step 1: Write thin shell wrapper**
+- [x] **Step 1: Write thin shell wrapper**
 
 ```bash
 #!/usr/bin/env bash
@@ -556,7 +556,7 @@ cd "$REPO_ROOT"
 python3 .claude/skills/project-dag/scripts/bootstrap.py "$@"
 ```
 
-- [ ] **Step 2: Make executable + run**
+- [x] **Step 2: Make executable + run**
 
 ```bash
 chmod +x .claude/skills/project-dag/scripts/dag-bootstrap.sh
@@ -565,7 +565,7 @@ bash .claude/skills/project-dag/scripts/dag-bootstrap.sh
 
 Expected: identical output to direct python invocation.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .claude/skills/project-dag/scripts/dag-bootstrap.sh
@@ -579,7 +579,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: dag-bootstrap.sh wrapper"
 **Files:**
 - Create: `.claude/skills/project-dag/scripts/dag-status.sh`
 
-- [ ] **Step 1: Write status reporter**
+- [x] **Step 1: Write status reporter**
 
 ```bash
 #!/usr/bin/env bash
@@ -622,7 +622,7 @@ echo "=== Run state ==="
 jq -r '.run | "  iterations: \(.iterations_completed)\n  closed: \(.tasks_closed)\n  blocked: \(.tasks_blocked)\n  phase: \(.current_phase)"' "$STATE"
 ```
 
-- [ ] **Step 2: Run**
+- [x] **Step 2: Run**
 
 ```bash
 chmod +x .claude/skills/project-dag/scripts/dag-status.sh
@@ -631,7 +631,7 @@ bash .claude/skills/project-dag/scripts/dag-status.sh
 
 Expected: counts + first 10 pending implementer tasks.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .claude/skills/project-dag/scripts/dag-status.sh
@@ -648,7 +648,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: dag-status.sh — ad-hoc state quer
 
 **Goal:** Atomic state mutations called by the agent after subagent completion. Both scripts: (1) update `state.json`; (2) flip plan-file checkbox if `done`; (3) append to `run.jsonl`.
 
-- [ ] **Step 1: Write `dag-mark-done.sh`**
+- [x] **Step 1: Write `dag-mark-done.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -700,7 +700,7 @@ echo "{\"ts\":\"$NOW\",\"event\":\"task_done\",\"task_id\":\"$TASK_ID\",\"commit
 echo "Marked $TASK_ID done (commit $COMMIT)"
 ```
 
-- [ ] **Step 2: Write `dag-mark-blocked.sh`**
+- [x] **Step 2: Write `dag-mark-blocked.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -739,7 +739,7 @@ echo "{\"ts\":\"$NOW\",\"event\":\"task_blocked\",\"task_id\":\"$TASK_ID\",\"rea
 echo "Marked $TASK_ID blocked: $REASON"
 ```
 
-- [ ] **Step 3: Make executable + smoke test**
+- [x] **Step 3: Make executable + smoke test**
 
 ```bash
 chmod +x .claude/skills/project-dag/scripts/dag-mark-done.sh
@@ -755,7 +755,7 @@ bash .claude/skills/project-dag/scripts/dag-bootstrap.sh
 
 Expected: `task_blocked` line in run.jsonl. Bootstrap re-derives clean state.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .claude/skills/project-dag/scripts/dag-mark-done.sh .claude/skills/project-dag/scripts/dag-mark-blocked.sh docs/superpowers/dag/run.jsonl
@@ -769,7 +769,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: dag-mark-{done,blocked}.sh — atom
 **Files:**
 - Create: `.claude/skills/project-dag/scripts/dag-terminal.sh`
 
-- [ ] **Step 1: Write terminal detector**
+- [x] **Step 1: Write terminal detector**
 
 ```bash
 #!/usr/bin/env bash
@@ -830,7 +830,7 @@ echo "{\"ts\":\"$NOW\",\"event\":\"terminal\",\"reason\":\"$KIND\"}" >> "$LOG"
 echo "$KIND"
 ```
 
-- [ ] **Step 2: Run**
+- [x] **Step 2: Run**
 
 ```bash
 chmod +x .claude/skills/project-dag/scripts/dag-terminal.sh
@@ -839,7 +839,7 @@ bash .claude/skills/project-dag/scripts/dag-terminal.sh || echo "Run continues (
 
 Expected: empty output (run continues — implementer tasks exist in current DAG).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .claude/skills/project-dag/scripts/dag-terminal.sh
@@ -855,7 +855,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: dag-terminal.sh — DAG_COMPLETE / 
 
 **Note:** This script handles state mutation only. The Claude session running `/loop /dag-tick` is responsible for dispatching the SDD subagent (via the `Agent` tool) between this script's "started" and "done" calls. See SKILL.md (Task 11).
 
-- [ ] **Step 1: Write the picker + start step**
+- [x] **Step 1: Write the picker + start step**
 
 ```bash
 #!/usr/bin/env bash
@@ -916,7 +916,7 @@ echo "{\"ts\":\"$NOW\",\"event\":\"task_started\",\"task_id\":\"$TASK_ID\"}" >> 
 echo "$TASK"
 ```
 
-- [ ] **Step 2: Make executable + smoke test (do NOT commit the state mutation)**
+- [x] **Step 2: Make executable + smoke test (do NOT commit the state mutation)**
 
 ```bash
 chmod +x .claude/skills/project-dag/scripts/dag-tick.sh
@@ -927,7 +927,7 @@ bash .claude/skills/project-dag/scripts/dag-bootstrap.sh
 
 Expected: prints a task ID + title (e.g. `2026-04-25-plan-4-debug-trace-impl.task-1`). Re-bootstrap reverts.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .claude/skills/project-dag/scripts/dag-tick.sh docs/superpowers/dag/state.json
@@ -943,7 +943,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: dag-tick.sh — pick next eligible 
 
 **Goal:** Document the agent loop so a fresh Claude session running `/loop /dag-tick` knows how to compose the shell scripts with `Agent` (subagent dispatch) + `ScheduleWakeup` (cross-session continuity).
 
-- [ ] **Step 1: Write SKILL.md**
+- [x] **Step 1: Write SKILL.md**
 
 ```markdown
 ---
@@ -1051,7 +1051,7 @@ When `dag-tick.sh` returns `TERMINAL: HUMAN_BLOCKED`:
 - Status: `bash .claude/skills/project-dag/scripts/dag-status.sh`
 ```
 
-- [ ] **Step 2: Verify SKILL.md is well-formed**
+- [x] **Step 2: Verify SKILL.md is well-formed**
 
 ```bash
 head -20 .claude/skills/project-dag/SKILL.md
@@ -1059,7 +1059,7 @@ head -20 .claude/skills/project-dag/SKILL.md
 
 Expected: frontmatter (`name:`, `description:`) + first H1.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .claude/skills/project-dag/SKILL.md
@@ -1075,7 +1075,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: SKILL.md — agent invocation patte
 - Create: `docs/superpowers/dag/templates/escalation.md`
 - Create: `docs/superpowers/dag/pending-decisions.md`
 
-- [ ] **Step 1: Write `daily-synthesis.md` template**
+- [x] **Step 1: Write `daily-synthesis.md` template**
 
 ```markdown
 ## DAG run — daily synthesis ({{DATE}}, day {{DAY_N}})
@@ -1098,7 +1098,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: SKILL.md — agent invocation patte
 Run continues; next wake in {{NEXT_WAKE_SECONDS}}s.
 ```
 
-- [ ] **Step 2: Write `escalation.md` template**
+- [x] **Step 2: Write `escalation.md` template**
 
 ```markdown
 ## DAG run — escalation ({{DATE}} {{TIME}})
@@ -1116,7 +1116,7 @@ Run continues; next wake in {{NEXT_WAKE_SECONDS}}s.
 {{RESOLUTION_OPTIONS}}
 ```
 
-- [ ] **Step 3: Write `pending-decisions.md` scaffold**
+- [x] **Step 3: Write `pending-decisions.md` scaffold**
 
 ```markdown
 # Pending Decisions
@@ -1136,7 +1136,7 @@ Run continues; next wake in {{NEXT_WAKE_SECONDS}}s.
 <!-- entries appended below by the agent -->
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/dag/templates/daily-synthesis.md \
@@ -1153,7 +1153,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: templates (daily-synthesis, escalat
 
 **Goal:** Validate the whole pipeline works without dispatching a real subagent. Simulate a task lifecycle end-to-end.
 
-- [ ] **Step 1: Bootstrap fresh state**
+- [x] **Step 1: Bootstrap fresh state**
 
 ```bash
 bash .claude/skills/project-dag/scripts/dag-bootstrap.sh
@@ -1162,7 +1162,7 @@ bash .claude/skills/project-dag/scripts/dag-status.sh
 
 Expected: counts printed; first 10 pending implementer tasks listed.
 
-- [ ] **Step 2: Pick a task (without committing the state mutation)**
+- [x] **Step 2: Pick a task (without committing the state mutation)**
 
 ```bash
 TASK_JSON=$(bash .claude/skills/project-dag/scripts/dag-tick.sh)
@@ -1173,7 +1173,7 @@ echo "Task ID: $TASK_ID"
 
 Expected: a real task ID like `2026-04-25-plan-4-debug-trace-impl.task-1`.
 
-- [ ] **Step 3: Simulate done, then re-bootstrap to clean up**
+- [x] **Step 3: Simulate done, then re-bootstrap to clean up**
 
 ```bash
 bash .claude/skills/project-dag/scripts/dag-mark-done.sh "$TASK_ID" "smoke-test-sha" '{"compliance":"PASS","quality":"PASS"}'
@@ -1185,7 +1185,7 @@ bash .claude/skills/project-dag/scripts/dag-status.sh
 
 Expected: run.jsonl has `task_started` + `task_done` lines. dag-status reflects 1 task done.
 
-- [ ] **Step 4: Restore plan-file + state**
+- [x] **Step 4: Restore plan-file + state**
 
 ```bash
 # Find the plan-file the smoke test flipped, revert that one line
@@ -1196,7 +1196,7 @@ bash .claude/skills/project-dag/scripts/dag-bootstrap.sh
 
 Expected: plan files clean. state.json regenerated. run.jsonl retains the smoke-test entries (append-only is correct behaviour; users can grep historical runs).
 
-- [ ] **Step 5: Commit final state + smoke-test run.jsonl history**
+- [x] **Step 5: Commit final state + smoke-test run.jsonl history**
 
 ```bash
 git add docs/superpowers/dag/state.json docs/superpowers/dag/run.jsonl
@@ -1210,7 +1210,7 @@ git -c core.hooksPath= commit -m "spec-c-v2: end-to-end smoke test — bootstrap
 **Files:**
 - Modify: `docs/superpowers/plans/2026-04-25-spec-c-v2-bootstrap-impl.md` (this file — tick the post-design box)
 
-- [ ] **Step 1: Run all status surfaces one more time**
+- [x] **Step 1: Run all status surfaces one more time**
 
 ```bash
 bash .claude/skills/project-dag/scripts/dag-status.sh
@@ -1222,7 +1222,7 @@ wc -l .claude/skills/project-dag/scripts/*.sh .claude/skills/project-dag/scripts
 
 Expected: state.json + run.jsonl present; SKILL.md + 6 scripts (`bootstrap.py`, `dag-bootstrap.sh`, `dag-status.sh`, `dag-mark-done.sh`, `dag-mark-blocked.sh`, `dag-terminal.sh`, `dag-tick.sh`); pending-decisions.md scaffolded; templates present.
 
-- [ ] **Step 2: Confirm the bootstrap.py doesn't accidentally classify B1' or critic-skills tasks as needing meta-work**
+- [x] **Step 2: Confirm the bootstrap.py doesn't accidentally classify B1' or critic-skills tasks as needing meta-work**
 
 ```bash
 jq '.tasks | map(select(.owner_class == "spec-needed" or .owner_class == "plan-writer")) | map({id, owner_class, title})' docs/superpowers/dag/state.json
@@ -1230,21 +1230,21 @@ jq '.tasks | map(select(.owner_class == "spec-needed" or .owner_class == "plan-w
 
 Expected: list shows only roadmap items genuinely lacking plans/specs (not items where a plan already exists).
 
-- [ ] **Step 3: Tick the post-design AIS box**
+- [x] **Step 3: Tick the post-design AIS box**
 
 Edit `docs/superpowers/plans/2026-04-25-spec-c-v2-bootstrap-impl.md` Re-evaluation line:
 ```
 - **Re-evaluation:** [x] AIS reviewed at design phase (initial fill).  [x] AIS reviewed post-design (after task list stabilises).
 ```
 
-- [ ] **Step 4: Final commit**
+- [x] **Step 4: Final commit**
 
 ```bash
 git add docs/superpowers/plans/2026-04-25-spec-c-v2-bootstrap-impl.md
 git -c core.hooksPath= commit -m "spec-c-v2: post-design AIS tick — bootstrap infrastructure complete"
 ```
 
-- [ ] **Step 5: Smoke verify branch state**
+- [x] **Step 5: Smoke verify branch state**
 
 ```bash
 git log --oneline -20
