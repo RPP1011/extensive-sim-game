@@ -159,6 +159,21 @@ pub fn step<CB: ComputeBackend, B: PolicyBackend>(
         }
     }
 
+    // Phase 5b: belief decay (per-tick confidence multiply + eviction)
+    {
+        let decay_rate = state.config.belief.decay_rate;
+        let floor = state.config.belief.eviction_threshold;
+        let observers: Vec<AgentId> = state.agents_alive().collect();
+        for observer in observers {
+            if let Some(beliefs) = state.agent_cold_beliefs_mut(observer) {
+                beliefs.retain(|_, bs| {
+                    bs.confidence *= decay_rate;
+                    bs.confidence >= floor
+                });
+            }
+        }
+    }
+
     // Phase 5 — view fold.
     if let Some(profile) = debug.tick_profile.as_ref() {
         if let Ok(mut p) = profile.lock() { p.enter("view_fold"); }
