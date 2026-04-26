@@ -161,7 +161,7 @@ git -c core.hooksPath= commit -am "refactor(engine): rename SimBackend → Compu
 **Files:**
 - Modify: `crates/engine/src/backend.rs`
 
-- [ ] **Step 1: Add the methods to the trait.**
+- [x] **Step 1: Add the methods to the trait.**
 
 ```rust
 use crate::mask::{MaskBuffer, MicroKind};
@@ -187,7 +187,7 @@ pub trait ComputeBackend {
 }
 ```
 
-- [ ] **Step 2: Build engine.**
+- [x] **Step 2: Build engine.**
 
 ```bash
 unset RUSTFLAGS && cargo build -p engine
@@ -201,7 +201,7 @@ unset RUSTFLAGS && cargo build --workspace 2>&1 | grep -E "^error" | head
 
 Expected: errors in `engine_rules::SerialBackend` + `engine_gpu::GpuBackend` (missing trait method impls). That's the intermediate state Tasks 3 and 7 close.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(engine/backend): add reset_mask + set_mask_bit + commit_mask trait methods (Plan 5a Task 2)"
