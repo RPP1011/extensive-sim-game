@@ -2803,16 +2803,29 @@ impl ComputeBackend for GpuBackend {
         }
     }
 
-    fn reset_mask(&mut self, buf: &mut engine::mask::MaskBuffer) {
-        buf.reset(); // Phase 1 stub: CPU pass-through. Plan 5d dispatches GPU clear kernel.
+    fn reset_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
+        // GPU: mask kernel writes the full buffer each tick; CPU-side reset not needed.
+        // The CPU MaskBuffer is not the source of truth on the GPU path.
     }
 
-    fn set_mask_bit(&mut self, buf: &mut engine::mask::MaskBuffer, slot: usize, kind: engine::mask::MicroKind) {
-        buf.set(slot, kind, true); // Phase 1 stub.
+    fn set_mask_bit(
+        &mut self,
+        _buf:  &mut engine::mask::MaskBuffer,
+        _slot: usize,
+        _kind: engine::mask::MicroKind,
+    ) {
+        // GPU: individual bit writes are not dispatched to GPU.
+        // The fused mask kernel (cs_fused_masks) computes the mask from agent SoA
+        // in commit_mask. Per-bit CPU writes are ignored on the GPU path.
     }
 
     fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
-        // Phase 1 stub: no-op (no GPU mirror to flush yet).
+        // GPU: trait-surface no-op. The fused mask kernel (cs_fused_masks) is
+        // dispatched inline in `GpuBackend::step` as part of the scoring pipeline,
+        // not from this trait method. `fill_all` is only invoked via `SerialBackend`
+        // which has a different code path. This stub exists for trait surface
+        // completeness; the GPU mask is computed from state SoA, not from per-bit
+        // CPU writes that would have happened here.
     }
 
     fn cascade_dispatch(
