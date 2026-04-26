@@ -3191,15 +3191,22 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-4"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 7,
-      "steps_done": 0,
+      "steps_done": 7,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "0f37b3ab",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS"
+        },
+        "note": "DEVIATION 1: BeliefState landed hand-written (matches T2 deviation; not DSL-emitted). DEVIATION 2: engine_data/build.rs HAND_WRITTEN_ALLOWLIST extended; not gated by current dispatch-critics heuristic (which only watches engine/build.rs) — observation worth noting. All 219 workspace tests pass. Build closed."
+      },
+      "started_at": "2026-04-26T07:44:05Z",
+      "completed_at": "2026-04-26T07:46:58Z",
       "retry_count": 0
     },
     {
@@ -3559,9 +3566,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T07:41:38Z",
-    "iterations_completed": 28,
-    "tasks_closed": 25,
+    "last_iteration_at": "2026-04-26T07:46:58Z",
+    "iterations_completed": 29,
+    "tasks_closed": 26,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

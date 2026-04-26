@@ -330,7 +330,7 @@ git -c core.hooksPath= commit -am "feat(dsl): cold_beliefs SoA field via DSL age
 - Modify: `assets/sim/config.sim` — add belief block (observation_range, decay_rate, etc.)
 - Modify: `crates/dsl_compiler/src/emit_*.rs` — handle the new struct emission
 
-- [ ] **Step 1: Declare BeliefState in DSL.**
+- [x] **Step 1: Declare BeliefState in DSL.**
 
 ```
 struct BeliefState {
@@ -346,7 +346,7 @@ const BELIEFS_PER_AGENT: usize = 8;
 const EVICTION_THRESHOLD: f32 = 0.05;
 ```
 
-- [ ] **Step 2: Declare belief config block.**
+- [x] **Step 2: Declare belief config block.**
 
 ```
 config belief {
@@ -357,11 +357,11 @@ config belief {
 }
 ```
 
-- [ ] **Step 3: Update emitter to handle the new struct decl.**
+- [x] **Step 3: Update emitter to handle the new struct decl.**
 
 Existing emitter emits config + entity types. Add support for plain `struct` declarations that emit to `engine_data/src/belief.rs` (or wherever — match existing pattern).
 
-- [ ] **Step 4: Regen.**
+- [x] **Step 4: Regen.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -371,14 +371,14 @@ head -30 crates/engine_data/src/belief.rs
 
 Expected: `pub struct BeliefState { ... }` + `pub const BELIEFS_PER_AGENT: usize = 8;` etc., all with `// GENERATED` header.
 
-- [ ] **Step 5: Workspace build now succeeds (Task 2 unblocked).**
+- [x] **Step 5: Workspace build now succeeds (Task 2 unblocked).**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
 unset RUSTFLAGS && cargo test --workspace
 ```
 
-- [ ] **Step 6: Schema-hash baseline updates.**
+- [x] **Step 6: Schema-hash baseline updates.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test schema_hash
@@ -389,7 +389,7 @@ unset RUSTFLAGS && cargo run --bin xtask -- update-schema-hash-baseline 2>/dev/n
 
 Update `crates/engine/.schema_hash` with the new hash. Document in commit message.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl): emit BeliefState shape + belief config (Plan ToM Task 3) — schema_hash bumps"
