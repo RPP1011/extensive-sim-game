@@ -1,9 +1,14 @@
-# Project DAG Skill — Design Spec
+# Project DAG Skill — Design Spec (v1, SUPERSEDED)
 
-> **Status:** Design (2026-04-24). Replaces ad-hoc markdown task tracking
-> with a structured DAG + invariant enforcement layer. Project-specific
-> skill (lives at `.claude/skills/project-dag/`); not intended as a
-> general-purpose Kanban tool.
+> **Status:** SUPERSEDED 2026-04-25 by `2026-04-25-project-dag-v2-design.md`.
+>
+> v1 designed an interactive tracking skill with a 10-invariant
+> enforcement catalog. The invariant layer was overtaken by Spec B' (build
+> sentinels + ast-grep CI) and Spec D + D-amendment (6 critic skills + the
+> dispatch-critics orchestrator + pre-commit gate). v2 reframes Spec C as
+> agent-infrastructure for a multi-day autonomous run that drains the
+> roadmap, references the existing enforcement layers, and adds the agent
+> loop missing from v1. Read v2 instead. v1 preserved for decision history.
 
 ## §1 Goals
 
