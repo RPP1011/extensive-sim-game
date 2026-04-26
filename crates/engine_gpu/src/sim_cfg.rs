@@ -6,7 +6,7 @@
 //! WGSL-side struct layout must match this Rust definition byte-for-
 //! byte. The `sim_cfg_layout` regression test fences field offsets.
 //!
-//! See `docs/spec/gpu.md (§3)`.
+//! See `docs/spec/engine.md §3`.
 
 #![cfg(feature = "gpu")]
 

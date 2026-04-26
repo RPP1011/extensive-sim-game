@@ -171,7 +171,7 @@ impl AbilityHint {
 /// ratings surfaced through the `.ability` DSL.
 ///
 /// v1 ships a fixed enum (per the spec's "fixed enum for v1" decision
-/// in `docs/spec/gpu.md (§5)`
+/// in `docs/spec/engine.md §11`
 /// "Open questions"). A user-extensible symbol table is deferred — the
 /// fixed enum lowers each tag to a known GPU buffer index without a
 /// per-scenario rebind.

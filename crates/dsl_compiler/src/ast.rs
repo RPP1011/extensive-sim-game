@@ -480,7 +480,7 @@ pub struct ScoringEntry {
 ///   the selected ability. Optional at parse time; Phase 3 may require
 ///   it when lowering.
 ///
-/// See `docs/spec/gpu.md (§5)`
+/// See `docs/spec/engine.md §11`
 /// §Architecture.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PerAbilityRow {

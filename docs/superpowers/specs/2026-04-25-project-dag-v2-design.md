@@ -113,7 +113,7 @@ docs/
       "id": "roadmap-plan-4-debug-trace",
       "title": "Plan 4 — debug & trace runtime",
       "tier": "engine-plans-not-yet-written",
-      "spec_ref": "docs/spec/runtime.md#§23",
+      "spec_ref": "docs/spec/engine.md#§13",
       "plans": ["plan-4-debug-trace"],
       "status": "pending"
     }
@@ -431,7 +431,7 @@ Agent posts a chat message every ~6-8 hours of run wall-clock time. Format:
 **Plans completed:** 0 (Mems behavior at 67%, expected to close tomorrow)
 
 **Blockers introduced:** 1
-- `plan-5-task-7`: subagent BLOCKED on missing trait method `Backend::tick_count`. Reason: spec/runtime.md §24 doesn't specify it. Marked for user decision.
+- `plan-5-task-7`: subagent BLOCKED on missing trait method `Backend::tick_count`. Reason: spec/engine.md §13 doesn't specify it. Marked for user decision.
 
 **Critic verdicts of note:**
 - 14 PASS verdicts (no FAILs)
@@ -484,7 +484,7 @@ Append-only file in the repo. One section per pending decision:
 
 ## 2026-04-25 14:33 — plan-write request: Plan 5 (ComputeBackend trait)
 
-Spec: `docs/spec/runtime.md` §24
+Spec: `docs/spec/engine.md` §15
 Roadmap tier: Engine plans not yet written
 Existing plans: none
 

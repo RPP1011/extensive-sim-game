@@ -31,7 +31,7 @@ A single compiler IR lowers to two backends:
 
 A static validator rejects rule bodies that can't lift to GPU: no heap allocation, no recursion, no dynamic dispatch, all loops bounded at parse time. If a rule can't compile to GPU, the build breaks. As a consequence, dozens of commits' worth of GPU infrastructure have landed without touching a single game rule.
 
-Spec: `spec/language.md` (DSL), `spec/compiler.md` (lowering), `spec/runtime.md` (engine contract).
+Spec: `spec/dsl.md` (DSL + compiler), `spec/engine.md` (engine contract).
 
 ## 3. The DSL → engine → GPU pipeline
 
@@ -41,14 +41,14 @@ Spec: `spec/language.md` (DSL), `spec/compiler.md` (lowering), `spec/runtime.md`
                               └►  Python classes  (training / external ML)
 ```
 
-The compiler owns text-to-engine lowering and emits all three targets from the same IR. Both backends consume the same `Engine` runtime: `Pool<T>` IDs, the event ring, the spatial index, the RNG streams, the mask buffer, the policy backend, and the materialized/lazy/topk view traits. The contract between compiler output and runtime is fixed by `spec/scoring_fields.md` (the `field_id` ABI) and the schema hash (`crates/engine/.schema_hash`); CI catches drift.
+The compiler owns text-to-engine lowering and emits all three targets from the same IR. Both backends consume the same `Engine` runtime: `Pool<T>` IDs, the event ring, the spatial index, the RNG streams, the mask buffer, the policy backend, and the materialized/lazy/topk view traits. The contract between compiler output and runtime is fixed by `spec/dsl.md` §8 (the `field_id` ABI) and the schema hash (`crates/engine/.schema_hash`); CI catches drift.
 
 Cross-refs:
 
-- DSL grammar and semantics: `spec/language.md`.
+- DSL grammar and semantics: `spec/dsl.md`.
 - Field catalog (every SoA field, who reads, who writes): `spec/state.md`.
-- Built-in functions and namespaces: `spec/stdlib.md`.
-- Codegen and lowering passes: `spec/compiler.md`.
+- Built-in functions and namespaces: `spec/dsl.md` §7.
+- Codegen and lowering passes: `spec/dsl.md` §9.
 - Ability DSL (a sub-language for ability definitions): `spec/ability.md`.
 - Economic system layered on top: `spec/economy.md`.
 
@@ -56,9 +56,9 @@ Cross-refs:
 
 `step(state, events, policy, cascade) → state'` is the atomic unit. Six phases, in order: **mask** (per-agent bitmap of eligible action kinds), **scoring** (argmax of `score(agent, action, target)` over the action × target space), **apply** (chosen intents become events on the per-tick ring), **cascade** (fixed-point iteration: physics rules dispatch over events, fold into views, may emit new events; bounded at 8 iterations, typically converges in 2–4), **movement** (positions update, can re-emit events that fold further — movement is part of the cascade, not a post-pass), and **finalize** (tick counter, invariants, telemetry). Events are the only observable side channel; all derived state is reconstructible from the event log.
 
-Authoritative description: `spec/runtime.md §14` (tick pipeline), with §11 (cascade), §12 (mask), §13 (policy), §15 (views), §22 (schema hash), §2 (determinism contract).
+Authoritative description: `spec/engine.md §4` (tick pipeline), with §5 (cascade), §4.2 (mask), §4.3 (policy), §4.7 (views), §8 (schema hash), §6 (determinism contract).
 
-Determinism on GPU is enforced by serializing fold dispatches per event so concurrent atomicCompareExchange races can't reorder floating-point folds; the host issues events in deterministic sequence. The drained event log is sorted by `(tick, kind, payload[0])` before chronicle replay. See `spec/runtime.md §2` and §8.
+Determinism on GPU is enforced by serializing fold dispatches per event so concurrent atomicCompareExchange races can't reorder floating-point folds; the host issues events in deterministic sequence. The drained event log is sorted by `(tick, kind, payload[0])` before chronicle replay. See `spec/engine.md §6` and §4.7.
 
 ## 5. A worked example: rout cascade
 
@@ -80,15 +80,13 @@ The full set of currently-declared views: `my_enemies`, `threat_level`, `kin_fea
 If you want the contract — read the spec:
 
 - `spec/README.md` — index and reading order for the canonical specification.
-- `spec/runtime.md` — the engine contract (state, events, mask, policy, cascade, tick pipeline, schema hash).
-- `spec/language.md` — the DSL grammar and semantics.
-- `spec/compiler.md` — DSL → Rust + SPIR-V + Python lowering.
+- `spec/engine.md` — the engine contract (state, events, mask, policy, cascade, tick pipeline, schema hash, GPU annexes).
+- `spec/dsl.md` — the DSL grammar, semantics, stdlib, compiler architecture, and scoring field-id mapping.
 - `spec/ability.md`, `spec/economy.md` — sub-languages and layered systems.
 
 If you want to know what's built right now — read live status:
 
 - `engine/status.md` — per-subsystem ✅/⚠️/❌ truth, currently-known issues, what would falsify each claim.
-- `spec/gpu.md` — GPU backend contract (resident cascade, sim-state, cold-state replay, ability eval, kernel reference).
 
 If you want to know what's coming — read planning:
 
@@ -96,4 +94,4 @@ If you want to know what's coming — read planning:
 - `superpowers/plans/` — written plans for in-flight work.
 - `superpowers/research/` and `superpowers/notes/` — design exploration and bisects.
 
-A reasonable five-file path for a new contributor: this doc → `engine/status.md` → `spec/README.md` → `spec/runtime.md` → `ROADMAP.md`.
+A reasonable five-file path for a new contributor: this doc → `engine/status.md` → `spec/README.md` → `spec/engine.md` → `ROADMAP.md`.

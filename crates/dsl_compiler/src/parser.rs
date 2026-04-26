@@ -1269,7 +1269,7 @@ fn parse_scoring_entry(c: &mut Cursor) -> PResult<ScoringEntry> {
 /// and followed by `:`.
 ///
 /// Added 2026-04-23 (GPU ability evaluation subsystem Phase 2). See
-/// `docs/spec/gpu.md (§5)`.
+/// `docs/spec/engine.md §11`.
 fn parse_per_ability_row(c: &mut Cursor) -> PResult<PerAbilityRow> {
     let start = c.pos;
     expect_keyword(c, "row").map_err(|e| e.with_context("parsing `row` keyword"))?;

@@ -572,7 +572,7 @@ These are the surfaces game-side `physics` rules use. Decision-time code (`scori
 
 ### 9.4.1 DSL surface for emission
 
-`physics` rule bodies invoke these via stdlib functions added to `spec/stdlib.md`. Sketch:
+`physics` rule bodies invoke these via stdlib functions added to `spec/dsl.md` §7. Sketch:
 
 ```
 physics on Attacked { actor: a, target: t, location: pos } {
@@ -696,7 +696,7 @@ Per-region render-state cache: `(epoch_floor_at_build, lod_level_chosen, draw_cm
 
 ### 12.2.1 Snapshot mechanism
 
-The snapshot reuses the existing engine infrastructure (`spec/gpu.md` §2): double-buffered, non-blocking. The renderer calls `voxel_storage::snapshot()`, receives a `VoxelSnapshot` analogous to `GpuSnapshot`, and reads against it for the duration of the frame. Like `GpuSnapshot`, contents reflect state as-of the previous snapshot call (one frame lag); front staging buffers populated by `map_async(Read)` while the back continues to receive sim writes. Region indices follow the same flip — the renderer's `VoxelRegionRegistryView` carries the chunk-epoch snapshot it was paired with, so visibility-cache invalidation aligns to the same tick boundary.
+The snapshot reuses the existing engine infrastructure (`spec/engine.md` §9): double-buffered, non-blocking. The renderer calls `voxel_storage::snapshot()`, receives a `VoxelSnapshot` analogous to `GpuSnapshot`, and reads against it for the duration of the frame. Like `GpuSnapshot`, contents reflect state as-of the previous snapshot call (one frame lag); front staging buffers populated by `map_async(Read)` while the back continues to receive sim writes. Region indices follow the same flip — the renderer's `VoxelRegionRegistryView` carries the chunk-epoch snapshot it was paired with, so visibility-cache invalidation aligns to the same tick boundary.
 
 ### 12.3 LOD
 
@@ -770,7 +770,7 @@ Reviewer flagged Phase 0 as undersized; it splits into two sub-phases that Phase
 The reviewer flagged this phase as undersized; it splits into four sub-phases, each its own implementation plan. The compiler scope is comparable to Spec B' Task 11 (~600 LoC of emit code).
 
 #### Phase 6a — Grammar + parser + IR
-- New `index` top-level declaration form added to `spec/language.md`.
+- New `index` top-level declaration form added to `spec/dsl.md`.
 - Storage-shape sub-syntax (`per_cell_2d(...)`, `bitset_pairs(...)`, `mesh_buffer(...)`, etc.).
 - IR: `Index`, `IndexStorage`, `CostClass`, `RebuildTrigger` types.
 - Parser produces IR nodes.
@@ -823,7 +823,7 @@ These warrant resolution during implementation but do not block this spec:
 2. **Index serialization format.** For save games and world sharing, we'll need a stable on-disk format for at least Navgrid and SurfaceMesh. Spec out when save/load ships.
 3. **Region overlap semantics for queries.** When two indexed regions cover a point and both have Navgrid, which wins? Innermost? Most-recently-built? Specify when first overlapping case arises.
 4. **Concurrent build limits.** How many indices may build simultaneously on async compute queues without VRAM pressure? Empirical, set during profiling.
-5. **Determinism of index build (constraint, not question).** Index *outputs* feeding execution-time queries that emit replayable events MUST be deterministic across runs and across CPU/GPU backends, even when build *scheduling* is non-deterministic. Two indices built in different orders must produce bit-identical query results. This is implied by §2's sim-determinism requirement: `resolve_movement` emits replayable events (`MovementBlocked`, `VoxelRegionEntered`, etc.) into `replayable_sha256`, and those events depend on indices via `walkable()` / navgrid lookups. The constraint binds CPU+GPU implementations to identical algorithms (not merely identical primitives). Render-only indices (LOD meshes, visibility cache) are exempt — they don't feed replayable events. The open part: deciding the canonical algorithm for each non-trivial index (greedy mesh tie-breaking, JFA pass count, A* tie-breaking) and codifying it in `spec/runtime.md`'s determinism contract.
+5. **Determinism of index build (constraint, not question).** Index *outputs* feeding execution-time queries that emit replayable events MUST be deterministic across runs and across CPU/GPU backends, even when build *scheduling* is non-deterministic. Two indices built in different orders must produce bit-identical query results. This is implied by §2's sim-determinism requirement: `resolve_movement` emits replayable events (`MovementBlocked`, `VoxelRegionEntered`, etc.) into `replayable_sha256`, and those events depend on indices via `walkable()` / navgrid lookups. The constraint binds CPU+GPU implementations to identical algorithms (not merely identical primitives). Render-only indices (LOD meshes, visibility cache) are exempt — they don't feed replayable events. The open part: deciding the canonical algorithm for each non-trivial index (greedy mesh tie-breaking, JFA pass count, A* tie-breaking) and codifying it in `spec/engine.md`'s determinism contract.
 6. **Region graph rebuild cost.** Adding/removing regions modifies the graph; at high churn (constant region churn from destruction), is incremental update or full rebuild cheaper? Profile.
 7. **First-frame latency on chunk exposure.** Worldgen + index builds for a freshly-exposed chunk neighborhood: how do we hide latency? Pre-emptive build-ahead from agent intent? Loading-screen for player-traversal? Specify when player-camera mode lands.
 
@@ -867,8 +867,7 @@ Tuning runbook lives at `docs/runbooks/spatial-layer-tuning.md` (TBD), structure
 
 - `superpowers/notes/2026-04-22-terrain-integration-gap.md` — origin of the integration question; minimal first slice.
 - `game/overview.md` — game scope, target scale, layer map.
-- `spec/runtime.md` — engine contract, view system, cascade discipline.
-- `spec/language.md` — DSL grammar; `index` declaration is a new top-level form to add.
+- `spec/engine.md` — engine contract, view system, cascade discipline, GPU annexes.
+- `spec/dsl.md` — DSL grammar; `index` declaration is a new top-level form to add.
 - `spec/state.md` — field catalog; new spatial-belief views land here.
-- `spec/gpu.md` — GPU backend contract; index build kernels are a new category.
 - arXiv 2505.02017 (Aokana) — surveyed; informs LOD-index design only.

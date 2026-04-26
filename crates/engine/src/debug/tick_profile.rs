@@ -3,7 +3,7 @@
 //! Wraps `Instant` measurements per phase; emits via `TelemetrySink` if
 //! installed; persists raw samples for offline analysis.
 //!
-//! Per `spec/runtime.md` §24 and Plan 4 Task 5.
+//! Per `spec/engine.md` §13 and Plan 4 Task 5.
 
 use crate::telemetry::{metrics, NullSink, TelemetrySink};
 use std::collections::BTreeMap;

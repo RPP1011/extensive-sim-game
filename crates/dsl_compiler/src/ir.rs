@@ -66,7 +66,7 @@ pub struct FieldRef {
 /// comparisons align without a runtime lookup. Column index into
 /// `tag_values` is the `#[repr(u8)]` ordinal.
 ///
-/// Spec: `docs/spec/gpu.md (§5)`
+/// Spec: `docs/spec/engine.md §11`
 /// §"Open questions" (fixed enum for v1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[repr(u8)]
@@ -722,7 +722,7 @@ pub struct ScoringEntryIR {
 /// * `target` — optional agent-id expression picking the cast target.
 ///
 /// Phase 2 of the GPU ability evaluation subsystem. See
-/// `docs/spec/gpu.md (§5)`
+/// `docs/spec/engine.md §11`
 /// §Architecture.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PerAbilityRowIR {

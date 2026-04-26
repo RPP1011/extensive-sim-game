@@ -460,7 +460,7 @@ pub const HINT_NONE_SENTINEL: u32 = 0xFFu32;
 ///
 /// The `hints` and `tag_values` fields are the Phase 1 addition of the
 /// GPU ability-evaluation subsystem (see
-/// `docs/spec/gpu.md (§5)`).
+/// `docs/spec/engine.md §11`).
 /// They carry the scoring surface that Phase 4 will bind and read; no
 /// physics kernel consumes them today. `empty()` initialises both to
 /// their "no data" defaults so existing tests that skip

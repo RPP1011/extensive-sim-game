@@ -10,7 +10,7 @@
 > - `docs/engine/status.md` — live subsystem status; the "not started" /
 >   "❌" rows (§18 save, §20 probes, §21 obs packer, §23 debug, §24 backends)
 >   are Plan 3 / Plan 4+ and not covered here.
-> - `docs/spec/runtime.md` — runtime contract sections §§1–26.
+> - `docs/spec/engine.md` — engine runtime contract (§§1–16, GPU annexes §§9–12).
 > - `docs/spec/state.md` — authoritative state catalog. Every scope
 >   statement below cites a section of this file.
 > - The 2026-04-19 state-port plan enumerated the storage-only stubs
@@ -995,7 +995,7 @@ Explicitly outside:
 | Chronicle prose rendering | Host-side text generation from events. Compiler / presentation layer. | spec.md §26 last bullet "chronicle prose templates"; a hypothetical `crates/chronicle/`. |
 | Curriculum pipelines | External training tooling. Reads trajectories but doesn't touch engine. | Downstream Python in `training/`. |
 | LLM backend | Separate downstream crate; engine exposes `PolicyBackend` trait only. | Spec.md §26 last bullet. |
-| DSL parser + codegen | Compiler concern. Engine receives emitted SPIR-V + Rust closures. | Spec.md §1 "Not owned by the engine"; `docs/spec/compiler.md`. |
+| DSL parser + codegen | Compiler concern. Engine receives emitted SPIR-V + Rust closures. | Spec.md §1 "Not owned by the engine"; `docs/spec/dsl.md` §9. |
 | Cascade **rules** (the DSL rule texts) | Compiler emits the kernels; engine provides the dispatch runtime. | Spec.md §26. |
 | Plan 4 debug & trace runtime | Has its own "to be written" slot in `status.md:34`. Spec.md §24. | Future plan. |
 | Plan 5 `ComputeBackend` trait extraction | `status.md:35`. | Future plan. |
@@ -1167,7 +1167,7 @@ the bias, Groups is the high-leverage pick.
 ## References
 
 - `docs/engine/status.md` — live subsystem status.
-- `docs/spec/runtime.md` — runtime contract (§§1–26).
+- `docs/spec/engine.md` — engine runtime contract (§§1–16, GPU annexes §§9–12).
 - `docs/spec/state.md` — authoritative state catalog.
 -  — system inventory (essential vs emergent).
 -  — user-story investigations.

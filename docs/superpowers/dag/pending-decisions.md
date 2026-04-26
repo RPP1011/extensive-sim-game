@@ -28,7 +28,7 @@ populates the new tasks; loop continues.
 
 ## 2026-04-26 — plan-writer: Plan 5b–e — Remaining ComputeBackend phases
 
-**Roadmap source:** `docs/spec/runtime.md` §8/§12/§14; `plans/2026-04-25-plan-5a-computebackend-mask-fill-impl.md` (Phase 1 of 5; Phases 5b–e deferred).
+**Roadmap source:** `docs/spec/engine.md` §8/§4.2/§4; `plans/2026-04-25-plan-5a-computebackend-mask-fill-impl.md` (Phase 1 of 5; Phases 5b–e deferred).
 
 **Spec exists.** Plan 5a established the `ComputeBackend` trait + mask-fill threading. Subsequent phases:
 - **5b** — cascade dispatch through backend (cascade currently goes through `CascadeRegistry::dispatch` directly; route through `backend.cascade_dispatch(...)`)
@@ -47,7 +47,7 @@ populates the new tasks; loop continues.
 
 **Roadmap source:** `docs/ROADMAP.md` "Engine plans not yet written" tier; depends on Plan 5 complete.
 
-**Spec exists** at `docs/spec/gpu.md`. Goal: bridge the `ComputeBackend` trait's kernel-dispatch surface (after 5b–e) to the existing `engine_gpu` primitives (kernels under `crates/engine_gpu/src/`). Most of the underlying GPU kernels already exist (megakernel + cold-state replay landed); this is mostly plumbing — wiring `GpuBackend` impl methods to invoke the right kernels for each backend trait method.
+**Spec exists** at `docs/spec/engine.md` (GPU annexes §§9–12). Goal: bridge the `ComputeBackend` trait's kernel-dispatch surface (after 5b–e) to the existing `engine_gpu` primitives (kernels under `crates/engine_gpu/src/`). Most of the underlying GPU kernels already exist (megakernel + cold-state replay landed); this is mostly plumbing — wiring `GpuBackend` impl methods to invoke the right kernels for each backend trait method.
 
 **Suggested scope:** ~6-10 tasks. Depends on Plan 5b–e closing first.
 
@@ -61,8 +61,8 @@ populates the new tasks; loop continues.
 **Roadmap source:** `docs/ROADMAP.md` "Engine plans not yet written" tier.
 
 **Note:** This entry was previously framed as "many kernels still on CPU." Investigation 2026-04-26 (during this session) showed that nearly all kernels already exist in `engine_gpu/src/`. The genuinely-remaining items are:
-- **GPU cold-state replay Phase 4** (memory + chronicle handlers per `spec/gpu.md` §4.5/§4.6) — small umbrella tail; could fold into Plan 6.
-- **Subsystem 3 — Ability evaluation on GPU** (`pick_ability` kernel + `ability::tag(TAG)` scoring grammar + `per_ability` row type per `spec/gpu.md` §5) — this IS a real not-yet-ported kernel.
+- **GPU cold-state replay Phase 4** (memory + chronicle handlers per `spec/engine.md` §10) — small umbrella tail; could fold into Plan 6.
+- **Subsystem 3 — Ability evaluation on GPU** (`pick_ability` kernel + `ability::tag(TAG)` scoring grammar + `per_ability` row type per `spec/engine.md` §11) — this IS a real not-yet-ported kernel.
 
 **Recommended action:** retire this catch-all plan-writer entry and replace with a focused plan for Subsystem 3 ability evaluation (the only genuinely-missing kernel). The "per-kernel porting" framing was overstated.
 
@@ -99,7 +99,7 @@ populates the new tasks; loop continues.
 
 ## 2026-04-26 — plan-writer: GPU ability evaluation (Subsystem 3)
 
-**Roadmap source:** `docs/ROADMAP.md` "Drafted (spec exists, plan does not)" tier; `docs/spec/gpu.md` §5.
+**Roadmap source:** `docs/ROADMAP.md` "Drafted (spec exists, plan does not)" tier; `docs/spec/engine.md` §11.
 
 **Spec exists.** Concrete deliverables: `pick_ability` kernel emitted from DSL → WGSL, new `ability::tag(TAG)` scoring grammar primitive, `per_ability` row type. This is the one genuinely-missing GPU kernel referenced in the Plan 7+ entry above.
 

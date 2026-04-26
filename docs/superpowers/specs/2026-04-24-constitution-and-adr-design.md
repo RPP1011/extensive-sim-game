@@ -150,12 +150,9 @@ convention):
 - [Overview](docs/overview.md): 5-minute architectural intro.
 
 ## Spec
-- [Language](docs/spec/language.md): world-sim DSL grammar + semantics.
-- [Runtime](docs/spec/runtime.md): engine runtime contract (§§1–26).
-- [Compiler](docs/spec/compiler.md): DSL → Rust + SPIR-V + Python lowering.
-- [GPU](docs/spec/gpu.md): GPU backend contract.
+- [DSL](docs/spec/dsl.md): world-sim DSL grammar + semantics, stdlib, compiler architecture, and scoring field-id mapping.
+- [Engine](docs/spec/engine.md): engine runtime contract (§§1–16, GPU annexes §§9–12).
 - [State](docs/spec/state.md): field catalog.
-- [Stdlib](docs/spec/stdlib.md): pinned built-ins.
 - [Ability DSL](docs/spec/ability.md): .ability language + IR.
 - [Economy](docs/spec/economy.md): economic system design.
 
@@ -212,9 +209,9 @@ If this becomes too token-heavy, replace with a leaner emission (e.g., principle
 
 Single-source-of-truth has a one-time cleanup cost. Once the constitution lands, sweep these locations for duplicate principle-flavored content and **delete** (not redirect):
 
-- `docs/spec/runtime.md` §22, §23, §24 — schema-hash rules, determinism contract, backend selection. Move principle content to constitution; delete from spec or keep only as implementation detail (e.g., concrete API for a principle).
-- `docs/spec/compiler.md` §1 (compiler-first framing) — collapse to spec-of-emission-mechanics; the principle moves to constitution.
-- `docs/spec/language.md` §9 (settled decisions) — many entries are de facto principles. Audit each; principles → constitution; implementation specifics → stay in spec.
+- `docs/spec/engine.md` §8, §6, §15 — schema-hash rules, determinism contract, backend selection. Move principle content to constitution; delete from spec or keep only as implementation detail (e.g., concrete API for a principle).
+- `docs/spec/dsl.md` §9 (compiler architecture) — collapse to spec-of-emission-mechanics; the principle moves to constitution.
+- `docs/spec/dsl.md` §13 (settled decisions) — many entries are de facto principles. Audit each; principles → constitution; implementation specifics → stay in spec.
 - `docs/spec/ability.md` §22.2 (`EffectOp` size budget) — principle to constitution; the variant table stays.
 - `docs/engine/status.md` "Top weak-test risks" + "Open verification questions" — these are fine; they're audit findings, not principles.
 
@@ -224,7 +221,7 @@ Migration is included in the implementation plan, not deferred.
 
 Hand-curated extraction from existing specs (no Haiku scan for the principle catalog). Process:
 
-1. Read `docs/spec/runtime.md`, `compiler.md`, `language.md` §9, `ability.md`, `economy.md` §1.3 cover-to-cover.
+1. Read `docs/spec/engine.md`, `docs/spec/dsl.md` §13, `ability.md`, `economy.md` §1.3 cover-to-cover.
 2. Identify principle-shaped statements (rules that govern behavior, not implementation specifics).
 3. Draft each as P-N with statement + rationale + enforcement + source.
 4. Cross-check no duplicates across principles.

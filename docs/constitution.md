@@ -17,7 +17,7 @@
 - Critic: project-critic checks any task tagged `engine-extension`.
 - Manual: code review.
 
-**Source.** `docs/spec/compiler.md` §1 (kept for archaeology only — readers do not follow pointers).
+**Source.** `docs/spec/dsl.md` §9 (kept for archaeology only — readers do not follow pointers).
 
 ---
 
@@ -32,7 +32,7 @@
 - Agent-write-time: `PreToolUse` hook on `Edit|Write` to `crates/engine/src/state/**` requires an open task tagged `schema-change`.
 - Manual: regen via the documented procedure.
 
-**Source.** `docs/spec/runtime.md` §22.
+**Source.** `docs/spec/engine.md` §8.
 
 ---
 
@@ -47,7 +47,7 @@
 - Compile-time: DSL `@cpu_only` annotation is a parser-recognized exception.
 - Critic: project-critic flags new behavior without parity test.
 
-**Source.** `docs/spec/compiler.md` §1, `docs/spec/runtime.md` §24.
+**Source.** `docs/spec/dsl.md` §9, `docs/spec/engine.md` §13.
 
 ---
 
@@ -75,7 +75,7 @@
 - CI: ast-grep rule rejecting `thread_rng()` / `SystemTime::now()` in `crates/engine/src/`.
 - Manual: code review.
 
-**Source.** `docs/spec/runtime.md` §7, `docs/spec/language.md` §9.
+**Source.** `docs/spec/engine.md` §6, `docs/spec/dsl.md` §13.
 
 ---
 
@@ -89,7 +89,7 @@
 - Manual: code review on `&mut SimState` writes.
 - CI (future): visibility rule that confines field writes to `step::*` and `snapshot::*`.
 
-**Source.** `docs/spec/runtime.md` §5.
+**Source.** `docs/spec/engine.md` §5.
 
 ---
 
@@ -103,7 +103,7 @@
 - Compile-time: parser requires the annotation; emitter generates flagged enum variants.
 - CI: trace-format roundtrip test.
 
-**Source.** `docs/spec/runtime.md` §5, `docs/spec/language.md` §2.2.
+**Source.** `docs/spec/engine.md` §5, `docs/spec/dsl.md` §2.
 
 ---
 
@@ -145,7 +145,7 @@
 - CI: `tests/proptest_baseline.rs` runs `step` on randomized inputs; never panics.
 - Manual: code review on `unwrap()` in hot paths.
 
-**Source.** `docs/spec/runtime.md` §14.
+**Source.** `docs/spec/engine.md` §4.
 
 ---
 
@@ -161,4 +161,4 @@
 - CI: `tests/rng_cross_backend.rs` asserts host `per_agent_u32` and shader `per_agent_u32_glsl` produce identical streams on shared inputs (RNG golden test).
 - Manual: code review on any new atomic-reduction kernel.
 
-**Source.** `docs/spec/runtime.md` §2, §15; `docs/spec/compiler.md` §1.2 (kept for archaeology only — readers do not follow pointers).
+**Source.** `docs/spec/engine.md` §6, §4.7; `docs/spec/dsl.md` §9 (kept for archaeology only — readers do not follow pointers).

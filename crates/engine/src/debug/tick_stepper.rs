@@ -1,6 +1,6 @@
 //! Pause-and-inspect harness for the per-tick step pipeline.
 //!
-//! Per spec/runtime.md §24: "tick_stepper — stops between phases; can request
+//! Per spec/engine.md §13: "tick_stepper — stops between phases; can request
 //! phase-specific downloads."
 
 use std::sync::mpsc::{channel, Receiver, Sender};

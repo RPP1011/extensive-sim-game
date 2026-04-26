@@ -134,7 +134,7 @@ The "Current state" section is owned by the skill; everything else is human-edit
     paths: ["crates/engine/src/handlers/**", "crates/engine/src/cascade/handlers/**"]
     tags: ["engine-extension"]
   check: invariants/compiler-first.py
-  source: docs/spec/compiler.md §1
+  source: docs/spec/dsl.md §9
   severity: block
 
 - id: schema-bump-on-layout
@@ -143,7 +143,7 @@ The "Current state" section is owned by the skill; everything else is human-edit
   applies_to:
     paths: ["crates/engine/src/state/**"]
   check: invariants/schema-bump-on-layout.py
-  source: docs/spec/runtime.md §22
+  source: docs/spec/engine.md §8
   severity: block
 ```
 

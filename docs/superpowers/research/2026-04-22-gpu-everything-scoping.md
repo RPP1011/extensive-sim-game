@@ -2,7 +2,7 @@
 
 **Status:** research, not a spec
 **Date:** 2026-04-22
-**Predecessor:** [GPU backend spec](../../spec/gpu.md) §2 (resident cascade)
+**Predecessor:** [Engine spec](../../spec/engine.md) §9 (resident cascade)
 **Branch:** `world-sim-bench`
 
 ## Purpose

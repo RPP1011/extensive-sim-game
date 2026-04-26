@@ -14,13 +14,9 @@
 
 ## Specification
 
-- [Language](docs/spec/language.md): world-sim DSL grammar + semantics.
-- [Runtime](docs/spec/runtime.md): engine runtime contract (§§1–26).
-- [Compiler](docs/spec/compiler.md): DSL → Rust + SPIR-V + Python lowering.
-- [GPU](docs/spec/gpu.md): GPU backend contract (cascade, sim-state, cold-state, ability-eval, pipeline).
+- [DSL](docs/spec/dsl.md): world-sim DSL grammar + semantics, stdlib, compiler architecture, and scoring field-id mapping.
+- [Engine](docs/spec/engine.md): engine runtime contract (§§1–16, GPU annexes §§9–12).
 - [State](docs/spec/state.md): field catalog (every SoA field, who reads, who writes).
-- [Stdlib](docs/spec/stdlib.md): pinned built-in functions and namespaces.
-- [Scoring fields](docs/spec/scoring_fields.md): `field_id` ABI table.
 - [Ability DSL](docs/spec/ability.md): `.ability` language reference + IR.
 - [Economy](docs/spec/economy.md): economic system design (recipes, contracts, market).
 

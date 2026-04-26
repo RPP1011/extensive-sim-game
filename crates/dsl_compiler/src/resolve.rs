@@ -2102,7 +2102,7 @@ fn resolve_ident(
     // `ability::tag(...)` and `ability::on_cooldown(...)` take args
     // and route through `resolve_ability_eval_call`; the naked forms
     // (`ability::hint`, `ability::range`) are handled here.
-    // See `docs/spec/gpu.md (§5)`
+    // See `docs/spec/engine.md §11`
     // §Architecture.
     if name == "ability::hint" || name == "abilities::hint" {
         return Ok(IrExpr::AbilityHint);
@@ -2377,7 +2377,7 @@ fn as_hint_literal(e: &Expr) -> Option<AbilityHint> {
 /// Only argument-taking primitives route through here —
 /// `ability::hint`, `ability::range` have no `()` suffix and are
 /// handled in `resolve_ident` instead. See
-/// `docs/spec/gpu.md (§5)`
+/// `docs/spec/engine.md §11`
 /// §Architecture.
 fn resolve_ability_eval_call(
     name: &str,

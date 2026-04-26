@@ -1,6 +1,6 @@
 //! Debug & trace runtime — engine primitive infrastructure for observability.
 //!
-//! Per `spec/runtime.md` §24. Six components, all host-side; GPU backends
+//! Per `spec/engine.md` §13. Six components, all host-side; GPU backends
 //! trigger downloads on demand:
 //!
 //!   - `trace_mask` — records mask buffer state per tick

@@ -13,7 +13,7 @@
 //! * PER-AB-5 — the spec's full `pick_ability` row parses + resolves
 //!   cleanly end-to-end.
 //!
-//! See `docs/spec/gpu.md (§5)`
+//! See `docs/spec/engine.md §11`
 //! §Architecture.
 
 use dsl_compiler::ast::{BinOp, Decl, ExprKind};
