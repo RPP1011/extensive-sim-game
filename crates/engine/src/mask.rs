@@ -174,4 +174,20 @@ impl MaskBuffer {
         let offset = agent_slot * MicroKind::ALL.len() + kind as usize;
         self.micro_kind.get(offset).copied().unwrap_or(false)
     }
+
+    /// Number of agents this buffer was sized for.
+    pub fn n_agents(&self) -> u32 {
+        (self.micro_kind.len() / MicroKind::ALL.len()) as u32
+    }
+
+    /// Number of micro-kind slots per agent.
+    pub fn n_kinds(&self) -> u32 {
+        MicroKind::ALL.len() as u32
+    }
+
+    /// Raw read-only view of the micro-kind bit matrix
+    /// (length = n_agents × n_kinds, row-major by agent).
+    pub fn bits(&self) -> &[bool] {
+        &self.micro_kind
+    }
 }

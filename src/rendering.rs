@@ -3,6 +3,7 @@ use voxel_engine::scene::{Scene, SceneConfig};
 use voxel_engine::camera::Camera;
 
 pub struct GameRenderer {
+    #[allow(dead_code)]
     scene: Scene,
 }
 
