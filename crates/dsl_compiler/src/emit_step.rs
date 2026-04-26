@@ -36,6 +36,7 @@ pub fn emit_step(_source_file: Option<&str>) -> String {
 //   6. Tick advance
 
 use engine::cascade::CascadeRegistry;
+use engine::debug::DebugConfig;
 use engine::event::EventRing;
 use engine::ids::AgentId;
 use engine::policy::{Action, ActionKind, AnnounceAudience, MacroAction, MicroTarget, PolicyBackend};
@@ -55,6 +56,10 @@ use crate::views::ViewRegistry;
 /// 4. Apply actions + cascade fixed-point
 /// 5. View fold (`views.fold_all`)
 /// 6. Tick advance (`state.tick += 1`)
+///
+/// `debug` is passed by the caller; `DebugConfig::default()` (all collectors
+/// disabled) is a zero-cost no-op path — all stepper checkpoints are guarded
+/// by `if let Some(stepper) = debug.tick_stepper.as_ref()`.
 pub fn step<B: PolicyBackend>(
     state:   &mut SimState,
     scratch: &mut SimScratch,
@@ -62,16 +67,53 @@ pub fn step<B: PolicyBackend>(
     views:   &mut ViewRegistry,
     policy:  &B,
     cascade: &CascadeRegistry<Event, ViewRegistry>,
+    debug:   &DebugConfig,
 ) {
+    // Checkpoint: BeforeViewFold (entry — before mask build begins).
+    if let Some(stepper) = debug.tick_stepper.as_ref() {
+        match stepper.checkpoint(engine::debug::tick_stepper::Phase::BeforeViewFold) {
+            engine::debug::tick_stepper::Step::Continue => {}
+            engine::debug::tick_stepper::Step::Pause => {}
+            engine::debug::tick_stepper::Step::Abort => return,
+        }
+    }
+
     // Phase 1 — mask build.
     crate::mask_fill::fill_all(&mut scratch.mask, &mut scratch.target_mask, state);
+
+    // Checkpoint: AfterMaskFill.
+    if let Some(stepper) = debug.tick_stepper.as_ref() {
+        match stepper.checkpoint(engine::debug::tick_stepper::Phase::AfterMaskFill) {
+            engine::debug::tick_stepper::Step::Continue => {}
+            engine::debug::tick_stepper::Step::Pause => {}
+            engine::debug::tick_stepper::Step::Abort => return,
+        }
+    }
 
     // Phase 2 — policy evaluate.
     scratch.actions.clear();
     policy.evaluate(state, &scratch.mask, &scratch.target_mask, &mut scratch.actions);
 
+    // Checkpoint: AfterScoring.
+    if let Some(stepper) = debug.tick_stepper.as_ref() {
+        match stepper.checkpoint(engine::debug::tick_stepper::Phase::AfterScoring) {
+            engine::debug::tick_stepper::Step::Continue => {}
+            engine::debug::tick_stepper::Step::Pause => {}
+            engine::debug::tick_stepper::Step::Abort => return,
+        }
+    }
+
     // Phase 3 — deterministic action shuffle.
     shuffle_actions_in_place(state.seed, state.tick, &scratch.actions, &mut scratch.shuffle_idx);
+
+    // Checkpoint: AfterActionSelect.
+    if let Some(stepper) = debug.tick_stepper.as_ref() {
+        match stepper.checkpoint(engine::debug::tick_stepper::Phase::AfterActionSelect) {
+            engine::debug::tick_stepper::Step::Continue => {}
+            engine::debug::tick_stepper::Step::Pause => {}
+            engine::debug::tick_stepper::Step::Abort => return,
+        }
+    }
 
     // Phase 4a — apply actions (emit root-cause events).
     let events_before = events.total_pushed();
@@ -81,11 +123,38 @@ pub fn step<B: PolicyBackend>(
     cascade.run_fixed_point(state, views, events);
     let _ = events_before; // reserved for future telemetry
 
+    // Checkpoint: AfterCascadeDispatch.
+    if let Some(stepper) = debug.tick_stepper.as_ref() {
+        match stepper.checkpoint(engine::debug::tick_stepper::Phase::AfterCascadeDispatch) {
+            engine::debug::tick_stepper::Step::Continue => {}
+            engine::debug::tick_stepper::Step::Pause => {}
+            engine::debug::tick_stepper::Step::Abort => return,
+        }
+    }
+
     // Phase 5 — view fold.
     views.fold_all(events, events_before, state.tick);
 
+    // Checkpoint: AfterViewFold.
+    if let Some(stepper) = debug.tick_stepper.as_ref() {
+        match stepper.checkpoint(engine::debug::tick_stepper::Phase::AfterViewFold) {
+            engine::debug::tick_stepper::Step::Continue => {}
+            engine::debug::tick_stepper::Step::Pause => {}
+            engine::debug::tick_stepper::Step::Abort => return,
+        }
+    }
+
     // Phase 6 — tick advance.
     state.tick = state.tick.wrapping_add(1);
+
+    // Checkpoint: TickEnd.
+    if let Some(stepper) = debug.tick_stepper.as_ref() {
+        match stepper.checkpoint(engine::debug::tick_stepper::Phase::TickEnd) {
+            engine::debug::tick_stepper::Step::Continue => {}
+            engine::debug::tick_stepper::Step::Pause => {}
+            engine::debug::tick_stepper::Step::Abort => return,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

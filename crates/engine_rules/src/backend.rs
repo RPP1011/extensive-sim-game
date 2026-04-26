@@ -4,6 +4,7 @@
 use crate::views::ViewRegistry;
 use engine::backend::SimBackend;
 use engine::cascade::CascadeRegistry;
+use engine::debug::DebugConfig;
 use engine::event::EventRing;
 use engine::policy::PolicyBackend;
 use engine::scratch::SimScratch;
@@ -29,6 +30,14 @@ impl SimBackend for SerialBackend {
         policy: &B,
         cascade: &CascadeRegistry<Self::Event, Self::Views>,
     ) {
-        crate::step::step(state, scratch, events, views, policy, cascade);
+        crate::step::step(
+            state,
+            scratch,
+            events,
+            views,
+            policy,
+            cascade,
+            &DebugConfig::default(),
+        );
     }
 }

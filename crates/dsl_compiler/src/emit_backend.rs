@@ -14,6 +14,7 @@ pub fn emit_backend(source_file: Option<&str>) -> String {
     emit_header(&mut out, source_file);
     writeln!(out, "use engine::backend::SimBackend;").unwrap();
     writeln!(out, "use engine::cascade::CascadeRegistry;").unwrap();
+    writeln!(out, "use engine::debug::DebugConfig;").unwrap();
     writeln!(out, "use engine::event::EventRing;").unwrap();
     writeln!(out, "use engine::policy::PolicyBackend;").unwrap();
     writeln!(out, "use engine::scratch::SimScratch;").unwrap();
@@ -40,7 +41,7 @@ pub fn emit_backend(source_file: Option<&str>) -> String {
     writeln!(out, "        policy:  &B,").unwrap();
     writeln!(out, "        cascade: &CascadeRegistry<Self::Event, Self::Views>,").unwrap();
     writeln!(out, "    ) {{").unwrap();
-    writeln!(out, "        crate::step::step(state, scratch, events, views, policy, cascade);").unwrap();
+    writeln!(out, "        crate::step::step(state, scratch, events, views, policy, cascade, &DebugConfig::default());").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
     out
