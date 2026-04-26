@@ -60,7 +60,7 @@
   - P10 (No Runtime Panic): PASS — `build.rs` panics fire at build time.
   - P11: N/A.
 
-- **Re-evaluation:** [x] AIS reviewed at design phase. [ ] AIS reviewed post-design (tick after final task).
+- **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — final scope: emitted handlers/views/mask predicates regenerated cleanly into engine_rules; emitted SimState SoA + step body + SerialBackend + mask_fill + cascade-register all live in engine_rules/engine_data per the new architecture; `compile-dsl --check` round-trips; sealed CascadeHandler + view traits behind `__sealed::Sealed`; trybuild compile-fail test asserts the seal; engine_rules/engine_data build.rs sentinels enforce `// GENERATED`; engine/build.rs primitives-only allowlist (1 documented exception: event_like_impl.rs, B2-deferred); pre-commit + ast-grep + stale-content + schema-hash CI guards. Tasks 9+10 (chronicle/engagement) absorbed (deleted, not yet re-emitted via DSL — follow-up). Tasks 3+5 (typed-ID lift) deferred — ID newtypes still in engine_data with engine re-export shim. B2 collapses; B3 ran in parallel and is complete.
 
 ---
 

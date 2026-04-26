@@ -252,7 +252,7 @@ fn emit_physics_damage_handler_from_seed() {
     // registration calls.
     let modrs = &artefacts.rust_physics_mod;
     assert!(modrs.contains("pub mod damage;"));
-    assert!(modrs.contains("pub fn register(registry: &mut CascadeRegistry)"));
+    assert!(modrs.contains("pub fn register(registry: &mut CascadeRegistry<Event, ViewRegistry>)"));
     assert!(modrs.contains("registry.install_kind(EventKindId::EffectDamageApplied"));
     assert!(modrs.contains("dispatch_effect_damage_applied"));
 
