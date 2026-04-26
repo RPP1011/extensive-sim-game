@@ -76,7 +76,7 @@ Tasks 1, 2, 5, 6 are autonomous. Tasks 3, 4, 7 emit `pending-decisions.md` entri
 - Create: `crates/engine/tests/combat_foundation_meteor_swarm.rs`
 - Create: `crates/engine/tests/combat_foundation_tank_wall.rs`
 
-- [ ] **Step 1: Read existing combat-foundation test patterns.**
+- [x] **Step 1: Read existing combat-foundation test patterns.**
 
 ```bash
 ls crates/engine/tests/combat_*.rs crates/engine/tests/cast_*.rs 2>/dev/null
@@ -85,7 +85,7 @@ grep -lE "2v2|meteor|tank_wall|tax_ability" crates/engine/tests/ 2>/dev/null
 
 Identify the closest existing test that exercises each mechanic. Each new fixture is a focused 50-100 line test that spawns the canonical setup, runs N ticks, asserts post-tick state.
 
-- [ ] **Step 2: Write `combat_foundation_2v2_cast.rs`.**
+- [x] **Step 2: Write `combat_foundation_2v2_cast.rs`.**
 
 Two casters per side, each with a single-target ability on cooldown. Assert: both teams cast in the first 3 ticks; cooldown gates prevent re-cast within the cooldown window; HP deltas match expected damage.
 
@@ -105,19 +105,19 @@ fn two_casters_per_side_alternate_targets() {
 }
 ```
 
-- [ ] **Step 3: Write `combat_foundation_tax_ability.rs`.**
+- [x] **Step 3: Write `combat_foundation_tax_ability.rs`.**
 
 The tax ability (resource transfer mechanic). Assert: caster's gold decreases; target's gold increases by the matching amount; no double-counting on cascade convergence.
 
-- [ ] **Step 4: Write `combat_foundation_meteor_swarm.rs`.**
+- [x] **Step 4: Write `combat_foundation_meteor_swarm.rs`.**
 
 AOE ability that fires multiple impact events in one cast. Assert: N targets each take damage; events emitted match expected count; no off-by-one in the spread radius.
 
-- [ ] **Step 5: Write `combat_foundation_tank_wall.rs`.**
+- [x] **Step 5: Write `combat_foundation_tank_wall.rs`.**
 
 Tank-wall scenario: shielded units in front absorb damage before wall is broken. Assert: shield reduces incoming damage; once shield depletes, residual damage routes to hp; the wall holds for the expected number of ticks under sustained pressure.
 
-- [ ] **Step 6: Run all 4.**
+- [x] **Step 6: Run all 4.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test combat_foundation_2v2_cast \
@@ -128,7 +128,7 @@ unset RUSTFLAGS && cargo test -p engine --test combat_foundation_2v2_cast \
 
 Expected: 4 PASS.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "test(engine): 4 named Combat Foundation regression fixtures (Tech-Debt Task 1)"
