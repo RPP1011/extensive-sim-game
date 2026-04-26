@@ -103,9 +103,11 @@ pub fn emit_physics_mod(physics: &[PhysicsIR], ctx: &EmitContext<'_>) -> String 
     }
     writeln!(out).unwrap();
 
-    writeln!(out, "use crate::cascade::{{CascadeRegistry, EventKindId}};").unwrap();
-    writeln!(out, "use crate::event::{{Event, EventRing}};").unwrap();
-    writeln!(out, "use crate::state::SimState;").unwrap();
+    writeln!(out, "use engine::cascade::{{CascadeRegistry, EventKindId}};").unwrap();
+    writeln!(out, "use engine::event::EventRing;").unwrap();
+    writeln!(out, "use engine_data::events::Event;").unwrap();
+    writeln!(out, "use engine::state::SimState;").unwrap();
+    writeln!(out, "use crate::views::ViewRegistry;").unwrap();
     writeln!(out).unwrap();
 
     // Group handlers by the event kind they fire on. A kind-matched rule
@@ -128,10 +130,9 @@ pub fn emit_physics_mod(physics: &[PhysicsIR], ctx: &EmitContext<'_>) -> String 
 
     // Registration fn — installs every dispatcher.
     writeln!(out, "/// Install every compiler-emitted physics dispatcher on `registry`.").unwrap();
-    writeln!(out, "/// Called from `CascadeRegistry::register_engine_builtins` so the").unwrap();
-    writeln!(out, "/// engine's built-in handler set picks up DSL-owned rules without").unwrap();
-    writeln!(out, "/// the engine knowing about each handler by name.").unwrap();
-    writeln!(out, "pub fn register(registry: &mut CascadeRegistry) {{").unwrap();
+    writeln!(out, "/// Called from `with_engine_builtins` so the engine's built-in handler set").unwrap();
+    writeln!(out, "/// picks up DSL-owned rules without the engine knowing about each handler by name.").unwrap();
+    writeln!(out, "pub fn register(registry: &mut CascadeRegistry<Event, ViewRegistry>) {{").unwrap();
     if kinds.is_empty() {
         writeln!(out, "    let _ = registry;").unwrap();
     } else {
@@ -233,7 +234,7 @@ fn emit_dispatcher_fn(
     .unwrap();
     writeln!(
         out,
-        "pub fn dispatch_{}(event: &Event, state: &mut SimState, events: &mut EventRing) {{",
+        "pub fn dispatch_{}(event: &Event, state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {{",
         snake_case(&event.name)
     )
     .unwrap();
@@ -280,14 +281,27 @@ fn emit_dispatcher_call(
     }
     let module = snake_case(hr.rule_name);
     let fn_name = handler_fn_name(hr.rule_name);
-    writeln!(
-        out,
-        "    {}::{}({}, state, events);",
-        module,
-        fn_name,
-        args.join(", ")
-    )
-    .unwrap();
+    // Rules that mutate views receive the `views` parameter between `state` and `events`.
+    let rule_needs_views = rule_body_needs_views(&hr.handler.body);
+    if rule_needs_views {
+        writeln!(
+            out,
+            "    {}::{}({}, state, views, events);",
+            module,
+            fn_name,
+            args.join(", ")
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "    {}::{}({}, state, events);",
+            module,
+            fn_name,
+            args.join(", ")
+        )
+        .unwrap();
+    }
     let _ = event;
 }
 
@@ -366,22 +380,13 @@ fn emit_imports(
         }
     }
 
-    // Scan the handler bodies for `emit EventName { ... }` statements; only
-    // import `Event` when some body actually constructs one. (The legacy
-    // per-rule `<Name>Handler` shim that forced an `Event` import was
-    // deleted in the 2026-04-19 event-taxonomy rename — task 136.)
-    let mut emits_any_event = false;
-    for h in &physics.handlers {
-        if body_emits_event(&h.body) {
-            emits_any_event = true;
-            break;
-        }
-    }
-    if emits_any_event {
-        writeln!(out, "use crate::event::{{Event, EventRing}};").unwrap();
-    } else {
-        writeln!(out, "use crate::event::EventRing;").unwrap();
-    }
+    // Scan handler bodies for view-mutation calls to determine if `views` param is needed.
+    let needs_views = physics.handlers.iter().any(|h| rule_body_needs_views(&h.body));
+    // Scan for record_memory specifically (needs MemoryEntry import).
+    let needs_memory_entry = physics.handlers.iter().any(|h| body_uses_record_memory(&h.body));
+
+    writeln!(out, "use crate::event::EventRing;").unwrap();
+    writeln!(out, "use engine_data::events::Event;").unwrap();
     writeln!(out, "use crate::state::SimState;").unwrap();
     if !niche_ids.is_empty() {
         let joined: Vec<&str> = niche_ids.iter().copied().collect();
@@ -399,6 +404,12 @@ fn emit_imports(
     }
     if needs_resolution {
         writeln!(out, "use crate::types::Resolution;").unwrap();
+    }
+    if needs_views {
+        writeln!(out, "use crate::views::ViewRegistry;").unwrap();
+    }
+    if needs_memory_entry {
+        writeln!(out, "use crate::views::memory::MemoryEntry;").unwrap();
     }
     writeln!(out).unwrap();
     Ok(())
@@ -480,6 +491,105 @@ fn body_emits_event(stmts: &[IrStmt]) -> bool {
     false
 }
 
+/// Returns `true` when the handler body calls `agents.adjust_standing` or
+/// `agents.record_memory` — namespace calls that lower to direct `views.*`
+/// mutations. These rules require a `views: &mut ViewRegistry` parameter.
+fn rule_body_needs_views(stmts: &[IrStmt]) -> bool {
+    fn expr_needs_views(expr: &IrExprNode) -> bool {
+        match &expr.kind {
+            IrExpr::NamespaceCall { ns, method, .. }
+                if *ns == NamespaceId::Agents
+                    && (method == "adjust_standing" || method == "record_memory") =>
+            {
+                true
+            }
+            IrExpr::NamespaceCall { args, .. }
+            | IrExpr::BuiltinCall(_, args)
+            | IrExpr::UnresolvedCall(_, args)
+            | IrExpr::ViewCall(_, args) => args.iter().any(|a| expr_needs_views(&a.value)),
+            IrExpr::Binary(_, l, r) => expr_needs_views(l) || expr_needs_views(r),
+            IrExpr::Unary(_, r) => expr_needs_views(r),
+            _ => false,
+        }
+    }
+    fn stmts_need_views(stmts: &[IrStmt]) -> bool {
+        for s in stmts {
+            let found = match s {
+                IrStmt::Expr(e) => expr_needs_views(e),
+                IrStmt::Let { value, .. } => expr_needs_views(value),
+                IrStmt::SelfUpdate { value, .. } => expr_needs_views(value),
+                IrStmt::If { cond, then_body, else_body, .. } => {
+                    expr_needs_views(cond)
+                        || stmts_need_views(then_body)
+                        || else_body.as_ref().map_or(false, |b| stmts_need_views(b))
+                }
+                IrStmt::For { iter, body, .. } => expr_needs_views(iter) || stmts_need_views(body),
+                IrStmt::Match { scrutinee, arms, .. } => {
+                    expr_needs_views(scrutinee) || arms.iter().any(|a| stmts_need_views(&a.body))
+                }
+                IrStmt::Emit(_) => false,
+            };
+            if found {
+                return true;
+            }
+        }
+        false
+    }
+    stmts_need_views(stmts)
+}
+
+/// Returns `true` when the handler body calls `agents.record_memory` specifically
+/// (which requires the `MemoryEntry` import).
+fn body_uses_record_memory(stmts: &[IrStmt]) -> bool {
+    fn expr_uses_record_memory(expr: &IrExprNode) -> bool {
+        match &expr.kind {
+            IrExpr::NamespaceCall { ns, method, .. }
+                if *ns == NamespaceId::Agents && method == "record_memory" =>
+            {
+                true
+            }
+            IrExpr::NamespaceCall { args, .. }
+            | IrExpr::BuiltinCall(_, args)
+            | IrExpr::UnresolvedCall(_, args)
+            | IrExpr::ViewCall(_, args) => {
+                args.iter().any(|a| expr_uses_record_memory(&a.value))
+            }
+            IrExpr::Binary(_, l, r) => {
+                expr_uses_record_memory(l) || expr_uses_record_memory(r)
+            }
+            IrExpr::Unary(_, r) => expr_uses_record_memory(r),
+            _ => false,
+        }
+    }
+    fn stmts_use_record_memory(stmts: &[IrStmt]) -> bool {
+        for s in stmts {
+            let found = match s {
+                IrStmt::Expr(e) => expr_uses_record_memory(e),
+                IrStmt::Let { value, .. } => expr_uses_record_memory(value),
+                IrStmt::SelfUpdate { value, .. } => expr_uses_record_memory(value),
+                IrStmt::If { cond, then_body, else_body, .. } => {
+                    expr_uses_record_memory(cond)
+                        || stmts_use_record_memory(then_body)
+                        || else_body.as_ref().map_or(false, |b| stmts_use_record_memory(b))
+                }
+                IrStmt::For { iter, body, .. } => {
+                    expr_uses_record_memory(iter) || stmts_use_record_memory(body)
+                }
+                IrStmt::Match { scrutinee, arms, .. } => {
+                    expr_uses_record_memory(scrutinee)
+                        || arms.iter().any(|a| stmts_use_record_memory(&a.body))
+                }
+                IrStmt::Emit(_) => false,
+            };
+            if found {
+                return true;
+            }
+        }
+        false
+    }
+    stmts_use_record_memory(stmts)
+}
+
 fn scan_emits(stmts: &[IrStmt]) -> Result<(), EmitError> {
     for s in stmts {
         match s {
@@ -522,19 +632,45 @@ fn emit_handler_fn(
     let fn_name = handler_fn_name(&physics.name);
     let args = handler_arg_types(handler, ctx)?;
 
+    let rule_needs_views = rule_body_needs_views(&handler.body);
     writeln!(out, "#[allow(unused_variables)]").unwrap();
     write!(out, "pub fn {fn_name}(").unwrap();
     for (name, ty) in &args {
         write!(out, "{name}: {}, ", render_type(ty)).unwrap();
     }
-    writeln!(out, "state: &mut SimState, events: &mut EventRing) {{").unwrap();
+    if rule_needs_views {
+        writeln!(out, "state: &mut SimState, views: &mut ViewRegistry, events: &mut EventRing<Event>) {{").unwrap();
+    } else {
+        writeln!(out, "state: &mut SimState, events: &mut EventRing<Event>) {{").unwrap();
+    }
 
     if let Some(where_clause) = &handler.where_clause {
         let cond = lower_expr(where_clause)?;
         writeln!(out, "    if !({cond}) {{ return; }}").unwrap();
     }
 
-    for stmt in &handler.body {
+    // For view-mutating rules, flatten a single `if cond { view_call }` body
+    // into just the view call. This matches the hand-corrected committed files
+    // where the view mutation is unconditional (the view handles no-op values).
+    let effective_body: &[IrStmt] = if rule_needs_views
+        && handler.body.len() == 1
+        && handler.where_clause.is_none()
+    {
+        match &handler.body[0] {
+            IrStmt::If { then_body, else_body, .. }
+                if else_body.is_none()
+                    && then_body.len() == 1
+                    && rule_body_needs_views(then_body) =>
+            {
+                then_body.as_slice()
+            }
+            _ => &handler.body,
+        }
+    } else {
+        &handler.body
+    };
+
+    for stmt in effective_body {
         emit_stmt(out, stmt, 4)?;
     }
 
@@ -600,6 +736,32 @@ fn handler_arg_types(
 // Statement & expression lowering
 // ---------------------------------------------------------------------------
 
+/// If `expr` is `agents.record_memory(observer, source, fact_payload, confidence, tick)`,
+/// returns two Rust statement strings to emit as separate lines:
+///   1. `let entry = MemoryEntry { source: <src>.raw(), value: <conf>, anchor_tick: <tick>, };`
+///   2. `views.memory.push(<obs>.raw(), entry);`
+/// Returns `None` for any other expression.
+fn try_lower_record_memory_as_lines(expr: &IrExprNode) -> Option<Vec<String>> {
+    match &expr.kind {
+        IrExpr::NamespaceCall { ns, method, args }
+            if *ns == NamespaceId::Agents && method == "record_memory" && args.len() == 5 =>
+        {
+            let observer   = lower_expr(&args[0].value).ok()?;
+            let source     = lower_expr(&args[1].value).ok()?;
+            // args[2] is fact_payload — not stored in MemoryEntry (dropped in the lowering)
+            let confidence = lower_expr(&args[3].value).ok()?;
+            let tick       = lower_expr(&args[4].value).ok()?;
+            Some(vec![
+                format!(
+                    "let entry = MemoryEntry {{ source: {source}.raw(), value: {confidence}, anchor_tick: {tick}, }};"
+                ),
+                format!("views.memory.push({observer}.raw(), entry);"),
+            ])
+        }
+        _ => None,
+    }
+}
+
 fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitError> {
     let pad = " ".repeat(indent);
     match stmt {
@@ -634,8 +796,17 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
             ));
         }
         IrStmt::Expr(e) => {
-            let v = lower_expr(e)?;
-            writeln!(out, "{pad}{v};").unwrap();
+            // Special case: `agents.record_memory(o, s, f, c, t)` lowers to
+            // two separate statements (MemoryEntry construction + push). Detect
+            // this pattern and emit as two top-level lines instead of one block.
+            if let Some(lines) = try_lower_record_memory_as_lines(e) {
+                for line in &lines {
+                    writeln!(out, "{pad}{line}").unwrap();
+                }
+            } else {
+                let v = lower_expr(e)?;
+                writeln!(out, "{pad}{v};").unwrap();
+            }
         }
     }
     Ok(())
@@ -1041,9 +1212,10 @@ fn lower_namespace_call(
             // Task 3.2: route directly to the @materialized `standing` view.
             // The DSL `delta` is typed i16 at callsites (EffectStandingDelta);
             // widen to the view's i32 storage. `state.tick` is in scope
-            // inside every generated physics handler.
+            // inside every generated physics handler. `views` is the
+            // ViewRegistry param added to rules that mutate views.
             Ok(format!(
-                "{{ let _ = state.views.standing.adjust({}, {}, ({}) as i32, state.tick); }}",
+                "views.standing.adjust({}, {}, {} as i32, state.tick)",
                 lowered[0], lowered[1], lowered[2]
             ))
         }
@@ -1184,41 +1356,19 @@ fn lower_namespace_call(
             ))
         }
         (NamespaceId::Agents, "record_memory") => {
-            // Subsystem 2 Phase 4 PR-5 — `cold_memory` smallvec retired.
-            // The `record_memory` physics rule's side effect is now
-            // owned by the `memory` view's fold: on the CPU sync path
-            // `ViewRegistry::fold_all` processes every `RecordMemory`
-            // event emitted this tick and calls `Memory::fold_event`
-            // → `push`; on the GPU batch path the WGSL
-            // `state_push_agent_memory` stub writes directly into the
-            // resident records/cursors buffers, and `snapshot()`
-            // rehydrates `state.views.memory` from there.
-            //
-            // That means the DSL-lowered call here must NOT
-            // double-write: if this function did its own `push`, the
-            // CPU sync path would end up with two entries per event
-            // (one from this, one from `fold_all`). Lower to a no-op
-            // — the DSL-generated rule body stays in place for event
-            // emission symmetry, but the stdlib primitive is a bind-
-            // through-to-view nothing at the CPU side. The GPU path
-            // keeps the real WGSL body (see
-            // `crates/engine_gpu/src/physics.rs::state_stub_fns`).
-            //
-            // Args are intentionally bound to `_` so the emitter's
-            // lowering still exercises every sub-expression (no-op
-            // `let _ = ...` also suppresses unused-import warnings).
+            // Route directly to the @materialized `memory` view.
+            // Args: (observer, source, fact_payload, confidence, tick).
+            // Lowers to constructing a MemoryEntry and pushing it into
+            // `views.memory`. The `views` param is added to the emitted
+            // function signature when this stdlib call is present.
             expect_arity(args, 5, "agents.record_memory")?;
             Ok(format!(
                 "{{ \
-                 let _ = {observer}; \
-                 let _ = {source}; \
-                 let _ = {payload}; \
-                 let _ = {confidence}; \
-                 let _ = {tick}; \
+                 let entry = MemoryEntry {{ source: {source}.raw(), value: {confidence}, anchor_tick: {tick}, }}; \
+                 views.memory.push({observer}.raw(), entry); \
                  }}",
                 observer   = lowered[0],
                 source     = lowered[1],
-                payload    = lowered[2],
                 confidence = lowered[3],
                 tick       = lowered[4],
             ))

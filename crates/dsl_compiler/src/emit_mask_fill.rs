@@ -45,42 +45,80 @@ pub fn emit_mask_fill(masks: &[MaskIR], source_file: Option<&str>) -> String {
     writeln!(out, "use engine::state::SimState;").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "/// Fill every mask bit and target-mask candidate list for the current tick.").unwrap();
-    writeln!(out, "/// Resets `buf` and `targets` before populating.").unwrap();
+    writeln!(out, "/// Resets `buf` and `targets` before populating. Called at the top of").unwrap();
+    writeln!(out, "/// `engine_rules::step::step` after the `tick` increment.").unwrap();
     writeln!(out, "pub fn fill_all(buf: &mut MaskBuffer, targets: &mut TargetMask, state: &SimState) {{").unwrap();
     writeln!(out, "    buf.reset();").unwrap();
     writeln!(out, "    targets.reset();").unwrap();
     writeln!(out, "    for id in state.agents_alive() {{").unwrap();
     writeln!(out, "        let slot = (id.raw() - 1) as usize;").unwrap();
 
-    // Emit a call for each mask declaration.
+    // Collect self-only and target-bound masks separately so we can emit
+    // them in the committed order: self-only block (with group comment),
+    // then cast, then target-bound enumerators + checks together.
+    let mut self_only: Vec<(&MaskIR, String)> = Vec::new();
+    let mut cast_present = false;
+    let mut target_bound: Vec<(&MaskIR, String)> = Vec::new();
+
     for mask in masks {
         let stem = snake_case(&mask.head.name);
         match &mask.head.shape {
             IrActionHeadShape::None => {
-                // Self-only mask — one bool call.
-                emit_self_only_mask(&mut out, &mask.head.name, &stem);
+                self_only.push((mask, stem));
             }
             IrActionHeadShape::Positional(params) => {
                 if params.is_empty() {
-                    // Treated as self-only.
-                    emit_self_only_mask(&mut out, &mask.head.name, &stem);
+                    self_only.push((mask, stem));
                 } else {
-                    // Check if it's the special Cast mask (has a non-AgentId param).
                     let is_cast = params.iter().any(|(n, _, _)| n == "ability");
                     if is_cast {
-                        emit_cast_mask(&mut out);
+                        cast_present = true;
                     } else if mask.candidate_source.is_some() {
-                        // Target-bound mask with candidate enumerator.
-                        emit_target_bound_mask(&mut out, &mask.head.name, &stem);
+                        target_bound.push((mask, stem));
                     } else {
-                        // Per-target predicate without enumerator — treat as self-only gate.
-                        emit_self_only_mask(&mut out, &mask.head.name, &stem);
+                        self_only.push((mask, stem));
                     }
                 }
             }
             IrActionHeadShape::Named(_) => {
-                // Named params are rare; fall back to self-only.
-                emit_self_only_mask(&mut out, &mask.head.name, &stem);
+                self_only.push((mask, stem));
+            }
+        }
+    }
+
+    // Self-only block.
+    if !self_only.is_empty() {
+        writeln!(out, "        // Self-only masks — each call returns a bool gating the action head.").unwrap();
+        for (mask, stem) in &self_only {
+            emit_self_only_mask(&mut out, &mask.head.name, stem);
+        }
+    }
+
+    // Cast mask (per-ability loop).
+    if cast_present {
+        emit_cast_mask(&mut out);
+    }
+
+    // Target-bound masks — enumerators first (alphabetical order to match
+    // committed mask_fill.rs), then candidate checks in the same order.
+    if !target_bound.is_empty() {
+        // Sort alphabetically by mask name so emitter output is stable and
+        // matches the committed file's Attack-before-MoveToward order.
+        let mut sorted_target: Vec<(&MaskIR, String)> = target_bound;
+        sorted_target.sort_by(|(a, _), (b, _)| a.head.name.cmp(&b.head.name));
+        writeln!(out, "        // Target-bound masks — run the candidate enumerator.").unwrap();
+        writeln!(out, "        // The enumerators push into `targets` directly.").unwrap();
+        for (mask, stem) in &sorted_target {
+            if micro_kind_from_name(&mask.head.name).is_some() {
+                writeln!(out, "        crate::mask::mask_{stem}_candidates(state, id, targets);").unwrap();
+            }
+        }
+        writeln!(out, "        // Mark Attack / MoveToward allowed if any candidates were pushed.").unwrap();
+        for (mask, _stem) in &sorted_target {
+            if let Some(kind) = micro_kind_from_name(&mask.head.name) {
+                writeln!(out, "        if !targets.candidates_for(id, {kind}).is_empty() {{").unwrap();
+                writeln!(out, "            buf.set(slot, {kind}, true);").unwrap();
+                writeln!(out, "        }}").unwrap();
             }
         }
     }
@@ -90,12 +128,10 @@ pub fn emit_mask_fill(masks: &[MaskIR], source_file: Option<&str>) -> String {
     out
 }
 
-fn emit_header(out: &mut String, source_file: Option<&str>) {
+fn emit_header(out: &mut String, _source_file: Option<&str>) {
+    // mask_fill.rs committed header has no "// Source:" line.
     writeln!(out, "// GENERATED by dsl_compiler. Do not edit by hand.").unwrap();
     writeln!(out, "// Regenerate with `cargo run --bin xtask -- compile-dsl`.").unwrap();
-    if let Some(s) = source_file {
-        writeln!(out, "// Source: {s}").unwrap();
-    }
     writeln!(out).unwrap();
 }
 
@@ -123,16 +159,18 @@ fn emit_self_only_mask(out: &mut String, name: &str, stem: &str) {
 }
 
 fn emit_cast_mask(out: &mut String) {
-    writeln!(out, "        // Cast mask — per-ability gate; set if ANY ability passes.").unwrap();
+    writeln!(out, "        // Cast mask — `mask_cast` is per-ability; we set the global Cast bit").unwrap();
+    writeln!(out, "        // if ANY ability in the registry passes the gate. When the registry").unwrap();
+    writeln!(out, "        // is empty the bit is set permissively (legacy fallback).").unwrap();
     writeln!(out, "        let n_abilities = state.ability_registry.len();").unwrap();
     writeln!(out, "        if n_abilities == 0 {{").unwrap();
     writeln!(out, "            buf.set(slot, MicroKind::Cast, true);").unwrap();
     writeln!(out, "        }} else {{").unwrap();
-    writeln!(out, "            'cast_gate: for raw in 1..=(n_abilities as u32) {{").unwrap();
+    writeln!(out, "            'outer: for raw in 1..=(n_abilities as u32) {{").unwrap();
     writeln!(out, "                if let Some(ability_id) = AbilityId::new(raw) {{").unwrap();
     writeln!(out, "                    if crate::mask::mask_cast(state, id, ability_id) {{").unwrap();
     writeln!(out, "                        buf.set(slot, MicroKind::Cast, true);").unwrap();
-    writeln!(out, "                        break 'cast_gate;").unwrap();
+    writeln!(out, "                        break 'outer;").unwrap();
     writeln!(out, "                    }}").unwrap();
     writeln!(out, "                }}").unwrap();
     writeln!(out, "            }}").unwrap();

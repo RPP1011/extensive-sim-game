@@ -100,12 +100,14 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         check_file(&rust_schema, &schema_fmt, &mut mismatches);
 
         // Physics per-rule files + aggregator.
+        // Use both-fmt comparison because the committed files may have hand-corrected
+        // import ordering that is not rustfmt-stable; normalise both sides.
         for (name, content) in &artefacts.rust_physics_modules {
             let formatted = rustfmt_string(content).unwrap_or_else(|_| content.clone());
-            check_file(&physics_dir.join(name), &formatted, &mut mismatches);
+            check_file_both_fmt(&physics_dir.join(name), &formatted, &mut mismatches);
         }
         let physics_mod_fmt = rustfmt_string(&artefacts.rust_physics_mod).unwrap_or_else(|_| artefacts.rust_physics_mod.clone());
-        check_file(
+        check_file_both_fmt(
             &physics_dir.join("mod.rs"),
             &physics_mod_fmt,
             &mut mismatches,
@@ -122,11 +124,11 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         );
 
         // engine-side EventLike impl.
-        let event_like_fmt = rustfmt_string(&artefacts.engine_event_like_impl)
-            .unwrap_or_else(|_| artefacts.engine_event_like_impl.clone());
-        check_file(
+        // Use both-fmt comparison because the committed file may not be rustfmt-stable
+        // (hand-corrected import ordering); normalise both sides.
+        check_file_both_fmt(
             &args.out_engine_event_like_impl,
-            &event_like_fmt,
+            &artefacts.engine_event_like_impl,
             &mut mismatches,
         );
 
@@ -134,24 +136,20 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         // These are static (almost entirely DSL-independent) but compiler-owned so
         // that future DSL-driven phases can grow into them.
         let step_content = dsl_compiler::emit_step::emit_step(sources.physics.as_deref());
-        let step_fmt = rustfmt_string(&step_content).unwrap_or(step_content);
-        check_file(&step_file, &step_fmt, &mut mismatches);
+        check_file_both_fmt(&step_file, &step_content, &mut mismatches);
 
         let backend_content = dsl_compiler::emit_backend::emit_backend(sources.physics.as_deref());
-        let backend_fmt = rustfmt_string(&backend_content).unwrap_or(backend_content);
-        check_file(&backend_file, &backend_fmt, &mut mismatches);
+        check_file_both_fmt(&backend_file, &backend_content, &mut mismatches);
 
         let mask_fill_content = dsl_compiler::emit_mask_fill::emit_mask_fill(
             &combined.masks,
             sources.masks.as_deref(),
         );
-        let mask_fill_fmt = rustfmt_string(&mask_fill_content).unwrap_or(mask_fill_content);
-        check_file(&mask_fill_file, &mask_fill_fmt, &mut mismatches);
+        check_file_both_fmt(&mask_fill_file, &mask_fill_content, &mut mismatches);
 
         let cascade_reg_content =
             dsl_compiler::emit_cascade_register::emit_cascade_register(sources.physics.as_deref());
-        let cascade_reg_fmt = rustfmt_string(&cascade_reg_content).unwrap_or(cascade_reg_content);
-        check_file(&cascade_reg_file, &cascade_reg_fmt, &mut mismatches);
+        check_file_both_fmt(&cascade_reg_file, &cascade_reg_content, &mut mismatches);
 
         // Stale file detection: committed Rust files not in the new emission.
         check_stale(&rust_events_dir, &artefacts.rust_event_structs, "rs", &mut mismatches);
@@ -586,6 +584,23 @@ fn check_file(path: &Path, expected: &str, out: &mut Vec<String>) {
     }
 }
 
+/// Like [`check_file`] but normalises both the on-disk content and the
+/// expected string through rustfmt before comparing. Use this when the
+/// committed file may not be rustfmt-stable (e.g. hand-corrected imports)
+/// but the semantic content must match the emitter output.
+fn check_file_both_fmt(path: &Path, expected: &str, out: &mut Vec<String>) {
+    match fs::read_to_string(path) {
+        Ok(actual) => {
+            let actual_fmt = rustfmt_string(&actual).unwrap_or(actual);
+            let expected_fmt = rustfmt_string(expected).unwrap_or_else(|_| expected.to_string());
+            if actual_fmt != expected_fmt {
+                out.push(format!("{} differs from expected emission", path.display()));
+            }
+        }
+        Err(e) => out.push(format!("{} missing or unreadable ({})", path.display(), e)),
+    }
+}
+
 fn check_stale(
     dir: &Path,
     current: &[(String, String)],
@@ -822,12 +837,9 @@ fn check_views(
     mismatches: &mut Vec<String>,
 ) {
     for (name, content) in &artefacts.rust_view_modules {
-        let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
-        check_file(&views_dir.join(name), &f, mismatches);
+        check_file_both_fmt(&views_dir.join(name), content, mismatches);
     }
-    let fmt = rustfmt_string(&artefacts.rust_view_mod)
-        .unwrap_or_else(|_| artefacts.rust_view_mod.clone());
-    check_file(&views_dir.join("mod.rs"), &fmt, mismatches);
+    check_file_both_fmt(&views_dir.join("mod.rs"), &artefacts.rust_view_mod, mismatches);
     check_stale(views_dir, &artefacts.rust_view_modules, "rs", mismatches);
 }
 
@@ -889,11 +901,9 @@ fn check_scaffolded_kinds(
     mismatches: &mut Vec<String>,
 ) {
     for (name, content) in &artefacts.rust_mask_modules {
-        let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
-        check_file(&mask_dir.join(name), &f, mismatches);
+        check_file_both_fmt(&mask_dir.join(name), content, mismatches);
     }
-    let fmt = rustfmt_string(&artefacts.rust_mask_mod).unwrap_or_else(|_| artefacts.rust_mask_mod.clone());
-    check_file(&mask_dir.join("mod.rs"), &fmt, mismatches);
+    check_file_both_fmt(&mask_dir.join("mod.rs"), &artefacts.rust_mask_mod, mismatches);
 
     for (name, content) in &artefacts.rust_scoring_modules {
         let f = rustfmt_string(content).unwrap_or_else(|_| content.clone());
