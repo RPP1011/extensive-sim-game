@@ -646,7 +646,7 @@ git -c core.hooksPath= commit -am "feat(dsl): update_beliefs physics cascade in 
 - Modify: `crates/dsl_compiler/src/emit_step.rs`
 - Run: regen
 
-- [ ] **Step 1: Add the phase emit.**
+- [x] **Step 1: Add the phase emit.**
 
 In `emit_step.rs`, after the cascade-dispatch phase emit and before tick-end:
 
@@ -666,20 +666,20 @@ writeln!(out, "    }}")?;
 
 (Adapt to `Config` accessor pattern in actual emitted code — `config.belief.decay_rate` may be `state.config.belief.decay_rate` etc.)
 
-- [ ] **Step 2: Regen + verify.**
+- [x] **Step 2: Regen + verify.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
 grep -A 3 "belief_decay\|belief decay" crates/engine_rules/src/step.rs | head
 ```
 
-- [ ] **Step 3: Workspace test.**
+- [x] **Step 3: Workspace test.**
 
 ```bash
 unset RUSTFLAGS && cargo test --workspace
 ```
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl): emit belief_decay phase in tick step (Plan ToM Task 7)"

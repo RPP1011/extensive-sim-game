@@ -3309,15 +3309,24 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-8"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "4421e283",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS",
+          "cross-backend-parity": "PASS",
+          "reduction-determinism": "PASS"
+        },
+        "note": "Phase 5b decay landed between cascade dispatch and view fold; collect::<Vec> avoids borrow conflict; deterministic decay (fixed multiply + retain)"
+      },
+      "started_at": "2026-04-26T08:16:06Z",
+      "completed_at": "2026-04-26T08:20:43Z",
       "retry_count": 0
     },
     {
@@ -3589,9 +3598,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T08:13:59Z",
-    "iterations_completed": 32,
-    "tasks_closed": 29,
+    "last_iteration_at": "2026-04-26T08:20:43Z",
+    "iterations_completed": 33,
+    "tasks_closed": 30,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
