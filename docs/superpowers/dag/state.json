@@ -305,16 +305,16 @@
       "blocks": [
         "2026-04-22-ir-interpreter.task-3"
       ],
-      "status": "pending",
+      "status": "blocked",
       "steps_total": 0,
       "steps_done": 0,
       "owner_class": "implementer",
-      "blocked_reason": null,
+      "blocked_reason": "Prerequisite P1a (dsl_ast extraction) not landed: crates/dsl_ast/ does not exist. Plan stalls until 2026-04-22-dsl-ast-extraction is executed first OR ir-interpreter is deferred.",
       "completed_commit": null,
       "critic_verdicts": {},
-      "started_at": null,
+      "started_at": "2026-04-26T04:45:17Z",
       "completed_at": null,
-      "retry_count": 0
+      "retry_count": 1
     },
     {
       "id": "2026-04-22-ir-interpreter.task-3",
@@ -3335,10 +3335,10 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T04:08:09Z",
-    "iterations_completed": 1,
+    "last_iteration_at": "2026-04-26T04:45:50Z",
+    "iterations_completed": 2,
     "tasks_closed": 1,
-    "tasks_blocked": 0,
+    "tasks_blocked": 1,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
   }
