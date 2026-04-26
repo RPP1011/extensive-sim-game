@@ -72,4 +72,21 @@ pub trait ComputeBackend {
         views:   &mut Self::Views,
         events:  &mut EventRing<Self::Event>,
     );
+
+    /// Fold this tick's events into the view registry.
+    ///
+    /// SerialBackend: delegates to `views.fold_all(events, events_before, tick)`.
+    /// GpuBackend: dispatches GPU view-fold kernels against `view_storage`.
+    /// Phase 5c stub forwards to the CPU fold path.
+    ///
+    /// `events_before` is the `EventRing::total_pushed()` watermark captured
+    /// before Phase 4a — it identifies the slice of events that belong to
+    /// this tick.
+    fn view_fold(
+        &mut self,
+        views:         &mut Self::Views,
+        events:        &EventRing<Self::Event>,
+        events_before: usize,
+        tick:          u32,
+    );
 }
