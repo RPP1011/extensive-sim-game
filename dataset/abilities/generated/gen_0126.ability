@@ -1,0 +1,428 @@
+// Auto-generated abilities (quality score >= 0.246)
+
+ability Generated {
+    target: market
+    cooldown: 742.8s, cast: 81ms
+    hint: leadership
+    cost: 17
+
+    field_repair
+    silent_movement
+}
+
+ability Generated {
+    target: party, range: 1.2
+    cooldown: 6167.6s, cast: 833ms
+    hint: leadership
+    cost: 28
+
+    fortify for 357t
+}
+
+ability Generated {
+    target: party, range: 8.9
+    cooldown: 5712.7s, cast: 1.5s
+    hint: leadership
+    cost: 10
+
+    read_the_room
+}
+
+ability Generated {
+    target: global
+    cooldown: 1340.6s, cast: 82ms
+    hint: leadership
+    cost: 4
+
+    trade_embargo for 656t
+    reveal 6
+    corner_market for 1351t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 38.3s
+
+    coordinated_strike
+}
+
+ability Generated {
+    target: self
+    cooldown: 1324.4s, cast: 287ms
+    hint: leadership
+    cost: 29
+
+    hold_the_line
+    field_triage 1.93
+    intel_gathering
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 15.6s
+
+    forage 0.63
+    masterwork_craft
+}
+
+ability Generated {
+    target: faction, range: 9.0
+    cooldown: 626.8s, cast: 802ms
+    hint: leadership
+    cost: 27
+
+    unbreakable
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 88.0s
+
+    stabilize_ally
+    life_eternal
+}
+
+ability Generated {
+    target: market
+    cooldown: 2158.4s, cast: 931ms
+    hint: leadership
+    cost: 23
+
+    golden_touch for 366t
+    track_prey
+    claim_by_right
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 17.5s
+
+    field_triage 0.55
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 17.9s
+
+    track_prey
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 13.9s
+
+    safe_house for 648t
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 42.5s
+
+    distraction for 4814t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 17.4s
+
+    prophecy 7
+    trade_embargo for 1305t
+}
+
+ability Generated {
+    target: market
+    cooldown: 995.9s, cast: 90ms
+    hint: leadership
+    cost: 4
+
+    name_the_nameless
+    forgery
+    fortify for 2583t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 88.9s
+
+    trap_sense
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 45.6s
+
+    blood_oath 0.35
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 14.9s
+
+    quick_study
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 12.0s
+
+    plague_ward for 1070t
+}
+
+ability Generated {
+    target: faction, range: 10.0
+    cooldown: 906.6s, cast: 1.3s
+    hint: leadership
+    cost: 6
+
+    treaty_breaker
+    intel_gathering
+    stabilize_ally
+    forage 0.54
+}
+
+ability Generated {
+    target: faction, range: 7.0
+    cooldown: 277.5s, cast: 792ms
+    hint: leadership
+    cost: 3
+
+    decipher
+}
+
+ability Generated {
+    target: party, range: 6.7
+    cooldown: 692.0s, cast: 588ms
+    hint: leadership
+    cost: 11
+
+    shadow_step for 2323t
+    safe_house for 62t
+    broker_alliance for 451t
+    master_armorer
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 80.4s
+
+    field_triage 1.04
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 14.2s
+
+    field_repair
+}
+
+ability Generated {
+    target: market
+    cooldown: 832.6s, cast: 1.9s
+    hint: leadership
+    cost: 16
+
+    unbreakable
+    trade_empire 5.2
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 38.4s
+
+    demand_audience
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 23.6s
+
+    forge_artifact
+    quick_study
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 15.7s
+
+    golden_touch for 536t
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 42.9s
+
+    battle_instinct
+    forge_artifact
+}
+
+ability Generated {
+    target: guild
+    cooldown: 598.3s, cast: 2.0s
+    hint: leadership
+    cost: 21
+
+    name_the_nameless
+    accelerated_study for 326t
+}
+
+ability Generated {
+    target: faction, range: 0.5
+    cooldown: 24620s, cast: 1.4s
+    hint: leadership
+    cost: 11
+
+    treaty_breaker
+    claim_territory
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 18.0s
+
+    sanctuary for 3042t
+}
+
+ability Generated {
+    target: self
+    cooldown: 838.3s, cast: 234ms
+    hint: leadership
+    cost: 20
+
+    shadow_step for 1843t
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 34.9s
+
+    blood_oath 0.27
+    forge_artifact
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 55.6s
+
+    demand_audience
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 28.9s
+
+    reveal 1
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 28.2s
+
+    accelerated_study for 629t
+}
+
+ability Generated {
+    target: party, range: 5.3
+    cooldown: 13295.7s, cast: 671ms
+    hint: leadership
+    cost: 2
+
+    stabilize_ally
+    battle_instinct
+    vanish
+    ceasefire for 603t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 15.7s
+
+    disinformation for 2303t
+}
+
+ability Generated {
+    target: adventurer, range: 5.6
+    cooldown: 22522.9s, cast: 784ms
+    hint: leadership
+    cost: 23
+
+    forage 1.56
+    shadow_step for 590t
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 10.6s
+
+    read_the_room
+}
+
+ability Generated {
+    target: adventurer, range: 1.7
+    cooldown: 1377.4s, cast: 1.2s
+    hint: leadership
+    cost: 17
+
+    safe_house for 187t
+}
+
+ability Generated {
+    target: market
+    cooldown: 4996.0s, cast: 1.6s
+    hint: leadership
+    cost: 7
+
+    ceasefire for 789t
+    hold_the_line
+    read_the_room
+    hidden_camp for 1852t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 18.8s
+
+    field_triage 1.70
+}
+
+ability Generated {
+    target: market
+    cooldown: 4281.1s, cast: 1.6s
+    hint: leadership
+    cost: 20
+
+    accelerated_study for 94t
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 32.8s
+
+    track_prey
+    hidden_camp for 2286t
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 21.9s
+
+    demand_audience
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 24.0s
+
+    golden_touch for 936t
+    track_prey
+}
+
+ability Generated {
+    target: adventurer, range: 8.6
+    cooldown: 1993.3s, cast: 374ms
+    hint: leadership
+    cost: 4
+
+    beast_lore
+    rally 0.18
+}
+

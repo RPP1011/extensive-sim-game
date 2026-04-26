@@ -55,6 +55,16 @@ pub fn emit_backend(source_file: Option<&str>) -> String {
     writeln!(out, "    fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {{").unwrap();
     writeln!(out, "        // SerialBackend: no-op; mask writes are immediate.").unwrap();
     writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    fn cascade_dispatch(").unwrap();
+    writeln!(out, "        &mut self,").unwrap();
+    writeln!(out, "        cascade: &CascadeRegistry<Self::Event, Self::Views>,").unwrap();
+    writeln!(out, "        state:   &mut SimState,").unwrap();
+    writeln!(out, "        views:   &mut Self::Views,").unwrap();
+    writeln!(out, "        events:  &mut EventRing<Self::Event>,").unwrap();
+    writeln!(out, "    ) {{").unwrap();
+    writeln!(out, "        cascade.run_fixed_point(state, views, events);").unwrap();
+    writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
     out
 }

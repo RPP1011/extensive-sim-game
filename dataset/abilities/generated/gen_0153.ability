@@ -1,0 +1,525 @@
+// Auto-generated abilities (quality score >= 0.628)
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 16.0s
+
+    damage_modify 1.89 for 5.0s [DARK: 26]
+    fear 1.3s when hit_count_above(4)
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 4.6s
+
+    heal 3/1s for 3.6s [DARK: 76]
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 5.6s
+
+    lifesteal 27 for 2.4s [DARK: 41] when target_hp_below(39%)
+}
+
+ability Generated {
+    target: self_aoe
+    cooldown: 12.1s, cast: 930ms
+    hint: utility
+    cost: 16
+
+    deliver chain { bounces: 15, range: 8.9, falloff: 0.2 } {
+        on_hit {
+            damage 15/1s for 3.5s in circle(2.2) [DARK: 64]
+            buff magic_resist 0.44 for 4.4s in circle(2.1) [DARK: 60]
+        }
+    }
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 11.4s
+
+    pull 4.7 in line(5.3, 1.3) [DARK: 67] when caster_hp_below(62%)
+}
+
+ability Generated {
+    target: self_aoe
+    cooldown: 15.6s, cast: 2.0s
+    hint: utility
+    cost: 9
+
+    suppress 2.6s in line(3.7, 1.8) [DARK: 57] when target_hp_above(45%) + 36% target_max_hp
+    damage 177
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 12.6s
+
+    echo 3 [DARK: 74] when caster_hp_below(66%)
+}
+
+ability Generated {
+    target: ally, range: 4.8
+    cooldown: 8.6s, cast: 1.3s
+    hint: utility
+
+    deliver zone { duration: 6.9s, tick: 1.3s } {
+        on_hit {
+            buff attack_speed 0.20 for 2.1s [DARK: 53] when hit_count_above(2) + 9% caster_attack_damage
+            polymorph 758ms when hit_count_above(3)
+        }
+    }
+}
+
+ability Generated {
+    target: ally, range: 9.3
+    cooldown: 5.2s, cast: 1.8s
+    hint: utility
+    cost: 22
+
+    deliver chain { bounces: 7, range: 3.9, falloff: 0.2 } {
+        on_hit {
+            shield 122 in circle(3.9) [DARK: 66]
+            damage 4/1s for 3.7s in cone(3.1, 47)
+            stun 5.0s when target_hp_above(74%)
+            spell_shield 2 when hit_count_above(3)
+        }
+    }
+}
+
+ability Generated {
+    target: self_aoe
+    cooldown: 45.8s, cast: 1.5s
+    hint: crowd_control
+    cost: 14
+
+    deliver trap { duration: 14.7s, trigger_radius: 8.4 } {
+        on_hit {
+            banish 3.8s in circle(3.8) [DARK: 31]
+            pull 4.4 in circle(1.4)
+        }
+    }
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 6.1s
+
+    knockback 1.5 in line(4.8, 1.5) [DARK: 30] when target_hp_below(17%)
+}
+
+ability Generated {
+    target: self_aoe
+    cooldown: 3.4s, cast: 1.4s
+    hint: crowd_control
+    cost: 23
+
+    buff attack_speed 0.28 for 2.4s [DARK: 50] when target_hp_below(45%)
+    debuff move_speed 0.34 for 2.5s
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 5.3s
+
+    knockback 3.3 [DARK: 45] when target_hp_above(42%)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 6.2s
+
+    buff attack_speed 0.29 for 3.3s [DARK: 72]
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 15.5s
+
+    refresh_cooldowns [DARK: 74]
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 4.7s
+
+    buff move_speed 0.24 for 8.3s in line(7.2, 0.7) [DARK: 40]
+}
+
+ability Generated {
+    target: self_aoe
+    cooldown: 11.3s, cast: 1.4s
+    hint: damage
+    cost: 9
+
+    deliver zone { duration: 10.3s, tick: 1.5s } {
+        on_hit {
+            shield 77 in cone(3.8, 57) [DARK: 74]
+            damage_modify 1.96 for 2.5s in circle(3.9) when target_hp_above(77%)
+            root 4.8s in circle(2.3) when caster_hp_below(33%)
+        }
+    }
+}
+
+ability Generated {
+    target: self_aoe
+    cooldown: 34.7s, cast: 542ms
+    hint: utility
+    cost: 14
+
+    deliver zone { duration: 6.7s, tick: 1.9s } {
+        on_hit {
+            buff damage_output 0.33 for 6.9s [DARK: 23] when target_hp_above(54%)
+            dash to_target in line(3.8, 1.8) [DARK: 37] when target_hp_below(60%)
+        }
+    }
+}
+
+ability Generated {
+    target: enemy, range: 9.1
+    cooldown: 3.2s, cast: 1.2s
+    hint: utility
+    cost: 13
+
+    deliver zone { duration: 7.4s, tick: 2.5s } {
+        on_hit {
+            buff armor 0.44 for 3.7s in line(3.3, 1.9) [DARK: 51] when caster_hp_below(69%)
+        }
+    }
+}
+
+ability Generated {
+    target: global
+    cooldown: 35.7s, cast: 1.3s
+    hint: defense
+    cost: 18
+
+    deliver chain { bounces: 8, range: 2.6, falloff: 0.2 } {
+        on_hit {
+            silence 4.0s in circle(1.0) [DARK: 54] when target_hp_below(30%) + 29% caster_attack_damage
+            confuse 1.9s in cone(3.8, 57)
+        }
+    }
+}
+
+ability Generated {
+    target: ally, range: 2.8
+    cooldown: 1.3s, cast: 1.9s
+    hint: utility
+    cost: 9
+
+    shield 67 in line(6.8, 0.9) [DARK: 49] when caster_hp_below(31%)
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 6.8s
+
+    heal 188 in line(6.9, 0.8) [DARK: 59]
+    fear 529ms in cone(3.5, 52)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 7.4s
+
+    silence 973ms [DARK: 47] when caster_hp_below(79%)
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 4.8s
+
+    knockback 3.4 [DARK: 76] when hit_count_above(2)
+}
+
+ability Generated {
+    target: ally, range: 9.5
+    cooldown: 25.7s, cast: 1.5s
+    hint: utility
+    cost: 18
+
+    deliver projectile { speed: 1.2 } {
+        on_hit {
+            debuff attack_speed 0.30 for 2.5s [DARK: 79] when hit_count_above(3) + 37% target_missing_hp
+        }
+    }
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 7.1s
+
+    stealth 767ms [DARK: 26] when caster_hp_below(15%)
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 9.2s
+
+    stun 1.6s [DARK: 69] when target_hp_above(23%)
+}
+
+ability Generated {
+    target: direction, range: 9.2
+    cooldown: 25.9s, cast: 1.0s
+    hint: crowd_control
+    cost: 12
+
+    deliver trap { duration: 3.5s, trigger_radius: 7.5 } {
+        on_hit {
+            dash 3.7 in cone(2.4, 36) [DARK: 24] + 25% target_max_hp
+            blink 4.4
+        }
+    }
+}
+
+ability Generated {
+    target: direction, range: 1.6
+    cooldown: 7.1s, cast: 895ms
+    hint: defense
+    cost: 1
+
+    deliver trap { duration: 12.5s, trigger_radius: 4.5 } {
+        on_hit {
+            heal 6/1s for 3.4s in circle(3.7) [DARK: 57] + 44% target_missing_hp
+            spell_shield 2
+        }
+    }
+}
+
+ability Generated {
+    target: global
+    cooldown: 4.6s, cast: 1.1s
+    hint: defense
+    cost: 11
+
+    suppress 2.1s in line(5.2, 1.3) [DARK: 49] + 32% target_missing_hp
+    banish 3.4s in circle(2.3)
+}
+
+ability Generated {
+    target: direction, range: 7.4
+    cooldown: 6.4s, cast: 573ms
+    hint: defense
+    cost: 15
+
+    deliver chain { bounces: 5, range: 0.6, falloff: 0.2 } {
+        on_hit {
+            buff move_speed 0.41 for 3.3s [DARK: 23] when caster_hp_below(65%)
+            heal 12/1s for 6.7s in circle(4.9) [DARK: 31] when target_hp_below(41%)
+        }
+    }
+}
+
+ability Generated {
+    target: enemy, range: 3.7
+    cooldown: 24.5s, cast: 2.0s
+    hint: utility
+    cost: 18
+
+    deliver zone { duration: 7.9s, tick: 2.7s } {
+        on_hit {
+            cooldown_lock 572ms [DARK: 51]
+            stun 775ms in line(3.5, 1.9) when caster_hp_below(72%)
+            buff armor 0.36 for 2.3s in line(7.1, 0.8) when hit_count_above(3)
+            fear 2.2s [DARK: 27]
+        }
+    }
+}
+
+ability Generated {
+    target: ally, range: 4.3
+    cooldown: 1.8s, cast: 1.9s
+    hint: utility
+    cost: 25
+
+    deliver projectile { speed: 1.1 } {
+        on_hit {
+            heal 13/1s for 3.5s [DARK: 46] when target_hp_below(44%)
+            stun 3.0s in cone(4.6, 70) [DARK: 66]
+        }
+    }
+}
+
+ability Generated {
+    target: global
+    cooldown: 16.0s, cast: 373ms
+    hint: utility
+    cost: 7
+
+    buff damage_output 0.35 for 4.9s [DARK: 70] + 47% caster_max_hp
+    echo 2 in line(7.0, 0.8)
+}
+
+ability Generated {
+    target: global
+    cooldown: 34.1s, cast: 1.0s
+    hint: utility
+    cost: 16
+
+    deliver trap { duration: 15.7s, trigger_radius: 6.1 } {
+        on_hit {
+            refresh_cooldowns [DARK: 79] + 33% target_missing_hp
+            silence 4.7s in cone(5.4, 81)
+            spell_shield 1 in circle(2.4)
+        }
+    }
+}
+
+ability Generated {
+    target: self
+    cooldown: 44.6s, cast: 44ms
+    hint: defense
+
+    deliver projectile { speed: 2.9 } {
+        on_hit {
+            dash 2.6 [DARK: 34] when caster_hp_below(27%)
+            shield 79 in cone(5.1, 77)
+            damage 156 in line(6.9, 0.8) when target_hp_above(63%)
+            free_cast 1 in cone(4.3, 65)
+        }
+    }
+}
+
+ability Generated {
+    target: enemy, range: 9.5
+    cooldown: 42.0s, cast: 1.9s
+    hint: utility
+    cost: 25
+
+    echo 2 in line(4.7, 1.5) [DARK: 24] + 37% caster_max_hp
+    buff magic_resist 0.16 for 3.7s in cone(5.8, 88)
+}
+
+ability Generated {
+    target: global
+    cooldown: 5.7s, cast: 31ms
+    hint: heal
+    cost: 12
+
+    deliver projectile { speed: 8.3 } {
+        on_hit {
+            blind 1.2s in cone(3.6, 54) [DARK: 60] + 20% caster_attack_damage
+        }
+    }
+}
+
+ability Generated {
+    target: direction, range: 5.3
+    cooldown: 5.8s, cast: 352ms
+    hint: defense
+    cost: 19
+
+    deliver chain { bounces: 13, range: 5.1, falloff: 0.2 } {
+        on_hit {
+            charm 521ms [DARK: 77] + 27% caster_attack_damage
+            buff magic_resist 0.46 for 3.3s [DARK: 79]
+            dash to_target in line(3.2, 1.9)
+            dash 1.9 in line(3.4, 1.9)
+        }
+    }
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 12.4s
+
+    heal 8/1s for 2.7s in line(6.0, 1.1) [DARK: 47]
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 9.0s
+
+    echo 3 [DARK: 67] when target_hp_below(68%)
+}
+
+ability Generated {
+    target: enemy, range: 2.9
+    cooldown: 1.7s, cast: 1.6s
+    hint: utility
+    cost: 26
+
+    debuff attack_speed 0.14 for 2.5s [DARK: 37] when target_hp_below(17%)
+}
+
+ability Generated {
+    target: ally, range: 8.9
+    cooldown: 8.8s, cast: 528ms
+    hint: defense
+    cost: 1
+
+    swap in cone(3.5, 53) [DARK: 60] + 45% caster_attack_damage
+    silence 572ms in cone(2.0, 31)
+}
+
+ability Generated {
+    target: self_aoe
+    cooldown: 7.1s, cast: 217ms
+    hint: utility
+    cost: 10
+
+    deliver projectile { speed: 12.3 } {
+        on_hit {
+            heal 171 [DARK: 64] + 9% target_max_hp
+            banish 1.8s in circle(2.3) when target_hp_below(39%)
+        }
+    }
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 16.3s
+
+    debuff damage_output 0.38 for 2.7s [DARK: 24] when caster_hp_below(58%)
+    instant_cast 2 in circle(4.3) [FIRE: 32]
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 10.8s
+
+    damage_modify 1.64 for 4.8s in circle(3.5) [DARK: 31]
+    buff armor 0.49 for 2.2s in circle(1.5) [HOLY: 78]
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 3.3s
+
+    damage 5/1s for 2.1s [DARK: 44]
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 11.0s
+
+    damage_modify 1.56 for 4.4s in cone(5.6, 84) [DARK: 52]
+}
+
+ability Generated {
+    target: global
+    cooldown: 4.7s, cast: 1.2s
+    hint: utility
+    cost: 25
+
+    deliver zone { duration: 9.8s, tick: 2.0s } {
+        on_hit {
+            damage 11/1s for 2.2s [DARK: 49] when hit_count_above(2)
+        }
+    }
+}
+
+ability Generated {
+    target: self
+    cooldown: 4.1s, cast: 1.0s
+    hint: defense
+    cost: 7
+
+    buff armor 0.18 for 2.1s in circle(3.7) [DARK: 32] + 48% target_max_hp
+    debuff move_speed 0.43 for 6.0s in cone(3.5, 53) when hit_count_above(4)
+}
+

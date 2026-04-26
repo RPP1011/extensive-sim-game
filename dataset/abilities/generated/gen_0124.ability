@@ -1,0 +1,406 @@
+// Auto-generated abilities (quality score >= 0.442)
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 12.0s
+
+    decipher
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 37.9s
+
+    field_triage 0.86
+    trade_embargo for 856t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 55.5s
+
+    broker_alliance for 2646t
+    claim_territory
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 22.2s
+
+    coordinated_strike
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 62.4s
+
+    hidden_camp for 184t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 83.8s
+
+    beast_lore
+    shadow_step for 637t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 61.0s
+
+    plague_ward for 553t
+    life_eternal
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 48.9s
+
+    forgery
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 39.4s
+
+    trade_embargo for 375t
+    ghost_walk for 245t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 43.6s
+
+    silent_movement
+}
+
+ability Generated {
+    target: market
+    cooldown: 1097.1s, cast: 1.2s
+    hint: leadership
+    cost: 13
+
+    omniscience
+    field_command for 248t
+    ceasefire for 3200t
+    coordinated_strike
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 15.4s
+
+    rally 0.20
+    sanctuary for 751t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 74.4s
+
+    silver_tongue
+    coordinated_strike
+}
+
+ability Generated {
+    target: faction, range: 4.8
+    cooldown: 28246.6s, cast: 2.0s
+    hint: leadership
+    cost: 26
+
+    rally 0.49
+    market_maker for 2721t
+}
+
+ability Generated {
+    target: region, range: 8.5
+    cooldown: 17628.0s, cast: 1.3s
+    hint: leadership
+    cost: 22
+
+    coordinated_strike
+    sanctuary for 95t
+    field_triage 1.39
+}
+
+ability Generated {
+    target: adventurer, range: 6.1
+    cooldown: 3535.6s, cast: 1.4s
+    hint: leadership
+    cost: 6
+
+    master_armorer
+    take_the_blow for 795t
+    demand_audience
+}
+
+ability Generated {
+    target: faction, range: 8.9
+    cooldown: 3966.0s, cast: 387ms
+    hint: leadership
+    cost: 15
+
+    corner_market for 2708t
+    read_the_room
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 45.9s
+
+    field_triage 1.23
+    sanctuary for 839t
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 82.2s
+
+    sanctuary for 595t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 18.7s
+
+    battle_instinct
+    appraise
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 40.6s
+
+    hold_the_line
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 69.1s
+
+    read_the_room
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 13.0s
+
+    broker_alliance for 984t
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 14.6s
+
+    sanctuary for 123t
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 52.1s
+
+    treaty_breaker
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 39.6s
+
+    coordinated_strike
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 23.6s
+
+    sanctuary for 72t
+    forbidden_knowledge
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 15.3s
+
+    treaty_breaker
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 18.9s
+
+    plague_ward for 2524t
+    hidden_camp for 1103t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 12.3s
+
+    corner_market for 1779t
+}
+
+ability Generated {
+    target: market
+    cooldown: 11380.4s, cast: 619ms
+    hint: leadership
+    cost: 5
+
+    unbreakable
+    rally 0.27
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 64.3s
+
+    prophecy 6
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 11.5s
+
+    sanctuary for 72t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 25.6s
+
+    decipher
+}
+
+ability Generated {
+    target: guild
+    cooldown: 2148.1s, cast: 1.3s
+    hint: leadership
+    cost: 10
+
+    demand_audience
+    accelerated_study for 77t
+    shadow_step for 1481t
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 18.4s
+
+    trade_empire 6.7
+    treaty_breaker
+}
+
+ability Generated {
+    target: adventurer, range: 5.0
+    cooldown: 6262.2s, cast: 1.9s
+    hint: leadership
+    cost: 28
+
+    field_repair
+    purify
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 15.1s
+
+    silent_movement
+    coordinated_strike
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 84.9s
+
+    decipher
+}
+
+ability Generated {
+    target: adventurer, range: 3.1
+    cooldown: 967.9s, cast: 1.5s
+    hint: leadership
+    cost: 20
+
+    distraction for 2474t
+    claim_territory
+    distraction for 1017t
+}
+
+ability Generated {
+    target: faction, range: 7.3
+    cooldown: 12017.6s, cast: 247ms
+    hint: leadership
+    cost: 16
+
+    war_cry for 2794t
+}
+
+ability Generated {
+    target: faction, range: 9.0
+    cooldown: 1051.8s, cast: 1.3s
+    hint: leadership
+    cost: 28
+
+    treaty_breaker
+    hidden_camp for 711t
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 32.4s
+
+    field_repair
+    beast_lore
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 17s
+
+    hidden_camp for 73t
+    rally 0.36
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 57.1s
+
+    beast_lore
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 24.7s
+
+    distraction for 799t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 30.2s
+
+    safe_house for 2256t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 49.1s
+
+    disinformation for 2464t
+    beast_lore
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 30.3s
+
+    treaty_breaker
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 10.1s
+
+    plague_ward for 245t
+}
+

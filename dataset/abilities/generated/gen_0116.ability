@@ -1,0 +1,398 @@
+// Auto-generated abilities (quality score >= 0.455)
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 30.3s
+
+    all_seeing_eye
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 36.8s
+
+    master_armorer
+    silver_tongue
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 81.5s
+
+    field_triage 1.61
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 46.6s
+
+    corner_market for 143t
+    masterwork_craft
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 30.4s
+
+    decipher
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 10.7s
+
+    trap_sense
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 31.3s
+
+    sanctuary for 178t
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 38.7s
+
+    vanish
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 18.5s
+
+    trade_empire 3.2
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 60.3s
+
+    living_legend
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 46.8s
+
+    read_the_room
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 70.8s
+
+    silver_tongue
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 18.8s
+
+    silver_tongue
+    field_command for 931t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 24.8s
+
+    intel_gathering
+    broker_alliance for 111t
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 22.5s
+
+    broker_alliance for 51t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 58.7s
+
+    claim_by_right
+    claim_by_right
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 34.8s
+
+    treaty_breaker
+    life_eternal
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 62.1s
+
+    coordinated_strike
+    intel_gathering
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 11.0s
+
+    fortify for 389t
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 20.0s
+
+    broker_alliance for 4564t
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 41.4s
+
+    field_triage 0.77
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 20.8s
+
+    war_cry for 385t
+    forage 0.34
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 19.3s
+
+    field_repair
+    quick_study
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 17.1s
+
+    ghost_walk for 2528t
+    treaty_breaker
+}
+
+ability Generated {
+    target: faction, range: 1.2
+    cooldown: 873.8s, cast: 395ms
+    hint: diplomacy
+    cost: 11
+
+    name_the_nameless
+    golden_touch for 3716t
+    disinformation for 3799t
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 18.6s
+
+    appraise
+}
+
+ability Generated {
+    target: region, range: 6.2
+    cooldown: 263.4s, cast: 762ms
+    hint: diplomacy
+    cost: 29
+
+    distraction for 1049t
+    decipher
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 33.2s
+
+    blood_oath 0.49
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 22.0s
+
+    track_prey
+    read_the_room
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 25.6s
+
+    silver_tongue
+    quick_study
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 44.7s
+
+    corner_market for 104t
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 28.2s
+
+    decipher
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 78.5s
+
+    disinformation for 3761t
+}
+
+ability Generated {
+    target: adventurer, range: 8.8
+    cooldown: 13367.2s, cast: 757ms
+    hint: diplomacy
+    cost: 16
+
+    forbidden_knowledge
+    master_armorer
+    disinformation for 4306t
+    broker_alliance for 1522t
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 10.0s
+
+    distraction for 357t
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 51.5s
+
+    omniscience
+}
+
+ability Generated {
+    target: adventurer, range: 8.5
+    cooldown: 17921.2s, cast: 1.7s
+    hint: diplomacy
+    cost: 28
+
+    master_armorer
+    track_prey
+    field_repair
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 46.4s
+
+    claim_by_right
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 69.6s
+
+    all_seeing_eye
+    trap_sense
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 36.5s
+
+    ghost_walk for 3294t
+    intel_gathering
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 20.3s
+
+    field_repair
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 31.6s
+
+    shadow_step for 2125t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 42.7s
+
+    life_eternal
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 69.8s
+
+    prophecy 6
+}
+
+ability Generated {
+    target: global
+    cooldown: 3295.0s, cast: 283ms
+    hint: diplomacy
+    cost: 5
+
+    demand_audience
+    claim_by_right
+    corner_market for 1678t
+}
+
+ability Generated {
+    target: adventurer, range: 6.2
+    cooldown: 2094.9s, cast: 247ms
+    hint: diplomacy
+    cost: 22
+
+    silver_tongue
+    blood_oath 0.45
+}
+
+ability Generated {
+    target: self
+    cooldown: 4128.6s, cast: 1.8s
+    hint: diplomacy
+    cost: 18
+
+    market_maker for 225t
+    field_triage 1.00
+    take_the_blow for 3653t
+    war_cry for 59t
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 34.5s
+
+    golden_touch for 4309t
+}
+
+ability Generated {
+    target: self
+    cooldown: 719.5s, cast: 260ms
+    hint: diplomacy
+    cost: 15
+
+    field_triage 1.23
+    vanish
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 59.0s
+
+    name_the_nameless
+    beast_lore
+}
+

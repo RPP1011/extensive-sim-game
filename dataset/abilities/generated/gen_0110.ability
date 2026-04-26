@@ -1,0 +1,370 @@
+// Auto-generated abilities (quality score >= 0.460)
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 15.6s
+
+    debuff damage_output 0.28 for 2.3s in circle(1.6) [ICE: 41]
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 9.1s
+
+    buff attack_speed 0.39 for 2.6s in circle(2.0) [POISON: 59] when target_hp_above(63%)
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 14.1s
+
+    debuff damage_output 0.48 for 3.7s in line(5.6, 1.2) [ICE: 35]
+    stealth 1.0s in circle(4.5) when caster_hp_below(52%)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 22.0s
+
+    spell_shield 2 in circle(3.9) when caster_hp_below(50%)
+    debuff damage_output 0.47 for 3.9s in circle(1.6)
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 7.4s
+
+    buff magic_resist 0.09 for 3.1s [PHYSICAL: 78] when target_hp_below(15%)
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 23.8s
+
+    polymorph 3.7s [FIRE: 38] when caster_hp_below(28%)
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 13.2s
+
+    pull 2.7 in line(7.8, 0.6) [ICE: 41]
+    banish 1.3s in circle(1.3) when hit_count_above(3)
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 5.2s
+
+    echo 2 [DARK: 65] when target_hp_above(48%)
+    buff magic_resist 0.23 for 8.0s in line(4.4, 1.6) [DARK: 54]
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 14.7s
+
+    buff damage_output 0.36 for 7.2s in line(6.0, 1.1) [PHYSICAL: 26] when target_hp_below(57%)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 5.9s
+
+    debuff move_speed 0.21 for 4.9s in cone(6.0, 89) [MAGIC: 25] when caster_hp_below(29%)
+    polymorph 1.8s [FIRE: 77]
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 8.5s
+
+    damage_modify 1.52 for 2.7s in cone(3.8, 57) [POISON: 32]
+    dash to_target
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 21.2s
+
+    buff move_speed 0.42 for 9.2s [POISON: 24]
+    dash 2.7 when hit_count_above(2)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 6.6s
+
+    knockback 2.8 in cone(5.2, 78) [DARK: 50]
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 7.6s
+
+    suppress 1.2s [ICE: 47]
+    debuff armor 0.26 for 4.5s when target_hp_below(37%)
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 7.4s
+
+    debuff attack_speed 0.24 for 3.2s in circle(2.9) [PHYSICAL: 46]
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 24.8s
+
+    heal 177 in line(5.9, 1.1) when target_hp_below(71%)
+    fear 3.7s [MAGIC: 59] when hit_count_above(3)
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 3.9s
+
+    spell_shield 1 in cone(5.7, 85) when caster_hp_below(15%)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 9.6s
+
+    instant_cast 2 in line(5.9, 1.1) [MAGIC: 68]
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 8.4s
+
+    debuff armor 0.30 for 2.7s [MAGIC: 28] when hit_count_above(2)
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 7.8s
+
+    damage_modify 1.82 for 2.5s [FIRE: 46]
+    heal 23/1s for 5.4s in cone(4.2, 63) [DARK: 68] when hit_count_above(4)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 8.6s
+
+    debuff armor 0.44 for 3.9s [POISON: 36] when target_hp_below(69%)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 27.3s
+
+    stealth 614ms when target_hp_below(49%)
+    buff damage_output 0.24 for 4.3s [PHYSICAL: 53] when caster_hp_below(40%)
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 8.3s
+
+    stealth 1.0s [MAGIC: 27] when target_hp_above(35%)
+    refresh_cooldowns
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 4.1s
+
+    stealth 833ms [DARK: 78] when hit_count_above(1)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 24.5s
+
+    blink 8.0 when caster_hp_below(79%)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 6.1s
+
+    root 2.4s in cone(5.5, 83) [DARK: 45] when target_hp_below(37%)
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 13.0s
+
+    knockback 4.7 in circle(3.9) [HOLY: 52]
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 3.8s
+
+    debuff magic_resist 0.18 for 2.6s [PHYSICAL: 29] when hit_count_above(1)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 5.9s
+
+    mana_burn 0.3 for 2.2s in cone(2.7, 40)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 8.9s
+
+    banish 1.7s [PHYSICAL: 50]
+    echo 1 in circle(4.5)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 8.0s
+
+    instant_cast 1 [DARK: 61]
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 5.1s
+
+    buff damage_output 0.10 for 2.1s in cone(4.4, 66) when target_hp_below(18%)
+    debuff attack_speed 0.19 for 6.1s in circle(5.0) when hit_count_above(1)
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 13.2s
+
+    pull 4.8 in circle(3.7) [PHYSICAL: 72] when caster_hp_below(63%)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 3.8s
+
+    cooldown_lock 2.1s [HOLY: 47] when target_hp_above(49%)
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 9.0s
+
+    dispel in circle(4.3) [HOLY: 23]
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 19.4s
+
+    suppress 1.1s [PHYSICAL: 27]
+    pull 2.7 [MAGIC: 49]
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 5.7s
+
+    debuff magic_resist 0.16 for 3.7s in cone(4.7, 70) [PHYSICAL: 26] when caster_hp_below(20%)
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 11.5s
+
+    taunt 539ms in line(6.4, 1.0)
+    heal 12/1s for 7.3s [PHYSICAL: 44] when target_hp_below(38%)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 25.3s
+
+    spell_shield 3 when target_hp_above(65%)
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 24.7s
+
+    amplify 2.8 2 [MAGIC: 73] when target_hp_above(41%)
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 19.3s
+
+    instant_cast 3 in line(7.5, 0.6) [HOLY: 31] when target_hp_above(76%)
+    stun 670ms [POISON: 66]
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 3.8s
+
+    suppress 2.3s in circle(2.8) [PHYSICAL: 55] when hit_count_above(3)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 9.9s
+
+    debuff damage_output 0.24 for 4.6s [PHYSICAL: 40]
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 15.0s
+
+    suppress 1.7s [POISON: 23]
+    debuff attack_speed 0.32 for 5.4s in circle(3.5) [DARK: 25]
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 4.0s
+
+    damage 10/1s for 5.1s in circle(3.5) [HOLY: 25] when target_hp_above(29%)
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 3.4s
+
+    blink 5.3 when hit_count_above(3)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 10.9s
+
+    pull 3.0 when hit_count_above(2)
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 21.7s
+
+    debuff magic_resist 0.37 for 2.2s in circle(4.6) when target_hp_below(58%)
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 26.4s
+
+    dispel [PHYSICAL: 74] when hit_count_above(2)
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 4.3s
+
+    refresh_cooldowns in circle(4.1)
+}
+

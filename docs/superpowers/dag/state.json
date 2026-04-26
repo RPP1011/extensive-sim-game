@@ -151,14 +151,14 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-3"
       ],
-      "status": "pending",
+      "status": "in_progress",
       "steps_total": 5,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
       "completed_commit": null,
       "critic_verdicts": {},
-      "started_at": null,
+      "started_at": "2026-04-26T21:58:06Z",
       "completed_at": null,
       "retry_count": 0
     },
@@ -594,8 +594,8 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T21:55:49Z",
-    "iterations_completed": 1,
+    "last_iteration_at": "2026-04-26T21:58:06Z",
+    "iterations_completed": 2,
     "tasks_closed": 1,
     "tasks_blocked": 0,
     "current_phase": "dispatching",

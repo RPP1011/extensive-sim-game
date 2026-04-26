@@ -1,0 +1,415 @@
+// Auto-generated abilities (quality score >= 0.214)
+
+ability Generated {
+    target: market
+    cooldown: 7162.0s, cast: 1.4s
+    hint: leadership
+    cost: 15
+
+    forbidden_knowledge
+    disinformation for 109t
+    blood_oath 0.36
+}
+
+ability Generated {
+    target: self
+    cooldown: 12083.7s, cast: 1.8s
+    hint: leadership
+    cost: 13
+
+    disinformation for 1452t
+}
+
+ability Generated {
+    target: global
+    cooldown: 20370.6s, cast: 644ms
+    hint: leadership
+    cost: 9
+
+    field_triage 1.37
+    blood_oath 0.40
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 31.5s
+
+    take_the_blow for 84t
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 27.8s
+
+    distraction for 60t
+}
+
+ability Generated {
+    target: adventurer, range: 8.6
+    cooldown: 8462.0s, cast: 677ms
+    hint: leadership
+    cost: 10
+
+    beast_lore
+    field_repair
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 14.6s
+
+    safe_house for 3109t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 18.1s
+
+    broker_alliance for 50t
+}
+
+ability Generated {
+    target: adventurer, range: 6.0
+    cooldown: 553.1s, cast: 1.1s
+    hint: leadership
+    cost: 23
+
+    field_command for 615t
+    disinformation for 121t
+    field_command for 118t
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 62.0s
+
+    stabilize_ally
+}
+
+ability Generated {
+    target: global
+    cooldown: 2784.9s, cast: 205ms
+    hint: leadership
+
+    purify
+}
+
+ability Generated {
+    target: region, range: 1.6
+    cooldown: 4262.7s, cast: 658ms
+    hint: leadership
+    cost: 19
+
+    silent_movement
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 40.4s
+
+    omniscience
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 56.9s
+
+    quick_study
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 76.9s
+
+    plague_ward for 50t
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 86.4s
+
+    rally 0.23
+    omniscience
+}
+
+ability Generated {
+    target: global
+    cooldown: 2554.2s, cast: 2.0s
+    hint: leadership
+    cost: 28
+
+    master_armorer
+}
+
+ability Generated {
+    target: adventurer, range: 8.1
+    cooldown: 7425.4s, cast: 1.6s
+    hint: leadership
+    cost: 26
+
+    sanctuary for 136t
+    sanctuary for 256t
+    forge_artifact
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 24.8s
+
+    silver_tongue
+}
+
+ability Generated {
+    target: guild
+    cooldown: 4041.7s, cast: 741ms
+    hint: leadership
+    cost: 14
+
+    demand_audience
+    prophecy 6
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 9.1s
+
+    accelerated_study for 4985t
+    ghost_walk for 1338t
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 18.3s
+
+    quick_study
+}
+
+ability Generated {
+    target: faction, range: 9.7
+    cooldown: 12964.6s, cast: 1.6s
+    hint: leadership
+    cost: 20
+
+    disinformation for 108t
+    vanish
+    forbidden_knowledge
+}
+
+ability Generated {
+    target: global
+    cooldown: 3042.8s, cast: 1.5s
+    hint: leadership
+    cost: 27
+
+    claim_territory
+    market_maker for 2791t
+    hidden_camp for 76t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 10.7s
+
+    subvert_loyalty
+}
+
+ability Generated {
+    target: market
+    cooldown: 880.8s, cast: 1.2s
+    hint: leadership
+    cost: 11
+
+    hold_the_line
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 15.9s
+
+    demand_audience
+}
+
+ability Generated {
+    target: self
+    cooldown: 298.1s, cast: 802ms
+    hint: leadership
+    cost: 6
+
+    track_prey
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 41.2s
+
+    forge_artifact
+    stabilize_ally
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 14.4s
+
+    blood_oath 0.17
+    trade_embargo for 256t
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 40.8s
+
+    disinformation for 242t
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 26.8s
+
+    vanish
+}
+
+ability Generated {
+    target: market
+    cooldown: 1722.8s, cast: 737ms
+    hint: leadership
+    cost: 29
+
+    forgery
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 49.0s
+
+    living_legend
+    decipher
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 30.1s
+
+    silver_tongue
+}
+
+ability Generated {
+    target: party, range: 3.6
+    cooldown: 1918.6s, cast: 1.9s
+    hint: leadership
+    cost: 26
+
+    battle_instinct
+}
+
+ability Generated {
+    target: self
+    cooldown: 10065.7s, cast: 1.9s
+    hint: leadership
+    cost: 21
+
+    silver_tongue
+    ceasefire for 88t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 81.2s
+
+    sanctuary for 406t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 89.5s
+
+    safe_house for 855t
+    name_the_nameless
+}
+
+ability Generated {
+    target: market
+    cooldown: 1532.1s, cast: 421ms
+    hint: leadership
+    cost: 11
+
+    all_seeing_eye
+    trap_sense
+    appraise
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 11.3s
+
+    ghost_walk for 200t
+}
+
+ability Generated {
+    target: faction, range: 8.5
+    cooldown: 1801.4s, cast: 1.3s
+    hint: leadership
+    cost: 18
+
+    trade_empire 5.6
+    forage 1.93
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 9.0s
+
+    corner_market for 263t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 46.5s
+
+    all_seeing_eye
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 25.1s
+
+    decipher
+    trade_empire 6.3
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 20.9s
+
+    beast_lore
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 28.0s
+
+    claim_territory
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 75.1s
+
+    silver_tongue
+}
+
+ability Generated {
+    target: market
+    cooldown: 4315.1s, cast: 1.1s
+    hint: leadership
+
+    distraction for 268t
+    distraction for 2712t
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 12.5s
+
+    ceasefire for 699t
+}
+

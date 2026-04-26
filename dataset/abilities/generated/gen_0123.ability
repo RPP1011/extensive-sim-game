@@ -1,0 +1,404 @@
+// Auto-generated abilities (quality score >= 0.211)
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 19.4s
+
+    read_the_room
+}
+
+ability Generated {
+    target: global
+    cooldown: 2078.7s, cast: 435ms
+    hint: stealth
+    cost: 3
+
+    quick_study
+    fortify for 428t
+}
+
+ability Generated {
+    target: market
+    cooldown: 1043.9s, cast: 2.0s
+    hint: stealth
+    cost: 12
+
+    life_eternal
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 12.4s
+
+    corner_market for 73t
+}
+
+ability Generated {
+    target: market
+    cooldown: 14957.4s, cast: 1.2s
+    hint: stealth
+    cost: 6
+
+    forge_artifact
+}
+
+ability Generated {
+    target: faction, range: 1.1
+    cooldown: 8200.9s, cast: 103ms
+    hint: stealth
+    cost: 11
+
+    accelerated_study for 1995t
+    reveal 5
+    fortify for 65t
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 62.3s
+
+    master_armorer
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 18.7s
+
+    golden_touch for 131t
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 18.3s
+
+    fortify for 2633t
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 18.7s
+
+    living_legend
+    field_repair
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 46.0s
+
+    distraction for 1159t
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 13.2s
+
+    war_cry for 1113t
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 23.4s
+
+    hidden_camp for 3969t
+    blood_oath 0.11
+}
+
+ability Generated {
+    target: global
+    cooldown: 2588.3s, cast: 322ms
+    hint: stealth
+    cost: 5
+
+    masterwork_craft
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 65.0s
+
+    trap_sense
+    hold_the_line
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 48.3s
+
+    accelerated_study for 106t
+}
+
+ability Generated {
+    target: guild
+    cooldown: 535.5s, cast: 2.0s
+    hint: stealth
+    cost: 26
+
+    blood_oath 0.19
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 24.1s
+
+    all_seeing_eye
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 34.4s
+
+    living_legend
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 23.9s
+
+    claim_by_right
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 62.0s
+
+    corner_market for 1777t
+}
+
+ability Generated {
+    target: self
+    cooldown: 461.7s, cast: 1.8s
+    hint: stealth
+    cost: 5
+
+    shadow_step for 870t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 15.9s
+
+    war_cry for 677t
+}
+
+ability Generated {
+    target: region, range: 1.4
+    cooldown: 4096.7s, cast: 1.9s
+    hint: stealth
+    cost: 10
+
+    claim_territory
+    silver_tongue
+    corner_market for 89t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 9.7s
+
+    shadow_step for 185t
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 31.6s
+
+    trade_embargo for 3020t
+    forgery
+}
+
+ability Generated {
+    target: faction, range: 6.8
+    cooldown: 4255.1s, cast: 610ms
+    hint: stealth
+    cost: 9
+
+    forge_artifact
+    market_maker for 138t
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 10.7s
+
+    ceasefire for 557t
+}
+
+ability Generated {
+    target: adventurer, range: 7.7
+    cooldown: 13850.9s, cast: 1.3s
+    hint: stealth
+    cost: 2
+
+    broker_alliance for 793t
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 48.7s
+
+    beast_lore
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 17.0s
+
+    appraise
+}
+
+ability Generated {
+    target: faction, range: 1.5
+    cooldown: 1574.0s, cast: 1.8s
+    hint: stealth
+    cost: 18
+
+    take_the_blow for 555t
+}
+
+ability Generated {
+    target: global
+    cooldown: 618.6s, cast: 1.9s
+    hint: stealth
+    cost: 1
+
+    quick_study
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 24.8s
+
+    omniscience
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 40s
+
+    read_the_room
+    hold_the_line
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 26.5s
+
+    demand_audience
+}
+
+ability Generated {
+    target: region, range: 3.2
+    cooldown: 4046.8s, cast: 894ms
+    hint: stealth
+    cost: 6
+
+    hold_the_line
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 21.9s
+
+    shadow_step for 790t
+    life_eternal
+}
+
+ability Generated {
+    target: global
+    cooldown: 436.7s, cast: 1.4s
+    hint: stealth
+    cost: 13
+
+    corner_market for 573t
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 10.3s
+
+    demand_audience
+}
+
+ability Generated {
+    target: market
+    cooldown: 1261.7s, cast: 1.3s
+    hint: stealth
+    cost: 1
+
+    field_command for 72t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 29.0s
+
+    market_maker for 3247t
+    disinformation for 4570t
+}
+
+ability Generated {
+    target: self
+    cooldown: 18082.9s, cast: 669ms
+    hint: stealth
+    cost: 7
+
+    masterwork_craft
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 22.4s
+
+    intel_gathering
+}
+
+ability Generated {
+    target: guild
+    cooldown: 739.5s, cast: 1.2s
+    hint: stealth
+    cost: 23
+
+    track_prey
+    purify
+    distraction for 1122t
+    hold_the_line
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 73.1s
+
+    track_prey
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 76.2s
+
+    subvert_loyalty
+}
+
+ability Generated {
+    target: guild
+    cooldown: 1467.5s, cast: 289ms
+    hint: stealth
+    cost: 17
+
+    claim_by_right
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 84.6s
+
+    corner_market for 61t
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 14.6s
+
+    stabilize_ally
+}
+

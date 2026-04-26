@@ -1,0 +1,425 @@
+// Auto-generated abilities (quality score >= 0.270)
+
+ability Generated {
+    target: region, range: 0.5
+    cooldown: 9966.8s, cast: 954ms
+    hint: diplomacy
+    cost: 20
+
+    living_legend
+    appraise
+    master_armorer
+    purify
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 28.7s
+
+    master_armorer
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 80.1s
+
+    corner_market for 187t
+}
+
+ability Generated {
+    target: guild
+    cooldown: 2925.8s, cast: 1.4s
+    hint: diplomacy
+    cost: 9
+
+    vanish
+    golden_touch for 4026t
+}
+
+ability Generated {
+    target: faction, range: 2.9
+    cooldown: 1689.8s, cast: 255ms
+    hint: diplomacy
+    cost: 22
+
+    forbidden_knowledge
+}
+
+ability Generated {
+    target: self
+    cooldown: 1422.8s, cast: 1.5s
+    hint: diplomacy
+    cost: 25
+
+    quick_study
+    unbreakable
+    golden_touch for 56t
+}
+
+ability Generated {
+    target: guild
+    cooldown: 883.0s, cast: 211ms
+    hint: diplomacy
+    cost: 11
+
+    ceasefire for 2522t
+    decipher
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 76.9s
+
+    take_the_blow for 107t
+    unbreakable
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 33.8s
+
+    omniscience
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 45.2s
+
+    treaty_breaker
+}
+
+ability Generated {
+    target: self
+    cooldown: 1758.9s, cast: 1.6s
+    hint: diplomacy
+    cost: 13
+
+    forbidden_knowledge
+    master_armorer
+    field_triage 0.71
+    intel_gathering
+}
+
+ability Generated {
+    target: market
+    cooldown: 7357.3s, cast: 1.7s
+    hint: diplomacy
+    cost: 1
+
+    all_seeing_eye
+    purify
+    corner_market for 2945t
+    sanctuary for 3639t
+}
+
+ability Generated {
+    target: adventurer, range: 1.8
+    cooldown: 1699.9s, cast: 1.5s
+    hint: diplomacy
+    cost: 22
+
+    ceasefire for 55t
+    forage 1.56
+}
+
+ability Generated {
+    target: guild
+    cooldown: 5080.1s, cast: 499ms
+    hint: diplomacy
+    cost: 19
+
+    trade_embargo for 70t
+    prophecy 4
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 42.8s
+
+    appraise
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 35.4s
+
+    accelerated_study for 65t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 74.0s
+
+    living_legend
+    field_command for 2298t
+}
+
+ability Generated {
+    target: party, range: 7.0
+    cooldown: 11954.9s, cast: 705ms
+    hint: diplomacy
+    cost: 7
+
+    intel_gathering
+    master_armorer
+    sapper_eye
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 17.2s
+
+    field_command for 113t
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 58.1s
+
+    masterwork_craft
+    vanish
+}
+
+ability Generated {
+    target: region, range: 7.3
+    cooldown: 998.3s, cast: 1.6s
+    hint: diplomacy
+    cost: 4
+
+    market_maker for 199t
+}
+
+ability Generated {
+    target: region, range: 4.7
+    cooldown: 1912.7s, cast: 532ms
+    hint: diplomacy
+    cost: 3
+
+    forgery
+    hidden_camp for 60t
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 17.5s
+
+    treaty_breaker
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 62.8s
+
+    silent_movement
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 64.3s
+
+    blood_oath 0.17
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 10.7s
+
+    silver_tongue
+    masterwork_craft
+}
+
+ability Generated {
+    target: guild
+    cooldown: 16282.1s, cast: 1.6s
+    hint: diplomacy
+    cost: 13
+
+    forgery
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 35.7s
+
+    broker_alliance for 2696t
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 85.3s
+
+    corner_market for 75t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 16.1s
+
+    reveal 3
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 53.3s
+
+    silent_movement
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 88.6s
+
+    name_the_nameless
+}
+
+ability Generated {
+    target: market
+    cooldown: 23507.3s, cast: 450ms
+    hint: diplomacy
+    cost: 15
+
+    treaty_breaker
+}
+
+ability Generated {
+    target: global
+    cooldown: 533.4s, cast: 391ms
+    hint: diplomacy
+    cost: 21
+
+    shadow_step for 904t
+    safe_house for 1950t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 23.0s
+
+    treaty_breaker
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 20.6s
+
+    accelerated_study for 935t
+    intel_gathering
+}
+
+ability Generated {
+    target: market
+    cooldown: 354.2s, cast: 435ms
+    hint: diplomacy
+    cost: 29
+
+    claim_by_right
+    distraction for 76t
+}
+
+ability Generated {
+    target: party, range: 5.1
+    cooldown: 287.0s, cast: 1.6s
+    hint: diplomacy
+    cost: 9
+
+    plague_ward for 52t
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 24.6s
+
+    decipher
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 12.2s
+
+    field_triage 1.07
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 63.2s
+
+    prophecy 2
+    silver_tongue
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 40.8s
+
+    stabilize_ally
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 9.7s
+
+    appraise
+}
+
+ability Generated {
+    target: global
+    cooldown: 15298.5s, cast: 995ms
+    hint: diplomacy
+    cost: 22
+
+    beast_lore
+}
+
+ability Generated {
+    target: guild
+    cooldown: 1187.1s, cast: 1.2s
+    hint: diplomacy
+    cost: 6
+
+    stabilize_ally
+}
+
+ability Generated {
+    target: guild
+    cooldown: 11063.3s, cast: 93ms
+    hint: diplomacy
+    cost: 19
+
+    golden_touch for 972t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 42.7s
+
+    accelerated_study for 690t
+    trap_sense
+}
+
+ability Generated {
+    target: region, range: 3.5
+    cooldown: 1311.5s, cast: 1.4s
+    hint: diplomacy
+    cost: 3
+
+    demand_audience
+}
+
+ability Generated {
+    target: faction, range: 8.3
+    cooldown: 1295.9s, cast: 468ms
+    hint: diplomacy
+    cost: 22
+
+    beast_lore
+    ceasefire for 66t
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 31.1s
+
+    plague_ward for 202t
+    accelerated_study for 85t
+}
+

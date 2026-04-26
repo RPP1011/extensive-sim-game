@@ -1,0 +1,409 @@
+// Auto-generated abilities (quality score >= 0.246)
+
+ability Generated {
+    target: faction, range: 1.1
+    cooldown: 1139.6s, cast: 1.7s
+    hint: stealth
+    cost: 3
+
+    read_the_room
+    market_maker for 425t
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 12.0s
+
+    hidden_camp for 4590t
+}
+
+ability Generated {
+    target: region, range: 6.4
+    cooldown: 10030.8s, cast: 998ms
+    hint: stealth
+    cost: 17
+
+    omniscience
+    quick_study
+    appraise
+    forgery
+}
+
+ability Generated {
+    target: adventurer, range: 6.4
+    cooldown: 920.1s, cast: 126ms
+    hint: stealth
+    cost: 3
+
+    unbreakable
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 64.7s
+
+    life_eternal
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 86.4s
+
+    field_repair
+    intel_gathering
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 10.5s
+
+    ceasefire for 4533t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 31.0s
+
+    safe_house for 861t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 52.5s
+
+    appraise
+    quick_study
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 49.8s
+
+    reveal 8
+    beast_lore
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 27.1s
+
+    purify
+    reveal 3
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 33.1s
+
+    sanctuary for 95t
+    life_eternal
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 58.1s
+
+    beast_lore
+    trap_sense
+}
+
+ability Generated {
+    target: market
+    cooldown: 12735.5s, cast: 1.6s
+    hint: stealth
+    cost: 22
+
+    intel_gathering
+    field_triage 0.19
+}
+
+ability Generated {
+    target: global
+    cooldown: 706.7s, cast: 571ms
+    hint: stealth
+    cost: 19
+
+    silver_tongue
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 37.1s
+
+    unbreakable
+    shadow_step for 54t
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 30.1s
+
+    purify
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 34.2s
+
+    accelerated_study for 103t
+}
+
+ability Generated {
+    target: region, range: 0.7
+    cooldown: 3439.1s, cast: 1.6s
+    hint: stealth
+    cost: 1
+
+    masterwork_craft
+    master_armorer
+    name_the_nameless
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 70.9s
+
+    war_cry for 3334t
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 39.0s
+
+    safe_house for 134t
+}
+
+passive Generated {
+    trigger: on_crisis_start
+    cooldown: 11.6s
+
+    plague_ward for 1493t
+    field_repair
+}
+
+ability Generated {
+    target: adventurer, range: 3.2
+    cooldown: 4722.1s, cast: 283ms
+    hint: stealth
+    cost: 2
+
+    subvert_loyalty
+    fortify for 4623t
+    demand_audience
+}
+
+ability Generated {
+    target: faction, range: 4.1
+    cooldown: 240.7s, cast: 1.9s
+    hint: stealth
+    cost: 3
+
+    take_the_blow for 1424t
+    living_legend
+}
+
+ability Generated {
+    target: region, range: 7.5
+    cooldown: 642.2s, cast: 545ms
+    hint: stealth
+    cost: 8
+
+    sapper_eye
+    safe_house for 2793t
+}
+
+ability Generated {
+    target: market
+    cooldown: 1186.4s, cast: 160ms
+    hint: stealth
+    cost: 16
+
+    stabilize_ally
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 31.3s
+
+    track_prey
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 70.1s
+
+    demand_audience
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 50.4s
+
+    blood_oath 0.34
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 12.6s
+
+    shadow_step for 636t
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 32.4s
+
+    silver_tongue
+}
+
+ability Generated {
+    target: market
+    cooldown: 8829.8s, cast: 81ms
+    hint: stealth
+    cost: 27
+
+    ceasefire for 246t
+    plague_ward for 1559t
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 25.3s
+
+    stabilize_ally
+    trap_sense
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 26.4s
+
+    rally 0.36
+}
+
+ability Generated {
+    target: region, range: 3.1
+    cooldown: 6497.3s, cast: 1.3s
+    hint: stealth
+    cost: 17
+
+    claim_territory
+    shadow_step for 874t
+}
+
+passive Generated {
+    trigger: on_level_up
+    cooldown: 33.2s
+
+    treaty_breaker
+    track_prey
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 50.1s
+
+    distraction for 201t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 13.9s
+
+    safe_house for 1499t
+    masterwork_craft
+}
+
+passive Generated {
+    trigger: on_damage_dealt
+    cooldown: 63.3s
+
+    living_legend
+}
+
+passive Generated {
+    trigger: on_death
+    cooldown: 15.8s
+
+    decipher
+}
+
+ability Generated {
+    target: self
+    cooldown: 3053.7s, cast: 323ms
+    hint: stealth
+    cost: 8
+
+    sanctuary for 3997t
+}
+
+passive Generated {
+    trigger: on_trade
+    cooldown: 28.8s
+
+    unbreakable
+    beast_lore
+}
+
+ability Generated {
+    target: faction, range: 5.4
+    cooldown: 902.8s, cast: 1.7s
+    hint: stealth
+    cost: 2
+
+    silent_movement
+    claim_territory
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 42.8s
+
+    blood_oath 0.15
+}
+
+passive Generated {
+    trigger: on_quest_complete
+    cooldown: 85.6s
+
+    forage 1.52
+}
+
+passive Generated {
+    trigger: on_kill
+    cooldown: 24.8s
+
+    omniscience
+}
+
+passive Generated {
+    trigger: on_ability_used
+    cooldown: 13.0s
+
+    track_prey
+}
+
+ability Generated {
+    target: adventurer, range: 4.8
+    cooldown: 3568.1s, cast: 477ms
+    hint: stealth
+    cost: 28
+
+    beast_lore
+}
+
+passive Generated {
+    trigger: on_heal_received
+    cooldown: 19.9s
+
+    demand_audience
+    living_legend
+}
+
+passive Generated {
+    trigger: on_damage_taken
+    cooldown: 12.2s
+
+    market_maker for 201t
+}
+

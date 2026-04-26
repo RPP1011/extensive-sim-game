@@ -58,4 +58,14 @@ impl ComputeBackend for SerialBackend {
     fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
         // SerialBackend: no-op; mask writes are immediate.
     }
+
+    fn cascade_dispatch(
+        &mut self,
+        cascade: &CascadeRegistry<Self::Event, Self::Views>,
+        state: &mut SimState,
+        views: &mut Self::Views,
+        events: &mut EventRing<Self::Event>,
+    ) {
+        cascade.run_fixed_point(state, views, events);
+    }
 }
