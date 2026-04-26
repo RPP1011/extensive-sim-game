@@ -31,6 +31,7 @@ impl ComputeBackend for SerialBackend {
         cascade: &CascadeRegistry<Self::Event, Self::Views>,
     ) {
         crate::step::step(
+            self,
             state,
             scratch,
             events,

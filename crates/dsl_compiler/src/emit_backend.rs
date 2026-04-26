@@ -41,7 +41,7 @@ pub fn emit_backend(source_file: Option<&str>) -> String {
     writeln!(out, "        policy:  &B,").unwrap();
     writeln!(out, "        cascade: &CascadeRegistry<Self::Event, Self::Views>,").unwrap();
     writeln!(out, "    ) {{").unwrap();
-    writeln!(out, "        crate::step::step(state, scratch, events, views, policy, cascade, &DebugConfig::default());").unwrap();
+    writeln!(out, "        crate::step::step(self, state, scratch, events, views, policy, cascade, &DebugConfig::default());").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "    fn reset_mask(&mut self, buf: &mut engine::mask::MaskBuffer) {{").unwrap();

@@ -11,6 +11,7 @@
 //   6. Tick advance
 
 use crate::views::ViewRegistry;
+use engine::backend::ComputeBackend;
 use engine::cascade::CascadeRegistry;
 use engine::debug::DebugConfig;
 use engine::event::EventRing;
@@ -37,7 +38,8 @@ use engine_data::events::Event;
 /// `debug` is passed by the caller; `DebugConfig::default()` (all collectors
 /// disabled) is a zero-cost no-op path — all stepper checkpoints are guarded
 /// by `if let Some(stepper) = debug.tick_stepper.as_ref()`.
-pub fn step<B: PolicyBackend>(
+pub fn step<CB: ComputeBackend, B: PolicyBackend>(
+    backend: &mut CB,
     state: &mut SimState,
     scratch: &mut SimScratch,
     events: &mut EventRing<Event>,
@@ -61,7 +63,7 @@ pub fn step<B: PolicyBackend>(
             p.enter("mask_fill");
         }
     }
-    crate::mask_fill::fill_all(&mut scratch.mask, &mut scratch.target_mask, state);
+    crate::mask_fill::fill_all(backend, &mut scratch.mask, &mut scratch.target_mask, state);
     if let Some(profile) = debug.tick_profile.as_ref() {
         if let Ok(mut p) = profile.lock() {
             p.exit_with_null();
