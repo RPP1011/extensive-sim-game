@@ -134,7 +134,7 @@ def parse_plan(path: Path) -> dict:
                 "status": "pending",
                 "steps_total": 0,
                 "steps_done": 0,
-                "owner_class": "implementer",  # default; overridden in Task 4
+                "owner_class": classify_owner(f"Task {h.group(1)}: {h.group(2).strip()}"),
                 "blocked_reason": None,
                 "completed_commit": None,
                 "critic_verdicts": {},
@@ -176,7 +176,71 @@ def parse_all_plans(plans_dir: Path) -> list[dict]:
     return [parse_plan(p) for p in sorted(plans_dir.glob("*.md")) if p.is_file()]
 
 
+SPEC_KEYWORDS = ("brainstorm with user", "design call", "spec brainstorm", "ux consultation")
+PLAN_KEYWORDS = ("draft plan", "write plan for", "plan to be written")
+HUMAN_KEYWORDS = ("user decides", "owner decides", "external coordination")
+
+
+def classify_owner(task_title: str, task_body: str = "") -> str:
+    blob = (task_title + " " + task_body).lower()
+    if any(kw in blob for kw in SPEC_KEYWORDS):
+        return "spec-needed"
+    if any(kw in blob for kw in PLAN_KEYWORDS):
+        return "plan-writer"
+    if any(kw in blob for kw in HUMAN_KEYWORDS):
+        return "human-needed"
+    return "implementer"
+
+
+def emit_meta_tasks(roadmap: list[dict], plans: list[dict]) -> list[dict]:
+    """For roadmap items with no plan, emit a plan-writer or spec-needed meta-task."""
+    plans_by_file = {p["file"]: p for p in plans}
+    meta: list[dict] = []
+    for item in roadmap:
+        # Resolve plan_refs against existing plan files
+        has_plan = any(
+            f"docs/superpowers/plans/{ref}" in plans_by_file or f"plans/{ref}" in plans_by_file
+            for ref in item["plan_refs"]
+        ) or any(item["id"].replace("roadmap-", "") in p["id"] for p in plans)
+        if has_plan:
+            continue
+        # Tier-based classification
+        if item["tier"] in ("drafted", "engine-plans-not-yet-written"):
+            owner = "plan-writer"
+            title = f"Write plan for: {item['title']}"
+        elif item["spec_ref"] is None and item["tier"] not in ("active", "partially-landed"):
+            owner = "spec-needed"
+            title = f"Brainstorm spec for: {item['title']}"
+        else:
+            continue  # active or partially-landed — bookkeeping only
+        meta.append({
+            "id": f"{item['id']}.{owner.replace('-', '_')}",
+            "plan": None,
+            "roadmap_parent": item["id"],
+            "title": title,
+            "checkbox_line": None,
+            "deps": [],
+            "blocks": [],
+            "status": "pending",
+            "steps_total": 0,
+            "steps_done": 0,
+            "owner_class": owner,
+            "blocked_reason": None,
+            "completed_commit": None,
+            "critic_verdicts": {},
+            "started_at": None,
+            "completed_at": None,
+            "retry_count": 0,
+        })
+    return meta
+
+
 if __name__ == "__main__":
+    roadmap = parse_roadmap(ROADMAP)
     plans = parse_all_plans(PLANS_DIR)
-    for p in plans:
-        print(f"{p['id']}: {p['tasks_done']}/{p['tasks_total']} tasks  ({p['status']})")
+    meta = emit_meta_tasks(roadmap, plans)
+    print(f"Roadmap items: {len(roadmap)}")
+    print(f"Plans: {len(plans)}")
+    print(f"Meta-tasks (plan-writer/spec-needed): {len(meta)}")
+    for m in meta:
+        print(f"  {m['id']} ({m['owner_class']}): {m['title']}")
