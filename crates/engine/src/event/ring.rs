@@ -5,10 +5,10 @@ use std::collections::VecDeque;
 
 /// An entry in the `EventRing`. The `event` is the replay payload; `id` and
 /// `cause` form the sidecar metadata (never folded into `replayable_sha256`).
-struct Entry<E: EventLike> {
-    event: E,
-    id:    EventId,
-    cause: Option<EventId>,
+pub struct Entry<E: EventLike> {
+    pub event: E,
+    pub id:    EventId,
+    pub cause: Option<EventId>,
 }
 
 pub struct EventRing<E: EventLike> {
@@ -113,6 +113,18 @@ impl<E: EventLike> EventRing<E> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &E> { self.entries.iter().map(|e| &e.event) }
+
+    /// Iterate all retained entries with their full sidecar metadata (`id`,
+    /// `cause`, and `event`). Used by the `causal_tree` presentation layer.
+    pub fn iter_with_meta(&self) -> impl Iterator<Item = &Entry<E>> {
+        self.entries.iter()
+    }
+
+    /// Look up a retained entry by its `EventId`. Returns `None` if the entry
+    /// has been evicted from the ring or the id was never assigned.
+    pub fn get_by_id(&self, id: EventId) -> Option<&Entry<E>> {
+        self.entries.iter().find(|e| e.id == id)
+    }
 
     pub fn len(&self) -> usize { self.entries.len() }
     pub fn is_empty(&self) -> bool { self.entries.is_empty() }
