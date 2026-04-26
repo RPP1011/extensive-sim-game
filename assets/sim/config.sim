@@ -64,6 +64,17 @@ config needs {
     rest_restore: f32 = 0.15,
 }
 
+// Theory-of-Mind observation radii (Plan ToM Task 6).
+// `observation_range` is the quiet-observation radius (movement, death).
+// `loud_observation_range` is the wider radius for noisy events (attacks).
+// `decay_rate` and `eviction_threshold` are reserved for the T7 decay pass.
+config belief {
+    observation_range:      f32 = 10.0,
+    loud_observation_range: f32 = 25.0,
+    decay_rate:             f32 = 0.98,
+    eviction_threshold:     f32 = 0.05,
+}
+
 config communication {
     max_announce_recipients: u32 = 32,
     max_announce_radius: f32 = 80.0,

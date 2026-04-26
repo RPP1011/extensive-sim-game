@@ -24,6 +24,9 @@ pub mod shield;
 pub mod slow;
 pub mod stun;
 pub mod transfer_gold;
+pub mod update_beliefs;
+pub mod update_beliefs_on_attack;
+pub mod update_beliefs_on_death;
 
 use crate::views::ViewRegistry;
 use engine::cascade::{CascadeRegistry, EventKindId};
@@ -50,6 +53,7 @@ pub fn dispatch_agent_attacked(
     chronicle_attack::chronicle_attack(actor, target, state, events);
     chronicle_wound::chronicle_wound(actor, target, state, events);
     rally_on_wound::rally_on_wound(actor, target, state, events);
+    update_beliefs_on_attack::update_beliefs_on_attack(actor, target, state, events);
 }
 
 #[allow(unused_variables)]
@@ -85,6 +89,7 @@ pub fn dispatch_agent_died(
     chronicle_death::chronicle_death(agent_id, state, events);
     engagement_on_death::engagement_on_death(agent_id, state, events);
     fear_spread_on_death::fear_spread_on_death(agent_id, state, events);
+    update_beliefs_on_death::update_beliefs_on_death(agent_id, state, events);
 }
 
 #[allow(unused_variables)]
@@ -123,6 +128,7 @@ pub fn dispatch_agent_moved(
         return;
     };
     engagement_on_move::engagement_on_move(actor, state, events);
+    update_beliefs::update_beliefs(actor, location, state, events);
 }
 
 #[allow(unused_variables)]

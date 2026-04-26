@@ -609,3 +609,89 @@ physics rally_on_wound @phase(event) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Theory-of-Mind — update_beliefs cascade rule (Plan ToM Task 6).
+// ---------------------------------------------------------------------------
+//
+// Fires on three event kinds and upserts per-(observer, target) BeliefState
+// entries for every same-species bystander within observation range.
+//
+// DSL-surface deviations from the plan body (T6 note):
+//   1. `query.agents_within(pos, r)` doesn't exist in the physics emitter
+//      yet — uses `query.nearby_kin(id, r)` (same-species only) as the
+//      closest supported primitive. Cross-species observation awaits a
+//      future `query.all_nearby` primitive (emit_physics.rs §Query).
+//   2. `agents.pos(id)` is not wired in the physics emitter; only the
+//      `location` field carried by `AgentMoved` is used for
+//      `last_known_pos`. AgentAttacked / AgentDied omit `last_known_pos`
+//      (defaults to Vec3::ZERO via `..Default::default()` spread).
+//   3. `agents.creature_type(id)` is not a registered resolver method;
+//      `last_known_creature_type` is omitted (defaults to
+//      `CreatureType::default()`). Wiring creature_type read is T6+1.
+//
+// `@cpu_only` suppresses WGSL emit entirely — the WGSL emitter returns
+// `Unsupported` for `BeliefObserve` (deferred to a future GPU task).
+// CPU Rust lowering (T5: `agent_cold_beliefs_mut().upsert(...)`) is active.
+
+@cpu_only physics update_beliefs @phase(event) {
+  on AgentMoved { actor: mover, location: loc } {
+    let hp_val     = agents.hp(mover)
+    let max_hp_val = agents.max_hp(mover)
+    let tick_val   = world.tick
+    for observer in query.nearby_kin(mover, config.belief.observation_range) {
+      if agents.alive(observer) {
+        beliefs(observer).observe(mover) with {
+          last_known_pos:    loc,
+          last_known_hp:     hp_val,
+          last_known_max_hp: max_hp_val,
+          last_updated_tick: tick_val,
+          confidence:        1.0,
+        }
+      }
+    }
+  }
+}
+
+@cpu_only physics update_beliefs_on_attack @phase(event) {
+  on AgentAttacked { actor: attacker, target: victim } {
+    let att_hp     = agents.hp(attacker)
+    let att_max_hp = agents.max_hp(attacker)
+    let vic_hp     = agents.hp(victim)
+    let vic_max_hp = agents.max_hp(victim)
+    let tick_val   = world.tick
+    for observer in query.nearby_kin(attacker, config.belief.loud_observation_range) {
+      if agents.alive(observer) {
+        beliefs(observer).observe(attacker) with {
+          last_known_hp:     att_hp,
+          last_known_max_hp: att_max_hp,
+          last_updated_tick: tick_val,
+          confidence:        1.0,
+        }
+        beliefs(observer).observe(victim) with {
+          last_known_hp:     vic_hp,
+          last_known_max_hp: vic_max_hp,
+          last_updated_tick: tick_val,
+          confidence:        1.0,
+        }
+      }
+    }
+  }
+}
+
+@cpu_only physics update_beliefs_on_death @phase(event) {
+  on AgentDied { agent_id: dead } {
+    let max_hp_val = agents.max_hp(dead)
+    let tick_val   = world.tick
+    for observer in query.nearby_kin(dead, config.belief.observation_range) {
+      if agents.alive(observer) {
+        beliefs(observer).observe(dead) with {
+          last_known_hp:     0.0,
+          last_known_max_hp: max_hp_val,
+          last_updated_tick: tick_val,
+          confidence:        1.0,
+        }
+      }
+    }
+  }
+}

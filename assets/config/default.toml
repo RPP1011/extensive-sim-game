@@ -4,6 +4,12 @@
 # be read at runtime via Config::from_toml. Do NOT change the set of
 # fields here; that bumps the config schema hash. Change values freely.
 
+[belief]
+observation_range = 10.0
+loud_observation_range = 25.0
+decay_rate = 0.98
+eviction_threshold = 0.05
+
 [combat]
 attack_damage = 10.0
 attack_range = 2.0
