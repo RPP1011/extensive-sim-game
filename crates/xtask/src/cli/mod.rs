@@ -138,12 +138,31 @@ pub struct CompileDslArgs {
     /// `@materialized` fold-storage structs + aggregator `ViewRegistry`).
     /// Lives under the engine crate because materialized views hold
     /// `HashMap<(AgentId, …), …>` storage that `SimState` owns.
-    #[arg(long, default_value = "crates/engine/src/generated/views")]
+    #[arg(long, default_value = "crates/engine_rules/src/views")]
     pub out_views: PathBuf,
+    /// Destination file for the emitted canonical serial tick pipeline
+    /// (`engine_rules/src/step.rs`).
+    #[arg(long, default_value = "crates/engine_rules/src/step.rs")]
+    pub out_step: PathBuf,
+    /// Destination file for the emitted `SerialBackend` struct.
+    #[arg(long, default_value = "crates/engine_rules/src/backend.rs")]
+    pub out_backend: PathBuf,
+    /// Destination file for the emitted `fill_all` mask-fill function.
+    #[arg(long, default_value = "crates/engine_rules/src/mask_fill.rs")]
+    pub out_mask_fill: PathBuf,
+    /// Destination file for the emitted `with_engine_builtins` cascade
+    /// registry factory.
+    #[arg(long, default_value = "crates/engine_rules/src/cascade_reg.rs")]
+    pub out_cascade_reg: PathBuf,
     /// Destination root for Python output. Files are written under
     /// `<out-python>/events/`.
     #[arg(long, default_value = "generated/python")]
     pub out_python: PathBuf,
+    /// Destination file for the emitted `impl engine::event::EventLike for
+    /// engine_data::events::Event { ... }` block. Lives in the engine crate
+    /// while engine retains its engine_data regular dep (B2-deferred).
+    #[arg(long, default_value = "crates/engine/src/event/event_like_impl.rs")]
+    pub out_engine_event_like_impl: PathBuf,
     /// Compare the emitted artefacts against the committed output. Exit 0 if
     /// identical, exit 1 with a file-level diff otherwise. No files are
     /// written when this is set.
