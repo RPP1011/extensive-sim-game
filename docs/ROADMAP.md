@@ -16,6 +16,10 @@
   Single-dispatch tick path; perf-sweep done at N=200k, optimization ongoing. `plans/gpu_megakernel_plan.md`, `plans/gpu_megakernel_perf.md`.
 - **GPU cold-state replay (Subsystem 2) — Phases 2–4**
   Phase 1 (DSL-compiler view annotations) done; Phase 2 (chronicle) done; Phase 3 (gold + standing) done; Phases 2–4 umbrella plan kept for future per-phase plans. `plans/2026-04-22-gpu-cold-state-replay.md`.
+- **Plan 5b–e — Remaining ComputeBackend phases**
+  Cascade dispatch + view fold + scoring/apply through backend, plus real GPU kernel dispatch. Successor to Plan 5a (landed). `plans/2026-04-26-plan-5b-e-computebackend-remaining-impl.md`.
+- **Subsystem 3 — GPU ability evaluation**
+  `pick_ability` kernel + `ability::tag(TAG)` scoring grammar + `per_ability` row type per `spec/engine.md` §11. The one genuinely-missing GPU kernel per the 2026-04-26 audit. `plans/2026-04-26-subsystem-3-ability-eval-impl.md`.
 
 ## Drafted (spec exists, plan does not)
 
@@ -23,17 +27,11 @@
   Voxel ops, control verbs (root/silence/fear/taunt), AI-state manipulation, structures, materials, passive triggers. `spec/ability.md`.
 - **Economic depth implementation**
   Recipes, contracts, labor, heterogeneity, information asymmetry, market structure, macro dynamics. 3 phases. `spec/economy.md`.
-- **GPU ability evaluation (Subsystem 3)**
-  Move ability evaluator kernel from CPU to GPU. `spec/engine.md` §11.
 
 ## Engine plans not yet written
 
-- **Plan 5b–e — Remaining ComputeBackend phases**
-  Phase 2: GPU impl bodies. Phase 3: PolicyBackend extraction. Phase 4-5: full kernel-dispatch surface + cross-backend parity tests. Prerequisite: Plan 5a complete.
 - **Plan 6 — `GpuBackend` foundation**
-  Bridge from `ComputeBackend` trait to `engine_gpu` primitives. Prerequisite: Plan 5 complete.
-- **Plan 7+ — per-kernel GPU porting under the trait**
-  Each kernel migrates with parity tests against `SerialBackend` reference.
+  Bridge from `ComputeBackend` trait to `engine_gpu` primitives. Prerequisite: Plan 5b–e complete.
 
 ## Partially landed (DSL stubs / MVP seam done; behaviour attachment pending)
 

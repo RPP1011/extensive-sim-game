@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-04-26T19:27:45Z",
+  "generated_at": "2026-04-26T21:44:03Z",
   "roadmap": [
     {
       "id": "roadmap-gpu-megakernel",
@@ -24,13 +24,22 @@
       "status": "pending"
     },
     {
-      "id": "roadmap-dsl-authoring-engine-ir-interpreter-p1b",
-      "title": "DSL Authoring Engine \u2014 IR interpreter (P1b)",
+      "id": "roadmap-plan-5be-remaining-computebackend-phases",
+      "title": "Plan 5b\u2013e \u2014 Remaining ComputeBackend phases",
       "tier": "active",
       "spec_ref": null,
       "plans": [
-        "2026-04-22-dsl-ast-extraction",
-        "2026-04-22-ir-interpreter"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "roadmap-subsystem-3-gpu-ability-evaluation",
+      "title": "Subsystem 3 \u2014 GPU ability evaluation",
+      "tier": "active",
+      "spec_ref": "engine.md",
+      "plans": [
+        "2026-04-26-subsystem-3-ability-eval-impl"
       ],
       "status": "pending"
     },
@@ -51,32 +60,8 @@
       "status": "pending"
     },
     {
-      "id": "roadmap-gpu-ability-evaluation-subsystem-3",
-      "title": "GPU ability evaluation (Subsystem 3)",
-      "tier": "drafted",
-      "spec_ref": "gpu.md",
-      "plans": [],
-      "status": "pending"
-    },
-    {
-      "id": "roadmap-plan-5be-remaining-computebackend-phases",
-      "title": "Plan 5b\u2013e \u2014 Remaining ComputeBackend phases",
-      "tier": "engine-plans-not-yet-written",
-      "spec_ref": null,
-      "plans": [],
-      "status": "pending"
-    },
-    {
       "id": "roadmap-plan-6-gpubackend-foundation",
       "title": "Plan 6 \u2014 `GpuBackend` foundation",
-      "tier": "engine-plans-not-yet-written",
-      "spec_ref": null,
-      "plans": [],
-      "status": "pending"
-    },
-    {
-      "id": "roadmap-plan-7-per-kernel-gpu-porting-under-the-trait",
-      "title": "Plan 7+ \u2014 per-kernel GPU porting under the trait",
       "tier": "engine-plans-not-yet-written",
       "spec_ref": null,
       "plans": [],
@@ -84,15 +69,6 @@
     }
   ],
   "plans": [
-    {
-      "id": "2026-04-22-dsl-ast-extraction",
-      "file": "docs/superpowers/plans/2026-04-22-dsl-ast-extraction.md",
-      "title": "dsl_ast Extraction Implementation Plan",
-      "depends_on": [],
-      "status": "pending",
-      "tasks_total": 0,
-      "tasks_done": 0
-    },
     {
       "id": "2026-04-22-gpu-cold-state-replay",
       "file": "docs/superpowers/plans/2026-04-22-gpu-cold-state-replay.md",
@@ -103,13 +79,22 @@
       "tasks_done": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter",
-      "file": "docs/superpowers/plans/2026-04-22-ir-interpreter.md",
-      "title": "DSL IR Interpreter (all rule classes) \u2014 Implementation Plan",
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "file": "docs/superpowers/plans/2026-04-26-plan-5b-e-computebackend-remaining-impl.md",
+      "title": "Plan 5b\u2013e (combined): Remaining ComputeBackend Phases \u2014 Implementation Plan",
       "depends_on": [],
-      "status": "in_progress",
-      "tasks_total": 12,
-      "tasks_done": 1
+      "status": "pending",
+      "tasks_total": 19,
+      "tasks_done": 0
+    },
+    {
+      "id": "2026-04-26-subsystem-3-ability-eval-impl",
+      "file": "docs/superpowers/plans/2026-04-26-subsystem-3-ability-eval-impl.md",
+      "title": "Subsystem 3 \u2014 GPU Ability Evaluation Implementation Plan",
+      "depends_on": [],
+      "status": "pending",
+      "tasks_total": 0,
+      "tasks_done": 0
     },
     {
       "id": "gpu_megakernel_perf",
@@ -132,64 +117,16 @@
   ],
   "tasks": [
     {
-      "id": "2026-04-22-ir-interpreter.task-1",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 1: Primitive survey",
-      "checkbox_line": 117,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-1",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 1: Add `cascade_dispatch` to the `ComputeBackend` trait",
+      "checkbox_line": 107,
       "deps": [],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-2"
-      ],
-      "status": "done",
-      "steps_total": 0,
-      "steps_done": 0,
-      "owner_class": "implementer",
-      "blocked_reason": null,
-      "completed_commit": "7c4eccb3",
-      "critic_verdicts": {
-        "compliance": "PASS",
-        "quality": "PASS",
-        "note": "docs-only commit; critics N/A"
-      },
-      "started_at": "2026-04-26T04:03:57Z",
-      "completed_at": "2026-04-26T04:08:09Z",
-      "retry_count": 0
-    },
-    {
-      "id": "2026-04-22-ir-interpreter.task-2",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 2: Define `Context` trait(s) in `dsl_ast`",
-      "checkbox_line": 129,
-      "deps": [
-        "2026-04-22-ir-interpreter.task-1"
-      ],
-      "blocks": [
-        "2026-04-22-ir-interpreter.task-3"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-2"
       ],
       "status": "pending",
-      "steps_total": 0,
-      "steps_done": 0,
-      "owner_class": "implementer",
-      "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": "2026-04-26T04:45:17Z",
-      "completed_at": null,
-      "retry_count": 1
-    },
-    {
-      "id": "2026-04-22-ir-interpreter.task-3",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 3: `MaskIR::eval`",
-      "checkbox_line": 144,
-      "deps": [
-        "2026-04-22-ir-interpreter.task-2"
-      ],
-      "blocks": [
-        "2026-04-22-ir-interpreter.task-4"
-      ],
-      "status": "pending",
-      "steps_total": 0,
+      "steps_total": 4,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -200,18 +137,18 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-4",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 4: `ScoringIR::eval`",
-      "checkbox_line": 158,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-2",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 2: Extend `emit_backend.rs` to emit the `SerialBackend::cascade_dispatch` impl",
+      "checkbox_line": 156,
       "deps": [
-        "2026-04-22-ir-interpreter.task-3"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-1"
       ],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-5"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-3"
       ],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 5,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -222,18 +159,18 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-5",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 5: `PhysicsIR::apply`",
-      "checkbox_line": 173,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-3",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 3: Update `emit_step.rs` to route cascade through `backend.cascade_dispatch`",
+      "checkbox_line": 211,
       "deps": [
-        "2026-04-22-ir-interpreter.task-4"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-2"
       ],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-6"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-4"
       ],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 6,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -244,18 +181,18 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-6",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 6: `ViewIR::fold`",
-      "checkbox_line": 188,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-4",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 4: Add `GpuBackend::cascade_dispatch` stub + verify cross-backend parity",
+      "checkbox_line": 279,
       "deps": [
-        "2026-04-22-ir-interpreter.task-5"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-3"
       ],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-7"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-5"
       ],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 6,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -266,18 +203,18 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-7",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 7: `impl Context for SimState`",
-      "checkbox_line": 202,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-5",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 5: Add `view_fold` to the `ComputeBackend` trait",
+      "checkbox_line": 352,
       "deps": [
-        "2026-04-22-ir-interpreter.task-6"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-4"
       ],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-8"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-6"
       ],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 4,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -288,18 +225,18 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-8",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 8: Mask dispatch branch + parity #1",
-      "checkbox_line": 217,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-6",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 6: Extend `emit_backend.rs` to emit `SerialBackend::view_fold`",
+      "checkbox_line": 407,
       "deps": [
-        "2026-04-22-ir-interpreter.task-7"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-5"
       ],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-9"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-7"
       ],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 5,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -310,18 +247,18 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-9",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 9: Scoring dispatch branch + parity #2",
-      "checkbox_line": 233,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-7",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 7: Update `emit_step.rs` to route view fold through `backend.view_fold`",
+      "checkbox_line": 461,
       "deps": [
-        "2026-04-22-ir-interpreter.task-8"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-6"
       ],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-10"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-8"
       ],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 5,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -332,18 +269,18 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-10",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 10: Cascade dispatch branch + parity #3",
-      "checkbox_line": 244,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-8",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 8: Add `GpuBackend::view_fold` stub",
+      "checkbox_line": 540,
       "deps": [
-        "2026-04-22-ir-interpreter.task-9"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-7"
       ],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-11"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-9"
       ],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 4,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -354,18 +291,18 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-11",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 11: View dispatch branch + parity #4",
-      "checkbox_line": 255,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-9",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 9: Add `apply_and_movement` to the `ComputeBackend` trait",
+      "checkbox_line": 596,
       "deps": [
-        "2026-04-22-ir-interpreter.task-10"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-8"
       ],
       "blocks": [
-        "2026-04-22-ir-interpreter.task-12"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-10"
       ],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 4,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -376,16 +313,214 @@
       "retry_count": 0
     },
     {
-      "id": "2026-04-22-ir-interpreter.task-12",
-      "plan": "2026-04-22-ir-interpreter",
-      "title": "Task 12: CI + docs",
-      "checkbox_line": 266,
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-10",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 10: Extend `emit_backend.rs` to emit `SerialBackend::apply_and_movement`",
+      "checkbox_line": 660,
       "deps": [
-        "2026-04-22-ir-interpreter.task-11"
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-9"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-11"
+      ],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-11",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 11: Verify `emit_step.rs` routing of Phase 4a",
+      "checkbox_line": 743,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-10"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-12"
+      ],
+      "status": "pending",
+      "steps_total": 3,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-12",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 12: Add `GpuBackend::apply_and_movement` stub",
+      "checkbox_line": 777,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-11"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-13"
+      ],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-13",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 13: Audit `set_mask_bit` GPU concern and implement queue-and-flush",
+      "checkbox_line": 846,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-12"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-14"
+      ],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-14",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 14: Wire `GpuBackend::cascade_dispatch` to real GPU cascade",
+      "checkbox_line": 927,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-13"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-15"
+      ],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-15",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 15: Wire `GpuBackend::apply_and_movement` to real GPU kernels",
+      "checkbox_line": 1005,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-14"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-16"
+      ],
+      "status": "pending",
+      "steps_total": 4,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-16",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 16: Wire `GpuBackend::view_fold` to GPU view-fold kernels",
+      "checkbox_line": 1061,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-15"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-17"
+      ],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-17",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 17: Write the full-tick parity test",
+      "checkbox_line": 1121,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-16"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-18"
+      ],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-18",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 18: Run full parity sweep with `gpu` feature",
+      "checkbox_line": 1290,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-17"
+      ],
+      "blocks": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-19"
+      ],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-19",
+      "plan": "2026-04-26-plan-5b-e-computebackend-remaining-impl",
+      "title": "Task 19: AIS post-design tick + final commit",
+      "checkbox_line": 1342,
+      "deps": [
+        "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-18"
       ],
       "blocks": [],
       "status": "pending",
-      "steps_total": 0,
+      "steps_total": 4,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
@@ -434,67 +569,10 @@
       "retry_count": 0
     },
     {
-      "id": "roadmap-gpu-ability-evaluation-subsystem-3.plan_writer",
-      "plan": null,
-      "roadmap_parent": "roadmap-gpu-ability-evaluation-subsystem-3",
-      "title": "Write plan for: GPU ability evaluation (Subsystem 3)",
-      "checkbox_line": null,
-      "deps": [],
-      "blocks": [],
-      "status": "pending",
-      "steps_total": 0,
-      "steps_done": 0,
-      "owner_class": "plan-writer",
-      "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
-      "retry_count": 0
-    },
-    {
-      "id": "roadmap-plan-5be-remaining-computebackend-phases.plan_writer",
-      "plan": null,
-      "roadmap_parent": "roadmap-plan-5be-remaining-computebackend-phases",
-      "title": "Write plan for: Plan 5b\u2013e \u2014 Remaining ComputeBackend phases",
-      "checkbox_line": null,
-      "deps": [],
-      "blocks": [],
-      "status": "pending",
-      "steps_total": 0,
-      "steps_done": 0,
-      "owner_class": "plan-writer",
-      "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
-      "retry_count": 0
-    },
-    {
       "id": "roadmap-plan-6-gpubackend-foundation.plan_writer",
       "plan": null,
       "roadmap_parent": "roadmap-plan-6-gpubackend-foundation",
       "title": "Write plan for: Plan 6 \u2014 `GpuBackend` foundation",
-      "checkbox_line": null,
-      "deps": [],
-      "blocks": [],
-      "status": "pending",
-      "steps_total": 0,
-      "steps_done": 0,
-      "owner_class": "plan-writer",
-      "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
-      "retry_count": 0
-    },
-    {
-      "id": "roadmap-plan-7-per-kernel-gpu-porting-under-the-trait.plan_writer",
-      "plan": null,
-      "roadmap_parent": "roadmap-plan-7-per-kernel-gpu-porting-under-the-trait",
-      "title": "Write plan for: Plan 7+ \u2014 per-kernel GPU porting under the trait",
       "checkbox_line": null,
       "deps": [],
       "blocks": [],
