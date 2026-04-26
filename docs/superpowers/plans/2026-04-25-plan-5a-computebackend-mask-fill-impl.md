@@ -215,7 +215,7 @@ git -c core.hooksPath= commit -am "feat(engine/backend): add reset_mask + set_ma
 - Modify: `crates/dsl_compiler/src/emit_backend.rs` — emit the new method impls.
 - Run: `cargo run --bin xtask -- compile-dsl` to regen `engine_rules/src/backend.rs`.
 
-- [ ] **Step 1: Read current `emit_backend.rs` shape.**
+- [x] **Step 1: Read current `emit_backend.rs` shape.**
 
 ```bash
 grep -nE "fn emit_backend|writeln!.*impl" crates/dsl_compiler/src/emit_backend.rs | head
@@ -223,7 +223,7 @@ grep -nE "fn emit_backend|writeln!.*impl" crates/dsl_compiler/src/emit_backend.r
 
 Identify where the `impl ComputeBackend for SerialBackend { ... }` block is emitted. Add 3 new method emits after `step`.
 
-- [ ] **Step 2: Emit the 3 method impls.**
+- [x] **Step 2: Emit the 3 method impls.**
 
 ```rust
 writeln!(out, "    fn reset_mask(&mut self, buf: &mut engine::mask::MaskBuffer) {{")?;
@@ -237,7 +237,7 @@ writeln!(out, "        // SerialBackend: no-op; mask writes are immediate.")?;
 writeln!(out, "    }}")?;
 ```
 
-- [ ] **Step 3: Regen + build.**
+- [x] **Step 3: Regen + build.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -246,7 +246,7 @@ unset RUSTFLAGS && cargo build -p engine_rules
 
 Expected: SUCCESS — SerialBackend now satisfies the trait. Workspace build still fails on engine_gpu (Task 7).
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl_compiler): emit SerialBackend mask-method impls (Plan 5a Task 3)"
