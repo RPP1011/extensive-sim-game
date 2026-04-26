@@ -3,12 +3,19 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
-use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
+use engine_data::events::Event;
 
 #[allow(unused_variables)]
-pub fn slow(c: AgentId, t: AgentId, e: u32, f: i16, state: &mut SimState, events: &mut EventRing<Event>) {
+pub fn slow(
+    c: AgentId,
+    t: AgentId,
+    e: u32,
+    f: i16,
+    state: &mut SimState,
+    events: &mut EventRing<Event>,
+) {
     if state.agent_alive(t) {
         if (f > 0) {
             let cur_exp = state.agent_slow_expires_at(t).unwrap_or(0);

@@ -3,11 +3,11 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
-use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
-use crate::views::ViewRegistry;
 use crate::views::memory::MemoryEntry;
+use crate::views::ViewRegistry;
+use engine_data::events::Event;
 
 #[allow(unused_variables)]
 pub fn record_memory(

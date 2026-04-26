@@ -1,0 +1,15 @@
+id: no-cascade-handler-impl-outside-engine-rules
+language: rust
+severity: error
+message: |
+  `impl CascadeHandler` must live in crates/engine_rules/. Hand-written
+  cascade handlers violate P1 (Compiler-First). Edit assets/sim/physics.sim
+  and let dsl_compiler emit the handler.
+rule:
+  any:
+    - pattern: impl CascadeHandler<$_> for $T { $$$ }
+    - pattern: impl $$$::CascadeHandler<$_> for $T { $$$ }
+ignores:
+  - "crates/engine_rules/**"
+  - "crates/engine/tests/**"
+  - "crates/engine/src/cascade/**"

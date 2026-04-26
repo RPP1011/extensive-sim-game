@@ -10,16 +10,18 @@
 //   5. View fold   — fold this tick's events into ViewRegistry
 //   6. Tick advance
 
+use crate::views::ViewRegistry;
 use engine::cascade::CascadeRegistry;
 use engine::event::EventRing;
 use engine::ids::AgentId;
-use engine::policy::{Action, ActionKind, AnnounceAudience, MacroAction, MicroTarget, PolicyBackend};
+use engine::policy::{
+    Action, ActionKind, AnnounceAudience, MacroAction, MicroTarget, PolicyBackend,
+};
 use engine::rng::per_agent_u32;
 use engine::scratch::SimScratch;
 use engine::state::SimState;
-use engine_data::events::Event;
 use engine_data::entities::Capabilities;
-use crate::views::ViewRegistry;
+use engine_data::events::Event;
 
 /// Canonical Serial tick step.
 ///
@@ -31,11 +33,11 @@ use crate::views::ViewRegistry;
 /// 5. View fold (`views.fold_all`)
 /// 6. Tick advance (`state.tick += 1`)
 pub fn step<B: PolicyBackend>(
-    state:   &mut SimState,
+    state: &mut SimState,
     scratch: &mut SimScratch,
-    events:  &mut EventRing<Event>,
-    views:   &mut ViewRegistry,
-    policy:  &B,
+    events: &mut EventRing<Event>,
+    views: &mut ViewRegistry,
+    policy: &B,
     cascade: &CascadeRegistry<Event, ViewRegistry>,
 ) {
     // Phase 1 — mask build.
@@ -43,10 +45,20 @@ pub fn step<B: PolicyBackend>(
 
     // Phase 2 — policy evaluate.
     scratch.actions.clear();
-    policy.evaluate(state, &scratch.mask, &scratch.target_mask, &mut scratch.actions);
+    policy.evaluate(
+        state,
+        &scratch.mask,
+        &scratch.target_mask,
+        &mut scratch.actions,
+    );
 
     // Phase 3 — deterministic action shuffle.
-    shuffle_actions_in_place(state.seed, state.tick, &scratch.actions, &mut scratch.shuffle_idx);
+    shuffle_actions_in_place(
+        state.seed,
+        state.tick,
+        &scratch.actions,
+        &mut scratch.shuffle_idx,
+    );
 
     // Phase 4a — apply actions (emit root-cause events).
     let events_before = events.total_pushed();
@@ -70,9 +82,9 @@ pub fn step<B: PolicyBackend>(
 /// Phase-3 helper. Populates `shuffle_idx` with a Fisher-Yates permutation of
 /// `0..actions.len()`, keyed by `(world_seed, tick)`.
 fn shuffle_actions_in_place(
-    world_seed:  u64,
-    tick:        u32,
-    actions:     &[Action],
+    world_seed: u64,
+    tick: u32,
+    actions: &[Action],
     shuffle_idx: &mut Vec<u32>,
 ) {
     let n = actions.len();
@@ -88,22 +100,25 @@ fn shuffle_actions_in_place(
 }
 
 /// Phase-4 helper. Walks the shuffled actions and emits root-cause events.
-fn apply_actions(
-    state:   &mut SimState,
-    scratch: &SimScratch,
-    events:  &mut EventRing<Event>,
-) {
+fn apply_actions(state: &mut SimState, scratch: &SimScratch, events: &mut EventRing<Event>) {
     let effect_slow_multiplier = |state: &SimState, id: AgentId| -> f32 {
         let factor_q8 = state.effective_slow_factor_q8(id);
-        if factor_q8 <= 0 { 1.0 } else { factor_q8 as f32 / 256.0 }
+        if factor_q8 <= 0 {
+            1.0
+        } else {
+            factor_q8 as f32 / 256.0
+        }
     };
 
     for &idx in scratch.shuffle_idx.iter() {
         let action = &scratch.actions[idx as usize];
         match action.kind {
-            ActionKind::Micro { kind: engine::mask::MicroKind::Hold, .. } => {}
             ActionKind::Micro {
-                kind:   engine::mask::MicroKind::MoveToward,
+                kind: engine::mask::MicroKind::Hold,
+                ..
+            } => {}
+            ActionKind::Micro {
+                kind: engine::mask::MicroKind::MoveToward,
                 target: MicroTarget::Position(target_pos),
             } => {
                 let from = match state.agent_pos(action.agent) {
@@ -120,9 +135,9 @@ fn apply_actions(
                         if !toward_engager {
                             speed *= state.config.combat.engagement_slow_factor;
                             events.push(Event::OpportunityAttackTriggered {
-                                actor:  engager,
+                                actor: engager,
                                 target: action.agent,
-                                tick:   state.tick,
+                                tick: state.tick,
                             });
                         }
                     }
@@ -130,15 +145,20 @@ fn apply_actions(
                     let to = from + dir * speed;
                     state.set_agent_pos(action.agent, to);
                     events.push(Event::AgentMoved {
-                        actor: action.agent, from, location: to, tick: state.tick,
+                        actor: action.agent,
+                        from,
+                        location: to,
+                        tick: state.tick,
                     });
                 }
             }
             ActionKind::Micro {
-                kind:   engine::mask::MicroKind::Flee,
+                kind: engine::mask::MicroKind::Flee,
                 target: MicroTarget::Agent(threat),
             } => {
-                if !state.agent_alive(threat) { continue; }
+                if !state.agent_alive(threat) {
+                    continue;
+                }
                 if let (Some(self_pos), Some(threat_pos)) =
                     (state.agent_pos(action.agent), state.agent_pos(threat))
                 {
@@ -160,9 +180,9 @@ fn apply_actions(
                     if away.length_squared() > 0.0 {
                         if let Some(engager) = state.agent_engaged_with(action.agent) {
                             events.push(Event::OpportunityAttackTriggered {
-                                actor:  engager,
+                                actor: engager,
                                 target: action.agent,
-                                tick:   state.tick,
+                                tick: state.tick,
                             });
                         }
                         let speed = state.config.movement.move_speed_mps
@@ -171,20 +191,21 @@ fn apply_actions(
                         state.set_agent_pos(action.agent, new_pos);
                         events.push(Event::AgentFled {
                             agent_id: action.agent,
-                            from:     self_pos,
-                            to:       new_pos,
-                            tick:     state.tick,
+                            from: self_pos,
+                            to: new_pos,
+                            tick: state.tick,
                         });
                     }
                 }
             }
             ActionKind::Micro {
-                kind:   engine::mask::MicroKind::Attack,
+                kind: engine::mask::MicroKind::Attack,
                 target: MicroTarget::Agent(tgt),
             } => {
-                if !state.agent_alive(tgt) { continue; }
-                if let (Some(sp), Some(tp)) =
-                    (state.agent_pos(action.agent), state.agent_pos(tgt))
+                if !state.agent_alive(tgt) {
+                    continue;
+                }
+                if let (Some(sp), Some(tp)) = (state.agent_pos(action.agent), state.agent_pos(tgt))
                 {
                     let range = state
                         .agent_attack_range(action.agent)
@@ -196,45 +217,60 @@ fn apply_actions(
                         let new_hp = (state.agent_hp(tgt).unwrap_or(0.0) - damage).max(0.0);
                         state.set_agent_hp(tgt, new_hp);
                         events.push(Event::AgentAttacked {
-                            actor:  action.agent,
+                            actor: action.agent,
                             target: tgt,
                             damage,
-                            tick:   state.tick,
+                            tick: state.tick,
                         });
                         if new_hp <= 0.0 {
                             events.push(Event::AgentDied {
                                 agent_id: tgt,
-                                tick:     state.tick,
+                                tick: state.tick,
                             });
                             state.kill_agent(tgt);
                         }
                     }
                 }
             }
-            ActionKind::Micro { kind: engine::mask::MicroKind::Eat, .. } => {
+            ActionKind::Micro {
+                kind: engine::mask::MicroKind::Eat,
+                ..
+            } => {
                 if let Some(cur) = state.agent_hunger(action.agent) {
                     let (new_val, applied) = restore_need(cur, state.config.needs.eat_restore);
                     state.set_agent_hunger(action.agent, new_val);
                     events.push(Event::AgentAte {
-                        agent_id: action.agent, delta: applied, tick: state.tick,
+                        agent_id: action.agent,
+                        delta: applied,
+                        tick: state.tick,
                     });
                 }
             }
-            ActionKind::Micro { kind: engine::mask::MicroKind::Drink, .. } => {
+            ActionKind::Micro {
+                kind: engine::mask::MicroKind::Drink,
+                ..
+            } => {
                 if let Some(cur) = state.agent_thirst(action.agent) {
                     let (new_val, applied) = restore_need(cur, state.config.needs.drink_restore);
                     state.set_agent_thirst(action.agent, new_val);
                     events.push(Event::AgentDrank {
-                        agent_id: action.agent, delta: applied, tick: state.tick,
+                        agent_id: action.agent,
+                        delta: applied,
+                        tick: state.tick,
                     });
                 }
             }
-            ActionKind::Micro { kind: engine::mask::MicroKind::Rest, .. } => {
+            ActionKind::Micro {
+                kind: engine::mask::MicroKind::Rest,
+                ..
+            } => {
                 if let Some(cur) = state.agent_rest_timer(action.agent) {
                     let (new_val, applied) = restore_need(cur, state.config.needs.rest_restore);
                     state.set_agent_rest_timer(action.agent, new_val);
                     events.push(Event::AgentRested {
-                        agent_id: action.agent, delta: applied, tick: state.tick,
+                        agent_id: action.agent,
+                        delta: applied,
+                        tick: state.tick,
                     });
                 }
             }
@@ -243,11 +279,11 @@ fn apply_actions(
                 target: MicroTarget::Ability { id, target },
             } => {
                 events.push(Event::AgentCast {
-                    actor:   action.agent,
+                    actor: action.agent,
                     ability: id,
                     target,
-                    depth:   0,
-                    tick:    state.tick,
+                    depth: 0,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -255,7 +291,9 @@ fn apply_actions(
                 target: MicroTarget::ItemSlot(slot),
             } => {
                 events.push(Event::AgentUsedItem {
-                    agent_id: action.agent, item_slot: slot, tick: state.tick,
+                    agent_id: action.agent,
+                    item_slot: slot,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -263,7 +301,9 @@ fn apply_actions(
                 target: MicroTarget::Opaque(r),
             } => {
                 events.push(Event::AgentHarvested {
-                    agent_id: action.agent, resource: r, tick: state.tick,
+                    agent_id: action.agent,
+                    resource: r,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -271,7 +311,10 @@ fn apply_actions(
                 target: MicroTarget::Position(p),
             } => {
                 events.push(Event::AgentPlacedTile {
-                    actor: action.agent, location: p, kind_tag: 0, tick: state.tick,
+                    actor: action.agent,
+                    location: p,
+                    kind_tag: 0,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -279,7 +322,10 @@ fn apply_actions(
                 target: MicroTarget::Position(p),
             } => {
                 events.push(Event::AgentPlacedVoxel {
-                    actor: action.agent, location: p, mat_tag: 0, tick: state.tick,
+                    actor: action.agent,
+                    location: p,
+                    mat_tag: 0,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -287,7 +333,9 @@ fn apply_actions(
                 target: MicroTarget::Position(p),
             } => {
                 events.push(Event::AgentHarvestedVoxel {
-                    actor: action.agent, location: p, tick: state.tick,
+                    actor: action.agent,
+                    location: p,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -295,7 +343,9 @@ fn apply_actions(
                 target: MicroTarget::Agent(b),
             } => {
                 events.push(Event::AgentConversed {
-                    agent_id: action.agent, partner: b, tick: state.tick,
+                    agent_id: action.agent,
+                    partner: b,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -303,7 +353,9 @@ fn apply_actions(
                 target: MicroTarget::Opaque(topic),
             } => {
                 events.push(Event::AgentSharedStory {
-                    agent_id: action.agent, topic, tick: state.tick,
+                    agent_id: action.agent,
+                    topic,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -311,7 +363,10 @@ fn apply_actions(
                 target: MicroTarget::Agent(r),
             } => {
                 events.push(Event::AgentCommunicated {
-                    speaker: action.agent, recipient: r, fact_ref: 0, tick: state.tick,
+                    speaker: action.agent,
+                    recipient: r,
+                    fact_ref: 0,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -319,7 +374,10 @@ fn apply_actions(
                 target: MicroTarget::Agent(t),
             } => {
                 events.push(Event::InformationRequested {
-                    asker: action.agent, target: t, query: 0, tick: state.tick,
+                    asker: action.agent,
+                    target: t,
+                    query: 0,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro {
@@ -327,29 +385,52 @@ fn apply_actions(
                 target: MicroTarget::Opaque(s),
             } => {
                 events.push(Event::AgentRemembered {
-                    agent_id: action.agent, subject: s, tick: state.tick,
+                    agent_id: action.agent,
+                    subject: s,
+                    tick: state.tick,
                 });
             }
             ActionKind::Micro { .. } => {
                 // Ill-formed (kind + target-type mismatch) — silently dropped.
             }
             ActionKind::Macro(MacroAction::NoOp) => {}
-            ActionKind::Macro(MacroAction::PostQuest { quest_id, category, resolution }) => {
+            ActionKind::Macro(MacroAction::PostQuest {
+                quest_id,
+                category,
+                resolution,
+            }) => {
                 events.push(Event::QuestPosted {
-                    poster: action.agent, quest_id, category, resolution, tick: state.tick,
+                    poster: action.agent,
+                    quest_id,
+                    category,
+                    resolution,
+                    tick: state.tick,
                 });
             }
             ActionKind::Macro(MacroAction::AcceptQuest { quest_id, acceptor }) => {
                 events.push(Event::QuestAccepted {
-                    acceptor, quest_id, tick: state.tick,
+                    acceptor,
+                    quest_id,
+                    tick: state.tick,
                 });
             }
-            ActionKind::Macro(MacroAction::Bid { auction_id, bidder, amount }) => {
+            ActionKind::Macro(MacroAction::Bid {
+                auction_id,
+                bidder,
+                amount,
+            }) => {
                 events.push(Event::BidPlaced {
-                    bidder, auction_id, amount, tick: state.tick,
+                    bidder,
+                    auction_id,
+                    amount,
+                    tick: state.tick,
                 });
             }
-            ActionKind::Macro(MacroAction::Announce { speaker, audience, fact_payload }) => {
+            ActionKind::Macro(MacroAction::Announce {
+                speaker,
+                audience,
+                fact_payload,
+            }) => {
                 // Simplified announce: emit AnnounceEmitted + RecordMemory for
                 // agents within announce radius. Channel gating and overhear
                 // are omitted in this engine_rules stub (full logic lives in
@@ -378,19 +459,24 @@ fn apply_actions(
                     .within_radius(state, center, radius)
                     .into_iter()
                     .collect();
-                let max_recipients =
-                    state.config.communication.max_announce_recipients as usize;
+                let max_recipients = state.config.communication.max_announce_recipients as usize;
                 let mut count = 0usize;
                 for obs in state.agents_alive() {
-                    if count >= max_recipients { break; }
-                    if obs == speaker { continue; }
-                    if !candidates.contains(&obs) { continue; }
+                    if count >= max_recipients {
+                        break;
+                    }
+                    if obs == speaker {
+                        continue;
+                    }
+                    if !candidates.contains(&obs) {
+                        continue;
+                    }
                     events.push(Event::RecordMemory {
-                        observer:     obs,
-                        source:       speaker,
+                        observer: obs,
+                        source: speaker,
                         fact_payload,
-                        confidence:   0.8,
-                        tick:         state.tick,
+                        confidence: 0.8,
+                        tick: state.tick,
                     });
                     count += 1;
                 }

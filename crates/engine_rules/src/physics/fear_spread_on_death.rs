@@ -3,9 +3,9 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
-use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
+use engine_data::events::Event;
 
 #[allow(unused_variables)]
 pub fn fear_spread_on_death(dead: AgentId, state: &mut SimState, events: &mut EventRing<Event>) {

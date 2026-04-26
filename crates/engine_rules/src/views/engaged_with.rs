@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 
-use engine_data::events::Event;
 use engine::ids::AgentId;
+use engine_data::events::Event;
 
 /// @materialized view `engaged_with` — `storage = per_entity_topk(K=1)`.
 #[derive(Debug, Default)]

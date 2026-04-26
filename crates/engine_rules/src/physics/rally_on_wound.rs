@@ -3,9 +3,9 @@
 // Do not edit by hand.
 
 use crate::event::EventRing;
-use engine_data::events::Event;
 use crate::ids::AgentId;
 use crate::state::SimState;
+use engine_data::events::Event;
 
 #[allow(unused_variables)]
 pub fn rally_on_wound(a: AgentId, t: AgentId, state: &mut SimState, events: &mut EventRing<Event>) {

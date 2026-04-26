@@ -2,8 +2,8 @@
 // Edit the .sim source; rerun `cargo run --bin xtask -- compile-dsl`.
 // Do not edit by hand.
 
-use engine_data::events::Event;
 use engine::ids::AgentId;
+use engine_data::events::Event;
 
 /// @materialized view `my_enemies` — `storage = per_entity_topk(K=8)`.
 #[derive(Debug, Clone, Copy, Default)]
