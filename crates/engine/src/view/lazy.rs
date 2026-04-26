@@ -46,6 +46,15 @@ pub struct NearestEnemyLazy {
     stale: bool,
 }
 
+impl std::fmt::Debug for NearestEnemyLazy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NearestEnemyLazy")
+            .field("stale", &self.stale)
+            .field("slots", &self.per_agent.len())
+            .finish()
+    }
+}
+
 const NEAREST_ENEMY_INVALIDATED_BY: &[EventKindId] = &[
     EventKindId::AgentMoved,
     EventKindId::AgentFled,

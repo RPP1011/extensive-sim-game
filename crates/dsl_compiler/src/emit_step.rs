@@ -6,6 +6,7 @@
 //!   3. deterministic action shuffle (Fisher-Yates)
 //!   4. apply actions + cascade fixed-point
 //!   5. view fold (`views.fold_all`)
+//!   5.5. lazy-view recompute (`views.invalidate_lazy_views`)
 //!   6. tick advance (`state.tick += 1`)
 //!
 //! Unlike the physics / mask / view emitters this module emits a single
@@ -166,6 +167,12 @@ pub fn step<CB: ComputeBackend, B: PolicyBackend>(
     if let Some(profile) = debug.tick_profile.as_ref() {
         if let Ok(mut p) = profile.lock() { p.exit_with_null(); }
     }
+
+    // Phase 5.5 — lazy-view recompute (stale-view repair).
+    // Must run after fold_all so materialized views are populated first.
+    // Marks lazy views stale when any of their invalidating events landed
+    // this tick; recompute happens on next consumer access or eagerly here.
+    views.invalidate_lazy_views(events, events_before);
 
     // Checkpoint: AfterViewFold.
     if let Some(stepper) = debug.tick_stepper.as_ref() {

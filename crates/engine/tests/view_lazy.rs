@@ -1,14 +1,14 @@
 //! LazyView trait-shape tests.
 //!
-//! NOTE (audit MEDIUM #11, 2026-04-19): `LazyView` is not yet wired into
-//! `step_full`. The engine's tick pipeline folds `MaterializedView<Event>` via
-//! `views: &mut [&mut dyn MaterializedView<Event>]` only — there is no automatic
-//! `invalidate_on_events` dispatch against lazy views. These tests exercise
-//! the trait surface (`compute`, `is_stale`, `invalidate_on_events`, and
-//! the declared `invalidated_by` kinds) by driving the view manually with
-//! a synthetic `EventRing<Event>`. The `#[ignore]` test `lazy_view_wired_into_step_full`
-//! below is the canary: when LazyView integration lands in `step_full`, that
-//! test should be un-ignored and will pass.
+//! These tests exercise the trait surface (`compute`, `is_stale`,
+//! `invalidate_on_events`, and the declared `invalidated_by` kinds) by driving
+//! the view manually with a synthetic `EventRing<Event>`.
+//!
+//! `lazy_view_wired_into_step_full` is the integration canary: it calls the
+//! real `engine_rules::step::step` and asserts the view is marked stale after
+//! an `AgentMoved` event is emitted. This requires `ViewRegistry` to hold a
+//! `NearestEnemyLazy` field and `step` to call `invalidate_lazy_views` after
+//! `fold_all` (Phase 5.5).
 
 use engine::cascade::CascadeRegistry;
 use engine_data::entities::CreatureType;
@@ -16,9 +16,11 @@ use engine::event::EventRing;
 use engine_data::events::Event;
 use engine::ids::AgentId;
 use engine::policy::UtilityBackend;
+use engine::scratch::SimScratch;
 use engine::state::{AgentSpawn, SimState};
-use engine::step::{step, SimScratch}; // Plan B1' Task 11: step is unimplemented!() stub
 use engine::view::{LazyView, NearestEnemyLazy};
+use engine_rules::{step::step, SimCascadeRegistry, ViewRegistry, SerialBackend};
+use engine::debug::DebugConfig;
 use glam::Vec3;
 
 fn spawn_two_away(state: &mut SimState) -> (AgentId, AgentId) {
@@ -41,7 +43,6 @@ fn spawn_two_away(state: &mut SimState) -> (AgentId, AgentId) {
     (a, b)
 }
 
-    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn fresh_view_is_stale_before_first_compute() {
     let view = NearestEnemyLazy::new(8);
@@ -50,7 +51,6 @@ fn fresh_view_is_stale_before_first_compute() {
     assert!(view.value(AgentId::new(1).unwrap()).is_none());
 }
 
-    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn compute_populates_and_marks_fresh() {
     let mut state = SimState::new(4, 42);
@@ -63,7 +63,6 @@ fn compute_populates_and_marks_fresh() {
     assert_eq!(view.value(b), Some(a));
 }
 
-    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn invalidated_by_agent_moved() {
     // LazyView declares which event kinds invalidate it. The engine's dispatch
@@ -87,7 +86,6 @@ fn invalidated_by_agent_moved() {
     assert!(view.is_stale());
 }
 
-    #[ignore] // Re-enable after B1' Task 11 emits engine_rules::step::step.
 #[test]
 fn does_not_invalidate_on_unrelated_event() {
     let mut state = SimState::new(4, 42);
@@ -115,34 +113,38 @@ fn does_not_invalidate_on_unrelated_event() {
 fn _unused_imports_anchor() {
     let _ = std::mem::size_of::<CascadeRegistry<Event>>();
     let _ = std::mem::size_of::<SimScratch>();
+    let _ = std::mem::size_of::<SimCascadeRegistry>();
 }
 
-/// Integration canary: when `LazyView` is wired into `step_full` (so the
-/// tick pipeline automatically calls `invalidate_on_events` against the
-/// events emitted that tick), un-ignore this test. It currently would
-/// fail because `step_full` only folds MaterializedView<Event>, not LazyView.
+/// Integration canary: `LazyView` is now wired into `step` via Phase 5.5
+/// (`views.invalidate_lazy_views`). The tick pipeline automatically calls
+/// `invalidate_on_events` on all lazy views after emitting events.
 ///
-/// Shape: spawn two agents, compute the view, run one `step` with
-/// UtilityBackend (which moves them toward each other, emitting
-/// `AgentMoved`), then assert the view is stale. Today the view remains
-/// fresh because nothing invalidates it automatically.
-    #[ignore = "LazyView not wired into step_full yet (audit MEDIUM #11)"]
+/// Shape: spawn two agents, compute the view (fresh), run one `step` with
+/// UtilityBackend (which moves them toward each other, emitting `AgentMoved`),
+/// then assert the view is now stale because `invalidate_lazy_views` ran.
 #[test]
 fn lazy_view_wired_into_step_full() {
-    let mut state = SimState::new(4, 42);
-    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let cap = 4;
+    let mut state = SimState::new(cap, 42);
+    let mut scratch = SimScratch::new(cap as usize);
     let mut events = EventRing::<Event>::with_cap(256);
-    let cascade = CascadeRegistry::<Event>::new();
-    let mut view = NearestEnemyLazy::new(state.agent_cap() as usize);
+    let cascade = SimCascadeRegistry::new();
+    let mut views = ViewRegistry::new_with_cap(cap as usize);
     let _ = spawn_two_away(&mut state);
 
-    view.compute(&state);
-    assert!(!view.is_stale());
+    // Compute the lazy view so it starts fresh.
+    views.nearest_enemy_lazy.compute(&state);
+    assert!(!views.nearest_enemy_lazy.is_stale(),
+        "view must be fresh after explicit compute");
 
-    // TODO(LazyView integration): this step should invalidate `view` because
-    // agents will move and emit AgentMoved. Today nothing wires the view in.
-    step(&mut state, &mut scratch, &mut events, &UtilityBackend, &cascade);
-    assert!(view.is_stale(),
+    // Run one tick. UtilityBackend causes agents to move toward each other,
+    // which emits AgentMoved — invalidating the nearest-enemy view via Phase 5.5.
+    let mut backend = SerialBackend;
+    step(&mut backend, &mut state, &mut scratch, &mut events, &mut views,
+         &UtilityBackend, &cascade, &DebugConfig::default());
+
+    assert!(views.nearest_enemy_lazy.is_stale(),
         "after step with UtilityBackend causing AgentMoved, view must be stale — \
-         indicates LazyView is now wired into step_full");
+         LazyView is now wired into step_full via Phase 5.5 (invalidate_lazy_views)");
 }

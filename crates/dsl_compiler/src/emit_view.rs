@@ -176,12 +176,14 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
         .collect();
 
     writeln!(out, "use engine::event::EventRing;").unwrap();
+    writeln!(out, "use engine::state::SimState;").unwrap();
+    writeln!(out, "use engine::view::{{LazyView, NearestEnemyLazy}};").unwrap();
     writeln!(out, "use engine_data::events::Event;").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "/// Compiler-emitted view registry — one field per `@materialized` view.").unwrap();
     writeln!(out, "/// The tick pipeline calls `fold_all` at the view-fold phase (spec §7.1).").unwrap();
-    writeln!(out, "#[derive(Debug, Default)]").unwrap();
+    writeln!(out, "#[derive(Debug)]").unwrap();
     writeln!(out, "pub struct ViewRegistry {{").unwrap();
     for v in &materialized {
         let field = snake_case(&v.name);
@@ -191,11 +193,30 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
     if materialized.is_empty() {
         writeln!(out, "    // No `@materialized` views in scope.").unwrap();
     }
+    writeln!(out, "    /// Lazy view — nearest enemy per agent. Invalidated by position/death events.").unwrap();
+    writeln!(out, "    pub nearest_enemy_lazy: NearestEnemyLazy,").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "impl ViewRegistry {{").unwrap();
-    writeln!(out, "    pub fn new() -> Self {{ Self::default() }}").unwrap();
+    writeln!(out, "    /// Construct a new registry sized for `agent_cap` agents.").unwrap();
+    writeln!(out, "    pub fn new_with_cap(agent_cap: usize) -> Self {{").unwrap();
+    writeln!(out, "        Self {{").unwrap();
+    for v in &materialized {
+        let field = snake_case(&v.name);
+        let ty = pascal_case(&v.name);
+        writeln!(out, "            {field}: {field}::{ty}::default(),").unwrap();
+    }
+    if materialized.is_empty() {
+        writeln!(out, "            // No materialized views.").unwrap();
+    }
+    writeln!(out, "            nearest_enemy_lazy: NearestEnemyLazy::new(agent_cap),").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "    /// Construct with a default cap of 0 (lazy view sized to zero slots).").unwrap();
+    writeln!(out, "    /// Prefer `new_with_cap` when the agent capacity is known.").unwrap();
+    writeln!(out, "    pub fn new() -> Self {{ Self::new_with_cap(0) }}").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "    /// Fold every materialized view over the current tick's events.").unwrap();
     writeln!(out, "    /// `events_before` is the push_count snapshot at the top of the tick.").unwrap();
@@ -220,6 +241,28 @@ pub fn emit_view_mod(views: &[ViewIR]) -> String {
         writeln!(out, "        self.{field}.fold_event(event, tick);").unwrap();
     }
     writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "    /// Invalidate all lazy views based on events emitted this tick.").unwrap();
+    writeln!(out, "    /// Called by the tick pipeline after `fold_all` (Phase 5.5).").unwrap();
+    writeln!(out, "    pub fn invalidate_lazy_views(&mut self, events: &EventRing<Event>, events_before: usize) {{").unwrap();
+    writeln!(out, "        // Walk only the events emitted this tick.").unwrap();
+    writeln!(out, "        let _ = events_before; // reserved; invalidate_on_events scans the full ring").unwrap();
+    writeln!(out, "        self.nearest_enemy_lazy.invalidate_on_events(events);").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out).unwrap();
+
+    writeln!(out, "    /// Recompute all stale lazy views from current state.").unwrap();
+    writeln!(out, "    /// Called on-demand (e.g. before policy evaluate if views must be fresh).").unwrap();
+    writeln!(out, "    pub fn recompute_stale_lazy_views(&mut self, state: &SimState) {{").unwrap();
+    writeln!(out, "        if self.nearest_enemy_lazy.is_stale() {{").unwrap();
+    writeln!(out, "            self.nearest_enemy_lazy.compute(state);").unwrap();
+    writeln!(out, "        }}").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "impl Default for ViewRegistry {{").unwrap();
+    writeln!(out, "    fn default() -> Self {{ Self::new() }}").unwrap();
     writeln!(out, "}}").unwrap();
 
     out

@@ -26,11 +26,13 @@ pub use standing::Standing;
 pub use threat_level::ThreatLevel;
 
 use engine::event::EventRing;
+use engine::state::SimState;
+use engine::view::{LazyView, NearestEnemyLazy};
 use engine_data::events::Event;
 
 /// Compiler-emitted view registry — one field per `@materialized` view.
 /// The tick pipeline calls `fold_all` at the view-fold phase (spec §7.1).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ViewRegistry {
     pub engaged_with: engaged_with::EngagedWith,
     pub kin_fear: kin_fear::KinFear,
@@ -40,11 +42,30 @@ pub struct ViewRegistry {
     pub rally_boost: rally_boost::RallyBoost,
     pub standing: standing::Standing,
     pub threat_level: threat_level::ThreatLevel,
+    /// Lazy view — nearest enemy per agent. Invalidated by position/death events.
+    pub nearest_enemy_lazy: NearestEnemyLazy,
 }
 
 impl ViewRegistry {
+    /// Construct a new registry sized for `agent_cap` agents.
+    pub fn new_with_cap(agent_cap: usize) -> Self {
+        Self {
+            engaged_with: engaged_with::EngagedWith::default(),
+            kin_fear: kin_fear::KinFear::default(),
+            memory: memory::Memory::default(),
+            my_enemies: my_enemies::MyEnemies::default(),
+            pack_focus: pack_focus::PackFocus::default(),
+            rally_boost: rally_boost::RallyBoost::default(),
+            standing: standing::Standing::default(),
+            threat_level: threat_level::ThreatLevel::default(),
+            nearest_enemy_lazy: NearestEnemyLazy::new(agent_cap),
+        }
+    }
+
+    /// Construct with a default cap of 0 (lazy view sized to zero slots).
+    /// Prefer `new_with_cap` when the agent capacity is known.
     pub fn new() -> Self {
-        Self::default()
+        Self::new_with_cap(0)
     }
 
     /// Fold every materialized view over the current tick's events.
@@ -72,5 +93,27 @@ impl ViewRegistry {
         self.rally_boost.fold_event(event, tick);
         self.standing.fold_event(event, tick);
         self.threat_level.fold_event(event, tick);
+    }
+
+    /// Invalidate all lazy views based on events emitted this tick.
+    /// Called by the tick pipeline after `fold_all` (Phase 5.5).
+    pub fn invalidate_lazy_views(&mut self, events: &EventRing<Event>, events_before: usize) {
+        // Walk only the events emitted this tick.
+        let _ = events_before; // reserved; invalidate_on_events scans the full ring
+        self.nearest_enemy_lazy.invalidate_on_events(events);
+    }
+
+    /// Recompute all stale lazy views from current state.
+    /// Called on-demand (e.g. before policy evaluate if views must be fresh).
+    pub fn recompute_stale_lazy_views(&mut self, state: &SimState) {
+        if self.nearest_enemy_lazy.is_stale() {
+            self.nearest_enemy_lazy.compute(state);
+        }
+    }
+}
+
+impl Default for ViewRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }

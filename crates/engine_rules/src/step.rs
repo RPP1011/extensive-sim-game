@@ -174,6 +174,12 @@ pub fn step<CB: ComputeBackend, B: PolicyBackend>(
         }
     }
 
+    // Phase 5.5 — lazy-view recompute (stale-view repair).
+    // Must run after fold_all so materialized views are populated first.
+    // Marks lazy views stale when any of their invalidating events landed
+    // this tick; recompute happens on next consumer access or eagerly here.
+    views.invalidate_lazy_views(events, events_before);
+
     // Checkpoint: AfterViewFold.
     if let Some(stepper) = debug.tick_stepper.as_ref() {
         match stepper.checkpoint(engine::debug::tick_stepper::Phase::AfterViewFold) {
