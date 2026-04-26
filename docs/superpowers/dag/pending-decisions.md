@@ -66,7 +66,8 @@ If `/loop /dag-tick` continues, it will dispatch sonnet subagents to "implement"
 - (c) Hybrid: collision detection only for specific kinds (e.g., NPCs
   collide with structures but not other NPCs).
 
-**Status:** awaiting user
+**Status:** **APPROVED: (b)** — co-occupancy intentional; viz handles overlap (status.md Q#11 closed). Edited 2026-04-26.
+**Original status:** awaiting user
 **To proceed:** add `**APPROVED:** [option]` to this section.
 
 ## 2026-04-26 — spec-needed: Announce 3D vs planar distance (Tech-Debt T4)
@@ -80,7 +81,8 @@ If `/loop /dag-tick` continues, it will dispatch sonnet subagents to "implement"
 - (b) Switch to planar (XZ-only) — cheaper computation, more intuitive for 2.5D scenes. Implementation: new `spatial.within_radius_xz()` primitive; update Announce dispatch.
 - (c) Per-event-kind choice — `Announce` is planar (sound travels along the floor); `BroadcastSelf` is 3D (visual). Adds complexity.
 
-**Status:** awaiting user
+**Status:** **APPROVED: (a)** — 3D Euclidean confirmed; spec/runtime.md §10 made explicit (status.md Q#1 closed). Edited 2026-04-26.
+**Original status:** awaiting user
 **To proceed:** add `**APPROVED:** [option]` to this section.
 
 ## 2026-04-26 — human-needed: Passive triggers spec mismatch (Tech-Debt T7)
@@ -91,5 +93,6 @@ If `/loop /dag-tick` continues, it will dispatch sonnet subagents to "implement"
 - (a) **Implement** — adds an `IrPassiveTrigger` IR node, parser/resolver extension, emit_physics generates per-trigger handlers, runtime fires them on emitted events. Substantial DSL grammar work; sub-plan needed. Estimated effort: 2-3 weeks (comparable to Theory of Mind Phase 1).
 - (b) **Downgrade markers** — rewrite spec/ability.md §6 + §23.1 to mark `passive` block + listed triggers as `planned`, not `runs-today`. Removes the false claim. Future plan adds them.
 
-**Status:** awaiting user
+**Status:** **APPROVED: (b)** — spec/ability.md §6 + §23.1 already mark triggers as planned; clarifying note added that block runs-today refers to parsing only. Edited 2026-04-26.
+**Original status:** awaiting user
 **To proceed:** add `**APPROVED:** [option]` to this section. If (a), agent will draft a Passive Triggers Implementation Plan as a follow-up. If (b), agent will edit spec/ability.md and commit.

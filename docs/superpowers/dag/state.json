@@ -2991,12 +2991,12 @@
       "blocks": [
         "2026-04-25-tech-debt-cleanup-impl.task-4"
       ],
-      "status": "deferred",
+      "status": "done",
       "steps_total": 0,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": "spec-needed: collision detection design decision; escalated to pending-decisions.md",
-      "completed_commit": null,
+      "completed_commit": "resolved-1b-co-occupancy-intentional",
       "critic_verdicts": {},
       "started_at": "2026-04-26T07:06:10Z",
       "completed_at": null,
@@ -3013,12 +3013,12 @@
       "blocks": [
         "2026-04-25-tech-debt-cleanup-impl.task-5"
       ],
-      "status": "deferred",
+      "status": "done",
       "steps_total": 0,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": "spec-needed: 3D vs planar distance for Announce; escalated to pending-decisions.md",
-      "completed_commit": null,
+      "completed_commit": "resolved-2a-3d-euclidean",
       "critic_verdicts": {},
       "started_at": "2026-04-26T07:09:05Z",
       "completed_at": null,
@@ -3092,12 +3092,12 @@
       "blocks": [
         "2026-04-25-tech-debt-cleanup-impl.task-8"
       ],
-      "status": "deferred",
+      "status": "done",
       "steps_total": 0,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": "human-needed: passive triggers — implement vs downgrade decision; escalated to pending-decisions.md",
-      "completed_commit": null,
+      "completed_commit": "resolved-3b-spec-already-planned",
       "critic_verdicts": {},
       "started_at": "2026-04-26T07:24:07Z",
       "completed_at": null,
@@ -3112,15 +3112,19 @@
         "2026-04-25-tech-debt-cleanup-impl.task-7"
       ],
       "blocks": [],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "tech-debt-final-verify-2026-04-26",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "final verification: workspace builds, tests PASS modulo pre-existing spec_snippets, compile-dsl --check ok after regen sweep (T5 hand-edit reverted), trybuild PASS, SimBackend audit clean. T3/T4/T7 user resolutions landed (1b/2a/3b)"
+      },
+      "started_at": "2026-04-26T07:26:29Z",
+      "completed_at": "2026-04-26T07:30:17Z",
       "retry_count": 0
     },
     {
@@ -3544,9 +3548,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T07:24:07Z",
-    "iterations_completed": 25,
-    "tasks_closed": 22,
+    "last_iteration_at": "2026-04-26T07:30:17Z",
+    "iterations_completed": 26,
+    "tasks_closed": 23,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

@@ -141,7 +141,7 @@ pub fn step<CB: ComputeBackend, B: PolicyBackend>(
             p.enter("cascade_dispatch");
         }
     }
-    apply_actions(state, scratch, events);  // scratch passed mut for neighbors_scratch reuse
+    apply_actions(state, scratch, events);
 
     // Phase 4b — cascade fixed-point.
     cascade.run_fixed_point(state, views, events);
@@ -246,7 +246,7 @@ fn shuffle_actions_in_place(
 }
 
 /// Phase-4 helper. Walks the shuffled actions and emits root-cause events.
-fn apply_actions(state: &mut SimState, scratch: &mut SimScratch, events: &mut EventRing<Event>) {
+fn apply_actions(state: &mut SimState, scratch: &SimScratch, events: &mut EventRing<Event>) {
     let effect_slow_multiplier = |state: &SimState, id: AgentId| -> f32 {
         let factor_q8 = state.effective_slow_factor_q8(id);
         if factor_q8 <= 0 {
@@ -601,8 +601,10 @@ fn apply_actions(state: &mut SimState, scratch: &mut SimScratch, events: &mut Ev
                     }
                 };
                 let spatial = state.spatial();
-                spatial.within_radius_into(state, center, radius, &mut scratch.neighbors_scratch);
-                let candidates: &[AgentId] = &scratch.neighbors_scratch;
+                let candidates: smallvec::SmallVec<[AgentId; 64]> = spatial
+                    .within_radius(state, center, radius)
+                    .into_iter()
+                    .collect();
                 let max_recipients = state.config.communication.max_announce_recipients as usize;
                 let mut count = 0usize;
                 for obs in state.agents_alive() {

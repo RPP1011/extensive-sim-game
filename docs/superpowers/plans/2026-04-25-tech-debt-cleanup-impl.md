@@ -46,7 +46,7 @@
   - P10 (No Runtime Panic): PASS — all changes either remove allocations or extend tested code.
   - P11 (Reduction Determinism): N/A.
 
-- **Re-evaluation:** [x] AIS reviewed at design phase. [ ] AIS reviewed post-design (tick after Task 7).
+- **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — final scope: 4 implementer tasks (T1 4 combat fixtures + 14 sub-tests; T2 LazyView Phase 5.5 emit + 5 tests; T5 NeighborSource _into APIs + Announce path; T6 PolicyBackend NO-OP — already zero-alloc); 3 escalation tasks resolved 2026-04-26 (T3/T4/T7) with user picks (1b/2a/3b): co-occupancy intentional (status.md Q#11 closed), 3D Euclidean confirmed in spec/runtime.md §10 (Q#1 closed), spec/ability.md clarified that `ability` block runs-today refers to parsing only — passive triggers already correctly marked planned in §23.1. T8 verification side-fix: regen reverted T5's hand-edit to engine_rules/src/step.rs — `within_radius_into` API still in place, future emit_step pass needs to thread scratch into emitted callers. All critic gates PASS on relevant commits.
 
 ---
 
@@ -425,7 +425,7 @@ No code; agent skips.
 
 ### Task 8: Final verification + AIS tick
 
-- [ ] **Step 1: Workspace clean rebuild.**
+- [x] **Step 1: Workspace clean rebuild.**
 
 ```bash
 unset RUSTFLAGS && cargo clean
@@ -435,7 +435,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 Expected: SUCCESS. The 4 implementation items (1, 2, 5, 6) added tests + perf improvements; the 3 escalation items (3, 4, 7) added entries to `pending-decisions.md` but no code.
 
-- [ ] **Step 2: `compile-dsl --check` round-trip.**
+- [x] **Step 2: `compile-dsl --check` round-trip.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
@@ -443,7 +443,7 @@ unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
 
 Expected: clean.
 
-- [ ] **Step 3: Verify pending-decisions has the 3 escalations.**
+- [x] **Step 3: Verify pending-decisions has the 3 escalations.**
 
 ```bash
 grep "spec-needed: Collision detection\|spec-needed: Announce 3D\|human-needed: Passive triggers" docs/superpowers/dag/pending-decisions.md
@@ -451,7 +451,7 @@ grep "spec-needed: Collision detection\|spec-needed: Announce 3D\|human-needed: 
 
 Expected: 3 matches.
 
-- [ ] **Step 4: Tick AIS post-design.**
+- [x] **Step 4: Tick AIS post-design.**
 
 ```
 [x] AIS reviewed post-design — final scope: 4 implementation items
@@ -460,7 +460,7 @@ alloc reduction, PolicyBackend zero-alloc); 3 spec-needed/human-needed
 items escalated to pending-decisions.md for user resolution.
 ```
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "chore(plan-tech-debt): final verification + AIS tick"

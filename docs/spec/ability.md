@@ -434,8 +434,9 @@ body_item = effect_stmt | deliver_block | recast_block | morph_block ;
   `effect_stmt`s, not both. `recast` and `morph` combine with either.
 - Ability names are globally unique across the compilation.
 
-**Status.** `runs-today` for the block itself. Individual header
-properties and body items carry their own status (below).
+**Status.** `runs-today` for `ability` block parsing. Individual header
+properties and body items carry their own status (below). The `passive`
+block (§6) is `planned` — see §23.1 for the full status matrix.
 
 **Errors.**
 - Duplicate header → `duplicate header 'cooldown'`.

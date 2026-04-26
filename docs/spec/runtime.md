@@ -335,8 +335,10 @@ Same 4 variants (`PostQuest`, `AcceptQuest`, `Bid`, `Announce`) + `NoOp`.
 
 Announce cascade (the only universal macro that mutates state) runs as:
 
-- Serial: `for obs in state.agents_alive() { ... }` loop with distance check, emits RecordMemory per recipient.
-- GPU: `apply_announce` kernel — parallel distance check per agent, atomic-append to event ring for each match, bounded by `MAX_ANNOUNCE_RECIPIENTS` via an atomic counter early-exit.
+- Serial: `for obs in state.agents_alive() { ... }` loop with **3D Euclidean** distance check (`spatial.within_radius(center, r)` evaluated in 3D), emits RecordMemory per recipient.
+- GPU: `apply_announce` kernel — parallel **3D distance** check per agent, atomic-append to event ring for each match, bounded by `MAX_ANNOUNCE_RECIPIENTS` via an atomic counter early-exit.
+
+**Distance semantics:** 3D Euclidean across both backends. Agents at different elevations are evaluated by full 3D distance, not planar (XZ-only). Confirmed 2026-04-26 (status.md Q#1 resolved).
 
 Both backends produce the same events in the same logical order (per-tick seq-sorted).
 
