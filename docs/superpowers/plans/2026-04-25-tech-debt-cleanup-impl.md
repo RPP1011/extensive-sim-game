@@ -145,7 +145,7 @@ git -c core.hooksPath= commit -am "test(engine): 4 named Combat Foundation regre
 - Modify: `crates/engine/src/view/lazy.rs` if needed (e.g., add `is_stale()` accessor, `recompute()` lifecycle).
 - Modify: `crates/engine/tests/view_lazy.rs` — un-`#[ignore]` `lazy_view_wired_into_step_full`.
 
-- [ ] **Step 1: Read current LazyView state.**
+- [x] **Step 1: Read current LazyView state.**
 
 ```bash
 grep -nE "pub trait LazyView|pub fn recompute|is_stale" crates/engine/src/view/lazy.rs | head
@@ -154,7 +154,7 @@ grep -nE "lazy_view_wired_into_step_full|#\[ignore\]" crates/engine/tests/view_l
 
 Identify the trait method that drives recompute (e.g., `fn recompute(&mut self, state: &SimState)`).
 
-- [ ] **Step 2: Add lazy-view recompute phase to emit_step.**
+- [x] **Step 2: Add lazy-view recompute phase to emit_step.**
 
 In `dsl_compiler/src/emit_step.rs`, between the view-fold phase and the mask-fill phase:
 
@@ -169,7 +169,7 @@ for view in &comp.views {
 
 (Adapt to actual IR field names. If `comp.views` doesn't have `is_lazy()`, add a small classification helper.)
 
-- [ ] **Step 3: Regen.**
+- [x] **Step 3: Regen.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -178,11 +178,11 @@ grep -A 3 "lazy view recompute" crates/engine_rules/src/step.rs
 
 Expected: the phase appears in the emitted step.rs body.
 
-- [ ] **Step 4: Un-ignore the test.**
+- [x] **Step 4: Un-ignore the test.**
 
 In `crates/engine/tests/view_lazy.rs`, find `#[ignore]` above `lazy_view_wired_into_step_full` and remove it.
 
-- [ ] **Step 5: Run.**
+- [x] **Step 5: Run.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test view_lazy
@@ -190,7 +190,7 @@ unset RUSTFLAGS && cargo test -p engine --test view_lazy
 
 Expected: `lazy_view_wired_into_step_full` PASSES.
 
-- [ ] **Step 6: Verify regen idempotence.**
+- [x] **Step 6: Verify regen idempotence.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
@@ -198,7 +198,7 @@ unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
 
 Expected: clean.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl): emit_step recomputes stale lazy views; un-ignore wiring test (Tech-Debt Task 2)"
