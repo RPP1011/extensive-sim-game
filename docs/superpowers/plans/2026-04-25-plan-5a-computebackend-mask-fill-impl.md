@@ -377,7 +377,7 @@ git -c core.hooksPath= commit -am "feat(dsl_compiler): emit_step threads Compute
 
 **Files:** none (verification).
 
-- [ ] **Step 1: Clean regen.**
+- [x] **Step 1: Clean regen.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -386,7 +386,7 @@ unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
 
 Expected: clean — emit is idempotent.
 
-- [ ] **Step 2: Test engine_rules in isolation.**
+- [x] **Step 2: Test engine_rules in isolation.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine_rules
@@ -394,7 +394,7 @@ unset RUSTFLAGS && cargo test -p engine_rules
 
 Expected: PASS.
 
-- [ ] **Step 3: Test engine.**
+- [x] **Step 3: Test engine.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine
@@ -402,7 +402,7 @@ unset RUSTFLAGS && cargo test -p engine
 
 Expected: PASS modulo pre-existing `rng::tests::per_agent_golden_value`.
 
-- [ ] **Step 4: Commit (only if regen produced anything new not already in the previous commits).**
+- [x] **Step 4: Commit (only if regen produced anything new not already in the previous commits).**
 
 ```bash
 git status -s

@@ -2491,15 +2491,19 @@
       "blocks": [
         "2026-04-25-plan-5a-computebackend-mask-fill-impl.task-7"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "85a3b900",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "regen idempotent; engine_rules tests PASS (4); engine integration tests PASS (13); side-fix: 8 SerialBackend injections in 3 debug test files; pre-existing rng::tests::per_agent_golden_value failure unaffected"
+      },
+      "started_at": "2026-04-26T06:26:05Z",
+      "completed_at": "2026-04-26T06:27:26Z",
       "retry_count": 0
     },
     {
@@ -3463,9 +3467,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T06:24:19Z",
-    "iterations_completed": 13,
-    "tasks_closed": 14,
+    "last_iteration_at": "2026-04-26T06:27:26Z",
+    "iterations_completed": 14,
+    "tasks_closed": 15,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
