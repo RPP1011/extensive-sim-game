@@ -68,3 +68,17 @@ If `/loop /dag-tick` continues, it will dispatch sonnet subagents to "implement"
 
 **Status:** awaiting user
 **To proceed:** add `**APPROVED:** [option]` to this section.
+
+## 2026-04-26 — spec-needed: Announce 3D vs planar distance (Tech-Debt T4)
+
+**Roadmap source:** `docs/engine/status.md` open question #1
+
+**Current state:** `Announce` event uses `spatial.within_radius()` which is 3D Euclidean. Spec §10 doesn't specify; this is an undocumented choice.
+
+**Decision required:**
+- (a) Confirm 3D — update spec to make it explicit; no code change.
+- (b) Switch to planar (XZ-only) — cheaper computation, more intuitive for 2.5D scenes. Implementation: new `spatial.within_radius_xz()` primitive; update Announce dispatch.
+- (c) Per-event-kind choice — `Announce` is planar (sound travels along the floor); `BroadcastSelf` is 3D (visual). Adds complexity.
+
+**Status:** awaiting user
+**To proceed:** add `**APPROVED:** [option]` to this section.

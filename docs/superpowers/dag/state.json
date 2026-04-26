@@ -3013,14 +3013,14 @@
       "blocks": [
         "2026-04-25-tech-debt-cleanup-impl.task-5"
       ],
-      "status": "pending",
+      "status": "deferred",
       "steps_total": 0,
       "steps_done": 0,
       "owner_class": "implementer",
-      "blocked_reason": null,
+      "blocked_reason": "spec-needed: 3D vs planar distance for Announce; escalated to pending-decisions.md",
       "completed_commit": null,
       "critic_verdicts": {},
-      "started_at": null,
+      "started_at": "2026-04-26T07:09:05Z",
       "completed_at": null,
       "retry_count": 0
     },
@@ -3531,8 +3531,8 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T07:06:10Z",
-    "iterations_completed": 21,
+    "last_iteration_at": "2026-04-26T07:09:05Z",
+    "iterations_completed": 22,
     "tasks_closed": 20,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
