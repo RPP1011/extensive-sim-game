@@ -418,7 +418,7 @@ git -c core.hooksPath= commit -am "chore: regen check after backend-mask threadi
 **Files:**
 - Modify: `crates/engine_gpu/src/lib.rs`
 
-- [ ] **Step 1: Add the 3 method bodies to GpuBackend's `impl ComputeBackend for GpuBackend`.**
+- [x] **Step 1: Add the 3 method bodies to GpuBackend's `impl ComputeBackend for GpuBackend`.**
 
 Both cfg-gated impls (the gpu-feature one and the no-gpu stub) need updating. For Phase 1, both delegate to Serial-equivalent behavior — the methods write through the `MaskBuffer` directly so the GPU path produces identical output:
 
@@ -436,7 +436,7 @@ fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
 }
 ```
 
-- [ ] **Step 2: Workspace build.**
+- [x] **Step 2: Workspace build.**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -445,7 +445,7 @@ unset RUSTFLAGS && cargo build --workspace --features gpu
 
 Expected: BOTH succeed.
 
-- [ ] **Step 3: Workspace test.**
+- [x] **Step 3: Workspace test.**
 
 ```bash
 unset RUSTFLAGS && cargo test --workspace
@@ -454,7 +454,7 @@ unset RUSTFLAGS && cargo test --workspace --features gpu
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(engine_gpu): GpuBackend stub mask-method impls (Phase 1 parity) (Plan 5a Task 7)"
