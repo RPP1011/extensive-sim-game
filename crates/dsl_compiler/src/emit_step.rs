@@ -79,7 +79,13 @@ pub fn step<B: PolicyBackend>(
     }
 
     // Phase 1 — mask build.
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.enter("mask_fill"); }
+    }
     crate::mask_fill::fill_all(&mut scratch.mask, &mut scratch.target_mask, state);
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.exit_with_null(); }
+    }
 
     // Checkpoint: AfterMaskFill.
     if let Some(stepper) = debug.tick_stepper.as_ref() {
@@ -92,7 +98,13 @@ pub fn step<B: PolicyBackend>(
 
     // Phase 2 — policy evaluate.
     scratch.actions.clear();
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.enter("scoring"); }
+    }
     policy.evaluate(state, &scratch.mask, &scratch.target_mask, &mut scratch.actions);
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.exit_with_null(); }
+    }
 
     // Checkpoint: AfterScoring.
     if let Some(stepper) = debug.tick_stepper.as_ref() {
@@ -104,7 +116,13 @@ pub fn step<B: PolicyBackend>(
     }
 
     // Phase 3 — deterministic action shuffle.
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.enter("action_select"); }
+    }
     shuffle_actions_in_place(state.seed, state.tick, &scratch.actions, &mut scratch.shuffle_idx);
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.exit_with_null(); }
+    }
 
     // Checkpoint: AfterActionSelect.
     if let Some(stepper) = debug.tick_stepper.as_ref() {
@@ -117,11 +135,17 @@ pub fn step<B: PolicyBackend>(
 
     // Phase 4a — apply actions (emit root-cause events).
     let events_before = events.total_pushed();
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.enter("cascade_dispatch"); }
+    }
     apply_actions(state, scratch, events);
 
     // Phase 4b — cascade fixed-point.
     cascade.run_fixed_point(state, views, events);
     let _ = events_before; // reserved for future telemetry
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.exit_with_null(); }
+    }
 
     // Checkpoint: AfterCascadeDispatch.
     if let Some(stepper) = debug.tick_stepper.as_ref() {
@@ -133,7 +157,13 @@ pub fn step<B: PolicyBackend>(
     }
 
     // Phase 5 — view fold.
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.enter("view_fold"); }
+    }
     views.fold_all(events, events_before, state.tick);
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.exit_with_null(); }
+    }
 
     // Checkpoint: AfterViewFold.
     if let Some(stepper) = debug.tick_stepper.as_ref() {
@@ -145,7 +175,13 @@ pub fn step<B: PolicyBackend>(
     }
 
     // Phase 6 — tick advance.
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.enter("tick_end"); }
+    }
     state.tick = state.tick.wrapping_add(1);
+    if let Some(profile) = debug.tick_profile.as_ref() {
+        if let Ok(mut p) = profile.lock() { p.exit_with_null(); }
+    }
 
     // Checkpoint: TickEnd.
     if let Some(stepper) = debug.tick_stepper.as_ref() {

@@ -25,7 +25,11 @@ pub struct DebugConfig {
     pub trace_mask: bool,
     pub causal_tree: bool,
     pub tick_stepper: Option<tick_stepper::StepperHandle>,
-    pub tick_profile: bool,
+    /// Phase timing histogram. When `Some`, each tick phase records enter/exit
+    /// nanosecond samples into the shared `TickProfile`. The `Arc<Mutex<>>`
+    /// wrapper allows the caller to inspect samples after `step()` returns
+    /// without holding a borrow across the tick boundary.
+    pub tick_profile: Option<std::sync::Arc<std::sync::Mutex<tick_profile::TickProfile>>>,
     pub agent_history: Option<agent_history::Filter>,
     pub repro_bundle: Option<std::path::PathBuf>,
 }
