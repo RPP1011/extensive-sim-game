@@ -41,14 +41,15 @@ pub fn emit_mask_fill(masks: &[MaskIR], source_file: Option<&str>) -> String {
     emit_header(&mut out, source_file);
 
     writeln!(out, "use engine::ability::AbilityId;").unwrap();
+    writeln!(out, "use engine::backend::ComputeBackend;").unwrap();
     writeln!(out, "use engine::mask::{{MaskBuffer, MicroKind, TargetMask}};").unwrap();
     writeln!(out, "use engine::state::SimState;").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "/// Fill every mask bit and target-mask candidate list for the current tick.").unwrap();
     writeln!(out, "/// Resets `buf` and `targets` before populating. Called at the top of").unwrap();
     writeln!(out, "/// `engine_rules::step::step` after the `tick` increment.").unwrap();
-    writeln!(out, "pub fn fill_all(buf: &mut MaskBuffer, targets: &mut TargetMask, state: &SimState) {{").unwrap();
-    writeln!(out, "    buf.reset();").unwrap();
+    writeln!(out, "pub fn fill_all<B: engine::backend::ComputeBackend>(backend: &mut B, buf: &mut MaskBuffer, targets: &mut TargetMask, state: &SimState) {{").unwrap();
+    writeln!(out, "    backend.reset_mask(buf);").unwrap();
     writeln!(out, "    targets.reset();").unwrap();
     writeln!(out, "    for id in state.agents_alive() {{").unwrap();
     writeln!(out, "        let slot = (id.raw() - 1) as usize;").unwrap();
@@ -117,13 +118,14 @@ pub fn emit_mask_fill(masks: &[MaskIR], source_file: Option<&str>) -> String {
         for (mask, _stem) in &sorted_target {
             if let Some(kind) = micro_kind_from_name(&mask.head.name) {
                 writeln!(out, "        if !targets.candidates_for(id, {kind}).is_empty() {{").unwrap();
-                writeln!(out, "            buf.set(slot, {kind}, true);").unwrap();
+                writeln!(out, "            backend.set_mask_bit(buf, slot, {kind});").unwrap();
                 writeln!(out, "        }}").unwrap();
             }
         }
     }
 
     writeln!(out, "    }}").unwrap();
+    writeln!(out, "    backend.commit_mask(buf);").unwrap();
     writeln!(out, "}}").unwrap();
     out
 }
@@ -153,7 +155,7 @@ fn micro_kind_from_name(name: &str) -> Option<&'static str> {
 fn emit_self_only_mask(out: &mut String, name: &str, stem: &str) {
     if let Some(kind) = micro_kind_from_name(name) {
         writeln!(out, "        if crate::mask::mask_{stem}(state, id) {{").unwrap();
-        writeln!(out, "            buf.set(slot, {kind}, true);").unwrap();
+        writeln!(out, "            backend.set_mask_bit(buf, slot, {kind});").unwrap();
         writeln!(out, "        }}").unwrap();
     }
 }
@@ -164,12 +166,12 @@ fn emit_cast_mask(out: &mut String) {
     writeln!(out, "        // is empty the bit is set permissively (legacy fallback).").unwrap();
     writeln!(out, "        let n_abilities = state.ability_registry.len();").unwrap();
     writeln!(out, "        if n_abilities == 0 {{").unwrap();
-    writeln!(out, "            buf.set(slot, MicroKind::Cast, true);").unwrap();
+    writeln!(out, "            backend.set_mask_bit(buf, slot, MicroKind::Cast);").unwrap();
     writeln!(out, "        }} else {{").unwrap();
     writeln!(out, "            'outer: for raw in 1..=(n_abilities as u32) {{").unwrap();
     writeln!(out, "                if let Some(ability_id) = AbilityId::new(raw) {{").unwrap();
     writeln!(out, "                    if crate::mask::mask_cast(state, id, ability_id) {{").unwrap();
-    writeln!(out, "                        buf.set(slot, MicroKind::Cast, true);").unwrap();
+    writeln!(out, "                        backend.set_mask_bit(buf, slot, MicroKind::Cast);").unwrap();
     writeln!(out, "                        break 'outer;").unwrap();
     writeln!(out, "                    }}").unwrap();
     writeln!(out, "                }}").unwrap();
@@ -181,7 +183,7 @@ fn emit_target_bound_mask(out: &mut String, name: &str, stem: &str) {
     if let Some(kind) = micro_kind_from_name(name) {
         writeln!(out, "        crate::mask::mask_{stem}_candidates(state, id, targets);").unwrap();
         writeln!(out, "        if !targets.candidates_for(id, {kind}).is_empty() {{").unwrap();
-        writeln!(out, "            buf.set(slot, {kind}, true);").unwrap();
+        writeln!(out, "            backend.set_mask_bit(buf, slot, {kind});").unwrap();
         writeln!(out, "        }}").unwrap();
     }
 }

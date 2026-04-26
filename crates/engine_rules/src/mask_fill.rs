@@ -2,44 +2,50 @@
 // Regenerate with `cargo run --bin xtask -- compile-dsl`.
 
 use engine::ability::AbilityId;
+use engine::backend::ComputeBackend;
 use engine::mask::{MaskBuffer, MicroKind, TargetMask};
 use engine::state::SimState;
 
 /// Fill every mask bit and target-mask candidate list for the current tick.
 /// Resets `buf` and `targets` before populating. Called at the top of
 /// `engine_rules::step::step` after the `tick` increment.
-pub fn fill_all(buf: &mut MaskBuffer, targets: &mut TargetMask, state: &SimState) {
-    buf.reset();
+pub fn fill_all<B: engine::backend::ComputeBackend>(
+    backend: &mut B,
+    buf: &mut MaskBuffer,
+    targets: &mut TargetMask,
+    state: &SimState,
+) {
+    backend.reset_mask(buf);
     targets.reset();
     for id in state.agents_alive() {
         let slot = (id.raw() - 1) as usize;
         // Self-only masks — each call returns a bool gating the action head.
         if crate::mask::mask_hold(state, id) {
-            buf.set(slot, MicroKind::Hold, true);
+            backend.set_mask_bit(buf, slot, MicroKind::Hold);
         }
         if crate::mask::mask_flee(state, id) {
-            buf.set(slot, MicroKind::Flee, true);
+            backend.set_mask_bit(buf, slot, MicroKind::Flee);
         }
         if crate::mask::mask_eat(state, id) {
-            buf.set(slot, MicroKind::Eat, true);
+            backend.set_mask_bit(buf, slot, MicroKind::Eat);
         }
         if crate::mask::mask_drink(state, id) {
-            buf.set(slot, MicroKind::Drink, true);
+            backend.set_mask_bit(buf, slot, MicroKind::Drink);
         }
         if crate::mask::mask_rest(state, id) {
-            buf.set(slot, MicroKind::Rest, true);
+            backend.set_mask_bit(buf, slot, MicroKind::Rest);
         }
         // Cast mask — `mask_cast` is per-ability; we set the global Cast bit
         // if ANY ability in the registry passes the gate. When the registry
         // is empty the bit is set permissively (legacy fallback).
         let n_abilities = state.ability_registry.len();
         if n_abilities == 0 {
-            buf.set(slot, MicroKind::Cast, true);
+            backend.set_mask_bit(buf, slot, MicroKind::Cast);
         } else {
             'outer: for raw in 1..=(n_abilities as u32) {
                 if let Some(ability_id) = AbilityId::new(raw) {
                     if crate::mask::mask_cast(state, id, ability_id) {
-                        buf.set(slot, MicroKind::Cast, true);
+                        backend.set_mask_bit(buf, slot, MicroKind::Cast);
                         break 'outer;
                     }
                 }
@@ -51,10 +57,11 @@ pub fn fill_all(buf: &mut MaskBuffer, targets: &mut TargetMask, state: &SimState
         crate::mask::mask_move_toward_candidates(state, id, targets);
         // Mark Attack / MoveToward allowed if any candidates were pushed.
         if !targets.candidates_for(id, MicroKind::Attack).is_empty() {
-            buf.set(slot, MicroKind::Attack, true);
+            backend.set_mask_bit(buf, slot, MicroKind::Attack);
         }
         if !targets.candidates_for(id, MicroKind::MoveToward).is_empty() {
-            buf.set(slot, MicroKind::MoveToward, true);
+            backend.set_mask_bit(buf, slot, MicroKind::MoveToward);
         }
     }
+    backend.commit_mask(buf);
 }
