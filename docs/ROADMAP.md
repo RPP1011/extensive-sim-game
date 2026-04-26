@@ -16,8 +16,8 @@
   Single-dispatch tick path; perf-sweep done at N=200k, optimization ongoing. `plans/gpu_megakernel_plan.md`, `plans/gpu_megakernel_perf.md`.
 - **GPU cold-state replay (Subsystem 2) — Phases 2–4**
   Phase 1 (DSL-compiler view annotations) done; Phase 2 (chronicle) done; Phase 3 (gold + standing) done; Phases 2–4 umbrella plan kept for future per-phase plans. `plans/2026-04-22-gpu-cold-state-replay.md`.
-- **DSL Authoring Engine — IR interpreter (P1b)**
-  Visitor-pattern interpreter on top of `dsl_ast`; `interpreted-rules` cargo feature for parity gate. `plans/2026-04-22-dsl-ast-extraction.md`, `plans/2026-04-22-ir-interpreter.md`.
+- **DSL Authoring Engine — IR interpreter (P1a + P1b)**
+  Visitor-pattern interpreter on top of an extracted `dsl_ast` crate; `interpreted-rules` cargo feature gates the runtime path. Unlocks fast `.sim` iteration without regen-and-recompile. Porting from `wsb-engine-viz` branch (16 commits, 2026-04-26).
 
 ## Drafted (spec exists, plan does not)
 
