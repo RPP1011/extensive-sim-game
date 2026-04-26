@@ -542,7 +542,7 @@ git commit -m "feat(dsl_compiler,engine_rules): route view fold through backend.
 **Files:**
 - Modify: `crates/engine_gpu/src/lib.rs`
 
-- [ ] **Step 1: Add stub to the `#[cfg(not(feature = "gpu"))]` impl (after `cascade_dispatch` stub).**
+- [x] **Step 1: Add stub to the `#[cfg(not(feature = "gpu"))]` impl (after `cascade_dispatch` stub).**
 
 ```rust
     fn view_fold(
@@ -558,7 +558,7 @@ git commit -m "feat(dsl_compiler,engine_rules): route view fold through backend.
 
 (`Self::Views = ()` in the no-gpu branch, so there's nothing to fold.)
 
-- [ ] **Step 2: Add stub to the `#[cfg(feature = "gpu")]` impl (after `cascade_dispatch` stub).**
+- [x] **Step 2: Add stub to the `#[cfg(feature = "gpu")]` impl (after `cascade_dispatch` stub).**
 
 ```rust
     fn view_fold(
@@ -573,7 +573,7 @@ git commit -m "feat(dsl_compiler,engine_rules): route view fold through backend.
     }
 ```
 
-- [ ] **Step 3: Build workspace + run all tests.**
+- [x] **Step 3: Build workspace + run all tests.**
 
 ```bash
 cargo build --workspace 2>&1 | grep -E "^error" | head -10
@@ -582,7 +582,7 @@ cargo test --workspace -- --test-threads=1 2>&1 | tail -10
 
 Expected: build SUCCESS, all tests PASS.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add crates/engine_gpu/src/lib.rs
