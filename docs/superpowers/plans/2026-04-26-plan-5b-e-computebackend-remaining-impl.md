@@ -158,7 +158,7 @@ git commit -m "feat(engine): add cascade_dispatch to ComputeBackend trait (Plan 
 **Files:**
 - Modify: `crates/dsl_compiler/src/emit_backend.rs`
 
-- [ ] **Step 1: Read emit_backend.rs to locate the insertion point.**
+- [x] **Step 1: Read emit_backend.rs to locate the insertion point.**
 
 ```bash
 cat crates/dsl_compiler/src/emit_backend.rs
@@ -166,7 +166,7 @@ cat crates/dsl_compiler/src/emit_backend.rs
 
 The last method emitted is `commit_mask` (closes at the `}}` before the final `}}` at line 58).
 
-- [ ] **Step 2: Add cascade_dispatch emission after the commit_mask block.**
+- [x] **Step 2: Add cascade_dispatch emission after the commit_mask block.**
 
 In `crates/dsl_compiler/src/emit_backend.rs`, inside `emit_backend`, after the `commit_mask` block (after line 57, before the closing `writeln!(out, "}}").unwrap();`):
 
@@ -183,7 +183,7 @@ In `crates/dsl_compiler/src/emit_backend.rs`, inside `emit_backend`, after the `
     writeln!(out, "    }}").unwrap();
 ```
 
-- [ ] **Step 3: Regenerate engine_rules/src/backend.rs.**
+- [x] **Step 3: Regenerate engine_rules/src/backend.rs.**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
@@ -191,7 +191,7 @@ cargo run --bin xtask -- compile-dsl
 
 Expected: `engine_rules/src/backend.rs` updated with the new method. Diff should show only the `cascade_dispatch` impl block added.
 
-- [ ] **Step 4: Build workspace to confirm engine_rules compiles.**
+- [x] **Step 4: Build workspace to confirm engine_rules compiles.**
 
 ```bash
 cargo build --workspace 2>&1 | grep -E "^error" | head -20
@@ -199,7 +199,7 @@ cargo build --workspace 2>&1 | grep -E "^error" | head -20
 
 Expected: only `engine_gpu` fails (it needs the stub impl next). Alternatively both may pass if `engine_gpu`'s stub methods already return default impls — but they don't; the trait is non-auto.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add crates/dsl_compiler/src/emit_backend.rs crates/engine_rules/src/backend.rs
