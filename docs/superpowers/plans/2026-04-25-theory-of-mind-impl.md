@@ -890,7 +890,7 @@ git -c core.hooksPath= commit -am "test(engine): silent_wolf_belief reference sc
 - Modify: `crates/engine/Cargo.toml` — add `[features] theory-of-mind = []`
 - Modify: emitted SoA + cascade-register code via `dsl_compiler` to feature-gate
 
-- [ ] **Step 1: Add the feature flag.**
+- [x] **Step 1: Add the feature flag.**
 
 ```toml
 [features]
@@ -898,7 +898,7 @@ default = []
 theory-of-mind = []
 ```
 
-- [ ] **Step 2: Emit feature-gated code.**
+- [x] **Step 2: Emit feature-gated code.**
 
 The emitter writes:
 
@@ -909,7 +909,7 @@ pub cold_beliefs: SoaSlot<BoundedMap<AgentId, BeliefState, 8>>,
 
 For the cascade-register and decay-phase emits, also gate via `#[cfg(feature = "theory-of-mind")]`. Without the feature: zero-cap field, no register call, no decay phase — base build is unaffected.
 
-- [ ] **Step 3: Build both ways.**
+- [x] **Step 3: Build both ways.**
 
 ```bash
 unset RUSTFLAGS && cargo build --workspace
@@ -918,14 +918,14 @@ unset RUSTFLAGS && cargo build --workspace --features theory-of-mind
 
 Both should succeed.
 
-- [ ] **Step 4: Test both ways.**
+- [x] **Step 4: Test both ways.**
 
 ```bash
 unset RUSTFLAGS && cargo test --workspace                       # default (no feature)
 unset RUSTFLAGS && cargo test --workspace --features theory-of-mind  # silent_wolf passes
 ```
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(engine): theory-of-mind feature flag — zero-cap when off (Plan ToM Task 11)"

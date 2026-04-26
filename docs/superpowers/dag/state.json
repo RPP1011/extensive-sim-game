@@ -3427,15 +3427,25 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-12"
       ],
-      "status": "in_progress",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
+      "completed_commit": "fd1784e0",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS",
+          "cross-backend-parity": "PASS",
+          "reduction-determinism": "PASS",
+          "schema-bump": "PASS"
+        },
+        "note": "theory-of-mind feature flag landed; cascading via engine_rules/theory-of-mind feature. Default build zero-cost (cfg gates field, accessors, decay phase, BeliefObserve emit, KIND_BELIEF_* eval). silent_wolf_belief test gated module-level. Both build modes clean; both test modes pass."
+      },
       "started_at": "2026-04-26T09:08:05Z",
-      "completed_at": null,
+      "completed_at": "2026-04-26T09:16:40Z",
       "retry_count": 0
     },
     {
@@ -3619,9 +3629,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T09:08:05Z",
+    "last_iteration_at": "2026-04-26T09:16:40Z",
     "iterations_completed": 37,
-    "tasks_closed": 33,
+    "tasks_closed": 34,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
