@@ -694,7 +694,7 @@ git -c core.hooksPath= commit -am "feat(dsl): emit belief_decay phase in tick st
 - Modify: `crates/dsl_compiler/src/ir.rs` — IR nodes
 - Modify: `crates/dsl_compiler/src/resolve.rs`
 
-- [ ] **Step 1: Add expression-grammar productions.**
+- [x] **Step 1: Add expression-grammar productions.**
 
 ```
 belief_expr := "beliefs" "(" agent_ref ")" belief_tail
@@ -705,7 +705,7 @@ belief_tail :=
     | "." "confidence" "(" agent_ref ")"              // BeliefsConfidence
 ```
 
-- [ ] **Step 2: Add IR nodes.**
+- [x] **Step 2: Add IR nodes.**
 
 ```rust
 pub enum IrExpr {
@@ -716,11 +716,11 @@ pub enum IrExpr {
 }
 ```
 
-- [ ] **Step 3: Resolve target field on `BeliefState`.**
+- [x] **Step 3: Resolve target field on `BeliefState`.**
 
 In `resolve.rs`: validate `field` is one of {`last_known_pos`, `last_known_hp`, `last_known_max_hp`, `last_known_creature_type`, `last_updated_tick`, `confidence`}. The `view_name` resolves like a regular `view::*` reference but is gated on the believed agent set.
 
-- [ ] **Step 4: Test parser.**
+- [x] **Step 4: Test parser.**
 
 ```rust
 #[test]
@@ -731,7 +731,7 @@ fn parses_beliefs_about() {
 }
 ```
 
-- [ ] **Step 5: Run + commit.**
+- [x] **Step 5: Run + commit.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p dsl_compiler parser_belief_accessor

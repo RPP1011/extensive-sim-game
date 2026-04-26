@@ -3340,15 +3340,22 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-9"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "4634d841",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS"
+        },
+        "note": "3 read variants (BeliefsAccessor/Confidence/View) landed across AST/IR/parser/resolver. is_belief_observe_stmt lookahead disambiguates from T4 statement form. 7 new tests PASS. All emitters return Unsupported (T9 closes scoring lowering)."
+      },
+      "started_at": "2026-04-26T08:23:06Z",
+      "completed_at": "2026-04-26T08:32:36Z",
       "retry_count": 0
     },
     {
@@ -3598,9 +3605,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T08:20:43Z",
-    "iterations_completed": 33,
-    "tasks_closed": 30,
+    "last_iteration_at": "2026-04-26T08:32:36Z",
+    "iterations_completed": 34,
+    "tasks_closed": 31,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
