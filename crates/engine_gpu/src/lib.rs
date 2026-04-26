@@ -376,6 +376,17 @@ impl ComputeBackend for GpuBackend {
     fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
         // Phase 1 stub: no-op (no GPU mirror to flush yet).
     }
+
+    fn cascade_dispatch(
+        &mut self,
+        cascade: &CascadeRegistry<Self::Event, Self::Views>,
+        state:   &mut SimState,
+        views:   &mut Self::Views,
+        events:  &mut EventRing<Self::Event>,
+    ) {
+        // Phase 5b stub: CPU pass-through. Plan 5e wires GPU cascade kernel.
+        cascade.run_fixed_point(state, views, events);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -2782,6 +2793,17 @@ impl ComputeBackend for GpuBackend {
 
     fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
         // Phase 1 stub: no-op (no GPU mirror to flush yet).
+    }
+
+    fn cascade_dispatch(
+        &mut self,
+        cascade: &CascadeRegistry<Self::Event, Self::Views>,
+        state:   &mut SimState,
+        views:   &mut Self::Views,
+        events:  &mut EventRing<Self::Event>,
+    ) {
+        // Phase 5b stub: CPU pass-through. Plan 5e wires GPU cascade kernel.
+        cascade.run_fixed_point(state, views, events);
     }
 }
 
