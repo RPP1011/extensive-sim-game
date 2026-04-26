@@ -66,6 +66,90 @@ def parse_roadmap(path: Path) -> list[dict]:
     return items
 
 
+def parse_plan(path: Path) -> dict:
+    """Parse a plan file -> {id, file, title, depends_on, tasks}."""
+    text = path.read_text()
+    lines = text.split("\n")
+
+    # Title from first H1
+    title = path.stem
+    for line in lines:
+        m = re.match(r"^# (.+?)\s*$", line)
+        if m:
+            title = m.group(1).strip()
+            break
+
+    # "Depends on:" line in header (before first task)
+    depends_on: list[str] = []
+    for line in lines[:80]:
+        m = re.match(r"^>\s*\*\*Depends on:\*\*\s*(.+?)\s*$", line)
+        if not m:
+            m = re.match(r"^\*\*Depends on:\*\*\s*(.+?)\s*$", line)
+        if m:
+            # Comma-separated plan IDs or filenames; strip parens/notes
+            raw = m.group(1)
+            # Pull plan filenames or task titles
+            for ref in re.split(r",\s*", raw):
+                ref = re.sub(r"\(.*?\)", "", ref).strip()
+                if ref:
+                    depends_on.append(ref)
+            break
+
+    # Tasks: "- [ ] **Step N: ..." or "- [ ] **Task N: ..."
+    tasks: list[dict] = []
+    plan_id = path.stem
+    task_index = 0
+    for lineno, line in enumerate(lines, start=1):
+        m = re.match(r"^- \[([ x])\] \*\*(?:Step|Task) (\d+):\s*(.+?)\*\*\s*$", line)
+        if m:
+            done = m.group(1) == "x"
+            step_num = m.group(2)
+            step_title = m.group(3).strip()
+            task_index += 1
+            tasks.append({
+                "id": f"{plan_id}.task-{task_index}",
+                "plan": plan_id,
+                "title": f"Step {step_num}: {step_title}",
+                "checkbox_line": lineno,
+                "deps": [],  # filled after all tasks gathered
+                "blocks": [],
+                "status": "done" if done else "pending",
+                "owner_class": "implementer",  # default; overridden in Task 4
+                "blocked_reason": None,
+                "completed_commit": None,
+                "critic_verdicts": {},
+                "started_at": None,
+                "completed_at": None,
+                "retry_count": 0,
+            })
+
+    # Sequential within-plan deps: task N depends on task N-1
+    for i in range(1, len(tasks)):
+        tasks[i]["deps"].append(tasks[i - 1]["id"])
+        tasks[i - 1]["blocks"].append(tasks[i]["id"])
+
+    tasks_done = sum(1 for t in tasks if t["status"] == "done")
+    return {
+        "id": plan_id,
+        "file": str(path.relative_to(REPO_ROOT)),
+        "title": title,
+        "depends_on": depends_on,
+        "status": (
+            "done" if tasks and tasks_done == len(tasks)
+            else "in_progress" if tasks_done > 0
+            else "pending"
+        ),
+        "tasks_total": len(tasks),
+        "tasks_done": tasks_done,
+        "tasks": tasks,
+    }
+
+
+def parse_all_plans(plans_dir: Path) -> list[dict]:
+    return [parse_plan(p) for p in sorted(plans_dir.glob("*.md")) if p.is_file()]
+
+
 if __name__ == "__main__":
-    items = parse_roadmap(ROADMAP)
-    print(json.dumps(items, indent=2))
+    plans = parse_all_plans(PLANS_DIR)
+    for p in plans:
+        print(f"{p['id']}: {p['tasks_done']}/{p['tasks_total']} tasks  ({p['status']})")
