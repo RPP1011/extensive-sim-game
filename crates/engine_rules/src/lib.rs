@@ -65,6 +65,259 @@ pub fn with_engine_builtins() -> SimCascadeRegistry {
     reg
 }
 
+/// Interpreter-driven view-fold pass (feature = "interpreted-rules").
+///
+/// Replaces `views.fold_all(events, events_before, state.tick)` in the
+/// generated `engine_rules::step::step` when the `interpreted-rules`
+/// feature is active. Each materialized view in the DSL compilation is
+/// folded over the current tick's events using `ViewIR::fold` instead of
+/// the compiled `fold_event` fast-path.
+///
+/// The `engaged_with` view always uses its compiled `fold_event` (fallback)
+/// because the DSL body uses `self += 1` for both `EngagementCommitted`
+/// (insert) and `EngagementBroken` (remove) — `view_self_add_int` can
+/// only express the insert direction; the remove path requires the
+/// compiled handler's explicit clear logic.
+#[cfg(feature = "interpreted-rules")]
+pub fn fold_views_interpreted(
+    events:        &engine::event::EventRing<engine_data::events::Event>,
+    events_before: usize,
+    state:         &engine::state::SimState,
+    views:         &mut ViewRegistry,
+) {
+    use dsl_ast::eval::{AgentId as DslAgentId, EvalValue as DslEvalValue, EffectOp as DslEffectOp, ViewContext};
+    use dsl_ast::ir::ViewBodyIR;
+    use engine::cascade::dispatch::interp::{event_kind_name, event_to_fields};
+    use engine::evaluator::context::EngineReadCtx;
+    use engine_data::events::Event;
+
+    let comp = engine::mask::interp::compilation();
+    let tick  = state.tick;
+
+    // We need a context type that implements ViewContext.
+    // The ReadContext part delegates to an EngineReadCtx;
+    // the ViewContext part writes to the ViewRegistry.
+    struct ViewFoldCtx<'a> {
+        state: &'a engine::state::SimState,
+        views: &'a mut ViewRegistry,
+    }
+
+    // Helper: engine AgentId → dsl_ast AgentId
+    #[inline]
+    fn to_engine_agent(id: DslAgentId) -> engine::ids::AgentId {
+        engine::ids::AgentId::new(id.raw()).expect("DslAgentId is always non-zero")
+    }
+
+    // Implement ReadContext for ViewFoldCtx by delegating to EngineReadCtx.
+    impl dsl_ast::eval::ReadContext for ViewFoldCtx<'_> {
+        fn world_tick(&self) -> u32 { self.state.tick }
+        fn agents_alive(&self, id: DslAgentId) -> bool {
+            EngineReadCtx::new(self.state).agents_alive(id)
+        }
+        fn agents_pos(&self, id: DslAgentId) -> dsl_ast::eval::Vec3 {
+            EngineReadCtx::new(self.state).agents_pos(id)
+        }
+        fn agents_hp(&self, id: DslAgentId) -> f32 {
+            EngineReadCtx::new(self.state).agents_hp(id)
+        }
+        fn agents_max_hp(&self, id: DslAgentId) -> f32 {
+            EngineReadCtx::new(self.state).agents_max_hp(id)
+        }
+        fn agents_hp_pct(&self, id: DslAgentId) -> f32 {
+            EngineReadCtx::new(self.state).agents_hp_pct(id)
+        }
+        fn agents_shield_hp(&self, id: DslAgentId) -> f32 {
+            EngineReadCtx::new(self.state).agents_shield_hp(id)
+        }
+        fn agents_stun_expires_at_tick(&self, id: DslAgentId) -> u32 {
+            EngineReadCtx::new(self.state).agents_stun_expires_at_tick(id)
+        }
+        fn agents_slow_expires_at_tick(&self, id: DslAgentId) -> u32 {
+            EngineReadCtx::new(self.state).agents_slow_expires_at_tick(id)
+        }
+        fn agents_slow_factor_q8(&self, id: DslAgentId) -> i16 {
+            EngineReadCtx::new(self.state).agents_slow_factor_q8(id)
+        }
+        fn agents_attack_damage(&self, id: DslAgentId) -> f32 {
+            EngineReadCtx::new(self.state).agents_attack_damage(id)
+        }
+        fn agents_engaged_with(&self, id: DslAgentId) -> Option<DslAgentId> {
+            EngineReadCtx::new(self.state).agents_engaged_with(id)
+        }
+        fn agents_is_hostile_to(&self, a: DslAgentId, b: DslAgentId) -> bool {
+            EngineReadCtx::new(self.state).agents_is_hostile_to(a, b)
+        }
+        fn agents_gold(&self, id: DslAgentId) -> i64 {
+            EngineReadCtx::new(self.state).agents_gold(id)
+        }
+        fn query_nearby_agents(&self, center: dsl_ast::eval::Vec3, radius: f32, f: &mut dyn FnMut(DslAgentId)) {
+            EngineReadCtx::new(self.state).query_nearby_agents(center, radius, f)
+        }
+        fn query_nearby_kin(&self, origin: DslAgentId, center: dsl_ast::eval::Vec3, radius: f32, f: &mut dyn FnMut(DslAgentId)) {
+            EngineReadCtx::new(self.state).query_nearby_kin(origin, center, radius, f)
+        }
+        fn query_nearest_hostile_to(&self, agent: DslAgentId, radius: f32) -> Option<DslAgentId> {
+            EngineReadCtx::new(self.state).query_nearest_hostile_to(agent, radius)
+        }
+        fn abilities_is_known(&self, ab: dsl_ast::eval::AbilityId) -> bool {
+            EngineReadCtx::new(self.state).abilities_is_known(ab)
+        }
+        fn abilities_known(&self, agent: DslAgentId, ab: dsl_ast::eval::AbilityId) -> bool {
+            EngineReadCtx::new(self.state).abilities_known(agent, ab)
+        }
+        fn abilities_cooldown_ready(&self, agent: DslAgentId, ab: dsl_ast::eval::AbilityId) -> bool {
+            EngineReadCtx::new(self.state).abilities_cooldown_ready(agent, ab)
+        }
+        fn abilities_cooldown_ticks(&self, ab: dsl_ast::eval::AbilityId) -> u32 {
+            EngineReadCtx::new(self.state).abilities_cooldown_ticks(ab)
+        }
+        fn abilities_effects(&self, ab: dsl_ast::eval::AbilityId, f: &mut dyn FnMut(DslEffectOp)) {
+            EngineReadCtx::new(self.state).abilities_effects(ab, f)
+        }
+        fn config_combat_attack_range(&self) -> f32 {
+            EngineReadCtx::new(self.state).config_combat_attack_range()
+        }
+        fn config_combat_engagement_range(&self) -> f32 {
+            EngineReadCtx::new(self.state).config_combat_engagement_range()
+        }
+        fn config_movement_max_move_radius(&self) -> f32 {
+            EngineReadCtx::new(self.state).config_movement_max_move_radius()
+        }
+        fn config_cascade_max_iterations(&self) -> u32 {
+            EngineReadCtx::new(self.state).config_cascade_max_iterations()
+        }
+        fn view_is_hostile(&self, a: DslAgentId, b: DslAgentId) -> bool {
+            EngineReadCtx::new(self.state).view_is_hostile(a, b)
+        }
+        fn view_is_stunned(&self, agent: DslAgentId) -> bool {
+            EngineReadCtx::new(self.state).view_is_stunned(agent)
+        }
+        fn view_threat_level(&self, _obs: DslAgentId, _tgt: DslAgentId) -> f32 { 0.0 }
+        fn view_my_enemies(&self, _obs: DslAgentId, _tgt: DslAgentId) -> f32 { 0.0 }
+        fn view_pack_focus(&self, _obs: DslAgentId, _tgt: DslAgentId) -> f32 { 0.0 }
+        fn view_kin_fear(&self, _obs: DslAgentId) -> f32 { 0.0 }
+        fn view_rally_boost(&self, _obs: DslAgentId) -> f32 { 0.0 }
+        fn view_slow_factor(&self, agent: DslAgentId) -> f32 {
+            EngineReadCtx::new(self.state).view_slow_factor(agent)
+        }
+    }
+
+    impl ViewContext for ViewFoldCtx<'_> {
+        fn view_self_add(&mut self, view_name: &str, key: &[DslAgentId], delta: f32) {
+            let tick = self.state.tick;
+            match (view_name, key) {
+                ("threat_level", [obs, tgt]) => {
+                    let actor  = to_engine_agent(*obs);
+                    let target = to_engine_agent(*tgt);
+                    for _ in 0..(delta.round() as usize).min(64) {
+                        let ev = Event::EffectDamageApplied { actor, target, amount: 0.0, tick };
+                        self.views.threat_level.fold_event(&ev, tick);
+                    }
+                }
+                ("kin_fear", [obs, src]) => {
+                    let observer = to_engine_agent(*obs);
+                    let dead_kin = to_engine_agent(*src);
+                    for _ in 0..(delta.round() as usize).min(64) {
+                        let ev = Event::FearSpread { observer, dead_kin, tick };
+                        self.views.kin_fear.fold_event(&ev, tick);
+                    }
+                }
+                ("my_enemies", [obs, tgt]) => {
+                    let actor  = to_engine_agent(*obs);
+                    let target = to_engine_agent(*tgt);
+                    for _ in 0..(delta.round() as usize).min(64) {
+                        let ev = Event::AgentAttacked { actor, target, damage: 0.0, tick };
+                        self.views.my_enemies.fold_event(&ev, tick);
+                    }
+                }
+                ("pack_focus", [obs, tgt]) => {
+                    let observer = to_engine_agent(*obs);
+                    let target   = to_engine_agent(*tgt);
+                    for _ in 0..(delta.round() as usize).min(64) {
+                        let ev = Event::PackAssist { observer, target, tick };
+                        self.views.pack_focus.fold_event(&ev, tick);
+                    }
+                }
+                ("rally_boost", [obs, src]) => {
+                    let observer    = to_engine_agent(*obs);
+                    let wounded_kin = to_engine_agent(*src);
+                    for _ in 0..(delta.round() as usize).min(64) {
+                        let ev = Event::RallyCall { observer, wounded_kin, tick };
+                        self.views.rally_boost.fold_event(&ev, tick);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        fn view_self_add_int(&mut self, view_name: &str, key: &[DslAgentId], delta: i64) {
+            if view_name == "engaged_with" && key.len() == 2 {
+                if delta > 0 {
+                    let a = to_engine_agent(key[0]);
+                    let b = to_engine_agent(key[1]);
+                    self.views.engaged_with.set(a, Some(b));
+                }
+            }
+        }
+    }
+
+    let mut ctx = ViewFoldCtx { state, views };
+
+    for event in events.iter_since(events_before) {
+        // `engaged_with` uses compiled fallback (see module doc).
+        ctx.views.engaged_with.fold_event(event, tick);
+
+        let event_kind   = event_kind_name(event);
+        let event_fields = event_to_fields(event);
+
+        for view in &comp.views {
+            // Skip lazy views.
+            if matches!(view.body, ViewBodyIR::Expr(_)) {
+                continue;
+            }
+            // Skip engaged_with (compiled fallback above).
+            if view.name == "engaged_with" {
+                continue;
+            }
+
+            // Build observer key.
+            #[inline]
+            fn dsl_agent(id: engine::ids::AgentId) -> DslAgentId {
+                DslAgentId::new(id.raw()).expect("engine AgentId is always non-zero")
+            }
+
+            let observer: Option<[DslAgentId; 2]> = match (&view.name[..], event) {
+                (
+                    "threat_level",
+                    Event::AgentAttacked { actor, target, .. }
+                    | Event::EffectDamageApplied { actor, target, .. },
+                ) | (
+                    "my_enemies",
+                    Event::AgentAttacked { actor, target, .. },
+                ) => Some([dsl_agent(*actor), dsl_agent(*target)]),
+
+                ("kin_fear", Event::FearSpread { observer: obs, dead_kin, .. }) => {
+                    Some([dsl_agent(*obs), dsl_agent(*dead_kin)])
+                }
+
+                ("pack_focus", Event::PackAssist { observer: obs, target, .. }) => {
+                    Some([dsl_agent(*obs), dsl_agent(*target)])
+                }
+
+                ("rally_boost", Event::RallyCall { observer: obs, wounded_kin, .. }) => {
+                    Some([dsl_agent(*obs), dsl_agent(*wounded_kin)])
+                }
+
+                _ => None,
+            };
+
+            if let Some(obs) = observer {
+                view.fold(event_kind, &event_fields, &obs, &mut ctx);
+            }
+        }
+    }
+}
+
 /// Re-export `GeneratedRule` from the engine's sealed module so emitted code
 /// in this crate can write `impl crate::GeneratedRule for Foo {}` without
 /// needing to reference the full `engine::cascade::handler::__sealed` path.

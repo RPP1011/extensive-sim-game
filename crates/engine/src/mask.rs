@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "interpreted-rules")]
-pub(crate) mod interp {
+pub mod interp {
     use crate::ids::AgentId;
     use crate::mask::{MicroKind, TargetMask};
     use crate::state::SimState;

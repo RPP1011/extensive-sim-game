@@ -184,6 +184,9 @@ pub fn step<CB: ComputeBackend, B: PolicyBackend>(
             p.enter("view_fold");
         }
     }
+    #[cfg(feature = "interpreted-rules")]
+    crate::fold_views_interpreted(events, events_before, state, views);
+    #[cfg(not(feature = "interpreted-rules"))]
     views.fold_all(events, events_before, state.tick);
     if let Some(profile) = debug.tick_profile.as_ref() {
         if let Ok(mut p) = profile.lock() {

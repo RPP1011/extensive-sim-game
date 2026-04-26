@@ -20,7 +20,7 @@ use crate::telemetry::{metrics, TelemetrySink};
 // stays `None` (zero cost, no-op in the dispatch hot path).
 
 #[cfg(feature = "interpreted-rules")]
-mod interp {
+pub mod interp {
     use engine_data::events::Event;
     use crate::evaluator::context::EngineCascadeCtx;
     use crate::event::EventRing;
