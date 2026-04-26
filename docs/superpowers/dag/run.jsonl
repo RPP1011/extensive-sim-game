@@ -1,1 +1,2 @@
 {"ts":"2026-04-26T03:56:31Z","event":"task_blocked","task_id":"nonexistent.task-1","reason":"smoke test - no real task"}
+{"ts":"2026-04-26T03:57:28Z","event":"task_started","task_id":"2026-04-22-ir-interpreter.task-1"}

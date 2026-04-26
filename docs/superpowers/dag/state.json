@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-04-26T03:54:54Z",
+  "generated_at": "2026-04-26T03:57:28Z",
   "roadmap": [
     {
       "id": "roadmap-gpu-megakernel",
@@ -243,7 +243,7 @@
       "blocked_reason": null,
       "completed_commit": null,
       "critic_verdicts": {},
-      "started_at": null,
+      "started_at": "2026-04-26T03:57:28Z",
       "completed_at": null,
       "retry_count": 0
     },
