@@ -3,6 +3,10 @@ mod map;
 mod capture;
 mod train_v6;
 mod compile_dsl_cmd;
+mod debug_cmd;
+mod trace_cmd;
+mod profile_cmd;
+mod repro_cmd;
 
 use std::process::ExitCode;
 
@@ -21,5 +25,9 @@ fn main() -> ExitCode {
         },
         TaskCommand::TrainV6(cmd) => train_v6::run_train_v6(cmd),
         TaskCommand::CompileDsl(args) => compile_dsl_cmd::run_compile_dsl(args),
+        TaskCommand::Debug(args) => debug_cmd::run_debug(args),
+        TaskCommand::Trace(args) => trace_cmd::run_trace(args),
+        TaskCommand::Profile(args) => profile_cmd::run_profile(args),
+        TaskCommand::Repro(args) => repro_cmd::run_repro(args),
     }
 }

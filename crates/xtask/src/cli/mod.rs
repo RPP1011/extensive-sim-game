@@ -21,6 +21,74 @@ pub enum TaskCommand {
     TrainV6(TrainV6Args),
     /// Compile DSL sources (`assets/sim/*.sim`) into Rust + Python artefacts.
     CompileDsl(CompileDslArgs),
+    /// Interactive per-phase REPL: pause at each tick pipeline phase, inspect state.
+    Debug(DebugArgs),
+    /// Non-interactive trace: collect mask + agent-history snapshots for N ticks.
+    Trace(TraceArgs),
+    /// Phase timing histogram: run N ticks, dump per-phase ns samples as a table.
+    Profile(ProfileArgs),
+    /// Reproduction bundle: capture scenario state + causal tree to a file.
+    Repro(ReproArgs),
+}
+
+/// Arguments for `debug` subcommand.
+#[derive(Debug, clap::Args)]
+#[command(about = "Interactive per-phase REPL (pause at each pipeline phase)")]
+pub struct DebugArgs {
+    /// Scenario TOML file to load (stub: path is logged; engine not invoked).
+    #[arg(long, default_value = "scenarios/basic_4v4.toml")]
+    pub scenario: PathBuf,
+    /// Number of ticks to step through.
+    #[arg(long, default_value_t = 5)]
+    pub ticks: u32,
+    /// Run non-interactively (auto-continue all phases; useful for CI).
+    #[arg(long)]
+    pub no_interactive: bool,
+}
+
+/// Arguments for `trace` subcommand.
+#[derive(Debug, clap::Args)]
+#[command(about = "Non-interactive mask + agent-history collection")]
+pub struct TraceArgs {
+    /// Scenario TOML file to load (stub: path is logged; engine not invoked).
+    #[arg(long, default_value = "scenarios/basic_4v4.toml")]
+    pub scenario: PathBuf,
+    /// Number of ticks to collect.
+    #[arg(long, default_value_t = 100)]
+    pub ticks: u32,
+    /// Write trace output to this file instead of stdout.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for `profile` subcommand.
+#[derive(Debug, clap::Args)]
+#[command(about = "Phase timing histogram — run N ticks and dump per-phase ns table")]
+pub struct ProfileArgs {
+    /// Scenario TOML file to load (stub: path is logged; engine not invoked).
+    #[arg(long, default_value = "scenarios/basic_4v4.toml")]
+    pub scenario: PathBuf,
+    /// Number of ticks to profile.
+    #[arg(long, default_value_t = 100)]
+    pub ticks: u32,
+}
+
+/// Arguments for `repro` subcommand.
+#[derive(Debug, clap::Args)]
+#[command(about = "Capture a reproduction bundle (snapshot + causal-tree + traces) to file")]
+pub struct ReproArgs {
+    /// Scenario TOML file to load (stub: path is logged; engine not invoked).
+    #[arg(long, default_value = "scenarios/basic_4v4.toml")]
+    pub scenario: PathBuf,
+    /// Number of ticks to run before capturing.
+    #[arg(long, default_value_t = 100)]
+    pub ticks: u32,
+    /// Write the bundle to this path.
+    #[arg(long, default_value = "/tmp/repro.bundle")]
+    pub output: PathBuf,
+    /// Replay an existing bundle (print causal-tree dump) instead of capturing.
+    #[arg(long)]
+    pub replay: Option<PathBuf>,
 }
 
 #[derive(Debug, Parser)]
