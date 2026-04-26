@@ -6,3 +6,5 @@
 {"ts":"2026-04-26T04:08:09Z","event":"task_done","task_id":"2026-04-22-ir-interpreter.task-1","commit":"7c4eccb3","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"docs-only commit; critics N/A"}}
 {"ts":"2026-04-26T04:45:17Z","event":"task_started","task_id":"2026-04-22-ir-interpreter.task-2"}
 {"ts":"2026-04-26T04:45:50Z","event":"task_blocked","task_id":"2026-04-22-ir-interpreter.task-2","reason":"Prerequisite P1a (dsl_ast extraction) not landed: crates/dsl_ast/ does not exist. Plan stalls until 2026-04-22-dsl-ast-extraction is executed first OR ir-interpreter is deferred."}
+{"ts":"2026-04-26T04:48:53Z","event":"task_started","task_id":"2026-04-25-plan-4-debug-trace-impl.task-1"}
+{"ts":"2026-04-26T04:52:53Z","event":"task_done","task_id":"2026-04-25-plan-4-debug-trace-impl.task-1","commit":"5efa1bad","critic_verdicts":{"compliance":"PASS","quality":"PASS","critics":{"allowlist-gate":"PASS","compiler-first":"PASS"}}}

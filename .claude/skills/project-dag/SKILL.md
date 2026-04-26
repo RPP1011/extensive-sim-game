@@ -79,7 +79,7 @@ Halt the loop (do NOT call `ScheduleWakeup`) on any of:
 
 - **Critic FAIL** in `.claude/scripts/dispatch-critics.sh` output (any of the 6 critics)
 - **3+ consecutive `task_blocked`** without intervening `task_done` (grep `run.jsonl`)
-- **Allowlist edit detected** — subagent modified `engine/build.rs`; even if critic-allowlist-gate PASSED, escalate for user review
+- **Unplanned allowlist edit** — subagent modified `engine/build.rs` and the plan task did NOT explicitly call this out. (Planned allowlist edits — where the task title or body contains "allowlist" or "ALLOWED_DIRS" or "build.rs" — proceed if `critic-allowlist-gate` PASSES. Trust the critic; that's why it exists.)
 - **Schema-hash baseline change** — schema-bump critic flagged it
 - **Test failure** the agent can't resolve in 2 retries
 

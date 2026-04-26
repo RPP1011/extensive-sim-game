@@ -104,7 +104,7 @@ Tasks land in order of independence: collector primitives first (they're indepen
 - Create: `crates/engine/src/debug/mod.rs`
 - Modify: `crates/engine/src/lib.rs` — add `pub mod debug;`
 
-- [ ] **Step 1: Add `"debug"` to `ALLOWED_DIRS` in `crates/engine/build.rs`.**
+- [x] **Step 1: Add `"debug"` to `ALLOWED_DIRS` in `crates/engine/build.rs`.**
 
 ```rust
 const ALLOWED_DIRS: &[&str] = &[
@@ -118,7 +118,7 @@ const ALLOWED_DIRS: &[&str] = &[
 ];
 ```
 
-- [ ] **Step 2: Create `crates/engine/src/debug/mod.rs` skeleton.**
+- [x] **Step 2: Create `crates/engine/src/debug/mod.rs` skeleton.**
 
 ```rust
 //! Debug & trace runtime — engine primitive infrastructure for observability.
@@ -156,9 +156,9 @@ pub struct DebugConfig {
 
 (The 6 sibling modules are stub-files in this task; populated in Tasks 2–7.)
 
-- [ ] **Step 3: Add `pub mod debug;` to `crates/engine/src/lib.rs`.**
+- [x] **Step 3: Add `pub mod debug;` to `crates/engine/src/lib.rs`.**
 
-- [ ] **Step 4: Build engine alone.**
+- [x] **Step 4: Build engine alone.**
 
 ```bash
 unset RUSTFLAGS && cargo build -p engine
@@ -166,7 +166,7 @@ unset RUSTFLAGS && cargo build -p engine
 
 Expected: SUCCESS. The build.rs allowlist accepts `debug/`. Module file is empty-but-valid Rust.
 
-- [ ] **Step 5: Negative test — confirm allowlist still rejects unauthorized dirs.**
+- [x] **Step 5: Negative test — confirm allowlist still rejects unauthorized dirs.**
 
 ```bash
 mkdir -p crates/engine/src/_disallowed_test
@@ -178,7 +178,7 @@ unset RUSTFLAGS && cargo build -p engine
 
 Expected: panic + restored clean build.
 
-- [ ] **Step 6: Workspace test.**
+- [x] **Step 6: Workspace test.**
 
 ```bash
 unset RUSTFLAGS && cargo test --workspace
@@ -186,7 +186,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 Expected: PASS modulo pre-existing `spec_snippets`.
 
-- [ ] **Step 7: Commit (allowlist-gate critic dispatches).**
+- [x] **Step 7: Commit (allowlist-gate critic dispatches).**
 
 ```bash
 git commit -am "$(cat <<'EOF'
