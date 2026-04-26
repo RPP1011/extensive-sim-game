@@ -814,14 +814,29 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
                 writeln!(out, "{pad}{v};").unwrap();
             }
         }
-        IrStmt::BeliefObserve { .. } => {
-            // Lowering to emitted Rust is deferred to T5 (emit_physics).
-            // Grammar + IR + resolver land in T4; code generation in T5.
-            return Err(EmitError::Unsupported(
-                "`beliefs().observe()` code generation not yet implemented \
-                 (deferred to Plan ToM Task 5)"
-                    .into(),
-            ));
+        IrStmt::BeliefObserve { observer, target, fields, .. } => {
+            // T5: lower to a BoundedMap upsert on the observer's cold_beliefs.
+            // agent_cold_beliefs_mut returns None if the observer is dead/invalid;
+            // silently skip in that case (no-op is safe — belief is stale anyway).
+            let obs = lower_expr(observer)?;
+            let tgt = lower_expr(target)?;
+            let mut field_inits: Vec<String> = fields
+                .iter()
+                .map(|f| {
+                    let val = lower_expr(&f.value)?;
+                    Ok(format!("{}: {}", f.name, val))
+                })
+                .collect::<Result<_, EmitError>>()?;
+            // Spread default so partial field lists compile without listing every field.
+            field_inits.push("..Default::default()".into());
+            let inits = field_inits.join(", ");
+            writeln!(
+                out,
+                "{pad}if let Some(__beliefs) = state.agent_cold_beliefs_mut({obs}) {{\
+\n{pad}    __beliefs.upsert({tgt}, engine_data::belief::BeliefState {{ {inits} }});\
+\n{pad}}}"
+            )
+            .unwrap();
         }
     }
     Ok(())
@@ -1972,6 +1987,84 @@ mod tests {
         assert!(
             out.contains("crate::ability::EffectOp::Damage { amount }"),
             "expected qualified EffectOp::Damage struct pattern, got:\n{out}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // T5: BeliefObserve lowering
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn belief_observe_lowers_to_bounded_map_upsert() {
+        // `beliefs(observer).observe(target) with { confidence: amount }` should
+        // lower to:
+        //   if let Some(__beliefs) = state.agent_cold_beliefs_mut(observer) {
+        //       __beliefs.upsert(target, engine_data::belief::BeliefState { confidence: amount, ..Default::default() });
+        //   }
+        let ev = EventIR {
+            name: "EffectDamageApplied".into(),
+            fields: vec![
+                EventField { name: "caster".into(), ty: IrType::AgentId, span: span() },
+                EventField { name: "target".into(), ty: IrType::AgentId, span: span() },
+                EventField { name: "amount".into(), ty: IrType::F32, span: span() },
+            ],
+            tags: vec![],
+            annotations: vec![],
+            span: span(),
+        };
+        let pattern = IrPhysicsPattern::Kind(IrEventPattern {
+            name: "EffectDamageApplied".into(),
+            event: Some(EventRef(0)),
+            bindings: vec![
+                pattern_bind("caster", "observer", 0),
+                pattern_bind("target", "tgt", 1),
+                pattern_bind("amount", "amount", 2),
+            ],
+            span: span(),
+        });
+        let belief_stmt = IrStmt::BeliefObserve {
+            observer: local("observer", 0),
+            target: local("tgt", 1),
+            fields: vec![IrFieldInit {
+                name: "confidence".into(),
+                value: local("amount", 2),
+                span: span(),
+            }],
+            span: span(),
+        };
+        let p = PhysicsIR {
+            name: "record_observe".into(),
+            handlers: vec![PhysicsHandlerIR {
+                pattern,
+                where_clause: None,
+                body: vec![belief_stmt],
+                span: span(),
+            }],
+            annotations: vec![],
+            cpu_only: false,
+            span: span(),
+        };
+        let ctx = EmitContext { events: std::slice::from_ref(&ev), event_tags: &[] };
+        let out = emit_physics(&p, None, &ctx).unwrap();
+        assert!(
+            out.contains("agent_cold_beliefs_mut(observer)"),
+            "expected agent_cold_beliefs_mut call; got:\n{out}"
+        );
+        assert!(
+            out.contains("__beliefs.upsert(tgt,"),
+            "expected __beliefs.upsert call; got:\n{out}"
+        );
+        assert!(
+            out.contains("engine_data::belief::BeliefState {"),
+            "expected BeliefState struct literal; got:\n{out}"
+        );
+        assert!(
+            out.contains("confidence: amount"),
+            "expected confidence field init; got:\n{out}"
+        );
+        assert!(
+            out.contains("..Default::default()"),
+            "expected spread default for unspecified fields; got:\n{out}"
         );
     }
 }
