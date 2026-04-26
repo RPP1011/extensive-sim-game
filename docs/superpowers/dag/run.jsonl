@@ -2,3 +2,5 @@
 {"ts":"2026-04-26T03:57:28Z","event":"task_started","task_id":"2026-04-22-ir-interpreter.task-1"}
 {"ts":"2026-04-26T03:59:08Z","event":"task_started","task_id":"2026-04-22-ir-interpreter.task-1"}
 {"ts":"2026-04-26T03:59:30Z","event":"task_done","task_id":"2026-04-22-ir-interpreter.task-1","commit":"smoke-test-sha-deadbeef","critic_verdicts":{"compliance":"PASS","quality":"PASS"}}
+{"ts":"2026-04-26T04:03:57Z","event":"task_started","task_id":"2026-04-22-ir-interpreter.task-1"}
+{"ts":"2026-04-26T04:08:09Z","event":"task_done","task_id":"2026-04-22-ir-interpreter.task-1","commit":"7c4eccb3","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"docs-only commit; critics N/A"}}

@@ -118,9 +118,9 @@ If any of (1)–(8) fails, the plan is not done.
 
 **Goal:** Inventory exactly which IR variants, stdlib functions, and field reads the wolves+humans fixture exercises in each of the four rule classes. This bounds the interpreter's required coverage for P1b.
 
-- [ ] Read `assets/sim/{masks,scoring,physics,views}.sim` and `assets/sim/entities.sim`.
-- [ ] For each of `MaskIR`, `ScoringIR`, `PhysicsIR`, `ViewIR`, list the IR variants present in the wolves+humans rules. Example: does the mask DSL use `BinOp::And`, `UnOp::Not`, `ExprKind::FieldRead`, stdlib `distance`, etc.?
-- [ ] Capture the inventory as a short comment block at the top of each `eval/<class>.rs` file (created empty in this task) — or a single `docs/superpowers/notes/2026-04-22-wolves-humans-interp-coverage.md` if you prefer. This is the checklist for Tasks 3–6.
+- [x] Read `assets/sim/{masks,scoring,physics,views}.sim` and `assets/sim/entities.sim`.
+- [x] For each of `MaskIR`, `ScoringIR`, `PhysicsIR`, `ViewIR`, list the IR variants present in the wolves+humans rules. Example: does the mask DSL use `BinOp::And`, `UnOp::Not`, `ExprKind::FieldRead`, stdlib `distance`, etc.?
+- [x] Capture the inventory as a short comment block at the top of each `eval/<class>.rs` file (created empty in this task) — or a single `docs/superpowers/notes/2026-04-22-wolves-humans-interp-coverage.md` if you prefer. This is the checklist for Tasks 3–6.
 
 **Acceptance:** Inventory committed. Subsequent tasks use this as the "what must be supported" ceiling. Anything outside this inventory is explicitly P1c+ scope.
 
