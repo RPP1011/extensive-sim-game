@@ -160,6 +160,8 @@ pub fn step<CB: ComputeBackend, B: PolicyBackend>(
     }
 
     // Phase 5b: belief decay (per-tick confidence multiply + eviction)
+    // Gated: only active when the `theory-of-mind` feature is on.
+    #[cfg(feature = "theory-of-mind")]
     {
         let decay_rate = state.config.belief.decay_rate;
         let floor = state.config.belief.eviction_threshold;

@@ -142,6 +142,7 @@ fn score_entry(
                     score += v * row.delta;
                 }
             }
+            #[cfg(feature = "theory-of-mind")]
             PredicateDescriptor::KIND_BELIEF_GRADIENT => {
                 let v = eval_belief_scalar(state, agent, target, &row.predicate);
                 if v.is_finite() {
@@ -336,6 +337,7 @@ fn eval_predicate(
             let rhs = f32::from_le_bytes(tb);
             compare_scalar(pred.op, lhs, rhs)
         }
+        #[cfg(feature = "theory-of-mind")]
         PredicateDescriptor::KIND_BELIEF_SCALAR_COMPARE => {
             let lhs = eval_belief_scalar(state, agent, target, pred);
             let mut tb = [0u8; 4];
@@ -399,6 +401,7 @@ fn eval_view_call(
 ///
 /// Returns the belief field value, or `f32::NAN` when the observer /
 /// target cannot be resolved or no belief entry exists (fail-closed).
+#[cfg(feature = "theory-of-mind")]
 fn eval_belief_scalar(
     state: &SimState,
     agent: AgentId,

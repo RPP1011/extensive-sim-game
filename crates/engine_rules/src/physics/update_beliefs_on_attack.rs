@@ -23,6 +23,7 @@ pub fn update_beliefs_on_attack(
         crate::spatial::nearby_kin(state, attacker, state.config.belief.loud_observation_range)
     {
         if state.agent_alive(observer) {
+            #[cfg(feature = "theory-of-mind")]
             if let Some(__beliefs) = state.agent_cold_beliefs_mut(observer) {
                 __beliefs.upsert(
                     attacker,
@@ -35,6 +36,7 @@ pub fn update_beliefs_on_attack(
                     },
                 );
             }
+            #[cfg(feature = "theory-of-mind")]
             if let Some(__beliefs) = state.agent_cold_beliefs_mut(observer) {
                 __beliefs.upsert(
                     victim,

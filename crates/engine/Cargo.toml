@@ -34,6 +34,10 @@ harness = false
 [features]
 default = []
 dhat-heap = []
+# Enables the Theory-of-Mind subsystem: cold_beliefs SoA field, belief-decay
+# Phase 5b, BeliefObserve cascade rules, and belief-predicate scoring arms.
+# Zero cost when off — the field and all call sites are removed by the compiler.
+theory-of-mind = []
 # Elide all contracts::{invariant, requires, ensures} attributes. Useful for
 # benchmarking when the debug-build contract overhead is under measurement.
 # When this feature is on, the engine behaves as if compiled in release mode

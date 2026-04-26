@@ -133,6 +133,8 @@ pub struct SimState {
     // observed AgentId.  Capacity N=8 (spec §3.1).  `BeliefState` is emitted by
     // the DSL compiler in Task 3; this field is intentionally forward-declared
     // here so the SoA layout is established before the type lands.
+    // Gated: zero-cost when the `theory-of-mind` feature is off.
+    #[cfg(feature = "theory-of-mind")]
     cold_beliefs: Vec<crate::pool::BoundedMap<AgentId, engine_data::belief::BeliefState, 8>>,
     /// Per-(agent, ability-slot) local cooldown cursor. Value = the
     /// tick when this specific ability slot next becomes ready;
@@ -281,6 +283,7 @@ impl SimState {
             cold_class_definitions: vec![[ClassSlot::default(); 4]; cap],
             cold_creditor_ledger:   (0..cap).map(|_| SmallVec::new()).collect(),
             cold_mentor_lineage:    vec![[None; 8]; cap],
+            #[cfg(feature = "theory-of-mind")]
             cold_beliefs:           (0..cap).map(|_| crate::pool::BoundedMap::new()).collect(),
             ability_cooldowns:      vec![[0u32; MAX_ABILITIES]; cap],
             // Incremental spatial hash — sized for `cap` agent slots.
@@ -381,7 +384,8 @@ impl SimState {
         self.cold_mentor_lineage[slot] = [None; 8];
         // Theory-of-Mind Phase 1: clear belief map on (re)spawn so a recycled
         // slot doesn't carry stale beliefs from the previous occupant.
-        self.cold_beliefs[slot]        = crate::pool::BoundedMap::new();
+        #[cfg(feature = "theory-of-mind")]
+        { self.cold_beliefs[slot]      = crate::pool::BoundedMap::new(); }
         self.ability_cooldowns[slot]   = [0u32; MAX_ABILITIES];
         // Incremental spatial-hash insert — O(1).
         self.spatial.insert(id, spec.pos, MovementMode::Walk);
@@ -884,12 +888,15 @@ impl SimState {
 
     // Theory-of-Mind Phase 1 (Plan 2026-04-25): belief-map accessors.
     // `BeliefState` is defined in `engine_data::belief` (Task 3 of the plan).
+    // Gated: zero-cost (method doesn't exist) when `theory-of-mind` feature is off.
+    #[cfg(feature = "theory-of-mind")]
     pub fn agent_cold_beliefs(
         &self,
         id: AgentId,
     ) -> Option<&crate::pool::BoundedMap<AgentId, engine_data::belief::BeliefState, 8>> {
         self.cold_beliefs.get(AgentSlotPool::slot_of_agent(id))
     }
+    #[cfg(feature = "theory-of-mind")]
     pub fn agent_cold_beliefs_mut(
         &mut self,
         id: AgentId,

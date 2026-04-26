@@ -13,6 +13,7 @@ pub fn update_beliefs_on_death(dead: AgentId, state: &mut SimState, events: &mut
     let tick_val = state.tick;
     for observer in crate::spatial::nearby_kin(state, dead, state.config.belief.observation_range) {
         if state.agent_alive(observer) {
+            #[cfg(feature = "theory-of-mind")]
             if let Some(__beliefs) = state.agent_cold_beliefs_mut(observer) {
                 __beliefs.upsert(
                     dead,

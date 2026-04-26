@@ -12,3 +12,9 @@ smallvec = "1.13"
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+default = []
+# Mirror of `engine/theory-of-mind`: enables the belief-write cascade rules
+# emitted into physics/*.rs and the Phase 5b decay block in step.rs.
+theory-of-mind = ["engine/theory-of-mind"]

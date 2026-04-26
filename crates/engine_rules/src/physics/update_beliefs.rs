@@ -21,6 +21,7 @@ pub fn update_beliefs(
     for observer in crate::spatial::nearby_kin(state, mover, state.config.belief.observation_range)
     {
         if state.agent_alive(observer) {
+            #[cfg(feature = "theory-of-mind")]
             if let Some(__beliefs) = state.agent_cold_beliefs_mut(observer) {
                 __beliefs.upsert(
                     mover,

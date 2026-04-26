@@ -1,4 +1,8 @@
 //! Silent Wolf — belief-aware scoring reference scenario.
+// T11: entire test module requires the `theory-of-mind` feature.
+// Run with: cargo test -p engine --test silent_wolf_belief --features engine_rules/theory-of-mind
+// (engine_rules/theory-of-mind transitively enables engine/theory-of-mind)
+#![cfg(feature = "theory-of-mind")]
 //!
 //! Plan: docs/superpowers/plans/2026-04-25-theory-of-mind-impl.md Task 10.
 //!

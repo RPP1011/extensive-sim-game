@@ -818,6 +818,7 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
             // T5: lower to a BoundedMap upsert on the observer's cold_beliefs.
             // agent_cold_beliefs_mut returns None if the observer is dead/invalid;
             // silently skip in that case (no-op is safe — belief is stale anyway).
+            // Gated: entire block is a no-op when `theory-of-mind` feature is off.
             let obs = lower_expr(observer)?;
             let tgt = lower_expr(target)?;
             let mut field_inits: Vec<String> = fields
@@ -832,7 +833,8 @@ fn emit_stmt(out: &mut String, stmt: &IrStmt, indent: usize) -> Result<(), EmitE
             let inits = field_inits.join(", ");
             writeln!(
                 out,
-                "{pad}if let Some(__beliefs) = state.agent_cold_beliefs_mut({obs}) {{\
+                "{pad}#[cfg(feature = \"theory-of-mind\")]\n\
+{pad}if let Some(__beliefs) = state.agent_cold_beliefs_mut({obs}) {{\
 \n{pad}    __beliefs.upsert({tgt}, engine_data::belief::BeliefState {{ {inits} }});\
 \n{pad}}}"
             )
