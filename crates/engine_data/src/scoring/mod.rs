@@ -86,6 +86,14 @@ impl PredicateDescriptor {
     /// layout as `KIND_VIEW_SCALAR_COMPARE`; `delta` is on the enclosing
     /// `ModifierRow.delta`. `payload[0..4]` is reserved (zeros).
     pub const KIND_VIEW_GRADIENT: u8 = 8;
+    /// Belief-state scalar compare — `score += (beliefs(obs).about(tgt).<field> <op> threshold) ? delta : 0`.
+    /// `field_id` holds the `BELIEF_FIELD_*` index; `payload[0..4]` = threshold (f32 LE);
+    /// `payload[4]` = observer slot code; `payload[5]` = target slot code.
+    /// Dispatched by `eval_belief_scalar` in the engine-side scorer.
+    pub const KIND_BELIEF_SCALAR_COMPARE: u8 = 9;
+    /// Belief-state gradient — `score += beliefs(obs).about(tgt).<field> * delta`.
+    /// Same slot layout as `KIND_BELIEF_SCALAR_COMPARE`; `payload[0..4]` is reserved.
+    pub const KIND_BELIEF_GRADIENT: u8 = 10;
 
     /// View-call arg-slot codes. Mirrored on the compiler side so a
     /// drift between the two lowerings is a rustc type error, not a
@@ -94,6 +102,17 @@ impl PredicateDescriptor {
     pub const ARG_TARGET: u8 = 1;
     pub const ARG_WILDCARD: u8 = 0xFE;
     pub const ARG_NONE: u8 = 0xFF;
+
+    /// Belief field indices. Mirrored on the compiler side; any drift is
+    /// a schema bug caught by `SCORING_HASH` in CI.
+    ///
+    /// Only the five scalar-numeric fields are valid in scoring predicates
+    /// (`last_known_pos: Vec3` and `last_known_creature_type: CreatureType`
+    /// are non-scalar and cannot appear in arithmetic / compare rows).
+    pub const BELIEF_FIELD_LAST_KNOWN_HP: u16 = 0;
+    pub const BELIEF_FIELD_LAST_KNOWN_MAX_HP: u16 = 1;
+    pub const BELIEF_FIELD_CONFIDENCE: u16 = 2;
+    pub const BELIEF_FIELD_LAST_UPDATED_TICK: u16 = 3;
 
     /// Runtime VIEW_IDs. Extend by adding a VIEW_ID_* constant + an
     /// engine-side `eval_view_call` arm + a VIEW_NAME_* entry in the

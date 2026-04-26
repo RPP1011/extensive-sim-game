@@ -143,12 +143,30 @@ const KIND_VIEW_SCALAR_COMPARE: u8 = 7;
 /// View-call gradient: `score += view_call * delta`. Same arg-slot
 /// layout as `KIND_VIEW_SCALAR_COMPARE`; threshold bytes unused.
 const KIND_VIEW_GRADIENT: u8 = 8;
+/// Belief-state scalar compare: `score += (beliefs(obs).about(tgt).<field> <op> threshold) ? delta : 0`.
+/// `field_id` holds the BELIEF_FIELD_* index; `payload[0..4]` = threshold (f32 LE);
+/// `payload[4]` = observer slot code; `payload[5]` = target slot code.
+/// Dispatched by `eval_belief_scalar` in the engine-side scorer.
+const KIND_BELIEF_SCALAR_COMPARE: u8 = 9;
+/// Belief-state gradient: `score += beliefs(obs).about(tgt).<field> * delta`.
+/// Same slot layout as `KIND_BELIEF_SCALAR_COMPARE`; threshold bytes unused.
+const KIND_BELIEF_GRADIENT: u8 = 10;
 
 // View-call arg-slot codes.
 const ARG_SELF: u8 = 0;
 const ARG_TARGET: u8 = 1;
 const ARG_WILDCARD: u8 = 0xFE;
 const ARG_NONE: u8 = 0xFF;
+
+// Belief field indices. Must match the engine-side `read_belief_field` dispatch.
+/// `BeliefState::last_known_hp` — last observed current HP.
+const BELIEF_FIELD_LAST_KNOWN_HP: u16 = 0;
+/// `BeliefState::last_known_max_hp` — last observed max HP.
+const BELIEF_FIELD_LAST_KNOWN_MAX_HP: u16 = 1;
+/// `BeliefState::confidence` — confidence scalar in [0, 1].
+const BELIEF_FIELD_CONFIDENCE: u16 = 2;
+/// `BeliefState::last_updated_tick` — tick at last observation (cast to f32).
+const BELIEF_FIELD_LAST_UPDATED_TICK: u16 = 3;
 
 /// Runtime VIEW_ID mapping — must match the engine-side
 /// `eval_view_call` dispatch in `crates/engine/src/policy/utility.rs`.
@@ -396,6 +414,14 @@ impl PredicateDescriptor {
     /// layout as `KIND_VIEW_SCALAR_COMPARE`; `delta` is on the enclosing
     /// `ModifierRow.delta`. `payload[0..4]` is reserved (zeros).
     pub const KIND_VIEW_GRADIENT: u8 = 8;
+    /// Belief-state scalar compare — `score += (beliefs(obs).about(tgt).<field> <op> threshold) ? delta : 0`.
+    /// `field_id` holds the `BELIEF_FIELD_*` index; `payload[0..4]` = threshold (f32 LE);
+    /// `payload[4]` = observer slot code; `payload[5]` = target slot code.
+    /// Dispatched by `eval_belief_scalar` in the engine-side scorer.
+    pub const KIND_BELIEF_SCALAR_COMPARE: u8 = 9;
+    /// Belief-state gradient — `score += beliefs(obs).about(tgt).<field> * delta`.
+    /// Same slot layout as `KIND_BELIEF_SCALAR_COMPARE`; `payload[0..4]` is reserved.
+    pub const KIND_BELIEF_GRADIENT: u8 = 10;
 
     /// View-call arg-slot codes. Mirrored on the compiler side so a
     /// drift between the two lowerings is a rustc type error, not a
@@ -404,6 +430,17 @@ impl PredicateDescriptor {
     pub const ARG_TARGET: u8 = 1;
     pub const ARG_WILDCARD: u8 = 0xFE;
     pub const ARG_NONE: u8 = 0xFF;
+
+    /// Belief field indices. Mirrored on the compiler side; any drift is
+    /// a schema bug caught by `SCORING_HASH` in CI.
+    ///
+    /// Only the five scalar-numeric fields are valid in scoring predicates
+    /// (`last_known_pos: Vec3` and `last_known_creature_type: CreatureType`
+    /// are non-scalar and cannot appear in arithmetic / compare rows).
+    pub const BELIEF_FIELD_LAST_KNOWN_HP: u16 = 0;
+    pub const BELIEF_FIELD_LAST_KNOWN_MAX_HP: u16 = 1;
+    pub const BELIEF_FIELD_CONFIDENCE: u16 = 2;
+    pub const BELIEF_FIELD_LAST_UPDATED_TICK: u16 = 3;
 
     /// Runtime VIEW_IDs. Extend by adding a VIEW_ID_* constant + an
     /// engine-side `eval_view_call` arm + a VIEW_NAME_* entry in the
@@ -542,10 +579,7 @@ fn lower_entry(entry: &ScoringEntryIR, views: &[ViewIR]) -> Result<LoweredEntry,
             SumTerm::Gradient { expr, delta } => {
                 // Recognise `view::<name>(args...)` gradients — they emit
                 // `KIND_VIEW_GRADIENT` so the runtime evaluates the view
-                // to produce the scalar the delta multiplies. Any other
-                // gradient-expression shape falls through to the v1
-                // `KIND_GRADIENT` placeholder (side-table emitter is a
-                // future milestone).
+                // to produce the scalar the delta multiplies.
                 if let IrExpr::ViewCall(vref, ir_args) = &expr.kind {
                     let vname = view_name(*vref, views);
                     let view_id = view_id_for(vname)?;
@@ -558,6 +592,20 @@ fn lower_entry(entry: &ScoringEntryIR, views: &[ViewIR]) -> Result<LoweredEntry,
                         kind: KIND_VIEW_GRADIENT,
                         op: 0,
                         field_id: view_id,
+                        payload,
+                        delta,
+                    });
+                // Recognise `beliefs(obs).about(tgt).<field>` / `.confidence(tgt)` gradients.
+                } else if let Some((belief_fid, obs_slot, tgt_slot)) =
+                    try_belief_gradient_expr(expr, target_binding)?
+                {
+                    let mut payload = [0u8; 12];
+                    payload[4] = obs_slot;
+                    payload[5] = tgt_slot;
+                    modifiers.push(LoweredModifier {
+                        kind: KIND_BELIEF_GRADIENT,
+                        op: 0,
+                        field_id: belief_fid,
                         payload,
                         delta,
                     });
@@ -714,6 +762,14 @@ fn collect_sum<'a>(
             *seen_base = true;
             Ok(())
         }
+        // `BeliefsView` (aggregate over the believed-agent set) is not yet
+        // supported as a top-level scoring sum term. Use it inside an `if`
+        // condition or `per_unit` gradient when T10 lands a view-aggregate kind.
+        IrExpr::BeliefsView { .. } => Err(EmitError::UnsupportedExprShape(
+            "`beliefs(...).view_name(_)` aggregate is not yet supported as a \
+             top-level scoring expression; use `beliefs(self).about(t).<field>` \
+             or wrap in `if ... { <lit> } else { 0.0 }`".into(),
+        )),
         other => Err(EmitError::UnsupportedExprShape(format!(
             "expected literal, `if <pred> {{ <lit> }} else {{ 0.0 }}`, or `<expr> per_unit <delta>` (or `+` of those); got {other:?}"
         ))),
@@ -781,6 +837,26 @@ fn lower_modifier(
         });
     }
 
+    // Belief-state scalar compare: `beliefs(obs).about(tgt).<field> <op> <lit>`.
+    // Runs before the generic field-ref branch so a belief accessor doesn't
+    // fall through to the "unsupported field" catch-all.
+    if let Some((belief_fid, obs_slot, tgt_slot, op_tag, threshold)) =
+        try_belief_scalar_compare(op, lhs, rhs, target_binding)?
+    {
+        let mut payload = [0u8; 12];
+        let tb = threshold.to_le_bytes();
+        payload[0..4].copy_from_slice(&tb);
+        payload[4] = obs_slot;
+        payload[5] = tgt_slot;
+        return Ok(LoweredModifier {
+            kind: KIND_BELIEF_SCALAR_COMPARE,
+            op: op_tag,
+            field_id: belief_fid,
+            payload,
+            delta,
+        });
+    }
+
     // Classic field scalar compare.
     let (final_op, field_id, threshold) = if let Some(fid) = try_field_ref(lhs, target_binding) {
         let t = lit_float(rhs).ok_or_else(|| {
@@ -798,7 +874,7 @@ fn lower_modifier(
         (flip_op(op), fid, t)
     } else {
         return Err(EmitError::UnsupportedPredicate(
-            "scalar compare must reference `self.<field>`, the head's target binding, or a `view::<name>(args)` call on one side".into(),
+            "scalar compare must reference `self.<field>`, the head's target binding, a `view::<name>(args)` call, or a `beliefs(...)` accessor on one side".into(),
         ));
     };
 
@@ -850,6 +926,141 @@ fn try_view_compare(
         return Ok(Some((view_id, slots, count, flip_op(op), threshold)));
     }
     Ok(None)
+}
+
+/// Try to recognise `beliefs(obs).about(tgt).<field> <op> <lit>` (or mirror)
+/// as a belief-state scalar compare. Returns `Ok(None)` when neither side is a
+/// belief accessor; `Ok(Some(_))` on success; `Err(_)` when one side is a
+/// belief accessor but the other isn't a literal, or the field is non-scalar.
+///
+/// Return tuple: `(belief_field_id, observer_slot, target_slot, op, threshold)`.
+fn try_belief_scalar_compare(
+    op: u8,
+    lhs: &IrExprNode,
+    rhs: &IrExprNode,
+    target_binding: Option<&str>,
+) -> Result<Option<(u16, u8, u8, u8, f32)>, EmitError> {
+    // Helper: extract (belief_field_id, observer_slot, target_slot) from a
+    // BeliefsAccessor or BeliefsConfidence node.
+    fn belief_slots(
+        expr: &IrExprNode,
+        target_binding: Option<&str>,
+    ) -> Result<Option<(u16, u8, u8)>, EmitError> {
+        match &expr.kind {
+            IrExpr::BeliefsAccessor { observer, target, field } => {
+                let fid = belief_field_id(field).ok_or_else(|| {
+                    EmitError::UnsupportedPredicate(format!(
+                        "belief field `{field}` is not a scalar — only \
+                         last_known_hp, last_known_max_hp, confidence, \
+                         last_updated_tick may appear in scoring predicates"
+                    ))
+                })?;
+                let obs_slot = agent_expr_slot(observer)?;
+                let tgt_slot = agent_expr_slot_with_binding(target, target_binding)?;
+                Ok(Some((fid, obs_slot, tgt_slot)))
+            }
+            IrExpr::BeliefsConfidence { observer, target } => {
+                let obs_slot = agent_expr_slot(observer)?;
+                let tgt_slot = agent_expr_slot_with_binding(target, target_binding)?;
+                Ok(Some((BELIEF_FIELD_CONFIDENCE, obs_slot, tgt_slot)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    if let Some((fid, obs, tgt)) = belief_slots(lhs, target_binding)? {
+        let threshold = lit_float(rhs).ok_or_else(|| {
+            EmitError::UnsupportedPredicate(
+                "RHS of belief scalar compare must be a float literal".into(),
+            )
+        })?;
+        return Ok(Some((fid, obs, tgt, op, threshold)));
+    }
+    if let Some((fid, obs, tgt)) = belief_slots(rhs, target_binding)? {
+        let threshold = lit_float(lhs).ok_or_else(|| {
+            EmitError::UnsupportedPredicate(
+                "LHS of belief scalar compare must be a float literal when belief accessor is on the right".into(),
+            )
+        })?;
+        return Ok(Some((fid, obs, tgt, flip_op(op), threshold)));
+    }
+    Ok(None)
+}
+
+/// Extract a `BeliefsAccessor` or `BeliefsConfidence` node's (field_id, obs_slot, tgt_slot)
+/// for use in a gradient `per_unit` term.
+fn try_belief_gradient_expr(
+    expr: &IrExprNode,
+    target_binding: Option<&str>,
+) -> Result<Option<(u16, u8, u8)>, EmitError> {
+    match &expr.kind {
+        IrExpr::BeliefsAccessor { observer, target, field } => {
+            let fid = belief_field_id(field).ok_or_else(|| {
+                EmitError::UnsupportedExprShape(format!(
+                    "belief field `{field}` is not a scalar — only \
+                     last_known_hp, last_known_max_hp, confidence, \
+                     last_updated_tick may appear in scoring gradient terms"
+                ))
+            })?;
+            let obs_slot = agent_expr_slot(observer)?;
+            let tgt_slot = agent_expr_slot_with_binding(target, target_binding)?;
+            Ok(Some((fid, obs_slot, tgt_slot)))
+        }
+        IrExpr::BeliefsConfidence { observer, target } => {
+            let obs_slot = agent_expr_slot(observer)?;
+            let tgt_slot = agent_expr_slot_with_binding(target, target_binding)?;
+            Ok(Some((BELIEF_FIELD_CONFIDENCE, obs_slot, tgt_slot)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Map a belief field name to its `BELIEF_FIELD_*` index. Returns `None` for
+/// non-scalar fields (`last_known_pos`, `last_known_creature_type`).
+fn belief_field_id(field: &str) -> Option<u16> {
+    match field {
+        "last_known_hp" => Some(BELIEF_FIELD_LAST_KNOWN_HP),
+        "last_known_max_hp" => Some(BELIEF_FIELD_LAST_KNOWN_MAX_HP),
+        "confidence" => Some(BELIEF_FIELD_CONFIDENCE),
+        "last_updated_tick" => Some(BELIEF_FIELD_LAST_UPDATED_TICK),
+        _ => None,
+    }
+}
+
+/// Resolve a bare agent-ref expression to an arg-slot code, defaulting
+/// `self` to `ARG_SELF`. Non-`self` bare locals raise `UnsupportedPredicate`
+/// because scoring belief reads always observe as `self`.
+fn agent_expr_slot(expr: &IrExprNode) -> Result<u8, EmitError> {
+    match &expr.kind {
+        IrExpr::Local(_, name) if name == "self" => Ok(ARG_SELF),
+        IrExpr::Local(_, name) => Err(EmitError::UnsupportedPredicate(format!(
+            "belief observer must be `self` in scoring predicates; got `{name}`"
+        ))),
+        other => Err(EmitError::UnsupportedPredicate(format!(
+            "belief observer must be a bare `self` local; got {other:?}"
+        ))),
+    }
+}
+
+/// Resolve a target agent-ref expression to an arg-slot code. `self` maps to
+/// `ARG_SELF`; the head's target binding maps to `ARG_TARGET`; anything else
+/// raises `UnsupportedPredicate`.
+fn agent_expr_slot_with_binding(
+    expr: &IrExprNode,
+    target_binding: Option<&str>,
+) -> Result<u8, EmitError> {
+    match &expr.kind {
+        IrExpr::Local(_, name) if name == "self" => Ok(ARG_SELF),
+        IrExpr::Local(_, name) => match target_binding {
+            Some(tb) if name == tb => Ok(ARG_TARGET),
+            _ => Err(EmitError::UnsupportedPredicate(format!(
+                "belief target `{name}` is not `self` or the head's target binding"
+            ))),
+        },
+        other => Err(EmitError::UnsupportedPredicate(format!(
+            "belief target must be a bare local (`self` or target binding); got {other:?}"
+        ))),
+    }
 }
 
 /// Look up the source-level view name for a `ViewRef`.
@@ -1124,6 +1335,49 @@ fn emit_modifier_literal(out: &mut String, m: &LoweredModifier) {
             "                predicate: PredicateDescriptor {{ kind: PredicateDescriptor::KIND_VIEW_GRADIENT, op: 0, field_id: {}, payload: {} }},",
             m.field_id,
             payload_str,
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                delta: {},",
+            format_float(m.delta as f64)
+        )
+        .unwrap();
+        writeln!(out, "            }},").unwrap();
+        return;
+    }
+    if m.kind == KIND_BELIEF_SCALAR_COMPARE {
+        // Belief scalar compare: `beliefs(obs).about(tgt).<field> <op> threshold`.
+        // payload[0..4] = threshold (f32 LE); payload[4] = observer slot;
+        // payload[5] = target slot. `field_id` = BELIEF_FIELD_* index.
+        writeln!(out, "            ModifierRow {{").unwrap();
+        writeln!(
+            out,
+            "                predicate: PredicateDescriptor {{ kind: PredicateDescriptor::KIND_BELIEF_SCALAR_COMPARE, op: PredicateDescriptor::{}, field_id: {}, payload: [{}, {}, {}, {}, {}, {}, 0, 0, 0, 0, 0, 0] }},",
+            op_const_name(m.op),
+            m.field_id,
+            m.payload[0], m.payload[1], m.payload[2], m.payload[3],
+            m.payload[4], m.payload[5],
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "                delta: {},",
+            format_float(m.delta as f64)
+        )
+        .unwrap();
+        writeln!(out, "            }},").unwrap();
+        return;
+    }
+    if m.kind == KIND_BELIEF_GRADIENT {
+        // Belief gradient: `beliefs(obs).about(tgt).<field> per_unit delta`.
+        // payload[4] = observer slot; payload[5] = target slot; `field_id` = BELIEF_FIELD_*.
+        writeln!(out, "            ModifierRow {{").unwrap();
+        writeln!(
+            out,
+            "                predicate: PredicateDescriptor {{ kind: PredicateDescriptor::KIND_BELIEF_GRADIENT, op: 0, field_id: {}, payload: [0, 0, 0, 0, {}, {}, 0, 0, 0, 0, 0, 0] }},",
+            m.field_id,
+            m.payload[4], m.payload[5],
         )
         .unwrap();
         writeln!(
