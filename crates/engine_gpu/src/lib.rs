@@ -364,6 +364,18 @@ impl ComputeBackend for GpuBackend {
     ) {
         engine::step::step(state, scratch, events, policy, cascade);
     }
+
+    fn reset_mask(&mut self, buf: &mut engine::mask::MaskBuffer) {
+        buf.reset(); // Phase 1 stub: CPU pass-through. Plan 5d dispatches GPU clear kernel.
+    }
+
+    fn set_mask_bit(&mut self, buf: &mut engine::mask::MaskBuffer, slot: usize, kind: engine::mask::MicroKind) {
+        buf.set(slot, kind, true); // Phase 1 stub.
+    }
+
+    fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
+        // Phase 1 stub: no-op (no GPU mirror to flush yet).
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -2758,6 +2770,18 @@ impl ComputeBackend for GpuBackend {
         } else {
             self.sync.last_phase_us.gpu_sidecar_us = 0;
         }
+    }
+
+    fn reset_mask(&mut self, buf: &mut engine::mask::MaskBuffer) {
+        buf.reset(); // Phase 1 stub: CPU pass-through. Plan 5d dispatches GPU clear kernel.
+    }
+
+    fn set_mask_bit(&mut self, buf: &mut engine::mask::MaskBuffer, slot: usize, kind: engine::mask::MicroKind) {
+        buf.set(slot, kind, true); // Phase 1 stub.
+    }
+
+    fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
+        // Phase 1 stub: no-op (no GPU mirror to flush yet).
     }
 }
 
