@@ -3395,14 +3395,14 @@
       "blocks": [
         "2026-04-25-theory-of-mind-impl.task-11"
       ],
-      "status": "pending",
+      "status": "in_progress",
       "steps_total": 4,
       "steps_done": 0,
       "owner_class": "implementer",
       "blocked_reason": null,
       "completed_commit": null,
       "critic_verdicts": {},
-      "started_at": null,
+      "started_at": "2026-04-26T08:52:05Z",
       "completed_at": null,
       "retry_count": 0
     },
@@ -3609,8 +3609,8 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T08:49:29Z",
-    "iterations_completed": 35,
+    "last_iteration_at": "2026-04-26T08:52:05Z",
+    "iterations_completed": 36,
     "tasks_closed": 32,
     "tasks_blocked": 0,
     "current_phase": "dispatching",

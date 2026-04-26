@@ -227,6 +227,16 @@ scoring {
   //     candidate target. Row-level bump (wildcard `_`), not
   //     target-bound — "my blood is up" is a row-wide signal, same
   //     shape as the Flee kin_fear bump.
+  // belief-aware attack bias — Plan ToM Task 10 (Silent Wolf reference
+  // scenario). When the attacker has a fresh, high-confidence belief
+  // about the target (confidence > 0.5 means the belief was formed
+  // within the last few ticks and hasn't decayed past the midpoint),
+  // the row picks up +0.2. Semantically: "I've seen this target recently
+  // — attack with confidence."  The predicate exercises
+  // `KIND_BELIEF_SCALAR_COMPARE` end-to-end (write → decay → read
+  // in the scoring loop). Delta kept smaller than the targeting deltas
+  // above so it augments but doesn't override the hp_pct priority
+  // ordering.
   Attack(target) = 0.0
     + (if self.hp_pct >= 0.8 { 0.5 } else { 0.0 })
     + (if target.hp_pct < 0.3 { 0.4 } else { 0.0 })
@@ -236,6 +246,7 @@ scoring {
     + (if view::my_enemies(self, target) > 0.5 { 0.4 } else { 0.0 })
     + (if view::pack_focus(self, target) > 0.5 { 0.4 } else { 0.0 })
     + (if view::rally_boost(self, _) > 0.3 { 0.3 } else { 0.0 })
+    + (if beliefs(self).about(target).confidence > 0.5 { 0.2 } else { 0.0 })
 
   // Cast / UseItem: "domain hook" kinds without a dedicated
   // `Action::*` constructor in `UtilityBackend::build_action`. Until

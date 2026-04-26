@@ -124,7 +124,7 @@ impl std::error::Error for EmitError {}
 // `engine_rules::scoring::types::MAX_MODIFIERS` being referenced in the
 // emitted code — a rustc error at build time.
 
-const MAX_MODIFIERS: usize = 8;
+const MAX_MODIFIERS: usize = 16;
 const PERSONALITY_DIMS: usize = 5;
 
 // PredicateDescriptor kind discriminants.
@@ -333,7 +333,7 @@ fn emit_types_prelude(out: &mut String) {
 
 const TYPES_PRELUDE: &str = r#"/// Maximum number of modifier rows per scoring entry. Fixed so the row is
 /// `#[repr(C)]` with a known size.
-pub const MAX_MODIFIERS: usize = 8;
+pub const MAX_MODIFIERS: usize = 16;
 
 /// Number of personality dimensions dot-producted with `personality_weights`.
 pub const PERSONALITY_DIMS: usize = 5;
@@ -1724,7 +1724,7 @@ mod tests {
         );
         // Padding rows present (MAX_MODIFIERS total).
         let padding_count = out.matches("ModifierRow::EMPTY,").count();
-        // Hold: 8 empties; Attack: 7 empties (one modifier fills slot 0).
+        // Hold: MAX_MODIFIERS empties; Attack: (MAX_MODIFIERS - 1) empties (one modifier fills slot 0).
         assert_eq!(padding_count, MAX_MODIFIERS + (MAX_MODIFIERS - 1));
     }
 

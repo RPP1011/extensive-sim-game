@@ -113,7 +113,7 @@ pub const WORKGROUP_SIZE: u32 = 64;
 /// Maximum modifier rows per `ScoringEntry`. Must match
 /// `engine_rules::scoring::MAX_MODIFIERS` and the emitter's
 /// `MAX_MODIFIERS` in `emit_scoring.rs`.
-pub const MAX_MODIFIERS: u32 = 8;
+pub const MAX_MODIFIERS: u32 = 16;
 
 /// Number of personality dimensions. Matches
 /// `engine_rules::scoring::PERSONALITY_DIMS`.

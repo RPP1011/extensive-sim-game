@@ -142,6 +142,12 @@ fn score_entry(
                     score += v * row.delta;
                 }
             }
+            PredicateDescriptor::KIND_BELIEF_GRADIENT => {
+                let v = eval_belief_scalar(state, agent, target, &row.predicate);
+                if v.is_finite() {
+                    score += v * row.delta;
+                }
+            }
             _ => {
                 if eval_predicate(&row.predicate, state, agent, target) {
                     score += row.delta;
@@ -330,6 +336,13 @@ fn eval_predicate(
             let rhs = f32::from_le_bytes(tb);
             compare_scalar(pred.op, lhs, rhs)
         }
+        PredicateDescriptor::KIND_BELIEF_SCALAR_COMPARE => {
+            let lhs = eval_belief_scalar(state, agent, target, pred);
+            let mut tb = [0u8; 4];
+            tb.copy_from_slice(&pred.payload[0..4]);
+            let rhs = f32::from_le_bytes(tb);
+            compare_scalar(pred.op, lhs, rhs)
+        }
         _ => false,
     }
 }
@@ -372,6 +385,60 @@ fn eval_view_call(
             let _ = (slot0, slot1, agent, target, state);
             0.0
         }
+        _ => f32::NAN,
+    }
+}
+
+/// Evaluate a belief-state scalar for use in `KIND_BELIEF_SCALAR_COMPARE`
+/// and `KIND_BELIEF_GRADIENT` predicates.
+///
+/// Layout of `pred`:
+/// - `field_id` = `BELIEF_FIELD_*` index.
+/// - `payload[4]` = observer slot code (ARG_SELF=0 or ARG_TARGET=1).
+/// - `payload[5]` = target slot code.
+///
+/// Returns the belief field value, or `f32::NAN` when the observer /
+/// target cannot be resolved or no belief entry exists (fail-closed).
+fn eval_belief_scalar(
+    state: &SimState,
+    agent: AgentId,
+    target: Option<AgentId>,
+    pred: &PredicateDescriptor,
+) -> f32 {
+    let obs_slot = pred.payload[4];
+    let tgt_slot = pred.payload[5];
+
+    let observer = match obs_slot {
+        PredicateDescriptor::ARG_SELF => agent,
+        PredicateDescriptor::ARG_TARGET => match target {
+            Some(t) => t,
+            None => return f32::NAN,
+        },
+        _ => return f32::NAN,
+    };
+    let tgt = match tgt_slot {
+        PredicateDescriptor::ARG_SELF => agent,
+        PredicateDescriptor::ARG_TARGET => match target {
+            Some(t) => t,
+            None => return f32::NAN,
+        },
+        _ => return f32::NAN,
+    };
+
+    let beliefs = match state.agent_cold_beliefs(observer) {
+        Some(b) => b,
+        None => return f32::NAN,
+    };
+    let entry = match beliefs.get(&tgt) {
+        Some(e) => e,
+        None => return 0.0, // no belief entry → 0.0 (not NaN; absence is meaningful)
+    };
+
+    match pred.field_id {
+        PredicateDescriptor::BELIEF_FIELD_LAST_KNOWN_HP => entry.last_known_hp,
+        PredicateDescriptor::BELIEF_FIELD_LAST_KNOWN_MAX_HP => entry.last_known_max_hp,
+        PredicateDescriptor::BELIEF_FIELD_CONFIDENCE => entry.confidence,
+        PredicateDescriptor::BELIEF_FIELD_LAST_UPDATED_TICK => entry.last_updated_tick as f32,
         _ => f32::NAN,
     }
 }
