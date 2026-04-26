@@ -2575,15 +2575,19 @@
         "2026-04-25-plan-5a-computebackend-mask-fill-impl.task-8"
       ],
       "blocks": [],
-      "status": "pending",
+      "status": "done",
       "steps_total": 6,
-      "steps_done": 0,
+      "steps_done": 6,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "pending-bookkeeping",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "final verification — workspace builds, compile-dsl --check ok, trybuild PASS, SimBackend audit clean (0 references in crates/), AIS post-design ticked"
+      },
+      "started_at": "2026-04-26T06:42:06Z",
+      "completed_at": "2026-04-26T06:42:49Z",
       "retry_count": 0
     },
     {
@@ -3483,9 +3487,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T06:39:57Z",
-    "iterations_completed": 16,
-    "tasks_closed": 17,
+    "last_iteration_at": "2026-04-26T06:42:49Z",
+    "iterations_completed": 17,
+    "tasks_closed": 18,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

@@ -47,7 +47,7 @@
   - P10 (No Runtime Panic): PASS — trait methods don't introduce panics; stubs return.
   - P11 (Reduction Determinism): N/A.
 
-- **Re-evaluation:** [x] AIS reviewed at design phase. [ ] AIS reviewed post-design (tick after Task 9).
+- **Re-evaluation:** [x] AIS reviewed at design phase. [x] AIS reviewed post-design — Phase 1 of 5 of ComputeBackend extraction landed. Trait renamed (SimBackend → ComputeBackend). 3 mask-related methods (reset_mask, set_mask_bit, commit_mask) added to surface. SerialBackend impls are CPU pass-through (emitted from emit_backend.rs); GpuBackend stubs match Serial behavior for parity. emit_mask_fill + emit_step + emit_backend updated. Cross-backend parity test passes. Side-fix: 8 SerialBackend injections in 3 Plan-4 debug test files (T6) needed because T5 added the CB generic to step's signature. Subsequent phases: 5b (cascade dispatch through backend), 5c (view fold), 5d (real GPU kernel emit), 5e (full parity sweep).
 
 ---
 
@@ -552,7 +552,7 @@ git -c core.hooksPath= commit -am "test(engine): backend mask-fill parity (Seria
 
 ### Task 9: Final verification + AIS tick
 
-- [ ] **Step 1: Clean rebuild.**
+- [x] **Step 1: Clean rebuild.**
 
 ```bash
 unset RUSTFLAGS && cargo clean
@@ -562,7 +562,7 @@ unset RUSTFLAGS && cargo test --workspace
 
 Expected: SUCCESS modulo pre-existing failures.
 
-- [ ] **Step 2: `compile-dsl --check`.**
+- [x] **Step 2: `compile-dsl --check`.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
@@ -570,13 +570,13 @@ unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl --check
 
 Expected: clean.
 
-- [ ] **Step 3: trybuild seal still passes.**
+- [x] **Step 3: trybuild seal still passes.**
 
 ```bash
 unset RUSTFLAGS && cargo test -p engine --test sealed_cascade_handler
 ```
 
-- [ ] **Step 4: Audit — no `SimBackend` references remain.**
+- [x] **Step 4: Audit — no `SimBackend` references remain.**
 
 ```bash
 git grep -E '\bSimBackend\b'
@@ -584,7 +584,7 @@ git grep -E '\bSimBackend\b'
 
 Expected: empty. Any remaining matches mean Task 1's sed missed something — fix.
 
-- [ ] **Step 5: Tick AIS post-design.**
+- [x] **Step 5: Tick AIS post-design.**
 
 ```
 [x] AIS reviewed post-design — Phase 1 of 5 of ComputeBackend extraction
@@ -597,7 +597,7 @@ dispatch through backend), 5c (view fold), 5d (real GPU kernel emit),
 5e (full parity sweep).
 ```
 
-- [ ] **Step 6: Final commit.**
+- [x] **Step 6: Final commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "chore(plan-5a): final verification + AIS tick"
