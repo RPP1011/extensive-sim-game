@@ -29,3 +29,5 @@
 {"ts":"2026-04-26T06:12:22Z","event":"task_done","task_id":"2026-04-25-plan-5a-computebackend-mask-fill-impl.task-2","commit":"1c6121fb","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"trait extended; intermediate state — workspace build broken intentionally; T3+T7 close the gap"}}
 {"ts":"2026-04-26T06:14:05Z","event":"task_started","task_id":"2026-04-25-plan-5a-computebackend-mask-fill-impl.task-3"}
 {"ts":"2026-04-26T06:15:34Z","event":"task_done","task_id":"2026-04-25-plan-5a-computebackend-mask-fill-impl.task-3","commit":"7f0067d5","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"SerialBackend impl bodies emitted; engine_rules builds clean; engine_gpu still missing T7 impls"}}
+{"ts":"2026-04-26T06:18:11Z","event":"task_started","task_id":"2026-04-25-plan-5a-computebackend-mask-fill-impl.task-4"}
+{"ts":"2026-04-26T06:20:16Z","event":"task_done","task_id":"2026-04-25-plan-5a-computebackend-mask-fill-impl.task-4","commit":"393914a9","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"emit_mask_fill threads backend via fill_all<B: ComputeBackend>; expected 2 call-site errors in step.rs; T5 closes"}}

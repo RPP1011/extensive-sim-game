@@ -259,7 +259,7 @@ git -c core.hooksPath= commit -am "feat(dsl_compiler): emit SerialBackend mask-m
 **Files:**
 - Modify: `crates/dsl_compiler/src/emit_mask_fill.rs`
 
-- [ ] **Step 1: Update the emit pass.**
+- [x] **Step 1: Update the emit pass.**
 
 The emitted `fill_all` becomes generic over a backend:
 
@@ -297,7 +297,7 @@ writeln!(out, "}}")?;
 
 (Adapt iteration sources `comp.masks_self_only()` etc. to the actual IR API. If those helpers don't exist, add them.)
 
-- [ ] **Step 2: Regen + verify.**
+- [x] **Step 2: Regen + verify.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- compile-dsl
@@ -306,7 +306,7 @@ head -30 crates/engine_rules/src/mask_fill.rs
 
 Expected: signature is `pub fn fill_all<B: engine::backend::ComputeBackend>(...)`; body uses `backend.set_mask_bit(...)` instead of `buf.set(...)`.
 
-- [ ] **Step 3: Build engine_rules.**
+- [x] **Step 3: Build engine_rules.**
 
 ```bash
 unset RUSTFLAGS && cargo build -p engine_rules
@@ -314,7 +314,7 @@ unset RUSTFLAGS && cargo build -p engine_rules
 
 Expected: failure — emit_step's call to `fill_all` doesn't pass a backend. Task 5 closes.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(dsl_compiler): emit_mask_fill threads ComputeBackend (Plan 5a Task 4)"
