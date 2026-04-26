@@ -510,15 +510,23 @@
       "blocks": [
         "2026-04-26-plan-5b-e-computebackend-remaining-impl.task-16"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "26a72846",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critics": {
+          "compiler-first": "PASS",
+          "cross-backend-parity": "PASS"
+        },
+        "note": "GPU apply+movement wired through run_gpu_apply_and_movement; CPU fallback on false return; GPU error count unchanged at 37"
+      },
+      "started_at": "2026-04-26T23:11:05Z",
+      "completed_at": "2026-04-26T23:14:11Z",
       "retry_count": 0
     },
     {
@@ -667,9 +675,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T23:09:01Z",
-    "iterations_completed": 14,
-    "tasks_closed": 14,
+    "last_iteration_at": "2026-04-26T23:14:11Z",
+    "iterations_completed": 15,
+    "tasks_closed": 15,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

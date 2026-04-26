@@ -1009,7 +1009,7 @@ git commit -m "feat(engine_gpu): GpuBackend::cascade_dispatch wires GPU cascade 
 
 The `cs_apply_actions` and `cs_movement` kernels exist in `apply_actions.rs` and `movement.rs`. They are already called from `GpuBackend::step` via `run_gpu_apply_and_movement` (line 2810).
 
-- [ ] **Step 1: Confirm `run_gpu_apply_and_movement` exists and read its signature.**
+- [x] **Step 1: Confirm `run_gpu_apply_and_movement` exists and read its signature.**
 
 ```bash
 grep -n "fn run_gpu_apply_and_movement\|fn run_apply_and_movement" crates/engine_gpu/src/lib.rs | head -5
@@ -1017,7 +1017,7 @@ grep -n "fn run_gpu_apply_and_movement\|fn run_apply_and_movement" crates/engine
 
 Expected: `fn run_gpu_apply_and_movement(&mut self, state: &mut SimState, events: &mut EventRing<Event>) -> bool` at line ~2810.
 
-- [ ] **Step 2: Replace the `#[cfg(feature = "gpu")]` `apply_and_movement` stub with a real dispatch.**
+- [x] **Step 2: Replace the `#[cfg(feature = "gpu")]` `apply_and_movement` stub with a real dispatch.**
 
 ```rust
     fn apply_and_movement(
@@ -1040,7 +1040,7 @@ Expected: `fn run_gpu_apply_and_movement(&mut self, state: &mut SimState, events
     }
 ```
 
-- [ ] **Step 3: Build + test with `gpu` feature.**
+- [x] **Step 3: Build + test with `gpu` feature.**
 
 ```bash
 cargo build --features engine_gpu/gpu -p engine_gpu 2>&1 | grep -E "^error" | head -20
@@ -1049,7 +1049,7 @@ cargo test --features engine_gpu/gpu -p engine_gpu -- --test-threads=1 2>&1 | ta
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
 ```bash
 git add crates/engine_gpu/src/lib.rs
