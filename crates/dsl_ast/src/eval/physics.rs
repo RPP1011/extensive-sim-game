@@ -363,6 +363,14 @@ fn exec_stmt<C: CascadeContext>(stmt: &IrStmt, ctx: &mut C, locals: &mut Locals)
             "dsl_ast::eval::physics: IrStmt::SelfUpdate is not in the wolves+humans survey — \
              see docs/superpowers/notes/2026-04-22-wolves-humans-interp-coverage.md §3"
         ),
+
+        IrStmt::BeliefObserve { .. } => {
+            // Theory-of-Mind belief-observe statements are not evaluated by
+            // the wolves+humans interpreter path. This variant was added on
+            // main (Plan ToM Task 8). ToM has its own hand-written path in
+            // engine; the interpreter skips belief-observe silently so that
+            // non-ToM rules continue to function correctly.
+        }
     }
 }
 
