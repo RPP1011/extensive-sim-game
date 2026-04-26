@@ -1,5 +1,12 @@
 # Ability DSL — Language Reference
 
+> ⚠️ **Audit 2026-04-26 — two-stack reality:** This spec describes a future-state engine path. There are **two parallel ability stacks** in the codebase:
+> - **Engine** (`crates/engine`) — what this spec targets. Hand-built `AbilityProgram`. `Delivery` enum has only `Instant`. `Area` enum has only `SingleTarget`. `EffectOp` has 8 variants (0-7). No passive triggers. The §23 status matrix describes only this stack.
+> - **TacticalSim** (`crates/tactical_sim/src/effects/dsl/`) — the running implementation for campaign play. Winnow-based parser, full `Delivery` (Projectile/Chain/Zone/Channel), full `Area` (all 5 disc shapes), 17+ passive trigger kinds, control/movement/buff verbs (charm, polymorph, dash, knockback, buff, debuff, …). TacticalSim is **1–2 tracks ahead** of the spec's `runs-today` claims, and implements several constructs the spec marks `reserved` (charm, polymorph, banish, reflect, summon, leash, redirect, …).
+>
+> All `.ability` files in `dataset/hero_templates/` and `assets/hero_templates/` are loaded by the **TacticalSim** parser, **not** by the engine or `dsl_compiler`. Cross-check spec claims against TacticalSim's implementation as a reference.
+> See `docs/superpowers/notes/2026-04-26-audit-ability.md` for the per-§23-row status (48 rows: ~10 ✅ engine / ~8 🤔 TacticalSim-only / ~15 ⚠️ partial / ~12 ❌).
+
 > **Status:** Design spec (2026-04-24). Canonical syntax, semantics, and
 > IR-lowering contract for `.ability` files. Authoritative for language
 > surface; defers runtime cascade semantics to `assets/sim/physics.sim`
@@ -1797,6 +1804,18 @@ layouts.
 ---
 
 ## §23 Capability status matrix
+
+> ⚠️ **Audit 2026-04-26 — matrix overclaims TacticalSim parity:** Status markers describe **only the engine stack**. Constructs marked `planned` for engine are often `runs-today` in TacticalSim:
+> - `passive` block: TacticalSim runs full trigger system (17+ kinds, depth-guarded recursion, cooldowns).
+> - `deliver projectile/chain/zone/channel`: TacticalSim parsed and dispatched; engine has only `Delivery::Instant`.
+> - 2D shapes (circle/cone/line/ring/spread): TacticalSim full impl; engine has only `SingleTarget`.
+> - Control verbs (root, silence, fear, taunt) + reserved verbs (charm, polymorph, banish, reflect, summon, leash, …): TacticalSim implements; spec says `planned`/`reserved`.
+> - Movement verbs (dash, knockback, pull, blink, swap), buffs/debuffs (lifesteal, reflect, blind), advanced (execute, self_damage, summon, dispel, immunity, death_mark, …): all TacticalSim-only.
+>
+> Spec also marks `hint: heal` as `planned` but engine `AbilityHint` enum has no `Heal` variant — no documented fallback to `Utility` exists either (overclaim).
+>
+> §22.2 `ModifyStanding` evolution to `{ a_sel, b_sel, delta }` not done; engine's `ModifyStanding` still carries only `delta: i16` — three-party standing writes (`endear`, `slander`, `rally_cry`) are unimplementable.
+> See `docs/superpowers/notes/2026-04-26-audit-ability.md` for per-row detail and the four implementation tracks proposed.
 
 Consolidated table. Per construct: status, required engine work, linked
 ticket (when opened). Construct IDs reference sections above.

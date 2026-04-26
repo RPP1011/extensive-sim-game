@@ -1,5 +1,12 @@
 # Economic Depth Design — Beyond X4
 
+> ❌ **Audit 2026-04-26 — entirely unimplemented:** All three phases (Phase 1 Foundation, Phase 2 Behavioral depth, Phase 3 Emergent macro) have **0 of ~80 spec deliverables landed in the engine crate.** Only a thin economic substrate exists: `Inventory.{gold: i32, commodities: [u16; 8]}` (anonymous slots, not `CommodityRegistry`), `EffectOp::TransferGold` (variant 5), `EffectOp::ModifyStanding` (variant 6), `Quest`+`Bid` macro frame, `standing(a,b)` view, stub IDs (`AuctionId`, `SettlementId`, `ItemId`), `Creditor` stub, `MentorLink` stub, `GroupRole::Apprentice`, `Capabilities.can_trade`.
+>
+> The largest single gap is `EffectOp::Recipe` (variant 17) + `RecipeRegistry` + `CommodityRegistry` — the "recipes-as-abilities" anchor (§3) that unblocks all downstream dims. Until that lands, production graph, ingredient chains, component assembly, three-party standing, obligations, property/inheritance, routes/caravans, skills, preferences, beliefs, banking — none are expressible.
+>
+> Old `npc_economy_plan.md` work (8-commodity production system) lived in a `src/world_sim/` branch that is **not present in the current codebase tree** — the spec §21.3–21.4 explicitly reshapes that design (settlements as views, production as recipes-as-abilities). Only `Inventory.{gold, commodities}` shape carries forward.
+> See `docs/superpowers/notes/2026-04-26-audit-economy.md` for the per-dim deliverable inventory and the proposed Plan A–I decomposition.
+
 > **Status:** Design spec (2026-04-24). Companion to `spec/ability.md`
 > (the action grammar). This doc owns the *system* design — supply chains,
 > contracts, labor, market structure, macro dynamics. The ability DSL spec owns

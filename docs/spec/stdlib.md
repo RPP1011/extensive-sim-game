@@ -180,6 +180,9 @@ No fields.
 
 ### `query`
 
+> ⚠️ **Audit 2026-04-26:** `query.nearby_agents`, `query.within_planar`, `query.nearby_items` resolve in `stdlib::method_sig` but **emit only in mask `from`-clauses**. They have **no lowering in `emit_physics.rs`, `emit_scoring.rs`, or `emit_view.rs`** — they fall through to `EmitError::Unsupported`. Highest-impact gap blocking neighbour-iterating physics rules. `query.agents_within` is a non-spec alias that does not exist; use `query.nearby_agents`.
+> See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
+
 Spatial and relational queries. Output is always a bounded list; the
 engine enforces per-query caps.
 
@@ -193,6 +196,9 @@ No fields.
 
 ### `voxel`
 
+> ⚠️ **Audit 2026-04-26:** All three `voxel.*` methods are registered and emit only in `emit_physics.rs`. View bodies and scoring bodies that call `voxel.surface_height` etc. fail emission with `Unsupported`.
+> See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
+
 Voxel-grid neighbourhood queries.
 
 | Method | Signature |
@@ -204,6 +210,17 @@ Voxel-grid neighbourhood queries.
 No fields.
 
 ### `agents`
+
+> 🤔 **Audit 2026-04-26 — stale name (4 methods):** Spec names below are wrong. Implementation uses **absolute expiry tick**, not remaining ticks:
+> - `agents.stun_remaining_ticks(a)` → actual: `agents.stun_expires_at_tick(a)`
+> - `agents.set_stun_remaining_ticks(a, v)` → actual: `agents.set_stun_expires_at_tick(a, v)`
+> - `agents.slow_remaining_ticks(a)` → actual: `agents.slow_expires_at_tick(a)`
+> - `agents.set_slow_remaining_ticks(a, v)` → actual: `agents.set_slow_expires_at_tick(a, v)`
+>
+> Spec authors writing `agents.stun_remaining_ticks(a) > 0` will get `UnresolvedCall` at compile time. Active stun semantic is `world.tick < agents.stun_expires_at_tick(a)`. Task 143 changed the storage but did not update this spec.
+>
+> Audit also lists ~15 implementation-extra methods not catalogued here (`agents.creature_type`, `agents.is_hostile_to`, `agents.engaged_with*`, `agents.record_memory`, `agents.cooldown_next_ready*`, `query.nearest_hostile_to*`, `query.nearby_kin`, full `abilities.*` and `terrain.*` namespaces).
+> See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for full inventory (57 stdlib functions: 30 ✅ / 16 ⚠️ / 7 ❌ / 4 🤔).
 
 Per-agent slot accessors used by `physics` cascades. The legacy collection
 namespace is also iterable as a sequence of agent rows; the methods below

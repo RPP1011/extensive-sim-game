@@ -142,6 +142,9 @@ String payloads are permitted only on `@non_replayable` events; the compiler rej
 
 ### 2.3 `view` declaration
 
+> ⚠️ **Audit 2026-04-26:** `@spatial query` declarations parse (`Decl::Query(QueryDecl)`) but `Compilation` has no `queries` field — silently dropped after parsing. Annotations `@indexed_on(field)`, `@top_k(K)`, `@backend(cpu|gpu)`, `@fidelity(>= Medium)` are accepted by the generic annotation parser but the resolver never interprets them. Fold body operator-set restriction (`ResolveError::UdfInViewFoldBody`) is **not implemented** — authors can write forbidden constructs in fold bodies without a compile-time error.
+> See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
+
 Views are pure over their inputs. The compiler chooses between lazy evaluation at read time and eager event-fold materialization per declaration.
 
 ```
@@ -233,6 +236,9 @@ Constraints (enforced by the resolver):
 
 ### 2.4 `physics` cascade rule
 
+> ⚠️ **Audit 2026-04-26:** `@before(Other)` / `@after(Other)` annotations are **silently accepted but never enforced** — no ordering-constraint graph built. Race detection (item 3 — two unordered same-phase rules writing same field via non-commutative updates) is **not implemented**.
+> See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
+
 Cascade rules respond to events and emit further events. They never mutate state directly — all writes go through `emit`. Phase-tagged ordering prevents races.
 
 ```
@@ -315,6 +321,9 @@ Compilation:
 - Every predicate node has a stable AST ID; an explanation kernel reruns the predicate against a captured state snapshot for `trace_mask(agent, action, tick)`.
 
 ### 2.6 `verb` (composition sugar)
+
+> ❌ **Audit 2026-04-26 — silent-drop:** `verb` declarations parse and resolve to `VerbIR`, but **`EmittedArtifacts` has no verb output and no emit pass exists**. A `.sim` file with `verb` declarations compiles silently to nothing. Same status applies to §2.8 `invariant`, §2.9 `probe`, §2.11 `metric` — all parse + resolve, none emit.
+> See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
 
 `verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and scoring entries. It does NOT add to the closed categorical action vocabulary.
 
@@ -650,6 +659,9 @@ Enum:      Source (Witnessed / TalkedWith / Overheard / Rumor / Announced /
 `@spatial` types expose `pos: vec3` and participate in 3D spatial indices. Every bounded collection declares its capacity; capacity is part of the schema hash.
 
 ### 5.2 Forbidden types
+
+> ❌ **Audit 2026-04-26:** Neither restriction is enforced. The resolver accepts `String` on replayable events and unbounded `Vec<T>` on entity/event fields silently — no `ResolveError::StringOnReplayableEvent` or equivalent.
+> See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
 
 `String` is forbidden on `@replayable` events, on `@primary` state fields, and on any field referenced by a mask or reward predicate. Strings are permitted only on `@non_replayable` events, the `chronicle_prose` side channel, and at display time. All load-bearing references are IDs. `class_tags` and `archetype` agent fields carry `TagId` / `ArchetypeId` with a compile-time string table.
 

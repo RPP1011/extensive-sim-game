@@ -1,5 +1,8 @@
 # World Sim State Catalog
 
+> ⚠️ **Audit 2026-04-26 — scope mismatch:** This catalog covers both per-fight `SimState` (combat engine) **and** the full `WorldState` (campaign / DF-style world sim). The `crates/engine` crate implements only the SoA hot/cold fields under `Agent state`. **Aggregate state (Settlement, RegionState, Faction, GuildState, TradeRoute, ServiceContract, EconomyState, etc.) and World state (VoxelWorld, RegionPlan, NavGrid, FidelityZone, BuildSeed, GroupIndex, etc.) are not implemented in the engine crate** — they live in the `headless_campaign` / `bevy_game` layer (or in legacy worktrees), which the audit did not cover.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for the per-section findings (42 ✅ / 18 ⚠️ / 31 ❌ / 7 🤔 / 4 ❓).
+
 Schema-of-record: every SoA field engine code touches, with semantics, writers, and readers.
 
 ## Contents
@@ -74,6 +77,9 @@ Agent → group association.
 
 ### StatusEffect
 
+> 🤔 **Audit 2026-04-26 (spec mismatch):** Spec catalogs `remaining_ms: u32`; implementation stores **absolute expiry tick** in `hot_stun_expires_at_tick` / `hot_slow_expires_at_tick` (Task 143). Per-kind typed payload (Slow{factor}, Buff/Debuff{stat,factor}) is replaced by an opaque `payload_q8: i16`. SmallVec cap=8 (cold), not Vec.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` and `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md`.
+
 Temporary state modifier on an entity.
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -85,6 +91,9 @@ Temporary state modifier on an entity.
 ---
 
 ### Needs (8-dimensional)
+
+> ⚠️ **Audit 2026-04-26 (scale mismatch):** Spec says range 0–100. **Implementation uses range 0.0–1.0** (initialized to 1.0 in `spawn_agent`). Quiet semantic hazard for any system that computes urgency as `(100 - need) / 100`.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 Maslow-inspired primary drives. Range 0–100. Higher = more satisfied. Engine carries Maslow-5 (`safety/shelter/social/purpose/esteem`) plus 3 physiological (`hunger/thirst/rest_timer`); `hunger` is shared.
 
@@ -120,6 +129,9 @@ Experience-shaped behavioral profile, 0–1. Set at spawn, drifts via events.
 
 ### Emotions (6D, Transient)
 
+> ❌ **Audit 2026-04-26:** Entire 6-dim emotion layer (`joy`, `anger`, `fear`, `grief`, `pride`, `anxiety`) is **not implemented** in `SimState` or any sub-module. High impact: emotions are spec'd to drive flee urgency, combat preference, productivity.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 Short-term state, 0–1, decays per tick (≈0.01–0.05 depending on event).
 
 | Field | Type | Meaning | Updated by | Read by |
@@ -148,6 +160,9 @@ Personality-weighted need-gap vector, 100-tick horizon bias. Recomputed every 50
 ---
 
 ### Memory
+
+> ⚠️ **Audit 2026-04-26 (shape narrowed):** Memory storage was retired to a `@per_entity_ring(K=64)` view in `engine_rules/src/views/memory.rs`. The view's `MemoryEntry` has only 3 fields (`source: u32, value: f32, anchor_tick: u32`) versus the 7 typed fields documented below (tick, MemEventType enum, location vec3, entity_ids, emotional_impact f32, Source enum, confidence f32). `MemEventType` enum, `Source` enum, location, entity_ids, and emotional_impact are absent. The `Memory.beliefs: Vec<Belief>` layer is entirely absent.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 Event log + semantic beliefs.
 
@@ -240,6 +255,9 @@ Directional relationship from one NPC toward another (asymmetric).
 ---
 
 ### AgentData
+
+> ❌ **Audit 2026-04-26 — entire sub-struct missing:** ~40 fields below (name, gold, debt, creditor_id, income_rate, economic_intent, price_knowledge, trade_route_id, work_state, behavior_profile, action_outcomes, price_beliefs, cultural_bias, morale, stress, fatigue, loyalty, injury, resolve, archetype, party_id, faction_id, mood, fears, deeds, current_intention, equipped_items, passive_effects, world_abilities, …) **do not exist in `crates/engine`**. The engine carries SoA hot/cold scalars only — there is no per-agent `AgentData` blob. A few related items exist as separate cold fields (`cold_class_definitions`, `cold_creditor_ledger`, `cold_mentor_lineage`).
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 Container for all agent-specific state. Carried by every Agent.
 
@@ -408,6 +426,9 @@ Container for all agent-specific state. Carried by every Agent.
 
 ### Inventory (Portable Commodity Storage)
 
+> 🤔 **Audit 2026-04-26 (type mismatch):** `Inventory.gold` is `i32` (not `f32` — deliberate i32 for GPU atomics). `commodities` is `[u16; 8]` (not `[f32; 8]`). `capacity: f32` field is absent.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
+
 | Field | Type | Meaning |
 |---|---|---|
 | commodities | [f32; NUM_COMMODITIES] | Per-commodity quantity (work, eat, trade, haul) |
@@ -443,6 +464,9 @@ TRANSFORMATIONS:
 ---
 
 ## Aggregate state
+
+> ❌ **Audit 2026-04-26:** This entire section is **not implemented in the engine crate**. Only skeletal `Group` (3 fields) and `Quest` (5–6 fields) exist in `crates/engine/src/aggregate/`. Settlement, RegionState, Faction, GuildState, TradeRoute, ServiceContract, EconomyState, ConstructionMemory, full `Group` (~25 fields), full `Quest` (13 fields), QuestPosting, etc. are absent — they live in legacy `headless_campaign` worktrees not in canonical engine.
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 `Group` is the universal social-collective primitive. Settlements, factions, families, guilds, religions, packs, cabals, parties, courts, leagues, monasteries are all `Group` discriminated by `kind`. The Group section at the end gives the canonical shape; per-kind sections describe additional fields.
 
@@ -788,6 +812,9 @@ Social-collective primitive — any collection of agents with shared identity. K
 ---
 
 ## World state
+
+> ❌ **Audit 2026-04-26:** This entire section is **not implemented in the engine crate**. VoxelWorld, RegionPlan, NavGrid, FidelityZone, BuildSeed, StructuralEvent, SimScratch, GroupIndex, etc. are absent from `crates/engine`. They live in `tactical_sim`/`bevy_game` layers. `WorldState.tick` is `u32` in implementation, not `u64` as spec'd. Several hot fields exist on agents that this catalog doesn't list (`hot_engaged_with`, `hot_stun_expires_at_tick`, `hot_slow_expires_at_tick`, `hot_slow_factor_q8`, `hot_cooldown_next_ready_tick`, `ability_cooldowns`).
+> See `docs/superpowers/notes/2026-04-26-audit-state.md` for detail.
 
 Environment layer: terrain, tiles, voxels, spatial indices, shared caches. Not per-entity, not per-settlement.
 
