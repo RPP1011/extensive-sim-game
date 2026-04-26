@@ -800,7 +800,7 @@ git -c core.hooksPath= commit -am "feat(engine/debug): repro_bundle composes sna
 - Create: `crates/xtask/src/{debug_cmd,trace_cmd,profile_cmd,repro_cmd}.rs`
 - Modify: `crates/xtask/src/main.rs` — dispatch arms
 
-- [ ] **Step 1: Add CLI subcommands.**
+- [x] **Step 1: Add CLI subcommands.**
 
 In `cli/mod.rs`:
 
@@ -823,7 +823,7 @@ pub struct DebugArgs {
 // (similar for TraceArgs, ProfileArgs, ReproArgs)
 ```
 
-- [ ] **Step 2: Implement `debug_cmd.rs`.**
+- [x] **Step 2: Implement `debug_cmd.rs`.**
 
 Constructs a `DebugConfig` with `tick_stepper` enabled, runs N ticks, drops into a tiny REPL between phases:
 
@@ -836,13 +836,13 @@ pub fn run_debug(args: DebugArgs) -> ExitCode {
 }
 ```
 
-- [ ] **Step 3: Implement `trace_cmd.rs`** — non-interactive mask + history collection.
+- [x] **Step 3: Implement `trace_cmd.rs`** — non-interactive mask + history collection.
 
-- [ ] **Step 4: Implement `profile_cmd.rs`** — collects phase histogram, dumps as table or JSON.
+- [x] **Step 4: Implement `profile_cmd.rs`** — collects phase histogram, dumps as table or JSON.
 
-- [ ] **Step 5: Implement `repro_cmd.rs`** — capture + write to file; load from file + replay.
+- [x] **Step 5: Implement `repro_cmd.rs`** — capture + write to file; load from file + replay.
 
-- [ ] **Step 6: Build, smoke-test each.**
+- [x] **Step 6: Build, smoke-test each.**
 
 ```bash
 unset RUSTFLAGS && cargo run --bin xtask -- debug --ticks 5
@@ -851,7 +851,7 @@ unset RUSTFLAGS && cargo run --bin xtask -- profile --ticks 100
 unset RUSTFLAGS && cargo run --bin xtask -- repro capture --output /tmp/bundle.tar.gz
 ```
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 
 ```bash
 git -c core.hooksPath= commit -am "feat(xtask): debug + trace + profile + repro subcommands (Plan 4 Task 8)"
