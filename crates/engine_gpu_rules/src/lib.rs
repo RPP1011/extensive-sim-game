@@ -7,6 +7,7 @@
 pub mod apply_actions;
 pub mod fused_mask;
 pub mod mask_unpack;
+pub mod movement;
 pub mod pick_ability;
 pub mod scoring;
 pub mod scoring_unpack;
@@ -25,6 +26,7 @@ pub enum KernelId {
     ApplyActions,
     FusedMask,
     MaskUnpack,
+    Movement,
     PickAbility,
     Scoring,
     ScoringUnpack,

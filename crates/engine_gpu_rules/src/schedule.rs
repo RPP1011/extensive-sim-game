@@ -18,4 +18,5 @@ pub const SCHEDULE: &[DispatchOp] = &[
     DispatchOp::Kernel(KernelId::ScoringUnpack),
     DispatchOp::Kernel(KernelId::ApplyActions),
     DispatchOp::Kernel(KernelId::PickAbility),
+    DispatchOp::Kernel(KernelId::Movement),
 ];

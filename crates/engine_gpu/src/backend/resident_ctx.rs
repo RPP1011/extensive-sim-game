@@ -156,6 +156,15 @@ pub struct ResidentPathContext {
     /// until a `per_ability` row exists in the resolved scoring IR
     /// (the bootstrap currently emits a stub WGSL).
     pub pick_ability_kernel: Option<engine_gpu_rules::pick_ability::PickAbilityKernel>,
+    /// T9 — lazy-initialised emitted MovementKernel from
+    /// `engine_gpu_rules`. Built on first `step_batch` call when the
+    /// `engine_gpu_emitted_movement_dispatch` feature is enabled;
+    /// remains `None` (and the slot is just type-checked) when the
+    /// feature is off. The hand-written
+    /// `cascade_ctx.movement.run_resident(...)` path is the only
+    /// dispatch that runs by default until T16 hoists the real
+    /// MoveToward / Flee semantics into the emitted WGSL body.
+    pub movement_kernel: Option<engine_gpu_rules::movement::MovementKernel>,
 }
 
 impl ResidentPathContext {
@@ -197,6 +206,7 @@ impl ResidentPathContext {
             fused_mask_unpack_kernel: None,
             apply_actions_kernel:   None,
             pick_ability_kernel:    None,
+            movement_kernel:        None,
         }
     }
 }

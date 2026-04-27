@@ -1717,6 +1717,96 @@ impl GpuBackend {
                 )
                 .expect("movement resident dispatch");
 
+            // T9 — emitted MovementKernel dispatch (feature-gated).
+            //
+            // The emitted Rust BGL diverges from the hand-written
+            // BGL: cfg uniform sits at slot 5 (after sim_cfg @ 4),
+            // matching the convention emit_scoring_kernel /
+            // emit_mask_kernel use. The hand-written kernel keeps cfg
+            // at slot 2 (sim_cfg @ 5). The current emitted WGSL is a
+            // no-op stub (no MoveToward / Flee position or event
+            // semantics) so dispatching it instead of the hand-written
+            // kernel WOULD break parity. Off by default; T16 hoists
+            // the real WGSL body and flips this on.
+            //
+            // Kept type-checked under the `else` so any drift between
+            // dsl_compiler's emit and this dispatch site fails at
+            // build time rather than at the eventual feature flip.
+            if cfg!(feature = "engine_gpu_emitted_movement_dispatch") {
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::movement::MovementKernel as EmittedMovementKernel;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  sync_scoring_kernel.scoring_buf(),
+                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+
+                let kernel = self
+                    .resident
+                    .movement_kernel
+                    .get_or_insert_with(|| EmittedMovementKernel::new(&self.device));
+                let cfg = kernel.build_cfg(state);
+                let cfg_buf =
+                    self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::movement::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                let bindings = kernel.bind(&sources, &cfg_buf);
+                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+            } else {
+                // Type-only exercise so any drift in the emitted
+                // BGL/WGSL pair fails the build now, not when the
+                // feature flips. Compile-time only — no GPU work.
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  sync_scoring_kernel.scoring_buf(),
+                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let _sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+                let _ = &self.resident.movement_kernel;
+            }
+
             if let Some(p) = profiler.as_mut() {
                 // Between movement and append_events.
                 p.write_between_pass_timestamp(

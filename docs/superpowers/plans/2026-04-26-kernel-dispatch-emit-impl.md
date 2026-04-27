@@ -2851,7 +2851,7 @@ This task also lights up the `DispatchOp::FixedPoint` variant — Movement itsel
 - Modify: `crates/engine_gpu/src/lib.rs` (call emitted kernel)
 - Test: `crates/dsl_compiler/tests/emit_movement_kernel_smoke.rs`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Create `crates/dsl_compiler/tests/emit_movement_kernel_smoke.rs`:
 
@@ -2869,12 +2869,12 @@ fn movement_rs_has_kernel_impl() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm fail**
+- [x] **Step 2: Run to confirm fail**
 
 Run: `cargo test -p dsl_compiler --test emit_movement_kernel_smoke`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement emit_movement_kernel.rs**
+- [x] **Step 3: Implement emit_movement_kernel.rs**
 
 Create `crates/dsl_compiler/src/emit_movement_kernel.rs`:
 
@@ -2989,14 +2989,14 @@ pub fn emit_movement_rs() -> String {
 }
 ```
 
-- [ ] **Step 4: Register module + run test**
+- [x] **Step 4: Register module + run test**
 
 Add `pub mod emit_movement_kernel;` to `crates/dsl_compiler/src/lib.rs`.
 
 Run: `cargo test -p dsl_compiler --test emit_movement_kernel_smoke`
 Expected: PASS.
 
-- [ ] **Step 5: Wire xtask to write movement.{rs,wgsl}**
+- [x] **Step 5: Wire xtask to write movement.{rs,wgsl}**
 
 In `crates/xtask/src/main.rs`:
 
@@ -3016,7 +3016,7 @@ modules.sort();
 
 Hoist the WGSL string out of `engine_gpu::movement::build_shader` into a `pub const MOVEMENT_WGSL: &str = "..."`. Transitional — Task 16 deletes `engine_gpu::movement`.
 
-- [ ] **Step 6: Wire engine_gpu's step_batch to call the emitted MovementKernel**
+- [x] **Step 6: Wire engine_gpu's step_batch to call the emitted MovementKernel**
 
 In `crates/engine_gpu/src/lib.rs::step_batch`, replace the existing movement dispatch with:
 
@@ -3041,7 +3041,7 @@ The `event_ring_records` and `event_ring_tail` fields wire to `pingpong.events_a
 
 Add `pub movement_kernel: Option<engine_gpu_rules::movement::MovementKernel>` to `ResidentPathContext` (engine_gpu side wrapper).
 
-- [ ] **Step 7: Add a Schedule entry for FixedPoint that we'll consume in Task 10**
+- [x] **Step 7: Add a Schedule entry for FixedPoint that we'll consume in Task 10**
 
 In `crates/xtask/src/main.rs`, change the schedule-emit call:
 
@@ -3061,14 +3061,14 @@ fs::write(PathBuf::from("crates/engine_gpu_rules/src/schedule.rs"),
 
 (Task 10 appends the FixedPoint and Indirect entries.)
 
-- [ ] **Step 8: Parity sweep**
+- [x] **Step 8: Parity sweep**
 
 Run: `cargo test -p engine_gpu --test parity_with_cpu`
 Run: `cargo test -p engine --test wolves_and_humans_parity`
 Run: `cargo test -p engine_gpu --test physics_parity` (still expected to pass — physics not yet migrated)
 Expected: all pass.
 
-- [ ] **Step 9: Bump baseline + commit**
+- [x] **Step 9: Bump baseline + commit**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
