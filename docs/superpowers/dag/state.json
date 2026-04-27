@@ -158,15 +158,19 @@
       "blocks": [
         "2026-04-26-subsystem-3-ability-eval-impl.task-B1"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 4,
-      "steps_done": 0,
+      "steps_done": 4,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "8f8e3582",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "Schema hash now covers per_ability_rows + chosen_ability_buf packing format. API substitution: compute_schema_hash→scoring_hash (existing API). Pivot point reached — Group A complete."
+      },
+      "started_at": "2026-04-27T00:07:03Z",
+      "completed_at": "2026-04-27T00:11:36Z",
       "retry_count": 0
     },
     {
@@ -425,9 +429,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T00:04:16Z",
-    "iterations_completed": 2,
-    "tasks_closed": 2,
+    "last_iteration_at": "2026-04-27T00:11:36Z",
+    "iterations_completed": 3,
+    "tasks_closed": 3,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null

@@ -524,7 +524,7 @@ git commit -m "feat(dsl_compiler): emit_pick_ability_wgsl produces cs_pick_abili
 
 The `chosen_ability_buf` packing format (2× u32 per agent: ability_slot + target_slot) must be hashed into the schema so a layout change fails CI.
 
-- [ ] **Step 1: Write a test that asserts `per_ability_rows` contribution to schema hash**
+- [x] **Step 1: Write a test that asserts `per_ability_rows` contribution to schema hash**
 
 Add to `crates/dsl_compiler/tests/per_ability_row.rs`:
 
@@ -553,7 +553,7 @@ scoring {}
 Run: `cargo test -p dsl_compiler schema_hash_differs_with_and_without_per_ability_row`
 Expected: FAIL if `per_ability_rows` are currently excluded from hashing, PASS if already covered.
 
-- [ ] **Step 2: Add `per_ability_rows` and `chosen_ability_buf` packing format to schema hash**
+- [x] **Step 2: Add `per_ability_rows` and `chosen_ability_buf` packing format to schema hash**
 
 In `crates/dsl_compiler/src/schema_hash.rs`, find where `ScoringIR` is hashed. Add:
 
@@ -573,14 +573,14 @@ for row in &scoring.per_ability_rows {
 }
 ```
 
-- [ ] **Step 3: Run the schema hash test**
+- [x] **Step 3: Run the schema hash test**
 
 ```bash
 cargo test -p dsl_compiler schema_hash_differs_with_and_without_per_ability_row
 ```
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add crates/dsl_compiler/src/schema_hash.rs crates/dsl_compiler/tests/per_ability_row.rs
