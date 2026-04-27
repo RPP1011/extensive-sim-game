@@ -15,7 +15,7 @@
     },
     {
       "id": "roadmap-gpu-cold-state-replay-subsystem-2-phases-24",
-      "title": "GPU cold-state replay (Subsystem 2) \u2014 Phases 2\u20134",
+      "title": "GPU cold-state replay (Subsystem 2) — Phases 2–4",
       "tier": "active",
       "spec_ref": null,
       "plans": [
@@ -72,7 +72,7 @@
     {
       "id": "gpu_megakernel_perf",
       "file": "docs/superpowers/plans/gpu_megakernel_perf.md",
-      "title": "GPU Megakernel Phase 8 \u2014 Perf Sweep + Crossover Measurement",
+      "title": "GPU Megakernel Phase 8 — Perf Sweep + Crossover Measurement",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 0,
@@ -98,15 +98,19 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-2"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 7,
-      "steps_done": 0,
+      "steps_done": 7,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "0bfd80e6",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "Bootstrap clean; sentinel verified; pre-commit hook engaged"
+      },
+      "started_at": "2026-04-27T04:54:09Z",
+      "completed_at": "2026-04-27T04:56:40Z",
       "retry_count": 0
     },
     {
@@ -376,7 +380,7 @@
     {
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-14",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
-      "title": "Task 14: Emit megakernel \u2014 fuse pass over SCHEDULE",
+      "title": "Task 14: Emit megakernel — fuse pass over SCHEDULE",
       "checkbox_line": 4290,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-13"
@@ -420,7 +424,7 @@
     {
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-16",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
-      "title": "Task 16: Final cleanup \u2014 delete hand-written kernel files; final parity sweep",
+      "title": "Task 16: Final cleanup — delete hand-written kernel files; final parity sweep",
       "checkbox_line": 4703,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-15"
@@ -478,11 +482,11 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": null,
-    "iterations_completed": 0,
-    "tasks_closed": 0,
+    "last_iteration_at": "2026-04-27T04:56:40Z",
+    "iterations_completed": 1,
+    "tasks_closed": 1,
     "tasks_blocked": 0,
-    "current_phase": "idle",
+    "current_phase": "dispatching",
     "next_wake_scheduled": null
   }
 }
