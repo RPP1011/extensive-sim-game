@@ -35,6 +35,8 @@ crates/engine_gpu/        ← hand-written GPU primitives only
 
 The cut: `engine_gpu/` owns *resources and orchestration*; `engine_gpu_rules/` owns *kernel-specific code*. Anything per-kernel (BGL shape, WGSL body, struct layout, dispatch encoding, dependency graph entry) moves to `engine_gpu_rules/`. Anything cross-kernel (megakernel composition, the resident context skeleton, the buffer pool) stays in `engine_gpu/`.
 
+**Invariant:** every file under `engine_gpu_rules/src/` is `// GENERATED`, including `lib.rs`. The only hand-written files in the crate are `Cargo.toml` and `build.rs`. `lib.rs` itself is regenerated each time `xtask compile-dsl` runs; its body contains a static prelude (the `Kernel` trait, the `KernelId` enum, the `BufferRef` enum) plus a varying module list — both produced by the same `emit_kernel_index` pass. The static prelude is byte-stable across regens with no `.sim` change. Enforced by a `build.rs` sentinel that scans for any `.rs`/`.wgsl` under `src/` lacking a `// GENERATED` header (same mechanism `engine_rules/` uses).
+
 This mirrors the `engine_data` ↔ `engine_rules` split that landed in Plan B1' (Subsystem 0): "data + hand-written primitives in one crate; all emitted code in a sibling crate." `engine_gpu_rules/` is the GPU sibling.
 
 ### Emit pipeline
@@ -45,11 +47,12 @@ This mirrors the `engine_data` ↔ `engine_rules` split that landed in Plan B1' 
    ▼
 dsl_compiler ─────── walks IR per row family
    │
-   ├─ Rust binding emit  → engine_gpu_rules/src/<kernel>.rs   (// GENERATED)
-   ├─ WGSL emit          → engine_gpu_rules/src/<kernel>.wgsl (// GENERATED)
-   ├─ Schedule emit      → engine_gpu_rules/src/schedule.rs   (// GENERATED)
-   ├─ Resident ctx emit  → engine_gpu_rules/src/resident_context.rs
-   └─ Megakernel emit    → engine_gpu_rules/src/megakernel.wgsl + .rs
+   ├─ Rust binding emit  → engine_gpu_rules/src/<kernel>.rs        (// GENERATED)
+   ├─ WGSL emit          → engine_gpu_rules/src/<kernel>.wgsl      (// GENERATED)
+   ├─ Schedule emit      → engine_gpu_rules/src/schedule.rs        (// GENERATED)
+   ├─ Resident ctx emit  → engine_gpu_rules/src/resident_context.rs (// GENERATED)
+   ├─ PingPong ctx emit  → engine_gpu_rules/src/pingpong_context.rs (// GENERATED)
+   └─ Megakernel emit    → engine_gpu_rules/src/megakernel.{rs,wgsl} (// GENERATED)
 ```
 
 Both Rust and WGSL committed. `xtask compile-dsl` regenerates them. `cargo build` is a pure compile step — same convention as `engine_rules/`.
