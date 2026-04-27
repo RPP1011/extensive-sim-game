@@ -16,4 +16,5 @@ pub const SCHEDULE: &[DispatchOp] = &[
     DispatchOp::Kernel(KernelId::MaskUnpack),
     DispatchOp::Kernel(KernelId::Scoring),
     DispatchOp::Kernel(KernelId::ScoringUnpack),
+    DispatchOp::Kernel(KernelId::ApplyActions),
 ];

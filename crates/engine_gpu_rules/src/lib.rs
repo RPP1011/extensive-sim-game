@@ -4,6 +4,7 @@
 #![allow(clippy::all)]
 #![allow(unused_imports)]
 
+pub mod apply_actions;
 pub mod fused_mask;
 pub mod mask_unpack;
 pub mod scoring;
@@ -20,6 +21,7 @@ pub mod megakernel;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum KernelId {
+    ApplyActions,
     FusedMask,
     MaskUnpack,
     Scoring,

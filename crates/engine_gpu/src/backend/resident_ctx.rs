@@ -137,6 +137,15 @@ pub struct ResidentPathContext {
     /// hand-written `mask_unpack_kernel` field above is kept for
     /// backward compatibility until T16 retires it.
     pub fused_mask_unpack_kernel: Option<engine_gpu_rules::mask_unpack::MaskUnpackKernel>,
+    /// T7 — lazy-initialised emitted ApplyActionsKernel from
+    /// `engine_gpu_rules`. Built on first `step_batch` call when the
+    /// `engine_gpu_emitted_apply_actions_dispatch` feature is enabled;
+    /// remains `None` (and the slot is just type-checked) when the
+    /// feature is off. The hand-written
+    /// `cascade_ctx.apply_actions.run_resident(...)` path is the only
+    /// dispatch that runs by default until T16 hoists the real
+    /// damage/heal/event semantics into the emitted WGSL body.
+    pub apply_actions_kernel: Option<engine_gpu_rules::apply_actions::ApplyActionsKernel>,
 }
 
 impl ResidentPathContext {
@@ -176,6 +185,7 @@ impl ResidentPathContext {
             pool,
             fused_mask_kernel:      None,
             fused_mask_unpack_kernel: None,
+            apply_actions_kernel:   None,
         }
     }
 }

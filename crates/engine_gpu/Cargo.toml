@@ -23,6 +23,13 @@ gpu = ["dep:wgpu", "dep:naga", "dep:pollster", "dep:dsl_compiler", "dep:bytemuck
 # the emit's BGL+WGSL pair is in sync; flipping this on without that
 # alignment WILL break GPU parity.
 engine_gpu_emitted_mask_dispatch = []
+# T7 — opt-in switch to start dispatching the emitted ApplyActionsKernel
+# from `step_batch` alongside (eventually instead of) the hand-written
+# `cascade_ctx.apply_actions.run_resident`. Off by default until the
+# emitter's WGSL body produces the real damage/heal/event semantics
+# (T16); flipping this on with the current no-op WGSL stub WILL break
+# parity (no agents would ever take damage on the GPU path).
+engine_gpu_emitted_apply_actions_dispatch = []
 
 [dependencies]
 engine = { path = "../engine" }
