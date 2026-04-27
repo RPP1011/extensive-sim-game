@@ -202,15 +202,22 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-6"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 7,
-      "steps_done": 0,
+      "steps_done": 7,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "ea73252d",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critic_compiler_first": "PASS",
+        "critic_cross_backend_parity": "PASS",
+        "critic_reduction_determinism": "PASS",
+        "note": "Wired BindingSources + emitted FusedMaskKernel into step_batch. Emitted dispatch feature-gated (off by default) because T4 emit had 4-binding BGL vs hand-written 14-binding BGL — feature flips on once emitter completes BGL match. Type-checked path validates drift at build time. GPU feature has 37 pre-existing compile errors (Plan B1 tombstones); zero new errors introduced."
+      },
+      "started_at": "2026-04-27T05:37:05Z",
+      "completed_at": "2026-04-27T05:58:09Z",
       "retry_count": 0
     },
     {
@@ -494,9 +501,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T05:34:50Z",
-    "iterations_completed": 4,
-    "tasks_closed": 4,
+    "last_iteration_at": "2026-04-27T05:58:09Z",
+    "iterations_completed": 5,
+    "tasks_closed": 5,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
