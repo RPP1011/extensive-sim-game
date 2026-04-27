@@ -176,15 +176,19 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-5"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 8,
-      "steps_done": 0,
+      "steps_done": 8,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "84f2950c",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "First per-kernel emitter validated. Adaptations: (1) wgpu version pin bumped 22→=26.0.1 to match workspace; (2) bgl_storage/bgl_uniform helpers exposed pub(crate) for cross-module use; (3) emit_masks_wgsl_fused used as real API name. Mask_unpack WGSL stays stub until T5 hoists real body."
+      },
+      "started_at": "2026-04-27T05:27:05Z",
+      "completed_at": "2026-04-27T05:34:50Z",
       "retry_count": 0
     },
     {
@@ -490,9 +494,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T05:24:38Z",
-    "iterations_completed": 3,
-    "tasks_closed": 3,
+    "last_iteration_at": "2026-04-27T05:34:50Z",
+    "iterations_completed": 4,
+    "tasks_closed": 4,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
