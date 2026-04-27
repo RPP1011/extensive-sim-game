@@ -130,7 +130,7 @@
 - Create: `crates/engine_gpu_rules/src/lib.rs` (placeholder; regenerated in Task 2)
 - Modify: `Cargo.toml` (workspace) — add member
 
-- [ ] **Step 1: Add the workspace member entry**
+- [x] **Step 1: Add the workspace member entry**
 
 Open `Cargo.toml` at the project root. Find the `[workspace]` block (around line 1) and add `crates/engine_gpu_rules` to `members`:
 
@@ -140,7 +140,7 @@ members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_data", "c
 exclude = ["crates/world_sim_bench"]
 ```
 
-- [ ] **Step 2: Create the crate manifest**
+- [x] **Step 2: Create the crate manifest**
 
 Write `crates/engine_gpu_rules/Cargo.toml`:
 
@@ -163,7 +163,7 @@ default = []
 gpu = []
 ```
 
-- [ ] **Step 3: Create the build sentinel**
+- [x] **Step 3: Create the build sentinel**
 
 Write `crates/engine_gpu_rules/build.rs` (mirror of `engine_rules/build.rs`):
 
@@ -207,7 +207,7 @@ fn walk(dir: &Path) {
 }
 ```
 
-- [ ] **Step 4: Create the placeholder lib.rs**
+- [x] **Step 4: Create the placeholder lib.rs**
 
 Write `crates/engine_gpu_rules/src/lib.rs`:
 
@@ -222,7 +222,7 @@ Write `crates/engine_gpu_rules/src/lib.rs`:
 #![allow(clippy::all)]
 ```
 
-- [ ] **Step 5: Verify the crate builds standalone**
+- [x] **Step 5: Verify the crate builds standalone**
 
 Run: `cargo build -p engine_gpu_rules`
 Expected:
@@ -231,7 +231,7 @@ Compiling engine_gpu_rules v0.1.0 (...)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in ...s
 ```
 
-- [ ] **Step 6: Verify the build sentinel rejects hand-edited files**
+- [x] **Step 6: Verify the build sentinel rejects hand-edited files**
 
 Create a one-line file `crates/engine_gpu_rules/src/touch_test.rs` containing:
 
@@ -244,7 +244,7 @@ Expected: build fails with the panic message `engine_gpu_rules: src/touch_test.r
 
 Then delete the file: `rm crates/engine_gpu_rules/src/touch_test.rs` and re-run `cargo build -p engine_gpu_rules` — expect a clean build.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add Cargo.toml crates/engine_gpu_rules/

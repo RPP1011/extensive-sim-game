@@ -1,0 +1,16 @@
+[package]
+name = "engine_gpu_rules"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+engine = { path = "../engine" }
+engine_data = { path = "../engine_data" }
+bytemuck = { version = "1.16", features = ["derive"] }
+wgpu = "22"
+
+[features]
+default = []
+# Mirror of engine_gpu's gpu feature; pulls in wgpu-touching code paths.
+gpu = []
