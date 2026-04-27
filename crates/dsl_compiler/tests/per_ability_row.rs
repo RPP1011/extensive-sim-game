@@ -609,3 +609,32 @@ scoring {
     // Sentinel for no-cast must be present
     assert!(wgsl.contains("SENTINEL_NO_CAST") || wgsl.contains("0xFFFFFFFFFFFFFFFF"), "sentinel defined");
 }
+
+// ---------------------------------------------------------------------------
+// SCHEMA-1: schema hash differs when a per_ability row is present vs. absent
+// ---------------------------------------------------------------------------
+//
+// The `chosen_ability_buf` packing format (2× u32 per agent: ability_slot +
+// target_slot) is part of the contract between the compiler-emitted WGSL and
+// the engine_gpu side. Adding a `per_ability` row, or changing that packing
+// layout, must perturb the schema hash so trace-format guards / CI catch the
+// drift.
+
+#[test]
+fn schema_hash_differs_with_and_without_per_ability_row() {
+    const WITH_ROW: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    score: ability::tag(PHYSICAL)
+  }
+}
+"#;
+    const WITHOUT_ROW: &str = r#"
+scoring {}
+"#;
+    let with_comp = dsl_compiler::compile(WITH_ROW).expect("compile WITH_ROW");
+    let without_comp = dsl_compiler::compile(WITHOUT_ROW).expect("compile WITHOUT_ROW");
+    let h1 = dsl_compiler::schema_hash::scoring_hash(&with_comp.scoring);
+    let h2 = dsl_compiler::schema_hash::scoring_hash(&without_comp.scoring);
+    assert_ne!(h1, h2, "schema hash must differ when per_ability rows are added");
+}

@@ -298,6 +298,31 @@ pub fn scoring_hash(blocks: &[ScoringIR]) -> [u8; 32] {
             h.update([0u8]);
             hash_expr(&mut h, &e.expr);
         }
+        // Hash per_ability rows (Subsystem 3 — ability evaluation kernel).
+        // The packing format for chosen_ability_buf is 2×u32 per agent:
+        //   [agent*2+0] = ability_slot  (0xFFFFFFFF = sentinel no-cast)
+        //   [agent*2+1] = target_agent_slot (0xFFFFFFFF = sentinel no-target)
+        // Changing this layout requires bumping the schema hash.
+        h.update(b"chosen_ability_buf_packing: 2xu32_per_agent_slot_then_target");
+        h.update(&(block.per_ability_rows.len() as u32).to_le_bytes());
+        for row in &block.per_ability_rows {
+            h.update(b"per_ability_row:");
+            h.update(row.name.as_bytes());
+            h.update([0u8]);
+            if let Some(guard) = &row.guard {
+                h.update([0x01u8]);
+                hash_expr(&mut h, guard);
+            } else {
+                h.update([0x00u8]);
+            }
+            hash_expr(&mut h, &row.score);
+            if let Some(target) = &row.target {
+                h.update([0x01u8]);
+                hash_expr(&mut h, target);
+            } else {
+                h.update([0x00u8]);
+            }
+        }
         h.update([0xFFu8]);
     }
     h.finalize().into()
