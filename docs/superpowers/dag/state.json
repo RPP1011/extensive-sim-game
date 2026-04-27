@@ -257,15 +257,22 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-8"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 8,
-      "steps_done": 0,
+      "steps_done": 8,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "c9521119",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critic_compiler_first": "PASS",
+        "critic_cross_backend_parity": "PASS",
+        "critic_reduction_determinism": "PASS",
+        "note": "ApplyActionsKernel emit. IR walk: 6 bindings, hand-written: 6 bindings, same count. Feature-gated (engine_gpu_emitted_apply_actions_dispatch off) — emitted WGSL is no-op stub, hand-written WGSL is dynamically constructed via build_shader(event_ring_capacity) so cannot be hoisted statically. T16 lands real WGSL body. Type-checked BindingSources caught T5/T6 drift at build time."
+      },
+      "started_at": "2026-04-27T06:14:03Z",
+      "completed_at": "2026-04-27T06:32:14Z",
       "retry_count": 0
     },
     {
@@ -505,9 +512,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T06:11:28Z",
-    "iterations_completed": 6,
-    "tasks_closed": 6,
+    "last_iteration_at": "2026-04-27T06:32:14Z",
+    "iterations_completed": 7,
+    "tasks_closed": 7,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
