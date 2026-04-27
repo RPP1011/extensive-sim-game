@@ -1326,6 +1326,24 @@ impl FusedMaskKernel {
             .bitmaps_concat_buf
     }
 
+    /// **T5 transitional accessor** — returns a buffer reference that
+    /// the emitted `MaskUnpackKernel` plumbs through `TransientHandles::
+    /// mask_unpack_agents_input`. Today's emitted WGSL is a stub, so the
+    /// concrete buffer this points at is irrelevant to dispatch
+    /// correctness; we hand back the pool's `pos_buf` as a stable,
+    /// already-allocated SoA handle. T16 retires the hand-written
+    /// kernel and the emit picks the real source buffer up directly.
+    pub fn unpack_agents_input_buf(&self) -> &wgpu::Buffer {
+        &self
+            .pool
+            .as_ref()
+            .expect(
+                "unpack_agents_input_buf: pool not initialised; call run_resident or \
+                 upload_soa_from_state first",
+            )
+            .pos_buf
+    }
+
     /// Upload state into the GPU buffers, dispatch the fused kernel,
     /// and read back one bitmap per mask. Output is indexed by
     /// `bindings()[i].index` — i.e. the same order the kernel module

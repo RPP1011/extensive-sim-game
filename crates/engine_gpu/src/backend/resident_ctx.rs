@@ -110,15 +110,47 @@ pub struct ResidentPathContext {
     /// batch's tick count in the test harness to print a mean.
     /// Empty when the profiler is disabled or `step_batch` hasn't run.
     pub last_batch_phase_us: Vec<(&'static str, u64)>,
+
+    // -- T5: emitted-kernel resident state ----------------------------
+    //
+    // The plan walks the migration of GPU dispatch from hand-written
+    // wrappers in `engine_gpu::*` to emitted kernels under
+    // `engine_gpu_rules::*`. T5 lights up the first emitted kernel
+    // (FusedMaskKernel + MaskUnpackKernel); the persistent containers
+    // and lazy-init kernel slots below are the resident-side anchors
+    // for the bind/record dispatch pattern. Later tasks (T6+) grow this
+    // section as more kernels migrate.
+    /// Persistent buffers shared across kernels for the whole batch;
+    /// rebuilt when the resident context is rebuilt (e.g. agent_cap
+    /// growth).
+    pub path_ctx:     engine_gpu_rules::resident_context::ResidentPathContext,
+    /// PingPong A/B ring containers (cascade physics).
+    pub pingpong_ctx: engine_gpu_rules::pingpong_context::PingPongContext,
+    /// Shape-keyed pooled buffers reused across kernels.
+    pub pool:         engine_gpu_rules::pool::Pool,
+    /// Lazy-initialised emitted FusedMaskKernel — built on first
+    /// `step_batch` call, reused across ticks until the resident
+    /// context is rebuilt.
+    pub fused_mask_kernel: Option<engine_gpu_rules::fused_mask::FusedMaskKernel>,
+    /// Lazy-initialised emitted MaskUnpackKernel — built on first
+    /// `step_batch` call, reused across ticks. T5 wiring; the
+    /// hand-written `mask_unpack_kernel` field above is kept for
+    /// backward compatibility until T16 retires it.
+    pub fused_mask_unpack_kernel: Option<engine_gpu_rules::mask_unpack::MaskUnpackKernel>,
 }
 
 impl ResidentPathContext {
     pub fn new(
+        device:                &wgpu::Device,
+        agent_cap:             u32,
         mask_unpack_kernel:    MaskUnpackKernel,
         scoring_unpack_kernel: ScoringUnpackKernel,
         fused_unpack_kernel:   FusedAgentUnpackKernel,
         alive_pack_kernel:     AlivePackKernel,
     ) -> Self {
+        let path_ctx = engine_gpu_rules::resident_context::ResidentPathContext::new(device, agent_cap);
+        let pingpong_ctx = engine_gpu_rules::pingpong_context::PingPongContext::new(device);
+        let pool = engine_gpu_rules::pool::Pool::new(device);
         Self {
             resident_agents_buf:    None,
             resident_agents_cap:    0,
@@ -139,6 +171,11 @@ impl ResidentPathContext {
             sim_cfg_buf:            None,
             profiler:               None,
             last_batch_phase_us:    Vec::new(),
+            path_ctx,
+            pingpong_ctx,
+            pool,
+            fused_mask_kernel:      None,
+            fused_mask_unpack_kernel: None,
         }
     }
 }

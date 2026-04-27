@@ -2140,6 +2140,7 @@ dependencies = [
  "dsl_compiler",
  "engine",
  "engine_data",
+ "engine_gpu_rules",
  "engine_rules",
  "glam",
  "memoffset",

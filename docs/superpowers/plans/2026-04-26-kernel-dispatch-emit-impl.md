@@ -1748,7 +1748,7 @@ This task also lands the `BindingSources<'a>` construction site in `step_batch`.
 - Modify: `crates/engine_gpu/src/backend/resident_ctx.rs` (add `Option<FusedMaskKernel>`; build `TransientHandles` + `ExternalBuffers` constructors)
 - Test: `crates/engine_gpu/tests/parity_with_cpu.rs` (existing; must stay green)
 
-- [ ] **Step 1: Confirm emitted bind/record signatures are stable**
+- [x] **Step 1: Confirm emitted bind/record signatures are stable**
 
 Task 4's emitter already produces `bind(&BindingSources, &cfg)` returning a populated `Bindings` and `record(&self, device, encoder, bindings, agent_cap)`. No re-edit of the emitter is required here.
 
@@ -1756,11 +1756,11 @@ Run: `cargo run --bin xtask -- compile-dsl`
 Run: `cargo build -p engine_gpu_rules`
 Expected: clean build.
 
-- [ ] **Step 2: (deleted — see Step 1)**
+- [x] **Step 2: (deleted — see Step 1)**
 
 (This step was previously a placeholder that re-ran compile-dsl after a no-longer-needed emitter edit.)
 
-- [ ] **Step 3: Add engine_gpu_rules to engine_gpu's deps**
+- [x] **Step 3: Add engine_gpu_rules to engine_gpu's deps**
 
 Open `crates/engine_gpu/Cargo.toml`. Under `[dependencies]` add (gating on the gpu feature where the existing engine_gpu deps gate):
 
@@ -1774,7 +1774,7 @@ And update the `gpu` feature line to:
 gpu = ["dep:wgpu", "dep:engine_gpu_rules", "engine_gpu_rules/gpu", /* ... existing entries ... */]
 ```
 
-- [ ] **Step 4: Build the BindingSources aggregate + replace the mask dispatch site in step_batch**
+- [x] **Step 4: Build the BindingSources aggregate + replace the mask dispatch site in step_batch**
 
 Open `crates/engine_gpu/src/lib.rs` around the `step_batch` body (line 991+ — the `fused_unpack_kernel.encode_unpack(...)` call at line 1126 is the integration point).
 
@@ -1843,7 +1843,7 @@ pub pool:         engine_gpu_rules::pool::Pool,
 
 > Implementation guidance: `mask_bitmaps_buf()` and `unpack_agents_input_buf()` may not exist as public accessors on the hand-written `FusedMaskKernel` / `MaskUnpackKernel`. If they don't, add thin `pub fn` getters returning `&wgpu::Buffer` (transitional; this hand-written code goes away in Task 16). The buffers themselves still come from `BufferPool`/the existing transient allocator — what changes is the wiring path, not the allocation strategy.
 
-- [ ] **Step 5: Run the parity sweep**
+- [x] **Step 5: Run the parity sweep**
 
 Run: `cargo test -p engine_gpu --test parity_with_cpu`
 Expected: all tests pass.
@@ -1856,13 +1856,13 @@ Expected: all tests pass.
 
 If any test fails, the failure is the new dispatch path producing different mask bitmaps. Localize by running `cargo test -p engine_gpu --test parity_with_cpu test_mask_only` (or the closest filter) and diffing against the hand-written kernel's output (CPU reference at `engine_gpu::mask::cpu_mask_bitmap`).
 
-- [ ] **Step 6: Update the schema-hash baseline**
+- [x] **Step 6: Update the schema-hash baseline**
 
 Run: `cargo run --bin xtask -- compile-dsl`
 Run: `cargo test -p engine_gpu_rules --test schema_hash`
 Expected: PASS (the baseline file was rewritten by xtask in step 2).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/engine_gpu/Cargo.toml crates/engine_gpu/src/lib.rs crates/engine_gpu/src/backend/resident_ctx.rs crates/engine_gpu/src/mask.rs crates/dsl_compiler/src/emit_mask_kernel.rs crates/dsl_compiler/src/emit_kernel_index.rs crates/engine_gpu_rules/
