@@ -8,7 +8,7 @@ build = "build.rs"
 engine = { path = "../engine" }
 engine_data = { path = "../engine_data" }
 bytemuck = { version = "1.16", features = ["derive"] }
-wgpu = "22"
+wgpu = "=26.0.1"
 
 [features]
 default = []

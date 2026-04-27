@@ -3,5 +3,9 @@
 
 /// Transient-lifetime buffer references — populated each tick by engine_gpu.
 pub struct TransientHandles<'a> {
+    /// FusedMaskKernel output: ceil(N/32) words × N masks; recycled per tick.
+    pub mask_bitmaps: &'a wgpu::Buffer,
+    /// MaskUnpackKernel scratch: source SoA before unpack.
+    pub mask_unpack_agents_input: &'a wgpu::Buffer,
     pub _phantom: std::marker::PhantomData<&'a ()>,
 }

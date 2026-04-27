@@ -4,6 +4,8 @@
 #![allow(clippy::all)]
 #![allow(unused_imports)]
 
+pub mod fused_mask;
+pub mod mask_unpack;
 
 pub mod schedule;
 pub mod resident_context;
@@ -16,6 +18,8 @@ pub mod megakernel;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum KernelId {
+    FusedMask,
+    MaskUnpack,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

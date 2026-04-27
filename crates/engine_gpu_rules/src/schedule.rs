@@ -11,4 +11,7 @@ pub enum DispatchOp {
     GatedBy { kernel: KernelId, gate: BufferRef },
 }
 
-pub const SCHEDULE: &[DispatchOp] = &[];
+pub const SCHEDULE: &[DispatchOp] = &[
+    DispatchOp::Kernel(KernelId::FusedMask),
+    DispatchOp::Kernel(KernelId::MaskUnpack),
+];

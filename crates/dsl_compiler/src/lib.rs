@@ -25,6 +25,7 @@ pub mod emit_external_buffers;
 pub mod emit_kernel_index;
 pub mod emit_mask;
 pub mod emit_mask_fill;
+pub mod emit_mask_kernel;
 pub mod emit_mask_wgsl;
 pub mod emit_physics;
 pub mod emit_physics_wgsl;

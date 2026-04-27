@@ -3,5 +3,9 @@
 
 /// External-lifetime buffer references — engine-owned (agent SoA, sim_cfg, registries).
 pub struct ExternalBuffers<'a> {
+    /// Agent SoA buffer (engine-owned).
+    pub agents: &'a wgpu::Buffer,
+    /// SimCfg uniform/storage buffer (engine-owned).
+    pub sim_cfg: &'a wgpu::Buffer,
     pub _phantom: std::marker::PhantomData<&'a ()>,
 }
