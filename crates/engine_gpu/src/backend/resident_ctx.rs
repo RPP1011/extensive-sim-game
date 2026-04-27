@@ -177,6 +177,23 @@ pub struct ResidentPathContext {
     pub seed_indirect_kernel: Option<engine_gpu_rules::seed_indirect::SeedIndirectKernel>,
     /// T10 — lazy-initialised emitted AppendEventsKernel.
     pub append_events_kernel: Option<engine_gpu_rules::append_events::AppendEventsKernel>,
+    /// T11 — lazy-initialised emitted per-view Fold kernels. One slot
+    /// per materialized view in the IR (engaged_with / threat_level /
+    /// kin_fear / my_enemies / pack_focus / rally_boost / standing /
+    /// memory). All built on first `step_batch` call when the
+    /// `engine_gpu_emitted_view_folds_dispatch` feature is enabled;
+    /// remain `None` (slot type-checked only) when off. The
+    /// hand-written `engine_gpu::view_storage` fold dispatch is the
+    /// only version that runs by default until T16 hoists the real
+    /// fold-body WGSL into the emitted kernels.
+    pub fold_engaged_with_kernel: Option<engine_gpu_rules::fold_engaged_with::FoldEngagedWithKernel>,
+    pub fold_threat_level_kernel: Option<engine_gpu_rules::fold_threat_level::FoldThreatLevelKernel>,
+    pub fold_kin_fear_kernel:     Option<engine_gpu_rules::fold_kin_fear::FoldKinFearKernel>,
+    pub fold_my_enemies_kernel:   Option<engine_gpu_rules::fold_my_enemies::FoldMyEnemiesKernel>,
+    pub fold_pack_focus_kernel:   Option<engine_gpu_rules::fold_pack_focus::FoldPackFocusKernel>,
+    pub fold_rally_boost_kernel:  Option<engine_gpu_rules::fold_rally_boost::FoldRallyBoostKernel>,
+    pub fold_standing_kernel:     Option<engine_gpu_rules::fold_standing::FoldStandingKernel>,
+    pub fold_memory_kernel:       Option<engine_gpu_rules::fold_memory::FoldMemoryKernel>,
 }
 
 impl ResidentPathContext {
@@ -222,6 +239,14 @@ impl ResidentPathContext {
             physics_kernel:         None,
             seed_indirect_kernel:   None,
             append_events_kernel:   None,
+            fold_engaged_with_kernel: None,
+            fold_threat_level_kernel: None,
+            fold_kin_fear_kernel:     None,
+            fold_my_enemies_kernel:   None,
+            fold_pack_focus_kernel:   None,
+            fold_rally_boost_kernel:  None,
+            fold_standing_kernel:     None,
+            fold_memory_kernel:       None,
         }
     }
 }

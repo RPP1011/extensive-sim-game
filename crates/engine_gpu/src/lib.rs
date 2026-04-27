@@ -2108,6 +2108,179 @@ impl GpuBackend {
                 let _ = &self.resident.append_events_kernel;
             }
 
+            // T11 — emitted per-view Fold<View>Kernel dispatches. Run
+            // alongside the hand-written fold kernels in
+            // `engine_gpu::view_storage` (whose dispatch happens
+            // post-batch when the cascade-driven event ring is drained
+            // into view storage); flipping
+            // `engine_gpu_emitted_view_folds_dispatch` on would
+            // double-fold each event into view storage (until T16
+            // retires the hand-written path), so it's off by default.
+            //
+            // Each block is kept type-checked under the `else` so any
+            // drift between dsl_compiler's emit and these dispatch
+            // sites fails at build time rather than at the eventual
+            // feature flip. Schedule order matches the `Fold<Pascal>`
+            // entries pushed by xtask: alphabetical by view name
+            // (engaged_with, kin_fear, memory, my_enemies, pack_focus,
+            // rally_boost, standing, threat_level).
+            if cfg!(feature = "engine_gpu_emitted_view_folds_dispatch") {
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  sync_scoring_kernel.scoring_buf(),
+                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+
+                // Fold<EngagedWith>.
+                {
+                    use engine_gpu_rules::fold_engaged_with::FoldEngagedWithKernel;
+                    let kernel = self.resident.fold_engaged_with_kernel
+                        .get_or_insert_with(|| FoldEngagedWithKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::fold_engaged_with::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // Fold<KinFear>.
+                {
+                    use engine_gpu_rules::fold_kin_fear::FoldKinFearKernel;
+                    let kernel = self.resident.fold_kin_fear_kernel
+                        .get_or_insert_with(|| FoldKinFearKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::fold_kin_fear::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // Fold<Memory>.
+                {
+                    use engine_gpu_rules::fold_memory::FoldMemoryKernel;
+                    let kernel = self.resident.fold_memory_kernel
+                        .get_or_insert_with(|| FoldMemoryKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::fold_memory::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // Fold<MyEnemies>.
+                {
+                    use engine_gpu_rules::fold_my_enemies::FoldMyEnemiesKernel;
+                    let kernel = self.resident.fold_my_enemies_kernel
+                        .get_or_insert_with(|| FoldMyEnemiesKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::fold_my_enemies::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // Fold<PackFocus>.
+                {
+                    use engine_gpu_rules::fold_pack_focus::FoldPackFocusKernel;
+                    let kernel = self.resident.fold_pack_focus_kernel
+                        .get_or_insert_with(|| FoldPackFocusKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::fold_pack_focus::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // Fold<RallyBoost>.
+                {
+                    use engine_gpu_rules::fold_rally_boost::FoldRallyBoostKernel;
+                    let kernel = self.resident.fold_rally_boost_kernel
+                        .get_or_insert_with(|| FoldRallyBoostKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::fold_rally_boost::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // Fold<Standing>.
+                {
+                    use engine_gpu_rules::fold_standing::FoldStandingKernel;
+                    let kernel = self.resident.fold_standing_kernel
+                        .get_or_insert_with(|| FoldStandingKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::fold_standing::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // Fold<ThreatLevel>.
+                {
+                    use engine_gpu_rules::fold_threat_level::FoldThreatLevelKernel;
+                    let kernel = self.resident.fold_threat_level_kernel
+                        .get_or_insert_with(|| FoldThreatLevelKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::fold_threat_level::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+            } else {
+                let _ = &self.resident.fold_engaged_with_kernel;
+                let _ = &self.resident.fold_kin_fear_kernel;
+                let _ = &self.resident.fold_memory_kernel;
+                let _ = &self.resident.fold_my_enemies_kernel;
+                let _ = &self.resident.fold_pack_focus_kernel;
+                let _ = &self.resident.fold_rally_boost_kernel;
+                let _ = &self.resident.fold_standing_kernel;
+                let _ = &self.resident.fold_threat_level_kernel;
+            }
+
             // Between append_events and the cascade driver (which starts
             // with spatial_rebuild / spatial_query / seed_kernel / iter 0).
             // The cascade driver adds its own "gap:append_events->seed_kernel"

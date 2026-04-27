@@ -467,6 +467,7 @@ fn collect_import(
 /// Returns `true` when the handler body contains at least one `emit` statement
 /// (directly or nested under `if` / `for` / `match`). Used by the emitter to
 /// skip the `Event` import in rules that only mutate via `agents.*` accessors.
+#[allow(dead_code)]
 fn body_emits_event(stmts: &[IrStmt]) -> bool {
     for s in stmts {
         match s {

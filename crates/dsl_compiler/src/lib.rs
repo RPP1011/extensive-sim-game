@@ -44,6 +44,7 @@ pub mod emit_sim_cfg;
 pub mod emit_step;
 pub mod emit_transient_handles;
 pub mod emit_view;
+pub mod emit_view_fold_kernel;
 pub mod emit_view_wgsl;
 pub mod schema_hash;
 

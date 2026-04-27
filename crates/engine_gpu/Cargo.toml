@@ -61,6 +61,15 @@ engine_gpu_emitted_seed_indirect_dispatch = []
 # Off by default; the hand-written
 # `cascade_ctx.encode_append_apply_events` keeps running until T16.
 engine_gpu_emitted_append_events_dispatch = []
+# T11 — opt-in switch to dispatch the emitted per-view Fold<View>Kernels
+# (engaged_with / threat_level / kin_fear / my_enemies / pack_focus /
+# rally_boost / standing / memory). One feature gates all 8 view fold
+# dispatches together — the per-view feature surface would otherwise
+# explode and these kernels share the same readiness criterion (all
+# emit a no-op WGSL stub matching the BGL slot-for-slot until T16
+# hoists the real fold body). Off by default until then; the
+# hand-written fold kernels in `engine_gpu::view_storage` keep running.
+engine_gpu_emitted_view_folds_dispatch = []
 
 [dependencies]
 engine = { path = "../engine" }

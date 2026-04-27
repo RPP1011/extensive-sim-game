@@ -6,6 +6,14 @@
 
 pub mod append_events;
 pub mod apply_actions;
+pub mod fold_engaged_with;
+pub mod fold_kin_fear;
+pub mod fold_memory;
+pub mod fold_my_enemies;
+pub mod fold_pack_focus;
+pub mod fold_rally_boost;
+pub mod fold_standing;
+pub mod fold_threat_level;
 pub mod fused_mask;
 pub mod mask_unpack;
 pub mod movement;
@@ -28,6 +36,14 @@ pub mod megakernel;
 pub enum KernelId {
     AppendEvents,
     ApplyActions,
+    FoldEngagedWith,
+    FoldKinFear,
+    FoldMemory,
+    FoldMyEnemies,
+    FoldPackFocus,
+    FoldRallyBoost,
+    FoldStanding,
+    FoldThreatLevel,
     FusedMask,
     MaskUnpack,
     Movement,

@@ -179,6 +179,7 @@ fn emit_cast_mask(out: &mut String) {
     writeln!(out, "        }}").unwrap();
 }
 
+#[allow(dead_code)]
 fn emit_target_bound_mask(out: &mut String, name: &str, stem: &str) {
     if let Some(kind) = micro_kind_from_name(name) {
         writeln!(out, "        crate::mask::mask_{stem}_candidates(state, id, targets);").unwrap();

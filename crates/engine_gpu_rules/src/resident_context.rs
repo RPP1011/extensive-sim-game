@@ -144,4 +144,52 @@ impl ResidentPathContext {
         // Vec<&'static T> coerces to &[&T] here.
         unsafe { std::mem::transmute::<&[&'static wgpu::Buffer], &'a [&'a wgpu::Buffer]>(v.as_slice()) }
     }
+
+    /// Returns (primary, anchor_opt, ids_opt) for the `threat_level` fold kernel.
+    /// Used by `FoldThreatLevelKernel::bind()`.
+    pub fn fold_view_threat_level_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        (&self.view_storage_threat_level, None, None)
+    }
+
+    /// Returns (primary, anchor_opt, ids_opt) for the `engaged_with` fold kernel.
+    /// Used by `FoldEngagedWithKernel::bind()`.
+    pub fn fold_view_engaged_with_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        (&self.standing_primary, None, None)
+    }
+
+    /// Returns (primary, anchor_opt, ids_opt) for the `my_enemies` fold kernel.
+    /// Used by `FoldMyEnemiesKernel::bind()`.
+    pub fn fold_view_my_enemies_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        (&self.view_storage_my_enemies, None, None)
+    }
+
+    /// Returns (primary, anchor_opt, ids_opt) for the `kin_fear` fold kernel.
+    /// Used by `FoldKinFearKernel::bind()`.
+    pub fn fold_view_kin_fear_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        (&self.view_storage_kin_fear, None, None)
+    }
+
+    /// Returns (primary, anchor_opt, ids_opt) for the `pack_focus` fold kernel.
+    /// Used by `FoldPackFocusKernel::bind()`.
+    pub fn fold_view_pack_focus_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        (&self.view_storage_pack_focus, None, None)
+    }
+
+    /// Returns (primary, anchor_opt, ids_opt) for the `rally_boost` fold kernel.
+    /// Used by `FoldRallyBoostKernel::bind()`.
+    pub fn fold_view_rally_boost_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        (&self.view_storage_rally_boost, None, None)
+    }
+
+    /// Returns (primary, anchor_opt, ids_opt) for the `standing` fold kernel.
+    /// Used by `FoldStandingKernel::bind()`.
+    pub fn fold_view_standing_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        (&self.standing_primary, None, None)
+    }
+
+    /// Returns (primary, anchor_opt, ids_opt) for the `memory` fold kernel.
+    /// Used by `FoldMemoryKernel::bind()`.
+    pub fn fold_view_memory_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        (&self.memory_primary, None, None)
+    }
 }

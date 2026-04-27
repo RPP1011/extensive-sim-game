@@ -22,4 +22,12 @@ pub const SCHEDULE: &[DispatchOp] = &[
     DispatchOp::FixedPoint { kernel: KernelId::Physics, max_iter: 8 },
     DispatchOp::Indirect { kernel: KernelId::SeedIndirect, args_buf: BufferRef::ResidentIndirectArgs },
     DispatchOp::Kernel(KernelId::AppendEvents),
+    DispatchOp::Kernel(KernelId::FoldThreatLevel),
+    DispatchOp::Kernel(KernelId::FoldEngagedWith),
+    DispatchOp::Kernel(KernelId::FoldMyEnemies),
+    DispatchOp::Kernel(KernelId::FoldKinFear),
+    DispatchOp::Kernel(KernelId::FoldPackFocus),
+    DispatchOp::Kernel(KernelId::FoldRallyBoost),
+    DispatchOp::Kernel(KernelId::FoldStanding),
+    DispatchOp::Kernel(KernelId::FoldMemory),
 ];

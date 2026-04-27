@@ -393,6 +393,7 @@ fn emit_candidate_enumerator_fn(
 /// Short human-readable summary of the `from` clause for the generated
 /// doc comment. Keeps the emission stable against rustfmt by avoiding
 /// embedded code fragments.
+#[allow(dead_code)]
 fn source_shape_summary(expr: &IrExprNode) -> &'static str {
     match &expr.kind {
         IrExpr::NamespaceCall { ns, method, .. }
