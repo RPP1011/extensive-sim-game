@@ -343,15 +343,21 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-11"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 8,
-      "steps_done": 0,
+      "steps_done": 8,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "3d4bdea1",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "compiler-first": "PASS",
+        "cross-backend-parity": "PASS",
+        "reduction-determinism": "PASS"
+      },
+      "started_at": "2026-04-27T16:10:16Z",
+      "completed_at": "2026-04-27T16:45:58Z",
       "retry_count": 0
     },
     {
@@ -525,9 +531,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T16:07:51Z",
-    "iterations_completed": 9,
-    "tasks_closed": 9,
+    "last_iteration_at": "2026-04-27T16:45:58Z",
+    "iterations_completed": 10,
+    "tasks_closed": 10,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
