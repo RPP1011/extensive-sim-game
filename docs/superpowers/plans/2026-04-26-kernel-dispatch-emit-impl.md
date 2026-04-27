@@ -3093,7 +3093,7 @@ Hand-written sources: `engine_gpu/src/physics.rs:1538-2860`, `engine_gpu/src/cas
 - Modify: `crates/engine_gpu/src/lib.rs` (replace physics dispatch loop with Schedule iteration)
 - Test: `crates/dsl_compiler/tests/emit_physics_smoke.rs`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 Create `crates/dsl_compiler/tests/emit_physics_smoke.rs`:
 
@@ -3124,12 +3124,12 @@ fn append_events_rs_has_kernel_impl() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm fail**
+- [x] **Step 2: Run to confirm fail**
 
 Run: `cargo test -p dsl_compiler --test emit_physics_smoke`
 Expected: FAIL — functions don't exist.
 
-- [ ] **Step 3: Add the three emitters to emit_movement_kernel.rs**
+- [x] **Step 3: Add the three emitters to emit_movement_kernel.rs**
 
 Append to `crates/dsl_compiler/src/emit_movement_kernel.rs`:
 
@@ -3441,12 +3441,12 @@ pub fn emit_append_events_rs() -> String {
 }
 ```
 
-- [ ] **Step 4: Run unit tests**
+- [x] **Step 4: Run unit tests**
 
 Run: `cargo test -p dsl_compiler --test emit_physics_smoke`
 Expected: 3 passed.
 
-- [ ] **Step 5: Wire xtask to write all three modules + WGSL bodies + Schedule entries**
+- [x] **Step 5: Wire xtask to write all three modules + WGSL bodies + Schedule entries**
 
 In `crates/xtask/src/main.rs`:
 
@@ -3497,7 +3497,7 @@ fs::write(PathBuf::from("crates/engine_gpu_rules/src/schedule.rs"),
     emit_schedule_rs(&entries)).expect("schedule.rs");
 ```
 
-- [ ] **Step 6: Wire physics + seed + append in engine_gpu's step_batch**
+- [x] **Step 6: Wire physics + seed + append in engine_gpu's step_batch**
 
 Extend the binding-source containers to expose cascade buffers. Inside the Task 10 xtask block, append:
 
@@ -3615,7 +3615,7 @@ Replace the `run_cascade_resident(...)` call in `step_batch` with an inline Fixe
 
 Add `pub physics_kernel`, `pub seed_indirect_kernel`, `pub append_events_kernel` Optional fields to `ResidentPathContext` (engine_gpu side wrapper). The `cascade_ctx.ab_for_iter` accessor stays as a transitional helper exposing the existing CascadeResidentCtx ring buffers; Task 16 deletes it once the residency is fully migrated to `engine_gpu_rules::PingPongContext`.
 
-- [ ] **Step 7: Parity sweep**
+- [x] **Step 7: Parity sweep**
 
 Run: `cargo test -p engine_gpu --test physics_parity`
 Run: `cargo test -p engine_gpu --test cascade_parity`
@@ -3624,7 +3624,7 @@ Run: `cargo test -p engine --test wolves_and_humans_parity`
 Run: `cargo test -p engine_gpu --test indirect_cascade_converges`
 Expected: all pass.
 
-- [ ] **Step 8: Bump baseline + commit**
+- [x] **Step 8: Bump baseline + commit**
 
 ```bash
 cargo run --bin xtask -- compile-dsl

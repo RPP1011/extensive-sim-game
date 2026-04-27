@@ -165,6 +165,18 @@ pub struct ResidentPathContext {
     /// dispatch that runs by default until T16 hoists the real
     /// MoveToward / Flee semantics into the emitted WGSL body.
     pub movement_kernel: Option<engine_gpu_rules::movement::MovementKernel>,
+    /// T10 — lazy-initialised emitted PhysicsKernel from
+    /// `engine_gpu_rules`. Built on first `step_batch` call when the
+    /// `engine_gpu_emitted_physics_dispatch` feature is enabled;
+    /// remains `None` (slot type-checked only) when the feature is off.
+    /// The hand-written
+    /// `cascade_resident::run_cascade_resident_with_iter_cap` is the
+    /// only dispatch that runs by default until T16 retires it.
+    pub physics_kernel: Option<engine_gpu_rules::physics::PhysicsKernel>,
+    /// T10 — lazy-initialised emitted SeedIndirectKernel.
+    pub seed_indirect_kernel: Option<engine_gpu_rules::seed_indirect::SeedIndirectKernel>,
+    /// T10 — lazy-initialised emitted AppendEventsKernel.
+    pub append_events_kernel: Option<engine_gpu_rules::append_events::AppendEventsKernel>,
 }
 
 impl ResidentPathContext {
@@ -207,6 +219,9 @@ impl ResidentPathContext {
             apply_actions_kernel:   None,
             pick_ability_kernel:    None,
             movement_kernel:        None,
+            physics_kernel:         None,
+            seed_indirect_kernel:   None,
+            append_events_kernel:   None,
         }
     }
 }

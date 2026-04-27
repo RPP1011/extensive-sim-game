@@ -11,5 +11,15 @@ pub struct TransientHandles<'a> {
     pub action_buf: &'a wgpu::Buffer,
     /// ScoringUnpackKernel scratch.
     pub scoring_unpack_agents_input: &'a wgpu::Buffer,
+    /// Cascade producer-ring records for the current iteration.
+    pub cascade_current_ring: &'a wgpu::Buffer,
+    /// Cascade producer-ring tail counter.
+    pub cascade_current_tail: &'a wgpu::Buffer,
+    /// Cascade consumer-ring records (next iteration).
+    pub cascade_next_ring: &'a wgpu::Buffer,
+    /// Cascade consumer-ring tail counter (atomic).
+    pub cascade_next_tail: &'a wgpu::Buffer,
+    /// dispatch_indirect args for the next iteration.
+    pub cascade_indirect_args: &'a wgpu::Buffer,
     pub _phantom: std::marker::PhantomData<&'a ()>,
 }

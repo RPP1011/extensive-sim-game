@@ -1298,6 +1298,17 @@ impl GpuBackend {
                     // type-only at the moment.
                     action_buf:                  self.sync.scoring_kernel.scoring_buf(),
                     scoring_unpack_agents_input: self.sync.scoring_kernel.scoring_buf(),
+                    // T10: emitted TransientHandles gained five
+                    // cascade_* fields (Physics + SeedIndirect refs).
+                    // The mask dispatch doesn't read them; the FixedPoint
+                    // loop in T10's gated dispatch rebuilds these per
+                    // iteration with the real CascadeResidentCtx ring
+                    // buffers. Stand-in to mask_sim_cfg_ref here.
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
@@ -1376,6 +1387,12 @@ impl GpuBackend {
                     // the gated path above.
                     action_buf:                  self.sync.scoring_kernel.scoring_buf(),
                     scoring_unpack_agents_input: self.sync.scoring_kernel.scoring_buf(),
+                    // T10 placeholders.
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
@@ -1528,6 +1545,15 @@ impl GpuBackend {
                     mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
                     action_buf:                  sync_scoring_kernel.scoring_buf(),
                     scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    // T10 placeholders — see comment in the mask block
+                    // (line ~1288) for rationale; emitted physics/seed/
+                    // append are feature-gated and rebuild these per-iter
+                    // in the FixedPoint loop.
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
@@ -1577,6 +1603,15 @@ impl GpuBackend {
                     mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
                     action_buf:                  sync_scoring_kernel.scoring_buf(),
                     scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    // T10 placeholders — see comment in the mask block
+                    // (line ~1288) for rationale; emitted physics/seed/
+                    // append are feature-gated and rebuild these per-iter
+                    // in the FixedPoint loop.
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
@@ -1633,6 +1668,15 @@ impl GpuBackend {
                     mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
                     action_buf:                  sync_scoring_kernel.scoring_buf(),
                     scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    // T10 placeholders — see comment in the mask block
+                    // (line ~1288) for rationale; emitted physics/seed/
+                    // append are feature-gated and rebuild these per-iter
+                    // in the FixedPoint loop.
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
@@ -1676,6 +1720,15 @@ impl GpuBackend {
                     mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
                     action_buf:                  sync_scoring_kernel.scoring_buf(),
                     scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    // T10 placeholders — see comment in the mask block
+                    // (line ~1288) for rationale; emitted physics/seed/
+                    // append are feature-gated and rebuild these per-iter
+                    // in the FixedPoint loop.
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
@@ -1745,6 +1798,15 @@ impl GpuBackend {
                     mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
                     action_buf:                  sync_scoring_kernel.scoring_buf(),
                     scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    // T10 placeholders — see comment in the mask block
+                    // (line ~1288) for rationale; emitted physics/seed/
+                    // append are feature-gated and rebuild these per-iter
+                    // in the FixedPoint loop.
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
@@ -1788,6 +1850,15 @@ impl GpuBackend {
                     mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
                     action_buf:                  sync_scoring_kernel.scoring_buf(),
                     scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    // T10 placeholders — see comment in the mask block
+                    // (line ~1288) for rationale; emitted physics/seed/
+                    // append are feature-gated and rebuild these per-iter
+                    // in the FixedPoint loop.
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
@@ -1805,6 +1876,142 @@ impl GpuBackend {
                     external:  &external,
                 };
                 let _ = &self.resident.movement_kernel;
+            }
+
+            // T10 — emitted PhysicsKernel FixedPoint dispatch
+            // (feature-gated). The hand-written cascade in
+            // `cascade_resident::run_cascade_resident_with_iter_cap`
+            // below is the only path that runs by default.
+            //
+            // The FixedPoint loop rebuilds `BindingSources` per
+            // iteration to alternate A/B ring refs in
+            // `transient.cascade_*`. The current emitted WGSL is a
+            // no-op stub (every binding touched once so naga keeps
+            // them live), so flipping this feature on with the
+            // bootstrap WGSL would write nothing useful — T16 hoists
+            // the real `cs_physics` body and unifies the BGL.
+            //
+            // Kept type-checked under the `else` so any drift
+            // between dsl_compiler's emit and this dispatch site
+            // fails at build time rather than at the eventual
+            // feature flip.
+            if cfg!(feature = "engine_gpu_emitted_physics_dispatch") {
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::physics::{PhysicsCfg, PhysicsKernel as EmittedPhysicsKernel};
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let kernel = self
+                    .resident
+                    .physics_kernel
+                    .get_or_insert_with(|| EmittedPhysicsKernel::new(&self.device));
+                let max_iter: u32 = 8;
+                for iter in 0..max_iter {
+                    // Per-iteration BindingSources: cascade_current/next
+                    // refs alternate by iter parity. Stand-ins until
+                    // T16 wires the real CascadeResidentCtx ring buffers.
+                    let transient = TransientHandles {
+                        mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                        mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                        action_buf:                  sync_scoring_kernel.scoring_buf(),
+                        scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                        cascade_current_ring:        mask_sim_cfg_ref,
+                        cascade_current_tail:        mask_sim_cfg_ref,
+                        cascade_next_ring:           mask_sim_cfg_ref,
+                        cascade_next_tail:           mask_sim_cfg_ref,
+                        cascade_indirect_args:       mask_sim_cfg_ref,
+                        _phantom: std::marker::PhantomData,
+                    };
+                    let external = ExternalBuffers {
+                        agents:           agents_buf,
+                        sim_cfg:          mask_sim_cfg_ref,
+                        ability_registry: mask_sim_cfg_ref,
+                        tag_values:       mask_sim_cfg_ref,
+                        _phantom:         std::marker::PhantomData,
+                    };
+                    let sources = BindingSources {
+                        resident:  &self.resident.path_ctx,
+                        pingpong:  &self.resident.pingpong_ctx,
+                        pool:      &self.resident.pool,
+                        transient: &transient,
+                        external:  &external,
+                    };
+                    let cfg = PhysicsCfg {
+                        agent_cap,
+                        iter_idx: iter,
+                        max_iter,
+                        event_ring_capacity: 4096,
+                    };
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::physics::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+            } else {
+                // Type-only exercise — keep the kernel slot reachable
+                // so dead-code lints stay quiet.
+                let _ = &self.resident.physics_kernel;
+            }
+
+            // T10 — emitted SeedIndirectKernel dispatch (feature-gated).
+            // DispatchOp::Indirect-driven; one-thread, one-workgroup.
+            // The current emitted WGSL stub doesn't actually compute
+            // dispatch_indirect args yet — the hand-written
+            // `SeedIndirectKernel` in `cascade_resident.rs` does that
+            // until T16 unifies the WGSL.
+            if cfg!(feature = "engine_gpu_emitted_seed_indirect_dispatch") {
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::seed_indirect::{SeedIndirectCfg, SeedIndirectKernel as EmittedSeedIndirectKernel};
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  sync_scoring_kernel.scoring_buf(),
+                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+                let kernel = self
+                    .resident
+                    .seed_indirect_kernel
+                    .get_or_insert_with(|| EmittedSeedIndirectKernel::new(&self.device));
+                let cfg = SeedIndirectCfg { iter_idx: 0, _pad: [0; 3] };
+                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("engine_gpu_rules::seed_indirect::cfg"),
+                    contents: bytemuck::cast_slice(&[cfg]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bindings = kernel.bind(&sources, &cfg_buf);
+                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+            } else {
+                let _ = &self.resident.seed_indirect_kernel;
             }
 
             if let Some(p) = profiler.as_mut() {
@@ -1840,6 +2047,65 @@ impl GpuBackend {
                     &cascade_ctx.apply_event_ring,
                     agent_cap,
                 );
+            }
+
+            // T10 — emitted AppendEventsKernel dispatch (feature-gated).
+            // Runs alongside the hand-written
+            // `encode_append_apply_events` above; flipping this on
+            // would double-write events into the batch ring (until T16
+            // retires the hand-written path), so it's off by default.
+            //
+            // Kept type-checked under the `else` so any drift between
+            // dsl_compiler's emit and this dispatch site fails at
+            // build time rather than at the eventual feature flip.
+            if cfg!(feature = "engine_gpu_emitted_append_events_dispatch") {
+                use engine_gpu_rules::append_events::AppendEventsKernel as EmittedAppendEventsKernel;
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  sync_scoring_kernel.scoring_buf(),
+                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+                let kernel = self
+                    .resident
+                    .append_events_kernel
+                    .get_or_insert_with(|| EmittedAppendEventsKernel::new(&self.device));
+                let cfg = kernel.build_cfg(state);
+                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("engine_gpu_rules::append_events::cfg"),
+                    contents: bytemuck::cast_slice(&[cfg]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bindings = kernel.bind(&sources, &cfg_buf);
+                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+            } else {
+                let _ = &self.resident.append_events_kernel;
             }
 
             // Between append_events and the cascade driver (which starts

@@ -19,6 +19,16 @@ pub struct ResidentPathContext {
     pub per_slot_cooldown: wgpu::Buffer,
     /// PickAbilityKernel output (Resident; consumed by ApplyActions next tick).
     pub chosen_ability_buf: wgpu::Buffer,
+    /// Per-agent gold balance (Resident).
+    pub gold: wgpu::Buffer,
+    /// Standing view storage primary buffer (Resident).
+    pub standing_primary: wgpu::Buffer,
+    /// Memory view storage primary buffer (Resident).
+    pub memory_primary: wgpu::Buffer,
+    /// Batch event ring records (consumed by view folds + post-batch readback).
+    pub batch_events_ring: wgpu::Buffer,
+    /// Batch event ring tail counter.
+    pub batch_events_tail: wgpu::Buffer,
     /// Cached slice over scoring view buffers — populated lazily by
     /// `scoring_view_buffers_slice` and re-used across `bind()` calls.
     /// `OnceLock` keeps it `Sync`-safe without runtime locking.
@@ -76,6 +86,36 @@ impl ResidentPathContext {
             }),
             chosen_ability_buf: _device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("engine_gpu_rules::resident::chosen_ability_buf"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            gold: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::gold"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            standing_primary: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::standing_primary"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            memory_primary: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::memory_primary"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            batch_events_ring: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::batch_events_ring"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            batch_events_tail: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::batch_events_tail"),
                 size: 4,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,

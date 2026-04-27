@@ -4,13 +4,16 @@
 #![allow(clippy::all)]
 #![allow(unused_imports)]
 
+pub mod append_events;
 pub mod apply_actions;
 pub mod fused_mask;
 pub mod mask_unpack;
 pub mod movement;
+pub mod physics;
 pub mod pick_ability;
 pub mod scoring;
 pub mod scoring_unpack;
+pub mod seed_indirect;
 
 pub mod schedule;
 pub mod resident_context;
@@ -23,13 +26,16 @@ pub mod megakernel;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum KernelId {
+    AppendEvents,
     ApplyActions,
     FusedMask,
     MaskUnpack,
     Movement,
+    Physics,
     PickAbility,
     Scoring,
     ScoringUnpack,
+    SeedIndirect,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

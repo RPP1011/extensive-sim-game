@@ -19,4 +19,7 @@ pub const SCHEDULE: &[DispatchOp] = &[
     DispatchOp::Kernel(KernelId::ApplyActions),
     DispatchOp::Kernel(KernelId::PickAbility),
     DispatchOp::Kernel(KernelId::Movement),
+    DispatchOp::FixedPoint { kernel: KernelId::Physics, max_iter: 8 },
+    DispatchOp::Indirect { kernel: KernelId::SeedIndirect, args_buf: BufferRef::ResidentIndirectArgs },
+    DispatchOp::Kernel(KernelId::AppendEvents),
 ];
