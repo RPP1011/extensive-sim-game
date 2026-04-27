@@ -583,3 +583,29 @@ scoring {
     assert!(out.contains("tag_value"), "score lowers to tag_value read");
     assert!(out.contains("nearest_hostile_in_range"), "target clause present");
 }
+
+// ---------------------------------------------------------------------------
+// EMIT-WGSL-1: emit_pick_ability_wgsl produces a string with cs_pick_ability entry point
+// ---------------------------------------------------------------------------
+
+#[test]
+fn emit_pick_ability_wgsl_produces_cs_entry_point() {
+    const SRC: &str = r#"
+scoring {
+  row pick_ability per_ability {
+    guard:  !ability::on_cooldown(ability)
+    score:  ability::tag(PHYSICAL) * 2.0
+    target: nearest_hostile_in_range(ability::range)
+  }
+}
+"#;
+    let comp = dsl_compiler::compile(SRC).expect("compile ok");
+    let wgsl = dsl_compiler::emit_scoring_wgsl::emit_pick_ability_wgsl(&comp.scoring[0]);
+    assert!(wgsl.contains("@compute"), "should have @compute attribute");
+    assert!(wgsl.contains("cs_pick_ability"), "entry point name");
+    assert!(wgsl.contains("chosen_ability_buf"), "output buffer binding");
+    assert!(wgsl.contains("per_slot_cooldown"), "cooldown buffer binding");
+    assert!(wgsl.contains("tag_values"), "tag values buffer binding");
+    // Sentinel for no-cast must be present
+    assert!(wgsl.contains("SENTINEL_NO_CAST") || wgsl.contains("0xFFFFFFFFFFFFFFFF"), "sentinel defined");
+}
