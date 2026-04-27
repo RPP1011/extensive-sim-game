@@ -16,8 +16,8 @@
   Single-dispatch tick path; perf-sweep done at N=200k, optimization ongoing. `plans/gpu_megakernel_plan.md`, `plans/gpu_megakernel_perf.md`.
 - **GPU cold-state replay (Subsystem 2) — Phases 2–4**
   Phase 1 (DSL-compiler view annotations) done; Phase 2 (chronicle) done; Phase 3 (gold + standing) done; Phases 2–4 umbrella plan kept for future per-phase plans. `plans/2026-04-22-gpu-cold-state-replay.md`.
-- **Subsystem 3 — GPU ability evaluation**
-  `pick_ability` kernel + `ability::tag(TAG)` scoring grammar + `per_ability` row type per `spec/engine.md` §11. The one genuinely-missing GPU kernel per the 2026-04-26 audit. `plans/2026-04-26-subsystem-3-ability-eval-impl.md`.
+- **Kernel dispatch-emit abstraction**
+  Compiler-emit GPU kernel wrappers + buffer ownership + Schedule into new sibling crate `engine_gpu_rules/`. Migrates all 14 hand-written kernels in one plan; folds in pick_ability (Subsystem 3 Group B). Subsumes Plan 6. `plans/2026-04-26-kernel-dispatch-emit-impl.md`, `specs/2026-04-26-kernel-dispatch-emit-design.md`.
 
 ## Drafted (spec exists, plan does not)
 
@@ -28,8 +28,7 @@
 
 ## Engine plans not yet written
 
-- **Plan 6 — `GpuBackend` foundation**
-  Bridge from `ComputeBackend` trait to `engine_gpu` primitives. Prerequisite: Plan 5b–e (landed 2026-04-26).
+_(no engine plans currently un-drafted — Plan 6 was subsumed by the kernel dispatch-emit abstraction, see Active tier.)_
 
 ## Partially landed (DSL stubs / MVP seam done; behaviour attachment pending)
 
