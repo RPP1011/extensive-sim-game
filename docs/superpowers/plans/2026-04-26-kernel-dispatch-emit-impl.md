@@ -1882,7 +1882,7 @@ This is the largest hand-written wrapper (`engine_gpu/src/scoring.rs` is 2795 li
 - Generated: `crates/engine_gpu_rules/src/scoring.{rs,wgsl}` + `scoring_unpack.{rs,wgsl}`
 - Test: `crates/dsl_compiler/tests/emit_scoring_kernel_smoke.rs`
 
-- [ ] **Step 1: Write failing emitter test**
+- [x] **Step 1: Write failing emitter test**
 
 Create `crates/dsl_compiler/tests/emit_scoring_kernel_smoke.rs`:
 
@@ -1910,12 +1910,12 @@ fn scoring_unpack_rs_has_impl() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm failure**
+- [x] **Step 2: Run to confirm failure**
 
 Run: `cargo test -p dsl_compiler --test emit_scoring_kernel_smoke`
 Expected: FAIL — module doesn't exist.
 
-- [ ] **Step 3: Implement emit_scoring_kernel.rs**
+- [x] **Step 3: Implement emit_scoring_kernel.rs**
 
 Create `crates/dsl_compiler/src/emit_scoring_kernel.rs`:
 
@@ -2179,14 +2179,14 @@ pub fn emit_scoring_unpack_rs() -> String {
 }
 ```
 
-- [ ] **Step 4: Register module + run unit tests**
+- [x] **Step 4: Register module + run unit tests**
 
 Add `pub mod emit_scoring_kernel;` to `crates/dsl_compiler/src/lib.rs`.
 
 Run: `cargo test -p dsl_compiler --test emit_scoring_kernel_smoke`
 Expected: 2 passed.
 
-- [ ] **Step 5: Wire xtask compile-dsl to write scoring + scoring_unpack files**
+- [x] **Step 5: Wire xtask compile-dsl to write scoring + scoring_unpack files**
 
 In `crates/xtask/src/main.rs`, extend the modules vec and write:
 
@@ -2224,7 +2224,7 @@ modules.sort();
 }
 ```
 
-- [ ] **Step 6: Re-run compile-dsl + build engine_gpu_rules**
+- [x] **Step 6: Re-run compile-dsl + build engine_gpu_rules**
 
 Run: `cargo run --bin xtask -- compile-dsl`
 Run: `cargo build -p engine_gpu_rules`

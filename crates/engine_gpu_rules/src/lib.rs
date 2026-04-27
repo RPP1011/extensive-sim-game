@@ -6,6 +6,8 @@
 
 pub mod fused_mask;
 pub mod mask_unpack;
+pub mod scoring;
+pub mod scoring_unpack;
 
 pub mod schedule;
 pub mod resident_context;
@@ -20,6 +22,8 @@ pub mod megakernel;
 pub enum KernelId {
     FusedMask,
     MaskUnpack,
+    Scoring,
+    ScoringUnpack,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

@@ -231,12 +231,23 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             Vec::new();
         let mut external_fields: Vec<dsl_compiler::emit_external_buffers::ExternalField> =
             Vec::new();
+        let mut resident_fields: Vec<dsl_compiler::emit_resident_context::ResidentField> =
+            Vec::new();
+        // Per-view resident-field names in `scoring_view_binding_order`
+        // emit order — consumed by emit_resident_context to generate
+        // `scoring_view_buffers_slice()`.
+        let mut scoring_view_field_names: Vec<String> = Vec::new();
         let mut schedule_entries: Vec<dsl_compiler::emit_schedule::ScheduleEntry> = Vec::new();
 
         // Emit engine_gpu_rules/src/lib.rs from the per-kernel module list.
         // Each per-kernel emit block below pushes its module name; the list
         // is sorted before emission so diffs after `.sim` edits stay readable.
-        let mut modules: Vec<String> = vec!["fused_mask".into(), "mask_unpack".into()];
+        let mut modules: Vec<String> = vec![
+            "fused_mask".into(),
+            "mask_unpack".into(),
+            "scoring".into(),
+            "scoring_unpack".into(),
+        ];
         modules.sort();
         {
             let lib_rs = dsl_compiler::emit_kernel_index::emit_lib_rs(&modules);
@@ -362,6 +373,144 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             });
         }
 
+        // ----- Per-kernel emit block: ScoringKernel + ScoringUnpackKernel (Task 6).
+        {
+            use dsl_compiler::emit_resident_context::ResidentField;
+            use dsl_compiler::emit_schedule::{DispatchOpKind, ScheduleEntry};
+            use dsl_compiler::emit_scoring_kernel::{
+                emit_scoring_rs, emit_scoring_unpack_rs, ViewSpecForEmit,
+            };
+            use dsl_compiler::emit_transient_handles::TransientField;
+            use dsl_compiler::emit_view_wgsl::{classify_view, ViewShape};
+
+            // Build ViewSpecForEmit list from the IR. Mirrors the
+            // hand-written engine_gpu::view_storage::build_all_specs:
+            // skip Lazy views; classify the rest into the three shape
+            // strings the emitter discriminates on.
+            //
+            // Note `classify_view` can fail for views the WGSL emitter
+            // doesn't yet lift (e.g. symmetric_pair_topk dedicated
+            // shapes); those are silently dropped here, matching the
+            // mask emitter's approach. The hand-written ScoringKernel
+            // also walks build_all_specs and skips Lazy via
+            // scoring_view_binding_order, so the Vec ends up identical
+            // up to ordering (we sort below).
+            let mut view_specs: Vec<ViewSpecForEmit> = Vec::new();
+            for v in &combined.views {
+                let spec = match classify_view(v) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let (shape, topk) = match spec.shape {
+                    ViewShape::Lazy => continue,
+                    ViewShape::SlotMap { .. } => ("SlotMap".to_string(), false),
+                    ViewShape::PairMapScalar => {
+                        ("PairMapScalar".to_string(), spec.topk.is_some())
+                    }
+                    ViewShape::PairMapDecay { .. } => {
+                        ("PairMapDecay".to_string(), spec.topk.is_some())
+                    }
+                };
+                view_specs.push(ViewSpecForEmit {
+                    name: spec.snake.clone(),
+                    shape,
+                    topk,
+                });
+            }
+            // Match `scoring_view_binding_order` ordering — sort by name.
+            view_specs.sort_by(|a, b| a.name.cmp(&b.name));
+
+            // Emit Rust kernel module.
+            let scoring_rs = emit_scoring_rs(&view_specs);
+            if let Err(e) = fs::write(
+                PathBuf::from("crates/engine_gpu_rules/src/scoring.rs"),
+                scoring_rs,
+            ) {
+                eprintln!("compile-dsl: write scoring.rs: {e}");
+                return ExitCode::FAILURE;
+            }
+
+            // Emit WGSL — wraps the existing emit_scoring_wgsl_atomic_views
+            // emitter (which already produces a full kernel body). Pass
+            // the same view specs so binding indices align with the
+            // generated Rust BGL.
+            let mut wgsl_specs: Vec<dsl_compiler::emit_view_wgsl::ViewStorageSpec> = Vec::new();
+            for v in &combined.views {
+                if let Ok(s) = classify_view(v) {
+                    if !matches!(s.shape, ViewShape::Lazy) {
+                        wgsl_specs.push(s);
+                    }
+                }
+            }
+            wgsl_specs.sort_by(|a, b| a.view_name.cmp(&b.view_name));
+            let scoring_wgsl_body =
+                dsl_compiler::emit_scoring_wgsl::emit_scoring_wgsl_atomic_views(&wgsl_specs);
+            let scoring_wgsl = format!(
+                "// GENERATED by dsl_compiler::emit_scoring_wgsl. Do not edit by hand.\n{scoring_wgsl_body}"
+            );
+            if let Err(e) = fs::write(
+                PathBuf::from("crates/engine_gpu_rules/src/scoring.wgsl"),
+                scoring_wgsl,
+            ) {
+                eprintln!("compile-dsl: write scoring.wgsl: {e}");
+                return ExitCode::FAILURE;
+            }
+
+            // Emit Rust unpack kernel module.
+            let scoring_unpack_rs = emit_scoring_unpack_rs();
+            if let Err(e) = fs::write(
+                PathBuf::from("crates/engine_gpu_rules/src/scoring_unpack.rs"),
+                scoring_unpack_rs,
+            ) {
+                eprintln!("compile-dsl: write scoring_unpack.rs: {e}");
+                return ExitCode::FAILURE;
+            }
+            // Stub unpack WGSL — T7 hoists the real body.
+            let unpack_wgsl =
+                "// GENERATED by dsl_compiler. Do not edit by hand.\n@compute @workgroup_size(64) fn cs_scoring_unpack(@builtin(global_invocation_id) gid: vec3<u32>) {}\n";
+            if let Err(e) = fs::write(
+                PathBuf::from("crates/engine_gpu_rules/src/scoring_unpack.wgsl"),
+                unpack_wgsl,
+            ) {
+                eprintln!("compile-dsl: write scoring_unpack.wgsl: {e}");
+                return ExitCode::FAILURE;
+            }
+
+            // Resident fields — scoring_table + per-view storage.
+            resident_fields.push(ResidentField {
+                name: "scoring_table".into(),
+                doc:  "Resident scoring table (per-action priors).".into(),
+            });
+            for spec in &view_specs {
+                let field_name = format!("view_storage_{}", spec.name);
+                resident_fields.push(ResidentField {
+                    name: field_name.clone(),
+                    doc:  format!("Resident view storage for `{}`.", spec.name),
+                });
+                scoring_view_field_names.push(field_name);
+            }
+
+            // Transient fields — scoring_out + scoring_unpack scratch.
+            transient_fields.push(TransientField {
+                name: "action_buf".into(),
+                doc:  "ScoringKernel output (action-per-agent buffer).".into(),
+            });
+            transient_fields.push(TransientField {
+                name: "scoring_unpack_agents_input".into(),
+                doc:  "ScoringUnpackKernel scratch.".into(),
+            });
+
+            // Schedule rows.
+            schedule_entries.push(ScheduleEntry {
+                kernel: "Scoring".into(),
+                kind:   DispatchOpKind::Kernel,
+            });
+            schedule_entries.push(ScheduleEntry {
+                kernel: "ScoringUnpack".into(),
+                kind:   DispatchOpKind::Kernel,
+            });
+        }
+
         // Schedule — populated above by per-kernel emit blocks.
         {
             let schedule_rs = dsl_compiler::emit_schedule::emit_schedule_rs(&schedule_entries);
@@ -374,9 +523,12 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             }
         }
 
-        // Resident context (initially empty struct).
+        // Resident context — populated above by per-kernel emit blocks.
         {
-            let rc_rs = dsl_compiler::emit_resident_context::emit_resident_context_rs(&[]);
+            let rc_rs = dsl_compiler::emit_resident_context::emit_resident_context_rs_with_scoring(
+                &resident_fields,
+                &scoring_view_field_names,
+            );
             if let Err(e) = fs::write(
                 PathBuf::from("crates/engine_gpu_rules/src/resident_context.rs"),
                 &rc_rs,

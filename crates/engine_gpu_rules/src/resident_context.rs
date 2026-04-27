@@ -3,6 +3,22 @@
 
 /// Resident-lifetime buffers — persist across ticks within a batch.
 pub struct ResidentPathContext {
+    /// Resident scoring table (per-action priors).
+    pub scoring_table: wgpu::Buffer,
+    /// Resident view storage for `kin_fear`.
+    pub view_storage_kin_fear: wgpu::Buffer,
+    /// Resident view storage for `my_enemies`.
+    pub view_storage_my_enemies: wgpu::Buffer,
+    /// Resident view storage for `pack_focus`.
+    pub view_storage_pack_focus: wgpu::Buffer,
+    /// Resident view storage for `rally_boost`.
+    pub view_storage_rally_boost: wgpu::Buffer,
+    /// Resident view storage for `threat_level`.
+    pub view_storage_threat_level: wgpu::Buffer,
+    /// Cached slice over scoring view buffers — populated lazily by
+    /// `scoring_view_buffers_slice` and re-used across `bind()` calls.
+    /// `OnceLock` keeps it `Sync`-safe without runtime locking.
+    scoring_view_buffers_cache: std::sync::OnceLock<Vec<&'static wgpu::Buffer>>,
 }
 
 impl ResidentPathContext {
@@ -11,6 +27,65 @@ impl ResidentPathContext {
     /// at runtime force a context rebuild (the existing GpuBackend
     /// resident-rebuild path).
     pub fn new(_device: &wgpu::Device, _agent_cap: u32) -> Self {
-        Self {}
+        Self {
+            scoring_table: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::scoring_table"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            view_storage_kin_fear: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::view_storage_kin_fear"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            view_storage_my_enemies: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::view_storage_my_enemies"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            view_storage_pack_focus: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::view_storage_pack_focus"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            view_storage_rally_boost: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::view_storage_rally_boost"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            view_storage_threat_level: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::view_storage_threat_level"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            scoring_view_buffers_cache: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Slice of per-view scoring buffers in `scoring_view_binding_order`
+    /// emit order. Used by `ScoringKernel::bind()`.
+    pub fn scoring_view_buffers_slice<'a>(&'a self) -> &'a [&'a wgpu::Buffer] {
+        let v = self.scoring_view_buffers_cache.get_or_init(|| {
+            // SAFETY: the &wgpu::Buffer references inside `Self` live as long as
+            // `Self` does. The OnceLock is dropped together with `Self`,
+            // so the 'static cast is sound for as long as the cache exists.
+            let raw: Vec<&'static wgpu::Buffer> = vec![
+                unsafe { &*((&self.view_storage_kin_fear) as *const wgpu::Buffer) },
+                unsafe { &*((&self.view_storage_my_enemies) as *const wgpu::Buffer) },
+                unsafe { &*((&self.view_storage_pack_focus) as *const wgpu::Buffer) },
+                unsafe { &*((&self.view_storage_rally_boost) as *const wgpu::Buffer) },
+                unsafe { &*((&self.view_storage_threat_level) as *const wgpu::Buffer) },
+            ];
+            raw
+        });
+        // Re-borrow at the caller's lifetime.
+        // Vec<&'static T> coerces to &[&T] here.
+        unsafe { std::mem::transmute::<&[&'static wgpu::Buffer], &'a [&'a wgpu::Buffer]>(v.as_slice()) }
     }
 }

@@ -7,5 +7,9 @@ pub struct TransientHandles<'a> {
     pub mask_bitmaps: &'a wgpu::Buffer,
     /// MaskUnpackKernel scratch: source SoA before unpack.
     pub mask_unpack_agents_input: &'a wgpu::Buffer,
+    /// ScoringKernel output (action-per-agent buffer).
+    pub action_buf: &'a wgpu::Buffer,
+    /// ScoringUnpackKernel scratch.
+    pub scoring_unpack_agents_input: &'a wgpu::Buffer,
     pub _phantom: std::marker::PhantomData<&'a ()>,
 }

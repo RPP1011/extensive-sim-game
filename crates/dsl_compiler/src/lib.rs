@@ -36,6 +36,7 @@ pub mod emit_resident_context;
 pub mod emit_rust;
 pub mod emit_schedule;
 pub mod emit_scoring;
+pub mod emit_scoring_kernel;
 pub mod emit_scoring_wgsl;
 pub mod emit_sim_cfg;
 pub mod emit_step;
