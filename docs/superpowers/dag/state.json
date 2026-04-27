@@ -231,15 +231,19 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-7"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 9,
-      "steps_done": 0,
+      "steps_done": 9,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "c4a87b97",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "ScoringKernel emit walks IR truth via emit_scoring_wgsl_atomic_views; produces 21-entry BGL matching its own WGSL output. Hand-written wrapper has 2 extra bindings (alive_bitmap, spatial_within) that surface as IR-vs-hand-written divergence — to be resolved at T15 parity gate. Adaptation: extended emit_resident_context with scoring_view_buffers_slice() helper; xtask CLI corrected to -p xtask --bin xtask."
+      },
+      "started_at": "2026-04-27T05:59:58Z",
+      "completed_at": "2026-04-27T06:11:28Z",
       "retry_count": 0
     },
     {
@@ -501,9 +505,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T05:58:09Z",
-    "iterations_completed": 5,
-    "tasks_closed": 5,
+    "last_iteration_at": "2026-04-27T06:11:28Z",
+    "iterations_completed": 6,
+    "tasks_closed": 6,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
