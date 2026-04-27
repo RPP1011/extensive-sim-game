@@ -29,6 +29,7 @@ pub mod emit_mask_kernel;
 pub mod emit_mask_wgsl;
 pub mod emit_physics;
 pub mod emit_physics_wgsl;
+pub mod emit_pick_ability_kernel;
 pub mod emit_pingpong_context;
 pub mod emit_pool;
 pub mod emit_python;

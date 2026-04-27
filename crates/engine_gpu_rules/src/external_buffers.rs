@@ -7,5 +7,9 @@ pub struct ExternalBuffers<'a> {
     pub agents: &'a wgpu::Buffer,
     /// SimCfg uniform/storage buffer (engine-owned).
     pub sim_cfg: &'a wgpu::Buffer,
+    /// AbilityRegistry buffer (engine-owned).
+    pub ability_registry: &'a wgpu::Buffer,
+    /// Per-tag value table (engine-owned).
+    pub tag_values: &'a wgpu::Buffer,
     pub _phantom: std::marker::PhantomData<&'a ()>,
 }

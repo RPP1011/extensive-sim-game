@@ -2581,7 +2581,7 @@ The per_ability row body emit (kernel WGSL) already landed in commits `d8e196e8`
 - Modify: `crates/engine_gpu/src/lib.rs` (call emitted kernel in `step_batch`)
 - Test: `crates/dsl_compiler/tests/emit_pick_ability_kernel_smoke.rs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `crates/dsl_compiler/tests/emit_pick_ability_kernel_smoke.rs`:
 
@@ -2602,12 +2602,12 @@ fn pick_ability_rs_has_kernel_impl_and_chosen_buf_binding() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm fail**
+- [x] **Step 2: Run to confirm fail**
 
 Run: `cargo test -p dsl_compiler --test emit_pick_ability_kernel_smoke`
 Expected: FAIL — module doesn't exist.
 
-- [ ] **Step 3: Implement emit_pick_ability_kernel.rs**
+- [x] **Step 3: Implement emit_pick_ability_kernel.rs**
 
 Create `crates/dsl_compiler/src/emit_pick_ability_kernel.rs`:
 
@@ -2734,14 +2734,14 @@ pub fn emit_pick_ability_rs() -> String {
 }
 ```
 
-- [ ] **Step 4: Register + run unit test**
+- [x] **Step 4: Register + run unit test**
 
 Add `pub mod emit_pick_ability_kernel;` to `crates/dsl_compiler/src/lib.rs`.
 
 Run: `cargo test -p dsl_compiler --test emit_pick_ability_kernel_smoke`
 Expected: PASS.
 
-- [ ] **Step 5: Wire xtask to write pick_ability.{rs,wgsl}**
+- [x] **Step 5: Wire xtask to write pick_ability.{rs,wgsl}**
 
 In `crates/xtask/src/main.rs`:
 
@@ -2771,7 +2771,7 @@ modules.sort();
 }
 ```
 
-- [ ] **Step 6: Wire into engine_gpu's step_batch**
+- [x] **Step 6: Wire into engine_gpu's step_batch**
 
 The xtask plumbing for Task 8 also needs to push the buffers PickAbilityKernel reads onto the binding-source containers. Inside the Task 8 xtask block, append:
 
@@ -2820,14 +2820,14 @@ In `crates/engine_gpu/src/lib.rs::step_batch`, after the scoring kernel dispatch
 
 Add `pub pick_ability_kernel: Option<engine_gpu_rules::pick_ability::PickAbilityKernel>` to `ResidentPathContext` (engine_gpu side wrapper). Wire `external.ability_registry` / `external.tag_values` from the existing `CascadeResidentCtx` accessors at the construction site of `ExternalBuffers` (one tick-level integration; transitional). The `resident.per_slot_cooldown` and `resident.chosen_ability_buf` buffers move into `engine_gpu_rules::ResidentPathContext`'s emitted constructor.
 
-- [ ] **Step 7: Parity sweep**
+- [x] **Step 7: Parity sweep**
 
 Run: `cargo test -p engine_gpu --test parity_with_cpu`
 Run: `cargo test -p engine --test wolves_and_humans_parity`
 Run: `cargo test -p dsl_compiler --test per_ability_row` (the existing per_ability schema-hash test).
 Expected: all pass.
 
-- [ ] **Step 8: Bump baseline + commit**
+- [x] **Step 8: Bump baseline + commit**
 
 ```bash
 cargo run --bin xtask -- compile-dsl

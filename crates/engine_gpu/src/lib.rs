@@ -1301,9 +1301,17 @@ impl GpuBackend {
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
-                    agents:  agents_buf,
-                    sim_cfg: mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    // T8: emitted ExternalBuffers gained ability_registry +
+                    // tag_values (consumed by PickAbilityKernel). No
+                    // dedicated GPU buffer wires up to either yet — the
+                    // dispatch is feature-gated off and these fields are
+                    // type-only. Use the sim_cfg buffer as a stand-in
+                    // reference; T16 swaps to the real packed buffers.
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
                 };
                 let sources = BindingSources {
                     resident:  &self.resident.path_ctx,
@@ -1371,9 +1379,17 @@ impl GpuBackend {
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
-                    agents:  agents_buf,
-                    sim_cfg: mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    // T8: emitted ExternalBuffers gained ability_registry +
+                    // tag_values (consumed by PickAbilityKernel). No
+                    // dedicated GPU buffer wires up to either yet — the
+                    // dispatch is feature-gated off and these fields are
+                    // type-only. Use the sim_cfg buffer as a stand-in
+                    // reference; T16 swaps to the real packed buffers.
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
                 };
                 let _sources = BindingSources {
                     resident:  &self.resident.path_ctx,
@@ -1515,9 +1531,17 @@ impl GpuBackend {
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
-                    agents:  agents_buf,
-                    sim_cfg: mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    // T8: emitted ExternalBuffers gained ability_registry +
+                    // tag_values (consumed by PickAbilityKernel). No
+                    // dedicated GPU buffer wires up to either yet — the
+                    // dispatch is feature-gated off and these fields are
+                    // type-only. Use the sim_cfg buffer as a stand-in
+                    // reference; T16 swaps to the real packed buffers.
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
                 };
                 let sources = BindingSources {
                     resident:  &self.resident.path_ctx,
@@ -1556,9 +1580,17 @@ impl GpuBackend {
                     _phantom: std::marker::PhantomData,
                 };
                 let external = ExternalBuffers {
-                    agents:  agents_buf,
-                    sim_cfg: mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    // T8: emitted ExternalBuffers gained ability_registry +
+                    // tag_values (consumed by PickAbilityKernel). No
+                    // dedicated GPU buffer wires up to either yet — the
+                    // dispatch is feature-gated off and these fields are
+                    // type-only. Use the sim_cfg buffer as a stand-in
+                    // reference; T16 swaps to the real packed buffers.
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
                 };
                 let _sources = BindingSources {
                     resident:  &self.resident.path_ctx,
@@ -1568,6 +1600,99 @@ impl GpuBackend {
                     external:  &external,
                 };
                 let _ = &self.resident.apply_actions_kernel;
+            }
+
+            // T8 — emitted PickAbilityKernel dispatch (feature-gated).
+            //
+            // The per_ability row body emit (kernel WGSL) already landed
+            // in commits `d8e196e8` (`emit_pick_ability_wgsl`) and
+            // `8f8e3582` (schema-hash coverage). T8 adds the wrapper
+            // Rust struct + BGL + dispatch encoder on top.
+            //
+            // There is no hand-written PickAbilityKernel to dispatch
+            // alongside (Subsystem 3 Group B was folded into this
+            // plan); the emitted version is the only version. Stays
+            // off-by-default until `assets/sim/scoring.sim` declares a
+            // real `per_ability` row (currently the WGSL emit is a
+            // no-op stub, so flipping the feature on now would write
+            // nothing useful into `chosen_ability_buf`).
+            //
+            // Kept type-checked under the `else` so any drift between
+            // dsl_compiler's emit and this dispatch site fails at
+            // build time rather than at the eventual feature flip.
+            if cfg!(feature = "engine_gpu_emitted_pick_ability_dispatch") {
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::pick_ability::PickAbilityKernel as EmittedPickAbilityKernel;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  sync_scoring_kernel.scoring_buf(),
+                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+
+                let kernel = self
+                    .resident
+                    .pick_ability_kernel
+                    .get_or_insert_with(|| EmittedPickAbilityKernel::new(&self.device));
+                let cfg = kernel.build_cfg(state);
+                let cfg_buf =
+                    self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::pick_ability::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                let bindings = kernel.bind(&sources, &cfg_buf);
+                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+            } else {
+                // Type-only exercise so any drift in the emitted
+                // BGL/WGSL pair fails the build now, not when the
+                // feature flips. Compile-time only — no GPU work.
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  sync_scoring_kernel.scoring_buf(),
+                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let _sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+                let _ = &self.resident.pick_ability_kernel;
             }
 
             // Between apply_actions and movement.

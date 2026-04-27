@@ -30,6 +30,15 @@ engine_gpu_emitted_mask_dispatch = []
 # (T16); flipping this on with the current no-op WGSL stub WILL break
 # parity (no agents would ever take damage on the GPU path).
 engine_gpu_emitted_apply_actions_dispatch = []
+# T8 — opt-in switch to start dispatching the emitted PickAbilityKernel
+# from `step_batch`. Off by default. There is no hand-written
+# pick_ability kernel to run alongside (Subsystem 3 Group B was folded
+# into this plan), so the emitted dispatch is the only version. Stays
+# gated until `assets/sim/scoring.sim` actually has a `per_ability` row
+# producing a real WGSL body (the bootstrap emits a no-op stub when the
+# row set is empty); flipping on without the row would dispatch the
+# stub and write nothing useful into `chosen_ability_buf`.
+engine_gpu_emitted_pick_ability_dispatch = []
 
 [dependencies]
 engine = { path = "../engine" }

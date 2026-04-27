@@ -146,6 +146,16 @@ pub struct ResidentPathContext {
     /// dispatch that runs by default until T16 hoists the real
     /// damage/heal/event semantics into the emitted WGSL body.
     pub apply_actions_kernel: Option<engine_gpu_rules::apply_actions::ApplyActionsKernel>,
+    /// T8 — lazy-initialised emitted PickAbilityKernel from
+    /// `engine_gpu_rules`. Built on first `step_batch` call when the
+    /// `engine_gpu_emitted_pick_ability_dispatch` feature is enabled;
+    /// remains `None` (and the slot is just type-checked) when the
+    /// feature is off. There is no hand-written pick_ability kernel
+    /// to fall back to (Subsystem 3 Group B folded into this plan);
+    /// the emitted dispatch is the only version. Stays off by default
+    /// until a `per_ability` row exists in the resolved scoring IR
+    /// (the bootstrap currently emits a stub WGSL).
+    pub pick_ability_kernel: Option<engine_gpu_rules::pick_ability::PickAbilityKernel>,
 }
 
 impl ResidentPathContext {
@@ -186,6 +196,7 @@ impl ResidentPathContext {
             fused_mask_kernel:      None,
             fused_mask_unpack_kernel: None,
             apply_actions_kernel:   None,
+            pick_ability_kernel:    None,
         }
     }
 }

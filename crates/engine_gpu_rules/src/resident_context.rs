@@ -15,6 +15,10 @@ pub struct ResidentPathContext {
     pub view_storage_rally_boost: wgpu::Buffer,
     /// Resident view storage for `threat_level`.
     pub view_storage_threat_level: wgpu::Buffer,
+    /// Per-agent per-slot cooldown counters (Resident; persists across ticks).
+    pub per_slot_cooldown: wgpu::Buffer,
+    /// PickAbilityKernel output (Resident; consumed by ApplyActions next tick).
+    pub chosen_ability_buf: wgpu::Buffer,
     /// Cached slice over scoring view buffers — populated lazily by
     /// `scoring_view_buffers_slice` and re-used across `bind()` calls.
     /// `OnceLock` keeps it `Sync`-safe without runtime locking.
@@ -60,6 +64,18 @@ impl ResidentPathContext {
             }),
             view_storage_threat_level: _device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("engine_gpu_rules::resident::view_storage_threat_level"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            per_slot_cooldown: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::per_slot_cooldown"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            chosen_ability_buf: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::chosen_ability_buf"),
                 size: 4,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
