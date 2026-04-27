@@ -150,15 +150,19 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-4"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 14,
-      "steps_done": 0,
+      "steps_done": 14,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "865b9c52",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "emit_schedule + 5 binding-source containers + gpu_rules_hash baseline. ~10 new tests. Adaptation: hook allowlist extended (113265ab) to cover engine_gpu_rules + xtask/src for // GENERATED marker. Known followup: GPU_RULES_HASH constant in engine_data hashes empty input, while .schema_hash file holds real content hash — reconciliation deferred."
+      },
+      "started_at": "2026-04-27T05:09:04Z",
+      "completed_at": "2026-04-27T05:24:38Z",
       "retry_count": 0
     },
     {
@@ -486,9 +490,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T05:06:21Z",
-    "iterations_completed": 2,
-    "tasks_closed": 2,
+    "last_iteration_at": "2026-04-27T05:24:38Z",
+    "iterations_completed": 3,
+    "tasks_closed": 3,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
