@@ -123,3 +123,5 @@
 {"ts":"2026-04-26T23:41:03Z","event":"task_started","task_id":"2026-04-26-plan-5b-e-computebackend-remaining-impl.task-19"}
 {"ts":"2026-04-26T23:46:06Z","event":"task_started","task_id":"2026-04-26-subsystem-3-ability-eval-impl.task-A1"}
 {"ts":"2026-04-26T23:50:46Z","event":"task_done","task_id":"2026-04-26-subsystem-3-ability-eval-impl.task-A1","commit":"236fd601","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"5 steps + 18 tests passing; minor plan adaptations: IrExpr::Lit→LitFloat/LitInt split, If field rename then_val→then_expr"}}
+{"ts":"2026-04-26T23:53:06Z","event":"task_started","task_id":"2026-04-26-subsystem-3-ability-eval-impl.task-A2"}
+{"ts":"2026-04-27T00:04:16Z","event":"task_done","task_id":"2026-04-26-subsystem-3-ability-eval-impl.task-A2","commit":"d8e196e8","critic_verdicts":{"compliance":"PASS","quality":"PASS","note":"5 steps + 19 tests passing; deviations: SIM_CFG_WGSL_PREFIX→emit_sim_cfg_struct_wgsl helper, IrExpr Lit/If adaptations from A1, WGSL syntax tweaks for portability"}}

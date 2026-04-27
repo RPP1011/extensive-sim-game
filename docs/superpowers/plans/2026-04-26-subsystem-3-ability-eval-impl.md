@@ -268,7 +268,7 @@ The `ability_registry` buffer is a new compact struct — distinct from `PackedA
 
 Tag values buffer: `@group(0) @binding(6)` — `tag_values: array<f32>` — flat `ability_count * NUM_ABILITY_TAGS` f32s.
 
-- [ ] **Step 1: Write a failing test for WGSL emission**
+- [x] **Step 1: Write a failing test for WGSL emission**
 
 Add to `crates/dsl_compiler/tests/per_ability_row.rs`:
 
@@ -300,7 +300,7 @@ scoring {
 Run: `cargo test -p dsl_compiler emit_pick_ability_wgsl_produces_cs_entry_point`
 Expected: FAIL — function does not exist yet.
 
-- [ ] **Step 2: Implement `emit_pick_ability_wgsl`**
+- [x] **Step 2: Implement `emit_pick_ability_wgsl`**
 
 Add to `crates/dsl_compiler/src/emit_scoring_wgsl.rs`:
 
@@ -493,21 +493,21 @@ fn lower_ability_score_expr_wgsl(expr: &IrExprNode) -> String {
 
 Note: `SIM_CFG_WGSL_PREFIX` is an existing constant in `emit_scoring_wgsl.rs` (the `SimCfg` struct declaration). Reuse it. If it does not exist as a named constant, inline the minimal subset (`struct SimCfg { tick: atomic<u32>, ... }`).
 
-- [ ] **Step 3: Run the WGSL emit test**
+- [x] **Step 3: Run the WGSL emit test**
 
 ```bash
 cargo test -p dsl_compiler emit_pick_ability_wgsl_produces_cs_entry_point
 ```
 Expected: PASS.
 
-- [ ] **Step 4: Verify `cargo test -p dsl_compiler` still fully passes**
+- [x] **Step 4: Verify `cargo test -p dsl_compiler` still fully passes**
 
 ```bash
 cargo test -p dsl_compiler
 ```
 Expected: all tests PASS. No regressions.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/dsl_compiler/src/emit_scoring_wgsl.rs crates/dsl_compiler/tests/per_ability_row.rs

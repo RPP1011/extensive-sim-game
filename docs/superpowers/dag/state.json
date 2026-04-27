@@ -132,15 +132,19 @@
       "blocks": [
         "2026-04-26-subsystem-3-ability-eval-impl.task-A3"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 5,
-      "steps_done": 0,
+      "steps_done": 5,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "d8e196e8",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "5 steps + 19 tests passing; deviations: SIM_CFG_WGSL_PREFIX→emit_sim_cfg_struct_wgsl helper, IrExpr Lit/If adaptations from A1, WGSL syntax tweaks for portability"
+      },
+      "started_at": "2026-04-26T23:53:06Z",
+      "completed_at": "2026-04-27T00:04:16Z",
       "retry_count": 0
     },
     {
@@ -421,9 +425,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-26T23:50:46Z",
-    "iterations_completed": 1,
-    "tasks_closed": 1,
+    "last_iteration_at": "2026-04-27T00:04:16Z",
+    "iterations_completed": 2,
+    "tasks_closed": 2,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
