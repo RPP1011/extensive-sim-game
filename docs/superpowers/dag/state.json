@@ -124,15 +124,19 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-3"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 8,
-      "steps_done": 0,
+      "steps_done": 8,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "90f1251d",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "note": "emit_kernel_index produces lib.rs prelude. Stub files added for 8 static infra modules (schedule/resident_context/etc.) so cargo build succeeds; T3 overwrites them. xtask integration site at compile_dsl_cmd.rs:226. A3 schema baseline regen committed separately as 1fd1158d cleanup."
+      },
+      "started_at": "2026-04-27T04:59:05Z",
+      "completed_at": "2026-04-27T05:06:21Z",
       "retry_count": 0
     },
     {
@@ -482,9 +486,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T04:56:40Z",
-    "iterations_completed": 1,
-    "tasks_closed": 1,
+    "last_iteration_at": "2026-04-27T05:06:21Z",
+    "iterations_completed": 2,
+    "tasks_closed": 2,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
