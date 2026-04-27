@@ -286,15 +286,22 @@
       "blocks": [
         "2026-04-26-kernel-dispatch-emit-impl.task-9"
       ],
-      "status": "pending",
+      "status": "done",
       "steps_total": 8,
-      "steps_done": 0,
+      "steps_done": 8,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "41d82fea",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "critic_compiler_first": "PASS",
+        "critic_cross_backend_parity": "PASS",
+        "critic_reduction_determinism": "PASS",
+        "note": "PickAbilityKernel emit. IR walk + emit_pick_ability_wgsl: 7 bindings, BGL slot-for-slot match. Plan snippet had stale slot order; agent correctly followed WGSL (authoritative). Engine_gpu feature-gated (engine_gpu_emitted_pick_ability_dispatch off). ExternalBuffers expansion forced fix at 4 existing T5/T7 wire sites — type-check drift detection working."
+      },
+      "started_at": "2026-04-27T06:35:04Z",
+      "completed_at": "2026-04-27T06:56:53Z",
       "retry_count": 0
     },
     {
@@ -512,9 +519,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-27T06:32:14Z",
-    "iterations_completed": 7,
-    "tasks_closed": 7,
+    "last_iteration_at": "2026-04-27T06:56:53Z",
+    "iterations_completed": 8,
+    "tasks_closed": 8,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
