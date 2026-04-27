@@ -223,6 +223,24 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
 
+        // Emit engine_gpu_rules/src/lib.rs from the (initially empty) module
+        // list. Subsequent kernel-emit tasks will populate the list.
+        {
+            let modules: Vec<String> = Vec::new(); // populated by per-kernel emitters in later tasks
+            let lib_rs = dsl_compiler::emit_kernel_index::emit_lib_rs(&modules);
+            let path = PathBuf::from("crates/engine_gpu_rules/src/lib.rs");
+            if let Some(parent) = path.parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    eprintln!("compile-dsl: mkdir engine_gpu_rules/src: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+            if let Err(e) = fs::write(&path, lib_rs) {
+                eprintln!("compile-dsl: write engine_gpu_rules/src/lib.rs: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+
         // Write the engine-side `impl EventLike for Event` generated file.
         // Lives in engine (not engine_data) to avoid a dep cycle while
         // engine retains its engine_data regular dep (chronicle.rs, Plan B2).

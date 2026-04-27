@@ -20,6 +20,7 @@ pub mod emit_cascade_register;
 pub mod emit_config;
 pub mod emit_entity;
 pub mod emit_enum;
+pub mod emit_kernel_index;
 pub mod emit_mask;
 pub mod emit_mask_fill;
 pub mod emit_mask_wgsl;
