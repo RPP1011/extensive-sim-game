@@ -14,3 +14,6 @@ wgpu = "22"
 default = []
 # Mirror of engine_gpu's gpu feature; pulls in wgpu-touching code paths.
 gpu = []
+
+[dev-dependencies]
+sha2 = "0.10"

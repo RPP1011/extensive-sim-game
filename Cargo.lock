@@ -2228,6 +2228,7 @@ dependencies = [
  "bytemuck",
  "engine",
  "engine_data",
+ "sha2",
  "wgpu 22.1.0",
 ]
 
@@ -7480,6 +7481,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dsl_compiler",
+ "walkdir",
 ]
 
 [[package]]
