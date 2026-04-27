@@ -2,8 +2,12 @@
   "hooks": {
     "SessionStart": [
       {
-        "type": "command",
-        "command": "cat docs/constitution.md"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat docs/constitution.md"
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -19,8 +23,12 @@
     ],
     "Stop": [
       {
-        "type": "command",
-        "command": ".claude/scripts/session-end-engine-review.sh"
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/scripts/session-end-engine-review.sh"
+          }
+        ]
       }
     ]
   }
