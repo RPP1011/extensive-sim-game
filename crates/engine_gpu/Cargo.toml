@@ -94,6 +94,17 @@ engine_gpu_emitted_alive_pack_dispatch = []
 # semantics (T16); flipping this on with the current no-op WGSL stub
 # WILL break parity (no SoA fields would get written on the GPU path).
 engine_gpu_emitted_fused_unpack_dispatch = []
+# T15 — opt-in umbrella switch to drive `step_batch` from
+# `engine_gpu_rules::schedule::SCHEDULE` via a single
+# `for op in SCHEDULE { self.dispatch(op, ...) }` loop. Consolidates
+# the per-task `engine_gpu_emitted_*_dispatch` blocks added in T9-T13
+# into one match-driven dispatcher. Off by default; flipping this on
+# would dispatch every emitted kernel each tick (which today are no-op
+# WGSL stubs) ALONGSIDE the hand-written kernels, so T16's WGSL-body
+# hoist is a prerequisite for using this in production. Until then the
+# loop is a refactor target — when the umbrella is off, the existing
+# per-feature gates remain authoritative.
+engine_gpu_emitted_schedule_loop = []
 
 [dependencies]
 engine = { path = "../engine" }

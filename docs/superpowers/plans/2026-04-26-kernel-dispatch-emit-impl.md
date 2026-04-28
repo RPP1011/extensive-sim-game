@@ -4291,7 +4291,7 @@ Run: `cargo test -p engine_gpu --test parity_with_cpu`
 Run: `cargo test -p engine --test wolves_and_humans_parity`
 Expected: all pass.
 
-- [ ] **Step 8: Bump baseline + commit**
+- [x] **Step 8: Bump baseline + commit**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
@@ -4312,7 +4312,7 @@ Megakernel is a second emit pass that walks `SCHEDULE` and produces a single fus
 - Modify: `crates/xtask/src/main.rs` (call emitter; produce `megakernel.{rs,wgsl}`)
 - Test: `crates/dsl_compiler/tests/emit_megakernel_smoke.rs`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 Create `crates/dsl_compiler/tests/emit_megakernel_smoke.rs`:
 
@@ -4355,12 +4355,12 @@ fn fixed_point_emits_while_loop() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm fail**
+- [x] **Step 2: Run to confirm fail**
 
 Run: `cargo test -p dsl_compiler --test emit_megakernel_smoke`
 Expected: FAIL — module doesn't exist.
 
-- [ ] **Step 3: Implement emit_megakernel.rs**
+- [x] **Step 3: Implement emit_megakernel.rs**
 
 Create `crates/dsl_compiler/src/emit_megakernel.rs`:
 
@@ -4518,14 +4518,14 @@ pub fn emit_megakernel_wgsl(entries: &[ScheduleEntry]) -> String {
 }
 ```
 
-- [ ] **Step 4: Register + run unit tests**
+- [x] **Step 4: Register + run unit tests**
 
 Add `pub mod emit_megakernel;` to `crates/dsl_compiler/src/lib.rs`.
 
 Run: `cargo test -p dsl_compiler --test emit_megakernel_smoke`
 Expected: 3 passed.
 
-- [ ] **Step 5: Wire xtask to write megakernel.{rs,wgsl}**
+- [x] **Step 5: Wire xtask to write megakernel.{rs,wgsl}**
 
 ```rust
 {
@@ -4538,7 +4538,7 @@ Expected: 3 passed.
 }
 ```
 
-- [ ] **Step 6: Verify the generated megakernel scaffold compiles in WGSL**
+- [x] **Step 6: Verify the generated megakernel scaffold compiles in WGSL**
 
 Run: `cargo run --bin xtask -- compile-dsl`
 Run: `cargo build -p engine_gpu_rules --features gpu`

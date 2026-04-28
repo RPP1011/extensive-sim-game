@@ -1073,6 +1073,26 @@ impl GpuBackend {
         let chunk_size = submit_granularity().unwrap_or(u32::MAX);
         let mut ticks_since_submit = 0u32;
         for tick_idx in 0..n_ticks {
+            // T15 — SCHEDULE-driven dispatch loop. Off by default; when
+            // the umbrella feature `engine_gpu_emitted_schedule_loop`
+            // is enabled, this loop drives every emitted kernel from
+            // `engine_gpu_rules::schedule::SCHEDULE` via the matching
+            // `self.dispatch(op, ...)` arm. Placed BEFORE the
+            // `&mut self.resident` / `&mut self.sync` destructures
+            // below so the dispatch method can hold `&mut self`
+            // exclusively. When the feature is OFF the existing per-
+            // feature `engine_gpu_emitted_*_dispatch` blocks remain
+            // authoritative — both paths produce identical (no-op)
+            // wiring today, so T15 is a refactor-only change.
+            #[cfg(feature = "engine_gpu_emitted_schedule_loop")]
+            {
+                let _ = tick_idx; // tick_idx unused inside the loop today
+                for op in engine_gpu_rules::schedule::SCHEDULE {
+                    self.dispatch(op, &mut encoder, state)
+                        .expect("emitted schedule dispatch");
+                }
+            }
+
             // Split-borrow: need `&` to `resident_agents_buf` plus
             // `&mut` to `fused_unpack_kernel` (and later `&mut` to
             // `resident_cascade_ctx` + `&` to `resident_indirect_args`)
@@ -2757,6 +2777,240 @@ impl GpuBackend {
                 }
             }
         }
+    }
+
+    /// T15 — SCHEDULE-driven kernel dispatcher.
+    ///
+    /// Replaces the open-coded `if cfg!(feature = "engine_gpu_emitted_*_dispatch")`
+    /// blocks scattered across `step_batch` (T9-T13) with a single match
+    /// driven by `engine_gpu_rules::schedule::SCHEDULE`. The match arms
+    /// cover every `KernelId` variant the schedule references; arms
+    /// touch their per-kernel slot on `self.resident` (lazy-initialised
+    /// on first call) plus a `BindingSources` aggregate built from
+    /// `self.resident.{path_ctx, pingpong_ctx, pool}` + per-tick
+    /// transient/external handles assembled inside this method.
+    ///
+    /// ### P10 (no-runtime-panic) note
+    /// Every `DispatchOp` variant is matched explicitly. The fallthrough
+    /// `panic!`s only fire if a future kernel emitter adds a `KernelId`
+    /// variant without updating both this match AND the SCHEDULE — both
+    /// of which are compile-time. Task 16 flips them to `unreachable!()`
+    /// once the migration is complete; until then they're no-runtime
+    /// guards on a closed enum, not user-reachable failure modes.
+    ///
+    /// ### Borrow note
+    /// `self.resident.path_ctx`/`pingpong_ctx`/`pool` (shared) and
+    /// `self.resident.<kernel_field>` (mutable) coexist via Rust's
+    /// per-field borrow-split. Same for `self.sync.<...>` accesses
+    /// inside the `TransientHandles` builder — different sub-paths of
+    /// `self`, so the borrow checker tracks them independently.
+    #[cfg(feature = "engine_gpu_emitted_schedule_loop")]
+    fn dispatch(
+        &mut self,
+        op: &engine_gpu_rules::schedule::DispatchOp,
+        encoder: &mut wgpu::CommandEncoder,
+        state: &SimState,
+    ) -> Result<(), ()> {
+        use engine_gpu_rules::binding_sources::BindingSources;
+        use engine_gpu_rules::external_buffers::ExternalBuffers;
+        use engine_gpu_rules::schedule::DispatchOp;
+        use engine_gpu_rules::transient_handles::TransientHandles;
+        use engine_gpu_rules::{Kernel as _, KernelId};
+        use wgpu::util::DeviceExt as _;
+
+        let agent_cap = state.agent_cap();
+        let agents_buf = self
+            .resident
+            .resident_agents_buf
+            .as_ref()
+            .expect("resident_agents_buf ensured by ensure_resident_init");
+        let sim_cfg_ref = self
+            .resident
+            .sim_cfg_buf
+            .as_ref()
+            .expect("sim_cfg_buf ensured by ensure_resident_init");
+
+        // Build transient/external aggregates ONCE per dispatch call.
+        // The placeholders match the per-feature blocks above (T9-T13)
+        // exactly — every emitted kernel today is a no-op WGSL stub, so
+        // the binding values don't matter for behaviour, only for BGL
+        // type-check survival. T16 swaps the placeholders for the real
+        // CascadeResidentCtx ring/indirect-args buffers.
+        let transient = TransientHandles {
+            mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+            mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+            action_buf:                  self.sync.scoring_kernel.scoring_buf(),
+            scoring_unpack_agents_input: self.sync.scoring_kernel.scoring_buf(),
+            cascade_current_ring:        sim_cfg_ref,
+            cascade_current_tail:        sim_cfg_ref,
+            cascade_next_ring:           sim_cfg_ref,
+            cascade_next_tail:           sim_cfg_ref,
+            cascade_indirect_args:       sim_cfg_ref,
+            fused_agent_unpack_input:    agents_buf,
+            fused_agent_unpack_mask_soa: sim_cfg_ref,
+            _phantom: std::marker::PhantomData,
+        };
+        let external = ExternalBuffers {
+            agents:           agents_buf,
+            sim_cfg:          sim_cfg_ref,
+            ability_registry: sim_cfg_ref,
+            tag_values:       sim_cfg_ref,
+            _phantom:         std::marker::PhantomData,
+        };
+        let sources = BindingSources {
+            resident:  &self.resident.path_ctx,
+            pingpong:  &self.resident.pingpong_ctx,
+            pool:      &self.resident.pool,
+            transient: &transient,
+            external:  &external,
+        };
+
+        // Helper macro — every plain-Kernel arm follows the same lazy-
+        // init / build_cfg / bind / record shape. Defined inline so each
+        // per-kernel branch stays a single line.
+        macro_rules! dispatch_kernel {
+            ($field:ident, $kernel_ty:path, $label:expr) => {{
+                let kernel = self.resident.$field
+                    .get_or_insert_with(|| <$kernel_ty>::new(&self.device));
+                let cfg = kernel.build_cfg(state);
+                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some($label),
+                    contents: bytemuck::cast_slice(&[cfg]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bindings = kernel.bind(&sources, &cfg_buf);
+                kernel.record(&self.device, encoder, &bindings, agent_cap);
+            }};
+        }
+
+        match op {
+            DispatchOp::Kernel(KernelId::FusedAgentUnpack) =>
+                dispatch_kernel!(fused_agent_unpack_kernel_emitted, engine_gpu_rules::fused_agent_unpack::FusedAgentUnpackKernel, "engine_gpu_rules::fused_agent_unpack::cfg"),
+            DispatchOp::Kernel(KernelId::AlivePack) =>
+                dispatch_kernel!(alive_pack_kernel_emitted, engine_gpu_rules::alive_pack::AlivePackKernel, "engine_gpu_rules::alive_pack::cfg"),
+            DispatchOp::Kernel(KernelId::SpatialHash) =>
+                dispatch_kernel!(spatial_hash_kernel, engine_gpu_rules::spatial_hash::SpatialHashKernel, "engine_gpu_rules::spatial_hash::cfg"),
+            DispatchOp::Kernel(KernelId::SpatialKinQuery) =>
+                dispatch_kernel!(spatial_kin_query_kernel, engine_gpu_rules::spatial_kin_query::SpatialKinQueryKernel, "engine_gpu_rules::spatial_kin_query::cfg"),
+            DispatchOp::Kernel(KernelId::SpatialEngagementQuery) =>
+                dispatch_kernel!(spatial_engagement_query_kernel, engine_gpu_rules::spatial_engagement_query::SpatialEngagementQueryKernel, "engine_gpu_rules::spatial_engagement_query::cfg"),
+            DispatchOp::Kernel(KernelId::FusedMask) =>
+                dispatch_kernel!(fused_mask_kernel, engine_gpu_rules::fused_mask::FusedMaskKernel, "engine_gpu_rules::fused_mask::cfg"),
+            DispatchOp::Kernel(KernelId::MaskUnpack) =>
+                dispatch_kernel!(fused_mask_unpack_kernel, engine_gpu_rules::mask_unpack::MaskUnpackKernel, "engine_gpu_rules::mask_unpack::cfg"),
+            DispatchOp::Kernel(KernelId::PickAbility) =>
+                dispatch_kernel!(pick_ability_kernel, engine_gpu_rules::pick_ability::PickAbilityKernel, "engine_gpu_rules::pick_ability::cfg"),
+            DispatchOp::Kernel(KernelId::ApplyActions) =>
+                dispatch_kernel!(apply_actions_kernel, engine_gpu_rules::apply_actions::ApplyActionsKernel, "engine_gpu_rules::apply_actions::cfg"),
+            DispatchOp::Kernel(KernelId::Movement) =>
+                dispatch_kernel!(movement_kernel, engine_gpu_rules::movement::MovementKernel, "engine_gpu_rules::movement::cfg"),
+            DispatchOp::Kernel(KernelId::FoldEngagedWith) =>
+                dispatch_kernel!(fold_engaged_with_kernel, engine_gpu_rules::fold_engaged_with::FoldEngagedWithKernel, "engine_gpu_rules::fold_engaged_with::cfg"),
+            DispatchOp::Kernel(KernelId::FoldThreatLevel) =>
+                dispatch_kernel!(fold_threat_level_kernel, engine_gpu_rules::fold_threat_level::FoldThreatLevelKernel, "engine_gpu_rules::fold_threat_level::cfg"),
+            DispatchOp::Kernel(KernelId::FoldKinFear) =>
+                dispatch_kernel!(fold_kin_fear_kernel, engine_gpu_rules::fold_kin_fear::FoldKinFearKernel, "engine_gpu_rules::fold_kin_fear::cfg"),
+            DispatchOp::Kernel(KernelId::FoldMyEnemies) =>
+                dispatch_kernel!(fold_my_enemies_kernel, engine_gpu_rules::fold_my_enemies::FoldMyEnemiesKernel, "engine_gpu_rules::fold_my_enemies::cfg"),
+            DispatchOp::Kernel(KernelId::FoldPackFocus) =>
+                dispatch_kernel!(fold_pack_focus_kernel, engine_gpu_rules::fold_pack_focus::FoldPackFocusKernel, "engine_gpu_rules::fold_pack_focus::cfg"),
+            DispatchOp::Kernel(KernelId::FoldRallyBoost) =>
+                dispatch_kernel!(fold_rally_boost_kernel, engine_gpu_rules::fold_rally_boost::FoldRallyBoostKernel, "engine_gpu_rules::fold_rally_boost::cfg"),
+            DispatchOp::Kernel(KernelId::FoldStanding) =>
+                dispatch_kernel!(fold_standing_kernel, engine_gpu_rules::fold_standing::FoldStandingKernel, "engine_gpu_rules::fold_standing::cfg"),
+            DispatchOp::Kernel(KernelId::FoldMemory) =>
+                dispatch_kernel!(fold_memory_kernel, engine_gpu_rules::fold_memory::FoldMemoryKernel, "engine_gpu_rules::fold_memory::cfg"),
+            DispatchOp::Kernel(KernelId::AppendEvents) =>
+                dispatch_kernel!(append_events_kernel, engine_gpu_rules::append_events::AppendEventsKernel, "engine_gpu_rules::append_events::cfg"),
+
+            DispatchOp::FixedPoint { kernel: KernelId::Physics, max_iter } => {
+                // FixedPoint requires per-iteration TransientHandles
+                // refresh (cascade A/B alternation). The body below
+                // mirrors T10's emitted physics loop in `step_batch`
+                // (lines ~2114-2175 of the pre-T15 file): rebuild
+                // sources per iter so `transient.cascade_*` could
+                // alternate by iter parity once T16 wires the real
+                // CascadeResidentCtx ring buffers. With today's
+                // placeholder bindings the alternation is type-only,
+                // but the loop structure stays so T16 only has to swap
+                // the buffer refs.
+                use engine_gpu_rules::physics::{PhysicsCfg, PhysicsKernel as EmittedPhysicsKernel};
+
+                let kernel = self
+                    .resident
+                    .physics_kernel
+                    .get_or_insert_with(|| EmittedPhysicsKernel::new(&self.device));
+                for iter in 0..*max_iter {
+                    // Per-iter rebuild of transient/external/sources —
+                    // keeps the cascade A/B alternation hook for T16.
+                    let transient_iter = TransientHandles {
+                        mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                        mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                        action_buf:                  self.sync.scoring_kernel.scoring_buf(),
+                        scoring_unpack_agents_input: self.sync.scoring_kernel.scoring_buf(),
+                        cascade_current_ring:        sim_cfg_ref,
+                        cascade_current_tail:        sim_cfg_ref,
+                        cascade_next_ring:           sim_cfg_ref,
+                        cascade_next_tail:           sim_cfg_ref,
+                        cascade_indirect_args:       sim_cfg_ref,
+                        fused_agent_unpack_input:    agents_buf,
+                        fused_agent_unpack_mask_soa: sim_cfg_ref,
+                        _phantom: std::marker::PhantomData,
+                    };
+                    let external_iter = ExternalBuffers {
+                        agents:           agents_buf,
+                        sim_cfg:          sim_cfg_ref,
+                        ability_registry: sim_cfg_ref,
+                        tag_values:       sim_cfg_ref,
+                        _phantom:         std::marker::PhantomData,
+                    };
+                    let sources_iter = BindingSources {
+                        resident:  &self.resident.path_ctx,
+                        pingpong:  &self.resident.pingpong_ctx,
+                        pool:      &self.resident.pool,
+                        transient: &transient_iter,
+                        external:  &external_iter,
+                    };
+                    let cfg = PhysicsCfg {
+                        agent_cap,
+                        iter_idx: iter,
+                        max_iter: *max_iter,
+                        event_ring_capacity: 4096,
+                    };
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::physics::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources_iter, &cfg_buf);
+                    kernel.record(&self.device, encoder, &bindings, agent_cap);
+                }
+            }
+
+            DispatchOp::Indirect { kernel: KernelId::SeedIndirect, args_buf: _ } =>
+                dispatch_kernel!(seed_indirect_kernel, engine_gpu_rules::seed_indirect::SeedIndirectKernel, "engine_gpu_rules::seed_indirect::cfg"),
+
+            // No-runtime-panic guarantee (P10): every variant the
+            // SCHEDULE actually references is matched explicitly above.
+            // The fallthrough panics are `unreachable!`-style guards on
+            // the closed `KernelId` enum — they only fire if a future
+            // kernel emitter adds a variant to SCHEDULE without
+            // updating dispatch(). Task 16 flips these to
+            // `unreachable!()` once exhaustiveness is verified.
+            DispatchOp::Kernel(other) => {
+                panic!("dispatch: unhandled kernel {other:?}");
+            }
+            DispatchOp::FixedPoint { kernel: other, .. } => {
+                panic!("dispatch: unhandled FixedPoint kernel {other:?}");
+            }
+            DispatchOp::Indirect { kernel: other, .. } => {
+                panic!("dispatch: unhandled Indirect kernel {other:?}");
+            }
+            DispatchOp::GatedBy { kernel: other, .. } => {
+                panic!("dispatch: unhandled GatedBy kernel {other:?}");
+            }
+        }
+        Ok(())
     }
 
     /// Phase D — Task D4: Lazy-init for the resident batch path.
