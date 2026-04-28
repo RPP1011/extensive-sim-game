@@ -4184,7 +4184,7 @@ The remaining hand-written kernels are alive-bitmap pack and the SoA fused-unpac
 - Modify: `crates/engine_gpu/src/lib.rs` (replace the existing pack/unpack calls)
 - Test: extend `crates/dsl_compiler/tests/emit_spatial_smoke.rs`
 
-- [ ] **Step 1: Add failing test**
+- [x] **Step 1: Add failing test**
 
 Append to `crates/dsl_compiler/tests/emit_spatial_smoke.rs`:
 
@@ -4202,12 +4202,12 @@ fn fused_agent_unpack_rs_has_kernel_impl() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm fail**
+- [x] **Step 2: Run to confirm fail**
 
 Run: `cargo test -p dsl_compiler --test emit_spatial_smoke alive_pack`
 Expected: FAIL.
 
-- [ ] **Step 3: Add the two emitters**
+- [x] **Step 3: Add the two emitters**
 
 Append to `crates/dsl_compiler/src/emit_spatial_kernel.rs`:
 
@@ -4225,12 +4225,12 @@ pub fn emit_fused_agent_unpack_rs() -> String {
 }
 ```
 
-- [ ] **Step 4: Run unit tests**
+- [x] **Step 4: Run unit tests**
 
 Run: `cargo test -p dsl_compiler --test emit_spatial_smoke`
 Expected: 5 passed.
 
-- [ ] **Step 5: Wire xtask + WGSL bodies**
+- [x] **Step 5: Wire xtask + WGSL bodies**
 
 ```rust
 modules.push("alive_pack".into());
@@ -4258,7 +4258,7 @@ entries.insert(1, ScheduleEntry { kernel: "AlivePack".into(),        kind: Dispa
 
 (Hoist `ALIVE_PACK_WGSL` and `FUSED_AGENT_UNPACK_WGSL` to `pub const`s — transitional.)
 
-- [ ] **Step 6: Wire into engine_gpu's step_batch**
+- [x] **Step 6: Wire into engine_gpu's step_batch**
 
 Extend the binding-source containers for these last two kernels:
 
@@ -4284,7 +4284,7 @@ transient_fields.push(TransientField {
 
 Replace the existing `fused_unpack_kernel.encode_unpack(...)` and `alive_pack_kernel.encode_pack(...)` calls (around `crates/engine_gpu/src/lib.rs:1126-1154`) with calls to the emitted kernels (same shape as Task 11 — `kernel.bind(&sources, &cfg_buf).record(...)`). Add `Option<AlivePackKernel>` + `Option<FusedAgentUnpackKernel>` fields to `ResidentPathContext` (engine_gpu side wrapper).
 
-- [ ] **Step 7: Parity sweep**
+- [x] **Step 7: Parity sweep**
 
 Run: `cargo test -p engine_gpu --test alive_bitmap_pack`
 Run: `cargo test -p engine_gpu --test parity_with_cpu`

@@ -18,6 +18,7 @@ pub mod fold_threat_level;
 pub mod fused_agent_unpack;
 pub mod fused_mask;
 pub mod mask_unpack;
+pub mod megakernel;
 pub mod movement;
 pub mod physics;
 pub mod pick_ability;
@@ -35,7 +36,6 @@ pub mod pool;
 pub mod transient_handles;
 pub mod external_buffers;
 pub mod binding_sources;
-pub mod megakernel;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum KernelId {
@@ -53,6 +53,7 @@ pub enum KernelId {
     FusedAgentUnpack,
     FusedMask,
     MaskUnpack,
+    Megakernel,
     Movement,
     Physics,
     PickAbility,

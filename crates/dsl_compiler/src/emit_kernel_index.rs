@@ -1,7 +1,8 @@
 //! Emits `engine_gpu_rules/src/lib.rs` — the static prelude (Kernel
 //! trait, KernelId enum, BufferRef enum, fixed module declarations
-//! for schedule/resident_context/pingpong_context/megakernel) plus
-//! the variable per-kernel module list.
+//! for schedule/resident_context/pingpong_context) plus the variable
+//! per-kernel module list (which includes `megakernel` once T14 wires
+//! it as a per-kernel emitter).
 //!
 //! Stable across regens when the kernel set is unchanged.
 
@@ -35,7 +36,6 @@ pub fn emit_lib_rs(modules: &[String]) -> String {
     writeln!(out, "pub mod transient_handles;").unwrap();
     writeln!(out, "pub mod external_buffers;").unwrap();
     writeln!(out, "pub mod binding_sources;").unwrap();
-    writeln!(out, "pub mod megakernel;").unwrap();
     writeln!(out).unwrap();
 
     // KernelId enum — one variant per emitted kernel module, PascalCase.
