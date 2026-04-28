@@ -109,7 +109,7 @@ impl std::error::Error for AliveBitmapError {}
 /// word non-atomically. `agents[i].alive` is a `u32` at offset 16 B
 /// inside the 64-byte `AgentSlot` layout; WGSL only needs the `alive`
 /// field of the struct declared here.
-const ALIVE_PACK_WGSL: &str = r#"
+pub const ALIVE_PACK_WGSL: &str = r#"
 struct AgentSlot {
     hp: f32,
     max_hp: f32,

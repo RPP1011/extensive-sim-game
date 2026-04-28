@@ -7,6 +7,10 @@ pub struct TransientHandles<'a> {
     pub mask_bitmaps: &'a wgpu::Buffer,
     /// MaskUnpackKernel scratch: source SoA before unpack.
     pub mask_unpack_agents_input: &'a wgpu::Buffer,
+    /// FusedAgentUnpackKernel scratch: source pre-unpack agent buffer.
+    pub fused_agent_unpack_input: &'a wgpu::Buffer,
+    /// FusedAgentUnpackKernel scratch: derived mask SoA.
+    pub fused_agent_unpack_mask_soa: &'a wgpu::Buffer,
     /// ScoringKernel output (action-per-agent buffer).
     pub action_buf: &'a wgpu::Buffer,
     /// ScoringUnpackKernel scratch.

@@ -1821,7 +1821,7 @@ impl MaskUnpackKernel {
 ///   3 (rw) mask_ct_out:     array<u32>          (mask SoA)
 ///   4 (rw) scoring_data:    array<AgentData>    (scoring AoS)
 ///   5 (uniform) cfg:        UnpackCfg
-const FUSED_AGENT_UNPACK_WGSL: &str = r#"
+pub const FUSED_AGENT_UNPACK_WGSL: &str = r#"
 struct Vec3f32 { x: f32, y: f32, z: f32 };
 
 struct AgentSlot {

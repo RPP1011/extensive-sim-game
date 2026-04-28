@@ -4,6 +4,7 @@
 #![allow(clippy::all)]
 #![allow(unused_imports)]
 
+pub mod alive_pack;
 pub mod append_events;
 pub mod apply_actions;
 pub mod fold_engaged_with;
@@ -14,6 +15,7 @@ pub mod fold_pack_focus;
 pub mod fold_rally_boost;
 pub mod fold_standing;
 pub mod fold_threat_level;
+pub mod fused_agent_unpack;
 pub mod fused_mask;
 pub mod mask_unpack;
 pub mod movement;
@@ -37,6 +39,7 @@ pub mod megakernel;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum KernelId {
+    AlivePack,
     AppendEvents,
     ApplyActions,
     FoldEngagedWith,
@@ -47,6 +50,7 @@ pub enum KernelId {
     FoldRallyBoost,
     FoldStanding,
     FoldThreatLevel,
+    FusedAgentUnpack,
     FusedMask,
     MaskUnpack,
     Movement,

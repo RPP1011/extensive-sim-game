@@ -1155,6 +1155,126 @@ impl GpuBackend {
                 agent_cap,
             );
 
+            // T13 — emitted FusedAgentUnpack + AlivePack dispatches.
+            // Run alongside the hand-written pack/unpack calls above;
+            // flipping the feature gates on with the current no-op
+            // WGSL stubs would do nothing useful (the hand-written
+            // calls still own the actual SoA + bitmap writes). The
+            // emitted dispatches are kept type-checked under the
+            // `else` branches so any drift between dsl_compiler's emit
+            // and these dispatch sites fails at build time rather than
+            // at the eventual feature flip. Schedule order matches
+            // xtask: FusedAgentUnpack at slot 0, AlivePack at slot 1.
+            //
+            // The two kernel-cfg structs (`AlivePackKernelCfg`,
+            // `FusedAgentUnpackKernelCfg`) emitted by the spatial helper
+            // don't match the hand-written `PackCfg` / `UnpackCfg`
+            // shapes — the emitted dispatch is for layout-validation
+            // only until T16 unifies the cfg + WGSL bodies.
+            let mask_sim_cfg_ref_t13 = sim_cfg_buf
+                .as_ref()
+                .expect("sim_cfg_buf ensured by ensure_resident_init");
+            if cfg!(feature = "engine_gpu_emitted_fused_unpack_dispatch") {
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  mask_sim_cfg_ref_t13,
+                    scoring_unpack_agents_input: mask_sim_cfg_ref_t13,
+                    cascade_current_ring:        mask_sim_cfg_ref_t13,
+                    cascade_current_tail:        mask_sim_cfg_ref_t13,
+                    cascade_next_ring:           mask_sim_cfg_ref_t13,
+                    cascade_next_tail:           mask_sim_cfg_ref_t13,
+                    cascade_indirect_args:       mask_sim_cfg_ref_t13,
+                    fused_agent_unpack_input:    agents_buf,
+                    fused_agent_unpack_mask_soa: mask_sim_cfg_ref_t13,
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref_t13,
+                    ability_registry: mask_sim_cfg_ref_t13,
+                    tag_values:       mask_sim_cfg_ref_t13,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+
+                use engine_gpu_rules::fused_agent_unpack::FusedAgentUnpackKernel;
+                let kernel = self.resident.fused_agent_unpack_kernel_emitted
+                    .get_or_insert_with(|| FusedAgentUnpackKernel::new(&self.device));
+                let cfg = kernel.build_cfg(state);
+                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("engine_gpu_rules::fused_agent_unpack::cfg"),
+                    contents: bytemuck::cast_slice(&[cfg]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bindings = kernel.bind(&sources, &cfg_buf);
+                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+            } else {
+                let _ = &self.resident.fused_agent_unpack_kernel_emitted;
+            }
+            if cfg!(feature = "engine_gpu_emitted_alive_pack_dispatch") {
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  mask_sim_cfg_ref_t13,
+                    scoring_unpack_agents_input: mask_sim_cfg_ref_t13,
+                    cascade_current_ring:        mask_sim_cfg_ref_t13,
+                    cascade_current_tail:        mask_sim_cfg_ref_t13,
+                    cascade_next_ring:           mask_sim_cfg_ref_t13,
+                    cascade_next_tail:           mask_sim_cfg_ref_t13,
+                    cascade_indirect_args:       mask_sim_cfg_ref_t13,
+                    fused_agent_unpack_input:    agents_buf,
+                    fused_agent_unpack_mask_soa: mask_sim_cfg_ref_t13,
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref_t13,
+                    ability_registry: mask_sim_cfg_ref_t13,
+                    tag_values:       mask_sim_cfg_ref_t13,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+
+                use engine_gpu_rules::alive_pack::AlivePackKernel;
+                let kernel = self.resident.alive_pack_kernel_emitted
+                    .get_or_insert_with(|| AlivePackKernel::new(&self.device));
+                let cfg = kernel.build_cfg(state);
+                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("engine_gpu_rules::alive_pack::cfg"),
+                    contents: bytemuck::cast_slice(&[cfg]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+                let bindings = kernel.bind(&sources, &cfg_buf);
+                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+            } else {
+                let _ = &self.resident.alive_pack_kernel_emitted;
+            }
+
             // 1c. Spatial pre-scoring: hoisted out of the cascade driver
             //     so the scoring kernel can iterate per-agent K=32
             //     candidate slots (instead of walking 0..agent_cap).

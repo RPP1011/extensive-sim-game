@@ -32,6 +32,18 @@ pub fn emit_engagement_query_rs() -> String {
     ])
 }
 
+pub fn emit_alive_pack_rs() -> String {
+    common_kernel_body("AlivePackKernel", "alive_pack", &[
+        ("agents", true), ("alive_bitmap", false),
+    ])
+}
+
+pub fn emit_fused_agent_unpack_rs() -> String {
+    common_kernel_body("FusedAgentUnpackKernel", "fused_agent_unpack", &[
+        ("agents_input", true), ("mask_soa", false), ("agent_data", false),
+    ])
+}
+
 #[allow(dead_code)]
 fn common_kernel_body(struct_name: &str, file_stem: &str, bindings: &[(&str, bool)]) -> String {
     use std::fmt::Write;

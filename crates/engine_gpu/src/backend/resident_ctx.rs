@@ -205,6 +205,20 @@ pub struct ResidentPathContext {
     pub spatial_kin_query_kernel: Option<engine_gpu_rules::spatial_kin_query::SpatialKinQueryKernel>,
     /// T12 — lazy-initialised emitted SpatialEngagementQueryKernel.
     pub spatial_engagement_query_kernel: Option<engine_gpu_rules::spatial_engagement_query::SpatialEngagementQueryKernel>,
+    /// T13 — lazy-initialised emitted AlivePackKernel from
+    /// `engine_gpu_rules`. Built on first `step_batch` call when the
+    /// `engine_gpu_emitted_alive_pack_dispatch` feature is enabled;
+    /// remains `None` (slot type-checked only) when off. The
+    /// hand-written `alive_pack_kernel.encode_pack` is the only
+    /// dispatch that runs by default until T16 retires it.
+    pub alive_pack_kernel_emitted: Option<engine_gpu_rules::alive_pack::AlivePackKernel>,
+    /// T13 — lazy-initialised emitted FusedAgentUnpackKernel from
+    /// `engine_gpu_rules`. Built on first `step_batch` call when the
+    /// `engine_gpu_emitted_fused_unpack_dispatch` feature is enabled;
+    /// remains `None` (slot type-checked only) when off. The
+    /// hand-written `fused_unpack_kernel.encode_unpack` is the only
+    /// dispatch that runs by default until T16 retires it.
+    pub fused_agent_unpack_kernel_emitted: Option<engine_gpu_rules::fused_agent_unpack::FusedAgentUnpackKernel>,
 }
 
 impl ResidentPathContext {
@@ -261,6 +275,8 @@ impl ResidentPathContext {
             spatial_hash_kernel:               None,
             spatial_kin_query_kernel:          None,
             spatial_engagement_query_kernel:   None,
+            alive_pack_kernel_emitted:         None,
+            fused_agent_unpack_kernel_emitted: None,
         }
     }
 }

@@ -80,6 +80,20 @@ engine_gpu_emitted_view_folds_dispatch = []
 # default until then; the hand-written spatial pre-scoring keeps
 # running.
 engine_gpu_emitted_spatial_dispatch = []
+# T13 — opt-in switch to dispatch the emitted AlivePackKernel from
+# `step_batch` alongside (eventually instead of) the hand-written
+# `alive_pack_kernel.encode_pack`. Off by default until the emitter's
+# WGSL body produces the real bitmap-packing semantics (T16); flipping
+# this on with the current no-op WGSL stub WILL break parity (the
+# alive bitmap would never get populated on the GPU path).
+engine_gpu_emitted_alive_pack_dispatch = []
+# T13 — opt-in switch to dispatch the emitted FusedAgentUnpackKernel
+# from `step_batch` alongside (eventually instead of) the hand-written
+# `fused_unpack_kernel.encode_unpack`. Off by default until the
+# emitter's WGSL body produces the real mask-SoA + scoring-AoS unpack
+# semantics (T16); flipping this on with the current no-op WGSL stub
+# WILL break parity (no SoA fields would get written on the GPU path).
+engine_gpu_emitted_fused_unpack_dispatch = []
 
 [dependencies]
 engine = { path = "../engine" }

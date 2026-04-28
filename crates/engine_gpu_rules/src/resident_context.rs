@@ -3,6 +3,8 @@
 
 /// Resident-lifetime buffers — persist across ticks within a batch.
 pub struct ResidentPathContext {
+    /// Per-agent alive bitmap (Resident; ceil(N/32) words).
+    pub alive_bitmap: wgpu::Buffer,
     /// Resident scoring table (per-action priors).
     pub scoring_table: wgpu::Buffer,
     /// Resident view storage for `kin_fear`.
@@ -42,6 +44,12 @@ impl ResidentPathContext {
     /// resident-rebuild path).
     pub fn new(_device: &wgpu::Device, _agent_cap: u32) -> Self {
         Self {
+            alive_bitmap: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::resident::alive_bitmap"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
             scoring_table: _device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("engine_gpu_rules::resident::scoring_table"),
                 size: 4,
