@@ -22,6 +22,9 @@ pub mod pick_ability;
 pub mod scoring;
 pub mod scoring_unpack;
 pub mod seed_indirect;
+pub mod spatial_engagement_query;
+pub mod spatial_hash;
+pub mod spatial_kin_query;
 
 pub mod schedule;
 pub mod resident_context;
@@ -52,6 +55,9 @@ pub enum KernelId {
     Scoring,
     ScoringUnpack,
     SeedIndirect,
+    SpatialEngagementQuery,
+    SpatialHash,
+    SpatialKinQuery,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

@@ -14,6 +14,9 @@ pub enum DispatchOp {
 pub const SCHEDULE: &[DispatchOp] = &[
     DispatchOp::Kernel(KernelId::FusedMask),
     DispatchOp::Kernel(KernelId::MaskUnpack),
+    DispatchOp::Kernel(KernelId::SpatialHash),
+    DispatchOp::Kernel(KernelId::SpatialKinQuery),
+    DispatchOp::Kernel(KernelId::SpatialEngagementQuery),
     DispatchOp::Kernel(KernelId::Scoring),
     DispatchOp::Kernel(KernelId::ScoringUnpack),
     DispatchOp::Kernel(KernelId::ApplyActions),

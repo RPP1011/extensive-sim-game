@@ -194,6 +194,17 @@ pub struct ResidentPathContext {
     pub fold_rally_boost_kernel:  Option<engine_gpu_rules::fold_rally_boost::FoldRallyBoostKernel>,
     pub fold_standing_kernel:     Option<engine_gpu_rules::fold_standing::FoldStandingKernel>,
     pub fold_memory_kernel:       Option<engine_gpu_rules::fold_memory::FoldMemoryKernel>,
+    /// T12 — lazy-initialised emitted SpatialHashKernel from
+    /// `engine_gpu_rules`. Built on first `step_batch` call when the
+    /// `engine_gpu_emitted_spatial_dispatch` feature is enabled;
+    /// remains `None` (slot type-checked only) when off. The
+    /// hand-written `cascade_resident::run_spatial_resident_pre_scoring`
+    /// is the only dispatch that runs by default until T16 retires it.
+    pub spatial_hash_kernel: Option<engine_gpu_rules::spatial_hash::SpatialHashKernel>,
+    /// T12 — lazy-initialised emitted SpatialKinQueryKernel.
+    pub spatial_kin_query_kernel: Option<engine_gpu_rules::spatial_kin_query::SpatialKinQueryKernel>,
+    /// T12 — lazy-initialised emitted SpatialEngagementQueryKernel.
+    pub spatial_engagement_query_kernel: Option<engine_gpu_rules::spatial_engagement_query::SpatialEngagementQueryKernel>,
 }
 
 impl ResidentPathContext {
@@ -247,6 +258,9 @@ impl ResidentPathContext {
             fold_rally_boost_kernel:  None,
             fold_standing_kernel:     None,
             fold_memory_kernel:       None,
+            spatial_hash_kernel:               None,
+            spatial_kin_query_kernel:          None,
+            spatial_engagement_query_kernel:   None,
         }
     }
 }

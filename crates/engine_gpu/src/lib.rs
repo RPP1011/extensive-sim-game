@@ -1198,6 +1198,102 @@ impl GpuBackend {
             let mask_sim_cfg_ref = sim_cfg_buf
                 .as_ref()
                 .expect("sim_cfg_buf ensured by ensure_resident_init");
+
+            // T12 — emitted SpatialHash + SpatialKinQuery +
+            // SpatialEngagementQuery dispatches. Run alongside the
+            // hand-written `run_spatial_resident_pre_scoring` above;
+            // flipping `engine_gpu_emitted_spatial_dispatch` on with
+            // the current no-op WGSL stubs would dispatch three
+            // do-nothing passes — the hand-written cascade still
+            // populates the actual `CascadeResidentCtx` spatial
+            // buffers consumed downstream. Off by default; T16
+            // hoists the real spatial body and unifies the BGL.
+            //
+            // Kept type-checked under the `else` so any drift between
+            // dsl_compiler's emit and these dispatch sites fails at
+            // build time rather than at the eventual feature flip.
+            // Schedule order matches xtask: hash → kin → engagement.
+            if cfg!(feature = "engine_gpu_emitted_spatial_dispatch") {
+                use engine_gpu_rules::binding_sources::BindingSources;
+                use engine_gpu_rules::external_buffers::ExternalBuffers;
+                use engine_gpu_rules::transient_handles::TransientHandles;
+                use engine_gpu_rules::Kernel as _;
+                use wgpu::util::DeviceExt as _;
+
+                let transient = TransientHandles {
+                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
+                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
+                    action_buf:                  mask_sim_cfg_ref,
+                    scoring_unpack_agents_input: mask_sim_cfg_ref,
+                    cascade_current_ring:        mask_sim_cfg_ref,
+                    cascade_current_tail:        mask_sim_cfg_ref,
+                    cascade_next_ring:           mask_sim_cfg_ref,
+                    cascade_next_tail:           mask_sim_cfg_ref,
+                    cascade_indirect_args:       mask_sim_cfg_ref,
+                    _phantom: std::marker::PhantomData,
+                };
+                let external = ExternalBuffers {
+                    agents:           agents_buf,
+                    sim_cfg:          mask_sim_cfg_ref,
+                    ability_registry: mask_sim_cfg_ref,
+                    tag_values:       mask_sim_cfg_ref,
+                    _phantom:         std::marker::PhantomData,
+                };
+                let sources = BindingSources {
+                    resident:  &self.resident.path_ctx,
+                    pingpong:  &self.resident.pingpong_ctx,
+                    pool:      &self.resident.pool,
+                    transient: &transient,
+                    external:  &external,
+                };
+
+                // SpatialHash.
+                {
+                    use engine_gpu_rules::spatial_hash::SpatialHashKernel;
+                    let kernel = self.resident.spatial_hash_kernel
+                        .get_or_insert_with(|| SpatialHashKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::spatial_hash::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // SpatialKinQuery.
+                {
+                    use engine_gpu_rules::spatial_kin_query::SpatialKinQueryKernel;
+                    let kernel = self.resident.spatial_kin_query_kernel
+                        .get_or_insert_with(|| SpatialKinQueryKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::spatial_kin_query::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+                // SpatialEngagementQuery.
+                {
+                    use engine_gpu_rules::spatial_engagement_query::SpatialEngagementQueryKernel;
+                    let kernel = self.resident.spatial_engagement_query_kernel
+                        .get_or_insert_with(|| SpatialEngagementQueryKernel::new(&self.device));
+                    let cfg = kernel.build_cfg(state);
+                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("engine_gpu_rules::spatial_engagement_query::cfg"),
+                        contents: bytemuck::cast_slice(&[cfg]),
+                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    });
+                    let bindings = kernel.bind(&sources, &cfg_buf);
+                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
+                }
+            } else {
+                let _ = &self.resident.spatial_hash_kernel;
+                let _ = &self.resident.spatial_kin_query_kernel;
+                let _ = &self.resident.spatial_engagement_query_kernel;
+            }
             if let Some(p) = profiler.as_mut() {
                 // Between fused_unpack and mask_resident.
                 p.write_between_pass_timestamp(

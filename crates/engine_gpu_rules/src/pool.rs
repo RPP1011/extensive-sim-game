@@ -3,10 +3,35 @@
 
 /// Pooled-lifetime buffers — shape-keyed; reused across compatible kernels.
 pub struct Pool {
+    /// Spatial-hash cell-index buffer (Pooled).
+    pub spatial_grid_cells: wgpu::Buffer,
+    /// Spatial-hash cell-offsets buffer (Pooled).
+    pub spatial_grid_offsets: wgpu::Buffer,
+    /// Per-query result buffer (Pooled).
+    pub spatial_query_results: wgpu::Buffer,
 }
 
 impl Pool {
     pub fn new(_device: &wgpu::Device) -> Self {
-        Self {}
+        Self {
+            spatial_grid_cells: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::pool::spatial_grid_cells"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            spatial_grid_offsets: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::pool::spatial_grid_offsets"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            spatial_query_results: _device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("engine_gpu_rules::pool::spatial_query_results"),
+                size: 4,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+        }
     }
 }

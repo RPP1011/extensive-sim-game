@@ -70,6 +70,16 @@ engine_gpu_emitted_append_events_dispatch = []
 # hoists the real fold body). Off by default until then; the
 # hand-written fold kernels in `engine_gpu::view_storage` keep running.
 engine_gpu_emitted_view_folds_dispatch = []
+# T12 — opt-in switch to dispatch the emitted SpatialHashKernel +
+# SpatialKinQueryKernel + SpatialEngagementQueryKernel from
+# `step_batch` alongside (eventually instead of) the hand-written
+# `cascade_resident::run_spatial_resident_pre_scoring`. One feature
+# gates all 3 spatial dispatches together — they share the same
+# readiness criterion (all emit a no-op WGSL stub matching the BGL
+# slot-for-slot until T16 hoists the real spatial body). Off by
+# default until then; the hand-written spatial pre-scoring keeps
+# running.
+engine_gpu_emitted_spatial_dispatch = []
 
 [dependencies]
 engine = { path = "../engine" }

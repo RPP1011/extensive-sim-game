@@ -41,6 +41,7 @@ pub mod emit_scoring;
 pub mod emit_scoring_kernel;
 pub mod emit_scoring_wgsl;
 pub mod emit_sim_cfg;
+pub mod emit_spatial_kernel;
 pub mod emit_step;
 pub mod emit_transient_handles;
 pub mod emit_view;

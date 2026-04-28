@@ -3910,7 +3910,7 @@ The spatial pipeline is one BGL-and-pipeline kernel for grid build + three per-q
 - Modify: `crates/engine_gpu/src/lib.rs` (replace `run_spatial_resident_pre_scoring` with emitted kernel calls)
 - Test: `crates/dsl_compiler/tests/emit_spatial_smoke.rs`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 Create `crates/dsl_compiler/tests/emit_spatial_smoke.rs`:
 
@@ -3937,12 +3937,12 @@ fn engagement_query_rs_has_kernel_impl() {
 }
 ```
 
-- [ ] **Step 2: Run to confirm fail**
+- [x] **Step 2: Run to confirm fail**
 
 Run: `cargo test -p dsl_compiler --test emit_spatial_smoke`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement emit_spatial_kernel.rs**
+- [x] **Step 3: Implement emit_spatial_kernel.rs**
 
 Create `crates/dsl_compiler/src/emit_spatial_kernel.rs`:
 
@@ -4087,14 +4087,14 @@ fn common_kernel_body(struct_name: &str, file_stem: &str, bindings: &[(&str, boo
 }
 ```
 
-- [ ] **Step 4: Register + run unit test**
+- [x] **Step 4: Register + run unit test**
 
 Add `pub mod emit_spatial_kernel;` to `crates/dsl_compiler/src/lib.rs`.
 
 Run: `cargo test -p dsl_compiler --test emit_spatial_smoke`
 Expected: 3 passed.
 
-- [ ] **Step 5: Wire xtask + WGSL bodies**
+- [x] **Step 5: Wire xtask + WGSL bodies**
 
 In `crates/xtask/src/main.rs`:
 
@@ -4137,7 +4137,7 @@ for (i, e) in spatial_entries.into_iter().enumerate() {
 
 (Hoist `SPATIAL_HASH_WGSL` / `SPATIAL_KIN_QUERY_WGSL` / `SPATIAL_ENGAGEMENT_QUERY_WGSL` `pub const`s in `engine_gpu::spatial_gpu` — transitional.)
 
-- [ ] **Step 6: Wire into engine_gpu's step_batch**
+- [x] **Step 6: Wire into engine_gpu's step_batch**
 
 Extend the `Pool` field list (xtask side, alongside the Task 12 emit block):
 
@@ -4155,7 +4155,7 @@ for (n, doc) in &[
 
 Replace the body of `run_spatial_resident_pre_scoring` with three emitted-kernel record calls (pattern same as Task 11 step 6 — `kernel.bind(&sources, &cfg_buf)` then `kernel.record(...)`). Add `Option<Spatial*Kernel>` fields to `ResidentPathContext` (engine_gpu side wrapper).
 
-- [ ] **Step 7: Parity sweep**
+- [x] **Step 7: Parity sweep**
 
 Run: `cargo test -p engine_gpu --test spatial_parity`
 Run: `cargo test -p engine_gpu --test spatial_resident`
@@ -4163,7 +4163,7 @@ Run: `cargo test -p engine_gpu --test parity_with_cpu`
 Run: `cargo test -p engine --test wolves_and_humans_parity`
 Expected: all pass.
 
-- [ ] **Step 8: Bump baseline + commit**
+- [x] **Step 8: Bump baseline + commit**
 
 ```bash
 cargo run --bin xtask -- compile-dsl
