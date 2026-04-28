@@ -61,16 +61,6 @@ pub mod gpu_util;
 #[cfg(feature = "gpu")]
 pub mod sim_cfg;
 
-#[cfg(feature = "gpu")]
-pub mod mask;
-
-/// Phase 3 — scoring kernel + deterministic argmax. Consumes fused
-/// mask bitmaps and produces one `ScoreOutput` per agent. View calls
-/// currently stubbed to 0.0 — follow-up integration task wires them
-/// to `view_storage`.
-#[cfg(feature = "gpu")]
-pub mod scoring;
-
 /// Phase 4 — per-view GPU storage + fold kernels. Not wired into the
 /// backend's tick loop yet; the follow-up integration task swaps
 /// scoring's stub views for reads against this module.
@@ -95,11 +85,6 @@ pub mod view_storage_symmetric_pair;
 #[cfg(feature = "gpu")]
 pub mod view_storage_per_entity_ring;
 
-/// Phase 5 — GPU spatial hash + nearest-hostile / nearby-kin queries.
-/// Not yet consumed by the backend's step loop; the scoring / physics
-/// kernels will call into `spatial_gpu::SPATIAL_WGSL` helpers.
-#[cfg(feature = "gpu")]
-pub mod spatial_gpu;
 
 /// Phase 6b — GPU event ring primitive. Fixed-capacity device buffer
 /// of `EventRecord` slots + atomic tail counter. Kernels emit events
@@ -111,12 +96,6 @@ pub mod spatial_gpu;
 #[cfg(feature = "gpu")]
 pub mod event_ring;
 
-/// Phase 6e — GPU physics kernel (Piece 2 of the cascade megakernel).
-/// Drives task 187's emitted WGSL against the event ring + agent SoA.
-/// Processes one cascade iteration per `run_batch` call — the cascade
-/// loop (Piece 3) drives re-dispatches until the ring stops growing.
-#[cfg(feature = "gpu")]
-pub mod physics;
 
 /// Phase 6f — cascade sub-dispatch loop (Piece 3). Drives `physics::run_batch`
 /// in a fixed-point loop, folds each iteration's emitted events into
@@ -126,23 +105,6 @@ pub mod physics;
 #[cfg(feature = "gpu")]
 pub mod cascade;
 
-/// Task 199 — GPU `apply_actions` kernel. WGSL port of the hot subset
-/// of `engine::step::apply_actions`: Attack damage + AgentAttacked /
-/// AgentDied event emission, one thread per agent slot. Needs /
-/// opportunity attacks / engagement-slow / announce are documented as
-/// out-of-scope in the module header. Not yet wired into
-/// `GpuBackend::step` as authoritative — scaffolding for a follow-up
-/// that removes the CPU `apply_actions` call entirely once the
-/// engagement-slow + opportunity-attack gaps close.
-#[cfg(feature = "gpu")]
-pub mod apply_actions;
-
-/// Task 199 — GPU movement kernel. WGSL port of the MoveToward / Flee
-/// position updates, one thread per agent slot. Pure-away flee only
-/// (no kin-flee-bias) in the initial landing — deer herding is a
-/// follow-up. Not yet wired into `GpuBackend::step` as authoritative.
-#[cfg(feature = "gpu")]
-pub mod movement;
 
 /// Phase C (task C1) — GPU-resident cascade driver. Composes Phase B's
 /// resident kernels into one indirect-dispatch sequence per tick with
@@ -166,13 +128,6 @@ pub mod snapshot;
 #[cfg(feature = "gpu")]
 pub mod gpu_profiling;
 
-/// Per-tick alive bitmap — packed `array<u32>` with one bit per agent
-/// slot. Written once at the top of each batch tick by the pack kernel;
-/// read by mask / scoring / physics kernels at binding slot 22 to avoid
-/// the 64-byte cacheline read that a direct `agents[x].alive` field
-/// access costs. See `alive_bitmap::ALIVE_BITMAP_BINDING`.
-#[cfg(feature = "gpu")]
-pub mod alive_bitmap;
 
 /// Phase 1 GPU backend.
 ///
@@ -2992,22 +2947,22 @@ impl GpuBackend {
 
             // No-runtime-panic guarantee (P10): every variant the
             // SCHEDULE actually references is matched explicitly above.
-            // The fallthrough panics are `unreachable!`-style guards on
-            // the closed `KernelId` enum — they only fire if a future
-            // kernel emitter adds a variant to SCHEDULE without
-            // updating dispatch(). Task 16 flips these to
-            // `unreachable!()` once exhaustiveness is verified.
+            // T16 flipped these to `unreachable!()` — they're compile-
+            // time contract assertions on the closed `KernelId` enum.
+            // Reaching them would be an emitter regression caught at
+            // the kernel-emit / compile-dsl level, well before any
+            // binary ships.
             DispatchOp::Kernel(other) => {
-                panic!("dispatch: unhandled kernel {other:?}");
+                unreachable!("KernelId {other:?} has no dispatch arm; emitter regression")
             }
             DispatchOp::FixedPoint { kernel: other, .. } => {
-                panic!("dispatch: unhandled FixedPoint kernel {other:?}");
+                unreachable!("FixedPoint {other:?} has no dispatch arm")
             }
             DispatchOp::Indirect { kernel: other, .. } => {
-                panic!("dispatch: unhandled Indirect kernel {other:?}");
+                unreachable!("Indirect {other:?} has no dispatch arm")
             }
             DispatchOp::GatedBy { kernel: other, .. } => {
-                panic!("dispatch: unhandled GatedBy kernel {other:?}");
+                unreachable!("GatedBy {other:?} has no dispatch arm")
             }
         }
         Ok(())

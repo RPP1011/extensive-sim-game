@@ -17,94 +17,9 @@ edition = "2021"
 # behind `gpu` because it's the only test that exercises the GPU kernel.
 default = []
 gpu = ["dep:wgpu", "dep:naga", "dep:pollster", "dep:dsl_compiler", "dep:bytemuck", "dep:engine_gpu_rules", "engine_gpu_rules/gpu"]
-# Opt-in switch to start dispatching the emitted FusedMaskKernel +
-# MaskUnpackKernel from `step_batch` alongside (eventually instead of)
-# the hand-written `mask_kernel.run_resident`. Off by default until
-# the emit's BGL+WGSL pair is in sync; flipping this on without that
-# alignment WILL break GPU parity.
-engine_gpu_emitted_mask_dispatch = []
-# T7 — opt-in switch to start dispatching the emitted ApplyActionsKernel
-# from `step_batch` alongside (eventually instead of) the hand-written
-# `cascade_ctx.apply_actions.run_resident`. Off by default until the
-# emitter's WGSL body produces the real damage/heal/event semantics
-# (T16); flipping this on with the current no-op WGSL stub WILL break
-# parity (no agents would ever take damage on the GPU path).
-engine_gpu_emitted_apply_actions_dispatch = []
-# T8 — opt-in switch to start dispatching the emitted PickAbilityKernel
-# from `step_batch`. Off by default. There is no hand-written
-# pick_ability kernel to run alongside (Subsystem 3 Group B was folded
-# into this plan), so the emitted dispatch is the only version. Stays
-# gated until `assets/sim/scoring.sim` actually has a `per_ability` row
-# producing a real WGSL body (the bootstrap emits a no-op stub when the
-# row set is empty); flipping on without the row would dispatch the
-# stub and write nothing useful into `chosen_ability_buf`.
-engine_gpu_emitted_pick_ability_dispatch = []
-# T9 — opt-in switch to start dispatching the emitted MovementKernel
-# from `step_batch` alongside (eventually instead of) the hand-written
-# `cascade_ctx.movement.run_resident`. Off by default until the
-# emitter's WGSL body produces the real MoveToward / Flee position +
-# event semantics (T16); flipping this on with the current no-op WGSL
-# stub WILL break parity (no agents would ever move on the GPU path).
-engine_gpu_emitted_movement_dispatch = []
-# T10 — opt-in switch to start dispatching the emitted PhysicsKernel
-# from `step_batch` (the FixedPoint loop). Off by default until the
-# emitter's WGSL body produces the real cascade-physics semantics
-# (T16); flipping this on with the current no-op WGSL stub WILL break
-# parity (no events would ever propagate). The hand-written
-# `cascade_resident::run_cascade_resident_with_iter_cap` keeps running
-# until then.
-engine_gpu_emitted_physics_dispatch = []
-# T10 — opt-in switch to dispatch the emitted SeedIndirectKernel.
-# Off by default; pairs with the FixedPoint physics dispatch.
-engine_gpu_emitted_seed_indirect_dispatch = []
-# T10 — opt-in switch to dispatch the emitted AppendEventsKernel.
-# Off by default; the hand-written
-# `cascade_ctx.encode_append_apply_events` keeps running until T16.
-engine_gpu_emitted_append_events_dispatch = []
-# T11 — opt-in switch to dispatch the emitted per-view Fold<View>Kernels
-# (engaged_with / threat_level / kin_fear / my_enemies / pack_focus /
-# rally_boost / standing / memory). One feature gates all 8 view fold
-# dispatches together — the per-view feature surface would otherwise
-# explode and these kernels share the same readiness criterion (all
-# emit a no-op WGSL stub matching the BGL slot-for-slot until T16
-# hoists the real fold body). Off by default until then; the
-# hand-written fold kernels in `engine_gpu::view_storage` keep running.
-engine_gpu_emitted_view_folds_dispatch = []
-# T12 — opt-in switch to dispatch the emitted SpatialHashKernel +
-# SpatialKinQueryKernel + SpatialEngagementQueryKernel from
-# `step_batch` alongside (eventually instead of) the hand-written
-# `cascade_resident::run_spatial_resident_pre_scoring`. One feature
-# gates all 3 spatial dispatches together — they share the same
-# readiness criterion (all emit a no-op WGSL stub matching the BGL
-# slot-for-slot until T16 hoists the real spatial body). Off by
-# default until then; the hand-written spatial pre-scoring keeps
-# running.
-engine_gpu_emitted_spatial_dispatch = []
-# T13 — opt-in switch to dispatch the emitted AlivePackKernel from
-# `step_batch` alongside (eventually instead of) the hand-written
-# `alive_pack_kernel.encode_pack`. Off by default until the emitter's
-# WGSL body produces the real bitmap-packing semantics (T16); flipping
-# this on with the current no-op WGSL stub WILL break parity (the
-# alive bitmap would never get populated on the GPU path).
-engine_gpu_emitted_alive_pack_dispatch = []
-# T13 — opt-in switch to dispatch the emitted FusedAgentUnpackKernel
-# from `step_batch` alongside (eventually instead of) the hand-written
-# `fused_unpack_kernel.encode_unpack`. Off by default until the
-# emitter's WGSL body produces the real mask-SoA + scoring-AoS unpack
-# semantics (T16); flipping this on with the current no-op WGSL stub
-# WILL break parity (no SoA fields would get written on the GPU path).
-engine_gpu_emitted_fused_unpack_dispatch = []
-# T15 — opt-in umbrella switch to drive `step_batch` from
-# `engine_gpu_rules::schedule::SCHEDULE` via a single
-# `for op in SCHEDULE { self.dispatch(op, ...) }` loop. Consolidates
-# the per-task `engine_gpu_emitted_*_dispatch` blocks added in T9-T13
-# into one match-driven dispatcher. Off by default; flipping this on
-# would dispatch every emitted kernel each tick (which today are no-op
-# WGSL stubs) ALONGSIDE the hand-written kernels, so T16's WGSL-body
-# hoist is a prerequisite for using this in production. Until then the
-# loop is a refactor target — when the umbrella is off, the existing
-# per-feature gates remain authoritative.
-engine_gpu_emitted_schedule_loop = []
+# T16 retired the per-task `engine_gpu_emitted_*_dispatch` feature
+# gates and the umbrella `engine_gpu_emitted_schedule_loop` — the
+# emitted SCHEDULE-driven dispatcher is now the only path.
 
 [dependencies]
 engine = { path = "../engine" }

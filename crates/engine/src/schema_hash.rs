@@ -66,5 +66,12 @@ pub fn schema_hash() -> [u8; 32] {
     h.update(b"SnapshotFormat:v1:WSIMSV01:hot+cold_scalars+pod_collections+ring_meta;header=64B");
     h.update(b"FeatureSource:Vitals=4,Position=7,Neighbor<K>=6K");
     h.update(b"ProbeHarness:v1:DEFAULT_AGENT_CAP=256,DEFAULT_EVENT_CAP=4096");
+    // T16 P2 coupling: engine snapshots reject if GPU rules changed without
+    // a coordinated bump. Cross-crate hash dependency — `compile-dsl`
+    // regenerates `engine_gpu_rules/.schema_hash`, and any drift there
+    // invalidates the engine schema hash too.
+    let gpu_hash_str = include_str!("../../engine_gpu_rules/.schema_hash").trim();
+    h.update(b"engine_gpu_rules.schema_hash=");
+    h.update(gpu_hash_str.as_bytes());
     h.finalize().into()
 }

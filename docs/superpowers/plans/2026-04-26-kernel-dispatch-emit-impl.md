@@ -57,8 +57,8 @@
   - P11 (Reduction Determinism): PASS — view-fold reductions and atomic-append paths are emitted byte-equal; sort-stability already lives in the WGSL emit at `emit_scoring_wgsl_atomic_views` and is preserved.
 
 - **Re-evaluation:**
-  - [ ] AIS reviewed at design phase (initial fill).
-  - [ ] AIS reviewed post-design (after task list stabilises).
+  - [x] AIS reviewed at design phase (initial fill).
+  - [x] AIS reviewed post-design (after task list stabilises).
 
 ---
 
@@ -4544,7 +4544,7 @@ Run: `cargo run --bin xtask -- compile-dsl`
 Run: `cargo build -p engine_gpu_rules --features gpu`
 Expected: clean build (the WGSL is loaded but not invoked yet — the megakernel-mode dispatch site is a runtime selector that this task does not enable; left for the gpu_megakernel_plan).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cargo test -p engine_gpu_rules --test schema_hash
@@ -4562,11 +4562,11 @@ This task replaces the open-coded sequence of kernel-record blocks built up acro
 - Modify: `crates/engine_gpu/src/lib.rs::step_batch`
 - Modify: `crates/engine_gpu/src/backend/resident_ctx.rs` (kernel handles already added by Tasks 4–13)
 
-- [ ] **Step 1: Locate the existing per-tick body**
+- [x] **Step 1: Locate the existing per-tick body**
 
 In `crates/engine_gpu/src/lib.rs::step_batch`, identify the inline blocks added in Tasks 4–13 (each a `{ ... kernel.bind(&sources, &cfg_buf).record(...) ... }` block). They sit inside `for tick_idx in 0..n_ticks { ... }`. The `BindingSources` construction (Task 5 step 4) sits at the top of the per-tick body.
 
-- [ ] **Step 2: Replace those blocks with a Schedule-driven dispatch**
+- [x] **Step 2: Replace those blocks with a Schedule-driven dispatch**
 
 Replace the body of `for tick_idx in 0..n_ticks { ... }` with:
 
@@ -4590,7 +4590,7 @@ for tick_idx in 0..n_ticks {
 }
 ```
 
-- [ ] **Step 3: Implement `GpuBackend::dispatch`**
+- [x] **Step 3: Implement `GpuBackend::dispatch`**
 
 Add a private method on `GpuBackend` (in `crates/engine_gpu/src/lib.rs`):
 
@@ -4698,7 +4698,7 @@ fn dispatch(
 
 > P10 note: the spec says "every `DispatchOp` variant has a panic-free path." The fallthrough panics are `unreachable!`-style guards on a closed enum: the compiler-emitted `KernelId` exhausts every enumerator the `dispatch_*` arms above match on. The fallthroughs only fire if a future kernel emitter adds a `KernelId` variant without updating `dispatch()` — which is a build-error at every match-arm site if we replace `panic!` with `unreachable!()` after Task 16 confirms exhaustiveness. Update those lines to `unreachable!()` once the dispatch is complete.
 
-- [ ] **Step 4: Run full parity sweep**
+- [x] **Step 4: Run full parity sweep**
 
 Run: `cargo test -p engine_gpu`
 Run: `cargo test -p engine --test wolves_and_humans_parity`
