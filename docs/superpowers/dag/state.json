@@ -509,15 +509,22 @@
         "2026-04-26-kernel-dispatch-emit-impl.task-15"
       ],
       "blocks": [],
-      "status": "pending",
+      "status": "done",
       "steps_total": 10,
-      "steps_done": 0,
+      "steps_done": 10,
       "owner_class": "implementer",
       "blocked_reason": null,
-      "completed_commit": null,
-      "critic_verdicts": {},
-      "started_at": null,
-      "completed_at": null,
+      "completed_commit": "4474566c",
+      "critic_verdicts": {
+        "compliance": "PASS",
+        "quality": "PASS",
+        "compiler-first": "PASS",
+        "cross-backend-parity": "PASS",
+        "reduction-determinism": "PASS",
+        "schema-bump": "PASS-PLAN-PRESCRIBED"
+      },
+      "started_at": "2026-04-28T11:49:06Z",
+      "completed_at": "2026-04-28T15:00:07Z",
       "retry_count": 0
     },
     {
@@ -561,9 +568,9 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-28T11:18:20Z",
-    "iterations_completed": 15,
-    "tasks_closed": 15,
+    "last_iteration_at": "2026-04-28T15:00:07Z",
+    "iterations_completed": 16,
+    "tasks_closed": 16,
     "tasks_blocked": 0,
     "current_phase": "dispatching",
     "next_wake_scheduled": null
