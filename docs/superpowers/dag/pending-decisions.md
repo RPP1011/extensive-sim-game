@@ -99,9 +99,19 @@ The constants `ALIVE_PACK_WGSL` and `FUSED_AGENT_UNPACK_WGSL` were hoisted to `p
 
 Estimated scope: 4-6 tasks (one per kernel module class).
 
-### Stream C — Port the 93 cfg-gated tests
+### PREREQUISITE — `step_batch` runtime fix (discovered 2026-04-28)
 
-**Plan written:** `docs/superpowers/plans/2026-04-28-gpu-test-port.md` (5 tasks). Approved 2026-04-28. Sequenced AHEAD of most Stream B tasks per the interleave: C1 (parity helper + parity_with_cpu) lands first; C2 lands before Stream B Bucket-R tasks so each WGSL fill is gated by its parity test.
+**Plan written:** `docs/superpowers/plans/2026-04-28-step-batch-runtime-fix.md` (6 tasks). **Blocks Stream C.**
+
+Discovery during Stream C Task 1 prep: `engine_gpu::step_batch` panics on every call because its per-tick CPU forward invokes `engine::step::step` which is `unimplemented!()` (Plan B1' Task 11 left a stub pending the emitted replacement at `engine_rules::step::step`). T15+T16+Stream A landed clean compiles but never proved runtime.
+
+The fix migrates `GpuBackend::ComputeBackend::Views` from `()` to `ViewRegistry`, threads `views` through `step_batch`, and replaces the 3 `engine::step::step` calls with `engine_rules::step::step` (passing `&mut SerialBackend` as the inner CB). Includes a runtime smoke test that proves `step_batch` actually executes — the gate that should have existed since T16.
+
+Lesson captured in the plan's Task 6 retrospective: critics check architectural compliance, not buildability or runtime. Plan close-criteria need a runtime gate, not just a compile pass.
+
+### Stream C — Port the cfg-gated tests (rescoped 4 tasks)
+
+**Plan written:** `docs/superpowers/plans/2026-04-28-gpu-test-port.md` (4 tasks, rescoped commit ed046d3c). Approved 2026-04-28. **BLOCKED on the step_batch runtime fix above.**
 
 #### Original framing
 
