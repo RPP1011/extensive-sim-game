@@ -35,7 +35,7 @@ That is the only production-code change. Documentation and follow-up notes (this
 
 The signature mismatch is small: `step` takes `_views: &mut Self::Views`; `step_batch` doesn't. `Self::Views = ()`, so `_views` is already a unit and dropping it is a no-op. `step_batch` takes `n_ticks: u32`; pass `1`.
 
-- [ ] **Step 1: Read the current step() body to confirm shape**
+- [x] **Step 1: Read the current step() body to confirm shape**
 
 Run: `sed -n '1080,1102p' crates/engine_gpu/src/lib.rs`
 
@@ -68,7 +68,7 @@ Expected to see (verbatim):
 
 If the body has drifted, stop and surface — the rest of this task is built on this exact shape.
 
-- [ ] **Step 2: Replace the CPU-forward body with a step_batch call**
+- [x] **Step 2: Replace the CPU-forward body with a step_batch call**
 
 Replace the body of `step()` (lines 1092-1100) with:
 
@@ -87,19 +87,19 @@ The `_views` parameter is dropped — it's `&mut ()` and `step_batch` has no `vi
 
 Use the Edit tool with the exact `engine::step::step(state, scratch, events, policy, cascade);` line + the full preceding comment block as `old_string`, the new comment + `self.step_batch(...)` call as `new_string`.
 
-- [ ] **Step 3: Run default-features build to confirm no regression**
+- [x] **Step 3: Run default-features build to confirm no regression**
 
 Run: `cargo build --workspace`
 
 Expected: clean build (no errors, no new warnings).
 
-- [ ] **Step 4: Run gpu-feature build to confirm step() still type-checks**
+- [x] **Step 4: Run gpu-feature build to confirm step() still type-checks**
 
 Run: `cargo build -p engine_gpu --features gpu`
 
 Expected: clean build. The signature compatibility is the only thing this verifies — the runtime behavior is exercised by Step 5.
 
-- [ ] **Step 5: Run default-features test suite to verify SerialBackend unaffected**
+- [x] **Step 5: Run default-features test suite to verify SerialBackend unaffected**
 
 Run: `cargo test -p engine`
 
@@ -109,7 +109,7 @@ Run: `cargo test -p engine_gpu`
 
 Expected: pass (no gpu-feature tests run by default; the cfg-gated tests stay gated).
 
-- [ ] **Step 6: Sanity-check the dispatch path is exercised**
+- [x] **Step 6: Sanity-check the dispatch path is exercised**
 
 Run: `grep -n 'pub fn step_batch' crates/engine_gpu/src/lib.rs`
 
@@ -119,7 +119,7 @@ Run: `grep -n 'self.step_batch(' crates/engine_gpu/src/lib.rs`
 
 Expected: at least one hit — the call we just inserted.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/engine_gpu/src/lib.rs

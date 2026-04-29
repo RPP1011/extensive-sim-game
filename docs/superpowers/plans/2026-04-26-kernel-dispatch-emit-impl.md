@@ -4706,7 +4706,7 @@ Expected: ALL existing parity tests pass.
 
 If any fail, the schedule order doesn't match the previous in-line order. Localize via `git diff` against pre-Task-15 — the dispatch arms move blocks but don't change them.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/engine_gpu/src/
@@ -4725,7 +4725,7 @@ Every kernel under `crates/engine_gpu/src/{mask,scoring,apply_actions,movement,p
 - Modify: `crates/engine_gpu/src/cascade_resident.rs` (delete kernel structs; keep `CascadeResidentCtx` skeleton if still referenced)
 - Modify: `crates/engine_gpu/src/lib.rs::dispatch` (turn `panic!` fallthroughs into `unreachable!()`)
 
-- [ ] **Step 1: Confirm no in-tree code imports the about-to-be-deleted modules**
+- [x] **Step 1: Confirm no in-tree code imports the about-to-be-deleted modules**
 
 Run: `grep -rn 'engine_gpu::mask::' crates/ --include='*.rs' | grep -v 'crates/engine_gpu/'`
 Expected: no hits (or only hits in deleted-by-this-task files).
@@ -4738,7 +4738,7 @@ Run: `grep -rn 'engine_gpu::alive_bitmap::' crates/ --include='*.rs' | grep -v '
 Run: `grep -rn 'engine_gpu::spatial_gpu::' crates/ --include='*.rs' | grep -v 'crates/engine_gpu/'`
 Expected: each command yields 0 cross-crate hits. If any command yields hits, replace those references with `engine_gpu_rules::<kernel>::` first.
 
-- [ ] **Step 2: Drop the `pub mod` declarations**
+- [x] **Step 2: Drop the `pub mod` declarations**
 
 Open `crates/engine_gpu/src/lib.rs` and delete:
 
@@ -4754,7 +4754,7 @@ pub mod spatial_gpu;
 
 (Keep `cascade_resident` for now — it owns `CascadeResidentCtx` and may still be referenced by snapshot/sync paths; trim it down in Step 3.)
 
-- [ ] **Step 3: Delete the kernel files**
+- [x] **Step 3: Delete the kernel files**
 
 Run:
 ```bash
@@ -4769,14 +4769,14 @@ rm crates/engine_gpu/src/spatial_gpu.rs
 
 In `crates/engine_gpu/src/cascade_resident.rs`, delete the `SeedIndirectKernel` and `AppendEventsKernel` impl blocks; keep only the `CascadeResidentCtx` struct + accessors.
 
-- [ ] **Step 4: Confirm `cargo build` is clean**
+- [x] **Step 4: Confirm `cargo build` is clean**
 
 Run: `cargo build -p engine_gpu --features gpu`
 Expected: clean build.
 
 If errors mention deleted symbols, those are the remaining transitional accessors that snapshot/sync paths still call. Replace each call with the `engine_gpu_rules` equivalent or extract a minimal hand-written helper into a non-kernel file (e.g. `engine_gpu/src/sync_helpers.rs`).
 
-- [ ] **Step 5: Run the full test sweep**
+- [x] **Step 5: Run the full test sweep**
 
 Run: `cargo test --workspace`
 Expected: all existing tests pass.
@@ -4793,7 +4793,7 @@ Specifically:
 - `cargo test -p engine_gpu_rules --test schema_hash` — PASS
 - `cargo test -p engine --test schema_hash` — PASS
 
-- [ ] **Step 6: Tighten `dispatch()`'s P10 guards**
+- [x] **Step 6: Tighten `dispatch()`'s P10 guards**
 
 In `crates/engine_gpu/src/lib.rs::dispatch`, replace the `panic!` fallthroughs with `unreachable!()`:
 
@@ -4806,7 +4806,7 @@ DispatchOp::GatedBy { kernel: other, .. } => unreachable!("GatedBy {other:?} has
 
 This is P10-clean: `unreachable!` is a compile-time contract assertion; reaching it would be an emitter regression detected at the kernel-emit level (the compile-dsl run would fail before the binary ships).
 
-- [ ] **Step 7: Re-run baseline + final test sweep**
+- [x] **Step 7: Re-run baseline + final test sweep**
 
 Run: `cargo run --bin xtask -- compile-dsl`
 Run: `cargo test -p engine_gpu_rules --test schema_hash`
@@ -4816,7 +4816,7 @@ Expected: PASS.
 Run: `cargo test --workspace`
 Expected: all pass.
 
-- [ ] **Step 8: Bump engine .schema_hash to roll in gpu_rules_hash**
+- [x] **Step 8: Bump engine .schema_hash to roll in gpu_rules_hash**
 
 Open `crates/engine/.schema_hash`. Add a coupling comment line above the existing 64-byte hex (this is the "Coupling line" the spec calls out):
 
@@ -4834,7 +4834,7 @@ Open `crates/engine/.schema_hash`. Add a coupling comment line above the existin
 Run: `cargo test -p engine --test schema_hash`
 Expected: FAIL on first run (with the new hash printed); after copying the new hash into `crates/engine/.schema_hash`, expect PASS.
 
-- [ ] **Step 9: Tick the AIS post-design checkbox**
+- [x] **Step 9: Tick the AIS post-design checkbox**
 
 Open `docs/superpowers/plans/2026-04-26-kernel-dispatch-emit-impl.md` and tick:
 
@@ -4842,7 +4842,7 @@ Open `docs/superpowers/plans/2026-04-26-kernel-dispatch-emit-impl.md` and tick:
 - **Re-evaluation:** [x] AIS reviewed at design phase (initial fill).  [x] AIS reviewed post-design (after task list stabilises).
 ```
 
-- [ ] **Step 10: Final commit**
+- [x] **Step 10: Final commit**
 
 ```bash
 git add crates/engine_gpu/ crates/engine/ docs/superpowers/plans/

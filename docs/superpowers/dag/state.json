@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-04-27T04:51:13Z",
+  "generated_at": "2026-04-29T02:11:36Z",
   "roadmap": [
     {
       "id": "roadmap-gpu-megakernel",
@@ -15,7 +15,7 @@
     },
     {
       "id": "roadmap-gpu-cold-state-replay-subsystem-2-phases-24",
-      "title": "GPU cold-state replay (Subsystem 2) — Phases 2–4",
+      "title": "GPU cold-state replay (Subsystem 2) \u2014 Phases 2\u20134",
       "tier": "active",
       "spec_ref": null,
       "plans": [
@@ -65,14 +65,41 @@
       "file": "docs/superpowers/plans/2026-04-26-kernel-dispatch-emit-impl.md",
       "title": "Kernel Dispatch-Emit Implementation Plan",
       "depends_on": [],
-      "status": "pending",
+      "status": "done",
       "tasks_total": 16,
+      "tasks_done": 16
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill",
+      "file": "docs/superpowers/plans/2026-04-28-emitted-wgsl-body-fill.md",
+      "title": "Emitted WGSL Body Fill Implementation Plan",
+      "depends_on": [],
+      "status": "pending",
+      "tasks_total": 8,
+      "tasks_done": 0
+    },
+    {
+      "id": "2026-04-28-gpu-step-batch-entry",
+      "file": "docs/superpowers/plans/2026-04-28-gpu-step-batch-entry.md",
+      "title": "GPU step \u2192 step_batch entry point Implementation Plan",
+      "depends_on": [],
+      "status": "done",
+      "tasks_total": 1,
+      "tasks_done": 1
+    },
+    {
+      "id": "2026-04-28-gpu-test-port",
+      "file": "docs/superpowers/plans/2026-04-28-gpu-test-port.md",
+      "title": "GPU Test Port Implementation Plan (Stream C)",
+      "depends_on": [],
+      "status": "pending",
+      "tasks_total": 5,
       "tasks_done": 0
     },
     {
       "id": "gpu_megakernel_perf",
       "file": "docs/superpowers/plans/gpu_megakernel_perf.md",
-      "title": "GPU Megakernel Phase 8 — Perf Sweep + Crossover Measurement",
+      "title": "GPU Megakernel Phase 8 \u2014 Perf Sweep + Crossover Measurement",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 0,
@@ -159,7 +186,7 @@
       "critic_verdicts": {
         "compliance": "PASS",
         "quality": "PASS",
-        "note": "emit_schedule + 5 binding-source containers + gpu_rules_hash baseline. ~10 new tests. Adaptation: hook allowlist extended (113265ab) to cover engine_gpu_rules + xtask/src for // GENERATED marker. Known followup: GPU_RULES_HASH constant in engine_data hashes empty input, while .schema_hash file holds real content hash — reconciliation deferred."
+        "note": "emit_schedule + 5 binding-source containers + gpu_rules_hash baseline. ~10 new tests. Adaptation: hook allowlist extended (113265ab) to cover engine_gpu_rules + xtask/src for // GENERATED marker. Known followup: GPU_RULES_HASH constant in engine_data hashes empty input, while .schema_hash file holds real content hash \u2014 reconciliation deferred."
       },
       "started_at": "2026-04-27T05:09:04Z",
       "completed_at": "2026-04-27T05:24:38Z",
@@ -185,7 +212,7 @@
       "critic_verdicts": {
         "compliance": "PASS",
         "quality": "PASS",
-        "note": "First per-kernel emitter validated. Adaptations: (1) wgpu version pin bumped 22→=26.0.1 to match workspace; (2) bgl_storage/bgl_uniform helpers exposed pub(crate) for cross-module use; (3) emit_masks_wgsl_fused used as real API name. Mask_unpack WGSL stays stub until T5 hoists real body."
+        "note": "First per-kernel emitter validated. Adaptations: (1) wgpu version pin bumped 22\u2192=26.0.1 to match workspace; (2) bgl_storage/bgl_uniform helpers exposed pub(crate) for cross-module use; (3) emit_masks_wgsl_fused used as real API name. Mask_unpack WGSL stays stub until T5 hoists real body."
       },
       "started_at": "2026-04-27T05:27:05Z",
       "completed_at": "2026-04-27T05:34:50Z",
@@ -214,7 +241,7 @@
         "critic_compiler_first": "PASS",
         "critic_cross_backend_parity": "PASS",
         "critic_reduction_determinism": "PASS",
-        "note": "Wired BindingSources + emitted FusedMaskKernel into step_batch. Emitted dispatch feature-gated (off by default) because T4 emit had 4-binding BGL vs hand-written 14-binding BGL — feature flips on once emitter completes BGL match. Type-checked path validates drift at build time. GPU feature has 37 pre-existing compile errors (Plan B1 tombstones); zero new errors introduced."
+        "note": "Wired BindingSources + emitted FusedMaskKernel into step_batch. Emitted dispatch feature-gated (off by default) because T4 emit had 4-binding BGL vs hand-written 14-binding BGL \u2014 feature flips on once emitter completes BGL match. Type-checked path validates drift at build time. GPU feature has 37 pre-existing compile errors (Plan B1 tombstones); zero new errors introduced."
       },
       "started_at": "2026-04-27T05:37:05Z",
       "completed_at": "2026-04-27T05:58:09Z",
@@ -240,7 +267,7 @@
       "critic_verdicts": {
         "compliance": "PASS",
         "quality": "PASS",
-        "note": "ScoringKernel emit walks IR truth via emit_scoring_wgsl_atomic_views; produces 21-entry BGL matching its own WGSL output. Hand-written wrapper has 2 extra bindings (alive_bitmap, spatial_within) that surface as IR-vs-hand-written divergence — to be resolved at T15 parity gate. Adaptation: extended emit_resident_context with scoring_view_buffers_slice() helper; xtask CLI corrected to -p xtask --bin xtask."
+        "note": "ScoringKernel emit walks IR truth via emit_scoring_wgsl_atomic_views; produces 21-entry BGL matching its own WGSL output. Hand-written wrapper has 2 extra bindings (alive_bitmap, spatial_within) that surface as IR-vs-hand-written divergence \u2014 to be resolved at T15 parity gate. Adaptation: extended emit_resident_context with scoring_view_buffers_slice() helper; xtask CLI corrected to -p xtask --bin xtask."
       },
       "started_at": "2026-04-27T05:59:58Z",
       "completed_at": "2026-04-27T06:11:28Z",
@@ -269,7 +296,7 @@
         "critic_compiler_first": "PASS",
         "critic_cross_backend_parity": "PASS",
         "critic_reduction_determinism": "PASS",
-        "note": "ApplyActionsKernel emit. IR walk: 6 bindings, hand-written: 6 bindings, same count. Feature-gated (engine_gpu_emitted_apply_actions_dispatch off) — emitted WGSL is no-op stub, hand-written WGSL is dynamically constructed via build_shader(event_ring_capacity) so cannot be hoisted statically. T16 lands real WGSL body. Type-checked BindingSources caught T5/T6 drift at build time."
+        "note": "ApplyActionsKernel emit. IR walk: 6 bindings, hand-written: 6 bindings, same count. Feature-gated (engine_gpu_emitted_apply_actions_dispatch off) \u2014 emitted WGSL is no-op stub, hand-written WGSL is dynamically constructed via build_shader(event_ring_capacity) so cannot be hoisted statically. T16 lands real WGSL body. Type-checked BindingSources caught T5/T6 drift at build time."
       },
       "started_at": "2026-04-27T06:14:03Z",
       "completed_at": "2026-04-27T06:32:14Z",
@@ -279,7 +306,7 @@
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-8",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
       "title": "Task 8: Emit `PickAbilityKernel` (per_ability variant)",
-      "checkbox_line": 2562,
+      "checkbox_line": 2573,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-7"
       ],
@@ -298,7 +325,7 @@
         "critic_compiler_first": "PASS",
         "critic_cross_backend_parity": "PASS",
         "critic_reduction_determinism": "PASS",
-        "note": "PickAbilityKernel emit. IR walk + emit_pick_ability_wgsl: 7 bindings, BGL slot-for-slot match. Plan snippet had stale slot order; agent correctly followed WGSL (authoritative). Engine_gpu feature-gated (engine_gpu_emitted_pick_ability_dispatch off). ExternalBuffers expansion forced fix at 4 existing T5/T7 wire sites — type-check drift detection working."
+        "note": "PickAbilityKernel emit. IR walk + emit_pick_ability_wgsl: 7 bindings, BGL slot-for-slot match. Plan snippet had stale slot order; agent correctly followed WGSL (authoritative). Engine_gpu feature-gated (engine_gpu_emitted_pick_ability_dispatch off). ExternalBuffers expansion forced fix at 4 existing T5/T7 wire sites \u2014 type-check drift detection working."
       },
       "started_at": "2026-04-27T06:35:04Z",
       "completed_at": "2026-04-27T06:56:53Z",
@@ -308,7 +335,7 @@
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-9",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
       "title": "Task 9: Emit `MovementKernel` (with FixedPoint Schedule op)",
-      "checkbox_line": 2830,
+      "checkbox_line": 2841,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-8"
       ],
@@ -336,7 +363,7 @@
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-10",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
       "title": "Task 10: Emit `PhysicsKernel`, `SeedIndirectKernel`, `AppendEventsKernel` (FixedPoint + Indirect)",
-      "checkbox_line": 3071,
+      "checkbox_line": 3082,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-9"
       ],
@@ -364,7 +391,7 @@
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-11",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
       "title": "Task 11: Emit `cs_fold_<view>` kernels (one emitter, all 8 view modules)",
-      "checkbox_line": 3627,
+      "checkbox_line": 3638,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-10"
       ],
@@ -392,7 +419,7 @@
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-12",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
       "title": "Task 12: Emit `cs_spatial_hash`, `cs_kin_query`, `cs_engagement_query` (Pooled lifetime)",
-      "checkbox_line": 3887,
+      "checkbox_line": 3902,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-11"
       ],
@@ -420,7 +447,7 @@
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-13",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
       "title": "Task 13: Emit `AlivePackKernel` + `FusedAgentUnpackKernel`",
-      "checkbox_line": 4162,
+      "checkbox_line": 4177,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-12"
       ],
@@ -447,8 +474,8 @@
     {
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-14",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
-      "title": "Task 14: Emit megakernel — fuse pass over SCHEDULE",
-      "checkbox_line": 4290,
+      "title": "Task 14: Emit megakernel \u2014 fuse pass over SCHEDULE",
+      "checkbox_line": 4305,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-13"
       ],
@@ -476,7 +503,7 @@
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-15",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
       "title": "Task 15: Wire engine_gpu's `step_batch` to consume `SCHEDULE`",
-      "checkbox_line": 4542,
+      "checkbox_line": 4557,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-14"
       ],
@@ -503,8 +530,8 @@
     {
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-16",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
-      "title": "Task 16: Final cleanup — delete hand-written kernel files; final parity sweep",
-      "checkbox_line": 4703,
+      "title": "Task 16: Final cleanup \u2014 delete hand-written kernel files; final parity sweep",
+      "checkbox_line": 4718,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-15"
       ],
@@ -525,6 +552,302 @@
       },
       "started_at": "2026-04-28T11:49:06Z",
       "completed_at": "2026-04-28T15:00:07Z",
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill.task-1",
+      "plan": "2026-04-28-emitted-wgsl-body-fill",
+      "title": "Task 1: Wire xtask to call `emit_physics_wgsl`",
+      "checkbox_line": 68,
+      "deps": [],
+      "blocks": [
+        "2026-04-28-emitted-wgsl-body-fill.task-2"
+      ],
+      "status": "pending",
+      "steps_total": 7,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill.task-2",
+      "plan": "2026-04-28-emitted-wgsl-body-fill",
+      "title": "Task 2: Wire xtask to call `emit_pick_ability_wgsl`",
+      "checkbox_line": 120,
+      "deps": [
+        "2026-04-28-emitted-wgsl-body-fill.task-1"
+      ],
+      "blocks": [
+        "2026-04-28-emitted-wgsl-body-fill.task-3"
+      ],
+      "status": "pending",
+      "steps_total": 4,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill.task-3",
+      "plan": "2026-04-28-emitted-wgsl-body-fill",
+      "title": "Task 3: Wire xtask to call view-fold WGSL emitters (\u00d78 fold modules)",
+      "checkbox_line": 154,
+      "deps": [
+        "2026-04-28-emitted-wgsl-body-fill.task-2"
+      ],
+      "blocks": [
+        "2026-04-28-emitted-wgsl-body-fill.task-4"
+      ],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill.task-4",
+      "plan": "2026-04-28-emitted-wgsl-body-fill",
+      "title": "Task 4: Recover + adapt `alive_pack.wgsl` and `fused_agent_unpack.wgsl`",
+      "checkbox_line": 214,
+      "deps": [
+        "2026-04-28-emitted-wgsl-body-fill.task-3"
+      ],
+      "blocks": [
+        "2026-04-28-emitted-wgsl-body-fill.task-5"
+      ],
+      "status": "pending",
+      "steps_total": 7,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill.task-5",
+      "plan": "2026-04-28-emitted-wgsl-body-fill",
+      "title": "Task 5: Recover + adapt `mask_unpack.wgsl`, `scoring_unpack.wgsl`, `apply_actions.wgsl`, `movement.wgsl`",
+      "checkbox_line": 300,
+      "deps": [
+        "2026-04-28-emitted-wgsl-body-fill.task-4"
+      ],
+      "blocks": [
+        "2026-04-28-emitted-wgsl-body-fill.task-6"
+      ],
+      "status": "pending",
+      "steps_total": 1,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill.task-6",
+      "plan": "2026-04-28-emitted-wgsl-body-fill",
+      "title": "Task 6: Recover + adapt `spatial_hash.wgsl`, `spatial_kin_query.wgsl`, `spatial_engagement_query.wgsl`",
+      "checkbox_line": 330,
+      "deps": [
+        "2026-04-28-emitted-wgsl-body-fill.task-5"
+      ],
+      "blocks": [
+        "2026-04-28-emitted-wgsl-body-fill.task-7"
+      ],
+      "status": "pending",
+      "steps_total": 0,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill.task-7",
+      "plan": "2026-04-28-emitted-wgsl-body-fill",
+      "title": "Task 7: Recover + adapt `seed_indirect.wgsl`, `append_events.wgsl`",
+      "checkbox_line": 338,
+      "deps": [
+        "2026-04-28-emitted-wgsl-body-fill.task-6"
+      ],
+      "blocks": [
+        "2026-04-28-emitted-wgsl-body-fill.task-8"
+      ],
+      "status": "pending",
+      "steps_total": 0,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-emitted-wgsl-body-fill.task-8",
+      "plan": "2026-04-28-emitted-wgsl-body-fill",
+      "title": "Task 8: Final verification + Stream B closeout",
+      "checkbox_line": 348,
+      "deps": [
+        "2026-04-28-emitted-wgsl-body-fill.task-7"
+      ],
+      "blocks": [],
+      "status": "pending",
+      "steps_total": 5,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-gpu-step-batch-entry.task-1",
+      "plan": "2026-04-28-gpu-step-batch-entry",
+      "title": "Task 1: Make `step()` route through `step_batch(n_ticks=1)`",
+      "checkbox_line": 31,
+      "deps": [],
+      "blocks": [],
+      "status": "done",
+      "steps_total": 7,
+      "steps_done": 7,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-gpu-test-port.task-1",
+      "plan": "2026-04-28-gpu-test-port",
+      "title": "Task 1: Build `parity_helper` + port `parity_with_cpu`",
+      "checkbox_line": 59,
+      "deps": [],
+      "blocks": [
+        "2026-04-28-gpu-test-port.task-2"
+      ],
+      "status": "pending",
+      "steps_total": 7,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-gpu-test-port.task-2",
+      "plan": "2026-04-28-gpu-test-port",
+      "title": "Task 2: Port Tier 1 per-kernel parity tests",
+      "checkbox_line": 177,
+      "deps": [
+        "2026-04-28-gpu-test-port.task-1"
+      ],
+      "blocks": [
+        "2026-04-28-gpu-test-port.task-3"
+      ],
+      "status": "pending",
+      "steps_total": 8,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-gpu-test-port.task-3",
+      "plan": "2026-04-28-gpu-test-port",
+      "title": "Task 3: Port Tier 2 smoke tests",
+      "checkbox_line": 250,
+      "deps": [
+        "2026-04-28-gpu-test-port.task-2"
+      ],
+      "blocks": [
+        "2026-04-28-gpu-test-port.task-4"
+      ],
+      "status": "pending",
+      "steps_total": 4,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-gpu-test-port.task-4",
+      "plan": "2026-04-28-gpu-test-port",
+      "title": "Task 4: Port Tier 3 correctness tests",
+      "checkbox_line": 302,
+      "deps": [
+        "2026-04-28-gpu-test-port.task-3"
+      ],
+      "blocks": [
+        "2026-04-28-gpu-test-port.task-5"
+      ],
+      "status": "pending",
+      "steps_total": 2,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
+      "retry_count": 0
+    },
+    {
+      "id": "2026-04-28-gpu-test-port.task-5",
+      "plan": "2026-04-28-gpu-test-port",
+      "title": "Task 5: Port Tier 4 perf tests + final closeout",
+      "checkbox_line": 346,
+      "deps": [
+        "2026-04-28-gpu-test-port.task-4"
+      ],
+      "blocks": [],
+      "status": "pending",
+      "steps_total": 3,
+      "steps_done": 0,
+      "owner_class": "implementer",
+      "blocked_reason": null,
+      "completed_commit": null,
+      "critic_verdicts": {},
+      "started_at": null,
+      "completed_at": null,
       "retry_count": 0
     },
     {
@@ -568,11 +891,11 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": "2026-04-28T15:00:07Z",
-    "iterations_completed": 16,
-    "tasks_closed": 16,
+    "last_iteration_at": null,
+    "iterations_completed": 0,
+    "tasks_closed": 0,
     "tasks_blocked": 0,
-    "current_phase": "dispatching",
+    "current_phase": "idle",
     "next_wake_scheduled": null
   }
 }
