@@ -115,9 +115,28 @@ Closed via commit `dd21f9b9`:
 - Plan template updated: `docs/architecture/plan-template-ais.md` now requires a "Runtime gate" entry for every plan touching per-tick code paths
 - Retrospective added to dispatch-emit plan capturing the lesson
 
-### Stream C — Port the cfg-gated tests (rescoped 4 tasks; UNBLOCKED)
+### Stream C — Port the cfg-gated tests (rescoped 4 tasks; CLOSED 2026-04-28)
 
-**Plan written:** `docs/superpowers/plans/2026-04-28-gpu-test-port.md` (4 tasks, rescoped commit ed046d3c). Approved 2026-04-28. Now executable — `step_batch` actually runs.
+**Plan written:** `docs/superpowers/plans/2026-04-28-gpu-test-port.md` (4 tasks, rescoped commit ed046d3c).
+
+**Completed:**
+- Task 1 (commit `a6c8a380`): parity helper + `parity_with_cpu` (3 tests at t=1, t=10, t=100; all PASS)
+- Task 2 (commit `37206b0d`): 5 smoke tests (`step_batch_smoke`, `tick_advance_is_gpu_resident` default-features; `async_smoke`, `snapshot_double_buffer`, `alive_bitmap_pack` gpu-feature-only)
+- Task 3 (RNG cross-backend gate): host-side P5 tests in `crates/engine/src/rng.rs` (6 inline unit tests) pass; verified. Cross-backend assertion against `per_agent_u32_glsl` is gated on the GPU runtime prelude growing that helper — currently the prelude only emits event-emission helpers, not RNG. Migrated to the physics-wgsl-runtime follow-up plan (which already needs a comprehensive runtime layer that would include `per_agent_u32_glsl`).
+- Task 4 (closeout): this entry update.
+
+**Outcome:** the 7 Stream-B-landed kernels (alive_pack, fold_standing, fold_memory, movement, apply_actions, seed_indirect, append_events) are now regression-gated by `parity_with_cpu` end-to-end and 5 smoke tests cover the dispatch path. Future kernel work cannot silently break the dispatcher or per-tick state advancement.
+
+### Deferred test categories (own follow-up plans)
+
+Per Stream C plan §"What this plan deliberately does NOT do", these remain file-cfg-gated:
+
+- Per-kernel parity tests for stubbed kernels (`physics_parity`, `cascade_parity`, `view_parity`, `topk_view_parity`, `spatial_parity`) → owned by `physics-wgsl-runtime` / `view-fold-helpers` / `spatial-rewrite` follow-up plans
+- Cold-state replay (`cold_state_*`) → physics-wgsl-runtime
+- Chronicle pipeline (`chronicle_batch_*`, `chronicle_drain_perf`, `chronicle_isolated_smoke`, `chronicle_batch_probe`) → physics-wgsl-runtime + chronicle-rewire
+- Perf benches (`gpu_step_perf`, `perf_n100`, `chronicle_batch_perf_*`) → perf-bench-rebuild
+- `gpu_prefix_scan` → primitive retired in T16; mark `#[ignore]` if reintroduced
+- GPU-side `per_agent_u32_glsl` → physics-wgsl-runtime (its prelude needs RNG)
 
 #### Original framing
 
