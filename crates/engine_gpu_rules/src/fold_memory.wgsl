@@ -52,7 +52,7 @@ struct RecordMemoryFold {
 // Fold `RecordMemory` events into view `memory`. One thread per event;
 // atomicAdd on the owner's cursor gives each writer a unique slot index.
 @compute @workgroup_size(64)
-fn view_memory_fold_record_memory(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn cs_fold_memory(@builtin(global_invocation_id) gid: vec3<u32>) {
     let event_idx = gid.x;
     if (event_idx >= cfg_record_memory.num_events) { return; }
     let e = events_record_memory[event_idx];

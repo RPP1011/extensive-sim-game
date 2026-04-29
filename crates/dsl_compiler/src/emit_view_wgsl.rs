@@ -1112,7 +1112,7 @@ pub fn emit_symmetric_pair_topk_fold_wgsl(view: &ViewIR) -> Result<String, EmitE
         .unwrap();
         writeln!(
             out,
-            "@compute @workgroup_size(64) fn view_{snake}_fold_noop(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+            "@compute @workgroup_size(64) fn cs_fold_{snake}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
         )
         .unwrap();
         writeln!(out, "    let _ = gid;").unwrap();
@@ -1244,7 +1244,7 @@ fn emit_symmetric_pair_topk_fold_handler_wgsl(
     .unwrap();
     writeln!(
         out,
-        "fn view_{snake}_fold_{ev_snake}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+        "fn cs_fold_{snake}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
     )
     .unwrap();
     writeln!(out, "    let event_idx = gid.x;").unwrap();
@@ -1758,7 +1758,7 @@ pub fn emit_per_entity_ring_fold_wgsl(view: &ViewIR) -> Result<String, EmitError
         .unwrap();
         writeln!(
             out,
-            "@compute @workgroup_size(64) fn view_{snake}_fold_noop(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+            "@compute @workgroup_size(64) fn cs_fold_{snake}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
         )
         .unwrap();
         writeln!(out, "    let _ = gid;").unwrap();
@@ -1884,7 +1884,7 @@ fn emit_per_entity_ring_fold_handler_wgsl(
     writeln!(out, "@compute @workgroup_size(64)").unwrap();
     writeln!(
         out,
-        "fn view_{snake}_fold_{ev_snake}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
+        "fn cs_fold_{snake}(@builtin(global_invocation_id) gid: vec3<u32>) {{"
     )
     .unwrap();
     writeln!(out, "    let event_idx = gid.x;").unwrap();

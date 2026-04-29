@@ -53,7 +53,7 @@ struct EffectStandingDeltaFold {
 // Fold `EffectStandingDelta` events into view `standing`. One thread per event;
 // canonicalises (a, b) -> (min, max), then find-or-insert-or-evict-weakest-|v|.
 @compute @workgroup_size(64)
-fn view_standing_fold_effect_standing_delta(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn cs_fold_standing(@builtin(global_invocation_id) gid: vec3<u32>) {
     let event_idx = gid.x;
     if (event_idx >= cfg_effect_standing_delta.num_events) { return; }
     let e = events_effect_standing_delta[event_idx];
