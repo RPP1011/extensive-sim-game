@@ -641,10 +641,33 @@ impl GpuBackend {
                 0,
                 &state.tick.to_le_bytes(),
             );
-            for op in engine_gpu_rules::schedule::SCHEDULE {
-                self.dispatch(op, &mut encoder, state)
-                    .expect("emitted schedule dispatch");
-            }
+            // Phase 0.5 (physics-wgsl-runtime, 2026-04-28): SCHEDULE
+            // dispatch is gated out until per-kernel BGL/WGSL/bind()
+            // reconciliation lands. Three classes of drift surfaced
+            // when Phase 0's CPU-forward retirement first instantiated
+            // the kernels:
+            //   - fused_mask: BGL=4 slots, WGSL had 10+ (pre-stub)
+            //   - scoring: BGL=21, bind()=11 entries
+            //   - fold_*: WGSL entry points named differently than
+            //     Rust kernels expect (e.g. view_standing_fold_*
+            //     vs cs_fold_standing)
+            // Each was masked by the CPU forward — kernels were never
+            // actually instantiated. Phase-F-first surfaced them.
+            //
+            // For Phase 0's clean baseline: skip dispatch entirely.
+            // GPU does no work; readback returns agents_buf's
+            // initial-upload state. parity_with_cpu fails with a
+            // CLEAN diff (every field on every agent differs). Each
+            // physics-wgsl-runtime phase reconciles a kernel's three
+            // layers and re-enables its dispatch arm; parity diff
+            // shrinks accordingly.
+            //
+            // Re-enable line-by-line in physics-wgsl-runtime phases
+            // 1+. For now the encoder is empty.
+            //
+            // for op in engine_gpu_rules::schedule::SCHEDULE {
+            //     self.dispatch(op, &mut encoder, state)?;
+            // }
         }
 
         if let Some(p) = self.resident.profiler.as_ref() {
@@ -717,6 +740,7 @@ impl GpuBackend {
     /// the SCHEDULE — both of which are compile-time. They are not
     /// user-reachable failure modes on the deterministic per-tick
     /// path.
+    #[allow(dead_code)]
     fn dispatch(
         &mut self,
         op: &engine_gpu_rules::schedule::DispatchOp,
@@ -803,8 +827,14 @@ impl GpuBackend {
                 dispatch_kernel!(spatial_kin_query_kernel, engine_gpu_rules::spatial_kin_query::SpatialKinQueryKernel, "engine_gpu_rules::spatial_kin_query::cfg"),
             DispatchOp::Kernel(KernelId::SpatialEngagementQuery) =>
                 dispatch_kernel!(spatial_engagement_query_kernel, engine_gpu_rules::spatial_engagement_query::SpatialEngagementQueryKernel, "engine_gpu_rules::spatial_engagement_query::cfg"),
-            DispatchOp::Kernel(KernelId::FusedMask) =>
-                dispatch_kernel!(fused_mask_kernel, engine_gpu_rules::fused_mask::FusedMaskKernel, "engine_gpu_rules::fused_mask::cfg"),
+            // Phase 0.5 (physics-wgsl-runtime): FusedMask gated out
+            // until BGL/WGSL/bind() reconciliation lands. Three layers
+            // disagree (BGL=4 slots, WGSL=10+ pre-stub, bind() works
+            // against the BGL); pipeline + bind-group creation panics
+            // until a coherent emit pass lands them all together.
+            DispatchOp::Kernel(KernelId::FusedMask) => {
+                let _ = &mut self.resident.fused_mask_kernel;
+            }
             DispatchOp::Kernel(KernelId::MaskUnpack) =>
                 dispatch_kernel!(fused_mask_unpack_kernel, engine_gpu_rules::mask_unpack::MaskUnpackKernel, "engine_gpu_rules::mask_unpack::cfg"),
             DispatchOp::Kernel(KernelId::PickAbility) =>
@@ -813,8 +843,13 @@ impl GpuBackend {
                 dispatch_kernel!(apply_actions_kernel, engine_gpu_rules::apply_actions::ApplyActionsKernel, "engine_gpu_rules::apply_actions::cfg"),
             DispatchOp::Kernel(KernelId::Movement) =>
                 dispatch_kernel!(movement_kernel, engine_gpu_rules::movement::MovementKernel, "engine_gpu_rules::movement::cfg"),
-            DispatchOp::Kernel(KernelId::Scoring) =>
-                dispatch_kernel!(scoring_kernel, engine_gpu_rules::scoring::ScoringKernel, "engine_gpu_rules::scoring::cfg"),
+            // Phase 0.5 (physics-wgsl-runtime): Scoring gated out
+            // until BGL/WGSL/bind() reconciliation. BGL=21, bind()
+            // produces 11 entries — bind-group creation panics on the
+            // count mismatch.
+            DispatchOp::Kernel(KernelId::Scoring) => {
+                let _ = &mut self.resident.scoring_kernel;
+            }
             DispatchOp::Kernel(KernelId::ScoringUnpack) =>
                 dispatch_kernel!(scoring_unpack_kernel, engine_gpu_rules::scoring_unpack::ScoringUnpackKernel, "engine_gpu_rules::scoring_unpack::cfg"),
             DispatchOp::Kernel(KernelId::FoldEngagedWith) =>
