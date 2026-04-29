@@ -53,9 +53,41 @@
 
 **Plan written:** `docs/superpowers/plans/2026-04-28-gpu-step-batch-entry.md` (Task 1, 7 steps). User approved 2026-04-28.
 
-### Stream B — Fill emitted WGSL bodies
+### Stream B — Fill emitted WGSL bodies (partial — checkpoint)
 
-**Plan written:** `docs/superpowers/plans/2026-04-28-emitted-wgsl-body-fill.md` (8 tasks). Approved 2026-04-28. Will execute interleaved with Stream C.
+**Plan written:** `docs/superpowers/plans/2026-04-28-emitted-wgsl-body-fill.md` (8 tasks). Approved 2026-04-28.
+
+**Landed (commits db689628 → 69c59e3a):**
+- Naga parse-validation gate for every `engine_gpu_rules/src/*.wgsl`
+- `dsl_compiler::emit_runtime_prelude_wgsl` — recovered + adapted prelude module (keystone)
+- 7 kernels with real WGSL bodies:
+  - `alive_pack.wgsl` (32 lines) — Bucket R, no prelude
+  - `fold_standing.wgsl` (125 lines) — self-contained TopK emitter
+  - `fold_memory.wgsl` (79 lines) — self-contained Ring emitter
+  - `movement.wgsl` (256 lines) — prelude-driven
+  - `apply_actions.wgsl` (~270 lines) — prelude-driven
+  - `seed_indirect.wgsl` (~30 lines) — cascade control, no prelude
+  - `append_events.wgsl` (~25 lines) — cascade control, no prelude
+
+**Outstanding (split into separable follow-up plans):**
+
+1. **`physics.wgsl` runtime layer** — `emit_physics_wgsl` produces 24 per-rule bodies that reference an "integration-phase" runtime not yet built. Needs:
+   - Typed `EventSlot` view of `current_event_ring` (raw u32 → struct)
+   - State accessors (`state_agent_hp`/`set_hp`/`kill_agent`, gold add, slot_of, alive_bit)
+   - `EVENT_KIND_*` + `EFFECT_OP_KIND_*` const blocks (~30 consts each)
+   - `wgsl_world_tick`, ability-registry helpers, view-read fns
+   - Physics-side `gpu_emit_event` writing to `next_event_ring` (the prelude writes to `event_ring_records` — different destination)
+   - Stubs for standing/memory/cast paths (their backing stores aren't yet wired)
+
+   Estimated 2-4 hours. Real engineering. Suggest: dedicated plan `2026-04-XX-physics-wgsl-runtime.md`.
+
+2. **6 PairMap/SlotMap fold modules** (`fold_engaged_with`, `fold_threat_level`, `fold_kin_fear`, `fold_my_enemies`, `fold_pack_focus`, `fold_rally_boost`). The `emit_view_fold_wgsl` emitter references undefined `view_agent_cap` and view-read helpers. Needs view-storage primitive layer. Likely shares prelude with physics. Estimated 1-2 hours.
+
+3. **3 spatial kernels** (`spatial_hash`, `spatial_kin_query`, `spatial_engagement_query`). Pre-T16 was 326-line single-kernel-3-entry-points; new design is 3 separate kernels with reduced bindings. Major rewrite. Estimated 3-5 hours.
+
+4. **3 fused-output unpack kernels** (`mask_unpack`, `scoring_unpack`, `fused_agent_unpack`) — architectural mismatch: new fused output bindings (`agents_soa`, `agent_data`) don't map to consumer (e.g. `fused_mask` reads 3 separate buffers). Needs design call before adaptation. Suggest: separate spec drafting before plan.
+
+5. **`pick_ability.wgsl`** — emitter wired but produces empty fallback (no per_ability rows in DSL). Falls under "Ability DSL implementation" follow-up plan, not Stream B.
 
 #### Original framing
 
