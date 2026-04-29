@@ -35,13 +35,13 @@ impl crate::Kernel for FoldPackFocusKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::fold_pack_focus::bgl"),
             entries: &[
-                crate::fused_mask::bgl_storage(0, true),  // event_ring
-                crate::fused_mask::bgl_storage(1, true),  // event_tail
-                crate::fused_mask::bgl_storage(2, false), // view_storage primary
-                crate::fused_mask::bgl_storage(3, false), // view_storage anchor (optional)
-                crate::fused_mask::bgl_storage(4, false), // view_storage ids (optional)
-                crate::fused_mask::bgl_storage(5, true),  // sim_cfg
-                crate::fused_mask::bgl_uniform(6),        // cfg
+                crate::fused_mask::bgl_storage(0, true), // event_ring
+                crate::fused_mask::bgl_storage(1, true), // event_tail
+                crate::fused_mask::bgl_storage(2, false), // view_storage_primary
+                crate::fused_mask::bgl_storage(3, false), // view_storage_anchor
+                crate::fused_mask::bgl_storage(4, false), // view_storage_ids
+                crate::fused_mask::bgl_storage(5, true), // sim_cfg
+                crate::fused_mask::bgl_uniform(6), // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -59,12 +59,6 @@ impl crate::Kernel for FoldPackFocusKernel {
         FoldPackFocusCfg { event_count: 0, tick: state.tick, _pad: [0; 2] }
     }
     fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> FoldPackFocusBindings<'a> {
-        // The view's storage shape (SlotMap / PairMapScalar / PairMapDecay,
-        // optionally topk) determines whether anchor/ids fields exist on
-        // the resident context. The emitter sets `Some(...)` if the view
-        // declared topk + anchor; otherwise None. The emitted helper
-        // `sources.resident.fold_view_<name>_handles()` returns a triple
-        // of (primary, anchor_opt, ids_opt) borrowed from the ctx fields.
         let (primary, anchor, ids) = sources.resident.fold_view_pack_focus_handles();
         FoldPackFocusBindings {
             event_ring:           &sources.resident.batch_events_ring,
@@ -77,16 +71,22 @@ impl crate::Kernel for FoldPackFocusKernel {
         }
     }
     fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, bindings: &FoldPackFocusBindings<'_>, agent_cap: u32) {
-        let dummy = bindings.view_storage_primary; // fallback for None anchors/ids
+        // Resolve view-handle slots: anchor/ids fall back to primary
+        // when the view doesn't expose dedicated buffers (the BGL slot
+        // still has to be live; rebinding primary is a no-op safe choice).
+        let primary_buf = bindings.view_storage_primary;
+        let anchor_buf = bindings.view_storage_anchor.unwrap_or(primary_buf);
+        let ids_buf = bindings.view_storage_ids.unwrap_or(primary_buf);
+        let _ = (anchor_buf, ids_buf);  // silence unused on shapes that don't bind anchor/ids
         let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("engine_gpu_rules::fold_pack_focus::bg"),
             layout: &self.bgl,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: bindings.event_tail.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.view_storage_primary.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.view_storage_anchor.unwrap_or(dummy).as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: bindings.view_storage_ids.unwrap_or(dummy).as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: primary_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: anchor_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: ids_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 5, resource: bindings.sim_cfg.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 6, resource: bindings.cfg.as_entire_binding() },
             ],

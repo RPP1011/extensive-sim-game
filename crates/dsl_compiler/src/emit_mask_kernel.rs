@@ -1,15 +1,119 @@
 //! Emits `engine_gpu_rules/src/fused_mask.rs` + `fused_mask.wgsl` and
 //! `mask_unpack.rs` + `mask_unpack.wgsl`.
 //!
-//! The mask WGSL body is produced by the existing
-//! `dsl_compiler::emit_mask_wgsl` module — this emitter wraps the body
-//! with a Rust struct that holds the pipeline + BGL and implements the
-//! `Kernel` trait.
+//! `fused_mask` is the canonical home for the BGL-helper functions
+//! `bgl_storage` / `bgl_uniform`. Every other kernel module imports
+//! them via `crate::fused_mask::bgl_*`. The fused-mask Rust module
+//! itself is emitted via the spec-driven `emit_kernel_module_rs` —
+//! see `fused_mask_spec` below — and the helper functions are
+//! appended to the same file because they have no other natural home.
 
 use std::fmt::Write;
 
-/// Emit `engine_gpu_rules/src/fused_mask.rs`.
+use crate::emit_kernel_module::emit_kernel_module_rs;
+use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelSpec};
+
+/// Build the `KernelSpec` for the fused-mask kernel. Four bindings:
+/// agents (read), mask_bitmaps (atomic), sim_cfg (read), cfg (uniform).
+/// Matches the WGSL emitted alongside.
+fn fused_mask_spec() -> KernelSpec {
+    KernelSpec {
+        name: "fused_mask".into(),
+        pascal: "FusedMask".into(),
+        entry_point: "cs_fused_masks".into(),
+        cfg_struct: "FusedMaskCfg".into(),
+        cfg_build_expr: "FusedMaskCfg { agent_cap: state.agent_cap(), num_mask_words: (state.agent_cap() + 31) / 32, _pad0: 0, _pad1: 0 }".into(),
+        cfg_struct_decl:
+            "#[repr(C)]\n\
+             #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
+             pub struct FusedMaskCfg {\n\
+             \x20   pub agent_cap: u32,\n\
+             \x20   pub num_mask_words: u32,\n\
+             \x20   pub _pad0: u32,\n\
+             \x20   pub _pad1: u32,\n\
+             }".into(),
+        bindings: vec![
+            KernelBinding {
+                slot: 0,
+                name: "agents".into(),
+                access: AccessMode::ReadStorage,
+                wgsl_ty: "array<u32>".into(),
+                bg_source: BgSource::External("agents".into()),
+            },
+            KernelBinding {
+                slot: 1,
+                name: "mask_bitmaps".into(),
+                access: AccessMode::AtomicStorage,
+                wgsl_ty: "u32".into(),
+                bg_source: BgSource::Transient("mask_bitmaps".into()),
+            },
+            KernelBinding {
+                slot: 2,
+                name: "sim_cfg".into(),
+                access: AccessMode::ReadStorage,
+                wgsl_ty: "array<u32>".into(),
+                bg_source: BgSource::External("sim_cfg".into()),
+            },
+            KernelBinding {
+                slot: 3,
+                name: "cfg".into(),
+                access: AccessMode::Uniform,
+                wgsl_ty: "FusedMaskCfg".into(),
+                bg_source: BgSource::Cfg,
+            },
+        ],
+    }
+}
+
+/// Public accessor — used by `emit_mask_wgsl` to derive the WGSL
+/// `@group(0)` declarations from the same spec the Rust BGL is built
+/// from.
+pub fn fused_mask_kernel_spec() -> KernelSpec {
+    fused_mask_spec()
+}
+
+/// Emit `engine_gpu_rules/src/fused_mask.rs` — spec-driven module +
+/// the BGL helpers (`bgl_storage`, `bgl_uniform`) appended.
 pub fn emit_fused_mask_rs() -> String {
+    let mut out = emit_kernel_module_rs(&fused_mask_spec());
+
+    // Append the BGL helpers — every other kernel imports these via
+    // `crate::fused_mask::bgl_*`. They live here because fused_mask
+    // is the canonical "first" kernel emitted alphabetically.
+    writeln!(out).unwrap();
+    writeln!(out, "pub(crate) fn bgl_storage(b: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {{").unwrap();
+    writeln!(out, "    wgpu::BindGroupLayoutEntry {{").unwrap();
+    writeln!(out, "        binding: b,").unwrap();
+    writeln!(out, "        visibility: wgpu::ShaderStages::COMPUTE,").unwrap();
+    writeln!(out, "        ty: wgpu::BindingType::Buffer {{").unwrap();
+    writeln!(out, "            ty: wgpu::BufferBindingType::Storage {{ read_only }},").unwrap();
+    writeln!(out, "            has_dynamic_offset: false,").unwrap();
+    writeln!(out, "            min_binding_size: None,").unwrap();
+    writeln!(out, "        }},").unwrap();
+    writeln!(out, "        count: None,").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "pub(crate) fn bgl_uniform(b: u32) -> wgpu::BindGroupLayoutEntry {{").unwrap();
+    writeln!(out, "    wgpu::BindGroupLayoutEntry {{").unwrap();
+    writeln!(out, "        binding: b,").unwrap();
+    writeln!(out, "        visibility: wgpu::ShaderStages::COMPUTE,").unwrap();
+    writeln!(out, "        ty: wgpu::BindingType::Buffer {{").unwrap();
+    writeln!(out, "            ty: wgpu::BufferBindingType::Uniform,").unwrap();
+    writeln!(out, "            has_dynamic_offset: false,").unwrap();
+    writeln!(out, "            min_binding_size: None,").unwrap();
+    writeln!(out, "        }},").unwrap();
+    writeln!(out, "        count: None,").unwrap();
+    writeln!(out, "    }}").unwrap();
+    writeln!(out, "}}").unwrap();
+    out
+}
+
+/// Legacy entry point — preserved for any straggler caller. The body
+/// now delegates to the spec-driven path.
+#[deprecated(note = "use emit_fused_mask_rs() — kept for transitional callers")]
+#[allow(dead_code)]
+pub fn emit_fused_mask_rs_legacy() -> String {
     let mut out = String::new();
     writeln!(out, "// GENERATED by dsl_compiler::emit_mask_kernel. Do not edit by hand.").unwrap();
     writeln!(out, "// Regenerate with `cargo run --bin xtask -- compile-dsl`.").unwrap();

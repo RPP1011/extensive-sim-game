@@ -320,12 +320,13 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
                 .filter(|m| dsl_compiler::emit_mask_wgsl::emit_mask_wgsl(m).is_ok())
                 .cloned()
                 .collect();
-            // Use the v2 emitter — produces 4-slot BGL-matching WGSL.
-            // The legacy emit_masks_wgsl_fused emits a 10+ slot WGSL
-            // that doesn't match emit_fused_mask_rs's 4-slot BGL,
-            // causing wgpu pipeline-creation panics. The v2 stub
-            // body (no per-mask logic) is enough to instantiate the
-            // pipeline; per-mask logic is a follow-up.
+            // The fused-mask kernel's 4-slot BGL is generated from the
+            // shared `KernelSpec` walked by `emit_kernel_module`; the
+            // WGSL emitter here uses the same spec to lay out
+            // `@group(0) @binding(N)` declarations, so BGL/WGSL drift
+            // is structurally impossible. Per-mask body lifting from
+            // the DSL is deferred — this v2 emitter writes a touch-
+            // every-binding stub body that satisfies pipeline creation.
             let module = dsl_compiler::emit_mask_wgsl::emit_masks_wgsl_fused_v2(&emittable_masks);
             let fused_wgsl_body = module.wgsl;
             let wgsl = format!(
@@ -719,12 +720,15 @@ fn cs_fused_agent_unpack(@builtin(global_invocation_id) gid: vec3<u32>) {\n\
             // Match `scoring_view_binding_order` ordering — sort by name.
             view_specs.sort_by(|a, b| a.name.cmp(&b.name));
 
-            // Emit Rust kernel module — v2 stub (5-slot BGL, no view
-            // bindings). Legacy emit_scoring_rs builds a per-view BGL
-            // whose bind() construction passes 1 buffer per view but
-            // the BGL declares 3 — wgpu validation panic. v2 strips
-            // view bindings; full scoring with view reads is a follow-up.
-            let _ = &view_specs; // legacy emit_scoring_rs argument
+            // Emit Rust kernel module via the spec-driven path. The
+            // 5-slot scoring spec lives in
+            // `emit_scoring_kernel::scoring_kernel_spec`; BGL +
+            // BindGroup entries + Bindings struct fields all derive
+            // from the same spec the WGSL emitter consults.
+            // Legacy `emit_scoring_rs(specs)` (per-view dynamic BGL)
+            // is dead — kept as `#[deprecated]` for transitional
+            // callers but no longer invoked.
+            let _ = &view_specs;
             let scoring_rs = dsl_compiler::emit_scoring_kernel::emit_scoring_rs_v2();
             if let Err(e) = fs::write(
                 PathBuf::from("crates/engine_gpu_rules/src/scoring.rs"),
@@ -734,8 +738,9 @@ fn cs_fused_agent_unpack(@builtin(global_invocation_id) gid: vec3<u32>) {\n\
                 return ExitCode::FAILURE;
             }
 
-            // V2 scoring WGSL — 5 bindings matching v2 BGL. View reads
-            // are TODO.
+            // Scoring WGSL — 5 bindings matching the spec-driven Rust
+            // BGL one-for-one. View reads are deferred until the
+            // scoring spec grows view-storage bindings.
             let mut wgsl_specs: Vec<dsl_compiler::emit_view_wgsl::ViewStorageSpec> = Vec::new();
             for v in &combined.views {
                 if let Ok(s) = classify_view(v) {
@@ -1315,7 +1320,8 @@ fn cs_physics(@builtin(global_invocation_id) gid: vec3<u32>) {\n\
                 };
 
                 // Emit Rust kernel wrapper.
-                let rs = dsl_compiler::emit_view_fold_kernel::emit_view_fold_rs(name);
+                let _ = name; // emit_view_fold_rs walks the IR for its names
+                let rs = dsl_compiler::emit_view_fold_kernel::emit_view_fold_rs(v);
                 if let Err(e) = fs::write(
                     PathBuf::from(format!("crates/engine_gpu_rules/src/fold_{name}.rs")),
                     rs,
