@@ -55,6 +55,10 @@
 
 ### Stream B — Fill emitted WGSL bodies
 
+**Plan written:** `docs/superpowers/plans/2026-04-28-emitted-wgsl-body-fill.md` (8 tasks). Approved 2026-04-28. Will execute interleaved with Stream C.
+
+#### Original framing
+
 Multiple emitted kernel modules in `engine_gpu_rules/src/` have placeholder WGSL bodies because xtask couldn't pull `engine_gpu` (with the `gpu` feature) into its compile graph during T11/T12/T13 (chicken-and-egg with the pre-existing breakage we just resolved). Now that the build is clean, the emitter can be wired to read the real `pub const *_WGSL` constants OR to call into `dsl_compiler` shader emitters that produce them.
 
 Affected modules (placeholder bodies): inspect each `engine_gpu_rules/src/*.wgsl` — most start with a `// GENERATED` comment + a stub. Specifically the spatial set (T12), alive_pack/fused_agent_unpack (T13), megakernel scaffold (T14 — intentional, owned by gpu_megakernel_plan), view fold modules (T11).
@@ -64,6 +68,10 @@ The constants `ALIVE_PACK_WGSL` and `FUSED_AGENT_UNPACK_WGSL` were hoisted to `p
 Estimated scope: 4-6 tasks (one per kernel module class).
 
 ### Stream C — Port the 93 cfg-gated tests
+
+**Plan written:** `docs/superpowers/plans/2026-04-28-gpu-test-port.md` (5 tasks). Approved 2026-04-28. Sequenced AHEAD of most Stream B tasks per the interleave: C1 (parity helper + parity_with_cpu) lands first; C2 lands before Stream B Bucket-R tasks so each WGSL fill is gated by its parity test.
+
+#### Original framing
 
 Tests reference deleted symbols: `crate::mask::cpu_mask_bitmap`, `crate::physics::run_batch_resident`, `state.views.*`, `ChronicleRing` layout, `crate::scoring::cpu_score_outputs`, etc. Each needs rewriting against the SCHEDULE-loop surface — sourcing inputs via `BindingSources`, dispatching via the kernel's `Kernel::record`, decoding outputs via `sync_helpers::unpack_agent_slots` etc.
 
@@ -89,7 +97,7 @@ Streams B and C are independently parallelizable once A lands. Total scope: ~20 
 
 **Why this matters:** Plan invariant #5 (every parity test passes) is currently unverifiable. Default-features tests pass; GPU correctness is uncovered until tests rebuild against the new surface. Without Stream A, GPU is functionally inert in `step()`.
 
-**Status:** Stream A planned and approved (2026-04-28). Streams B and C still awaiting user.
-**To proceed (B/C):** add `**APPROVED:**` with sequencing preference. Stream A unblocks both; B and C parallelize.
+**Status:** Streams A, B, C all planned and approved (2026-04-28). Execution order: C1 → B1 → B2 → B3 → C2 → B4 → B5 → B6 → B7 → C3 → B8 → C4 → C5. Total: 14 task-pairs.
+**To proceed:** execute per the interleave; or hand off to subagent-driven-development at the next /dag-tick.
 
 ---
