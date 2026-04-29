@@ -38,24 +38,62 @@
 
 ---
 
-## 2026-04-28 — plan-writer: engine_gpu --features gpu repair (surfaced by dispatch-emit T16)
+## 2026-04-28 — plan-writer: GPU execution recovery (post-dispatch-emit)
 
-**Background.** Dispatch-emit Plan COMPLETE (16/16, last commit `4474566c`). The plan deleted the 7 hand-written kernel modules from `crates/engine_gpu/src/`. After deletion, `cargo build -p engine_gpu --features gpu` has 100 errors — 49 pre-existing at HEAD, 51 newly exposed by the deletions.
+**Background.** Dispatch-emit Plan was marked COMPLETE 16/16 but in retrospect over-aggressively. T16 (commit `4474566c`) deleted the hand-written kernel modules and got critics PASS — but it also broke `cargo build -p engine_gpu --features gpu`. Commit `984a6e5a` repaired the build honestly (no shims, no `unimplemented!()`):
 
-**The pre-existing 49 errors** are NOT in the deleted hand-written kernels. They're in `step_batch`, `cascade.rs`, `cascade_resident.rs`, `backend/{resident,sync}_ctx.rs`, `event_ring.rs`, `view_storage_symmetric_pair.rs`. Symptoms:
-- `state.views` field accesses (state-port migration removed `views` from `SimState`)
-- `engine::generated` module missing
-- `engine_rules::scoring` import unresolved
-- `EventRing` / `CascadeRegistry` missing generic args
-- `cascade.run_fixed_point_tel` arity mismatch (4 args expected, 3 supplied)
+- `step()` now CPU-forwards via `engine::step::step` — honest fallback, P10-clean
+- `cascade.rs` (981 lines) and `cascade_resident.rs` (1,602 lines) DELETED — they orchestrated kernels that no longer exist; redundant with the SCHEDULE-loop dispatcher (T15)
+- 93 tests across 29 files file-scope-gated (`#![cfg(any())]` + reason banner). Bodies preserved verbatim.
+- Real Pod-type helpers extracted to `crates/engine_gpu/src/sync_helpers.rs` (no stubs)
 
-**The 51 newly-exposed errors** are dangling refs to the deleted modules in `lib.rs` (52 sites), `cascade.rs`, `cascade_resident.rs`, `backend/{resident,sync}_ctx.rs`. These references should be replaced with `engine_gpu_rules::*` types end-to-end.
+**The cost:** GPU isn't actually executing anymore in `step()`. The dispatch-emit plan delivered the architectural shape (single source of truth, SCHEDULE-loop dispatcher, emit pipeline) but parity execution is parked behind three concrete work streams:
 
-**Suggested plan scope:** ~10 tasks. Roughly: (a) catalog every dangling reference; (b) port step_batch loop body to consume `engine_gpu_rules::*`; (c) rewire snapshot/sync helpers; (d) restore EventRing/CascadeRegistry generic args; (e) migrate or restore `state.views`; (f) trim cascade_resident.rs to skeleton; (g) re-enable parity tests as gates.
+### Stream A — Promote `step_batch` to ComputeBackend entry point
 
-**Why this matters:** Plan invariant #5 (every parity test passes) cannot be verified until this lands. Default-features build is clean and unaffected; this only blocks `--features gpu`.
+Currently `ComputeBackend::step` is a CPU forward and `step_batch` runs the SCHEDULE-loop. Make `step` route through `step_batch(n=1)` (or fold `step_batch`'s body into `step`). After this, every CPU consumer hits the GPU dispatcher.
+
+Risk: `step_batch` was designed for batched execution; some setup amortizes across n>1 ticks. The n=1 case may need the per-tick path inlined.
+
+Estimated scope: 1-2 tasks.
+
+### Stream B — Fill emitted WGSL bodies
+
+Multiple emitted kernel modules in `engine_gpu_rules/src/` have placeholder WGSL bodies because xtask couldn't pull `engine_gpu` (with the `gpu` feature) into its compile graph during T11/T12/T13 (chicken-and-egg with the pre-existing breakage we just resolved). Now that the build is clean, the emitter can be wired to read the real `pub const *_WGSL` constants OR to call into `dsl_compiler` shader emitters that produce them.
+
+Affected modules (placeholder bodies): inspect each `engine_gpu_rules/src/*.wgsl` — most start with a `// GENERATED` comment + a stub. Specifically the spatial set (T12), alive_pack/fused_agent_unpack (T13), megakernel scaffold (T14 — intentional, owned by gpu_megakernel_plan), view fold modules (T11).
+
+The constants `ALIVE_PACK_WGSL` and `FUSED_AGENT_UNPACK_WGSL` were hoisted to `pub const` in T13 specifically for this; they currently live in `crates/engine_gpu/src/{alive_bitmap,mask}.rs` — those files were deleted in T16, so the constants need re-extracting from git history (`git show 4474566c~1`) into a small `engine_gpu_rules`-side data module OR moving to `dsl_compiler`'s emitter source.
+
+Estimated scope: 4-6 tasks (one per kernel module class).
+
+### Stream C — Port the 93 cfg-gated tests
+
+Tests reference deleted symbols: `crate::mask::cpu_mask_bitmap`, `crate::physics::run_batch_resident`, `state.views.*`, `ChronicleRing` layout, `crate::scoring::cpu_score_outputs`, etc. Each needs rewriting against the SCHEDULE-loop surface — sourcing inputs via `BindingSources`, dispatching via the kernel's `Kernel::record`, decoding outputs via `sync_helpers::unpack_agent_slots` etc.
+
+Test inventory (29 files, all under `crates/engine_gpu/tests/`): alive_bitmap_pack, async_smoke, batch_iter_cap_convergence, cascade_parity, chronicle_batch_*, cold_state_*, event_ring_parity, gpu_prefix_scan, gpu_step_perf, indirect_cascade_converges, parity_with_cpu, perf_n100, physics_*, snapshot_double_buffer, spatial_*, step_batch_smoke, tick_advance_is_gpu_resident, topk_view_parity, view_parity.
+
+Suggested grouping:
+- Tier 1 (parity gates, P3): parity_with_cpu, physics_parity, cascade_parity, view_parity, topk_view_parity, spatial_parity
+- Tier 2 (smoke): step_batch_smoke, alive_bitmap_pack, async_smoke, snapshot_double_buffer, tick_advance_is_gpu_resident
+- Tier 3 (correctness): cold_state_*, indirect_cascade_converges, event_ring_parity
+- Tier 4 (perf, lowest priority): gpu_step_perf, perf_n100, chronicle_batch_perf_*
+
+Estimated scope: 10-15 tasks (one per test or pair, plus a shared rewrite-helper task).
+
+### Suggested plan structure
+
+3 sub-plans, executable in parallel after Stream A lands:
+
+1. `2026-04-XX-gpu-step-batch-entry.md` — Stream A (small, unblocks A11/A12 dependents)
+2. `2026-04-XX-emitted-wgsl-body-port.md` — Stream B
+3. `2026-04-XX-gpu-test-port.md` — Stream C
+
+Streams B and C are independently parallelizable once A lands. Total scope: ~20 tasks across 3 plans.
+
+**Why this matters:** Plan invariant #5 (every parity test passes) is currently unverifiable. Default-features tests pass; GPU correctness is uncovered until tests rebuild against the new surface. Without Stream A, GPU is functionally inert in `step()`.
 
 **Status:** awaiting user
-**To proceed:** add `**APPROVED:**` to authorize plan-writing, optionally with sequencing preference (before vs. after the Ability DSL / Economic depth plans).
+**To proceed:** add `**APPROVED:**` with sequencing preference. Three sub-plans (parallel after A), or fold into one mega-plan? Sequence relative to Ability DSL / Economic depth?
 
 ---
