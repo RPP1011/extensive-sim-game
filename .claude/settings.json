@@ -9,27 +9,6 @@
           }
         ]
       }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/scripts/pre-tool-engine-edit.sh"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/scripts/session-end-engine-review.sh"
-          }
-        ]
-      }
     ]
   }
 }

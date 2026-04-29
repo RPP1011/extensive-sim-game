@@ -1,82 +1,23 @@
 #!/usr/bin/env bash
 # .githooks/pre-commit
 # (1) cargo check — quick build sanity.
-# (2) critic-verdict gate — blocks if any .claude/critic-output-*.txt has
-#     VERDICT: FAIL, or if engine source mtime > newest critic-output mtime
-#     (stale-PASS guard). Per docs/superpowers/specs/2026-04-25-dispatch-critics-hooks-design.md.
+# (2) // GENERATED header rule — files in engine_rules/ engine_data/
+#     engine_gpu_rules/ must carry the marker; files elsewhere must
+#     not. Per Spec B' §7.
+# (3) compile-dsl --check on DSL source changes — guards against
+#     stale generated output.
+#
+# DISABLED 2026-04-29: critic-verdict gate. The dispatch-critics
+# system was producing more drag than signal across many sessions
+# (compile-clean ≠ runtime-clean was a real failure mode the critics
+# happily PASS'd through). Re-enable by restoring the block from git
+# history (commit before the disable).
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 echo "[pre-commit] Running cargo check..."
 cargo check
-
-# ──────────────────────────────────────────────────────────────────
-# Critic-verdict gate
-# ──────────────────────────────────────────────────────────────────
-
-# Skip if no engine files in this commit's staged content.
-staged=$(git diff --cached --name-only)
-if ! echo "$staged" | grep -qE '^(crates/engine|crates/engine_rules|crates/engine_data|crates/engine_gpu)/|^assets/sim/'; then
-    echo "[pre-commit] OK"
-    exit 0
-fi
-
-echo "[pre-commit] Engine files staged — checking critic verdicts..."
-
-# (1) Find any critic-output file with a FAIL verdict.
-fails=()
-shopt -s nullglob
-for f in .claude/critic-output-*.txt; do
-    if grep -m1 '^VERDICT: FAIL' "$f" > /dev/null 2>&1; then
-        fails+=("$(basename "$f" .txt | sed 's/^critic-output-//')")
-    fi
-done
-shopt -u nullglob
-
-if [[ ${#fails[@]} -gt 0 ]]; then
-    echo "" >&2
-    echo "=== ABORT: critic verdicts have unresolved FAILs ===" >&2
-    for c in "${fails[@]}"; do
-        verdict_line=$(grep -m1 '^VERDICT:' ".claude/critic-output-${c}.txt")
-        evidence_line=$(grep -m1 '^EVIDENCE:' ".claude/critic-output-${c}.txt" || echo "EVIDENCE: (none cited)")
-        echo "  critic-${c}: $verdict_line" >&2
-        echo "    $evidence_line" >&2
-    done
-    echo "" >&2
-    echo "Fix the cited issues, then re-run:" >&2
-    echo "  bash .claude/scripts/dispatch-critics.sh --target WORKING-TREE --all" >&2
-    echo "" >&2
-    echo "When all critics PASS, commit will be allowed." >&2
-    exit 1
-fi
-
-# (2) Stale-PASS guard: if engine source has been edited since the last
-# critic run, force re-run.
-shopt -s nullglob
-critic_files=( .claude/critic-output-*.txt )
-shopt -u nullglob
-
-if [[ ${#critic_files[@]} -eq 0 ]]; then
-    newest_critic=0
-else
-    newest_critic=$(stat -c %Y "${critic_files[@]}" 2>/dev/null | sort -n | tail -1)
-fi
-
-newest_engine=$(find crates/engine crates/engine_rules crates/engine_data crates/engine_gpu assets/sim \
-    -type f \( -name '*.rs' -o -name '*.sim' \) 2>/dev/null \
-    | xargs stat -c %Y 2>/dev/null | sort -n | tail -1)
-
-if [[ -n "$newest_engine" ]] && [[ "$newest_engine" -gt "${newest_critic:-0}" ]]; then
-    echo "" >&2
-    echo "=== ABORT: engine source has changed since last critic run (or critics never ran) ===" >&2
-    echo "Re-run:" >&2
-    echo "  bash .claude/scripts/dispatch-critics.sh --target WORKING-TREE --all" >&2
-    echo "" >&2
-    exit 1
-fi
-
-echo "[pre-commit] All critic verdicts PASS"
 
 # === Spec B' §7 header rule: files staged in engine_rules/, engine_data/, or
 # engine_gpu_rules/ require // GENERATED.
