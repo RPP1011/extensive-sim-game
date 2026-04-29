@@ -58,6 +58,7 @@ pub struct AppState {
     pub sim:       engine::state::SimState,
     pub scratch:   engine::step::SimScratch,
     pub events:    engine::event::EventRing<engine_data::events::Event>,
+    pub views:     engine_rules::ViewRegistry,
     pub cascade:   engine::cascade::CascadeRegistry<engine_data::events::Event, engine_rules::ViewRegistry>,
     pub backend:   engine::policy::UtilityBackend,
     #[allow(dead_code)]
@@ -153,7 +154,7 @@ impl AppState {
             mouse_captured: false, last_mouse: None,
             orbit_captured: false, last_orbit: None,
             grid, gpu_texture: None,
-            sim, scratch, events, cascade, backend, agent_ids,
+            sim, scratch, events, views: engine_rules::ViewRegistry::default(), cascade, backend, agent_ids,
             tick_period: 0.1,
             sim_accum:   0.0,
             sim_speed:   1.0,
@@ -192,6 +193,7 @@ impl AppState {
         self.sim = sim;
         self.scratch = scratch;
         self.events = events;
+        self.views = engine_rules::ViewRegistry::default();
         self.cascade = cascade;
         self.backend = backend;
         self.agent_ids = agent_ids;
@@ -211,9 +213,12 @@ impl AppState {
         self.sim_accum += dt;
         let mut ticked = 0;
         while self.sim_accum >= effective_period && ticked < self.max_ticks_per_frame {
-            engine::step::step(
+            engine_rules::step::step(
+                &mut engine_rules::backend::SerialBackend,
                 &mut self.sim, &mut self.scratch, &mut self.events,
+                &mut self.views,
                 &self.backend, &self.cascade,
+                &engine::debug::DebugConfig::default(),
             );
             self.sim_accum -= effective_period;
             ticked += 1;
@@ -345,9 +350,12 @@ impl AppState {
             }
             KeyCode::Period => {
                 if self.paused {
-                    engine::step::step(
+                    engine_rules::step::step(
+                        &mut engine_rules::backend::SerialBackend,
                         &mut self.sim, &mut self.scratch, &mut self.events,
+                        &mut self.views,
                         &self.backend, &self.cascade,
+                        &engine::debug::DebugConfig::default(),
                     );
                     eprintln!("[viz] step → tick {}", self.sim.tick);
                 } else {

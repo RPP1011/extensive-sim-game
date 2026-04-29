@@ -49,6 +49,7 @@ use engine::{
     state::SimState,
     step::SimScratch,
 };
+use engine_rules::views::ViewRegistry;
 #[cfg(feature = "gpu")]
 use engine_data::events::Event;
 
@@ -259,12 +260,36 @@ impl GpuBackend {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// CPU-forward stub matching the gpu-feature `step_batch` shape so
+    /// tests + xtask scenarios that call `step_batch` keep compiling
+    /// under default features. Forwards N CPU steps via
+    /// `engine_rules::step::step` — the same path the gpu-feature
+    /// `step_batch` uses for its per-tick CPU forward.
+    pub fn step_batch<B: PolicyBackend>(
+        &mut self,
+        state: &mut SimState,
+        scratch: &mut SimScratch,
+        events: &mut EventRing<engine_data::events::Event>,
+        views: &mut ViewRegistry,
+        policy: &B,
+        cascade: &CascadeRegistry<engine_data::events::Event, ViewRegistry>,
+        n_ticks: u32,
+    ) {
+        for _ in 0..n_ticks {
+            engine_rules::step::step(
+                &mut engine_rules::backend::SerialBackend,
+                state, scratch, events, views, policy, cascade,
+                &engine::debug::DebugConfig::default(),
+            );
+        }
+    }
 }
 
 #[cfg(not(feature = "gpu"))]
 impl ComputeBackend for GpuBackend {
     type Event = engine_data::events::Event;
-    type Views = ();
+    type Views = ViewRegistry;
 
     #[inline]
     fn step<B: PolicyBackend>(
@@ -272,11 +297,15 @@ impl ComputeBackend for GpuBackend {
         state: &mut SimState,
         scratch: &mut SimScratch,
         events: &mut EventRing<Self::Event>,
-        _views: &mut Self::Views,
+        views: &mut Self::Views,
         policy: &B,
         cascade: &CascadeRegistry<Self::Event, Self::Views>,
     ) {
-        engine::step::step(state, scratch, events, policy, cascade);
+        engine_rules::step::step(
+            &mut engine_rules::backend::SerialBackend,
+            state, scratch, events, views, policy, cascade,
+            &engine::debug::DebugConfig::default(),
+        );
     }
 
     fn reset_mask(&mut self, buf: &mut engine::mask::MaskBuffer) {
@@ -543,8 +572,9 @@ impl GpuBackend {
         state: &mut SimState,
         scratch: &mut SimScratch,
         events: &mut EventRing<Event>,
+        views: &mut ViewRegistry,
         policy: &B,
-        cascade: &CascadeRegistry<Event, ()>,
+        cascade: &CascadeRegistry<Event, ViewRegistry>,
         n_ticks: u32,
     ) {
         if let Err(e) = self.ensure_resident_init(state) {
@@ -552,7 +582,11 @@ impl GpuBackend {
                 "engine_gpu::step_batch: resident init failed ({e}), falling back to CPU loop"
             );
             for _ in 0..n_ticks {
-                engine::step::step(state, scratch, events, policy, cascade);
+                engine_rules::step::step(
+                    &mut engine_rules::backend::SerialBackend,
+                    state, scratch, events, views, policy, cascade,
+                    &engine::debug::DebugConfig::default(),
+                );
             }
             return;
         }
@@ -585,7 +619,11 @@ impl GpuBackend {
             // running the CPU step. Honest fallback — once each WGSL
             // body is filled in, this call will be replaced with a
             // GPU-resident commit.
-            engine::step::step(state, scratch, events, policy, cascade);
+            engine_rules::step::step(
+                &mut engine_rules::backend::SerialBackend,
+                state, scratch, events, views, policy, cascade,
+                &engine::debug::DebugConfig::default(),
+            );
         }
 
         if let Some(p) = self.resident.profiler.as_ref() {
@@ -1078,14 +1116,14 @@ impl GpuBackend {
 #[cfg(feature = "gpu")]
 impl ComputeBackend for GpuBackend {
     type Event = Event;
-    type Views = ();
+    type Views = ViewRegistry;
 
     fn step<B: PolicyBackend>(
         &mut self,
         state:    &mut SimState,
         scratch:  &mut SimScratch,
         events:   &mut EventRing<Self::Event>,
-        _views:   &mut Self::Views,
+        views:    &mut Self::Views,
         policy:   &B,
         cascade:  &CascadeRegistry<Self::Event, Self::Views>,
     ) {
@@ -1096,7 +1134,7 @@ impl ComputeBackend for GpuBackend {
         // (Stream B); when those bodies replace the CPU forward, this
         // path becomes GPU-authoritative without any further change
         // here.
-        self.step_batch(state, scratch, events, policy, cascade, 1);
+        self.step_batch(state, scratch, events, views, policy, cascade, 1);
     }
 
     fn reset_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
