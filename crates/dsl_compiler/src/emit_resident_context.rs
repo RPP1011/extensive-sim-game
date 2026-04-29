@@ -113,11 +113,17 @@ pub fn emit_resident_context_rs_with_scoring_and_folds(
         for f in fields {
             // Each kernel emitter is responsible for the actual size /
             // descriptor when it lands. The bootstrap stub allocates a
-            // 4-byte placeholder; kernel emitters in later tasks
-            // override this routine wholesale by re-emitting the file.
+            // 256-byte placeholder — large enough to satisfy WGSL
+            // struct stride contracts (StandingEdge = 16B × K=8 = 128B
+            // per row; MemoryEntry = 16B × K=64 = 1024B per row, but
+            // the smoke test only needs the binding to validate, not
+            // hold real data; a 256-byte buffer covers any single-row
+            // BGL min_binding_size check). Kernel emitters in later
+            // tasks override this routine wholesale by re-emitting
+            // the file with size driven from the per-view K.
             writeln!(out, "            {}: _device.create_buffer(&wgpu::BufferDescriptor {{", f.name).unwrap();
             writeln!(out, "                label: Some(\"engine_gpu_rules::resident::{}\"),", f.name).unwrap();
-            writeln!(out, "                size: 4,").unwrap();
+            writeln!(out, "                size: 256,").unwrap();
             writeln!(out, "                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,").unwrap();
             writeln!(out, "                mapped_at_creation: false,").unwrap();
             writeln!(out, "            }}),").unwrap();

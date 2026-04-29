@@ -84,6 +84,74 @@ pub struct ResidentPathContext {
     pub fused_agent_unpack_kernel_emitted: Option<engine_gpu_rules::fused_agent_unpack::FusedAgentUnpackKernel>,
     pub scoring_kernel: Option<engine_gpu_rules::scoring::ScoringKernel>,
     pub scoring_unpack_kernel: Option<engine_gpu_rules::scoring_unpack::ScoringUnpackKernel>,
+
+    /// Placeholder scratch buffers — one distinct buffer per
+    /// `TransientHandles` field. The dispatch path uses these as
+    /// stand-ins until the real per-tick scratch allocation lands.
+    /// Distinct buffers (rather than a single shared placeholder) are
+    /// required because wgpu validates that a single buffer can't be
+    /// bound with conflicting STORAGE_READ_ONLY / READ_WRITE usages
+    /// in the same dispatch's BindGroup.
+    ///
+    /// Each is sized to be large enough to satisfy any single-row
+    /// BGL min_binding_size check (256 bytes covers our struct array
+    /// strides through K=8 SymmetricPairTopK and K=64 PerEntityRing
+    /// for a single agent slot).
+    pub transient_placeholders: TransientPlaceholders,
+}
+
+/// One placeholder buffer per `TransientHandles` field. The real
+/// per-tick scratch allocation will replace these once the dispatch
+/// path mutates state through dedicated scratch buffers; for now
+/// they exist purely so wgpu validation sees distinct resources at
+/// each binding slot (vs a single shared placeholder, which triggers
+/// "conflicting usages" errors when one slot is read-only and
+/// another is read-write).
+pub struct TransientPlaceholders {
+    pub mask_bitmaps: wgpu::Buffer,
+    pub mask_unpack_agents_input: wgpu::Buffer,
+    pub action_buf: wgpu::Buffer,
+    pub scoring_unpack_agents_input: wgpu::Buffer,
+    pub cascade_current_ring: wgpu::Buffer,
+    pub cascade_current_tail: wgpu::Buffer,
+    pub cascade_next_ring: wgpu::Buffer,
+    pub cascade_next_tail: wgpu::Buffer,
+    pub cascade_indirect_args: wgpu::Buffer,
+    pub fused_agent_unpack_input: wgpu::Buffer,
+    pub fused_agent_unpack_mask_soa: wgpu::Buffer,
+}
+
+impl TransientPlaceholders {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let alloc = |label: &'static str| -> wgpu::Buffer {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: 256,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::INDIRECT,
+                mapped_at_creation: false,
+            })
+        };
+        Self {
+            mask_bitmaps: alloc("transient_placeholder::mask_bitmaps"),
+            mask_unpack_agents_input: alloc("transient_placeholder::mask_unpack_agents_input"),
+            action_buf: alloc("transient_placeholder::action_buf"),
+            scoring_unpack_agents_input: alloc(
+                "transient_placeholder::scoring_unpack_agents_input",
+            ),
+            cascade_current_ring: alloc("transient_placeholder::cascade_current_ring"),
+            cascade_current_tail: alloc("transient_placeholder::cascade_current_tail"),
+            cascade_next_ring: alloc("transient_placeholder::cascade_next_ring"),
+            cascade_next_tail: alloc("transient_placeholder::cascade_next_tail"),
+            cascade_indirect_args: alloc("transient_placeholder::cascade_indirect_args"),
+            fused_agent_unpack_input: alloc("transient_placeholder::fused_agent_unpack_input"),
+            fused_agent_unpack_mask_soa: alloc(
+                "transient_placeholder::fused_agent_unpack_mask_soa",
+            ),
+        }
+    }
 }
 
 impl ResidentPathContext {
@@ -131,6 +199,7 @@ impl ResidentPathContext {
             fused_agent_unpack_kernel_emitted: None,
             scoring_kernel:         None,
             scoring_unpack_kernel:  None,
+            transient_placeholders: TransientPlaceholders::new(device),
         }
     }
 }

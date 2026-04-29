@@ -745,21 +745,27 @@ impl GpuBackend {
         // Build transient/external aggregates ONCE per dispatch call.
         // Every emitted kernel today is a no-op WGSL stub, so the
         // binding values don't matter for behaviour, only for BGL
-        // type-check survival. T16 hoists the real bodies and these
-        // placeholders get replaced with the live ring/indirect-args
-        // buffers.
+        // type-check survival. The per-tick scratch allocation that
+        // T16 hoists isn't here yet, so each transient field points
+        // at a distinct 256-byte placeholder owned by
+        // `ResidentPathContext::transient_placeholders` — using a
+        // single shared placeholder triggers wgpu's
+        // "STORAGE_READ_ONLY/READ_WRITE conflicting usage" check
+        // when one kernel binds the same buffer in both rw and ro
+        // slots at the same dispatch.
+        let pl = &self.resident.transient_placeholders;
         let transient = TransientHandles {
-            mask_bitmaps:                sim_cfg_ref,
-            mask_unpack_agents_input:    sim_cfg_ref,
-            action_buf:                  sim_cfg_ref,
-            scoring_unpack_agents_input: sim_cfg_ref,
-            cascade_current_ring:        sim_cfg_ref,
-            cascade_current_tail:        sim_cfg_ref,
-            cascade_next_ring:           sim_cfg_ref,
-            cascade_next_tail:           sim_cfg_ref,
-            cascade_indirect_args:       sim_cfg_ref,
-            fused_agent_unpack_input:    agents_buf,
-            fused_agent_unpack_mask_soa: sim_cfg_ref,
+            mask_bitmaps:                &pl.mask_bitmaps,
+            mask_unpack_agents_input:    &pl.mask_unpack_agents_input,
+            action_buf:                  &pl.action_buf,
+            scoring_unpack_agents_input: &pl.scoring_unpack_agents_input,
+            cascade_current_ring:        &pl.cascade_current_ring,
+            cascade_current_tail:        &pl.cascade_current_tail,
+            cascade_next_ring:           &pl.cascade_next_ring,
+            cascade_next_tail:           &pl.cascade_next_tail,
+            cascade_indirect_args:       &pl.cascade_indirect_args,
+            fused_agent_unpack_input:    &pl.fused_agent_unpack_input,
+            fused_agent_unpack_mask_soa: &pl.fused_agent_unpack_mask_soa,
             _phantom: std::marker::PhantomData,
         };
         let external = ExternalBuffers {
@@ -845,17 +851,17 @@ impl GpuBackend {
                     .get_or_insert_with(|| EmittedPhysicsKernel::new(&self.device));
                 for iter in 0..*max_iter {
                     let transient_iter = TransientHandles {
-                        mask_bitmaps:                sim_cfg_ref,
-                        mask_unpack_agents_input:    sim_cfg_ref,
-                        action_buf:                  sim_cfg_ref,
-                        scoring_unpack_agents_input: sim_cfg_ref,
-                        cascade_current_ring:        sim_cfg_ref,
-                        cascade_current_tail:        sim_cfg_ref,
-                        cascade_next_ring:           sim_cfg_ref,
-                        cascade_next_tail:           sim_cfg_ref,
-                        cascade_indirect_args:       sim_cfg_ref,
-                        fused_agent_unpack_input:    agents_buf,
-                        fused_agent_unpack_mask_soa: sim_cfg_ref,
+                        mask_bitmaps:                &pl.mask_bitmaps,
+                        mask_unpack_agents_input:    &pl.mask_unpack_agents_input,
+                        action_buf:                  &pl.action_buf,
+                        scoring_unpack_agents_input: &pl.scoring_unpack_agents_input,
+                        cascade_current_ring:        &pl.cascade_current_ring,
+                        cascade_current_tail:        &pl.cascade_current_tail,
+                        cascade_next_ring:           &pl.cascade_next_ring,
+                        cascade_next_tail:           &pl.cascade_next_tail,
+                        cascade_indirect_args:       &pl.cascade_indirect_args,
+                        fused_agent_unpack_input:    &pl.fused_agent_unpack_input,
+                        fused_agent_unpack_mask_soa: &pl.fused_agent_unpack_mask_soa,
                         _phantom: std::marker::PhantomData,
                     };
                     let external_iter = ExternalBuffers {
