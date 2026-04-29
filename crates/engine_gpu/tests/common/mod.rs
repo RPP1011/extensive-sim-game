@@ -107,6 +107,15 @@ pub fn assert_cpu_gpu_parity<P, F>(
     // GPU side — via step_batch which internally does the same
     // engine_rules::step::step under default features (no-gpu stub) or
     // with the SCHEDULE-loop dispatch + CPU forward under --features gpu.
+    #[cfg(feature = "gpu")]
+    let mut gpu = match engine_gpu::GpuBackend::new() {
+        Ok(g) => g,
+        Err(_) => {
+            eprintln!("skipping CPU/GPU parity: no gpu adapter");
+            return;
+        }
+    };
+    #[cfg(not(feature = "gpu"))]
     let mut gpu = engine_gpu::GpuBackend::new();
     let mut gpu_state = fixture();
     let mut gpu_scratch = SimScratch::new(gpu_state.agent_cap() as usize);

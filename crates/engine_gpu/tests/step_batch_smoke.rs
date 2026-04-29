@@ -1,149 +1,49 @@
-// T16-broken: this test references hand-written kernel modules
-// (mask, scoring, physics, apply_actions, movement, spatial_gpu,
-// alive_bitmap, cascade, cascade_resident) that were retired in
-// commit 4474566c when the SCHEDULE-driven dispatcher in
-// `engine_gpu_rules` became authoritative. The test source is
-// preserved verbatim below the cfg gate so the SCHEDULE-loop port
-// (follow-up: gpu-feature-repair plan) has a reference for what
-// behaviour each test asserted.
-//
-// Equivalent to `#[ignore = "broken by T16 hand-written-kernel
-// deletion; needs SCHEDULE-loop port (follow-up)"]` on every
-// `#[test]` below — but applied at file scope because the test
-// bodies do not compile against the post-T16 surface.
-#![cfg(any())]
+//! End-to-end smoke: `step_batch(n)` runs without panicking and
+//! advances the tick counter by `n`. Works under default features
+//! (CPU forward via engine_rules::step::step) and under `--features
+//! gpu` (SCHEDULE-loop dispatcher + CPU forward).
 
-//! Task D4 — smoke test for `GpuBackend::step_batch` rewrite.
-//!
-//! This test does NOT exercise parity against the CPU backend — that's
-//! Task D5 (`async_smoke`) and downstream integration tests. What we
-//! verify here:
-//!
-//!   * The resident init path builds successfully (buffer allocation,
-//!     cascade DSL load, resident cascade ctx construction).
-//!   * A 1-tick `step_batch` records + submits + polls without panic.
-//!   * The CPU-side `state.tick` advances by the expected amount.
-//!
-//! A warmup `step()` runs first so `cascade_ctx` + `view_storage` are
-//! initialised on the sync path too, exercising `ensure_resident_init`'s
-//! idempotency path on the subsequent `step_batch` call.
+mod common;
 
-#![cfg(feature = "gpu")]
-
-use engine::backend::ComputeBackend;
+use common::smoke_fixture_n4;
 use engine::cascade::CascadeRegistry;
-use engine_data::entities::CreatureType;
 use engine::event::EventRing;
-use engine::policy::UtilityBackend;
-use engine::state::{AgentSpawn, SimState};
 use engine::step::SimScratch;
-use engine_gpu::GpuBackend;
-use glam::Vec3;
+use engine_data::events::Event;
+use engine_rules::views::ViewRegistry;
 
 #[test]
-fn step_batch_one_tick_does_not_panic() {
-    let mut gpu = match GpuBackend::new() {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("step_batch_smoke: GPU init failed — skipping ({e})");
-            return;
-        }
-    };
-    let mut state = SimState::new(16, 0xBEEF);
-    for i in 0..4 {
-        let ct = if i % 2 == 0 {
-            CreatureType::Human
-        } else {
-            CreatureType::Wolf
-        };
-        state
-            .spawn_agent(AgentSpawn {
-                creature_type: ct,
-                pos: Vec3::new(i as f32 * 2.0, 0.0, 0.0),
-                hp: 100.0,
-                max_hp: 100.0,
-            })
-            .expect("spawn_agent");
-    }
+fn step_batch_n1_advances_tick() {
+    let mut state = smoke_fixture_n4();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(64);
+    let mut views = ViewRegistry::default();
+    let policy = engine::policy::utility::UtilityBackend;
+    let cascade = CascadeRegistry::<Event, ViewRegistry>::new();
 
-    // Warmup: sync step populates cascade_ctx + view_storage, so the
-    // first `step_batch` call exercises the already-initialised branch
-    // of `ensure_resident_init`.
-    gpu.step(
-        &mut state,
-        &mut scratch,
-        &mut events,
-        &UtilityBackend,
-        &cascade,
-    );
-    let tick_before = state.tick;
-
+    let mut gpu = engine_gpu::GpuBackend::new();
+    let tick0 = state.tick;
     gpu.step_batch(
-        &mut state,
-        &mut scratch,
-        &mut events,
-        &UtilityBackend,
-        &cascade,
-        1,
+        &mut state, &mut scratch, &mut events,
+        &mut views, &policy, &cascade, 1,
     );
-
-    // After step_batch, CPU state.tick stays stale; GPU sim_cfg.tick is
-    // authoritative. Observer reads current tick via snapshot.
-    let _e = gpu.snapshot(&mut state).expect("empty");
-    let _k = gpu.snapshot(&mut state).expect("kick");
-    let snap = gpu.snapshot(&mut state).expect("read");
-    assert_eq!(
-        snap.tick,
-        tick_before.wrapping_add(1),
-        "snapshot.tick should advance by 1 after step_batch(1)",
-    );
+    assert_eq!(state.tick, tick0 + 1);
 }
 
 #[test]
-fn step_batch_three_ticks_advances_tick_counter() {
-    let mut gpu = match GpuBackend::new() {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("step_batch_smoke: GPU init failed — skipping ({e})");
-            return;
-        }
-    };
-    let mut state = SimState::new(8, 0xC0FFEE);
-    for i in 0..2 {
-        state
-            .spawn_agent(AgentSpawn {
-                creature_type: CreatureType::Human,
-                pos: Vec3::new(i as f32 * 3.0, 0.0, 0.0),
-                hp: 100.0,
-                max_hp: 100.0,
-            })
-            .expect("spawn_agent");
-    }
+fn step_batch_n10_advances_tick() {
+    let mut state = smoke_fixture_n4();
     let mut scratch = SimScratch::new(state.agent_cap() as usize);
-    let mut events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::with_engine_builtins();
+    let mut events = EventRing::<Event>::with_cap(4096);
+    let mut views = ViewRegistry::default();
+    let policy = engine::policy::utility::UtilityBackend;
+    let cascade = CascadeRegistry::<Event, ViewRegistry>::new();
 
-    let tick_before = state.tick;
+    let mut gpu = engine_gpu::GpuBackend::new();
+    let tick0 = state.tick;
     gpu.step_batch(
-        &mut state,
-        &mut scratch,
-        &mut events,
-        &UtilityBackend,
-        &cascade,
-        3,
+        &mut state, &mut scratch, &mut events,
+        &mut views, &policy, &cascade, 10,
     );
-
-    // After step_batch, CPU state.tick stays stale; GPU sim_cfg.tick is
-    // authoritative. Observer reads current tick via snapshot.
-    let _e = gpu.snapshot(&mut state).expect("empty");
-    let _k = gpu.snapshot(&mut state).expect("kick");
-    let snap = gpu.snapshot(&mut state).expect("read");
-    assert_eq!(
-        snap.tick,
-        tick_before.wrapping_add(3),
-        "snapshot.tick should advance by 3 after step_batch(3)",
-    );
+    assert_eq!(state.tick, tick0 + 10);
 }

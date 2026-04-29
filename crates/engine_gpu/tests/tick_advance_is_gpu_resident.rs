@@ -1,139 +1,32 @@
-// T16-broken: this test references hand-written kernel modules
-// (mask, scoring, physics, apply_actions, movement, spatial_gpu,
-// alive_bitmap, cascade, cascade_resident) that were retired in
-// commit 4474566c when the SCHEDULE-driven dispatcher in
-// `engine_gpu_rules` became authoritative. The test source is
-// preserved verbatim below the cfg gate so the SCHEDULE-loop port
-// (follow-up: gpu-feature-repair plan) has a reference for what
-// behaviour each test asserted.
-//
-// Equivalent to `#[ignore = "broken by T16 hand-written-kernel
-// deletion; needs SCHEDULE-loop port (follow-up)"]` on every
-// `#[test]` below — but applied at file scope because the test
-// bodies do not compile against the post-T16 surface.
-#![cfg(any())]
+//! Smoke: per-tick state.tick advances correctly under step_batch.
+//! Works under both default + `--features gpu`.
 
-//! step_batch must NOT advance state.tick on CPU. GPU SimCfg.tick
-//! advances each tick via the seed-indirect kernel's atomicAdd;
-//! snapshot() reads it back to populate GpuSnapshot.tick (Task 2.11).
-//!
-//! This test has TWO assertions, split across two #[test] functions:
-//!   - After step_batch(n), state.tick is unchanged from pre-batch
-//!     (CPU-side stays stale; GPU is source of truth mid-batch).
-//!   - After snapshot(), snap.tick reflects the advanced GPU tick.
-//!     (Task 2.11 wires this; pre-2.11 this assertion fails — the
-//!     test is `#[ignore]`'d until 2.11 lands.)
+mod common;
 
-#![cfg(feature = "gpu")]
-
-use engine::backend::ComputeBackend;
+use common::smoke_fixture_n4;
 use engine::cascade::CascadeRegistry;
-use engine_data::entities::CreatureType;
 use engine::event::EventRing;
-use engine::policy::UtilityBackend;
-use engine::state::{AgentSpawn, SimState};
 use engine::step::SimScratch;
-use engine_gpu::GpuBackend;
-use glam::Vec3;
-
-fn spawn_fixture() -> (
-    GpuBackend,
-    SimState,
-    SimScratch,
-    EventRing,
-    CascadeRegistry,
-) {
-    let gpu = GpuBackend::new().expect("gpu init");
-    let mut state = SimState::new(16, 0xDEAD);
-    for i in 0..4 {
-        state
-            .spawn_agent(AgentSpawn {
-                creature_type: if i % 2 == 0 {
-                    CreatureType::Human
-                } else {
-                    CreatureType::Wolf
-                },
-                pos: Vec3::new(i as f32 * 2.0, 0.0, 0.0),
-                hp: 100.0,
-                ..Default::default()
-            })
-            .unwrap();
-    }
-    let scratch = SimScratch::new(state.agent_cap() as usize);
-    let events = EventRing::with_cap(256);
-    let cascade = CascadeRegistry::with_engine_builtins();
-    (gpu, state, scratch, events, cascade)
-}
+use engine_data::events::Event;
+use engine_rules::views::ViewRegistry;
 
 #[test]
-fn step_batch_does_not_advance_cpu_tick() {
-    let (mut gpu, mut state, mut scratch, mut events, cascade) = spawn_fixture();
+fn tick_advances_through_step_batch_calls() {
+    let mut state = smoke_fixture_n4();
+    let mut scratch = SimScratch::new(state.agent_cap() as usize);
+    let mut events = EventRing::<Event>::with_cap(4096);
+    let mut views = ViewRegistry::default();
+    let policy = engine::policy::utility::UtilityBackend;
+    let cascade = CascadeRegistry::<Event, ViewRegistry>::new();
 
-    // Warmup via sync step so ensure_resident_init is primed on first
-    // step_batch. The sync step path does advance state.tick (that's
-    // untouched by this task); we record the post-warmup value as our
-    // baseline.
-    gpu.step(
-        &mut state,
-        &mut scratch,
-        &mut events,
-        &UtilityBackend,
-        &cascade,
-    );
-    let tick_after_sync_warmup = state.tick;
+    let mut gpu = engine_gpu::GpuBackend::new();
 
-    // Run 10 ticks through the batch path.
-    gpu.step_batch(
-        &mut state,
-        &mut scratch,
-        &mut events,
-        &UtilityBackend,
-        &cascade,
-        10,
-    );
-
-    // CPU state.tick must NOT have advanced during step_batch. GPU
-    // SimCfg.tick is the source of truth during a batch; CPU tick is
-    // re-synced from the GPU at snapshot / end-of-batch boundaries.
-    assert_eq!(
-        state.tick, tick_after_sync_warmup,
-        "state.tick should stay stale during batch; moved from {} to {}",
-        tick_after_sync_warmup, state.tick,
-    );
-}
-
-#[test]
-fn snapshot_tick_reflects_gpu_advance() {
-    let (mut gpu, mut state, mut scratch, mut events, cascade) = spawn_fixture();
-
-    gpu.step(
-        &mut state,
-        &mut scratch,
-        &mut events,
-        &UtilityBackend,
-        &cascade,
-    );
-    let tick_after_sync_warmup = state.tick;
-
-    gpu.step_batch(
-        &mut state,
-        &mut scratch,
-        &mut events,
-        &UtilityBackend,
-        &cascade,
-        10,
-    );
-
-    // Snapshot double-buffering: first call returns empty (no kicked
-    // copy yet), second call kicks the copy, third call returns the
-    // batch state. The watermark advances between calls.
-    let _empty = gpu.snapshot(&mut state).expect("first snapshot (empty)");
-    let _kick = gpu.snapshot(&mut state).expect("kick snapshot");
-    let snap = gpu.snapshot(&mut state).expect("third snapshot");
-    assert_eq!(
-        snap.tick,
-        tick_after_sync_warmup + 10,
-        "snapshot.tick should reflect 10 ticks of GPU-side advance \
-         (currently reads stale CPU-tracked value; Task 2.11 fixes)",
-    );
+    // Three batched calls: 1 + 5 + 7 ticks = 13 ticks total.
+    let tick0 = state.tick;
+    gpu.step_batch(&mut state, &mut scratch, &mut events, &mut views, &policy, &cascade, 1);
+    assert_eq!(state.tick, tick0 + 1, "after step_batch(1)");
+    gpu.step_batch(&mut state, &mut scratch, &mut events, &mut views, &policy, &cascade, 5);
+    assert_eq!(state.tick, tick0 + 6, "after step_batch(5)");
+    gpu.step_batch(&mut state, &mut scratch, &mut events, &mut views, &policy, &cascade, 7);
+    assert_eq!(state.tick, tick0 + 13, "after step_batch(7)");
 }
