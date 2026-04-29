@@ -554,19 +554,32 @@ impl GpuBackend {
     /// per call after recording every tick into a single command
     /// encoder.
     ///
-    /// Post-T16 the SCHEDULE-driven path is the sole authoritative
-    /// driver. Each kernel in `engine_gpu_rules::*` is currently a
-    /// no-op WGSL stub (the bodies were retired alongside the hand-
-    /// written kernels), so this method advances `state.tick` on the
-    /// CPU side via the supplied `cascade` registry's CPU fallback to
-    /// keep the rest of the engine's tick semantics intact while the
-    /// emitted shader bodies are filled in.
+    /// ### Phase 0 (physics-wgsl-runtime, 2026-04-28): GPU-authoritative
+    ///
+    /// step_batch is now GPU-authoritative for state mutation within
+    /// a batch:
+    ///   1. Caller-supplied `state.agents_*` is uploaded to `agents_buf`
+    ///      on the FIRST call and on `agent_cap` growth (re-upload on
+    ///      every call would clobber GPU-resident state mid-simulation).
+    ///   2. Per tick: state.tick advances host-side; the new value
+    ///      is written to sim_cfg.tick; SCHEDULE dispatches record
+    ///      into the encoder.
+    ///   3. End of batch: queue.submit, device.poll(Wait), agents_buf
+    ///      readback, decode into state via sync_helpers::unpack_agent_slots.
+    ///
+    /// Readback strategy: per-batch (correctness-first while staying
+    /// perf-amortizable). Per-tick readback was considered but rejected
+    /// because step_batch's whole purpose is to amortize encoder/submit
+    /// across n_ticks. Per-batch readback gives end-of-batch state
+    /// (sufficient for parity tests) without sacrificing the
+    /// amortization. Future perf optimization (gpu_megakernel_plan)
+    /// can introduce double-buffered async readback.
     ///
     /// ### Fallback
     ///
     /// If resident init fails (GPU allocation error, etc.) the batch
-    /// path falls back to calling `engine::step::step` N times so the
-    /// tick loop still advances on the CPU.
+    /// path falls back to calling `engine_rules::step::step` N times
+    /// so the tick loop still advances on the CPU.
     pub fn step_batch<B: PolicyBackend>(
         &mut self,
         state: &mut SimState,
@@ -601,29 +614,37 @@ impl GpuBackend {
             p.begin_frame();
         }
 
+        // Phase 0 (physics-wgsl-runtime): GPU-authoritative tick body.
+        // No CPU forward. state.tick advances host-side; sim_cfg.tick
+        // is uploaded per tick; SCHEDULE dispatches record into
+        // `encoder` and run on submit.
+        //
+        // Suppress unused-variable warnings for parameters the
+        // GPU-authoritative path doesn't consume yet (scratch, events,
+        // views, policy, cascade). They become live again as physics
+        // rules light up — events readback (Phase 1+) will use
+        // `events`, view fold readback (Phase 4) will use `views`,
+        // etc. The init-failure fallback above DOES consume them.
+        let _ = (scratch, events, views, policy, cascade);
+        let sim_cfg_buf_handle = self
+            .resident
+            .sim_cfg_buf
+            .as_ref()
+            .expect("sim_cfg_buf ensured by ensure_resident_init")
+            .clone();
         for _tick_idx in 0..n_ticks {
-            // SCHEDULE-driven dispatch: walk every op the emitter
-            // recorded and dispatch its matching kernel arm. Today's
-            // emitted WGSL is a no-op stub for every kernel, so the
-            // pass advances `state.tick` (via the CPU `engine::step`
-            // forward below) but doesn't yet mutate state on the GPU
-            // — the dispatch is wiring-only until each kernel's WGSL
-            // body is hoisted in a follow-up.
+            state.tick = state.tick.wrapping_add(1);
+            // Upload tick to sim_cfg slot 0 (offset 0). SimCfg's first
+            // u32 is `tick` (verified via crates/engine_gpu/src/sim_cfg.rs:43).
+            self.queue.write_buffer(
+                &sim_cfg_buf_handle,
+                0,
+                &state.tick.to_le_bytes(),
+            );
             for op in engine_gpu_rules::schedule::SCHEDULE {
                 self.dispatch(op, &mut encoder, state)
                     .expect("emitted schedule dispatch");
             }
-
-            // CPU forward: while the emitted kernel bodies are stubs,
-            // keep the engine's authoritative tick state in sync by
-            // running the CPU step. Honest fallback — once each WGSL
-            // body is filled in, this call will be replaced with a
-            // GPU-resident commit.
-            engine_rules::step::step(
-                &mut engine_rules::backend::SerialBackend,
-                state, scratch, events, views, policy, cascade,
-                &engine::debug::DebugConfig::default(),
-            );
         }
 
         if let Some(p) = self.resident.profiler.as_ref() {
@@ -632,6 +653,31 @@ impl GpuBackend {
 
         self.queue.submit(Some(encoder.finish()));
         let _ = self.device.poll(wgpu::PollType::Wait);
+
+        // Phase 0 (physics-wgsl-runtime): per-batch agents readback.
+        // Brings GPU-mutated agent state back into the CPU mirror so
+        // callers see authoritative state after step_batch returns.
+        // Today the emitted WGSL bodies are mostly stubs, so this
+        // readback gets back agents_buf's pre-batch state — that's
+        // exactly the planned RED state for parity_with_cpu. As
+        // physics rules light up (Phase 1+), GPU writes show up here
+        // and parity diff shrinks.
+        {
+            let agents_buf = self
+                .resident
+                .resident_agents_buf
+                .as_ref()
+                .expect("resident_agents_buf ensured by ensure_resident_init")
+                .clone();
+            let agent_cap = self.resident.resident_agents_cap;
+            let slots = crate::sync_helpers::readback_agents_buf(
+                &self.device,
+                &self.queue,
+                &agents_buf,
+                agent_cap,
+            );
+            crate::sync_helpers::unpack_agent_slots(state, &slots);
+        }
 
         // Read per-phase µs back from the profiler. Empty when the
         // adapter lacked TIMESTAMP_QUERY at init.

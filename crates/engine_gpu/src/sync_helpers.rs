@@ -183,3 +183,22 @@ pub fn create_alive_bitmap_buffer(device: &wgpu::Device, agent_cap: u32) -> wgpu
         mapped_at_creation: false,
     })
 }
+
+/// Read the GPU agents buffer back into a `Vec<GpuAgentSlot>`.
+/// Used by `step_batch` (Phase 0 of physics-wgsl-runtime) to bring
+/// GPU-mutated agent state back to the CPU mirror after a batch.
+///
+/// Caller must have already issued `device.poll(Wait)` after the
+/// batch's `queue.submit()`; this function is sync-only.
+#[cfg(feature = "gpu")]
+pub fn readback_agents_buf(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    agents_buf: &wgpu::Buffer,
+    agent_cap: u32,
+) -> Vec<GpuAgentSlot> {
+    let bytes = (agent_cap as usize) * std::mem::size_of::<GpuAgentSlot>();
+    let raw = crate::gpu_util::readback::readback_typed::<u8>(device, queue, agents_buf, bytes)
+        .expect("readback_agents_buf: GPU readback failed");
+    bytemuck::cast_slice::<u8, GpuAgentSlot>(&raw).to_vec()
+}
