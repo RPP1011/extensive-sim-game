@@ -51,11 +51,7 @@
 
 ### Stream A — Promote `step_batch` to ComputeBackend entry point
 
-Currently `ComputeBackend::step` is a CPU forward and `step_batch` runs the SCHEDULE-loop. Make `step` route through `step_batch(n=1)` (or fold `step_batch`'s body into `step`). After this, every CPU consumer hits the GPU dispatcher.
-
-Risk: `step_batch` was designed for batched execution; some setup amortizes across n>1 ticks. The n=1 case may need the per-tick path inlined.
-
-Estimated scope: 1-2 tasks.
+**Plan written:** `docs/superpowers/plans/2026-04-28-gpu-step-batch-entry.md` (Task 1, 7 steps). User approved 2026-04-28.
 
 ### Stream B — Fill emitted WGSL bodies
 
@@ -93,7 +89,7 @@ Streams B and C are independently parallelizable once A lands. Total scope: ~20 
 
 **Why this matters:** Plan invariant #5 (every parity test passes) is currently unverifiable. Default-features tests pass; GPU correctness is uncovered until tests rebuild against the new surface. Without Stream A, GPU is functionally inert in `step()`.
 
-**Status:** awaiting user
-**To proceed:** add `**APPROVED:**` with sequencing preference. Three sub-plans (parallel after A), or fold into one mega-plan? Sequence relative to Ability DSL / Economic depth?
+**Status:** Stream A planned and approved (2026-04-28). Streams B and C still awaiting user.
+**To proceed (B/C):** add `**APPROVED:**` with sequencing preference. Stream A unblocks both; B and C parallelize.
 
 ---
