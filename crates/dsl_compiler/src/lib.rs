@@ -17,6 +17,7 @@ pub use dsl_ast::tokens;
 // Emitter modules
 pub mod emit_alive_pack_wgsl;
 pub mod emit_backend;
+pub mod emit_runtime_prelude_wgsl;
 pub mod emit_binding_sources;
 pub mod emit_cascade_register;
 pub mod emit_config;
