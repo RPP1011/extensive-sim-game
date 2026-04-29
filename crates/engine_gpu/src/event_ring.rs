@@ -1128,7 +1128,7 @@ impl GpuEventRing {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        events: &mut EventRing,
+        events: &mut EventRing<Event>,
     ) -> Result<DrainOutcome, EventRingError> {
         // Copy tail into readback buffer.
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -1554,7 +1554,7 @@ impl GpuChronicleRing {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        events: &mut EventRing,
+        events: &mut EventRing<Event>,
     ) -> Result<ChronicleDrainOutcome, EventRingError> {
         // Copy tail into readback buffer.
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

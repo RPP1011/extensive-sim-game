@@ -13,7 +13,7 @@
 use crate::event_ring::{
     EventRecord, GpuChronicleRing, GpuEventRing, CHRONICLE_RECORD_BYTES, RECORD_BYTES,
 };
-use crate::physics::GpuAgentSlot;
+use crate::sync_helpers::GpuAgentSlot;
 
 pub use crate::event_ring::ChronicleRecord;
 

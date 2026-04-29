@@ -97,22 +97,12 @@ pub mod view_storage_per_entity_ring;
 pub mod event_ring;
 
 
-/// Phase 6f — cascade sub-dispatch loop (Piece 3). Drives `physics::run_batch`
-/// in a fixed-point loop, folds each iteration's emitted events into
-/// `view_storage`, and returns the aggregated output. Not yet authoritative
-/// inside `GpuBackend::step` — Piece 4 replaces the CPU forward with a
-/// cascade call.
+/// Pod helpers (`GpuAgentSlot`, `pack_agent_slots`, alive-bitmap
+/// allocator) that survived the T16 hand-written-kernel deletion. Real
+/// working code, not stubs — used by `snapshot::GpuSnapshot` decoding
+/// and by `ensure_resident_init`'s upload path.
 #[cfg(feature = "gpu")]
-pub mod cascade;
-
-
-/// Phase C (task C1) — GPU-resident cascade driver. Composes Phase B's
-/// resident kernels into one indirect-dispatch sequence per tick with
-/// no Rust-side convergence check and no per-iter readback. Scaffolding
-/// for Phase D's `step_batch(n)`; not yet consumed by `GpuBackend::step`
-/// which still drives the sync cascade in `cascade.rs`.
-#[cfg(feature = "gpu")]
-pub mod cascade_resident;
+pub mod sync_helpers;
 
 /// Phase D (task D1) — double-buffered snapshot staging primitives.
 /// `GpuStaging` owns one side of an agents+events staging pair;
@@ -230,16 +220,9 @@ pub enum GpuInitError {
     NoAdapter,
     /// Device request failed — driver bug, feature mismatch, etc.
     RequestDevice(String),
-    /// Kernel init failed — WGSL emit or naga parse.
-    Kernel(mask::KernelError),
-    /// Phase 3 scoring kernel init failed — WGSL compile / pipeline
-    /// construction.
-    Scoring(scoring::ScoringError),
-    /// Phase 6d view storage init failed — fold shader compile / buffer
+    /// View storage init failed — fold shader compile / buffer
     /// allocation.
     ViewStorage(view_storage::ViewStorageError),
-    /// Alive-bitmap pack kernel init failed — WGSL compile.
-    AliveBitmap(alive_bitmap::AliveBitmapError),
 }
 
 #[cfg(feature = "gpu")]
@@ -248,10 +231,7 @@ impl std::fmt::Display for GpuInitError {
         match self {
             GpuInitError::NoAdapter => write!(f, "no compatible GPU adapter"),
             GpuInitError::RequestDevice(s) => write!(f, "request_device: {s}"),
-            GpuInitError::Kernel(e) => write!(f, "kernel init: {e}"),
-            GpuInitError::Scoring(e) => write!(f, "scoring init: {e}"),
             GpuInitError::ViewStorage(e) => write!(f, "view_storage init: {e}"),
-            GpuInitError::AliveBitmap(e) => write!(f, "alive_bitmap init: {e}"),
         }
     }
 }
@@ -260,30 +240,9 @@ impl std::fmt::Display for GpuInitError {
 impl std::error::Error for GpuInitError {}
 
 #[cfg(feature = "gpu")]
-impl From<mask::KernelError> for GpuInitError {
-    fn from(e: mask::KernelError) -> Self {
-        GpuInitError::Kernel(e)
-    }
-}
-
-#[cfg(feature = "gpu")]
-impl From<scoring::ScoringError> for GpuInitError {
-    fn from(e: scoring::ScoringError) -> Self {
-        GpuInitError::Scoring(e)
-    }
-}
-
-#[cfg(feature = "gpu")]
 impl From<view_storage::ViewStorageError> for GpuInitError {
     fn from(e: view_storage::ViewStorageError) -> Self {
         GpuInitError::ViewStorage(e)
-    }
-}
-
-#[cfg(feature = "gpu")]
-impl From<alive_bitmap::AliveBitmapError> for GpuInitError {
-    fn from(e: alive_bitmap::AliveBitmapError) -> Self {
-        GpuInitError::AliveBitmap(e)
     }
 }
 
@@ -408,74 +367,19 @@ pub fn test_device() -> Result<(wgpu::Device, wgpu::Queue), GpuInitError> {
     })
 }
 
-/// Research-mode switch: dispatch the mask kernel as three separate
-/// sub-kernels (self-only / MoveToward / Attack) with profiler marks
-/// between them, so Stage A's GPU timestamps can attribute µs/tick to
-/// each sub-phase. Read once at first use and cached.
-///
-/// Toggle via `ENGINE_GPU_SPLIT_MASK_MEASURE=1`. Default off; the
-/// production path keeps using the fused dispatch. See
-/// `docs/superpowers/research/2026-04-24-mask-kernel-subphase-measurement.md`.
-#[cfg(feature = "gpu")]
-fn split_mask_measure_enabled() -> bool {
-    use std::sync::atomic::{AtomicU8, Ordering};
-    static CACHED: AtomicU8 = AtomicU8::new(2); // 0 = off, 1 = on, 2 = uninit
-    match CACHED.load(Ordering::Relaxed) {
-        0 => false,
-        1 => true,
-        _ => {
-            let on = std::env::var("ENGINE_GPU_SPLIT_MASK_MEASURE")
-                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes"))
-                .unwrap_or(false);
-            CACHED.store(if on { 1 } else { 0 }, Ordering::Relaxed);
-            on
-        }
-    }
-}
 
-/// Opt-in: read `ENGINE_GPU_SUBMIT_GRANULARITY=K` from the environment and
-/// split `step_batch(N)` into `ceil(N/K)` sub-submits of up to K ticks
-/// each. Returns `None` when the env var is absent / malformed / `0`, in
-/// which case `step_batch` uses the default single-submit path (one
-/// encoder, one `queue.submit`, one `device.poll(Wait)`).
-///
-/// Cached so the `std::env::var` lookup happens once per process — the
-/// sweep harness sets the var before spawning the test binary, so it's
-/// stable for the duration.
-///
-/// Part of the per-dispatch attribution research task
-/// (2026-04-24-gpu-per-dispatch-attribution.md). Production paths do NOT
-/// set this var, so behaviour is unchanged.
-#[cfg(feature = "gpu")]
-fn submit_granularity() -> Option<u32> {
-    use std::sync::atomic::{AtomicI32, Ordering};
-    // i32: -1 = uninit, 0 = disabled, >0 = K.
-    static CACHED: AtomicI32 = AtomicI32::new(-1);
-    match CACHED.load(Ordering::Relaxed) {
-        -1 => {
-            let parsed = std::env::var("ENGINE_GPU_SUBMIT_GRANULARITY")
-                .ok()
-                .and_then(|s| s.parse::<u32>().ok())
-                .filter(|&k| k > 0);
-            let cached_val = parsed.map(|k| k as i32).unwrap_or(0);
-            CACHED.store(cached_val, Ordering::Relaxed);
-            parsed
-        }
-        0 => None,
-        k => Some(k as u32),
-    }
-}
 
 #[cfg(feature = "gpu")]
 impl GpuBackend {
     /// Spin up a wgpu instance, request an adapter + device, and
-    /// compile the Attack mask kernel. Blocks on the async setup via
+    /// allocate the view storage + emitted-kernel infrastructure used
+    /// by `step_batch()`. Blocks on the async setup via
     /// `pollster::block_on` so callers stay synchronous — the engine
     /// tick loop is strictly sync.
     ///
-    /// On a headless / no-GPU machine wgpu falls back to LLVMpipe
-    /// (Linux software Vulkan) or equivalent, which is slow but correct.
-    /// CI that lacks a real GPU should still see this succeed.
+    /// Post-T16 (commit `4474566c`) this no longer compiles any
+    /// hand-written kernels. Each emitted kernel in
+    /// `engine_gpu_rules::*` is lazy-built on first dispatch.
     pub fn new() -> Result<Self, GpuInitError> {
         pollster::block_on(Self::new_async())
     }
@@ -494,24 +398,9 @@ impl GpuBackend {
             .await
             .map_err(|_| GpuInitError::NoAdapter)?;
         let backend_label = format!("{:?}", adapter.get_info().backend);
-        // `downlevel_defaults` caps `max_storage_buffers_per_shader_stage`
-        // at 4 — fine for the Phase 1 Attack-only kernel (4 storage
-        // buffers + 1 uniform) but the Phase 2 fused kernel needs 10
-        // (3 SoA reads + 7 per-mask bitmap writes). The adapter's real
-        // limit on every Vulkan / Metal / DX12 target we care about is
-        // at least 16; lean on that by asking for the adapter's full
-        // limits. On CI-style software adapters (LLVMpipe) this still
-        // works: LLVMpipe reports >= 8 and we only need 10. If some
-        // future target returns a smaller limit we'll have to cap N
-        // and split the dispatch — but that's a Phase 3+ concern.
         let adapter_limits = adapter.limits();
 
-        // Perf Stage A.1 — opt-in timestamp-query feature request. We
-        // check the adapter's advertised features and only ask for the
-        // two timestamp bits if the adapter supports them both; asking
-        // for a missing feature would fail device creation. On
-        // llvmpipe / other software adapters that don't advertise these
-        // the profiler falls back to a no-op at runtime.
+        // Perf Stage A.1 — opt-in timestamp-query feature request.
         let adapter_features = adapter.features();
         let timestamps_supported = crate::gpu_profiling::adapter_supports_timestamps(adapter_features);
         let required_features = if timestamps_supported {
@@ -531,33 +420,16 @@ impl GpuBackend {
             .await
             .map_err(|e| GpuInitError::RequestDevice(format!("{e}")))?;
 
-        let mask_kernel = mask::FusedMaskKernel::new(&device)?;
-        let scoring_kernel = scoring::ScoringKernel::new(&device, &queue)?;
         let view_storage = view_storage::ViewStorage::new(&device, INITIAL_VIEW_AGENT_CAP)?;
-        let mask_unpack_kernel = mask::MaskUnpackKernel::new(&device)?;
-        let scoring_unpack_kernel = scoring::ScoringUnpackKernel::new(&device)?;
-        let fused_unpack_kernel = mask::FusedAgentUnpackKernel::new(&device)?;
-        let alive_pack_kernel = alive_bitmap::AlivePackKernel::new(&device)?;
-
-        let sync = crate::backend::SyncPathContext::new(
-            mask_kernel,
-            scoring_kernel,
-            view_storage,
-            backend_label,
-        );
+        let sync = crate::backend::SyncPathContext::new(view_storage, backend_label);
 
         let mut resident = crate::backend::ResidentPathContext::new(
             &device,
             INITIAL_VIEW_AGENT_CAP,
-            mask_unpack_kernel,
-            scoring_unpack_kernel,
-            fused_unpack_kernel,
-            alive_pack_kernel,
         );
-        // Perf Stage A.1 — allocate the timestamp profiler up front.
-        // Disabled-mode profiler (no QuerySet alloc) when the adapter
-        // lacked the timestamp features; every subsequent `mark` call
-        // is a cheap no-op.
+        // Allocate the timestamp profiler up front. Disabled-mode
+        // profiler when the adapter lacked the timestamp features;
+        // every subsequent `mark` call is a cheap no-op.
         resident.profiler = Some(crate::gpu_profiling::GpuProfiler::new(
             &device,
             &queue,
@@ -575,145 +447,27 @@ impl GpuBackend {
         })
     }
 
-    /// Lazily build the cascade context on first `step`. Caches the
-    /// result on the backend; subsequent ticks are amortised — no more
-    /// DSL parsing or WGSL compilation. Exposed as its own fn so tests
-    /// can ask for the init cost explicitly before a timing loop starts.
-    pub fn ensure_cascade_initialized(&mut self) -> Result<(), cascade::CascadeCtxError> {
-        if self.sync.cascade_ctx.is_none() {
-            let ctx = cascade::CascadeCtx::new(&self.device)?;
-            self.sync.cascade_ctx = Some(ctx);
-        }
-        Ok(())
-    }
-
-    /// Iteration count from the most recent GPU cascade. `None` before
-    /// the first `step` or when cascade init failed on that tick.
-    pub fn last_cascade_iterations(&self) -> Option<u32> {
-        self.sync.last_cascade_iterations
-    }
-
-    /// Enable or disable the post-step scoring sidecar. The sidecar
-    /// runs a full mask + scoring kernel dispatch against post-step
-    /// state to populate `last_mask_bitmaps` / `last_scoring_outputs`
-    /// for diagnostic callers. Perf harnesses turn it off to shave
-    /// ~3-10 ms/tick at N=1000 (the sidecar dispatches are pure
-    /// duplication since the backend doesn't use its own scoring
-    /// output — the CPU `step_phases_1_to_3` already decided actions).
-    pub fn set_skip_scoring_sidecar(&mut self, skip: bool) {
-        self.sync.skip_scoring_sidecar = skip;
-    }
-
-    /// True iff the scoring sidecar is currently disabled. Default
-    /// is `false` so existing tests keep working.
-    pub fn skip_scoring_sidecar(&self) -> bool {
-        self.sync.skip_scoring_sidecar
-    }
-
     /// Per-tick phase timings from the most recent `step`. Reset at
     /// the top of each step; populated as each phase finishes. Fields
-    /// are in microseconds. A zero field means the phase was skipped
-    /// on that tick (e.g. sidecar with `skip_scoring_sidecar = true`).
+    /// are in microseconds.
     pub fn last_phase_timings(&self) -> PhaseTimings {
         self.sync.last_phase_us
     }
 
-    /// Perf Stage A.1 — per-phase GPU µs from the most recent
-    /// `step_batch` call, summed across every tick in the batch. Each
-    /// entry is `(label, total_us)`; divide by the batch's tick count
-    /// to get a mean µs/tick. Empty when the adapter lacks
-    /// `TIMESTAMP_QUERY` or `step_batch` hasn't run yet.
+    /// Per-phase GPU µs from the most recent `step_batch` call,
+    /// summed across every tick in the batch.
     pub fn last_batch_phase_us(&self) -> &[(&'static str, u64)] {
         &self.resident.last_batch_phase_us
     }
 
     /// True iff the GPU profiler is live (adapter advertised
-    /// `TIMESTAMP_QUERY` + `TIMESTAMP_QUERY_INSIDE_ENCODERS` at init
-    /// time and the profiler was constructed accordingly). Tests use
-    /// this to gate the "expected GPU µs breakdown" output section;
-    /// the sync-step wall-clock timing still works regardless.
+    /// `TIMESTAMP_QUERY` + `TIMESTAMP_QUERY_INSIDE_ENCODERS` at init).
     pub fn gpu_profiler_enabled(&self) -> bool {
         self.resident
             .profiler
             .as_ref()
             .map(|p| p.is_enabled())
             .unwrap_or(false)
-    }
-
-    /// Perf Stage A.2 — running `(hits, misses)` totals for the
-    /// resident physics bind-group cache. `None` before the cascade
-    /// context is initialized (no step has run).
-    ///
-    /// The cache is expected to converge to 100% hit rate after the
-    /// first batch tick populates its ≤3 unique key tuples; runaway
-    /// misses (e.g. hits=0 after 400 lookups) signal that one of the
-    /// key fields is drifting per-iteration.
-    #[doc(hidden)]
-    pub fn physics_resident_bg_cache_stats(&self) -> Option<(u64, u64)> {
-        self.sync
-            .cascade_ctx
-            .as_ref()
-            .map(|ctx| ctx.physics.resident_bg_cache_stats())
-    }
-
-    /// Task 203 — drain the GPU chronicle ring into the CPU event
-    /// ring. The chronicle ring is written to by physics every tick
-    /// (via `emit ChronicleEntry` rules) but is NOT drained by the
-    /// cascade driver — it accumulates across ticks until this method
-    /// runs. Every currently-resident record is pushed into `events`
-    /// as an `Event::ChronicleEntry`, then the ring's tail atomic is
-    /// reset to 0 so the next session starts with a fresh window.
-    ///
-    /// Returns the chronicle drain outcome, or `None` if the cascade
-    /// context hasn't been initialised yet (no step has run and
-    /// there's nothing to drain).
-    ///
-    /// ## Relationship to the CPU `cold_state_replay` path
-    ///
-    /// The authoritative source of `Event::ChronicleEntry` in the CPU
-    /// event ring today is `cascade::cold_state_replay`, which walks
-    /// the drained seed + cascade events once per tick and dispatches
-    /// the 8 chronicle rules CPU-side. That path runs inside
-    /// `GpuBackend::step` unconditionally — flushing the GPU
-    /// chronicle ring on top of that would double-count every
-    /// narrative entry.
-    ///
-    /// So `flush_chronicle` is opt-in for callers that DISABLE
-    /// `cold_state_replay` (e.g., a future observability tool that
-    /// wants to read chronicles off the GPU without round-tripping
-    /// through the CPU cold-state handler). In the default step
-    /// pipeline the chronicle ring is a write-only observability
-    /// channel that tests/tools can peek at without perturbing the
-    /// CPU ring's contents.
-    pub fn flush_chronicle(
-        &mut self,
-        events: &mut EventRing,
-    ) -> Option<crate::event_ring::ChronicleDrainOutcome> {
-        let cascade_ctx = self.sync.cascade_ctx.as_mut()?;
-        let outcome = match cascade_ctx
-            .physics
-            .chronicle_ring()
-            .drain(&self.device, &self.queue, events)
-        {
-            Ok(o) => o,
-            Err(e) => {
-                eprintln!("engine_gpu::flush_chronicle: drain failed: {e}");
-                return None;
-            }
-        };
-        // Reset the tail so subsequent ticks don't re-see already-
-        // drained records. The records buffer stays populated (stale
-        // slots beyond the new tail are invisible to the next drain).
-        cascade_ctx.physics.chronicle_ring().reset(&self.queue);
-        Some(outcome)
-    }
-
-    /// Set iff the most recent `step` fell back to the CPU cascade
-    /// (init or dispatch error). The backend records the error string
-    /// rather than returning it so the `ComputeBackend::step` signature
-    /// stays byte-for-byte compatible with `CpuBackend`.
-    pub fn last_cascade_error(&self) -> Option<&str> {
-        self.sync.last_cascade_error.as_deref()
     }
 
     /// Borrow the backing view storage. Tests and integration callers
@@ -723,29 +477,23 @@ impl GpuBackend {
         &self.sync.view_storage
     }
 
-    /// Mutable borrow of the view storage — the integration layer uses
-    /// this to dispatch fold kernels against the backend's device/queue.
+    /// Mutable borrow of the view storage.
     pub fn view_storage_mut(&mut self) -> &mut view_storage::ViewStorage {
         &mut self.sync.view_storage
     }
 
-    /// The backend's wgpu device — exposed so tests / integration can
-    /// dispatch `view_storage` fold kernels against the same device the
-    /// scoring kernel runs on.
+    /// The backend's wgpu device.
     pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
 
-    /// The backend's wgpu queue — paired with `device()` for uploads
-    /// and fold dispatches from the test harness.
+    /// The backend's wgpu queue.
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
 
-    /// Resize the view storage to match the given agent_cap, preserving
-    /// zeroed state. Called before the first step if the SimState's
-    /// agent_cap exceeds `INITIAL_VIEW_AGENT_CAP`. This is not called
-    /// inside `step` to avoid silently dropping fold state mid-run.
+    /// Resize the view storage to match the given `agent_cap`,
+    /// preserving zeroed state.
     pub fn rebuild_view_storage(
         &mut self,
         agent_cap: u32,
@@ -754,219 +502,60 @@ impl GpuBackend {
         Ok(())
     }
 
-    /// Human-readable name of the wgpu backend the device is running
-    /// on — one of `Vulkan`, `Metal`, `Dx12`, `Gl`, `BrowserWebGpu`, or
-    /// `Empty`. Captured at init so tests can log which path they
-    /// actually exercised (useful when Linux falls back to `Gl`/LLVMpipe).
+    /// Human-readable name of the wgpu backend the device is running on.
     pub fn backend_label(&self) -> &str {
         &self.sync.backend_label
     }
 
-    /// Per-mask packed bitmaps from the most recent `step`, in the
-    /// same order as `mask_bindings()`. Bit `i` of word `i/32` of
-    /// `last_mask_bitmaps()[k]` is set iff slot `i`'s agent passed
-    /// mask `k`'s predicate this tick. Empty before the first `step`;
-    /// `last_mask_bitmaps()[k]` is `None`-empty if the kernel dispatch
-    /// failed the most recent tick.
-    pub fn last_mask_bitmaps(&self) -> &[Vec<u32>] {
-        &self.sync.last_mask_bitmaps
-    }
-
-    /// Per-mask metadata (name, index, shape) in fused-kernel order.
-    /// Stable across ticks — set at `GpuBackend::new` when the
-    /// pipeline compiles. Callers use this to pair a bitmap from
-    /// `last_mask_bitmaps` with its DSL mask name for diagnostics or
-    /// mask-specific handling.
-    pub fn mask_bindings(&self) -> &[dsl_compiler::emit_mask_wgsl::FusedMaskBinding] {
-        self.sync.mask_kernel.bindings()
-    }
-
-    /// Convenience lookup — scan `mask_bindings()` for the slot
-    /// matching `name` and return the corresponding bitmap from the
-    /// most recent `step`, or `None` if the mask isn't in the fused
-    /// kernel (Cast, future non-agent masks) or `step` hasn't run yet.
-    pub fn last_bitmap_for(&self, name: &str) -> Option<&[u32]> {
-        let bindings = self.sync.mask_kernel.bindings();
-        let idx = bindings.iter().position(|b| b.mask_name == name)?;
-        self.sync.last_mask_bitmaps.get(idx).map(|v| v.as_slice())
-    }
-
-    /// Run the fused-mask kernel against the current `state` without
-    /// touching the CPU step — used by the parity test's direct
-    /// "known-state spawn check" mode. Returns every bitmap in the
-    /// emitter's binding order; caller pairs each against
-    /// `mask::cpu_mask_bitmap(state, name)`.
-    pub fn verify_masks_on_gpu(
-        &mut self,
-        state: &SimState,
-    ) -> Result<Vec<Vec<u32>>, mask::KernelError> {
-        self.sync.mask_kernel.run_and_readback(&self.device, &self.queue, state)
-    }
-
-    /// Per-agent scoring outputs from the most recent `step` — one
-    /// `ScoreOutput` per agent slot. Carries the GPU's argmax decision
-    /// (chosen_action, chosen_target). Empty before the first `step`
-    /// or when the scoring kernel dispatch failed.
-    pub fn last_scoring_outputs(&self) -> &[scoring::ScoreOutput] {
-        &self.sync.last_scoring_outputs
-    }
-
-    /// Run the scoring kernel against `state`'s current snapshot
-    /// (without advancing the CPU step). Used by the parity test's
-    /// "known-state spawn check" mode — same shape as
-    /// `verify_masks_on_gpu` but for scoring. Internally runs the
-    /// fused mask kernel first to get the bitmaps the scoring kernel
-    /// reads.
-    ///
-    /// Phase 6d: resets the view storage to zero before dispatching so
-    /// the scoring kernel reads deterministic empty views. Callers that
-    /// need pre-folded view state should use `run_step_once` (which
-    /// preserves cross-call fold state) or call `view_storage_mut()`
-    /// directly to seed cells.
-    pub fn verify_scoring_on_gpu(
-        &mut self,
-        state: &SimState,
-    ) -> Result<Vec<scoring::ScoreOutput>, scoring::ScoringError> {
-        self.ensure_view_storage_cap(state.agent_cap())?;
-        self.sync.view_storage.reset(&self.queue);
-        let bitmaps = self
-            .sync
-            .mask_kernel
-            .run_and_readback(&self.device, &self.queue, state)?;
-        self.sync.scoring_kernel.run_and_readback(
-            &self.device,
-            &self.queue,
-            state,
-            &self.sync.mask_kernel,
-            &bitmaps,
-            &self.sync.view_storage,
-        )
-    }
-
-    /// Grow `view_storage` to match the SimState's agent_cap if the
-    /// current storage is too small. Preserves zero-state on resize
-    /// (fresh allocation). Used internally by `step` and
-    /// `verify_scoring_on_gpu`.
+    /// Grow `view_storage` to match the SimState's `agent_cap` if the
+    /// current storage is too small. Preserves zero-state on resize.
     fn ensure_view_storage_cap(
         &mut self,
         agent_cap: u32,
-    ) -> Result<(), scoring::ScoringError> {
+    ) -> Result<(), view_storage::ViewStorageError> {
         if self.sync.view_storage.agent_cap() < agent_cap {
-            view_storage::ViewStorage::new(&self.device, agent_cap)
-                .map(|vs| self.sync.view_storage = vs)
-                .map_err(|e| scoring::ScoringError::Dispatch(format!(
-                    "view_storage rebuild for agent_cap={agent_cap} failed: {e}"
-                )))?;
+            let vs = view_storage::ViewStorage::new(&self.device, agent_cap)?;
+            self.sync.view_storage = vs;
         }
         Ok(())
     }
 
-    /// Same shape as `verify_scoring_on_gpu` but **does not** reset the
-    /// view storage. Callers that have pre-folded view cells (via
-    /// direct `view_storage.fold_*_events` calls) use this to exercise
-    /// the scoring kernel against the post-fold state without the
-    /// reset wiping their writes. Used by the Piece 1 test harness.
-    pub fn verify_scoring_on_gpu_preserving_views(
-        &mut self,
-        state: &SimState,
-    ) -> Result<Vec<scoring::ScoreOutput>, scoring::ScoringError> {
-        self.ensure_view_storage_cap(state.agent_cap())?;
-        let bitmaps = self
-            .sync
-            .mask_kernel
-            .run_and_readback(&self.device, &self.queue, state)?;
-        self.sync.scoring_kernel.run_and_readback(
-            &self.device,
-            &self.queue,
-            state,
-            &self.sync.mask_kernel,
-            &bitmaps,
-            &self.sync.view_storage,
-        )
-    }
-
-    /// Phase 9 (task 195) — batched step API. Runs `n_ticks` ticks in
-    /// a row without any CPU-side work between them beyond what
-    /// `ComputeBackend::step` already does per tick. The API exists to
-    /// give callers a single entry point for "just advance the sim N
-    /// ticks"; the per-tick pipeline still submits + waits on GPU work
-    /// individually.
+    /// Batched step API. Runs `n_ticks` ticks driven by the
+    /// SCHEDULE-loop dispatcher in [`Self::dispatch`]; submits once
+    /// per call after recording every tick into a single command
+    /// encoder.
     ///
-    /// This API is a scaffolding deliverable for the full megakernel
-    /// plan: the next milestone would be to share a single command
-    /// buffer across all N ticks (no wgpu submit between ticks), with
-    /// a GPU-resident cascade range buffer so physics can iterate on
-    /// its own output without CPU readback. That requires:
-    ///   * a WGSL `update_cascade_range` kernel that reads the
-    ///     event-ring tail + writes the next iteration's (start, count)
-    ///     into a storage buffer physics reads,
-    ///   * a physics shader rebind that consumes its events-in slice
-    ///     from the shared event ring rather than a separate
-    ///     `events_in_buf`,
-    ///   * GPU-side apply_actions + movement kernels so phases 4a and
-    ///     movement don't need CPU-side state mutation.
-    ///
-    /// The scope of all three changes is ~800-1200 LOC of WGSL + Rust
-    /// glue. Task 195 lands the per-tick wins (pooled staging, fused
-    /// submits, sidecar opt-out, diagnostic surface) that unblock the
-    /// measurement work; task 196+ consumes those + lands the
-    /// cross-tick single-submit pipeline.
-    /// Phase D — Task D4: GPU-resident batched step. Records `n_ticks`
-    /// ticks of resident cascade execution into a single command
-    /// encoder, submits once, polls once.
-    ///
-    /// Unlike the per-tick `step`, this path is explicitly
-    /// non-deterministic and does NOT keep `state` byte-for-byte in
-    /// lockstep with the GPU buffer mid-batch — the caller's `state` is
-    /// slightly stale at end-of-batch (CPU-side `state.tick` is advanced,
-    /// but agent HP / position / alive fields are NOT read back from
-    /// the GPU `resident_agents_buf` until a future integration task
-    /// lands a commit step). Observers consume the GPU-side snapshot
-    /// via [`Self::snapshot`] instead.
-    ///
-    /// ### Unused parameters (batch path)
-    ///
-    /// * `scratch` — kept for signature compatibility with the sync
-    ///   `ComputeBackend::step` trait. The resident kernels don't use the
-    ///   CPU scratch buffers.
-    /// * `events` — the batch path does NOT push to the CPU event ring
-    ///   per-tick. GPU-emitted events stay resident in the physics
-    ///   rings and are observed via `snapshot()`.
-    /// * `policy` — the batch path has no policy hook. The GPU scoring
-    ///   kernel runs its own deterministic argmax.
-    /// * `cascade` — the batch path uses its own `cascade_resident`
-    ///   driver with the engine-builtin cascade physics compiled into
-    ///   the lazy `cascade_ctx`.
+    /// Post-T16 the SCHEDULE-driven path is the sole authoritative
+    /// driver. Each kernel in `engine_gpu_rules::*` is currently a
+    /// no-op WGSL stub (the bodies were retired alongside the hand-
+    /// written kernels), so this method advances `state.tick` on the
+    /// CPU side via the supplied `cascade` registry's CPU fallback to
+    /// keep the rest of the engine's tick semantics intact while the
+    /// emitted shader bodies are filled in.
     ///
     /// ### Fallback
     ///
-    /// If resident init fails (GPU allocation error, cascade DSL load
-    /// failure, etc.) the batch path falls back to calling the sync
-    /// `ComputeBackend::step` N times so the tick loop still advances.
-    /// Mid-batch kernel failures panic via `expect(...)` — the batch
-    /// path is committed once init succeeds.
+    /// If resident init fails (GPU allocation error, etc.) the batch
+    /// path falls back to calling `engine::step::step` N times so the
+    /// tick loop still advances on the CPU.
     pub fn step_batch<B: PolicyBackend>(
         &mut self,
         state: &mut SimState,
         scratch: &mut SimScratch,
-        events: &mut EventRing,
+        events: &mut EventRing<Event>,
         policy: &B,
-        cascade: &CascadeRegistry,
+        cascade: &CascadeRegistry<Event, ()>,
         n_ticks: u32,
     ) {
         if let Err(e) = self.ensure_resident_init(state) {
             eprintln!(
-                "engine_gpu::step_batch: resident init failed ({e}), falling back to sync loop"
+                "engine_gpu::step_batch: resident init failed ({e}), falling back to CPU loop"
             );
             for _ in 0..n_ticks {
-                <Self as ComputeBackend>::step(self, state, scratch, events, policy, cascade);
+                engine::step::step(state, scratch, events, policy, cascade);
             }
             return;
         }
-
-        // Shadow unused params so the reader sees they're intentional
-        // no-ops on the batch path (doc-commented above).
-        let _ = (scratch, events, policy, cascade);
 
         let mut encoder = self
             .device
@@ -974,1693 +563,46 @@ impl GpuBackend {
                 label: Some("engine_gpu::step_batch::enc"),
             });
 
-        // Perf Stage A.1 — reset the profiler's frame state. No-op when
-        // the adapter didn't advertise TIMESTAMP_QUERY.
         if let Some(p) = self.resident.profiler.as_mut() {
             p.begin_frame();
         }
 
-        // C1 + C2 fix: reset the batch-scoped event accumulator and the
-        // chronicle ring at the START of each batch. Both rings are
-        // append-only within a batch — the batch events ring collects
-        // apply+movement events across every tick (per-tick-reset of
-        // `apply_event_ring` would otherwise drop all but the last
-        // tick's events from `snapshot()`'s view), and the chronicle
-        // ring collects narrative entries the physics kernel emits.
-        // Without these resets the chronicle ring would grow
-        // unboundedly across back-to-back `step_batch` calls in a
-        // long-running session and eventually overflow its
-        // `DEFAULT_CHRONICLE_CAPACITY`.
-        //
-        // Also zero the snapshot watermark — the batch ring is reset,
-        // so any watermark recorded during the previous batch is
-        // meaningless against the new tail.
-        {
-            let resident_ctx = self
-                .resident
-                .resident_cascade_ctx
-                .as_ref()
-                .expect("resident_cascade_ctx ensured by ensure_resident_init");
-            resident_ctx.reset_batch_events_ring(&mut encoder);
-            resident_ctx.reset_chronicle_ring(&mut encoder);
-        }
-        self.snapshot.snapshot_event_ring_read = 0;
-        self.snapshot.snapshot_chronicle_ring_read = 0;
-
-        let agent_cap = state.agent_cap();
-        // Stage B.1 — capture the iter_cap used on the final tick so
-        // the end-of-batch sanity check can compare the last tick's
-        // per-iter counts against it. `None` iff n_ticks == 0.
-        let mut last_iter_cap_used: Option<u32> = None;
-
-        // Per-dispatch attribution research mode (2026-04-24): when
-        // ENGINE_GPU_SUBMIT_GRANULARITY=K is set, submit+poll every K
-        // ticks instead of once per step_batch. `chunk_size == 0` is
-        // treated as "no sweep" (single-submit path) — the Option
-        // plumbing from `submit_granularity()` already filters that out.
-        //
-        // Correctness: the batch-scoped rings (batch_events_ring,
-        // chronicle_ring) are reset once at the start of the batch and
-        // then append-only across every tick. Submits are just GPU
-        // fence points — the rings' device-side state survives them.
-        // So splitting submits does NOT affect the data any snapshot
-        // observes post-batch.
-        let chunk_size = submit_granularity().unwrap_or(u32::MAX);
-        let mut ticks_since_submit = 0u32;
-        for tick_idx in 0..n_ticks {
-            // T15 — SCHEDULE-driven dispatch loop. Off by default; when
-            // the umbrella feature `engine_gpu_emitted_schedule_loop`
-            // is enabled, this loop drives every emitted kernel from
-            // `engine_gpu_rules::schedule::SCHEDULE` via the matching
-            // `self.dispatch(op, ...)` arm. Placed BEFORE the
-            // `&mut self.resident` / `&mut self.sync` destructures
-            // below so the dispatch method can hold `&mut self`
-            // exclusively. When the feature is OFF the existing per-
-            // feature `engine_gpu_emitted_*_dispatch` blocks remain
-            // authoritative — both paths produce identical (no-op)
-            // wiring today, so T15 is a refactor-only change.
-            #[cfg(feature = "engine_gpu_emitted_schedule_loop")]
-            {
-                let _ = tick_idx; // tick_idx unused inside the loop today
-                for op in engine_gpu_rules::schedule::SCHEDULE {
-                    self.dispatch(op, &mut encoder, state)
-                        .expect("emitted schedule dispatch");
-                }
+        for _tick_idx in 0..n_ticks {
+            // SCHEDULE-driven dispatch: walk every op the emitter
+            // recorded and dispatch its matching kernel arm. Today's
+            // emitted WGSL is a no-op stub for every kernel, so the
+            // pass advances `state.tick` (via the CPU `engine::step`
+            // forward below) but doesn't yet mutate state on the GPU
+            // — the dispatch is wiring-only until each kernel's WGSL
+            // body is hoisted in a follow-up.
+            for op in engine_gpu_rules::schedule::SCHEDULE {
+                self.dispatch(op, &mut encoder, state)
+                    .expect("emitted schedule dispatch");
             }
 
-            // Split-borrow: need `&` to `resident_agents_buf` plus
-            // `&mut` to `fused_unpack_kernel` (and later `&mut` to
-            // `resident_cascade_ctx` + `&` to `resident_indirect_args`)
-            // simultaneously. Destructuring `&mut self.resident` gives
-            // independent per-field borrows.
-            let crate::backend::ResidentPathContext {
-                resident_agents_buf,
-                resident_indirect_args,
-                resident_cascade_ctx,
-                sim_cfg_buf,
-                gold_buf,
-                standing_storage,
-                memory_storage,
-                alive_bitmap_buf,
-                alive_pack_kernel,
-                fused_unpack_kernel,
-                profiler,
-                ..
-            } = &mut self.resident;
-            let agents_buf = resident_agents_buf
-                .as_ref()
-                .expect("resident_agents_buf ensured by ensure_resident_init");
-
-            // Perf Stage A.1 — bookend each phase with a timestamp so
-            // the test harness can surface GPU-µs/tick per phase.
-            //
-            // Per-dispatch attribution (2026-04-24): in addition to the
-            // legacy per-phase marks ("fused_unpack", "mask+scoring",
-            // …) we also emit "gap:*" marks at every between-pass
-            // boundary so the harness can attribute any GPU-µs that
-            // lives outside a compute-pass scope (barriers, pipeline
-            // swaps, memory-bandwidth contention, driver JIT). The two
-            // schedules are interleaved — a legacy mark and a gap mark
-            // that coincide at the same encoder position record a
-            // near-zero delta, which is harmless.
-            if let Some(p) = profiler.as_mut() {
-                p.write_between_pass_timestamp(
-                    &mut encoder,
-                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[0],
-                );
-                p.mark(&mut encoder, "fused_unpack");
-            }
-
-            // 1. Fused unpack: one dispatch writes both mask's SoA
-            //    (pos/alive/creature_type) and scoring's
-            //    `agent_data_buf` (mutable subset: pos/hp/shield/alive/
-            //    creature_type/hp_pct). Merges what used to be two
-            //    separate unpack dispatches into one — saves a compute
-            //    pass begin/end + pipeline set per tick. Also emits
-            //    the per-tick mask-bitmap clears (mask kernel
-            //    atomicOr's bits in, so stale bits would poison
-            //    subsequent ticks).
-            fused_unpack_kernel
-                .encode_unpack(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    &mut self.sync.mask_kernel,
-                    &mut self.sync.scoring_kernel,
-                    agents_buf,
-                    agent_cap,
-                )
-                .expect("fused unpack dispatch");
-
-            // 1b. Alive bitmap pack: one thread per u32 word scans 32
-            //     agent slots' `alive` fields and writes the packed
-            //     word. Dispatched before mask/scoring so every
-            //     downstream reader (bound at BGL slot 22) sees the
-            //     tick-start alive state. Non-atomic writes — each
-            //     thread owns its output word.
-            let alive_bitmap_ref = alive_bitmap_buf
-                .as_ref()
-                .expect("alive_bitmap_buf ensured by ensure_resident_init");
-            alive_pack_kernel.encode_pack(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                agents_buf,
-                alive_bitmap_ref,
-                agent_cap,
-            );
-
-            // T13 — emitted FusedAgentUnpack + AlivePack dispatches.
-            // Run alongside the hand-written pack/unpack calls above;
-            // flipping the feature gates on with the current no-op
-            // WGSL stubs would do nothing useful (the hand-written
-            // calls still own the actual SoA + bitmap writes). The
-            // emitted dispatches are kept type-checked under the
-            // `else` branches so any drift between dsl_compiler's emit
-            // and these dispatch sites fails at build time rather than
-            // at the eventual feature flip. Schedule order matches
-            // xtask: FusedAgentUnpack at slot 0, AlivePack at slot 1.
-            //
-            // The two kernel-cfg structs (`AlivePackKernelCfg`,
-            // `FusedAgentUnpackKernelCfg`) emitted by the spatial helper
-            // don't match the hand-written `PackCfg` / `UnpackCfg`
-            // shapes — the emitted dispatch is for layout-validation
-            // only until T16 unifies the cfg + WGSL bodies.
-            let mask_sim_cfg_ref_t13 = sim_cfg_buf
-                .as_ref()
-                .expect("sim_cfg_buf ensured by ensure_resident_init");
-            if cfg!(feature = "engine_gpu_emitted_fused_unpack_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  mask_sim_cfg_ref_t13,
-                    scoring_unpack_agents_input: mask_sim_cfg_ref_t13,
-                    cascade_current_ring:        mask_sim_cfg_ref_t13,
-                    cascade_current_tail:        mask_sim_cfg_ref_t13,
-                    cascade_next_ring:           mask_sim_cfg_ref_t13,
-                    cascade_next_tail:           mask_sim_cfg_ref_t13,
-                    cascade_indirect_args:       mask_sim_cfg_ref_t13,
-                    fused_agent_unpack_input:    agents_buf,
-                    fused_agent_unpack_mask_soa: mask_sim_cfg_ref_t13,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref_t13,
-                    ability_registry: mask_sim_cfg_ref_t13,
-                    tag_values:       mask_sim_cfg_ref_t13,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-
-                use engine_gpu_rules::fused_agent_unpack::FusedAgentUnpackKernel;
-                let kernel = self.resident.fused_agent_unpack_kernel_emitted
-                    .get_or_insert_with(|| FusedAgentUnpackKernel::new(&self.device));
-                let cfg = kernel.build_cfg(state);
-                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("engine_gpu_rules::fused_agent_unpack::cfg"),
-                    contents: bytemuck::cast_slice(&[cfg]),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
-                let bindings = kernel.bind(&sources, &cfg_buf);
-                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-            } else {
-                let _ = &self.resident.fused_agent_unpack_kernel_emitted;
-            }
-            if cfg!(feature = "engine_gpu_emitted_alive_pack_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  mask_sim_cfg_ref_t13,
-                    scoring_unpack_agents_input: mask_sim_cfg_ref_t13,
-                    cascade_current_ring:        mask_sim_cfg_ref_t13,
-                    cascade_current_tail:        mask_sim_cfg_ref_t13,
-                    cascade_next_ring:           mask_sim_cfg_ref_t13,
-                    cascade_next_tail:           mask_sim_cfg_ref_t13,
-                    cascade_indirect_args:       mask_sim_cfg_ref_t13,
-                    fused_agent_unpack_input:    agents_buf,
-                    fused_agent_unpack_mask_soa: mask_sim_cfg_ref_t13,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref_t13,
-                    ability_registry: mask_sim_cfg_ref_t13,
-                    tag_values:       mask_sim_cfg_ref_t13,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-
-                use engine_gpu_rules::alive_pack::AlivePackKernel;
-                let kernel = self.resident.alive_pack_kernel_emitted
-                    .get_or_insert_with(|| AlivePackKernel::new(&self.device));
-                let cfg = kernel.build_cfg(state);
-                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("engine_gpu_rules::alive_pack::cfg"),
-                    contents: bytemuck::cast_slice(&[cfg]),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
-                let bindings = kernel.bind(&sources, &cfg_buf);
-                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-            } else {
-                let _ = &self.resident.alive_pack_kernel_emitted;
-            }
-
-            // 1c. Spatial pre-scoring: hoisted out of the cascade driver
-            //     so the scoring kernel can iterate per-agent K=32
-            //     candidate slots (instead of walking 0..agent_cap).
-            //     Encodes:
-            //       * grid rebuild (CPU SoA pack + clear/count/scan/
-            //         scatter/sort)
-            //       * 3 per-agent query dispatches at kin_radius (12 m,
-            //         feeds cascade physics's nearby_kin), engagement_
-            //         range (2 m, feeds nearest_hostile), and
-            //         max_move_radius (20 m, feeds the scoring kernel's
-            //         per-agent candidate set).
-            //
-            //     Spatial output buffers are owned by
-            //     `CascadeResidentCtx::spatial_bufs` and stable across
-            //     the tick — the cascade driver later in this same
-            //     encoder reads them without re-dispatching. Encoded
-            //     between alive_pack (which populates `agents_buf` +
-            //     `alive_bitmap_buf` for the spatial query's reads) and
-            //     mask (which the spatial output isn't yet consumed by;
-            //     it's first read by scoring further down).
-            {
-                let resident_ctx_pre = resident_cascade_ctx
-                    .as_mut()
-                    .expect("resident_cascade_ctx ensured by ensure_resident_init");
-                let sync_cascade_ctx_pre = self
-                    .sync
-                    .cascade_ctx
-                    .as_mut()
-                    .expect("cascade_ctx ensured by ensure_resident_init");
-                crate::cascade_resident::run_spatial_resident_pre_scoring(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    state,
-                    sync_cascade_ctx_pre,
-                    resident_ctx_pre,
-                )
-                .expect("spatial pre-scoring dispatch");
-            }
-
-            let mask_sim_cfg_ref = sim_cfg_buf
-                .as_ref()
-                .expect("sim_cfg_buf ensured by ensure_resident_init");
-
-            // T12 — emitted SpatialHash + SpatialKinQuery +
-            // SpatialEngagementQuery dispatches. Run alongside the
-            // hand-written `run_spatial_resident_pre_scoring` above;
-            // flipping `engine_gpu_emitted_spatial_dispatch` on with
-            // the current no-op WGSL stubs would dispatch three
-            // do-nothing passes — the hand-written cascade still
-            // populates the actual `CascadeResidentCtx` spatial
-            // buffers consumed downstream. Off by default; T16
-            // hoists the real spatial body and unifies the BGL.
-            //
-            // Kept type-checked under the `else` so any drift between
-            // dsl_compiler's emit and these dispatch sites fails at
-            // build time rather than at the eventual feature flip.
-            // Schedule order matches xtask: hash → kin → engagement.
-            if cfg!(feature = "engine_gpu_emitted_spatial_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  mask_sim_cfg_ref,
-                    scoring_unpack_agents_input: mask_sim_cfg_ref,
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-
-                // SpatialHash.
-                {
-                    use engine_gpu_rules::spatial_hash::SpatialHashKernel;
-                    let kernel = self.resident.spatial_hash_kernel
-                        .get_or_insert_with(|| SpatialHashKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::spatial_hash::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // SpatialKinQuery.
-                {
-                    use engine_gpu_rules::spatial_kin_query::SpatialKinQueryKernel;
-                    let kernel = self.resident.spatial_kin_query_kernel
-                        .get_or_insert_with(|| SpatialKinQueryKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::spatial_kin_query::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // SpatialEngagementQuery.
-                {
-                    use engine_gpu_rules::spatial_engagement_query::SpatialEngagementQueryKernel;
-                    let kernel = self.resident.spatial_engagement_query_kernel
-                        .get_or_insert_with(|| SpatialEngagementQueryKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::spatial_engagement_query::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-            } else {
-                let _ = &self.resident.spatial_hash_kernel;
-                let _ = &self.resident.spatial_kin_query_kernel;
-                let _ = &self.resident.spatial_engagement_query_kernel;
-            }
-            if let Some(p) = profiler.as_mut() {
-                // Between fused_unpack and mask_resident.
-                p.write_between_pass_timestamp(
-                    &mut encoder,
-                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[1],
-                );
-                p.mark(&mut encoder, "mask+scoring");
-            }
-            // Intra-kernel sub-phase measurement (research-mode,
-            // 2026-04-24-mask-kernel-subphase-measurement.md). Gated
-            // on an env var so production dispatches the single fused
-            // kernel. When the var is set the mask kernel splits into
-            // 3 sub-dispatches each bookended by a profiler mark,
-            // letting the perf test attribute GPU-µs to self-only /
-            // MoveToward / Attack sub-phases. NOTE: the split path
-            // uses its own hardcoded SPLIT_MASK_WGSL and does NOT
-            // bind alive_bitmap — it's measurement-only and doesn't
-            // need to reflect the bitmap optimization.
-            let split_mask = split_mask_measure_enabled();
-            if split_mask {
-                self.sync
-                    .mask_kernel
-                    .run_resident_split(
-                        &self.device,
-                        &self.queue,
-                        &mut encoder,
-                        agents_buf,
-                        mask_sim_cfg_ref,
-                        agent_cap,
-                        profiler.as_mut(),
-                    )
-                    .expect("mask resident split dispatch");
-            } else {
-                self.sync
-                    .mask_kernel
-                    .run_resident(
-                        &self.device,
-                        &self.queue,
-                        &mut encoder,
-                        agents_buf,
-                        mask_sim_cfg_ref,
-                        alive_bitmap_ref,
-                        agent_cap,
-                    )
-                    .expect("mask resident dispatch");
-            }
-
-            // T5: dispatch the emitted FusedMaskKernel + MaskUnpackKernel
-            // out of `engine_gpu_rules` ALONGSIDE the hand-written
-            // `mask_kernel.run_resident` above. The bind/record pattern
-            // walks a single `BindingSources` aggregate built per tick,
-            // with the kernel structs lazy-initialised on the resident
-            // context the first time we see them.
-            //
-            // Why both run for now: the emitted Rust BGL + emitted WGSL
-            // pair is still being aligned (the WGSL was generated by
-            // emit_mask_wgsl with the legacy 14-binding interface; the
-            // Rust wrapper expects a 4-binding compact one). Until those
-            // converge in a later task, the emitted dispatch is wiring-
-            // only and the hand-written dispatch carries actual mask-
-            // bitmap output. T16 retires the hand-written kernel.
-            //
-            // The `cfg!(feature = "engine_gpu_emitted_mask_dispatch")`
-            // gate is intentionally opt-in: the build flips it on
-            // once the emitter pair is in sync, at which point the
-            // hand-written dispatch above can be deleted in the same
-            // change.
-            if cfg!(feature = "engine_gpu_emitted_mask_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::fused_mask::FusedMaskKernel as EmittedFusedMaskKernel;
-                use engine_gpu_rules::mask_unpack::MaskUnpackKernel as EmittedMaskUnpackKernel;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                // BindingSources is the aggregate every emitted kernel
-                // pulls buffers from. `transient` + `external` are
-                // freshly built each tick from refs into engine_gpu's
-                // existing buffers; the resident/pingpong/pool
-                // containers persist across ticks on `self.resident`.
-                //
-                // `mask_bitmaps_buf` and `unpack_agents_input_buf` are
-                // transitional accessors on the hand-written
-                // FusedMaskKernel — see the doc comments on each;
-                // T16 deletes them along with the hand-written
-                // kernel itself.
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    // T6 added action_buf + scoring_unpack_agents_input to
-                    // TransientHandles. The scoring kernel's output buffer
-                    // lives on `self.sync.scoring_kernel.scoring_buf()`;
-                    // the unpack scratch isn't exposed by the hand-written
-                    // kernel, so we reuse the same buffer here as a
-                    // placeholder until T7+ wires it. The emitted kernel
-                    // mask dispatch doesn't read these fields, so this is
-                    // type-only at the moment.
-                    action_buf:                  self.sync.scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: self.sync.scoring_kernel.scoring_buf(),
-                    // T10: emitted TransientHandles gained five
-                    // cascade_* fields (Physics + SeedIndirect refs).
-                    // The mask dispatch doesn't read them; the FixedPoint
-                    // loop in T10's gated dispatch rebuilds these per
-                    // iteration with the real CascadeResidentCtx ring
-                    // buffers. Stand-in to mask_sim_cfg_ref here.
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    // T8: emitted ExternalBuffers gained ability_registry +
-                    // tag_values (consumed by PickAbilityKernel). No
-                    // dedicated GPU buffer wires up to either yet — the
-                    // dispatch is feature-gated off and these fields are
-                    // type-only. Use the sim_cfg buffer as a stand-in
-                    // reference; T16 swaps to the real packed buffers.
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-
-                // FusedMaskKernel: lazy-init on the resident context;
-                // build_cfg per tick (cheap), upload as a uniform, then
-                // bind + record into the encoder.
-                {
-                    let kernel = self
-                        .resident
-                        .fused_mask_kernel
-                        .get_or_insert_with(|| EmittedFusedMaskKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf =
-                        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("engine_gpu_rules::fused_mask::cfg"),
-                            contents: bytemuck::cast_slice(&[cfg]),
-                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                        });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-
-                // MaskUnpackKernel: same pattern. Today's emitted WGSL
-                // is a stub — T6+ hoists the real shader body so the
-                // kernel begins producing the SoA the FusedMaskKernel
-                // reads.
-                {
-                    let kernel = self
-                        .resident
-                        .fused_mask_unpack_kernel
-                        .get_or_insert_with(|| EmittedMaskUnpackKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf =
-                        self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("engine_gpu_rules::mask_unpack::cfg"),
-                            contents: bytemuck::cast_slice(&[cfg]),
-                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                        });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-            } else {
-                // Emit-side wiring only — keep the bind/record types in
-                // type-check view so any drift between dsl_compiler's
-                // emit and this dispatch site fails the build now, not
-                // when the feature flag flips. Pure compile-time
-                // exercise of the BindingSources aggregate; no GPU work.
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    // Placeholder reuse — see the parallel T7 comment in
-                    // the gated path above.
-                    action_buf:                  self.sync.scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: self.sync.scoring_kernel.scoring_buf(),
-                    // T10 placeholders.
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    // T8: emitted ExternalBuffers gained ability_registry +
-                    // tag_values (consumed by PickAbilityKernel). No
-                    // dedicated GPU buffer wires up to either yet — the
-                    // dispatch is feature-gated off and these fields are
-                    // type-only. Use the sim_cfg buffer as a stand-in
-                    // reference; T16 swaps to the real packed buffers.
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let _sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-                // Touch the lazy slots so the dead-code lint stays
-                // quiet without instantiating either kernel (would
-                // build the pipeline against a still-misaligned BGL/
-                // WGSL pair on a real GPU).
-                let _ = &self.resident.fused_mask_kernel;
-                let _ = &self.resident.fused_mask_unpack_kernel;
-            }
-
-            // Between mask_resident and scoring_resident.
-            if let Some(p) = profiler.as_mut() {
-                p.write_between_pass_timestamp(
-                    &mut encoder,
-                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[2],
-                );
-            }
-
-            // 2. Scoring: reads mask_bitmaps + agent_data (both
-            //    populated above). Task 2.5 of the GPU sim-state
-            //    refactor retired the per-tick `refresh_tick_cfg_for_resident`:
-            //    every remaining `GpuConfig` field is batch-stable and the
-            //    two tick-varying scalars (`attack_range`, `tick`) now
-            //    live in `sim_cfg_buf`, which the seed-indirect kernel
-            //    mutates on-GPU.
-            // Spatial-within buffer was populated above by
-            // `run_spatial_resident_pre_scoring`; the scoring kernel
-            // iterates per-agent K=32 candidate slots from this buffer
-            // instead of walking 0..agent_cap.
-            let spatial_within_buf = resident_cascade_ctx
-                .as_ref()
-                .expect("resident_cascade_ctx ensured by ensure_resident_init")
-                .scoring_within_buf()
-                .clone();
-            self.sync
-                .scoring_kernel
-                .run_resident(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    agents_buf,
-                    self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_sim_cfg_ref,
-                    alive_bitmap_ref,
-                    &spatial_within_buf,
-                    agent_cap,
-                )
-                .expect("scoring resident dispatch");
-
-            if let Some(p) = profiler.as_mut() {
-                // Between scoring_resident and apply_actions.run_resident.
-                p.write_between_pass_timestamp(
-                    &mut encoder,
-                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[3],
-                );
-                p.mark(&mut encoder, "apply+movement");
-            }
-
-            // 3. apply_actions + movement: both read from the scoring
-            //    output buffer, mutate `resident_agents_buf`, and append
-            //    events into the shared apply_event_ring. Reset the
-            //    ring's tail inside the encoder so the reset is ordered
-            //    relative to this tick's kernels (not all ticks'
-            //    kernels — queue.write_buffer would collapse).
-            //
-            //    Cfg uniforms for both kernels were uploaded once in
-            //    `ensure_resident_init` (they carry `tick`, which the
-            //    batch path lets drift per the step_batch
-            //    non-determinism contract — see the plan's Open
-            //    Question #1).
-            // Cache `last_cascade_iterations` before the split-borrow
-            // below — the destructure holds the whole `self.sync`
-            // across the rest of this block so we can't reach in for
-            // it after.
-            let last_cascade_iterations_copy = self.sync.last_cascade_iterations;
-
-            // Split-borrow `self.sync` so we can hold a `&mut cascade_ctx`
-            // and read `scoring_kernel.scoring_buf()` simultaneously.
-            // Field destructuring of `&mut self.sync` gives the borrow
-            // checker independent per-field borrows.
-            let crate::backend::SyncPathContext {
-                cascade_ctx: sync_cascade_ctx_opt,
-                scoring_kernel: sync_scoring_kernel,
-                ..
-            } = &mut self.sync;
-            let cascade_ctx = sync_cascade_ctx_opt
-                .as_mut()
-                .expect("cascade_ctx ensured by ensure_resident_init");
-            encoder.clear_buffer(cascade_ctx.apply_event_ring.tail_buffer(), 0, None);
-
-            cascade_ctx
-                .apply_actions
-                .run_resident(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    agents_buf,
-                    sync_scoring_kernel.scoring_buf(),
-                    mask_sim_cfg_ref,
-                    &cascade_ctx.apply_event_ring,
-                    agent_cap,
-                )
-                .expect("apply_actions resident dispatch");
-
-            // T7 — emitted ApplyActionsKernel dispatch (feature-gated).
-            //
-            // The emitted Rust BGL diverges from the hand-written
-            // BGL: cfg uniform sits at slot 5 (after sim_cfg @ 4),
-            // matching the convention emit_scoring_kernel /
-            // emit_mask_kernel use. The hand-written kernel keeps cfg
-            // at slot 2 (sim_cfg @ 5). The current emitted WGSL is a
-            // no-op stub (no damage / heal / event semantics) so
-            // dispatching it instead of the hand-written kernel WOULD
-            // break parity. Off by default; T16 hoists the real WGSL
-            // body and flips this on.
-            //
-            // Kept type-checked under the `else` so any drift between
-            // dsl_compiler's emit and this dispatch site fails at
-            // build time rather than at the eventual feature flip.
-            if cfg!(feature = "engine_gpu_emitted_apply_actions_dispatch") {
-                use engine_gpu_rules::apply_actions::ApplyActionsKernel as EmittedApplyActionsKernel;
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    // T10 placeholders — see comment in the mask block
-                    // (line ~1288) for rationale; emitted physics/seed/
-                    // append are feature-gated and rebuild these per-iter
-                    // in the FixedPoint loop.
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    // T8: emitted ExternalBuffers gained ability_registry +
-                    // tag_values (consumed by PickAbilityKernel). No
-                    // dedicated GPU buffer wires up to either yet — the
-                    // dispatch is feature-gated off and these fields are
-                    // type-only. Use the sim_cfg buffer as a stand-in
-                    // reference; T16 swaps to the real packed buffers.
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-
-                let kernel = self
-                    .resident
-                    .apply_actions_kernel
-                    .get_or_insert_with(|| EmittedApplyActionsKernel::new(&self.device));
-                let cfg = kernel.build_cfg(state);
-                let cfg_buf =
-                    self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::apply_actions::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                let bindings = kernel.bind(&sources, &cfg_buf);
-                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-            } else {
-                // Type-only exercise so any drift in the emitted
-                // BGL/WGSL pair fails the build now, not when the
-                // feature flips. Compile-time only — no GPU work.
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    // T10 placeholders — see comment in the mask block
-                    // (line ~1288) for rationale; emitted physics/seed/
-                    // append are feature-gated and rebuild these per-iter
-                    // in the FixedPoint loop.
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    // T8: emitted ExternalBuffers gained ability_registry +
-                    // tag_values (consumed by PickAbilityKernel). No
-                    // dedicated GPU buffer wires up to either yet — the
-                    // dispatch is feature-gated off and these fields are
-                    // type-only. Use the sim_cfg buffer as a stand-in
-                    // reference; T16 swaps to the real packed buffers.
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let _sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-                let _ = &self.resident.apply_actions_kernel;
-            }
-
-            // T8 — emitted PickAbilityKernel dispatch (feature-gated).
-            //
-            // The per_ability row body emit (kernel WGSL) already landed
-            // in commits `d8e196e8` (`emit_pick_ability_wgsl`) and
-            // `8f8e3582` (schema-hash coverage). T8 adds the wrapper
-            // Rust struct + BGL + dispatch encoder on top.
-            //
-            // There is no hand-written PickAbilityKernel to dispatch
-            // alongside (Subsystem 3 Group B was folded into this
-            // plan); the emitted version is the only version. Stays
-            // off-by-default until `assets/sim/scoring.sim` declares a
-            // real `per_ability` row (currently the WGSL emit is a
-            // no-op stub, so flipping the feature on now would write
-            // nothing useful into `chosen_ability_buf`).
-            //
-            // Kept type-checked under the `else` so any drift between
-            // dsl_compiler's emit and this dispatch site fails at
-            // build time rather than at the eventual feature flip.
-            if cfg!(feature = "engine_gpu_emitted_pick_ability_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::pick_ability::PickAbilityKernel as EmittedPickAbilityKernel;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    // T10 placeholders — see comment in the mask block
-                    // (line ~1288) for rationale; emitted physics/seed/
-                    // append are feature-gated and rebuild these per-iter
-                    // in the FixedPoint loop.
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-
-                let kernel = self
-                    .resident
-                    .pick_ability_kernel
-                    .get_or_insert_with(|| EmittedPickAbilityKernel::new(&self.device));
-                let cfg = kernel.build_cfg(state);
-                let cfg_buf =
-                    self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::pick_ability::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                let bindings = kernel.bind(&sources, &cfg_buf);
-                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-            } else {
-                // Type-only exercise so any drift in the emitted
-                // BGL/WGSL pair fails the build now, not when the
-                // feature flips. Compile-time only — no GPU work.
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    // T10 placeholders — see comment in the mask block
-                    // (line ~1288) for rationale; emitted physics/seed/
-                    // append are feature-gated and rebuild these per-iter
-                    // in the FixedPoint loop.
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let _sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-                let _ = &self.resident.pick_ability_kernel;
-            }
-
-            // Between apply_actions and movement.
-            if let Some(p) = profiler.as_mut() {
-                p.write_between_pass_timestamp(
-                    &mut encoder,
-                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[4],
-                );
-            }
-
-            cascade_ctx
-                .movement
-                .run_resident(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    agents_buf,
-                    sync_scoring_kernel.scoring_buf(),
-                    mask_sim_cfg_ref,
-                    &cascade_ctx.apply_event_ring,
-                    agent_cap,
-                )
-                .expect("movement resident dispatch");
-
-            // T9 — emitted MovementKernel dispatch (feature-gated).
-            //
-            // The emitted Rust BGL diverges from the hand-written
-            // BGL: cfg uniform sits at slot 5 (after sim_cfg @ 4),
-            // matching the convention emit_scoring_kernel /
-            // emit_mask_kernel use. The hand-written kernel keeps cfg
-            // at slot 2 (sim_cfg @ 5). The current emitted WGSL is a
-            // no-op stub (no MoveToward / Flee position or event
-            // semantics) so dispatching it instead of the hand-written
-            // kernel WOULD break parity. Off by default; T16 hoists
-            // the real WGSL body and flips this on.
-            //
-            // Kept type-checked under the `else` so any drift between
-            // dsl_compiler's emit and this dispatch site fails at
-            // build time rather than at the eventual feature flip.
-            if cfg!(feature = "engine_gpu_emitted_movement_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::movement::MovementKernel as EmittedMovementKernel;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    // T10 placeholders — see comment in the mask block
-                    // (line ~1288) for rationale; emitted physics/seed/
-                    // append are feature-gated and rebuild these per-iter
-                    // in the FixedPoint loop.
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-
-                let kernel = self
-                    .resident
-                    .movement_kernel
-                    .get_or_insert_with(|| EmittedMovementKernel::new(&self.device));
-                let cfg = kernel.build_cfg(state);
-                let cfg_buf =
-                    self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::movement::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                let bindings = kernel.bind(&sources, &cfg_buf);
-                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-            } else {
-                // Type-only exercise so any drift in the emitted
-                // BGL/WGSL pair fails the build now, not when the
-                // feature flips. Compile-time only — no GPU work.
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    // T10 placeholders — see comment in the mask block
-                    // (line ~1288) for rationale; emitted physics/seed/
-                    // append are feature-gated and rebuild these per-iter
-                    // in the FixedPoint loop.
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let _sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-                let _ = &self.resident.movement_kernel;
-            }
-
-            // T10 — emitted PhysicsKernel FixedPoint dispatch
-            // (feature-gated). The hand-written cascade in
-            // `cascade_resident::run_cascade_resident_with_iter_cap`
-            // below is the only path that runs by default.
-            //
-            // The FixedPoint loop rebuilds `BindingSources` per
-            // iteration to alternate A/B ring refs in
-            // `transient.cascade_*`. The current emitted WGSL is a
-            // no-op stub (every binding touched once so naga keeps
-            // them live), so flipping this feature on with the
-            // bootstrap WGSL would write nothing useful — T16 hoists
-            // the real `cs_physics` body and unifies the BGL.
-            //
-            // Kept type-checked under the `else` so any drift
-            // between dsl_compiler's emit and this dispatch site
-            // fails at build time rather than at the eventual
-            // feature flip.
-            if cfg!(feature = "engine_gpu_emitted_physics_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::physics::{PhysicsCfg, PhysicsKernel as EmittedPhysicsKernel};
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let kernel = self
-                    .resident
-                    .physics_kernel
-                    .get_or_insert_with(|| EmittedPhysicsKernel::new(&self.device));
-                let max_iter: u32 = 8;
-                for iter in 0..max_iter {
-                    // Per-iteration BindingSources: cascade_current/next
-                    // refs alternate by iter parity. Stand-ins until
-                    // T16 wires the real CascadeResidentCtx ring buffers.
-                    let transient = TransientHandles {
-                        mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                        mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                        action_buf:                  sync_scoring_kernel.scoring_buf(),
-                        scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                        cascade_current_ring:        mask_sim_cfg_ref,
-                        cascade_current_tail:        mask_sim_cfg_ref,
-                        cascade_next_ring:           mask_sim_cfg_ref,
-                        cascade_next_tail:           mask_sim_cfg_ref,
-                        cascade_indirect_args:       mask_sim_cfg_ref,
-                        _phantom: std::marker::PhantomData,
-                    };
-                    let external = ExternalBuffers {
-                        agents:           agents_buf,
-                        sim_cfg:          mask_sim_cfg_ref,
-                        ability_registry: mask_sim_cfg_ref,
-                        tag_values:       mask_sim_cfg_ref,
-                        _phantom:         std::marker::PhantomData,
-                    };
-                    let sources = BindingSources {
-                        resident:  &self.resident.path_ctx,
-                        pingpong:  &self.resident.pingpong_ctx,
-                        pool:      &self.resident.pool,
-                        transient: &transient,
-                        external:  &external,
-                    };
-                    let cfg = PhysicsCfg {
-                        agent_cap,
-                        iter_idx: iter,
-                        max_iter,
-                        event_ring_capacity: 4096,
-                    };
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::physics::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-            } else {
-                // Type-only exercise — keep the kernel slot reachable
-                // so dead-code lints stay quiet.
-                let _ = &self.resident.physics_kernel;
-            }
-
-            // T10 — emitted SeedIndirectKernel dispatch (feature-gated).
-            // DispatchOp::Indirect-driven; one-thread, one-workgroup.
-            // The current emitted WGSL stub doesn't actually compute
-            // dispatch_indirect args yet — the hand-written
-            // `SeedIndirectKernel` in `cascade_resident.rs` does that
-            // until T16 unifies the WGSL.
-            if cfg!(feature = "engine_gpu_emitted_seed_indirect_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::seed_indirect::{SeedIndirectCfg, SeedIndirectKernel as EmittedSeedIndirectKernel};
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-                let kernel = self
-                    .resident
-                    .seed_indirect_kernel
-                    .get_or_insert_with(|| EmittedSeedIndirectKernel::new(&self.device));
-                let cfg = SeedIndirectCfg { iter_idx: 0, _pad: [0; 3] };
-                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("engine_gpu_rules::seed_indirect::cfg"),
-                    contents: bytemuck::cast_slice(&[cfg]),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
-                let bindings = kernel.bind(&sources, &cfg_buf);
-                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-            } else {
-                let _ = &self.resident.seed_indirect_kernel;
-            }
-
-            if let Some(p) = profiler.as_mut() {
-                // Between movement and append_events.
-                p.write_between_pass_timestamp(
-                    &mut encoder,
-                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[5],
-                );
-                p.mark(&mut encoder, "append_events");
-            }
-
-            // 3b. C1 fix: append apply+movement events into the
-            //     batch-scoped accumulator BEFORE the cascade seed
-            //     clears-and-consumes `apply_event_ring.tail`. Reads
-            //     apply_tail atomically and copies records 0..tail into
-            //     `batch_events_ring`, advancing its atomic tail. This
-            //     is what `snapshot()` later reads from — so the
-            //     snapshot sees events from EVERY tick in the batch,
-            //     not just the last one.
-            //
-            //     Ordered inside the encoder (and between compute
-            //     passes) so it lands AFTER movement writes into
-            //     `apply_event_ring` and BEFORE the cascade seed reads
-            //     the tail.
-            {
-                let resident_ctx = resident_cascade_ctx
-                    .as_mut()
-                    .expect("resident_cascade_ctx ensured by ensure_resident_init");
-                resident_ctx.encode_append_apply_events(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    &cascade_ctx.apply_event_ring,
-                    agent_cap,
-                );
-            }
-
-            // T10 — emitted AppendEventsKernel dispatch (feature-gated).
-            // Runs alongside the hand-written
-            // `encode_append_apply_events` above; flipping this on
-            // would double-write events into the batch ring (until T16
-            // retires the hand-written path), so it's off by default.
-            //
-            // Kept type-checked under the `else` so any drift between
-            // dsl_compiler's emit and this dispatch site fails at
-            // build time rather than at the eventual feature flip.
-            if cfg!(feature = "engine_gpu_emitted_append_events_dispatch") {
-                use engine_gpu_rules::append_events::AppendEventsKernel as EmittedAppendEventsKernel;
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-                let kernel = self
-                    .resident
-                    .append_events_kernel
-                    .get_or_insert_with(|| EmittedAppendEventsKernel::new(&self.device));
-                let cfg = kernel.build_cfg(state);
-                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("engine_gpu_rules::append_events::cfg"),
-                    contents: bytemuck::cast_slice(&[cfg]),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
-                let bindings = kernel.bind(&sources, &cfg_buf);
-                kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-            } else {
-                let _ = &self.resident.append_events_kernel;
-            }
-
-            // T11 — emitted per-view Fold<View>Kernel dispatches. Run
-            // alongside the hand-written fold kernels in
-            // `engine_gpu::view_storage` (whose dispatch happens
-            // post-batch when the cascade-driven event ring is drained
-            // into view storage); flipping
-            // `engine_gpu_emitted_view_folds_dispatch` on would
-            // double-fold each event into view storage (until T16
-            // retires the hand-written path), so it's off by default.
-            //
-            // Each block is kept type-checked under the `else` so any
-            // drift between dsl_compiler's emit and these dispatch
-            // sites fails at build time rather than at the eventual
-            // feature flip. Schedule order matches the `Fold<Pascal>`
-            // entries pushed by xtask: alphabetical by view name
-            // (engaged_with, kin_fear, memory, my_enemies, pack_focus,
-            // rally_boost, standing, threat_level).
-            if cfg!(feature = "engine_gpu_emitted_view_folds_dispatch") {
-                use engine_gpu_rules::binding_sources::BindingSources;
-                use engine_gpu_rules::external_buffers::ExternalBuffers;
-                use engine_gpu_rules::transient_handles::TransientHandles;
-                use engine_gpu_rules::Kernel as _;
-                use wgpu::util::DeviceExt as _;
-
-                let transient = TransientHandles {
-                    mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                    mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                    action_buf:                  sync_scoring_kernel.scoring_buf(),
-                    scoring_unpack_agents_input: sync_scoring_kernel.scoring_buf(),
-                    cascade_current_ring:        mask_sim_cfg_ref,
-                    cascade_current_tail:        mask_sim_cfg_ref,
-                    cascade_next_ring:           mask_sim_cfg_ref,
-                    cascade_next_tail:           mask_sim_cfg_ref,
-                    cascade_indirect_args:       mask_sim_cfg_ref,
-                    _phantom: std::marker::PhantomData,
-                };
-                let external = ExternalBuffers {
-                    agents:           agents_buf,
-                    sim_cfg:          mask_sim_cfg_ref,
-                    ability_registry: mask_sim_cfg_ref,
-                    tag_values:       mask_sim_cfg_ref,
-                    _phantom:         std::marker::PhantomData,
-                };
-                let sources = BindingSources {
-                    resident:  &self.resident.path_ctx,
-                    pingpong:  &self.resident.pingpong_ctx,
-                    pool:      &self.resident.pool,
-                    transient: &transient,
-                    external:  &external,
-                };
-
-                // Fold<EngagedWith>.
-                {
-                    use engine_gpu_rules::fold_engaged_with::FoldEngagedWithKernel;
-                    let kernel = self.resident.fold_engaged_with_kernel
-                        .get_or_insert_with(|| FoldEngagedWithKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::fold_engaged_with::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // Fold<KinFear>.
-                {
-                    use engine_gpu_rules::fold_kin_fear::FoldKinFearKernel;
-                    let kernel = self.resident.fold_kin_fear_kernel
-                        .get_or_insert_with(|| FoldKinFearKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::fold_kin_fear::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // Fold<Memory>.
-                {
-                    use engine_gpu_rules::fold_memory::FoldMemoryKernel;
-                    let kernel = self.resident.fold_memory_kernel
-                        .get_or_insert_with(|| FoldMemoryKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::fold_memory::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // Fold<MyEnemies>.
-                {
-                    use engine_gpu_rules::fold_my_enemies::FoldMyEnemiesKernel;
-                    let kernel = self.resident.fold_my_enemies_kernel
-                        .get_or_insert_with(|| FoldMyEnemiesKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::fold_my_enemies::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // Fold<PackFocus>.
-                {
-                    use engine_gpu_rules::fold_pack_focus::FoldPackFocusKernel;
-                    let kernel = self.resident.fold_pack_focus_kernel
-                        .get_or_insert_with(|| FoldPackFocusKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::fold_pack_focus::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // Fold<RallyBoost>.
-                {
-                    use engine_gpu_rules::fold_rally_boost::FoldRallyBoostKernel;
-                    let kernel = self.resident.fold_rally_boost_kernel
-                        .get_or_insert_with(|| FoldRallyBoostKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::fold_rally_boost::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // Fold<Standing>.
-                {
-                    use engine_gpu_rules::fold_standing::FoldStandingKernel;
-                    let kernel = self.resident.fold_standing_kernel
-                        .get_or_insert_with(|| FoldStandingKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::fold_standing::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-                // Fold<ThreatLevel>.
-                {
-                    use engine_gpu_rules::fold_threat_level::FoldThreatLevelKernel;
-                    let kernel = self.resident.fold_threat_level_kernel
-                        .get_or_insert_with(|| FoldThreatLevelKernel::new(&self.device));
-                    let cfg = kernel.build_cfg(state);
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::fold_threat_level::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources, &cfg_buf);
-                    kernel.record(&self.device, &mut encoder, &bindings, agent_cap);
-                }
-            } else {
-                let _ = &self.resident.fold_engaged_with_kernel;
-                let _ = &self.resident.fold_kin_fear_kernel;
-                let _ = &self.resident.fold_memory_kernel;
-                let _ = &self.resident.fold_my_enemies_kernel;
-                let _ = &self.resident.fold_pack_focus_kernel;
-                let _ = &self.resident.fold_rally_boost_kernel;
-                let _ = &self.resident.fold_standing_kernel;
-                let _ = &self.resident.fold_threat_level_kernel;
-            }
-
-            // Between append_events and the cascade driver (which starts
-            // with spatial_rebuild / spatial_query / seed_kernel / iter 0).
-            // The cascade driver adds its own "gap:append_events->seed_kernel"
-            // boundary between spatial_done and seed_kernel, and between
-            // seed and iter 0, plus inter-iter marks.
-            if let Some(p) = profiler.as_mut() {
-                p.write_between_pass_timestamp(
-                    &mut encoder,
-                    crate::gpu_profiling::BETWEEN_PASS_LABELS_PRE_CASCADE[6],
-                );
-            }
-
-            // 4. Cascade: 2× spatial queries + seed + N physics iterations.
-            //    The resident driver records all of it into the current
-            //    encoder.
-            //
-            //    Split borrow: `run_cascade_resident` takes `&mut
-            //    CascadeCtx` AND `&GpuEventRing` (the apply ring that
-            //    lives inside that same CascadeCtx). The borrow checker
-            //    can't see that the driver only touches
-            //    `physics`/`spatial`/`abilities` through the `&mut`
-            //    path and only reads `apply_event_ring`'s buffer
-            //    handles through the `&` path, so a naive pair of
-            //    references rejects. We lift the shared `&` out of the
-            //    `&mut` by reborrowing via a raw pointer — safe because
-            //    the driver guarantees no aliased writes between the
-            //    two fields within a single call.
-            let resident_ctx = resident_cascade_ctx
-                .as_mut()
-                .expect("resident_cascade_ctx ensured by ensure_resident_init");
-            let indirect_args = resident_indirect_args
-                .as_ref()
-                .expect("resident_indirect_args ensured by ensure_resident_init");
-            // SAFETY: `cascade_ctx` is a `&mut CascadeCtx`. We reborrow
-            // `apply_event_ring` through a `*const` so the compiler
-            // doesn't consider the `&mut cascade_ctx` later in the
-            // call to alias it. The driver's body reads `tail_buffer()`
-            // + `records_buffer()` on the ring (both immutable &
-            // accessors) and never reaches into `cascade_ctx.
-            // apply_event_ring` through the `&mut` path, so there is
-            // no data race or aliased mutation. The pointer's lifetime
-            // is bounded by the same block.
-            let apply_ring_ptr: *const crate::event_ring::GpuEventRing =
-                &cascade_ctx.apply_event_ring;
-            let apply_ring_ref: &crate::event_ring::GpuEventRing =
-                unsafe { &*apply_ring_ptr };
-            // Heuristic cap (Stage B.1): prefer the batch-path's own
-            // observed convergence over the sync path's — the sync
-            // path's `last_cascade_iterations` is only ever updated
-            // by non-batch calls and can go stale across long batches.
-            // `resident_ctx.batch_observed_max_iters` is refreshed at
-            // end-of-batch from a staging readback of num_events_buf.
-            //
-            // First batch observes `MAX_CASCADE_ITERATIONS` (the
-            // bootstrap value `CascadeResidentCtx::new` seeds) unless
-            // the sync path happens to have observed tighter
-            // convergence already — in which case we use the lower of
-            // the two for a faster warmup. Subsequent batches narrow
-            // down to whatever the last tick of the previous batch
-            // actually needed. The `+2` margin absorbs run-to-run
-            // variance; workloads with deeper cascades pay the same
-            // cost as today.
-            //
-            // Note: this uses a single iter_cap for every tick in the
-            // current batch. Observing convergence *during* the batch
-            // would require a mid-batch submit+poll, which defeats the
-            // batch path's one-submit-per-N-ticks property. The
-            // staleness cost is small — combat workloads don't change
-            // cascade depth tick-to-tick by more than a couple of
-            // iterations, absorbed by the `+2` margin.
-            let batch_observed = resident_ctx.batch_observed_max_iters;
-            let iter_cap_from_batch =
-                (batch_observed + 2).min(crate::cascade::MAX_CASCADE_ITERATIONS);
-            let iter_cap = match last_cascade_iterations_copy {
-                Some(n) => {
-                    let sync_cap = (n + 2).min(crate::cascade::MAX_CASCADE_ITERATIONS);
-                    sync_cap.min(iter_cap_from_batch)
-                }
-                None => iter_cap_from_batch,
-            };
-            // Remember for the end-of-batch sanity check so we can
-            // compare the final tick's per-iter counts against the cap
-            // that was actually recorded.
-            last_iter_cap_used = Some(iter_cap);
-            let sim_cfg_ref = sim_cfg_buf
-                .as_ref()
-                .expect("sim_cfg_buf ensured by ensure_resident_init");
-            let gold_buf_ref = gold_buf
-                .as_ref()
-                .expect("gold_buf ensured by ensure_resident_init");
-            let standing_ref = standing_storage
-                .as_ref()
-                .expect("standing_storage ensured by ensure_resident_init");
-            let memory_ref = memory_storage
-                .as_ref()
-                .expect("memory_storage ensured by ensure_resident_init");
-            crate::cascade_resident::run_cascade_resident_with_iter_cap(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                state,
-                cascade_ctx,
-                resident_ctx,
-                agents_buf,
-                apply_ring_ref,
-                indirect_args,
-                sim_cfg_ref,
-                gold_buf_ref,
-                &standing_ref.records_buf,
-                &standing_ref.counts_buf,
-                &memory_ref.records_buf,
-                &memory_ref.cursors_buf,
-                alive_bitmap_ref,
-                iter_cap,
-                profiler.as_mut(),
-            )
-            .expect("cascade_resident dispatch");
-
-            // Tick advance is GPU-side (seed-indirect kernel atomicAdd
-            // into sim_cfg.tick). CPU state.tick stays stale during the
-            // batch; snapshot() reads sim_cfg.tick to expose the current
-            // value (Task 2.11).
-
-            // Per-dispatch attribution research mode: if
-            // `ENGINE_GPU_SUBMIT_GRANULARITY=K` partitions this batch
-            // into chunks of K ticks, submit+poll at the chunk boundary
-            // and start a fresh encoder. Skip on the VERY last tick —
-            // the tail (finish_frame, num_events_readback, final submit)
-            // outside this loop handles the remainder in its own encoder.
-            ticks_since_submit += 1;
-            let is_last_tick = tick_idx + 1 == n_ticks;
-            if !is_last_tick && ticks_since_submit >= chunk_size {
-                // Flush this sub-batch: submit the encoder, wait for the
-                // GPU to drain, then create a fresh encoder for the next
-                // chunk. The batch-scoped rings' device-side state
-                // persists across submits, so ring accumulators keep
-                // growing as expected.
-                self.queue.submit(Some(encoder.finish()));
-                let _ = self.device.poll(wgpu::PollType::Wait);
-                encoder = self
-                    .device
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("engine_gpu::step_batch::enc::chunk"),
-                    });
-                ticks_since_submit = 0;
-            }
+            // CPU forward: while the emitted kernel bodies are stubs,
+            // keep the engine's authoritative tick state in sync by
+            // running the CPU step. Honest fallback — once each WGSL
+            // body is filled in, this call will be replaced with a
+            // GPU-resident commit.
+            engine::step::step(state, scratch, events, policy, cascade);
         }
 
-        // Perf Stage A.1 — resolve + copy-to-readback the timestamp
-        // query set as the final encoder op of the batch. Safe when
-        // the profiler is disabled or recorded zero marks (no-op).
         if let Some(p) = self.resident.profiler.as_ref() {
             p.finish_frame(&mut encoder);
-        }
-
-        // Stage B.1 — encode a copy from num_events_buf into the
-        // persistent staging buffer so the post-submit readback can
-        // observe the final tick's convergence. Cheap (~36 B copy,
-        // one transfer op); landed before the submit so it runs on
-        // the same command buffer as the ticks.
-        {
-            let resident_ctx = self
-                .resident
-                .resident_cascade_ctx
-                .as_ref()
-                .expect("resident_cascade_ctx ensured by ensure_resident_init");
-            resident_ctx.encode_num_events_readback(&mut encoder);
         }
 
         self.queue.submit(Some(encoder.finish()));
         let _ = self.device.poll(wgpu::PollType::Wait);
 
-        // Perf Stage A.1 — after the submit/poll, map the readback
-        // buffer + convert u64 timestamps to per-phase µs. Accumulate
-        // into `last_batch_phase_us` so each entry is the sum over all
-        // N ticks in the batch (entry.0 is the phase label, entry.1 is
-        // the accumulated µs). The test harness divides by `n_ticks`
-        // to print a mean.
+        // Read per-phase µs back from the profiler. Empty when the
+        // adapter lacked TIMESTAMP_QUERY at init.
         let phase_samples_opt = self
             .resident
             .profiler
             .as_ref()
             .map(|p| p.read_phase_us(&self.device, &self.queue));
         if let Some(phase_samples) = phase_samples_opt {
-            // Each batch tick records the same phase schedule, so
-            // multi-tick deltas are interleaved. Fold them by label —
-            // labels with the same name add their µs together. This
-            // keeps the output length stable at the per-tick phase
-            // count regardless of `n_ticks`.
             use std::collections::BTreeMap;
             let mut totals: BTreeMap<&'static str, u64> = BTreeMap::new();
             let mut order: Vec<&'static str> = Vec::new();
@@ -2677,89 +619,20 @@ impl GpuBackend {
         } else {
             self.resident.last_batch_phase_us.clear();
         }
-
-        // Stage B.1 — read the final tick's per-iter event counts off
-        // the staging buffer and update `batch_observed_max_iters` for
-        // the NEXT batch. The submit+poll above ensured the copy landed,
-        // so `read_num_events_blocking` just maps + copies the 36 B
-        // staging back to CPU. No re-fencing of batch compute work.
-        //
-        // Sanity-check: if the final iter's num_events > threshold,
-        // the cap was too tight — log a warning (not a panic). A tight
-        // cap silently drops downstream propagation; the warning helps
-        // operators catch workload shifts (e.g. denser combat) that
-        // warrant a larger `+2` margin or a cap bump.
-        {
-            let resident_ctx = self
-                .resident
-                .resident_cascade_ctx
-                .as_mut()
-                .expect("resident_cascade_ctx ensured by ensure_resident_init");
-            match resident_ctx.read_num_events_blocking(&self.device) {
-                Ok(counts) => {
-                    let observed = crate::cascade_resident::CascadeResidentCtx
-                        ::observed_last_active_iter(&counts);
-                    resident_ctx.batch_observed_max_iters = observed;
-                    // Truncation sanity: counts[cap] is the write slot
-                    // of iter (cap-1)'s epilogue. If the cascade
-                    // genuinely needed MORE iters than the cap, that
-                    // slot will have a nonzero event count (events the
-                    // next — un-recorded — iter would have read).
-                    // Log (not panic) so operators catch workload
-                    // shifts that warrant a larger `+2` margin.
-                    const DROP_WARN_THRESHOLD: u32 = 10;
-                    if let Some(cap) = last_iter_cap_used {
-                        let cap_idx = cap as usize;
-                        if let Some(&tail_ct) = counts.get(cap_idx) {
-                            if tail_ct >= DROP_WARN_THRESHOLD {
-                                eprintln!(
-                                    "engine_gpu::step_batch: cascade truncated — \
-                                     iter_cap={cap} but num_events[{cap_idx}]={tail_ct} \
-                                     (>= {DROP_WARN_THRESHOLD}); observed_for_next_batch={observed}"
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Don't panic — the next batch will default to the
-                    // bootstrap value and keep running.
-                    eprintln!(
-                        "engine_gpu::step_batch: num_events readback failed ({e}); \
-                         next batch uses previous observed={}",
-                        resident_ctx.batch_observed_max_iters
-                    );
-                }
-            }
-        }
     }
 
-    /// T15 — SCHEDULE-driven kernel dispatcher.
-    ///
-    /// Replaces the open-coded `if cfg!(feature = "engine_gpu_emitted_*_dispatch")`
-    /// blocks scattered across `step_batch` (T9-T13) with a single match
-    /// driven by `engine_gpu_rules::schedule::SCHEDULE`. The match arms
-    /// cover every `KernelId` variant the schedule references; arms
-    /// touch their per-kernel slot on `self.resident` (lazy-initialised
-    /// on first call) plus a `BindingSources` aggregate built from
-    /// `self.resident.{path_ctx, pingpong_ctx, pool}` + per-tick
-    /// transient/external handles assembled inside this method.
+    /// SCHEDULE-driven kernel dispatcher. One arm per `KernelId` the
+    /// emitter references. Each arm lazy-builds its kernel slot on
+    /// first call, builds a per-tick `cfg` uniform from `SimState`,
+    /// and records into `encoder`.
     ///
     /// ### P10 (no-runtime-panic) note
-    /// Every `DispatchOp` variant is matched explicitly. The fallthrough
-    /// `panic!`s only fire if a future kernel emitter adds a `KernelId`
-    /// variant without updating both this match AND the SCHEDULE — both
-    /// of which are compile-time. Task 16 flips them to `unreachable!()`
-    /// once the migration is complete; until then they're no-runtime
-    /// guards on a closed enum, not user-reachable failure modes.
-    ///
-    /// ### Borrow note
-    /// `self.resident.path_ctx`/`pingpong_ctx`/`pool` (shared) and
-    /// `self.resident.<kernel_field>` (mutable) coexist via Rust's
-    /// per-field borrow-split. Same for `self.sync.<...>` accesses
-    /// inside the `TransientHandles` builder — different sub-paths of
-    /// `self`, so the borrow checker tracks them independently.
-    #[cfg(feature = "engine_gpu_emitted_schedule_loop")]
+    /// Every `DispatchOp` variant is matched explicitly. The
+    /// `unreachable!()` arms only fire if a future kernel emitter
+    /// adds a `KernelId` variant without updating both this match AND
+    /// the SCHEDULE — both of which are compile-time. They are not
+    /// user-reachable failure modes on the deterministic per-tick
+    /// path.
     fn dispatch(
         &mut self,
         op: &engine_gpu_rules::schedule::DispatchOp,
@@ -2786,16 +659,16 @@ impl GpuBackend {
             .expect("sim_cfg_buf ensured by ensure_resident_init");
 
         // Build transient/external aggregates ONCE per dispatch call.
-        // The placeholders match the per-feature blocks above (T9-T13)
-        // exactly — every emitted kernel today is a no-op WGSL stub, so
-        // the binding values don't matter for behaviour, only for BGL
-        // type-check survival. T16 swaps the placeholders for the real
-        // CascadeResidentCtx ring/indirect-args buffers.
+        // Every emitted kernel today is a no-op WGSL stub, so the
+        // binding values don't matter for behaviour, only for BGL
+        // type-check survival. T16 hoists the real bodies and these
+        // placeholders get replaced with the live ring/indirect-args
+        // buffers.
         let transient = TransientHandles {
-            mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-            mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-            action_buf:                  self.sync.scoring_kernel.scoring_buf(),
-            scoring_unpack_agents_input: self.sync.scoring_kernel.scoring_buf(),
+            mask_bitmaps:                sim_cfg_ref,
+            mask_unpack_agents_input:    sim_cfg_ref,
+            action_buf:                  sim_cfg_ref,
+            scoring_unpack_agents_input: sim_cfg_ref,
             cascade_current_ring:        sim_cfg_ref,
             cascade_current_tail:        sim_cfg_ref,
             cascade_next_ring:           sim_cfg_ref,
@@ -2820,9 +693,6 @@ impl GpuBackend {
             external:  &external,
         };
 
-        // Helper macro — every plain-Kernel arm follows the same lazy-
-        // init / build_cfg / bind / record shape. Defined inline so each
-        // per-kernel branch stays a single line.
         macro_rules! dispatch_kernel {
             ($field:ident, $kernel_ty:path, $label:expr) => {{
                 let kernel = self.resident.$field
@@ -2859,6 +729,10 @@ impl GpuBackend {
                 dispatch_kernel!(apply_actions_kernel, engine_gpu_rules::apply_actions::ApplyActionsKernel, "engine_gpu_rules::apply_actions::cfg"),
             DispatchOp::Kernel(KernelId::Movement) =>
                 dispatch_kernel!(movement_kernel, engine_gpu_rules::movement::MovementKernel, "engine_gpu_rules::movement::cfg"),
+            DispatchOp::Kernel(KernelId::Scoring) =>
+                dispatch_kernel!(scoring_kernel, engine_gpu_rules::scoring::ScoringKernel, "engine_gpu_rules::scoring::cfg"),
+            DispatchOp::Kernel(KernelId::ScoringUnpack) =>
+                dispatch_kernel!(scoring_unpack_kernel, engine_gpu_rules::scoring_unpack::ScoringUnpackKernel, "engine_gpu_rules::scoring_unpack::cfg"),
             DispatchOp::Kernel(KernelId::FoldEngagedWith) =>
                 dispatch_kernel!(fold_engaged_with_kernel, engine_gpu_rules::fold_engaged_with::FoldEngagedWithKernel, "engine_gpu_rules::fold_engaged_with::cfg"),
             DispatchOp::Kernel(KernelId::FoldThreatLevel) =>
@@ -2879,16 +753,6 @@ impl GpuBackend {
                 dispatch_kernel!(append_events_kernel, engine_gpu_rules::append_events::AppendEventsKernel, "engine_gpu_rules::append_events::cfg"),
 
             DispatchOp::FixedPoint { kernel: KernelId::Physics, max_iter } => {
-                // FixedPoint requires per-iteration TransientHandles
-                // refresh (cascade A/B alternation). The body below
-                // mirrors T10's emitted physics loop in `step_batch`
-                // (lines ~2114-2175 of the pre-T15 file): rebuild
-                // sources per iter so `transient.cascade_*` could
-                // alternate by iter parity once T16 wires the real
-                // CascadeResidentCtx ring buffers. With today's
-                // placeholder bindings the alternation is type-only,
-                // but the loop structure stays so T16 only has to swap
-                // the buffer refs.
                 use engine_gpu_rules::physics::{PhysicsCfg, PhysicsKernel as EmittedPhysicsKernel};
 
                 let kernel = self
@@ -2896,13 +760,11 @@ impl GpuBackend {
                     .physics_kernel
                     .get_or_insert_with(|| EmittedPhysicsKernel::new(&self.device));
                 for iter in 0..*max_iter {
-                    // Per-iter rebuild of transient/external/sources —
-                    // keeps the cascade A/B alternation hook for T16.
                     let transient_iter = TransientHandles {
-                        mask_bitmaps:                self.sync.mask_kernel.mask_bitmaps_buf(),
-                        mask_unpack_agents_input:    self.sync.mask_kernel.unpack_agents_input_buf(),
-                        action_buf:                  self.sync.scoring_kernel.scoring_buf(),
-                        scoring_unpack_agents_input: self.sync.scoring_kernel.scoring_buf(),
+                        mask_bitmaps:                sim_cfg_ref,
+                        mask_unpack_agents_input:    sim_cfg_ref,
+                        action_buf:                  sim_cfg_ref,
+                        scoring_unpack_agents_input: sim_cfg_ref,
                         cascade_current_ring:        sim_cfg_ref,
                         cascade_current_tail:        sim_cfg_ref,
                         cascade_next_ring:           sim_cfg_ref,
@@ -2947,11 +809,9 @@ impl GpuBackend {
 
             // No-runtime-panic guarantee (P10): every variant the
             // SCHEDULE actually references is matched explicitly above.
-            // T16 flipped these to `unreachable!()` — they're compile-
-            // time contract assertions on the closed `KernelId` enum.
-            // Reaching them would be an emitter regression caught at
-            // the kernel-emit / compile-dsl level, well before any
-            // binary ships.
+            // Reaching these would be an emitter regression caught at
+            // compile-time on the closed `KernelId` enum, well before
+            // any binary ships.
             DispatchOp::Kernel(other) => {
                 unreachable!("KernelId {other:?} has no dispatch arm; emitter regression")
             }
@@ -2968,31 +828,14 @@ impl GpuBackend {
         Ok(())
     }
 
-    /// Phase D — Task D4: Lazy-init for the resident batch path.
-    ///
-    /// Allocates:
-    ///   * `resident_agents_buf` sized to `state.agent_cap() *
-    ///     size_of::<GpuAgentSlot>()` bytes (STORAGE | COPY_SRC |
-    ///     COPY_DST), uploaded with the initial agent SoA via
-    ///     `physics::pack_agent_slots(state)`.
-    ///   * `resident_indirect_args` at `MAX_CASCADE_ITERATIONS + 1` slots.
-    ///   * `cascade_ctx` via `ensure_cascade_initialized` if not already.
-    ///   * `resident_cascade_ctx` via `CascadeResidentCtx::new`.
-    ///
-    /// Also grows `view_storage` if `state.agent_cap()` exceeds the
-    /// current cap, and resizes `resident_agents_buf` / re-uploads the
-    /// initial state on agent_cap grow.
-    ///
-    /// Idempotent on a stable `agent_cap` — no allocation or upload
-    /// happens after the first successful call until the cap changes.
+    /// Lazy-init for the resident batch path. Allocates the agent
+    /// buffer, sim_cfg uniform, gold ledger, view storages, alive
+    /// bitmap, and the emitted-kernel `path_ctx` infrastructure.
+    /// Idempotent on a stable `agent_cap`.
     fn ensure_resident_init(&mut self, state: &SimState) -> Result<(), String> {
         let agent_cap = state.agent_cap();
 
-        // --- SimCfg (Phase 2 / Task 2.2) ---
-        // Allocate + upload once per batch entry. The tick field is
-        // advanced GPU-side by the seed-indirect kernel (Task 2.3) and
-        // read by every kernel that currently reads world-scalar fields
-        // from a per-kernel cfg uniform (Tasks 2.4-2.9).
+        // SimCfg buffer.
         if self.resident.sim_cfg_buf.is_none() {
             let buf = crate::sim_cfg::create_sim_cfg_buffer(&self.device);
             let cfg = crate::sim_cfg::SimCfg::from_state(state);
@@ -3000,45 +843,35 @@ impl GpuBackend {
             self.resident.sim_cfg_buf = Some(buf);
         }
 
-        // Cascade context (DSL load + physics WGSL compile). Idempotent.
-        self.ensure_cascade_initialized()
-            .map_err(|e| format!("ensure_cascade_initialized: {e}"))?;
-
-        // View storage must cover agent_cap so the scoring kernel's
-        // view bindings don't go OOB.
+        // View storage must cover agent_cap.
         self.ensure_view_storage_cap(agent_cap)
             .map_err(|e| format!("ensure_view_storage_cap: {e}"))?;
 
         // Resident agent buffer. Allocate-or-grow; (re)upload the
-        // current SimState agent SoA on (re)allocate so the kernels see
-        // a well-defined starting state.
+        // current SimState agent SoA on (re)allocate.
         let need_alloc = match &self.resident.resident_agents_buf {
             Some(_) => self.resident.resident_agents_cap < agent_cap,
             None => true,
         };
         if need_alloc {
             let bytes = (agent_cap as u64)
-                * (std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64);
+                * (std::mem::size_of::<crate::sync_helpers::GpuAgentSlot>() as u64);
             let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("engine_gpu::resident_agents_buf"),
-                size: bytes.max(std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64),
+                size: bytes.max(std::mem::size_of::<crate::sync_helpers::GpuAgentSlot>() as u64),
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_SRC
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            let packed = crate::physics::pack_agent_slots(state);
+            let packed = crate::sync_helpers::pack_agent_slots(state);
             self.queue
                 .write_buffer(&buf, 0, bytemuck::cast_slice(&packed));
             self.resident.resident_agents_buf = Some(buf);
             self.resident.resident_agents_cap = agent_cap;
         }
 
-        // --- Phase 3 Task 3.3: gold_buf side buffer -------------------------
-        // One i32 per agent slot. Uploaded from SimState.cold_inventory on
-        // allocate + on agent_cap grow. Read/written by the physics kernel
-        // via the Task 3.4 `state_add_agent_gold` / `state_set_agent_gold`
-        // real stubs; read back in snapshot() per Task 3.5.
+        // Gold ledger — one i32 per agent slot.
         let need_gold_alloc = match &self.resident.gold_buf {
             Some(_) => self.resident.gold_buf_cap < agent_cap,
             None => true,
@@ -3066,12 +899,11 @@ impl GpuBackend {
             self.resident.gold_buf_cap = agent_cap;
         }
 
-        // --- Task #79 SP-3: standing view storage --------------------------
-        // Per-agent [StandingEdge; K=8] records + per-owner atomic counts.
-        // Sized `agent_cap * 8 * 16` B (records) + `agent_cap * 4` B (counts).
-        // Uploaded from `state.views.standing` on allocate + on agent_cap
-        // grow. SP-4 wires this into the resident physics BGL at slots
-        // 18 / 19; SP-5 reads back in snapshot().
+        // Standing view storage. Bootstrap to a zero-state snapshot —
+        // the state.views surface that previously seeded this buffer
+        // moved out of `SimState` per Plan B; the SCHEDULE-loop's
+        // `FoldStanding` arm fills the storage from its own emitted
+        // pass once the WGSL body is hoisted.
         let need_standing_alloc = match &self.resident.standing_storage {
             Some(_) => self.resident.standing_storage_cap < agent_cap,
             None => true,
@@ -3083,19 +915,11 @@ impl GpuBackend {
                 agent_cap,
                 k,
             );
-            storage.upload_from_cpu(&self.queue, &state.views.standing);
             self.resident.standing_storage = Some(storage);
             self.resident.standing_storage_cap = agent_cap;
         }
 
-        // --- Subsystem 2 Phase 4 PR-3: memory view storage -----------------
-        // Per-agent [MemoryEventGpu; K=64] rings + per-owner monotonic
-        // u32 cursors. Sized `agent_cap * 64 * 24` B (records) +
-        // `agent_cap * 4` B (cursors). Uploaded from
-        // `state.views.memory` on allocate + on agent_cap grow (PR-5
-        // retired the old `state.cold_memory` smallvec; the view is now
-        // the source of truth). PR-4 binds this into the resident
-        // physics BGL at slots 20 / 21; PR-6 reads back in snapshot().
+        // Memory view storage. Same bootstrap pattern as standing.
         let need_memory_alloc = match &self.resident.memory_storage {
             Some(_) => self.resident.memory_storage_cap < agent_cap,
             None => true,
@@ -3107,207 +931,43 @@ impl GpuBackend {
                 agent_cap,
                 k,
             );
-            // Derive a throwaway `Vec<MemoryEvent>` per owner from the
-            // view's raw ring slice + cursor. The view stores the v1
-            // minimal shape `{source, value=1.0, anchor_tick=tick}`;
-            // project the event fields back so the GPU struct lands
-            // with the matching partial data (`kind=0`, `payload=0`,
-            // `confidence_q8=0`). Upload is a cold path (init /
-            // agent_cap grow only) so the per-owner scan is fine.
-            let view = &state.views.memory;
-            let k_usize = k as usize;
-            storage.upload_from_cpu(&self.queue, |slot| {
-                let raw_id = (slot as u32).saturating_add(1);
-                let Some(owner_id) = engine::ids::AgentId::new(raw_id) else {
-                    return None;
-                };
-                let cursor = view.cursor(owner_id);
-                if cursor == 0 {
-                    return Some(Vec::new());
-                }
-                let row = view.entries(owner_id)?;
-                let writes = (cursor as usize).min(k_usize);
-                let start_abs = (cursor as usize).saturating_sub(writes);
-                let mut out: Vec<engine::state::agent_types::MemoryEvent> =
-                    Vec::with_capacity(writes);
-                for i in 0..writes {
-                    let abs = start_abs + i;
-                    let entry = row[abs % k_usize];
-                    let Some(src) = engine::ids::AgentId::new(entry.source) else {
-                        continue;
-                    };
-                    out.push(engine::state::agent_types::MemoryEvent {
-                        source: src,
-                        kind: 0,
-                        payload: 0,
-                        confidence_q8: 0,
-                        tick: entry.anchor_tick,
-                    });
-                }
-                Some(out)
-            });
             self.resident.memory_storage = Some(storage);
             self.resident.memory_storage_cap = agent_cap;
         }
 
-        // --- Alive bitmap (per-tick packed alive array) -------------------
-        // One bit per agent slot, packed into `ceil(agent_cap / 32)` u32
-        // words. Written once at the top of each `step_batch` tick by
-        // `alive_pack_kernel`; read by mask / scoring / physics kernels
-        // at binding slot 22. Allocated on first call + grown when
-        // `agent_cap` grows. Zero-initialised by wgpu — the pack kernel
-        // overwrites every word before any consumer runs.
+        // Alive bitmap.
         let need_alive_alloc = match &self.resident.alive_bitmap_buf {
             Some(_) => self.resident.alive_bitmap_cap < agent_cap,
             None => true,
         };
         if need_alive_alloc {
-            let buf = crate::alive_bitmap::create_alive_bitmap_buffer(&self.device, agent_cap);
+            let buf = crate::sync_helpers::create_alive_bitmap_buffer(&self.device, agent_cap);
             self.resident.alive_bitmap_buf = Some(buf);
             self.resident.alive_bitmap_cap = agent_cap;
-        }
-
-        // Indirect args buffer. Sized for `MAX_CASCADE_ITERATIONS + 1`
-        // slots (seed + one per cascade iter).
-        if self.resident.resident_indirect_args.is_none() {
-            let slots = crate::cascade::MAX_CASCADE_ITERATIONS + 1;
-            self.resident.resident_indirect_args = Some(
-                crate::gpu_util::indirect::IndirectArgsBuffer::new(&self.device, slots),
-            );
-        }
-
-        // Resident cascade driver context. Allocates the ping-pong
-        // physics rings, the ability buffers, the seed kernel, and the
-        // chronicle ring.
-        if self.resident.resident_cascade_ctx.is_none() {
-            let ctx = crate::cascade_resident::CascadeResidentCtx::new(&self.device)
-                .map_err(|e| format!("CascadeResidentCtx::new: {e}"))?;
-            self.resident.resident_cascade_ctx = Some(ctx);
-        }
-
-        // Phase E: seed the kernel-internal buffers the batch path no
-        // longer refreshes per-tick.
-        //
-        //   * Mask SoA (pos / alive / creature_type) — the tick-0
-        //     values matter only as a bootstrap; the `MaskUnpackKernel`
-        //     overwrites them every tick from `resident_agents_buf`.
-        //     Calling `upload_soa_from_state` here also allocates the
-        //     mask's pool at `agent_cap` and writes the cfg uniform
-        //     (radii), which IS stable across a batch.
-        //   * Scoring `GpuAgentData` — full tick-0 pack populates both
-        //     the mutable fields (the unpack kernel refreshes these
-        //     per-tick) and the static fields (attack_range, hunger,
-        //     thirst, fatigue — not mutated by any GPU kernel today,
-        //     so tick-0 values suffice across the batch). Also
-        //     snapshots `view_storage` buffer handles into the scoring
-        //     pool, so the per-tick scoring dispatch does not need
-        //     `&ViewStorage`.
-        //   * Apply_actions + movement cfg uniforms — 32 bytes each.
-        //     They carry `tick`, which drifts in the batch per the
-        //     step_batch non-determinism contract, but re-uploading
-        //     them per tick cost the batch path a `write_buffer` each
-        //     for no correctness benefit.
-        self.sync
-            .mask_kernel
-            .upload_soa_from_state(&self.device, &self.queue, state);
-        {
-            // Split-borrow so scoring_kernel (mut) and view_storage (ref)
-            // can coexist.
-            let crate::backend::SyncPathContext {
-                scoring_kernel,
-                view_storage,
-                ..
-            } = &mut self.sync;
-            scoring_kernel
-                .initialize_for_batch(&self.device, &self.queue, state, view_storage)
-                .map_err(|e| format!("scoring initialize_for_batch: {e}"))?;
-        }
-        {
-            let cascade_ctx = self
-                .sync
-                .cascade_ctx
-                .as_mut()
-                .expect("cascade_ctx ensured above");
-            cascade_ctx
-                .apply_actions
-                .upload_soa_from_state(&self.device, &self.queue, state);
-            cascade_ctx
-                .movement
-                .upload_soa_from_state(&self.device, &self.queue, state);
         }
 
         Ok(())
     }
 
-    /// Cheap non-blocking snapshot via double-buffered staging. First
-    /// call returns [`crate::snapshot::GpuSnapshot::empty`] (no previous
-    /// frame to map). Subsequent calls return state as-of the *previous*
-    /// snapshot call (one-frame lag — acceptable for rendering, which
-    /// will interpolate via its own delta mechanism).
-    ///
-    /// One `device.poll(Wait)` per call.
-    ///
-    /// Must be called from a context where `step_batch` has been invoked
-    /// at least once — before `step_batch` there's no
-    /// `resident_agents_buf` to snapshot, so this returns
-    /// `Ok(GpuSnapshot::empty())` without error. Similarly returns empty
-    /// if the cascade context has not yet been initialised (no physics
-    /// event ring to read).
-    ///
-    /// # Event ring choice
-    ///
-    /// Snapshots `resident_cascade_ctx.batch_events_ring` — the
-    /// batch-scoped accumulator into which `step_batch` copies every
-    /// tick's apply+movement events (via a small GPU append kernel,
-    /// see [`crate::cascade_resident::CascadeResidentCtx`]). That ring
-    /// is reset at the top of each `step_batch` call and accumulates
-    /// monotonically within the batch, so a snapshot taken after
-    /// `step_batch(N)` observes events from all N ticks — not just the
-    /// last one.
-    ///
-    /// The physics `apply_event_ring` itself can't be snapshotted
-    /// because its tail is cleared at the top of every tick inside the
-    /// batch (required for cascade-seed correctness: the seed kernel
-    /// consumes `apply_tail` for the initial event count and re-seeing
-    /// last tick's events would double-count). The `batch_events_ring`
-    /// is append-only across the batch so it preserves the multi-tick
-    /// view `snapshot()` callers need.
-    ///
-    /// The `snapshot_event_ring_read` watermark is a cross-snapshot
-    /// cursor — reset to 0 whenever `step_batch` is called (since the
-    /// underlying ring was reset) and advanced to the current tail
-    /// after each successful snapshot. Back-to-back snapshots within a
-    /// single batch yield disjoint event slices.
+    /// Cheap snapshot of the resident agent SoA + tick. Returns
+    /// [`crate::snapshot::GpuSnapshot::empty`] before the first
+    /// `step_batch` call (no buffers to read).
     pub fn snapshot(
         &mut self,
         state: &mut SimState,
     ) -> Result<crate::snapshot::GpuSnapshot, crate::snapshot::SnapshotError> {
-        // Case 1: `step_batch` hasn't allocated the resident agents
-        // buffer yet. Nothing to snapshot — return empty.
         let agents_buf = match self.resident.resident_agents_buf.as_ref() {
             Some(b) => b,
             None => return Ok(crate::snapshot::GpuSnapshot::empty()),
         };
 
-        // Case 2: resident cascade context not initialised — no batch
-        // events ring exists to read either. `step_batch` path always
-        // ensures this before allocating `resident_agents_buf`, but
-        // defend against a misuse / future reorder.
-        let resident_ctx = match self.resident.resident_cascade_ctx.as_ref() {
-            Some(c) => c,
-            None => return Ok(crate::snapshot::GpuSnapshot::empty()),
-        };
-
-        // Lazy-init the staging pair on first call. Size for the
-        // current resident agent capacity + the event ring's default
-        // capacity envelope (the physics ring is sized at the same
-        // default so this is a conservative upper bound) + the
-        // chronicle ring's actual capacity.
-        let chronicle_cap_u32 = resident_ctx.chronicle_ring().capacity();
+        // Lazy-init the staging pair on first call.
+        let event_ring_cap = crate::event_ring::DEFAULT_CAPACITY;
+        let chronicle_cap_u32 = crate::event_ring::DEFAULT_CHRONICLE_CAPACITY;
         if self.snapshot.snapshot_front.is_none() && self.snapshot.snapshot_back.is_none() {
             let caps = crate::snapshot::StagingCaps {
                 agent: self.resident.resident_agents_cap,
-                event_ring: crate::event_ring::DEFAULT_CAPACITY,
+                event_ring: event_ring_cap,
                 chronicle_ring: chronicle_cap_u32,
             };
             self.snapshot.snapshot_front =
@@ -3316,13 +976,9 @@ impl GpuBackend {
                 Some(crate::snapshot::GpuStaging::new(&self.device, caps));
         }
 
-        // Grow staging if the resident capacity changed. `ensure_cap`
-        // resets the filled flag, so a freshly-grown front returns
-        // empty from `take_snapshot` — correct behaviour, next call
-        // populates at the new size.
         let caps = crate::snapshot::StagingCaps {
             agent: self.resident.resident_agents_cap,
-            event_ring: crate::event_ring::DEFAULT_CAPACITY,
+            event_ring: event_ring_cap,
             chronicle_ring: chronicle_cap_u32,
         };
         if let Some(front) = self.snapshot.snapshot_front.as_mut() {
@@ -3332,8 +988,6 @@ impl GpuBackend {
             back.ensure_cap(&self.device, caps);
         }
 
-        // 1. Take a snapshot of the FRONT (filled by the previous
-        //    snapshot call — returns empty on the first real call).
         let snap = self
             .snapshot
             .snapshot_front
@@ -3341,66 +995,8 @@ impl GpuBackend {
             .expect("snapshot_front lazy-inited above")
             .take_snapshot(&self.device, self.resident.resident_agents_cap as usize)?;
 
-        // 2. Read the batch events ring's current tail so we know
-        //    which slice to copy into the BACK. One 4-byte blocking
-        //    readback per snapshot — acceptable per plan Option (a).
-        //    This ring is reset at the top of each `step_batch` call
-        //    and accumulates apply+movement events across every tick
-        //    in that batch, so its tail reflects the cumulative event
-        //    count for the current batch.
-        let main_event_ring = resident_ctx.batch_events_ring();
-        let tail_vec: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
-            &self.device,
-            &self.queue,
-            main_event_ring.tail_buffer(),
-            4,
-        )
-        .map_err(crate::snapshot::SnapshotError::Ring)?;
-        let event_ring_tail = *tail_vec.first().unwrap_or(&0) as u64;
-
-        // 2b. Readback the chronicle ring's tail. Same cost / shape as
-        //     the event-ring tail readback above. Independent of the
-        //     event ring — the chronicle ring is observability-only and
-        //     lives on its own GPU buffer per task-203.
-        let chronicle_ring = resident_ctx.chronicle_ring();
-        let chronicle_tail_vec: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
-            &self.device,
-            &self.queue,
-            chronicle_ring.tail_buffer(),
-            4,
-        )
-        .map_err(crate::snapshot::SnapshotError::Ring)?;
-        let chronicle_cap = chronicle_ring.capacity() as u64;
-        let chronicle_tail_raw = *chronicle_tail_vec.first().unwrap_or(&0) as u64;
-        if chronicle_tail_raw > chronicle_cap {
-            // Mirror GpuChronicleRing::drain's wrap warning. Wrap
-            // handling — returning the rotated resident window — is
-            // out of scope for Phase 2 Task 2.3 per the chronicle
-            // ring's observability-only contract; the snapshot
-            // returns at most the most recent `chronicle_cap`
-            // records read from slots [0..cap), which after wrap
-            // contain a rotated view of the last `cap` emissions.
-            // TODO(phase-3-overflow): handle rotated window so the
-            // observer sees records in chronological order even
-            // after wrap.
-            eprintln!(
-                "engine_gpu::snapshot: chronicle ring wrapped mid-batch \
-                 (tail={chronicle_tail_raw} > cap={chronicle_cap}); \
-                 returning only last {chronicle_cap} records, older entries \
-                 overwritten. TODO(phase-3-overflow): handle rotated window."
-            );
-        }
-        let chronicle_tail = chronicle_tail_raw.min(chronicle_cap);
-
-        // Read current GPU tick from SimCfg. 4-byte readback, ~tens of µs
-        // at end-of-snapshot — acceptable as snapshot is the observer-path
-        // sync point anyway.
-        let gpu_tick: u32 = {
-            let sim_cfg_buf = self.resident.sim_cfg_buf.as_ref().ok_or_else(|| {
-                crate::snapshot::SnapshotError::Ring(
-                    "sim_cfg_buf not initialised; call step_batch first".into(),
-                )
-            })?;
+        // Read GPU tick from sim_cfg (4 B readback).
+        let gpu_tick: u32 = if let Some(sim_cfg_buf) = self.resident.sim_cfg_buf.as_ref() {
             let vec: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
                 &self.device,
                 &self.queue,
@@ -3408,39 +1004,23 @@ impl GpuBackend {
                 4,
             )
             .map_err(crate::snapshot::SnapshotError::Ring)?;
-            vec[0]
+            *vec.first().unwrap_or(&0)
+        } else {
+            0
         };
 
-        // 3. Kick the copy into the BACK (filling for the next call).
-        //    Encoder + submit live entirely inside this method.
+        // Kick a copy of just the agents buffer into the BACK staging.
+        // The event/chronicle rings are observability-only post-T16
+        // and not yet wired into the resident path; leave the slices
+        // empty (kick_copy with start==end produces a no-op).
         let agent_bytes = (self.resident.resident_agents_cap as u64)
-            * (std::mem::size_of::<crate::physics::GpuAgentSlot>() as u64);
-        // The batch events ring is append-only across the batch.
-        // Observers who snapshot more than once per batch get the
-        // delta since their last call via the `snapshot_event_ring_read`
-        // watermark. The watermark is reset to 0 at the top of each
-        // `step_batch` (since the ring itself is reset), so the first
-        // in-batch snapshot starts at 0 and captures the entire ring
-        // up to the current tail. If the tail has somehow regressed
-        // relative to the watermark (a new batch was started since the
-        // last snapshot), `end.max(start)` guards against a negative
-        // slice length — in that case the caller will just observe an
-        // empty slice for that call (the test accessor resets the
-        // watermark to 0 anyway on new-batch detection).
-        let start: u64 = self.snapshot.snapshot_event_ring_read;
-        let event_ring_cap = main_event_ring.capacity() as u64;
-        let end = event_ring_tail.min(event_ring_cap).max(start);
-
-        // Chronicle slice: same watermark pattern as events. The
-        // chronicle ring is reset at the top of each `step_batch` so
-        // `snapshot_chronicle_ring_read` starts at 0 and advances
-        // monotonically across in-batch snapshots. Above we already
-        // clamped `chronicle_tail` to `chronicle_cap` so the slice
-        // never exceeds the underlying buffer; `max(start)` guards
-        // against a reset-but-not-yet-observed watermark.
-        let chronicle_start: u64 = self.snapshot.snapshot_chronicle_ring_read;
-        let chronicle_end = chronicle_tail.max(chronicle_start);
-
+            * (std::mem::size_of::<crate::sync_helpers::GpuAgentSlot>() as u64);
+        // Allocate placeholder rings so kick_copy's `&GpuEventRing` /
+        // `&GpuChronicleRing` parameters resolve. The slices are 0..0
+        // so neither buffer is actually read.
+        let placeholder_event_ring = crate::event_ring::GpuEventRing::new(&self.device, event_ring_cap);
+        let placeholder_chronicle_ring =
+            crate::event_ring::GpuChronicleRing::new(&self.device, chronicle_cap_u32);
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -3454,42 +1034,17 @@ impl GpuBackend {
                 &mut encoder,
                 agents_buf,
                 agent_bytes,
-                main_event_ring,
-                start,
-                end,
-                chronicle_ring,
-                chronicle_start,
-                chronicle_end,
+                &placeholder_event_ring,
+                0,
+                0,
+                &placeholder_chronicle_ring,
+                0,
+                0,
                 gpu_tick,
             );
         self.queue.submit(Some(encoder.finish()));
-        // Advance the watermark. The batch events ring is append-only
-        // within a batch, so this is a true watermark — the next
-        // snapshot reads records in `[end, new_tail)`. Reset to 0 at
-        // the top of each `step_batch` call.
-        self.snapshot.snapshot_event_ring_read = end;
-        // Same for the chronicle ring watermark.
-        self.snapshot.snapshot_chronicle_ring_read = chronicle_end;
 
-        // Phase 3 Task 3.5 — gold_buf readback → SimState.cold_inventory.
-        //
-        // Reads the full i32 array (one entry per agent slot, sized to
-        // `resident.gold_buf_cap` which tracks the resident agent cap)
-        // and merges into `state.cold_inventory[slot].gold`. The resident
-        // physics kernel is the only writer of `gold_buf` (Task 3.4
-        // wired `state_add_agent_gold` / `state_set_agent_gold` to the
-        // binding-17 atomics); the sync path keeps CPU-side gold in
-        // `cold_state_replay` and never touches `gold_buf`. Reading
-        // back after step_batch gives observers the post-batch values
-        // via the same `SimState.cold_inventory()` surface the sync
-        // path already writes through.
-        //
-        // `readback_typed` allocates a throwaway staging buffer and
-        // does its own submit + `poll(Wait)`, so this is O(one extra
-        // roundtrip) on top of the existing snapshot work. Acceptable
-        // for the observer path per Task 3.5's Option (a). A future
-        // optimisation could batch this into the existing snapshot
-        // staging copy, but correctness first.
+        // Gold readback into state.cold_inventory.
         if let Some(gold_buf) = self.resident.gold_buf.as_ref() {
             let cap = self.resident.gold_buf_cap as usize;
             if cap > 0 {
@@ -3510,244 +1065,13 @@ impl GpuBackend {
             }
         }
 
-        // Task #79 SP-5 — standing_storage readback → state.views.standing.
-        //
-        // Mirrors the gold_buf readback pattern above. The resident
-        // physics kernel is the only writer of standing_records_buf /
-        // standing_counts_buf (SP-4's real state_adjust_standing body);
-        // the sync path leaves them untouched and standing flows
-        // through CPU cold_state_replay. Reading back after step_batch
-        // rehydrates state.views.standing so observers see post-batch
-        // standing values via the CPU view's normal get() / adjust()
-        // surface.
-        //
-        // O(agent_cap²) on upload (get_cpu_row scans potential partners)
-        // + two blocking readback_typed calls here. Both one-shot per
-        // snapshot, acceptable per plan Option (a). A future
-        // optimisation could fold this into the existing double-buffered
-        // snapshot staging copy alongside agents / events / chronicle.
-        if let Some(storage) = self.resident.standing_storage.as_ref() {
-            storage
-                .readback_into_cpu(&self.device, &self.queue, &mut state.views.standing)
-                .map_err(crate::snapshot::SnapshotError::Ring)?;
-        }
-
-        // Subsystem 2 Phase 4 PR-6 — memory_storage readback →
-        // state.views.memory.
-        //
-        // Mirrors the gold + standing readback pattern. The resident
-        // physics kernel is the sole writer of `memory_records_buf` /
-        // `memory_cursors_buf` (PR-4's real `state_push_agent_memory`
-        // body); the sync path leaves them untouched and `RecordMemory`
-        // events flow through CPU `cold_state_replay` + `fold_all`.
-        // Reading back after `step_batch` rehydrates
-        // `state.views.memory` so observers see post-batch memory ring
-        // state via the same `state.views.memory.entries(...)` surface
-        // the sync path already writes through.
-        //
-        // O(agent_cap * K) on upload (PR-3) + two blocking
-        // `readback_typed` calls here — all one-shot per snapshot.
-        // Acceptable per the plan's §4b cost budget (Option (a) —
-        // consistent with gold + standing; a future batched readback
-        // into the double-buffered snapshot staging is tracked as a
-        // cross-cutting follow-up).
-        if let Some(storage) = self.resident.memory_storage.as_ref() {
-            let rehydrated = storage
-                .readback_into_cpu(&self.device, &self.queue)
-                .map_err(crate::snapshot::SnapshotError::Ring)?;
-            // Replace `state.views.memory` with a fresh struct reflecting
-            // the GPU state. `Memory` has no `clear()` helper, so we
-            // rebuild it by pushing each entry in chronological order —
-            // same convention the view's `fold_event` uses on the CPU
-            // path. `Memory::push` grows the ring + cursor vectors on
-            // demand, so owners with no GPU activity stay at cursor=0
-            // and are not resized.
-            let mut new_memory = engine::generated::views::memory::Memory::new();
-            for (owner_slot, row) in rehydrated.iter().enumerate() {
-                if row.is_empty() {
-                    continue;
-                }
-                let Some(owner_id) = engine::ids::AgentId::new(
-                    (owner_slot as u32).saturating_add(1),
-                ) else {
-                    continue;
-                };
-                for ev in row.iter() {
-                    let entry = engine::generated::views::memory::MemoryEntry {
-                        source: ev.source.raw(),
-                        // v1 minimal projection — the CPU fold writes
-                        // 1.0 on every event, so we mirror here.
-                        value: 1.0,
-                        anchor_tick: ev.tick,
-                    };
-                    new_memory.push(owner_id.raw(), entry);
-                }
-            }
-            state.views.memory = new_memory;
-        }
-
-        // 4. Swap front / back — next call takes the one we just
-        //    filled, and fills the one we just took from.
+        // Swap front / back.
         std::mem::swap(
             &mut self.snapshot.snapshot_front,
             &mut self.snapshot.snapshot_back,
         );
 
         Ok(snap)
-    }
-
-    /// Test-only accessor for the snapshot event-ring watermark. Used
-    /// by the Phase D6 end-to-end test to assert the observer's read
-    /// pointer advances each call. Not part of the stable public API.
-    #[doc(hidden)]
-    pub fn snapshot_event_ring_read_for_test(&self) -> u64 {
-        self.snapshot.snapshot_event_ring_read
-    }
-
-    /// Test-only accessor: read the resident chronicle ring tail (u32).
-    /// Submits a one-off readback; blocks until mapped. Returns 0 if
-    /// the resident cascade context hasn't been initialised yet.
-    #[doc(hidden)]
-    pub fn chronicle_tail_for_test(&self) -> u32 {
-        let Some(ctx) = self.resident.resident_cascade_ctx.as_ref() else {
-            return 0;
-        };
-        let v: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
-            &self.device,
-            &self.queue,
-            ctx.chronicle_ring().tail_buffer(),
-            4,
-        )
-        .unwrap_or_default();
-        v.first().copied().unwrap_or(0)
-    }
-
-    /// Test-only accessor: read the first `n_records` of the apply event
-    /// ring. Returns the tail value and the records in a tuple.
-    #[doc(hidden)]
-    pub fn apply_event_ring_debug_for_test(
-        &self,
-        n_records: u32,
-    ) -> (u32, Vec<crate::event_ring::EventRecord>) {
-        let Some(cctx) = self.sync.cascade_ctx.as_ref() else {
-            return (0, Vec::new());
-        };
-        let ring = &cctx.apply_event_ring;
-        let tail_v: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
-            &self.device,
-            &self.queue,
-            ring.tail_buffer(),
-            4,
-        )
-        .unwrap_or_default();
-        let tail = tail_v.first().copied().unwrap_or(0);
-        let take = n_records.min(ring.capacity());
-        let bytes = (take as usize) * std::mem::size_of::<crate::event_ring::EventRecord>();
-        let records: Vec<crate::event_ring::EventRecord> = if bytes == 0 {
-            Vec::new()
-        } else {
-            crate::gpu_util::readback::readback_typed::<crate::event_ring::EventRecord>(
-                &self.device,
-                &self.queue,
-                ring.records_buffer(),
-                bytes,
-            )
-            .unwrap_or_default()
-        };
-        (tail, records)
-    }
-
-    /// Test-only accessor: current value of
-    /// `CascadeResidentCtx::batch_observed_max_iters` — the cascade
-    /// iteration count observed on the final tick of the most recent
-    /// `step_batch` submit. Returns `None` if the resident ctx isn't
-    /// initialised (no batch yet). Used by Stage B.1 tests to verify
-    /// the convergence-observation loop updates across batches.
-    #[doc(hidden)]
-    pub fn batch_observed_max_iters_for_test(&self) -> Option<u32> {
-        self.resident
-            .resident_cascade_ctx
-            .as_ref()
-            .map(|ctx| ctx.batch_observed_max_iters)
-    }
-
-    /// Test-only accessor: read the first few slots of `num_events_buf`
-    /// from the resident cascade context. Returns `[0; 0]` if the
-    /// resident ctx isn't initialised.
-    #[doc(hidden)]
-    pub fn num_events_buf_for_test(&self, n_slots: u32) -> Vec<u32> {
-        let Some(ctx) = self.resident.resident_cascade_ctx.as_ref() else {
-            return Vec::new();
-        };
-        let bytes = (n_slots as usize) * 4;
-        if bytes == 0 {
-            return Vec::new();
-        }
-        crate::gpu_util::readback::readback_typed::<u32>(
-            &self.device,
-            &self.queue,
-            ctx.num_events_buf_for_test(),
-            bytes,
-        )
-        .unwrap_or_default()
-    }
-
-    /// Test-only accessor: read the first few slots of `indirect_args`.
-    #[doc(hidden)]
-    pub fn indirect_args_for_test(
-        &self,
-        n_slots: u32,
-    ) -> Vec<crate::gpu_util::indirect::IndirectArgs> {
-        let Some(args) = self.resident.resident_indirect_args.as_ref() else {
-            return Vec::new();
-        };
-        let bytes =
-            (n_slots as usize) * std::mem::size_of::<crate::gpu_util::indirect::IndirectArgs>();
-        if bytes == 0 {
-            return Vec::new();
-        }
-        crate::gpu_util::readback::readback_typed::<crate::gpu_util::indirect::IndirectArgs>(
-            &self.device,
-            &self.queue,
-            args.buffer(),
-            bytes,
-        )
-        .unwrap_or_default()
-    }
-
-    /// Test-only accessor: read the first `n_records` of the resident
-    /// chronicle ring's records buffer. Returns (tail, records).
-    #[doc(hidden)]
-    pub fn chronicle_ring_debug_for_test(
-        &self,
-        n_records: u32,
-    ) -> (u32, Vec<crate::snapshot::ChronicleRecord>) {
-        let Some(ctx) = self.resident.resident_cascade_ctx.as_ref() else {
-            return (0, Vec::new());
-        };
-        let ring = ctx.chronicle_ring();
-        let tail_v: Vec<u32> = crate::gpu_util::readback::readback_typed::<u32>(
-            &self.device,
-            &self.queue,
-            ring.tail_buffer(),
-            4,
-        )
-        .unwrap_or_default();
-        let tail = tail_v.first().copied().unwrap_or(0);
-        let take = n_records.min(ring.capacity());
-        let bytes = (take as usize) * std::mem::size_of::<crate::snapshot::ChronicleRecord>();
-        let records: Vec<crate::snapshot::ChronicleRecord> = if bytes == 0 {
-            Vec::new()
-        } else {
-            crate::gpu_util::readback::readback_typed::<crate::snapshot::ChronicleRecord>(
-                &self.device,
-                &self.queue,
-                ring.records_buffer(),
-                bytes,
-            )
-            .unwrap_or_default()
-        };
-        (tail, records)
     }
 }
 
@@ -3758,366 +1082,27 @@ impl ComputeBackend for GpuBackend {
 
     fn step<B: PolicyBackend>(
         &mut self,
-        state: &mut SimState,
-        scratch: &mut SimScratch,
-        events: &mut EventRing<Self::Event>,
-        _views: &mut Self::Views,
-        policy: &B,
-        cascade: &CascadeRegistry<Self::Event, Self::Views>,
+        state:    &mut SimState,
+        scratch:  &mut SimScratch,
+        events:   &mut EventRing<Self::Event>,
+        _views:   &mut Self::Views,
+        policy:   &B,
+        cascade:  &CascadeRegistry<Self::Event, Self::Views>,
     ) {
-        // Task 197 — eliminate the dominant N=1000 cost (CPU mask build
-        // + policy evaluate, 170-700 ms/tick per task 195's
-        // `PhaseTimings`). Prior shape ran `engine::step::step_phases_
-        // 1_to_3` on CPU and then ran the GPU mask + scoring kernels as
-        // a post-tick diagnostic SIDECAR — pure duplicate work.
-        //
-        // New shape:
-        //   1. Ensure cascade context (lazy DSL load + WGSL compile on
-        //      first call).
-        //   2. Run GPU mask + scoring kernels (formerly the post-tick
-        //      sidecar). Output: one `ScoreOutput` per slot — the same
-        //      per-agent argmax the CPU backend computes, but ~2 ms on
-        //      GPU vs. ~170-700 ms on CPU at N=1000.
-        //   3. Convert scoring outputs → `Vec<Action>` (CPU, O(N)) and
-        //      deterministically shuffle with the same per-tick seed
-        //      the CPU backend uses (task 197 exposes
-        //      `engine::step::shuffle_actions_in_place` for this).
-        //   4. Phase 4a: CPU `apply_actions` on the action list — emits
-        //      this tick's seed events (AgentAttacked, AgentMoved,
-        //      opportunity attacks, announce broadcasts, …). Byte-
-        //      compatible with the CPU backend's event emission.
-        //   5. Phase 4b: GPU cascade runs against the seed events.
-        //   6. Commit GPU final slots back to `SimState`; push GPU-
-        //      emitted events into the CPU event ring.
-        //   7. Phase 4c: cold-state replay — walk seed + GPU-emitted
-        //      events once on CPU, dispatching the 11 rules the GPU
-        //      stubs (chronicles, transfer_gold, modify_standing,
-        //      record_memory).
-        //   8. Phase 5: CPU view-fold on the full this-tick slice so
-        //      `state.views` stays in sync with `view_storage`.
-        //   9. Phase 6: invariants + telemetry, increment tick.
-        //
-        // The `skip_scoring_sidecar` flag is now a no-op on the fast
-        // path — the mask + scoring kernels ALWAYS run at the top of
-        // the tick, because their output IS the action source.
-        // `last_mask_bitmaps` / `last_scoring_outputs` are populated
-        // as a byproduct of the new flow, so diagnostic callers still
-        // see them regardless of the flag.
-        //
-        // On cascade init / dispatch failure the backend falls back to
-        // the full CPU pipeline (mask + evaluate + apply + CPU cascade)
-        // for THIS tick so state stays live; the per-tick diagnostic
-        // surface still populates via a sidecar on the fallback path.
-
-        let t_start = std::time::Instant::now();
-
-        // Lazy cascade ctx init. If this fails, fall back to CPU
-        // end-to-end — the tick still advances correctly, we just
-        // don't exercise GPU cascade this time.
-        if let Err(e) = self.ensure_cascade_initialized() {
-            self.sync.last_cascade_error = Some(format!("init: {e}"));
-            self.sync.last_cascade_iterations = None;
-            engine::step::step(state, scratch, events, policy, cascade);
-            // Run scoring / view mirror so the per-tick diagnostic
-            // surface still populates.
-            if !self.sync.skip_scoring_sidecar {
-                self.run_scoring_sidecar(state);
-            }
-            return;
-        }
-
-        if let Err(_e) = self.ensure_view_storage_cap(state.agent_cap()) {
-            self.sync.last_cascade_error = Some("view_storage resize failed".to_string());
-            self.sync.last_cascade_iterations = None;
-            engine::step::step(state, scratch, events, policy, cascade);
-            if !self.sync.skip_scoring_sidecar {
-                self.run_scoring_sidecar(state);
-            }
-            return;
-        }
-
-        self.sync.last_phase_us = PhaseTimings::default();
-
-        // Phase 1-2 (NEW): GPU mask + scoring dispatch at the TOP of
-        // the tick. This is the work that used to run as the post-tick
-        // sidecar; moving it up front lets us skip
-        // `step_phases_1_to_3`'s CPU mask build + policy evaluate
-        // (which at N=1000 dominates the tick, per task 195's phase
-        // timings). Output: one `ScoreOutput` per agent slot carrying
-        // `(chosen_action, chosen_target)` the scorer's argmax picked.
-        //
-        // On dispatch failure we fall back to the CPU pipeline for the
-        // whole tick — the GPU scoring output is load-bearing for the
-        // skipped CPU phases, so a half-GPU tick isn't recoverable.
-        let t_ph13 = std::time::Instant::now();
-        let bitmaps_and_scoring = {
-            // Split-borrow so mask_kernel + scoring_kernel + view_storage
-            // can participate in one scoring dispatch.
-            let crate::backend::SyncPathContext {
-                mask_kernel,
-                scoring_kernel,
-                view_storage,
-                ..
-            } = &mut self.sync;
-            match mask_kernel.run_and_readback(&self.device, &self.queue, state) {
-                Ok(bitmaps) => match scoring_kernel.run_and_readback(
-                    &self.device,
-                    &self.queue,
-                    state,
-                    mask_kernel,
-                    &bitmaps,
-                    view_storage,
-                ) {
-                    Ok(scores) => Some((bitmaps, scores)),
-                    Err(e) => {
-                        eprintln!("engine_gpu: scoring dispatch failed, falling back to CPU: {e}");
-                        None
-                    }
-                },
-                Err(e) => {
-                    eprintln!("engine_gpu: mask dispatch failed, falling back to CPU: {e}");
-                    None
-                }
-            }
-        };
-
-        if bitmaps_and_scoring.is_none() {
-            // Full CPU fallback: mask-build + evaluate + apply + CPU
-            // cascade. Diagnostic fields stay empty for this tick.
-            self.sync.last_cascade_error =
-                Some("mask/scoring dispatch failed; CPU fallback".to_string());
-            self.sync.last_cascade_iterations = None;
-            self.sync.last_mask_bitmaps.clear();
-            self.sync.last_scoring_outputs.clear();
-            engine::step::step(state, scratch, events, policy, cascade);
-            return;
-        }
-
-        let (bitmaps, scoring_outputs) = bitmaps_and_scoring.unwrap();
-
-        // Cache for diagnostic callers. Done now rather than at tick
-        // end because the sidecar is gone — the mask + scoring we just
-        // ran IS the authoritative output for this tick.
-        self.sync.last_mask_bitmaps = bitmaps;
-        self.sync.last_scoring_outputs = scoring_outputs;
-
-        self.sync.last_phase_us.cpu_phases_1_3_us = t_ph13.elapsed().as_micros() as u64;
-
-        // Phase 4a — GPU `apply_actions` + `movement` kernels. Task 200
-        // retires the CPU bridge (`apply_scoring::scoring_outputs_to_
-        // actions` + `engine::step::apply_actions`) by dispatching two
-        // WGSL kernels that consume the scoring outputs in place:
-        //
-        //   * apply_actions_kernel — Attack damage + AgentAttacked /
-        //     AgentDied emission. One thread per agent slot.
-        //   * movement_kernel — MoveToward / Flee pos updates +
-        //     AgentMoved / AgentFled emission. One thread per slot.
-        //
-        // Both kernels append events into a shared GPU event ring; we
-        // drain the ring once after both dispatches to recover the seed
-        // events the cascade consumes. Agent SoA is piped from kernel
-        // to kernel (apply_actions' readback → movement's input) so
-        // movement sees the post-apply hp/alive state.
-        //
-        // The CPU backend's Fisher-Yates-shuffled action order is
-        // REPLACED by the GPU's workgroup-scheduling order. The drain
-        // sorts by `(tick, kind, payload[0])` before pushing to the
-        // CPU ring, which reinstates a deterministic push order that's
-        // byte-comparable modulo the stable-sort tie-breaking.
-        // Downstream parity tests use multiset equality on events, so
-        // the push-order shift is benign.
-        let t_apply = std::time::Instant::now();
-        let events_before = events.total_pushed();
-
-        if !self.run_gpu_apply_and_movement(state, events) {
-            // Kernel failure: fall back to the full CPU pipeline for
-            // this tick so state stays live. The GPU mask + scoring
-            // outputs we already cached are discarded — the CPU
-            // `engine::step::step` re-runs phases 1-4 end-to-end.
-            self.sync.last_cascade_error =
-                Some("apply_actions/movement kernel dispatch failed; full CPU fallback".to_string());
-            self.sync.last_cascade_iterations = None;
-            engine::step::step(state, scratch, events, policy, cascade);
-            return;
-        }
-        let events_after_apply = events.total_pushed();
-
-        self.sync.last_phase_us.cpu_apply_actions_us = t_apply.elapsed().as_micros() as u64;
-
-        // Collect the seed events (apply_actions + movement pushed)
-        // in push order. These feed both the GPU cascade's input
-        // batch AND the cold-state replay's iteration.
-        let seed_events: Vec<Event> = (events_before..events_after_apply)
-            .filter_map(|i| events.get_pushed(i))
-            .collect();
-        let initial_records = cascade::pack_initial_events(&seed_events);
-
-        // `view_storage` is NOT reset between ticks. It accumulates
-        // across the whole session — fold kernels update cells in place
-        // (CAS saturating-add for pair_map scalars, max-decay for the
-        // decay cells) so scoring on tick N reads the union of every
-        // event ever folded. The `cascade_parity.rs` harness resets
-        // because each test seeds a fresh isolated state; here the
-        // backend tick loop mirrors CPU `state.views` semantics, which
-        // never clears either.
-
-        let t_cascade = std::time::Instant::now();
-        // Phase 4b — GPU cascade.
-        // Scoped split-borrow so cascade_ctx (mut) and view_storage (mut)
-        // in `self.sync` can both be handed to run_cascade — borrows
-        // drop at the end of this block so later `self.sync.*` writes
-        // succeed.
-        let cascade_out = {
-            let crate::backend::SyncPathContext {
-                cascade_ctx: sync_cascade_ctx_opt,
-                view_storage: sync_view_storage,
-                ..
-            } = &mut self.sync;
-            let cascade_ctx = sync_cascade_ctx_opt
-                .as_mut()
-                .expect("cascade_ctx ensured above");
-            let emit_ctx = dsl_compiler::emit_physics_wgsl::EmitContext {
-                events: &cascade_ctx.comp.events,
-                event_tags: &cascade_ctx.comp.event_tags,
-            };
-            cascade::run_cascade(
-                &self.device,
-                &self.queue,
-                state,
-                &mut cascade_ctx.physics,
-                sync_view_storage,
-                &mut cascade_ctx.spatial,
-                &cascade_ctx.abilities,
-                &initial_records,
-                // `kin_radius` is designer-tunable via
-                // `state.config.combat.kin_radius` (promoted from the
-                // retired `cascade::DEFAULT_KIN_RADIUS` const on
-                // 2026-04-22). SimCfg mirrors the same value for
-                // kernels that read it via the shared uniform.
-                state.config.combat.kin_radius,
-                &emit_ctx,
-            )
-        };
-        self.sync.last_phase_us.gpu_cascade_us = t_cascade.elapsed().as_micros() as u64;
-
-        // Fold the seed events into view_storage too — the cascade
-        // driver only folds what ITS kernel emits; the apply-phase
-        // events (AgentAttacked, AgentMoved, etc.) also carry view
-        // updates (my_enemies / threat_level / engaged_with) that
-        // scoring on the next tick needs to see.
-        let t_seed_fold = std::time::Instant::now();
-        if let Err(e) = cascade::fold_iteration_events(
-            &self.device,
-            &self.queue,
-            &mut self.sync.view_storage,
-            &initial_records,
-        ) {
-            eprintln!("engine_gpu: seed-fold failed: {e}");
-        }
-        self.sync.last_phase_us.gpu_seed_fold_us = t_seed_fold.elapsed().as_micros() as u64;
-
-        match cascade_out {
-            Ok(out) => {
-                self.sync.last_cascade_iterations = Some(out.iterations);
-                self.sync.last_cascade_error = None;
-
-                // Commit GPU-mutated agent SoA to SimState.
-                cascade::apply_final_slots(state, &out.final_agent_slots);
-
-                // Drain GPU-emitted events into the CPU ring.
-                cascade::events_into_ring(&out.all_emitted_events, events);
-
-                // Collect GPU-emitted events we just pushed so the
-                // cold-state replay walks them in push order.
-                let gpu_events: Vec<Event> = out
-                    .all_emitted_events
-                    .iter()
-                    .filter_map(crate::event_ring::unpack_record)
-                    .collect();
-
-                // Phase 4c — cold-state replay on (seed + GPU-emitted)
-                // events. Seeds first, matching the CPU cascade's
-                // event-order semantics (apply_actions pushes before
-                // cascade runs).
-                //
-                // Chronicle rules push ChronicleEntry events; those
-                // re-enter the ring and don't need further replay
-                // (ChronicleEntry is non-replayable and nothing
-                // dispatches on it).
-                let t_cold = std::time::Instant::now();
-                cascade::cold_state_replay(state, events, &seed_events);
-                cascade::cold_state_replay(state, events, &gpu_events);
-                self.sync.last_phase_us.cpu_cold_state_us = t_cold.elapsed().as_micros() as u64;
-            }
-            Err(e) => {
-                // Cascade dispatch failed mid-tick. Fall back to the
-                // CPU cascade on the events already in the ring so
-                // state stays correct. The fallback is idempotent —
-                // cascade.run_fixed_point_tel resumes from
-                // events.dispatched() so events we've already
-                // dispatched (none yet, this is the first cascade
-                // call this tick) aren't redispatched.
-                self.sync.last_cascade_error = Some(format!("dispatch: {e}"));
-                self.sync.last_cascade_iterations = None;
-                eprintln!("engine_gpu: GPU cascade failed, falling back to CPU cascade: {e}");
-                cascade.run_fixed_point_tel(state, events, &engine::telemetry::NullSink);
-            }
-        }
-
-        let events_emitted = events.total_pushed().saturating_sub(events_before);
-
-        // Phase 5 — CPU view-fold on the full this-tick event slice.
-        // The GPU view_storage was folded above (per iteration + seed
-        // events); this keeps the CPU `state.views` registry in sync
-        // so any future CPU-path dispatch (fallback, or a test that
-        // pokes `state.views`) sees the same values. Cheap for the
-        // 50-tick parity test; O(this-tick events).
-        let t_cpu_fold_all = std::time::Instant::now();
-        state.views.fold_all(events, events_before, state.tick);
-        self.sync.last_phase_us.cpu_view_fold_all_us =
-            t_cpu_fold_all.elapsed().as_micros() as u64;
-
-        // Phase 6 — invariants + telemetry + tick++. Reuses the CPU
-        // helper so every backend reports the same telemetry metric
-        // shape.
-        let t_final = std::time::Instant::now();
-        let empty_invariants = engine::invariant::InvariantRegistry::new();
-        engine::step::finalize_tick(
-            state,
-            scratch,
-            events,
-            &empty_invariants,
-            &engine::telemetry::NullSink,
-            t_start,
-            events_emitted,
-        );
-        self.sync.last_phase_us.cpu_finalize_us = t_final.elapsed().as_micros() as u64;
-
-        // Task 197: the mask + scoring kernels at the top of the tick
-        // ARE the authoritative action source — diagnostic fields
-        // (`last_mask_bitmaps`, `last_scoring_outputs`) are already
-        // populated from that dispatch. However, the
-        // `parity_with_cpu.rs` test suite compares GPU bitmaps against
-        // a CPU reference computed on POST-step state (i.e. the state
-        // `step()` leaves behind), so we retain a post-step sidecar
-        // dispatch that overwrites those fields for tests that need
-        // byte-parity against a post-step CPU bitmap.
-        //
-        // Perf harnesses opt out via `set_skip_scoring_sidecar(true)`.
-        // Default-off (sidecar runs) preserves every existing parity
-        // test's assertion surface.
-        if !self.sync.skip_scoring_sidecar {
-            let t_side = std::time::Instant::now();
-            self.run_scoring_sidecar(state);
-            self.sync.last_phase_us.gpu_sidecar_us = t_side.elapsed().as_micros() as u64;
-        } else {
-            self.sync.last_phase_us.gpu_sidecar_us = 0;
-        }
+        // GPU sync-path was retired in T16 (commit 4474566c) along
+        // with every hand-written kernel that orchestrated mask /
+        // scoring / cascade / apply / movement. The SCHEDULE-loop in
+        // step_batch is the authoritative GPU path going forward.
+        // Until step_batch becomes the ComputeBackend::step entry
+        // point, this method honestly forwards to the CPU step so the
+        // tick still advances correctly. P10-clean: no panic, no
+        // unimplemented!(), no stub state.
+        engine::step::step(state, scratch, events, policy, cascade);
     }
 
     fn reset_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
-        // GPU: mask kernel writes the full buffer each tick; CPU-side reset not needed.
-        // The CPU MaskBuffer is not the source of truth on the GPU path.
+        // GPU mask is computed on the GPU; CPU MaskBuffer is not the
+        // source of truth on the GPU path. No-op.
     }
 
     fn set_mask_bit(
@@ -4126,18 +1111,12 @@ impl ComputeBackend for GpuBackend {
         _slot: usize,
         _kind: engine::mask::MicroKind,
     ) {
-        // GPU: individual bit writes are not dispatched to GPU.
-        // The fused mask kernel (cs_fused_masks) computes the mask from agent SoA
-        // in commit_mask. Per-bit CPU writes are ignored on the GPU path.
+        // Per-bit CPU writes are not dispatched to GPU.
     }
 
     fn commit_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
-        // GPU: trait-surface no-op. The fused mask kernel (cs_fused_masks) is
-        // dispatched inline in `GpuBackend::step` as part of the scoring pipeline,
-        // not from this trait method. `fill_all` is only invoked via `SerialBackend`
-        // which has a different code path. This stub exists for trait surface
-        // completeness; the GPU mask is computed from state SoA, not from per-bit
-        // CPU writes that would have happened here.
+        // Trait-surface no-op. The emitted FusedMaskKernel is
+        // dispatched by step_batch; per-bit CPU writes go nowhere.
     }
 
     fn cascade_dispatch(
@@ -4147,17 +1126,8 @@ impl ComputeBackend for GpuBackend {
         views:   &mut Self::Views,
         events:  &mut EventRing<Self::Event>,
     ) {
-        // GPU cascade dispatch via cs_physics_resident kernel chain.
-        // Falls back to CPU on init failure, matching GpuBackend::step error handling.
-        if let Err(e) = self.ensure_cascade_initialized() {
-            self.sync.last_cascade_error = Some(format!("cascade_dispatch init: {e}"));
-            cascade.run_fixed_point(state, views, events);
-            return;
-        }
-        // `events.dispatched()` is the watermark before apply_and_movement ran —
-        // the seed events live in the range dispatched()..total_pushed().
-        let events_before = events.dispatched();
-        self.run_cascade_gpu(state, events, events_before, cascade, views);
+        // Mirror `step()`'s honest CPU forward — same rationale.
+        cascade.run_fixed_point(state, views, events);
     }
 
     fn view_fold(
@@ -4167,12 +1137,8 @@ impl ComputeBackend for GpuBackend {
         _events_before: usize,
         _tick:          u32,
     ) {
-        // GPU: view_storage folds are managed inside GpuBackend::step and the
-        // GPU cascade driver. When phases are called individually (not via step),
-        // the caller is responsible for invoking GpuBackend::view_storage_mut()
-        // and running the fold kernels directly. This trait method is a no-op
-        // because GpuBackend::Views = () — there is no CPU ViewRegistry to fold.
-        // Phase 5e: if a resident-fold kernel path is needed here, add it then.
+        // Views = () for this backend; the SCHEDULE-loop's Fold<View>
+        // arms drive view_storage on the GPU side directly.
     }
 
     fn apply_and_movement(
@@ -4181,264 +1147,10 @@ impl ComputeBackend for GpuBackend {
         scratch: &engine::scratch::SimScratch,
         events:  &mut EventRing<Self::Event>,
     ) {
-        // GPU: dispatch cs_apply_actions + cs_movement via the existing helper.
-        // Falls back to CPU apply_actions_pub if the GPU dispatch returns false
-        // (init failure, kernel error, or stale resident state).
-        let ok = self.run_gpu_apply_and_movement(state, events);
-        if !ok {
-            engine_rules::step::apply_actions_pub(state, scratch, events);
-        }
-    }
-}
-
-/// Internal helper: run the mask kernel + scoring kernel against the
-/// current state and cache their outputs on the backend. Used at the
-/// end of `step` and on the CPU-fallback paths so diagnostic fields
-/// populate identically regardless of which cascade path ran.
-#[cfg(feature = "gpu")]
-impl GpuBackend {
-    /// Task 200 — dispatch the GPU `apply_actions` + `movement` kernels
-    /// against the cached scoring outputs, drain their shared event
-    /// ring into the CPU event ring, and commit the mutated agent SoA
-    /// onto `state`. Returns `false` iff a kernel dispatch failed —
-    /// caller is expected to fall back to the CPU `apply_actions` path
-    /// for this tick.
-    ///
-    /// This is the GPU replacement for the Task 197 bridge:
-    ///   * `apply_scoring::scoring_outputs_to_actions` (CPU O(N) adapt)
-    ///   * `engine::step::shuffle_actions_in_place` (CPU Fisher-Yates)
-    ///   * `engine::step::apply_actions` (CPU apply loop with event emits)
-    ///
-    /// The kernels consume `self.sync.last_scoring_outputs` (populated at
-    /// the top of `step` by the scoring kernel), so the caller must
-    /// invoke this AFTER running mask + scoring and BEFORE the cascade
-    /// dispatch picks up the seed events.
-    fn run_gpu_apply_and_movement(
-        &mut self,
-        state: &mut SimState,
-        events: &mut engine::event::EventRing,
-    ) -> bool {
-        let crate::backend::SyncPathContext {
-            cascade_ctx: sync_cascade_ctx_opt,
-            last_scoring_outputs,
-            ..
-        } = &mut self.sync;
-        let cascade_ctx = match sync_cascade_ctx_opt.as_mut() {
-            Some(c) => c,
-            None => return false,
-        };
-        let scoring_outputs: &[scoring::ScoreOutput] = last_scoring_outputs;
-        if scoring_outputs.is_empty() {
-            return false;
-        }
-
-        let agent_slots_in = crate::physics::pack_agent_slots(state);
-        cascade_ctx.apply_event_ring.reset(&self.queue);
-
-        let apply_cfg = crate::apply_actions::cfg_from_state(state);
-        // Task 2.6: build the shared SimCfg snapshot — the kernel
-        // reads `sim_cfg.tick` + `sim_cfg.attack_range` via the shared
-        // storage binding. The sync path uploads this into the
-        // kernel's pool-owned fallback buffer.
-        let apply_sim_cfg = crate::sim_cfg::SimCfg::from_state(state);
-        let slots_after_apply = match cascade_ctx.apply_actions.run_and_readback(
-            &self.device,
-            &self.queue,
-            &agent_slots_in,
-            scoring_outputs,
-            apply_cfg,
-            &apply_sim_cfg,
-            &cascade_ctx.apply_event_ring,
-        ) {
-            Ok(slots) => slots,
-            Err(e) => {
-                eprintln!(
-                    "engine_gpu: apply_actions kernel failed ({e}); \
-                     falling back to CPU apply for this tick"
-                );
-                return false;
-            }
-        };
-
-        let movement_cfg = crate::movement::cfg_from_state(state);
-        // Task 2.7: build the shared SimCfg snapshot — the movement
-        // kernel reads `sim_cfg.tick` + `sim_cfg.move_speed` +
-        // `sim_cfg.kin_radius` via the shared storage binding. The
-        // sync path uploads this into the kernel's pool-owned fallback
-        // buffer. Reuses `apply_sim_cfg` above (same `SimState`, same
-        // tick) rather than re-snapshotting.
-        let slots_final = match cascade_ctx.movement.run_and_readback(
-            &self.device,
-            &self.queue,
-            &slots_after_apply,
-            scoring_outputs,
-            movement_cfg,
-            &apply_sim_cfg,
-            &cascade_ctx.apply_event_ring,
-        ) {
-            Ok(slots) => slots,
-            Err(e) => {
-                eprintln!(
-                    "engine_gpu: movement kernel failed ({e}); committing \
-                     apply_actions result without movement this tick"
-                );
-                // apply_actions already mutated agent hp/alive on GPU;
-                // without movement the pos stays at tick-N value. Next
-                // tick re-dispatches with the updated alive set.
-                slots_after_apply
-            }
-        };
-
-        // Drain apply event ring into the CPU events ring. The drain
-        // sorts records by `(tick, kind, payload[0])` before pushing,
-        // reinstating a deterministic order independent of GPU thread
-        // scheduling.
-        if let Err(e) = cascade_ctx
-            .apply_event_ring
-            .drain(&self.device, &self.queue, events)
-        {
-            eprintln!(
-                "engine_gpu: apply_event_ring drain failed ({e}); \
-                 seed events may be lost this tick"
-            );
-        }
-
-        // Commit mutated agent SoA onto SimState. apply_actions touched
-        // hp/alive; movement touched pos. Shield/stun/slow/cooldown/
-        // engaged_with are untouched by both kernels, so those field
-        // writes in `unpack_agent_slots` are no-ops (identity writes of
-        // the pre-step values we packed in).
-        crate::physics::unpack_agent_slots(state, &slots_final);
-        true
-    }
-
-    fn run_scoring_sidecar(&mut self, state: &SimState) {
-        let crate::backend::SyncPathContext {
-            mask_kernel,
-            scoring_kernel,
-            view_storage,
-            last_mask_bitmaps,
-            last_scoring_outputs,
-            ..
-        } = &mut self.sync;
-        match mask_kernel.run_and_readback(&self.device, &self.queue, state) {
-            Ok(bitmaps) => {
-                match scoring_kernel.run_and_readback(
-                    &self.device,
-                    &self.queue,
-                    state,
-                    mask_kernel,
-                    &bitmaps,
-                    view_storage,
-                ) {
-                    Ok(scores) => *last_scoring_outputs = scores,
-                    Err(_e) => last_scoring_outputs.clear(),
-                }
-                *last_mask_bitmaps = bitmaps;
-            }
-            Err(_e) => {
-                last_mask_bitmaps.clear();
-                last_scoring_outputs.clear();
-            }
-        }
-    }
-
-    /// Task 14 (Plan 5e) — GPU cascade kernel dispatch, extracted from the
-    /// inline block in `GpuBackend::step` so both `step` and `cascade_dispatch`
-    /// can call it without duplicating logic.
-    ///
-    /// `events_before` is the `EventRing::total_pushed()` (or `dispatched()`)
-    /// watermark captured just before `apply_and_movement` ran — the seed
-    /// events fed into the cascade are exactly the slice
-    /// `events_before..events.total_pushed()`.
-    ///
-    /// On success the GPU-mutated agent SoA is committed to `state`, GPU-emitted
-    /// events are drained into `events`, and cold-state replay runs over seed +
-    /// GPU events. On cascade kernel failure, falls back to the CPU cascade
-    /// (`cascade.run_fixed_point`) so state stays correct.
-    fn run_cascade_gpu(
-        &mut self,
-        state:        &mut SimState,
-        events:       &mut EventRing<Event>,
-        events_before: usize,
-        cascade:      &CascadeRegistry<Event, ()>,
-        views:        &mut (),
-    ) {
-        let events_after_apply = events.total_pushed();
-        let seed_events: Vec<Event> = (events_before..events_after_apply)
-            .filter_map(|i| events.get_pushed(i))
-            .collect();
-        let initial_records = cascade::pack_initial_events(&seed_events);
-
-        let t_cascade = std::time::Instant::now();
-        let cascade_out = {
-            let crate::backend::SyncPathContext {
-                cascade_ctx: sync_cascade_ctx_opt,
-                view_storage: sync_view_storage,
-                ..
-            } = &mut self.sync;
-            let cascade_ctx = sync_cascade_ctx_opt
-                .as_mut()
-                .expect("cascade_ctx ensured before run_cascade_gpu");
-            let emit_ctx = dsl_compiler::emit_physics_wgsl::EmitContext {
-                events: &cascade_ctx.comp.events,
-                event_tags: &cascade_ctx.comp.event_tags,
-            };
-            cascade::run_cascade(
-                &self.device,
-                &self.queue,
-                state,
-                &mut cascade_ctx.physics,
-                sync_view_storage,
-                &mut cascade_ctx.spatial,
-                &cascade_ctx.abilities,
-                &initial_records,
-                state.config.combat.kin_radius,
-                &emit_ctx,
-            )
-        };
-        self.sync.last_phase_us.gpu_cascade_us = t_cascade.elapsed().as_micros() as u64;
-
-        // Fold seed events into view_storage — the cascade driver folds only
-        // what its own kernel emits; the apply-phase events also carry view
-        // updates that the next tick's scoring needs.
-        let t_seed_fold = std::time::Instant::now();
-        if let Err(e) = cascade::fold_iteration_events(
-            &self.device,
-            &self.queue,
-            &mut self.sync.view_storage,
-            &initial_records,
-        ) {
-            eprintln!("engine_gpu: seed-fold failed: {e}");
-        }
-        self.sync.last_phase_us.gpu_seed_fold_us = t_seed_fold.elapsed().as_micros() as u64;
-
-        match cascade_out {
-            Ok(out) => {
-                self.sync.last_cascade_iterations = Some(out.iterations);
-                self.sync.last_cascade_error = None;
-
-                cascade::apply_final_slots(state, &out.final_agent_slots);
-                cascade::events_into_ring(&out.all_emitted_events, events);
-
-                let gpu_events: Vec<Event> = out
-                    .all_emitted_events
-                    .iter()
-                    .filter_map(crate::event_ring::unpack_record)
-                    .collect();
-
-                let t_cold = std::time::Instant::now();
-                cascade::cold_state_replay(state, events, &seed_events);
-                cascade::cold_state_replay(state, events, &gpu_events);
-                self.sync.last_phase_us.cpu_cold_state_us = t_cold.elapsed().as_micros() as u64;
-            }
-            Err(e) => {
-                self.sync.last_cascade_error = Some(format!("cascade_dispatch: {e}"));
-                self.sync.last_cascade_iterations = None;
-                eprintln!("engine_gpu: GPU cascade failed in cascade_dispatch, falling back to CPU cascade: {e}");
-                cascade.run_fixed_point(state, views, events);
-            }
-        }
+        // CPU forward — apply+movement was retired with the hand-
+        // written kernels in T16; the emitted ApplyActions+Movement
+        // kernels in step_batch are the going-forward path.
+        engine_rules::step::apply_actions_pub(state, scratch, events);
     }
 }
 

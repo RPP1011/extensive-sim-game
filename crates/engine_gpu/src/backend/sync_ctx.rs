@@ -1,47 +1,39 @@
-//! Sync-path state on the GPU backend — kernels and buffers used
-//! exclusively by `ComputeBackend::step()`.
+//! Sync-path state on the GPU backend.
+//!
+//! Post-T16 (commit `4474566c`) the hand-written kernel modules
+//! (`mask`, `scoring`, `physics`, `apply_actions`, `movement`,
+//! `spatial_gpu`, `alive_bitmap`, `cascade`) were retired in favor of
+//! the SCHEDULE-driven dispatcher in `engine_gpu_rules`. The previous
+//! sync-path orchestration (mask + scoring + cascade + apply + movement)
+//! went with them; what remains here is the minimum per-tick state
+//! `GpuBackend` still surfaces:
+//!
+//! * `view_storage` — Phase 4 fold-kernel storage. Still allocated up
+//!   front; the SCHEDULE-loop's `Fold<View>` arms write into it.
+//! * `backend_label` — adapter backend name captured at init.
+//! * `last_phase_us` — per-phase µs surface kept for harness
+//!   compatibility; populated only by `step_batch` paths that opt in.
+//!
+//! `ComputeBackend::step` no longer dispatches GPU kernels — see the
+//! method body in `lib.rs` for the CPU-fallback rationale.
 
 #![cfg(feature = "gpu")]
 
-use crate::cascade::CascadeCtx;
-use crate::mask::FusedMaskKernel;
-use crate::scoring::{ScoreOutput, ScoringKernel};
 use crate::view_storage::ViewStorage;
 use crate::PhaseTimings;
 
 pub struct SyncPathContext {
-    pub mask_kernel:             FusedMaskKernel,
-    pub scoring_kernel:          ScoringKernel,
-    pub view_storage:            ViewStorage,
-    pub cascade_ctx:             Option<CascadeCtx>,
-    pub backend_label:           String,
-    pub last_mask_bitmaps:       Vec<Vec<u32>>,
-    pub last_scoring_outputs:    Vec<ScoreOutput>,
-    pub last_cascade_iterations: Option<u32>,
-    pub last_cascade_error:      Option<String>,
-    pub skip_scoring_sidecar:    bool,
-    pub last_phase_us:           PhaseTimings,
+    pub view_storage:  ViewStorage,
+    pub backend_label: String,
+    pub last_phase_us: PhaseTimings,
 }
 
 impl SyncPathContext {
-    pub fn new(
-        mask_kernel:    FusedMaskKernel,
-        scoring_kernel: ScoringKernel,
-        view_storage:   ViewStorage,
-        backend_label:  String,
-    ) -> Self {
+    pub fn new(view_storage: ViewStorage, backend_label: String) -> Self {
         Self {
-            mask_kernel,
-            scoring_kernel,
             view_storage,
-            cascade_ctx:             None,
             backend_label,
-            last_mask_bitmaps:       Vec::new(),
-            last_scoring_outputs:    Vec::new(),
-            last_cascade_iterations: None,
-            last_cascade_error:      None,
-            skip_scoring_sidecar:    true,
-            last_phase_us:           PhaseTimings::default(),
+            last_phase_us: PhaseTimings::default(),
         }
     }
 }

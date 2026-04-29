@@ -72,7 +72,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use engine::generated::views::standing::{Standing, StandingEdge};
+use engine_rules::views::standing::{Standing, StandingEdge};
 use engine::ids::AgentId;
 
 /// Slot count per owner — the `K` from `symmetric_pair_topk(K=8)` on
