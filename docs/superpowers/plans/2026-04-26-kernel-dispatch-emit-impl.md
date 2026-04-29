@@ -4861,3 +4861,26 @@ After Task 16 completes, the following invariants hold:
 4. `cargo test -p engine_gpu_rules --test schema_hash` passes against a committed baseline.
 5. Every parity test (`wolves_and_humans_parity`, `parity_with_cpu`, `physics_parity`, `cascade_parity`, `view_parity`, `topk_view_parity`, `spatial_parity`) passes.
 6. Engine snapshot loads reject when GPU rules change (because `engine/.schema_hash` rolls in `engine_gpu_rules/.schema_hash`).
+
+---
+
+## Retrospective (2026-04-28)
+
+**T16 + Stream A landed as "complete" with critics PASS — but `step_batch` panicked on every call.**
+
+T16 marked the dispatch-emit plan complete on the basis that:
+- Workspace builds clean (default features)
+- `engine_gpu_rules/.schema_hash` baseline matches
+- Critics 3/3 PASS (compiler-first / cross-backend-parity / reduction-determinism)
+
+What was NOT verified: that any of the new code paths actually runs at runtime. Invariant #5 above ("every parity test passes") was unverifiable because the cfg-gated tests were left gated. The first time anything would have actually called `step_batch`, it hit `engine::step::step` (an `unimplemented!()` stub from Plan B1' Task 11) and panicked.
+
+This was discovered during Stream C prep on 2026-04-28 — fixed by `2026-04-28-step-batch-runtime-fix.md`, which migrated `engine_gpu` and `viz` to call `engine_rules::step::step` and added a runtime smoke test (`step_batch_runtime_smoke`) that proves `step_batch` actually executes.
+
+**Lessons:**
+
+1. **Critics check architectural compliance, not buildability or runtime.** They passed every plan close-out. They are necessary but insufficient.
+2. **`cargo build` clean ≠ runtime clean.** A `pub fn foo()` containing `unimplemented!()` compiles fine but explodes on call.
+3. **Tests must actually run the changed code path.** Tier-2 smoke + Tier-1 parity tests would have caught this immediately. Re-enabling them was deferred to "Stream C" and never gated T16's close.
+
+**Process change:** `docs/architecture/plan-template-ais.md` updated 2026-04-28 to require a "Runtime gate" entry in every plan that touches a per-tick code path. Future plans MUST list at least one test that runs the changed path and asserts an observable post-condition. Compile-pass is no longer sufficient for plan close.

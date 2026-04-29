@@ -99,19 +99,25 @@ The constants `ALIVE_PACK_WGSL` and `FUSED_AGENT_UNPACK_WGSL` were hoisted to `p
 
 Estimated scope: 4-6 tasks (one per kernel module class).
 
-### PREREQUISITE — `step_batch` runtime fix (discovered 2026-04-28)
+### `step_batch` runtime fix (CLOSED 2026-04-28, commit dd21f9b9)
 
-**Plan written:** `docs/superpowers/plans/2026-04-28-step-batch-runtime-fix.md` (6 tasks). **Blocks Stream C.**
+Plan: `docs/superpowers/plans/2026-04-28-step-batch-runtime-fix.md`
 
-Discovery during Stream C Task 1 prep: `engine_gpu::step_batch` panics on every call because its per-tick CPU forward invokes `engine::step::step` which is `unimplemented!()` (Plan B1' Task 11 left a stub pending the emitted replacement at `engine_rules::step::step`). T15+T16+Stream A landed clean compiles but never proved runtime.
+Discovered during Stream C Task 1 prep: `engine_gpu::step_batch` panicked on every call because its per-tick CPU forward invoked `engine::step::step` which is `unimplemented!()` (Plan B1' Task 11 deletion). T15+T16+Stream A landed clean compiles but never proved runtime.
 
-The fix migrates `GpuBackend::ComputeBackend::Views` from `()` to `ViewRegistry`, threads `views` through `step_batch`, and replaces the 3 `engine::step::step` calls with `engine_rules::step::step` (passing `&mut SerialBackend` as the inner CB). Includes a runtime smoke test that proves `step_batch` actually executes — the gate that should have existed since T16.
+Closed via commit `dd21f9b9`:
+- `GpuBackend::ComputeBackend::Views`: `()` → `ViewRegistry` (both no-gpu + gpu impls)
+- `step_batch` signature gains `views: &mut ViewRegistry`; cascade generic `<Event, ()>` → `<Event, ViewRegistry>`
+- 3 `engine::step::step` call sites in `engine_gpu/src/lib.rs` migrated to `engine_rules::step::step` (passing `&mut SerialBackend` as inner CB)
+- 2 `engine::step::step` call sites in `viz/src/state.rs` migrated; `views: ViewRegistry` field added to `AppState`
+- New no-gpu `step_batch` method so default-features callers compile
+- New runtime smoke test `step_batch_runtime_smoke` (NOT cfg-gated) — 2/2 PASS, proves `step_batch` executes end-to-end
+- Plan template updated: `docs/architecture/plan-template-ais.md` now requires a "Runtime gate" entry for every plan touching per-tick code paths
+- Retrospective added to dispatch-emit plan capturing the lesson
 
-Lesson captured in the plan's Task 6 retrospective: critics check architectural compliance, not buildability or runtime. Plan close-criteria need a runtime gate, not just a compile pass.
+### Stream C — Port the cfg-gated tests (rescoped 4 tasks; UNBLOCKED)
 
-### Stream C — Port the cfg-gated tests (rescoped 4 tasks)
-
-**Plan written:** `docs/superpowers/plans/2026-04-28-gpu-test-port.md` (4 tasks, rescoped commit ed046d3c). Approved 2026-04-28. **BLOCKED on the step_batch runtime fix above.**
+**Plan written:** `docs/superpowers/plans/2026-04-28-gpu-test-port.md` (4 tasks, rescoped commit ed046d3c). Approved 2026-04-28. Now executable — `step_batch` actually runs.
 
 #### Original framing
 
