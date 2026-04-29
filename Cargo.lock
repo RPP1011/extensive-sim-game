@@ -2156,6 +2156,7 @@ dependencies = [
  "bytemuck",
  "engine",
  "engine_data",
+ "naga",
  "sha2",
  "wgpu",
 ]
