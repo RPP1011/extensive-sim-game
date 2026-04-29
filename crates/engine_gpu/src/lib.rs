@@ -1089,15 +1089,14 @@ impl ComputeBackend for GpuBackend {
         policy:   &B,
         cascade:  &CascadeRegistry<Self::Event, Self::Views>,
     ) {
-        // GPU sync-path was retired in T16 (commit 4474566c) along
-        // with every hand-written kernel that orchestrated mask /
-        // scoring / cascade / apply / movement. The SCHEDULE-loop in
-        // step_batch is the authoritative GPU path going forward.
-        // Until step_batch becomes the ComputeBackend::step entry
-        // point, this method honestly forwards to the CPU step so the
-        // tick still advances correctly. P10-clean: no panic, no
-        // unimplemented!(), no stub state.
-        engine::step::step(state, scratch, events, policy, cascade);
+        // SCHEDULE-loop entry point. Forwards to step_batch(n_ticks=1)
+        // so every per-tick consumer of ComputeBackend::step exercises
+        // the emitted dispatcher. step_batch internally CPU-forwards
+        // inside its tick body until each emitted WGSL body lands
+        // (Stream B); when those bodies replace the CPU forward, this
+        // path becomes GPU-authoritative without any further change
+        // here.
+        self.step_batch(state, scratch, events, policy, cascade, 1);
     }
 
     fn reset_mask(&mut self, _buf: &mut engine::mask::MaskBuffer) {
