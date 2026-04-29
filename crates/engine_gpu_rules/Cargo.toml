@@ -17,3 +17,4 @@ gpu = []
 
 [dev-dependencies]
 sha2 = "0.10"
+naga = { version = "=26.0.0", features = ["wgsl-in"] }
