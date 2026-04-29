@@ -15,7 +15,7 @@
     },
     {
       "id": "roadmap-gpu-cold-state-replay-subsystem-2-phases-24",
-      "title": "GPU cold-state replay (Subsystem 2) \u2014 Phases 2\u20134",
+      "title": "GPU cold-state replay (Subsystem 2) — Phases 2–4",
       "tier": "active",
       "spec_ref": null,
       "plans": [
@@ -81,7 +81,7 @@
     {
       "id": "2026-04-28-gpu-step-batch-entry",
       "file": "docs/superpowers/plans/2026-04-28-gpu-step-batch-entry.md",
-      "title": "GPU step \u2192 step_batch entry point Implementation Plan",
+      "title": "GPU step → step_batch entry point Implementation Plan",
       "depends_on": [],
       "status": "done",
       "tasks_total": 1,
@@ -99,7 +99,7 @@
     {
       "id": "gpu_megakernel_perf",
       "file": "docs/superpowers/plans/gpu_megakernel_perf.md",
-      "title": "GPU Megakernel Phase 8 \u2014 Perf Sweep + Crossover Measurement",
+      "title": "GPU Megakernel Phase 8 — Perf Sweep + Crossover Measurement",
       "depends_on": [],
       "status": "pending",
       "tasks_total": 0,
@@ -186,7 +186,7 @@
       "critic_verdicts": {
         "compliance": "PASS",
         "quality": "PASS",
-        "note": "emit_schedule + 5 binding-source containers + gpu_rules_hash baseline. ~10 new tests. Adaptation: hook allowlist extended (113265ab) to cover engine_gpu_rules + xtask/src for // GENERATED marker. Known followup: GPU_RULES_HASH constant in engine_data hashes empty input, while .schema_hash file holds real content hash \u2014 reconciliation deferred."
+        "note": "emit_schedule + 5 binding-source containers + gpu_rules_hash baseline. ~10 new tests. Adaptation: hook allowlist extended (113265ab) to cover engine_gpu_rules + xtask/src for // GENERATED marker. Known followup: GPU_RULES_HASH constant in engine_data hashes empty input, while .schema_hash file holds real content hash — reconciliation deferred."
       },
       "started_at": "2026-04-27T05:09:04Z",
       "completed_at": "2026-04-27T05:24:38Z",
@@ -212,7 +212,7 @@
       "critic_verdicts": {
         "compliance": "PASS",
         "quality": "PASS",
-        "note": "First per-kernel emitter validated. Adaptations: (1) wgpu version pin bumped 22\u2192=26.0.1 to match workspace; (2) bgl_storage/bgl_uniform helpers exposed pub(crate) for cross-module use; (3) emit_masks_wgsl_fused used as real API name. Mask_unpack WGSL stays stub until T5 hoists real body."
+        "note": "First per-kernel emitter validated. Adaptations: (1) wgpu version pin bumped 22→=26.0.1 to match workspace; (2) bgl_storage/bgl_uniform helpers exposed pub(crate) for cross-module use; (3) emit_masks_wgsl_fused used as real API name. Mask_unpack WGSL stays stub until T5 hoists real body."
       },
       "started_at": "2026-04-27T05:27:05Z",
       "completed_at": "2026-04-27T05:34:50Z",
@@ -241,7 +241,7 @@
         "critic_compiler_first": "PASS",
         "critic_cross_backend_parity": "PASS",
         "critic_reduction_determinism": "PASS",
-        "note": "Wired BindingSources + emitted FusedMaskKernel into step_batch. Emitted dispatch feature-gated (off by default) because T4 emit had 4-binding BGL vs hand-written 14-binding BGL \u2014 feature flips on once emitter completes BGL match. Type-checked path validates drift at build time. GPU feature has 37 pre-existing compile errors (Plan B1 tombstones); zero new errors introduced."
+        "note": "Wired BindingSources + emitted FusedMaskKernel into step_batch. Emitted dispatch feature-gated (off by default) because T4 emit had 4-binding BGL vs hand-written 14-binding BGL — feature flips on once emitter completes BGL match. Type-checked path validates drift at build time. GPU feature has 37 pre-existing compile errors (Plan B1 tombstones); zero new errors introduced."
       },
       "started_at": "2026-04-27T05:37:05Z",
       "completed_at": "2026-04-27T05:58:09Z",
@@ -267,7 +267,7 @@
       "critic_verdicts": {
         "compliance": "PASS",
         "quality": "PASS",
-        "note": "ScoringKernel emit walks IR truth via emit_scoring_wgsl_atomic_views; produces 21-entry BGL matching its own WGSL output. Hand-written wrapper has 2 extra bindings (alive_bitmap, spatial_within) that surface as IR-vs-hand-written divergence \u2014 to be resolved at T15 parity gate. Adaptation: extended emit_resident_context with scoring_view_buffers_slice() helper; xtask CLI corrected to -p xtask --bin xtask."
+        "note": "ScoringKernel emit walks IR truth via emit_scoring_wgsl_atomic_views; produces 21-entry BGL matching its own WGSL output. Hand-written wrapper has 2 extra bindings (alive_bitmap, spatial_within) that surface as IR-vs-hand-written divergence — to be resolved at T15 parity gate. Adaptation: extended emit_resident_context with scoring_view_buffers_slice() helper; xtask CLI corrected to -p xtask --bin xtask."
       },
       "started_at": "2026-04-27T05:59:58Z",
       "completed_at": "2026-04-27T06:11:28Z",
@@ -296,7 +296,7 @@
         "critic_compiler_first": "PASS",
         "critic_cross_backend_parity": "PASS",
         "critic_reduction_determinism": "PASS",
-        "note": "ApplyActionsKernel emit. IR walk: 6 bindings, hand-written: 6 bindings, same count. Feature-gated (engine_gpu_emitted_apply_actions_dispatch off) \u2014 emitted WGSL is no-op stub, hand-written WGSL is dynamically constructed via build_shader(event_ring_capacity) so cannot be hoisted statically. T16 lands real WGSL body. Type-checked BindingSources caught T5/T6 drift at build time."
+        "note": "ApplyActionsKernel emit. IR walk: 6 bindings, hand-written: 6 bindings, same count. Feature-gated (engine_gpu_emitted_apply_actions_dispatch off) — emitted WGSL is no-op stub, hand-written WGSL is dynamically constructed via build_shader(event_ring_capacity) so cannot be hoisted statically. T16 lands real WGSL body. Type-checked BindingSources caught T5/T6 drift at build time."
       },
       "started_at": "2026-04-27T06:14:03Z",
       "completed_at": "2026-04-27T06:32:14Z",
@@ -325,7 +325,7 @@
         "critic_compiler_first": "PASS",
         "critic_cross_backend_parity": "PASS",
         "critic_reduction_determinism": "PASS",
-        "note": "PickAbilityKernel emit. IR walk + emit_pick_ability_wgsl: 7 bindings, BGL slot-for-slot match. Plan snippet had stale slot order; agent correctly followed WGSL (authoritative). Engine_gpu feature-gated (engine_gpu_emitted_pick_ability_dispatch off). ExternalBuffers expansion forced fix at 4 existing T5/T7 wire sites \u2014 type-check drift detection working."
+        "note": "PickAbilityKernel emit. IR walk + emit_pick_ability_wgsl: 7 bindings, BGL slot-for-slot match. Plan snippet had stale slot order; agent correctly followed WGSL (authoritative). Engine_gpu feature-gated (engine_gpu_emitted_pick_ability_dispatch off). ExternalBuffers expansion forced fix at 4 existing T5/T7 wire sites — type-check drift detection working."
       },
       "started_at": "2026-04-27T06:35:04Z",
       "completed_at": "2026-04-27T06:56:53Z",
@@ -474,7 +474,7 @@
     {
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-14",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
-      "title": "Task 14: Emit megakernel \u2014 fuse pass over SCHEDULE",
+      "title": "Task 14: Emit megakernel — fuse pass over SCHEDULE",
       "checkbox_line": 4305,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-13"
@@ -530,7 +530,7 @@
     {
       "id": "2026-04-26-kernel-dispatch-emit-impl.task-16",
       "plan": "2026-04-26-kernel-dispatch-emit-impl",
-      "title": "Task 16: Final cleanup \u2014 delete hand-written kernel files; final parity sweep",
+      "title": "Task 16: Final cleanup — delete hand-written kernel files; final parity sweep",
       "checkbox_line": 4718,
       "deps": [
         "2026-04-26-kernel-dispatch-emit-impl.task-15"
@@ -563,16 +563,16 @@
       "blocks": [
         "2026-04-28-emitted-wgsl-body-fill.task-2"
       ],
-      "status": "pending",
+      "status": "blocked",
       "steps_total": 7,
       "steps_done": 0,
       "owner_class": "implementer",
-      "blocked_reason": null,
+      "blocked_reason": "Plan assumed wire-emitter alone would produce a runnable WGSL. emit_physics_wgsl is prelude-dependent: output references undefined symbols (events_in/EventSlot typed buffer, state_agent_*/state_set_agent_* getters, gpu_emit_event push fn, EVENT_KIND_* consts, slot_of/alive_bit helpers, abilities_is_known/abilities_effects_count, view-read fns). These came from hand-written WGSL constants in pre-T16 deleted kernel files. Task 1 needs restructure to include runtime-prelude module. Plan updated to add Task 0 (naga-parse gate) ahead of Task 1; Task 1 description acknowledges prelude requirement. Awaiting user decision on prelude design before re-attempting.",
       "completed_commit": null,
       "critic_verdicts": {},
-      "started_at": null,
+      "started_at": "2026-04-29T02:12:39Z",
       "completed_at": null,
-      "retry_count": 0
+      "retry_count": 1
     },
     {
       "id": "2026-04-28-emitted-wgsl-body-fill.task-2",
@@ -599,7 +599,7 @@
     {
       "id": "2026-04-28-emitted-wgsl-body-fill.task-3",
       "plan": "2026-04-28-emitted-wgsl-body-fill",
-      "title": "Task 3: Wire xtask to call view-fold WGSL emitters (\u00d78 fold modules)",
+      "title": "Task 3: Wire xtask to call view-fold WGSL emitters (×8 fold modules)",
       "checkbox_line": 154,
       "deps": [
         "2026-04-28-emitted-wgsl-body-fill.task-2"
@@ -891,11 +891,11 @@
   ],
   "run": {
     "started_at": null,
-    "last_iteration_at": null,
-    "iterations_completed": 0,
+    "last_iteration_at": "2026-04-29T02:22:09Z",
+    "iterations_completed": 1,
     "tasks_closed": 0,
-    "tasks_blocked": 0,
-    "current_phase": "idle",
+    "tasks_blocked": 1,
+    "current_phase": "dispatching",
     "next_wake_scheduled": null
   }
 }
