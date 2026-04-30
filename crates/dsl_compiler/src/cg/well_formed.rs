@@ -42,7 +42,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::cg::data_handle::{AgentRef, CgExprId, DataHandle};
 use crate::cg::dispatch::DispatchShape;
-use crate::cg::expr::{type_check, CgTy, TypeCheckCtx, TypeError};
+use crate::cg::expr::{data_handle_ty, type_check, CgExpr, CgTy, TypeCheckCtx, TypeError};
 use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, ScoringRowOp, SpatialQueryKind};
 use crate::cg::program::CgProgram;
 use crate::cg::stmt::{CgStmt, CgStmtId, CgStmtListId};
@@ -154,6 +154,30 @@ pub enum CgError {
         kind_label: &'static str,
         shape_label: &'static str,
     },
+
+    /// A [`CgStmt::Assign`]'s value type does not match the storage
+    /// type of its target [`DataHandle`]. The well-formed pass
+    /// type-checks the assignment value with [`type_check`] and then
+    /// compares the result to [`data_handle_ty`] of the target. A
+    /// `Bool` value assigned to an `AgentField::Hp` (which is `F32`)
+    /// is the canonical defect this variant catches.
+    AssignTypeMismatch {
+        op: OpId,
+        target: DataHandle,
+        expected: CgTy,
+        got: CgTy,
+    },
+
+    /// A [`ScoringRowOp`]'s `target` expression has a type other than
+    /// [`CgTy::AgentId`]. Scoring rows must produce an agent-id
+    /// candidate; a row whose `target` is a `F32` (or any non-agent
+    /// type) is structurally wrong and is rejected here. `row_index`
+    /// pins which row inside the op carried the offending target.
+    ScoringTargetNotAgentId {
+        op: OpId,
+        row_index: u32,
+        got: CgTy,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +261,114 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
         },
         ComputeOpKind::Plumbing { kind } => match *kind {},
     }
+}
+
+// ---------------------------------------------------------------------------
+// collect_subexpr_ids — adversarial-input expr-id reachability walk.
+// ---------------------------------------------------------------------------
+
+/// Recursively collect every [`CgExprId`] reachable from `root` (the
+/// root id itself + every sub-id embedded in the [`CgExpr`] tree under
+/// it). The walk is panic-free: arena lookups use `slice::get`, and
+/// every recursion guards against cycles via a `visited` set so that a
+/// corrupted arena with self-referential ids (`Binary { lhs: self, .. }`)
+/// can't loop forever.
+///
+/// This is the load-bearing helper that closes the P10 panic gap: the
+/// well-formed pass calls this BEFORE any [`type_check`] dispatch and
+/// validates that every reachable id is in-range. If any sub-id is out
+/// of range, the offending op skips its type-check pass (the type
+/// checker would index past the arena) but still runs the structural
+/// id-range / P6 / kind-shape / cycle checks.
+fn collect_subexpr_ids(arena: &[CgExpr], root: CgExprId, out: &mut Vec<CgExprId>) {
+    let mut visited: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    let mut stack: Vec<CgExprId> = vec![root];
+    while let Some(id) = stack.pop() {
+        if !visited.insert(id.0) {
+            // Already walked — avoids infinite loops on adversarially
+            // self-referential arenas.
+            continue;
+        }
+        out.push(id);
+        // Use `slice::get` — never index with `[..]`.
+        let Some(expr) = arena.get(id.0 as usize) else {
+            // Out-of-range id; nothing to recurse into. The id itself
+            // has already been recorded for the caller's range check.
+            continue;
+        };
+        match expr {
+            CgExpr::Binary { lhs, rhs, .. } => {
+                stack.push(*lhs);
+                stack.push(*rhs);
+            }
+            CgExpr::Unary { arg, .. } => {
+                stack.push(*arg);
+            }
+            CgExpr::Builtin { args, .. } => {
+                for a in args {
+                    stack.push(*a);
+                }
+            }
+            CgExpr::Select { cond, then, else_, .. } => {
+                stack.push(*cond);
+                stack.push(*then);
+                stack.push(*else_);
+            }
+            CgExpr::Read(handle) => {
+                // `AgentRef::Target(expr_id)` embeds an expression id
+                // inside a data handle reachable from a `Read`. Fold
+                // it into the reachability walk so the OOR check
+                // catches it too.
+                if let DataHandle::AgentField {
+                    target: AgentRef::Target(target_expr),
+                    ..
+                } = handle
+                {
+                    stack.push(*target_expr);
+                }
+            }
+            CgExpr::Lit(_) | CgExpr::Rng { .. } => {}
+        }
+    }
+}
+
+/// Validate every id collected by [`collect_subexpr_ids`] against the
+/// arena length. Pushes an [`CgError::ExprIdOutOfRange`] for each id
+/// past the arena end and returns `true` if the root tree is
+/// "expression-corrupted" (i.e. any sub-id is out of range).
+///
+/// Returning `true` signals callers to skip [`type_check`] for the
+/// offending op — the type checker descends through the arena and
+/// would index past the end on a corrupted sub-id.
+fn validate_expr_subtree(
+    arena: &[CgExpr],
+    root: CgExprId,
+    op_id: OpId,
+    expr_arena_len: u32,
+    errors: &mut Vec<CgError>,
+) -> bool {
+    let mut ids = Vec::new();
+    collect_subexpr_ids(arena, root, &mut ids);
+    let mut corrupted = false;
+    for id in ids {
+        if id.0 >= expr_arena_len {
+            corrupted = true;
+            // Dedup: only report the same offending id once per op.
+            // (A repeated reference inside the tree would otherwise
+            // produce duplicate errors.) We use `errors.iter()`
+            // because the error set is small per op; the comparison
+            // is an Eq match on the variant.
+            let candidate = CgError::ExprIdOutOfRange {
+                op: op_id,
+                referenced: id,
+                arena_len: expr_arena_len,
+            };
+            if !errors.contains(&candidate) {
+                errors.push(candidate);
+            }
+        }
+    }
+    corrupted
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +461,14 @@ pub fn check_well_formed(prog: &CgProgram) -> Result<(), Vec<CgError>> {
 
 /// Per-op checks — id-range, handle consistency, type checking, P6, and
 /// kind/shape compatibility.
+///
+/// Returns nothing — all defects are pushed into `errors`. The
+/// expression-corruption flag (`expr_corrupted`) is computed up-front
+/// from the reachability walk (see [`validate_expr_subtree`]) and
+/// gates the type-check pass for this op only. Other checks (P6,
+/// kind/shape, structural id-range, handle consistency) still run on
+/// expression-corrupted ops because they don't recurse into the
+/// expression arena.
 fn check_op(
     op: &ComputeOp,
     op_id: OpId,
@@ -338,36 +478,78 @@ fn check_op(
     list_arena_len: u32,
     errors: &mut Vec<CgError>,
 ) {
-    // --- id-range checks per kind ------------------------------------
+    // --- pre-pass: validate every reachable expr id. ---------------------
+    //
+    // The post-validation `expr_corrupted` flag is the gate that
+    // skips type-check for the offending op (and only that op). It's
+    // OR'd across every reachable subtree from the op's payload.
+    //
+    // We walk:
+    //   - mask predicate id (root)
+    //   - each scoring row's utility + target ids (roots)
+    //   - each AgentRef::Target(expr_id) inside the op's reads/writes
+    //   - every expression embedded in the op's body statements (Assign
+    //     value, Emit field expr, If cond)
+    //
+    // Every sub-id reached recursively (Binary lhs/rhs, Unary arg,
+    // Builtin args, Select cond/then/else_, Read(AgentField target))
+    // is also validated.
+    let arena: &[CgExpr] = prog.exprs.as_slice();
+    let mut expr_corrupted = false;
 
     match &op.kind {
         ComputeOpKind::MaskPredicate { predicate, .. } => {
-            if predicate.0 >= expr_arena_len {
-                errors.push(CgError::ExprIdOutOfRange {
-                    op: op_id,
-                    referenced: *predicate,
-                    arena_len: expr_arena_len,
-                });
+            if validate_expr_subtree(arena, *predicate, op_id, expr_arena_len, errors) {
+                expr_corrupted = true;
             }
         }
         ComputeOpKind::ScoringArgmax { rows, .. } => {
             for row in rows {
-                if row.utility.0 >= expr_arena_len {
-                    errors.push(CgError::ExprIdOutOfRange {
-                        op: op_id,
-                        referenced: row.utility,
-                        arena_len: expr_arena_len,
-                    });
+                if validate_expr_subtree(arena, row.utility, op_id, expr_arena_len, errors) {
+                    expr_corrupted = true;
                 }
-                if row.target.0 >= expr_arena_len {
-                    errors.push(CgError::ExprIdOutOfRange {
-                        op: op_id,
-                        referenced: row.target,
-                        arena_len: expr_arena_len,
-                    });
+                if validate_expr_subtree(arena, row.target, op_id, expr_arena_len, errors) {
+                    expr_corrupted = true;
                 }
             }
         }
+        ComputeOpKind::PhysicsRule { body, .. } | ComputeOpKind::ViewFold { body, .. } => {
+            // Body subexpressions are reached via `walk_body_expr_subtrees`
+            // — see below. List-id-range is checked in the dedicated
+            // pass below this match.
+            if body.0 < list_arena_len {
+                if walk_body_expr_subtrees(
+                    *body,
+                    op_id,
+                    prog,
+                    expr_arena_len,
+                    list_arena_len,
+                    errors,
+                ) {
+                    expr_corrupted = true;
+                }
+            }
+        }
+        ComputeOpKind::SpatialQuery { .. } => {}
+        ComputeOpKind::Plumbing { kind } => match *kind {},
+    }
+
+    // Validate AgentRef::Target ids on every read/write handle.
+    for handle in op.reads.iter().chain(op.writes.iter()) {
+        if let DataHandle::AgentField {
+            target: AgentRef::Target(expr_id),
+            ..
+        } = handle
+        {
+            if validate_expr_subtree(arena, *expr_id, op_id, expr_arena_len, errors) {
+                expr_corrupted = true;
+            }
+        }
+    }
+
+    // --- list/stmt id-range checks per kind --------------------------
+
+    match &op.kind {
         ComputeOpKind::PhysicsRule { body, .. } | ComputeOpKind::ViewFold { body, .. } => {
             if body.0 >= list_arena_len {
                 errors.push(CgError::StmtListIdOutOfRange {
@@ -376,8 +558,8 @@ fn check_op(
                     arena_len: list_arena_len,
                 });
             } else {
-                // Body resolves; walk it for inner expr/list/stmt
-                // references.
+                // Body resolves; walk it for inner stmt/list id-range
+                // references (expr ids are already covered above).
                 walk_list_id_ranges(
                     *body,
                     op_id,
@@ -389,13 +571,10 @@ fn check_op(
                 );
             }
         }
-        ComputeOpKind::SpatialQuery { .. } => {
-            // No id refs to check.
-        }
-        ComputeOpKind::Plumbing { kind } => {
-            // Uninhabited — no instance reachable.
-            match *kind {}
-        }
+        ComputeOpKind::MaskPredicate { .. }
+        | ComputeOpKind::ScoringArgmax { .. }
+        | ComputeOpKind::SpatialQuery { .. } => {}
+        ComputeOpKind::Plumbing { kind } => match *kind {},
     }
 
     // --- DataHandle structural consistency on reads + writes ---------
@@ -411,9 +590,16 @@ fn check_op(
     }
 
     // --- Type checking on embedded expressions -----------------------
+    //
+    // SKIPPED if the op's reachable expr-id set has any out-of-range
+    // member: `type_check` recurses through `ctx.arena.get(id)` which
+    // panics on OOR (the panicking impl lives at expr.rs:684). The
+    // corruption flag is the gate that closes the P10 hole.
 
-    let ctx = TypeCheckCtx::new(prog);
-    type_check_op(op, op_id, prog, &ctx, expr_arena_len, errors);
+    if !expr_corrupted {
+        let ctx = TypeCheckCtx::new(prog);
+        type_check_op(op, op_id, prog, &ctx, expr_arena_len, errors);
+    }
 
     // --- P6 mutation channel: AgentField writes only in ViewFold ----
 
@@ -430,6 +616,93 @@ fn check_op(
             shape_label: label.snake(),
         });
     }
+}
+
+/// Walk a body stmt-list and validate every embedded expression
+/// subtree against the arena (recursing through nested If branches).
+/// Returns `true` if any reachable expr id was out of range, signalling
+/// the caller to skip the type-check pass for the owning op.
+///
+/// Always returns when the list-id is out-of-range — that's a separate
+/// defect reported by the structural pass; here we just stop walking
+/// and never panic.
+fn walk_body_expr_subtrees(
+    list_id: CgStmtListId,
+    op_id: OpId,
+    prog: &CgProgram,
+    expr_arena_len: u32,
+    list_arena_len: u32,
+    errors: &mut Vec<CgError>,
+) -> bool {
+    let mut corrupted = false;
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return false;
+    };
+    let arena: &[CgExpr] = prog.exprs.as_slice();
+    for stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        match stmt {
+            CgStmt::Assign { value, target } => {
+                if validate_expr_subtree(arena, *value, op_id, expr_arena_len, errors) {
+                    corrupted = true;
+                }
+                // Validate AgentRef::Target embedded in the assign
+                // target handle (the value-side is captured by the
+                // op-level reads/writes pass too, but body-targets
+                // can hold target-pointers that lowering computed).
+                if let DataHandle::AgentField {
+                    target: AgentRef::Target(target_expr),
+                    ..
+                } = target
+                {
+                    if validate_expr_subtree(arena, *target_expr, op_id, expr_arena_len, errors) {
+                        corrupted = true;
+                    }
+                }
+            }
+            CgStmt::Emit { fields, .. } => {
+                for (_, expr_id) in fields {
+                    if validate_expr_subtree(arena, *expr_id, op_id, expr_arena_len, errors) {
+                        corrupted = true;
+                    }
+                }
+            }
+            CgStmt::If { cond, then, else_ } => {
+                if validate_expr_subtree(arena, *cond, op_id, expr_arena_len, errors) {
+                    corrupted = true;
+                }
+                if then.0 < list_arena_len {
+                    if walk_body_expr_subtrees(
+                        *then,
+                        op_id,
+                        prog,
+                        expr_arena_len,
+                        list_arena_len,
+                        errors,
+                    ) {
+                        corrupted = true;
+                    }
+                }
+                if let Some(else_id) = else_ {
+                    if else_id.0 < list_arena_len {
+                        if walk_body_expr_subtrees(
+                            *else_id,
+                            op_id,
+                            prog,
+                            expr_arena_len,
+                            list_arena_len,
+                            errors,
+                        ) {
+                            corrupted = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    corrupted
 }
 
 /// Walk a `CgStmtListId` recursively for id-range defects in its
@@ -458,39 +731,19 @@ fn walk_list_id_ranges(
         let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
             continue;
         };
+        // NB: expr-id range checks (Assign.value, Emit field, If.cond)
+        // are handled by `walk_body_expr_subtrees` /
+        // `validate_expr_subtree`, which also recurse into sub-ids
+        // (Binary lhs/rhs etc.). This walk only handles list/stmt-id
+        // ranges to avoid double-reporting expr defects.
         match stmt {
-            CgStmt::Assign { value, target } => {
-                if value.0 >= expr_arena_len {
-                    errors.push(CgError::ExprIdOutOfRange {
-                        op: op_id,
-                        referenced: *value,
-                        arena_len: expr_arena_len,
-                    });
-                }
-                // Target's structural consistency is covered by the
-                // op-level reads/writes walk; checking again here
-                // would double-report.
-                let _ = target;
+            CgStmt::Assign { .. } | CgStmt::Emit { .. } => {
+                // Nothing to range-check at the list-walk level —
+                // these statements only embed expr-ids and (for
+                // Assign) a target handle, all of which are validated
+                // elsewhere.
             }
-            CgStmt::Emit { fields, .. } => {
-                for (_, expr_id) in fields {
-                    if expr_id.0 >= expr_arena_len {
-                        errors.push(CgError::ExprIdOutOfRange {
-                            op: op_id,
-                            referenced: *expr_id,
-                            arena_len: expr_arena_len,
-                        });
-                    }
-                }
-            }
-            CgStmt::If { cond, then, else_ } => {
-                if cond.0 >= expr_arena_len {
-                    errors.push(CgError::ExprIdOutOfRange {
-                        op: op_id,
-                        referenced: *cond,
-                        arena_len: expr_arena_len,
-                    });
-                }
+            CgStmt::If { then, else_, .. } => {
                 if then.0 >= list_arena_len {
                     errors.push(CgError::StmtListIdOutOfRange {
                         op: op_id,
@@ -587,33 +840,36 @@ fn type_check_op(
 ) {
     match &op.kind {
         ComputeOpKind::MaskPredicate { predicate, .. } => {
-            if predicate.0 < expr_arena_len {
-                let expr = &prog.exprs[predicate.0 as usize];
-                match type_check(expr, *predicate, ctx) {
-                    Ok(ty) => {
-                        if ty != CgTy::Bool {
-                            errors.push(CgError::TypeMismatch {
-                                op: op_id,
-                                error: TypeError::ClaimedResultMismatch {
-                                    node: *predicate,
-                                    expected: CgTy::Bool,
-                                    got: ty,
-                                },
-                            });
-                        }
-                    }
-                    Err(err) => {
+            // Safe indexing: caller guards by `expr_corrupted`, so any
+            // sub-id reachable from `predicate` is in-range; still use
+            // `.get` to never index past arena.
+            let Some(expr) = prog.exprs.get(predicate.0 as usize) else {
+                return;
+            };
+            match type_check(expr, *predicate, ctx) {
+                Ok(ty) => {
+                    if ty != CgTy::Bool {
                         errors.push(CgError::TypeMismatch {
                             op: op_id,
-                            error: err,
+                            error: TypeError::ClaimedResultMismatch {
+                                node: *predicate,
+                                expected: CgTy::Bool,
+                                got: ty,
+                            },
                         });
                     }
+                }
+                Err(err) => {
+                    errors.push(CgError::TypeMismatch {
+                        op: op_id,
+                        error: err,
+                    });
                 }
             }
         }
         ComputeOpKind::ScoringArgmax { rows, .. } => {
-            for row in rows {
-                type_check_row(row, op_id, prog, ctx, expr_arena_len, errors);
+            for (row_index, row) in rows.iter().enumerate() {
+                type_check_row(row, row_index as u32, op_id, prog, ctx, expr_arena_len, errors);
             }
         }
         ComputeOpKind::PhysicsRule { body, .. } | ComputeOpKind::ViewFold { body, .. } => {
@@ -630,16 +886,21 @@ fn type_check_op(
     }
 }
 
+/// Type-check a single [`ScoringRowOp`]. Validates:
+///   - `row.utility` type-checks (delegates to [`type_check`])
+///   - `row.target` type-checks AND its result is [`CgTy::AgentId`]
+///     (a non-AgentId target is rejected as
+///     [`CgError::ScoringTargetNotAgentId`]).
 fn type_check_row(
     row: &ScoringRowOp,
+    row_index: u32,
     op_id: OpId,
     prog: &CgProgram,
     ctx: &TypeCheckCtx<'_>,
-    expr_arena_len: u32,
+    _expr_arena_len: u32,
     errors: &mut Vec<CgError>,
 ) {
-    if row.utility.0 < expr_arena_len {
-        let expr = &prog.exprs[row.utility.0 as usize];
+    if let Some(expr) = prog.exprs.get(row.utility.0 as usize) {
         if let Err(err) = type_check(expr, row.utility, ctx) {
             errors.push(CgError::TypeMismatch {
                 op: op_id,
@@ -647,13 +908,21 @@ fn type_check_row(
             });
         }
     }
-    if row.target.0 < expr_arena_len {
-        let expr = &prog.exprs[row.target.0 as usize];
-        if let Err(err) = type_check(expr, row.target, ctx) {
-            errors.push(CgError::TypeMismatch {
+    if let Some(expr) = prog.exprs.get(row.target.0 as usize) {
+        match type_check(expr, row.target, ctx) {
+            Ok(target_ty) => {
+                if target_ty != CgTy::AgentId {
+                    errors.push(CgError::ScoringTargetNotAgentId {
+                        op: op_id,
+                        row_index,
+                        got: target_ty,
+                    });
+                }
+            }
+            Err(err) => errors.push(CgError::TypeMismatch {
                 op: op_id,
                 error: err,
-            });
+            }),
         }
     }
 }
@@ -674,21 +943,36 @@ fn type_check_list(
             continue;
         };
         match stmt {
-            CgStmt::Assign { value, .. } => {
-                if value.0 < expr_arena_len {
-                    let expr = &prog.exprs[value.0 as usize];
-                    if let Err(err) = type_check(expr, *value, ctx) {
-                        errors.push(CgError::TypeMismatch {
+            CgStmt::Assign { value, target } => {
+                if let Some(expr) = prog.exprs.get(value.0 as usize) {
+                    match type_check(expr, *value, ctx) {
+                        Ok(value_ty) => {
+                            // Compare value type vs the target
+                            // handle's storage type. A mismatch
+                            // surfaces as a structured
+                            // `AssignTypeMismatch` (distinct from
+                            // `TypeMismatch`, which wraps inner
+                            // expression typing defects).
+                            let expected = data_handle_ty(target);
+                            if value_ty != expected {
+                                errors.push(CgError::AssignTypeMismatch {
+                                    op: op_id,
+                                    target: target.clone(),
+                                    expected,
+                                    got: value_ty,
+                                });
+                            }
+                        }
+                        Err(err) => errors.push(CgError::TypeMismatch {
                             op: op_id,
                             error: err,
-                        });
+                        }),
                     }
                 }
             }
             CgStmt::Emit { fields, .. } => {
                 for (_, expr_id) in fields {
-                    if expr_id.0 < expr_arena_len {
-                        let expr = &prog.exprs[expr_id.0 as usize];
+                    if let Some(expr) = prog.exprs.get(expr_id.0 as usize) {
                         if let Err(err) = type_check(expr, *expr_id, ctx) {
                             errors.push(CgError::TypeMismatch {
                                 op: op_id,
@@ -699,8 +983,7 @@ fn type_check_list(
                 }
             }
             CgStmt::If { cond, then, else_ } => {
-                if cond.0 < expr_arena_len {
-                    let expr = &prog.exprs[cond.0 as usize];
+                if let Some(expr) = prog.exprs.get(cond.0 as usize) {
                     match type_check(expr, *cond, ctx) {
                         Ok(ty) => {
                             if ty != CgTy::Bool {
@@ -1127,7 +1410,17 @@ mod tests {
         .unwrap();
 
         // --- view fold: assigns view storage (allowed) ---
-        let view_value = b.add_expr(lit_f32(2.0)).unwrap();
+        // ViewStorage::Primary's storage type is `ViewKey { view }`,
+        // so we feed the slot a `Read` of the prior tick's primary
+        // (the canonical fold pattern: read prior, transform, write
+        // back). Picking a value of the right type avoids triggering
+        // `AssignTypeMismatch`.
+        let view_value = b
+            .add_expr(CgExpr::Read(DataHandle::ViewStorage {
+                view: ViewId(0),
+                slot: ViewStorageSlot::Primary,
+            }))
+            .unwrap();
         let view_assign = b
             .add_stmt(CgStmt::Assign {
                 target: DataHandle::ViewStorage {
@@ -1725,4 +2018,459 @@ mod tests {
         // Just exercise the helper so Cargo doesn't warn unused.
         let _ = lit_bool(true);
     }
+
+    // -----------------------------------------------------------------
+    // 12. If.cond non-Bool — closes Task 1.6 spec gap
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn if_cond_non_bool_returns_type_mismatch() {
+        // A `CgStmt::If` whose `cond` is a non-Bool literal must
+        // surface as a `TypeMismatch` with `ClaimedResultMismatch
+        // { expected: Bool, got: F32 }`. Build the If inside a
+        // physics-rule body (the only place If can live today).
+        let mut b = CgProgramBuilder::new();
+        // F32-typed cond — this is the defect we're testing.
+        let cond = b.add_expr(lit_f32(1.0)).unwrap();
+        // An empty inner body (no statements). The If's then/else
+        // need real list ids; an empty list is fine.
+        let inner = b.add_stmt_list(CgStmtList::new(vec![])).unwrap();
+        let if_stmt = b
+            .add_stmt(CgStmt::If {
+                cond,
+                then: inner,
+                else_: None,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![if_stmt])).unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: EventKindId(0),
+                body,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        let prog = b.finish();
+
+        let errs = check_well_formed(&prog).expect_err("If.cond non-Bool");
+        let saw = errs.iter().any(|e| {
+            matches!(
+                e,
+                CgError::TypeMismatch {
+                    op: OpId(0),
+                    error: TypeError::ClaimedResultMismatch {
+                        expected: CgTy::Bool,
+                        got: CgTy::F32,
+                        ..
+                    },
+                }
+            )
+        });
+        assert!(saw, "missing If-cond Bool TypeMismatch in {:?}", errs);
+    }
+
+    // -----------------------------------------------------------------
+    // 13. Assign value type vs target type
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn assign_wrong_value_type_returns_assign_type_mismatch() {
+        // Assign a `Bool` value to AgentField::Hp (an F32 slot). The
+        // pass must surface `AssignTypeMismatch { expected: F32, got:
+        // Bool }`. Use a ViewFold (the one place AgentField writes
+        // are allowed under P6).
+        let mut b = CgProgramBuilder::new();
+        let bool_val = b.add_expr(lit_bool(true)).unwrap();
+        let assign = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Hp,
+                    target: AgentRef::Self_,
+                },
+                value: bool_val,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![assign])).unwrap();
+        b.add_op(
+            ComputeOpKind::ViewFold {
+                view: ViewId(0),
+                on_event: EventKindId(0),
+                body,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        let prog = b.finish();
+
+        let errs = check_well_formed(&prog).expect_err("Assign wrong type");
+        let target_handle = DataHandle::AgentField {
+            field: AgentFieldId::Hp,
+            target: AgentRef::Self_,
+        };
+        assert!(
+            errs.contains(&CgError::AssignTypeMismatch {
+                op: OpId(0),
+                target: target_handle,
+                expected: CgTy::F32,
+                got: CgTy::Bool,
+            }),
+            "missing AssignTypeMismatch in {:?}",
+            errs
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 14. Scoring row target must be AgentId
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn scoring_row_target_non_agent_id_returns_error() {
+        // A scoring row whose `target` is F32-typed (instead of
+        // AgentId) must surface as `ScoringTargetNotAgentId`.
+        let mut b = CgProgramBuilder::new();
+        let util = b.add_expr(lit_f32(1.0)).unwrap();
+        // F32-typed target — this is the defect.
+        let bad_target = b.add_expr(lit_f32(0.0)).unwrap();
+        b.add_op(
+            ComputeOpKind::ScoringArgmax {
+                scoring: ScoringId(0),
+                rows: vec![ScoringRowOp {
+                    action: ActionId(0),
+                    utility: util,
+                    target: bad_target,
+                }],
+            },
+            DispatchShape::PerAgent,
+            Span::dummy(),
+        )
+        .unwrap();
+        let prog = b.finish();
+
+        let errs = check_well_formed(&prog).expect_err("scoring target non-AgentId");
+        assert!(
+            errs.contains(&CgError::ScoringTargetNotAgentId {
+                op: OpId(0),
+                row_index: 0,
+                got: CgTy::F32,
+            }),
+            "missing ScoringTargetNotAgentId in {:?}",
+            errs
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 15. Nested expr-id OOR (the P10 panic gap)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn nested_binary_lhs_out_of_range_does_not_panic() {
+        // Construct a program where a top-level mask predicate
+        // references a Binary whose `lhs` points at an out-of-range
+        // expr id. The pre-fix implementation would PANIC here (the
+        // type checker recursively dereferences `lhs` via
+        // `ctx.arena.get(...)` which panics on a `Vec<CgExpr>` arena
+        // with an OOR id, see expr.rs:684). Post-fix: the well-formed
+        // pass surfaces a typed `ExprIdOutOfRange` and skips
+        // type-check for this op.
+        let mut prog = CgProgram::new();
+        // expr#0: rhs (F32 lit)
+        prog.exprs.push(CgExpr::Lit(LitValue::F32(0.5)));
+        // expr#1: Binary with lhs = #99 (OOR), rhs = #0 (in-range)
+        prog.exprs.push(CgExpr::Binary {
+            op: BinaryOp::LtF32,
+            lhs: CgExprId(99),
+            rhs: CgExprId(0),
+            ty: CgTy::Bool,
+        });
+        prog.ops.push(ComputeOp {
+            id: OpId(0),
+            kind: ComputeOpKind::MaskPredicate {
+                mask: MaskId(0),
+                predicate: CgExprId(1),
+            },
+            reads: vec![],
+            writes: vec![DataHandle::MaskBitmap { mask: MaskId(0) }],
+            shape: DispatchShape::PerAgent,
+            span: Span::dummy(),
+        });
+
+        let errs = check_well_formed(&prog).expect_err("nested OOR must not panic");
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                CgError::ExprIdOutOfRange {
+                    op: OpId(0),
+                    referenced: CgExprId(99),
+                    arena_len: 2,
+                }
+            )),
+            "missing nested ExprIdOutOfRange in {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn nested_select_cond_out_of_range_does_not_panic() {
+        // Similar to the Binary case but for Select.cond.
+        let mut prog = CgProgram::new();
+        // expr#0: F32 lit (then)
+        prog.exprs.push(CgExpr::Lit(LitValue::F32(1.0)));
+        // expr#1: F32 lit (else)
+        prog.exprs.push(CgExpr::Lit(LitValue::F32(0.0)));
+        // expr#2: Select with OOR cond
+        prog.exprs.push(CgExpr::Select {
+            cond: CgExprId(99),
+            then: CgExprId(0),
+            else_: CgExprId(1),
+            ty: CgTy::F32,
+        });
+        // expr#3: Use expr#2 as a scoring row utility (the row's
+        // target must be in-range AgentId; otherwise we'd shadow this
+        // assertion with a separate row-target defect).
+        prog.exprs.push(CgExpr::Lit(LitValue::AgentId(0)));
+        prog.ops.push(ComputeOp {
+            id: OpId(0),
+            kind: ComputeOpKind::ScoringArgmax {
+                scoring: ScoringId(0),
+                rows: vec![ScoringRowOp {
+                    action: ActionId(0),
+                    utility: CgExprId(2),
+                    target: CgExprId(3),
+                }],
+            },
+            reads: vec![],
+            writes: vec![DataHandle::ScoringOutput],
+            shape: DispatchShape::PerAgent,
+            span: Span::dummy(),
+        });
+
+        let errs = check_well_formed(&prog).expect_err("nested Select OOR must not panic");
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                CgError::ExprIdOutOfRange {
+                    op: OpId(0),
+                    referenced: CgExprId(99),
+                    arena_len: 4,
+                }
+            )),
+            "missing nested Select-cond ExprIdOutOfRange in {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn nested_oor_inside_agent_ref_target_does_not_panic() {
+        // An AgentRef::Target(expr_id) embedded in a Read whose
+        // expr_id is out-of-range. Pre-fix would panic (the Read's
+        // sub-id is not validated by the structural pass). Post-fix:
+        // the reachability walk picks up the embedded id and reports
+        // it as `ExprIdOutOfRange`.
+        let mut prog = CgProgram::new();
+        // expr#0: a Read of AgentField with Target(#99) — OOR
+        prog.exprs.push(CgExpr::Read(DataHandle::AgentField {
+            field: AgentFieldId::Hp,
+            target: AgentRef::Target(CgExprId(99)),
+        }));
+        // expr#1: Lit F32 (rhs)
+        prog.exprs.push(CgExpr::Lit(LitValue::F32(0.5)));
+        // expr#2: Binary with the Read as lhs — produces a Bool
+        prog.exprs.push(CgExpr::Binary {
+            op: BinaryOp::LtF32,
+            lhs: CgExprId(0),
+            rhs: CgExprId(1),
+            ty: CgTy::Bool,
+        });
+        prog.ops.push(ComputeOp {
+            id: OpId(0),
+            kind: ComputeOpKind::MaskPredicate {
+                mask: MaskId(0),
+                predicate: CgExprId(2),
+            },
+            reads: vec![],
+            writes: vec![DataHandle::MaskBitmap { mask: MaskId(0) }],
+            shape: DispatchShape::PerAgent,
+            span: Span::dummy(),
+        });
+
+        let errs = check_well_formed(&prog).expect_err("AgentRef::Target OOR must not panic");
+        assert!(
+            errs.iter().any(|e| matches!(
+                e,
+                CgError::ExprIdOutOfRange {
+                    op: OpId(0),
+                    referenced: CgExprId(99),
+                    arena_len: 3,
+                }
+            )),
+            "missing AgentRef::Target ExprIdOutOfRange in {:?}",
+            errs
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 16. Cumulative-corruption test — load-bearing "never panics"
+    // assertion. Stresses every check simultaneously.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn cumulative_corruption_collects_all_error_kinds_without_panic() {
+        // Build a program that simultaneously contains:
+        //   (a) a nested expr-id OOR in op#0 (Binary lhs = #99)
+        //   (b) a type mismatch in op#1 (mask predicate is F32-typed,
+        //       not Bool)
+        //   (c) a cycle in the read/write graph (op#2 + op#3 cross-
+        //       reading each other's masks)
+        //   (d) a P6 violation in op#4 (physics rule writing
+        //       AgentField directly)
+        //   (e) a kind/shape mismatch in op#5 (mask predicate paired
+        //       with PerEvent dispatch)
+        //
+        // Asserts that `check_well_formed` returns Err (never panic)
+        // and that AT LEAST ONE error of each kind is present.
+        let mut prog = CgProgram::new();
+
+        // --- Shared expressions used by multiple ops ------------------
+        // expr#0: hp read (F32)
+        prog.exprs.push(read_self_hp());
+        // expr#1: 0.5 (F32)
+        prog.exprs.push(lit_f32(0.5));
+        // expr#2: bool lit (true) — used by op#5's predicate
+        prog.exprs.push(lit_bool(true));
+        // expr#3: Binary with OOR lhs — used by op#0 predicate
+        prog.exprs.push(CgExpr::Binary {
+            op: BinaryOp::LtF32,
+            lhs: CgExprId(99),
+            rhs: CgExprId(1),
+            ty: CgTy::Bool,
+        });
+        // expr#4: Lit F32(0.0) — used by op#4's Assign value
+        prog.exprs.push(lit_f32(0.0));
+
+        // --- op#0: nested expr-id OOR (predicate #3 → Binary{lhs=#99}) ---
+        prog.ops.push(ComputeOp {
+            id: OpId(0),
+            kind: ComputeOpKind::MaskPredicate {
+                mask: MaskId(0),
+                predicate: CgExprId(3),
+            },
+            reads: vec![],
+            writes: vec![DataHandle::MaskBitmap { mask: MaskId(0) }],
+            shape: DispatchShape::PerAgent,
+            span: Span::dummy(),
+        });
+
+        // --- op#1: type mismatch (predicate = #0 which is F32) ---
+        prog.ops.push(ComputeOp {
+            id: OpId(1),
+            kind: ComputeOpKind::MaskPredicate {
+                mask: MaskId(1),
+                predicate: CgExprId(0),
+            },
+            reads: vec![],
+            writes: vec![DataHandle::MaskBitmap { mask: MaskId(1) }],
+            shape: DispatchShape::PerAgent,
+            span: Span::dummy(),
+        });
+
+        // --- op#2: writes mask(2), reads mask(7) — pair of cycle ---
+        prog.ops.push(ComputeOp {
+            id: OpId(2),
+            kind: ComputeOpKind::MaskPredicate {
+                mask: MaskId(2),
+                predicate: CgExprId(2), // Bool-typed lit — well-typed
+            },
+            reads: vec![DataHandle::MaskBitmap { mask: MaskId(7) }],
+            writes: vec![DataHandle::MaskBitmap { mask: MaskId(2) }],
+            shape: DispatchShape::PerAgent,
+            span: Span::dummy(),
+        });
+
+        // --- op#3: writes mask(7), reads mask(2) — closes the cycle ---
+        prog.ops.push(ComputeOp {
+            id: OpId(3),
+            kind: ComputeOpKind::MaskPredicate {
+                mask: MaskId(7),
+                predicate: CgExprId(2),
+            },
+            reads: vec![DataHandle::MaskBitmap { mask: MaskId(2) }],
+            writes: vec![DataHandle::MaskBitmap { mask: MaskId(7) }],
+            shape: DispatchShape::PerAgent,
+            span: Span::dummy(),
+        });
+
+        // --- op#4: P6 violation — physics rule assigns AgentField ---
+        // Build a stmt list with one Assign{AgentField, F32}.
+        let assign_id = CgStmtId(0);
+        prog.stmts.push(CgStmt::Assign {
+            target: DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::Self_,
+            },
+            value: CgExprId(4),
+        });
+        let body_list_id = CgStmtListId(0);
+        prog.stmt_lists.push(CgStmtList::new(vec![assign_id]));
+        prog.ops.push(ComputeOp {
+            id: OpId(4),
+            kind: ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: EventKindId(0),
+                body: body_list_id,
+            },
+            reads: vec![],
+            writes: vec![],
+            shape: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            span: Span::dummy(),
+        });
+
+        // --- op#5: kind/shape mismatch — MaskPredicate + PerEvent ---
+        prog.ops.push(ComputeOp {
+            id: OpId(5),
+            kind: ComputeOpKind::MaskPredicate {
+                mask: MaskId(8),
+                predicate: CgExprId(2),
+            },
+            reads: vec![],
+            writes: vec![DataHandle::MaskBitmap { mask: MaskId(8) }],
+            shape: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            span: Span::dummy(),
+        });
+
+        // The pass must NOT panic on this adversarial input.
+        let errs = check_well_formed(&prog).expect_err("cumulative corruption");
+
+        let saw_oor = errs
+            .iter()
+            .any(|e| matches!(e, CgError::ExprIdOutOfRange { .. }));
+        let saw_type_mismatch = errs
+            .iter()
+            .any(|e| matches!(e, CgError::TypeMismatch { .. }));
+        let saw_cycle = errs.iter().any(|e| matches!(e, CgError::Cycle { .. }));
+        let saw_p6 = errs
+            .iter()
+            .any(|e| matches!(e, CgError::P6Violation { .. }));
+        let saw_kind_shape = errs
+            .iter()
+            .any(|e| matches!(e, CgError::KindShapeMismatch { .. }));
+
+        assert!(
+            saw_oor && saw_type_mismatch && saw_cycle && saw_p6 && saw_kind_shape,
+            "missing one or more error kinds; got {:?}",
+            errs
+        );
+    }
+
 }
