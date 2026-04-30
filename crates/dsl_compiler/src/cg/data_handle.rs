@@ -266,15 +266,6 @@ impl AgentFieldId {
         }
     }
 
-    /// Inverse of [`AgentFieldId::snake`]. Returns `Some(variant)` when
-    /// `s` is the snake_case name of a declared variant, `None`
-    /// otherwise. Used by the expression lowering to map DSL field
-    /// identifiers (`self.<name>`) back to the typed [`AgentFieldId`].
-    ///
-    /// Colocated with `snake()` so the two cannot drift if a new
-    /// variant lands; the
-    /// `agent_field_id_from_snake_round_trips_every_variant` test
-    /// guards round-trip exhaustively.
     /// Every declared [`AgentFieldId`] variant, in declaration order.
     /// Used by [`crate::cg::op::PlumbingKind::PackAgents`] /
     /// [`crate::cg::op::PlumbingKind::UnpackAgents`] to enumerate the
@@ -342,6 +333,15 @@ impl AgentFieldId {
             .collect()
     }
 
+    /// Inverse of [`AgentFieldId::snake`]. Returns `Some(variant)` when
+    /// `s` is the snake_case name of a declared variant, `None`
+    /// otherwise. Used by the expression lowering to map DSL field
+    /// identifiers (`self.<name>`) back to the typed [`AgentFieldId`].
+    ///
+    /// Colocated with `snake()` so the two cannot drift if a new
+    /// variant lands; the
+    /// `agent_field_id_from_snake_round_trips_every_variant` test
+    /// guards round-trip exhaustively.
     pub fn from_snake(s: &str) -> Option<Self> {
         use AgentFieldId::*;
         Some(match s {

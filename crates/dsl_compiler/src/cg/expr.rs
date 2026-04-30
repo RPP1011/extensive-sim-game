@@ -595,6 +595,23 @@ pub enum CgExpr {
 /// op layer (Task 1.3) makes that decomposition explicit, we report
 /// these as `U32` — the storage-element type. This is the same call
 /// the existing emitters make.
+///
+/// # Panics
+///
+/// Plumbing-only handles (`AliveBitmap`, `IndirectArgs`,
+/// `AgentScratch`, `SimCfgBuffer`, `SnapshotKick`) are not
+/// expression-readable: they appear only on
+/// [`crate::cg::op::PlumbingKind`] ops, whose reads/writes are
+/// recorded structurally via
+/// [`crate::cg::op::PlumbingKind::dependencies`] and never via embedded
+/// `CgExpr::Read` nodes. `data_handle_ty` is an expression-typing
+/// helper; reaching one of these arms means an `CgExpr::Read` was
+/// constructed naming a plumbing handle, which violates the IR's
+/// invariants. We `unreachable!` rather than coerce silently to U32 —
+/// the storage element type would be a lie (e.g., `AliveBitmap` is a
+/// packed bit array). This is a compile-time helper, not a
+/// deterministic-runtime path, so the panic is the correct contract
+/// per P10.
 pub fn data_handle_ty(h: &DataHandle) -> CgTy {
     use crate::cg::data_handle::{
         AgentFieldTy, DataHandle as H, EventRingAccess, SpatialStorageKind, ViewStorageSlot,
@@ -646,15 +663,29 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
         // `CgExpr` reads (their reads/writes are sourced structurally
         // from `PlumbingKind::dependencies()`); the IR layer never
         // type-checks an expression that names one of these handles.
-        // The variants surface here for completeness — every storage
-        // class chooses an underlying element type, U32 mirrors the
-        // raw-buffer convention used by the surrounding emitters
-        // (alive_pack, seed_indirect, agent SoA stride).
-        H::AliveBitmap
-        | H::IndirectArgs { .. }
-        | H::AgentScratch { .. }
-        | H::SimCfgBuffer
-        | H::SnapshotKick => CgTy::U32,
+        // Per the doc comment's "Panics" section: returning a synthetic
+        // type here would silently mask an invariant violation, so each
+        // arm panics with a per-variant message instead.
+        H::AliveBitmap => unreachable!(
+            "plumbing handle 'AliveBitmap' is not expression-readable; \
+             data_handle_ty should never see this in practice"
+        ),
+        H::IndirectArgs { .. } => unreachable!(
+            "plumbing handle 'IndirectArgs' is not expression-readable; \
+             data_handle_ty should never see this in practice"
+        ),
+        H::AgentScratch { .. } => unreachable!(
+            "plumbing handle 'AgentScratch' is not expression-readable; \
+             data_handle_ty should never see this in practice"
+        ),
+        H::SimCfgBuffer => unreachable!(
+            "plumbing handle 'SimCfgBuffer' is not expression-readable; \
+             data_handle_ty should never see this in practice"
+        ),
+        H::SnapshotKick => unreachable!(
+            "plumbing handle 'SnapshotKick' is not expression-readable; \
+             data_handle_ty should never see this in practice"
+        ),
     }
 }
 

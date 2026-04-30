@@ -542,6 +542,26 @@ The single entry point. Walks the entire Compilation; emits one CgProgram coveri
 
 `cargo test -p dsl_compiler --test lower_full_compilation` — lowers every `assets/sim/*.sim` file. Asserts the resulting program is well-formed (`check_well_formed` passes).
 
+**Cycle gating (carry-forward from Task 2.7):**
+
+`synthesize_plumbing_ops` produces structurally cyclic dependencies — `PackAgents`
+reads every `AgentField` and `UnpackAgents` writes every `AgentField`, with
+`AgentScratch{Packed}` as the intermediate. The cycle is real at the IR layer
+(the IR doesn't model tick phases or the host/device boundary) but is resolved
+at runtime by the schedule layer (PackAgents at tick start, UnpackAgents at tick
+end).
+
+The driver's `check_well_formed` gate runs on the **user-op-only program** —
+before `synthesize_plumbing_ops` is invoked. Post-plumbing well-formedness is a
+Phase 3 (schedule synthesis) concern.
+
+Phase 3 must address this either:
+- (a) Structurally: introduce a tick-phase or host/device tag on
+  `DataHandle::AgentField` so Pack reads and Unpack writes resolve to distinct
+  handles (cleanest).
+- (b) Procedurally: define a phase-aware cycle detector that respects schedule
+  barriers (Pack at start, Unpack at end → no cycle within a phase).
+
 - [ ] **Step 3: Snapshot the full program**
 
 Pretty-print the lowered CgProgram; commit the snapshot. Future changes that perturb lowering surface as snapshot diffs in code review.

@@ -800,7 +800,72 @@ mod tests {
         }));
     }
 
-    // ---- 11. Source-order preserved in lower_plumbing -----------------
+    // ---- 11. Synthesizer: full canonical output ordering --------------
+
+    #[test]
+    fn synthesize_full_canonical_ordering() {
+        // Pin the documented end-to-end output sequence:
+        //   [UploadSimCfg, PackAgents, AliveBitmap?,
+        //    seed_indirect_args*, drain_events*,
+        //    UnpackAgents, KickSnapshot]
+        //
+        // Build a single user op that triggers ALL three conditional
+        // kinds simultaneously:
+        //   - writes AgentField{Alive, Self_}        → AliveBitmap
+        //   - shape PerEvent { source_ring: ring_a } → SeedIndirectArgs{a}
+        //   - reads EventRing { ring: ring_b, Drain} → DrainEvents{b}
+        //
+        // A single op is enough because alive-write, shape, and Drain
+        // read are independent triggers; the synthesizer must coalesce
+        // them into the documented order regardless of source proximity.
+        let ring_a = EventRingId(2);
+        let ring_b = EventRingId(5);
+        let mut builder = CgProgramBuilder::new();
+        let body = builder
+            .add_stmt_list(CgStmtList::new(vec![]))
+            .expect("add list");
+        let op_id = builder
+            .add_op(
+                ComputeOpKind::PhysicsRule {
+                    rule: PhysicsRuleId(0),
+                    on_event: EventKindId(0),
+                    body,
+                    replayable: ReplayabilityFlag::Replayable,
+                },
+                DispatchShape::PerEvent { source_ring: ring_a },
+                Span::dummy(),
+            )
+            .expect("add op");
+        let mut prog = builder.finish();
+        // Inject the alive write + Drain read via the same `record_*`
+        // seam lowering uses for registry-resolved bindings.
+        prog.ops[op_id.0 as usize].record_write(DataHandle::AgentField {
+            field: AgentFieldId::Alive,
+            target: AgentRef::Self_,
+        });
+        prog.ops[op_id.0 as usize].record_read(DataHandle::EventRing {
+            ring: ring_b,
+            kind: EventRingAccess::Drain,
+        });
+
+        let kinds = synthesize_plumbing_ops(&prog);
+        // Assert the EXACT vec — no `contains`, no relative-order
+        // checks. This pins the canonical ordering end-to-end.
+        assert_eq!(
+            kinds,
+            vec![
+                PlumbingKind::UploadSimCfg,
+                PlumbingKind::PackAgents,
+                PlumbingKind::AliveBitmap,
+                PlumbingKind::SeedIndirectArgs { ring: ring_a },
+                PlumbingKind::DrainEvents { ring: ring_b },
+                PlumbingKind::UnpackAgents,
+                PlumbingKind::KickSnapshot,
+            ]
+        );
+    }
+
+    // ---- 12. Source-order preserved in lower_plumbing -----------------
 
     #[test]
     fn lower_plumbing_preserves_source_order() {
