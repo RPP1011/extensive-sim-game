@@ -40,6 +40,7 @@ use crate::cg::data_handle::{MaskId, ViewId, ViewStorageSlot};
 use crate::cg::expr::{CgTy, TypeError};
 use crate::cg::op::{ActionId, PhysicsRuleId, ScoringId, SpatialQueryKind};
 use crate::cg::program::BuilderError;
+use crate::cg::well_formed::CgError;
 
 /// Typed defect surfaced by any CG lowering pass.
 ///
@@ -611,6 +612,36 @@ pub enum LoweringError {
         op_label: &'static str,
         span: Span,
     },
+
+    // -- Driver pass (Task 2.8) ------------------------------------------
+
+    /// A view fold-handler or physics-rule kind-pattern names an
+    /// event the driver's event-kind registry could not resolve.
+    /// Carries the source-level event name and the offending
+    /// pattern's span so the diagnostic can pinpoint the
+    /// reference.
+    ///
+    /// Surfaces in two cases today: (a) the resolver populated
+    /// `pattern.event` but the [`dsl_ast::ir::EventRef`] points
+    /// past the registry's table (driver/registry drift); (b) the
+    /// resolver left `pattern.event` as `None` (parse-time
+    /// failure that didn't abort resolution). Both are
+    /// driver-level defects, surfaced typed rather than panicking.
+    UnresolvedEventPattern {
+        event_name: String,
+        span: Span,
+    },
+
+    /// The driver's `check_well_formed` gate flagged a
+    /// user-op-only program defect. Wraps the typed [`CgError`]
+    /// produced by [`crate::cg::well_formed::check_well_formed`]
+    /// without losing the structural payload.
+    ///
+    /// Carries no span — `CgError` variants pin their own
+    /// op/expr/list ids; the driver passes them through unchanged.
+    WellFormed {
+        error: CgError,
+    },
 }
 
 /// Closed-set discriminant for which sub-expression of a scoring row
@@ -1016,6 +1047,18 @@ impl fmt::Display for LoweringError {
                 f,
                 "scoring#{} row(action=#{}) {} at {}..{} failed type-check — {}",
                 scoring.0, action.0, subject, span.start, span.end, error
+            ),
+
+            // -- Driver pass ------------------------------------------
+            LoweringError::UnresolvedEventPattern { event_name, span } => write!(
+                f,
+                "lowering: event pattern `{}` at {}..{} could not be resolved against the event-kind registry",
+                event_name, span.start, span.end
+            ),
+            LoweringError::WellFormed { error } => write!(
+                f,
+                "lowering: user-op-only well-formedness gate flagged: {}",
+                error
             ),
         }
     }

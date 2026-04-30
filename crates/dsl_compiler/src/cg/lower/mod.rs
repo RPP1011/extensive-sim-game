@@ -26,6 +26,7 @@
 //! (`Mask*`, `View*`, …) so the enum stays readable as it grows. See
 //! `error.rs`'s module docs for the convention.
 
+pub mod driver;
 pub mod error;
 pub mod expr;
 pub mod mask;
@@ -35,6 +36,7 @@ pub mod scoring;
 pub mod spatial;
 pub mod view;
 
+pub use driver::{lower_compilation_to_cg, DriverOutcome};
 pub use error::LoweringError;
 pub use expr::{lower_expr, LoweringCtx};
 pub use mask::lower_mask;
