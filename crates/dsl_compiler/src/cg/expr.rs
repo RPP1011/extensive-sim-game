@@ -628,9 +628,10 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
         H::EventRing { kind, .. } => match kind {
             // Reads pull a typed event record — opaque at this layer
             // (decomposition into fields is a later concern); appends
-            // emit a record. We represent both as U32 (the underlying
-            // ring element type).
-            EventRingAccess::Read | EventRingAccess::Append => CgTy::U32,
+            // emit a record. We represent all three as U32 (the
+            // underlying ring element type). `Drain` is the consumer
+            // mode introduced by Task 2.7 plumbing.
+            EventRingAccess::Read | EventRingAccess::Append | EventRingAccess::Drain => CgTy::U32,
         },
         H::ConfigConst { .. } => CgTy::F32,
         H::MaskBitmap { .. } => CgTy::Bool,
@@ -640,6 +641,20 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
             SpatialStorageKind::GridOffsets => CgTy::U32,
         },
         H::Rng { .. } => CgTy::U32,
+        // Plumbing-only handles. These are touched only by
+        // [`crate::cg::op::PlumbingKind`] ops, which carry no embedded
+        // `CgExpr` reads (their reads/writes are sourced structurally
+        // from `PlumbingKind::dependencies()`); the IR layer never
+        // type-checks an expression that names one of these handles.
+        // The variants surface here for completeness — every storage
+        // class chooses an underlying element type, U32 mirrors the
+        // raw-buffer convention used by the surrounding emitters
+        // (alive_pack, seed_indirect, agent SoA stride).
+        H::AliveBitmap
+        | H::IndirectArgs { .. }
+        | H::AgentScratch { .. }
+        | H::SimCfgBuffer
+        | H::SnapshotKick => CgTy::U32,
     }
 }
 

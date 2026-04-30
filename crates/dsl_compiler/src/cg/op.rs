@@ -17,7 +17,10 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::data_handle::{DataHandle, MaskId, SpatialStorageKind, ViewId};
+use super::data_handle::{
+    AgentFieldId, AgentRef, AgentScratchKind, DataHandle, EventRingAccess, EventRingId, MaskId,
+    SpatialStorageKind, ViewId,
+};
 use super::dispatch::DispatchShape;
 use super::expr::ExprArena;
 use super::stmt::{
@@ -216,36 +219,156 @@ impl fmt::Display for SpatialQueryKind {
 }
 
 // ---------------------------------------------------------------------------
-// PlumbingKind — deferred to Task 2.7
+// PlumbingKind — Task 2.7
 // ---------------------------------------------------------------------------
 
-/// One-shot plumbing kinds — emit-strategy operations that the schedule
-/// synthesizer can choose to inline or split out, but that are not
-/// directly user-authored DSL declarations.
+/// One-shot plumbing kinds — emit-strategy operations that are not
+/// directly user-authored DSL declarations but still appear in the
+/// compute graph because the schedule needs them.
 ///
-/// **Variants land in Task 2.7 (Plumbing lowering)**, which owns both
-/// the variant set (alive-bitmap pack, fused agent unpack, sim_cfg
-/// upload, event-ring drain, indirect-args seed, …) and each variant's
-/// concrete `(reads, writes)` signature. The Plumbing lowering pass is
-/// the one with access to the registries and emit-time conventions
-/// needed to derive those signatures honestly — Task 1.3 has only the
-/// IR data model and cannot supply real `DataHandle` bindings without
-/// either fabricating sentinel ids or aliasing user-allocated ids.
+/// Variants enumerate each piece of "between-kernel" work the runtime
+/// performs every tick: packing/unpacking agents, refreshing the alive
+/// bitmap, draining cascade-event rings, uploading sim_cfg, kicking the
+/// snapshot, and seeding indirect-dispatch args. Each variant carries
+/// its full structural read/write set via
+/// [`PlumbingKind::dependencies`] — no sentinel ids, no `String` keys,
+/// every read and write is a typed [`DataHandle`].
 ///
-/// Until then, `PlumbingKind` is uninhabited: the type exists so the
-/// [`ComputeOpKind::Plumbing { kind: PlumbingKind }`] wrapper variant
-/// typechecks, but no `Plumbing` op can be constructed. Any
-/// `match` over `PlumbingKind` is exhaustively unreachable — see
-/// [`ComputeOpKind::compute_dependencies`]'s `Plumbing` arm for the
-/// canonical empty-match form.
+/// The synthesizer (`synthesize_plumbing_ops`) walks a program's user-
+/// facing ops and decides which plumbing kinds are needed; the lowering
+/// (`lower_plumbing`) pushes them onto the builder.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum PlumbingKind {}
+pub enum PlumbingKind {
+    /// Pack every per-agent SoA field into the
+    /// [`AgentScratchKind::Packed`] scratch buffer for the GPU upload.
+    /// Reads every [`AgentFieldId`] variant; writes the packed scratch.
+    /// Per-agent dispatch.
+    PackAgents,
+
+    /// Unpack the [`AgentScratchKind::Packed`] scratch buffer back into
+    /// per-field SoA storage after the GPU dispatch finishes. Reads the
+    /// packed scratch; writes every [`AgentFieldId`] variant. Per-agent
+    /// dispatch.
+    UnpackAgents,
+
+    /// Refresh the [`DataHandle::AliveBitmap`] (one bit per agent) from
+    /// the per-agent [`AgentFieldId::Alive`] field. Per-word dispatch
+    /// (each thread owns one 32-agent word).
+    AliveBitmap,
+
+    /// Drain a cascade-event ring after the apply pass consumed its
+    /// entries. Reads the ring with [`EventRingAccess::Drain`]; writes
+    /// nothing structural at the IR level (the drain mutates the ring's
+    /// internal tail counter, but that is encoded by the access mode
+    /// rather than as a separate write target). Per-event dispatch on
+    /// the ring it drains.
+    DrainEvents { ring: EventRingId },
+
+    /// Upload the sim_cfg uniform buffer to the GPU. Reads nothing the
+    /// IR can see structurally (the data lives on the host); writes
+    /// [`DataHandle::SimCfgBuffer`] as a whole-buffer write. One-shot.
+    UploadSimCfg,
+
+    /// Trigger the snapshot dump for this tick. Reads nothing
+    /// structural; writes [`DataHandle::SnapshotKick`]. One-shot.
+    KickSnapshot,
+
+    /// Seed the indirect-dispatch args buffer for `ring`'s next per-
+    /// event dispatch from the ring's current tail count. Reads the
+    /// ring with [`EventRingAccess::Read`] (count only); writes
+    /// [`DataHandle::IndirectArgs { ring }`]. One-shot.
+    SeedIndirectArgs { ring: EventRingId },
+}
+
+impl PlumbingKind {
+    /// Stable snake_case label for diagnostics + pretty-printing.
+    pub fn label(&self) -> String {
+        match self {
+            PlumbingKind::PackAgents => String::from("pack_agents"),
+            PlumbingKind::UnpackAgents => String::from("unpack_agents"),
+            PlumbingKind::AliveBitmap => String::from("alive_bitmap"),
+            PlumbingKind::DrainEvents { ring } => {
+                format!("drain_events(ring=#{})", ring.0)
+            }
+            PlumbingKind::UploadSimCfg => String::from("upload_sim_cfg"),
+            PlumbingKind::KickSnapshot => String::from("kick_snapshot"),
+            PlumbingKind::SeedIndirectArgs { ring } => {
+                format!("seed_indirect_args(ring=#{})", ring.0)
+            }
+        }
+    }
+
+    /// Structural `(reads, writes)` signature for the plumbing kind.
+    /// Every entry is a typed [`DataHandle`]; no sentinel ids. Mirrors
+    /// the `dependencies()` method on [`SpatialQueryKind`] so the
+    /// auto-walker (`ComputeOpKind::compute_dependencies`) has a
+    /// single source of truth for plumbing reads/writes.
+    pub fn dependencies(&self) -> (Vec<DataHandle>, Vec<DataHandle>) {
+        match self {
+            PlumbingKind::PackAgents => (
+                AgentFieldId::all_agent_field_handles(),
+                vec![DataHandle::AgentScratch {
+                    kind: AgentScratchKind::Packed,
+                }],
+            ),
+            PlumbingKind::UnpackAgents => (
+                vec![DataHandle::AgentScratch {
+                    kind: AgentScratchKind::Packed,
+                }],
+                AgentFieldId::all_agent_field_handles(),
+            ),
+            PlumbingKind::AliveBitmap => (
+                vec![DataHandle::AgentField {
+                    field: AgentFieldId::Alive,
+                    target: AgentRef::Self_,
+                }],
+                vec![DataHandle::AliveBitmap],
+            ),
+            PlumbingKind::DrainEvents { ring } => (
+                vec![DataHandle::EventRing {
+                    ring: *ring,
+                    kind: EventRingAccess::Drain,
+                }],
+                vec![],
+            ),
+            PlumbingKind::UploadSimCfg => (vec![], vec![DataHandle::SimCfgBuffer]),
+            PlumbingKind::KickSnapshot => (vec![], vec![DataHandle::SnapshotKick]),
+            PlumbingKind::SeedIndirectArgs { ring } => (
+                vec![DataHandle::EventRing {
+                    ring: *ring,
+                    kind: EventRingAccess::Read,
+                }],
+                vec![DataHandle::IndirectArgs { ring: *ring }],
+            ),
+        }
+    }
+
+    /// Canonical [`DispatchShape`] for the plumbing kind.
+    ///
+    /// Each plumbing kind has a single natural shape: per-agent for
+    /// pack/unpack, per-word for the alive bitmap, per-event for the
+    /// drain (the ring drives the count), and one-shot for the
+    /// scalar-output variants (sim_cfg upload, snapshot kick, indirect-
+    /// args seed). Returning the shape from the kind keeps the lowering
+    /// pass from re-deriving it per variant.
+    pub fn dispatch_shape(&self) -> DispatchShape {
+        match self {
+            PlumbingKind::PackAgents => DispatchShape::PerAgent,
+            PlumbingKind::UnpackAgents => DispatchShape::PerAgent,
+            PlumbingKind::AliveBitmap => DispatchShape::PerWord,
+            PlumbingKind::DrainEvents { ring } => DispatchShape::PerEvent {
+                source_ring: *ring,
+            },
+            PlumbingKind::UploadSimCfg => DispatchShape::OneShot,
+            PlumbingKind::KickSnapshot => DispatchShape::OneShot,
+            PlumbingKind::SeedIndirectArgs { .. } => DispatchShape::OneShot,
+        }
+    }
+}
 
 impl fmt::Display for PlumbingKind {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Uninhabited — no instance can reach this. The `match *self
-        // {}` is the canonical "consume an uninhabited value" form.
-        match *self {}
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.label())
     }
 }
 
@@ -465,9 +588,12 @@ impl ComputeOpKind {
                 writes.extend(w);
             }
             ComputeOpKind::Plumbing { kind } => {
-                // PlumbingKind is uninhabited (Task 2.7 lands the
-                // variants); this match is exhaustively unreachable.
-                match *kind {}
+                // Plumbing kinds carry their (reads, writes) signature
+                // on `PlumbingKind::dependencies()` — single source of
+                // truth shared with the schedule synthesizer.
+                let (r, w) = kind.dependencies();
+                reads.extend(r);
+                writes.extend(w);
             }
         }
         (reads, writes)
@@ -506,7 +632,7 @@ impl ComputeOpKind {
             ComputeOpKind::SpatialQuery { kind } => {
                 format!("spatial_query({})", kind)
             }
-            ComputeOpKind::Plumbing { kind } => format!("plumbing({})", kind),
+            ComputeOpKind::Plumbing { kind } => format!("plumbing({})", kind.label()),
         }
     }
 }
@@ -750,16 +876,122 @@ mod tests {
         );
     }
 
-    // ---- PlumbingKind (deferred to Task 2.7) ----
+    // ---- PlumbingKind (Task 2.7) ----
 
-    /// `PlumbingKind` is uninhabited until Task 2.7 lands its variants;
-    /// this test asserts the wrapper variant is structurally a member
-    /// of `ComputeOpKind`. The function below cannot be called (no
-    /// `PlumbingKind` value can be produced), which is the whole point
-    /// — `Plumbing` ops can't be constructed from outside lowering.
     #[test]
-    fn plumbing_wrapper_variant_compiles_against_uninhabited_kind() {
-        let _: fn(PlumbingKind) -> ComputeOpKind = |k| ComputeOpKind::Plumbing { kind: k };
+    fn plumbing_kind_display_and_roundtrip() {
+        let cases = [
+            (PlumbingKind::PackAgents, "pack_agents"),
+            (PlumbingKind::UnpackAgents, "unpack_agents"),
+            (PlumbingKind::AliveBitmap, "alive_bitmap"),
+            (
+                PlumbingKind::DrainEvents {
+                    ring: EventRingId(2),
+                },
+                "drain_events(ring=#2)",
+            ),
+            (PlumbingKind::UploadSimCfg, "upload_sim_cfg"),
+            (PlumbingKind::KickSnapshot, "kick_snapshot"),
+            (
+                PlumbingKind::SeedIndirectArgs {
+                    ring: EventRingId(5),
+                },
+                "seed_indirect_args(ring=#5)",
+            ),
+        ];
+        for (kind, expected) in cases {
+            assert_eq!(format!("{}", kind), expected);
+            assert_roundtrip(&kind);
+        }
+    }
+
+    #[test]
+    fn plumbing_kind_dispatch_shape_per_variant() {
+        assert_eq!(PlumbingKind::PackAgents.dispatch_shape(), DispatchShape::PerAgent);
+        assert_eq!(
+            PlumbingKind::UnpackAgents.dispatch_shape(),
+            DispatchShape::PerAgent
+        );
+        assert_eq!(PlumbingKind::AliveBitmap.dispatch_shape(), DispatchShape::PerWord);
+        assert_eq!(
+            PlumbingKind::DrainEvents {
+                ring: EventRingId(2)
+            }
+            .dispatch_shape(),
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(2),
+            }
+        );
+        assert_eq!(PlumbingKind::UploadSimCfg.dispatch_shape(), DispatchShape::OneShot);
+        assert_eq!(PlumbingKind::KickSnapshot.dispatch_shape(), DispatchShape::OneShot);
+        assert_eq!(
+            PlumbingKind::SeedIndirectArgs {
+                ring: EventRingId(5)
+            }
+            .dispatch_shape(),
+            DispatchShape::OneShot
+        );
+    }
+
+    #[test]
+    fn plumbing_kind_dependencies_pack_unpack_symmetric() {
+        let (pack_r, pack_w) = PlumbingKind::PackAgents.dependencies();
+        let (unpack_r, unpack_w) = PlumbingKind::UnpackAgents.dependencies();
+        // PackAgents reads every AgentField, UnpackAgents writes them.
+        assert_eq!(pack_r, unpack_w);
+        // PackAgents writes the packed scratch, UnpackAgents reads it.
+        assert_eq!(pack_w, unpack_r);
+        assert_eq!(pack_r.len(), AgentFieldId::all_variants().len());
+    }
+
+    #[test]
+    fn plumbing_kind_dependencies_alive_bitmap_reads_self_alive() {
+        let (r, w) = PlumbingKind::AliveBitmap.dependencies();
+        assert_eq!(
+            r,
+            vec![DataHandle::AgentField {
+                field: AgentFieldId::Alive,
+                target: AgentRef::Self_,
+            }]
+        );
+        assert_eq!(w, vec![DataHandle::AliveBitmap]);
+    }
+
+    #[test]
+    fn plumbing_kind_dependencies_drain_events_uses_drain_access() {
+        let (r, w) = PlumbingKind::DrainEvents {
+            ring: EventRingId(7),
+        }
+        .dependencies();
+        assert_eq!(
+            r,
+            vec![DataHandle::EventRing {
+                ring: EventRingId(7),
+                kind: EventRingAccess::Drain,
+            }]
+        );
+        assert!(w.is_empty());
+    }
+
+    #[test]
+    fn plumbing_kind_dependencies_seed_indirect_args_pairs_ring_with_indirect() {
+        let (r, w) = PlumbingKind::SeedIndirectArgs {
+            ring: EventRingId(3),
+        }
+        .dependencies();
+        assert_eq!(
+            r,
+            vec![DataHandle::EventRing {
+                ring: EventRingId(3),
+                kind: EventRingAccess::Read,
+            }]
+        );
+        assert_eq!(
+            w,
+            vec![DataHandle::IndirectArgs {
+                ring: EventRingId(3),
+            }]
+        );
     }
 
     // ---- ScoringRowOp ----
@@ -843,9 +1075,10 @@ mod tests {
                 kind: SpatialQueryKind::BuildHash,
             }
             .label(),
-            // Plumbing kind variants land in Task 2.7; until then no
-            // Plumbing op can be constructed, so it's not exercised
-            // here.
+            ComputeOpKind::Plumbing {
+                kind: PlumbingKind::PackAgents,
+            }
+            .label(),
         ];
         let mut seen = std::collections::HashSet::new();
         for l in &labels {
@@ -1109,10 +1342,36 @@ mod tests {
         }
     }
 
-    // No `plumbing_kind_op_deps_match_kind_signature` test today —
-    // `PlumbingKind` is uninhabited until Task 2.7 lands. The
-    // structural test above (`plumbing_wrapper_variant_compiles_…`) is
-    // sufficient to assert the wrapper exists.
+    #[test]
+    fn plumbing_kind_op_deps_match_kind_signature() {
+        // Every plumbing kind's lowered op's reads/writes vectors must
+        // equal the `(reads, writes)` table on `PlumbingKind` — the
+        // auto-walker (Task 1.3) is the single source of truth and
+        // this test pins that the `Plumbing` arm of
+        // `compute_dependencies` routes through `dependencies()`.
+        let exprs: Vec<CgExpr> = vec![];
+        let stmts: Vec<CgStmt> = vec![];
+        let lists: Vec<CgStmtList> = vec![];
+        for kind in [
+            PlumbingKind::PackAgents,
+            PlumbingKind::UnpackAgents,
+            PlumbingKind::AliveBitmap,
+            PlumbingKind::DrainEvents {
+                ring: EventRingId(2),
+            },
+            PlumbingKind::UploadSimCfg,
+            PlumbingKind::KickSnapshot,
+            PlumbingKind::SeedIndirectArgs {
+                ring: EventRingId(3),
+            },
+        ] {
+            let op_kind = ComputeOpKind::Plumbing { kind };
+            let (op_r, op_w) = op_kind.compute_dependencies(&exprs, &stmts, &lists);
+            let (k_r, k_w) = kind.dependencies();
+            assert_eq!(op_r, k_r, "plumbing kind {kind}: reads diverged");
+            assert_eq!(op_w, k_w, "plumbing kind {kind}: writes diverged");
+        }
+    }
 
     // ---- ComputeOp constructor + recompute ----
 
@@ -1350,8 +1609,19 @@ mod tests {
             ComputeOpKind::SpatialQuery {
                 kind: SpatialQueryKind::BuildHash,
             },
-            // Plumbing variant intentionally omitted — `PlumbingKind`
-            // is uninhabited until Task 2.7.
+            ComputeOpKind::Plumbing {
+                kind: PlumbingKind::PackAgents,
+            },
+            ComputeOpKind::Plumbing {
+                kind: PlumbingKind::DrainEvents {
+                    ring: EventRingId(2),
+                },
+            },
+            ComputeOpKind::Plumbing {
+                kind: PlumbingKind::SeedIndirectArgs {
+                    ring: EventRingId(5),
+                },
+            },
         ];
         for k in &kinds {
             let json = serde_json::to_string(k).expect("serialize");

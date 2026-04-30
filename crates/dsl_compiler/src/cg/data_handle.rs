@@ -275,6 +275,73 @@ impl AgentFieldId {
     /// variant lands; the
     /// `agent_field_id_from_snake_round_trips_every_variant` test
     /// guards round-trip exhaustively.
+    /// Every declared [`AgentFieldId`] variant, in declaration order.
+    /// Used by [`crate::cg::op::PlumbingKind::PackAgents`] /
+    /// [`crate::cg::op::PlumbingKind::UnpackAgents`] to enumerate the
+    /// full read/write set without forcing a separate
+    /// `DataHandle::AllAgentFields` aggregate variant.
+    ///
+    /// Adding a new [`AgentFieldId`] variant requires extending this
+    /// list — exhaustively checked by the
+    /// `all_agent_field_variants_round_trip_through_snake` test in
+    /// this module (any miss surfaces as a missing snake-name).
+    pub fn all_variants() -> &'static [AgentFieldId] {
+        use AgentFieldId::*;
+        &[
+            Pos,
+            Hp,
+            MaxHp,
+            Alive,
+            MovementMode,
+            Level,
+            MoveSpeed,
+            MoveSpeedMult,
+            ShieldHp,
+            Armor,
+            MagicResist,
+            AttackDamage,
+            AttackRange,
+            Mana,
+            MaxMana,
+            Hunger,
+            Thirst,
+            RestTimer,
+            Safety,
+            Shelter,
+            Social,
+            Purpose,
+            Esteem,
+            RiskTolerance,
+            SocialDrive,
+            Ambition,
+            Altruism,
+            Curiosity,
+            EngagedWith,
+            StunExpiresAtTick,
+            SlowExpiresAtTick,
+            SlowFactorQ8,
+            CooldownNextReadyTick,
+            CreatureType,
+            SpawnTick,
+            GridId,
+            LocalPos,
+            MoveTarget,
+        ]
+    }
+
+    /// Convenience: every [`AgentFieldId`] variant wrapped in a
+    /// `DataHandle::AgentField { field, target: AgentRef::Self_ }`.
+    /// Used by plumbing lowering's pack / unpack reads/writes.
+    pub fn all_agent_field_handles() -> Vec<DataHandle> {
+        Self::all_variants()
+            .iter()
+            .map(|f| DataHandle::AgentField {
+                field: *f,
+                target: AgentRef::Self_,
+            })
+            .collect()
+    }
+
     pub fn from_snake(s: &str) -> Option<Self> {
         use AgentFieldId::*;
         Some(match s {
@@ -422,12 +489,23 @@ impl fmt::Display for ViewStorageSlot {
 /// directions (read vs append) explicitly so dependency analysis can
 /// build a proper producer/consumer graph and the lowering knows
 /// which atomics to insert.
+///
+/// `Drain` is a third mode introduced by Task 2.7 plumbing: the apply-
+/// path consumes events from the ring and zeroes the ring's tail
+/// counter so the next iteration starts empty. Drain is structurally
+/// distinct from `Read` because read-only consumers can run alongside
+/// each other; a drain mutates the ring's tail and must be exclusive.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum EventRingAccess {
     /// Read events out of the ring (a fold or apply pass).
     Read,
     /// Append events into the ring (an emitter pass).
     Append,
+    /// Drain the ring — read every entry and reset the tail counter.
+    /// Used by [`crate::cg::op::PlumbingKind::DrainEvents`]; the IR
+    /// tracks drain as a third mode so schedule synthesis can sequence
+    /// it after every reader/writer of the ring.
+    Drain,
 }
 
 impl fmt::Display for EventRingAccess {
@@ -435,6 +513,7 @@ impl fmt::Display for EventRingAccess {
         match self {
             EventRingAccess::Read => f.write_str("read"),
             EventRingAccess::Append => f.write_str("append"),
+            EventRingAccess::Drain => f.write_str("drain"),
         }
     }
 }
@@ -465,6 +544,37 @@ impl fmt::Display for SpatialStorageKind {
             SpatialStorageKind::GridCells => f.write_str("grid_cells"),
             SpatialStorageKind::GridOffsets => f.write_str("grid_offsets"),
             SpatialStorageKind::QueryResults => f.write_str("query_results"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Agent scratch buffers (Task 2.7 plumbing)
+// ---------------------------------------------------------------------------
+
+/// Kinds of per-agent scratch buffer the plumbing layer uses. Sourced
+/// from the existing emit-time agent pack/unpack pipeline (today only
+/// the canonical packed-SoA scratch exists; future packings — e.g.,
+/// per-field shadow buffers — accrete here as variants).
+///
+/// The variant set is intentionally tight: a generic "scratch" with a
+/// free-form id would defeat structural typing. Each named kind maps
+/// to one well-known buffer at emit time; the lowering pass selects
+/// the kind by [`crate::cg::op::PlumbingKind`].
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AgentScratchKind {
+    /// Packed agent SoA buffer used by `PackAgents` / `UnpackAgents` —
+    /// one record per agent slot with every hot/cold field laid out in
+    /// the engine's GPU `GpuAgentSlot` order. Reads land into here
+    /// before a GPU dispatch reads the agents; writes from this buffer
+    /// land back into per-field [`AgentFieldId`] storage on unpack.
+    Packed,
+}
+
+impl fmt::Display for AgentScratchKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AgentScratchKind::Packed => f.write_str("packed"),
         }
     }
 }
@@ -579,6 +689,49 @@ pub enum DataHandle {
     /// tick, purpose)`. Emit-time becomes a function call — but at
     /// the IR level it's a typed read.
     Rng { purpose: RngPurpose },
+
+    /// Per-agent alive-status bitmap (1 bit per agent). One global
+    /// resource — the IR carries no id field. Refreshed by
+    /// [`crate::cg::op::PlumbingKind::AliveBitmap`] every tick after
+    /// any op that mutates [`AgentFieldId::Alive`]. Distinct from
+    /// [`MaskBitmap`] (which is per-mask user-authored predicate
+    /// output) because the alive bitmap is a runtime-system invariant,
+    /// not a DSL-surface predicate.
+    AliveBitmap,
+
+    /// Indirect-args buffer for one cascade ring's per-iteration
+    /// dispatch. Seeded by
+    /// [`crate::cg::op::PlumbingKind::SeedIndirectArgs`] from the
+    /// ring's tail count so the next [`crate::cg::dispatch::DispatchShape::PerEvent`]
+    /// dispatch reads the correct workgroup count. One buffer per
+    /// ring; the typed [`EventRingId`] keeps producer/consumer edges
+    /// honest at the IR level.
+    IndirectArgs { ring: EventRingId },
+
+    /// Per-agent scratch buffer for the GPU pack/unpack pipeline.
+    /// `kind` selects which scratch buffer is being touched (today
+    /// only [`AgentScratchKind::Packed`]). [`PackAgents`] writes the
+    /// packed buffer; [`UnpackAgents`] reads it back into per-field
+    /// storage.
+    ///
+    /// [`PackAgents`]: crate::cg::op::PlumbingKind::PackAgents
+    /// [`UnpackAgents`]: crate::cg::op::PlumbingKind::UnpackAgents
+    AgentScratch { kind: AgentScratchKind },
+
+    /// The sim_cfg uniform buffer — a whole-buffer write performed by
+    /// [`crate::cg::op::PlumbingKind::UploadSimCfg`] every tick. The
+    /// per-key [`ConfigConst`] handles cover individual reads of
+    /// configuration constants once the buffer has been uploaded; the
+    /// upload itself touches the buffer as one indivisible region, so
+    /// it gets its own variant rather than synthesising a sentinel
+    /// `ConfigConst` id.
+    SimCfgBuffer,
+
+    /// The snapshot dump trigger — written by
+    /// [`crate::cg::op::PlumbingKind::KickSnapshot`] at end-of-tick to
+    /// signal the runtime that the snapshot ring should advance.
+    /// Single global resource, no id field.
+    SnapshotKick,
 }
 
 /// Kind tag for an interned id surfaced by [`DataHandle::fmt_with`].
@@ -665,6 +818,15 @@ impl DataHandle {
             DataHandle::ScoringOutput => f.write_str("scoring.output"),
             DataHandle::SpatialStorage { kind } => write!(f, "spatial.{}", kind),
             DataHandle::Rng { purpose } => write!(f, "rng({})", purpose),
+            DataHandle::AliveBitmap => f.write_str("alive_bitmap"),
+            DataHandle::IndirectArgs { ring } => {
+                write!(f, "indirect_args[")?;
+                write_named_id(f, names.name_for(IdKind::EventRing, ring.0), ring.0)?;
+                write!(f, "]")
+            }
+            DataHandle::AgentScratch { kind } => write!(f, "agent_scratch.{}", kind),
+            DataHandle::SimCfgBuffer => f.write_str("sim_cfg_buffer"),
+            DataHandle::SnapshotKick => f.write_str("snapshot_kick"),
         }
     }
 }
@@ -1038,6 +1200,92 @@ mod tests {
         set.insert(b.clone());
         set.insert(c.clone());
         assert_eq!(set.len(), 2, "a == b should collapse to one set entry");
+    }
+
+    // ---- New plumbing-related variants (Task 2.7) ---------------------
+
+    #[test]
+    fn alive_bitmap_display_and_roundtrip() {
+        let h = DataHandle::AliveBitmap;
+        assert_eq!(format!("{}", h), "alive_bitmap");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn indirect_args_display_and_roundtrip() {
+        let h = DataHandle::IndirectArgs {
+            ring: EventRingId(2),
+        };
+        assert_eq!(format!("{}", h), "indirect_args[#2]");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn agent_scratch_packed_display_and_roundtrip() {
+        let h = DataHandle::AgentScratch {
+            kind: AgentScratchKind::Packed,
+        };
+        assert_eq!(format!("{}", h), "agent_scratch.packed");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn sim_cfg_buffer_display_and_roundtrip() {
+        let h = DataHandle::SimCfgBuffer;
+        assert_eq!(format!("{}", h), "sim_cfg_buffer");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn snapshot_kick_display_and_roundtrip() {
+        let h = DataHandle::SnapshotKick;
+        assert_eq!(format!("{}", h), "snapshot_kick");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn event_ring_drain_display_and_roundtrip() {
+        let h = DataHandle::EventRing {
+            ring: EventRingId(4),
+            kind: EventRingAccess::Drain,
+        };
+        assert_eq!(format!("{}", h), "event_ring[#4].drain");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn agent_field_id_all_variants_matches_snake_name_count() {
+        // Every entry returned by `all_variants` must round-trip
+        // through `snake()` / `from_snake()` — guards against a future
+        // variant being added to `AgentFieldId` without extending the
+        // `all_variants` enumeration.
+        let all = AgentFieldId::all_variants();
+        for v in all {
+            assert_eq!(
+                AgentFieldId::from_snake(v.snake()),
+                Some(*v),
+                "all_variants entry {v:?} did not round-trip through snake"
+            );
+        }
+        // A spot-check on count — the enum has 38 variants today; if a
+        // new variant lands and `all_variants` isn't updated, this
+        // assertion fails before the round-trip loop above can.
+        assert_eq!(all.len(), 38);
+    }
+
+    #[test]
+    fn all_agent_field_handles_returns_one_self_handle_per_variant() {
+        let handles = AgentFieldId::all_agent_field_handles();
+        assert_eq!(handles.len(), AgentFieldId::all_variants().len());
+        for (h, v) in handles.iter().zip(AgentFieldId::all_variants().iter()) {
+            match h {
+                DataHandle::AgentField { field, target } => {
+                    assert_eq!(field, v);
+                    assert_eq!(target, &AgentRef::Self_);
+                }
+                other => panic!("unexpected handle {other:?}"),
+            }
+        }
     }
 
     #[test]

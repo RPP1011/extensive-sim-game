@@ -899,11 +899,11 @@ impl CgProgramBuilder {
             ComputeOpKind::PhysicsRule { body, .. } => self.check_list_id(*body),
             ComputeOpKind::ViewFold { body, .. } => self.check_list_id(*body),
             ComputeOpKind::SpatialQuery { .. } => Ok(()),
-            ComputeOpKind::Plumbing { kind } => {
-                // Uninhabited until Task 2.7 — the empty match
-                // exhausts every reachable variant.
-                match *kind {}
-            }
+            // Plumbing kinds carry no `CgExprId` / `CgStmtListId`
+            // references (every variant's reads/writes are sourced
+            // from `PlumbingKind::dependencies()` as typed
+            // `DataHandle`s); nothing to validate.
+            ComputeOpKind::Plumbing { .. } => Ok(()),
         }
     }
 

@@ -44,7 +44,9 @@ use std::fmt;
 use crate::cg::data_handle::{AgentRef, CgExprId, DataHandle};
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::expr::{data_handle_ty, type_check, CgExpr, CgTy, TypeCheckCtx, TypeError};
-use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, ScoringRowOp, Span, SpatialQueryKind};
+use crate::cg::op::{
+    ComputeOp, ComputeOpKind, OpId, PlumbingKind, ScoringRowOp, Span, SpatialQueryKind,
+};
 use crate::cg::program::CgProgram;
 use crate::cg::stmt::{CgStmt, CgStmtId, CgStmtListId, VariantId};
 
@@ -410,7 +412,7 @@ fn kind_label(kind: &ComputeOpKind) -> &'static str {
         ComputeOpKind::PhysicsRule { .. } => "physics_rule",
         ComputeOpKind::ViewFold { .. } => "view_fold",
         ComputeOpKind::SpatialQuery { .. } => "spatial_query",
-        ComputeOpKind::Plumbing { kind } => match *kind {},
+        ComputeOpKind::Plumbing { .. } => "plumbing",
     }
 }
 
@@ -440,7 +442,21 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
                 &[DispatchShapeLabel::PerAgent]
             }
         },
-        ComputeOpKind::Plumbing { kind } => match *kind {},
+        // Plumbing kinds each have a single canonical dispatch shape,
+        // pinned by `PlumbingKind::dispatch_shape`. The well-formed
+        // pass mirrors that table — any drift between the lowering's
+        // chosen shape and the IR-canonical shape surfaces as a
+        // `KindShapeMismatch`.
+        ComputeOpKind::Plumbing { kind } => match kind {
+            PlumbingKind::PackAgents | PlumbingKind::UnpackAgents => {
+                &[DispatchShapeLabel::PerAgent]
+            }
+            PlumbingKind::AliveBitmap => &[DispatchShapeLabel::PerWord],
+            PlumbingKind::DrainEvents { .. } => &[DispatchShapeLabel::PerEvent],
+            PlumbingKind::UploadSimCfg
+            | PlumbingKind::KickSnapshot
+            | PlumbingKind::SeedIndirectArgs { .. } => &[DispatchShapeLabel::OneShot],
+        },
     }
 }
 
@@ -706,7 +722,10 @@ fn check_op(
             }
         }
         ComputeOpKind::SpatialQuery { .. } => {}
-        ComputeOpKind::Plumbing { kind } => match *kind {},
+        // Plumbing kinds carry no embedded `CgExpr` / `CgStmt` — every
+        // variant's reads/writes are typed `DataHandle`s sourced from
+        // `PlumbingKind::dependencies()`. Nothing to walk.
+        ComputeOpKind::Plumbing { .. } => {}
     }
 
     // Validate AgentRef::Target ids on every read/write handle.
@@ -747,7 +766,9 @@ fn check_op(
         ComputeOpKind::MaskPredicate { .. }
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. } => {}
-        ComputeOpKind::Plumbing { kind } => match *kind {},
+        // Plumbing kinds reference no `CgStmtListId` — no list-range
+        // check to perform.
+        ComputeOpKind::Plumbing { .. } => {}
     }
 
     // --- DataHandle structural consistency on reads + writes ---------
@@ -1015,7 +1036,12 @@ fn check_data_handle_consistency(
         | DataHandle::MaskBitmap { .. }
         | DataHandle::ScoringOutput
         | DataHandle::SpatialStorage { .. }
-        | DataHandle::Rng { .. } => None,
+        | DataHandle::Rng { .. }
+        | DataHandle::AliveBitmap
+        | DataHandle::IndirectArgs { .. }
+        | DataHandle::AgentScratch { .. }
+        | DataHandle::SimCfgBuffer
+        | DataHandle::SnapshotKick => None,
     }
 }
 
@@ -1080,7 +1106,11 @@ fn type_check_op(
         ComputeOpKind::SpatialQuery { .. } => {
             // No expressions to type-check — kernel is built-in.
         }
-        ComputeOpKind::Plumbing { kind } => match *kind {},
+        ComputeOpKind::Plumbing { .. } => {
+            // Plumbing kinds carry no embedded expressions; their
+            // structural reads/writes are typed `DataHandle`s sourced
+            // from `PlumbingKind::dependencies()`. Nothing to walk.
+        }
     }
 }
 
@@ -1291,9 +1321,15 @@ fn p6_check_op(op: &ComputeOp, op_id: OpId, prog: &CgProgram, errors: &mut Vec<C
         ComputeOpKind::MaskPredicate { .. }
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. } => {}
-        // Plumbing is uninhabited; ViewFold returns above.
+        // ViewFold returns above; Plumbing carries no body so there is
+        // nothing to walk for the P6 mutation-channel check. Plumbing
+        // ops do write `DataHandle::AgentField` directly when packing/
+        // unpacking, but those writes appear on `op.writes` (sourced
+        // from `PlumbingKind::dependencies`) rather than via a
+        // `CgStmt::Assign`, so the P6 walker — which only inspects
+        // `Assign` statements — has nothing to flag here.
         ComputeOpKind::ViewFold { .. } => {}
-        ComputeOpKind::Plumbing { kind } => match *kind {},
+        ComputeOpKind::Plumbing { .. } => {}
     }
 }
 
@@ -1363,8 +1399,8 @@ fn match_uniqueness_check_op(
         ComputeOpKind::PhysicsRule { body, .. } | ComputeOpKind::ViewFold { body, .. } => *body,
         ComputeOpKind::MaskPredicate { .. }
         | ComputeOpKind::ScoringArgmax { .. }
-        | ComputeOpKind::SpatialQuery { .. } => return,
-        ComputeOpKind::Plumbing { kind } => match *kind {},
+        | ComputeOpKind::SpatialQuery { .. }
+        | ComputeOpKind::Plumbing { .. } => return,
     };
     match_uniqueness_walk_list(body, op, op_id, prog, errors);
 }
