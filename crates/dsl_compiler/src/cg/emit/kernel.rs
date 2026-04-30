@@ -160,7 +160,7 @@ impl From<InnerEmitError> for KernelEmitError {
 ///
 /// Returns the [`KernelSpec`] on success. The spec is also validated
 /// via [`KernelSpec::validate`] before return — a non-Ok validation is
-/// surfaced as [`EmitError::InvalidKernelSpec`].
+/// surfaced as [`KernelEmitError::InvalidKernelSpec`].
 ///
 /// # Errors
 ///
@@ -181,6 +181,24 @@ pub fn kernel_topology_to_spec(
     prog: &CgProgram,
     ctx: &EmitCtx<'_>,
 ) -> Result<KernelSpec, KernelEmitError> {
+    let (spec, _body) = kernel_topology_to_spec_and_body(topology, prog, ctx)?;
+    Ok(spec)
+}
+
+/// Lower a [`KernelTopology`] to its [`KernelSpec`] AND return the
+/// composed WGSL body string alongside. Useful for tests + Task 4.3
+/// callers that consume both. `KernelSpec` itself does not carry the
+/// body string today; see `# Limitations` on
+/// [`kernel_topology_to_spec`].
+///
+/// This function carries the full lowering pipeline; the
+/// [`kernel_topology_to_spec`] entry point delegates here and discards
+/// the body so the body is never computed twice.
+pub fn kernel_topology_to_spec_and_body(
+    topology: &KernelTopology,
+    prog: &CgProgram,
+    ctx: &EmitCtx<'_>,
+) -> Result<(KernelSpec, String), KernelEmitError> {
     // 1. Resolve the topology to (body_ops, dispatch, kind_label).
     //
     //    `body_ops` is the list of `OpId`s whose expressions /
@@ -292,16 +310,15 @@ pub fn kernel_topology_to_spec(
     let cfg_build_expr = build_cfg_build_expr(&cfg_struct);
 
     // 8. Compose the WGSL body — one fragment per op, joined with
-    //    blank lines. We invoke the body builder here for two reasons:
-    //    (a) inner-walk arena failures surface as typed errors before
-    //    spec construction completes, so a malformed program never
-    //    yields a spec the body lowering can't render; (b) the body
-    //    itself is not stored on `KernelSpec` (it lives in the WGSL
-    //    emitter that consumes the spec) — Task 4.3 will redo body
-    //    composition at that layer. The
-    //    [`kernel_topology_to_spec_and_body`] helper exposes the body
-    //    string for tests + Task 4.3 callers.
-    let _wgsl_body = build_wgsl_body(&body_ops, &dispatch, prog, ctx)?;
+    //    blank lines. Computing the body here surfaces any inner-walk
+    //    arena failures as typed errors before the spec is returned, so
+    //    a malformed program never yields a spec whose body the
+    //    downstream WGSL emitter can't render. The body itself is not
+    //    stored on `KernelSpec` (it lives in the WGSL emitter that
+    //    consumes the spec) — Task 4.3 will redo body composition at
+    //    that layer. We return it alongside the spec for tests + Task
+    //    4.3 callers; [`kernel_topology_to_spec`] discards it.
+    let wgsl_body = build_wgsl_body(&body_ops, &dispatch, prog, ctx)?;
 
     let spec = KernelSpec {
         name,
@@ -315,24 +332,7 @@ pub fn kernel_topology_to_spec(
 
     spec.validate()
         .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
-    Ok(spec)
-}
-
-/// Lower a [`KernelTopology`] to its [`KernelSpec`] AND return the
-/// composed WGSL body string alongside. Useful for tests + Task 4.3
-/// callers that consume both. `KernelSpec` itself does not carry the
-/// body string today; see `# Limitations` on
-/// [`kernel_topology_to_spec`].
-pub fn kernel_topology_to_spec_and_body(
-    topology: &KernelTopology,
-    prog: &CgProgram,
-    ctx: &EmitCtx<'_>,
-) -> Result<(KernelSpec, String), KernelEmitError> {
-    let spec = kernel_topology_to_spec(topology, prog, ctx)?;
-    let body_ops = topology_body_ops(topology, prog)?;
-    let dispatch = topology_dispatch(topology, prog)?;
-    let body = build_wgsl_body(&body_ops, &dispatch, prog, ctx)?;
-    Ok((spec, body))
+    Ok((spec, wgsl_body))
 }
 
 // ---------------------------------------------------------------------------
@@ -429,7 +429,8 @@ fn handle_to_binding_metadata(h: &DataHandle) -> Option<BindingMetadata> {
             };
             let wgsl_ty = match kind {
                 EventRingAccess::Append => "u32".into(),
-                _ => "array<u32>".into(),
+                EventRingAccess::Read => "array<u32>".into(),
+                EventRingAccess::Drain => "array<u32>".into(),
             };
             Some(BindingMetadata {
                 bg_source: BgSource::Transient(format!("event_ring_{}", ring.0)),
@@ -785,44 +786,6 @@ fn resolve_op(prog: &CgProgram, op_id: OpId) -> Result<&ComputeOp, KernelEmitErr
         })
 }
 
-fn topology_body_ops(
-    topology: &KernelTopology,
-    prog: &CgProgram,
-) -> Result<Vec<OpId>, KernelEmitError> {
-    match topology {
-        KernelTopology::Fused { ops, .. } => Ok(ops.clone()),
-        KernelTopology::Split { op, .. } => Ok(vec![*op]),
-        KernelTopology::Indirect { consumers, .. } => {
-            // Validate every consumer resolves before returning.
-            for op_id in consumers {
-                resolve_op(prog, *op_id)?;
-            }
-            if consumers.is_empty() {
-                Err(KernelEmitError::EmptyKernelTopology)
-            } else {
-                Ok(consumers.clone())
-            }
-        }
-    }
-}
-
-fn topology_dispatch(
-    topology: &KernelTopology,
-    prog: &CgProgram,
-) -> Result<DispatchShape, KernelEmitError> {
-    match topology {
-        KernelTopology::Fused { dispatch, .. } => Ok(*dispatch),
-        KernelTopology::Split { dispatch, .. } => Ok(*dispatch),
-        KernelTopology::Indirect { consumers, .. } => {
-            let first = *consumers
-                .first()
-                .ok_or(KernelEmitError::EmptyKernelTopology)?;
-            let op = resolve_op(prog, first)?;
-            Ok(op.shape)
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -900,17 +863,7 @@ mod tests {
             prog,
             prog,
         );
-        // ComputeOp::new takes the program by reference but we need to
-        // push afterwards — clone the op and push.
-        let cloned = ComputeOp {
-            id: OpId(0),
-            kind: op.kind.clone(),
-            reads: op.reads.clone(),
-            writes: op.writes.clone(),
-            shape: op.shape,
-            span: op.span,
-        };
-        push_op(prog, cloned)
+        push_op(prog, op)
     }
 
     /// Build a PhysicsRule op with a body `self.hp = self.hp + 1.0` —
@@ -959,15 +912,7 @@ mod tests {
             prog,
             prog,
         );
-        let cloned = ComputeOp {
-            id: OpId(0),
-            kind: op.kind.clone(),
-            reads: op.reads.clone(),
-            writes: op.writes.clone(),
-            shape: op.shape,
-            span: op.span,
-        };
-        push_op(prog, cloned)
+        push_op(prog, op)
     }
 
     /// Build a SeedIndirectArgs producer for `ring`.
@@ -984,15 +929,7 @@ mod tests {
             prog,
             prog,
         );
-        let cloned = ComputeOp {
-            id: OpId(0),
-            kind: op.kind.clone(),
-            reads: op.reads.clone(),
-            writes: op.writes.clone(),
-            shape: op.shape,
-            span: op.span,
-        };
-        push_op(prog, cloned)
+        push_op(prog, op)
     }
 
     // ---- 1. Split { single PerAgent op } ----
@@ -1062,7 +999,12 @@ mod tests {
     // ---- 3. Indirect { producer, 1 consumer } ----
 
     #[test]
-    fn indirect_topology_emits_consumer_kernel_with_indirect_args_binding() {
+    fn indirect_topology_emits_consumer_kernel_using_consumer_reads() {
+        // The indirect-args buffer is bound to the producer kernel +
+        // the dispatch wiring (Task 4.3), not to the consumer kernel.
+        // The consumer kernel's bindings come from its own reads /
+        // writes only — here, agent_hp (read+write by the physics
+        // rule) and cfg.
         let mut prog = CgProgram::default();
         let ring = EventRingId(7);
         let producer = seed_indirect_op(&mut prog, ring);
@@ -1079,6 +1021,16 @@ mod tests {
         let names: Vec<&str> = spec.bindings.iter().map(|b| b.name.as_str()).collect();
         assert!(names.contains(&"agent_hp"), "names: {:?}", names);
         assert_eq!(names.last(), Some(&"cfg"));
+
+        // The indirect-args buffer for `ring` is NOT in the consumer
+        // kernel's bindings — it lives on the producer (which
+        // `record_write(IndirectArgs)`s it) and the schedule-layer
+        // dispatch wiring.
+        let indirect_args_name = format!("indirect_args_{}", ring.0);
+        assert!(
+            !names.contains(&indirect_args_name.as_str()),
+            "consumer kernel must not bind {indirect_args_name}; got names: {names:?}"
+        );
 
         let agent = spec.bindings.iter().find(|b| b.name == "agent_hp").unwrap();
         // Physics rule writes hp → upgraded to read_write.
