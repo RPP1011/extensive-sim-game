@@ -21,6 +21,7 @@
 
 pub mod data_handle;
 pub mod dispatch;
+pub mod emit;
 pub mod expr;
 pub mod lower;
 pub mod op;
@@ -31,6 +32,10 @@ pub mod well_formed;
 
 pub use data_handle::*;
 pub use dispatch::*;
+pub use emit::{
+    lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl, EmitCtx, EmitError,
+    HandleNamingStrategy,
+};
 pub use expr::*;
 pub use lower::{lower_expr, LoweringCtx, LoweringError};
 pub use op::*;
