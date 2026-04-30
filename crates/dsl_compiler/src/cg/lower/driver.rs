@@ -28,22 +28,23 @@
 //!    shapes and, when present, push a [`SpatialQueryKind::BuildHash`]
 //!    entry first. Then call [`lower_spatial_queries`] to push one
 //!    op per kind.
-//! 4. **Cycle gate.** Snapshot the program after step 3 (the
-//!    user-op-only program) and run [`check_well_formed`]. Errors
-//!    surface as [`LoweringError::WellFormed`] entries on the
-//!    accumulator. The plan reserves post-plumbing well-formedness
-//!    for Phase 3.
-//! 5. **Plumbing synthesis.** Call [`synthesize_plumbing_ops`] on
+//! 4. **Ring-edge wiring (pre-gate).** For every user op whose
+//!    dispatch shape is [`DispatchShape::PerEvent { source_ring }`],
+//!    record an [`EventRingAccess::Read`] read on `source_ring`. For
+//!    every [`crate::cg::stmt::CgStmt::Emit`] reachable from any
+//!    op's body (descending through `If` / `Match` arms), record an
+//!    [`EventRingAccess::Append`] write on the destination ring.
+//!    Both wirings mutate the in-progress builder via
+//!    [`CgProgramBuilder::ops_mut`] so the cycle gate (step 5) sees
+//!    the symmetric ring graph.
+//! 5. **Cycle gate.** Snapshot the program after step 4 (the
+//!    user-op-only program with ring edges wired) and run
+//!    [`check_well_formed`]. Errors surface as
+//!    [`LoweringError::WellFormed`] entries on the accumulator. The
+//!    plan reserves post-plumbing well-formedness for Phase 3.
+//! 6. **Plumbing synthesis.** Call [`synthesize_plumbing_ops`] on
 //!    the user-op-only program, then [`lower_plumbing`] to push one
 //!    op per kind.
-//! 6. **Source-ring symmetry.** Walk the finished program and, for
-//!    each [`ComputeOp`] whose dispatch is
-//!    [`DispatchShape::PerEvent { source_ring }`], record an
-//!    [`EventRingAccess::Read`] read on `source_ring`. The
-//!    destination-ring (Emit) write half is structurally awkward —
-//!    Emit lives inside a `CgStmtList`, not on the op directly, and
-//!    the auto-walker does not know which ring an event-name
-//!    resolves to. See "Limitations" below for the deferred path.
 //!
 //! # Diagnostic model
 //!
@@ -67,23 +68,6 @@
 //!
 //! # Limitations
 //!
-//! - **Destination-ring (Emit) writes are not wired today.** The
-//!   plan amendment calls for the driver to record an
-//!   [`EventRingAccess::Append`] write on the destination ring of
-//!   every `CgStmt::Emit`, but the [`crate::cg::op::ComputeOp`] surface
-//!   exposes [`crate::cg::op::ComputeOp::record_write`] on the op,
-//!   not on individual statements — and an op can carry multiple
-//!   distinct emit destinations through `If` / `Match` arms. Wiring
-//!   the driver to walk the body's stmt list and resolve event-name
-//!   → `EventRingId` per Emit is structurally clean but requires
-//!   the plumbing tasks (or a sibling walk) to know which event
-//!   names map to which rings. Today's event-ring registry maps
-//!   one ring per event kind; the walk is feasible but the
-//!   well_formed cycle gate runs on the user-op-only program
-//!   (before plumbing), so wiring destination-ring writes after
-//!   `builder.finish()` doesn't change the gate's verdict. The
-//!   structural walk lands in a follow-up once a Phase 3 consumer
-//!   needs it.
 //! - **Per-mask spatial query selection.** The driver picks
 //!   [`SpatialQueryKind::KinQuery`] for every mask with a `from
 //!   query.nearby_agents(...)` clause. Real mask kernels split
@@ -120,10 +104,11 @@ use dsl_ast::ir::{
 use crate::cg::data_handle::{DataHandle, EventRingAccess, EventRingId, MaskId, ViewId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
 use crate::cg::op::{
-    ActionId, EventKindId, PhysicsRuleId, ReplayabilityFlag, ScoringId, SpatialQueryKind,
+    ActionId, ComputeOp, ComputeOpKind, EventKindId, PhysicsRuleId, ReplayabilityFlag, ScoringId,
+    SpatialQueryKind,
 };
 use crate::cg::program::{CgProgram, CgProgramBuilder};
-use crate::cg::stmt::VariantId;
+use crate::cg::stmt::{CgStmt, CgStmtListId, VariantId};
 use crate::cg::well_formed::check_well_formed;
 
 use super::error::LoweringError;
@@ -168,9 +153,8 @@ use super::view::{lower_view, HandlerResolution};
 /// # Limitations
 ///
 /// See the module-level "Limitations" section for the deferred
-/// pieces — destination-ring Emit writes, per-mask spatial query
-/// selection, replayability annotation parsing, and view-call
-/// signature registration.
+/// pieces — per-mask spatial query selection, replayability
+/// annotation parsing, and view-call signature registration.
 pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOutcome> {
     let mut builder = CgProgramBuilder::new();
     let mut diagnostics: Vec<LoweringError> = Vec::new();
@@ -204,7 +188,31 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
         diagnostics.push(e);
     }
 
-    // -- Phase 4: cycle gate (user-op-only program) ---------------------
+    // -- Phase 4: ring-edge wiring (pre-gate) ---------------------------
+    //
+    // The plan amendment (lines 575–595 of
+    // `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`)
+    // makes ring-edge symmetry a hard obligation on the driver. For
+    // every PerEvent-shaped op the driver records an
+    // `EventRingAccess::Read` on its source ring; for every
+    // `CgStmt::Emit` reachable from any op's body the driver records
+    // an `EventRingAccess::Append` on the destination ring (mapped
+    // 1:1 by `EventRingId(i) ↔ EventKindId(i)` per Phase 1's
+    // allocation rule). Without this, `check_well_formed`'s
+    // `detect_cycles` (which consults only `op.reads` /
+    // `op.writes`) silently misses event-ring producer/consumer
+    // cycles between physics rules and view folds.
+    //
+    // The destination-ring walk needs the program's statement
+    // arenas; we collect a snapshot first, compute (op_index, dest
+    // rings) pairs against it, then apply both wirings to the
+    // builder's ops via `ops_mut`.
+    let arena_snapshot = ctx.builder.program().clone();
+    let emit_writes = collect_emit_destination_rings(&arena_snapshot);
+    wire_source_ring_reads(ctx.builder.ops_mut());
+    apply_emit_destination_rings(ctx.builder.ops_mut(), &emit_writes);
+
+    // -- Phase 5: cycle gate (user-op-only program) ---------------------
     //
     // The plan amendment scopes the cycle gate to the program built
     // BEFORE plumbing synthesis. The plumbing synthesizer produces
@@ -212,6 +220,9 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     // AgentField, UnpackAgents writes every AgentField) which Phase
     // 3 schedule synthesis resolves; running well_formed against a
     // post-plumbing program would always fire a false cycle.
+    //
+    // Ring edges (Phase 4) must be wired BEFORE this snapshot —
+    // see the rationale on Phase 4.
     let user_op_program = ctx.builder.program().clone();
     if let Err(errors) = check_well_formed(&user_op_program) {
         for cg_error in errors {
@@ -219,15 +230,13 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
         }
     }
 
-    // -- Phase 5: plumbing synthesis ------------------------------------
+    // -- Phase 6: plumbing synthesis ------------------------------------
     let plumbing_kinds = synthesize_plumbing_ops(ctx.builder.program());
     if let Err(e) = lower_plumbing(&plumbing_kinds, &mut ctx) {
         diagnostics.push(e);
     }
 
-    // -- Phase 6: source-ring symmetry ----------------------------------
-    let mut prog = builder.finish();
-    wire_source_ring_reads(&mut prog);
+    let prog = builder.finish();
 
     if diagnostics.is_empty() {
         Ok(prog)
@@ -315,26 +324,31 @@ fn populate_event_kinds(
 /// `EffectOp` arms; user-declared enums in `comp.enums` populate
 /// the same map so a synthetic match arm naming a user variant
 /// resolves cleanly. A duplicate variant name across enums (rare
-/// in practice) overwrites the prior entry and emits a defensive
-/// diagnostic — the driver flags it but does not abort.
+/// in practice) overwrites the prior entry and pushes a typed
+/// [`LoweringError::DuplicateVariantInRegistry`] — the driver
+/// flags it but does not abort.
 fn populate_variants_from_enums(
     comp: &Compilation,
     ctx: &mut LoweringCtx<'_>,
-    _diagnostics: &mut Vec<LoweringError>,
+    diagnostics: &mut Vec<LoweringError>,
 ) {
     // Walk each enum's variants in declaration order, allocating
-    // ids contiguously. Note: VariantId is a typed newtype around a
-    // flat u32; collisions across enums are surfaced via the
-    // `register_variant` helper's return value (the prior id), but
-    // the lowering currently treats the registry as last-write-wins
-    // — physics matches today only reference stdlib EffectOp
-    // variants, so a real-world collision is unlikely.
+    // ids contiguously. Collisions across enums are surfaced via
+    // `register_variant`'s return value (the prior id) — the
+    // lowering treats the registry as last-write-wins and pushes
+    // a typed diagnostic so callers can refuse the program.
     let mut next_id: u32 = 0;
     for enum_ir in &comp.enums {
         for variant_name in &enum_ir.variants {
             let id = VariantId(next_id);
             next_id += 1;
-            ctx.register_variant(variant_name.clone(), id);
+            if let Some(prior_id) = ctx.register_variant(variant_name.clone(), id) {
+                diagnostics.push(LoweringError::DuplicateVariantInRegistry {
+                    name: variant_name.clone(),
+                    prior_id,
+                    new_id: id,
+                });
+            }
         }
     }
 }
@@ -385,10 +399,17 @@ fn allocate_action(
 /// references. View signatures are NOT populated today — see the
 /// module-level "Limitations" note on view-call signature
 /// registration.
+///
+/// A duplicate registration (the same `AstViewRef` resolving twice)
+/// is a driver-side defect — `ViewId`s are allocated in source
+/// order and the AST resolver assigns each view a unique ref. The
+/// driver pushes a typed
+/// [`LoweringError::DuplicateViewInRegistry`] if it ever observes
+/// one and continues with last-write-wins.
 fn populate_views(
     comp: &Compilation,
     ctx: &mut LoweringCtx<'_>,
-    _diagnostics: &mut Vec<LoweringError>,
+    diagnostics: &mut Vec<LoweringError>,
 ) {
     // The AST resolver assigns each view a `ViewRef(i)` matching
     // its position in `comp.views`; the driver mirrors that into a
@@ -401,7 +422,14 @@ fn populate_views(
     // see the module-level "Limitations" docstring.
     for i in 0..comp.views.len() {
         let view_id = ViewId(i as u32);
-        let _ = ctx.register_view(dsl_ast::ir::ViewRef(i as u16), view_id);
+        let ast_ref = dsl_ast::ir::ViewRef(i as u16);
+        if let Some(prior_id) = ctx.register_view(ast_ref, view_id) {
+            diagnostics.push(LoweringError::DuplicateViewInRegistry {
+                ast_ref,
+                prior_id,
+                new_id: view_id,
+            });
+        }
     }
 }
 
@@ -673,10 +701,10 @@ fn collect_required_spatial_kinds(prog: &CgProgram) -> Vec<SpatialQueryKind> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 6 helpers — source-ring symmetry
+// Phase 4 helpers — ring-edge wiring (pre-gate)
 // ---------------------------------------------------------------------------
 
-/// For each [`ComputeOp`] in `prog.ops` whose dispatch shape is
+/// For each [`ComputeOp`] in `ops` whose dispatch shape is
 /// [`DispatchShape::PerEvent { source_ring }`], record an
 /// [`EventRingAccess::Read`] read on `source_ring`.
 ///
@@ -685,13 +713,121 @@ fn collect_required_spatial_kinds(prog: &CgProgram) -> Vec<SpatialQueryKind> {
 /// identity but the reads list does not), missing producer/consumer
 /// cycles between physics rules and view folds. The plan
 /// amendment makes this a hard obligation on the driver.
-fn wire_source_ring_reads(prog: &mut CgProgram) {
-    for op in &mut prog.ops {
+///
+/// Operates on a `&mut [ComputeOp]` rather than `&mut CgProgram` so
+/// the driver can call it on the in-progress builder via
+/// [`CgProgramBuilder::ops_mut`] before the cycle gate snapshot.
+fn wire_source_ring_reads(ops: &mut [ComputeOp]) {
+    for op in ops.iter_mut() {
         if let DispatchShape::PerEvent { source_ring } = op.shape {
             op.record_read(DataHandle::EventRing {
                 ring: source_ring,
                 kind: EventRingAccess::Read,
             });
+        }
+    }
+}
+
+/// Walk every user op's body's statement list and collect, per op
+/// index, the set of destination [`EventRingId`]s every reachable
+/// [`CgStmt::Emit`] resolves to. The driver's allocation rule pairs
+/// `EventKindId(i)` with `EventRingId(i)`, so the walker can
+/// translate each `Emit { event: EventKindId(i), .. }` directly.
+///
+/// Returns `(op_index, dest_ring)` pairs — duplicates are preserved
+/// (an op that emits twice into the same ring records two entries;
+/// downstream `record_write` consumers tolerate duplicates the same
+/// way the auto-walker does for repeated `Assign`s).
+///
+/// Two-phase shape (collect-then-apply) avoids holding a mutable
+/// borrow on the op list while traversing the (immutable) statement
+/// arenas. See [`apply_emit_destination_rings`] for the application
+/// half.
+fn collect_emit_destination_rings(prog: &CgProgram) -> Vec<(usize, EventRingId)> {
+    let mut out: Vec<(usize, EventRingId)> = Vec::new();
+    for (op_index, op) in prog.ops.iter().enumerate() {
+        let body_list = body_list_for_op_kind(&op.kind);
+        let Some(list_id) = body_list else { continue };
+        let mut emits: Vec<EventKindId> = Vec::new();
+        collect_emits_in_list(list_id, prog, &mut emits);
+        for kind in emits {
+            // Phase 1 allocates rings parallel to event kinds — see
+            // `populate_event_kinds`. The 1:1 mapping holds for every
+            // event in `comp.events`; an out-of-range
+            // `EventKindId(i)` would be a driver-side defect, but
+            // record_write tolerates the entry regardless (the
+            // well_formed gate would surface a writer-without-reader
+            // diagnostic separately).
+            out.push((op_index, EventRingId(kind.0)));
+        }
+    }
+    out
+}
+
+/// Apply the (op_index, dest_ring) pairs collected by
+/// [`collect_emit_destination_rings`] to `ops` via
+/// [`ComputeOp::record_write`]. Pairs naming an op index past the
+/// slice's length are silently dropped — the caller built the pairs
+/// from a snapshot of the same builder, so this should never trip
+/// in practice.
+fn apply_emit_destination_rings(ops: &mut [ComputeOp], pairs: &[(usize, EventRingId)]) {
+    for &(op_index, ring) in pairs {
+        if let Some(op) = ops.get_mut(op_index) {
+            op.record_write(DataHandle::EventRing {
+                ring,
+                kind: EventRingAccess::Append,
+            });
+        }
+    }
+}
+
+/// Pick the body [`CgStmtListId`] for ops whose kind carries one;
+/// `None` for kinds that don't have a stmt-list body.
+///
+/// Listed exhaustively rather than with a `_ =>` fallthrough so a
+/// future op kind that introduces a new body shape forces an
+/// explicit decision here instead of silently bypassing the Emit
+/// walker.
+fn body_list_for_op_kind(kind: &ComputeOpKind) -> Option<CgStmtListId> {
+    match kind {
+        ComputeOpKind::PhysicsRule { body, .. } => Some(*body),
+        ComputeOpKind::ViewFold { body, .. } => Some(*body),
+        ComputeOpKind::MaskPredicate { .. } => None,
+        ComputeOpKind::ScoringArgmax { .. } => None,
+        ComputeOpKind::SpatialQuery { .. } => None,
+        ComputeOpKind::Plumbing { .. } => None,
+    }
+}
+
+/// Recursively collect every [`CgStmt::Emit`]'s [`EventKindId`] from
+/// the statement list named by `list_id`, descending through `If`
+/// arms (both `then` and `else_`) and `Match` arm bodies.
+///
+/// Listed exhaustively over [`CgStmt`] variants — no `_ =>` arm —
+/// so a future statement variant that introduces an emit-bearing
+/// body forces an explicit case here.
+fn collect_emits_in_list(list_id: CgStmtListId, prog: &CgProgram, out: &mut Vec<EventKindId>) {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return;
+    };
+    for &stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        match stmt {
+            CgStmt::Emit { event, .. } => out.push(*event),
+            CgStmt::If { then, else_, .. } => {
+                collect_emits_in_list(*then, prog, out);
+                if let Some(else_list) = else_ {
+                    collect_emits_in_list(*else_list, prog, out);
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    collect_emits_in_list(arm.body, prog, out);
+                }
+            }
+            CgStmt::Assign { .. } => {}
         }
     }
 }
@@ -798,7 +934,7 @@ mod tests {
             .unwrap();
 
         let mut prog = builder.finish();
-        wire_source_ring_reads(&mut prog);
+        wire_source_ring_reads(&mut prog.ops);
 
         // Op 0 (Plumbing/PerAgent) should have NO new EventRing read
         // appended for op 0 (auto-walker may have synthesized other
@@ -887,6 +1023,108 @@ mod tests {
         assert_eq!(
             kinds,
             vec![SpatialQueryKind::BuildHash, SpatialQueryKind::KinQuery]
+        );
+    }
+
+    /// `populate_variants_from_enums` surfaces a typed
+    /// `DuplicateVariantInRegistry` diagnostic when two enums declare
+    /// the same source-level variant name. Last-write-wins semantics
+    /// remain in place; the diagnostic exists so callers (or future
+    /// tests) can refuse the program without scanning the registry by
+    /// hand.
+    #[test]
+    fn populate_variants_from_enums_flags_duplicate_variant() {
+        use dsl_ast::ast::Span;
+        use dsl_ast::ir::EnumIR;
+
+        let mut comp = Compilation::default();
+        // Two enums, both declaring a `Damage` variant. The second
+        // occurrence collides with the first.
+        comp.enums.push(EnumIR {
+            name: "EffectOpA".to_string(),
+            variants: vec!["Damage".to_string(), "Heal".to_string()],
+            annotations: Vec::new(),
+            span: Span::dummy(),
+        });
+        comp.enums.push(EnumIR {
+            name: "EffectOpB".to_string(),
+            variants: vec!["Damage".to_string()], // collides with EnumA's Damage
+            annotations: Vec::new(),
+            span: Span::dummy(),
+        });
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let mut diagnostics: Vec<LoweringError> = Vec::new();
+        populate_variants_from_enums(&comp, &mut ctx, &mut diagnostics);
+
+        // Exactly one duplicate diagnostic for `Damage` — the second
+        // registration. `Heal` was unique; the first `Damage`
+        // registered without conflict.
+        let dup_count = diagnostics
+            .iter()
+            .filter(|d| matches!(d, LoweringError::DuplicateVariantInRegistry { name, .. } if name == "Damage"))
+            .count();
+        assert_eq!(
+            dup_count, 1,
+            "expected one DuplicateVariantInRegistry for `Damage`; got diagnostics: {diagnostics:?}"
+        );
+    }
+
+    /// `populate_views` surfaces a typed `DuplicateViewInRegistry`
+    /// diagnostic if `register_view` ever observes the same AST view
+    /// ref twice. Driver allocates `ViewId(i)` in source order, so a
+    /// real-world collision would be a driver-side defect — the
+    /// typed surface lets a test assert the contract.
+    #[test]
+    fn populate_views_flags_duplicate_view() {
+        use dsl_ast::ir::ViewRef;
+
+        // We can't easily make `populate_views` itself emit a
+        // duplicate (it iterates `0..comp.views.len()` and assigns
+        // unique ids), but the typed registry is the same one used
+        // by `register_view`. Pre-register a colliding entry to
+        // exercise the diagnostic path; then run `populate_views`
+        // on a one-view Compilation and assert the collision is
+        // surfaced.
+        let mut comp = Compilation::default();
+        comp.views.push(dsl_ast::ir::ViewIR {
+            name: "v0".to_string(),
+            kind: dsl_ast::ir::ViewKind::Lazy,
+            params: Vec::new(),
+            return_ty: dsl_ast::ir::IrType::F32,
+            body: dsl_ast::ir::ViewBodyIR::Expr(dsl_ast::ir::IrExprNode {
+                kind: dsl_ast::ir::IrExpr::LitFloat(0.0),
+                span: dsl_ast::ast::Span::dummy(),
+            }),
+            annotations: Vec::new(),
+            decay: None,
+            span: dsl_ast::ast::Span::dummy(),
+        });
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // Pre-seed the registry with a stale entry for ViewRef(0)
+        // so the driver's call collides.
+        let prior_id = ViewId(99);
+        let prior = ctx.register_view(ViewRef(0), prior_id);
+        assert!(prior.is_none(), "registry should be empty before pre-seed");
+
+        let mut diagnostics: Vec<LoweringError> = Vec::new();
+        populate_views(&comp, &mut ctx, &mut diagnostics);
+
+        let dup = diagnostics.iter().find_map(|d| match d {
+            LoweringError::DuplicateViewInRegistry {
+                ast_ref,
+                prior_id,
+                new_id,
+            } => Some((ast_ref.0, prior_id.0, new_id.0)),
+            _ => None,
+        });
+        assert_eq!(
+            dup,
+            Some((0, 99, 0)),
+            "expected DuplicateViewInRegistry(ast_ref=0, prior=99, new=0); got diagnostics: {diagnostics:?}"
         );
     }
 }

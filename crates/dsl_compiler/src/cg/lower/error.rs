@@ -40,6 +40,7 @@ use crate::cg::data_handle::{MaskId, ViewId, ViewStorageSlot};
 use crate::cg::expr::{CgTy, TypeError};
 use crate::cg::op::{ActionId, PhysicsRuleId, ScoringId, SpatialQueryKind};
 use crate::cg::program::BuilderError;
+use crate::cg::stmt::VariantId;
 use crate::cg::well_formed::CgError;
 
 /// Typed defect surfaced by any CG lowering pass.
@@ -642,6 +643,42 @@ pub enum LoweringError {
     WellFormed {
         error: CgError,
     },
+
+    /// The driver's variant-registry population observed two enum
+    /// variants with the same source-level name (e.g. `Damage`
+    /// declared in two distinct enums). The registry is a flat
+    /// name → id map; the second occurrence overwrites the first,
+    /// which would silently mis-route physics `Match` arms naming
+    /// the colliding name. The driver flags it but does not abort —
+    /// physics matches today only reference stdlib `EffectOp`
+    /// variants, so a real-world collision is unlikely.
+    DuplicateVariantInRegistry {
+        /// The source-level variant identifier that collided.
+        name: String,
+        /// The id the registry already held for `name` before the
+        /// collision.
+        prior_id: VariantId,
+        /// The id the driver tried to register for `name` (the
+        /// collision write — last-write-wins, so this is the id the
+        /// registry holds after the call).
+        new_id: VariantId,
+    },
+
+    /// The driver's view-registry population observed two views
+    /// resolving to the same typed [`ViewId`] — a driver-side defect
+    /// since [`ViewId`]s are allocated in source order. The driver
+    /// flags it but does not abort.
+    DuplicateViewInRegistry {
+        /// The AST-level view ref the driver attempted to register.
+        ast_ref: AstViewRef,
+        /// The view id that was already registered for the same AST
+        /// ref before this attempt.
+        prior_id: ViewId,
+        /// The id the driver tried to register (the collision write —
+        /// last-write-wins, so this is the id the registry holds
+        /// after the call).
+        new_id: ViewId,
+    },
 }
 
 /// Closed-set discriminant for which sub-expression of a scoring row
@@ -1059,6 +1096,24 @@ impl fmt::Display for LoweringError {
                 f,
                 "lowering: user-op-only well-formedness gate flagged: {}",
                 error
+            ),
+            LoweringError::DuplicateVariantInRegistry {
+                name,
+                prior_id,
+                new_id,
+            } => write!(
+                f,
+                "lowering: duplicate variant `{}` in registry — prior id #{}, new id #{} (last-write-wins)",
+                name, prior_id.0, new_id.0
+            ),
+            LoweringError::DuplicateViewInRegistry {
+                ast_ref,
+                prior_id,
+                new_id,
+            } => write!(
+                f,
+                "lowering: duplicate view AstViewRef(#{}) in registry — prior ViewId(#{}), new ViewId(#{}) (last-write-wins)",
+                ast_ref.0, prior_id.0, new_id.0
             ),
         }
     }

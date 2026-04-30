@@ -924,6 +924,22 @@ impl CgProgramBuilder {
     pub fn program(&self) -> &CgProgram {
         &self.inner
     }
+
+    /// Append-only seam for post-construction registry-resolved bindings
+    /// (e.g., [`ComputeOp::record_read`] for source rings,
+    /// [`ComputeOp::record_write`] for `Emit` destination rings). Use
+    /// sparingly — most reads/writes should be auto-derived via
+    /// [`ComputeOp::new`].
+    ///
+    /// The driver needs this to wire ring edges (source-ring reads,
+    /// destination-ring writes) BEFORE the cycle gate snapshot. Wiring
+    /// post-`finish()` doesn't change the gate's verdict because the
+    /// gate consults `op.reads` / `op.writes`; the symmetry between
+    /// `DispatchShape::PerEvent` and `CgStmt::Emit` and the ring graph
+    /// must be present at gate time.
+    pub fn ops_mut(&mut self) -> &mut Vec<ComputeOp> {
+        &mut self.inner.ops
+    }
 }
 
 // ---------------------------------------------------------------------------
