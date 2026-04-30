@@ -38,7 +38,7 @@ use dsl_ast::ir::{Builtin, NamespaceId, ViewRef as AstViewRef};
 
 use crate::cg::data_handle::{MaskId, ViewId, ViewStorageSlot};
 use crate::cg::expr::{CgTy, TypeError};
-use crate::cg::op::{PhysicsRuleId, SpatialQueryKind};
+use crate::cg::op::{ActionId, PhysicsRuleId, ScoringId, SpatialQueryKind};
 use crate::cg::program::BuilderError;
 
 /// Typed defect surfaced by any CG lowering pass.
@@ -488,6 +488,62 @@ pub enum LoweringError {
         span: Span,
     },
 
+    // -- Scoring pass (Task 2.5) -----------------------------------------
+
+    /// A scoring row's `utility` expression (the score) type-checked to
+    /// a non-`F32` type. Scoring utilities are scalar floats —
+    /// `engine::scoring` accumulates them with `+` and picks the
+    /// argmax — so an integer / agent-id / bool utility is rejected.
+    /// Distinct from [`Self::IllTypedExpression`] because the
+    /// constraint here is scoring-row-level (the argmax shape requires
+    /// F32), not operator-level.
+    ScoringUtilityNotF32 {
+        scoring: ScoringId,
+        action: ActionId,
+        got: CgTy,
+        span: Span,
+    },
+
+    /// A scoring row's `target` expression (per-ability rows only)
+    /// type-checked to a non-[`CgTy::AgentId`] type. Per-ability rows
+    /// require the target expression to resolve to an agent id
+    /// because the engine applies the action to that specific agent
+    /// when the row wins the argmax.
+    ScoringTargetNotAgentId {
+        scoring: ScoringId,
+        action: ActionId,
+        got: CgTy,
+        span: Span,
+    },
+
+    /// A scoring row's `guard` expression (per-ability rows only)
+    /// type-checked to a non-`Bool` type. Guards are boolean
+    /// predicates — `None` parses as `true`; an explicit guard must
+    /// evaluate to `Bool` so the kernel can short-circuit the row
+    /// when the predicate fails.
+    ScoringGuardNotBool {
+        scoring: ScoringId,
+        action: ActionId,
+        got: CgTy,
+        span: Span,
+    },
+
+    /// A type-check of a scoring-row's expression node itself (after
+    /// lowering) failed. Surfaces the underlying [`TypeError`] without
+    /// panicking; should not normally fire because expression
+    /// lowering already type-checks every node it constructs.
+    /// `subject_label` names which sub-expression of the row tripped
+    /// the check (`"utility"` | `"target"` | `"guard"`).
+    ScoringRowTypeCheckFailure {
+        scoring: ScoringId,
+        action: ActionId,
+        subject_label: &'static str,
+        error: TypeError,
+        span: Span,
+    },
+
+    // -- (continued: pre-existing variants) -----------------------------
+
     /// A fold-handler `IrStmt::SelfUpdate` carries an operator the CG
     /// IR's `ComputeOpKind::ViewFold` wrapper does not yet thread.
     /// Today only `+=` is lowered — the merge semantics for `=`,
@@ -814,6 +870,49 @@ impl fmt::Display for LoweringError {
                 f,
                 "physics#{} match at {}..{} has no arms — empty matches have no defined runtime behaviour",
                 rule.0, span.start, span.end
+            ),
+
+            // -- Scoring pass -----------------------------------------
+            LoweringError::ScoringUtilityNotF32 {
+                scoring,
+                action,
+                got,
+                span,
+            } => write!(
+                f,
+                "scoring#{} row(action=#{}) utility at {}..{} produced {} — must be F32",
+                scoring.0, action.0, span.start, span.end, got
+            ),
+            LoweringError::ScoringTargetNotAgentId {
+                scoring,
+                action,
+                got,
+                span,
+            } => write!(
+                f,
+                "scoring#{} row(action=#{}) target at {}..{} produced {} — must be AgentId",
+                scoring.0, action.0, span.start, span.end, got
+            ),
+            LoweringError::ScoringGuardNotBool {
+                scoring,
+                action,
+                got,
+                span,
+            } => write!(
+                f,
+                "scoring#{} row(action=#{}) guard at {}..{} produced {} — must be Bool",
+                scoring.0, action.0, span.start, span.end, got
+            ),
+            LoweringError::ScoringRowTypeCheckFailure {
+                scoring,
+                action,
+                subject_label,
+                error,
+                span,
+            } => write!(
+                f,
+                "scoring#{} row(action=#{}) {} at {}..{} failed type-check — {}",
+                scoring.0, action.0, subject_label, span.start, span.end, error
             ),
         }
     }

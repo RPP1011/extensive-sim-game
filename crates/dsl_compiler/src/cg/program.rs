@@ -878,15 +878,21 @@ impl CgProgramBuilder {
 
     /// Validate every id reference inside `kind`. Each variant has
     /// distinct reference shapes — mask predicates carry one expr id,
-    /// scoring rows carry two each, physics/view-fold carry one stmt
-    /// list id, spatial query / plumbing carry none.
+    /// scoring rows carry one required (`utility`) plus up to two
+    /// optional (`target`, `guard`) expr ids each, physics/view-fold
+    /// carry one stmt list id, spatial query / plumbing carry none.
     fn validate_op_kind_refs(&self, kind: &ComputeOpKind) -> Result<(), BuilderError> {
         match kind {
             ComputeOpKind::MaskPredicate { predicate, .. } => self.check_expr_id(*predicate),
             ComputeOpKind::ScoringArgmax { rows, .. } => {
                 for row in rows {
                     self.check_expr_id(row.utility)?;
-                    self.check_expr_id(row.target)?;
+                    if let Some(target_id) = row.target {
+                        self.check_expr_id(target_id)?;
+                    }
+                    if let Some(guard_id) = row.guard {
+                        self.check_expr_id(guard_id)?;
+                    }
                 }
                 Ok(())
             }
@@ -1312,7 +1318,8 @@ mod tests {
                     rows: vec![ScoringRowOp {
                         action: ActionId(0),
                         utility,
-                        target: CgExprId(99),
+                        target: Some(CgExprId(99)),
+                        guard: None,
                     }],
                 },
                 DispatchShape::PerAgent,
@@ -1326,6 +1333,60 @@ mod tests {
                 arena_len: 1,
             }
         );
+    }
+
+    #[test]
+    fn builder_add_op_scoring_validates_optional_guard() {
+        // Guard id is dangling — utility + target are valid.
+        let mut b = CgProgramBuilder::new();
+        let utility = b.add_expr(lit_f32(1.0)).unwrap();
+        let err = b
+            .add_op(
+                ComputeOpKind::ScoringArgmax {
+                    scoring: ScoringId(0),
+                    rows: vec![ScoringRowOp {
+                        action: ActionId(0),
+                        utility,
+                        target: None,
+                        guard: Some(CgExprId(42)),
+                    }],
+                },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+            )
+            .expect_err("dangling row guard");
+        assert_eq!(
+            err,
+            BuilderError::DanglingExprId {
+                referenced: CgExprId(42),
+                arena_len: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn builder_add_op_scoring_accepts_standard_row_with_no_target_no_guard() {
+        // Standard row — target = None, guard = None. Must lower
+        // cleanly with only the utility expression.
+        let mut b = CgProgramBuilder::new();
+        let utility = b.add_expr(lit_f32(0.1)).unwrap();
+        let op_id = b
+            .add_op(
+                ComputeOpKind::ScoringArgmax {
+                    scoring: ScoringId(0),
+                    rows: vec![ScoringRowOp {
+                        action: ActionId(0),
+                        utility,
+                        target: None,
+                        guard: None,
+                    }],
+                },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+            )
+            .expect("standard row lowers cleanly");
+        let prog = b.finish();
+        assert_eq!(prog.ops[op_id.0 as usize].id, op_id);
     }
 
     #[test]
@@ -1771,7 +1832,8 @@ mod tests {
                 rows: vec![ScoringRowOp {
                     action: ActionId(0),
                     utility,
-                    target,
+                    target: Some(target),
+                    guard: None,
                 }],
             },
             DispatchShape::PerAgent,

@@ -256,21 +256,61 @@ impl fmt::Display for PlumbingKind {
 /// One row of a scoring argmax. The DSL surface gives each row a head
 /// (`Attack(target)`, `MoveToward(target)`, …) which lowering resolves
 /// to a stable [`ActionId`]; the row's body is a utility expression
-/// (the score) and a target expression (the agent id to act upon).
+/// (the score) plus optional target / guard expressions.
+///
+/// **Field optionality.** The DSL surface today carries TWO scoring-row
+/// shapes (see [`dsl_ast::ir::ScoringRowKind`]):
+///
+/// - **Standard rows** (`Head = expr`) — the row's target is implicit
+///   in the action at runtime (the engine resolves which agent to
+///   apply against based on the action kind and the per-action
+///   selector). Standard rows lower with `target = None, guard =
+///   None`.
+/// - **Per-ability rows** (`row <name> per_ability { guard, score,
+///   target }`) — the row carries an explicit target expression
+///   (typed `AgentId`) and an optional guard predicate (typed
+///   `Bool`). Per-ability rows populate `target` / `guard` directly
+///   from the AST.
+///
+/// Carrying both fields as `Option<CgExprId>` keeps the shape honest
+/// at the IR level: a synthetic placeholder for standard rows would
+/// have no defined runtime semantics, and routing a guard through a
+/// separately-named field (rather than baking it into `utility` via
+/// `if guard then score else -inf`) lets the well-formed pass type-
+/// check guard separately and lets the kernel emitter short-circuit
+/// the row when guard is false.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct ScoringRowOp {
     pub action: ActionId,
+    /// Score / utility expression — required, must type-check to
+    /// [`crate::cg::expr::CgTy::F32`] (per the well-formed pass).
     pub utility: super::data_handle::CgExprId,
-    pub target: super::data_handle::CgExprId,
+    /// Per-ability target agent-id expression. `None` for standard
+    /// rows; populated only by per-ability row lowering. The well-
+    /// formed pass type-checks `Some` values to
+    /// [`crate::cg::expr::CgTy::AgentId`] via
+    /// [`crate::cg::well_formed::CgError::ScoringTargetNotAgentId`].
+    pub target: Option<super::data_handle::CgExprId>,
+    /// Per-ability guard predicate. `None` for standard rows AND for
+    /// per-ability rows that carry no guard (`guard = None` parses
+    /// as `true`); populated only when the AST surfaces an explicit
+    /// boolean predicate. The well-formed pass type-checks `Some`
+    /// values to [`crate::cg::expr::CgTy::Bool`].
+    pub guard: Option<super::data_handle::CgExprId>,
 }
 
 impl fmt::Display for ScoringRowOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "row(action=#{}, utility=expr#{}, target=expr#{})",
-            self.action.0, self.utility.0, self.target.0
-        )
+        write!(f, "row(action=#{}, utility=expr#{}", self.action.0, self.utility.0)?;
+        match self.target {
+            Some(t) => write!(f, ", target=Some(expr#{})", t.0)?,
+            None => write!(f, ", target=None")?,
+        }
+        match self.guard {
+            Some(g) => write!(f, ", guard=Some(expr#{}))", g.0)?,
+            None => write!(f, ", guard=None)")?,
+        }
+        Ok(())
     }
 }
 
@@ -379,7 +419,12 @@ impl ComputeOpKind {
             ComputeOpKind::ScoringArgmax { scoring: _, rows } => {
                 for row in rows {
                     collect_expr_reads(row.utility, exprs, &mut reads);
-                    collect_expr_reads(row.target, exprs, &mut reads);
+                    if let Some(target_id) = row.target {
+                        collect_expr_reads(target_id, exprs, &mut reads);
+                    }
+                    if let Some(guard_id) = row.guard {
+                        collect_expr_reads(guard_id, exprs, &mut reads);
+                    }
                 }
                 writes.push(DataHandle::ScoringOutput);
             }
@@ -720,17 +765,50 @@ mod tests {
     // ---- ScoringRowOp ----
 
     #[test]
-    fn scoring_row_op_display_and_roundtrip() {
+    fn scoring_row_op_display_and_roundtrip_standard_row() {
+        // Standard row (no target, no guard) — both fields None.
         let row = ScoringRowOp {
             action: ActionId(3),
             utility: CgExprId(7),
-            target: CgExprId(9),
+            target: None,
+            guard: None,
         };
         assert_eq!(
             format!("{}", row),
-            "row(action=#3, utility=expr#7, target=expr#9)"
+            "row(action=#3, utility=expr#7, target=None, guard=None)"
         );
         assert_roundtrip(&row);
+    }
+
+    #[test]
+    fn scoring_row_op_display_and_roundtrip_per_ability_row() {
+        // Per-ability row with both target + guard populated.
+        let row = ScoringRowOp {
+            action: ActionId(3),
+            utility: CgExprId(7),
+            target: Some(CgExprId(9)),
+            guard: Some(CgExprId(11)),
+        };
+        assert_eq!(
+            format!("{}", row),
+            "row(action=#3, utility=expr#7, target=Some(expr#9), guard=Some(expr#11))"
+        );
+        assert_roundtrip(&row);
+    }
+
+    #[test]
+    fn scoring_row_op_display_per_ability_row_target_only() {
+        // Per-ability row with target but no guard.
+        let row = ScoringRowOp {
+            action: ActionId(0),
+            utility: CgExprId(1),
+            target: Some(CgExprId(2)),
+            guard: None,
+        };
+        assert_eq!(
+            format!("{}", row),
+            "row(action=#0, utility=expr#1, target=Some(expr#2), guard=None)"
+        );
     }
 
     // ---- ComputeOpKind ----
@@ -837,12 +915,14 @@ mod tests {
                 ScoringRowOp {
                     action: ActionId(0),
                     utility: CgExprId(2),
-                    target: CgExprId(3),
+                    target: Some(CgExprId(3)),
+                    guard: None,
                 },
                 ScoringRowOp {
                     action: ActionId(1),
                     utility: CgExprId(4),
-                    target: CgExprId(5),
+                    target: Some(CgExprId(5)),
+                    guard: None,
                 },
             ],
         };
@@ -1252,7 +1332,8 @@ mod tests {
                 rows: vec![ScoringRowOp {
                     action: ActionId(0),
                     utility: CgExprId(1),
-                    target: CgExprId(2),
+                    target: Some(CgExprId(2)),
+                    guard: None,
                 }],
             },
             ComputeOpKind::PhysicsRule {

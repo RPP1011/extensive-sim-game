@@ -170,11 +170,36 @@ pub enum CgError {
     },
 
     /// A [`ScoringRowOp`]'s `target` expression has a type other than
-    /// [`CgTy::AgentId`]. Scoring rows must produce an agent-id
-    /// candidate; a row whose `target` is a `F32` (or any non-agent
-    /// type) is structurally wrong and is rejected here. `row_index`
-    /// pins which row inside the op carried the offending target.
+    /// [`CgTy::AgentId`]. Per-ability scoring rows produce an agent-id
+    /// candidate; a row whose `target` is `Some(expr)` typing to a
+    /// non-agent type is structurally wrong and is rejected here.
+    /// Standard rows leave `target` as `None`, which never fires this
+    /// check. `row_index` pins which row inside the op carried the
+    /// offending target.
     ScoringTargetNotAgentId {
+        op: OpId,
+        row_index: u32,
+        got: CgTy,
+    },
+
+    /// A [`ScoringRowOp`]'s `guard` expression has a type other than
+    /// [`CgTy::Bool`]. Per-ability scoring rows guard their score with
+    /// a boolean predicate; a `Some(expr)` guard typing to anything
+    /// other than `Bool` is structurally wrong. Standard rows leave
+    /// `guard` as `None`, which never fires this check.
+    ScoringGuardNotBool {
+        op: OpId,
+        row_index: u32,
+        got: CgTy,
+    },
+
+    /// A [`ScoringRowOp`]'s `utility` expression has a type other than
+    /// [`CgTy::F32`]. Scoring utilities are scalar floats —
+    /// `engine::scoring` accumulates them with `+` and picks the
+    /// argmax; an integer / agent-id / bool utility is rejected.
+    /// `row_index` pins which row inside the op carried the offending
+    /// utility.
+    ScoringUtilityNotF32 {
         op: OpId,
         row_index: u32,
         got: CgTy,
@@ -307,6 +332,24 @@ impl fmt::Display for CgError {
             } => write!(
                 f,
                 "op#{}: scoring row#{} target must be agent_id, got {}",
+                op.0, row_index, got
+            ),
+            CgError::ScoringGuardNotBool {
+                op,
+                row_index,
+                got,
+            } => write!(
+                f,
+                "op#{}: scoring row#{} guard must be bool, got {}",
+                op.0, row_index, got
+            ),
+            CgError::ScoringUtilityNotF32 {
+                op,
+                row_index,
+                got,
+            } => write!(
+                f,
+                "op#{}: scoring row#{} utility must be f32, got {}",
                 op.0, row_index, got
             ),
             CgError::MatchDuplicateVariant { op, variant, span } => write!(
@@ -639,7 +682,12 @@ fn check_op(
         ComputeOpKind::ScoringArgmax { rows, .. } => {
             for row in rows {
                 validate_expr_subtree(arena, row.utility, op_id, expr_arena_len, errors);
-                validate_expr_subtree(arena, row.target, op_id, expr_arena_len, errors);
+                if let Some(target_id) = row.target {
+                    validate_expr_subtree(arena, target_id, op_id, expr_arena_len, errors);
+                }
+                if let Some(guard_id) = row.guard {
+                    validate_expr_subtree(arena, guard_id, op_id, expr_arena_len, errors);
+                }
             }
         }
         ComputeOpKind::PhysicsRule { body, .. } | ComputeOpKind::ViewFold { body, .. } => {
@@ -1037,10 +1085,17 @@ fn type_check_op(
 }
 
 /// Type-check a single [`ScoringRowOp`]. Validates:
-///   - `row.utility` type-checks (delegates to [`type_check`])
-///   - `row.target` type-checks AND its result is [`CgTy::AgentId`]
-///     (a non-AgentId target is rejected as
-///     [`CgError::ScoringTargetNotAgentId`]).
+///   - `row.utility` type-checks AND its result is [`CgTy::F32`]
+///     (a non-F32 utility is rejected as
+///     [`CgError::ScoringUtilityNotF32`]).
+///   - `row.target` (if `Some`) type-checks AND its result is
+///     [`CgTy::AgentId`] (a non-AgentId target is rejected as
+///     [`CgError::ScoringTargetNotAgentId`]). Standard rows whose
+///     `target` is `None` skip this check.
+///   - `row.guard` (if `Some`) type-checks AND its result is
+///     [`CgTy::Bool`] (a non-Bool guard is rejected as
+///     [`CgError::ScoringGuardNotBool`]). Rows without a guard skip
+///     this check.
 fn type_check_row(
     row: &ScoringRowOp,
     row_index: u32,
@@ -1051,21 +1106,13 @@ fn type_check_row(
     errors: &mut Vec<CgError>,
 ) {
     if let Some(expr) = prog.exprs.get(row.utility.0 as usize) {
-        if let Err(err) = type_check(expr, row.utility, ctx) {
-            errors.push(CgError::TypeMismatch {
-                op: op_id,
-                error: err,
-            });
-        }
-    }
-    if let Some(expr) = prog.exprs.get(row.target.0 as usize) {
-        match type_check(expr, row.target, ctx) {
-            Ok(target_ty) => {
-                if target_ty != CgTy::AgentId {
-                    errors.push(CgError::ScoringTargetNotAgentId {
+        match type_check(expr, row.utility, ctx) {
+            Ok(utility_ty) => {
+                if utility_ty != CgTy::F32 {
+                    errors.push(CgError::ScoringUtilityNotF32 {
                         op: op_id,
                         row_index,
-                        got: target_ty,
+                        got: utility_ty,
                     });
                 }
             }
@@ -1073,6 +1120,44 @@ fn type_check_row(
                 op: op_id,
                 error: err,
             }),
+        }
+    }
+    if let Some(target_id) = row.target {
+        if let Some(expr) = prog.exprs.get(target_id.0 as usize) {
+            match type_check(expr, target_id, ctx) {
+                Ok(target_ty) => {
+                    if target_ty != CgTy::AgentId {
+                        errors.push(CgError::ScoringTargetNotAgentId {
+                            op: op_id,
+                            row_index,
+                            got: target_ty,
+                        });
+                    }
+                }
+                Err(err) => errors.push(CgError::TypeMismatch {
+                    op: op_id,
+                    error: err,
+                }),
+            }
+        }
+    }
+    if let Some(guard_id) = row.guard {
+        if let Some(expr) = prog.exprs.get(guard_id.0 as usize) {
+            match type_check(expr, guard_id, ctx) {
+                Ok(guard_ty) => {
+                    if guard_ty != CgTy::Bool {
+                        errors.push(CgError::ScoringGuardNotBool {
+                            op: op_id,
+                            row_index,
+                            got: guard_ty,
+                        });
+                    }
+                }
+                Err(err) => errors.push(CgError::TypeMismatch {
+                    op: op_id,
+                    error: err,
+                }),
+            }
         }
     }
 }
@@ -1601,7 +1686,8 @@ mod tests {
                 rows: vec![ScoringRowOp {
                     action: ActionId(0),
                     utility: util,
-                    target: tgt,
+                    target: Some(tgt),
+                    guard: None,
                 }],
             },
             DispatchShape::PerAgent,
@@ -2379,7 +2465,8 @@ mod tests {
                 rows: vec![ScoringRowOp {
                     action: ActionId(0),
                     utility: util,
-                    target: bad_target,
+                    target: Some(bad_target),
+                    guard: None,
                 }],
             },
             DispatchShape::PerAgent,
@@ -2477,7 +2564,8 @@ mod tests {
                 rows: vec![ScoringRowOp {
                     action: ActionId(0),
                     utility: CgExprId(2),
-                    target: CgExprId(3),
+                    target: Some(CgExprId(3)),
+                    guard: None,
                 }],
             },
             reads: vec![],

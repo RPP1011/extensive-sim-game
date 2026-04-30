@@ -34,7 +34,7 @@ use crate::cg::expr::{
     data_handle_ty, type_check, BinaryOp, BuiltinId, CgExpr, CgTy, LitValue, NumericTy,
     TypeCheckCtx, TypeError, UnaryOp,
 };
-use crate::cg::op::EventKindId;
+use crate::cg::op::{ActionId, EventKindId};
 use crate::cg::program::CgProgramBuilder;
 use crate::cg::stmt::{LocalId, VariantId};
 
@@ -94,6 +94,19 @@ pub struct LoweringCtx<'a> {
     /// `Match` lowering converts each binding's local through this
     /// map. The driver populates it; tests populate it directly.
     pub local_ids: HashMap<LocalRef, LocalId>,
+    /// Action-name → typed [`ActionId`] resolver. Scoring-row heads
+    /// (`Hold`, `MoveToward`, `Attack`, … and `row <name>
+    /// per_ability` row names) resolve through this map. The driver
+    /// populates this from the action surface (one allocation per
+    /// distinct head name across the scoring decl); tests populate it
+    /// directly via [`Self::register_action`].
+    ///
+    /// Standard scoring rows AND per-ability scoring rows share this
+    /// id space — both are "actions" in the engine's apply layer (the
+    /// engine maps the winning [`ActionId`] to a behaviour). The
+    /// driver allocates each distinct name to a unique id; using the
+    /// same map for both row shapes preserves the contract.
+    pub action_ids: HashMap<String, ActionId>,
     /// Accumulator for per-rule diagnostics. The expression lowering
     /// itself returns `Err` on first defect; this vector exists so
     /// later op-lowering passes can collect non-fatal rule-level
@@ -111,6 +124,7 @@ impl<'a> LoweringCtx<'a> {
             variant_ids: HashMap::new(),
             event_kind_ids: HashMap::new(),
             local_ids: HashMap::new(),
+            action_ids: HashMap::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -147,6 +161,14 @@ impl<'a> LoweringCtx<'a> {
     /// (driver-side duplicate).
     pub fn register_local(&mut self, ast_ref: LocalRef, id: LocalId) -> Option<LocalId> {
         self.local_ids.insert(ast_ref, id)
+    }
+
+    /// Register an action-name → typed [`ActionId`] mapping. Returns
+    /// the prior `ActionId` if one was registered for the same name
+    /// (driver-side duplicate). Used by scoring lowering to resolve
+    /// row heads to stable typed action ids.
+    pub fn register_action(&mut self, name: impl Into<String>, id: ActionId) -> Option<ActionId> {
+        self.action_ids.insert(name.into(), id)
     }
 
     /// Register an AST view ref → CG view id mapping. Returns the prior
