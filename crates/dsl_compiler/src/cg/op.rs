@@ -17,9 +17,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::data_handle::{
-    DataHandle, EventRingAccess, EventRingId, MaskId, SpatialStorageKind, ViewId,
-};
+use super::data_handle::{DataHandle, MaskId, SpatialStorageKind, ViewId};
 use super::dispatch::DispatchShape;
 use super::expr::ExprArena;
 use super::stmt::{
@@ -170,155 +168,36 @@ impl fmt::Display for SpatialQueryKind {
 }
 
 // ---------------------------------------------------------------------------
-// PlumbingKind — typed enumeration of one-shot scratch ops
+// PlumbingKind — deferred to Task 2.7
 // ---------------------------------------------------------------------------
 
 /// One-shot plumbing kinds — emit-strategy operations that the schedule
 /// synthesizer can choose to inline or split out, but that are not
 /// directly user-authored DSL declarations.
 ///
-/// The variants here mirror the standalone WGSL emitters in
-/// `crates/dsl_compiler/src/emit_*_wgsl.rs`:
+/// **Variants land in Task 2.7 (Plumbing lowering)**, which owns both
+/// the variant set (alive-bitmap pack, fused agent unpack, sim_cfg
+/// upload, event-ring drain, indirect-args seed, …) and each variant's
+/// concrete `(reads, writes)` signature. The Plumbing lowering pass is
+/// the one with access to the registries and emit-time conventions
+/// needed to derive those signatures honestly — Task 1.3 has only the
+/// IR data model and cannot supply real `DataHandle` bindings without
+/// either fabricating sentinel ids or aliasing user-allocated ids.
 ///
-/// - `AlivePack` → `emit_alive_pack_wgsl` — packs per-agent alive
-///   bits into a `u32` bitmap.
-/// - `FusedAgentUnpack` → unpacks the agents-input scratch into the
-///   per-frame agent SoA + per-mask scratch.
-/// - `SeedIndirect` → seeds the cascade's indirect-args buffer based
-///   on the apply-path event ring's tail count.
-/// - `SimCfgUpload` → uploads `sim_cfg` (tick, agent_cap, …) into
-///   the GPU uniform buffer.
-/// - `EventRingDrain { ring }` → resets a ring's tail counter back
-///   to zero at the end of a tick. The ring id distinguishes apply-
-///   path vs cascade rings.
-///
-/// Each variant has a fixed (reads, writes) signature, encoded in
-/// [`PlumbingKind::dependencies`].
+/// Until then, `PlumbingKind` is uninhabited: the type exists so the
+/// [`ComputeOpKind::Plumbing { kind: PlumbingKind }`] wrapper variant
+/// typechecks, but no `Plumbing` op can be constructed. Any
+/// `match` over `PlumbingKind` is exhaustively unreachable — see
+/// [`ComputeOpKind::compute_dependencies`]'s `Plumbing` arm for the
+/// canonical empty-match form.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub enum PlumbingKind {
-    /// Pack per-agent `alive` flags into a `u32` bitmap, one word
-    /// per 32 agents. One thread per output word.
-    AlivePack,
-
-    /// Unpack a fused agents-input buffer into the agent SoA + mask
-    /// scratch. One thread per agent slot.
-    FusedAgentUnpack,
-
-    /// Seed the cascade's indirect-args buffer (workgroup count) from
-    /// the apply-path event ring's tail. Single-threaded.
-    SeedIndirect,
-
-    /// Upload sim_cfg (tick, agent_cap, registry slots, …) into the
-    /// GPU uniform buffer. Single-threaded.
-    SimCfgUpload,
-
-    /// Reset an event ring's tail counter to zero at end-of-tick.
-    /// `ring` names which ring (apply-path vs cascade) is being
-    /// drained.
-    EventRingDrain { ring: EventRingId },
-}
-
-impl PlumbingKind {
-    /// `(reads, writes)` signature.
-    ///
-    /// `AlivePack` reads `agent.self.alive` (the SoA alive flag) and
-    /// writes a packed bitmap. The bitmap has no first-class
-    /// [`DataHandle`] variant today; the emit-time `alive_bitmap`
-    /// pool slot is a [`DataHandle::SpatialStorage`]-adjacent scratch.
-    /// We surface the read explicitly and surface the write as the
-    /// `MaskBitmap { mask: MaskId(0) }` sentinel — the alive-pack
-    /// path does not have a user-visible mask id, so the IR treats the
-    /// "alive bitmap" as mask id 0 by convention. Lowering passes
-    /// (Phase 2) re-target this if the convention changes.
-    ///
-    /// `FusedAgentUnpack` reads the agents-input scratch and writes
-    /// the per-mask scratch + per-agent fields. The per-frame agents
-    /// SoA is a virtual buffer that doesn't have a single
-    /// [`DataHandle`] variant; the IR records the touched mask
-    /// bitmap (mask id 0) and a generic alive-flag write to surface
-    /// the per-agent side.
-    ///
-    /// `SeedIndirect` reads the apply-path event ring's tail counter
-    /// and writes the cascade indirect-args buffer; we surface the
-    /// read as an [`DataHandle::EventRing`] read on ring 0 (the
-    /// apply-path A-ring by convention) and the write as a
-    /// [`DataHandle::SpatialStorage::QueryResults`] sentinel — the
-    /// indirect-args buffer is pool-resident scratch, not first-class
-    /// IR storage. This is consistent with how Task 1.1 surfaces
-    /// pool buffers.
-    ///
-    /// `SimCfgUpload` writes the `ConfigConst { id: 0 }` slot —
-    /// `sim_cfg` is a single config struct, treated as id 0 here.
-    /// Reads are empty (the values come from CPU state).
-    ///
-    /// `EventRingDrain { ring }` writes the ring's tail back to zero;
-    /// we surface this as an [`DataHandle::EventRing`] append on the
-    /// ring (semantically a write of the tail counter).
-    ///
-    /// These conventions are deliberately coarse — the schedule
-    /// synthesizer (Phase 3) only needs to know *which buffers* a
-    /// plumbing op touches, not the field-level decomposition.
-    pub fn dependencies(self) -> (Vec<DataHandle>, Vec<DataHandle>) {
-        use super::data_handle::{
-            AgentFieldId, AgentRef, ConfigConstId, DataHandle as DH, MaskId, SpatialStorageKind,
-        };
-        match self {
-            PlumbingKind::AlivePack => (
-                vec![DH::AgentField {
-                    field: AgentFieldId::Alive,
-                    target: AgentRef::Self_,
-                }],
-                vec![DH::MaskBitmap { mask: MaskId(0) }],
-            ),
-            PlumbingKind::FusedAgentUnpack => (
-                vec![DH::AgentField {
-                    field: AgentFieldId::Alive,
-                    target: AgentRef::Self_,
-                }],
-                vec![DH::MaskBitmap { mask: MaskId(0) }],
-            ),
-            PlumbingKind::SeedIndirect => (
-                vec![DH::EventRing {
-                    ring: EventRingId(0),
-                    kind: EventRingAccess::Read,
-                }],
-                vec![DH::SpatialStorage {
-                    kind: SpatialStorageKind::QueryResults,
-                }],
-            ),
-            PlumbingKind::SimCfgUpload => (
-                vec![],
-                vec![DH::ConfigConst {
-                    id: ConfigConstId(0),
-                }],
-            ),
-            PlumbingKind::EventRingDrain { ring } => (
-                vec![],
-                vec![DH::EventRing {
-                    ring,
-                    kind: EventRingAccess::Append,
-                }],
-            ),
-        }
-    }
-
-    /// Stable snake_case label for pretty-printing.
-    pub fn label(self) -> String {
-        match self {
-            PlumbingKind::AlivePack => "alive_pack".to_string(),
-            PlumbingKind::FusedAgentUnpack => "fused_agent_unpack".to_string(),
-            PlumbingKind::SeedIndirect => "seed_indirect".to_string(),
-            PlumbingKind::SimCfgUpload => "sim_cfg_upload".to_string(),
-            PlumbingKind::EventRingDrain { ring } => {
-                format!("event_ring_drain(ring=#{})", ring.0)
-            }
-        }
-    }
-}
+pub enum PlumbingKind {}
 
 impl fmt::Display for PlumbingKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.label())
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Uninhabited — no instance can reach this. The `match *self
+        // {}` is the canonical "consume an uninhabited value" form.
+        match *self {}
     }
 }
 
@@ -407,6 +286,26 @@ impl ComputeOpKind {
     /// This is the function called by [`ComputeOp::new`] to populate
     /// the `reads` and `writes` fields. Those fields must NEVER be
     /// set independently of this — they are derived state.
+    ///
+    /// **Scope of the auto-walker.** This walker reports only the
+    /// dependencies that are structurally derivable from the IR's
+    /// expression and statement trees. It does NOT synthesize:
+    ///
+    /// - The source event ring read for [`PhysicsRule`] /
+    ///   [`ViewFold`]. The ring identity is recorded in
+    ///   [`DispatchShape::PerEvent { source_ring }`], populated by
+    ///   the lowering pass that consults the event registry.
+    /// - The target event ring write for [`crate::cg::stmt::CgStmt::Emit`].
+    ///   The walker descends into each field-value expression for
+    ///   reads, but the ring binding is added by the AST → HIR
+    ///   lowering pass via [`ComputeOp::record_write`].
+    /// - View-storage writes inside a [`ViewFold`] body. The walker
+    ///   records whatever real `Assign` targets the body contains; if
+    ///   the body writes nothing, that's a real signal, not a defect
+    ///   to paper over.
+    ///
+    /// [`PhysicsRule`]: ComputeOpKind::PhysicsRule
+    /// [`ViewFold`]: ComputeOpKind::ViewFold
     pub fn compute_dependencies(
         &self,
         exprs: &dyn ExprArena,
@@ -429,43 +328,27 @@ impl ComputeOpKind {
             }
             ComputeOpKind::PhysicsRule {
                 rule: _,
-                on_event,
+                on_event: _,
                 body,
             } => {
-                // Reading the source event ring is an implicit input
-                // for every per-event handler. The ring id is the
-                // event variant's id by convention (Task 1.1's
-                // EventRingId is opaque; lowering resolves the
-                // mapping).
-                reads.push(DataHandle::EventRing {
-                    ring: EventRingId(on_event.0),
-                    kind: EventRingAccess::Read,
-                });
+                // Source event ring read is recorded in
+                // `DispatchShape::PerEvent { source_ring }`, populated
+                // by lowering. The auto-walker only reports what the
+                // body's statements/expressions touch.
                 collect_list_dependencies(*body, exprs, stmts, lists, &mut reads, &mut writes);
             }
             ComputeOpKind::ViewFold {
-                view,
-                on_event,
+                view: _,
+                on_event: _,
                 body,
             } => {
-                // Same implicit event-ring read as PhysicsRule.
-                reads.push(DataHandle::EventRing {
-                    ring: EventRingId(on_event.0),
-                    kind: EventRingAccess::Read,
-                });
+                // Source event ring read is recorded in
+                // `DispatchShape::PerEvent { source_ring }`, populated
+                // by lowering. View-storage writes are recorded by
+                // `Assign` statements in the body, also populated by
+                // lowering — if the body writes nothing, the op
+                // writes nothing.
                 collect_list_dependencies(*body, exprs, stmts, lists, &mut reads, &mut writes);
-                // Whatever slots the body wrote are already in
-                // `writes`; additionally, the view's primary storage
-                // is the canonical "fold output" slot, so surface it
-                // even when the body didn't touch a per-slot handle
-                // explicitly. (The body of a fold lowering today
-                // always writes ViewStorage{view, slot=Primary}, but
-                // recording it here is defensive — duplicate-tolerant
-                // by design.)
-                writes.push(DataHandle::ViewStorage {
-                    view: *view,
-                    slot: super::data_handle::ViewStorageSlot::Primary,
-                });
             }
             ComputeOpKind::SpatialQuery { kind } => {
                 let (r, w) = kind.dependencies();
@@ -473,9 +356,9 @@ impl ComputeOpKind {
                 writes.extend(w);
             }
             ComputeOpKind::Plumbing { kind } => {
-                let (r, w) = kind.dependencies();
-                reads.extend(r);
-                writes.extend(w);
+                // PlumbingKind is uninhabited (Task 2.7 lands the
+                // variants); this match is exhaustively unreachable.
+                match *kind {}
             }
         }
         (reads, writes)
@@ -588,6 +471,30 @@ impl ComputeOp {
         self.reads = reads;
         self.writes = writes;
     }
+
+    /// Append a read recorded by the lowering pass.
+    ///
+    /// The auto-walker covers what the IR can know structurally — the
+    /// reads/writes its expression and statement trees express
+    /// directly. Lowering uses this method (and [`Self::record_write`])
+    /// to add bindings the walker can't synthesize: the source ring
+    /// identity behind a [`DispatchShape::PerEvent`] dispatch, the
+    /// destination ring an [`crate::cg::stmt::CgStmt::Emit`] resolves
+    /// to, and similar registry-resolved bindings.
+    ///
+    /// Lowering is responsible for calling this exactly once per such
+    /// dependency. Duplicate entries are tolerated by downstream
+    /// consumers (the auto-walker itself records duplicates), so this
+    /// method does no de-duplication.
+    pub fn record_read(&mut self, handle: DataHandle) {
+        self.reads.push(handle);
+    }
+
+    /// Append a write recorded by the lowering pass. See
+    /// [`Self::record_read`] for the rationale.
+    pub fn record_write(&mut self, handle: DataHandle) {
+        self.writes.push(handle);
+    }
 }
 
 impl fmt::Display for ComputeOp {
@@ -622,8 +529,8 @@ impl fmt::Display for ComputeOp {
 mod tests {
     use super::*;
     use crate::cg::data_handle::{
-        AgentFieldId, AgentRef, CgExprId, ConfigConstId, EventRingAccess, EventRingId, MaskId,
-        SpatialStorageKind, ViewId, ViewStorageSlot,
+        AgentFieldId, AgentRef, CgExprId, EventRingAccess, EventRingId, MaskId, SpatialStorageKind,
+        ViewId, ViewStorageSlot,
     };
     use crate::cg::expr::{BinaryOp, CgExpr, CgTy, LitValue};
     use crate::cg::stmt::{CgStmt, CgStmtId, CgStmtList, EventField};
@@ -727,92 +634,16 @@ mod tests {
         );
     }
 
-    // ---- PlumbingKind ----
+    // ---- PlumbingKind (deferred to Task 2.7) ----
 
+    /// `PlumbingKind` is uninhabited until Task 2.7 lands its variants;
+    /// this test asserts the wrapper variant is structurally a member
+    /// of `ComputeOpKind`. The function below cannot be called (no
+    /// `PlumbingKind` value can be produced), which is the whole point
+    /// — `Plumbing` ops can't be constructed from outside lowering.
     #[test]
-    fn plumbing_kind_display_and_roundtrip() {
-        let cases = [
-            (PlumbingKind::AlivePack, "alive_pack"),
-            (PlumbingKind::FusedAgentUnpack, "fused_agent_unpack"),
-            (PlumbingKind::SeedIndirect, "seed_indirect"),
-            (PlumbingKind::SimCfgUpload, "sim_cfg_upload"),
-            (
-                PlumbingKind::EventRingDrain {
-                    ring: EventRingId(2),
-                },
-                "event_ring_drain(ring=#2)",
-            ),
-        ];
-        for (kind, expected) in cases {
-            assert_eq!(format!("{}", kind), expected);
-            assert_roundtrip(&kind);
-        }
-    }
-
-    #[test]
-    fn plumbing_alive_pack_dependencies() {
-        let (r, w) = PlumbingKind::AlivePack.dependencies();
-        assert_eq!(
-            r,
-            vec![DataHandle::AgentField {
-                field: AgentFieldId::Alive,
-                target: AgentRef::Self_,
-            }]
-        );
-        assert_eq!(w, vec![DataHandle::MaskBitmap { mask: MaskId(0) }]);
-    }
-
-    #[test]
-    fn plumbing_fused_agent_unpack_dependencies() {
-        let (r, w) = PlumbingKind::FusedAgentUnpack.dependencies();
-        assert_eq!(r.len(), 1);
-        assert_eq!(w.len(), 1);
-    }
-
-    #[test]
-    fn plumbing_seed_indirect_dependencies() {
-        let (r, w) = PlumbingKind::SeedIndirect.dependencies();
-        assert_eq!(
-            r,
-            vec![DataHandle::EventRing {
-                ring: EventRingId(0),
-                kind: EventRingAccess::Read,
-            }]
-        );
-        assert_eq!(
-            w,
-            vec![DataHandle::SpatialStorage {
-                kind: SpatialStorageKind::QueryResults,
-            }]
-        );
-    }
-
-    #[test]
-    fn plumbing_sim_cfg_upload_dependencies() {
-        let (r, w) = PlumbingKind::SimCfgUpload.dependencies();
-        assert!(r.is_empty());
-        assert_eq!(
-            w,
-            vec![DataHandle::ConfigConst {
-                id: ConfigConstId(0),
-            }]
-        );
-    }
-
-    #[test]
-    fn plumbing_event_ring_drain_dependencies() {
-        let (r, w) = PlumbingKind::EventRingDrain {
-            ring: EventRingId(5),
-        }
-        .dependencies();
-        assert!(r.is_empty());
-        assert_eq!(
-            w,
-            vec![DataHandle::EventRing {
-                ring: EventRingId(5),
-                kind: EventRingAccess::Append,
-            }]
-        );
+    fn plumbing_wrapper_variant_compiles_against_uninhabited_kind() {
+        let _: fn(PlumbingKind) -> ComputeOpKind = |k| ComputeOpKind::Plumbing { kind: k };
     }
 
     // ---- ScoringRowOp ----
@@ -862,10 +693,9 @@ mod tests {
                 kind: SpatialQueryKind::BuildHash,
             }
             .label(),
-            ComputeOpKind::Plumbing {
-                kind: PlumbingKind::AlivePack,
-            }
-            .label(),
+            // Plumbing kind variants land in Task 2.7; until then no
+            // Plumbing op can be constructed, so it's not exercised
+            // here.
         ];
         let mut seen = std::collections::HashSet::new();
         for l in &labels {
@@ -973,8 +803,14 @@ mod tests {
     }
 
     #[test]
-    fn physics_rule_deps_walks_body_and_reads_event_ring() {
+    fn physics_rule_deps_walks_body_only() {
         // body: { if cond { assign(hp <- 0.0) } emit(event#9, ...) }
+        //
+        // Auto-walker reports only what the body's statements/exprs
+        // touch. The source event ring read for on_event=7 is recorded
+        // in `DispatchShape::PerEvent { source_ring }` by lowering, not
+        // synthesized here. The destination ring write for the `Emit`
+        // is added by lowering via `record_write`.
         let exprs: Vec<CgExpr> = vec![
             lit_bool(true), // 0  -- cond
             lit_f32(0.0),   // 1  -- new hp
@@ -1019,41 +855,36 @@ mod tests {
             body: CgStmtListId(1),
         };
         let (r, w) = kind.compute_dependencies(&exprs, &stmts, &lists);
-        // First read = the implicit event-ring read for on_event=7.
-        assert_eq!(
-            r[0],
-            DataHandle::EventRing {
-                ring: EventRingId(7),
-                kind: EventRingAccess::Read,
-            }
-        );
-        // Then: the if's cond is a lit (no read), then-arm assigns hp
+        // Reads: the if's cond is a lit (no read), then-arm assigns hp
         // (its value is a lit, no read), then emit's field is hp read.
-        assert!(r.contains(&DataHandle::AgentField {
-            field: AgentFieldId::Hp,
-            target: AgentRef::Self_,
-        }));
-        // Writes: hp (from assign) + event-ring append (from emit).
-        assert_eq!(w.len(), 2);
+        // No synthesized event-ring read.
         assert_eq!(
-            w[0],
-            DataHandle::AgentField {
+            r,
+            vec![DataHandle::AgentField {
                 field: AgentFieldId::Hp,
                 target: AgentRef::Self_,
-            }
+            }]
         );
+        // Writes: hp (from the assign) only. The emit's destination
+        // ring is bound by lowering, not by the auto-walker.
         assert_eq!(
-            w[1],
-            DataHandle::EventRing {
-                ring: EventRingId(9),
-                kind: EventRingAccess::Append,
-            }
+            w,
+            vec![DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::Self_,
+            }]
         );
     }
 
     #[test]
-    fn view_fold_deps_walks_body_and_writes_view_primary() {
+    fn view_fold_deps_walks_body_only() {
         // body: { assign(view[#3].primary <- hp) }
+        //
+        // Auto-walker reports only what the body's statements/exprs
+        // touch. The source event ring read is recorded in
+        // `DispatchShape::PerEvent` by lowering; no defensive
+        // view-storage write is synthesized — if the body writes the
+        // view-primary slot, that real `Assign` is what surfaces.
         let exprs: Vec<CgExpr> = vec![read_self_hp()];
         let stmts: Vec<CgStmt> = vec![CgStmt::Assign {
             target: DataHandle::ViewStorage {
@@ -1069,29 +900,42 @@ mod tests {
             body: CgStmtListId(0),
         };
         let (r, w) = kind.compute_dependencies(&exprs, &stmts, &lists);
-        // Reads: implicit event-ring read on event 2 + the body's hp read.
+        // Reads: just the body's hp read — no synthesized event-ring read.
         assert_eq!(
             r,
-            vec![
-                DataHandle::EventRing {
-                    ring: EventRingId(2),
-                    kind: EventRingAccess::Read,
-                },
-                DataHandle::AgentField {
-                    field: AgentFieldId::Hp,
-                    target: AgentRef::Self_,
-                },
-            ]
+            vec![DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::Self_,
+            }]
         );
-        // Writes: body's view-primary write + the appended fold-output
-        // view-primary handle (duplicate-tolerant by design).
-        assert_eq!(w.len(), 2);
-        let view_primary = DataHandle::ViewStorage {
+        // Writes: just the body's view-primary write — no defensive
+        // duplicate.
+        assert_eq!(
+            w,
+            vec![DataHandle::ViewStorage {
+                view: ViewId(3),
+                slot: ViewStorageSlot::Primary,
+            }]
+        );
+    }
+
+    #[test]
+    fn view_fold_with_empty_body_has_no_writes() {
+        // A view fold with an empty body produces no writes — the
+        // auto-walker reports the real signal (this body writes
+        // nothing) instead of papering over with a synthesized
+        // ViewStorage handle.
+        let exprs: Vec<CgExpr> = vec![];
+        let stmts: Vec<CgStmt> = vec![];
+        let lists: Vec<CgStmtList> = vec![CgStmtList::new(vec![])];
+        let kind = ComputeOpKind::ViewFold {
             view: ViewId(3),
-            slot: ViewStorageSlot::Primary,
+            on_event: EventKindId(2),
+            body: CgStmtListId(0),
         };
-        assert_eq!(w[0], view_primary);
-        assert_eq!(w[1], view_primary);
+        let (r, w) = kind.compute_dependencies(&exprs, &stmts, &lists);
+        assert!(r.is_empty(), "expected no reads, got {r:?}");
+        assert!(w.is_empty(), "expected no writes, got {w:?}");
     }
 
     #[test]
@@ -1112,27 +956,10 @@ mod tests {
         }
     }
 
-    #[test]
-    fn plumbing_kind_op_deps_match_kind_signature() {
-        let exprs: Vec<CgExpr> = vec![];
-        let stmts: Vec<CgStmt> = vec![];
-        let lists: Vec<CgStmtList> = vec![];
-        for kind in [
-            PlumbingKind::AlivePack,
-            PlumbingKind::FusedAgentUnpack,
-            PlumbingKind::SeedIndirect,
-            PlumbingKind::SimCfgUpload,
-            PlumbingKind::EventRingDrain {
-                ring: EventRingId(11),
-            },
-        ] {
-            let op_kind = ComputeOpKind::Plumbing { kind };
-            let (op_r, op_w) = op_kind.compute_dependencies(&exprs, &stmts, &lists);
-            let (k_r, k_w) = kind.dependencies();
-            assert_eq!(op_r, k_r);
-            assert_eq!(op_w, k_w);
-        }
-    }
+    // No `plumbing_kind_op_deps_match_kind_signature` test today —
+    // `PlumbingKind` is uninhabited until Task 2.7 lands. The
+    // structural test above (`plumbing_wrapper_variant_compiles_…`) is
+    // sufficient to assert the wrapper exists.
 
     // ---- ComputeOp constructor + recompute ----
 
@@ -1368,14 +1195,87 @@ mod tests {
             ComputeOpKind::SpatialQuery {
                 kind: SpatialQueryKind::BuildHash,
             },
-            ComputeOpKind::Plumbing {
-                kind: PlumbingKind::AlivePack,
-            },
+            // Plumbing variant intentionally omitted — `PlumbingKind`
+            // is uninhabited until Task 2.7.
         ];
         for k in &kinds {
             let json = serde_json::to_string(k).expect("serialize");
             let back: ComputeOpKind = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(&back, k, "kind round-trip mismatch (json was {json})");
         }
+    }
+
+    // ---- record_read / record_write ----
+
+    #[test]
+    fn record_write_appends_lowering_supplied_handle() {
+        // Construct a physics-rule op (auto-walker captures only the
+        // body's writes; lowering then records the destination event
+        // ring for the embedded Emit).
+        let exprs: Vec<CgExpr> = vec![read_self_hp()];
+        let stmts: Vec<CgStmt> = vec![CgStmt::Emit {
+            event: EventKindId(9),
+            fields: vec![(
+                EventField {
+                    event: EventKindId(9),
+                    index: 0,
+                },
+                CgExprId(0),
+            )],
+        }];
+        let lists: Vec<CgStmtList> = vec![CgStmtList::new(vec![CgStmtId(0)])];
+        let mut op = ComputeOp::new(
+            OpId(0),
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: EventKindId(7),
+                body: CgStmtListId(0),
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(7),
+            },
+            Span::dummy(),
+            &exprs,
+            &stmts,
+            &lists,
+        );
+        // Lowering supplies the destination ring write.
+        let dest = DataHandle::EventRing {
+            ring: EventRingId(9),
+            kind: EventRingAccess::Append,
+        };
+        assert!(!op.writes.contains(&dest));
+        op.record_write(dest.clone());
+        assert!(op.writes.contains(&dest));
+    }
+
+    #[test]
+    fn record_read_appends_lowering_supplied_handle() {
+        let exprs: Vec<CgExpr> = vec![];
+        let stmts: Vec<CgStmt> = vec![];
+        let lists: Vec<CgStmtList> = vec![CgStmtList::new(vec![])];
+        let mut op = ComputeOp::new(
+            OpId(0),
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: EventKindId(7),
+                body: CgStmtListId(0),
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(7),
+            },
+            Span::dummy(),
+            &exprs,
+            &stmts,
+            &lists,
+        );
+        // Lowering supplies the source ring read.
+        let src = DataHandle::EventRing {
+            ring: EventRingId(7),
+            kind: EventRingAccess::Read,
+        };
+        assert!(op.reads.is_empty());
+        op.record_read(src.clone());
+        assert_eq!(op.reads, vec![src]);
     }
 }

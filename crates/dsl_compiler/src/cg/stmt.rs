@@ -274,9 +274,15 @@ pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<Dat
 ///
 /// Order: depth-first in source-code order. `Assign` records the RHS
 /// expression's reads first, then the assignment's target as a write.
-/// `Emit` records each field expression's reads in field order, then
-/// the event ring as a write. `If` records the condition's reads, then
-/// walks the then-arm (in order), then the else-arm (if any).
+/// `Emit` records each field expression's reads in field order; the
+/// destination ring write is **not** synthesized here — the
+/// [`EventKindId`] alone doesn't determine which ring stores the
+/// event (rings are an emit-time concept resolved by lowering against
+/// the event registry). The AST → HIR lowering pass adds the ring
+/// write to the enclosing op's `writes` via
+/// [`crate::cg::op::ComputeOp::record_write`]. `If` records the
+/// condition's reads, then walks the then-arm (in order), then the
+/// else-arm (if any).
 pub fn collect_stmt_dependencies(
     id: CgStmtId,
     exprs: &dyn ExprArena,
@@ -291,14 +297,12 @@ pub fn collect_stmt_dependencies(
             collect_expr_reads(*value, exprs, reads);
             writes.push(target.clone());
         }
-        CgStmt::Emit { event, fields } => {
+        CgStmt::Emit { event: _, fields } => {
             for (_, expr_id) in fields {
                 collect_expr_reads(*expr_id, exprs, reads);
             }
-            writes.push(DataHandle::EventRing {
-                ring: super::data_handle::EventRingId(event.0),
-                kind: super::data_handle::EventRingAccess::Append,
-            });
+            // No synthesized ring write here — see the doc comment
+            // above for the rationale.
         }
         CgStmt::If { cond, then, else_ } => {
             collect_expr_reads(*cond, exprs, reads);
@@ -333,9 +337,7 @@ pub fn collect_list_dependencies(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cg::data_handle::{
-        AgentFieldId, AgentRef, CgExprId, EventRingAccess, EventRingId, RngPurpose,
-    };
+    use crate::cg::data_handle::{AgentFieldId, AgentRef, CgExprId, RngPurpose};
     use crate::cg::expr::{BinaryOp, CgExpr, CgTy, LitValue};
     use crate::cg::op::EventKindId;
 
@@ -650,7 +652,11 @@ mod tests {
     }
 
     #[test]
-    fn collect_stmt_dependencies_emit_writes_event_ring() {
+    fn collect_stmt_dependencies_emit_walks_field_value_reads_only() {
+        // The walker descends into each field-value expression for
+        // reads, but does NOT synthesize a destination event-ring
+        // write — ring binding is a lowering concern (see the doc
+        // comment on `collect_stmt_dependencies`).
         let exprs: Vec<CgExpr> = vec![read_self_hp(), lit_f32(0.0)];
         let stmts: Vec<CgStmt> = vec![CgStmt::Emit {
             event: EventKindId(7),
@@ -675,14 +681,14 @@ mod tests {
         let mut reads = Vec::new();
         let mut writes = Vec::new();
         collect_stmt_dependencies(CgStmtId(0), &exprs, &stmts, &lists, &mut reads, &mut writes);
+        // Reads: hp from the first field's value expr.
         assert_eq!(reads.len(), 1);
-        assert_eq!(
-            writes,
-            vec![DataHandle::EventRing {
-                ring: EventRingId(7),
-                kind: EventRingAccess::Append,
-            }]
-        );
+        assert!(reads.contains(&DataHandle::AgentField {
+            field: AgentFieldId::Hp,
+            target: AgentRef::Self_,
+        }));
+        // Writes: none — the `Emit`'s ring binding is added by lowering.
+        assert!(writes.is_empty(), "expected no writes, got {writes:?}");
     }
 
     #[test]
@@ -758,18 +764,12 @@ mod tests {
         collect_list_dependencies(CgStmtListId(0), &exprs, &stmts, &lists, &mut reads, &mut writes);
         // Reads: emit's field expr reads hp.
         assert_eq!(reads.len(), 1);
-        // Writes: assign's hp + emit's event ring (in that order).
-        assert_eq!(writes.len(), 2);
+        // Writes: just assign's hp — the emit's destination ring is
+        // bound by lowering, not by the auto-walker.
+        assert_eq!(writes.len(), 1);
         match &writes[0] {
             DataHandle::AgentField { field, .. } => assert_eq!(*field, AgentFieldId::Hp),
-            _ => panic!("expected hp write first"),
-        }
-        match &writes[1] {
-            DataHandle::EventRing { ring, kind } => {
-                assert_eq!(*ring, EventRingId(3));
-                assert_eq!(*kind, EventRingAccess::Append);
-            }
-            _ => panic!("expected event-ring write second"),
+            _ => panic!("expected hp write"),
         }
     }
 }
