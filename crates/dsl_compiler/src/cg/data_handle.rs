@@ -28,11 +28,11 @@ use serde::{Deserialize, Serialize};
 /// Stable id for a `view` declaration. Indexes the program's view
 /// table; assignment order matches resolved IR order so snapshots are
 /// reproducible.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ViewId(pub u32);
 
 /// Stable id for a mask predicate. One per `mask` declaration.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct MaskId(pub u32);
 
 /// Stable id for an event-ring data channel. The IR distinguishes
@@ -43,21 +43,21 @@ pub struct MaskId(pub u32);
 /// `batch_events`) and the cascade A/B ring used by the cascade
 /// pingpong context. Lowering passes resolve a ring id to a buffer
 /// name; the IR itself does not name buffers.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EventRingId(pub u32);
 
 /// Stable id for a configuration constant — `config.combat.attack_range`,
 /// `config.movement.move_speed_mps`, ability-registry slots, etc.
 /// The id is resolved to a struct-field path at emit time via the
 /// `emit_config` pipeline; the IR carries only the id.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ConfigConstId(pub u32);
 
 /// Stable id for a node in the compute-graph expression tree.
 /// `CgExpr` itself is defined in Task 1.2; this id type is hosted
 /// here so `AgentRef::Target` can reference it without a forward
 /// dependency.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CgExprId(pub u32);
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ pub struct CgExprId(pub u32);
 /// the field-type tag tiny here avoids forcing every later layer
 /// that reads `AgentFieldId` to thread a full type universe just to
 /// know "is this a u32?".
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum AgentFieldTy {
     /// Plain `f32` — vitals, ranges, multipliers, needs.
     F32,
@@ -124,7 +124,7 @@ impl fmt::Display for AgentFieldTy {
 /// Each variant carries an `AgentFieldTy` payload via the
 /// [`AgentFieldId::ty`] method below — that method is the single
 /// source of truth for "which primitive does this field carry?"
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum AgentFieldId {
     // --- Hot SoA: physical state, vitals, combat ---
     Pos,
@@ -284,7 +284,7 @@ impl fmt::Display for AgentFieldId {
 /// computed: it carries a CgExpr id whose evaluation produces the
 /// agent slot to read or write (typically read out of a candidate
 /// buffer or scoring output).
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum AgentRef {
     /// The dispatch's current agent (PerAgent shape).
     Self_,
@@ -330,7 +330,7 @@ impl fmt::Display for AgentRef {
 /// The plan calls these "primary, anchor, ids, …" generically; the
 /// shape-specific layers (Counts, Cursors) keep the IR honest about
 /// which buffers a given view actually has.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ViewStorageSlot {
     /// The main storage backing the view — values for pair_map,
     /// slots for sym_pair_topk, rings for per_entity_ring.
@@ -368,7 +368,7 @@ impl fmt::Display for ViewStorageSlot {
 /// directions (read vs append) explicitly so dependency analysis can
 /// build a proper producer/consumer graph and the lowering knows
 /// which atomics to insert.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum EventRingAccess {
     /// Read events out of the ring (a fold or apply pass).
     Read,
@@ -392,7 +392,7 @@ impl fmt::Display for EventRingAccess {
 /// Pieces of the uniform spatial grid the DSL can read or write.
 /// Sourced from `BindingSources`'s `pool` group (see
 /// `crates/dsl_compiler/src/emit_spatial_kernel.rs`).
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SpatialStorageKind {
     /// `spatial_grid_cells` — packed agent ids, indexed by cell
     /// offset.
@@ -431,7 +431,7 @@ impl fmt::Display for SpatialStorageKind {
 /// Variants mirror the documented purposes in
 /// `crates/engine/src/rng.rs` (`b"action"`, `b"sample"`,
 /// `b"shuffle"`, `b"conception"`).
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RngPurpose {
     /// `b"action"` — action selection / tiebreak.
     Action,
@@ -480,7 +480,7 @@ impl fmt::Display for RngPurpose {
 /// never via raw names. Naming becomes an emit-time concern: the
 /// lowering decides what binding slot or struct field corresponds
 /// to a given handle.
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum DataHandle {
     /// Per-agent SoA field. `field` is a typed enum that names every
     /// field the DSL can read or write (hp, pos, alive, shield_hp,

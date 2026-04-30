@@ -43,14 +43,14 @@ use super::op::EventKindId;
 
 /// Stable id for a statement node in a [`StmtArena`]. Sibling to
 /// [`CgExprId`].
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CgStmtId(pub u32);
 
 /// Stable id for a [`CgStmtList`] in the program. The list arena is
 /// separate from the statement arena: `CgStmtListId` indexes into a
 /// `Vec<CgStmtList>`, each list holds its `Vec<CgStmtId>` of statements
 /// in execution order.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CgStmtListId(pub u32);
 
 /// Stable id for a field within an event variant. `event` names which
@@ -62,7 +62,7 @@ pub struct CgStmtListId(pub u32);
 /// Encoding the (event, index) pair structurally — rather than a flat
 /// `EventFieldId(u32)` — keeps the IR honest about the fact that field
 /// indices only make sense relative to a particular event variant.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EventField {
     pub event: EventKindId,
     pub index: u8,

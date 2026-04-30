@@ -39,18 +39,18 @@ pub use dsl_ast::ast::Span;
 /// Stable id for a [`ComputeOp`] in the program's op arena. Sibling to
 /// [`crate::cg::CgExprId`]; the program (Task 1.5) holds the
 /// `Vec<ComputeOp>` indexed by this id.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct OpId(pub u32);
 
 /// Stable id for a `scoring` declaration. One per top-level scoring
 /// block in the DSL source; assignment order matches resolved IR
 /// order so snapshots are reproducible.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ScoringId(pub u32);
 
 /// Stable id for a `physics` rule. One per physics declaration; the
 /// rule's `on Event => …` handlers each become a [`ComputeOpKind::PhysicsRule`].
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PhysicsRuleId(pub u32);
 
 /// Stable id for an event variant. One per `event` declaration in the
@@ -58,13 +58,13 @@ pub struct PhysicsRuleId(pub u32);
 /// [`ComputeOpKind::ViewFold`] to name which event triggers the body
 /// and by [`crate::cg::stmt::CgStmt::Emit`] to name the variant being
 /// emitted.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EventKindId(pub u32);
 
 /// Stable id for an action — the head of a scoring row. Each row's
 /// argmax candidate is identified by an `ActionId`; the engine maps
 /// the winning id to a concrete behaviour at apply time.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ActionId(pub u32);
 
 // ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ pub struct ActionId(pub u32);
 /// Adding a new spatial kernel adds a variant here. The IR-level
 /// `(reads, writes)` signature for each variant is encoded in
 /// [`SpatialQueryKind::dependencies`].
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SpatialQueryKind {
     /// Build the per-cell agent index — reads agents (positions),
     /// writes the cell + offset arrays.
@@ -190,7 +190,7 @@ impl fmt::Display for SpatialQueryKind {
 /// `match` over `PlumbingKind` is exhaustively unreachable — see
 /// [`ComputeOpKind::compute_dependencies`]'s `Plumbing` arm for the
 /// canonical empty-match form.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PlumbingKind {}
 
 impl fmt::Display for PlumbingKind {

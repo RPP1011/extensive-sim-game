@@ -1101,15 +1101,15 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
         return;
     }
 
-    // Map handle → writers.
-    let mut writers: BTreeMap<HandleKey, Vec<OpId>> = BTreeMap::new();
+    // Map handle → writers. `DataHandle` is now `Ord` (Task 1.6 cleanup
+    // — see the Ord-derive batch on the id newtypes), so we key the
+    // adjacency map by reference into the `op.writes` storage. No
+    // Display-string materialization, no `HandleKey` indirection.
+    let mut writers: BTreeMap<&DataHandle, Vec<OpId>> = BTreeMap::new();
     for (op_index, op) in prog.ops.iter().enumerate() {
         let id = OpId(op_index as u32);
         for w in &op.writes {
-            writers
-                .entry(HandleKey::from_handle(w))
-                .or_default()
-                .push(id);
+            writers.entry(w).or_default().push(id);
         }
     }
 
@@ -1119,8 +1119,7 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
     for (op_index, op) in prog.ops.iter().enumerate() {
         let consumer = OpId(op_index as u32);
         for r in &op.reads {
-            let key = HandleKey::from_handle(r);
-            if let Some(producers) = writers.get(&key) {
+            if let Some(producers) = writers.get(r) {
                 for &producer in producers {
                     if producer == consumer {
                         // Self-edge — not a cycle (event-fold pattern).
@@ -1143,24 +1142,6 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
             ops.sort_by_key(|o| o.0);
             errors.push(CgError::Cycle { ops });
         }
-    }
-}
-
-/// Strict-ordered key for [`DataHandle`] — `DataHandle` is `Eq + Hash`
-/// but not `Ord`. We project into a small `(u32, ...)` tuple via
-/// serialization. JSON serialization is overkill; build a lightweight
-/// canonical bytestring instead.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct HandleKey(String);
-
-impl HandleKey {
-    fn from_handle(handle: &DataHandle) -> Self {
-        // Use the handle's `Display` form — every variant prints a
-        // distinct, structurally complete string (the Display impls
-        // were tested in Task 1.1 to be unique per variant).
-        // `AgentRef::Target(expr_id)` includes the expr id, so two
-        // handles with different targets produce different keys.
-        Self(format!("{}", handle))
     }
 }
 
