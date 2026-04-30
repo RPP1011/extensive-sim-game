@@ -25,6 +25,7 @@ pub mod expr;
 pub mod lower;
 pub mod op;
 pub mod program;
+pub mod schedule;
 pub mod stmt;
 pub mod well_formed;
 
@@ -34,5 +35,6 @@ pub use expr::*;
 pub use lower::{lower_expr, LoweringCtx, LoweringError};
 pub use op::*;
 pub use program::*;
+pub use schedule::{dependency_graph, topological_sort, CycleError, DepGraph};
 pub use stmt::*;
 pub use well_formed::*;
