@@ -46,12 +46,15 @@
 //!   pack/unpack sequencing or megakernel synthesis (Task 3.3); until
 //!   then, returning a deterministic grouping in source order keeps the
 //!   pipeline alive.
-//! - **`PerEvent` indirection always wins over fusion size.** A group
-//!   of two or more `PerEvent` ops sharing the same source ring is
-//!   classified [`FusibilityClass::Indirect`] (not `Fused`). Indirect-
-//!   dispatch rings are a different kernel-shape concern than per-agent
-//!   fusion; a future task may revisit and fuse indirect-driven kernel
-//!   bodies while keeping the indirect dispatch outer wrapper.
+//! - **`PerEvent` indirection always wins over fusion size.** Any
+//!   `PerEvent` group — singleton or multi-op, single ring or otherwise
+//!   — is classified [`FusibilityClass::Indirect`] (not `Fused`, not
+//!   `Split`). Even a lone `DrainEvents` / `SeedIndirectArgs` op
+//!   dispatches indirectly via the ring's tail count, so the indirect
+//!   classification is unconditional on group size. Indirect-dispatch
+//!   rings are a different kernel-shape concern than per-agent fusion;
+//!   a future task may revisit and fuse indirect-driven kernel bodies
+//!   while keeping the indirect dispatch outer wrapper.
 
 use std::collections::BTreeSet;
 
@@ -213,6 +216,16 @@ pub enum FusionDiagnosticKind {
     /// [`FusibilityClass::Indirect`] — schedule synthesis drives the
     /// dispatch via the ring's tail count.
     Indirect,
+    /// [`super::topology::topological_sort`] returned a cycle error;
+    /// fusion analysis fell back to source order. Downstream consumers
+    /// should treat the resulting groups with caution — the cycle may
+    /// indicate a missing schedule barrier or a programming error in
+    /// the IR. Inspect `op.reads` / `op.writes` for the cycling
+    /// handles.
+    ///
+    /// Emitted as the FIRST diagnostic in the stream when fallback
+    /// fires, before any per-group classification diagnostic.
+    CycleFallback,
 }
 
 impl FusionDiagnosticKind {
@@ -224,6 +237,7 @@ impl FusionDiagnosticKind {
             FusionDiagnosticKind::SplitDispatchShapeMismatch => "split_dispatch_shape_mismatch",
             FusionDiagnosticKind::SplitWriteConflict { .. } => "split_write_conflict",
             FusionDiagnosticKind::Indirect => "indirect",
+            FusionDiagnosticKind::CycleFallback => "cycle_fallback",
         }
     }
 }
@@ -234,7 +248,8 @@ impl std::fmt::Display for FusionDiagnosticKind {
             FusionDiagnosticKind::Fused
             | FusionDiagnosticKind::Singleton
             | FusionDiagnosticKind::SplitDispatchShapeMismatch
-            | FusionDiagnosticKind::Indirect => f.write_str(self.label()),
+            | FusionDiagnosticKind::Indirect
+            | FusionDiagnosticKind::CycleFallback => f.write_str(self.label()),
             FusionDiagnosticKind::SplitWriteConflict { handle } => {
                 write!(f, "split_write_conflict(handle={})", handle)
             }
@@ -276,15 +291,26 @@ pub fn fusion_decisions(
     prog: &CgProgram,
     deps: &DepGraph,
 ) -> (Vec<FusionGroup>, Vec<FusionDiagnostic>) {
-    // Resolve a deterministic walk order. On cycle, fall back to source
-    // order (see module-level `# Limitations`).
-    let topo_order: Vec<OpId> = match topological_sort(deps) {
-        Ok(order) => order,
-        Err(_cycle) => (0..prog.ops.len() as u32).map(OpId).collect(),
-    };
-
     let mut groups: Vec<FusionGroup> = Vec::new();
     let mut diagnostics: Vec<FusionDiagnostic> = Vec::new();
+
+    // Resolve a deterministic walk order. On cycle, fall back to source
+    // order (see module-level `# Limitations`) AND surface a typed
+    // `CycleFallback` diagnostic as the first entry in the stream so
+    // downstream consumers can detect the degraded analysis.
+    let topo_order: Vec<OpId> = match topological_sort(deps) {
+        Ok(order) => order,
+        Err(_cycle) => {
+            diagnostics.push(FusionDiagnostic {
+                kind: FusionDiagnosticKind::CycleFallback,
+                ops: Vec::new(),
+                message: "fusion analysis fell back to source order due to a cycle in \
+                          the dependency graph"
+                    .to_string(),
+            });
+            (0..prog.ops.len() as u32).map(OpId).collect()
+        }
+    };
 
     // In-progress group state.
     let mut current_ops: Vec<OpId> = Vec::new();
@@ -468,20 +494,27 @@ fn close_current_group(
 
 /// Classify a finalised group.
 ///
-/// - Singleton → [`FusibilityClass::Split`].
-/// - Multi-op `PerEvent` group → [`FusibilityClass::Indirect`] (the
-///   ring drives the dispatch even when the kernels share a body).
-/// - Multi-op group on any other shape → [`FusibilityClass::Fused`].
+/// - Any `PerEvent` group (including singleton) →
+///   [`FusibilityClass::Indirect`]. Even a lone `DrainEvents` /
+///   `SeedIndirectArgs` op dispatches indirectly via the ring's tail
+///   count, so the indirect topology classification is unconditional on
+///   group size.
+/// - Singleton non-`PerEvent` group → [`FusibilityClass::Split`].
+/// - Multi-op group on any non-`PerEvent` shape →
+///   [`FusibilityClass::Fused`].
 fn classify(ops: &[OpId], shape: &DispatchShape) -> FusibilityClass {
-    if ops.len() < 2 {
-        return FusibilityClass::Split;
-    }
     match shape {
         DispatchShape::PerEvent { .. } => FusibilityClass::Indirect,
         DispatchShape::PerAgent
         | DispatchShape::PerPair { .. }
         | DispatchShape::OneShot
-        | DispatchShape::PerWord => FusibilityClass::Fused,
+        | DispatchShape::PerWord => {
+            if ops.len() < 2 {
+                FusibilityClass::Split
+            } else {
+                FusibilityClass::Fused
+            }
+        }
     }
 }
 
@@ -801,11 +834,54 @@ mod tests {
         let deps = dependency_graph(&prog);
         let (groups, _diagnostics) = fusion_decisions(&prog, &deps);
 
+        // The two `PerEvent` ops dispatch on distinct rings, so they
+        // can't fuse — the analysis splits at the shape boundary. Each
+        // resulting singleton is still a `PerEvent` op, however, so its
+        // classification is `Indirect` (the ring drives an indirect
+        // dispatch even at group size 1).
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].ops, vec![d0]);
         assert_eq!(groups[1].ops, vec![d1]);
-        assert_eq!(groups[0].fusibility_classification, FusibilityClass::Split);
-        assert_eq!(groups[1].fusibility_classification, FusibilityClass::Split);
+        assert_eq!(
+            groups[0].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+        assert_eq!(
+            groups[1].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+    }
+
+    // --- 5c. Singleton PerEvent op classifies as Indirect --------------
+
+    #[test]
+    fn singleton_per_event_op_classified_as_indirect() {
+        // A lone `DrainEvents` op — no fusable neighbour, but it still
+        // dispatches indirectly via the ring's tail count. The
+        // classification must be `Indirect`, not `Split`, regardless of
+        // group size.
+        let mut b = CgProgramBuilder::new();
+        let d = add_drain_events_op(&mut b, EventRingId(7));
+        let prog = b.finish();
+
+        let deps = dependency_graph(&prog);
+        let (groups, diagnostics) = fusion_decisions(&prog, &deps);
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].ops, vec![d]);
+        assert_eq!(
+            groups[0].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+
+        // The diagnostic stream must record the indirect classification
+        // (one diagnostic, kind = Indirect).
+        assert_eq!(diagnostics.len(), 1);
+        assert!(matches!(
+            diagnostics[0].kind,
+            FusionDiagnosticKind::Indirect
+        ));
+        assert_eq!(diagnostics[0].ops, vec![d]);
     }
 
     // --- 6. OneShot ops fuse with each other but not with PerAgent -----
@@ -902,6 +978,7 @@ mod tests {
         let mut saw_split_shape = false;
         let mut saw_split_write = false;
         let mut saw_indirect = false;
+        let mut saw_cycle_fallback = false;
         for d in &diagnostics {
             match &d.kind {
                 FusionDiagnosticKind::Fused => saw_fused = true,
@@ -909,6 +986,7 @@ mod tests {
                 FusionDiagnosticKind::SplitDispatchShapeMismatch => saw_split_shape = true,
                 FusionDiagnosticKind::SplitWriteConflict { .. } => saw_split_write = true,
                 FusionDiagnosticKind::Indirect => saw_indirect = true,
+                FusionDiagnosticKind::CycleFallback => saw_cycle_fallback = true,
             }
         }
         // Fused isn't reachable in this fixture — replace with a small
@@ -919,8 +997,17 @@ mod tests {
         assert!(saw_split_shape, "missing SplitShape: {:?}", diagnostics);
         assert!(saw_split_write, "missing SplitWrite: {:?}", diagnostics);
         assert!(saw_indirect, "missing Indirect: {:?}", diagnostics);
-        // Fused coverage is asserted in `three_per_agent_ops_no_conflicts_fuse_into_one_group`.
+        // Fused coverage is asserted in
+        // `three_per_agent_ops_no_conflicts_fuse_into_one_group`.
+        // CycleFallback coverage is asserted in
+        // `cycle_in_graph_falls_back_to_source_order` (must NOT fire on
+        // an acyclic fixture like this one).
         let _ = saw_fused;
+        assert!(
+            !saw_cycle_fallback,
+            "CycleFallback fired on an acyclic fixture: {:?}",
+            diagnostics
+        );
     }
 
     #[test]
@@ -987,13 +1074,32 @@ mod tests {
         let deps = dependency_graph(&prog);
         assert!(deps.has_cycle(), "fixture must produce a cycle");
 
-        let (groups, _diagnostics) = fusion_decisions(&prog, &deps);
+        let (groups, diagnostics) = fusion_decisions(&prog, &deps);
         // Source-order fallback: [m0, m1]. Same shape, no WAW. Fuses.
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].ops, vec![m0, m1]);
         assert_eq!(
             groups[0].fusibility_classification,
             FusibilityClass::Fused
+        );
+
+        // The cycle fallback must surface as the FIRST diagnostic in
+        // the stream — downstream consumers detect degraded analysis
+        // by inspecting `diagnostics[0].kind`.
+        assert!(
+            !diagnostics.is_empty(),
+            "expected at least one diagnostic"
+        );
+        assert!(
+            matches!(diagnostics[0].kind, FusionDiagnosticKind::CycleFallback),
+            "expected CycleFallback as first diagnostic, got {:?}",
+            diagnostics[0].kind
+        );
+        assert!(diagnostics[0].ops.is_empty());
+        assert!(
+            diagnostics[0].message.contains("cycle"),
+            "diagnostic message should mention the cycle: {:?}",
+            diagnostics[0].message
         );
     }
 
