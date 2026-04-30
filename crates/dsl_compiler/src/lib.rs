@@ -14,6 +14,9 @@ pub use dsl_ast::resolve;
 pub use dsl_ast::resolve_error;
 pub use dsl_ast::tokens;
 
+// Compute-Graph IR (NEW — see docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md)
+pub mod cg;
+
 // Emitter modules
 pub mod emit_alive_pack_wgsl;
 pub mod emit_kernel_module;
