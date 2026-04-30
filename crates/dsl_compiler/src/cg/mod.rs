@@ -20,5 +20,7 @@
 //! this commit.
 
 pub mod data_handle;
+pub mod expr;
 
 pub use data_handle::*;
+pub use expr::*;
