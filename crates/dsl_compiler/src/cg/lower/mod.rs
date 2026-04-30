@@ -13,7 +13,8 @@
 //! - Task 2.3: [`view`] — `ViewIR → ComputeOp::ViewFold | …`.
 //! - Task 2.4: [`physics`] — physics rules → `ComputeOp::PhysicsRule`.
 //! - Task 2.5: [`scoring`] — scoring rows → `ComputeOp::ScoringArgmax`.
-//! - Task 2.6: `spatial` — spatial queries.
+//! - Task 2.6: [`spatial`] — driver-supplied [`crate::cg::op::SpatialQueryKind`]
+//!   list → `ComputeOp::SpatialQuery`.
 //! - Task 2.7: `plumbing` — driver glue (`lower_compilation`).
 //!
 //! Submodules wire in incrementally as each task lands.
@@ -30,6 +31,7 @@ pub mod expr;
 pub mod mask;
 pub mod physics;
 pub mod scoring;
+pub mod spatial;
 pub mod view;
 
 pub use error::LoweringError;
@@ -37,4 +39,5 @@ pub use expr::{lower_expr, LoweringCtx};
 pub use mask::lower_mask;
 pub use physics::{lower_physics, ReplayabilityFlag};
 pub use scoring::lower_scoring;
+pub use spatial::lower_spatial_queries;
 pub use view::{lower_view, HandlerResolution};
