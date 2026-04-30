@@ -38,7 +38,7 @@ use dsl_ast::ir::{Builtin, NamespaceId, ViewRef as AstViewRef};
 
 use crate::cg::data_handle::{MaskId, ViewId, ViewStorageSlot};
 use crate::cg::expr::{CgTy, TypeError};
-use crate::cg::op::SpatialQueryKind;
+use crate::cg::op::{PhysicsRuleId, SpatialQueryKind};
 use crate::cg::program::BuilderError;
 
 /// Typed defect surfaced by any CG lowering pass.
@@ -383,6 +383,111 @@ pub enum LoweringError {
         span: Span,
     },
 
+    // -- Physics pass (Task 2.4) -----------------------------------------
+
+    /// The driver supplied a per-handler resolution list whose length
+    /// does not match the physics rule's handler count. Mirrors the
+    /// view-pass [`Self::ViewHandlerResolutionLengthMismatch`] —
+    /// every physics handler must have its `(EventKindId,
+    /// EventRingId)` resolved before lowering can run.
+    PhysicsHandlerResolutionLengthMismatch {
+        rule: PhysicsRuleId,
+        expected: usize,
+        got: usize,
+        span: Span,
+    },
+
+    /// A statement form inside a physics rule's handler body that the
+    /// CG statement language does not represent yet. Reasonable cases
+    /// — `Let` (local-binding desugaring still on the driver),
+    /// `For` (iteration over `abilities.effects(ab)` in the `cast`
+    /// rule, deferred), `BeliefObserve` (decomposition into
+    /// BeliefState SoA assigns), bare `Expr` (namespace setter calls
+    /// like `agents.set_hp(t, x)` that need namespace lowering),
+    /// `SelfUpdate` (forbidden in physics — only valid inside view
+    /// fold bodies) — surface here as a typed deferral with a closed-
+    /// set tag so the caller knows precisely which AST node was
+    /// rejected.
+    ///
+    /// `ast_label` is a closed-set `&'static str` tag drawn from
+    /// `IrStmt`'s discriminants (`"Let"`, `"For"`, `"Match"`,
+    /// `"BeliefObserve"`, `"Expr"`, `"SelfUpdate"`).
+    UnsupportedPhysicsStmt {
+        rule: PhysicsRuleId,
+        ast_label: &'static str,
+        span: Span,
+    },
+
+    /// A `Match` arm's `IrPattern::Struct { name, .. }` references a
+    /// variant name that the lowering context's `variant_ids`
+    /// registry does not know. Driver populates the registry from the
+    /// stdlib enum surface (today `EffectOp`); a missing entry is
+    /// either a stale registry or a hand-built AST referencing a
+    /// variant outside the stdlib enums. Surfaced with the
+    /// source-level name so the diagnostic can name the offending
+    /// variant.
+    UnknownMatchVariant {
+        rule: PhysicsRuleId,
+        variant_name: String,
+        span: Span,
+    },
+
+    /// A `Match` arm carries an `IrPattern` shape the physics
+    /// lowering does not recognise as a match arm. Today only
+    /// `IrPattern::Struct { name, bindings }` is wired (the shape
+    /// stdlib `EffectOp` matches uses); other shapes (`Bind`,
+    /// `Ctor`, `Expr`, `Wildcard`) lower as this typed deferral
+    /// rather than silently routing through the wrong arm.
+    ///
+    /// `pattern_label` is a closed-set `&'static str` tag drawn from
+    /// `IrPattern`'s discriminants.
+    UnsupportedMatchPattern {
+        rule: PhysicsRuleId,
+        pattern_label: &'static str,
+        span: Span,
+    },
+
+    /// A `Match` arm's pattern binding (e.g., `Damage { amount }`'s
+    /// `amount`) carries an inner `IrPattern` shape the physics
+    /// lowering does not recognise. Today only the shorthand bind
+    /// shape (`IrPattern::Bind { name, local }`) is wired — that
+    /// matches the canonical `Damage { amount }` form where the
+    /// field name and binder name are the same identifier. Aliased
+    /// binds (`Damage { amount: a }`) parse as a nested `Bind` too;
+    /// the resolver flattens both into the same shape. Other shapes
+    /// (literal patterns, nested ctors, wildcards inside a struct
+    /// binding) surface here.
+    UnsupportedMatchBindingShape {
+        rule: PhysicsRuleId,
+        field_name: String,
+        pattern_label: &'static str,
+        span: Span,
+    },
+
+    /// A pattern binder references an AST `LocalRef` that the
+    /// lowering context's `local_ids` registry does not know. The
+    /// driver populates the map per-handler from the resolver's
+    /// scope tracker; a missing entry is either a stale registry or
+    /// a hand-built AST referencing a synthetic local. The error
+    /// names the source-level binder identifier so the diagnostic
+    /// can pinpoint the offending name.
+    UnknownLocalRef {
+        rule: PhysicsRuleId,
+        binder_name: String,
+        span: Span,
+    },
+
+    /// A `Match` carries no arms — physics lowering refuses to
+    /// produce a `CgStmt::Match` with an empty arm list because the
+    /// resulting op would have no defined behaviour at runtime
+    /// (every dispatch on the scrutinee falls through unmatched).
+    /// The resolver normally rejects empty-arm matches at parse
+    /// time; defense-in-depth here catches synthetic IR.
+    EmptyMatchArms {
+        rule: PhysicsRuleId,
+        span: Span,
+    },
+
     /// A fold-handler `IrStmt::SelfUpdate` carries an operator the CG
     /// IR's `ComputeOpKind::ViewFold` wrapper does not yet thread.
     /// Today only `+=` is lowered — the merge semantics for `=`,
@@ -646,6 +751,69 @@ impl fmt::Display for LoweringError {
                 f,
                 "view #{} self-update operator {} not supported by CG IR; only += is lowered today",
                 view.0, op_label
+            ),
+
+            // -- Physics pass -----------------------------------------
+            LoweringError::PhysicsHandlerResolutionLengthMismatch {
+                rule,
+                expected,
+                got,
+                span,
+            } => write!(
+                f,
+                "physics#{} at {}..{} has {} handler(s) but the driver supplied {} (EventKindId, EventRingId) entries",
+                rule.0, span.start, span.end, expected, got
+            ),
+            LoweringError::UnsupportedPhysicsStmt {
+                rule,
+                ast_label,
+                span,
+            } => write!(
+                f,
+                "physics#{} body at {}..{} contains AST statement `{}` which has no CG-statement equivalent yet",
+                rule.0, span.start, span.end, ast_label
+            ),
+            LoweringError::UnknownMatchVariant {
+                rule,
+                variant_name,
+                span,
+            } => write!(
+                f,
+                "physics#{} match arm at {}..{} references variant `{}` which is not registered in the lowering context",
+                rule.0, span.start, span.end, variant_name
+            ),
+            LoweringError::UnsupportedMatchPattern {
+                rule,
+                pattern_label,
+                span,
+            } => write!(
+                f,
+                "physics#{} match arm at {}..{} uses pattern shape `{}` — only `Struct {{ Name {{ binders }} }}` is recognised today",
+                rule.0, span.start, span.end, pattern_label
+            ),
+            LoweringError::UnsupportedMatchBindingShape {
+                rule,
+                field_name,
+                pattern_label,
+                span,
+            } => write!(
+                f,
+                "physics#{} match arm at {}..{} binding for field `{}` uses pattern shape `{}` — only shorthand `Bind` is recognised today",
+                rule.0, span.start, span.end, field_name, pattern_label
+            ),
+            LoweringError::UnknownLocalRef {
+                rule,
+                binder_name,
+                span,
+            } => write!(
+                f,
+                "physics#{} match-arm binder `{}` at {}..{} resolves to a LocalRef not registered in the lowering context",
+                rule.0, binder_name, span.start, span.end
+            ),
+            LoweringError::EmptyMatchArms { rule, span } => write!(
+                f,
+                "physics#{} match at {}..{} has no arms — empty matches have no defined runtime behaviour",
+                rule.0, span.start, span.end
             ),
         }
     }

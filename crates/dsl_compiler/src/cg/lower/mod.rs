@@ -28,9 +28,11 @@
 pub mod error;
 pub mod expr;
 pub mod mask;
+pub mod physics;
 pub mod view;
 
 pub use error::LoweringError;
 pub use expr::{lower_expr, LoweringCtx};
 pub use mask::lower_mask;
+pub use physics::{lower_physics, ReplayabilityFlag};
 pub use view::{lower_view, HandlerResolution};

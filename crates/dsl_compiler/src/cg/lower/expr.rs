@@ -24,7 +24,7 @@ use std::collections::HashMap;
 
 use dsl_ast::ast::{BinOp, Span, UnOp};
 use dsl_ast::ir::{
-    Builtin, IrCallArg, IrExpr, IrExprNode, NamespaceId, ViewRef as AstViewRef,
+    Builtin, IrCallArg, IrExpr, IrExprNode, LocalRef, NamespaceId, ViewRef as AstViewRef,
 };
 
 use crate::cg::data_handle::{
@@ -35,6 +35,7 @@ use crate::cg::expr::{
     TypeCheckCtx, TypeError, UnaryOp,
 };
 use crate::cg::program::CgProgramBuilder;
+use crate::cg::stmt::{LocalId, VariantId};
 
 pub use super::error::LoweringError;
 
@@ -61,6 +62,17 @@ pub struct LoweringCtx<'a> {
     /// validate operand types; the builder's `validate_expr_refs`
     /// catches dangling ids and the lowering catches arity at AST level.
     pub view_signatures: HashMap<ViewId, (Vec<CgTy>, CgTy)>,
+    /// Variant-name → typed [`VariantId`] resolver, keyed on the
+    /// source-level variant identifier (`"Damage"`, `"Heal"`, …). The
+    /// driver populates this from the stdlib enum registry (today
+    /// only `EffectOp` is matched); physics-pass `Match` lowering
+    /// looks up arm patterns here. Tests populate the map directly.
+    pub variant_ids: HashMap<String, VariantId>,
+    /// AST [`LocalRef`] → typed [`LocalId`] resolver. Pattern binders
+    /// resolved by the AST resolver carry a `LocalRef`; physics-pass
+    /// `Match` lowering converts each binding's local through this
+    /// map. The driver populates it; tests populate it directly.
+    pub local_ids: HashMap<LocalRef, LocalId>,
     /// Accumulator for per-rule diagnostics. The expression lowering
     /// itself returns `Err` on first defect; this vector exists so
     /// later op-lowering passes can collect non-fatal rule-level
@@ -75,8 +87,25 @@ impl<'a> LoweringCtx<'a> {
             builder,
             view_ids: HashMap::new(),
             view_signatures: HashMap::new(),
+            variant_ids: HashMap::new(),
+            local_ids: HashMap::new(),
             diagnostics: Vec::new(),
         }
+    }
+
+    /// Register a variant-name → typed id mapping. Returns the prior
+    /// `VariantId` if one was registered for the same name (a
+    /// duplicate registration is a driver-side defect — surfacing it
+    /// lets tests assert exclusive allocation).
+    pub fn register_variant(&mut self, name: impl Into<String>, id: VariantId) -> Option<VariantId> {
+        self.variant_ids.insert(name.into(), id)
+    }
+
+    /// Register an AST `LocalRef` → typed [`LocalId`] mapping. Returns
+    /// the prior `LocalId` if one was registered for the same ref
+    /// (driver-side duplicate).
+    pub fn register_local(&mut self, ast_ref: LocalRef, id: LocalId) -> Option<LocalId> {
+        self.local_ids.insert(ast_ref, id)
     }
 
     /// Register an AST view ref → CG view id mapping. Returns the prior

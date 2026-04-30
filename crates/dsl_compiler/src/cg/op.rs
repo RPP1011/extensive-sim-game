@@ -252,10 +252,19 @@ pub enum ComputeOpKind {
 
     /// Per-event handler. Lowered from `physics` rules. `body` is a
     /// `CgStmtList` (sibling tree to `CgExpr` — assignments + emits).
+    ///
+    /// `replayable` propagates the constitution P7 flag from the IR.
+    /// Replayable rules (`@phase(event)`) emit into the deterministic
+    /// ring that folds into the trace hash; non-replayable rules
+    /// (`@phase(post)`) emit into chronicle / telemetry rings that
+    /// the runtime fold ignores. The driver computes the flag from
+    /// the rule's `@phase(...)` annotation and threads it through
+    /// lowering so emit can sort the rule into the right ring.
     PhysicsRule {
         rule: PhysicsRuleId,
         on_event: EventKindId,
         body: CgStmtListId,
+        replayable: bool,
     },
 
     /// Per-event view-storage update. Lowered from `view fold { on
@@ -330,11 +339,18 @@ impl ComputeOpKind {
                 rule: _,
                 on_event: _,
                 body,
+                replayable: _,
             } => {
                 // Source event ring read is recorded in
                 // `DispatchShape::PerEvent { source_ring }`, populated
                 // by lowering. The auto-walker only reports what the
                 // body's statements/expressions touch.
+                //
+                // The `replayable` flag is metadata (it informs which
+                // ring `Emit` writes into, captured via
+                // `record_write` post-construction by the driver); it
+                // does not contribute structural reads/writes the
+                // walker can synthesize.
                 collect_list_dependencies(*body, exprs, stmts, lists, &mut reads, &mut writes);
             }
             ComputeOpKind::ViewFold {
@@ -378,10 +394,15 @@ impl ComputeOpKind {
                     rows.len()
                 )
             }
-            ComputeOpKind::PhysicsRule { rule, on_event, .. } => {
+            ComputeOpKind::PhysicsRule {
+                rule,
+                on_event,
+                replayable,
+                ..
+            } => {
                 format!(
-                    "physics_rule(rule=#{}, on_event=#{})",
-                    rule.0, on_event.0
+                    "physics_rule(rule=#{}, on_event=#{}, replayable={})",
+                    rule.0, on_event.0, replayable
                 )
             }
             ComputeOpKind::ViewFold { view, on_event, .. } => {
@@ -681,6 +702,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body: CgStmtListId(0),
+                replayable: true,
             }
             .label(),
             ComputeOpKind::ViewFold {
@@ -853,6 +875,7 @@ mod tests {
             rule: PhysicsRuleId(2),
             on_event: EventKindId(7),
             body: CgStmtListId(1),
+            replayable: true,
         };
         let (r, w) = kind.compute_dependencies(&exprs, &stmts, &lists);
         // Reads: the if's cond is a lit (no read), then-arm assigns hp
@@ -1186,6 +1209,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(1),
                 body: CgStmtListId(0),
+                replayable: true,
             },
             ComputeOpKind::ViewFold {
                 view: ViewId(0),
@@ -1230,6 +1254,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(7),
                 body: CgStmtListId(0),
+                replayable: true,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),
@@ -1260,6 +1285,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(7),
                 body: CgStmtListId(0),
+                replayable: true,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),

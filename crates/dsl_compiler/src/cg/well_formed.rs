@@ -791,6 +791,21 @@ fn walk_body_expr_subtrees(
                     }
                 }
             }
+            CgStmt::Match { scrutinee, arms } => {
+                validate_expr_subtree(arena, *scrutinee, op_id, expr_arena_len, errors);
+                for arm in arms {
+                    if arm.body.0 < list_arena_len {
+                        walk_body_expr_subtrees(
+                            arm.body,
+                            op_id,
+                            prog,
+                            expr_arena_len,
+                            list_arena_len,
+                            errors,
+                        );
+                    }
+                }
+            }
         }
     }
 }
@@ -861,6 +876,27 @@ fn walk_list_id_ranges(
                     } else {
                         walk_list_id_ranges(
                             *else_id,
+                            op_id,
+                            prog,
+                            expr_arena_len,
+                            stmt_arena_len,
+                            list_arena_len,
+                            errors,
+                        );
+                    }
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    if arm.body.0 >= list_arena_len {
+                        errors.push(CgError::StmtListIdOutOfRange {
+                            op: op_id,
+                            referenced: arm.body,
+                            arena_len: list_arena_len,
+                        });
+                    } else {
+                        walk_list_id_ranges(
+                            arm.body,
                             op_id,
                             prog,
                             expr_arena_len,
@@ -1098,6 +1134,24 @@ fn type_check_list(
                     type_check_list(*else_id, op_id, prog, ctx, expr_arena_len, errors);
                 }
             }
+            CgStmt::Match { scrutinee, arms } => {
+                // Type-check the scrutinee expression (any well-typed
+                // CgExpr is acceptable — sum-type scrutinees aren't
+                // a distinct CgTy in v1, so the well-formed pass
+                // doesn't gate on the scrutinee's type variant; it
+                // only catches inner expression-tree defects).
+                if let Some(expr) = prog.exprs.get(scrutinee.0 as usize) {
+                    if let Err(err) = type_check(expr, *scrutinee, ctx) {
+                        errors.push(CgError::TypeMismatch {
+                            op: op_id,
+                            error: err,
+                        });
+                    }
+                }
+                for arm in arms {
+                    type_check_list(arm.body, op_id, prog, ctx, expr_arena_len, errors);
+                }
+            }
         }
     }
 }
@@ -1165,6 +1219,11 @@ fn p6_walk_list(
                 p6_walk_list(*then, op_id, kind_label, prog, errors);
                 if let Some(else_id) = else_ {
                     p6_walk_list(*else_id, op_id, kind_label, prog, errors);
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                for arm in arms {
+                    p6_walk_list(arm.body, op_id, kind_label, prog, errors);
                 }
             }
         }
@@ -1472,6 +1531,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(7),
                 body: physics_body,
+                replayable: true,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),
@@ -1578,6 +1638,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body: CgStmtListId(99),
+                replayable: true,
             },
             reads: vec![],
             writes: vec![],
@@ -1614,6 +1675,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body,
+                replayable: true,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(0),
@@ -1835,6 +1897,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body,
+                replayable: true,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(0),
@@ -2026,6 +2089,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body,
+                replayable: true,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),
@@ -2119,6 +2183,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body,
+                replayable: true,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(0),
@@ -2496,6 +2561,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body: body_list_id,
+                replayable: true,
             },
             reads: vec![],
             writes: vec![],

@@ -8,16 +8,20 @@
 //!
 //! # Variant set
 //!
-//! The CG layer ships three statement forms — assignment, event emit,
-//! and conditional. The DSL surface AST has additional control-flow
-//! and binding forms (`for`, `match`, `let`, `belief observe`); the
-//! AST → CG lowering (Phase 2 of the plan) is responsible for
-//! desugaring them — `for` unrolls or fuses into the dispatch shape,
-//! `match` cascades into nested `If`s, `let` flattens via SSA expression
-//! sharing, `BeliefObserve` decomposes into a sequence of `Assign`s
-//! against the BeliefState SoA fields. Adding a new CG-level statement
-//! variant is therefore a deliberate choice: it widens the set of
-//! shapes every later layer (HIR/MIR/LIR + emit) must handle.
+//! The CG layer ships four statement forms — assignment, event emit,
+//! conditional, and typed pattern match. The DSL surface AST has
+//! additional control-flow and binding forms (`for`, `let`, `belief
+//! observe`); the AST → CG lowering (Phase 2 of the plan) is
+//! responsible for desugaring them — `for` unrolls or fuses into the
+//! dispatch shape, `let` flattens via SSA expression sharing,
+//! `BeliefObserve` decomposes into a sequence of `Assign`s against the
+//! BeliefState SoA fields. The `match` form survives lowering: physics
+//! rules like `cast` dispatch on stdlib sum types (`EffectOp` variant)
+//! and the typed `CgStmt::Match` pins the variant id + binders so emit
+//! can produce the correct match arms without re-resolving variant
+//! names. Adding a new CG-level statement variant is therefore a
+//! deliberate choice: it widens the set of shapes every later layer
+//! (HIR/MIR/LIR + emit) must handle.
 //!
 //! # Arena vs node
 //!
@@ -74,6 +78,105 @@ impl fmt::Display for EventField {
     }
 }
 
+/// Stable id for a sum-type variant — used by [`CgStmt::Match`] to name
+/// the case its arm matches. The id resolves through a driver-supplied
+/// registry (the lowering context's `variant_ids` map) at AST → CG
+/// lowering time; emit then maps the id to the concrete `<EnumName>::<Variant>`
+/// path in the generated code.
+///
+/// Today the only sum type the IR matches over is the stdlib `EffectOp`
+/// (the `cast` physics rule's `match op { Damage { amount } => … }` shape);
+/// future plumbing-level scrutinees (e.g., a generic enum surface) reuse
+/// the same id space — the registry is the single source of truth.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct VariantId(pub u32);
+
+impl fmt::Display for VariantId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "variant#{}", self.0)
+    }
+}
+
+/// Stable id for a local binding introduced inside a body (a match-arm
+/// pattern binder, a `let`-introduced local, a fold binder once
+/// supported). The id resolves through a driver-supplied registry
+/// (the lowering context's `local_ids` map). The CG IR carries the id
+/// rather than the source-level name so consumers (emit, fusion) don't
+/// re-parse strings to disambiguate two bindings sharing a name across
+/// nested scopes.
+///
+/// Locals are not first-class CG expressions today — bindings only
+/// surface as match-arm payload destinations (a future task wires
+/// `CgExpr::Local(LocalId)` reads when expression lowering grows local
+/// resolution).
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LocalId(pub u32);
+
+impl fmt::Display for LocalId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "local#{}", self.0)
+    }
+}
+
+/// One field-binding in a [`CgMatchArm`]'s pattern.
+///
+/// `field_name` is the source-level identifier on the variant
+/// (`"amount"` for `Damage { amount }`, `"factor_q8"` for `Slow { …,
+/// factor_q8 }`). It stays a `String` because variant field names are
+/// free-form per-variant identifiers; unlike [`EventField`] (which uses
+/// the variant's declared field-index because every event variant is
+/// authored in the user's DSL with a fixed schema), the stdlib sum
+/// types matched over here (`EffectOp`) carry their fields by name in
+/// the resolver's IR — the typed-index registry doesn't exist for them.
+/// Wrapping a single name in an opaque newtype would not buy any
+/// type-safety improvement; the `String` is the honest carrier.
+///
+/// `local` is the typed [`LocalId`] the binding introduces. Body
+/// references to the binder will resolve against this id once
+/// expression lowering grows local-binding support.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MatchArmBinding {
+    pub field_name: String,
+    pub local: LocalId,
+}
+
+impl fmt::Display for MatchArmBinding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}={}", self.field_name, self.local)
+    }
+}
+
+/// One arm of a [`CgStmt::Match`].
+///
+/// `variant` selects the sum-type case this arm matches; `bindings`
+/// names each captured field; `body` is the statement list executed
+/// when the variant matches.
+///
+/// The lowering produces arms in source order. The well-formed pass
+/// validates that no two arms share a variant id (today the only
+/// sum type matched is `EffectOp`, where the resolver already rejects
+/// duplicate arms; defense-in-depth at the CG level catches a
+/// synthetic IR that bypasses resolve).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CgMatchArm {
+    pub variant: VariantId,
+    pub bindings: Vec<MatchArmBinding>,
+    pub body: CgStmtListId,
+}
+
+impl fmt::Display for CgMatchArm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "arm({}, [", self.variant)?;
+        for (i, b) in self.bindings.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{}", b)?;
+        }
+        write!(f, "], body=stmts#{})", self.body.0)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CgStmt
 // ---------------------------------------------------------------------------
@@ -87,6 +190,11 @@ impl fmt::Display for EventField {
 ///   resolves which ring at emit time).
 /// - `If` branches between two sub-bodies. Both arms are themselves
 ///   `CgStmtList`s; the `else` branch is optional.
+/// - `Match` dispatches on a typed sum-type scrutinee. Each arm names
+///   a [`VariantId`], a list of field-binders, and a body statement
+///   list. Used by the `cast` physics rule and similar — the AST
+///   resolves the variant + binder names to typed ids before lowering
+///   so emit can produce match arms without re-resolving strings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CgStmt {
     /// Write `value` into the slot named by `target`. The slot type is
@@ -113,6 +221,23 @@ pub enum CgStmt {
         then: CgStmtListId,
         else_: Option<CgStmtListId>,
     },
+
+    /// Pattern-match dispatch. `scrutinee` is the value being matched
+    /// (a sum-type-shaped expression — today only the stdlib
+    /// `EffectOp` from `cast` rules); `arms` enumerates the cases in
+    /// source order. Each arm names a [`VariantId`], its field
+    /// binders, and the statement list to execute on match.
+    ///
+    /// The arm body sees its [`MatchArmBinding`] locals in scope. The
+    /// CG IR does not yet thread local references through expression
+    /// reads — bodies that reference a binder lower as
+    /// [`crate::cg::lower::LoweringError::UnsupportedLocalBinding`]
+    /// at the expression layer until expression lowering grows local
+    /// resolution.
+    Match {
+        scrutinee: CgExprId,
+        arms: Vec<CgMatchArm>,
+    },
 }
 
 impl fmt::Display for CgStmt {
@@ -136,6 +261,16 @@ impl fmt::Display for CgStmt {
                 ),
                 None => write!(f, "if(cond=expr#{}, then=stmts#{})", cond.0, then.0),
             },
+            CgStmt::Match { scrutinee, arms } => {
+                write!(f, "match(scrutinee=expr#{}, arms=[", scrutinee.0)?;
+                for (i, arm) in arms.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{}", arm)?;
+                }
+                f.write_str("])")
+            }
         }
     }
 }
@@ -322,6 +457,19 @@ pub fn collect_stmt_dependencies(
             collect_list_dependencies(*then, exprs, stmts, lists, reads, writes);
             if let Some(else_id) = else_ {
                 collect_list_dependencies(*else_id, exprs, stmts, lists, reads, writes);
+            }
+        }
+        CgStmt::Match { scrutinee, arms } => {
+            // Match: walk the scrutinee for reads, then descend into
+            // each arm's body (in source order) for the union of
+            // their reads/writes. Arm bindings introduce locals that
+            // are scoped to the arm body — they don't surface as a
+            // structural read here (the body's expression walks pick
+            // up references to them once expression lowering grows
+            // local-binding support; today that path errors out).
+            collect_expr_reads(*scrutinee, exprs, reads);
+            for arm in arms {
+                collect_list_dependencies(arm.body, exprs, stmts, lists, reads, writes);
             }
         }
     }
@@ -747,6 +895,199 @@ mod tests {
         // Both arms write hp; cond is a literal so no reads from there.
         assert!(reads.is_empty());
         assert_eq!(writes.len(), 2);
+    }
+
+    // ---- CgStmt::Match Display + roundtrip + walker ----
+
+    #[test]
+    fn variant_id_display_and_roundtrip() {
+        assert_eq!(format!("{}", VariantId(7)), "variant#7");
+        assert_roundtrip(&VariantId(0));
+        assert_roundtrip(&VariantId(42));
+    }
+
+    #[test]
+    fn local_id_display_and_roundtrip() {
+        assert_eq!(format!("{}", LocalId(3)), "local#3");
+        assert_roundtrip(&LocalId(0));
+        assert_roundtrip(&LocalId(11));
+    }
+
+    #[test]
+    fn match_arm_binding_display_and_roundtrip() {
+        let b = MatchArmBinding {
+            field_name: "amount".to_string(),
+            local: LocalId(2),
+        };
+        assert_eq!(format!("{}", b), "amount=local#2");
+        assert_roundtrip(&b);
+    }
+
+    #[test]
+    fn cg_match_arm_display_and_roundtrip() {
+        let arm = CgMatchArm {
+            variant: VariantId(1),
+            bindings: vec![
+                MatchArmBinding {
+                    field_name: "amount".to_string(),
+                    local: LocalId(0),
+                },
+                MatchArmBinding {
+                    field_name: "factor_q8".to_string(),
+                    local: LocalId(1),
+                },
+            ],
+            body: CgStmtListId(3),
+        };
+        assert_eq!(
+            format!("{}", arm),
+            "arm(variant#1, [amount=local#0, factor_q8=local#1], body=stmts#3)"
+        );
+        assert_roundtrip(&arm);
+    }
+
+    #[test]
+    fn match_stmt_display_and_roundtrip() {
+        let s = CgStmt::Match {
+            scrutinee: CgExprId(5),
+            arms: vec![
+                CgMatchArm {
+                    variant: VariantId(0),
+                    bindings: vec![MatchArmBinding {
+                        field_name: "amount".to_string(),
+                        local: LocalId(0),
+                    }],
+                    body: CgStmtListId(1),
+                },
+                CgMatchArm {
+                    variant: VariantId(1),
+                    bindings: vec![],
+                    body: CgStmtListId(2),
+                },
+            ],
+        };
+        assert_eq!(
+            format!("{}", s),
+            "match(scrutinee=expr#5, arms=[arm(variant#0, [amount=local#0], body=stmts#1), arm(variant#1, [], body=stmts#2)])"
+        );
+        assert_roundtrip(&s);
+    }
+
+    #[test]
+    fn collect_stmt_dependencies_match_walks_scrutinee_and_arms() {
+        // match scrutinee=hp { variant#0 => emit(event#3) }
+        //
+        // Scrutinee read of hp + the arm body's emit field-expr reads
+        // (none here — the emit has no fields). No writes (Emit's
+        // ring binding is added by lowering, not by the auto-walker).
+        let exprs: Vec<CgExpr> = vec![read_self_hp()];
+        let stmts: Vec<CgStmt> = vec![
+            // 0: arm body's emit
+            CgStmt::Emit {
+                event: EventKindId(3),
+                fields: vec![],
+            },
+            // 1: top-level match
+            CgStmt::Match {
+                scrutinee: CgExprId(0),
+                arms: vec![CgMatchArm {
+                    variant: VariantId(0),
+                    bindings: vec![],
+                    body: CgStmtListId(0),
+                }],
+            },
+        ];
+        let lists: Vec<CgStmtList> = vec![CgStmtList::new(vec![CgStmtId(0)])];
+        let mut reads = Vec::new();
+        let mut writes = Vec::new();
+        collect_stmt_dependencies(CgStmtId(1), &exprs, &stmts, &lists, &mut reads, &mut writes);
+        assert_eq!(
+            reads,
+            vec![DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::Self_,
+            }]
+        );
+        assert!(writes.is_empty(), "Emit's ring write is not auto-derived");
+    }
+
+    #[test]
+    fn collect_stmt_dependencies_match_unions_arm_writes() {
+        // match scrutinee { variant#0 => assign(hp <- 1.0),
+        //                   variant#1 => assign(pos <- ...) }
+        // Each arm contributes a write — the walker reports the union
+        // in source order (arm 0 first, arm 1 second).
+        let exprs: Vec<CgExpr> = vec![
+            lit_f32(0.0),    // 0  scrutinee — placeholder lit
+            lit_f32(1.0),    // 1  arm0 value
+            read_self_pos(), // 2  arm1 value
+        ];
+        let stmts: Vec<CgStmt> = vec![
+            // 0: arm0 body — assign hp
+            CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Hp,
+                    target: AgentRef::Self_,
+                },
+                value: CgExprId(1),
+            },
+            // 1: arm1 body — assign pos
+            CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Pos,
+                    target: AgentRef::Self_,
+                },
+                value: CgExprId(2),
+            },
+            // 2: top-level match
+            CgStmt::Match {
+                scrutinee: CgExprId(0),
+                arms: vec![
+                    CgMatchArm {
+                        variant: VariantId(0),
+                        bindings: vec![],
+                        body: CgStmtListId(0),
+                    },
+                    CgMatchArm {
+                        variant: VariantId(1),
+                        bindings: vec![],
+                        body: CgStmtListId(1),
+                    },
+                ],
+            },
+        ];
+        let lists: Vec<CgStmtList> = vec![
+            CgStmtList::new(vec![CgStmtId(0)]),
+            CgStmtList::new(vec![CgStmtId(1)]),
+        ];
+        let mut reads = Vec::new();
+        let mut writes = Vec::new();
+        collect_stmt_dependencies(CgStmtId(2), &exprs, &stmts, &lists, &mut reads, &mut writes);
+        // Reads: arm1's pos read; arm0's value is a lit. Scrutinee is
+        // also a lit so contributes nothing.
+        assert_eq!(
+            reads,
+            vec![DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::Self_,
+            }]
+        );
+        // Writes: arm0 hp first, then arm1 pos.
+        assert_eq!(writes.len(), 2);
+        assert_eq!(
+            writes[0],
+            DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::Self_,
+            }
+        );
+        assert_eq!(
+            writes[1],
+            DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::Self_,
+            }
+        );
     }
 
     #[test]

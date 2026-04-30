@@ -784,7 +784,13 @@ impl CgProgramBuilder {
 
     /// Validate every id reference inside `stmt`. `Assign` walks its
     /// value expression; `Emit` walks each field expression; `If`
-    /// walks the condition expression and the then/else list ids.
+    /// walks the condition expression and the then/else list ids;
+    /// `Match` walks the scrutinee expression and each arm's body
+    /// list id (the typed [`crate::cg::stmt::VariantId`] /
+    /// [`crate::cg::stmt::LocalId`] payloads are not arena-relative,
+    /// so the builder does not range-check them — the well-formed
+    /// pass owns that diagnostic if a registry-resolution defect ever
+    /// surfaces).
     fn validate_stmt_refs(&self, stmt: &CgStmt) -> Result<(), BuilderError> {
         match stmt {
             CgStmt::Assign { value, .. } => self.check_expr_id(*value),
@@ -799,6 +805,13 @@ impl CgProgramBuilder {
                 self.check_list_id(*then)?;
                 if let Some(else_id) = else_ {
                     self.check_list_id(*else_id)?;
+                }
+                Ok(())
+            }
+            CgStmt::Match { scrutinee, arms } => {
+                self.check_expr_id(*scrutinee)?;
+                for arm in arms {
+                    self.check_list_id(arm.body)?;
                 }
                 Ok(())
             }
@@ -1322,6 +1335,7 @@ mod tests {
                     rule: PhysicsRuleId(0),
                     on_event: EventKindId(0),
                     body: CgStmtListId(0),
+                    replayable: true,
                 },
                 DispatchShape::PerEvent {
                     source_ring: EventRingId(0),
@@ -1767,6 +1781,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body: physics_body,
+                replayable: true,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(0),
@@ -1826,7 +1841,7 @@ program {
     ops: [
         op#0 kind=mask_predicate(mask=#0) shape=per_agent reads=[agent.self.hp] writes=[mask[#0].bitmap],
         op#1 kind=scoring_argmax(scoring=#0, rows=1) shape=per_agent reads=[] writes=[scoring.output],
-        op#2 kind=physics_rule(rule=#0, on_event=#0) shape=per_event(ring=#0) reads=[] writes=[agent.self.hp],
+        op#2 kind=physics_rule(rule=#0, on_event=#0, replayable=true) shape=per_event(ring=#0) reads=[] writes=[agent.self.hp],
         op#3 kind=view_fold(view=#0, on_event=#0) shape=per_event(ring=#0) reads=[agent.self.hp] writes=[view[#0].primary],
         op#4 kind=spatial_query(build_hash) shape=per_agent reads=[] writes=[spatial.grid_cells, spatial.grid_offsets],
     ],
@@ -1871,6 +1886,7 @@ program {
                     rule: PhysicsRuleId(0),
                     on_event: EventKindId(7),
                     body,
+                    replayable: true,
                 },
                 DispatchShape::PerEvent {
                     source_ring: EventRingId(7),
