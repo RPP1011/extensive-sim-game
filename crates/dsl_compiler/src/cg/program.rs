@@ -468,20 +468,20 @@ impl CgProgram {
 // --- Arena trait impls --------------------------------------------------
 
 impl ExprArena for CgProgram {
-    fn get(&self, id: CgExprId) -> &CgExpr {
-        &self.exprs[id.0 as usize]
+    fn get(&self, id: CgExprId) -> Option<&CgExpr> {
+        ExprArena::get(&self.exprs, id)
     }
 }
 
 impl StmtArena for CgProgram {
-    fn get(&self, id: CgStmtId) -> &CgStmt {
-        &self.stmts[id.0 as usize]
+    fn get(&self, id: CgStmtId) -> Option<&CgStmt> {
+        StmtArena::get(&self.stmts, id)
     }
 }
 
 impl StmtListArena for CgProgram {
-    fn get(&self, id: CgStmtListId) -> &CgStmtList {
-        &self.stmt_lists[id.0 as usize]
+    fn get(&self, id: CgStmtListId) -> Option<&CgStmtList> {
+        StmtListArena::get(&self.stmt_lists, id)
     }
 }
 
@@ -1366,7 +1366,7 @@ mod tests {
         let mut b = CgProgramBuilder::new();
         let id = b.add_expr(read_self_hp()).unwrap();
         let prog = b.finish();
-        let node: &CgExpr = ExprArena::get(&prog, id);
+        let node: &CgExpr = ExprArena::get(&prog, id).expect("expr id resolves");
         match node {
             CgExpr::Read(DataHandle::AgentField { field, .. }) => {
                 assert_eq!(*field, AgentFieldId::Hp);
@@ -1389,7 +1389,7 @@ mod tests {
             })
             .unwrap();
         let prog = b.finish();
-        let node: &CgStmt = StmtArena::get(&prog, stmt_id);
+        let node: &CgStmt = StmtArena::get(&prog, stmt_id).expect("stmt id resolves");
         match node {
             CgStmt::Assign { value, .. } => assert_eq!(*value, val),
             other => panic!("expected Assign, got {other:?}"),
@@ -1413,7 +1413,7 @@ mod tests {
             .add_stmt_list(CgStmtList::new(vec![stmt_id]))
             .unwrap();
         let prog = b.finish();
-        let node: &CgStmtList = StmtListArena::get(&prog, list_id);
+        let node: &CgStmtList = StmtListArena::get(&prog, list_id).expect("list id resolves");
         assert_eq!(node.stmts, vec![stmt_id]);
     }
 

@@ -189,19 +189,23 @@ impl fmt::Display for CgStmtList {
 ///   arena.
 /// - `[CgStmt]` and `Vec<CgStmt>` impls below let tests carry a tiny
 ///   arena directly.
+///
+/// `Option<&CgStmt>` keeps arena lookups panic-free; out-of-range ids
+/// return `None` and the caller decides whether that's a defect (the
+/// well-formed pass) or the end of a walk.
 pub trait StmtArena {
-    fn get(&self, id: CgStmtId) -> &CgStmt;
+    fn get(&self, id: CgStmtId) -> Option<&CgStmt>;
 }
 
 impl StmtArena for [CgStmt] {
-    fn get(&self, id: CgStmtId) -> &CgStmt {
-        &self[id.0 as usize]
+    fn get(&self, id: CgStmtId) -> Option<&CgStmt> {
+        <[CgStmt]>::get(self, id.0 as usize)
     }
 }
 
 impl StmtArena for Vec<CgStmt> {
-    fn get(&self, id: CgStmtId) -> &CgStmt {
-        &self[id.0 as usize]
+    fn get(&self, id: CgStmtId) -> Option<&CgStmt> {
+        <[CgStmt]>::get(self.as_slice(), id.0 as usize)
     }
 }
 
@@ -210,18 +214,18 @@ impl StmtArena for Vec<CgStmt> {
 /// program can store statement nodes and statement lists in different
 /// arenas (which `CgProgram` does — see Task 1.5).
 pub trait StmtListArena {
-    fn get(&self, id: CgStmtListId) -> &CgStmtList;
+    fn get(&self, id: CgStmtListId) -> Option<&CgStmtList>;
 }
 
 impl StmtListArena for [CgStmtList] {
-    fn get(&self, id: CgStmtListId) -> &CgStmtList {
-        &self[id.0 as usize]
+    fn get(&self, id: CgStmtListId) -> Option<&CgStmtList> {
+        <[CgStmtList]>::get(self, id.0 as usize)
     }
 }
 
 impl StmtListArena for Vec<CgStmtList> {
-    fn get(&self, id: CgStmtListId) -> &CgStmtList {
-        &self[id.0 as usize]
+    fn get(&self, id: CgStmtListId) -> Option<&CgStmtList> {
+        <[CgStmtList]>::get(self.as_slice(), id.0 as usize)
     }
 }
 
@@ -236,7 +240,12 @@ impl StmtListArena for Vec<CgStmtList> {
 /// same input arena always produces the same output ordering, including
 /// duplicates.
 pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<DataHandle>) {
-    let node = exprs.get(id);
+    // Out-of-range id (corrupted arena): the auto-walker skips silently.
+    // The well-formed pass reports the defect through its dedicated
+    // expression-id-range walk; mirroring it here would double-report.
+    let Some(node) = exprs.get(id) else {
+        return;
+    };
     match node {
         CgExpr::Read(h) => out.push(h.clone()),
         CgExpr::Lit(_) => {}
@@ -291,7 +300,11 @@ pub fn collect_stmt_dependencies(
     reads: &mut Vec<DataHandle>,
     writes: &mut Vec<DataHandle>,
 ) {
-    let node = stmts.get(id);
+    // Out-of-range stmt id: skip silently — the well-formed pass owns
+    // the structural id-range diagnostic.
+    let Some(node) = stmts.get(id) else {
+        return;
+    };
     match node {
         CgStmt::Assign { target, value } => {
             collect_expr_reads(*value, exprs, reads);
@@ -324,7 +337,11 @@ pub fn collect_list_dependencies(
     reads: &mut Vec<DataHandle>,
     writes: &mut Vec<DataHandle>,
 ) {
-    let list = lists.get(list_id);
+    // Out-of-range list id: skip silently — the well-formed pass owns
+    // the structural id-range diagnostic.
+    let Some(list) = lists.get(list_id) else {
+        return;
+    };
     for stmt_id in &list.stmts {
         collect_stmt_dependencies(*stmt_id, exprs, stmts, lists, reads, writes);
     }
@@ -502,12 +519,12 @@ mod tests {
                 else_: None,
             },
         ];
-        let s0 = StmtArena::get(&arena, CgStmtId(0));
+        let s0 = StmtArena::get(&arena, CgStmtId(0)).expect("stmt#0 resolves");
         match s0 {
             CgStmt::Assign { value, .. } => assert_eq!(*value, CgExprId(0)),
             _ => panic!("expected Assign at #0"),
         }
-        let s1 = StmtArena::get(&arena, CgStmtId(1));
+        let s1 = StmtArena::get(&arena, CgStmtId(1)).expect("stmt#1 resolves");
         match s1 {
             CgStmt::If { cond, .. } => assert_eq!(*cond, CgExprId(1)),
             _ => panic!("expected If at #1"),
@@ -520,9 +537,9 @@ mod tests {
             CgStmtList::new(vec![]),
             CgStmtList::new(vec![CgStmtId(7)]),
         ];
-        let l0 = StmtListArena::get(&arena, CgStmtListId(0));
+        let l0 = StmtListArena::get(&arena, CgStmtListId(0)).expect("list#0 resolves");
         assert!(l0.is_empty());
-        let l1 = StmtListArena::get(&arena, CgStmtListId(1));
+        let l1 = StmtListArena::get(&arena, CgStmtListId(1)).expect("list#1 resolves");
         assert_eq!(l1.stmts, vec![CgStmtId(7)]);
     }
 

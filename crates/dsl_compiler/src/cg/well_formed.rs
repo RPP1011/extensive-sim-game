@@ -333,26 +333,27 @@ fn collect_subexpr_ids(arena: &[CgExpr], root: CgExprId, out: &mut Vec<CgExprId>
 }
 
 /// Validate every id collected by [`collect_subexpr_ids`] against the
-/// arena length. Pushes an [`CgError::ExprIdOutOfRange`] for each id
-/// past the arena end and returns `true` if the root tree is
-/// "expression-corrupted" (i.e. any sub-id is out of range).
+/// arena length. Pushes a [`CgError::ExprIdOutOfRange`] for each id
+/// past the arena end.
 ///
-/// Returning `true` signals callers to skip [`type_check`] for the
-/// offending op — the type checker descends through the arena and
-/// would index past the end on a corrupted sub-id.
+/// This pass is the source of [`CgError::ExprIdOutOfRange`] (with op
+/// context). It does NOT gate the type-check pass — `type_check` itself
+/// returns [`TypeError::DanglingExprId`] when it encounters an
+/// out-of-range child, so running both is safe and produces non-
+/// overlapping diagnostics (this pass reports the structural id-range
+/// defect; `type_check` reports the type-coherence defect with a
+/// different node anchor).
 fn validate_expr_subtree(
     arena: &[CgExpr],
     root: CgExprId,
     op_id: OpId,
     expr_arena_len: u32,
     errors: &mut Vec<CgError>,
-) -> bool {
+) {
     let mut ids = Vec::new();
     collect_subexpr_ids(arena, root, &mut ids);
-    let mut corrupted = false;
     for id in ids {
         if id.0 >= expr_arena_len {
-            corrupted = true;
             // Dedup: only report the same offending id once per op.
             // (A repeated reference inside the tree would otherwise
             // produce duplicate errors.) We use `errors.iter()`
@@ -368,7 +369,6 @@ fn validate_expr_subtree(
             }
         }
     }
-    corrupted
 }
 
 // ---------------------------------------------------------------------------
@@ -462,13 +462,14 @@ pub fn check_well_formed(prog: &CgProgram) -> Result<(), Vec<CgError>> {
 /// Per-op checks — id-range, handle consistency, type checking, P6, and
 /// kind/shape compatibility.
 ///
-/// Returns nothing — all defects are pushed into `errors`. The
-/// expression-corruption flag (`expr_corrupted`) is computed up-front
-/// from the reachability walk (see [`validate_expr_subtree`]) and
-/// gates the type-check pass for this op only. Other checks (P6,
-/// kind/shape, structural id-range, handle consistency) still run on
-/// expression-corrupted ops because they don't recurse into the
-/// expression arena.
+/// Returns nothing — all defects are pushed into `errors`. Each check
+/// is independent: structural id-range checks (this pass's
+/// [`validate_expr_subtree`]) report [`CgError::ExprIdOutOfRange`] with
+/// op context; type checking ([`type_check`]) reports
+/// [`CgError::TypeMismatch`] including [`TypeError::DanglingExprId`]
+/// for the same arena defect from the type-coherence side. Both run
+/// unconditionally — `type_check` is panic-free now that `ExprArena::get`
+/// returns `Option`.
 fn check_op(
     op: &ComputeOp,
     op_id: OpId,
@@ -478,13 +479,10 @@ fn check_op(
     list_arena_len: u32,
     errors: &mut Vec<CgError>,
 ) {
-    // --- pre-pass: validate every reachable expr id. ---------------------
+    // --- structural pre-pass: validate every reachable expr id. ---------
     //
-    // The post-validation `expr_corrupted` flag is the gate that
-    // skips type-check for the offending op (and only that op). It's
-    // OR'd across every reachable subtree from the op's payload.
-    //
-    // We walk:
+    // Records [`CgError::ExprIdOutOfRange`] for every out-of-range id
+    // reachable from the op's expression roots. We walk:
     //   - mask predicate id (root)
     //   - each scoring row's utility + target ids (roots)
     //   - each AgentRef::Target(expr_id) inside the op's reads/writes
@@ -495,22 +493,15 @@ fn check_op(
     // Builtin args, Select cond/then/else_, Read(AgentField target))
     // is also validated.
     let arena: &[CgExpr] = prog.exprs.as_slice();
-    let mut expr_corrupted = false;
 
     match &op.kind {
         ComputeOpKind::MaskPredicate { predicate, .. } => {
-            if validate_expr_subtree(arena, *predicate, op_id, expr_arena_len, errors) {
-                expr_corrupted = true;
-            }
+            validate_expr_subtree(arena, *predicate, op_id, expr_arena_len, errors);
         }
         ComputeOpKind::ScoringArgmax { rows, .. } => {
             for row in rows {
-                if validate_expr_subtree(arena, row.utility, op_id, expr_arena_len, errors) {
-                    expr_corrupted = true;
-                }
-                if validate_expr_subtree(arena, row.target, op_id, expr_arena_len, errors) {
-                    expr_corrupted = true;
-                }
+                validate_expr_subtree(arena, row.utility, op_id, expr_arena_len, errors);
+                validate_expr_subtree(arena, row.target, op_id, expr_arena_len, errors);
             }
         }
         ComputeOpKind::PhysicsRule { body, .. } | ComputeOpKind::ViewFold { body, .. } => {
@@ -518,16 +509,14 @@ fn check_op(
             // — see below. List-id-range is checked in the dedicated
             // pass below this match.
             if body.0 < list_arena_len {
-                if walk_body_expr_subtrees(
+                walk_body_expr_subtrees(
                     *body,
                     op_id,
                     prog,
                     expr_arena_len,
                     list_arena_len,
                     errors,
-                ) {
-                    expr_corrupted = true;
-                }
+                );
             }
         }
         ComputeOpKind::SpatialQuery { .. } => {}
@@ -541,9 +530,7 @@ fn check_op(
             ..
         } = handle
         {
-            if validate_expr_subtree(arena, *expr_id, op_id, expr_arena_len, errors) {
-                expr_corrupted = true;
-            }
+            validate_expr_subtree(arena, *expr_id, op_id, expr_arena_len, errors);
         }
     }
 
@@ -591,15 +578,14 @@ fn check_op(
 
     // --- Type checking on embedded expressions -----------------------
     //
-    // SKIPPED if the op's reachable expr-id set has any out-of-range
-    // member: `type_check` recurses through `ctx.arena.get(id)` which
-    // panics on OOR (the panicking impl lives at expr.rs:684). The
-    // corruption flag is the gate that closes the P10 hole.
+    // Runs unconditionally — `type_check` is panic-free since
+    // `ExprArena::get` returns `Option`. Out-of-range sub-ids surface
+    // as [`TypeError::DanglingExprId`] wrapped in a
+    // [`CgError::TypeMismatch`]; the structural id-range pass above
+    // produced the [`CgError::ExprIdOutOfRange`] form independently.
 
-    if !expr_corrupted {
-        let ctx = TypeCheckCtx::new(prog);
-        type_check_op(op, op_id, prog, &ctx, expr_arena_len, errors);
-    }
+    let ctx = TypeCheckCtx::new(prog);
+    type_check_op(op, op_id, prog, &ctx, expr_arena_len, errors);
 
     // --- P6 mutation channel: AgentField writes only in ViewFold ----
 
@@ -620,8 +606,8 @@ fn check_op(
 
 /// Walk a body stmt-list and validate every embedded expression
 /// subtree against the arena (recursing through nested If branches).
-/// Returns `true` if any reachable expr id was out of range, signalling
-/// the caller to skip the type-check pass for the owning op.
+/// Pushes [`CgError::ExprIdOutOfRange`] into `errors` for each reachable
+/// out-of-range id.
 ///
 /// Always returns when the list-id is out-of-range — that's a separate
 /// defect reported by the structural pass; here we just stop walking
@@ -633,10 +619,9 @@ fn walk_body_expr_subtrees(
     expr_arena_len: u32,
     list_arena_len: u32,
     errors: &mut Vec<CgError>,
-) -> bool {
-    let mut corrupted = false;
+) {
     let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
-        return false;
+        return;
     };
     let arena: &[CgExpr] = prog.exprs.as_slice();
     for stmt_id in &list.stmts {
@@ -645,9 +630,7 @@ fn walk_body_expr_subtrees(
         };
         match stmt {
             CgStmt::Assign { value, target } => {
-                if validate_expr_subtree(arena, *value, op_id, expr_arena_len, errors) {
-                    corrupted = true;
-                }
+                validate_expr_subtree(arena, *value, op_id, expr_arena_len, errors);
                 // Validate AgentRef::Target embedded in the assign
                 // target handle (the value-side is captured by the
                 // op-level reads/writes pass too, but body-targets
@@ -657,52 +640,41 @@ fn walk_body_expr_subtrees(
                     ..
                 } = target
                 {
-                    if validate_expr_subtree(arena, *target_expr, op_id, expr_arena_len, errors) {
-                        corrupted = true;
-                    }
+                    validate_expr_subtree(arena, *target_expr, op_id, expr_arena_len, errors);
                 }
             }
             CgStmt::Emit { fields, .. } => {
                 for (_, expr_id) in fields {
-                    if validate_expr_subtree(arena, *expr_id, op_id, expr_arena_len, errors) {
-                        corrupted = true;
-                    }
+                    validate_expr_subtree(arena, *expr_id, op_id, expr_arena_len, errors);
                 }
             }
             CgStmt::If { cond, then, else_ } => {
-                if validate_expr_subtree(arena, *cond, op_id, expr_arena_len, errors) {
-                    corrupted = true;
-                }
+                validate_expr_subtree(arena, *cond, op_id, expr_arena_len, errors);
                 if then.0 < list_arena_len {
-                    if walk_body_expr_subtrees(
+                    walk_body_expr_subtrees(
                         *then,
                         op_id,
                         prog,
                         expr_arena_len,
                         list_arena_len,
                         errors,
-                    ) {
-                        corrupted = true;
-                    }
+                    );
                 }
                 if let Some(else_id) = else_ {
                     if else_id.0 < list_arena_len {
-                        if walk_body_expr_subtrees(
+                        walk_body_expr_subtrees(
                             *else_id,
                             op_id,
                             prog,
                             expr_arena_len,
                             list_arena_len,
                             errors,
-                        ) {
-                            corrupted = true;
-                        }
+                        );
                     }
                 }
             }
         }
     }
-    corrupted
 }
 
 /// Walk a `CgStmtListId` recursively for id-range defects in its

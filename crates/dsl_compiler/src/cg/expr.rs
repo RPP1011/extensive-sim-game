@@ -671,19 +671,25 @@ impl CgExpr {
 /// Resolver from a [`CgExprId`] to the underlying [`CgExpr`]. The
 /// prog-arena (Task 1.5) implements this; tests pass a closure over a
 /// `&[CgExpr]` slice.
+///
+/// The `Option<&CgExpr>` return surfaces out-of-range ids without
+/// panicking — every caller (type checker, pretty-printer, well-formed
+/// pass) handles the `None` arm explicitly. Closing the P10 panic gap
+/// at the API layer keeps later passes (Phase 2 lowering) safe even on
+/// partially-constructed arenas.
 pub trait ExprArena {
-    fn get(&self, id: CgExprId) -> &CgExpr;
+    fn get(&self, id: CgExprId) -> Option<&CgExpr>;
 }
 
 impl ExprArena for [CgExpr] {
-    fn get(&self, id: CgExprId) -> &CgExpr {
-        &self[id.0 as usize]
+    fn get(&self, id: CgExprId) -> Option<&CgExpr> {
+        <[CgExpr]>::get(self, id.0 as usize)
     }
 }
 
 impl ExprArena for Vec<CgExpr> {
-    fn get(&self, id: CgExprId) -> &CgExpr {
-        &self[id.0 as usize]
+    fn get(&self, id: CgExprId) -> Option<&CgExpr> {
+        <[CgExpr]>::get(self.as_slice(), id.0 as usize)
     }
 }
 
@@ -701,6 +707,18 @@ pub fn pretty(expr: &CgExpr, arena: &dyn ExprArena) -> String {
     s
 }
 
+/// Pretty-print a sub-expression by id. If the id is out-of-range
+/// (corrupted arena), emit a `<oor:#N>` token rather than panicking —
+/// the pretty-printer is a debugging aid and must tolerate the same
+/// adversarial inputs the well-formed pass tolerates.
+fn pretty_child(id: CgExprId, arena: &dyn ExprArena, out: &mut String) -> fmt::Result {
+    use std::fmt::Write;
+    match arena.get(id) {
+        Some(child) => pretty_into(child, arena, out),
+        None => write!(out, "<oor:#{}>", id.0),
+    }
+}
+
 fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::Result {
     use std::fmt::Write;
     match expr {
@@ -708,15 +726,15 @@ fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::R
         CgExpr::Lit(v) => write!(out, "(lit {})", v),
         CgExpr::Binary { op, lhs, rhs, .. } => {
             write!(out, "({} ", op)?;
-            pretty_into(arena.get(*lhs), arena, out)?;
+            pretty_child(*lhs, arena, out)?;
             out.push(' ');
-            pretty_into(arena.get(*rhs), arena, out)?;
+            pretty_child(*rhs, arena, out)?;
             out.push(')');
             Ok(())
         }
         CgExpr::Unary { op, arg, .. } => {
             write!(out, "({} ", op)?;
-            pretty_into(arena.get(*arg), arena, out)?;
+            pretty_child(*arg, arena, out)?;
             out.push(')');
             Ok(())
         }
@@ -724,7 +742,7 @@ fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::R
             write!(out, "(builtin.{}", fn_id)?;
             for a in args {
                 out.push(' ');
-                pretty_into(arena.get(*a), arena, out)?;
+                pretty_child(*a, arena, out)?;
             }
             out.push(')');
             Ok(())
@@ -734,11 +752,11 @@ fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::R
             cond, then, else_, ..
         } => {
             out.push_str("(select ");
-            pretty_into(arena.get(*cond), arena, out)?;
+            pretty_child(*cond, arena, out)?;
             out.push(' ');
-            pretty_into(arena.get(*then), arena, out)?;
+            pretty_child(*then, arena, out)?;
             out.push(' ');
-            pretty_into(arena.get(*else_), arena, out)?;
+            pretty_child(*else_, arena, out)?;
             out.push(')');
             Ok(())
         }
@@ -788,6 +806,12 @@ pub enum TypeError {
     /// that exercise `ViewCall` should use a `TypeCheckCtx` whose
     /// `view_signature` resolver is wired up.
     ViewSignatureUnresolved { node: CgExprId, view: ViewId },
+    /// A child id referenced by `node` does not resolve in the arena —
+    /// the recursive descent encountered an out-of-range id. Surfaced
+    /// as a typed error rather than a panic so the well-formed pass
+    /// (and any future caller running `type_check` on a partially-
+    /// constructed program) handles arena corruption uniformly.
+    DanglingExprId { node: CgExprId, referenced: CgExprId },
 }
 
 /// Resolves a view's `(args, result)` signature. The standalone type
@@ -819,6 +843,52 @@ impl<'a> TypeCheckCtx<'a> {
     }
 }
 
+/// Shared arity / per-operand / claimed-result check used by both the
+/// `Fixed` and `ViewCall` builtin paths. Pulled out so adding a new
+/// builtin signature shape only adds one resolver branch — the
+/// validation logic itself is single-source.
+fn check_against_signature(
+    args: &[CgExprId],
+    want_args: &[CgTy],
+    result: CgTy,
+    fn_id: BuiltinId,
+    claimed_ty: CgTy,
+    node_id: CgExprId,
+    ctx: &TypeCheckCtx<'_>,
+) -> Result<CgTy, TypeError> {
+    if args.len() != want_args.len() {
+        return Err(TypeError::ArityMismatch {
+            node: node_id,
+            builtin: fn_id,
+            expected: want_args.len() as u8,
+            got: args.len() as u8,
+        });
+    }
+    for (i, (arg_id, want)) in args.iter().zip(want_args.iter()).enumerate() {
+        let arg_node = ctx.arena.get(*arg_id).ok_or(TypeError::DanglingExprId {
+            node: node_id,
+            referenced: *arg_id,
+        })?;
+        let arg_ty = type_check(arg_node, *arg_id, ctx)?;
+        if arg_ty != *want {
+            return Err(TypeError::OperandMismatch {
+                node: node_id,
+                operand_index: i as u8,
+                expected: *want,
+                got: arg_ty,
+            });
+        }
+    }
+    if claimed_ty != result {
+        return Err(TypeError::ClaimedResultMismatch {
+            node: node_id,
+            expected: result,
+            got: claimed_ty,
+        });
+    }
+    Ok(result)
+}
+
 /// Type-check `expr` with `node_id` as its identity (used in error
 /// reports). Returns `Ok(ty)` if the tree is well-typed, else a
 /// `TypeError` naming the offending node + the typed mismatch.
@@ -826,6 +896,12 @@ impl<'a> TypeCheckCtx<'a> {
 /// The check is recursive: child nodes are themselves type-checked
 /// before their type is consulted. A failure deep in the tree
 /// surfaces as the deepest mismatch encountered.
+///
+/// **Arena tolerance.** If a child id resolves to `None` in the arena
+/// (a dangling reference), the checker returns
+/// [`TypeError::DanglingExprId`] rather than panicking. Callers no
+/// longer need a separate pre-pass to gate `type_check` against
+/// out-of-range ids — the typed-error form makes the API panic-free.
 pub fn type_check(
     expr: &CgExpr,
     node_id: CgExprId,
@@ -836,8 +912,14 @@ pub fn type_check(
         CgExpr::Lit(v) => Ok(v.ty()),
 
         CgExpr::Binary { op, lhs, rhs, ty } => {
-            let lhs_node = ctx.arena.get(*lhs);
-            let rhs_node = ctx.arena.get(*rhs);
+            let lhs_node = ctx.arena.get(*lhs).ok_or(TypeError::DanglingExprId {
+                node: node_id,
+                referenced: *lhs,
+            })?;
+            let rhs_node = ctx.arena.get(*rhs).ok_or(TypeError::DanglingExprId {
+                node: node_id,
+                referenced: *rhs,
+            })?;
             let lhs_ty = type_check(lhs_node, *lhs, ctx)?;
             let rhs_ty = type_check(rhs_node, *rhs, ctx)?;
             let want = op.operand_ty();
@@ -869,7 +951,10 @@ pub fn type_check(
         }
 
         CgExpr::Unary { op, arg, ty } => {
-            let arg_node = ctx.arena.get(*arg);
+            let arg_node = ctx.arena.get(*arg).ok_or(TypeError::DanglingExprId {
+                node: node_id,
+                referenced: *arg,
+            })?;
             let arg_ty = type_check(arg_node, *arg, ctx)?;
             let want = op.operand_ty();
             if arg_ty != want {
@@ -904,26 +989,7 @@ pub fn type_check(
                         got: args.len() as u8,
                     });
                 }
-                for (i, (arg_id, want)) in args.iter().zip(want_args.iter()).enumerate() {
-                    let arg_node = ctx.arena.get(*arg_id);
-                    let arg_ty = type_check(arg_node, *arg_id, ctx)?;
-                    if arg_ty != *want {
-                        return Err(TypeError::OperandMismatch {
-                            node: node_id,
-                            operand_index: i as u8,
-                            expected: *want,
-                            got: arg_ty,
-                        });
-                    }
-                }
-                if *ty != result {
-                    return Err(TypeError::ClaimedResultMismatch {
-                        node: node_id,
-                        expected: result,
-                        got: *ty,
-                    });
-                }
-                Ok(result)
+                check_against_signature(args, &want_args, result, *fn_id, *ty, node_id, ctx)
             }
             BuiltinSignature::ViewCall { view } => {
                 let resolver = ctx.view_signature.ok_or(TypeError::ViewSignatureUnresolved {
@@ -935,34 +1001,7 @@ pub fn type_check(
                         node: node_id,
                         view,
                     })?;
-                if args.len() != want_args.len() {
-                    return Err(TypeError::ArityMismatch {
-                        node: node_id,
-                        builtin: *fn_id,
-                        expected: want_args.len() as u8,
-                        got: args.len() as u8,
-                    });
-                }
-                for (i, (arg_id, want)) in args.iter().zip(want_args.iter()).enumerate() {
-                    let arg_node = ctx.arena.get(*arg_id);
-                    let arg_ty = type_check(arg_node, *arg_id, ctx)?;
-                    if arg_ty != *want {
-                        return Err(TypeError::OperandMismatch {
-                            node: node_id,
-                            operand_index: i as u8,
-                            expected: *want,
-                            got: arg_ty,
-                        });
-                    }
-                }
-                if *ty != result {
-                    return Err(TypeError::ClaimedResultMismatch {
-                        node: node_id,
-                        expected: result,
-                        got: *ty,
-                    });
-                }
-                Ok(result)
+                check_against_signature(args, &want_args, result, *fn_id, *ty, node_id, ctx)
             }
         },
 
@@ -985,7 +1024,10 @@ pub fn type_check(
             else_,
             ty,
         } => {
-            let cond_node = ctx.arena.get(*cond);
+            let cond_node = ctx.arena.get(*cond).ok_or(TypeError::DanglingExprId {
+                node: node_id,
+                referenced: *cond,
+            })?;
             let cond_ty = type_check(cond_node, *cond, ctx)?;
             if cond_ty != CgTy::Bool {
                 return Err(TypeError::SelectCondNotBool {
@@ -993,9 +1035,15 @@ pub fn type_check(
                     got: cond_ty,
                 });
             }
-            let then_node = ctx.arena.get(*then);
+            let then_node = ctx.arena.get(*then).ok_or(TypeError::DanglingExprId {
+                node: node_id,
+                referenced: *then,
+            })?;
             let then_ty = type_check(then_node, *then, ctx)?;
-            let else_node = ctx.arena.get(*else_);
+            let else_node = ctx.arena.get(*else_).ok_or(TypeError::DanglingExprId {
+                node: node_id,
+                referenced: *else_,
+            })?;
             let else_ty = type_check(else_node, *else_, ctx)?;
             if then_ty != else_ty {
                 return Err(TypeError::SelectArmsMismatch {
