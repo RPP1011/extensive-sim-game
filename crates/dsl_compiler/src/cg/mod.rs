@@ -25,6 +25,7 @@ pub mod expr;
 pub mod op;
 pub mod program;
 pub mod stmt;
+pub mod well_formed;
 
 pub use data_handle::*;
 pub use dispatch::*;
@@ -32,3 +33,4 @@ pub use expr::*;
 pub use op::*;
 pub use program::*;
 pub use stmt::*;
+pub use well_formed::*;
