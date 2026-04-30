@@ -350,24 +350,58 @@ fn numeric_ty_token(t: NumericTy) -> &'static str {
 // Literal emission
 // ---------------------------------------------------------------------------
 
-/// Render a [`LitValue`] as a WGSL constant fragment. `f32` formats
-/// route through `{value:?}` (round-trip-safe debug form) so the
-/// output is determined entirely by the input's bit pattern.
+/// Render an `f32` as a WGSL float literal, matching the legacy
+/// `emit_view::format_f32_lit` convention so Phase-5 byte-for-byte
+/// parity with the legacy emit path holds.
+///
+/// Convention (ported locally — does **not** depend on `emit_view.rs`,
+/// which is slated for retirement in Task 5.2):
+/// 1. Format via `Display` (`{v}`) — gives `"1"` for `1.0`, `"1.5"` for
+///    `1.5`, `"0.00001"` for `1e-5`, `"1000000000000000000000000000000"`
+///    for `1e30`, and the fully-expanded decimal for sub-normals.
+/// 2. If the result already contains `.`, `e`, or `E`, return as-is.
+/// 3. Otherwise append `".0"` so WGSL parses the literal as `f32`,
+///    not an abstract integer.
+///
+/// # WGSL syntax notes
+///
+/// - Integer-valued: `1.0` → `"1.0"`. Round-trip safe.
+/// - Sub-unit: `0.5` → `"0.5"`, `-0.5` → `"-0.5"`. Both retain the dot.
+/// - Very large: `1e30` → `"1000…0.0"` — a 31-digit literal. Legal WGSL,
+///   but ugly; well-formed sim programs do not use literals this large.
+/// - Very small: `1e-30` → `"0.000…01"` — a 32-digit literal. Same caveat.
+/// - `f32::MIN_POSITIVE` (`~1.175e-38`) — the fully-expanded decimal is
+///   45+ characters; well-formed sim programs do not embed it as a literal.
+fn format_f32_lit(v: f32) -> String {
+    let s = format!("{v}");
+    if s.contains('.') || s.contains('e') || s.contains('E') {
+        s
+    } else {
+        format!("{s}.0")
+    }
+}
+
+/// Render a [`LitValue`] as a WGSL constant fragment. `f32` and the
+/// three components of `Vec3F32` route through [`format_f32_lit`] so
+/// output is byte-identical to the legacy emit path.
 fn lower_literal(lit: &LitValue) -> String {
     match lit {
         LitValue::Bool(true) => "true".to_string(),
         LitValue::Bool(false) => "false".to_string(),
         LitValue::U32(v) => format!("{}u", v),
         LitValue::I32(v) => format!("{}i", v),
-        // `{:?}` produces "1.0" / "1.5" / "1e30" — round-trip-safe and
-        // deterministic (no locale, no formatter state).
-        LitValue::F32(v) => format!("{:?}", v),
+        LitValue::F32(v) => format_f32_lit(*v),
         // Tick is u32 at the WGSL level — see `CgTy::Tick` doc.
         LitValue::Tick(v) => format!("{}u", v),
         // AgentId is a u32 slot index at the WGSL level.
         LitValue::AgentId(v) => format!("{}u", v),
         LitValue::Vec3F32 { x, y, z } => {
-            format!("vec3<f32>({:?}, {:?}, {:?})", x, y, z)
+            format!(
+                "vec3<f32>({}, {}, {})",
+                format_f32_lit(*x),
+                format_f32_lit(*y),
+                format_f32_lit(*z)
+            )
         }
     }
 }
@@ -458,9 +492,12 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
 // Statement emission
 // ---------------------------------------------------------------------------
 
-/// Indent every line of `s` by `indent` two-space levels.
+/// Indent every line of `s` by `indent` four-space levels — matches
+/// the convention used throughout the legacy emit path
+/// (`emit_view_wgsl.rs`, etc.) so Phase-5 parity holds without
+/// whitespace drift.
 fn indent_block(s: &str, indent: usize) -> String {
-    let prefix: String = "  ".repeat(indent);
+    let prefix: String = "    ".repeat(indent);
     s.lines()
         .map(|line| {
             if line.is_empty() {
@@ -548,8 +585,23 @@ fn lower_emit_to_wgsl(
     Ok(format!("emit_event_{}({});", event_id, parts.join(", ")))
 }
 
-/// Lower a [`CgStmt::Match`] as an `if`-chain. WGSL's `switch` would
-/// be a future-tense option; today the chain is the honest placeholder.
+/// Lower a [`CgStmt::Match`] as a scrutinee-bound `if`-chain. WGSL's
+/// `switch` would be a future-tense option; today the chain is the
+/// honest placeholder.
+///
+/// The scrutinee is bound to a local variable `_scrut_<N>` *before* the
+/// chain so non-identifier scrutinees (e.g. a `Binary { ... }` node
+/// lowered to `(x + 1)`) produce valid WGSL — `((x + 1)_tag)` is
+/// nonsense, `_scrut_<N>.tag` is fine. `<N>` is the scrutinee's
+/// [`CgExprId`] (the only id this function has access to — `CgStmtId` /
+/// `CgStmtListId` are not threaded through). Since each `Match`
+/// statement has a distinct scrutinee expression node in the arena, the
+/// id is unique-per-match-site within a program.
+///
+/// Arm-binding locals are still emitted as a comment for now, but the
+/// comment references `_scrut_<N>.<field>` so a future Task 4.x can
+/// flip the comment into a real `let local_<N>: <ty> = _scrut_<N>.<field>;`
+/// without changing the surrounding shape.
 fn lower_match_to_wgsl(
     scrutinee: CgExprId,
     arms: &[CgMatchArm],
@@ -562,7 +614,8 @@ fn lower_match_to_wgsl(
         // programs.)
         return Ok(format!("// match {} {{ /* no arms */ }}", s));
     }
-    let mut out = String::new();
+    let scrut_name = format!("_scrut_{}", scrutinee.0);
+    let mut out = format!("let {} = {};\n", scrut_name, s);
     for (i, arm) in arms.iter().enumerate() {
         let body = lower_cg_stmt_list_to_wgsl(arm.body, ctx)?;
         let bindings_comment = if arm.bindings.is_empty() {
@@ -572,23 +625,28 @@ fn lower_match_to_wgsl(
                 .bindings
                 .iter()
                 .map(|b: &MatchArmBinding| {
-                    format!("{}=local_{}", b.field_name, b.local.0)
+                    format!(
+                        "{name}=local_{lid} from {scrut}.{name}",
+                        name = b.field_name,
+                        lid = b.local.0,
+                        scrut = scrut_name,
+                    )
                 })
                 .collect();
             format!(" /* bindings: {} */", pairs.join(", "))
         };
         if i == 0 {
             out.push_str(&format!(
-                "if (({}_tag) == VARIANT_{}u) {{{}\n{}\n}}",
-                s,
+                "if ({}.tag == VARIANT_{}u) {{{}\n{}\n}}",
+                scrut_name,
                 arm.variant.0,
                 bindings_comment,
                 indent_block(&body, 1)
             ));
         } else {
             out.push_str(&format!(
-                " else if (({}_tag) == VARIANT_{}u) {{{}\n{}\n}}",
-                s,
+                " else if ({}.tag == VARIANT_{}u) {{{}\n{}\n}}",
+                scrut_name,
                 arm.variant.0,
                 bindings_comment,
                 indent_block(&body, 1)
@@ -1322,11 +1380,11 @@ mod tests {
         let with_else = lower_cg_stmt_to_wgsl(if_with_else, &ctx).unwrap();
         assert_eq!(
             with_else,
-            "if (true) {\n  agent_self_hp = 1.0;\n} else {\n  agent_self_hp = 0.0;\n}"
+            "if (true) {\n    agent_self_hp = 1.0;\n} else {\n    agent_self_hp = 0.0;\n}"
         );
 
         let no_else = lower_cg_stmt_to_wgsl(if_no_else, &ctx).unwrap();
-        assert_eq!(no_else, "if (true) {\n  agent_self_hp = 1.0;\n}");
+        assert_eq!(no_else, "if (true) {\n    agent_self_hp = 1.0;\n}");
     }
 
     #[test]
@@ -1388,10 +1446,71 @@ mod tests {
         );
         let ctx = EmitCtx::structural(&prog);
         let out = lower_cg_stmt_to_wgsl(match_stmt, &ctx).unwrap();
-        let expected = "if ((agent_self_hp_tag) == VARIANT_0u) { /* bindings: amount=local_0 */\n\
-                        \x20\x20agent_self_hp = 1.0;\n\
-                        } else if ((agent_self_hp_tag) == VARIANT_1u) {\n\
-                        \x20\x20agent_self_hp = 0.0;\n\
+        // Scrutinee `hp` has CgExprId(0) → binding name `_scrut_0`.
+        let expected = "let _scrut_0 = agent_self_hp;\n\
+                        if (_scrut_0.tag == VARIANT_0u) { /* bindings: amount=local_0 from _scrut_0.amount */\n\
+                        \x20\x20\x20\x20agent_self_hp = 1.0;\n\
+                        } else if (_scrut_0.tag == VARIANT_1u) {\n\
+                        \x20\x20\x20\x20agent_self_hp = 0.0;\n\
+                        }";
+        assert_eq!(out, expected);
+    }
+
+    /// Non-identifier scrutinee — verify the `let _scrut_<N> = (...);`
+    /// binding makes the emission valid even when the scrutinee lowers
+    /// to a parenthesised expression like `(agent_self_hp + 1.0)`.
+    /// Without the binding, the old shape produced
+    /// `((agent_self_hp + 1.0)_tag) == ...` which is invalid WGSL.
+    #[test]
+    fn lower_match_with_non_identifier_scrutinee_binds_local() {
+        let mut prog = empty_prog();
+        let hp = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::Self_,
+            }),
+        );
+        let one = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(1.0)));
+        // Scrutinee is `hp + 1.0` — lowers to `(agent_self_hp + 1.0)`.
+        let scrutinee_expr = push_expr(
+            &mut prog,
+            CgExpr::Binary {
+                op: BinaryOp::AddF32,
+                lhs: hp,
+                rhs: one,
+                ty: CgTy::F32,
+            },
+        );
+        let zero = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(0.0)));
+        let arm_assign = push_stmt(
+            &mut prog,
+            CgStmt::Assign {
+                target: DataHandle::AgentField {
+                    field: AgentFieldId::Hp,
+                    target: AgentRef::Self_,
+                },
+                value: zero,
+            },
+        );
+        let arm_body = push_list(&mut prog, CgStmtList::new(vec![arm_assign]));
+        let match_stmt = push_stmt(
+            &mut prog,
+            CgStmt::Match {
+                scrutinee: scrutinee_expr,
+                arms: vec![CgMatchArm {
+                    variant: VariantId(0),
+                    bindings: vec![],
+                    body: arm_body,
+                }],
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let out = lower_cg_stmt_to_wgsl(match_stmt, &ctx).unwrap();
+        // scrutinee_expr is the third pushed expression → CgExprId(2).
+        let expected = "let _scrut_2 = (agent_self_hp + 1.0);\n\
+                        if (_scrut_2.tag == VARIANT_0u) {\n\
+                        \x20\x20\x20\x20agent_self_hp = 0.0;\n\
                         }";
         assert_eq!(out, expected);
     }
@@ -1492,23 +1611,6 @@ mod tests {
                 target: AgentRef::Self_,
             }),
         );
-        let hp = push_expr(
-            &mut prog,
-            CgExpr::Read(DataHandle::AgentField {
-                field: AgentFieldId::Hp,
-                target: AgentRef::Self_,
-            }),
-        );
-        let three = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(3.0)));
-        let _scaled = push_expr(
-            &mut prog,
-            CgExpr::Binary {
-                op: BinaryOp::MulF32,
-                lhs: hp,
-                rhs: three,
-                ty: CgTy::F32,
-            },
-        );
         let normalize = push_expr(
             &mut prog,
             CgExpr::Unary {
@@ -1522,6 +1624,37 @@ mod tests {
         for _ in 0..32 {
             assert_eq!(lower_cg_expr_to_wgsl(normalize, &ctx).unwrap(), first);
         }
+    }
+
+    /// Edge-case coverage for `format_f32_lit` — pin the legacy
+    /// (`emit_view::format_f32_lit`) convention's output for the values
+    /// most likely to surface differences with `{:?}` / `{}` alone.
+    /// A regression here breaks Phase-5 byte-for-byte parity.
+    #[test]
+    fn format_f32_lit_edge_cases() {
+        // Integer-valued: Display gives "1", we append ".0".
+        assert_eq!(format_f32_lit(1.0), "1.0");
+        assert_eq!(format_f32_lit(0.0), "0.0");
+        assert_eq!(format_f32_lit(-1.0), "-1.0");
+        assert_eq!(format_f32_lit(100.0), "100.0");
+        // Sub-unit: Display already contains '.', return as-is.
+        assert_eq!(format_f32_lit(0.5), "0.5");
+        assert_eq!(format_f32_lit(-0.5), "-0.5");
+        assert_eq!(format_f32_lit(1.5), "1.5");
+        // Very large: Display fully expands, no '.' / 'e', append ".0".
+        // Well-formed sim programs do not embed literals this large, but
+        // the lowering must not panic on them.
+        assert_eq!(
+            format_f32_lit(1e30),
+            "1000000000000000000000000000000.0"
+        );
+        // Very small (denormal-adjacent): Display contains '.', return
+        // as-is — the literal's enormous length is a known caveat for
+        // pathological inputs, not for well-formed programs.
+        assert!(format_f32_lit(1e-30).contains('.'));
+        assert!(format_f32_lit(1e-5).starts_with("0."));
+        // f32::MIN_POSITIVE — sub-normal-adjacent. Same caveat.
+        assert!(format_f32_lit(f32::MIN_POSITIVE).contains('.'));
     }
 
     // ---- 11. Error cases ----
