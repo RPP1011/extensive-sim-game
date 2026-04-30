@@ -36,7 +36,7 @@ use std::fmt;
 use dsl_ast::ast::{BinOp, Span};
 use dsl_ast::ir::{Builtin, NamespaceId, ViewRef as AstViewRef};
 
-use crate::cg::data_handle::MaskId;
+use crate::cg::data_handle::{MaskId, ViewId, ViewStorageSlot};
 use crate::cg::expr::{CgTy, TypeError};
 use crate::cg::op::SpatialQueryKind;
 use crate::cg::program::BuilderError;
@@ -324,6 +324,64 @@ pub enum LoweringError {
         kind: SpatialQueryKind,
         span: Span,
     },
+
+    // -- View pass (Task 2.3) --------------------------------------------
+
+    /// A statement form inside a view's fold-handler body that the CG
+    /// statement language does not represent. Reasonable cases (a `Let`
+    /// binding, a bare `Expr` statement, etc.) lower fine in later
+    /// tasks; until then they surface here as a typed deferral so the
+    /// caller knows precisely which AST node was rejected and where.
+    ///
+    /// `ast_label` is a closed-set tag drawn from `IrStmt`'s
+    /// discriminants (`"Let"`, `"Expr"`, `"For"`, `"Match"`,
+    /// `"BeliefObserve"`, `"Emit"`); kept as `&'static str` so the
+    /// payload stays allocation-free.
+    UnsupportedViewFoldStmt {
+        view: ViewId,
+        ast_label: &'static str,
+        span: Span,
+    },
+
+    /// The driver supplied a per-handler resolution list whose length
+    /// does not match the view's fold-handler count. Catches a driver
+    /// invariant drift — every fold handler must have its
+    /// `(EventKindId, EventRingId)` resolved before lowering can run.
+    ViewHandlerResolutionLengthMismatch {
+        view: ViewId,
+        expected: usize,
+        got: usize,
+        span: Span,
+    },
+
+    /// A fold handler's `Assign` (lowered from a `self += <expr>`-style
+    /// statement) writes to a [`ViewStorageSlot`] the view's storage
+    /// hint does not expose. The mapping `StorageHint → valid slots` is
+    /// documented on [`ViewStorageSlot`]; an out-of-bounds slot is a
+    /// lowering defect, surfaced typed rather than silently producing a
+    /// broken op.
+    InvalidViewStorageSlot {
+        view: ViewId,
+        hint_label: &'static str,
+        requested_slot: ViewStorageSlot,
+        span: Span,
+    },
+
+    /// A `@lazy` view declared with at least one `@materialized`-only
+    /// trait (storage hint, decay annotation) — or vice versa. The
+    /// resolver normally rejects this; lowering surfaces the typed
+    /// variant so a driver-supplied `IrView` that bypassed resolve
+    /// (tests, snapshot fixtures) still lights up structurally.
+    ///
+    /// `kind_label` ("lazy" | "materialized") names which view-kind
+    /// surface was claimed; `body_label` ("expr" | "fold") names what
+    /// body shape was found.
+    ViewKindBodyMismatch {
+        view: ViewId,
+        kind_label: &'static str,
+        body_label: &'static str,
+        span: Span,
+    },
 }
 
 impl fmt::Display for LoweringError {
@@ -515,6 +573,47 @@ impl fmt::Display for LoweringError {
                 f,
                 "mask#{} at {}..{} has no `from` clause but the driver supplied SpatialQueryKind::{}",
                 mask.0, span.start, span.end, kind
+            ),
+
+            // -- View pass --------------------------------------------
+            LoweringError::UnsupportedViewFoldStmt {
+                view,
+                ast_label,
+                span,
+            } => write!(
+                f,
+                "view#{} fold body at {}..{} contains AST statement `{}` which has no CG-statement equivalent yet",
+                view.0, span.start, span.end, ast_label
+            ),
+            LoweringError::ViewHandlerResolutionLengthMismatch {
+                view,
+                expected,
+                got,
+                span,
+            } => write!(
+                f,
+                "view#{} at {}..{} has {} fold handler(s) but the driver supplied {} (EventKindId, EventRingId) entries",
+                view.0, span.start, span.end, expected, got
+            ),
+            LoweringError::InvalidViewStorageSlot {
+                view,
+                hint_label,
+                requested_slot,
+                span,
+            } => write!(
+                f,
+                "view#{} fold body at {}..{} writes to {} slot which is not exposed by the `{}` storage hint",
+                view.0, span.start, span.end, requested_slot, hint_label
+            ),
+            LoweringError::ViewKindBodyMismatch {
+                view,
+                kind_label,
+                body_label,
+                span,
+            } => write!(
+                f,
+                "view#{} at {}..{} declared as `@{}` but has a `{}` body — `@lazy` views require an expression body and `@materialized` views require a fold body",
+                view.0, span.start, span.end, kind_label, body_label
             ),
         }
     }
