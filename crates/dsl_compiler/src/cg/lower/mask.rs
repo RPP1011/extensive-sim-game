@@ -3,33 +3,30 @@
 //! Phase 2, Task 2.2 of the Compute-Graph IR pipeline (see
 //! `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`). Each
 //! `mask <Name>` decl in the resolved DSL IR becomes one
-//! [`ComputeOp`] whose [`ComputeOpKind`] is
+//! [`crate::cg::op::ComputeOp`] whose [`ComputeOpKind`] is
 //! [`ComputeOpKind::MaskPredicate`].
 //!
 //! The pass:
 //!
-//! 1. Lowers the mask predicate body via [`super::expr::lower_expr`],
+//! 1. Resolves the dispatch shape from the `(candidate_source,
+//!    spatial_query_kind, head.shape)` triple. Mismatches surface as
+//!    typed [`LoweringError`] variants (see step list below).
+//! 2. Lowers the mask predicate body via [`super::expr::lower_expr`],
 //!    reusing the expression-level lowering wholesale.
-//! 2. Type-checks the produced node — a mask predicate must be `Bool`.
-//! 3. Resolves the `from <expr>` clause:
-//!    - Absent → [`DispatchShape::PerAgent`].
-//!    - `query.nearby_agents(...)` shape with a caller-supplied
-//!      [`SpatialQueryKind`] → [`DispatchShape::PerPair`] with
-//!      [`PerPairSource::SpatialQuery`].
-//!    - Any other shape → typed [`MaskLoweringError::UnsupportedFromClause`].
-//! 4. Builds the op via [`CgProgramBuilder::add_op`] (which
-//!    auto-derives reads/writes from `kind`).
+//! 3. Type-checks the produced node — a mask predicate must be `Bool`.
+//! 4. Builds the op via [`crate::cg::program::CgProgramBuilder::add_op`]
+//!    (which auto-derives reads/writes from `kind`).
 //! 5. Interns the mask name on the builder for pretty-printing.
 //!
-//! # Why a separate `MaskLoweringError`
+//! # Typed-error surface
 //!
-//! Task 2.1's [`super::expr::LoweringError`] is the typed defect set
-//! for *expression*-level lowering — it has no vocabulary for "mask
-//! predicate produced a non-Bool" or "from clause shape unrecognized".
-//! Rather than mutate the expression-level enum to absorb mask-shaped
-//! variants, this pass returns its own [`MaskLoweringError`] which
-//! wraps an `expr::LoweringError` for the predicate-body case and adds
-//! mask-level variants alongside.
+//! All defects surface as variants on the unified
+//! [`super::error::LoweringError`]. Mask-specific variants carry the
+//! `Mask*` prefix (`MaskPredicateNotBool`, `UnsupportedMaskFromClause`,
+//! `UnsupportedMaskHeadShape`, …) per the convention documented on
+//! `error.rs`. Predicate-body failures returned by
+//! [`super::expr::lower_expr`] propagate unchanged via `?` — there is no
+//! wrapper variant.
 //!
 //! # Spatial query resolution
 //!
@@ -43,135 +40,16 @@
 //! validates that the AST shape is recognized and threads the kind
 //! into the dispatch shape.
 
-use std::fmt;
-
 use dsl_ast::ast::Span;
-use dsl_ast::ir::{IrExpr, IrExprNode, MaskIR, NamespaceId};
+use dsl_ast::ir::{IrActionHeadShape, IrExpr, IrExprNode, MaskIR, NamespaceId};
 
 use crate::cg::data_handle::{CgExprId, MaskId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
 use crate::cg::expr::{type_check, CgTy, TypeCheckCtx, TypeError};
 use crate::cg::op::{ComputeOpKind, OpId, SpatialQueryKind};
-use crate::cg::program::BuilderError;
 
-use super::expr::{lower_expr, LoweringCtx, LoweringError};
-
-// ---------------------------------------------------------------------------
-// MaskLoweringError — typed defects the mask lowering can report.
-// ---------------------------------------------------------------------------
-
-/// Typed defect surfaced by [`lower_mask`].
-///
-/// Keeps the mask-level concerns (predicate-not-Bool, from-clause
-/// shape, missing/unexpected spatial-query kind) separate from the
-/// expression-level [`LoweringError`] vocabulary. The
-/// [`MaskLoweringError::Predicate`] variant wraps an inner
-/// `LoweringError` so failures inside the predicate body propagate
-/// without losing typed information.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MaskLoweringError {
-    /// The mask's predicate body failed to lower at the expression
-    /// level. The inner [`LoweringError`] names the offending sub-node.
-    Predicate(LoweringError),
-
-    /// The predicate body type-checked to a non-`Bool` type. Mask
-    /// predicates write into a per-agent bitmap; the predicate value
-    /// must be `Bool` so each tick's value is a single bit. Distinct
-    /// from [`LoweringError::IllTypedExpression`] because the constraint
-    /// here is mask-level (the bitmap shape), not operator-level.
-    PredicateNotBool {
-        mask: MaskId,
-        got: CgTy,
-        span: Span,
-    },
-
-    /// A type-check of the predicate node itself (after lowering) failed.
-    /// Surfaces the underlying [`TypeError`] without panicking; should
-    /// not normally fire because [`lower_expr`] already type-checks every
-    /// node it constructs.
-    PredicateTypeCheckFailure {
-        mask: MaskId,
-        error: TypeError,
-        span: Span,
-    },
-
-    /// The mask's `from <expr>` clause is a shape mask lowering does
-    /// not recognize. v1 supports only
-    /// `query.nearby_agents(<pos>, <radius>)`; any other shape (a bare
-    /// view call, a different namespace method, a literal) surfaces
-    /// here. Span points at the `from`-clause expression.
-    UnsupportedFromClause {
-        mask: MaskId,
-        span: Span,
-    },
-
-    /// The mask has a `from` clause but the caller supplied no
-    /// [`SpatialQueryKind`]. The driver (Task 2.6 / 2.8) is responsible
-    /// for resolving each from-bearing mask to a kin / engagement /
-    /// future kind; a missing resolution is a driver defect, surfaced
-    /// here as a typed error rather than a panic.
-    MissingSpatialQueryKind {
-        mask: MaskId,
-        span: Span,
-    },
-
-    /// The caller supplied a [`SpatialQueryKind`] but the mask has no
-    /// `from` clause. Catches the inverse bug (driver pre-allocated a
-    /// kind for a self-only mask).
-    UnexpectedSpatialQueryKind {
-        mask: MaskId,
-        kind: SpatialQueryKind,
-        span: Span,
-    },
-
-    /// The builder rejected `add_op` for the constructed mask op. Wraps
-    /// any [`BuilderError`] (dangling expr id, duplicate intern entry,
-    /// …) so the typed reason survives.
-    BuilderRejected {
-        error: BuilderError,
-        span: Span,
-    },
-}
-
-impl fmt::Display for MaskLoweringError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MaskLoweringError::Predicate(inner) => write!(f, "mask predicate: {}", inner),
-            MaskLoweringError::PredicateNotBool { mask, got, span } => write!(
-                f,
-                "mask#{} predicate at {}..{} produced {} — must be Bool",
-                mask.0, span.start, span.end, got
-            ),
-            MaskLoweringError::PredicateTypeCheckFailure { mask, error, span } => write!(
-                f,
-                "mask#{} predicate at {}..{} failed type-check — {}",
-                mask.0, span.start, span.end, error
-            ),
-            MaskLoweringError::UnsupportedFromClause { mask, span } => write!(
-                f,
-                "mask#{} `from` clause at {}..{} has an unsupported shape — only `query.nearby_agents(<pos>, <radius>)` is recognised",
-                mask.0, span.start, span.end
-            ),
-            MaskLoweringError::MissingSpatialQueryKind { mask, span } => write!(
-                f,
-                "mask#{} at {}..{} has a `from` clause but no SpatialQueryKind was supplied by the driver",
-                mask.0, span.start, span.end
-            ),
-            MaskLoweringError::UnexpectedSpatialQueryKind { mask, kind, span } => write!(
-                f,
-                "mask#{} at {}..{} has no `from` clause but the driver supplied SpatialQueryKind::{}",
-                mask.0, span.start, span.end, kind
-            ),
-            MaskLoweringError::BuilderRejected { error, span } => write!(
-                f,
-                "mask op at {}..{} rejected by builder — {}",
-                span.start, span.end, error
-            ),
-        }
-    }
-}
-
-impl std::error::Error for MaskLoweringError {}
+use super::error::LoweringError;
+use super::expr::{lower_expr, LoweringCtx};
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -189,7 +67,7 @@ impl std::error::Error for MaskLoweringError {}
 ///   clause AND the driver has resolved the candidate source to a
 ///   spatial query. The lowering does not invent a default — a missing
 ///   resolution surfaces as
-///   [`MaskLoweringError::MissingSpatialQueryKind`].
+///   [`LoweringError::MissingSpatialQueryKind`].
 /// - `ir`: the resolved AST mask. Its `head.name` is interned on the
 ///   builder (idempotent per id+name); its `predicate` is lowered via
 ///   [`lower_expr`]; its optional `candidate_source` is recognised in
@@ -204,10 +82,11 @@ impl std::error::Error for MaskLoweringError {}
 ///
 /// # Errors
 ///
-/// See [`MaskLoweringError`] for the closed defect set. Predicate-body
-/// failures wrap the underlying [`LoweringError`]; mask-shape concerns
-/// (non-Bool predicate, from-clause shape, spatial-query resolution
-/// mismatches, builder rejections) surface as their own variants.
+/// See [`LoweringError`] for the closed defect set. Predicate-body
+/// failures returned by [`lower_expr`] propagate unchanged; mask-shape
+/// concerns (non-Bool predicate, from-clause shape, head-shape gating,
+/// spatial-query resolution mismatches, builder rejections) surface as
+/// the corresponding `Mask*` / construct-shared variants.
 ///
 /// # Side effects
 ///
@@ -216,21 +95,54 @@ impl std::error::Error for MaskLoweringError {}
 /// any partial sub-tree pushes inside `lower_expr` are left as orphans
 /// in the arena (see `lower_expr`'s "Orphan behavior" note); no op is
 /// added.
+///
+/// # Limitations
+///
+/// Today's expression lowering (Task 2.1) does not yet bind `target` as
+/// a local in pair-bound mask predicates. Masks like
+/// `MoveToward(target)` and `Attack(target)`, whose predicates
+/// reference `target.alive` or `target.pos`, surface as
+/// [`LoweringError::UnsupportedLocalBinding`]. The `target` binding
+/// lands in the driver task (2.6 spatial / 2.7 plumbing / 2.8
+/// end-to-end driver) which will extend the expression lowering's
+/// [`LoweringCtx`] to carry the per-pair candidate context.
+///
+/// Likewise, parametric heads without an explicit `from` clause (e.g.,
+/// `mask Cast(ability: AbilityId)` from `assets/sim/masks.sim`) are
+/// rejected with [`LoweringError::UnsupportedMaskHeadShape`] until
+/// Task 2.6 adds the matching [`PerPairSource`] variant
+/// (e.g., `AbilityCatalog`).
 pub fn lower_mask(
     mask_id: MaskId,
     spatial_query_kind: Option<SpatialQueryKind>,
     ir: &MaskIR,
     ctx: &mut LoweringCtx<'_>,
-) -> Result<OpId, MaskLoweringError> {
-    // Step 1: resolve the dispatch shape from the (from-clause,
-    // spatial-query-kind) pairing. Done first because a mismatched pair
-    // is a hard error that should not produce a half-built program.
+) -> Result<OpId, LoweringError> {
+    // Step 1a: gate parametric heads (`Positional` / `Named`) without a
+    // `from` clause. See `LoweringError::UnsupportedMaskHeadShape`'s
+    // doc comment for the rationale; Task 2.6 (spatial query lowering)
+    // is the harmonization point that will add the matching
+    // `PerPairSource::AbilityCatalog` (or similar) variant.
+    if let Some(head_label) = parametric_head_label(&ir.head.shape) {
+        if ir.candidate_source.is_none() {
+            return Err(LoweringError::UnsupportedMaskHeadShape {
+                mask: mask_id,
+                head_label,
+                span: ir.head.span,
+            });
+        }
+    }
+
+    // Step 1b: resolve the dispatch shape from the (from-clause,
+    // spatial-query-kind) pairing. Done before lowering the predicate
+    // so a mismatched pair is a hard error that does not produce a
+    // half-built program.
     let shape = resolve_dispatch_shape(mask_id, spatial_query_kind, ir)?;
 
     // Step 2: lower the predicate body. Reuses the expression-level
     // lowering — the predicate is just a `IrExprNode` whose value
     // must be `Bool`.
-    let predicate_id = lower_expr(&ir.predicate, ctx).map_err(MaskLoweringError::Predicate)?;
+    let predicate_id = lower_expr(&ir.predicate, ctx)?;
 
     // Step 3: confirm the predicate type-checks to `Bool`. `lower_expr`
     // already type-checks the node it pushes, but its check is
@@ -238,7 +150,7 @@ pub fn lower_mask(
     // mask-level (the bitmap shape requires Bool).
     let predicate_ty = predicate_node_ty(ctx, predicate_id, mask_id, ir.predicate.span)?;
     if predicate_ty != CgTy::Bool {
-        return Err(MaskLoweringError::PredicateNotBool {
+        return Err(LoweringError::MaskPredicateNotBool {
             mask: mask_id,
             got: predicate_ty,
             span: ir.predicate.span,
@@ -255,7 +167,7 @@ pub fn lower_mask(
     let op_id = ctx
         .builder
         .add_op(kind, shape, ir.span)
-        .map_err(|e| MaskLoweringError::BuilderRejected {
+        .map_err(|e| LoweringError::BuilderRejected {
             error: e,
             span: ir.span,
         })?;
@@ -265,7 +177,7 @@ pub fn lower_mask(
     // builder error.
     ctx.builder
         .intern_mask_name(mask_id, ir.head.name.clone())
-        .map_err(|e| MaskLoweringError::BuilderRejected {
+        .map_err(|e| LoweringError::BuilderRejected {
             error: e,
             span: ir.head.span,
         })?;
@@ -277,6 +189,22 @@ pub fn lower_mask(
 // Per-step helpers
 // ---------------------------------------------------------------------------
 
+/// Return a `&'static str` tag for parametric head shapes that today's
+/// dispatch surface cannot represent without a `from` clause. Returns
+/// `None` for [`IrActionHeadShape::None`] (the self-only mask shape that
+/// routes cleanly to [`DispatchShape::PerAgent`]).
+///
+/// Closed-set tags (`"positional"` | `"named"`) keep the typed-error
+/// payload free of `String` allocations; the gate is a `&'static str`
+/// match in [`LoweringError::UnsupportedMaskHeadShape`].
+fn parametric_head_label(shape: &IrActionHeadShape) -> Option<&'static str> {
+    match shape {
+        IrActionHeadShape::None => None,
+        IrActionHeadShape::Positional(_) => Some("positional"),
+        IrActionHeadShape::Named(_) => Some("named"),
+    }
+}
+
 /// Resolve `(candidate_source, spatial_query_kind)` to a
 /// [`DispatchShape`]. Refuses to invent defaults: a `from` clause
 /// without a kind, or a kind without a `from` clause, both surface as
@@ -285,7 +213,7 @@ fn resolve_dispatch_shape(
     mask_id: MaskId,
     spatial_query_kind: Option<SpatialQueryKind>,
     ir: &MaskIR,
-) -> Result<DispatchShape, MaskLoweringError> {
+) -> Result<DispatchShape, LoweringError> {
     match (&ir.candidate_source, spatial_query_kind) {
         // Self-only mask — no `from` clause, no spatial query.
         (None, None) => Ok(DispatchShape::PerAgent),
@@ -304,14 +232,14 @@ fn resolve_dispatch_shape(
         // mask. Surface as typed error rather than fall back to
         // PerAgent (which would silently skip the candidate
         // enumerator).
-        (Some(source), None) => Err(MaskLoweringError::MissingSpatialQueryKind {
+        (Some(source), None) => Err(LoweringError::MissingSpatialQueryKind {
             mask: mask_id,
             span: source.span,
         }),
 
         // Inverse bug: caller pre-allocated a spatial query for a
         // self-only mask. Catches driver invariant drift.
-        (None, Some(kind)) => Err(MaskLoweringError::UnexpectedSpatialQueryKind {
+        (None, Some(kind)) => Err(LoweringError::UnexpectedSpatialQueryKind {
             mask: mask_id,
             kind,
             span: ir.span,
@@ -328,14 +256,14 @@ fn resolve_dispatch_shape(
 fn validate_from_clause_shape(
     mask_id: MaskId,
     source: &IrExprNode,
-) -> Result<(), MaskLoweringError> {
+) -> Result<(), LoweringError> {
     match &source.kind {
         IrExpr::NamespaceCall { ns, method, args }
             if *ns == NamespaceId::Query && method == "nearby_agents" && args.len() == 2 =>
         {
             Ok(())
         }
-        _ => Err(MaskLoweringError::UnsupportedFromClause {
+        _ => Err(LoweringError::UnsupportedMaskFromClause {
             mask: mask_id,
             span: source.span,
         }),
@@ -350,12 +278,12 @@ fn predicate_node_ty(
     predicate_id: CgExprId,
     mask_id: MaskId,
     span: Span,
-) -> Result<CgTy, MaskLoweringError> {
+) -> Result<CgTy, LoweringError> {
     let prog = ctx.builder.program();
     let node = prog
         .exprs
         .get(predicate_id.0 as usize)
-        .ok_or(MaskLoweringError::PredicateTypeCheckFailure {
+        .ok_or(LoweringError::MaskPredicateTypeCheckFailure {
             mask: mask_id,
             error: TypeError::DanglingExprId {
                 node: predicate_id,
@@ -371,7 +299,7 @@ fn predicate_node_ty(
         };
     let tc_ctx = TypeCheckCtx::with_view_signature(&prog.exprs, resolver);
     type_check(node, predicate_id, &tc_ctx).map_err(|e| {
-        MaskLoweringError::PredicateTypeCheckFailure {
+        LoweringError::MaskPredicateTypeCheckFailure {
             mask: mask_id,
             error: e,
             span,
@@ -389,7 +317,7 @@ mod tests {
 
     use dsl_ast::ast::{BinOp, Span as AstSpan};
     use dsl_ast::ir::{
-        IrActionHead, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, LocalRef, MaskIR,
+        IrActionHead, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, IrType, LocalRef, MaskIR,
     };
 
     use crate::cg::data_handle::{AgentFieldId, AgentRef, DataHandle};
@@ -623,11 +551,11 @@ mod tests {
         let mut ctx = LoweringCtx::new(&mut builder);
         let err = lower_mask(MaskId(0), None, &mask, &mut ctx).expect_err("non-bool predicate");
         match err {
-            MaskLoweringError::PredicateNotBool { mask, got, .. } => {
+            LoweringError::MaskPredicateNotBool { mask, got, .. } => {
                 assert_eq!(mask, MaskId(0));
                 assert_eq!(got, CgTy::F32);
             }
-            other => panic!("expected PredicateNotBool, got {other:?}"),
+            other => panic!("expected MaskPredicateNotBool, got {other:?}"),
         }
         // No op was pushed on the builder — only the orphaned predicate
         // sub-tree from `lower_expr` remains.
@@ -658,10 +586,10 @@ mod tests {
         )
         .expect_err("unsupported from clause");
         match err {
-            MaskLoweringError::UnsupportedFromClause { mask, .. } => {
+            LoweringError::UnsupportedMaskFromClause { mask, .. } => {
                 assert_eq!(mask, MaskId(7));
             }
-            other => panic!("expected UnsupportedFromClause, got {other:?}"),
+            other => panic!("expected UnsupportedMaskFromClause, got {other:?}"),
         }
         let prog = builder.finish();
         assert!(prog.ops.is_empty());
@@ -684,7 +612,7 @@ mod tests {
         let err = lower_mask(MaskId(0), None, &mask, &mut ctx)
             .expect_err("from clause without resolved kind");
         match err {
-            MaskLoweringError::MissingSpatialQueryKind { mask, .. } => {
+            LoweringError::MissingSpatialQueryKind { mask, .. } => {
                 assert_eq!(mask, MaskId(0));
             }
             other => panic!("expected MissingSpatialQueryKind, got {other:?}"),
@@ -713,7 +641,7 @@ mod tests {
         )
         .expect_err("kind without from");
         match err {
-            MaskLoweringError::UnexpectedSpatialQueryKind { mask, kind, .. } => {
+            LoweringError::UnexpectedSpatialQueryKind { mask, kind, .. } => {
                 assert_eq!(mask, MaskId(0));
                 assert_eq!(kind, SpatialQueryKind::KinQuery);
             }
@@ -726,8 +654,8 @@ mod tests {
     #[test]
     fn predicate_lowering_failure_propagates() {
         // `self.hp_pct` — not a registered AgentFieldId, so lower_expr
-        // returns UnknownAgentField. The mask lowering wraps it in
-        // MaskLoweringError::Predicate.
+        // returns UnknownAgentField. After the unification, the mask
+        // pass propagates it unchanged via `?` (no wrapper variant).
         let mut bad = field_self("hp_pct");
         bad.span = span(3, 9);
         let mask = MaskIR {
@@ -742,14 +670,60 @@ mod tests {
         let mut ctx = LoweringCtx::new(&mut builder);
         let err = lower_mask(MaskId(0), None, &mask, &mut ctx).expect_err("unknown field");
         match err {
-            MaskLoweringError::Predicate(LoweringError::UnknownAgentField {
-                field_name,
-                ..
-            }) => {
+            LoweringError::UnknownAgentField { field_name, .. } => {
                 assert_eq!(field_name, "hp_pct");
             }
-            other => panic!("expected Predicate(UnknownAgentField), got {other:?}"),
+            other => panic!("expected UnknownAgentField, got {other:?}"),
         }
+    }
+
+    // ---- Negative: parametric head without `from` clause ----------------
+
+    #[test]
+    fn rejects_positional_head_without_from_clause() {
+        // `mask Cast(ability: AbilityId)` from `assets/sim/masks.sim` —
+        // a `Positional` head with no `from` clause. Dispatch surface
+        // can't represent the `(agent × ability)` pair semantics yet,
+        // so the lowering refuses with `UnsupportedMaskHeadShape`.
+        let head = IrActionHead {
+            name: "Cast".to_string(),
+            shape: IrActionHeadShape::Positional(vec![(
+                "ability".to_string(),
+                LocalRef(1),
+                IrType::AbilityId,
+            )]),
+            span: span(5, 25),
+        };
+        let mask = MaskIR {
+            head,
+            candidate_source: None,
+            predicate: field_self("alive"),
+            annotations: vec![],
+            span: span(0, 30),
+        };
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let err = lower_mask(MaskId(9), None, &mask, &mut ctx)
+            .expect_err("parametric head without from");
+        match err {
+            LoweringError::UnsupportedMaskHeadShape {
+                mask,
+                head_label,
+                span,
+            } => {
+                assert_eq!(mask, MaskId(9));
+                assert_eq!(head_label, "positional");
+                // Span points at the head, not the whole mask.
+                assert_eq!(span.start, 5);
+                assert_eq!(span.end, 25);
+            }
+            other => panic!("expected UnsupportedMaskHeadShape, got {other:?}"),
+        }
+        // No op was pushed; the head-shape gate fires before the
+        // predicate is even lowered.
+        let prog = builder.finish();
+        assert!(prog.ops.is_empty());
     }
 
     // ---- Snapshot: pinned `Display` form for a lowered op ---------------
@@ -807,11 +781,11 @@ mod tests {
         );
     }
 
-    // ---- Display impl coverage for MaskLoweringError --------------------
+    // ---- Display impl coverage for unified LoweringError mask variants --
 
     #[test]
-    fn mask_lowering_error_display_predicate_not_bool() {
-        let e = MaskLoweringError::PredicateNotBool {
+    fn lowering_error_display_mask_predicate_not_bool() {
+        let e = LoweringError::MaskPredicateNotBool {
             mask: MaskId(3),
             got: CgTy::F32,
             span: span(7, 12),
@@ -823,8 +797,8 @@ mod tests {
     }
 
     #[test]
-    fn mask_lowering_error_display_unsupported_from_clause() {
-        let e = MaskLoweringError::UnsupportedFromClause {
+    fn lowering_error_display_unsupported_mask_from_clause() {
+        let e = LoweringError::UnsupportedMaskFromClause {
             mask: MaskId(0),
             span: span(0, 5),
         };
@@ -834,8 +808,8 @@ mod tests {
     }
 
     #[test]
-    fn mask_lowering_error_display_missing_spatial_query_kind() {
-        let e = MaskLoweringError::MissingSpatialQueryKind {
+    fn lowering_error_display_missing_spatial_query_kind() {
+        let e = LoweringError::MissingSpatialQueryKind {
             mask: MaskId(2),
             span: span(0, 5),
         };
@@ -845,14 +819,16 @@ mod tests {
     }
 
     #[test]
-    fn mask_lowering_error_display_predicate_wraps_inner() {
-        let inner = LoweringError::UnknownAgentField {
-            field_name: "hp_pct".to_string(),
-            span: span(3, 9),
+    fn lowering_error_display_unsupported_mask_head_shape() {
+        let e = LoweringError::UnsupportedMaskHeadShape {
+            mask: MaskId(4),
+            head_label: "positional",
+            span: span(2, 8),
         };
-        let e = MaskLoweringError::Predicate(inner);
         let s = format!("{}", e);
-        assert!(s.contains("mask predicate"));
-        assert!(s.contains("hp_pct"));
+        assert!(s.contains("mask#4"));
+        assert!(s.contains("positional"));
+        assert!(s.contains("from"));
+        assert!(s.contains("Task 2.6"));
     }
 }
