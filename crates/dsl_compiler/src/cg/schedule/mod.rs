@@ -17,14 +17,19 @@
 //! Default / Megakernel fusion policies, plus the strategy-aware
 //! [`strategy::fusion_candidates_with_strategy`] /
 //! [`strategy::fusion_decisions_with_strategy`] entry points that wrap
-//! Task 3.2's analysis. Subsequent Phase-3 tasks (3.4 backend
-//! emission) accrete here.
+//! Task 3.2's analysis. Task 3.4 ships [`synthesis`]: the
+//! [`synthesis::ComputeSchedule`] /
+//! [`synthesis::ComputeStage`] / [`synthesis::KernelTopology`] output
+//! types plus [`synthesis::synthesize_schedule`], which wraps the
+//! strategy-shaped fusion analysis in a stage-list lowering Phase-4
+//! emit consumes.
 //!
 //! See `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`,
 //! Phase 3, for the design rationale.
 
 pub mod fusion;
 pub mod strategy;
+pub mod synthesis;
 pub mod topology;
 
 pub use fusion::{
@@ -33,5 +38,9 @@ pub use fusion::{
 };
 pub use strategy::{
     fusion_candidates_with_strategy, fusion_decisions_with_strategy, ScheduleStrategy,
+};
+pub use synthesis::{
+    synthesize_schedule, ComputeSchedule, ComputeStage, KernelTopology, ScheduleDiagnostic,
+    ScheduleDiagnosticKind, ScheduleSynthesisResult,
 };
 pub use topology::{dependency_graph, topological_sort, CycleError, DepGraph};

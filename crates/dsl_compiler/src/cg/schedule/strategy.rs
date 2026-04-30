@@ -28,15 +28,17 @@
 //!
 //! - **Strategy is a fusion policy, not a complete schedule.** The
 //!   strategy chooses how the topological walk groups ops; it does
-//!   not produce the `ComputeSchedule` value Phase-3 / Task 3.4 will
-//!   wrap around the groups (kernel topology, dispatch arguments,
-//!   barrier placement). Calling
+//!   not produce the [`super::synthesis::ComputeSchedule`] value
+//!   Task 3.4 wraps around the groups (kernel topology, dispatch
+//!   arguments, barrier placement). Calling
 //!   [`fusion_candidates_with_strategy`] yields the partition; turning
-//!   that partition into a schedulable artefact is Task 3.4's job. The
-//!   plan's forward-looking
-//!   `CgProgramBuilder::build_with_strategy(strategy)` API is therefore
-//!   *not* added in Task 3.3 — the strategy is exposed at the
-//!   fusion-analysis layer until `ComputeSchedule` exists.
+//!   that partition into a schedulable artefact is the job of
+//!   [`super::synthesis::synthesize_schedule`]. The plan's forward-
+//!   looking `CgProgramBuilder::build_with_strategy(strategy)` API is
+//!   intentionally NOT a builder method — the typed API
+//!   [`super::synthesis::synthesize_schedule`] takes the finished
+//!   program and a strategy, keeping the builder free of schedule-pass
+//!   responsibilities.
 //! - **`Megakernel` ignores dispatch-shape mismatches at the IR
 //!   level.** The IR-level decision is "merge every op into one
 //!   group". Per-thread branching across mixed dispatch shapes
@@ -57,6 +59,19 @@
 //!   decision is "merge them all"; the representative shape is just a
 //!   placeholder so [`super::fusion::FusionGroup`] remains a single
 //!   shared structure.
+//! - **`Megakernel` may produce a single-op `Fused` group.** Even when
+//!   the program contains exactly one op, `Megakernel` classifies the
+//!   merged group as [`FusibilityClass::Fused`] (in contrast to
+//!   `Default` / `Conservative`, which classify singletons as `Split`).
+//!   This is a structural consequence of the strategy's "wrap every op
+//!   in one fused group" rule, not a special case. **Downstream
+//!   consumers (Task 3.4 schedule synthesis, Phase-4 WGSL emit) MUST
+//!   handle `KernelTopology::Fused { ops, .. }` with `ops.len() == 1`
+//!   correctly** — the fused emission path is not allowed to assume a
+//!   minimum group size. Schedule synthesis preserves the IR-level
+//!   classification and surfaces the single-op Fused topology
+//!   verbatim; emit lowers it as a single-kernel dispatch with no
+//!   special case.
 //! - **Cycle fallback is per-strategy.** All three strategies fall
 //!   back to source order when [`super::topology::topological_sort`]
 //!   reports a cycle, and surface the
@@ -218,26 +233,11 @@ fn conservative_decisions(
                     op_id.0, shape
                 ),
             ),
-            FusibilityClass::Fused => {
-                // Unreachable for size-1 ops under `classify`'s rules
-                // (multi-op-only path). Emit a Singleton diagnostic
-                // and downgrade the classification to keep the
-                // strategy invariant ("Conservative emits no Fused
-                // groups") true. This branch is structurally
-                // unreachable; keeping it explicit avoids a `_ =>`
-                // fallthrough.
-                (
-                    FusionDiagnosticKind::Singleton,
-                    format!(
-                        "conservative: singleton op#{} on shape {} (downgraded)",
-                        op_id.0, shape
-                    ),
-                )
-            }
-        };
-        let final_class = match classification {
-            FusibilityClass::Fused => FusibilityClass::Split,
-            other => other,
+            FusibilityClass::Fused => unreachable!(
+                "classify(ops, shape) returns Split or Indirect for size-1 ops; \
+                 Fused is reserved for multi-op groups, so the Conservative \
+                 strategy (one singleton per op) cannot reach this arm."
+            ),
         };
         diagnostics.push(FusionDiagnostic {
             kind,
@@ -247,7 +247,7 @@ fn conservative_decisions(
         groups.push(FusionGroup {
             ops,
             shape,
-            fusibility_classification: final_class,
+            fusibility_classification: classification,
         });
     }
 
