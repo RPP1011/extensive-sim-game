@@ -49,11 +49,30 @@
 //! per-ability row names lower through
 //! [`super::expr::LoweringCtx::action_ids`]. The driver populates the
 //! map per-scoring-decl with one allocation per distinct head /
-//! per-ability row name; the lowering refuses an unregistered name
-//! with [`LoweringError::ScoringRowTypeCheckFailure`] in a future
-//! follow-up — for now an unregistered name surfaces via a typed
-//! deferral (see "Limitations" below). Tests populate the map
-//! directly via [`super::expr::LoweringCtx::register_action`].
+//! per-ability row name. An unregistered name surfaces as
+//! [`LoweringError::UnknownScoringAction`] — a dedicated typed
+//! variant that mirrors the physics pass's
+//! [`LoweringError::UnknownMatchVariant`] precedent. Tests populate
+//! the map directly via
+//! [`super::expr::LoweringCtx::register_action`].
+//!
+//! # Action head-shape gate
+//!
+//! Standard scoring rows (`Head = <expr>`) carry an
+//! [`dsl_ast::ir::IrActionHead`] whose `shape` field is one of
+//! [`dsl_ast::ir::IrActionHeadShape::None`] (bare name —
+//! `Hold = 0.1`),
+//! [`dsl_ast::ir::IrActionHeadShape::Positional`] (e.g.,
+//! `Attack(target) = …`), or
+//! [`dsl_ast::ir::IrActionHeadShape::Named`] (e.g.,
+//! `Cast(ability: AbilityId) = …`). Real DSL fixtures
+//! (`assets/sim/scoring.sim`) use `None` exclusively — the
+//! per-action argmax kernel resolves the target implicitly from the
+//! action kind. The lowering gates parametric shapes with
+//! [`LoweringError::UnsupportedScoringHeadShape`] (mirroring
+//! `lower_mask`'s `parametric_head_label` precedent) so a future
+//! row with binders fails loudly rather than silently dropping the
+//! parameters.
 //!
 //! # Typed-error surface
 //!
@@ -61,27 +80,19 @@
 //! [`super::error::LoweringError`]. Scoring-specific variants carry
 //! the `Scoring*` prefix (`ScoringUtilityNotF32`,
 //! `ScoringTargetNotAgentId`, `ScoringGuardNotBool`,
-//! `ScoringRowTypeCheckFailure`) per the convention documented on
-//! `error.rs`. Expression-body failures returned by
-//! [`super::expr::lower_expr`] propagate unchanged via `?` — there is
-//! no wrapper variant.
+//! `ScoringRowTypeCheckFailure`) or the `*Scoring*` infix
+//! (`UnknownScoringAction`, `UnsupportedScoringHeadShape`) per the
+//! convention documented on `error.rs`. Expression-body failures
+//! returned by [`super::expr::lower_expr`] propagate unchanged via
+//! `?` — there is no wrapper variant.
 //!
 //! # Limitations
 //!
-//! - **Action-name resolution.** Scoring row heads / per-ability row
-//!   names not present in [`super::expr::LoweringCtx::action_ids`]
-//!   surface as a typed deferral
-//!   ([`LoweringError::UnsupportedLocalBinding`] is *not* the right
-//!   variant — the lowering returns a dedicated error; see the
-//!   `lower_scoring` impl). The driver task (2.7 / 2.8) is the
-//!   natural caller that will populate `action_ids` from the action
-//!   surface; tests today register names directly via
-//!   [`super::expr::LoweringCtx::register_action`].
 //! - **`IrActionHead` shapes.** Today only `head.name` is consulted —
-//!   the `head.shape` (positional / named binders) is not yet wired
-//!   through the expression layer (see `lower_mask`'s
-//!   `target`-binding gap for the same reason). Per-ability rows
-//!   that reference `target.<field>` inside their `score` / `guard`
+//!   the `head.shape` (positional / named binders) is rejected by
+//!   [`LoweringError::UnsupportedScoringHeadShape`] (see the
+//!   "Action head-shape gate" section above). Per-ability rows that
+//!   reference `target.<field>` inside their `score` / `guard`
 //!   expressions will surface as
 //!   [`LoweringError::UnsupportedLocalBinding`] from the underlying
 //!   `lower_expr` until the driver task wires per-row local binding.
@@ -98,14 +109,14 @@
 //!   Phase 1 amendment to the [`ScoringRowOp`] shape.
 
 use dsl_ast::ast::Span;
-use dsl_ast::ir::{IrExprNode, PerAbilityRowIR, ScoringEntryIR, ScoringIR};
+use dsl_ast::ir::{IrActionHeadShape, IrExprNode, PerAbilityRowIR, ScoringEntryIR, ScoringIR};
 
 use crate::cg::data_handle::CgExprId;
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::expr::{type_check, CgTy, TypeCheckCtx, TypeError};
 use crate::cg::op::{ActionId, ComputeOpKind, OpId, ScoringId, ScoringRowOp};
 
-use super::error::LoweringError;
+use super::error::{LoweringError, ScoringRowSubject};
 use super::expr::{lower_expr, LoweringCtx};
 
 // ---------------------------------------------------------------------------
@@ -231,11 +242,30 @@ fn intern_scoring_name(
 
 /// Lower a standard scoring row (`Head = expr`) to a
 /// [`ScoringRowOp`] with `target = None, guard = None`.
+///
+/// Gates parametric head shapes (`Positional` / `Named`) before
+/// action-id resolution — see
+/// [`LoweringError::UnsupportedScoringHeadShape`]. Real DSL fixtures
+/// use [`IrActionHeadShape::None`] exclusively; the gate is
+/// defense-in-depth so a future row with binders fails loudly rather
+/// than silently dropping the parameters.
 fn lower_standard_row(
     scoring_id: ScoringId,
     entry: &ScoringEntryIR,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<ScoringRowOp, LoweringError> {
+    if let Some(head_label) = parametric_scoring_head_label(&entry.head.shape) {
+        // Head-shape gate fires *before* action resolution — a
+        // parametric head may reference an action whose registry
+        // entry only knows the bare name. `action: None` signals
+        // "not yet resolved".
+        return Err(LoweringError::UnsupportedScoringHeadShape {
+            scoring: scoring_id,
+            action: None,
+            head_label,
+            span: entry.head.span,
+        });
+    }
     let action = resolve_action_id(scoring_id, &entry.head.name, entry.head.span, ctx)?;
     let utility = lower_expr(&entry.expr, ctx)?;
     check_utility_f32(scoring_id, action, utility, entry.expr.span, ctx)?;
@@ -289,16 +319,9 @@ fn lower_per_ability_row(
 /// distinct head / per-ability-row name across the scoring decl;
 /// tests register names directly via
 /// [`super::expr::LoweringCtx::register_action`]. An unregistered
-/// name surfaces as
-/// [`LoweringError::ScoringRowTypeCheckFailure`] with
-/// `subject_label = "head"` so the diagnostic anchors at the row
-/// head and names the missing identifier through the wrapped
-/// `TypeError::DanglingExprId` shape.
-///
-/// (Reusing `ScoringRowTypeCheckFailure` for the deferral keeps
-/// the error vocabulary tight; the driver task that wires
-/// `action_ids` will swap this for a dedicated `UnknownAction`
-/// variant once a real fixture exercises it.)
+/// name surfaces as [`LoweringError::UnknownScoringAction`] — a
+/// dedicated typed variant that mirrors the physics pass's
+/// [`LoweringError::UnknownMatchVariant`] precedent.
 fn resolve_action_id(
     scoring_id: ScoringId,
     name: &str,
@@ -308,28 +331,34 @@ fn resolve_action_id(
     ctx.action_ids
         .get(name)
         .copied()
-        .ok_or(LoweringError::ScoringRowTypeCheckFailure {
+        .ok_or_else(|| LoweringError::UnknownScoringAction {
             scoring: scoring_id,
-            // We don't have an ActionId yet (that's what we're
-            // resolving), so the diagnostic uses the placeholder
-            // `ActionId(u32::MAX)` to signal "unknown". This is the
-            // single deferral case in scoring lowering; see the
-            // module docstring's Limitations note.
-            action: ActionId(u32::MAX),
-            subject_label: "head",
-            error: TypeError::DanglingExprId {
-                node: CgExprId(0),
-                referenced: CgExprId(0),
-            },
+            name: name.to_string(),
             span,
         })
+}
+
+/// Return a `&'static str` tag for parametric scoring head shapes
+/// that today's argmax kernel cannot route. Returns `None` for
+/// [`IrActionHeadShape::None`] (the bare-name shape that real DSL
+/// fixtures use exclusively). Mirrors the precedent set by
+/// [`super::mask::parametric_head_label`] (private; same shape).
+///
+/// Closed-set tags (`"positional"` | `"named"`) keep the typed-error
+/// payload free of `String` allocations.
+fn parametric_scoring_head_label(shape: &IrActionHeadShape) -> Option<&'static str> {
+    match shape {
+        IrActionHeadShape::None => None,
+        IrActionHeadShape::Positional(_) => Some("positional"),
+        IrActionHeadShape::Named(_) => Some("named"),
+    }
 }
 
 /// Type-check `utility` resolves to `CgTy::F32`. Surfaces a non-F32
 /// result as [`LoweringError::ScoringUtilityNotF32`]; a re-typecheck
 /// failure on the constructed node surfaces as
 /// [`LoweringError::ScoringRowTypeCheckFailure`] with
-/// `subject_label = "utility"`.
+/// `subject = ScoringRowSubject::Utility`.
 fn check_utility_f32(
     scoring_id: ScoringId,
     action: ActionId,
@@ -337,7 +366,7 @@ fn check_utility_f32(
     span: Span,
     ctx: &LoweringCtx<'_>,
 ) -> Result<(), LoweringError> {
-    let ty = node_ty(scoring_id, action, "utility", utility, span, ctx)?;
+    let ty = node_ty(scoring_id, action, ScoringRowSubject::Utility, utility, span, ctx)?;
     if ty != CgTy::F32 {
         return Err(LoweringError::ScoringUtilityNotF32 {
             scoring: scoring_id,
@@ -360,7 +389,14 @@ fn lower_target(
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgExprId, LoweringError> {
     let target_id = lower_expr(target_node, ctx)?;
-    let ty = node_ty(scoring_id, action, "target", target_id, target_node.span, ctx)?;
+    let ty = node_ty(
+        scoring_id,
+        action,
+        ScoringRowSubject::Target,
+        target_id,
+        target_node.span,
+        ctx,
+    )?;
     if ty != CgTy::AgentId {
         return Err(LoweringError::ScoringTargetNotAgentId {
             scoring: scoring_id,
@@ -383,7 +419,14 @@ fn lower_guard(
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgExprId, LoweringError> {
     let guard_id = lower_expr(guard_node, ctx)?;
-    let ty = node_ty(scoring_id, action, "guard", guard_id, guard_node.span, ctx)?;
+    let ty = node_ty(
+        scoring_id,
+        action,
+        ScoringRowSubject::Guard,
+        guard_id,
+        guard_node.span,
+        ctx,
+    )?;
     if ty != CgTy::Bool {
         return Err(LoweringError::ScoringGuardNotBool {
             scoring: scoring_id,
@@ -399,12 +442,12 @@ fn lower_guard(
 /// Mirrors `mask::predicate_node_ty`: dangling-id / type-check
 /// defects surface as
 /// [`LoweringError::ScoringRowTypeCheckFailure`] with the supplied
-/// `subject_label` so the diagnostic names which sub-expression
-/// failed.
+/// [`ScoringRowSubject`] so the diagnostic names which
+/// sub-expression failed.
 fn node_ty(
     scoring_id: ScoringId,
     action: ActionId,
-    subject_label: &'static str,
+    subject: ScoringRowSubject,
     expr_id: CgExprId,
     span: Span,
     ctx: &LoweringCtx<'_>,
@@ -414,7 +457,7 @@ fn node_ty(
         LoweringError::ScoringRowTypeCheckFailure {
             scoring: scoring_id,
             action,
-            subject_label,
+            subject,
             error: TypeError::DanglingExprId {
                 node: expr_id,
                 referenced: expr_id,
@@ -433,7 +476,7 @@ fn node_ty(
         LoweringError::ScoringRowTypeCheckFailure {
             scoring: scoring_id,
             action,
-            subject_label,
+            subject,
             error: e,
             span,
         }
@@ -881,7 +924,7 @@ mod tests {
         let e = LoweringError::ScoringRowTypeCheckFailure {
             scoring: ScoringId(0),
             action: ActionId(0),
-            subject_label: "head",
+            subject: ScoringRowSubject::Utility,
             error: TypeError::DanglingExprId {
                 node: CgExprId(0),
                 referenced: CgExprId(0),
@@ -890,7 +933,8 @@ mod tests {
         };
         let s = format!("{}", e);
         assert!(s.contains("scoring#0"));
-        assert!(s.contains("head"));
+        // Display renders the typed enum as its lowercase tag.
+        assert!(s.contains("utility"), "missing utility tag in {s:?}");
     }
 
     // ---- 11. Empty scoring decl produces empty-rows op ------------------
@@ -994,12 +1038,13 @@ mod tests {
         );
     }
 
-    // ---- 13. Unregistered action name surfaces as typed deferral --------
+    // ---- 13. Unregistered action name surfaces as typed UnknownScoringAction
 
     #[test]
-    fn unregistered_action_name_surfaces_as_row_type_check_failure() {
+    fn unregistered_action_name_surfaces_as_unknown_scoring_action() {
         // scoring { Hold = 0.1 } — but no register_action call, so the
-        // resolution fails.
+        // resolution fails. Asserts the dedicated typed variant fires
+        // rather than overloading `ScoringRowTypeCheckFailure`.
         let ir = scoring_with(
             vec![ScoringEntryIR {
                 head: IrActionHead {
@@ -1019,19 +1064,99 @@ mod tests {
         let err = lower_scoring(ScoringId(0), &ir, &mut ctx)
             .expect_err("unregistered head must surface");
         match err {
-            LoweringError::ScoringRowTypeCheckFailure {
+            LoweringError::UnknownScoringAction {
                 scoring,
-                subject_label,
+                name,
                 span,
-                ..
             } => {
                 assert_eq!(scoring, ScoringId(0));
-                assert_eq!(subject_label, "head");
+                assert_eq!(name, "Hold");
                 assert_eq!(span.start, 11);
                 assert_eq!(span.end, 15);
             }
-            other => panic!("expected ScoringRowTypeCheckFailure, got {other:?}"),
+            other => panic!("expected UnknownScoringAction, got {other:?}"),
         }
+    }
+
+    // ---- 13b. UnknownScoringAction Display arm coverage -----------------
+
+    #[test]
+    fn lowering_error_display_unknown_scoring_action() {
+        let e = LoweringError::UnknownScoringAction {
+            scoring: ScoringId(2),
+            name: "Hold".to_string(),
+            span: span(7, 12),
+        };
+        let s = format!("{}", e);
+        assert!(s.contains("scoring #2"), "missing scoring tag in {s:?}");
+        assert!(s.contains("`Hold`"), "missing action name in {s:?}");
+        assert!(s.contains("unknown action"), "missing diagnostic in {s:?}");
+    }
+
+    // ---- 13c. Parametric scoring head shape gate ------------------------
+
+    #[test]
+    fn rejects_positional_scoring_head_shape() {
+        // scoring { Attack(target) = 0.5 } — parametric head shape
+        // not routable today.
+        let ir = scoring_with(
+            vec![ScoringEntryIR {
+                head: IrActionHead {
+                    name: "Attack".to_string(),
+                    shape: IrActionHeadShape::Positional(vec![(
+                        "target".to_string(),
+                        dsl_ast::ir::LocalRef(0),
+                        dsl_ast::ir::IrType::AgentId,
+                    )]),
+                    span: span(0, 14),
+                },
+                expr: lit_f32(0.5),
+                span: span(0, 0),
+            }],
+            vec![],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // Even with the action registered, the head-shape gate fires
+        // first.
+        ctx.register_action("Attack", ActionId(9));
+
+        let err = lower_scoring(ScoringId(0), &ir, &mut ctx)
+            .expect_err("positional head must be rejected");
+        match err {
+            LoweringError::UnsupportedScoringHeadShape {
+                scoring,
+                action,
+                head_label,
+                span,
+            } => {
+                assert_eq!(scoring, ScoringId(0));
+                // Gate fires before resolution — `action: None` per the
+                // variant doc.
+                assert_eq!(action, None);
+                assert_eq!(head_label, "positional");
+                assert_eq!(span.start, 0);
+                assert_eq!(span.end, 14);
+            }
+            other => panic!("expected UnsupportedScoringHeadShape, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowering_error_display_unsupported_scoring_head_shape() {
+        let e = LoweringError::UnsupportedScoringHeadShape {
+            scoring: ScoringId(1),
+            action: None,
+            head_label: "named",
+            span: span(3, 8),
+        };
+        let s = format!("{}", e);
+        assert!(s.contains("scoring#1"), "missing scoring tag in {s:?}");
+        assert!(s.contains("named"), "missing head_label in {s:?}");
+        assert!(
+            s.contains("<unresolved>"),
+            "missing unresolved-action label in {s:?}"
+        );
     }
 
     // ---- 14. Constructed CgExpr arena content sanity --------------------

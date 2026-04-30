@@ -528,16 +528,61 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// A scoring row references a source-level action name that the
+    /// lowering context's `action_ids` registry does not know.
+    /// Mirrors the physics pass's
+    /// [`Self::UnknownMatchVariant`] precedent — both surface a
+    /// missing-name resolution as a dedicated typed variant rather
+    /// than overloading a sibling type-check failure.
+    ///
+    /// The driver (Task 2.7 / 2.8) populates `action_ids` from the
+    /// action surface; tests register names directly via
+    /// [`super::expr::LoweringCtx::register_action`]. A missing entry
+    /// is either a stale registry or a hand-built AST referencing a
+    /// synthetic action name. The error names the source-level
+    /// identifier so the diagnostic can pinpoint the offending name.
+    UnknownScoringAction {
+        scoring: ScoringId,
+        name: String,
+        span: Span,
+    },
+
+    /// A scoring row carries a parametric head (`Attack(target)`,
+    /// `Cast(ability: AbilityId)`) that the scoring lowering does not
+    /// route. Today's scoring rows in `assets/sim/scoring.sim`
+    /// exclusively use `IrActionHeadShape::None` (bare action names —
+    /// the per-action argmax kernel resolves the target implicitly
+    /// from the action kind). Mirrors the mask pass's
+    /// [`Self::UnsupportedMaskHeadShape`] precedent — surface the
+    /// gate so a future scoring row with a parametric head fails
+    /// loudly rather than silently dropping the binders.
+    ///
+    /// `action` is `Option` because the head-shape gate fires before
+    /// action-id resolution succeeds — a parametric head may never
+    /// resolve to an `ActionId` if the registry only knows the bare
+    /// name.
+    ///
+    /// `head_label` is a closed-set tag (`"positional"` | `"named"`)
+    /// — `&'static str` so the variant carries no free-form payload,
+    /// matching mask's pattern.
+    UnsupportedScoringHeadShape {
+        scoring: ScoringId,
+        action: Option<ActionId>,
+        head_label: &'static str,
+        span: Span,
+    },
+
     /// A type-check of a scoring-row's expression node itself (after
     /// lowering) failed. Surfaces the underlying [`TypeError`] without
     /// panicking; should not normally fire because expression
     /// lowering already type-checks every node it constructs.
-    /// `subject_label` names which sub-expression of the row tripped
-    /// the check (`"utility"` | `"target"` | `"guard"`).
+    /// `subject` names which sub-expression of the row tripped the
+    /// check ([`ScoringRowSubject::Utility`] |
+    /// [`ScoringRowSubject::Target`] | [`ScoringRowSubject::Guard`]).
     ScoringRowTypeCheckFailure {
         scoring: ScoringId,
         action: ActionId,
-        subject_label: &'static str,
+        subject: ScoringRowSubject,
         error: TypeError,
         span: Span,
     },
@@ -566,6 +611,39 @@ pub enum LoweringError {
         op_label: &'static str,
         span: Span,
     },
+}
+
+/// Closed-set discriminant for which sub-expression of a scoring row
+/// tripped a type-check failure. Replaces the previous `&'static str`
+/// payload on [`LoweringError::ScoringRowTypeCheckFailure`] so the
+/// vocabulary is enforced by the type system rather than by string
+/// convention. Mirrors the typed-enum precedent established by prior
+/// Phase 2 tasks for closed-set discriminants.
+///
+/// `Display` renders the canonical lowercase tag (`"utility"`,
+/// `"target"`, `"guard"`) — preserves the exact format produced by the
+/// previous `&'static str` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ScoringRowSubject {
+    /// The row's `utility` (score) expression — must type-check to
+    /// `CgTy::F32`.
+    Utility,
+    /// A per-ability row's `target` expression — must type-check to
+    /// `CgTy::AgentId`.
+    Target,
+    /// A per-ability row's `guard` expression — must type-check to
+    /// `CgTy::Bool`.
+    Guard,
+}
+
+impl fmt::Display for ScoringRowSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScoringRowSubject::Utility => f.write_str("utility"),
+            ScoringRowSubject::Target => f.write_str("target"),
+            ScoringRowSubject::Guard => f.write_str("guard"),
+        }
+    }
 }
 
 impl fmt::Display for LoweringError {
@@ -903,16 +981,41 @@ impl fmt::Display for LoweringError {
                 "scoring#{} row(action=#{}) guard at {}..{} produced {} — must be Bool",
                 scoring.0, action.0, span.start, span.end, got
             ),
+            LoweringError::UnknownScoringAction {
+                scoring,
+                name,
+                span,
+            } => write!(
+                f,
+                "scoring #{} references unknown action `{}` at {}..{}",
+                scoring.0, name, span.start, span.end
+            ),
+            LoweringError::UnsupportedScoringHeadShape {
+                scoring,
+                action,
+                head_label,
+                span,
+            } => {
+                let action_label = match action {
+                    Some(a) => format!("#{}", a.0),
+                    None => String::from("<unresolved>"),
+                };
+                write!(
+                    f,
+                    "scoring#{} action `{}` head shape `{}` at {}..{} not supported — only bare action names are routable today",
+                    scoring.0, action_label, head_label, span.start, span.end
+                )
+            }
             LoweringError::ScoringRowTypeCheckFailure {
                 scoring,
                 action,
-                subject_label,
+                subject,
                 error,
                 span,
             } => write!(
                 f,
                 "scoring#{} row(action=#{}) {} at {}..{} failed type-check — {}",
-                scoring.0, action.0, subject_label, span.start, span.end, error
+                scoring.0, action.0, subject, span.start, span.end, error
             ),
         }
     }
