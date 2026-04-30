@@ -414,24 +414,16 @@ scoring {
 /// `record_write` with the same handle vocabulary the driver's
 /// wirings use, then run `check_well_formed` and assert the cycle.
 ///
-/// **Wiring shape.** `detect_cycles` keys its writers map by the
-/// full `DataHandle` (including the `EventRingAccess` discriminant),
-/// so producer/consumer edges form when both halves of the edge
-/// reference the same ring with the same access. The plan
-/// amendment carries one canonical access per direction
-/// (`source_ring → Read`, `dest_ring → Append`); the cycle gate
-/// becomes effective once a follow-up either (a) projects the
-/// cycle graph by ring identity alone, or (b) the engine grows a
-/// shared ring-handle access kind. Both paths land in Phase 3
-/// schedule synthesis. To make this test independent of that
-/// follow-up — i.e. to actually demonstrate the gate *firing* on
-/// a cycle today — we mirror the wirings with `Append` on both
-/// sides of each edge, matching the `record_write`'s access kind
-/// the producer uses. The structural shape (one ring touched by
-/// op A as producer and op B as consumer) is identical to the
-/// driver's Phase 4 output; only the consumer-side access matches
-/// the producer's so the gate's exact-key matcher closes the
-/// edge.
+/// **Wiring shape.** This test uses the spec-prescribed Read/Append
+/// shape that the driver itself emits (`source_ring → Read`,
+/// `dest_ring → Append`). `detect_cycles` projects every
+/// `DataHandle::EventRing` to its ring identity alone via
+/// `DataHandle::cycle_edge_key` (see `data_handle.rs::CycleEdgeKey`),
+/// so a producer's `Append` and a consumer's `Read` on the same ring
+/// resolve to the same key and the cycle edge closes regardless of
+/// access mode. This matches what the driver's Phase 4 lowering
+/// produces end-to-end; the fixture is synthetic only because the AST
+/// resolver rejects user source that would compile to this shape.
 #[test]
 fn cycle_gate_detects_event_ring_cycle() {
     let mut builder = CgProgramBuilder::new();
@@ -478,15 +470,18 @@ fn cycle_gate_detects_event_ring_cycle() {
         )
         .expect("add op B");
 
-    // Install the ring edges. Op A is a producer of ring 1 and a
-    // consumer of ring 0; op B mirrors. Both sides use `Append` so
-    // `detect_cycles`'s exact-key matcher closes the edges; see the
-    // test docstring for why this is the structural equivalent of
-    // the driver's `Read` + `Append` wiring under today's gate.
+    // Install the ring edges using the driver's spec-prescribed
+    // shape: source-ring reads carry `EventRingAccess::Read`,
+    // destination-ring writes carry `EventRingAccess::Append`. Op A
+    // is a producer of ring 1 (Append) and a consumer of ring 0
+    // (Read); op B mirrors. `detect_cycles` projects the EventRing
+    // handle to its ring identity alone, so the producer's Append
+    // and the consumer's Read resolve to the same edge key — the
+    // cycle closes.
     let ops = builder.ops_mut();
     ops[op_a_id.0 as usize].record_read(DataHandle::EventRing {
         ring: EventRingId(0),
-        kind: EventRingAccess::Append,
+        kind: EventRingAccess::Read,
     });
     ops[op_a_id.0 as usize].record_write(DataHandle::EventRing {
         ring: EventRingId(1),
@@ -494,7 +489,7 @@ fn cycle_gate_detects_event_ring_cycle() {
     });
     ops[op_b_id.0 as usize].record_read(DataHandle::EventRing {
         ring: EventRingId(1),
-        kind: EventRingAccess::Append,
+        kind: EventRingAccess::Read,
     });
     ops[op_b_id.0 as usize].record_write(DataHandle::EventRing {
         ring: EventRingId(0),

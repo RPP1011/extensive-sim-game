@@ -852,6 +852,78 @@ impl fmt::Display for DataHandle {
 }
 
 // ---------------------------------------------------------------------------
+// Cycle-edge projection
+// ---------------------------------------------------------------------------
+
+/// Projection of a [`DataHandle`] used as the key when matching writers
+/// to readers during cycle detection (see
+/// `crate::cg::well_formed::detect_cycles`).
+///
+/// Most variants are projected as-is — full identity equality is what
+/// "this storage location aliases that one" means for cycle detection.
+/// The one exception is [`DataHandle::EventRing`]: its
+/// [`EventRingAccess`] discriminant (`Read` | `Append` | `Drain`)
+/// reflects the **producer/consumer kind** of the access, not a
+/// distinct resource. A producer's `Append` and a consumer's `Read` on
+/// the same ring form a real dependency edge — the cycle gate must
+/// close that edge regardless of access mode. So `EventRing` collapses
+/// to its [`EventRingId`] alone, and every other variant keeps its
+/// full identity by being wrapped in [`CycleEdgeKey::Other`].
+///
+/// This projection is **additive**: it does not change
+/// [`DataHandle`]'s `Eq`/`Hash`/`Ord` semantics. Other consumers of
+/// `DataHandle` (the writers/readers maps in op metadata, error
+/// rendering, etc.) continue to use full-identity equality.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub enum CycleEdgeKey {
+    /// An event ring keyed by ring identity alone — access mode
+    /// (Read/Append/Drain) is intentionally collapsed.
+    Ring(EventRingId),
+    /// Any non-`EventRing` `DataHandle`, keyed by its full identity.
+    Other(DataHandle),
+}
+
+impl DataHandle {
+    /// Project this [`DataHandle`] to its [`CycleEdgeKey`] for cycle
+    /// detection.
+    ///
+    /// `EventRing { ring, kind: _ }` → `Ring(ring)` so that producer
+    /// (`Append`) and consumer (`Read`) accesses on the same ring map
+    /// to the same key. Every other variant is returned as
+    /// `Other(self.clone())` — full identity is preserved.
+    ///
+    /// The `kind` field on `EventRing` is matched explicitly (not via
+    /// `..`) so adding a new field to `EventRing` will force a compile
+    /// error here, prompting an explicit decision about whether the
+    /// new field participates in the cycle-edge identity.
+    pub fn cycle_edge_key(&self) -> CycleEdgeKey {
+        match self {
+            // EventRing: collapse the access kind. Producer/consumer
+            // edges must close regardless of which side the read or
+            // write claims.
+            DataHandle::EventRing { ring, kind: _ } => CycleEdgeKey::Ring(*ring),
+
+            // Every other variant keeps full-identity equality. List
+            // exhaustively so adding a new `DataHandle` variant forces
+            // an explicit decision here rather than silently falling
+            // into the `Other` bucket via a wildcard.
+            DataHandle::AgentField { .. }
+            | DataHandle::ViewStorage { .. }
+            | DataHandle::ConfigConst { .. }
+            | DataHandle::MaskBitmap { .. }
+            | DataHandle::ScoringOutput
+            | DataHandle::SpatialStorage { .. }
+            | DataHandle::Rng { .. }
+            | DataHandle::AliveBitmap
+            | DataHandle::IndirectArgs { .. }
+            | DataHandle::AgentScratch { .. }
+            | DataHandle::SimCfgBuffer
+            | DataHandle::SnapshotKick => CycleEdgeKey::Other(self.clone()),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

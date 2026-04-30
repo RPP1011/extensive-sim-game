@@ -41,7 +41,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::cg::data_handle::{AgentRef, CgExprId, DataHandle};
+use crate::cg::data_handle::{AgentRef, CgExprId, CycleEdgeKey, DataHandle};
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::expr::{data_handle_ty, type_check, CgExpr, CgTy, TypeCheckCtx, TypeError};
 use crate::cg::op::{
@@ -1458,25 +1458,36 @@ fn match_uniqueness_walk_list(
 /// NOT count as cycles — that's a legitimate event-fold pattern (read
 /// prior tick's storage, write next tick's).
 ///
-/// Implementation: build a `HashMap<DataHandle, Vec<OpId>>` of writers
-/// per handle; for each op's reads, add edges from each writer of that
-/// handle to this op. Then run a DFS-based SCC finder; report any SCC
-/// of size > 1.
+/// Implementation: build a `BTreeMap<CycleEdgeKey, Vec<OpId>>` of
+/// writers per handle; for each op's reads, add edges from each writer
+/// of that handle to this op. Then run a DFS-based SCC finder; report
+/// any SCC of size > 1.
+///
+/// **Projection note.** Writers and readers are keyed by
+/// [`DataHandle::cycle_edge_key`], not by raw `DataHandle`, so
+/// [`DataHandle::EventRing`]'s `Read`/`Append`/`Drain` access discriminants
+/// collapse to a single per-ring key. The access mode is a
+/// producer/consumer marker, not a separate resource: a producer
+/// `Append` and a consumer `Read` on the same ring still form a real
+/// dependency edge, and the cycle gate must close that edge. Other
+/// variants keep their full-identity keys via `CycleEdgeKey::Other`;
+/// see `data_handle.rs`.
 fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
     let n = prog.ops.len();
     if n == 0 {
         return;
     }
 
-    // Map handle → writers. `DataHandle` is now `Ord` (Task 1.6 cleanup
-    // — see the Ord-derive batch on the id newtypes), so we key the
-    // adjacency map by reference into the `op.writes` storage. No
-    // Display-string materialization, no `HandleKey` indirection.
-    let mut writers: BTreeMap<&DataHandle, Vec<OpId>> = BTreeMap::new();
+    // Map projected handle → writers. We project via
+    // `DataHandle::cycle_edge_key` so that producer/consumer ring
+    // accesses with different `EventRingAccess` modes resolve to the
+    // same key (see the docstring above). Other variants are wrapped
+    // as `CycleEdgeKey::Other` and keep full-identity equality.
+    let mut writers: BTreeMap<CycleEdgeKey, Vec<OpId>> = BTreeMap::new();
     for (op_index, op) in prog.ops.iter().enumerate() {
         let id = OpId(op_index as u32);
         for w in &op.writes {
-            writers.entry(w).or_default().push(id);
+            writers.entry(w.cycle_edge_key()).or_default().push(id);
         }
     }
 
@@ -1486,7 +1497,7 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
     for (op_index, op) in prog.ops.iter().enumerate() {
         let consumer = OpId(op_index as u32);
         for r in &op.reads {
-            if let Some(producers) = writers.get(r) {
+            if let Some(producers) = writers.get(&r.cycle_edge_key()) {
                 for &producer in producers {
                     if producer == consumer {
                         // Self-edge — not a cycle (event-fold pattern).
@@ -1620,7 +1631,7 @@ mod tests {
     use super::*;
 
     use crate::cg::data_handle::{
-        AgentFieldId, AgentRef, EventRingId, MaskId, ViewId, ViewStorageSlot,
+        AgentFieldId, AgentRef, EventRingAccess, EventRingId, MaskId, ViewId, ViewStorageSlot,
     };
     use crate::cg::expr::{BinaryOp, CgExpr, CgTy, LitValue};
     use crate::cg::op::{
@@ -2047,6 +2058,89 @@ mod tests {
             _ => false,
         });
         assert!(saw_cycle, "missing 2-op Cycle in {:?}", errs);
+    }
+
+    #[test]
+    fn cycle_two_ops_event_ring_read_and_append() {
+        // Spec-shape ring cycle: op#0 reads ring(0) (Read) and writes
+        // ring(1) (Append); op#1 reads ring(1) (Read) and writes
+        // ring(0) (Append). The producer-side `Append` and the
+        // consumer-side `Read` for each ring carry different
+        // `EventRingAccess` discriminants, so a `DataHandle`
+        // full-identity match would NOT close the edge — only the
+        // `cycle_edge_key` projection by ring identity does.
+        //
+        // This is exactly what the driver's Phase 4 wiring emits;
+        // verifying the gate fires here is the unit-level guarantee
+        // the projection works for cycles in event-ring traffic.
+        //
+        // Build two trivial PhysicsRule ops with empty bodies, then
+        // splice the ring reads/writes via record_read / record_write
+        // (mirrors the lowering driver's wiring of source-ring reads
+        // and destination-ring writes).
+        let mut b = CgProgramBuilder::new();
+        let body_a = b.add_stmt_list(CgStmtList::new(Vec::new())).unwrap();
+        let body_b = b.add_stmt_list(CgStmtList::new(Vec::new())).unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: EventKindId(0),
+                body: body_a,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(1),
+                on_event: EventKindId(1),
+                body: body_b,
+                replayable: ReplayabilityFlag::Replayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(1),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        let mut prog = b.finish();
+
+        // Op 0: consumer of ring 0 (Read), producer of ring 1 (Append).
+        prog.ops[0].record_read(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[0].record_write(DataHandle::EventRing {
+            ring: EventRingId(1),
+            kind: EventRingAccess::Append,
+        });
+        // Op 1: consumer of ring 1 (Read), producer of ring 0 (Append).
+        prog.ops[1].record_read(DataHandle::EventRing {
+            ring: EventRingId(1),
+            kind: EventRingAccess::Read,
+        });
+        prog.ops[1].record_write(DataHandle::EventRing {
+            ring: EventRingId(0),
+            kind: EventRingAccess::Append,
+        });
+
+        let errs = check_well_formed(&prog)
+            .expect_err("ring-symmetric cycle should trip the cycle gate");
+        let saw_cycle = errs.iter().any(|e| match e {
+            CgError::Cycle { ops } => {
+                ops.contains(&OpId(0)) && ops.contains(&OpId(1)) && ops.len() == 2
+            }
+            _ => false,
+        });
+        assert!(
+            saw_cycle,
+            "missing 2-op Cycle on Read/Append ring edges in {:?}",
+            errs
+        );
     }
 
     #[test]
