@@ -22,6 +22,7 @@
 pub mod data_handle;
 pub mod dispatch;
 pub mod expr;
+pub mod lower;
 pub mod op;
 pub mod program;
 pub mod stmt;
@@ -30,6 +31,7 @@ pub mod well_formed;
 pub use data_handle::*;
 pub use dispatch::*;
 pub use expr::*;
+pub use lower::{lower_expr, LoweringCtx, LoweringError};
 pub use op::*;
 pub use program::*;
 pub use stmt::*;

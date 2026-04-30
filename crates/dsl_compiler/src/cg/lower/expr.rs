@@ -1,0 +1,2328 @@
+//! Expression lowering — `IrExprNode → CgExprId`.
+//!
+//! Walks resolved DSL IR (`dsl_ast::ir::IrExprNode`) and pushes nodes
+//! into a [`CgProgramBuilder`]. Every constructed [`CgExpr`] is
+//! type-checked via [`crate::cg::expr::type_check`] before its id is
+//! returned, so a successful lowering produces a node whose claimed
+//! [`CgTy`] matches its operand types.
+//!
+//! See `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`,
+//! Task 2.1, for the design rationale and step list.
+//!
+//! # Diagnostics vs hard errors
+//!
+//! `lower_expr` operates on a *single* `IrExprNode` — the expression
+//! tree. If lowering fails (anywhere in the tree), the caller gets back
+//! a [`LoweringError`] and no node is pushed. This is the unit at this
+//! layer; the next-layer-up driver (mask / scoring / fold lowering, in
+//! later tasks) decides whether to accumulate per-rule diagnostics or
+//! short-circuit. Diagnostic accumulation lives on
+//! [`LoweringCtx::diagnostics`] for that future use; this pass does not
+//! push to it directly.
+
+use std::collections::HashMap;
+use std::fmt;
+
+use dsl_ast::ast::{BinOp, Span, UnOp};
+use dsl_ast::ir::{
+    Builtin, IrCallArg, IrExpr, IrExprNode, NamespaceId, ViewRef as AstViewRef,
+};
+
+use crate::cg::data_handle::{
+    AgentFieldId, AgentFieldTy, AgentRef, CgExprId, DataHandle, RngPurpose, ViewId,
+};
+use crate::cg::expr::{
+    data_handle_ty, type_check, BinaryOp, BuiltinId, CgExpr, CgTy, LitValue, NumericTy,
+    TypeCheckCtx, TypeError, UnaryOp,
+};
+use crate::cg::program::{BuilderError, CgProgramBuilder};
+
+// ---------------------------------------------------------------------------
+// LoweringError — typed defects the expression lowering can report.
+// ---------------------------------------------------------------------------
+
+/// Typed defect surfaced by [`lower_expr`].
+///
+/// Every variant pins the offending location (a `Span` from the AST
+/// node) plus the structural reason. No `String` reasons except for the
+/// genuinely-string-keyed surfaces (free-form field / namespace / view
+/// names that don't appear as a typed AST enum).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoweringError {
+    /// AST variant the expression lowering does not yet handle. Used as
+    /// a typed escape hatch for the staged work in Phase 2 — quantifiers,
+    /// folds, struct literals, etc. land in their own tasks; until then
+    /// they surface here.
+    UnsupportedAstNode {
+        /// Stable label for the AST variant — closed set of `&'static
+        /// str` tags pulled from `IrExpr` discriminants.
+        ast_label: &'static str,
+        span: Span,
+    },
+
+    /// `agent.alive < 5` and friends: an operator was applied to operand
+    /// types that don't share a usable structural form. The closest
+    /// CG-IR analogue would be an ill-typed [`CgExpr::Binary`]; we
+    /// refuse to construct it.
+    IllTypedExpression {
+        expected: CgTy,
+        got: CgTy,
+        span: Span,
+    },
+
+    /// Two-operand ops (binary, equality, comparison) whose operand
+    /// types disagree with each other. Distinct from
+    /// [`Self::IllTypedExpression`] (which carries an *expected* shape):
+    /// here we report both sides as a typed mismatch and let the caller
+    /// surface the specific operator that produced it.
+    BinaryOperandTyMismatch {
+        op: BinOp,
+        lhs_ty: CgTy,
+        rhs_ty: CgTy,
+        span: Span,
+    },
+
+    /// A constructed [`CgExpr`] failed [`type_check`] — the lowering
+    /// produced an internally-inconsistent node. Shouldn't normally fire
+    /// (every arm constructs a `ty` derived from the operator), but the
+    /// pass surfaces the typed error rather than panicking, so an
+    /// emitter bug shows up as a typed report.
+    TypeCheckFailure {
+        error: TypeError,
+        span: Span,
+    },
+
+    /// A `Field { base, field_name, .. }` access whose `field_name`
+    /// doesn't map to any [`AgentFieldId`]. The base must already have
+    /// been recognised as `self`; the field name is the offending part,
+    /// so it appears here as a string (DSL field names are free-form
+    /// identifiers — there's no closed enum for them in the AST).
+    UnknownAgentField {
+        field_name: String,
+        span: Span,
+    },
+
+    /// A `Field { base, field_name, .. }` access whose `base` is not a
+    /// shape the expression lowering recognises today (only `self.<f>`
+    /// is wired through Task 2.1). Other bases — locals other than
+    /// `self`, namespace fields, builder receivers — surface as this
+    /// typed deferral so a follow-up task can light them up without a
+    /// matching `_ =>` fallthrough.
+    UnsupportedFieldBase {
+        field_name: String,
+        span: Span,
+    },
+
+    /// A binary operator the CG IR doesn't surface (`Mod` is the only
+    /// one in the v1 surface). Carried as a typed variant so the
+    /// rejection is structured rather than a string.
+    UnsupportedBinaryOp {
+        op: BinOp,
+        span: Span,
+    },
+
+    /// A builtin call has the wrong number of arguments for its
+    /// CG-side signature. Mirrors `TypeError::ArityMismatch` but
+    /// surfaces *before* the CG node is constructed.
+    BuiltinArityMismatch {
+        builtin: Builtin,
+        expected: u8,
+        got: u8,
+        span: Span,
+    },
+
+    /// A builtin maps to no [`BuiltinId`] yet — quantifier-style
+    /// builtins (`Count`, `Sum`, `Forall`, `Exists`, plus the
+    /// fold-shape `Min`/`Max` variants) lower to op-level constructs,
+    /// not to `CgExpr::Builtin`. Surfacing them here as a typed deferral
+    /// avoids silently dropping them.
+    UnsupportedBuiltin {
+        builtin: Builtin,
+        span: Span,
+    },
+
+    /// Numeric builtins (`Min`, `Max`, `Clamp`, `SaturatingAdd`) are
+    /// typed in the CG IR (`Min(NumericTy::F32)` vs `Min(NumericTy::U32)`),
+    /// but the AST `Builtin` enum is untyped. The lowering picks the
+    /// `NumericTy` from the operand type — if the operand isn't one of
+    /// `{F32, U32, I32}`, this typed error fires.
+    NumericBuiltinNonNumericOperand {
+        builtin: Builtin,
+        operand_index: u8,
+        got: CgTy,
+        span: Span,
+    },
+
+    /// A `Local` reference whose name isn't `self` (the only local the
+    /// expression lowering binds to a CG concept today). Other locals —
+    /// `target`, event-pattern bindings, fold binders — light up as the
+    /// surrounding op-lowering tasks bind them.
+    UnsupportedLocalBinding {
+        name: String,
+        span: Span,
+    },
+
+    /// A `ViewRef` referenced by an `IrExpr::ViewCall` has no entry in
+    /// the lowering context's view map. Until Task 2.3 wires the global
+    /// view table, expression-level tests inject the map directly; an
+    /// unknown ref surfaces here.
+    UnknownView {
+        ast_ref: AstViewRef,
+        span: Span,
+    },
+
+    /// `IrExpr::NamespaceCall` for a namespace / method pair that has
+    /// no expression-level lowering today. Most namespace calls are
+    /// op-level (spatial queries, RNG draws that produce typed ops);
+    /// the few that fold into a single `CgExpr` (e.g., `rng.uniform`)
+    /// are wired here as they're needed.
+    UnsupportedNamespaceCall {
+        ns: NamespaceId,
+        method: String,
+        span: Span,
+    },
+
+    /// `IrExpr::NamespaceField` for a namespace / field pair that has
+    /// no expression-level CG lowering. `world.tick` and friends will
+    /// arrive in later tasks once a concrete consumer needs them.
+    UnsupportedNamespaceField {
+        ns: NamespaceId,
+        field: String,
+        span: Span,
+    },
+
+    /// The builder rejected an `add_expr` call. Because the lowering
+    /// only ever pushes children before parents, this should not fire
+    /// under normal operation; surfacing it as a typed wrap makes any
+    /// regression (a builder invariant tightening) immediately
+    /// debuggable.
+    BuilderRejected {
+        error: BuilderError,
+        span: Span,
+    },
+}
+
+impl fmt::Display for LoweringError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LoweringError::UnsupportedAstNode { ast_label, span } => write!(
+                f,
+                "lowering: AST variant `{}` at {}..{} is not yet supported",
+                ast_label, span.start, span.end
+            ),
+            LoweringError::IllTypedExpression { expected, got, span } => write!(
+                f,
+                "lowering: expression at {}..{} is ill-typed — expected {}, got {}",
+                span.start, span.end, expected, got
+            ),
+            LoweringError::BinaryOperandTyMismatch {
+                op,
+                lhs_ty,
+                rhs_ty,
+                span,
+            } => write!(
+                f,
+                "lowering: binary `{:?}` at {}..{} has mismatched operands — lhs is {}, rhs is {}",
+                op, span.start, span.end, lhs_ty, rhs_ty
+            ),
+            LoweringError::TypeCheckFailure { error, span } => write!(
+                f,
+                "lowering: constructed CgExpr at {}..{} failed type-check — {}",
+                span.start, span.end, error
+            ),
+            LoweringError::UnknownAgentField { field_name, span } => write!(
+                f,
+                "lowering: `self.{}` at {}..{} does not name an agent field",
+                field_name, span.start, span.end
+            ),
+            LoweringError::UnsupportedFieldBase { field_name, span } => write!(
+                f,
+                "lowering: field access `.{}` at {}..{} has an unsupported base shape",
+                field_name, span.start, span.end
+            ),
+            LoweringError::UnsupportedBinaryOp { op, span } => write!(
+                f,
+                "lowering: binary operator `{:?}` at {}..{} has no CG-IR equivalent",
+                op, span.start, span.end
+            ),
+            LoweringError::BuiltinArityMismatch {
+                builtin,
+                expected,
+                got,
+                span,
+            } => write!(
+                f,
+                "lowering: builtin `{}` at {}..{} expected {} argument(s), got {}",
+                builtin.name(),
+                span.start,
+                span.end,
+                expected,
+                got
+            ),
+            LoweringError::UnsupportedBuiltin { builtin, span } => write!(
+                f,
+                "lowering: builtin `{}` at {}..{} has no expression-level CG equivalent",
+                builtin.name(),
+                span.start,
+                span.end
+            ),
+            LoweringError::NumericBuiltinNonNumericOperand {
+                builtin,
+                operand_index,
+                got,
+                span,
+            } => write!(
+                f,
+                "lowering: builtin `{}` at {}..{} operand[{}] expected numeric type, got {}",
+                builtin.name(),
+                span.start,
+                span.end,
+                operand_index,
+                got
+            ),
+            LoweringError::UnsupportedLocalBinding { name, span } => write!(
+                f,
+                "lowering: local binding `{}` at {}..{} is not bound to a CG concept",
+                name, span.start, span.end
+            ),
+            LoweringError::UnknownView { ast_ref, span } => write!(
+                f,
+                "lowering: ViewRef({}) at {}..{} not present in lowering context",
+                ast_ref.0, span.start, span.end
+            ),
+            LoweringError::UnsupportedNamespaceCall { ns, method, span } => write!(
+                f,
+                "lowering: namespace call `{}.{}()` at {}..{} has no expression-level lowering",
+                ns.name(),
+                method,
+                span.start,
+                span.end
+            ),
+            LoweringError::UnsupportedNamespaceField { ns, field, span } => write!(
+                f,
+                "lowering: namespace field `{}.{}` at {}..{} has no expression-level lowering",
+                ns.name(),
+                field,
+                span.start,
+                span.end
+            ),
+            LoweringError::BuilderRejected { error, span } => write!(
+                f,
+                "lowering: builder rejected expr at {}..{} — {}",
+                span.start, span.end, error
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LoweringError {}
+
+// ---------------------------------------------------------------------------
+// LoweringCtx
+// ---------------------------------------------------------------------------
+
+/// Context threaded through expression lowering.
+///
+/// Carries the in-flight [`CgProgramBuilder`] (the recipient of every
+/// `add_expr` call) plus typed lookup tables that map AST resolved-ids
+/// to CG newtype ids. The maps are populated by the surrounding
+/// op-lowering driver (Task 2.7); for Task 2.1's tests, they're built
+/// directly (typically empty).
+pub struct LoweringCtx<'a> {
+    /// Builder receiving every freshly-allocated [`CgExpr`].
+    pub builder: &'a mut CgProgramBuilder,
+    /// AST `ViewRef` → CG `ViewId` map. Empty at expression-pass tests
+    /// that don't exercise `IrExpr::ViewCall`; populated by the driver.
+    pub view_ids: HashMap<AstViewRef, ViewId>,
+    /// Optional view signature resolver — passed through to
+    /// [`type_check`]. `None` means `IrExpr::ViewCall` lowering itself
+    /// pins the result type from `view_ids` but the type checker can't
+    /// validate operand types; the builder's `validate_expr_refs`
+    /// catches dangling ids and the lowering catches arity at AST level.
+    pub view_signatures: HashMap<ViewId, (Vec<CgTy>, CgTy)>,
+    /// Accumulator for per-rule diagnostics. The expression lowering
+    /// itself returns `Err` on first defect; this vector exists so
+    /// later op-lowering passes can collect non-fatal rule-level
+    /// diagnostics in the same context.
+    pub diagnostics: Vec<LoweringError>,
+}
+
+impl<'a> LoweringCtx<'a> {
+    /// Construct a context with empty maps and no diagnostics.
+    pub fn new(builder: &'a mut CgProgramBuilder) -> Self {
+        Self {
+            builder,
+            view_ids: HashMap::new(),
+            view_signatures: HashMap::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    /// Register an AST view ref → CG view id mapping. Returns the prior
+    /// `ViewId` if one was registered for the same ref (shouldn't
+    /// happen in practice — surfacing it lets tests assert exclusive
+    /// allocation).
+    pub fn register_view(&mut self, ast_ref: AstViewRef, view_id: ViewId) -> Option<ViewId> {
+        self.view_ids.insert(ast_ref, view_id)
+    }
+
+    /// Register the typed signature of `view_id`. Used by the recursive
+    /// type-checker when it encounters a `CgExpr::Builtin { fn_id:
+    /// ViewCall { view }, .. }`. Tests that don't exercise view calls
+    /// can leave this empty.
+    pub fn register_view_signature(
+        &mut self,
+        view_id: ViewId,
+        args: Vec<CgTy>,
+        result: CgTy,
+    ) -> Option<(Vec<CgTy>, CgTy)> {
+        self.view_signatures.insert(view_id, (args, result))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+/// Lower a resolved DSL expression to a CG expression id.
+///
+/// On success returns the newly-allocated `CgExprId`; the corresponding
+/// `CgExpr` is in `ctx.builder.program().exprs[id.0 as usize]`. On
+/// failure returns a typed [`LoweringError`] naming the offending node
+/// (via its `Span`) and the structural reason. No partial work is
+/// committed — the builder pushes children before parents, so a parent
+/// failure leaves the children in the arena but no parent referencing
+/// them. (The driver-level lowering decides whether to surface or roll
+/// back.)
+///
+/// Type-checking runs after every node is constructed: a successful
+/// return means the produced `CgExpr` matches its operand types under
+/// the operator's signature.
+pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprId, LoweringError> {
+    let span = ast.span;
+    match &ast.kind {
+        // ---- Literals ----
+        IrExpr::LitBool(b) => add(ctx, CgExpr::Lit(LitValue::Bool(*b)), span),
+        IrExpr::LitInt(v) => {
+            // The DSL surface uses signed `i64` literals; the CG IR's
+            // numeric literals are 32-bit. We pick `I32` for negative
+            // values and `U32` for non-negative ones, narrowing the
+            // i64. Out-of-range narrowings surface as typed
+            // ill-typed errors so silent truncation can't sneak past.
+            if *v < 0 {
+                if *v < i32::MIN as i64 {
+                    return Err(LoweringError::IllTypedExpression {
+                        expected: CgTy::I32,
+                        got: CgTy::I32,
+                        span,
+                    });
+                }
+                add(ctx, CgExpr::Lit(LitValue::I32(*v as i32)), span)
+            } else {
+                if *v > u32::MAX as i64 {
+                    return Err(LoweringError::IllTypedExpression {
+                        expected: CgTy::U32,
+                        got: CgTy::U32,
+                        span,
+                    });
+                }
+                add(ctx, CgExpr::Lit(LitValue::U32(*v as u32)), span)
+            }
+        }
+        IrExpr::LitFloat(v) => add(ctx, CgExpr::Lit(LitValue::F32(*v as f32)), span),
+
+        // ---- Field access ----
+        IrExpr::Field {
+            base, field_name, ..
+        } => lower_field(base, field_name, span, ctx),
+
+        // ---- Local references ----
+        //
+        // The expression layer only recognises `self` as a base for
+        // dotted field reads; bare `self` itself is not a CG value (it
+        // would map to "the current agent slot", but that's an op-level
+        // concept, not an expression value). Other locals must be bound
+        // by op-lowering (`target`, fold binders, etc.).
+        IrExpr::Local(_, name) => Err(LoweringError::UnsupportedLocalBinding {
+            name: name.clone(),
+            span,
+        }),
+
+        // ---- Operators ----
+        IrExpr::Binary(op, lhs, rhs) => lower_binary(*op, lhs, rhs, span, ctx),
+        IrExpr::Unary(op, arg) => lower_unary(*op, arg, span, ctx),
+
+        // ---- Conditional expression ----
+        IrExpr::If {
+            cond,
+            then_expr,
+            else_expr,
+        } => match else_expr {
+            Some(else_box) => lower_select(cond, then_expr, else_box, span, ctx),
+            // `if … then …` without `else` has no value type; only the
+            // statement form supports a None else-branch.
+            None => Err(LoweringError::UnsupportedAstNode {
+                ast_label: "If(without-else)",
+                span,
+            }),
+        },
+
+        // ---- Calls ----
+        IrExpr::BuiltinCall(b, args) => lower_builtin_call(*b, args, span, ctx),
+        IrExpr::ViewCall(view_ref, args) => lower_view_call(*view_ref, args, span, ctx),
+        IrExpr::NamespaceCall { ns, method, args } => {
+            lower_namespace_call(*ns, method.as_str(), args, span, ctx)
+        }
+        IrExpr::NamespaceField { ns, field, .. } => {
+            // No expression-level NamespaceField lowering is wired in
+            // Task 2.1. The op-level driver will lift `config.<…>`
+            // through a `ConfigConstId` later.
+            Err(LoweringError::UnsupportedNamespaceField {
+                ns: *ns,
+                field: field.clone(),
+                span,
+            })
+        }
+        IrExpr::Namespace(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Namespace",
+            span,
+        }),
+        IrExpr::Event(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Event",
+            span,
+        }),
+        IrExpr::Entity(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Entity",
+            span,
+        }),
+        IrExpr::View(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "View",
+            span,
+        }),
+        IrExpr::Verb(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Verb",
+            span,
+        }),
+        IrExpr::VerbCall(_, _) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "VerbCall",
+            span,
+        }),
+        IrExpr::UnresolvedCall(_, _) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "UnresolvedCall",
+            span,
+        }),
+        IrExpr::EnumVariant { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "EnumVariant",
+            span,
+        }),
+        IrExpr::LitString(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "LitString",
+            span,
+        }),
+        IrExpr::Index(_, _) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Index",
+            span,
+        }),
+        IrExpr::In(_, _) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "In",
+            span,
+        }),
+        IrExpr::Contains(_, _) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Contains",
+            span,
+        }),
+        IrExpr::Quantifier { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Quantifier",
+            span,
+        }),
+        IrExpr::Fold { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Fold",
+            span,
+        }),
+        IrExpr::List(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "List",
+            span,
+        }),
+        IrExpr::Tuple(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Tuple",
+            span,
+        }),
+        IrExpr::StructLit { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "StructLit",
+            span,
+        }),
+        IrExpr::Ctor { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Ctor",
+            span,
+        }),
+        IrExpr::Match { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Match",
+            span,
+        }),
+        IrExpr::PerUnit { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "PerUnit",
+            span,
+        }),
+        IrExpr::AbilityTag { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "AbilityTag",
+            span,
+        }),
+        IrExpr::AbilityHint => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "AbilityHint",
+            span,
+        }),
+        IrExpr::AbilityHintLit(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "AbilityHintLit",
+            span,
+        }),
+        IrExpr::AbilityRange => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "AbilityRange",
+            span,
+        }),
+        IrExpr::AbilityOnCooldown(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "AbilityOnCooldown",
+            span,
+        }),
+        IrExpr::Raw(_) => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "Raw",
+            span,
+        }),
+        IrExpr::BeliefsAccessor { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "BeliefsAccessor",
+            span,
+        }),
+        IrExpr::BeliefsConfidence { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "BeliefsConfidence",
+            span,
+        }),
+        IrExpr::BeliefsView { .. } => Err(LoweringError::UnsupportedAstNode {
+            ast_label: "BeliefsView",
+            span,
+        }),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Per-shape helpers
+// ---------------------------------------------------------------------------
+
+/// Push `expr` into the builder, then immediately type-check it. Wraps
+/// the builder error and the type-check error in `LoweringError` so
+/// every push goes through one funnel.
+fn add(
+    ctx: &mut LoweringCtx<'_>,
+    expr: CgExpr,
+    span: Span,
+) -> Result<CgExprId, LoweringError> {
+    let id = ctx
+        .builder
+        .add_expr(expr)
+        .map_err(|e| LoweringError::BuilderRejected { error: e, span })?;
+    typecheck_node(ctx, id, span)?;
+    Ok(id)
+}
+
+/// Run [`type_check`] on the node at `id`, surfacing any failure as a
+/// typed [`LoweringError::TypeCheckFailure`]. Defers view-signature
+/// lookup to the in-context map (`ctx.view_signatures`).
+fn typecheck_node(
+    ctx: &LoweringCtx<'_>,
+    id: CgExprId,
+    span: Span,
+) -> Result<CgTy, LoweringError> {
+    let prog = ctx.builder.program();
+    let node = prog
+        .exprs
+        .get(id.0 as usize)
+        .ok_or(LoweringError::TypeCheckFailure {
+            error: TypeError::DanglingExprId {
+                node: id,
+                referenced: id,
+            },
+            span,
+        })?;
+    let resolver: &dyn Fn(ViewId) -> Option<(Vec<CgTy>, CgTy)> = &|view_id| {
+        ctx.view_signatures
+            .get(&view_id)
+            .map(|(args, result)| (args.clone(), *result))
+    };
+    let tc_ctx = TypeCheckCtx::with_view_signature(prog, resolver);
+    type_check(node, id, &tc_ctx).map_err(|e| LoweringError::TypeCheckFailure { error: e, span })
+}
+
+/// Lower `<base>.<field_name>`. Today only the `self` base is wired —
+/// other bases (locals other than `self`, namespace fields,
+/// builder-receiver chains) surface as typed deferrals.
+fn lower_field(
+    base: &IrExprNode,
+    field_name: &str,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    match &base.kind {
+        IrExpr::Local(_, local_name) if local_name == "self" => {
+            let field = map_field_name(field_name).ok_or_else(|| {
+                LoweringError::UnknownAgentField {
+                    field_name: field_name.to_string(),
+                    span,
+                }
+            })?;
+            add(
+                ctx,
+                CgExpr::Read(DataHandle::AgentField {
+                    field,
+                    target: AgentRef::Self_,
+                }),
+                span,
+            )
+        }
+        _ => Err(LoweringError::UnsupportedFieldBase {
+            field_name: field_name.to_string(),
+            span,
+        }),
+    }
+}
+
+/// Map a DSL field name to the canonical [`AgentFieldId`]. The mapping
+/// is the inverse of [`AgentFieldId::snake`]; an unknown name returns
+/// `None` and surfaces upstream as
+/// [`LoweringError::UnknownAgentField`].
+fn map_field_name(name: &str) -> Option<AgentFieldId> {
+    use AgentFieldId::*;
+    Some(match name {
+        "pos" => Pos,
+        "hp" => Hp,
+        "max_hp" => MaxHp,
+        "alive" => Alive,
+        "movement_mode" => MovementMode,
+        "level" => Level,
+        "move_speed" => MoveSpeed,
+        "move_speed_mult" => MoveSpeedMult,
+        "shield_hp" => ShieldHp,
+        "armor" => Armor,
+        "magic_resist" => MagicResist,
+        "attack_damage" => AttackDamage,
+        "attack_range" => AttackRange,
+        "mana" => Mana,
+        "max_mana" => MaxMana,
+        "hunger" => Hunger,
+        "thirst" => Thirst,
+        "rest_timer" => RestTimer,
+        "safety" => Safety,
+        "shelter" => Shelter,
+        "social" => Social,
+        "purpose" => Purpose,
+        "esteem" => Esteem,
+        "risk_tolerance" => RiskTolerance,
+        "social_drive" => SocialDrive,
+        "ambition" => Ambition,
+        "altruism" => Altruism,
+        "curiosity" => Curiosity,
+        "engaged_with" => EngagedWith,
+        "stun_expires_at_tick" => StunExpiresAtTick,
+        "slow_expires_at_tick" => SlowExpiresAtTick,
+        "slow_factor_q8" => SlowFactorQ8,
+        "cooldown_next_ready_tick" => CooldownNextReadyTick,
+        "creature_type" => CreatureType,
+        "spawn_tick" => SpawnTick,
+        "grid_id" => GridId,
+        "local_pos" => LocalPos,
+        "move_target" => MoveTarget,
+        _ => return None,
+    })
+}
+
+/// Lower a binary operator. Picks the typed [`BinaryOp`] variant based
+/// on operand types — the AST's untyped `BinOp::Lt` becomes
+/// `BinaryOp::LtF32` when both operands are `F32`, etc.
+fn lower_binary(
+    op: BinOp,
+    lhs: &IrExprNode,
+    rhs: &IrExprNode,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    let lhs_id = lower_expr(lhs, ctx)?;
+    let rhs_id = lower_expr(rhs, ctx)?;
+    let lhs_ty = typecheck_node(ctx, lhs_id, lhs.span)?;
+    let rhs_ty = typecheck_node(ctx, rhs_id, rhs.span)?;
+
+    if lhs_ty != rhs_ty {
+        return Err(LoweringError::BinaryOperandTyMismatch {
+            op,
+            lhs_ty,
+            rhs_ty,
+            span,
+        });
+    }
+
+    let cg_op = pick_binary_op(op, lhs_ty, span)?;
+    let result_ty = cg_op.result_ty();
+    add(
+        ctx,
+        CgExpr::Binary {
+            op: cg_op,
+            lhs: lhs_id,
+            rhs: rhs_id,
+            ty: result_ty,
+        },
+        span,
+    )
+}
+
+/// Pick the typed [`BinaryOp`] variant for a given AST op + operand
+/// type. An unsupported combination (e.g., `agent.alive < 5`'s
+/// `Lt<Bool>`) becomes [`LoweringError::IllTypedExpression`].
+fn pick_binary_op(op: BinOp, ty: CgTy, span: Span) -> Result<BinaryOp, LoweringError> {
+    match (op, ty) {
+        // Logical — Bool only.
+        (BinOp::And, CgTy::Bool) => Ok(BinaryOp::And),
+        (BinOp::Or, CgTy::Bool) => Ok(BinaryOp::Or),
+        (BinOp::And | BinOp::Or, _) => Err(LoweringError::IllTypedExpression {
+            expected: CgTy::Bool,
+            got: ty,
+            span,
+        }),
+
+        // Equality — Bool, U32, I32, F32, AgentId. Tick comparisons go
+        // through U32 (BinaryOp doc states this).
+        (BinOp::Eq, CgTy::Bool) => Ok(BinaryOp::EqBool),
+        (BinOp::Eq, CgTy::U32) | (BinOp::Eq, CgTy::Tick) => Ok(BinaryOp::EqU32),
+        (BinOp::Eq, CgTy::I32) => Ok(BinaryOp::EqI32),
+        (BinOp::Eq, CgTy::F32) => Ok(BinaryOp::EqF32),
+        (BinOp::Eq, CgTy::AgentId) => Ok(BinaryOp::EqAgentId),
+        (BinOp::Eq, CgTy::Vec3F32) | (BinOp::Eq, CgTy::ViewKey { .. }) => {
+            Err(LoweringError::IllTypedExpression {
+                expected: CgTy::F32,
+                got: ty,
+                span,
+            })
+        }
+        (BinOp::NotEq, CgTy::Bool) => Ok(BinaryOp::NeBool),
+        (BinOp::NotEq, CgTy::U32) | (BinOp::NotEq, CgTy::Tick) => Ok(BinaryOp::NeU32),
+        (BinOp::NotEq, CgTy::I32) => Ok(BinaryOp::NeI32),
+        (BinOp::NotEq, CgTy::F32) => Ok(BinaryOp::NeF32),
+        (BinOp::NotEq, CgTy::AgentId) => Ok(BinaryOp::NeAgentId),
+        (BinOp::NotEq, CgTy::Vec3F32) | (BinOp::NotEq, CgTy::ViewKey { .. }) => {
+            Err(LoweringError::IllTypedExpression {
+                expected: CgTy::F32,
+                got: ty,
+                span,
+            })
+        }
+
+        // Ordered comparisons — F32, U32 (incl. Tick), I32 only.
+        (BinOp::Lt, CgTy::F32) => Ok(BinaryOp::LtF32),
+        (BinOp::Lt, CgTy::U32) | (BinOp::Lt, CgTy::Tick) => Ok(BinaryOp::LtU32),
+        (BinOp::Lt, CgTy::I32) => Ok(BinaryOp::LtI32),
+        (BinOp::LtEq, CgTy::F32) => Ok(BinaryOp::LeF32),
+        (BinOp::LtEq, CgTy::U32) | (BinOp::LtEq, CgTy::Tick) => Ok(BinaryOp::LeU32),
+        (BinOp::LtEq, CgTy::I32) => Ok(BinaryOp::LeI32),
+        (BinOp::Gt, CgTy::F32) => Ok(BinaryOp::GtF32),
+        (BinOp::Gt, CgTy::U32) | (BinOp::Gt, CgTy::Tick) => Ok(BinaryOp::GtU32),
+        (BinOp::Gt, CgTy::I32) => Ok(BinaryOp::GtI32),
+        (BinOp::GtEq, CgTy::F32) => Ok(BinaryOp::GeF32),
+        (BinOp::GtEq, CgTy::U32) | (BinOp::GtEq, CgTy::Tick) => Ok(BinaryOp::GeU32),
+        (BinOp::GtEq, CgTy::I32) => Ok(BinaryOp::GeI32),
+        (BinOp::Lt | BinOp::LtEq | BinOp::Gt | BinOp::GtEq, _) => {
+            Err(LoweringError::IllTypedExpression {
+                expected: CgTy::F32,
+                got: ty,
+                span,
+            })
+        }
+
+        // Arithmetic — F32, U32, I32 only.
+        (BinOp::Add, CgTy::F32) => Ok(BinaryOp::AddF32),
+        (BinOp::Add, CgTy::U32) => Ok(BinaryOp::AddU32),
+        (BinOp::Add, CgTy::I32) => Ok(BinaryOp::AddI32),
+        (BinOp::Sub, CgTy::F32) => Ok(BinaryOp::SubF32),
+        (BinOp::Sub, CgTy::U32) => Ok(BinaryOp::SubU32),
+        (BinOp::Sub, CgTy::I32) => Ok(BinaryOp::SubI32),
+        (BinOp::Mul, CgTy::F32) => Ok(BinaryOp::MulF32),
+        (BinOp::Mul, CgTy::U32) => Ok(BinaryOp::MulU32),
+        (BinOp::Mul, CgTy::I32) => Ok(BinaryOp::MulI32),
+        (BinOp::Div, CgTy::F32) => Ok(BinaryOp::DivF32),
+        (BinOp::Div, CgTy::U32) => Ok(BinaryOp::DivU32),
+        (BinOp::Div, CgTy::I32) => Ok(BinaryOp::DivI32),
+        (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div, _) => {
+            Err(LoweringError::IllTypedExpression {
+                expected: CgTy::F32,
+                got: ty,
+                span,
+            })
+        }
+
+        // Mod — no CG variant in v1.
+        (BinOp::Mod, _) => Err(LoweringError::UnsupportedBinaryOp { op, span }),
+    }
+}
+
+/// Lower a unary operator. The CG-side variant is picked from operand
+/// type (`Neg`/`Abs`/`Sqrt` go through `F32`/`I32`; `Not` is `Bool`-only).
+fn lower_unary(
+    op: UnOp,
+    arg: &IrExprNode,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    let arg_id = lower_expr(arg, ctx)?;
+    let arg_ty = typecheck_node(ctx, arg_id, arg.span)?;
+    let cg_op = pick_unary_op(op, arg_ty, span)?;
+    let result_ty = cg_op.result_ty();
+    add(
+        ctx,
+        CgExpr::Unary {
+            op: cg_op,
+            arg: arg_id,
+            ty: result_ty,
+        },
+        span,
+    )
+}
+
+fn pick_unary_op(op: UnOp, ty: CgTy, span: Span) -> Result<UnaryOp, LoweringError> {
+    match (op, ty) {
+        (UnOp::Not, CgTy::Bool) => Ok(UnaryOp::NotBool),
+        (UnOp::Not, _) => Err(LoweringError::IllTypedExpression {
+            expected: CgTy::Bool,
+            got: ty,
+            span,
+        }),
+        (UnOp::Neg, CgTy::F32) => Ok(UnaryOp::NegF32),
+        (UnOp::Neg, CgTy::I32) => Ok(UnaryOp::NegI32),
+        (UnOp::Neg, _) => Err(LoweringError::IllTypedExpression {
+            expected: CgTy::F32,
+            got: ty,
+            span,
+        }),
+    }
+}
+
+/// Lower an `if cond then a else b` AST node into a [`CgExpr::Select`].
+fn lower_select(
+    cond: &IrExprNode,
+    then_expr: &IrExprNode,
+    else_expr: &IrExprNode,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    let cond_id = lower_expr(cond, ctx)?;
+    let then_id = lower_expr(then_expr, ctx)?;
+    let else_id = lower_expr(else_expr, ctx)?;
+    let cond_ty = typecheck_node(ctx, cond_id, cond.span)?;
+    if cond_ty != CgTy::Bool {
+        return Err(LoweringError::IllTypedExpression {
+            expected: CgTy::Bool,
+            got: cond_ty,
+            span,
+        });
+    }
+    let then_ty = typecheck_node(ctx, then_id, then_expr.span)?;
+    let else_ty = typecheck_node(ctx, else_id, else_expr.span)?;
+    if then_ty != else_ty {
+        return Err(LoweringError::BinaryOperandTyMismatch {
+            // Repurpose `BinOp::Eq` here as the "==-compatible" tag —
+            // there's no AST op behind a `Select` arm mismatch, so we
+            // pick the closest semantic neighbour. The displayed form
+            // distinguishes the two arm types directly.
+            op: BinOp::Eq,
+            lhs_ty: then_ty,
+            rhs_ty: else_ty,
+            span,
+        });
+    }
+    add(
+        ctx,
+        CgExpr::Select {
+            cond: cond_id,
+            then: then_id,
+            else_: else_id,
+            ty: then_ty,
+        },
+        span,
+    )
+}
+
+/// Lower a [`Builtin`] call to a [`CgExpr::Builtin`]. The CG-side
+/// `BuiltinId` variant is picked from the AST `Builtin` enum + (where
+/// applicable) operand types.
+fn lower_builtin_call(
+    builtin: Builtin,
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    // Aggregations / quantifiers are AST-level dedicated nodes (Fold,
+    // Quantifier) — they don't appear here as `BuiltinCall(Min, _)` in
+    // their fold-shape, but the parser does produce `BuiltinCall(Min,
+    // [a, b])` for the pairwise shape. Differentiate by arity.
+    match builtin {
+        Builtin::Forall | Builtin::Exists | Builtin::Count | Builtin::Sum => {
+            return Err(LoweringError::UnsupportedBuiltin { builtin, span });
+        }
+        _ => {}
+    }
+
+    // Lower every argument first; then dispatch on the typed shape.
+    let mut arg_ids = Vec::with_capacity(args.len());
+    let mut arg_tys = Vec::with_capacity(args.len());
+    for a in args {
+        let id = lower_expr(&a.value, ctx)?;
+        let ty = typecheck_node(ctx, id, a.value.span)?;
+        arg_ids.push(id);
+        arg_tys.push(ty);
+    }
+
+    match builtin {
+        Builtin::Distance | Builtin::PlanarDistance | Builtin::ZSeparation => {
+            expect_arity(builtin, 2, args.len(), span)?;
+            let fn_id = match builtin {
+                Builtin::Distance => BuiltinId::Distance,
+                Builtin::PlanarDistance => BuiltinId::PlanarDistance,
+                Builtin::ZSeparation => BuiltinId::ZSeparation,
+                _ => unreachable!("outer match restricts to 3 distance variants"),
+            };
+            // Operand types must both be Vec3F32. Type checker enforces
+            // it; we run that on the parent below.
+            let result_ty = CgTy::F32;
+            add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id,
+                    args: arg_ids,
+                    ty: result_ty,
+                },
+                span,
+            )
+        }
+        Builtin::Entity => {
+            expect_arity(builtin, 1, args.len(), span)?;
+            let result_ty = CgTy::AgentId;
+            add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id: BuiltinId::Entity,
+                    args: arg_ids,
+                    ty: result_ty,
+                },
+                span,
+            )
+        }
+        Builtin::Floor | Builtin::Ceil | Builtin::Round
+        | Builtin::Ln | Builtin::Log2 | Builtin::Log10 => {
+            expect_arity(builtin, 1, args.len(), span)?;
+            let fn_id = match builtin {
+                Builtin::Floor => BuiltinId::Floor,
+                Builtin::Ceil => BuiltinId::Ceil,
+                Builtin::Round => BuiltinId::Round,
+                Builtin::Ln => BuiltinId::Ln,
+                Builtin::Log2 => BuiltinId::Log2,
+                Builtin::Log10 => BuiltinId::Log10,
+                _ => unreachable!("outer match restricts to 6 unary-f32 builtins"),
+            };
+            add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id,
+                    args: arg_ids,
+                    ty: CgTy::F32,
+                },
+                span,
+            )
+        }
+        Builtin::Sqrt => {
+            // `sqrt` lowers to a `UnaryOp` (CG IR represents shape-pure
+            // scalar functions there). Surface this rewrite explicitly.
+            expect_arity(builtin, 1, args.len(), span)?;
+            // Re-use the already-pushed arg id; build a Unary node.
+            let arg_id = arg_ids[0];
+            let arg_ty = arg_tys[0];
+            if arg_ty != CgTy::F32 {
+                return Err(LoweringError::IllTypedExpression {
+                    expected: CgTy::F32,
+                    got: arg_ty,
+                    span,
+                });
+            }
+            add(
+                ctx,
+                CgExpr::Unary {
+                    op: UnaryOp::SqrtF32,
+                    arg: arg_id,
+                    ty: CgTy::F32,
+                },
+                span,
+            )
+        }
+        Builtin::Abs => {
+            // Same UnaryOp rewrite as `sqrt`, but typed `F32` or `I32`.
+            expect_arity(builtin, 1, args.len(), span)?;
+            let arg_id = arg_ids[0];
+            let arg_ty = arg_tys[0];
+            let unary = match arg_ty {
+                CgTy::F32 => UnaryOp::AbsF32,
+                CgTy::I32 => UnaryOp::AbsI32,
+                _ => {
+                    return Err(LoweringError::NumericBuiltinNonNumericOperand {
+                        builtin,
+                        operand_index: 0,
+                        got: arg_ty,
+                        span,
+                    });
+                }
+            };
+            add(
+                ctx,
+                CgExpr::Unary {
+                    op: unary,
+                    arg: arg_id,
+                    ty: arg_ty,
+                },
+                span,
+            )
+        }
+        Builtin::Min => lower_pairwise_numeric(
+            builtin,
+            BuiltinIdCtor::Min,
+            &arg_ids,
+            &arg_tys,
+            args,
+            span,
+            ctx,
+        ),
+        Builtin::Max => lower_pairwise_numeric(
+            builtin,
+            BuiltinIdCtor::Max,
+            &arg_ids,
+            &arg_tys,
+            args,
+            span,
+            ctx,
+        ),
+        Builtin::Clamp => {
+            expect_arity(builtin, 3, args.len(), span)?;
+            let nty = numeric_ty_from(builtin, arg_tys[0], 0, span)?;
+            // Validate the other two are the same numeric type.
+            for (idx, &t) in arg_tys.iter().enumerate().skip(1) {
+                let other = numeric_ty_from(builtin, t, idx as u8, span)?;
+                if other != nty {
+                    return Err(LoweringError::BinaryOperandTyMismatch {
+                        op: BinOp::Eq, // best structural neighbour
+                        lhs_ty: nty.cg_ty(),
+                        rhs_ty: other.cg_ty(),
+                        span,
+                    });
+                }
+            }
+            add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id: BuiltinId::Clamp(nty),
+                    args: arg_ids,
+                    ty: nty.cg_ty(),
+                },
+                span,
+            )
+        }
+        Builtin::SaturatingAdd => lower_pairwise_numeric(
+            builtin,
+            BuiltinIdCtor::SaturatingAdd,
+            &arg_ids,
+            &arg_tys,
+            args,
+            span,
+            ctx,
+        ),
+        // Already filtered above.
+        Builtin::Forall | Builtin::Exists | Builtin::Count | Builtin::Sum => {
+            unreachable!("filtered earlier in lower_builtin_call")
+        }
+    }
+}
+
+/// Tag distinguishing the three pairwise-numeric AST builtins that
+/// share the same lowering shape. Only used inside
+/// `lower_pairwise_numeric`.
+enum BuiltinIdCtor {
+    Min,
+    Max,
+    SaturatingAdd,
+}
+
+impl BuiltinIdCtor {
+    fn build(&self, t: NumericTy) -> BuiltinId {
+        match self {
+            BuiltinIdCtor::Min => BuiltinId::Min(t),
+            BuiltinIdCtor::Max => BuiltinId::Max(t),
+            BuiltinIdCtor::SaturatingAdd => BuiltinId::SaturatingAdd(t),
+        }
+    }
+}
+
+fn lower_pairwise_numeric(
+    builtin: Builtin,
+    ctor: BuiltinIdCtor,
+    arg_ids: &[CgExprId],
+    arg_tys: &[CgTy],
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    expect_arity(builtin, 2, args.len(), span)?;
+    let nty_lhs = numeric_ty_from(builtin, arg_tys[0], 0, span)?;
+    let nty_rhs = numeric_ty_from(builtin, arg_tys[1], 1, span)?;
+    if nty_lhs != nty_rhs {
+        return Err(LoweringError::BinaryOperandTyMismatch {
+            op: BinOp::Eq,
+            lhs_ty: nty_lhs.cg_ty(),
+            rhs_ty: nty_rhs.cg_ty(),
+            span,
+        });
+    }
+    let fn_id = ctor.build(nty_lhs);
+    add(
+        ctx,
+        CgExpr::Builtin {
+            fn_id,
+            args: arg_ids.to_vec(),
+            ty: nty_lhs.cg_ty(),
+        },
+        span,
+    )
+}
+
+fn numeric_ty_from(
+    builtin: Builtin,
+    ty: CgTy,
+    operand_index: u8,
+    span: Span,
+) -> Result<NumericTy, LoweringError> {
+    match ty {
+        CgTy::F32 => Ok(NumericTy::F32),
+        CgTy::U32 => Ok(NumericTy::U32),
+        CgTy::I32 => Ok(NumericTy::I32),
+        _ => Err(LoweringError::NumericBuiltinNonNumericOperand {
+            builtin,
+            operand_index,
+            got: ty,
+            span,
+        }),
+    }
+}
+
+fn expect_arity(
+    builtin: Builtin,
+    expected: u8,
+    got: usize,
+    span: Span,
+) -> Result<(), LoweringError> {
+    if got as u8 == expected {
+        Ok(())
+    } else {
+        Err(LoweringError::BuiltinArityMismatch {
+            builtin,
+            expected,
+            got: got as u8,
+            span,
+        })
+    }
+}
+
+/// Lower a `view::<name>(args)` call into a `CgExpr::Builtin { fn_id:
+/// ViewCall { view }, .. }`. Result type is fetched from
+/// `ctx.view_signatures` if registered; otherwise falls back to
+/// `ViewKey { view }` (Phase 1's chosen phantom) and the type checker
+/// surfaces an unresolved-signature error if a downstream consumer
+/// requires the concrete shape.
+fn lower_view_call(
+    ast_ref: AstViewRef,
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    let view_id = *ctx
+        .view_ids
+        .get(&ast_ref)
+        .ok_or(LoweringError::UnknownView { ast_ref, span })?;
+
+    let mut arg_ids = Vec::with_capacity(args.len());
+    for a in args {
+        let id = lower_expr(&a.value, ctx)?;
+        arg_ids.push(id);
+    }
+    // Result type — pulled from the context's signature registry, or
+    // defaulted to `ViewKey { view }` when unregistered (matches the
+    // Phase 1 phantom shape).
+    let result_ty = ctx
+        .view_signatures
+        .get(&view_id)
+        .map(|(_, r)| *r)
+        .unwrap_or(CgTy::ViewKey { view: view_id });
+    add(
+        ctx,
+        CgExpr::Builtin {
+            fn_id: BuiltinId::ViewCall { view: view_id },
+            args: arg_ids,
+            ty: result_ty,
+        },
+        span,
+    )
+}
+
+/// Lower an `IrExpr::NamespaceCall`. Most stdlib namespace calls don't
+/// produce a single `CgExpr` — they lower to op-level constructs
+/// (`SpatialQuery`, `EventRing`, etc.). The two cases that do are:
+///
+/// * `rng.<purpose>()` — pure expression, becomes `CgExpr::Rng`.
+/// * `agents.<field>(<expr>)` — read of an agent field whose target is
+///   given by a sub-expression. The sub-expression must already lower
+///   to an `AgentId`-typed `CgExpr`.
+///
+/// All other namespace/method pairs surface as
+/// [`LoweringError::UnsupportedNamespaceCall`] for now.
+fn lower_namespace_call(
+    ns: NamespaceId,
+    method: &str,
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    match (ns, method) {
+        (NamespaceId::Rng, m) => {
+            // `rng.action()`, `rng.sample()`, etc. — argument list (if
+            // any) is consumed at op-level (the seed/agent/tick are
+            // implicit). We accept zero args here.
+            if !args.is_empty() {
+                return Err(LoweringError::BuiltinArityMismatch {
+                    builtin: Builtin::Entity, // closest neighbour for the typed report
+                    expected: 0,
+                    got: args.len() as u8,
+                    span,
+                });
+            }
+            let purpose = match m {
+                "action" => RngPurpose::Action,
+                "sample" => RngPurpose::Sample,
+                "shuffle" => RngPurpose::Shuffle,
+                "conception" => RngPurpose::Conception,
+                _ => {
+                    return Err(LoweringError::UnsupportedNamespaceCall {
+                        ns,
+                        method: method.to_string(),
+                        span,
+                    })
+                }
+            };
+            add(
+                ctx,
+                CgExpr::Rng {
+                    purpose,
+                    ty: CgTy::U32,
+                },
+                span,
+            )
+        }
+        (NamespaceId::Agents, field) if args.len() == 1 => {
+            // `agents.<field>(<expr>)` — typed agent-field read where
+            // the target slot is computed by `<expr>`. The DSL surfaces
+            // this for cross-agent reads (`agents.hp(target)` etc.).
+            let target_expr = &args[0].value;
+            let target_id = lower_expr(target_expr, ctx)?;
+            let target_ty = typecheck_node(ctx, target_id, target_expr.span)?;
+            if target_ty != CgTy::AgentId {
+                return Err(LoweringError::IllTypedExpression {
+                    expected: CgTy::AgentId,
+                    got: target_ty,
+                    span,
+                });
+            }
+            let field_id = map_field_name(field).ok_or_else(|| {
+                LoweringError::UnknownAgentField {
+                    field_name: field.to_string(),
+                    span,
+                }
+            })?;
+            // `data_handle_ty` produces the right `CgTy` for whatever
+            // primitive the field carries — we use it to satisfy the
+            // type checker's claimed-result rule on `Read`.
+            let handle = DataHandle::AgentField {
+                field: field_id,
+                target: AgentRef::Target(target_id),
+            };
+            // Sanity: the field's primitive type must round-trip
+            // through `data_handle_ty` — otherwise `Read` wouldn't
+            // produce a meaningful CgExpr.
+            let _ty = data_handle_ty(&handle);
+            add(ctx, CgExpr::Read(handle), span)
+        }
+        _ => Err(LoweringError::UnsupportedNamespaceCall {
+            ns,
+            method: method.to_string(),
+            span,
+        }),
+    }
+}
+
+/// Confirm `AgentFieldTy` doesn't have a closed-set match arm gap. The
+/// primitive-type set is referenced indirectly via [`data_handle_ty`];
+/// this helper isn't called from production code, but documents the
+/// invariant the lowering depends on (every `AgentFieldTy` has a
+/// non-`ViewKey` `CgTy` representation).
+#[allow(dead_code)]
+fn _agent_field_ty_invariant(t: AgentFieldTy) -> CgTy {
+    match t {
+        AgentFieldTy::F32 => CgTy::F32,
+        AgentFieldTy::U32 => CgTy::U32,
+        AgentFieldTy::I16 => CgTy::I32,
+        AgentFieldTy::Bool => CgTy::Bool,
+        AgentFieldTy::Vec3 => CgTy::Vec3F32,
+        AgentFieldTy::EnumU8 => CgTy::U32,
+        AgentFieldTy::OptAgentId => CgTy::AgentId,
+        AgentFieldTy::OptEnumU32 => CgTy::U32,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cg::expr::pretty;
+    use dsl_ast::ast::Span as AstSpan;
+    use dsl_ast::ir::LocalRef;
+
+    // ---- helpers ----
+
+    fn span(start: usize, end: usize) -> AstSpan {
+        AstSpan::new(start, end)
+    }
+
+    fn node(kind: IrExpr) -> IrExprNode {
+        IrExprNode {
+            kind,
+            span: span(0, 0),
+        }
+    }
+
+    fn arg(value: IrExprNode) -> IrCallArg {
+        let s = value.span;
+        IrCallArg {
+            name: None,
+            value,
+            span: s,
+        }
+    }
+
+    fn local_self() -> IrExprNode {
+        node(IrExpr::Local(LocalRef(0), "self".to_string()))
+    }
+
+    fn field_self(name: &str) -> IrExprNode {
+        node(IrExpr::Field {
+            base: Box::new(local_self()),
+            field_name: name.to_string(),
+            field: None,
+        })
+    }
+
+    fn lower_to_string(ast: &IrExprNode) -> Result<String, LoweringError> {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let id = lower_expr(ast, &mut ctx)?;
+        let prog = builder.finish();
+        let node = &prog.exprs[id.0 as usize];
+        Ok(pretty(node, &prog.exprs))
+    }
+
+    // ---- Literals ----
+
+    #[test]
+    fn literal_bool_lowers() {
+        let ast = node(IrExpr::LitBool(true));
+        assert_eq!(lower_to_string(&ast).unwrap(), "(lit true)");
+    }
+
+    #[test]
+    fn literal_int_positive_picks_u32() {
+        let ast = node(IrExpr::LitInt(5));
+        assert_eq!(lower_to_string(&ast).unwrap(), "(lit 5u32)");
+    }
+
+    #[test]
+    fn literal_int_negative_picks_i32() {
+        let ast = node(IrExpr::LitInt(-3));
+        assert_eq!(lower_to_string(&ast).unwrap(), "(lit -3i32)");
+    }
+
+    #[test]
+    fn literal_float_lowers_f32() {
+        let ast = node(IrExpr::LitFloat(1.5));
+        assert_eq!(lower_to_string(&ast).unwrap(), "(lit 1.5f32)");
+    }
+
+    #[test]
+    fn literal_int_overflow_u32_rejected() {
+        let ast = node(IrExpr::LitInt((u32::MAX as i64) + 1));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::IllTypedExpression { .. } => {}
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn literal_int_overflow_i32_rejected() {
+        let ast = node(IrExpr::LitInt((i32::MIN as i64) - 1));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    // ---- Field access (the plan's `agent.hp` example) ----
+
+    #[test]
+    fn self_hp_lowers_to_read_agent_field() {
+        let ast = field_self("hp");
+        assert_eq!(lower_to_string(&ast).unwrap(), "(read agent.self.hp)");
+    }
+
+    #[test]
+    fn self_pos_lowers_to_read_vec3_field() {
+        let ast = field_self("pos");
+        assert_eq!(lower_to_string(&ast).unwrap(), "(read agent.self.pos)");
+    }
+
+    #[test]
+    fn self_alive_lowers_to_read_bool_field() {
+        let ast = field_self("alive");
+        assert_eq!(lower_to_string(&ast).unwrap(), "(read agent.self.alive)");
+    }
+
+    #[test]
+    fn unknown_self_field_rejected() {
+        let ast = field_self("hp_pct");
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::UnknownAgentField { field_name, .. } => {
+                assert_eq!(field_name, "hp_pct");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_on_non_self_local_rejected() {
+        let ast = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(LocalRef(1), "target".to_string()))),
+            field_name: "hp".to_string(),
+            field: None,
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::UnsupportedFieldBase { .. }));
+    }
+
+    // ---- The plan's specific rejection — `agent.alive < 5` ----
+
+    #[test]
+    fn agent_alive_lt_5_rejects_with_typed_error() {
+        // agent.alive : Bool
+        // 5            : U32
+        // → mismatched binary operand types
+        let ast = node(IrExpr::Binary(
+            BinOp::Lt,
+            Box::new(field_self("alive")),
+            Box::new(node(IrExpr::LitInt(5))),
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::BinaryOperandTyMismatch {
+                op,
+                lhs_ty,
+                rhs_ty,
+                ..
+            } => {
+                assert_eq!(op, BinOp::Lt);
+                assert_eq!(lhs_ty, CgTy::Bool);
+                assert_eq!(rhs_ty, CgTy::U32);
+            }
+            other => panic!("expected BinaryOperandTyMismatch, got {other:?}"),
+        }
+    }
+
+    // ---- BinaryOp coverage ----
+
+    #[test]
+    fn binary_arithmetic_f32() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Add,
+            Box::new(field_self("hp")),
+            Box::new(field_self("max_hp")),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(add.f32 (read agent.self.hp) (read agent.self.max_hp))"
+        );
+    }
+
+    #[test]
+    fn binary_arithmetic_u32() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Sub,
+            Box::new(field_self("level")),
+            Box::new(node(IrExpr::LitInt(1))),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(sub.u32 (read agent.self.level) (lit 1u32))"
+        );
+    }
+
+    #[test]
+    fn binary_comparison_f32_lt() {
+        // self.hp < self.max_hp
+        let ast = node(IrExpr::Binary(
+            BinOp::Lt,
+            Box::new(field_self("hp")),
+            Box::new(field_self("max_hp")),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(lt.f32 (read agent.self.hp) (read agent.self.max_hp))"
+        );
+    }
+
+    #[test]
+    fn binary_comparison_u32_le() {
+        // self.level <= 5
+        let ast = node(IrExpr::Binary(
+            BinOp::LtEq,
+            Box::new(field_self("level")),
+            Box::new(node(IrExpr::LitInt(5))),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(le.u32 (read agent.self.level) (lit 5u32))"
+        );
+    }
+
+    #[test]
+    fn binary_equality_bool() {
+        // self.alive == self.alive
+        let ast = node(IrExpr::Binary(
+            BinOp::Eq,
+            Box::new(field_self("alive")),
+            Box::new(field_self("alive")),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(eq.bool (read agent.self.alive) (read agent.self.alive))"
+        );
+    }
+
+    #[test]
+    fn binary_equality_agent_id() {
+        // self.engaged_with == self.engaged_with
+        let ast = node(IrExpr::Binary(
+            BinOp::Eq,
+            Box::new(field_self("engaged_with")),
+            Box::new(field_self("engaged_with")),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(eq.agent_id (read agent.self.engaged_with) (read agent.self.engaged_with))"
+        );
+    }
+
+    #[test]
+    fn binary_logical_and() {
+        let ast = node(IrExpr::Binary(
+            BinOp::And,
+            Box::new(field_self("alive")),
+            Box::new(field_self("alive")),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(and (read agent.self.alive) (read agent.self.alive))"
+        );
+    }
+
+    #[test]
+    fn binary_logical_or() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Or,
+            Box::new(node(IrExpr::LitBool(true))),
+            Box::new(node(IrExpr::LitBool(false))),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(or (lit true) (lit false))"
+        );
+    }
+
+    #[test]
+    fn binary_mod_unsupported() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Mod,
+            Box::new(node(IrExpr::LitInt(7))),
+            Box::new(node(IrExpr::LitInt(3))),
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedBinaryOp { op: BinOp::Mod, .. }
+        ));
+    }
+
+    #[test]
+    fn binary_logical_and_on_non_bool_rejected() {
+        let ast = node(IrExpr::Binary(
+            BinOp::And,
+            Box::new(node(IrExpr::LitInt(1))),
+            Box::new(node(IrExpr::LitInt(2))),
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    // ---- UnaryOp coverage ----
+
+    #[test]
+    fn unary_not_bool() {
+        let ast = node(IrExpr::Unary(UnOp::Not, Box::new(field_self("alive"))));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(not.bool (read agent.self.alive))"
+        );
+    }
+
+    #[test]
+    fn unary_neg_f32() {
+        let ast = node(IrExpr::Unary(UnOp::Neg, Box::new(field_self("hp"))));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(neg.f32 (read agent.self.hp))"
+        );
+    }
+
+    #[test]
+    fn unary_neg_i32() {
+        // self.slow_factor_q8 is i16 widened to i32 in CG IR.
+        let ast = node(IrExpr::Unary(
+            UnOp::Neg,
+            Box::new(field_self("slow_factor_q8")),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(neg.i32 (read agent.self.slow_factor_q8))"
+        );
+    }
+
+    #[test]
+    fn unary_not_on_u32_rejected() {
+        let ast = node(IrExpr::Unary(UnOp::Not, Box::new(field_self("level"))));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    #[test]
+    fn unary_neg_on_bool_rejected() {
+        let ast = node(IrExpr::Unary(UnOp::Neg, Box::new(field_self("alive"))));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    // ---- Builtins ----
+
+    #[test]
+    fn distance_builtin_lowers() {
+        // distance(self.pos, self.pos)  — DSL spec example.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Distance,
+            vec![arg(field_self("pos")), arg(field_self("pos"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.distance (read agent.self.pos) (read agent.self.pos))"
+        );
+    }
+
+    #[test]
+    fn planar_distance_builtin_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::PlanarDistance,
+            vec![arg(field_self("pos")), arg(field_self("pos"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.planar_distance (read agent.self.pos) (read agent.self.pos))"
+        );
+    }
+
+    #[test]
+    fn z_separation_builtin_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::ZSeparation,
+            vec![arg(field_self("pos")), arg(field_self("pos"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.z_separation (read agent.self.pos) (read agent.self.pos))"
+        );
+    }
+
+    #[test]
+    fn distance_arity_mismatch_rejected() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Distance,
+            vec![arg(field_self("pos"))],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::BuiltinArityMismatch {
+                builtin: Builtin::Distance,
+                expected,
+                got,
+                ..
+            } => {
+                assert_eq!(expected, 2);
+                assert_eq!(got, 1);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn distance_with_non_vec3_args_fails_typecheck() {
+        // distance(self.hp, self.hp) — operands must be Vec3, not F32.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Distance,
+            vec![arg(field_self("hp")), arg(field_self("hp"))],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::TypeCheckFailure { .. }));
+    }
+
+    #[test]
+    fn min_f32_pairwise_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Min,
+            vec![arg(field_self("hp")), arg(field_self("max_hp"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.min.f32 (read agent.self.hp) (read agent.self.max_hp))"
+        );
+    }
+
+    #[test]
+    fn max_u32_pairwise_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Max,
+            vec![
+                arg(field_self("level")),
+                arg(node(IrExpr::LitInt(7))),
+            ],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.max.u32 (read agent.self.level) (lit 7u32))"
+        );
+    }
+
+    #[test]
+    fn clamp_f32_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Clamp,
+            vec![
+                arg(field_self("hp")),
+                arg(node(IrExpr::LitFloat(0.0))),
+                arg(field_self("max_hp")),
+            ],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.clamp.f32 (read agent.self.hp) (lit 0.0f32) (read agent.self.max_hp))"
+        );
+    }
+
+    #[test]
+    fn saturating_add_u32_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::SaturatingAdd,
+            vec![
+                arg(field_self("level")),
+                arg(node(IrExpr::LitInt(1))),
+            ],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.saturating_add.u32 (read agent.self.level) (lit 1u32))"
+        );
+    }
+
+    #[test]
+    fn entity_builtin_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Entity,
+            vec![arg(field_self("engaged_with"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.entity (read agent.self.engaged_with))"
+        );
+    }
+
+    #[test]
+    fn floor_builtin_lowers() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Floor,
+            vec![arg(field_self("hp"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(builtin.floor (read agent.self.hp))"
+        );
+    }
+
+    #[test]
+    fn ceil_ln_log2_log10_round_lower() {
+        // Quick smoke test that all five additional unary-f32 builtins
+        // share the same path.
+        for (b, label) in [
+            (Builtin::Ceil, "ceil"),
+            (Builtin::Round, "round"),
+            (Builtin::Ln, "ln"),
+            (Builtin::Log2, "log2"),
+            (Builtin::Log10, "log10"),
+        ] {
+            let ast = node(IrExpr::BuiltinCall(b, vec![arg(field_self("hp"))]));
+            let s = lower_to_string(&ast).unwrap();
+            assert_eq!(
+                s,
+                format!("(builtin.{label} (read agent.self.hp))"),
+                "builtin {label}"
+            );
+        }
+    }
+
+    #[test]
+    fn sqrt_builtin_rewrites_to_unary() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Sqrt,
+            vec![arg(field_self("hp"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(sqrt.f32 (read agent.self.hp))"
+        );
+    }
+
+    #[test]
+    fn abs_f32_rewrites_to_unary() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Abs,
+            vec![arg(field_self("hp"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(abs.f32 (read agent.self.hp))"
+        );
+    }
+
+    #[test]
+    fn abs_i32_rewrites_to_unary() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Abs,
+            vec![arg(field_self("slow_factor_q8"))],
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(abs.i32 (read agent.self.slow_factor_q8))"
+        );
+    }
+
+    #[test]
+    fn abs_on_bool_rejected() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Abs,
+            vec![arg(field_self("alive"))],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::NumericBuiltinNonNumericOperand { .. }
+        ));
+    }
+
+    #[test]
+    fn min_on_bool_rejected() {
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Min,
+            vec![
+                arg(field_self("alive")),
+                arg(field_self("alive")),
+            ],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::NumericBuiltinNonNumericOperand { .. }
+        ));
+    }
+
+    #[test]
+    fn min_with_mixed_numeric_types_rejected() {
+        // min(self.hp, self.level) — F32 vs U32.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Min,
+            vec![arg(field_self("hp")), arg(field_self("level"))],
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        // The two operand lowerings succeed independently; the
+        // pairwise-numeric helper rejects the mix.
+        assert!(matches!(
+            err,
+            LoweringError::BinaryOperandTyMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn quantifier_builtins_unsupported() {
+        for b in [Builtin::Forall, Builtin::Exists, Builtin::Count, Builtin::Sum] {
+            let ast = node(IrExpr::BuiltinCall(b, vec![]));
+            let err = lower_to_string(&ast).unwrap_err();
+            assert!(
+                matches!(err, LoweringError::UnsupportedBuiltin { .. }),
+                "expected UnsupportedBuiltin for {b:?}, got {err:?}"
+            );
+        }
+    }
+
+    // ---- Conditional (Select) ----
+
+    #[test]
+    fn if_then_else_lowers_to_select() {
+        // if self.alive then 1.0 else 0.0
+        let ast = node(IrExpr::If {
+            cond: Box::new(field_self("alive")),
+            then_expr: Box::new(node(IrExpr::LitFloat(1.0))),
+            else_expr: Some(Box::new(node(IrExpr::LitFloat(0.0)))),
+        });
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(select (read agent.self.alive) (lit 1.0f32) (lit 0.0f32))"
+        );
+    }
+
+    #[test]
+    fn if_with_non_bool_cond_rejected() {
+        // if self.hp then 1.0 else 0.0 — `cond` is f32, not bool.
+        let ast = node(IrExpr::If {
+            cond: Box::new(field_self("hp")),
+            then_expr: Box::new(node(IrExpr::LitFloat(1.0))),
+            else_expr: Some(Box::new(node(IrExpr::LitFloat(0.0)))),
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    #[test]
+    fn if_with_arms_mismatch_rejected() {
+        // if self.alive then 1.0 else 1u32
+        let ast = node(IrExpr::If {
+            cond: Box::new(field_self("alive")),
+            then_expr: Box::new(node(IrExpr::LitFloat(1.0))),
+            else_expr: Some(Box::new(node(IrExpr::LitInt(1)))),
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::BinaryOperandTyMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn if_without_else_rejected() {
+        let ast = node(IrExpr::If {
+            cond: Box::new(field_self("alive")),
+            then_expr: Box::new(node(IrExpr::LitFloat(1.0))),
+            else_expr: None,
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedAstNode {
+                ast_label: "If(without-else)",
+                ..
+            }
+        ));
+    }
+
+    // ---- RNG / namespace calls ----
+
+    #[test]
+    fn rng_action_lowers_to_rng_node() {
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "action".to_string(),
+            args: vec![],
+        });
+        assert_eq!(lower_to_string(&ast).unwrap(), "(rng action)");
+    }
+
+    #[test]
+    fn rng_sample_lowers() {
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "sample".to_string(),
+            args: vec![],
+        });
+        assert_eq!(lower_to_string(&ast).unwrap(), "(rng sample)");
+    }
+
+    #[test]
+    fn rng_unknown_purpose_rejected() {
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "uniform".to_string(),
+            args: vec![],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedNamespaceCall { .. }
+        ));
+    }
+
+    #[test]
+    fn agents_pos_with_target_expr_lowers_to_target_read() {
+        // agents.pos(self.engaged_with) — engaged_with is AgentId, so
+        // the resulting Read uses AgentRef::Target(child_id).
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Agents,
+            method: "pos".to_string(),
+            args: vec![arg(field_self("engaged_with"))],
+        });
+        let s = lower_to_string(&ast).unwrap();
+        // The target-id varies based on arena ordering, but the prefix
+        // is stable.
+        assert!(
+            s.starts_with("(read agent.target(#"),
+            "unexpected lowering: {s}"
+        );
+        assert!(s.ends_with(").pos)"));
+    }
+
+    #[test]
+    fn agents_field_with_non_agent_id_arg_rejected() {
+        // agents.hp(self.hp) — arg is f32, not AgentId.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Agents,
+            method: "hp".to_string(),
+            args: vec![arg(field_self("hp"))],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    #[test]
+    fn unsupported_namespace_call_typed_error() {
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Cascade,
+            method: "iterations".to_string(),
+            args: vec![],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedNamespaceCall { .. }
+        ));
+    }
+
+    #[test]
+    fn namespace_field_typed_error() {
+        let ast = node(IrExpr::NamespaceField {
+            ns: NamespaceId::World,
+            field: "tick".to_string(),
+            ty: dsl_ast::ir::IrType::U64,
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedNamespaceField { .. }
+        ));
+    }
+
+    // ---- ViewCall ----
+
+    #[test]
+    fn view_call_with_registered_signature_lowers() {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let ast_ref = AstViewRef(0);
+        let view_id = ViewId(0);
+        ctx.register_view(ast_ref, view_id);
+        ctx.register_view_signature(view_id, vec![CgTy::AgentId], CgTy::Bool);
+
+        // view::is_hostile(self.engaged_with)
+        let ast = node(IrExpr::ViewCall(
+            ast_ref,
+            vec![arg(field_self("engaged_with"))],
+        ));
+        let id = lower_expr(&ast, &mut ctx).unwrap();
+        let prog = builder.finish();
+        let node = &prog.exprs[id.0 as usize];
+        assert_eq!(
+            pretty(node, &prog.exprs),
+            "(builtin.view_call.#0 (read agent.self.engaged_with))"
+        );
+    }
+
+    #[test]
+    fn view_call_unknown_ref_rejected() {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let ast = node(IrExpr::ViewCall(AstViewRef(99), vec![]));
+        let err = lower_expr(&ast, &mut ctx).unwrap_err();
+        assert!(matches!(err, LoweringError::UnknownView { .. }));
+    }
+
+    // ---- Local references ----
+
+    #[test]
+    fn bare_local_self_rejected() {
+        // `self` alone (not `.field`) has no expression-level CG form.
+        let ast = local_self();
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedLocalBinding { .. }
+        ));
+    }
+
+    // ---- Unsupported AST shapes — typed deferral ----
+
+    #[test]
+    fn lit_string_unsupported() {
+        let ast = node(IrExpr::LitString("foo".to_string()));
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedAstNode {
+                ast_label: "LitString",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn fold_unsupported() {
+        let ast = node(IrExpr::Fold {
+            kind: dsl_ast::ast::FoldKind::Sum,
+            binder: None,
+            binder_name: None,
+            iter: None,
+            body: Box::new(node(IrExpr::LitInt(1))),
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedAstNode {
+                ast_label: "Fold",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn struct_lit_unsupported() {
+        let ast = node(IrExpr::StructLit {
+            name: "X".to_string(),
+            ctor: None,
+            fields: vec![],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedAstNode {
+                ast_label: "StructLit",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn ability_tag_unsupported() {
+        let ast = node(IrExpr::AbilityTag {
+            tag: dsl_ast::ir::AbilityTag::Physical,
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedAstNode { ast_label: "AbilityTag", .. }
+        ));
+    }
+
+    // ---- Span propagation ----
+
+    #[test]
+    fn lowering_error_carries_node_span() {
+        let mut bad = field_self("hp_pct");
+        bad.span = span(11, 22);
+        let err = lower_to_string(&bad).unwrap_err();
+        match err {
+            LoweringError::UnknownAgentField { span: s, .. } => {
+                assert_eq!(s.start, 11);
+                assert_eq!(s.end, 22);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    // ---- Plan/spec example: `mask Attack` predicate fragment ----
+
+    #[test]
+    fn distance_lt_attack_range_full_predicate() {
+        // (distance(self.pos, self.pos) < self.attack_range)
+        // — analogue of `distance(self, t) < AGGRO_RANGE` in the spec
+        // example, with `t` substituted by `self` so we don't need a
+        // target binding (Task 2.1 doesn't yet wire those).
+        let ast = node(IrExpr::Binary(
+            BinOp::Lt,
+            Box::new(node(IrExpr::BuiltinCall(
+                Builtin::Distance,
+                vec![arg(field_self("pos")), arg(field_self("pos"))],
+            ))),
+            Box::new(field_self("attack_range")),
+        ));
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(lt.f32 (builtin.distance (read agent.self.pos) (read agent.self.pos)) (read agent.self.attack_range))"
+        );
+    }
+
+    // ---- LoweringError Display sanity ----
+
+    #[test]
+    fn lowering_error_display_includes_span_and_reason() {
+        let e = LoweringError::UnknownAgentField {
+            field_name: "hp_pct".to_string(),
+            span: span(3, 9),
+        };
+        let s = format!("{}", e);
+        assert!(s.contains("hp_pct"));
+        assert!(s.contains("3..9"));
+    }
+
+    #[test]
+    fn lowering_error_display_unsupported_ast_node() {
+        let e = LoweringError::UnsupportedAstNode {
+            ast_label: "Fold",
+            span: span(0, 5),
+        };
+        let s = format!("{}", e);
+        assert!(s.contains("Fold"));
+    }
+}
