@@ -62,7 +62,10 @@ pub enum CgTy {
     /// Tick stamp — `world.tick`, expiry stamps. Wider than U32 in
     /// the engine (u64) but narrowed here because the GPU side uses
     /// u32 ticks; the IR carries the narrowed form because that's
-    /// what every emit consumes.
+    /// what every emit consumes. Surfaces as a *type tag* via
+    /// `LitValue::Tick` and `ViewStorageSlot::Anchor`'s
+    /// `data_handle_ty`; comparisons themselves use `BinaryOp::*U32`
+    /// (the engine compares ticks as u32).
     Tick,
     /// "Key into view N" — the result type of `view::<name>(self, _)`
     /// reads. `view` records which materialized view this key
@@ -164,6 +167,13 @@ pub enum BinaryOp {
     DivI32,
 
     // --- Ordered comparisons ---
+    //
+    // No `*Tick` variants — tick stamps are represented as `u32` once
+    // they reach the IR (`AgentFieldTy::U32` for stamp fields,
+    // `data_handle_ty` resolves `ViewStorageSlot::Anchor` to
+    // `CgTy::Tick` but lowering coerces the comparison to `*U32` since
+    // the engine compares ticks as u32). Tick comparisons use the
+    // `*U32` variants.
     LtF32,
     LeF32,
     GtF32,
@@ -176,23 +186,17 @@ pub enum BinaryOp {
     LeI32,
     GtI32,
     GeI32,
-    LtTick,
-    LeTick,
-    GtTick,
-    GeTick,
 
     // --- Equality ---
     EqBool,
     EqU32,
     EqI32,
     EqF32,
-    EqTick,
     EqAgentId,
     NeBool,
     NeU32,
     NeI32,
     NeF32,
-    NeTick,
     NeAgentId,
 
     // --- Logical ---
@@ -214,7 +218,6 @@ impl BinaryOp {
             AddI32 | SubI32 | MulI32 | DivI32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32 | NeI32 => {
                 CgTy::I32
             }
-            LtTick | LeTick | GtTick | GeTick | EqTick | NeTick => CgTy::Tick,
             EqAgentId | NeAgentId => CgTy::AgentId,
             EqBool | NeBool | And | Or => CgTy::Bool,
         }
@@ -229,9 +232,8 @@ impl BinaryOp {
             AddI32 | SubI32 | MulI32 | DivI32 => CgTy::I32,
             // Every comparison and logical op produces `Bool`.
             LtF32 | LeF32 | GtF32 | GeF32 | EqF32 | NeF32 | LtU32 | LeU32 | GtU32 | GeU32
-            | EqU32 | NeU32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32 | NeI32 | LtTick | LeTick
-            | GtTick | GeTick | EqTick | NeTick | EqAgentId | NeAgentId | EqBool | NeBool
-            | And | Or => CgTy::Bool,
+            | EqU32 | NeU32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32 | NeI32 | EqAgentId
+            | NeAgentId | EqBool | NeBool | And | Or => CgTy::Bool,
         }
     }
 
@@ -265,21 +267,15 @@ impl BinaryOp {
             LeI32 => "le.i32",
             GtI32 => "gt.i32",
             GeI32 => "ge.i32",
-            LtTick => "lt.tick",
-            LeTick => "le.tick",
-            GtTick => "gt.tick",
-            GeTick => "ge.tick",
             EqBool => "eq.bool",
             EqU32 => "eq.u32",
             EqI32 => "eq.i32",
             EqF32 => "eq.f32",
-            EqTick => "eq.tick",
             EqAgentId => "eq.agent_id",
             NeBool => "ne.bool",
             NeU32 => "ne.u32",
             NeI32 => "ne.i32",
             NeF32 => "ne.f32",
-            NeTick => "ne.tick",
             NeAgentId => "ne.agent_id",
             And => "and",
             Or => "or",
@@ -814,6 +810,66 @@ pub enum TypeError {
     DanglingExprId { node: CgExprId, referenced: CgExprId },
 }
 
+impl fmt::Display for TypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeError::ClaimedResultMismatch {
+                node,
+                expected,
+                got,
+            } => write!(
+                f,
+                "expr#{} claims result {} but operands require {}",
+                node.0, got, expected
+            ),
+            TypeError::OperandMismatch {
+                node,
+                operand_index,
+                expected,
+                got,
+            } => write!(
+                f,
+                "expr#{} operand[{}] expected {}, got {}",
+                node.0, operand_index, expected, got
+            ),
+            TypeError::ArityMismatch {
+                node,
+                builtin,
+                expected,
+                got,
+            } => write!(
+                f,
+                "expr#{} builtin {} expected {} argument(s), got {}",
+                node.0, builtin, expected, got
+            ),
+            TypeError::SelectCondNotBool { node, got } => write!(
+                f,
+                "expr#{} select cond expected bool, got {}",
+                node.0, got
+            ),
+            TypeError::SelectArmsMismatch {
+                node,
+                then_ty,
+                else_ty,
+            } => write!(
+                f,
+                "expr#{} select arms mismatch — then is {}, else is {}",
+                node.0, then_ty, else_ty
+            ),
+            TypeError::ViewSignatureUnresolved { node, view } => write!(
+                f,
+                "expr#{} view_call.#{} signature unresolved (no resolver wired)",
+                node.0, view.0
+            ),
+            TypeError::DanglingExprId { node, referenced } => write!(
+                f,
+                "expr#{} references dangling expr#{}",
+                node.0, referenced.0
+            ),
+        }
+    }
+}
+
 /// Resolves a view's `(args, result)` signature. The standalone type
 /// checker passes `None` here and gets `ViewSignatureUnresolved` for
 /// any `ViewCall` it encounters; the program-level type-check (Task
@@ -1178,7 +1234,9 @@ mod tests {
         assert_eq!(BinaryOp::LtF32.result_ty(), CgTy::Bool);
         assert_eq!(BinaryOp::EqAgentId.operand_ty(), CgTy::AgentId);
         assert_eq!(BinaryOp::EqAgentId.result_ty(), CgTy::Bool);
-        assert_eq!(BinaryOp::GtTick.operand_ty(), CgTy::Tick);
+        // Tick comparisons reuse the U32 variants — see the BinaryOp
+        // doc comment for the rationale.
+        assert_eq!(BinaryOp::GtU32.operand_ty(), CgTy::U32);
 
         // Logical: Bool/Bool/Bool.
         assert_eq!(BinaryOp::And.operand_ty(), CgTy::Bool);
@@ -1213,21 +1271,15 @@ mod tests {
             BinaryOp::LeI32,
             BinaryOp::GtI32,
             BinaryOp::GeI32,
-            BinaryOp::LtTick,
-            BinaryOp::LeTick,
-            BinaryOp::GtTick,
-            BinaryOp::GeTick,
             BinaryOp::EqBool,
             BinaryOp::EqU32,
             BinaryOp::EqI32,
             BinaryOp::EqF32,
-            BinaryOp::EqTick,
             BinaryOp::EqAgentId,
             BinaryOp::NeBool,
             BinaryOp::NeU32,
             BinaryOp::NeI32,
             BinaryOp::NeF32,
-            BinaryOp::NeTick,
             BinaryOp::NeAgentId,
             BinaryOp::And,
             BinaryOp::Or,

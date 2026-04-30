@@ -527,24 +527,111 @@ pub enum DataHandle {
     Rng { purpose: RngPurpose },
 }
 
-impl fmt::Display for DataHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+/// Kind tag for an interned id surfaced by [`DataHandle::fmt_with`].
+/// Closed set — adding a new id-kind to a [`DataHandle`] variant adds a
+/// member here so the `DataHandleNameResolver` impls handle every
+/// shape exhaustively.
+///
+/// Today only the four kinds actually embedded in a [`DataHandle`]
+/// (`view`, `mask`, `event_ring`, `config_const`) are listed. Other id
+/// kinds the IR has (event-kind, action, scoring, physics-rule) live on
+/// op variants (`ComputeOpKind::*`), not on data handles, and are
+/// rendered through the program-level pretty-printer rather than
+/// through `DataHandle::Display`.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum IdKind {
+    View,
+    Mask,
+    EventRing,
+    ConfigConst,
+}
+
+/// Resolves an interned id to its human-readable name. The
+/// program-level interner implements this in `program.rs`; tests pass
+/// the unit `()` resolver below for the always-`None` shape (every id
+/// renders as `#N`).
+///
+/// Borrowed-return shape: `Option<&str>` with the lifetime tied to
+/// `&self`. The closure-based form runs into `for<'a>` higher-rank
+/// trouble; a trait object sidesteps it cleanly while keeping the
+/// "single-source rendering" guarantee.
+pub trait DataHandleNameResolver {
+    fn name_for(&self, kind: IdKind, id: u32) -> Option<&str>;
+}
+
+/// The unit resolver: always returns `None`. Used by
+/// [`fmt::Display for DataHandle`] so the default rendering keeps the
+/// opaque `#N` form. Tests for the unnamed path of `fmt_with` use this
+/// resolver directly.
+impl DataHandleNameResolver for () {
+    fn name_for(&self, _kind: IdKind, _id: u32) -> Option<&str> {
+        None
+    }
+}
+
+impl DataHandle {
+    /// Format the handle, consulting `names` for human-readable id
+    /// substitutions. `names.name_for(kind, id)` returning `Some(name)`
+    /// replaces the opaque `#N` form with `name`; returning `None`
+    /// keeps the `#N` form (Task 1.1's contract).
+    ///
+    /// Both [`fmt::Display`] and the program-level
+    /// `display_with_names` route through this single method, so the
+    /// shape of the rendered output is single-source: adding a new
+    /// `DataHandle` variant updates both surfaces simultaneously.
+    pub fn fmt_with(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        names: &dyn DataHandleNameResolver,
+    ) -> fmt::Result {
         match self {
             DataHandle::AgentField { field, target } => {
                 write!(f, "agent.{}.{}", target, field)
             }
             DataHandle::ViewStorage { view, slot } => {
-                write!(f, "view[#{}].{}", view.0, slot)
+                write!(f, "view[")?;
+                write_named_id(f, names.name_for(IdKind::View, view.0), view.0)?;
+                write!(f, "].{}", slot)
             }
             DataHandle::EventRing { ring, kind } => {
-                write!(f, "event_ring[#{}].{}", ring.0, kind)
+                write!(f, "event_ring[")?;
+                write_named_id(f, names.name_for(IdKind::EventRing, ring.0), ring.0)?;
+                write!(f, "].{}", kind)
             }
-            DataHandle::ConfigConst { id } => write!(f, "config[#{}]", id.0),
-            DataHandle::MaskBitmap { mask } => write!(f, "mask[#{}].bitmap", mask.0),
+            DataHandle::ConfigConst { id } => {
+                write!(f, "config[")?;
+                write_named_id(f, names.name_for(IdKind::ConfigConst, id.0), id.0)?;
+                write!(f, "]")
+            }
+            DataHandle::MaskBitmap { mask } => {
+                write!(f, "mask[")?;
+                write_named_id(f, names.name_for(IdKind::Mask, mask.0), mask.0)?;
+                write!(f, "].bitmap")
+            }
             DataHandle::ScoringOutput => f.write_str("scoring.output"),
             DataHandle::SpatialStorage { kind } => write!(f, "spatial.{}", kind),
             DataHandle::Rng { purpose } => write!(f, "rng({})", purpose),
         }
+    }
+}
+
+/// Format an id token as either its interned `name` (when present) or
+/// the opaque `#N` form. Shared between `DataHandle::fmt_with` and
+/// any future caller that needs the same rendering rule.
+fn write_named_id(f: &mut fmt::Formatter<'_>, name: Option<&str>, id: u32) -> fmt::Result {
+    match name {
+        Some(n) => f.write_str(n),
+        None => write!(f, "#{}", id),
+    }
+}
+
+impl fmt::Display for DataHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Default rendering: never substitute names — every id renders
+        // as `#N`. Programs that want named substitution route through
+        // `DataHandle::fmt_with` directly (or via
+        // `CgProgram::display_with_names`).
+        self.fmt_with(f, &())
     }
 }
 

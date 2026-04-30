@@ -39,6 +39,7 @@
 //! for the inverse case.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use crate::cg::data_handle::{AgentRef, CgExprId, DataHandle};
 use crate::cg::dispatch::DispatchShape;
@@ -178,6 +179,123 @@ pub enum CgError {
         row_index: u32,
         got: CgTy,
     },
+}
+
+impl fmt::Display for HandleConsistencyReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HandleConsistencyReason::AgentRefTargetExprOutOfRange {
+                referenced,
+                arena_len,
+            } => write!(
+                f,
+                "AgentRef::Target(expr#{}) out of range (expr arena holds {} entries)",
+                referenced.0, arena_len
+            ),
+        }
+    }
+}
+
+impl fmt::Display for CgError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CgError::OpIdOutOfRange {
+                op,
+                referenced,
+                arena_len,
+            } => write!(
+                f,
+                "op#{}: referenced op#{} out of range (op arena holds {} entries)",
+                op.0, referenced.0, arena_len
+            ),
+            CgError::ExprIdOutOfRange {
+                op,
+                referenced,
+                arena_len,
+            } => write!(
+                f,
+                "op#{}: referenced expr#{} out of range (expr arena holds {} entries)",
+                op.0, referenced.0, arena_len
+            ),
+            CgError::StmtListIdOutOfRange {
+                op,
+                referenced,
+                arena_len,
+            } => write!(
+                f,
+                "op#{}: referenced stmt-list#{} out of range (stmt-list arena holds {} entries)",
+                op.0, referenced.0, arena_len
+            ),
+            CgError::StmtIdOutOfRange {
+                list,
+                referenced,
+                arena_len,
+            } => write!(
+                f,
+                "stmt-list#{}: referenced stmt#{} out of range (stmt arena holds {} entries)",
+                list.0, referenced.0, arena_len
+            ),
+            CgError::DataHandleIdInconsistent {
+                op,
+                handle,
+                reason,
+            } => write!(
+                f,
+                "op#{}: data handle {} inconsistent — {}",
+                op.0, handle, reason
+            ),
+            CgError::Cycle { ops } => {
+                f.write_str("cycle in read/write graph: [")?;
+                for (i, op) in ops.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "op#{}", op.0)?;
+                }
+                f.write_str("]")
+            }
+            CgError::TypeMismatch { op, error } => {
+                write!(f, "op#{}: type mismatch — {}", op.0, error)
+            }
+            CgError::P6Violation {
+                op,
+                kind_label,
+                write,
+            } => write!(
+                f,
+                "op#{}: P6 violation — {} writes agent field {}",
+                op.0, kind_label, write
+            ),
+            CgError::KindShapeMismatch {
+                op,
+                kind_label,
+                shape_label,
+            } => write!(
+                f,
+                "op#{}: kind/shape mismatch — {} cannot dispatch as {}",
+                op.0, kind_label, shape_label
+            ),
+            CgError::AssignTypeMismatch {
+                op,
+                target,
+                expected,
+                got,
+            } => write!(
+                f,
+                "op#{}: assign type mismatch — target {} expects {}, got {}",
+                op.0, target, expected, got
+            ),
+            CgError::ScoringTargetNotAgentId {
+                op,
+                row_index,
+                got,
+            } => write!(
+                f,
+                "op#{}: scoring row#{} target must be agent_id, got {}",
+                op.0, row_index, got
+            ),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2426,4 +2544,124 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------
+    // 17. Display impl on CgError — every variant produces a non-empty
+    // human-readable message containing the variant tag.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn cg_error_display_covers_every_variant() {
+        let cases: Vec<(CgError, &str)> = vec![
+            (
+                CgError::OpIdOutOfRange {
+                    op: OpId(1),
+                    referenced: OpId(7),
+                    arena_len: 3,
+                },
+                "op#1: referenced op#7 out of range",
+            ),
+            (
+                CgError::ExprIdOutOfRange {
+                    op: OpId(0),
+                    referenced: CgExprId(99),
+                    arena_len: 5,
+                },
+                "op#0: referenced expr#99 out of range",
+            ),
+            (
+                CgError::StmtListIdOutOfRange {
+                    op: OpId(2),
+                    referenced: CgStmtListId(4),
+                    arena_len: 1,
+                },
+                "op#2: referenced stmt-list#4 out of range",
+            ),
+            (
+                CgError::StmtIdOutOfRange {
+                    list: CgStmtListId(0),
+                    referenced: CgStmtId(8),
+                    arena_len: 2,
+                },
+                "stmt-list#0: referenced stmt#8 out of range",
+            ),
+            (
+                CgError::DataHandleIdInconsistent {
+                    op: OpId(0),
+                    handle: DataHandle::AgentField {
+                        field: AgentFieldId::Hp,
+                        target: AgentRef::Target(CgExprId(99)),
+                    },
+                    reason: HandleConsistencyReason::AgentRefTargetExprOutOfRange {
+                        referenced: CgExprId(99),
+                        arena_len: 1,
+                    },
+                },
+                "data handle",
+            ),
+            (
+                CgError::Cycle {
+                    ops: vec![OpId(0), OpId(1)],
+                },
+                "cycle in read/write graph",
+            ),
+            (
+                CgError::TypeMismatch {
+                    op: OpId(0),
+                    error: TypeError::ClaimedResultMismatch {
+                        node: CgExprId(2),
+                        expected: CgTy::Bool,
+                        got: CgTy::F32,
+                    },
+                },
+                "type mismatch",
+            ),
+            (
+                CgError::P6Violation {
+                    op: OpId(0),
+                    kind_label: "physics_rule",
+                    write: DataHandle::AgentField {
+                        field: AgentFieldId::Hp,
+                        target: AgentRef::Self_,
+                    },
+                },
+                "P6 violation",
+            ),
+            (
+                CgError::KindShapeMismatch {
+                    op: OpId(0),
+                    kind_label: "mask_predicate",
+                    shape_label: "per_event",
+                },
+                "kind/shape mismatch",
+            ),
+            (
+                CgError::AssignTypeMismatch {
+                    op: OpId(0),
+                    target: DataHandle::AgentField {
+                        field: AgentFieldId::Hp,
+                        target: AgentRef::Self_,
+                    },
+                    expected: CgTy::F32,
+                    got: CgTy::Bool,
+                },
+                "assign type mismatch",
+            ),
+            (
+                CgError::ScoringTargetNotAgentId {
+                    op: OpId(0),
+                    row_index: 0,
+                    got: CgTy::F32,
+                },
+                "scoring row#0 target must be agent_id",
+            ),
+        ];
+        for (err, needle) in cases {
+            let s = format!("{}", err);
+            assert!(!s.is_empty(), "Display of {err:?} produced an empty string");
+            assert!(
+                s.contains(needle),
+                "Display of {err:?} = {s:?} missing substring {needle:?}"
+            );
+        }
+    }
 }

@@ -54,7 +54,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::data_handle::{
-    CgExprId, ConfigConstId, DataHandle, EventRingId, MaskId, ViewId,
+    CgExprId, ConfigConstId, DataHandle, DataHandleNameResolver, EventRingId, IdKind, MaskId,
+    ViewId,
 };
 use super::dispatch::DispatchShape;
 use super::expr::{CgExpr, ExprArena};
@@ -264,22 +265,27 @@ impl Interner {
     }
 }
 
-/// Helper — render `id` as `name` if interned, else `#N`. Used by both
-/// the program pretty-printer and `display_with_names`.
-fn render_id<'a>(name: Option<&'a str>, id: u32) -> NamedId<'a> {
-    NamedId { name, id }
-}
-
-struct NamedId<'a> {
-    name: Option<&'a str>,
+/// Helper — record a name in an interner table. Idempotent: passing
+/// the same id twice with the same name is a no-op. Conflicting names
+/// surface as [`BuilderError::DuplicateInternEntry`]. Used by every
+/// `CgProgramBuilder::intern_*_name` method.
+fn intern_into(
+    table: &mut BTreeMap<u32, String>,
+    id_kind: &'static str,
     id: u32,
-}
-
-impl fmt::Display for NamedId<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.name {
-            Some(n) => write!(f, "{}", n),
-            None => write!(f, "#{}", self.id),
+    name: String,
+) -> Result<(), BuilderError> {
+    match table.get(&id) {
+        Some(prior) if prior != &name => Err(BuilderError::DuplicateInternEntry {
+            id_kind,
+            id,
+            prior: prior.clone(),
+            new: name,
+        }),
+        Some(_) => Ok(()),
+        None => {
+            table.insert(id, name);
+            Ok(())
         }
     }
 }
@@ -343,6 +349,22 @@ pub enum BuilderError {
         referenced: CgStmtListId,
         arena_len: u32,
     },
+    /// An `intern_*_name` call attempted to overwrite an existing entry
+    /// for the same id with a *different* name. Idempotent re-interns
+    /// (same id, same name) are accepted silently and never produce
+    /// this error. `id_kind` is one of a closed set of `&'static str`
+    /// tags (`"view"`, `"mask"`, `"scoring"`, `"physics_rule"`,
+    /// `"event_kind"`, `"action"`, `"config_const"`, `"event_ring"`)
+    /// — not a free-form string. `prior` and `new` are display values
+    /// (the existing and conflicting names); they exist so error
+    /// messages can name both names without forcing the caller to
+    /// re-look-up the prior entry.
+    DuplicateInternEntry {
+        id_kind: &'static str,
+        id: u32,
+        prior: String,
+        new: String,
+    },
 }
 
 impl fmt::Display for BuilderError {
@@ -371,6 +393,16 @@ impl fmt::Display for BuilderError {
                 f,
                 "dangling CgStmtListId(#{}) (stmt-list arena holds {} entries)",
                 referenced.0, arena_len
+            ),
+            BuilderError::DuplicateInternEntry {
+                id_kind,
+                id,
+                prior,
+                new,
+            } => write!(
+                f,
+                "duplicate intern entry for {}#{}: prior name {:?}, new name {:?}",
+                id_kind, id, prior, new
             ),
         }
     }
@@ -434,34 +466,40 @@ impl CgProgram {
 
     /// Render `handle` consulting `self.interner` — `view[#3]` becomes
     /// `view[standing]` if the interner has a name for `ViewId(3)`,
-    /// else stays `view[#3]`. Mirrors the [`fmt::Display`] impl on
-    /// `DataHandle` shape-for-shape; the only difference is the named
-    /// substitution.
+    /// else stays `view[#3]`. Delegates to [`DataHandle::fmt_with`] so
+    /// the rendering shape is single-source: adding a new
+    /// `DataHandle` variant updates both
+    /// [`DataHandle::Display`] (opaque form) and `display_with_names`
+    /// (named form) simultaneously.
     pub fn display_with_names(&self, handle: &DataHandle) -> String {
-        match handle {
-            DataHandle::AgentField { field, target } => {
-                format!("agent.{}.{}", target, field)
-            }
-            DataHandle::ViewStorage { view, slot } => {
-                let name = render_id(self.interner.get_view_name(*view), view.0);
-                format!("view[{}].{}", name, slot)
-            }
-            DataHandle::EventRing { ring, kind } => {
-                let name = render_id(self.interner.get_event_ring_name(*ring), ring.0);
-                format!("event_ring[{}].{}", name, kind)
-            }
-            DataHandle::ConfigConst { id } => {
-                let name = render_id(self.interner.get_config_const_name(*id), id.0);
-                format!("config[{}]", name)
-            }
-            DataHandle::MaskBitmap { mask } => {
-                let name = render_id(self.interner.get_mask_name(*mask), mask.0);
-                format!("mask[{}].bitmap", name)
-            }
-            DataHandle::ScoringOutput => "scoring.output".to_string(),
-            DataHandle::SpatialStorage { kind } => format!("spatial.{}", kind),
-            DataHandle::Rng { purpose } => format!("rng({})", purpose),
+        format!("{}", DataHandleWithNames(handle, &self.interner))
+    }
+}
+
+/// The interner serves as a [`DataHandleNameResolver`]: each
+/// `IdKind` variant routes to the matching `get_*_name` table.
+/// Adding a new `IdKind` variant adds a match arm here so the
+/// dispatch is exhaustive.
+impl DataHandleNameResolver for Interner {
+    fn name_for(&self, kind: IdKind, id: u32) -> Option<&str> {
+        match kind {
+            IdKind::View => self.get_view_name(ViewId(id)),
+            IdKind::Mask => self.get_mask_name(MaskId(id)),
+            IdKind::EventRing => self.get_event_ring_name(EventRingId(id)),
+            IdKind::ConfigConst => self.get_config_const_name(ConfigConstId(id)),
         }
+    }
+}
+
+/// Adapter that pairs a [`DataHandle`] with an [`Interner`] so the two
+/// can be passed to `format!` / `write!` together. The `Display` impl
+/// routes through [`DataHandle::fmt_with`], so the named-rendering path
+/// is the single source of truth for handle output.
+struct DataHandleWithNames<'a>(&'a DataHandle, &'a Interner);
+
+impl<'a> fmt::Display for DataHandleWithNames<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt_with(f, self.1)
     }
 }
 
@@ -565,29 +603,97 @@ impl CgProgramBuilder {
 
     /// Record a human-readable name for `id` — used by
     /// [`CgProgram::display_with_names`] and by diagnostics.
-    pub fn intern_view_name(&mut self, id: ViewId, name: impl Into<String>) {
-        self.inner.interner.views.insert(id.0, name.into());
+    ///
+    /// Idempotent: passing the same name for the same id twice returns
+    /// `Ok(())` without overwriting. Passing a *different* name for an
+    /// already-interned id returns
+    /// [`BuilderError::DuplicateInternEntry`] — the lowering pass that
+    /// triggered the conflict has a name-allocation defect.
+    pub fn intern_view_name(
+        &mut self,
+        id: ViewId,
+        name: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        intern_into(&mut self.inner.interner.views, "view", id.0, name.into())
     }
-    pub fn intern_mask_name(&mut self, id: MaskId, name: impl Into<String>) {
-        self.inner.interner.masks.insert(id.0, name.into());
+    pub fn intern_mask_name(
+        &mut self,
+        id: MaskId,
+        name: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        intern_into(&mut self.inner.interner.masks, "mask", id.0, name.into())
     }
-    pub fn intern_scoring_name(&mut self, id: ScoringId, name: impl Into<String>) {
-        self.inner.interner.scorings.insert(id.0, name.into());
+    pub fn intern_scoring_name(
+        &mut self,
+        id: ScoringId,
+        name: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        intern_into(
+            &mut self.inner.interner.scorings,
+            "scoring",
+            id.0,
+            name.into(),
+        )
     }
-    pub fn intern_physics_rule_name(&mut self, id: PhysicsRuleId, name: impl Into<String>) {
-        self.inner.interner.physics_rules.insert(id.0, name.into());
+    pub fn intern_physics_rule_name(
+        &mut self,
+        id: PhysicsRuleId,
+        name: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        intern_into(
+            &mut self.inner.interner.physics_rules,
+            "physics_rule",
+            id.0,
+            name.into(),
+        )
     }
-    pub fn intern_event_kind_name(&mut self, id: EventKindId, name: impl Into<String>) {
-        self.inner.interner.event_kinds.insert(id.0, name.into());
+    pub fn intern_event_kind_name(
+        &mut self,
+        id: EventKindId,
+        name: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        intern_into(
+            &mut self.inner.interner.event_kinds,
+            "event_kind",
+            id.0,
+            name.into(),
+        )
     }
-    pub fn intern_action_name(&mut self, id: ActionId, name: impl Into<String>) {
-        self.inner.interner.actions.insert(id.0, name.into());
+    pub fn intern_action_name(
+        &mut self,
+        id: ActionId,
+        name: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        intern_into(
+            &mut self.inner.interner.actions,
+            "action",
+            id.0,
+            name.into(),
+        )
     }
-    pub fn intern_config_const_name(&mut self, id: ConfigConstId, name: impl Into<String>) {
-        self.inner.interner.config_consts.insert(id.0, name.into());
+    pub fn intern_config_const_name(
+        &mut self,
+        id: ConfigConstId,
+        name: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        intern_into(
+            &mut self.inner.interner.config_consts,
+            "config_const",
+            id.0,
+            name.into(),
+        )
     }
-    pub fn intern_event_ring_name(&mut self, id: EventRingId, name: impl Into<String>) {
-        self.inner.interner.event_rings.insert(id.0, name.into());
+    pub fn intern_event_ring_name(
+        &mut self,
+        id: EventRingId,
+        name: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        intern_into(
+            &mut self.inner.interner.event_rings,
+            "event_ring",
+            id.0,
+            name.into(),
+        )
     }
 
     // --- Diagnostic push ------------------------------------------------
@@ -1316,14 +1422,18 @@ mod tests {
     #[test]
     fn builder_intern_methods_populate_interner_tables() {
         let mut b = CgProgramBuilder::new();
-        b.intern_view_name(ViewId(0), "standing");
-        b.intern_mask_name(MaskId(1), "low_hp");
-        b.intern_scoring_name(ScoringId(2), "combat");
-        b.intern_physics_rule_name(PhysicsRuleId(3), "on_attack");
-        b.intern_event_kind_name(EventKindId(4), "AttackHit");
-        b.intern_action_name(ActionId(5), "MoveToward");
-        b.intern_config_const_name(ConfigConstId(6), "attack_range");
-        b.intern_event_ring_name(EventRingId(7), "apply_ring");
+        b.intern_view_name(ViewId(0), "standing").unwrap();
+        b.intern_mask_name(MaskId(1), "low_hp").unwrap();
+        b.intern_scoring_name(ScoringId(2), "combat").unwrap();
+        b.intern_physics_rule_name(PhysicsRuleId(3), "on_attack")
+            .unwrap();
+        b.intern_event_kind_name(EventKindId(4), "AttackHit")
+            .unwrap();
+        b.intern_action_name(ActionId(5), "MoveToward").unwrap();
+        b.intern_config_const_name(ConfigConstId(6), "attack_range")
+            .unwrap();
+        b.intern_event_ring_name(EventRingId(7), "apply_ring")
+            .unwrap();
         let prog = b.finish();
         assert_eq!(
             prog.interner.get_view_name(ViewId(0)),
@@ -1422,7 +1532,7 @@ mod tests {
     #[test]
     fn display_with_names_substitutes_view_name() {
         let mut b = CgProgramBuilder::new();
-        b.intern_view_name(ViewId(3), "engaged");
+        b.intern_view_name(ViewId(3), "engaged").unwrap();
         let prog = b.finish();
         let h = DataHandle::ViewStorage {
             view: ViewId(3),
@@ -1455,10 +1565,11 @@ mod tests {
     #[test]
     fn display_with_names_for_each_handle_variant() {
         let mut b = CgProgramBuilder::new();
-        b.intern_view_name(ViewId(0), "standing");
-        b.intern_mask_name(MaskId(1), "low_hp");
-        b.intern_event_ring_name(EventRingId(2), "apply");
-        b.intern_config_const_name(ConfigConstId(3), "attack_range");
+        b.intern_view_name(ViewId(0), "standing").unwrap();
+        b.intern_mask_name(MaskId(1), "low_hp").unwrap();
+        b.intern_event_ring_name(EventRingId(2), "apply").unwrap();
+        b.intern_config_const_name(ConfigConstId(3), "attack_range")
+            .unwrap();
         let prog = b.finish();
 
         // AgentField — no interner involvement (field name is fixed).
@@ -1523,8 +1634,8 @@ mod tests {
     #[test]
     fn program_serde_round_trip_preserves_structure_modulo_spans() {
         let mut b = CgProgramBuilder::new();
-        b.intern_view_name(ViewId(0), "standing");
-        b.intern_mask_name(MaskId(1), "low_hp");
+        b.intern_view_name(ViewId(0), "standing").unwrap();
+        b.intern_mask_name(MaskId(1), "low_hp").unwrap();
         let hp = b.add_expr(read_self_hp()).unwrap();
         let half = b.add_expr(lit_f32(0.5)).unwrap();
         let pred = b
@@ -1582,8 +1693,8 @@ mod tests {
     /// and pin the full pretty-printed output.
     fn build_fixture() -> CgProgram {
         let mut b = CgProgramBuilder::new();
-        b.intern_view_name(ViewId(0), "standing");
-        b.intern_mask_name(MaskId(0), "low_hp");
+        b.intern_view_name(ViewId(0), "standing").unwrap();
+        b.intern_mask_name(MaskId(0), "low_hp").unwrap();
 
         // Expression arena layout (deterministic, in insertion order).
         let hp = b.add_expr(read_self_hp()).unwrap(); // #0
@@ -1813,5 +1924,178 @@ program {
             format!("{}", e),
             "dangling CgStmtListId(#1) (stmt-list arena holds 0 entries)"
         );
+    }
+
+    #[test]
+    fn builder_error_display_duplicate_intern_entry() {
+        let e = BuilderError::DuplicateInternEntry {
+            id_kind: "view",
+            id: 3,
+            prior: "engaged".to_string(),
+            new: "fleeing".to_string(),
+        };
+        let s = format!("{}", e);
+        assert!(s.contains("view#3"), "missing id token: {s}");
+        assert!(s.contains("engaged"), "missing prior name: {s}");
+        assert!(s.contains("fleeing"), "missing new name: {s}");
+    }
+
+    // --- intern_*_name idempotency + duplicate detection -------------
+
+    #[test]
+    fn intern_view_name_is_idempotent_for_same_name() {
+        let mut b = CgProgramBuilder::new();
+        b.intern_view_name(ViewId(0), "standing").unwrap();
+        // Same id, same name — accepted silently.
+        b.intern_view_name(ViewId(0), "standing").unwrap();
+        let prog = b.finish();
+        assert_eq!(prog.interner.get_view_name(ViewId(0)), Some("standing"));
+    }
+
+    #[test]
+    fn intern_view_name_rejects_conflicting_name_for_same_id() {
+        let mut b = CgProgramBuilder::new();
+        b.intern_view_name(ViewId(0), "standing").unwrap();
+        let err = b
+            .intern_view_name(ViewId(0), "fleeing")
+            .expect_err("duplicate intern entry");
+        assert_eq!(
+            err,
+            BuilderError::DuplicateInternEntry {
+                id_kind: "view",
+                id: 0,
+                prior: "standing".to_string(),
+                new: "fleeing".to_string(),
+            }
+        );
+        // Original entry preserved — failed re-intern does not overwrite.
+        let prog = b.finish();
+        assert_eq!(prog.interner.get_view_name(ViewId(0)), Some("standing"));
+    }
+
+    #[test]
+    fn intern_methods_use_distinct_id_kind_tags() {
+        // Each typed intern method routes to a distinct `id_kind` tag.
+        // Verifies the closed set agreed with `IdKind` usage in
+        // `DataHandleNameResolver` for `Interner`.
+        let mut b = CgProgramBuilder::new();
+        b.intern_view_name(ViewId(0), "v").unwrap();
+        b.intern_mask_name(MaskId(0), "m").unwrap();
+        b.intern_scoring_name(ScoringId(0), "s").unwrap();
+        b.intern_physics_rule_name(PhysicsRuleId(0), "p").unwrap();
+        b.intern_event_kind_name(EventKindId(0), "e").unwrap();
+        b.intern_action_name(ActionId(0), "a").unwrap();
+        b.intern_config_const_name(ConfigConstId(0), "c").unwrap();
+        b.intern_event_ring_name(EventRingId(0), "r").unwrap();
+
+        // Each table records its own (id, name) — the `id_kind` tag in
+        // a duplicate-error helps disambiguate.
+        let err = b
+            .intern_view_name(ViewId(0), "v2")
+            .expect_err("view dup");
+        assert!(
+            matches!(
+                err,
+                BuilderError::DuplicateInternEntry {
+                    id_kind: "view",
+                    ..
+                }
+            ),
+            "expected view tag on duplicate, got {err:?}"
+        );
+        let err = b
+            .intern_mask_name(MaskId(0), "m2")
+            .expect_err("mask dup");
+        assert!(
+            matches!(
+                err,
+                BuilderError::DuplicateInternEntry {
+                    id_kind: "mask",
+                    ..
+                }
+            ),
+            "expected mask tag on duplicate, got {err:?}"
+        );
+    }
+
+    // --- DataHandle::fmt_with via Interner ---------------------------
+
+    #[test]
+    fn data_handle_fmt_with_named_path_renders_named_ids_and_falls_back_to_opaque() {
+        // Program with named ViewId(0) but unnamed EventRingId(3).
+        // `display_with_names` prints `view[standing]` (named) and
+        // `event_ring[#3]` (opaque), confirming the resolver routes
+        // each id-kind through the right interner table.
+        let mut b = CgProgramBuilder::new();
+        b.intern_view_name(ViewId(0), "standing").unwrap();
+        // No intern call for EventRingId(3) — its name renders opaque.
+        let prog = b.finish();
+
+        let view_handle = DataHandle::ViewStorage {
+            view: ViewId(0),
+            slot: super::super::data_handle::ViewStorageSlot::Primary,
+        };
+        let ring_handle = DataHandle::EventRing {
+            ring: EventRingId(3),
+            kind: super::super::data_handle::EventRingAccess::Read,
+        };
+        assert_eq!(
+            prog.display_with_names(&view_handle),
+            "view[standing].primary"
+        );
+        assert_eq!(
+            prog.display_with_names(&ring_handle),
+            "event_ring[#3].read"
+        );
+        // Bare Display on the same handles always renders opaque —
+        // names are not consulted.
+        assert_eq!(format!("{}", view_handle), "view[#0].primary");
+        assert_eq!(format!("{}", ring_handle), "event_ring[#3].read");
+    }
+
+    #[test]
+    fn data_handle_fmt_with_unit_resolver_matches_display() {
+        // `DataHandle::fmt_with` with the unit resolver `&()` produces
+        // identical output to bare `Display`. Verifies the Display impl
+        // is a delegate, not a parallel implementation.
+        let cases = vec![
+            DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::Self_,
+            },
+            DataHandle::ViewStorage {
+                view: ViewId(2),
+                slot: super::super::data_handle::ViewStorageSlot::Primary,
+            },
+            DataHandle::EventRing {
+                ring: EventRingId(4),
+                kind: super::super::data_handle::EventRingAccess::Append,
+            },
+            DataHandle::ConfigConst {
+                id: ConfigConstId(7),
+            },
+            DataHandle::MaskBitmap { mask: MaskId(1) },
+            DataHandle::ScoringOutput,
+            DataHandle::SpatialStorage {
+                kind: SpatialStorageKind::GridCells,
+            },
+            DataHandle::Rng {
+                purpose: RngPurpose::Action,
+            },
+        ];
+        for h in cases {
+            let display = format!("{}", h);
+            // The fmt_with(&()) path is the same path Display itself
+            // invokes — equality is by construction, but we assert it
+            // anyway as a regression guard.
+            struct WithUnit<'a>(&'a DataHandle);
+            impl<'a> fmt::Display for WithUnit<'a> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.0.fmt_with(f, &())
+                }
+            }
+            let via_fmt_with = format!("{}", WithUnit(&h));
+            assert_eq!(display, via_fmt_with, "Display vs fmt_with(&()) drift");
+        }
     }
 }
