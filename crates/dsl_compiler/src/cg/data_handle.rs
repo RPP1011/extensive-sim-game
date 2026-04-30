@@ -265,6 +265,60 @@ impl AgentFieldId {
             MoveTarget => "move_target",
         }
     }
+
+    /// Inverse of [`AgentFieldId::snake`]. Returns `Some(variant)` when
+    /// `s` is the snake_case name of a declared variant, `None`
+    /// otherwise. Used by the expression lowering to map DSL field
+    /// identifiers (`self.<name>`) back to the typed [`AgentFieldId`].
+    ///
+    /// Colocated with `snake()` so the two cannot drift if a new
+    /// variant lands; the
+    /// `agent_field_id_from_snake_round_trips_every_variant` test
+    /// guards round-trip exhaustively.
+    pub fn from_snake(s: &str) -> Option<Self> {
+        use AgentFieldId::*;
+        Some(match s {
+            "pos" => Pos,
+            "hp" => Hp,
+            "max_hp" => MaxHp,
+            "alive" => Alive,
+            "movement_mode" => MovementMode,
+            "level" => Level,
+            "move_speed" => MoveSpeed,
+            "move_speed_mult" => MoveSpeedMult,
+            "shield_hp" => ShieldHp,
+            "armor" => Armor,
+            "magic_resist" => MagicResist,
+            "attack_damage" => AttackDamage,
+            "attack_range" => AttackRange,
+            "mana" => Mana,
+            "max_mana" => MaxMana,
+            "hunger" => Hunger,
+            "thirst" => Thirst,
+            "rest_timer" => RestTimer,
+            "safety" => Safety,
+            "shelter" => Shelter,
+            "social" => Social,
+            "purpose" => Purpose,
+            "esteem" => Esteem,
+            "risk_tolerance" => RiskTolerance,
+            "social_drive" => SocialDrive,
+            "ambition" => Ambition,
+            "altruism" => Altruism,
+            "curiosity" => Curiosity,
+            "engaged_with" => EngagedWith,
+            "stun_expires_at_tick" => StunExpiresAtTick,
+            "slow_expires_at_tick" => SlowExpiresAtTick,
+            "slow_factor_q8" => SlowFactorQ8,
+            "cooldown_next_ready_tick" => CooldownNextReadyTick,
+            "creature_type" => CreatureType,
+            "spawn_tick" => SpawnTick,
+            "grid_id" => GridId,
+            "local_pos" => LocalPos,
+            "move_target" => MoveTarget,
+            _ => return None,
+        })
+    }
 }
 
 impl fmt::Display for AgentFieldId {
@@ -770,6 +824,69 @@ mod tests {
         for n in &names {
             assert!(seen.insert(*n), "duplicate AgentFieldId snake name: {n}");
         }
+    }
+
+    #[test]
+    fn agent_field_id_from_snake_round_trips_every_variant() {
+        // Property: for every declared `AgentFieldId` variant,
+        // `from_snake(snake()) == Some(variant)`. Mirrors the variant
+        // list in `agent_field_id_snake_names_are_unique` — both will
+        // miss a new variant the same way (compile-time `match`
+        // exhaustiveness on `snake()` plus this hand-written list keeps
+        // them in lockstep).
+        //
+        // Also asserts `from_snake` rejects an obviously-bogus name —
+        // keeps the `_ => None` arm honest.
+        let variants = [
+            AgentFieldId::Pos,
+            AgentFieldId::Hp,
+            AgentFieldId::MaxHp,
+            AgentFieldId::Alive,
+            AgentFieldId::MovementMode,
+            AgentFieldId::Level,
+            AgentFieldId::MoveSpeed,
+            AgentFieldId::MoveSpeedMult,
+            AgentFieldId::ShieldHp,
+            AgentFieldId::Armor,
+            AgentFieldId::MagicResist,
+            AgentFieldId::AttackDamage,
+            AgentFieldId::AttackRange,
+            AgentFieldId::Mana,
+            AgentFieldId::MaxMana,
+            AgentFieldId::Hunger,
+            AgentFieldId::Thirst,
+            AgentFieldId::RestTimer,
+            AgentFieldId::Safety,
+            AgentFieldId::Shelter,
+            AgentFieldId::Social,
+            AgentFieldId::Purpose,
+            AgentFieldId::Esteem,
+            AgentFieldId::RiskTolerance,
+            AgentFieldId::SocialDrive,
+            AgentFieldId::Ambition,
+            AgentFieldId::Altruism,
+            AgentFieldId::Curiosity,
+            AgentFieldId::EngagedWith,
+            AgentFieldId::StunExpiresAtTick,
+            AgentFieldId::SlowExpiresAtTick,
+            AgentFieldId::SlowFactorQ8,
+            AgentFieldId::CooldownNextReadyTick,
+            AgentFieldId::CreatureType,
+            AgentFieldId::SpawnTick,
+            AgentFieldId::GridId,
+            AgentFieldId::LocalPos,
+            AgentFieldId::MoveTarget,
+        ];
+        for v in variants {
+            let name = v.snake();
+            assert_eq!(
+                AgentFieldId::from_snake(name),
+                Some(v),
+                "from_snake({name:?}) did not round-trip to {v:?}"
+            );
+        }
+        assert_eq!(AgentFieldId::from_snake("hp_pct"), None);
+        assert_eq!(AgentFieldId::from_snake(""), None);
     }
 
     // ---- ViewStorage ----

@@ -82,6 +82,53 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// An integer literal whose value does not fit into the chosen
+    /// 32-bit narrowing target. The DSL surface uses `i64` literals; the
+    /// CG IR's numeric literals are 32-bit. Out-of-range narrowings
+    /// surface as this typed defect instead of silent truncation.
+    LiteralOutOfRange {
+        value: i64,
+        target: CgTy,
+        span: Span,
+    },
+
+    /// `if cond then a else b` whose `then` and `else` arms produce
+    /// different types — a [`CgExpr::Select`] requires both arms to
+    /// share the result type. Distinct from
+    /// [`Self::BinaryOperandTyMismatch`] because Select is not a binary
+    /// op; surfacing the typed variant keeps diagnostic readers from
+    /// chasing a non-existent operator.
+    SelectArmMismatch {
+        then_ty: CgTy,
+        else_ty: CgTy,
+        span: Span,
+    },
+
+    /// A multi-operand builtin (`Min`, `Max`, `Clamp`, `SaturatingAdd`)
+    /// whose operands disagree on the underlying numeric type. The
+    /// builtin itself is well-formed; the operands are not. Distinct
+    /// from [`Self::BinaryOperandTyMismatch`] because these builtins are
+    /// not binary ops in the AST surface.
+    BuiltinOperandMismatch {
+        builtin: Builtin,
+        lhs_ty: CgTy,
+        rhs_ty: CgTy,
+        span: Span,
+    },
+
+    /// A namespace call (`rng.<method>(<args>)`, etc.) with the wrong
+    /// number of arguments for its expression-level lowering. Distinct
+    /// from [`Self::BuiltinArityMismatch`] because namespace calls are
+    /// not [`Builtin`]s — the DSL's namespace identifier is the typed
+    /// surface, the method is a free-form identifier on the namespace.
+    NamespaceCallArityMismatch {
+        ns: NamespaceId,
+        method: String,
+        expected: usize,
+        got: usize,
+        span: Span,
+    },
+
     /// A constructed [`CgExpr`] failed [`type_check`] — the lowering
     /// produced an internally-inconsistent node. Shouldn't normally fire
     /// (every arm constructs a `ty` derived from the operator), but the
@@ -224,6 +271,50 @@ impl fmt::Display for LoweringError {
                 f,
                 "lowering: binary `{:?}` at {}..{} has mismatched operands — lhs is {}, rhs is {}",
                 op, span.start, span.end, lhs_ty, rhs_ty
+            ),
+            LoweringError::LiteralOutOfRange { value, target, span } => write!(
+                f,
+                "lowering: literal at {}..{} out of range — value {} does not fit in {}",
+                span.start, span.end, value, target
+            ),
+            LoweringError::SelectArmMismatch {
+                then_ty,
+                else_ty,
+                span,
+            } => write!(
+                f,
+                "lowering: select at {}..{} has mismatched arms — then is {}, else is {}",
+                span.start, span.end, then_ty, else_ty
+            ),
+            LoweringError::BuiltinOperandMismatch {
+                builtin,
+                lhs_ty,
+                rhs_ty,
+                span,
+            } => write!(
+                f,
+                "lowering: builtin `{}` at {}..{} has mismatched operands — lhs is {}, rhs is {}",
+                builtin.name(),
+                span.start,
+                span.end,
+                lhs_ty,
+                rhs_ty
+            ),
+            LoweringError::NamespaceCallArityMismatch {
+                ns,
+                method,
+                expected,
+                got,
+                span,
+            } => write!(
+                f,
+                "lowering: namespace call `{}.{}()` at {}..{} expected {} argument(s), got {}",
+                ns.name(),
+                method,
+                span.start,
+                span.end,
+                expected,
+                got
             ),
             LoweringError::TypeCheckFailure { error, span } => write!(
                 f,
@@ -389,11 +480,10 @@ impl<'a> LoweringCtx<'a> {
 /// On success returns the newly-allocated `CgExprId`; the corresponding
 /// `CgExpr` is in `ctx.builder.program().exprs[id.0 as usize]`. On
 /// failure returns a typed [`LoweringError`] naming the offending node
-/// (via its `Span`) and the structural reason. No partial work is
-/// committed — the builder pushes children before parents, so a parent
-/// failure leaves the children in the arena but no parent referencing
-/// them. (The driver-level lowering decides whether to surface or roll
-/// back.)
+/// (via its `Span`) and the structural reason. The arena is not rolled
+/// back on failure — see [`add`]'s "Orphan behavior" note for the full
+/// story; in short, partial children (and possibly the just-pushed
+/// parent itself) remain as orphans that downstream emit walks ignore.
 ///
 /// Type-checking runs after every node is constructed: a successful
 /// return means the produced `CgExpr` matches its operand types under
@@ -411,18 +501,18 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
             // ill-typed errors so silent truncation can't sneak past.
             if *v < 0 {
                 if *v < i32::MIN as i64 {
-                    return Err(LoweringError::IllTypedExpression {
-                        expected: CgTy::I32,
-                        got: CgTy::I32,
+                    return Err(LoweringError::LiteralOutOfRange {
+                        value: *v,
+                        target: CgTy::I32,
                         span,
                     });
                 }
                 add(ctx, CgExpr::Lit(LitValue::I32(*v as i32)), span)
             } else {
                 if *v > u32::MAX as i64 {
-                    return Err(LoweringError::IllTypedExpression {
-                        expected: CgTy::U32,
-                        got: CgTy::U32,
+                    return Err(LoweringError::LiteralOutOfRange {
+                        value: *v,
+                        target: CgTy::U32,
                         span,
                     });
                 }
@@ -606,9 +696,19 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
 // Per-shape helpers
 // ---------------------------------------------------------------------------
 
-/// Push `expr` into the builder, then immediately type-check it. Wraps
-/// the builder error and the type-check error in `LoweringError` so
-/// every push goes through one funnel.
+/// Push `expr` into the builder, type-check it, and return its id.
+///
+/// Wraps the builder error and the type-check error in
+/// [`LoweringError`] so every push goes through one funnel.
+///
+/// **Orphan behavior:** if `type_check` fails, the just-pushed parent
+/// expression remains in the arena as an orphan — the caller gets
+/// `Err`, but the arena is not rolled back. Children pushed before the
+/// failing type-check also remain. Orphans are harmless: downstream
+/// emit walks only ids reachable from `ComputeOpKind`, so orphan exprs
+/// are dead-stripped at emit time. The well-formed pass treats them as
+/// non-errors (an orphan expr in the arena that no op references is
+/// not a P10 / structural concern).
 fn add(
     ctx: &mut LoweringCtx<'_>,
     expr: CgExpr,
@@ -661,7 +761,7 @@ fn lower_field(
 ) -> Result<CgExprId, LoweringError> {
     match &base.kind {
         IrExpr::Local(_, local_name) if local_name == "self" => {
-            let field = map_field_name(field_name).ok_or_else(|| {
+            let field = AgentFieldId::from_snake(field_name).ok_or_else(|| {
                 LoweringError::UnknownAgentField {
                     field_name: field_name.to_string(),
                     span,
@@ -681,55 +781,6 @@ fn lower_field(
             span,
         }),
     }
-}
-
-/// Map a DSL field name to the canonical [`AgentFieldId`]. The mapping
-/// is the inverse of [`AgentFieldId::snake`]; an unknown name returns
-/// `None` and surfaces upstream as
-/// [`LoweringError::UnknownAgentField`].
-fn map_field_name(name: &str) -> Option<AgentFieldId> {
-    use AgentFieldId::*;
-    Some(match name {
-        "pos" => Pos,
-        "hp" => Hp,
-        "max_hp" => MaxHp,
-        "alive" => Alive,
-        "movement_mode" => MovementMode,
-        "level" => Level,
-        "move_speed" => MoveSpeed,
-        "move_speed_mult" => MoveSpeedMult,
-        "shield_hp" => ShieldHp,
-        "armor" => Armor,
-        "magic_resist" => MagicResist,
-        "attack_damage" => AttackDamage,
-        "attack_range" => AttackRange,
-        "mana" => Mana,
-        "max_mana" => MaxMana,
-        "hunger" => Hunger,
-        "thirst" => Thirst,
-        "rest_timer" => RestTimer,
-        "safety" => Safety,
-        "shelter" => Shelter,
-        "social" => Social,
-        "purpose" => Purpose,
-        "esteem" => Esteem,
-        "risk_tolerance" => RiskTolerance,
-        "social_drive" => SocialDrive,
-        "ambition" => Ambition,
-        "altruism" => Altruism,
-        "curiosity" => Curiosity,
-        "engaged_with" => EngagedWith,
-        "stun_expires_at_tick" => StunExpiresAtTick,
-        "slow_expires_at_tick" => SlowExpiresAtTick,
-        "slow_factor_q8" => SlowFactorQ8,
-        "cooldown_next_ready_tick" => CooldownNextReadyTick,
-        "creature_type" => CreatureType,
-        "spawn_tick" => SpawnTick,
-        "grid_id" => GridId,
-        "local_pos" => LocalPos,
-        "move_target" => MoveTarget,
-        _ => return None,
-    })
 }
 
 /// Lower a binary operator. Picks the typed [`BinaryOp`] variant based
@@ -921,14 +972,9 @@ fn lower_select(
     let then_ty = typecheck_node(ctx, then_id, then_expr.span)?;
     let else_ty = typecheck_node(ctx, else_id, else_expr.span)?;
     if then_ty != else_ty {
-        return Err(LoweringError::BinaryOperandTyMismatch {
-            // Repurpose `BinOp::Eq` here as the "==-compatible" tag —
-            // there's no AST op behind a `Select` arm mismatch, so we
-            // pick the closest semantic neighbour. The displayed form
-            // distinguishes the two arm types directly.
-            op: BinOp::Eq,
-            lhs_ty: then_ty,
-            rhs_ty: else_ty,
+        return Err(LoweringError::SelectArmMismatch {
+            then_ty,
+            else_ty,
             span,
         });
     }
@@ -1107,8 +1153,8 @@ fn lower_builtin_call(
             for (idx, &t) in arg_tys.iter().enumerate().skip(1) {
                 let other = numeric_ty_from(builtin, t, idx as u8, span)?;
                 if other != nty {
-                    return Err(LoweringError::BinaryOperandTyMismatch {
-                        op: BinOp::Eq, // best structural neighbour
+                    return Err(LoweringError::BuiltinOperandMismatch {
+                        builtin,
                         lhs_ty: nty.cg_ty(),
                         rhs_ty: other.cg_ty(),
                         span,
@@ -1173,8 +1219,8 @@ fn lower_pairwise_numeric(
     let nty_lhs = numeric_ty_from(builtin, arg_tys[0], 0, span)?;
     let nty_rhs = numeric_ty_from(builtin, arg_tys[1], 1, span)?;
     if nty_lhs != nty_rhs {
-        return Err(LoweringError::BinaryOperandTyMismatch {
-            op: BinOp::Eq,
+        return Err(LoweringError::BuiltinOperandMismatch {
+            builtin,
             lhs_ty: nty_lhs.cg_ty(),
             rhs_ty: nty_rhs.cg_ty(),
             span,
@@ -1294,10 +1340,11 @@ fn lower_namespace_call(
             // any) is consumed at op-level (the seed/agent/tick are
             // implicit). We accept zero args here.
             if !args.is_empty() {
-                return Err(LoweringError::BuiltinArityMismatch {
-                    builtin: Builtin::Entity, // closest neighbour for the typed report
+                return Err(LoweringError::NamespaceCallArityMismatch {
+                    ns,
+                    method: m.to_string(),
                     expected: 0,
-                    got: args.len() as u8,
+                    got: args.len(),
                     span,
                 });
             }
@@ -1337,7 +1384,7 @@ fn lower_namespace_call(
                     span,
                 });
             }
-            let field_id = map_field_name(field).ok_or_else(|| {
+            let field_id = AgentFieldId::from_snake(field).ok_or_else(|| {
                 LoweringError::UnknownAgentField {
                     field_name: field.to_string(),
                     span,
@@ -1465,19 +1512,30 @@ mod tests {
 
     #[test]
     fn literal_int_overflow_u32_rejected() {
-        let ast = node(IrExpr::LitInt((u32::MAX as i64) + 1));
+        let v = (u32::MAX as i64) + 1;
+        let ast = node(IrExpr::LitInt(v));
         let err = lower_to_string(&ast).unwrap_err();
         match err {
-            LoweringError::IllTypedExpression { .. } => {}
+            LoweringError::LiteralOutOfRange { value, target, .. } => {
+                assert_eq!(value, v);
+                assert_eq!(target, CgTy::U32);
+            }
             other => panic!("unexpected error: {other:?}"),
         }
     }
 
     #[test]
     fn literal_int_overflow_i32_rejected() {
-        let ast = node(IrExpr::LitInt((i32::MIN as i64) - 1));
+        let v = (i32::MIN as i64) - 1;
+        let ast = node(IrExpr::LitInt(v));
         let err = lower_to_string(&ast).unwrap_err();
-        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+        match err {
+            LoweringError::LiteralOutOfRange { value, target, .. } => {
+                assert_eq!(value, v);
+                assert_eq!(target, CgTy::I32);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     // ---- Field access (the plan's `agent.hp` example) ----
@@ -1982,10 +2040,46 @@ mod tests {
         let err = lower_to_string(&ast).unwrap_err();
         // The two operand lowerings succeed independently; the
         // pairwise-numeric helper rejects the mix.
-        assert!(matches!(
-            err,
-            LoweringError::BinaryOperandTyMismatch { .. }
+        match err {
+            LoweringError::BuiltinOperandMismatch {
+                builtin: Builtin::Min,
+                lhs_ty,
+                rhs_ty,
+                ..
+            } => {
+                assert_eq!(lhs_ty, CgTy::F32);
+                assert_eq!(rhs_ty, CgTy::U32);
+            }
+            other => panic!("expected BuiltinOperandMismatch(Min), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn clamp_with_mixed_numeric_types_rejected() {
+        // clamp(self.hp, 0u32, self.max_hp) — first/last are F32,
+        // middle slot is U32. The clamp lowering picks `nty` from the
+        // first operand, then rejects the second when it doesn't match.
+        let ast = node(IrExpr::BuiltinCall(
+            Builtin::Clamp,
+            vec![
+                arg(field_self("hp")),
+                arg(node(IrExpr::LitInt(0))),
+                arg(field_self("max_hp")),
+            ],
         ));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::BuiltinOperandMismatch {
+                builtin: Builtin::Clamp,
+                lhs_ty,
+                rhs_ty,
+                ..
+            } => {
+                assert_eq!(lhs_ty, CgTy::F32);
+                assert_eq!(rhs_ty, CgTy::U32);
+            }
+            other => panic!("expected BuiltinOperandMismatch(Clamp), got {other:?}"),
+        }
     }
 
     #[test]
@@ -2037,10 +2131,13 @@ mod tests {
             else_expr: Some(Box::new(node(IrExpr::LitInt(1)))),
         });
         let err = lower_to_string(&ast).unwrap_err();
-        assert!(matches!(
-            err,
-            LoweringError::BinaryOperandTyMismatch { .. }
-        ));
+        match err {
+            LoweringError::SelectArmMismatch { then_ty, else_ty, .. } => {
+                assert_eq!(then_ty, CgTy::F32);
+                assert_eq!(else_ty, CgTy::U32);
+            }
+            other => panic!("expected SelectArmMismatch, got {other:?}"),
+        }
     }
 
     #[test]
@@ -2094,6 +2191,34 @@ mod tests {
             err,
             LoweringError::UnsupportedNamespaceCall { .. }
         ));
+    }
+
+    #[test]
+    fn rng_with_extra_args_rejected_with_namespace_arity() {
+        // `rng.action(<extra>)` — RNG draws are nullary at the
+        // expression layer; passing args surfaces the typed
+        // namespace-call arity mismatch rather than the builtin one.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "action".to_string(),
+            args: vec![arg(node(IrExpr::LitInt(0)))],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::NamespaceCallArityMismatch {
+                ns,
+                method,
+                expected,
+                got,
+                ..
+            } => {
+                assert_eq!(ns, NamespaceId::Rng);
+                assert_eq!(method, "action");
+                assert_eq!(expected, 0);
+                assert_eq!(got, 1);
+            }
+            other => panic!("expected NamespaceCallArityMismatch, got {other:?}"),
+        }
     }
 
     #[test]
