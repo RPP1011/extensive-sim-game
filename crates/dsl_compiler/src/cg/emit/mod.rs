@@ -32,7 +32,20 @@
 //! - [`kernel::kernel_topology_to_spec_and_body`] — same as above,
 //!   plus the composed WGSL body string (used by tests + Task 4.3).
 //!
-//! Task 4.3 will assemble full kernel modules.
+//! Task 4.3 (this commit) — *full-program emission*.
+//!
+//! - [`program::emit_cg_program`] — walks every kernel in a
+//!   [`crate::cg::schedule::synthesis::ComputeSchedule`], lowers each
+//!   topology to a [`crate::kernel_binding_ir::KernelSpec`] via Task
+//!   4.2, then composes the per-kernel WGSL + Rust source files. The
+//!   four downstream surfaces are sourced from
+//!   [`crate::kernel_lowerings`] — drift across them is structurally
+//!   impossible.
+//! - [`program::EmittedArtifacts`] — the deterministic file set
+//!   (`BTreeMap<filename, contents>`) the xtask writes into
+//!   `crates/engine_gpu_rules/src/`.
+//! - [`program::ProgramEmitError`] — typed errors for kernel-lowering
+//!   failures and structural-name collisions.
 //!
 //! # Why string emission here
 //!
@@ -53,9 +66,11 @@
 //! `wgsl_emit_is_deterministic` test pins this contract.
 
 pub mod kernel;
+pub mod program;
 pub mod wgsl_body;
 
 pub use kernel::{kernel_topology_to_spec, kernel_topology_to_spec_and_body, KernelEmitError};
+pub use program::{emit_cg_program, EmittedArtifacts, ProgramEmitError};
 pub use wgsl_body::{
     lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl, EmitCtx, EmitError,
     HandleNamingStrategy,
