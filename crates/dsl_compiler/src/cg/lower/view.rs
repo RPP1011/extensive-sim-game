@@ -125,8 +125,16 @@
 //!   already rejects `Emit`, `For`, `Match`, and `BeliefObserve` inside
 //!   fold bodies, so those AST shapes will not normally reach
 //!   `lower_view`.
+//! - `IrStmt::SelfUpdate` accepts only the `+=` operator. The merge
+//!   semantics for `=`, `-=`, `*=`, `/=` are not threaded into
+//!   [`ComputeOpKind::ViewFold`] today, so accepting them silently
+//!   would lower to the same CG IR as `+=` and silently miscompile.
+//!   Non-`+=` operators surface as
+//!   [`LoweringError::UnsupportedFoldOperator`]; this gate retires
+//!   when `ComputeOpKind::ViewFold` gains an explicit operator field
+//!   (Task 2.8 / driver-IR shape change).
 
-use dsl_ast::ir::{FoldHandlerIR, IrStmt, StorageHint, ViewBodyIR, ViewIR, ViewKind};
+use dsl_ast::ir::{DecayHint, FoldHandlerIR, IrStmt, StorageHint, ViewBodyIR, ViewIR, ViewKind};
 
 use crate::cg::data_handle::{CgExprId, DataHandle, EventRingId, ViewId, ViewStorageSlot};
 use crate::cg::dispatch::DispatchShape;
@@ -273,7 +281,14 @@ pub fn lower_view(
                 });
             }
             intern_view_name(view_id, ir, ctx)?;
-            lower_fold_handlers(view_id, *hint, handlers, handler_resolutions, ctx)
+            lower_fold_handlers(
+                view_id,
+                *hint,
+                ir.decay.as_ref(),
+                handlers,
+                handler_resolutions,
+                ctx,
+            )
         }
 
         // ---- Kind/body mismatch arms ----
@@ -319,9 +334,15 @@ fn intern_view_name(
 /// [`ComputeOpKind::ViewFold`] op per handler. The caller is
 /// responsible for ensuring `handlers.len() == handler_resolutions.len()`
 /// — `lower_view` checks the invariant before delegating here.
+///
+/// `decay` is the view's `@decay(...)` annotation if present; it is
+/// threaded into the storage-slot validator so `(PairMap, Anchor)`
+/// becomes legal precisely when decay is set (see
+/// `storage_hint_exposes_slot`'s docstring).
 fn lower_fold_handlers(
     view_id: ViewId,
     hint: StorageHint,
+    decay: Option<&DecayHint>,
     handlers: &[FoldHandlerIR],
     handler_resolutions: &[HandlerResolution],
     ctx: &mut LoweringCtx<'_>,
@@ -333,7 +354,7 @@ fn lower_fold_handlers(
     );
     let mut op_ids = Vec::with_capacity(handlers.len());
     for (handler, resolution) in handlers.iter().zip(handler_resolutions.iter()) {
-        let op_id = lower_one_handler(view_id, hint, handler, *resolution, ctx)?;
+        let op_id = lower_one_handler(view_id, hint, decay, handler, *resolution, ctx)?;
         op_ids.push(op_id);
     }
     Ok(op_ids)
@@ -343,6 +364,7 @@ fn lower_fold_handlers(
 fn lower_one_handler(
     view_id: ViewId,
     hint: StorageHint,
+    decay: Option<&DecayHint>,
     handler: &FoldHandlerIR,
     resolution: HandlerResolution,
     ctx: &mut LoweringCtx<'_>,
@@ -351,7 +373,7 @@ fn lower_one_handler(
     // ids into a `CgStmtList`. The `lower_stmt` helper validates the
     // storage-slot invariant per `Assign` it produces — see
     // `lower_stmt`'s docstring.
-    let stmt_ids = lower_stmt_list(view_id, hint, &handler.body, ctx)?;
+    let stmt_ids = lower_stmt_list(view_id, hint, decay, &handler.body, ctx)?;
     let list = CgStmtList::new(stmt_ids);
     let body_list_id = ctx
         .builder
@@ -406,12 +428,13 @@ fn lower_one_handler(
 fn lower_stmt_list(
     view_id: ViewId,
     hint: StorageHint,
+    decay: Option<&DecayHint>,
     body: &[IrStmt],
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<Vec<CgStmtId>, LoweringError> {
     let mut ids = Vec::with_capacity(body.len());
     for stmt in body {
-        let id = lower_stmt(view_id, hint, stmt, ctx)?;
+        let id = lower_stmt(view_id, hint, decay, stmt, ctx)?;
         ids.push(id);
     }
     Ok(ids)
@@ -421,15 +444,16 @@ fn lower_stmt_list(
 ///
 /// Recognised shapes:
 ///
-/// - `IrStmt::SelfUpdate { op: _, value, span }` →
+/// - `IrStmt::SelfUpdate { op, value, span }` with `op == "+="` →
 ///   `CgStmt::Assign { target: ViewStorage{view, slot: Primary},
-///   value: <lower_expr(value)> }`. The accumulation operator
-///   (`+=` / `-=` / `*=` / `/=` / `=`) is *not* threaded into the
-///   `CgStmt` — the merge semantics live on the
-///   [`ComputeOpKind::ViewFold`] wrapper, which is the unit the engine
-///   schedules and runs the per-event update under. The body expresses
-///   *what value to merge in*, not *how*. See the module-level
-///   "Statement-body coverage" docs for why.
+///   value: <lower_expr(value)> }`. Other operators (`=`, `-=`,
+///   `*=`, `/=`, or any unrecognised string) surface as
+///   [`LoweringError::UnsupportedFoldOperator`] — the merge
+///   semantics for non-`+=` operators are not yet represented on
+///   the [`ComputeOpKind::ViewFold`] wrapper, so silent acceptance
+///   would miscompile any future fold body that uses them. See the
+///   module-level "Statement-body coverage" docs and the
+///   [`LoweringError::UnsupportedFoldOperator`] docstring.
 ///
 /// Every other AST statement shape (`Let`, `Expr`, `If`,
 /// resolver-rejected `Emit` / `For` / `Match` / `BeliefObserve`)
@@ -438,11 +462,33 @@ fn lower_stmt_list(
 fn lower_stmt(
     view_id: ViewId,
     hint: StorageHint,
+    decay: Option<&DecayHint>,
     stmt: &IrStmt,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgStmtId, LoweringError> {
     match stmt {
-        IrStmt::SelfUpdate { op: _, value, span } => {
+        IrStmt::SelfUpdate { op, value, span } => {
+            // Operator gate: only `+=` is threaded through the
+            // existing `ComputeOpKind::ViewFold` wrapper. The other
+            // four canonical operators (`=`, `-=`, `*=`, `/=`) are
+            // grammatically valid but semantically distinct merges;
+            // accepting them silently would produce identical CG IR
+            // to `+=` and silently miscompile (e.g., a multiplicative
+            // decay rule). Reject up front with a typed deferral.
+            //
+            // Defense-in-depth: the resolver enforces the 5-element
+            // vocabulary, but the AST holds `op` as a free-form
+            // `String`, so unrecognised strings also route here under
+            // the closed-set tag `"unknown"`.
+            let op_label = canonical_self_update_op_label(op.as_str());
+            if op_label != "+=" {
+                return Err(LoweringError::UnsupportedFoldOperator {
+                    view: view_id,
+                    op_label,
+                    span: *span,
+                });
+            }
+
             // Lower the value expression. `lower_expr` does its own
             // type-checking and pushes the sub-tree into the builder.
             let value_id = lower_expr(value, ctx)?;
@@ -456,7 +502,7 @@ fn lower_stmt(
             // shape that needed an alternate primary surface would
             // surface as a typed defect rather than silent miscompile.
             let slot = ViewStorageSlot::Primary;
-            validate_storage_slot(view_id, hint, slot, *span)?;
+            validate_storage_slot(view_id, hint, decay, slot, *span)?;
             let target = DataHandle::ViewStorage {
                 view: view_id,
                 slot,
@@ -517,7 +563,13 @@ fn push_assign(
 /// Validate that `slot` is exposed by the view's `hint`.
 ///
 /// The mapping `(StorageHint, ViewStorageSlot) → valid?` mirrors the
-/// table documented on [`ViewStorageSlot`] in `data_handle.rs`:
+/// table documented on [`ViewStorageSlot`] in `data_handle.rs`. The
+/// `decay` parameter encodes the one cell that is conditional on a
+/// view-level annotation rather than the hint variant itself —
+/// `(PairMap, Anchor)` is exposed precisely when `@decay(...)` is set
+/// on the view (the existing `emit_view_fold_kernel` exposes Anchor
+/// for `PairMap + @decay` views; without decay there is no anchor
+/// pattern to update). Every other cell is unconditional.
 ///
 /// - `PairMap` (no decay) → Primary
 /// - `PairMap + @decay` → Primary, Anchor
@@ -538,10 +590,11 @@ fn push_assign(
 fn validate_storage_slot(
     view_id: ViewId,
     hint: StorageHint,
+    decay: Option<&DecayHint>,
     slot: ViewStorageSlot,
     span: dsl_ast::ast::Span,
 ) -> Result<(), LoweringError> {
-    if storage_hint_exposes_slot(hint, slot) {
+    if storage_hint_exposes_slot(hint, slot, decay) {
         Ok(())
     } else {
         Err(LoweringError::InvalidViewStorageSlot {
@@ -561,21 +614,25 @@ fn validate_storage_slot(
 /// a new variant to either enum is a compile-time error here, so the
 /// hint-slot table cannot drift silently.
 ///
-/// Note: `PairMap` carrying `@decay` exposes the `Anchor` slot in the
-/// existing emit_view_fold_kernel. The CG-IR-level `StorageHint` is a
-/// coarse classification (the `@decay` annotation is a sibling field
-/// on `ViewIR`), so the table here treats `PairMap → Anchor` as
-/// `false`. When (and if) a fold body lowers a write to `Anchor`, the
-/// driver will need to thread the `decay.is_some()` bit; today no body
-/// does — see the module-level "Statement-body coverage" docs.
-fn storage_hint_exposes_slot(hint: StorageHint, slot: ViewStorageSlot) -> bool {
+/// The `decay` parameter encodes the single conditional cell:
+/// `(PairMap, Anchor)` becomes `true` precisely when `decay.is_some()`,
+/// matching the `emit_view_fold_kernel`'s anchor-pattern lowering for
+/// `PairMap + @decay` views. Every other cell is unconditional —
+/// adding `decay` must NOT introduce wildcards in the table; the
+/// 5×5 cross-product stays exhaustive so no future hint/slot
+/// combination drifts past this gate silently.
+fn storage_hint_exposes_slot(
+    hint: StorageHint,
+    slot: ViewStorageSlot,
+    decay: Option<&DecayHint>,
+) -> bool {
     use StorageHint as H;
     use ViewStorageSlot as S;
     match (hint, slot) {
-        // PairMap → Primary only at the IR-layer hint (Anchor is
-        // conditional on @decay, see fn doc).
+        // PairMap → Primary always; Anchor exposed iff @decay is set
+        // on the view (the anchor-pattern lowering is the consumer).
         (H::PairMap, S::Primary) => true,
-        (H::PairMap, S::Anchor) => false,
+        (H::PairMap, S::Anchor) => decay.is_some(),
         (H::PairMap, S::Ids) => false,
         (H::PairMap, S::Counts) => false,
         (H::PairMap, S::Cursors) => false,
@@ -607,6 +664,21 @@ fn storage_hint_exposes_slot(hint: StorageHint, slot: ViewStorageSlot) -> bool {
         (H::LazyCached, S::Ids) => false,
         (H::LazyCached, S::Counts) => false,
         (H::LazyCached, S::Cursors) => false,
+    }
+}
+
+/// Map an AST `IrStmt::SelfUpdate.op` string to its canonical
+/// closed-set tag. The DSL grammar admits five operators; any other
+/// string surfaces as `"unknown"` so a synthetic AST cannot smuggle
+/// an unsupported operator past the gate in `lower_stmt`.
+fn canonical_self_update_op_label(op: &str) -> &'static str {
+    match op {
+        "=" => "=",
+        "+=" => "+=",
+        "-=" => "-=",
+        "*=" => "*=",
+        "/=" => "/=",
+        _ => "unknown",
     }
 }
 
@@ -993,10 +1065,12 @@ mod tests {
         // Sanity that the table is encoded correctly. Direct test of
         // the validator avoids constructing a full view body that
         // writes Anchor (no real fold body does — see the
-        // module-level statement-coverage docs).
+        // module-level statement-coverage docs). `decay = None` here
+        // is the no-decay PairMap path.
         assert!(validate_storage_slot(
             ViewId(0),
             StorageHint::PairMap,
+            None,
             ViewStorageSlot::Primary,
             span(0, 0)
         )
@@ -1005,10 +1079,11 @@ mod tests {
         let err = validate_storage_slot(
             ViewId(0),
             StorageHint::PairMap,
+            None,
             ViewStorageSlot::Anchor,
             span(5, 9),
         )
-        .expect_err("PairMap doesn't expose Anchor in the IR-level table");
+        .expect_err("PairMap without @decay doesn't expose Anchor");
         match err {
             LoweringError::InvalidViewStorageSlot {
                 view,
@@ -1030,6 +1105,7 @@ mod tests {
         assert!(validate_storage_slot(
             ViewId(0),
             StorageHint::PerEntityTopK { k: 1, keyed_on: 0 },
+            None,
             ViewStorageSlot::Ids,
             span(0, 0)
         )
@@ -1037,6 +1113,7 @@ mod tests {
         assert!(validate_storage_slot(
             ViewId(0),
             StorageHint::PerEntityTopK { k: 8, keyed_on: 0 },
+            None,
             ViewStorageSlot::Ids,
             span(0, 0)
         )
@@ -1048,6 +1125,7 @@ mod tests {
         assert!(validate_storage_slot(
             ViewId(0),
             StorageHint::SymmetricPairTopK { k: 8 },
+            None,
             ViewStorageSlot::Counts,
             span(0, 0)
         )
@@ -1056,6 +1134,7 @@ mod tests {
         assert!(validate_storage_slot(
             ViewId(0),
             StorageHint::SymmetricPairTopK { k: 8 },
+            None,
             ViewStorageSlot::Cursors,
             span(0, 0)
         )
@@ -1067,6 +1146,7 @@ mod tests {
         assert!(validate_storage_slot(
             ViewId(0),
             StorageHint::PerEntityRing { k: 64 },
+            None,
             ViewStorageSlot::Cursors,
             span(0, 0)
         )
@@ -1075,6 +1155,7 @@ mod tests {
         assert!(validate_storage_slot(
             ViewId(0),
             StorageHint::PerEntityRing { k: 64 },
+            None,
             ViewStorageSlot::Counts,
             span(0, 0)
         )
@@ -1092,6 +1173,7 @@ mod tests {
             assert!(validate_storage_slot(
                 ViewId(0),
                 StorageHint::LazyCached,
+                None,
                 slot,
                 span(0, 0)
             )
@@ -1100,10 +1182,84 @@ mod tests {
         assert!(validate_storage_slot(
             ViewId(0),
             StorageHint::LazyCached,
+            None,
             ViewStorageSlot::Primary,
             span(0, 0)
         )
         .is_ok());
+    }
+
+    // ---- Conditional: PairMap + @decay exposes Anchor -------------------
+
+    #[test]
+    fn pair_map_with_decay_exposes_anchor() {
+        // Construct a `DecayHint` and confirm the table flips
+        // `(PairMap, Anchor)` from rejection to acceptance. This is
+        // the only conditional cell — every other cell is unconditional.
+        let decay = DecayHint {
+            rate: 0.95,
+            per: dsl_ast::ir::DecayUnit::Tick,
+            span: span(0, 0),
+        };
+        assert!(validate_storage_slot(
+            ViewId(0),
+            StorageHint::PairMap,
+            Some(&decay),
+            ViewStorageSlot::Anchor,
+            span(0, 0)
+        )
+        .is_ok());
+        // Primary is still legal regardless of decay.
+        assert!(validate_storage_slot(
+            ViewId(0),
+            StorageHint::PairMap,
+            Some(&decay),
+            ViewStorageSlot::Primary,
+            span(0, 0)
+        )
+        .is_ok());
+        // The other three slots remain unconditionally rejected even
+        // with @decay set.
+        for slot in [
+            ViewStorageSlot::Ids,
+            ViewStorageSlot::Counts,
+            ViewStorageSlot::Cursors,
+        ] {
+            assert!(validate_storage_slot(
+                ViewId(0),
+                StorageHint::PairMap,
+                Some(&decay),
+                slot,
+                span(0, 0)
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn pair_map_without_decay_does_not_expose_anchor() {
+        // Negative-direction sanity — `decay = None` keeps the
+        // `(PairMap, Anchor)` cell at `false`, matching the no-decay
+        // PairMap kernel that has no anchor pattern.
+        let err = validate_storage_slot(
+            ViewId(0),
+            StorageHint::PairMap,
+            None,
+            ViewStorageSlot::Anchor,
+            span(0, 0),
+        )
+        .expect_err("PairMap without @decay must reject Anchor");
+        match err {
+            LoweringError::InvalidViewStorageSlot {
+                hint_label,
+                requested_slot,
+                ..
+            } => {
+                assert_eq!(hint_label, "pair_map");
+                assert_eq!(requested_slot, ViewStorageSlot::Anchor);
+            }
+            other => panic!("expected InvalidViewStorageSlot, got {other:?}"),
+        }
     }
 
     // ---- Negative: unsupported fold-body statement form -----------------
@@ -1205,6 +1361,159 @@ mod tests {
             }
             other => panic!("expected UnsupportedViewFoldStmt(Emit), got {other:?}"),
         }
+    }
+
+    // ---- SelfUpdate operator gate ---------------------------------------
+
+    /// Build a fold handler with a single `IrStmt::SelfUpdate` carrying
+    /// the supplied operator string. Used by the operator-gate tests
+    /// below to exercise non-`+=` and unrecognised-string paths.
+    fn handler_with_self_update_op(
+        event_name: &str,
+        op: &str,
+        value: IrExprNode,
+        stmt_span: AstSpan,
+    ) -> FoldHandlerIR {
+        FoldHandlerIR {
+            pattern: IrEventPattern {
+                name: event_name.to_string(),
+                event: None,
+                bindings: vec![],
+                span: span(0, 0),
+            },
+            body: vec![IrStmt::SelfUpdate {
+                op: op.to_string(),
+                value,
+                span: stmt_span,
+            }],
+            span: span(0, 0),
+        }
+    }
+
+    #[test]
+    fn rejects_self_update_with_minus_equals() {
+        // `-=` is grammatically valid (resolver permits it) but
+        // semantically distinct from `+=`. The CG IR's
+        // `ComputeOpKind::ViewFold` does not yet thread the operator,
+        // so silent acceptance would lower `self -= x` identically to
+        // `self += x` — a guaranteed miscompile. Reject with a typed
+        // deferral.
+        let view = fold_view(
+            "v",
+            StorageHint::PerEntityTopK { k: 8, keyed_on: 0 },
+            vec![handler_with_self_update_op(
+                "AgentAttacked",
+                "-=",
+                lit_f32(1.0),
+                span(11, 17),
+            )],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let err = lower_view(
+            ViewId(0),
+            &view,
+            &[HandlerResolution {
+                event_kind: EventKindId(0),
+                source_ring: EventRingId(0),
+            }],
+            &mut ctx,
+        )
+        .expect_err("non-`+=` operator must be rejected");
+        match err {
+            LoweringError::UnsupportedFoldOperator {
+                view,
+                op_label,
+                span,
+            } => {
+                assert_eq!(view, ViewId(0));
+                assert_eq!(op_label, "-=");
+                assert_eq!(span.start, 11);
+                assert_eq!(span.end, 17);
+            }
+            other => panic!("expected UnsupportedFoldOperator, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_self_update_with_unknown_operator_string() {
+        // Defense-in-depth — the resolver enforces the 5-element
+        // operator vocabulary at parse time, but the AST holds the
+        // operator as `String`. A synthetic AST that smuggles in an
+        // arbitrary string surfaces under the closed-set tag
+        // `"unknown"` rather than falling through silently.
+        let view = fold_view(
+            "v",
+            StorageHint::PerEntityTopK { k: 8, keyed_on: 0 },
+            vec![handler_with_self_update_op(
+                "AgentAttacked",
+                "&=",
+                lit_f32(1.0),
+                span(0, 0),
+            )],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let err = lower_view(
+            ViewId(0),
+            &view,
+            &[HandlerResolution {
+                event_kind: EventKindId(0),
+                source_ring: EventRingId(0),
+            }],
+            &mut ctx,
+        )
+        .expect_err("unknown operator string must be rejected");
+        match err {
+            LoweringError::UnsupportedFoldOperator { op_label, .. } => {
+                assert_eq!(op_label, "unknown");
+            }
+            other => panic!("expected UnsupportedFoldOperator, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accepts_self_update_with_plus_equals() {
+        // Regression guard — the existing `+=` path must continue to
+        // lower successfully through the operator gate. Mirrors the
+        // smallest-happy-path test above but pinned next to the
+        // negative cases for readability.
+        let view = fold_view(
+            "v",
+            StorageHint::PerEntityTopK { k: 8, keyed_on: 0 },
+            vec![handler_with_self_update_op(
+                "AgentAttacked",
+                "+=",
+                lit_f32(1.0),
+                span(0, 0),
+            )],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let ops = lower_view(
+            ViewId(0),
+            &view,
+            &[HandlerResolution {
+                event_kind: EventKindId(0),
+                source_ring: EventRingId(0),
+            }],
+            &mut ctx,
+        )
+        .expect("`+=` is the supported operator and must lower cleanly");
+        assert_eq!(ops.len(), 1);
+    }
+
+    #[test]
+    fn lowering_error_display_unsupported_fold_operator() {
+        let e = LoweringError::UnsupportedFoldOperator {
+            view: ViewId(7),
+            op_label: "*=",
+            span: span(3, 5),
+        };
+        let s = format!("{}", e);
+        assert!(s.contains("view #7"));
+        assert!(s.contains("*="));
+        assert!(s.contains("only += is lowered today"));
     }
 
     // ---- Snapshot: pinned `Display` form for a lowered op ---------------

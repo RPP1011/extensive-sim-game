@@ -382,6 +382,29 @@ pub enum LoweringError {
         body_label: &'static str,
         span: Span,
     },
+
+    /// A fold-handler `IrStmt::SelfUpdate` carries an operator the CG
+    /// IR's `ComputeOpKind::ViewFold` wrapper does not yet thread.
+    /// Today only `+=` is lowered — the merge semantics for `=`,
+    /// `-=`, `*=`, `/=` would silently lower to identical CG IR as
+    /// `+=` because the operator is not represented in the op kind
+    /// (see the module-level "Statement-body coverage" docs on
+    /// `view.rs`). Defense-in-depth gate: the resolver enforces the
+    /// 5-element vocabulary at parse time, but the AST holds the
+    /// operator as a free-form `String`, so this error also catches
+    /// resolver-permitted-but-unsupported variants and any unknown
+    /// string a synthetic AST might smuggle through.
+    ///
+    /// `op_label` is a closed-set tag drawn from the canonical
+    /// operator strings (`"="` | `"+="` | `"-="` | `"*="` | `"/="`),
+    /// or `"unknown"` for unrecognised strings. When
+    /// `ComputeOpKind::ViewFold` gains an explicit operator field
+    /// (Task 2.8 / driver-IR shape change), this gate goes away.
+    UnsupportedFoldOperator {
+        view: ViewId,
+        op_label: &'static str,
+        span: Span,
+    },
 }
 
 impl fmt::Display for LoweringError {
@@ -614,6 +637,15 @@ impl fmt::Display for LoweringError {
                 f,
                 "view#{} at {}..{} declared as `@{}` but has a `{}` body — `@lazy` views require an expression body and `@materialized` views require a fold body",
                 view.0, span.start, span.end, kind_label, body_label
+            ),
+            LoweringError::UnsupportedFoldOperator {
+                view,
+                op_label,
+                span: _,
+            } => write!(
+                f,
+                "view #{} self-update operator {} not supported by CG IR; only += is lowered today",
+                view.0, op_label
             ),
         }
     }

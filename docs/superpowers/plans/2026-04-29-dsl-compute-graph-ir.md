@@ -552,6 +552,28 @@ Pretty-print the lowered CgProgram; commit the snapshot. Future changes that per
 git commit -m "feat(dsl_compiler/cg/lower): full DSL → CgProgram lowering"
 ```
 
+**Source-ring symmetry obligation (carry-forward from Tasks 2.3, 2.4):**
+
+After `builder.finish()`, the driver MUST iterate `prog.ops` and, for each
+`ComputeOpKind::ViewFold` / `PhysicsRule` op, invoke
+`op.record_read(DataHandle::EventRing { ring: source_ring, kind: EventRingAccess::Read })`
+to symmetrically wire the source-ring read. Similarly, for every `CgStmt::Emit`
+inside any op's body, the driver invokes
+`op.record_write(DataHandle::EventRing { ring: dest_ring, kind: EventRingAccess::Append })`.
+
+The per-op lowerings (Tasks 2.3 view, 2.4 physics) deliberately stop at the
+dispatch-shape representation — `DispatchShape::PerEvent { source_ring }`
+captures the ring identity, but the auto-walker (Task 1.3) only synthesises
+*structural* reads/writes from the body's `Assign` targets and expression
+reads, not registry-resolved ring edges. The driver is the natural place to
+add the explicit `EventRing` handles because it has the full registry view.
+
+Without this symmetry, `well_formed::detect_cycles` (which consults only
+`op.reads` / `op.writes`) silently misses event-ring producer/consumer cycles —
+no false positives, no true positives. Both sides must be wired together; wiring
+only one creates an asymmetric edge graph that produces *worse* diagnostics
+than wiring neither.
+
 ---
 
 ## Phase 3: Schedule synthesis
