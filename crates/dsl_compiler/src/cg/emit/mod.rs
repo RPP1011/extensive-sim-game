@@ -19,8 +19,20 @@
 //! - [`wgsl_body::lower_cg_stmt_list_to_wgsl`] — list-of-statements
 //!   joiner.
 //!
-//! Task 4.2 will compose these per-expression strings into kernel
-//! bodies. Task 4.3 will assemble full kernel modules.
+//! Task 4.2 (this commit) — *kernel-topology composition*.
+//!
+//! - [`kernel::kernel_topology_to_spec`] — walks a
+//!   [`crate::cg::schedule::synthesis::KernelTopology`] and produces
+//!   the corresponding [`crate::kernel_binding_ir::KernelSpec`]. The
+//!   four downstream surfaces (Rust BGL entries, WGSL binding decls,
+//!   BindGroupEntry construction, the `Bindings` struct) are all
+//!   derived from the spec via the existing
+//!   [`crate::kernel_lowerings`] helpers — drift is structurally
+//!   impossible.
+//! - [`kernel::kernel_topology_to_spec_and_body`] — same as above,
+//!   plus the composed WGSL body string (used by tests + Task 4.3).
+//!
+//! Task 4.3 will assemble full kernel modules.
 //!
 //! # Why string emission here
 //!
@@ -40,8 +52,10 @@
 //! iteration appears in any code path. The
 //! `wgsl_emit_is_deterministic` test pins this contract.
 
+pub mod kernel;
 pub mod wgsl_body;
 
+pub use kernel::{kernel_topology_to_spec, kernel_topology_to_spec_and_body, KernelEmitError};
 pub use wgsl_body::{
     lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl, EmitCtx, EmitError,
     HandleNamingStrategy,
