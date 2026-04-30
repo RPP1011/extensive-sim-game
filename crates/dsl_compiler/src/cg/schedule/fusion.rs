@@ -502,7 +502,11 @@ fn close_current_group(
 /// - Singleton non-`PerEvent` group → [`FusibilityClass::Split`].
 /// - Multi-op group on any non-`PerEvent` shape →
 ///   [`FusibilityClass::Fused`].
-fn classify(ops: &[OpId], shape: &DispatchShape) -> FusibilityClass {
+///
+/// Visible to the [`super`] schedule module (used by Task 3.3's
+/// `strategy` layer to classify Conservative-strategy singletons without
+/// re-deriving the rule).
+pub(super) fn classify(ops: &[OpId], shape: &DispatchShape) -> FusibilityClass {
     match shape {
         DispatchShape::PerEvent { .. } => FusibilityClass::Indirect,
         DispatchShape::PerAgent
