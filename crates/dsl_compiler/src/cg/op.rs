@@ -68,6 +68,54 @@ pub struct EventKindId(pub u32);
 pub struct ActionId(pub u32);
 
 // ---------------------------------------------------------------------------
+// ReplayabilityFlag — typed P7 replayability binding for PhysicsRule
+// ---------------------------------------------------------------------------
+
+/// Per-rule replayability flag carried on
+/// [`ComputeOpKind::PhysicsRule`]. Propagated from the constitution P7
+/// surface (the rule's `@phase(...)` annotation) into the lowered op
+/// so emit can sort the rule's emissions into the right ring.
+///
+/// Encoded as a typed enum rather than a bare `bool` so call sites
+/// read self-explanatory (`ReplayabilityFlag::Replayable` rather than
+/// a positional `true`). Style matches the other Phase 1 closed-set
+/// kinds in this module ([`SpatialQueryKind`],
+/// [`crate::cg::data_handle::EventRingAccess`]).
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ReplayabilityFlag {
+    /// `@phase(event)` — emissions land in the deterministic ring
+    /// the runtime folds into the trace hash.
+    Replayable,
+    /// `@phase(post)` — emissions land in chronicle / telemetry
+    /// rings the runtime fold ignores.
+    NonReplayable,
+}
+
+impl ReplayabilityFlag {
+    /// Stable snake_case label for pretty-printing.
+    pub fn label(self) -> &'static str {
+        match self {
+            ReplayabilityFlag::Replayable => "replayable",
+            ReplayabilityFlag::NonReplayable => "non_replayable",
+        }
+    }
+
+    /// Convert to a `bool` for downstream emit consumers that key off
+    /// the binary distinction. The IR-canonical carrier is the enum;
+    /// this helper exists so emit code that historically read a
+    /// `bool` field can keep its call sites unchanged.
+    pub fn as_bool(self) -> bool {
+        matches!(self, ReplayabilityFlag::Replayable)
+    }
+}
+
+impl fmt::Display for ReplayabilityFlag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SpatialQueryKind — typed enumeration of spatial-grid ops
 // ---------------------------------------------------------------------------
 
@@ -264,7 +312,7 @@ pub enum ComputeOpKind {
         rule: PhysicsRuleId,
         on_event: EventKindId,
         body: CgStmtListId,
-        replayable: bool,
+        replayable: ReplayabilityFlag,
     },
 
     /// Per-event view-storage update. Lowered from `view fold { on
@@ -402,7 +450,9 @@ impl ComputeOpKind {
             } => {
                 format!(
                     "physics_rule(rule=#{}, on_event=#{}, replayable={})",
-                    rule.0, on_event.0, replayable
+                    rule.0,
+                    on_event.0,
+                    replayable.label()
                 )
             }
             ComputeOpKind::ViewFold { view, on_event, .. } => {
@@ -702,7 +752,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body: CgStmtListId(0),
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             }
             .label(),
             ComputeOpKind::ViewFold {
@@ -875,7 +925,7 @@ mod tests {
             rule: PhysicsRuleId(2),
             on_event: EventKindId(7),
             body: CgStmtListId(1),
-            replayable: true,
+            replayable: ReplayabilityFlag::Replayable,
         };
         let (r, w) = kind.compute_dependencies(&exprs, &stmts, &lists);
         // Reads: the if's cond is a lit (no read), then-arm assigns hp
@@ -1209,7 +1259,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(1),
                 body: CgStmtListId(0),
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             ComputeOpKind::ViewFold {
                 view: ViewId(0),
@@ -1254,7 +1304,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(7),
                 body: CgStmtListId(0),
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),
@@ -1285,7 +1335,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(7),
                 body: CgStmtListId(0),
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),

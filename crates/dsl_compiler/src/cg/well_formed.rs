@@ -44,9 +44,9 @@ use std::fmt;
 use crate::cg::data_handle::{AgentRef, CgExprId, DataHandle};
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::expr::{data_handle_ty, type_check, CgExpr, CgTy, TypeCheckCtx, TypeError};
-use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, ScoringRowOp, SpatialQueryKind};
+use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, ScoringRowOp, Span, SpatialQueryKind};
 use crate::cg::program::CgProgram;
-use crate::cg::stmt::{CgStmt, CgStmtId, CgStmtListId};
+use crate::cg::stmt::{CgStmt, CgStmtId, CgStmtListId, VariantId};
 
 // ---------------------------------------------------------------------------
 // HandleConsistencyReason — typed reasons a DataHandle can be malformed.
@@ -179,6 +179,21 @@ pub enum CgError {
         row_index: u32,
         got: CgTy,
     },
+
+    /// Two arms of a [`crate::cg::stmt::CgStmt::Match`] reference the
+    /// same [`VariantId`]. The
+    /// [`crate::cg::stmt::CgMatchArm`]'s docstring promises the
+    /// well-formed pass enforces this — duplicate arms would make
+    /// dispatch order-dependent and indistinguishable to downstream
+    /// emit. The AST resolver normally rejects duplicate source-level
+    /// arms, so this defends against synthetic IRs that bypass the
+    /// resolver. `span` is the enclosing op's span — the inner CgStmt
+    /// does not carry one of its own.
+    MatchDuplicateVariant {
+        op: OpId,
+        variant: VariantId,
+        span: Span,
+    },
 }
 
 impl fmt::Display for HandleConsistencyReason {
@@ -293,6 +308,11 @@ impl fmt::Display for CgError {
                 f,
                 "op#{}: scoring row#{} target must be agent_id, got {}",
                 op.0, row_index, got
+            ),
+            CgError::MatchDuplicateVariant { op, variant, span } => write!(
+                f,
+                "op#{}: match arms duplicate {} (span {}..{})",
+                op.0, variant, span.start, span.end
             ),
         }
     }
@@ -708,6 +728,10 @@ fn check_op(
     // --- P6 mutation channel: AgentField writes only in ViewFold ----
 
     p6_check_op(op, op_id, prog, errors);
+
+    // --- Match arm uniqueness -----------------------------------------
+
+    match_uniqueness_check_op(op, op_id, prog, errors);
 
     // --- Kind/shape compatibility ------------------------------------
 
@@ -1231,6 +1255,79 @@ fn p6_walk_list(
 }
 
 // ---------------------------------------------------------------------------
+// Match-arm variant uniqueness
+// ---------------------------------------------------------------------------
+
+/// Walk every [`crate::cg::stmt::CgStmt::Match`] reachable from this op's
+/// body and report a [`CgError::MatchDuplicateVariant`] for each arm-set
+/// that contains the same [`VariantId`] twice. The
+/// [`crate::cg::stmt::CgMatchArm`]'s docstring promises this guarantee;
+/// the AST resolver normally rejects duplicates, so this is the
+/// defense-in-depth gate against synthetic IRs.
+///
+/// Walks bodies of [`ComputeOpKind::PhysicsRule`] and
+/// [`ComputeOpKind::ViewFold`]; other kinds carry no statement bodies
+/// and are skipped.
+fn match_uniqueness_check_op(
+    op: &ComputeOp,
+    op_id: OpId,
+    prog: &CgProgram,
+    errors: &mut Vec<CgError>,
+) {
+    let body = match &op.kind {
+        ComputeOpKind::PhysicsRule { body, .. } | ComputeOpKind::ViewFold { body, .. } => *body,
+        ComputeOpKind::MaskPredicate { .. }
+        | ComputeOpKind::ScoringArgmax { .. }
+        | ComputeOpKind::SpatialQuery { .. } => return,
+        ComputeOpKind::Plumbing { kind } => match *kind {},
+    };
+    match_uniqueness_walk_list(body, op, op_id, prog, errors);
+}
+
+/// Recursive walker — visits every nested list (If branches, Match arm
+/// bodies, …) and inspects each `Match` for duplicate variant ids.
+fn match_uniqueness_walk_list(
+    list_id: CgStmtListId,
+    op: &ComputeOp,
+    op_id: OpId,
+    prog: &CgProgram,
+    errors: &mut Vec<CgError>,
+) {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        match stmt {
+            CgStmt::Assign { .. } | CgStmt::Emit { .. } => {
+                // Leaves — no nested bodies to descend into.
+            }
+            CgStmt::If { then, else_, .. } => {
+                match_uniqueness_walk_list(*then, op, op_id, prog, errors);
+                if let Some(else_id) = else_ {
+                    match_uniqueness_walk_list(*else_id, op, op_id, prog, errors);
+                }
+            }
+            CgStmt::Match { arms, .. } => {
+                let mut seen: BTreeSet<VariantId> = BTreeSet::new();
+                for arm in arms {
+                    if !seen.insert(arm.variant) {
+                        errors.push(CgError::MatchDuplicateVariant {
+                            op: op_id,
+                            variant: arm.variant,
+                            span: op.span,
+                        });
+                    }
+                    match_uniqueness_walk_list(arm.body, op, op_id, prog, errors);
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Cycle detection
 // ---------------------------------------------------------------------------
 
@@ -1406,10 +1503,11 @@ mod tests {
     };
     use crate::cg::expr::{BinaryOp, CgExpr, CgTy, LitValue};
     use crate::cg::op::{
-        ActionId, ComputeOp, EventKindId, PhysicsRuleId, ScoringId, ScoringRowOp, Span,
+        ActionId, ComputeOp, EventKindId, PhysicsRuleId, ReplayabilityFlag, ScoringId,
+        ScoringRowOp, Span,
     };
     use crate::cg::program::{CgProgram, CgProgramBuilder};
-    use crate::cg::stmt::{CgStmt, CgStmtId, CgStmtList, EventField};
+    use crate::cg::stmt::{CgMatchArm, CgStmt, CgStmtId, CgStmtList, EventField};
 
     // -----------------------------------------------------------------
     // Helpers
@@ -1531,7 +1629,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(7),
                 body: physics_body,
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),
@@ -1638,7 +1736,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body: CgStmtListId(99),
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             reads: vec![],
             writes: vec![],
@@ -1675,7 +1773,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body,
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(0),
@@ -1897,7 +1995,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body,
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(0),
@@ -2089,7 +2187,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body,
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),
@@ -2183,7 +2281,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body,
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             DispatchShape::PerEvent {
                 source_ring: EventRingId(0),
@@ -2561,7 +2659,7 @@ mod tests {
                 rule: PhysicsRuleId(0),
                 on_event: EventKindId(0),
                 body: body_list_id,
-                replayable: true,
+                replayable: ReplayabilityFlag::Replayable,
             },
             reads: vec![],
             writes: vec![],
@@ -2720,6 +2818,14 @@ mod tests {
                 },
                 "scoring row#0 target must be agent_id",
             ),
+            (
+                CgError::MatchDuplicateVariant {
+                    op: OpId(0),
+                    variant: VariantId(7),
+                    span: Span::new(3, 9),
+                },
+                "match arms duplicate",
+            ),
         ];
         for (err, needle) in cases {
             let s = format!("{}", err);
@@ -2727,6 +2833,128 @@ mod tests {
             assert!(
                 s.contains(needle),
                 "Display of {err:?} = {s:?} missing substring {needle:?}"
+            );
+        }
+    }
+
+    /// Build a `PhysicsRule` op whose body contains a `Match` with two
+    /// arms that share the same `VariantId(0)`. The well-formed pass
+    /// must surface a [`CgError::MatchDuplicateVariant`].
+    #[test]
+    fn match_arms_with_duplicate_variant_id_rejected() {
+        let mut b = CgProgramBuilder::new();
+        // Scrutinee — any well-typed expression suffices; the pass
+        // doesn't gate on the scrutinee's variant.
+        let scrutinee = b
+            .add_expr(CgExpr::Lit(LitValue::F32(0.0)))
+            .expect("add scrutinee");
+        // Two arms, both `VariantId(0)`. Empty bodies.
+        let empty_body = b
+            .add_stmt_list(CgStmtList::new(vec![]))
+            .expect("empty arm body");
+        let match_stmt = b
+            .add_stmt(CgStmt::Match {
+                scrutinee,
+                arms: vec![
+                    CgMatchArm {
+                        variant: VariantId(0),
+                        bindings: vec![],
+                        body: empty_body,
+                    },
+                    CgMatchArm {
+                        variant: VariantId(0),
+                        bindings: vec![],
+                        body: empty_body,
+                    },
+                ],
+            })
+            .expect("add match");
+        let body = b
+            .add_stmt_list(CgStmtList::new(vec![match_stmt]))
+            .expect("body list");
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: EventKindId(0),
+                body,
+                replayable: ReplayabilityFlag::NonReplayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .expect("add op");
+        let prog = b.finish();
+        let errs = check_well_formed(&prog).expect_err("duplicate variant must surface");
+        let dup = errs
+            .iter()
+            .find(|e| matches!(e, CgError::MatchDuplicateVariant { .. }))
+            .expect("MatchDuplicateVariant present in error vec");
+        match dup {
+            CgError::MatchDuplicateVariant { op, variant, .. } => {
+                assert_eq!(*op, OpId(0));
+                assert_eq!(*variant, VariantId(0));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    /// Inverse: a `Match` whose arms are all distinct passes the
+    /// uniqueness check (no `MatchDuplicateVariant` in the error
+    /// vec).
+    #[test]
+    fn match_arms_with_distinct_variant_ids_pass() {
+        let mut b = CgProgramBuilder::new();
+        let scrutinee = b
+            .add_expr(CgExpr::Lit(LitValue::F32(0.0)))
+            .expect("add scrutinee");
+        let empty_body = b
+            .add_stmt_list(CgStmtList::new(vec![]))
+            .expect("empty arm body");
+        let match_stmt = b
+            .add_stmt(CgStmt::Match {
+                scrutinee,
+                arms: vec![
+                    CgMatchArm {
+                        variant: VariantId(0),
+                        bindings: vec![],
+                        body: empty_body,
+                    },
+                    CgMatchArm {
+                        variant: VariantId(1),
+                        bindings: vec![],
+                        body: empty_body,
+                    },
+                ],
+            })
+            .expect("add match");
+        let body = b
+            .add_stmt_list(CgStmtList::new(vec![match_stmt]))
+            .expect("body list");
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: EventKindId(0),
+                body,
+                replayable: ReplayabilityFlag::NonReplayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .expect("add op");
+        let prog = b.finish();
+        // The well-formed pass may surface other defects, but it must
+        // NOT include a MatchDuplicateVariant for this op.
+        let result = check_well_formed(&prog);
+        if let Err(errs) = result {
+            assert!(
+                !errs
+                    .iter()
+                    .any(|e| matches!(e, CgError::MatchDuplicateVariant { .. })),
+                "no MatchDuplicateVariant expected, got: {errs:?}"
             );
         }
     }

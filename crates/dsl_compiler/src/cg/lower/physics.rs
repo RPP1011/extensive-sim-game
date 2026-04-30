@@ -37,9 +37,10 @@
 //! Today's `lower_physics` recognises three body-statement forms:
 //!
 //! - `IrStmt::Emit { event, fields }` →
-//!   [`crate::cg::stmt::CgStmt::Emit`] (after resolving each field
-//!   name to the (event, index) pair via the driver-supplied event
-//!   schema map carried on [`LoweringCtx`]).
+//!   [`crate::cg::stmt::CgStmt::Emit`] (after resolving the event
+//!   name through [`LoweringCtx::event_kind_ids`] — the dedicated
+//!   event-kind registry, kept distinct from the sum-type variant
+//!   registry so the two id spaces can't silently alias).
 //! - `IrStmt::If { cond, then_body, else_body }` →
 //!   [`crate::cg::stmt::CgStmt::If`] (with the cond expression
 //!   type-checked to `Bool`).
@@ -129,41 +130,18 @@ use dsl_ast::ir::{
 };
 
 use crate::cg::dispatch::DispatchShape;
-use crate::cg::op::{ComputeOpKind, EventKindId, OpId, PhysicsRuleId};
+use crate::cg::op::{ComputeOpKind, OpId, PhysicsRuleId};
 use crate::cg::stmt::{CgMatchArm, CgStmt, CgStmtId, CgStmtList, MatchArmBinding};
 
 use super::error::LoweringError;
 use super::expr::{lower_expr, LoweringCtx};
 use super::view::HandlerResolution;
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
-
-/// Per-rule replayability flag. Propagated from the constitution P7
-/// surface (the rule's `@phase(...)` annotation) into the lowered
-/// op so emit can sort the rule's emissions into the right ring.
-///
-/// Encoded as a typed enum rather than a bare `bool` so call sites
-/// read self-explanatory (`ReplayabilityFlag::Replayable` rather than
-/// a positional `true`).
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub enum ReplayabilityFlag {
-    /// `@phase(event)` — emissions land in the deterministic ring
-    /// the runtime folds into the trace hash.
-    Replayable,
-    /// `@phase(post)` — emissions land in chronicle / telemetry
-    /// rings the runtime fold ignores.
-    NonReplayable,
-}
-
-impl ReplayabilityFlag {
-    /// Convert to the `bool` payload carried on
-    /// [`ComputeOpKind::PhysicsRule`].
-    pub fn as_bool(self) -> bool {
-        matches!(self, ReplayabilityFlag::Replayable)
-    }
-}
+// Re-export the canonical typed P7 flag at the lowering surface so
+// `pub use physics::ReplayabilityFlag` in `mod.rs` continues to work.
+// The IR-canonical definition lives in `crate::cg::op` (sibling to
+// the other Phase 1 closed-set kinds).
+pub use crate::cg::op::ReplayabilityFlag;
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -323,7 +301,7 @@ fn lower_one_handler(
         rule: rule_id,
         on_event: resolution.event_kind,
         body: body_list_id,
-        replayable: replayable.as_bool(),
+        replayable,
     };
     let shape = DispatchShape::PerEvent {
         source_ring: resolution.source_ring,
@@ -445,38 +423,40 @@ fn lower_stmt(
 
 /// Lower an `IrStmt::Emit` to `CgStmt::Emit`.
 ///
-/// Today's lowering threads the `event` reference through
-/// [`LoweringCtx::event_kind_ids`] (driver-supplied) — but Task 2.4
-/// runs without a global event registry; tests that exercise emits
-/// inject the [`EventKindId`] directly via the
-/// [`HandlerResolution`] flowing into the enclosing op. Inside an
-/// arm body, however, the enclosing-op's `on_event` is not the
+/// The emit's destination event-name is resolved through
+/// [`LoweringCtx::event_kind_ids`] — the dedicated event-kind
+/// registry (distinct from [`LoweringCtx::variant_ids`], which is
+/// the sum-type variant registry consulted by `Match` arm
+/// lowering). The two id spaces are independent: a driver
+/// allocating `Damage → VariantId(0)` and `AgentDied →
+/// EventKindId(0)` produces no ambiguity at the emit / match
+/// dispatch sites because each side reads its own map. The Task
+/// 2.4 follow-up split this registry to make the dispatch typed
+/// end-to-end.
+///
+/// Inside an arm body, the enclosing op's `on_event` is not the
 /// emit's *destination* event — the emit may target a different
 /// event variant (e.g., `physics damage` reads `EffectDamageApplied`
-/// and emits `AgentAttacked` + `AgentDied`). For that reason the
-/// per-emit `EventKindId` resolution is left to the driver's
-/// future event registry; until then physics tests build emits
-/// with `event: Some(EventRef(...))` and the lowering pulls the
-/// id from a `ctx.event_kind_ids` map (added in a follow-up task).
+/// and emits `AgentAttacked` + `AgentDied`). The driver populates
+/// the registry from the event surface; tests populate it
+/// directly via [`LoweringCtx::register_event_kind`].
 ///
-/// Today we surface non-test, no-event emits as a typed deferral
-/// — Task 2.4 ships the `Emit` lowering with `fields: vec![]` for
-/// payload-free emits (the chronicle-class shape) and refuses
-/// fielded emits until the driver wires the field-schema.
+/// Today we ship the `Emit` lowering with `fields: vec![]` for
+/// payload-free emits (the chronicle-class shape) and refuse
+/// fielded emits until the driver wires the field-schema. An
+/// unknown event-name surfaces as
+/// [`LoweringError::UnknownMatchVariant`] (the closed-set name is
+/// reused to avoid widening the error vocabulary for a deferral
+/// that the same driver task lights up).
 fn lower_emit(
     rule_id: PhysicsRuleId,
     emit: &IrEmit,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgStmtId, LoweringError> {
-    // Today's lowering recognises the typed pre-resolved event ref
-    // through [`LoweringCtx::variant_ids`] keyed on the event name —
-    // the same map physics-Match uses for variant resolution. A
-    // driver populates the registry once; both consumers share it.
     let event_kind = ctx
-        .variant_ids
+        .event_kind_ids
         .get(&emit.event_name)
         .copied()
-        .map(|v| EventKindId(v.0))
         .ok_or_else(|| LoweringError::UnknownMatchVariant {
             rule: rule_id,
             variant_name: emit.event_name.clone(),
@@ -742,6 +722,7 @@ mod tests {
     };
 
     use crate::cg::data_handle::EventRingId;
+    use crate::cg::op::EventKindId;
     use crate::cg::program::CgProgramBuilder;
     use crate::cg::stmt::{CgStmt, LocalId, VariantId};
 
@@ -817,9 +798,12 @@ mod tests {
 
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
-        // Driver supplies the variant-id registry. `ChronicleEntry`
-        // resolves to the EventKindId we use as scrutinee.
-        ctx.register_variant("ChronicleEntry", VariantId(9));
+        // Driver supplies the event-kind registry. `ChronicleEntry`
+        // is the emit destination — registered via `event_kind_ids`,
+        // not `variant_ids` (which is the sum-type-variant registry
+        // for match arms). The two id spaces are distinct after the
+        // Task 2.4 follow-up split.
+        ctx.register_event_kind("ChronicleEntry", EventKindId(9));
 
         let ops = lower_physics(
             PhysicsRuleId(0),
@@ -848,7 +832,11 @@ mod tests {
             } => {
                 assert_eq!(*rule, PhysicsRuleId(0));
                 assert_eq!(*on_event, EventKindId(7));
-                assert!(!*replayable, "rule lowered with NonReplayable flag");
+                assert_eq!(
+                    *replayable,
+                    ReplayabilityFlag::NonReplayable,
+                    "rule lowered with NonReplayable flag"
+                );
             }
             other => panic!("unexpected kind: {other:?}"),
         }
@@ -902,8 +890,8 @@ mod tests {
 
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
-        ctx.register_variant("A", VariantId(11));
-        ctx.register_variant("B", VariantId(12));
+        ctx.register_event_kind("A", EventKindId(11));
+        ctx.register_event_kind("B", EventKindId(12));
 
         let ops = lower_physics(
             PhysicsRuleId(0),
@@ -922,7 +910,11 @@ mod tests {
         let op = &prog.ops[0];
         match &op.kind {
             ComputeOpKind::PhysicsRule { body, replayable, .. } => {
-                assert!(*replayable, "rule lowered with Replayable flag");
+                assert_eq!(
+                    *replayable,
+                    ReplayabilityFlag::Replayable,
+                    "rule lowered with Replayable flag"
+                );
                 let body_list = &prog.stmt_lists[body.0 as usize];
                 assert_eq!(body_list.stmts.len(), 1);
                 match &prog.stmts[body_list.stmts[0].0 as usize] {
@@ -1015,10 +1007,15 @@ mod tests {
 
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
+        // Sum-type variants matched in arms — registered via the
+        // variant-id space.
         ctx.register_variant("Damage", VariantId(0));
         ctx.register_variant("Heal", VariantId(1));
-        ctx.register_variant("A", VariantId(2));
-        ctx.register_variant("B", VariantId(3));
+        // Emit destinations — registered via the event-kind space.
+        // The split (Task 2.4 follow-up) keeps the two id spaces from
+        // silently aliasing.
+        ctx.register_event_kind("A", EventKindId(2));
+        ctx.register_event_kind("B", EventKindId(3));
         ctx.register_local(damage_local, LocalId(101));
         ctx.register_local(heal_local, LocalId(102));
 
@@ -1076,7 +1073,7 @@ mod tests {
         // Replayable variant.
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
-        ctx.register_variant("A", VariantId(0));
+        ctx.register_event_kind("A", EventKindId(0));
         let _ = lower_physics(
             PhysicsRuleId(0),
             ReplayabilityFlag::Replayable,
@@ -1087,14 +1084,16 @@ mod tests {
         .expect("lowers replayable");
         let prog = builder.finish();
         match &prog.ops[0].kind {
-            ComputeOpKind::PhysicsRule { replayable, .. } => assert!(*replayable),
+            ComputeOpKind::PhysicsRule { replayable, .. } => {
+                assert_eq!(*replayable, ReplayabilityFlag::Replayable);
+            }
             other => panic!("unexpected kind: {other:?}"),
         }
 
         // NonReplayable variant.
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
-        ctx.register_variant("A", VariantId(0));
+        ctx.register_event_kind("A", EventKindId(0));
         let _ = lower_physics(
             PhysicsRuleId(1),
             ReplayabilityFlag::NonReplayable,
@@ -1105,7 +1104,9 @@ mod tests {
         .expect("lowers non-replayable");
         let prog = builder.finish();
         match &prog.ops[0].kind {
-            ComputeOpKind::PhysicsRule { replayable, .. } => assert!(!*replayable),
+            ComputeOpKind::PhysicsRule { replayable, .. } => {
+                assert_eq!(*replayable, ReplayabilityFlag::NonReplayable);
+            }
             other => panic!("unexpected kind: {other:?}"),
         }
     }
@@ -1420,7 +1421,7 @@ mod tests {
 
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
-        ctx.register_variant("ChronicleEntry", VariantId(9));
+        ctx.register_event_kind("ChronicleEntry", EventKindId(9));
         lower_physics(
             PhysicsRuleId(2),
             ReplayabilityFlag::NonReplayable,
@@ -1435,7 +1436,7 @@ mod tests {
         let prog = builder.finish();
         assert_eq!(
             format!("{}", prog.ops[0]),
-            "op#0 kind=physics_rule(rule=#2, on_event=#5, replayable=false) shape=per_event(ring=#3) reads=[] writes=[]"
+            "op#0 kind=physics_rule(rule=#2, on_event=#5, replayable=non_replayable) shape=per_event(ring=#3) reads=[] writes=[]"
         );
     }
 
@@ -1513,5 +1514,133 @@ mod tests {
         assert!(s.contains("physics#0"));
         assert!(s.contains("amount"));
         assert!(s.contains("Wildcard"));
+    }
+
+    // ---- 13. Variant-id / event-kind-id registry split ------------------
+
+    /// Regression test for the Task 2.4 follow-up split: emit-name
+    /// resolution and match-variant resolution traverse independent
+    /// registries on [`LoweringCtx`]. The natural per-sequence
+    /// allocation pattern (the same id `0` used for both a sum-type
+    /// variant and an event kind) used to be ambiguous because both
+    /// resolutions read a single `variant_ids` map. The split makes
+    /// each side route through its own typed map; the test asserts
+    /// emits resolve to `EventKindId(0)` while match arms resolve to
+    /// the variant's own `VariantId(0)` (driver-distinct, type-distinct).
+    #[test]
+    fn variant_id_and_event_kind_id_registries_are_independent() {
+        // Body: match scrutinee { Foo {} => { emit AgentDied {} } }
+        let arm = IrStmtMatchArm {
+            pattern: IrPattern::Struct {
+                name: "Foo".to_string(),
+                ctor: None,
+                bindings: vec![],
+            },
+            body: vec![IrStmt::Emit(IrEmit {
+                event_name: "AgentDied".to_string(),
+                event: None,
+                fields: vec![],
+                span: span(0, 0),
+            })],
+            span: span(0, 0),
+        };
+        let rule = rule_with_body(
+            "r",
+            "E",
+            vec![IrStmt::Match {
+                scrutinee: lit_f32(0.0),
+                arms: vec![arm],
+                span: span(0, 100),
+            }],
+        );
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // Driver populates BOTH spaces with the natural id-0
+        // allocation. The split keeps them from aliasing.
+        ctx.register_variant("Foo", VariantId(0));
+        ctx.register_event_kind("AgentDied", EventKindId(0));
+
+        lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::NonReplayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect("lowers");
+
+        let prog = builder.finish();
+        // Find the emit and the match — both at id 0 in their
+        // respective spaces. The emit's event must be `EventKindId(0)`
+        // (resolved through `event_kind_ids`); the match arm's
+        // variant must be `VariantId(0)` (resolved through
+        // `variant_ids`). The two ids are typed-distinct even though
+        // their numeric payloads collide — this is exactly the
+        // ambiguity the split prevents.
+        let mut found_emit = false;
+        let mut found_match_arm = false;
+        for stmt in &prog.stmts {
+            match stmt {
+                CgStmt::Emit { event, .. } => {
+                    assert_eq!(*event, EventKindId(0));
+                    found_emit = true;
+                }
+                CgStmt::Match { arms, .. } => {
+                    assert_eq!(arms.len(), 1);
+                    assert_eq!(arms[0].variant, VariantId(0));
+                    found_match_arm = true;
+                }
+                CgStmt::Assign { .. } | CgStmt::If { .. } => {
+                    // Other body shapes — not produced by this fixture.
+                }
+            }
+        }
+        assert!(found_emit, "expected an Emit stmt in the lowered body");
+        assert!(found_match_arm, "expected a Match stmt in the lowered body");
+    }
+
+    /// Without the split, an emit-name absent from the
+    /// (now-distinct) event-kind registry surfaces as
+    /// [`LoweringError::UnknownMatchVariant`] — even when the same
+    /// name IS registered in the variant-id space. Confirms the two
+    /// registries are read independently at lowering.
+    #[test]
+    fn emit_resolution_does_not_fall_through_to_variant_ids() {
+        let rule = rule_with_body(
+            "r",
+            "E",
+            vec![IrStmt::Emit(IrEmit {
+                event_name: "Damage".to_string(),
+                event: None,
+                fields: vec![],
+                span: span(8, 14),
+            })],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // Damage IS registered as a sum-type variant, but NOT as an
+        // event kind. Pre-split, the emit would have silently
+        // resolved through the unified map; post-split, it must
+        // surface as a typed error.
+        ctx.register_variant("Damage", VariantId(7));
+        let err = lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::NonReplayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect_err("emit lookup must not fall through to variant_ids");
+        match err {
+            LoweringError::UnknownMatchVariant {
+                variant_name, span, ..
+            } => {
+                assert_eq!(variant_name, "Damage");
+                assert_eq!(span.start, 8);
+                assert_eq!(span.end, 14);
+            }
+            other => panic!("expected UnknownMatchVariant for emit, got {other:?}"),
+        }
     }
 }

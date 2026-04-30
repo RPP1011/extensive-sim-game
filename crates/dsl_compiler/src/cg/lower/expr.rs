@@ -34,6 +34,7 @@ use crate::cg::expr::{
     data_handle_ty, type_check, BinaryOp, BuiltinId, CgExpr, CgTy, LitValue, NumericTy,
     TypeCheckCtx, TypeError, UnaryOp,
 };
+use crate::cg::op::EventKindId;
 use crate::cg::program::CgProgramBuilder;
 use crate::cg::stmt::{LocalId, VariantId};
 
@@ -62,12 +63,32 @@ pub struct LoweringCtx<'a> {
     /// validate operand types; the builder's `validate_expr_refs`
     /// catches dangling ids and the lowering catches arity at AST level.
     pub view_signatures: HashMap<ViewId, (Vec<CgTy>, CgTy)>,
-    /// Variant-name → typed [`VariantId`] resolver, keyed on the
-    /// source-level variant identifier (`"Damage"`, `"Heal"`, …). The
-    /// driver populates this from the stdlib enum registry (today
-    /// only `EffectOp` is matched); physics-pass `Match` lowering
-    /// looks up arm patterns here. Tests populate the map directly.
+    /// Sum-type variant-name → typed [`VariantId`] resolver, keyed on
+    /// the source-level variant identifier (`"Damage"`, `"Heal"`, …).
+    /// Used by physics-pass `Match` lowering to resolve arm patterns
+    /// to their typed variant id. The driver populates this from the
+    /// stdlib enum registry (today only `EffectOp` is matched); tests
+    /// populate the map directly.
+    ///
+    /// **Distinct from [`Self::event_kind_ids`].** Sum-type variants
+    /// (matched in arms) and event kinds (named in `Emit` and fold
+    /// handlers) inhabit independent id spaces. A driver populating
+    /// both with the natural per-sequence allocation pattern (e.g.,
+    /// `Damage → 0` and `AgentDied → 0`) must not let an emit-name
+    /// resolution route through this map — that's exactly the silent
+    /// mis-routing the split prevents.
     pub variant_ids: HashMap<String, VariantId>,
+    /// Event-name → typed [`EventKindId`] resolver, keyed on the
+    /// source-level event variant identifier (`"AgentDied"`,
+    /// `"ChronicleEntry"`, …). Used by physics `Emit` lowering and
+    /// view-fold handler resolution to map the event name in the
+    /// source surface to the typed id the IR carries. The driver
+    /// populates this from the event registry; tests populate it
+    /// directly.
+    ///
+    /// **Distinct from [`Self::variant_ids`].** See its doc for the
+    /// rationale.
+    pub event_kind_ids: HashMap<String, EventKindId>,
     /// AST [`LocalRef`] → typed [`LocalId`] resolver. Pattern binders
     /// resolved by the AST resolver carry a `LocalRef`; physics-pass
     /// `Match` lowering converts each binding's local through this
@@ -88,17 +109,37 @@ impl<'a> LoweringCtx<'a> {
             view_ids: HashMap::new(),
             view_signatures: HashMap::new(),
             variant_ids: HashMap::new(),
+            event_kind_ids: HashMap::new(),
             local_ids: HashMap::new(),
             diagnostics: Vec::new(),
         }
     }
 
-    /// Register a variant-name → typed id mapping. Returns the prior
-    /// `VariantId` if one was registered for the same name (a
-    /// duplicate registration is a driver-side defect — surfacing it
-    /// lets tests assert exclusive allocation).
+    /// Register a sum-type variant-name → typed id mapping. Returns
+    /// the prior `VariantId` if one was registered for the same name
+    /// (a duplicate registration is a driver-side defect — surfacing
+    /// it lets tests assert exclusive allocation).
+    ///
+    /// Note: this populates [`Self::variant_ids`] only — event-kind
+    /// names use the dedicated [`Self::register_event_kind`] helper.
     pub fn register_variant(&mut self, name: impl Into<String>, id: VariantId) -> Option<VariantId> {
         self.variant_ids.insert(name.into(), id)
+    }
+
+    /// Register an event-name → typed [`EventKindId`] mapping. Returns
+    /// the prior `EventKindId` if one was registered for the same name
+    /// (a duplicate registration is a driver-side defect — surfacing
+    /// it lets tests assert exclusive allocation).
+    ///
+    /// Note: this populates [`Self::event_kind_ids`] only — sum-type
+    /// variant names use the dedicated [`Self::register_variant`]
+    /// helper. The two id spaces are distinct; see their field docs.
+    pub fn register_event_kind(
+        &mut self,
+        name: impl Into<String>,
+        id: EventKindId,
+    ) -> Option<EventKindId> {
+        self.event_kind_ids.insert(name.into(), id)
     }
 
     /// Register an AST `LocalRef` → typed [`LocalId`] mapping. Returns
