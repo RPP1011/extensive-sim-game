@@ -20,7 +20,13 @@
 //! this commit.
 
 pub mod data_handle;
+pub mod dispatch;
 pub mod expr;
+pub mod op;
+pub mod stmt;
 
 pub use data_handle::*;
+pub use dispatch::*;
 pub use expr::*;
+pub use op::*;
+pub use stmt::*;
