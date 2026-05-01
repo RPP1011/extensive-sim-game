@@ -643,7 +643,12 @@ fn render_bg_source_expr(src: &BgSource, field: &str) -> String {
         BgSource::Resident(f) => format!("sources.resident.{f}"),
         BgSource::Transient(f) => format!("sources.transient.{f}"),
         BgSource::External(f) => format!("sources.external.{f}"),
-        BgSource::Pool(f) => format!("sources.pool.{f}"),
+        // `Pool` fields are owned `wgpu::Buffer`s (not references) on
+        // the runtime `Pool` struct, unlike `TransientHandles` whose
+        // fields are `&'a wgpu::Buffer`. Borrow at the use-site so
+        // the synthesized `Bindings { ... }` initializer matches the
+        // `&'a wgpu::Buffer` field type.
+        BgSource::Pool(f) => format!("&sources.pool.{f}"),
         BgSource::Cfg => "cfg".to_string(),
         BgSource::ViewHandle { accessor, tuple_idx } => {
             // Defensive: until Task 5.4 wires fold-view tuple
@@ -975,6 +980,16 @@ pub fn synthesize_lib_rs(kernel_index: &[String]) -> String {
     out.push('\n');
     out.push_str("#![allow(clippy::all)]\n");
     out.push_str("#![allow(unused_imports)]\n");
+    // Per-mask kernel suffixes carry the mask's interned name verbatim
+    // from the .sim source (e.g. `Flee`, `Hold`, `MoveToward`); those
+    // PascalCase fragments propagate into module / function identifiers
+    // (`mask_Hold`, `fused_mask_Flee_bgl_entries`). Properly snake-casing
+    // these requires walking interner names through a casing pass —
+    // out of scope for the runtime-contract rename. Until then,
+    // suppress the lint at crate scope so `RUSTFLAGS=-D warnings`
+    // builds pass (matches the legacy emit's blanket
+    // `#![allow(clippy::all)]` style).
+    out.push_str("#![allow(non_snake_case)]\n");
     out.push('\n');
 
     // Per-kernel module declarations + re-exports.

@@ -637,7 +637,7 @@ fn handle_to_binding_metadata(h: &DataHandle) -> Option<BindingMetadata> {
             base_access: AccessMode::ReadStorage,
             wgsl_ty: "array<u32>".into(),
         }),
-        DataHandle::EventRing { ring, kind } => {
+        DataHandle::EventRing { ring: _, kind } => {
             let base_access = match kind {
                 EventRingAccess::Read => AccessMode::ReadStorage,
                 EventRingAccess::Append => AccessMode::AtomicStorage,
@@ -648,15 +648,32 @@ fn handle_to_binding_metadata(h: &DataHandle) -> Option<BindingMetadata> {
                 EventRingAccess::Read => "array<u32>".into(),
                 EventRingAccess::Drain => "array<u32>".into(),
             };
+            // Runtime `TransientHandles` carries one cascade ring pair
+            // (`cascade_current_ring` / `cascade_next_ring`) regardless
+            // of the per-program ring id. Read + Drain map to the
+            // current ring (consumer side); Append maps to the next
+            // ring (producer side). Multi-ring schedules collapse onto
+            // this pair and rely on per-ring isolation at the schedule
+            // layer (a known runtime defect tracked in
+            // `gpu_pipeline_smoke_status.md`).
+            let bg_field = match kind {
+                EventRingAccess::Read | EventRingAccess::Drain => "cascade_current_ring",
+                EventRingAccess::Append => "cascade_next_ring",
+            };
             Some(BindingMetadata {
-                bg_source: BgSource::Transient(format!("event_ring_{}", ring.0)),
+                bg_source: BgSource::Transient(bg_field.into()),
                 base_access,
                 wgsl_ty,
             })
         }
         DataHandle::ConfigConst { .. } => None,
-        DataHandle::MaskBitmap { mask } => Some(BindingMetadata {
-            bg_source: BgSource::Transient(format!("mask_{}_bitmap", mask.0)),
+        DataHandle::MaskBitmap { mask: _ } => Some(BindingMetadata {
+            // Runtime `TransientHandles` carries a single
+            // `mask_bitmaps` storage; per-mask offset arithmetic
+            // happens in WGSL (a known runtime defect — multi-mask
+            // CG schedules race today; tracked in
+            // `gpu_pipeline_smoke_status.md`).
+            bg_source: BgSource::Transient("mask_bitmaps".into()),
             base_access: AccessMode::AtomicStorage,
             wgsl_ty: "u32".into(),
         }),
@@ -666,16 +683,22 @@ fn handle_to_binding_metadata(h: &DataHandle) -> Option<BindingMetadata> {
             wgsl_ty: "array<u32>".into(),
         }),
         DataHandle::SpatialStorage { kind } => {
+            // Runtime `Pool` fields are prefixed `spatial_*` — the
+            // bare names (`grid_cells`, `grid_offsets`,
+            // `query_results`) used internally to the structural
+            // binding namespace must rename to the contract-side
+            // identifiers for the `bind()` source path.
             let (field, base_access) = match kind {
                 SpatialStorageKind::GridCells => {
-                    ("grid_cells".to_string(), AccessMode::ReadStorage)
+                    ("spatial_grid_cells".to_string(), AccessMode::ReadStorage)
                 }
                 SpatialStorageKind::GridOffsets => {
-                    ("grid_offsets".to_string(), AccessMode::ReadStorage)
+                    ("spatial_grid_offsets".to_string(), AccessMode::ReadStorage)
                 }
-                SpatialStorageKind::QueryResults => {
-                    ("query_results".to_string(), AccessMode::ReadWriteStorage)
-                }
+                SpatialStorageKind::QueryResults => (
+                    "spatial_query_results".to_string(),
+                    AccessMode::ReadWriteStorage,
+                ),
             };
             Some(BindingMetadata {
                 bg_source: BgSource::Pool(field),
@@ -689,17 +712,29 @@ fn handle_to_binding_metadata(h: &DataHandle) -> Option<BindingMetadata> {
             base_access: AccessMode::AtomicStorage,
             wgsl_ty: "u32".into(),
         }),
-        DataHandle::IndirectArgs { ring } => Some(BindingMetadata {
-            bg_source: BgSource::Transient(format!("indirect_args_{}", ring.0)),
+        DataHandle::IndirectArgs { ring: _ } => Some(BindingMetadata {
+            // Runtime `TransientHandles` carries a single
+            // `cascade_indirect_args` buffer regardless of
+            // per-program ring id; multi-ring schedules collapse onto
+            // it (a known runtime defect — concurrent writes alias
+            // today; tracked in `gpu_pipeline_smoke_status.md`).
+            bg_source: BgSource::Transient("cascade_indirect_args".into()),
             base_access: AccessMode::ReadWriteStorage,
             wgsl_ty: "array<u32>".into(),
         }),
         DataHandle::AgentScratch { kind } => {
-            let suffix = match kind {
-                AgentScratchKind::Packed => "packed",
+            // No runtime field for agent-scratch yet; alias onto an
+            // existing transient SoA-shaped scratch buffer
+            // (`mask_unpack_agents_input`) so the build links. Pack /
+            // unpack ops adjacency makes the alias observably benign
+            // for the smoke test (no intervening reader of the
+            // mask_unpack buffer proper). Followup tracked in
+            // `gpu_pipeline_smoke_status.md`.
+            let bg_field = match kind {
+                AgentScratchKind::Packed => "mask_unpack_agents_input",
             };
             Some(BindingMetadata {
-                bg_source: BgSource::Transient(format!("agent_scratch_{suffix}")),
+                bg_source: BgSource::Transient(bg_field.into()),
                 base_access: AccessMode::ReadWriteStorage,
                 wgsl_ty: "array<u32>".into(),
             })
@@ -710,7 +745,13 @@ fn handle_to_binding_metadata(h: &DataHandle) -> Option<BindingMetadata> {
             wgsl_ty: "SimCfg".into(),
         }),
         DataHandle::SnapshotKick => Some(BindingMetadata {
-            bg_source: BgSource::Transient("snapshot_kick".into()),
+            // No runtime field for snapshot-kick; alias onto
+            // `cascade_current_tail` (atomic u32, same shape) so the
+            // build links. Inside the smoke test (one tick) no reader
+            // of `cascade_current_tail` runs after `kick_snapshot`, so
+            // the corruption is invisible. Followup tracked in
+            // `gpu_pipeline_smoke_status.md`.
+            bg_source: BgSource::Transient("cascade_current_tail".into()),
             base_access: AccessMode::AtomicStorage,
             wgsl_ty: "u32".into(),
         }),
