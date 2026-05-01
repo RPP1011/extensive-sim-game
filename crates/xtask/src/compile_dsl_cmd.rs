@@ -33,6 +33,28 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
+
+    // Side-channel: when `--cg-emit-into <dir>` is set, additionally run
+    // the Compute-Graph IR (CG) pipeline and write its EmittedArtifacts
+    // under `<dir>/src/`. This does NOT replace the legacy emit — the
+    // legacy path below still runs unchanged. See Task 5.1 of
+    // `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`.
+    //
+    // Failures from the CG pipeline (lowering deferrals, schedule
+    // collisions, emit errors) are NOT fatal to the legacy emit —
+    // the side-channel is a diagnostic surface, and the controller
+    // reads its stderr to decide what Task 5.x work comes next. We
+    // print the error and continue with the legacy path.
+    if let Some(cg_dir) = args.cg_emit_into.as_ref() {
+        if let Err(e) = emit_cg_side_channel(&combined, cg_dir) {
+            eprintln!("compile-dsl: cg-emit-into: {e}");
+            eprintln!(
+                "compile-dsl: cg-emit-into: continuing with legacy emit (CG side-channel \
+                 failures are diagnostic, not fatal — see Task 5.1)"
+            );
+        }
+    }
+
     let artefacts = dsl_compiler::emit_with_per_kind_sources(
         &combined,
         dsl_compiler::EmissionSources {
@@ -2321,4 +2343,271 @@ fn check_scaffolded_kinds(
     check_stale(mask_dir, &artefacts.rust_mask_modules, "rs", mismatches);
     check_stale(scoring_dir, &artefacts.rust_scoring_modules, "rs", mismatches);
     check_stale(entity_dir, &artefacts.rust_entity_modules, "rs", mismatches);
+}
+
+// ---------------------------------------------------------------------------
+// CG side-channel emit (Task 5.1, 2026-04-29)
+// ---------------------------------------------------------------------------
+
+/// Run the Compute-Graph IR (CG) pipeline (lower → synthesize_schedule →
+/// emit_cg_program) against `comp` and write the resulting
+/// [`dsl_compiler::cg::emit::EmittedArtifacts`] into `<dir>/src/`.
+///
+/// This is the side-channel installed by `--cg-emit-into <dir>`. It does
+/// NOT touch the legacy emit path; the same `Compilation` is run through
+/// the legacy emitters separately. The two outputs may diverge — the
+/// reframed Phase 5 plan drops byte-equal-to-legacy as a goal in favour
+/// of behavioral parity (see
+/// `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`,
+/// Task 5.1).
+///
+/// Failure modes:
+/// - `<dir>/src/` cannot be created → I/O error string.
+/// - `emit_cg_program` returns a typed `ProgramEmitError` → propagated
+///   as a `Display` string.
+///
+/// Lowering deferrals (typed `LoweringError`s from the Phase 2 driver)
+/// are NOT failures: the driver returns a best-effort program alongside
+/// the diagnostics, and we proceed to emit. Each diagnostic is printed
+/// to stderr so the controller can see what AST shapes still need
+/// coverage.
+///
+/// # Limitations
+///
+/// See the docstring on `CompileDslArgs::cg_emit_into`.
+fn emit_cg_side_channel(
+    comp: &dsl_compiler::ir::Compilation,
+    dir: &Path,
+) -> Result<CgSideChannelStats, String> {
+    use dsl_compiler::cg::emit::emit_cg_program;
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    use dsl_compiler::cg::schedule::{synthesize_schedule, ScheduleStrategy};
+
+    let src_dir = dir.join("src");
+    fs::create_dir_all(&src_dir)
+        .map_err(|e| format!("create_dir_all {}: {e}", src_dir.display()))?;
+
+    let prog = match lower_compilation_to_cg(comp) {
+        Ok(p) => p,
+        Err(outcome) => {
+            // Surface every typed deferral / non-fatal diagnostic so the
+            // controller can read what's still uncovered.
+            eprintln!(
+                "compile-dsl: cg-emit-into: lowering produced {} diagnostic(s):",
+                outcome.diagnostics.len()
+            );
+            for diag in &outcome.diagnostics {
+                eprintln!("  - {diag:?}");
+            }
+            // Proceed with the best-effort program — the side-channel is
+            // a diagnostic surface, not a strict gate.
+            outcome.program
+        }
+    };
+
+    let synthesis = synthesize_schedule(&prog, ScheduleStrategy::Default);
+    if !synthesis.fusion_diagnostics.is_empty() || !synthesis.schedule_diagnostics.is_empty() {
+        eprintln!(
+            "compile-dsl: cg-emit-into: schedule synthesis produced \
+             {} fusion + {} schedule diagnostic(s)",
+            synthesis.fusion_diagnostics.len(),
+            synthesis.schedule_diagnostics.len(),
+        );
+        for d in &synthesis.fusion_diagnostics {
+            eprintln!("  - fusion: {d:?}");
+        }
+        for d in &synthesis.schedule_diagnostics {
+            eprintln!("  - schedule: {d:?}");
+        }
+    }
+
+    let artifacts = match emit_cg_program(&synthesis.schedule, &prog) {
+        Ok(a) => a,
+        Err(e) => {
+            // Drop a `_diagnostics.txt` next to where the kernel files
+            // would have gone so the parity harness has a non-empty
+            // surface to probe + the controller can see what failed.
+            let diag_path = src_dir.join("_diagnostics.txt");
+            let _ = fs::write(
+                &diag_path,
+                format!(
+                    "CG-side-channel emit failed at the emit_cg_program step.\n\
+                     This is the documented Task 5.1 limitation; semantic-name \
+                     alignment closes it (see\n\
+                     `docs/superpowers/plans/2026-04-29-dsl-compute-graph-ir.md`).\n\
+                     \n\
+                     Error:\n\
+                     {e}\n",
+                ),
+            );
+            return Err(format!("emit_cg_program: {e}"));
+        }
+    };
+
+    write_cg_artifacts(&src_dir, &artifacts)?;
+
+    let stats = CgSideChannelStats {
+        wgsl_files_written: artifacts.wgsl_files.len(),
+        rust_files_written: artifacts.rust_files.len(),
+        kernel_index_len: artifacts.kernel_index.len(),
+    };
+    println!(
+        "compile-dsl: cg-emit-into: wrote {} wgsl + {} rust file(s) under {} ({} kernel(s) in index)",
+        stats.wgsl_files_written,
+        stats.rust_files_written,
+        src_dir.display(),
+        stats.kernel_index_len,
+    );
+    Ok(stats)
+}
+
+/// Per-side-channel-emit accounting. Returned to keep tests readable;
+/// `run_compile_dsl` only reads it for the printed summary.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct CgSideChannelStats {
+    wgsl_files_written: usize,
+    rust_files_written: usize,
+    kernel_index_len: usize,
+}
+
+/// Write a CG [`EmittedArtifacts`] into `<src_dir>/`.
+///
+/// Each `wgsl_files[name]` is written as `<src_dir>/<name>` (the keys
+/// already carry the `.wgsl` extension), same for `rust_files[name]`
+/// with `.rs`. No `Cargo.toml` or `lib.rs` is synthesised in Task 5.1 —
+/// see the limitations docstring on `CompileDslArgs::cg_emit_into`.
+fn write_cg_artifacts(
+    src_dir: &Path,
+    artifacts: &dsl_compiler::cg::emit::EmittedArtifacts,
+) -> Result<(), String> {
+    for (name, content) in &artifacts.wgsl_files {
+        let path = src_dir.join(name);
+        fs::write(&path, content)
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+    }
+    for (name, content) in &artifacts.rust_files {
+        let path = src_dir.join(name);
+        fs::write(&path, content)
+            .map_err(|e| format!("write {}: {e}", path.display()))?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for the CG side-channel
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod cg_side_channel_tests {
+    use super::*;
+
+    /// Pick a unique scratch directory under `std::env::temp_dir()` keyed
+    /// by test name + process id + nanosecond timestamp. Avoids clashes
+    /// between concurrent test runs without pulling in `tempfile`.
+    fn scratch_dir(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("xtask_cg_{tag}_{pid}_{nanos}"));
+        // Best-effort cleanup of a stale prior run.
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// Empty Compilation lowers to an all-plumbing program; the CG
+    /// emitter today returns a `KernelNameCollision` error on it (see
+    /// `cg::emit::program::tests::driver_roundtrip_lowers_synthesizes_and_emits`).
+    /// The side-channel surfaces that as a `Display`-stringified
+    /// `Err`, NOT a panic — that's the contract this test pins.
+    #[test]
+    fn empty_compilation_surfaces_emit_error_as_display_string() {
+        let comp = dsl_compiler::ir::Compilation::default();
+        let dir = scratch_dir("empty_emit_err");
+        let result = emit_cg_side_channel(&comp, &dir);
+        match result {
+            Ok(stats) => {
+                // If the CG pipeline ever stops colliding on the empty
+                // Compilation (Task 5.x semantic naming), this branch
+                // should produce a structurally-valid stats record.
+                assert!(
+                    stats.kernel_index_len > 0,
+                    "stats={stats:?} should record at least one kernel if emit succeeded"
+                );
+            }
+            Err(msg) => {
+                // Pin the typed error path: the `Display` shape comes
+                // from `ProgramEmitError`. Today that's a structural
+                // collision on the empty-Compilation plumbing; the
+                // failure surface is a string, not a panic.
+                assert!(
+                    msg.contains("emit_cg_program") || msg.contains("collision"),
+                    "expected typed emit-program error in message; got: {msg}"
+                );
+            }
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Side-channel writes files into `<dir>/src/` and creates the
+    /// directory if missing. Uses a fixture Compilation built directly
+    /// (mirrors what the driver round-trip exercises in the cg::emit
+    /// tests).
+    #[test]
+    fn side_channel_creates_target_directory() {
+        let comp = dsl_compiler::ir::Compilation::default();
+        let dir = scratch_dir("creates_dir");
+        // Confirm absence before; the helper must create both `dir` and
+        // `dir/src/`.
+        assert!(!dir.exists(), "scratch dir should not pre-exist: {}", dir.display());
+        let _ = emit_cg_side_channel(&comp, &dir);
+        // Whether emit succeeded or failed, the directory creation step
+        // ran first — assert the side-effect.
+        assert!(
+            dir.join("src").exists(),
+            "src/ should exist after side-channel emit attempt: {}",
+            dir.display()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `write_cg_artifacts` writes one file per (filename, content) pair
+    /// in both maps, into the target directory verbatim.
+    #[test]
+    fn write_cg_artifacts_writes_each_file() {
+        use std::collections::BTreeMap;
+
+        let dir = scratch_dir("write_artifacts");
+        fs::create_dir_all(&dir).expect("mkdir scratch");
+
+        let mut wgsl: BTreeMap<String, String> = BTreeMap::new();
+        wgsl.insert("kernel_a.wgsl".to_string(), "// wgsl_a\n".to_string());
+        wgsl.insert("kernel_b.wgsl".to_string(), "// wgsl_b\n".to_string());
+
+        let mut rs: BTreeMap<String, String> = BTreeMap::new();
+        rs.insert("kernel_a.rs".to_string(), "// rs_a\n".to_string());
+
+        let artifacts = dsl_compiler::cg::emit::EmittedArtifacts {
+            wgsl_files: wgsl,
+            rust_files: rs,
+            kernel_index: vec!["kernel_a".to_string(), "kernel_b".to_string()],
+        };
+        write_cg_artifacts(&dir, &artifacts).expect("write_cg_artifacts");
+
+        assert_eq!(
+            fs::read_to_string(dir.join("kernel_a.wgsl")).unwrap(),
+            "// wgsl_a\n"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("kernel_b.wgsl")).unwrap(),
+            "// wgsl_b\n"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("kernel_a.rs")).unwrap(),
+            "// rs_a\n"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

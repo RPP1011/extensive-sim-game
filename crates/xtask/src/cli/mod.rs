@@ -21,6 +21,12 @@ pub enum TaskCommand {
     TrainV6(TrainV6Args),
     /// Compile DSL sources (`assets/sim/*.sim`) into Rust + Python artefacts.
     CompileDsl(CompileDslArgs),
+    /// Behavioral parity harness for the Compute-Graph IR (CG) pipeline.
+    /// Reads side-channel CG output (produced by `compile-dsl --cg-emit-into`)
+    /// and reports whether a CG-overlaid `engine_gpu_rules` will compile.
+    /// Today this is a diagnostic command — see `# Limitations` on
+    /// [`CompileDslParityArgs`].
+    CompileDslParity(CompileDslParityArgs),
     /// Interactive per-phase REPL: pause at each tick pipeline phase, inspect state.
     Debug(DebugArgs),
     /// Non-interactive trace: collect mask + agent-history snapshots for N ticks.
@@ -236,4 +242,56 @@ pub struct CompileDslArgs {
     /// written when this is set.
     #[arg(long)]
     pub check: bool,
+    /// Side-channel: when set, additionally run the Compute-Graph IR
+    /// (CG) pipeline (lower → synthesize_schedule(Default) →
+    /// emit_cg_program) and write its [`EmittedArtifacts`] under
+    /// `<dir>/src/`. Does NOT replace the legacy emit; behavior of the
+    /// other outputs is unchanged.
+    ///
+    /// # Limitations (Task 5.1, 2026-04-29)
+    ///
+    /// - The CG pipeline emits ~21 ops today (9 view_fold + 12
+    ///   plumbing); 0 mask/scoring/physics/spatial. Closing those is
+    ///   Task 5.5 (AST coverage).
+    /// - The emitted Rust files lack `Kernel` trait impls and
+    ///   cross-kernel helpers (Task 5.2).
+    /// - Cross-cutting modules (BindingSources, etc.) not yet emitted
+    ///   (Task 5.4).
+    /// - No `Cargo.toml` or `lib.rs` is synthesised — only per-kernel
+    ///   files. The companion `compile-dsl-parity` subcommand reports
+    ///   which pieces are missing.
+    /// - Lowering deferrals (typed `LoweringError`s from the Phase 2
+    ///   driver) are printed to stderr; the side-channel still emits
+    ///   the best-effort program.
+    #[arg(long, value_name = "DIR")]
+    pub cg_emit_into: Option<PathBuf>,
+}
+
+/// Arguments for `compile-dsl-parity` subcommand.
+///
+/// Behavioral-parity harness for the CG pipeline. Reads CG-emitted
+/// files from `--cg-out <dir>` (produced by
+/// `compile-dsl --cg-emit-into`) and reports whether a CG-overlaid
+/// `engine_gpu_rules` would compile.
+///
+/// # Limitations (Task 5.1, 2026-04-29)
+///
+/// - Today this only verifies that the side-channel directory is
+///   structurally inhabited (correct file count, expected extensions).
+///   It does NOT yet attempt to overlay-build `engine_gpu_rules` or
+///   run `parity_with_cpu` — closing that is Tasks 5.2-5.7 of the
+///   reframed plan.
+/// - **The command is EXPECTED to FAIL today** because the CG output
+///   is missing the pieces those follow-up tasks add (`Kernel` trait
+///   impls, cross-kernel helpers, Cargo.toml/lib.rs, full op
+///   coverage). The non-zero exit is the diagnostic the controller
+///   uses to decide what to wire next.
+#[derive(Debug, clap::Args)]
+#[command(about = "CG-pipeline parity harness — behavioral check on side-channel output")]
+pub struct CompileDslParityArgs {
+    /// Side-channel directory previously populated by
+    /// `compile-dsl --cg-emit-into <dir>`. The harness expects
+    /// `<dir>/src/*.{rs,wgsl}` files inside.
+    #[arg(long, value_name = "DIR")]
+    pub cg_out: PathBuf,
 }
