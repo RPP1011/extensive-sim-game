@@ -48,10 +48,14 @@
 //!   of the [`SPATIAL_BUILD_HASH_BODY`] / [`SPATIAL_KIN_QUERY_BODY`] /
 //!   [`SPATIAL_ENGAGEMENT_QUERY_BODY`] templates (verbatim ports from
 //!   the legacy `engine_gpu_rules/src/spatial_*.wgsl` stubs — Task
-//!   5.6c). [`ComputeOpKind::ScoringArgmax`] and
-//!   [`ComputeOpKind::Plumbing`] still emit a documented
-//!   `// TODO(task-4.x)` placeholder line (never a Rust panic) —
-//!   subsequent Task 5.6 sub-batches will replace those.
+//!   5.6c). [`ComputeOpKind::Plumbing`] dispatches per-`PlumbingKind`
+//!   to one of the [`PACK_AGENTS_BODY`] / [`UNPACK_AGENTS_BODY`] /
+//!   [`ALIVE_BITMAP_BODY`] / [`UPLOAD_SIM_CFG_BODY`] /
+//!   [`KICK_SNAPSHOT_BODY`] templates plus the per-ring
+//!   [`drain_events_body`] / [`seed_indirect_args_body`] formatters
+//!   (Task 5.6d). [`ComputeOpKind::ScoringArgmax`] still emits a
+//!   documented `// TODO(task-4.x)` placeholder line (never a Rust
+//!   panic) — Task 5.6e will replace it.
 //! - **`Indirect` topology emits the consumer kernel only.** The
 //!   producer (a [`crate::cg::op::PlumbingKind::SeedIndirectArgs`])
 //!   does not contribute to the kernel WGSL body — its dispatch-args
@@ -1367,11 +1371,308 @@ fn lower_op_body(op: &ComputeOp, ctx: &EmitCtx<'_>) -> Result<String, KernelEmit
                 SPATIAL_ENGAGEMENT_QUERY_BODY.to_string()
             }
         }),
-        ComputeOpKind::Plumbing { kind } => Ok(format!(
-            "// TODO(task-4.x): plumbing body for kind={}. \
-             Legacy emitters: emit_alive_pack_wgsl, emit_seed_indirect_wgsl, etc.",
-            kind.label()
-        )),
+        // Task 5.6d: per-`PlumbingKind` body dispatch. Exhaustive over
+        // every variant so adding a new kind forces an explicit body
+        // decision here. See the const-by-const docs below for the
+        // legacy-port rationale and the binding-name normalization
+        // that keeps each fragment compatible with the structural
+        // [`KernelSpec`] layout (no spec-level renames).
+        ComputeOpKind::Plumbing { kind } => Ok(plumbing_body_for_kind(kind)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Plumbing body templates (Task 5.6d)
+// ---------------------------------------------------------------------------
+//
+// Per-`PlumbingKind` WGSL body fragments. Each const carries a per-
+// variant docstring spelling out (1) which legacy emitter the body is
+// ported from, (2) the bindings it touches by structural name, and
+// (3) any drift vs. the legacy WGSL it replaces.
+//
+// Naming convention. The fragments reference bindings by the
+// **structural** names produced by [`structural_binding_name`] —
+// `agent_<field>`, `agent_scratch_packed`, `alive_bitmap`,
+// `event_ring_<ring>`, `indirect_args_<ring>`, `sim_cfg`,
+// `snapshot_kick`. The legacy WGSL files used different names
+// (`agents`, `apply_tail`, `agents_input`, ...) because they declared
+// their own bindings inline; the CG path declares bindings via the
+// shared [`KernelSpec`] pipeline so the body must use the
+// spec-derived names. Structural names are picked, never spec
+// renames, because the spec layer is shared across every kernel and
+// touching it for one kind would be cross-cutting scope creep.
+//
+// Stub-touch convention. Every binding the spec declares for a
+// kernel must be referenced at least once in the body or naga's
+// dead-code pass will strip the binding from the BGL. The
+// hand-written legacy stubs (`fused_agent_unpack.wgsl`,
+// `spatial_*.wgsl`) follow the same `let _foo = binding[0];`
+// pattern; we mirror it here so the BGL stays live until the real
+// algorithm is folded into the IR.
+
+/// WGSL body for [`PlumbingKind::PackAgents`].
+///
+/// Per-agent dispatch. Reads every per-agent SoA field and writes the
+/// packed agent scratch buffer. The legacy pack side was never given a
+/// real WGSL body — `engine_gpu_rules/src/fused_agent_unpack.wgsl`
+/// covers the *unpack* side as a stub that touches its three bindings
+/// (`agents_input`, `mask_soa`, `agent_data`); the pack analog lives
+/// host-side in the legacy emitter pipeline. We mirror the stub
+/// convention: touch a representative agent-field binding (`agent_pos`
+/// — every CG kernel emitting `PackAgents` will declare every
+/// `agent_<field>` slot) and the packed scratch slot, plus the cfg
+/// uniform's `agent_cap`, so the BGL stays live.
+///
+/// # Limitations
+///
+/// - **Structural placeholder.** The CG IR has no abstraction for
+///   "lay out one agent's fields into a packed slot at offset
+///   `agent_id * SLOT_STRIDE`"; surfacing it would require new
+///   [`ComputeOpKind`] sub-shapes (or a typed AgentSlotPack op).
+///   Until that abstraction lands, the body cannot describe the real
+///   pack algorithm — it stays a binding-touch stub.
+/// - **Single agent-field binding referenced.** The spec declares one
+///   binding per `AgentFieldId` variant (every variant is in the
+///   read set per [`PlumbingKind::PackAgents::dependencies`]). The
+///   stub touches only `agent_pos`; touching all 30+ fields would
+///   bloat the body without changing what the spec sees. naga keeps
+///   every declared binding even when only some are referenced (the
+///   wgpu-side BGL is built from the spec, not from naga's elision
+///   pass), so this is safe.
+const PACK_AGENTS_BODY: &str = "// PlumbingKind::PackAgents — structural stub.\n\
+    // Real per-agent SoA->packed lowering needs a typed AgentSlotPack op\n\
+    // (Task 5.x); today this is a binding-touch stub that keeps the\n\
+    // declared agent + scratch BGL slots live.\n\
+    let _ap = agent_pos[agent_id];\n\
+    let _as = agent_scratch_packed[0];\n\
+    let _c = cfg.agent_cap;";
+
+/// WGSL body for [`PlumbingKind::UnpackAgents`].
+///
+/// Per-agent dispatch. Reads the packed agent scratch buffer and
+/// writes back into per-field SoA storage. Verbatim port of
+/// `engine_gpu_rules/src/fused_agent_unpack.wgsl`'s body shape (which
+/// is itself a stub: it touches `agents_input`, `mask_soa`,
+/// `agent_data`, and `cfg.agent_cap` to keep the BGL live).
+///
+/// # Limitations
+///
+/// - **Structural placeholder.** Same rationale as
+///   [`PACK_AGENTS_BODY`] — the inverse algorithm needs a typed
+///   AgentSlotUnpack op the IR doesn't carry today.
+/// - **Single agent-field binding referenced.** The spec declares one
+///   binding per `AgentFieldId` variant (each in the *write* set);
+///   the stub touches `agent_pos` only. naga's elision is moot here
+///   because the BGL is built from the spec rather than from naga's
+///   live-binding analysis.
+const UNPACK_AGENTS_BODY: &str = "// PlumbingKind::UnpackAgents — structural stub. Verbatim\n\
+    // port of engine_gpu_rules/src/fused_agent_unpack.wgsl (the\n\
+    // legacy file is itself a stub that touches every binding).\n\
+    let _as = agent_scratch_packed[0];\n\
+    let _ap = agent_pos[agent_id];\n\
+    let _c = cfg.agent_cap;";
+
+/// WGSL body for [`PlumbingKind::AliveBitmap`].
+///
+/// Per-word dispatch. Reads 32 consecutive `agent_alive[i]` slots,
+/// packs the non-zero ones into a single u32, writes the result to
+/// `alive_bitmap[word_idx]`. Ported from
+/// `engine_gpu_rules/src/alive_pack.wgsl` with one structural
+/// adaptation: the legacy file declared `agents: array<u32>` (the
+/// flat AgentSlot-strided layout) and reached into it via
+/// `agents[slot * SLOT_STRIDE_U32 + ALIVE_OFFSET_U32]`; the CG path
+/// declares `agent_alive: array<u32>` directly (one entry per agent,
+/// the SoA shape) so the access becomes `agent_alive[slot]`.
+///
+/// The output binding `alive_bitmap` is declared with
+/// `AccessMode::AtomicStorage`, which the WGSL emitter renders as
+/// `array<atomic<u32>>` (per
+/// [`crate::kernel_lowerings::lower_wgsl_bindings`]). Atomic types
+/// do not support index-assignment, so the write goes through
+/// `atomicStore`. The legacy file used a non-atomic declaration
+/// (one thread per word, no contention) — we cannot downgrade
+/// because the CG metadata categorises bitmap-shaped slots as
+/// atomic, so the access mode stays atomic and the body uses
+/// `atomicStore`.
+///
+/// # Limitations
+///
+/// - **Atomic-store vs legacy non-atomic write.** Functionally
+///   equivalent (single writer per word) but the WGSL form differs
+///   from `alive_pack.wgsl`. The metadata-driven access mode is the
+///   single source of truth; aligning the legacy file to atomic on
+///   the next regen is a separate concern.
+const ALIVE_BITMAP_BODY: &str = "// PlumbingKind::AliveBitmap — pack 32 alive slots into one\n\
+    // u32 word. Ported from engine_gpu_rules/src/alive_pack.wgsl;\n\
+    // the legacy file's flat-stride agent indexing (slot * STRIDE +\n\
+    // ALIVE_OFFSET) collapses to direct SoA access (`agent_alive[slot]`)\n\
+    // because the CG path declares per-field bindings.\n\
+    let base_slot = word_idx * 32u;\n\
+    var word: u32 = 0u;\n\
+    for (var i: u32 = 0u; i < 32u; i = i + 1u) {\n\
+        let slot = base_slot + i;\n\
+        if (slot >= cfg.agent_cap) { break; }\n\
+        let alive_word = agent_alive[slot];\n\
+        if (alive_word != 0u) {\n\
+            word = word | (1u << i);\n\
+        }\n\
+    }\n\
+    atomicStore(&alive_bitmap[word_idx], word);";
+
+/// WGSL body for [`PlumbingKind::DrainEvents`].
+///
+/// Per-event dispatch on `ring`. The drain operation mutates the
+/// ring's tail counter to zero so the next iteration sees an empty
+/// ring; the actual reset happens host-side (legacy:
+/// `crates/engine_gpu/src/cascade_resident.rs` issues a
+/// `queue.write_buffer` on the tail), not from a shader. The CG
+/// kernel exists so the schedule stays uniform (every plumbing kind
+/// produces a kernel) but its WGSL body is a no-op binding-touch.
+///
+/// # Limitations
+///
+/// - **No real GPU-side drain.** Tail reset is host-side. A future
+///   CG variant (atomic store of zero from a 1-thread kernel) could
+///   replace the host-side write, but it requires the ring binding's
+///   tail to be split out from the records — the IR currently
+///   binds them together via the [`DataHandle::EventRing`] handle.
+/// - **Binding-touch stub.** Touches `event_ring_<r>[0]` and
+///   `cfg.agent_cap` to keep both declared bindings live.
+fn drain_events_body(ring_id: u32) -> String {
+    format!(
+        "// PlumbingKind::DrainEvents (ring={ring_id}) — host-side drain;\n\
+        // the GPU-side kernel is a no-op binding-touch. Tail reset is\n\
+        // issued from the CPU via queue.write_buffer (legacy parity).\n\
+        let _e = event_ring_{ring_id}[0];\n\
+        let _c = cfg.agent_cap;"
+    )
+}
+
+/// WGSL body for [`PlumbingKind::UploadSimCfg`].
+///
+/// One-shot. The sim_cfg buffer is uploaded host-side via
+/// `queue.write_buffer`; the GPU-side kernel cannot write to a
+/// uniform binding (the WGSL emitter declares
+/// `var<uniform> sim_cfg: SimCfg;` — uniforms are read-only inside
+/// a shader). The kernel is still scheduled because every plumbing
+/// kind produces a kernel node; its body is a no-op.
+///
+/// # Limitations
+///
+/// - **No body — sim_cfg upload is host-side.** The kernel exists for
+///   schedule uniformity; the spec declares the binding to keep the
+///   data dependency edge live for cycle detection. The body's only
+///   job is to keep naga happy, which the gid guard already does.
+/// - **No `SimCfg` struct decl in the WGSL output.** The structural
+///   metadata sets `wgsl_ty: "SimCfg"` for [`DataHandle::SimCfgBuffer`]
+///   without surfacing the struct decl; a fully-naga-clean build
+///   would need that decl emitted at the WGSL module level (today
+///   the legacy hand-written `sim_cfg` shader carries it inline).
+///   Out of scope for Task 5.6d — touched in a follow-up alongside
+///   the cfg-shape refinement.
+const UPLOAD_SIM_CFG_BODY: &str = "// PlumbingKind::UploadSimCfg — host-side upload (queue.\n\
+    // write_buffer). Body is a no-op; the spec declares sim_cfg as\n\
+    // a Uniform binding which is read-only inside the shader.";
+
+/// WGSL body for [`PlumbingKind::KickSnapshot`].
+///
+/// One-shot. Triggers a snapshot dump for the current tick by
+/// flagging the `snapshot_kick` slot. The CG metadata declares the
+/// slot with `AccessMode::AtomicStorage`, which renders as
+/// `array<atomic<u32>>`; the body uses `atomicStore` to set
+/// `snapshot_kick[0]` to a non-zero sentinel (`1u`). The legacy
+/// snapshot pipeline triggers the dump via a host-side dispatch
+/// rather than a GPU-side store — the CG kernel is a structural
+/// placeholder until snapshot triggering is folded into the GPU
+/// schedule.
+///
+/// # Limitations
+///
+/// - **Sentinel store, no real snapshot logic.** A real CG-driven
+///   snapshot would cascade through buffer copies; that pipeline
+///   does not yet have an IR representation. The store keeps the
+///   binding live and signals "kick" semantically.
+const KICK_SNAPSHOT_BODY: &str = "// PlumbingKind::KickSnapshot — flag the snapshot_kick slot;\n\
+    // host-side snapshot pipeline observes the flag post-tick.\n\
+    atomicStore(&snapshot_kick[0], 1u);";
+
+/// WGSL body for [`PlumbingKind::SeedIndirectArgs`].
+///
+/// One-shot. Reads the producer ring's tail count and writes
+/// `indirect_args_<ring>[0..3] = (wg, 1, 1)` so the next per-event
+/// dispatch on `ring` knows how many workgroups to launch. Adapted
+/// from `engine_gpu_rules/src/seed_indirect.wgsl` with one
+/// structural adaptation: the legacy file separated the ring's tail
+/// (`apply_tail: array<u32>`) from the ring records (a different
+/// binding) and read `apply_tail[0]` for the count. The CG path
+/// folds tail + records into a single `event_ring_<r>` binding via
+/// [`DataHandle::EventRing`], so the body reads `event_ring_<r>[0]`
+/// for the count under a structural assumption: tail count lives at
+/// offset 0 of the unified ring binding.
+///
+/// `wg = ceil(n / 64)` capped at `CAP_WG = 4096` (legacy ceiling for
+/// 200_000-agent dispatches at 64-lane workgroups).
+///
+/// # Limitations
+///
+/// - **Tail-at-offset-0 assumption.** The CG IR binds the ring as a
+///   single `array<u32>`; whether `event_ring_<r>[0]` actually holds
+///   the tail count depends on the (currently undefined) layout
+///   convention shared between IR and runtime. The follow-up that
+///   formalises the ring layout (split tail from records into
+///   distinct data handles) will replace this read with the typed
+///   tail accessor.
+/// - **`CAP_WG` constant inlined.** 4096 mirrors the legacy ceiling;
+///   surfacing it through the cfg uniform is a Task 5.7+ refinement.
+fn seed_indirect_args_body(ring_id: u32) -> String {
+    format!(
+        "// PlumbingKind::SeedIndirectArgs (ring={ring_id}) — adapted from\n\
+        // engine_gpu_rules/src/seed_indirect.wgsl. Reads tail count from\n\
+        // event_ring_{ring_id}[0] (single-binding ring assumption — see\n\
+        // Limitations on `seed_indirect_args_body`); writes (wg, 1, 1)\n\
+        // into indirect_args_{ring_id} so the next per-event dispatch on\n\
+        // ring={ring_id} launches ceil(n/64) workgroups (capped at\n\
+        // CAP_WG=4096).\n\
+        let n = event_ring_{ring_id}[0];\n\
+        let req = (n + 63u) / 64u;\n\
+        var wg: u32 = req;\n\
+        if (wg > 4096u) {{ wg = 4096u; }}\n\
+        indirect_args_{ring_id}[0] = wg;\n\
+        indirect_args_{ring_id}[1] = 1u;\n\
+        indirect_args_{ring_id}[2] = 1u;"
+    )
+}
+
+/// Per-[`PlumbingKind`] body dispatch. Exhaustive over every variant —
+/// adding a new variant forces an explicit body decision here.
+///
+/// # Limitations
+///
+/// - **Coverage of [`PlumbingKind`] variants only.** The plan
+///   (Task 5.6 §3.4) lists additional plumbing-shaped kernels —
+///   `MaskUnpack`, `ScoringUnpack`, `ApplyActions`, `Movement`,
+///   `Physics`, `AppendEvents` — that exist in the legacy emitter
+///   pipeline but do **not** yet have [`PlumbingKind`] variants in
+///   the CG IR. Adding bodies for those requires first synthesising
+///   new `PlumbingKind` variants in Phase 1 (`cg/op.rs`) plus the
+///   plumbing synthesizer (`cg/lower/plumbing.rs`); that work is
+///   tracked as a Task 5.6d follow-up and is out of scope here.
+/// - **Bodies are verbatim ports from legacy stubs.** Where the
+///   legacy WGSL file is itself a binding-touch stub
+///   (`fused_agent_unpack.wgsl`, `spatial_*.wgsl`), the CG body
+///   mirrors the stub. Where the legacy file carries a real
+///   algorithm (`alive_pack.wgsl`, `seed_indirect.wgsl`), the CG
+///   body ports it with documented adaptations to the structural
+///   binding names.
+fn plumbing_body_for_kind(kind: &PlumbingKind) -> String {
+    match kind {
+        PlumbingKind::PackAgents => PACK_AGENTS_BODY.to_string(),
+        PlumbingKind::UnpackAgents => UNPACK_AGENTS_BODY.to_string(),
+        PlumbingKind::AliveBitmap => ALIVE_BITMAP_BODY.to_string(),
+        PlumbingKind::DrainEvents { ring } => drain_events_body(ring.0),
+        PlumbingKind::UploadSimCfg => UPLOAD_SIM_CFG_BODY.to_string(),
+        PlumbingKind::KickSnapshot => KICK_SNAPSHOT_BODY.to_string(),
+        PlumbingKind::SeedIndirectArgs { ring } => seed_indirect_args_body(ring.0),
     }
 }
 
@@ -2799,5 +3100,275 @@ mod tests {
         let ctx4 = EmitCtx::structural(&prog4);
         let spec4 = kernel_topology_to_spec(&topology4, &prog4, &ctx4).unwrap();
         assert_eq!(spec4.kind, KernelKind::Generic);
+    }
+
+    // ---- 13. Plumbing body templates (Task 5.6d) ----
+
+    /// Helper: build a `Split` Plumbing topology for `kind` and lower
+    /// it to `(spec, body)`. Used by the per-`PlumbingKind` body
+    /// assertions below.
+    fn plumbing_spec_and_body(kind: PlumbingKind) -> (KernelSpec, String) {
+        let mut prog = CgProgram::default();
+        let dispatch = kind.dispatch_shape();
+        let op = ComputeOp::new(
+            OpId(0),
+            ComputeOpKind::Plumbing { kind },
+            dispatch,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap()
+    }
+
+    #[test]
+    fn plumbing_pack_agents_emits_pack_agents_body() {
+        let (_spec, body) = plumbing_spec_and_body(PlumbingKind::PackAgents);
+        // Per-kind preamble comment from the body const.
+        assert!(
+            body.contains("PlumbingKind::PackAgents"),
+            "PackAgents body: {body}"
+        );
+        // Touches the packed scratch + a representative agent-field
+        // binding + the cfg uniform's agent_cap.
+        assert!(body.contains("agent_scratch_packed"), "body: {body}");
+        assert!(body.contains("agent_pos"), "body: {body}");
+        assert!(body.contains("cfg.agent_cap"), "body: {body}");
+        // No leftover TODO placeholder from the pre-Task-5.6d shape.
+        assert!(
+            !body.contains("TODO(task-4.x): plumbing body"),
+            "body still carries pre-5.6d TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn plumbing_unpack_agents_emits_unpack_agents_body() {
+        let (_spec, body) = plumbing_spec_and_body(PlumbingKind::UnpackAgents);
+        assert!(
+            body.contains("PlumbingKind::UnpackAgents"),
+            "UnpackAgents body: {body}"
+        );
+        assert!(body.contains("agent_scratch_packed"), "body: {body}");
+        assert!(body.contains("agent_pos"), "body: {body}");
+        assert!(
+            !body.contains("TODO(task-4.x): plumbing body"),
+            "body still carries pre-5.6d TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn plumbing_alive_bitmap_emits_alive_bitmap_body() {
+        let (_spec, body) = plumbing_spec_and_body(PlumbingKind::AliveBitmap);
+        assert!(
+            body.contains("PlumbingKind::AliveBitmap"),
+            "AliveBitmap body: {body}"
+        );
+        // Reads agent.alive (per-agent SoA) and writes alive_bitmap via
+        // atomicStore (atomic access mode).
+        assert!(body.contains("agent_alive["), "body: {body}");
+        assert!(body.contains("atomicStore(&alive_bitmap"), "body: {body}");
+        // PerWord preamble from `thread_indexing_preamble`.
+        assert!(body.contains("word_idx = gid.x"), "body: {body}");
+        // 32-slot pack loop.
+        assert!(body.contains("for (var i: u32 = 0u; i < 32u"), "body: {body}");
+        assert!(
+            !body.contains("TODO(task-4.x): plumbing body"),
+            "body still carries pre-5.6d TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn plumbing_drain_events_emits_drain_events_body_with_ring_id() {
+        let ring = EventRingId(7);
+        let (_spec, body) =
+            plumbing_spec_and_body(PlumbingKind::DrainEvents { ring });
+        assert!(
+            body.contains("PlumbingKind::DrainEvents (ring=7)"),
+            "DrainEvents body: {body}"
+        );
+        // Touches the ring binding (structural name `event_ring_<r>`).
+        assert!(body.contains("event_ring_7["), "body: {body}");
+        // PerEvent preamble from `thread_indexing_preamble`.
+        assert!(body.contains("event_idx = gid.x"), "body: {body}");
+        assert!(
+            !body.contains("TODO(task-4.x): plumbing body"),
+            "body still carries pre-5.6d TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn plumbing_upload_sim_cfg_emits_upload_sim_cfg_body() {
+        let (_spec, body) = plumbing_spec_and_body(PlumbingKind::UploadSimCfg);
+        assert!(
+            body.contains("PlumbingKind::UploadSimCfg"),
+            "UploadSimCfg body: {body}"
+        );
+        // OneShot preamble.
+        assert!(body.contains("if (gid.x != 0u)"), "body: {body}");
+        // Documents the host-side upload — body itself is a no-op.
+        assert!(body.contains("host-side upload"), "body: {body}");
+        assert!(
+            !body.contains("TODO(task-4.x): plumbing body"),
+            "body still carries pre-5.6d TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn plumbing_kick_snapshot_emits_kick_snapshot_body() {
+        let (_spec, body) = plumbing_spec_and_body(PlumbingKind::KickSnapshot);
+        assert!(
+            body.contains("PlumbingKind::KickSnapshot"),
+            "KickSnapshot body: {body}"
+        );
+        // OneShot preamble.
+        assert!(body.contains("if (gid.x != 0u)"), "body: {body}");
+        // atomicStore on the snapshot_kick slot (atomic access mode).
+        assert!(
+            body.contains("atomicStore(&snapshot_kick[0], 1u);"),
+            "body: {body}"
+        );
+        assert!(
+            !body.contains("TODO(task-4.x): plumbing body"),
+            "body still carries pre-5.6d TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn plumbing_seed_indirect_args_emits_body_with_ring_id() {
+        let ring = EventRingId(2);
+        let (_spec, body) =
+            plumbing_spec_and_body(PlumbingKind::SeedIndirectArgs { ring });
+        assert!(
+            body.contains("PlumbingKind::SeedIndirectArgs (ring=2)"),
+            "SeedIndirectArgs body: {body}"
+        );
+        // Reads tail count from event_ring_<ring>[0]; writes (wg, 1, 1)
+        // to indirect_args_<ring>.
+        assert!(body.contains("event_ring_2[0]"), "body: {body}");
+        assert!(body.contains("indirect_args_2[0] = wg"), "body: {body}");
+        assert!(body.contains("indirect_args_2[1] = 1u"), "body: {body}");
+        assert!(body.contains("indirect_args_2[2] = 1u"), "body: {body}");
+        // CAP_WG cap.
+        assert!(body.contains("if (wg > 4096u)"), "body: {body}");
+        // OneShot preamble.
+        assert!(body.contains("if (gid.x != 0u)"), "body: {body}");
+        assert!(
+            !body.contains("TODO(task-4.x): plumbing body"),
+            "body still carries pre-5.6d TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn plumbing_seed_indirect_args_distinct_ring_ids_emit_distinct_bodies() {
+        // Two SeedIndirectArgs ops on different rings should emit
+        // bodies that reference their ring id distinctly — the per-
+        // ring formatter `seed_indirect_args_body` must thread the
+        // ring id through every binding reference.
+        let (_a, body_a) =
+            plumbing_spec_and_body(PlumbingKind::SeedIndirectArgs {
+                ring: EventRingId(0),
+            });
+        let (_b, body_b) =
+            plumbing_spec_and_body(PlumbingKind::SeedIndirectArgs {
+                ring: EventRingId(3),
+            });
+        assert!(body_a.contains("event_ring_0[0]"), "body_a: {body_a}");
+        assert!(body_a.contains("indirect_args_0["), "body_a: {body_a}");
+        assert!(!body_a.contains("event_ring_3"), "body_a leaked ring=3: {body_a}");
+        assert!(body_b.contains("event_ring_3[0]"), "body_b: {body_b}");
+        assert!(body_b.contains("indirect_args_3["), "body_b: {body_b}");
+        assert!(!body_b.contains("event_ring_0"), "body_b leaked ring=0: {body_b}");
+    }
+
+    /// Snapshot: pin the `AliveBitmap` body output through
+    /// `kernel_topology_to_spec_and_body`. Any drift in the body const,
+    /// the PerWord preamble shape, or the op-comment header surfaces
+    /// here — the assertions below describe the exact expected form so
+    /// the snapshot survives a body-content tweak with a one-site update.
+    #[test]
+    fn plumbing_body_snapshot_alive_bitmap() {
+        let (spec, body) = plumbing_spec_and_body(PlumbingKind::AliveBitmap);
+        // Spec name + entry point are the legacy filenames (Task 5.2).
+        assert_eq!(spec.name, "alive_pack");
+        assert_eq!(spec.entry_point, "cs_alive_pack");
+        // Pin the body's structural sections in order: PerWord preamble
+        // -> op-comment header -> per-kind body comment -> agent_alive
+        // read -> atomicStore. Each contains-check is order-independent;
+        // the relative-offset asserts catch reordering.
+        let preamble_idx = body
+            .find("word_idx = gid.x")
+            .unwrap_or_else(|| panic!("missing PerWord preamble: {body}"));
+        let op_comment_idx = body
+            .find("// op#0 (plumbing)")
+            .unwrap_or_else(|| panic!("missing op-comment header: {body}"));
+        let kind_comment_idx = body
+            .find("PlumbingKind::AliveBitmap")
+            .unwrap_or_else(|| panic!("missing per-kind comment: {body}"));
+        let agent_alive_idx = body
+            .find("agent_alive[slot]")
+            .unwrap_or_else(|| panic!("missing agent_alive read: {body}"));
+        let atomic_store_idx = body
+            .find("atomicStore(&alive_bitmap[word_idx], word);")
+            .unwrap_or_else(|| panic!("missing atomicStore: {body}"));
+        assert!(
+            preamble_idx < op_comment_idx,
+            "PerWord preamble must come before op-comment header"
+        );
+        assert!(
+            op_comment_idx < kind_comment_idx,
+            "op-comment header must come before per-kind body comment"
+        );
+        assert!(
+            kind_comment_idx < agent_alive_idx,
+            "per-kind comment must come before the agent_alive read"
+        );
+        assert!(
+            agent_alive_idx < atomic_store_idx,
+            "agent_alive read must come before the atomicStore"
+        );
+    }
+
+    /// Smoke test: every `PlumbingKind` variant produces a non-empty
+    /// body that does NOT carry a leftover TODO placeholder. Mirrors
+    /// the `plumbing_kinds_map_to_legacy_filenames` test's exhaustive
+    /// list — adding a new variant requires updating both, which the
+    /// match-arm exhaustiveness in `plumbing_body_for_kind` and the
+    /// dispatch-shape mapping in `PlumbingKind::dispatch_shape` already
+    /// enforce at the type level.
+    #[test]
+    fn every_plumbing_kind_emits_non_empty_non_todo_body() {
+        let kinds = [
+            PlumbingKind::PackAgents,
+            PlumbingKind::UnpackAgents,
+            PlumbingKind::AliveBitmap,
+            PlumbingKind::DrainEvents { ring: EventRingId(0) },
+            PlumbingKind::UploadSimCfg,
+            PlumbingKind::KickSnapshot,
+            PlumbingKind::SeedIndirectArgs { ring: EventRingId(0) },
+        ];
+        for kind in kinds {
+            let (_spec, body) = plumbing_spec_and_body(kind);
+            assert!(
+                !body.is_empty(),
+                "kind={kind:?} produced empty body"
+            );
+            assert!(
+                !body.contains("TODO(task-4.x): plumbing body"),
+                "kind={kind:?} still carries pre-5.6d TODO placeholder: {body}"
+            );
+            // Every body labels its variant — eyeballing per-kind
+            // bodies in CI logs stays trivial.
+            assert!(
+                body.contains("PlumbingKind::"),
+                "kind={kind:?} body missing PlumbingKind::* tag: {body}"
+            );
+        }
     }
 }
