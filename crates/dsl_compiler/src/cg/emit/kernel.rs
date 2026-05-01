@@ -97,7 +97,8 @@ use crate::cg::data_handle::{
 };
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::op::{
-    ComputeOp, ComputeOpKind, OpId, PlumbingKind, ScoringId, ScoringRowOp, SpatialQueryKind,
+    ComputeOp, ComputeOpKind, OpId, PlumbingKind, ReplayabilityFlag, ScoringId, ScoringRowOp,
+    SpatialQueryKind,
 };
 use crate::cg::program::CgProgram;
 use crate::cg::schedule::synthesis::KernelTopology;
@@ -987,6 +988,24 @@ pub fn semantic_kernel_name_for_topology(
 
 fn semantic_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> String {
     debug_assert!(!body_ops.is_empty(), "semantic_kernel_name on empty ops");
+
+    // Special case: a fused-or-singleton run of ViewFold ops on the
+    // same view collapses to `fold_<view>` (no event suffix). This
+    // matches the legacy `emit_view_fold_kernel` topology where one
+    // kernel module owns all of a view's handlers; the in-kernel
+    // body switches on `event.tag` to dispatch per-handler logic.
+    if let Some(name) = view_fold_fused_kernel_name(body_ops, prog) {
+        return name;
+    }
+
+    // PhysicsRule analogue: a fused-or-singleton run of PhysicsRule
+    // ops with matching replayability collapses to `physics`
+    // (replayable) or `physics_post` (non-replayable). Mirrors the
+    // legacy `physics.rs` kernel module.
+    if let Some(name) = physics_rule_fused_kernel_name(body_ops) {
+        return name;
+    }
+
     if body_ops.len() == 1 {
         return single_op_kernel_name(&body_ops[0].kind, prog);
     }
@@ -998,6 +1017,60 @@ fn semantic_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> String {
     } else {
         format!("fused_{first}")
     }
+}
+
+/// `Some("fold_<view>")` iff every op in `body_ops` is a
+/// [`ComputeOpKind::ViewFold`] referencing the same view. Returns
+/// `None` otherwise (mixed kinds, different views, or zero ops).
+/// When the slice is a singleton we still drop the event suffix —
+/// the legacy emitter names a single-handler view's kernel
+/// `fold_<view>`, never `fold_<view>_<event>`.
+fn view_fold_fused_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> Option<String> {
+    let mut view = None;
+    for op in body_ops {
+        match &op.kind {
+            ComputeOpKind::ViewFold { view: v, .. } => match view {
+                None => view = Some(*v),
+                Some(prev) if prev == *v => {}
+                Some(_) => return None,
+            },
+            ComputeOpKind::MaskPredicate { .. }
+            | ComputeOpKind::ScoringArgmax { .. }
+            | ComputeOpKind::PhysicsRule { .. }
+            | ComputeOpKind::SpatialQuery { .. }
+            | ComputeOpKind::Plumbing { .. } => return None,
+        }
+    }
+    let view = view?;
+    Some(match prog.interner.get_view_name(view) {
+        Some(name) => format!("fold_{name}"),
+        None => format!("fold_view_{}", view.0),
+    })
+}
+
+/// `Some("physics")` for a homogeneous Replayable PhysicsRule group;
+/// `Some("physics_post")` for a homogeneous NonReplayable group;
+/// `None` otherwise (mixed kinds, mixed replayability, or zero ops).
+fn physics_rule_fused_kernel_name(body_ops: &[&ComputeOp]) -> Option<String> {
+    let mut flag = None;
+    for op in body_ops {
+        match &op.kind {
+            ComputeOpKind::PhysicsRule { replayable, .. } => match flag {
+                None => flag = Some(*replayable),
+                Some(prev) if prev == *replayable => {}
+                Some(_) => return None,
+            },
+            ComputeOpKind::MaskPredicate { .. }
+            | ComputeOpKind::ScoringArgmax { .. }
+            | ComputeOpKind::ViewFold { .. }
+            | ComputeOpKind::SpatialQuery { .. }
+            | ComputeOpKind::Plumbing { .. } => return None,
+        }
+    }
+    Some(match flag? {
+        ReplayabilityFlag::Replayable => "physics".to_string(),
+        ReplayabilityFlag::NonReplayable => "physics_post".to_string(),
+    })
 }
 
 /// Snake_case kernel name for a single op (the building block of
@@ -2860,7 +2933,14 @@ mod tests {
     }
 
     #[test]
-    fn physics_rule_uses_interner_name_when_present() {
+    fn physics_rule_singleton_collapses_to_physics_kernel_name() {
+        // Post Task 5.7-iter2: a singleton (Replayable) PhysicsRule
+        // op resolves to the canonical `physics` kernel name. The
+        // legacy SCHEDULE wraps physics dispatch in a single
+        // FixedPoint(physics, max_iter=8); the kernel-naming layer
+        // matches that contract by collapsing every rule into the
+        // shared `physics` module regardless of the rule's per-rule
+        // interner name.
         let mut prog = CgProgram::default();
         let ring = EventRingId(0);
         let op = physics_op(&mut prog, PhysicsRuleId(4), ring);
@@ -2873,7 +2953,7 @@ mod tests {
         };
         let ctx = EmitCtx::structural(&prog);
         let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
-        assert_eq!(spec.name, "physics_cast_apply");
+        assert_eq!(spec.name, "physics");
     }
 
     #[test]
@@ -2889,11 +2969,14 @@ mod tests {
     }
 
     #[test]
-    fn view_fold_with_pascal_case_event_name_normalizes_to_snake_case() {
-        // Interner stores event-kind names PascalCase as authored in
-        // the DSL (`event AgentAttacked { ... }`). The kernel name
-        // suffix must be snake_case so the output filename / Rust
-        // module name follow the legacy convention.
+    fn view_fold_singleton_collapses_to_fold_view_kernel_name() {
+        // Post Task 5.7-iter2: a singleton ViewFold op resolves to
+        // `fold_<view>` (no event suffix). This matches the legacy
+        // emitter where one kernel module owns ALL of a view's
+        // handlers; the in-kernel body switches on `event.tag` to
+        // dispatch per-handler logic. The pascal_to_snake helper
+        // is no longer reached on the kernel-name path because no
+        // event suffix is appended.
         use crate::cg::data_handle::ViewId;
         let mut prog = CgProgram::default();
         let body = push_list(&mut prog, CgStmtList { stmts: vec![] });
@@ -2926,11 +3009,15 @@ mod tests {
         };
         let ctx = EmitCtx::structural(&prog);
         let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
-        assert_eq!(spec.name, "fold_threat_level_agent_attacked");
+        assert_eq!(spec.name, "fold_threat_level");
     }
 
     #[test]
-    fn view_fold_uses_interner_name_with_event_suffix() {
+    fn view_fold_uses_interner_name_for_view_kernel() {
+        // Post Task 5.7-iter2: the ViewFold kernel name is
+        // `fold_<view>` regardless of the (single) handler's event
+        // kind. The view name comes from the interner; the event
+        // kind is no longer reflected in the kernel name.
         use crate::cg::data_handle::ViewId;
         let mut prog = CgProgram::default();
         let body = push_list(&mut prog, CgStmtList { stmts: vec![] });
@@ -2963,17 +3050,19 @@ mod tests {
         };
         let ctx = EmitCtx::structural(&prog);
         let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
-        // Event kind suffix disambiguates multi-handler views.
-        assert_eq!(spec.name, "fold_threat_level_agent_attacked");
+        assert_eq!(spec.name, "fold_threat_level");
     }
 
     #[test]
-    fn view_fold_distinct_event_kinds_yield_distinct_kernel_names() {
+    fn view_fold_distinct_event_kinds_fuse_to_one_kernel_name() {
         // The DSL `threat_level` view in `assets/sim/views.sim` has
         // two `on` handlers (`AgentAttacked`, `EffectDamageApplied`).
-        // Each lowers to its own ViewFold op; without the event-kind
-        // suffix both would collide on the kernel name. This test pins
-        // that they DO diverge.
+        // After Task 5.7-iter2 driver-level ring unification, both
+        // handlers share `EventRingId(0)` so the schedule synthesizer
+        // fuses them into a single `KernelTopology::Fused`. The fused
+        // kernel name collapses to `fold_<view>` regardless of how
+        // many handlers the view has — matching the legacy emitter
+        // shape exactly.
         use crate::cg::data_handle::ViewId;
         let mut prog = CgProgram::default();
         prog.interner.views.insert(3, "threat_level".to_string());
@@ -3007,6 +3096,19 @@ mod tests {
         let a = mk_fold(&mut prog, 0);
         let b = mk_fold(&mut prog, 1);
         let ctx = EmitCtx::structural(&prog);
+        let fused = KernelTopology::Fused {
+            ops: vec![a, b],
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let spec_fused = kernel_topology_to_spec(&fused, &prog, &ctx).unwrap();
+        assert_eq!(spec_fused.name, "fold_threat_level");
+
+        // Even per-handler singleton topologies emit the same
+        // collapsed kernel name. The KernelNameCollision gate at
+        // program-emit time only fires when two such kernels
+        // co-exist unfused in the schedule.
         let spec_a = kernel_topology_to_spec(
             &KernelTopology::Split {
                 op: a,
@@ -3022,16 +3124,15 @@ mod tests {
             &KernelTopology::Split {
                 op: b,
                 dispatch: DispatchShape::PerEvent {
-                    source_ring: EventRingId(1),
+                    source_ring: EventRingId(0),
                 },
             },
             &prog,
             &ctx,
         )
         .unwrap();
-        assert_eq!(spec_a.name, "fold_threat_level_agent_attacked");
-        assert_eq!(spec_b.name, "fold_threat_level_effect_damage_applied");
-        assert_ne!(spec_a.name, spec_b.name);
+        assert_eq!(spec_a.name, "fold_threat_level");
+        assert_eq!(spec_b.name, "fold_threat_level");
     }
 
     #[test]
@@ -3656,16 +3757,18 @@ mod tests {
                 6,
                 "cfg".to_string(),
                 "Uniform".to_string(),
-                "FoldThreatLevelAgentAttackedCfg".to_string(),
+                "FoldThreatLevelCfg".to_string(),
             ),
         ];
         assert_eq!(snapshot, expected);
 
-        // ViewFold cfg shape pinned explicitly.
+        // ViewFold cfg shape pinned explicitly. The cfg struct name
+        // is derived from the kernel name, which collapses to
+        // `fold_threat_level` post Task 5.7-iter2 (no event suffix).
         assert!(spec.cfg_struct_decl.contains("event_count: u32, pub tick: u32, pub _pad: [u32; 2]"));
         assert_eq!(
             spec.cfg_build_expr,
-            "FoldThreatLevelAgentAttackedCfg { event_count: 0, tick: state.tick, _pad: [0; 2] }"
+            "FoldThreatLevelCfg { event_count: 0, tick: state.tick, _pad: [0; 2] }"
         );
     }
 

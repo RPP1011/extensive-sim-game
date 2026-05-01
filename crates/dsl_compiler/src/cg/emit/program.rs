@@ -2076,9 +2076,11 @@ mod tests {
         let wgsl_key = format!("{}.wgsl", artifacts.kernel_index[0]);
         let wgsl = &artifacts.wgsl_files[&wgsl_key];
 
-        // Cfg struct decl appears before the bindings.
+        // Cfg struct decl appears before the bindings. Post Task
+        // 5.7-iter2 the kernel name collapses to `fold_threat_level`
+        // (no event suffix) so the cfg struct is `FoldThreatLevelCfg`.
         assert!(
-            wgsl.contains("struct FoldThreatLevelAgentAttackedCfg { event_count: u32, tick: u32, _pad0: u32, _pad1: u32 };"),
+            wgsl.contains("struct FoldThreatLevelCfg { event_count: u32, tick: u32, _pad0: u32, _pad1: u32 };"),
             "cfg struct decl missing: {wgsl}"
         );
         // 7 binding decls.
@@ -2098,12 +2100,13 @@ mod tests {
         );
         assert!(wgsl.contains("@binding(5) var<storage, read> sim_cfg"), "wgsl: {wgsl}");
         assert!(
-            wgsl.contains("@binding(6) var<uniform> cfg: FoldThreatLevelAgentAttackedCfg;"),
+            wgsl.contains("@binding(6) var<uniform> cfg: FoldThreatLevelCfg;"),
             "wgsl: {wgsl}"
         );
-        // Entry point + event_count gate.
+        // Entry point + event_count gate. Post-iter2 the entry-point
+        // name follows the collapsed kernel name `fold_threat_level`.
         assert!(
-            wgsl.contains("fn cs_fold_threat_level_agent_attacked"),
+            wgsl.contains("fn cs_fold_threat_level"),
             "entry point missing: {wgsl}"
         );
         assert!(wgsl.contains("let event_idx = gid.x;"), "wgsl: {wgsl}");
@@ -2186,9 +2189,11 @@ mod tests {
         // No panicking placeholders.
         assert!(!rs.contains("unimplemented!"), "{rs}");
         assert!(!rs.contains("todo!()"), "{rs}");
-        // The Kernel trait impl shape carries through.
+        // The Kernel trait impl shape carries through. Post-iter2
+        // the kernel struct name is `FoldThreatLevelKernel` (snake
+        // `fold_threat_level` → pascal `FoldThreatLevel`).
         assert!(
-            rs.contains("impl crate::Kernel for FoldThreatLevelAgentAttackedKernel"),
+            rs.contains("impl crate::Kernel for FoldThreatLevelKernel"),
             "{rs}"
         );
         // Cfg shape — Rust struct decl mirrors the WGSL decl.
