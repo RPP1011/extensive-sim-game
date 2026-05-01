@@ -65,11 +65,20 @@
 //! iteration appears in any code path. The
 //! `wgsl_emit_is_deterministic` test pins this contract.
 
+pub mod cross_cutting;
 pub mod kernel;
 pub mod program;
 pub mod wgsl_body;
 
-pub use kernel::{kernel_topology_to_spec, kernel_topology_to_spec_and_body, KernelEmitError};
+pub use cross_cutting::{
+    synthesize_binding_sources, synthesize_external_buffers, synthesize_pingpong_context,
+    synthesize_pool, synthesize_resident_context, synthesize_schedule as synthesize_schedule_module,
+    synthesize_transient_handles,
+};
+pub use kernel::{
+    kernel_topology_to_spec, kernel_topology_to_spec_and_body, semantic_kernel_name_for_topology,
+    KernelEmitError,
+};
 pub use program::{emit_cg_program, EmittedArtifacts, ProgramEmitError};
 pub use wgsl_body::{
     lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl, EmitCtx, EmitError,

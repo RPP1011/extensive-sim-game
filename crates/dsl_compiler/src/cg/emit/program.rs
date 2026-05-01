@@ -238,6 +238,39 @@ pub fn emit_cg_program(
     // it as `<src>/lib.rs` verbatim.
     rust_files.insert("lib.rs".to_string(), synthesize_lib_rs(&kernel_index));
 
+    // Synthesize the seven cross-cutting modules (Task 5.4). Each
+    // becomes a separate `<name>.rs` entry; the side-channel writer
+    // resolves them under `<src>/<name>.rs`. lib.rs declares each via
+    // `pub mod <name>;`.
+    rust_files.insert(
+        "binding_sources.rs".to_string(),
+        super::cross_cutting::synthesize_binding_sources(),
+    );
+    rust_files.insert(
+        "resident_context.rs".to_string(),
+        super::cross_cutting::synthesize_resident_context(prog),
+    );
+    rust_files.insert(
+        "external_buffers.rs".to_string(),
+        super::cross_cutting::synthesize_external_buffers(),
+    );
+    rust_files.insert(
+        "transient_handles.rs".to_string(),
+        super::cross_cutting::synthesize_transient_handles(),
+    );
+    rust_files.insert(
+        "pingpong_context.rs".to_string(),
+        super::cross_cutting::synthesize_pingpong_context(),
+    );
+    rust_files.insert(
+        "pool.rs".to_string(),
+        super::cross_cutting::synthesize_pool(),
+    );
+    rust_files.insert(
+        "schedule.rs".to_string(),
+        super::cross_cutting::synthesize_schedule(schedule, prog),
+    );
+
     Ok(EmittedArtifacts {
         wgsl_files,
         rust_files,
@@ -924,9 +957,17 @@ pub fn synthesize_lib_rs(kernel_index: &[String]) -> String {
     }
     out.push('\n');
 
-    // binding_sources is required by every emitted kernel; declare it
-    // so the path resolution in `use crate::binding_sources::…` works.
+    // Cross-cutting modules (Task 5.4). binding_sources is required by
+    // every emitted kernel; the rest define the runtime contract
+    // engine_gpu consumes (resident / pingpong / pool / transient /
+    // external aggregates, plus the SCHEDULE constant).
     out.push_str("pub mod binding_sources;\n");
+    out.push_str("pub mod resident_context;\n");
+    out.push_str("pub mod external_buffers;\n");
+    out.push_str("pub mod transient_handles;\n");
+    out.push_str("pub mod pingpong_context;\n");
+    out.push_str("pub mod pool;\n");
+    out.push_str("pub mod schedule;\n");
     out.push('\n');
 
     // KernelKind enum.
@@ -1185,20 +1226,35 @@ mod tests {
     #[test]
     fn empty_schedule_yields_only_lib_rs_artifact() {
         // An empty schedule still synthesizes `lib.rs` (the kernel
-        // registry + Kernel trait + bgl helpers) so the side-channel
-        // output is always a self-contained Rust crate. No per-kernel
-        // wgsl/rust files are produced.
+        // registry + Kernel trait + bgl helpers) plus the seven
+        // cross-cutting modules (Task 5.4 — binding_sources,
+        // resident_context, external_buffers, transient_handles,
+        // pingpong_context, pool, schedule) so the side-channel output
+        // is always a self-contained Rust crate. No per-kernel wgsl /
+        // rust files are produced.
         let prog = CgProgram::default();
         let schedule = ComputeSchedule { stages: vec![] };
         let artifacts = emit_cg_program(&schedule, &prog).expect("empty schedule must succeed");
         assert!(artifacts.wgsl_files.is_empty(), "wgsl: {:?}", artifacts.wgsl_files);
-        // `lib.rs` is the only Rust file emitted for an empty schedule.
-        assert_eq!(
-            artifacts.rust_files.keys().collect::<Vec<_>>(),
-            vec![&"lib.rs".to_string()],
-            "rust: {:?}",
-            artifacts.rust_files.keys().collect::<Vec<_>>()
-        );
+        // `lib.rs` + 7 cross-cutting modules = 8 entries, no per-kernel
+        // files.
+        let mut expected: Vec<String> = vec![
+            "binding_sources.rs",
+            "external_buffers.rs",
+            "lib.rs",
+            "pingpong_context.rs",
+            "pool.rs",
+            "resident_context.rs",
+            "schedule.rs",
+            "transient_handles.rs",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        expected.sort();
+        let mut got: Vec<String> = artifacts.rust_files.keys().cloned().collect();
+        got.sort();
+        assert_eq!(got, expected, "rust files: {got:?}");
         assert!(artifacts.kernel_index.is_empty(), "index: {:?}", artifacts.kernel_index);
         // The synthesized lib content carries the trait + helpers even
         // when no kernels are emitted.
@@ -1206,6 +1262,22 @@ mod tests {
         assert!(lib.contains("pub trait Kernel"), "lib: {lib}");
         assert!(lib.contains("pub(crate) fn bgl_storage"), "lib: {lib}");
         assert!(lib.contains("pub(crate) fn bgl_uniform"), "lib: {lib}");
+        // lib.rs declares each cross-cutting module so the cross-module
+        // path resolution works.
+        for cc in [
+            "binding_sources",
+            "resident_context",
+            "external_buffers",
+            "transient_handles",
+            "pingpong_context",
+            "pool",
+            "schedule",
+        ] {
+            assert!(
+                lib.contains(&format!("pub mod {cc};")),
+                "lib.rs missing `pub mod {cc};`: {lib}"
+            );
+        }
     }
 
     // ---- 2. Single Split kernel ----
@@ -1222,8 +1294,9 @@ mod tests {
         let artifacts = emit_cg_program(&schedule, &prog).expect("single split must succeed");
 
         assert_eq!(artifacts.wgsl_files.len(), 1);
-        // One per-kernel file plus the synthesized `lib.rs`.
-        assert_eq!(artifacts.rust_files.len(), 2);
+        // One per-kernel file + the synthesized `lib.rs` + 7
+        // cross-cutting modules (Task 5.4).
+        assert_eq!(artifacts.rust_files.len(), 1 + 1 + 7);
         assert!(artifacts.rust_files.contains_key("lib.rs"));
         assert_eq!(artifacts.kernel_index.len(), 1);
 
@@ -1288,8 +1361,9 @@ mod tests {
         };
         let artifacts = emit_cg_program(&schedule, &prog).expect("multi-stage emit");
         assert_eq!(artifacts.wgsl_files.len(), 2);
-        // Two per-kernel files + the synthesized `lib.rs`.
-        assert_eq!(artifacts.rust_files.len(), 3);
+        // Two per-kernel files + the synthesized `lib.rs` + 7
+        // cross-cutting modules (Task 5.4).
+        assert_eq!(artifacts.rust_files.len(), 2 + 1 + 7);
         assert!(artifacts.rust_files.contains_key("lib.rs"));
         assert_eq!(artifacts.kernel_index.len(), 2);
 
@@ -1459,13 +1533,29 @@ mod tests {
             artifacts.kernel_index.len(),
             "one wgsl file per kernel"
         );
-        // Per-kernel rust files + the synthesized `lib.rs`.
+        // Per-kernel rust files + the synthesized `lib.rs` + 7
+        // cross-cutting modules (Task 5.4).
         assert_eq!(
             artifacts.rust_files.len(),
-            artifacts.kernel_index.len() + 1,
-            "one rust file per kernel + lib.rs"
+            artifacts.kernel_index.len() + 1 + 7,
+            "one rust file per kernel + lib.rs + 7 cross-cutting modules"
         );
         assert!(artifacts.rust_files.contains_key("lib.rs"), "lib.rs missing");
+        for cc in [
+            "binding_sources.rs",
+            "resident_context.rs",
+            "external_buffers.rs",
+            "transient_handles.rs",
+            "pingpong_context.rs",
+            "pool.rs",
+            "schedule.rs",
+        ] {
+            assert!(
+                artifacts.rust_files.contains_key(cc),
+                "cross-cutting module {cc} missing from rust_files: {:?}",
+                artifacts.rust_files.keys().collect::<Vec<_>>()
+            );
+        }
     }
 
     // ---- 8. Indirect topology emits the consumer kernel ----

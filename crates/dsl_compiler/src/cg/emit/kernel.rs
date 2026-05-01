@@ -793,6 +793,46 @@ fn structural_binding_name(h: &DataHandle) -> String {
 ///   { ring }` use a per-ring suffix (`drain_events_<ring>` /
 ///   `seed_indirect_<ring>`) so distinct rings never collide. Without
 ///   a ring-name interner the suffix is the numeric ring id.
+/// Public wrapper over [`semantic_kernel_name`] that takes a
+/// [`KernelTopology`] directly. Resolves the topology to its body ops
+/// (mirroring the routing in [`kernel_topology_to_spec_and_body`]) and
+/// returns the same snake_case name the per-kernel emit uses for the
+/// `.rs` / `.wgsl` filenames. Returns `None` when the topology resolves
+/// to an empty body or carries an out-of-range op id (defensive — the
+/// per-kernel emit would already have surfaced these as
+/// [`KernelEmitError`] variants).
+///
+/// Used by [`super::cross_cutting::synthesize_schedule`] so the
+/// schedule entries reference the same kernel names the per-kernel
+/// modules carry — drift between the two sites is structurally
+/// impossible because both call this helper.
+///
+/// # Limitations
+/// - **Indirect topologies report only the consumer kernel name.** The
+///   `SeedIndirectArgs` producer is a separate plumbing op handled
+///   independently at the schedule layer.
+pub fn semantic_kernel_name_for_topology(
+    topology: &KernelTopology,
+    prog: &CgProgram,
+) -> Option<String> {
+    let body_ops: Vec<OpId> = match topology {
+        KernelTopology::Fused { ops, .. } => ops.clone(),
+        KernelTopology::Split { op, .. } => vec![*op],
+        KernelTopology::Indirect { consumers, .. } => consumers.clone(),
+    };
+    if body_ops.is_empty() {
+        return None;
+    }
+    let mut resolved: Vec<&ComputeOp> = Vec::with_capacity(body_ops.len());
+    for id in &body_ops {
+        match resolve_op(prog, *id) {
+            Ok(op) => resolved.push(op),
+            Err(_) => return None,
+        }
+    }
+    Some(semantic_kernel_name(&resolved, prog))
+}
+
 fn semantic_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> String {
     debug_assert!(!body_ops.is_empty(), "semantic_kernel_name on empty ops");
     if body_ops.len() == 1 {
