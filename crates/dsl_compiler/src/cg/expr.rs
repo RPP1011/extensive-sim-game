@@ -584,6 +584,45 @@ pub enum CgExpr {
         else_: CgExprId,
         ty: CgTy,
     },
+    /// The current dispatch's actor as an `AgentId` value. Surfaces in
+    /// the surface DSL as a bare `self` reference (e.g.,
+    /// `agents.alive(self)`, `target != self`). Resolved by lowering
+    /// `IrExpr::Local(_, "self")` when no `.field` access is present
+    /// (the `self.<field>` path goes through
+    /// `Read(AgentField { target: AgentRef::Self_, ... })`). Always
+    /// typed `CgTy::AgentId`. Distinct from
+    /// `Read(AgentField { target: AgentRef::Self_, ... })`: this
+    /// variant carries the actor's *id*, not the read of any field.
+    AgentSelfId,
+    /// The per-pair candidate's `AgentId` value. Surfaces in
+    /// pair-bound dispatch contexts (today only
+    /// `mask <Name>(target) from query.nearby_agents(...)`
+    /// predicates) where bare `target` appears
+    /// (`agents.alive(target)`, `target != self`). Lowering only
+    /// constructs this variant when `LoweringCtx::target_local` is
+    /// `true`; outside pair-bound contexts the bare `target`
+    /// reference surfaces as `LoweringError::UnsupportedLocalBinding`.
+    /// Mirrors `AgentRef::PerPairCandidate`'s contract: the
+    /// candidate's slot id is implicit in the surrounding
+    /// `DispatchShape::PerPair { source }`; the IR layer just tags
+    /// the read.
+    PerPairCandidateId,
+    /// Read a let-bound local. `local` resolves through the
+    /// surrounding op's body — either an `IrStmt::Let` lowered to
+    /// `CgStmt::Let { local, value, ty }` (Task 5.5b), or a future
+    /// match-arm binding once those wire in. `ty` mirrors the
+    /// binding's declared CG type so the type checker has the result
+    /// type without needing to walk the binder.
+    ///
+    /// Lowering only constructs this variant when
+    /// `IrExpr::Local(_, name)` resolves through
+    /// `LoweringCtx::local_ids` (the typed `LocalRef → LocalId`
+    /// registry). The read carries no `LocalRef` — once the lowering
+    /// binds, only the typed `LocalId` flows in the IR.
+    ReadLocal {
+        local: crate::cg::stmt::LocalId,
+        ty: CgTy,
+    },
 }
 
 /// Compute the type a `DataHandle` reads at. `Read(h)` has the type
@@ -702,6 +741,9 @@ impl CgExpr {
             CgExpr::Builtin { ty, .. } => *ty,
             CgExpr::Rng { ty, .. } => *ty,
             CgExpr::Select { ty, .. } => *ty,
+            CgExpr::AgentSelfId => CgTy::AgentId,
+            CgExpr::PerPairCandidateId => CgTy::AgentId,
+            CgExpr::ReadLocal { ty, .. } => *ty,
         }
     }
 }
@@ -802,6 +844,9 @@ fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::R
             out.push(')');
             Ok(())
         }
+        CgExpr::AgentSelfId => write!(out, "(agent self_id)"),
+        CgExpr::PerPairCandidateId => write!(out, "(agent per_pair_candidate_id)"),
+        CgExpr::ReadLocal { local, ty } => write!(out, "(read_local {} {})", local, ty),
     }
 }
 
@@ -1163,6 +1208,10 @@ pub fn type_check(
             }
             Ok(then_ty)
         }
+
+        CgExpr::AgentSelfId => Ok(CgTy::AgentId),
+        CgExpr::PerPairCandidateId => Ok(CgTy::AgentId),
+        CgExpr::ReadLocal { ty, .. } => Ok(*ty),
     }
 }
 
@@ -1922,6 +1971,74 @@ mod tests {
                 expected: CgTy::U32,
                 got: CgTy::F32,
             }
+        );
+    }
+
+    // ---- Task 5.5d: AgentSelfId / PerPairCandidateId / ReadLocal ----
+
+    #[test]
+    fn agent_self_id_ty_is_agent_id() {
+        let e = CgExpr::AgentSelfId;
+        assert_eq!(e.ty(), CgTy::AgentId);
+        let arena: Vec<CgExpr> = vec![e.clone()];
+        assert_eq!(pretty(&arena[0], &arena), "(agent self_id)");
+        // Serde round-trip.
+        let json = serde_json::to_string(&e).unwrap();
+        let back: CgExpr = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, e);
+    }
+
+    #[test]
+    fn per_pair_candidate_id_ty_is_agent_id() {
+        let e = CgExpr::PerPairCandidateId;
+        assert_eq!(e.ty(), CgTy::AgentId);
+        let arena: Vec<CgExpr> = vec![e.clone()];
+        assert_eq!(pretty(&arena[0], &arena), "(agent per_pair_candidate_id)");
+        let json = serde_json::to_string(&e).unwrap();
+        let back: CgExpr = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, e);
+    }
+
+    #[test]
+    fn type_check_passes_for_self_id_and_pair_candidate_id() {
+        let arena: Vec<CgExpr> = vec![CgExpr::AgentSelfId, CgExpr::PerPairCandidateId];
+        let ctx = TypeCheckCtx::new(&arena);
+        assert_eq!(
+            type_check(&arena[0], CgExprId(0), &ctx).unwrap(),
+            CgTy::AgentId
+        );
+        assert_eq!(
+            type_check(&arena[1], CgExprId(1), &ctx).unwrap(),
+            CgTy::AgentId
+        );
+    }
+
+    #[test]
+    fn read_local_ty_pinned_from_field() {
+        use crate::cg::stmt::LocalId;
+        let e = CgExpr::ReadLocal {
+            local: LocalId(3),
+            ty: CgTy::F32,
+        };
+        assert_eq!(e.ty(), CgTy::F32);
+        let arena: Vec<CgExpr> = vec![e.clone()];
+        assert_eq!(pretty(&arena[0], &arena), "(read_local local#3 f32)");
+        let json = serde_json::to_string(&e).unwrap();
+        let back: CgExpr = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, e);
+    }
+
+    #[test]
+    fn type_check_passes_for_read_local() {
+        use crate::cg::stmt::LocalId;
+        let arena: Vec<CgExpr> = vec![CgExpr::ReadLocal {
+            local: LocalId(3),
+            ty: CgTy::F32,
+        }];
+        let ctx = TypeCheckCtx::new(&arena);
+        assert_eq!(
+            type_check(&arena[0], CgExprId(0), &ctx).unwrap(),
+            CgTy::F32
         );
     }
 }

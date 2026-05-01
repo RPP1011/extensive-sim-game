@@ -215,6 +215,23 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// A bare `IrExpr::Local(local_ref, name)` resolved through
+    /// [`super::expr::LoweringCtx::local_ids`] to a typed
+    /// [`crate::cg::stmt::LocalId`], but the matching
+    /// `LocalId → CgTy` entry in
+    /// [`super::expr::LoweringCtx::local_tys`] was missing. The
+    /// driver populates `local_tys` as part of `IrStmt::Let` lowering
+    /// (`record_local_ty`); a missing entry is either a stale
+    /// registry or a hand-built AST whose let-binding was lowered
+    /// without recording the type. Distinct from
+    /// [`Self::UnsupportedLocalBinding`] — that variant fires when
+    /// the *name* is unknown; this one fires when the *type* of a
+    /// bound name is unknown. Task 5.5d.
+    UnknownLocalType {
+        local: crate::cg::stmt::LocalId,
+        span: Span,
+    },
+
     /// A `ViewRef` referenced by an `IrExpr::ViewCall` has no entry in
     /// the lowering context's view map. Until Task 2.3 wires the global
     /// view table, expression-level tests inject the map directly; an
@@ -899,6 +916,11 @@ impl fmt::Display for LoweringError {
                 f,
                 "lowering: local binding `{}` at {}..{} is not bound to a CG concept",
                 name, span.start, span.end
+            ),
+            LoweringError::UnknownLocalType { local, span } => write!(
+                f,
+                "lowering: bare local {} at {}..{} resolved to a binding with no recorded CgTy",
+                local, span.start, span.end
             ),
             LoweringError::UnknownView { ast_ref, span } => write!(
                 f,

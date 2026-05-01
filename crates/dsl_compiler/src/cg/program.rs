@@ -756,7 +756,12 @@ impl CgProgramBuilder {
     /// first dangling id encountered, in left-to-right operand order.
     fn validate_expr_refs(&self, expr: &CgExpr) -> Result<(), BuilderError> {
         match expr {
-            CgExpr::Read(_) | CgExpr::Lit(_) | CgExpr::Rng { .. } => Ok(()),
+            CgExpr::Read(_)
+            | CgExpr::Lit(_)
+            | CgExpr::Rng { .. }
+            | CgExpr::AgentSelfId
+            | CgExpr::PerPairCandidateId
+            | CgExpr::ReadLocal { .. } => Ok(()),
             CgExpr::Binary { lhs, rhs, .. } => {
                 self.check_expr_id(*lhs)?;
                 self.check_expr_id(*rhs)?;

@@ -438,6 +438,13 @@ pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<Dat
             collect_expr_reads(*then, exprs, out);
             collect_expr_reads(*else_, exprs, out);
         }
+        CgExpr::AgentSelfId | CgExpr::PerPairCandidateId | CgExpr::ReadLocal { .. } => {
+            // Bare actor / candidate id reads + let-bound local reads
+            // do not contribute structural reads of any persisted
+            // `DataHandle`. The actor / candidate slot ids are
+            // implicit in the dispatch shape; the let-bound local
+            // lives in the surrounding body's scope.
+        }
     }
 }
 

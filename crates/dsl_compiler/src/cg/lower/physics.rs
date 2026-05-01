@@ -589,6 +589,11 @@ fn lower_let(
         None => ctx.allocate_local(ast_local),
     };
 
+    // Task 5.5d: record the binding's CG type so bare-local reads
+    // (`IrExpr::Local(local_ref, _)` resolved to this binding's
+    // `LocalId`) can reconstruct `CgExpr::ReadLocal { local, ty }`.
+    ctx.record_local_ty(local_id, value_ty);
+
     let stmt = CgStmt::Let {
         local: local_id,
         value: value_id,

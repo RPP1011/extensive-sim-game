@@ -504,6 +504,16 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             // false-value-first order.
             Ok(format!("select({}, {}, {})", e, t, c))
         }
+        // Bare actor / candidate id reads — emit the kernel-local
+        // identifier the surrounding template binds. The MaskPredicate
+        // PerAgent template binds `agent_id`; the PerPair template
+        // binds `per_pair_candidate`. Naming is kept in sync with the
+        // existing AgentRef tokens (wgsl_body.rs `agent_ref_token`).
+        CgExpr::AgentSelfId => Ok("agent_id".to_string()),
+        CgExpr::PerPairCandidateId => Ok("per_pair_candidate".to_string()),
+        // Let-bound local — emit the `let local_<N>: <ty> = ...;` name
+        // produced by `CgStmt::Let` emission.
+        CgExpr::ReadLocal { local, ty: _ } => Ok(format!("local_{}", local.0)),
     }
 }
 

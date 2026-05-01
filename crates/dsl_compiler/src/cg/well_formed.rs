@@ -524,7 +524,11 @@ fn collect_subexpr_ids(arena: &[CgExpr], root: CgExprId, out: &mut Vec<CgExprId>
                     stack.push(*target_expr);
                 }
             }
-            CgExpr::Lit(_) | CgExpr::Rng { .. } => {}
+            CgExpr::Lit(_)
+            | CgExpr::Rng { .. }
+            | CgExpr::AgentSelfId
+            | CgExpr::PerPairCandidateId
+            | CgExpr::ReadLocal { .. } => {}
         }
     }
 }

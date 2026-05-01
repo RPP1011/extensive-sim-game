@@ -157,6 +157,16 @@ pub struct LoweringCtx<'a> {
     /// before, with the type checker resolving against
     /// `ctx.view_signatures`. Task 5.5c.
     pub lazy_view_bodies: HashMap<ViewId, LazyViewSnapshot>,
+    /// Typed `LocalId → CgTy` map. Populated by `IrStmt::Let` lowering
+    /// (Task 5.5b/d) at the moment each binding's CG type becomes
+    /// known. Used by `IrExpr::Local` resolution (Task 5.5d) to
+    /// reconstruct `CgExpr::ReadLocal { local, ty }` for bare-local
+    /// reads.
+    ///
+    /// Distinct from [`Self::local_ids`]: that map carries
+    /// `LocalRef → LocalId` (binder identity), this one carries
+    /// `LocalId → CgTy` (binder type).
+    pub local_tys: HashMap<LocalId, CgTy>,
 }
 
 /// Captured form of a `@lazy` view's resolved AST: enough to
@@ -197,6 +207,7 @@ impl<'a> LoweringCtx<'a> {
             target_local: false,
             config_const_ids: HashMap::new(),
             lazy_view_bodies: HashMap::new(),
+            local_tys: HashMap::new(),
         }
     }
 
@@ -332,6 +343,15 @@ impl<'a> LoweringCtx<'a> {
     ) -> Option<LazyViewSnapshot> {
         self.lazy_view_bodies.insert(view_id, snapshot)
     }
+
+    /// Record `local_id → ty` for later `IrExpr::Local` resolution.
+    /// Called by physics-Let lowering after the bound expression's CG
+    /// type is known. Returns the prior `CgTy` if one was registered
+    /// for the same id (driver-side duplicate — surfacing it lets
+    /// tests assert exclusive allocation).
+    pub fn record_local_ty(&mut self, local_id: LocalId, ty: CgTy) -> Option<CgTy> {
+        self.local_tys.insert(local_id, ty)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -391,15 +411,10 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
 
         // ---- Local references ----
         //
-        // The expression layer only recognises `self` as a base for
-        // dotted field reads; bare `self` itself is not a CG value (it
-        // would map to "the current agent slot", but that's an op-level
-        // concept, not an expression value). Other locals must be bound
-        // by op-lowering (`target`, fold binders, etc.).
-        IrExpr::Local(_, name) => Err(LoweringError::UnsupportedLocalBinding {
-            name: name.clone(),
-            span,
-        }),
+        // Resolution order in `lower_bare_local`: let-bound locals
+        // first (via `ctx.local_ids` → `ctx.local_tys`), then bare
+        // `self` and pair-bound `target`, then a typed deferral.
+        IrExpr::Local(local_ref, name) => lower_bare_local(*local_ref, name, span, ctx),
 
         // ---- Operators ----
         IrExpr::Binary(op, lhs, rhs) => lower_binary(*op, lhs, rhs, span, ctx),
@@ -691,6 +706,55 @@ fn lower_field(
         }
         _ => Err(LoweringError::UnsupportedFieldBase {
             field_name: field_name.to_string(),
+            span,
+        }),
+    }
+}
+
+/// Lower a bare `IrExpr::Local(local_ref, name)` (no `.field` access)
+/// to a CG expression.
+///
+/// Resolution order:
+///
+/// 1. **Let-bound local.** If `ctx.local_ids` has an entry for
+///    `local_ref`, the local was introduced by an enclosing
+///    `IrStmt::Let` (lowered to `CgStmt::Let { local, value, ty }`).
+///    The expression resolves to `CgExpr::ReadLocal { local, ty }`
+///    where `ty` comes from `ctx.local_tys`. A missing
+///    `local_tys` entry surfaces as
+///    [`LoweringError::UnknownLocalType`].
+/// 2. **Bare `self`.** Resolves to [`CgExpr::AgentSelfId`] (typed
+///    `AgentId`). Used in surface DSL like `agents.alive(self)` and
+///    `target != self`.
+/// 3. **Bare `target` in a pair-bound context.** Resolves to
+///    [`CgExpr::PerPairCandidateId`] (typed `AgentId`) when
+///    `ctx.target_local` is `true`. Outside pair-bound contexts, falls
+///    through to the default error.
+/// 4. **Anything else** — surfaces as
+///    [`LoweringError::UnsupportedLocalBinding`].
+fn lower_bare_local(
+    local_ref: LocalRef,
+    name: &str,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    // Step 1: let-bound local.
+    if let Some(&local_id) = ctx.local_ids.get(&local_ref) {
+        let ty = ctx.local_tys.get(&local_id).copied().ok_or(
+            LoweringError::UnknownLocalType {
+                local: local_id,
+                span,
+            },
+        )?;
+        return add(ctx, CgExpr::ReadLocal { local: local_id, ty }, span);
+    }
+
+    // Step 2-3: structural locals.
+    match name {
+        "self" => add(ctx, CgExpr::AgentSelfId, span),
+        "target" if ctx.target_local => add(ctx, CgExpr::PerPairCandidateId, span),
+        _ => Err(LoweringError::UnsupportedLocalBinding {
+            name: name.to_string(),
             span,
         }),
     }
@@ -2654,14 +2718,100 @@ mod tests {
     // ---- Local references ----
 
     #[test]
-    fn bare_local_self_rejected() {
-        // `self` alone (not `.field`) has no expression-level CG form.
+    fn bare_local_self_lowers_to_agent_self_id() {
+        // Task 5.5d: bare `self` resolves to `CgExpr::AgentSelfId`.
         let ast = local_self();
-        let err = lower_to_string(&ast).unwrap_err();
-        assert!(matches!(
-            err,
-            LoweringError::UnsupportedLocalBinding { .. }
+        assert_eq!(lower_to_string(&ast).unwrap(), "(agent self_id)");
+    }
+
+    #[test]
+    fn bare_target_in_pair_bound_lowers_to_per_pair_candidate_id() {
+        let ast = node(IrExpr::Local(LocalRef(1), "target".to_string()));
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.target_local = true;
+        let id = lower_expr(&ast, &mut ctx).expect("lowers");
+        let prog = builder.finish();
+        let node_at = &prog.exprs[id.0 as usize];
+        assert_eq!(pretty(node_at, &prog.exprs), "(agent per_pair_candidate_id)");
+    }
+
+    #[test]
+    fn bare_target_outside_pair_bound_rejected() {
+        let ast = node(IrExpr::Local(LocalRef(1), "target".to_string()));
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // ctx.target_local left false.
+        let err = lower_expr(&ast, &mut ctx).expect_err("must reject");
+        match err {
+            LoweringError::UnsupportedLocalBinding { name, .. } => {
+                assert_eq!(name, "target");
+            }
+            other => panic!("expected UnsupportedLocalBinding, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bare_unknown_local_rejected() {
+        let ast = node(IrExpr::Local(LocalRef(2), "foo".to_string()));
+        let err = lower_to_string(&ast).expect_err("must reject");
+        match err {
+            LoweringError::UnsupportedLocalBinding { name, .. } => {
+                assert_eq!(name, "foo");
+            }
+            other => panic!("expected UnsupportedLocalBinding, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn target_neq_self_lowers_in_pair_bound() {
+        // (target != self) under target_local = true.
+        let ast = node(IrExpr::Binary(
+            BinOp::NotEq,
+            Box::new(node(IrExpr::Local(LocalRef(1), "target".to_string()))),
+            Box::new(node(IrExpr::Local(LocalRef(0), "self".to_string()))),
         ));
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.target_local = true;
+        let id = lower_expr(&ast, &mut ctx).expect("lowers");
+        let prog = builder.finish();
+        let node_at = &prog.exprs[id.0 as usize];
+        assert_eq!(
+            pretty(node_at, &prog.exprs),
+            "(ne.agent_id (agent per_pair_candidate_id) (agent self_id))"
+        );
+    }
+
+    #[test]
+    fn let_bound_local_read_lowers_to_read_local() {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_local(LocalRef(7), LocalId(3));
+        ctx.record_local_ty(LocalId(3), CgTy::F32);
+
+        let ast = node(IrExpr::Local(LocalRef(7), "x".to_string()));
+        let id = lower_expr(&ast, &mut ctx).expect("lowers");
+        let prog = builder.finish();
+        let node_at = &prog.exprs[id.0 as usize];
+        assert_eq!(pretty(node_at, &prog.exprs), "(read_local local#3 f32)");
+    }
+
+    #[test]
+    fn let_bound_local_without_recorded_ty_rejected() {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_local(LocalRef(7), LocalId(3));
+        // Note: no ty recorded.
+
+        let ast = node(IrExpr::Local(LocalRef(7), "x".to_string()));
+        let err = lower_expr(&ast, &mut ctx).expect_err("must reject");
+        match err {
+            LoweringError::UnknownLocalType { local, .. } => {
+                assert_eq!(local, LocalId(3));
+            }
+            other => panic!("expected UnknownLocalType, got {other:?}"),
+        }
     }
 
     // ---- Unsupported AST shapes — typed deferral ----
