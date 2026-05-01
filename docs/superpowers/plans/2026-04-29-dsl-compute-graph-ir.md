@@ -805,7 +805,16 @@ Implement real WGSL bodies for op kinds that today emit `// TODO(task-4.x)` comm
 
 Replace xtask's legacy-emitter calls with `emit_cg_program` writes. Run `parity_with_cpu` (Phase 6 gate). If parity fails, fix the IR/lowering/schedule — NOT the test.
 
-- [ ] **Step 1-2: Switchover + parity gate.**
+**Pre-switchover blockers** (carried forward from Task 5.4 review — these are runtime correctness gates, not aesthetic refinements):
+
+1. **Resident view-buffer aliasing.** Legacy `ResidentPathContext` aliases three fold accessors back to existing fields (`fold_view_engaged_with_handles → standing_primary`, `fold_view_standing_handles → standing_primary`, `fold_view_memory_handles → memory_primary`). Task 5.4's CG-emitted version emits separate `view_storage_<name>` fields per view — wire-incompatible with `engine_gpu`'s consumer. Decide before switchover: (a) IR-level alias hint surfacing the legacy aliasing, OR (b) update `engine_gpu` to expect distinct buffers per view name.
+
+2. **`scoring_view_buffers_slice` ordering.** CG-emitted version walks every materialised view in interner order; legacy uses `scoring_view_binding_order` (subset, defined order). Behavioral divergence — verify with parity test that the consumer is robust under the new order.
+
+3. **Schedule `DispatchOp` wrappers.** CG-emitted `SCHEDULE` constant only populates `DispatchOp::Kernel(...)` arms; legacy wraps with `FixedPoint { kernel: Physics, max_iter: 8 }` and `Indirect { kernel: SeedIndirect, args_buf: ResidentIndirectArgs }`. Without these wrappers, physics won't fixpoint-loop and seed-indirect won't dispatch indirect — runtime correctness blocker. Plumb the topology classification through `synthesize_schedule` to populate the right arms.
+
+- [ ] **Step 1: Address pre-switchover blockers (1-3 above).**
+- [ ] **Step 2: Switchover + parity gate.**
 - [ ] **Step 3: Commit.** `refactor(xtask): canonical compile-dsl emit is CG pipeline`
 
 ### Task 5.8: Retire legacy emitters
