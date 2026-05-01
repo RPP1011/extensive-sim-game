@@ -907,7 +907,7 @@ fn compose_dispatch_call(topology: &KernelTopology) -> String {
 /// `kernel_index` is the schedule-order list of snake_case kernel names
 /// (one per emitted module). The output declares each module, re-exports
 /// the `<Pascal>Kernel` struct, defines the [`crate::Kernel`] trait,
-/// the `KernelKind` registry enum, the `BufferRef` enum, and the
+/// the `KernelId` registry enum, the `BufferRef` enum, and the
 /// `bgl_storage` / `bgl_uniform` helper fns every per-kernel module
 /// invokes as `crate::bgl_storage(...)` / `crate::bgl_uniform(...)`.
 ///
@@ -929,7 +929,7 @@ fn compose_dispatch_call(topology: &KernelTopology) -> String {
 ///   not yet, but every emitted kernel imports `BindingSources` from
 ///   `binding_sources` (which transitively pulls in the rest). Task
 ///   5.4+ extends.
-/// - **`KernelKind` variants are PascalCase derived from
+/// - **`KernelId` variants are PascalCase derived from
 ///   [`snake_to_pascal`].** Two distinct snake names that pascalize to
 ///   the same identifier (e.g. `foo_bar` and `foo__bar`) would collide
 ///   here; today the [`super::kernel::semantic_kernel_name`] mapping
@@ -970,9 +970,9 @@ pub fn synthesize_lib_rs(kernel_index: &[String]) -> String {
     out.push_str("pub mod schedule;\n");
     out.push('\n');
 
-    // KernelKind enum.
+    // KernelId enum.
     out.push_str("#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]\n");
-    out.push_str("pub enum KernelKind {\n");
+    out.push_str("pub enum KernelId {\n");
     for name in kernel_index {
         out.push_str(&format!("    {},\n", snake_to_pascal(name)));
     }
@@ -1654,8 +1654,8 @@ mod tests {
             "binding_sources mod missing: {lib}"
         );
         assert!(
-            lib.contains("pub enum KernelKind {"),
-            "KernelKind enum missing: {lib}"
+            lib.contains("pub enum KernelId {"),
+            "KernelId enum missing: {lib}"
         );
         assert!(
             lib.contains("pub enum BufferRef"),
@@ -1691,7 +1691,7 @@ mod tests {
             lib.contains("pub use fold_threat_level::FoldThreatLevelKernel;"),
             "{lib}"
         );
-        // KernelKind variants in PascalCase.
+        // KernelId variants in PascalCase.
         assert!(lib.contains("    FusedMask,"), "{lib}");
         assert!(lib.contains("    Scoring,"), "{lib}");
         assert!(lib.contains("    FoldThreatLevel,"), "{lib}");

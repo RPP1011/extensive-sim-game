@@ -14,6 +14,14 @@ use dsl_compiler::ir::Compilation;
 use crate::cli::CompileDslArgs;
 
 pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
+    if args.check && args.cg_canonical {
+        eprintln!(
+            "compile-dsl: --check and --cg-canonical are mutually \
+             exclusive (the CG pipeline does not have a --check mode \
+             yet). Drop one of the flags."
+        );
+        return ExitCode::FAILURE;
+    }
     let sim_files = match discover_sim_files(&args.src) {
         Ok(files) => files,
         Err(e) => {
@@ -244,6 +252,13 @@ pub fn run_compile_dsl(args: CompileDslArgs) -> ExitCode {
             eprintln!("compile-dsl: {e}");
             return ExitCode::FAILURE;
         }
+
+        // ----- BEGIN: legacy per-kernel + cross-cutting emit (Task 5.7).
+        //              Skipped when --cg-canonical is set; replaced by the
+        //              CG pipeline write below. The legacy path remains
+        //              the no-flag default; reverting to legacy is just
+        //              dropping the flag and re-running compile-dsl.
+        if !args.cg_canonical {
 
         // Per-kernel emit accumulators. Each per-kernel block below pushes
         // the fields / schedule rows it needs; xtask flushes them once at
@@ -1572,6 +1587,14 @@ fn cs_fold_{name}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n\
         // gpu_megakernel_plan work in flight to fill in. T14 lands
         // the wiring only — the megakernel pipeline is compiled but
         // not dispatched yet (selector wiring is left to T15+).
+        //
+        // Megakernel emit is inside the legacy block because it
+        // consumes `schedule_entries` accumulated by per-kernel
+        // blocks above. The CG canonical path does not emit
+        // megakernel — the on-disk megakernel.rs / .wgsl from a
+        // prior legacy regen are left untouched (CG's lib.rs
+        // doesn't declare `pub mod megakernel`, so they're dead
+        // files under the canonical layout).
         {
             let mk_rs =
                 dsl_compiler::emit_megakernel::emit_megakernel_rs(&schedule_entries);
@@ -1591,6 +1614,80 @@ fn cs_fold_{name}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n\
                 eprintln!("compile-dsl: write megakernel.wgsl: {e}");
                 return ExitCode::FAILURE;
             }
+        }
+
+        }
+        // ----- END: legacy per-kernel + cross-cutting emit.
+
+        if args.cg_canonical {
+            // CG-canonical: run lower → synthesize_schedule → emit_cg_program
+            // and write the resulting EmittedArtifacts into
+            // crates/engine_gpu_rules/src/. Mirrors `emit_cg_side_channel`
+            // but skips its production-path-rejection guard (this IS the
+            // production path).
+            use dsl_compiler::cg::emit::emit_cg_program;
+            use dsl_compiler::cg::lower::lower_compilation_to_cg;
+            use dsl_compiler::cg::schedule::{synthesize_schedule, ScheduleStrategy};
+
+            let prog = match lower_compilation_to_cg(&combined) {
+                Ok(p) => p,
+                Err(outcome) => {
+                    eprintln!(
+                        "compile-dsl: --cg-canonical: lowering produced {} diagnostic(s):",
+                        outcome.diagnostics.len()
+                    );
+                    for diag in &outcome.diagnostics {
+                        eprintln!("  - {diag}");
+                    }
+                    outcome.program
+                }
+            };
+            let synthesis = synthesize_schedule(&prog, ScheduleStrategy::Default);
+            if !synthesis.fusion_diagnostics.is_empty()
+                || !synthesis.schedule_diagnostics.is_empty()
+            {
+                eprintln!(
+                    "compile-dsl: --cg-canonical: schedule synthesis produced \
+                     {} fusion + {} schedule diagnostic(s)",
+                    synthesis.fusion_diagnostics.len(),
+                    synthesis.schedule_diagnostics.len(),
+                );
+                for d in &synthesis.fusion_diagnostics {
+                    eprintln!("  - fusion: {}", d.message);
+                }
+                for d in &synthesis.schedule_diagnostics {
+                    eprintln!("  - schedule: {}", d.message);
+                }
+            }
+
+            let artifacts = match emit_cg_program(&synthesis.schedule, &prog) {
+                Ok(a) => a,
+                Err(e) => {
+                    eprintln!("compile-dsl: --cg-canonical: emit_cg_program failed: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+
+            let target = PathBuf::from("crates/engine_gpu_rules/src");
+            if let Err(e) = fs::create_dir_all(&target) {
+                eprintln!(
+                    "compile-dsl: --cg-canonical: mkdir {}: {e}",
+                    target.display()
+                );
+                return ExitCode::FAILURE;
+            }
+            if let Err(e) = write_cg_artifacts(&target, &artifacts) {
+                eprintln!("compile-dsl: --cg-canonical: {e}");
+                return ExitCode::FAILURE;
+            }
+            println!(
+                "compile-dsl: --cg-canonical: wrote {} wgsl + {} rust file(s) to {} \
+                 ({} kernel(s) in index)",
+                artifacts.wgsl_files.len(),
+                artifacts.rust_files.len(),
+                target.display(),
+                artifacts.kernel_index.len(),
+            );
         }
 
         // Schema hash baseline. Walk the engine_gpu_rules/src/ tree (after
@@ -2744,5 +2841,47 @@ mod cg_side_channel_tests {
         );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- Task 5.7 P4 — --cg-canonical flag ----
+
+    #[test]
+    fn cg_canonical_flag_is_visible_in_help() {
+        // Smoke test: parse the args and verify cg_canonical is a real
+        // field. (Doesn't exercise the write path — that needs a full
+        // cargo run round-trip.)
+        use clap::Parser;
+        let args = crate::cli::CompileDslArgs::parse_from([
+            "compile-dsl",
+            "--cg-canonical",
+        ]);
+        assert!(args.cg_canonical, "--cg-canonical must set the field true");
+    }
+
+    #[test]
+    fn cg_canonical_default_is_false() {
+        use clap::Parser;
+        let args = crate::cli::CompileDslArgs::parse_from(["compile-dsl"]);
+        assert!(
+            !args.cg_canonical,
+            "--cg-canonical must default false (legacy emit canonical)"
+        );
+    }
+
+    #[test]
+    fn cg_canonical_and_check_are_mutually_exclusive() {
+        use clap::Parser;
+        let args = crate::cli::CompileDslArgs::parse_from([
+            "compile-dsl",
+            "--cg-canonical",
+            "--check",
+        ]);
+        let exit = run_compile_dsl(args);
+        // Compare via Debug rendering since ExitCode lacks PartialEq.
+        assert_eq!(
+            format!("{exit:?}"),
+            format!("{:?}", ExitCode::FAILURE),
+            "--cg-canonical + --check must short-circuit FAILURE"
+        );
     }
 }

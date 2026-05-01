@@ -273,6 +273,42 @@ pub struct CompileDslArgs {
     ///   side-channel still emits the best-effort program.
     #[arg(long, value_name = "DIR")]
     pub cg_emit_into: Option<PathBuf>,
+
+    /// Switchover: write CG-emitted `EmittedArtifacts` directly into
+    /// `crates/engine_gpu_rules/src/` instead of the legacy emit path.
+    ///
+    /// When set:
+    /// - The CG pipeline (lower → synthesize_schedule → emit_cg_program)
+    ///   runs once and writes per-kernel WGSL + Rust modules,
+    ///   `lib.rs`, and the cross-cutting modules (binding_sources,
+    ///   resident_context, schedule, etc.) into
+    ///   `crates/engine_gpu_rules/src/`.
+    /// - The legacy `engine_gpu_rules` emit blocks (per-kernel files +
+    ///   schedule + resident_context + lib.rs) are SKIPPED.
+    /// - All other emissions (engine_data events / schema /
+    ///   scoring / entities / enums / configs, engine_rules
+    ///   step / backend / mask_fill / cascade_reg, Python events /
+    ///   enums) run from the legacy path unchanged — the CG pipeline
+    ///   doesn't cover those.
+    ///
+    /// When NOT set: behaviour unchanged from pre-Task-5.7 (legacy
+    /// emit is canonical; `--cg-emit-into` produces an optional
+    /// side-channel diff).
+    ///
+    /// **Reversibility.** Reverting to the legacy path is just
+    /// dropping the flag and re-running `compile-dsl` — the legacy
+    /// emit path overwrites the CG-written files. No engine_gpu
+    /// code change is required to switch back.
+    ///
+    /// **Mutual exclusion.** `--cg-canonical` and `--cg-emit-into`
+    /// can both be set simultaneously, but the `--cg-emit-into` path
+    /// MUST NOT resolve under `crates/engine_gpu_rules/` (the existing
+    /// `path_resolves_into_engine_gpu_rules` rejection still applies).
+    /// The flags answer different questions: `--cg-emit-into` writes
+    /// a SIDE-CHANNEL diff to a scratch dir; `--cg-canonical` flips
+    /// the production overlay.
+    #[arg(long)]
+    pub cg_canonical: bool,
 }
 
 /// Arguments for `compile-dsl-parity` subcommand.
