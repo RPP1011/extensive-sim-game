@@ -92,8 +92,8 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
 use crate::cg::data_handle::{
-    AgentFieldTy, AgentScratchKind, CycleEdgeKey, DataHandle, EventRingAccess, SpatialStorageKind,
-    ViewStorageSlot,
+    AgentFieldTy, AgentScratchKind, CycleEdgeKey, DataHandle, EventRingAccess, MaskId,
+    SpatialStorageKind, ViewStorageSlot,
 };
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PlumbingKind, SpatialQueryKind};
@@ -133,6 +133,14 @@ pub enum KernelEmitError {
     /// arena-out-of-range error. The wrapped variant carries the
     /// typed payload.
     Inner(InnerEmitError),
+    /// An op-kind landed under a [`DispatchShape`] its lowering does
+    /// not support. Surfaced by per-op body templates (today:
+    /// `MaskPredicate` admits `PerAgent` + `PerPair`; everything else
+    /// is a typed mismatch). Task 5.6a.
+    InvalidDispatchForOpKind {
+        op_kind: &'static str,
+        dispatch: String,
+    },
 }
 
 impl fmt::Display for KernelEmitError {
@@ -148,6 +156,10 @@ impl fmt::Display for KernelEmitError {
                 write!(f, "synthesised KernelSpec failed validation: {reason}")
             }
             KernelEmitError::Inner(inner) => write!(f, "inner lowering failure: {inner}"),
+            KernelEmitError::InvalidDispatchForOpKind { op_kind, dispatch } => write!(
+                f,
+                "{op_kind} op cannot lower under dispatch shape {dispatch}"
+            ),
         }
     }
 }
@@ -1216,7 +1228,7 @@ fn build_wgsl_body(
             out.push_str("\n\n");
         }
         let op = resolve_op(prog, *op_id)?;
-        let fragment = lower_op_body(op, ctx)?;
+        let fragment = lower_op_body(op, dispatch, ctx)?;
         // Comment header per op for traceability.
         writeln!(out, "// op#{} ({})", op.id.0, compute_op_kind_short(&op.kind))
             .expect("write to String never fails");
@@ -1329,23 +1341,32 @@ const SPATIAL_ENGAGEMENT_QUERY_BODY: &str = "// SpatialQuery::EngagementQuery �
     let _c = cfg.agent_cap;";
 
 /// Per-op body lowering. Returns the WGSL fragment for the op without
-/// surrounding kernel boilerplate.
-fn lower_op_body(op: &ComputeOp, ctx: &EmitCtx<'_>) -> Result<String, KernelEmitError> {
+/// surrounding kernel boilerplate. `dispatch` carries the kernel's
+/// dispatch shape so per-op bodies that vary across shapes
+/// (`MaskPredicate` PerAgent vs PerPair) can branch appropriately
+/// (Task 5.6a).
+fn lower_op_body(
+    op: &ComputeOp,
+    dispatch: &DispatchShape,
+    ctx: &EmitCtx<'_>,
+) -> Result<String, KernelEmitError> {
     match &op.kind {
         ComputeOpKind::MaskPredicate { mask, predicate } => {
             let predicate_wgsl = lower_cg_expr_to_wgsl(*predicate, ctx)?;
-            // Placeholder atomic-or write — the legacy mask emitter
-            // packs 32 agents per word and atomicOrs the bit. Task 5.1
-            // aligns the exact form.
-            Ok(format!(
-                "let mask_{0}_value: bool = {1};\n\
-                 if (mask_{0}_value) {{\n\
-                 \x20   let word = agent_id >> 5u;\n\
-                 \x20   let bit = 1u << (agent_id & 31u);\n\
-                 \x20   atomicOr(&mask_{0}_bitmap[word], bit);\n\
-                 }}",
-                mask.0, predicate_wgsl
-            ))
+            match dispatch {
+                DispatchShape::PerAgent => {
+                    Ok(mask_predicate_per_agent_body(*mask, &predicate_wgsl))
+                }
+                DispatchShape::PerPair { .. } => {
+                    Ok(mask_predicate_per_pair_body(*mask, &predicate_wgsl))
+                }
+                DispatchShape::PerEvent { .. }
+                | DispatchShape::OneShot
+                | DispatchShape::PerWord => Err(KernelEmitError::InvalidDispatchForOpKind {
+                    op_kind: "MaskPredicate",
+                    dispatch: format!("{dispatch}"),
+                }),
+            }
         }
         ComputeOpKind::PhysicsRule { body, .. } => {
             lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)
@@ -1379,6 +1400,48 @@ fn lower_op_body(op: &ComputeOp, ctx: &EmitCtx<'_>) -> Result<String, KernelEmit
         // [`KernelSpec`] layout (no spec-level renames).
         ComputeOpKind::Plumbing { kind } => Ok(plumbing_body_for_kind(kind)),
     }
+}
+
+// ---------------------------------------------------------------------------
+// MaskPredicate body templates (Task 5.6a)
+// ---------------------------------------------------------------------------
+
+/// PerAgent dispatch — `agent_id` is bound by the
+/// `thread_indexing_preamble`. Each mask op uses per-id-suffixed
+/// locals (`mask_<ID>_word`, `mask_<ID>_bit`) so a Fused kernel with
+/// multiple `MaskPredicate` ops doesn't redeclare `word`/`bit`.
+fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
+    format!(
+        "let mask_{0}_value: bool = {1};\n\
+         if (mask_{0}_value) {{\n\
+         \x20   let mask_{0}_word = agent_id >> 5u;\n\
+         \x20   let mask_{0}_bit  = 1u << (agent_id & 31u);\n\
+         \x20   atomicOr(&mask_{0}_bitmap[mask_{0}_word], mask_{0}_bit);\n\
+         }}",
+        mask.0, predicate_wgsl
+    )
+}
+
+/// PerPair dispatch — derive `(agent, cand)` from `pair = gid.x`,
+/// bound-check `agent`, evaluate the predicate, atomic-OR the
+/// agent's bit. `mask_<ID>_k` placeholder is `1u` until Task 5.7
+/// wires `cfg.per_pair_candidates`.
+fn mask_predicate_per_pair_body(mask: MaskId, predicate_wgsl: &str) -> String {
+    format!(
+        "// PerPair MaskPredicate — derive (agent, cand) from `pair`.\n\
+         let mask_{0}_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.\n\
+         let mask_{0}_agent = pair / mask_{0}_k;\n\
+         let mask_{0}_cand  = pair % mask_{0}_k;\n\
+         if (mask_{0}_agent >= cfg.agent_cap) {{ return; }}\n\
+         \n\
+         let mask_{0}_value: bool = {1};\n\
+         if (mask_{0}_value) {{\n\
+         \x20   let mask_{0}_word = mask_{0}_agent >> 5u;\n\
+         \x20   let mask_{0}_bit  = 1u << (mask_{0}_agent & 31u);\n\
+         \x20   atomicOr(&mask_{0}_bitmap[mask_{0}_word], mask_{0}_bit);\n\
+         }}",
+        mask.0, predicate_wgsl
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2130,6 +2193,220 @@ mod tests {
         // The lowered predicate text from Task 4.1's expr walker
         // should appear: `(agent_self_hp < 5.0)`.
         assert!(body.contains("agent_self_hp < 5.0"), "body: {body}");
+    }
+
+    // ---- 8b. MaskPredicate body (Task 5.6a) ----
+
+    #[test]
+    fn mask_predicate_per_agent_body_emits_atomic_or_at_agent_id() {
+        let mut prog = CgProgram::default();
+        let lit_true = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
+        let kind = ComputeOpKind::MaskPredicate {
+            mask: MaskId(7),
+            predicate: lit_true,
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        assert!(body.contains("let agent_id = gid.x;"), "body: {body}");
+        assert!(body.contains("if (agent_id >= cfg.agent_cap)"), "body: {body}");
+        assert!(body.contains("let mask_7_value: bool = true;"), "body: {body}");
+        assert!(body.contains("let mask_7_word = agent_id >> 5u;"), "body: {body}");
+        assert!(
+            body.contains("let mask_7_bit  = 1u << (agent_id & 31u);"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("atomicOr(&mask_7_bitmap[mask_7_word], mask_7_bit);"),
+            "body: {body}"
+        );
+    }
+
+    #[test]
+    fn mask_predicate_per_pair_body_derives_agent_from_pair_and_writes_per_agent_bit() {
+        use crate::cg::dispatch::PerPairSource;
+        let mut prog = CgProgram::default();
+        let lit_true = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
+        let kind = ComputeOpKind::MaskPredicate {
+            mask: MaskId(11),
+            predicate: lit_true,
+        };
+        let pair_dispatch = DispatchShape::PerPair {
+            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            pair_dispatch,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: pair_dispatch,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        assert!(body.contains("let pair = gid.x;"), "body: {body}");
+        assert!(body.contains("let mask_11_k = 1u;"), "body: {body}");
+        assert!(
+            body.contains("let mask_11_agent = pair / mask_11_k;"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("let mask_11_cand  = pair % mask_11_k;"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("if (mask_11_agent >= cfg.agent_cap) { return; }"),
+            "body: {body}"
+        );
+        assert!(body.contains("let mask_11_value: bool = true;"), "body: {body}");
+        assert!(
+            body.contains("let mask_11_word = mask_11_agent >> 5u;"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("let mask_11_bit  = 1u << (mask_11_agent & 31u);"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("atomicOr(&mask_11_bitmap[mask_11_word], mask_11_bit);"),
+            "body: {body}"
+        );
+    }
+
+    #[test]
+    fn mask_predicate_under_unsupported_dispatch_shape_errors() {
+        let mut prog = CgProgram::default();
+        let lit_true = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
+        let kind = ComputeOpKind::MaskPredicate {
+            mask: MaskId(0),
+            predicate: lit_true,
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::OneShot,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::OneShot,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let err = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                KernelEmitError::InvalidDispatchForOpKind { op_kind: "MaskPredicate", .. }
+            ),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn fused_two_mask_predicates_emit_distinct_local_names() {
+        let mut prog = CgProgram::default();
+        let m0 = mask_op(&mut prog, MaskId(0));
+        let m1 = mask_op(&mut prog, MaskId(1));
+        let topology = KernelTopology::Fused {
+            ops: vec![m0, m1],
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        assert!(
+            body.contains("atomicOr(&mask_0_bitmap[mask_0_word], mask_0_bit);"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("atomicOr(&mask_1_bitmap[mask_1_word], mask_1_bit);"),
+            "body: {body}"
+        );
+        // No bare `let word = …`.
+        assert!(!body.contains("\n    let word ="), "body: {body}");
+        assert!(!body.contains("\nlet word ="), "body: {body}");
+    }
+
+    #[test]
+    fn mask_predicate_per_pair_body_passes_through_per_pair_candidate_target_read() {
+        use crate::cg::dispatch::PerPairSource;
+        let mut prog = CgProgram::default();
+        // Predicate: `target.hp < 5.0` (read of PerPairCandidate's hp).
+        let target_hp = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::PerPairCandidate,
+            }),
+        );
+        let five = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(5.0)));
+        let lt = push_expr(
+            &mut prog,
+            CgExpr::Binary {
+                op: crate::cg::expr::BinaryOp::LtF32,
+                lhs: target_hp,
+                rhs: five,
+                ty: CgTy::Bool,
+            },
+        );
+        let kind = ComputeOpKind::MaskPredicate {
+            mask: MaskId(9),
+            predicate: lt,
+        };
+        let pair_dispatch = DispatchShape::PerPair {
+            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            pair_dispatch,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: pair_dispatch,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        // The placeholder identifier from wgsl_body.rs flows through.
+        assert!(
+            body.contains("agent_per_pair_candidate_hp"),
+            "body: {body}"
+        );
     }
 
     // ---- 9. Scoring placeholder body ----
