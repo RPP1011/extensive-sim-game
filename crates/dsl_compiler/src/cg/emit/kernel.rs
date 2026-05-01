@@ -234,10 +234,58 @@ pub fn kernel_topology_to_spec_and_body(
         return Err(KernelEmitError::EmptyKernelTopology);
     }
 
-    // 2. Collect every (handle, was_written) pair across all body ops.
+    // 2. Classify the kernel kind — drives per-kind cfg shape, BGL
+    //    layout, and (for ViewFold) custom binding synthesis. See
+    //    [`KernelKindClass`] for the routing table.
+    let body_ops_resolved: Vec<&ComputeOp> = body_ops
+        .iter()
+        .map(|id| resolve_op(prog, *id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let class = classify_kernel(&body_ops_resolved, prog);
+
+    // 3. Pick a semantic kernel name aligned with the legacy emitter
+    //    filenames (`fused_mask`, `scoring`, `fold_<view>`, ...). See
+    //    `semantic_kernel_name` for the full mapping table.
+    let _ = kind_label;
+    let name = semantic_kernel_name(&body_ops_resolved, prog);
+    let pascal = snake_to_pascal(&name);
+    let entry_point = format!("cs_{name}");
+    let cfg_struct = format!("{pascal}Cfg");
+
+    // 4. ViewFold has a fixed 7-binding shape mirroring the legacy
+    //    `fold_<view>.rs` modules (event_ring, event_tail,
+    //    view_storage_primary, view_storage_anchor, view_storage_ids,
+    //    sim_cfg, cfg). The generic handle-aggregation pipeline does
+    //    not produce the anchor/ids slots (they are not data-flow
+    //    handles in the IR; the legacy kernels carry them so the BGL
+    //    matches a runtime-rebound primary fallback). Synthesise the
+    //    spec directly for ViewFold; route every other kernel through
+    //    the generic pipeline.
+    if let KernelKindClass::ViewFold { view_name } = &class {
+        let bindings = build_view_fold_bindings(view_name, &cfg_struct);
+        let cfg_struct_decl = build_view_fold_cfg_struct_decl(&cfg_struct);
+        let cfg_build_expr = build_view_fold_cfg_build_expr(&cfg_struct);
+        let wgsl_body = build_view_fold_wgsl_body(&body_ops, prog, ctx)?;
+        let spec = KernelSpec {
+            name,
+            pascal,
+            entry_point,
+            cfg_struct,
+            cfg_build_expr,
+            cfg_struct_decl,
+            bindings,
+        };
+        spec.validate()
+            .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
+        return Ok((spec, wgsl_body));
+    }
+
+    // --- Generic (non-ViewFold) path ----------------------------------
+
+    // 5. Collect every (handle, was_written) pair across all body ops.
     //
     //    `was_written` is true if any op writes the handle (drives the
-    //    AccessMode upgrade in step 3). The handle is keyed by its full
+    //    AccessMode upgrade in step 6). The handle is keyed by its full
     //    `DataHandle` value but deduplicated through `cycle_edge_key`
     //    so that two `EventRing { ring, kind: Read | Append }` accesses
     //    on the same ring share a binding (the cycle key collapses the
@@ -253,7 +301,7 @@ pub fn kernel_topology_to_spec_and_body(
         }
     }
 
-    // 3. For each unique handle, derive its `BindingMetadata` (if the
+    // 6. For each unique handle, derive its `BindingMetadata` (if the
     //    handle is binding-relevant — Rng / ConfigConst are not). Skip
     //    handles that have no binding metadata.
     let mut typed_bindings: Vec<TypedBinding> = Vec::new();
@@ -275,25 +323,12 @@ pub fn kernel_topology_to_spec_and_body(
         });
     }
 
-    // 4. Sort bindings by their cycle-edge key for determinism.
+    // 7. Sort bindings by their cycle-edge key for determinism.
     //    `BTreeMap` already iterates sorted, but `typed_bindings` is
     //    materialised post-filter so re-sort defensively.
     typed_bindings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
 
-    // 5. Pick a semantic kernel name aligned with the legacy emitter
-    //    filenames (`fused_mask`, `scoring`, `fold_<view>`, ...). See
-    //    `semantic_kernel_name` for the full mapping table.
-    let _ = kind_label;
-    let body_ops_resolved: Vec<&ComputeOp> = body_ops
-        .iter()
-        .map(|id| resolve_op(prog, *id))
-        .collect::<Result<Vec<_>, _>>()?;
-    let name = semantic_kernel_name(&body_ops_resolved, prog);
-    let pascal = snake_to_pascal(&name);
-    let entry_point = format!("cs_{name}");
-    let cfg_struct = format!("{pascal}Cfg");
-
-    // 6. Assign slots — data bindings 0..N, cfg uniform at slot N.
+    // 8. Assign slots — data bindings 0..N, cfg uniform at slot N.
     let mut bindings: Vec<KernelBinding> = Vec::with_capacity(typed_bindings.len() + 1);
     for (slot, tb) in typed_bindings.into_iter().enumerate() {
         bindings.push(KernelBinding {
@@ -313,21 +348,21 @@ pub fn kernel_topology_to_spec_and_body(
         bg_source: BgSource::Cfg,
     });
 
-    // 7. Build the cfg struct decl + cfg-construction expression. For
-    //    Task 4.2 these are the minimal valid forms; the kernel's
-    //    actual cfg shape is a Task 5.1 alignment concern.
-    let cfg_struct_decl = build_cfg_struct_decl(&cfg_struct);
-    let cfg_build_expr = build_cfg_build_expr(&cfg_struct);
+    // 9. Build the cfg struct decl + cfg-construction expression — per
+    //    classified kind. ViewFold is handled above; non-ViewFold
+    //    kernels keep the placeholder shape today.
+    let cfg_struct_decl = build_generic_cfg_struct_decl(&cfg_struct);
+    let cfg_build_expr = build_generic_cfg_build_expr(&cfg_struct);
 
-    // 8. Compose the WGSL body — one fragment per op, joined with
-    //    blank lines. Computing the body here surfaces any inner-walk
-    //    arena failures as typed errors before the spec is returned, so
-    //    a malformed program never yields a spec whose body the
-    //    downstream WGSL emitter can't render. The body itself is not
-    //    stored on `KernelSpec` (it lives in the WGSL emitter that
-    //    consumes the spec) — Task 4.3 will redo body composition at
-    //    that layer. We return it alongside the spec for tests + Task
-    //    4.3 callers; [`kernel_topology_to_spec`] discards it.
+    // 10. Compose the WGSL body — one fragment per op, joined with
+    //     blank lines. Computing the body here surfaces any inner-walk
+    //     arena failures as typed errors before the spec is returned,
+    //     so a malformed program never yields a spec whose body the
+    //     downstream WGSL emitter can't render. The body itself is not
+    //     stored on `KernelSpec` (it lives in the WGSL emitter that
+    //     consumes the spec) — Task 4.3 will redo body composition at
+    //     that layer. We return it alongside the spec for tests + Task
+    //     4.3 callers; [`kernel_topology_to_spec`] discards it.
     let wgsl_body = build_wgsl_body(&body_ops, &dispatch, prog, ctx)?;
 
     let spec = KernelSpec {
@@ -343,6 +378,92 @@ pub fn kernel_topology_to_spec_and_body(
     spec.validate()
         .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
     Ok((spec, wgsl_body))
+}
+
+// ---------------------------------------------------------------------------
+// Kernel-kind classification
+// ---------------------------------------------------------------------------
+
+/// Coarse classification of a kernel's body ops. Used to pick the
+/// per-kind cfg shape, BGL layout, and (for ViewFold) the custom
+/// hand-synthesised spec.
+///
+/// # Limitations
+///
+/// - **ViewFold detection requires every body op to be a
+///   [`ComputeOpKind::ViewFold`] handler over the same view.** Single
+///   ViewFold ops (Split topology) and consumer-fused ViewFold groups
+///   (Indirect topology with all-ViewFold consumers) both classify as
+///   [`KernelKindClass::ViewFold`]. The view name is pulled from the
+///   first consumer's `view: ViewId` via [`CgProgram::interner`]; if
+///   no name is interned the fallback is `view_<id>`. Two consumers
+///   over distinct views in the same kernel — synthesis does not
+///   produce this today; if it did, the first consumer's view would
+///   win and the others would point at the wrong resident accessor.
+///   Task 5.4 wires the resident-handle accessor (the call site
+///   here references `sources.resident.fold_view_<view>_handles()`).
+/// - **Other classifications are not yet surfaced.** MaskPredicate,
+///   PhysicsRule, ScoringArgmax, SpatialQuery, Plumbing all fall under
+///   [`KernelKindClass::Generic`] today; per-kind cfg refinement for
+///   those is a future task (5.5+).
+#[derive(Debug, Clone)]
+enum KernelKindClass {
+    /// Every body op is a [`ComputeOpKind::ViewFold`] over a single
+    /// view. Drives the legacy 7-binding fold-kernel layout +
+    /// `{ event_count, tick, _pad: [u32; 2] }` cfg shape.
+    ViewFold {
+        /// snake_case view name. Pulled from the program interner;
+        /// falls back to `view_<id>` when no name is interned. Drives
+        /// the resident accessor `fold_view_<view_name>_handles()` —
+        /// emitted by [`build_view_fold_bindings`]; the accessor
+        /// itself is generated by Task 5.4's `emit_resident_context`.
+        view_name: String,
+    },
+    /// Anything not detected as ViewFold. Routes through the generic
+    /// handle-aggregation pipeline + placeholder cfg shape.
+    Generic,
+}
+
+/// Classify a kernel's body ops. See [`KernelKindClass`] for the
+/// table. `prog` carries the interner so the ViewFold path can
+/// resolve a snake_case view name eagerly.
+fn classify_kernel(body_ops: &[&ComputeOp], prog: &CgProgram) -> KernelKindClass {
+    if body_ops.is_empty() {
+        return KernelKindClass::Generic;
+    }
+    // ViewFold detection: every body op must be a ViewFold and all
+    // must reference the same view id.
+    let mut first_view_id: Option<crate::cg::data_handle::ViewId> = None;
+    for op in body_ops {
+        match &op.kind {
+            ComputeOpKind::ViewFold { view, .. } => {
+                if let Some(prev) = first_view_id {
+                    if prev != *view {
+                        return KernelKindClass::Generic;
+                    }
+                } else {
+                    first_view_id = Some(*view);
+                }
+            }
+            ComputeOpKind::MaskPredicate { .. }
+            | ComputeOpKind::PhysicsRule { .. }
+            | ComputeOpKind::ScoringArgmax { .. }
+            | ComputeOpKind::SpatialQuery { .. }
+            | ComputeOpKind::Plumbing { .. } => {
+                return KernelKindClass::Generic;
+            }
+        }
+    }
+    // Reachable only if every op is a ViewFold — first_view_id is set.
+    let view_id = match first_view_id {
+        Some(v) => v,
+        None => return KernelKindClass::Generic,
+    };
+    let view_name = match prog.interner.get_view_name(view_id) {
+        Some(name) => name.to_string(),
+        None => format!("view_{}", view_id.0),
+    };
+    KernelKindClass::ViewFold { view_name }
 }
 
 // ---------------------------------------------------------------------------
@@ -789,15 +910,21 @@ fn compute_op_kind_short(kind: &ComputeOpKind) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
-// Cfg struct + build expr
+// Cfg struct + build expr — generic (non-ViewFold) kernels
 // ---------------------------------------------------------------------------
 
-/// Build a minimal cfg struct decl. The legacy emitters embed
-/// per-kernel cfg fields (e.g. `agent_cap`, `num_mask_words`); Task 4.2
-/// produces a single-field placeholder so the spec validates and the
-/// downstream lowerings have something to consume. Task 5.1 will
-/// refine.
-fn build_cfg_struct_decl(cfg_struct: &str) -> String {
+/// Build a minimal cfg struct decl for non-ViewFold kernels. The legacy
+/// emitters embed per-kernel cfg fields (e.g. `agent_cap`,
+/// `num_mask_words`); the generic placeholder shape is one field so the
+/// spec validates and downstream lowerings have something to consume.
+///
+/// # Limitations
+///
+/// - **Per-kind refinement is partial.** ViewFold has its own cfg shape
+///   (event_count + tick) routed through [`build_view_fold_cfg_struct_decl`].
+///   Mask, scoring, physics, spatial, and plumbing kernels share this
+///   placeholder today; Task 5.5 will refine.
+fn build_generic_cfg_struct_decl(cfg_struct: &str) -> String {
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
@@ -805,8 +932,203 @@ fn build_cfg_struct_decl(cfg_struct: &str) -> String {
     )
 }
 
-fn build_cfg_build_expr(cfg_struct: &str) -> String {
+fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
     format!("{cfg_struct} {{ agent_cap: state.agent_cap(), _pad: [0; 3] }}")
+}
+
+// ---------------------------------------------------------------------------
+// ViewFold-specific spec synthesis
+// ---------------------------------------------------------------------------
+
+/// Build the cfg struct decl for a ViewFold kernel. Mirrors the legacy
+/// fold-kernel shape (`{ event_count: u32, tick: u32, _pad: [u32; 2] }`)
+/// — `event_count` is left at 0 in build_cfg and populated at dispatch
+/// time via the indirect-args buffer.
+///
+/// # Limitations
+///
+/// - **`event_count` is set to 0 in build_cfg.** The real value comes
+///   from the cascade tail / per-fold indirect-args buffer at dispatch
+///   time. Task 5.7 wires the dispatch-time population.
+fn build_view_fold_cfg_struct_decl(cfg_struct: &str) -> String {
+    format!(
+        "#[repr(C)]\n\
+         #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
+         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub _pad: [u32; 2] }}"
+    )
+}
+
+fn build_view_fold_cfg_build_expr(cfg_struct: &str) -> String {
+    format!("{cfg_struct} {{ event_count: 0, tick: state.tick, _pad: [0; 2] }}")
+}
+
+/// Synthesise the 7-binding [`KernelBinding`] vector for a ViewFold
+/// kernel. The slot layout mirrors the legacy `fold_<view>.rs` modules
+/// (`crates/engine_gpu_rules/src/fold_threat_level.rs` etc.):
+///
+///   slot 0: event_ring             (read storage)
+///   slot 1: event_tail             (read storage)
+///   slot 2: view_storage_primary   (read_write storage)
+///   slot 3: view_storage_anchor    (read_write storage)
+///   slot 4: view_storage_ids       (read_write storage)
+///   slot 5: sim_cfg                (read storage)  -- legacy convention; not a uniform here
+///   slot 6: cfg                    (uniform)
+///
+/// The three view-storage slots use [`BgSource::ViewHandle`] tagged
+/// with the per-view resident accessor name
+/// (`fold_view_<view_name>_handles`); the program-emit layer
+/// destructures the tuple once into local primary/anchor/ids buffers
+/// and the `record()` body's anchor/ids slots fall back to primary via
+/// `Option::unwrap_or`.
+///
+/// # Limitations
+///
+/// - **`sim_cfg` slot is `BgSource::External("sim_cfg")` storage —
+///   the legacy fold kernels declare slot 5 as `var<storage, read>`
+///   even though `sim_cfg` is uniform-shaped on the resident path.
+///   Aligning with that convention for parity; the WGSL declaration
+///   will be `var<storage, read> sim_cfg: array<u32>` per
+///   [`crate::kernel_lowerings::lower_wgsl_bindings`].
+/// - **The resident-handle accessor (`fold_view_<view>_handles`) is
+///   generated by Task 5.4's `emit_resident_context`.** Today's
+///   side-channel run inherits the legacy `resident_context.rs` which
+///   already exposes the accessors for the 9 active views. New views
+///   landing before Task 5.4 will need a manual accessor stub.
+/// - **Anchor/ids slots are tagged `ReadWriteStorage` even though they
+///   may fall back to `primary` at runtime.** The BGL slot has to be
+///   live; rebinding primary into both is a no-op safe choice that
+///   matches the legacy emitters.
+fn build_view_fold_bindings(view_name: &str, cfg_struct: &str) -> Vec<KernelBinding> {
+    let accessor = format!("fold_view_{view_name}_handles");
+    vec![
+        KernelBinding {
+            slot: 0,
+            name: "event_ring".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::Resident("batch_events_ring".into()),
+        },
+        KernelBinding {
+            slot: 1,
+            name: "event_tail".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::Resident("batch_events_tail".into()),
+        },
+        KernelBinding {
+            slot: 2,
+            name: "view_storage_primary".into(),
+            access: AccessMode::ReadWriteStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::ViewHandle {
+                accessor: accessor.clone(),
+                tuple_idx: 0,
+            },
+        },
+        KernelBinding {
+            slot: 3,
+            name: "view_storage_anchor".into(),
+            access: AccessMode::ReadWriteStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::ViewHandle {
+                accessor: accessor.clone(),
+                tuple_idx: 1,
+            },
+        },
+        KernelBinding {
+            slot: 4,
+            name: "view_storage_ids".into(),
+            access: AccessMode::ReadWriteStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::ViewHandle {
+                accessor,
+                tuple_idx: 2,
+            },
+        },
+        KernelBinding {
+            slot: 5,
+            name: "sim_cfg".into(),
+            access: AccessMode::ReadStorage,
+            wgsl_ty: "array<u32>".into(),
+            bg_source: BgSource::External("sim_cfg".into()),
+        },
+        KernelBinding {
+            slot: 6,
+            name: "cfg".into(),
+            access: AccessMode::Uniform,
+            wgsl_ty: cfg_struct.to_string(),
+            bg_source: BgSource::Cfg,
+        },
+    ]
+}
+
+/// Compose the ViewFold-specific WGSL body. Adds the per-kind preamble
+/// (`if event_idx >= cfg.event_count { return; }`) and concatenates the
+/// per-handler bodies through Task 4.1's [`lower_cg_stmt_list_to_wgsl`].
+///
+/// # Limitations
+///
+/// - **Body lowering inherits Task 4.1's coverage.** Event-pattern
+///   bindings (`MatchArmBinding::local`) read from inside an arm body
+///   surface as [`InnerEmitError::UnsupportedLocalBinding`]; for those
+///   the body falls through to a documented `// TODO(task-5.5)` line
+///   so the WGSL still compiles structurally.
+/// - **No storage-hint-specific body templates.** The PairMap /
+///   SymmetricPairTopK / PerEntityRing / PerEntityTopK / PairMap@decay
+///   update primitives (atomicAdd, sort-and-write, ring-append-modulo)
+///   are not yet emitted around the lowered body. The body emerges
+///   verbatim from the IR's `CgStmt::Assign { target: ViewStorage{..}, .. }`
+///   statements, which today lower as plain assignments. Storage-hint
+///   templating is a Task 5.5 concern.
+/// - **`event_count` and event decode are not wired.** The preamble
+///   bounds-checks against `cfg.event_count` but no event-record
+///   decode is performed; per-view handlers reading event fields hit
+///   the Task 4.1 `UnsupportedLocalBinding` path.
+fn build_view_fold_wgsl_body(
+    body_ops: &[OpId],
+    prog: &CgProgram,
+    ctx: &EmitCtx<'_>,
+) -> Result<String, KernelEmitError> {
+    let mut out = String::new();
+    out.push_str("    let event_idx = gid.x;\n");
+    out.push_str("    if (event_idx >= cfg.event_count) { return; }\n");
+    out.push_str("    let _tick = cfg.tick;\n\n");
+
+    for (i, op_id) in body_ops.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n");
+        }
+        let op = resolve_op(prog, *op_id)?;
+        // ViewFold body is a CgStmtList; lower via Task 4.1.
+        let fragment = match &op.kind {
+            ComputeOpKind::ViewFold { body, .. } => {
+                lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)?
+            }
+            ComputeOpKind::MaskPredicate { .. }
+            | ComputeOpKind::PhysicsRule { .. }
+            | ComputeOpKind::ScoringArgmax { .. }
+            | ComputeOpKind::SpatialQuery { .. }
+            | ComputeOpKind::Plumbing { .. } => {
+                // Reachable only if the classifier admitted a non-ViewFold
+                // op into a ViewFold-classed kernel — the classifier
+                // returns Generic in that case, so this is structurally
+                // unreachable. Emit a documented TODO instead of panicking.
+                "// TODO(task-5.5): non-ViewFold op in ViewFold kernel — \
+                 classifier should have routed through generic path."
+                    .to_string()
+            }
+        };
+        writeln!(
+            out,
+            "    // op#{} ({})",
+            op.id.0,
+            compute_op_kind_short(&op.kind)
+        )
+        .expect("write to String never fails");
+        out.push_str(&fragment);
+    }
+
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -1709,5 +2031,394 @@ mod tests {
         // Prefixed with `fused_` since the first op's name doesn't
         // already start with `fused_`.
         assert_eq!(spec.name, "fused_mask_low_hp", "spec.name: {}", spec.name);
+    }
+
+    // ---- 11. ViewFold body parity (Task 5.3) ----
+
+    /// Build a ViewFold op for `view` triggered by `event_kind`. The
+    /// body is a single assignment `view_storage_primary = 1.0` so the
+    /// inner-walk lowering produces a non-empty fragment.
+    fn view_fold_op(
+        prog: &mut CgProgram,
+        view: crate::cg::data_handle::ViewId,
+        event_kind: EventKindId,
+        ring: EventRingId,
+    ) -> OpId {
+        let one = push_expr(prog, CgExpr::Lit(LitValue::F32(1.0)));
+        let assign = push_stmt(
+            prog,
+            CgStmt::Assign {
+                target: DataHandle::ViewStorage {
+                    view,
+                    slot: crate::cg::data_handle::ViewStorageSlot::Primary,
+                },
+                value: one,
+            },
+        );
+        let body = push_list(prog, CgStmtList { stmts: vec![assign] });
+        let kind = ComputeOpKind::ViewFold {
+            view,
+            on_event: event_kind,
+            body,
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerEvent { source_ring: ring },
+            Span::dummy(),
+            prog,
+            prog,
+            prog,
+        );
+        push_op(prog, op)
+    }
+
+    /// ViewFold kernel cfg shape carries `event_count` + `tick`, not
+    /// the placeholder `agent_cap`. Pins per-kind cfg routing.
+    #[test]
+    fn view_fold_kernel_uses_event_count_tick_cfg_shape() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        // ViewFold cfg fields: event_count, tick, _pad: [u32; 2].
+        assert!(
+            spec.cfg_struct_decl.contains("event_count: u32"),
+            "decl: {}",
+            spec.cfg_struct_decl
+        );
+        assert!(
+            spec.cfg_struct_decl.contains("tick: u32"),
+            "decl: {}",
+            spec.cfg_struct_decl
+        );
+        assert!(
+            spec.cfg_struct_decl.contains("_pad: [u32; 2]"),
+            "decl: {}",
+            spec.cfg_struct_decl
+        );
+        assert!(
+            spec.cfg_build_expr
+                .contains("event_count: 0, tick: state.tick"),
+            "build_expr: {}",
+            spec.cfg_build_expr
+        );
+    }
+
+    /// Non-ViewFold kernels (mask, physics, plumbing, scoring, spatial)
+    /// keep the placeholder `{ agent_cap, _pad: [u32; 3] }` cfg shape.
+    /// Pin that the per-kind routing didn't accidentally cross over.
+    #[test]
+    fn non_view_fold_kernel_keeps_agent_cap_cfg_shape() {
+        let mut prog = CgProgram::default();
+        let op = mask_op(&mut prog, MaskId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        assert!(
+            spec.cfg_struct_decl.contains("agent_cap: u32"),
+            "decl: {}",
+            spec.cfg_struct_decl
+        );
+        assert!(
+            spec.cfg_build_expr.contains("agent_cap: state.agent_cap()"),
+            "build_expr: {}",
+            spec.cfg_build_expr
+        );
+    }
+
+    /// ViewFold kernel emits the legacy 7-binding layout: event_ring,
+    /// event_tail, view_storage_primary, view_storage_anchor,
+    /// view_storage_ids, sim_cfg, cfg.
+    #[test]
+    fn view_fold_kernel_emits_seven_legacy_bindings() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+
+        let names: Vec<&str> = spec.bindings.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "event_ring",
+                "event_tail",
+                "view_storage_primary",
+                "view_storage_anchor",
+                "view_storage_ids",
+                "sim_cfg",
+                "cfg",
+            ],
+            "bindings: {names:?}"
+        );
+
+        // Slots are contiguous 0..7.
+        for (i, b) in spec.bindings.iter().enumerate() {
+            assert_eq!(b.slot, i as u32, "binding {} slot mismatch: {:?}", i, b);
+        }
+
+        // The three view-storage slots carry ViewHandle bg_source with
+        // the per-view resident accessor name.
+        let view_handle_bindings: Vec<&KernelBinding> = spec
+            .bindings
+            .iter()
+            .filter(|b| matches!(b.bg_source, BgSource::ViewHandle { .. }))
+            .collect();
+        assert_eq!(view_handle_bindings.len(), 3, "expected 3 ViewHandle bindings");
+        for b in &view_handle_bindings {
+            match &b.bg_source {
+                BgSource::ViewHandle { accessor, .. } => {
+                    assert_eq!(accessor, "fold_view_threat_level_handles");
+                }
+                BgSource::Resident(_)
+                | BgSource::Transient(_)
+                | BgSource::External(_)
+                | BgSource::Pool(_)
+                | BgSource::Cfg
+                | BgSource::AliasOf(_) => unreachable!("filtered above"),
+            }
+        }
+    }
+
+    /// Body composition for ViewFold injects the `event_idx` declaration
+    /// + `event_count` bounds-check, then concatenates each handler's
+    /// IR-lowered body via Task 4.1.
+    #[test]
+    fn view_fold_wgsl_body_has_event_count_gate() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(5);
+        prog.interner.views.insert(5, "kin_fear".to_string());
+        prog.interner.event_kinds.insert(2, "FearSpread".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(2), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+        assert!(body.contains("let event_idx = gid.x;"), "body: {body}");
+        assert!(
+            body.contains("if (event_idx >= cfg.event_count)"),
+            "body: {body}"
+        );
+        assert!(body.contains("// op#"), "body: {body}");
+        // The single body assignment lowered through Task 4.1.
+        assert!(body.contains("view_5_primary"), "body: {body}");
+    }
+
+    /// Indirect topology of all-ViewFold consumers also routes through
+    /// the ViewFold path — drives the cascade-driven fold case.
+    #[test]
+    fn indirect_topology_of_view_folds_routes_through_view_fold_path() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let ring = EventRingId(2);
+        let view = ViewId(7);
+        prog.interner.views.insert(7, "memory".to_string());
+        prog.interner.event_kinds.insert(0, "RecordMemory".into());
+        let producer = seed_indirect_op(&mut prog, ring);
+        let consumer = view_fold_op(&mut prog, view, EventKindId(0), ring);
+        let topology = KernelTopology::Indirect {
+            producer,
+            consumers: vec![consumer],
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+
+        // ViewFold-specific cfg shape applied.
+        assert!(
+            spec.cfg_struct_decl.contains("event_count: u32"),
+            "decl: {}",
+            spec.cfg_struct_decl
+        );
+        // 7-binding layout.
+        let names: Vec<&str> = spec.bindings.iter().map(|b| b.name.as_str()).collect();
+        assert!(
+            names.contains(&"view_storage_primary") && names.contains(&"event_ring"),
+            "names: {names:?}"
+        );
+        // Resident accessor matches the consumer view name.
+        let mut found_accessor = false;
+        for b in &spec.bindings {
+            if let BgSource::ViewHandle { accessor, .. } = &b.bg_source {
+                assert_eq!(accessor, "fold_view_memory_handles");
+                found_accessor = true;
+            }
+        }
+        assert!(found_accessor, "expected ViewHandle binding with memory accessor");
+    }
+
+    /// Two ViewFold ops over the SAME view in a Fused topology classify
+    /// as ViewFold (multi-handler view subscribes to multiple events).
+    /// The consumer view name carries through.
+    #[test]
+    fn fused_view_folds_over_same_view_classify_as_view_fold() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner.event_kinds.insert(0, "AgentAttacked".into());
+        prog.interner
+            .event_kinds
+            .insert(1, "EffectDamageApplied".into());
+        let op_a = view_fold_op(&mut prog, view, EventKindId(0), EventRingId(0));
+        let op_b = view_fold_op(&mut prog, view, EventKindId(1), EventRingId(0));
+        let topology = KernelTopology::Fused {
+            ops: vec![op_a, op_b],
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+
+        assert!(
+            spec.cfg_struct_decl.contains("event_count: u32"),
+            "decl: {}",
+            spec.cfg_struct_decl
+        );
+        // Both bodies appear in the WGSL output (joined with the
+        // op-comment lines).
+        let (_spec, body) = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+        let op_count = body.matches("// op#").count();
+        assert_eq!(op_count, 2, "body: {body}");
+    }
+
+    /// ViewFold falls back to `view_<id>` when the interner has no
+    /// name for the view — the resident accessor is built from the
+    /// fallback identifier.
+    #[test]
+    fn view_fold_with_no_interner_name_falls_back_to_view_id() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(99);
+        // No interner entry for view #99.
+        let op = view_fold_op(&mut prog, view, EventKindId(0), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        for b in &spec.bindings {
+            if let BgSource::ViewHandle { accessor, .. } = &b.bg_source {
+                assert_eq!(accessor, "fold_view_view_99_handles");
+            }
+        }
+    }
+
+    /// Snapshot — pin a ViewFold spec's bindings vec end-to-end. Any
+    /// regression in slot ordering, naming, or BgSource tags surfaces
+    /// here.
+    #[test]
+    fn snapshot_view_fold_spec_bindings_and_cfg() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+
+        // Pin the (slot, name, access-debug, wgsl_ty) tuple per binding.
+        let snapshot: Vec<(u32, String, String, String)> = spec
+            .bindings
+            .iter()
+            .map(|b| {
+                (
+                    b.slot,
+                    b.name.clone(),
+                    format!("{:?}", b.access),
+                    b.wgsl_ty.clone(),
+                )
+            })
+            .collect();
+        let expected = vec![
+            (
+                0,
+                "event_ring".to_string(),
+                "ReadStorage".to_string(),
+                "array<u32>".to_string(),
+            ),
+            (
+                1,
+                "event_tail".to_string(),
+                "ReadStorage".to_string(),
+                "array<u32>".to_string(),
+            ),
+            (
+                2,
+                "view_storage_primary".to_string(),
+                "ReadWriteStorage".to_string(),
+                "array<u32>".to_string(),
+            ),
+            (
+                3,
+                "view_storage_anchor".to_string(),
+                "ReadWriteStorage".to_string(),
+                "array<u32>".to_string(),
+            ),
+            (
+                4,
+                "view_storage_ids".to_string(),
+                "ReadWriteStorage".to_string(),
+                "array<u32>".to_string(),
+            ),
+            (
+                5,
+                "sim_cfg".to_string(),
+                "ReadStorage".to_string(),
+                "array<u32>".to_string(),
+            ),
+            (
+                6,
+                "cfg".to_string(),
+                "Uniform".to_string(),
+                "FoldThreatLevelAgentAttackedCfg".to_string(),
+            ),
+        ];
+        assert_eq!(snapshot, expected);
+
+        // ViewFold cfg shape pinned explicitly.
+        assert!(spec.cfg_struct_decl.contains("event_count: u32, pub tick: u32, pub _pad: [u32; 2]"));
+        assert_eq!(
+            spec.cfg_build_expr,
+            "FoldThreatLevelAgentAttackedCfg { event_count: 0, tick: state.tick, _pad: [0; 2] }"
+        );
     }
 }

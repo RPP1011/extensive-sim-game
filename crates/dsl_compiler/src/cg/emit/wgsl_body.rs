@@ -5,6 +5,20 @@
 //! Composing fragments into kernel bodies is Task 4.2's job; assembling
 //! the kernel module is Task 4.3.
 //!
+//! # Task 5.3 (ViewFold body parity) note
+//!
+//! Task 5.3's ViewFold-specific WGSL body composition is plumbed
+//! through [`super::kernel::build_view_fold_wgsl_body`], which calls
+//! [`lower_cg_stmt_list_to_wgsl`] (this module) on each handler's
+//! [`crate::cg::stmt::CgStmtList`] body. The inner-expression and
+//! inner-statement walks here are storage-hint-agnostic — the fold
+//! body's `CgStmt::Assign { target: ViewStorage{view,slot}, value }`
+//! lowers to a plain WGSL assignment, and any storage-hint-specific
+//! update primitives (atomicAdd vs sort-and-write vs ring-append-modulo)
+//! are wired by Task 5.5. The Task 5.3 cut surfaces the entry-point +
+//! event-count gate around whatever Task 4.1 produces; per-storage-hint
+//! body templates are deferred.
+//!
 //! # Limitations
 //!
 //! - **Naming strategy.** Today only [`HandleNamingStrategy::Structural`]

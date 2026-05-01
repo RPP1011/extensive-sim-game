@@ -266,6 +266,15 @@ fn compose_wgsl_file(spec: &KernelSpec, body: &str, topology: &KernelTopology) -
     out.push_str("// Regenerate with `cargo run --bin xtask -- compile-dsl`.\n");
     out.push('\n');
 
+    // ViewFold kernels reference the cfg uniform via a named WGSL
+    // struct (`{Pascal}Cfg { event_count, tick, _pad0, _pad1 }`); the
+    // legacy fold WGSL files declare that struct inline before the
+    // uniform binding so naga can resolve `cfg.event_count`.
+    if is_view_fold_spec(spec) {
+        out.push_str(&compose_view_fold_wgsl_cfg_struct(spec));
+        out.push('\n');
+    }
+
     out.push_str(&lower_wgsl_bindings(spec));
     out.push('\n');
 
@@ -283,6 +292,31 @@ fn compose_wgsl_file(spec: &KernelSpec, body: &str, topology: &KernelTopology) -
     out.push_str("}\n");
 
     out
+}
+
+/// Emit the WGSL `struct {Pascal}Cfg { event_count: u32, tick: u32,
+/// _pad0: u32, _pad1: u32 };` declaration ViewFold kernels reference
+/// from the cfg uniform binding. Sourced directly from the cfg
+/// binding's WGSL type name; the WGSL field shape mirrors the Rust
+/// `{ event_count, tick, _pad: [u32; 2] }` cfg, expanded to four
+/// scalar fields because WGSL doesn't support array members in
+/// uniform-shaped structs the same way Rust does.
+///
+/// # Limitations
+///
+/// - **Field shape is hard-coded to the ViewFold cfg.** Future
+///   per-kind cfg refinements will need to surface the WGSL struct
+///   decl from the kernel-spec layer rather than rebuilding it here.
+fn compose_view_fold_wgsl_cfg_struct(spec: &KernelSpec) -> String {
+    let cfg = spec
+        .bindings
+        .iter()
+        .find(|b| matches!(b.bg_source, BgSource::Cfg))
+        .expect("ViewFold spec must carry a cfg binding");
+    format!(
+        "struct {ty} {{ event_count: u32, tick: u32, _pad0: u32, _pad1: u32 }};\n",
+        ty = cfg.wgsl_ty
+    )
 }
 
 /// Compose a single `.rs` file from a [`KernelSpec`] + originating
@@ -333,12 +367,19 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
         pascal = spec.pascal
     ));
 
-    // Bindings struct.
+    // Bindings struct. ViewFold kernels emit `Option<&'a wgpu::Buffer>`
+    // for the anchor/ids slots (matching the legacy fold-kernel
+    // contract); generic kernels use the spec-driven lowering which
+    // emits `&'a wgpu::Buffer` for every binding.
     out.push_str(&format!(
         "pub struct {pascal}Bindings<'a> {{\n",
         pascal = spec.pascal
     ));
-    out.push_str(&lower_rust_bindings_struct_fields(spec));
+    if is_view_fold_spec(spec) {
+        out.push_str(&compose_view_fold_bindings_struct_fields(spec));
+    } else {
+        out.push_str(&lower_rust_bindings_struct_fields(spec));
+    }
     out.push_str("}\n\n");
 
     // Cfg struct decl — KernelSpec.cfg_struct_decl is the full
@@ -358,36 +399,44 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
     out.push_str(&compose_kernel_trait_impl(spec, topology));
     out.push('\n');
 
-    // BGL entries function.
-    out.push_str(&format!(
-        "pub fn {name}_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {{\n    \
-         vec![\n",
-        name = spec.name
-    ));
-    out.push_str(&render_cg_bgl_entries(spec));
-    out.push_str("    ]\n}\n\n");
+    // BGL entries function. ViewFold kernels skip the standalone
+    // `_bgl_entries` / `_bind_group_entries` / `_build_cfg` helpers —
+    // the legacy `crates/engine_gpu_rules/src/fold_<view>.rs` modules
+    // do not expose them, and the `lower_rust_bg_entries` lowering
+    // would produce `Option`-typed expressions that don't carry
+    // `.as_entire_binding()`. The Kernel trait impl above remains the
+    // single entry point for ViewFold callers.
+    if !is_view_fold_spec(spec) {
+        out.push_str(&format!(
+            "pub fn {name}_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {{\n    \
+             vec![\n",
+            name = spec.name
+        ));
+        out.push_str(&render_cg_bgl_entries(spec));
+        out.push_str("    ]\n}\n\n");
 
-    // Bind-group entries function. Returns the BindGroupEntry list a
-    // caller wraps with the BGL into a BindGroup.
-    out.push_str(&format!(
-        "pub fn {name}_bind_group_entries<'a>(\n    \
-         bindings: &'a {pascal}Bindings<'a>,\n) -> \
-         Vec<wgpu::BindGroupEntry<'a>> {{\n    vec![\n",
-        name = spec.name,
-        pascal = spec.pascal
-    ));
-    out.push_str(&lower_rust_bg_entries(spec));
-    out.push_str("    ]\n}\n\n");
+        // Bind-group entries function. Returns the BindGroupEntry list a
+        // caller wraps with the BGL into a BindGroup.
+        out.push_str(&format!(
+            "pub fn {name}_bind_group_entries<'a>(\n    \
+             bindings: &'a {pascal}Bindings<'a>,\n) -> \
+             Vec<wgpu::BindGroupEntry<'a>> {{\n    vec![\n",
+            name = spec.name,
+            pascal = spec.pascal
+        ));
+        out.push_str(&lower_rust_bg_entries(spec));
+        out.push_str("    ]\n}\n\n");
 
-    // Cfg builder (free fn variant — kept for backwards compat with any
-    // caller that hasn't switched to `<Pascal>Kernel::build_cfg`).
-    out.push_str(&format!(
-        "pub fn {name}_build_cfg(state: &engine::state::SimState) -> {cfg} {{\n    \
-         {build}\n}}\n",
-        name = spec.name,
-        cfg = spec.cfg_struct,
-        build = spec.cfg_build_expr,
-    ));
+        // Cfg builder (free fn variant — kept for backwards compat with
+        // any caller that hasn't switched to `<Pascal>Kernel::build_cfg`).
+        out.push_str(&format!(
+            "pub fn {name}_build_cfg(state: &engine::state::SimState) -> {cfg} {{\n    \
+             {build}\n}}\n",
+            name = spec.name,
+            cfg = spec.cfg_struct,
+            build = spec.cfg_build_expr,
+        ));
+    }
 
     out
 }
@@ -452,40 +501,48 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology) -> St
     ));
 
     // bind()
-    out.push_str(&format!(
-        "    fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> {pascal}Bindings<'a> {{\n        \
-         let _ = sources;\n        \
-         {pascal}Bindings {{\n",
-        pascal = spec.pascal
-    ));
-    out.push_str(&compose_bind_body(spec));
-    out.push_str("        }\n    }\n\n");
+    if is_view_fold_spec(spec) {
+        out.push_str(&compose_view_fold_bind_method(spec));
+    } else {
+        out.push_str(&format!(
+            "    fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> {pascal}Bindings<'a> {{\n        \
+             let _ = sources;\n        \
+             {pascal}Bindings {{\n",
+            pascal = spec.pascal
+        ));
+        out.push_str(&compose_bind_body(spec));
+        out.push_str("        }\n    }\n\n");
+    }
 
     // record()
-    out.push_str(&format!(
-        "    fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, bindings: &{pascal}Bindings<'_>, agent_cap: u32) {{\n",
-        pascal = spec.pascal
-    ));
-    out.push_str(&format!(
-        "        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n            \
-             label: Some(\"engine_gpu_rules::{name}::bg\"),\n            \
-             layout: &self.bgl,\n            \
-             entries: &[\n",
-        name = spec.name
-    ));
-    out.push_str(&lower_rust_bg_entries(spec));
-    out.push_str("            ],\n        });\n");
-    out.push_str(&format!(
-        "        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{\n            \
-             label: Some(\"engine_gpu_rules::{name}::pass\"),\n            \
-             timestamp_writes: None,\n        \
-             }});\n",
-        name = spec.name
-    ));
-    out.push_str("        pass.set_pipeline(&self.pipeline);\n");
-    out.push_str("        pass.set_bind_group(0, &bg, &[]);\n");
-    out.push_str(&compose_dispatch_call(topology));
-    out.push_str("    }\n");
+    if is_view_fold_spec(spec) {
+        out.push_str(&compose_view_fold_record_method(spec));
+    } else {
+        out.push_str(&format!(
+            "    fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, bindings: &{pascal}Bindings<'_>, agent_cap: u32) {{\n",
+            pascal = spec.pascal
+        ));
+        out.push_str(&format!(
+            "        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n            \
+                 label: Some(\"engine_gpu_rules::{name}::bg\"),\n            \
+                 layout: &self.bgl,\n            \
+                 entries: &[\n",
+            name = spec.name
+        ));
+        out.push_str(&lower_rust_bg_entries(spec));
+        out.push_str("            ],\n        });\n");
+        out.push_str(&format!(
+            "        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{\n            \
+                 label: Some(\"engine_gpu_rules::{name}::pass\"),\n            \
+                 timestamp_writes: None,\n        \
+                 }});\n",
+            name = spec.name
+        ));
+        out.push_str("        pass.set_pipeline(&self.pipeline);\n");
+        out.push_str("        pass.set_bind_group(0, &bg, &[]);\n");
+        out.push_str(&compose_dispatch_call(topology));
+        out.push_str("    }\n");
+    }
 
     out.push_str("}\n");
     out
@@ -564,6 +621,209 @@ fn render_bg_source_expr(src: &BgSource, field: &str) -> String {
             format!("/* alias of {target} */ sources.external.sim_cfg")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// ViewFold-specific composition (Task 5.3)
+// ---------------------------------------------------------------------------
+
+/// Detect whether a [`KernelSpec`] was synthesised by Task 5.3's
+/// ViewFold path. The signal is the presence of any
+/// [`BgSource::ViewHandle`] binding — only ViewFold kernels emit
+/// those today, and the tag carries the per-view resident accessor
+/// name needed by the Task-5.4 handle-tuple destructure.
+fn is_view_fold_spec(spec: &KernelSpec) -> bool {
+    spec.bindings
+        .iter()
+        .any(|b| matches!(b.bg_source, BgSource::ViewHandle { .. }))
+}
+
+/// Pull the per-view resident accessor name from a ViewFold spec —
+/// every ViewHandle binding in the spec carries the same accessor by
+/// construction (see [`super::kernel::build_view_fold_bindings`]).
+/// Returns `None` if the spec is not a ViewFold spec.
+fn view_fold_accessor(spec: &KernelSpec) -> Option<&str> {
+    spec.bindings.iter().find_map(|b| match &b.bg_source {
+        BgSource::ViewHandle { accessor, .. } => Some(accessor.as_str()),
+        BgSource::Resident(_)
+        | BgSource::Transient(_)
+        | BgSource::External(_)
+        | BgSource::Pool(_)
+        | BgSource::Cfg
+        | BgSource::AliasOf(_) => None,
+    })
+}
+
+/// Compose the `<Pascal>Bindings<'a>` struct fields for a ViewFold
+/// kernel. The anchor/ids slots are `Option<&'a wgpu::Buffer>` —
+/// they fall back to primary at `record()` time when the resident
+/// accessor returns `None` (single-storage views like `threat_level`
+/// don't expose dedicated anchor/ids buffers).
+///
+/// # Limitations
+/// - **Field shape is fixed at the 7-binding ViewFold layout.** The
+///   helper assumes the spec carries exactly those bindings (event_ring,
+///   event_tail, view_storage_primary, view_storage_anchor,
+///   view_storage_ids, sim_cfg, cfg) in that slot order — guaranteed
+///   by [`super::kernel::build_view_fold_bindings`]. A spec with a
+///   different shape would silently produce a misaligned struct.
+fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
+    let mut out = String::new();
+    for b in &spec.bindings {
+        // Anchor/ids slots get Option<&'a wgpu::Buffer> per legacy
+        // fold-kernel contract. All other slots are mandatory.
+        let optional = matches!(
+            b.name.as_str(),
+            "view_storage_anchor" | "view_storage_ids"
+        );
+        if optional {
+            writeln!(out, "    pub {}: Option<&'a wgpu::Buffer>,", b.name)
+                .expect("write to String never fails");
+        } else {
+            writeln!(out, "    pub {}: &'a wgpu::Buffer,", b.name)
+                .expect("write to String never fails");
+        }
+    }
+    out
+}
+
+/// Compose the `bind()` method body for a ViewFold kernel. Mirrors
+/// the legacy `fold_<view>.rs` pattern:
+///
+/// ```ignore
+/// fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> ... {
+///     let (primary, anchor, ids) = sources.resident.fold_view_<view>_handles();
+///     <Pascal>Bindings {
+///         event_ring: &sources.resident.batch_events_ring,
+///         event_tail: &sources.resident.batch_events_tail,
+///         view_storage_primary: primary,
+///         view_storage_anchor: anchor,
+///         view_storage_ids: ids,
+///         sim_cfg: sources.external.sim_cfg,
+///         cfg,
+///     }
+/// }
+/// ```
+///
+/// # Limitations
+///
+/// - **Resident accessor (`fold_view_<view>_handles`) is a Task 5.4
+///   dependency.** Today the legacy `resident_context.rs` exposes the
+///   accessors for the 9 active views; new views landing before Task
+///   5.4 will need a manual stub. The accessor name is pulled from
+///   the spec's ViewHandle binding — the kernel-spec layer
+///   ([`super::kernel::build_view_fold_bindings`]) sets it to
+///   `fold_view_<view_name>_handles`.
+/// - **`sources.resident.batch_events_ring` / `batch_events_tail`** —
+///   the resident path always exposes these (see
+///   `crates/engine_gpu_rules/src/resident_context.rs`).
+fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
+    let accessor = view_fold_accessor(spec).expect("ViewFold spec must carry an accessor");
+    let mut out = String::new();
+    out.push_str(&format!(
+        "    fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> {pascal}Bindings<'a> {{\n",
+        pascal = spec.pascal
+    ));
+    out.push_str(&format!(
+        "        // Resolve the per-view storage tuple via the resident accessor synthesised\n\
+         \x20       // by Task 5.4's emit_resident_context. anchor / ids may be `None` for\n\
+         \x20       // views that share storage with `primary` (single-buffer fold layouts).\n\
+         \x20       let (primary, anchor, ids) = sources.resident.{accessor}();\n",
+    ));
+    out.push_str(&format!(
+        "        {pascal}Bindings {{\n",
+        pascal = spec.pascal
+    ));
+    out.push_str("            event_ring: &sources.resident.batch_events_ring,\n");
+    out.push_str("            event_tail: &sources.resident.batch_events_tail,\n");
+    out.push_str("            view_storage_primary: primary,\n");
+    out.push_str("            view_storage_anchor: anchor,\n");
+    out.push_str("            view_storage_ids: ids,\n");
+    out.push_str("            sim_cfg: sources.external.sim_cfg,\n");
+    out.push_str("            cfg,\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n\n");
+    out
+}
+
+/// Compose the `record()` method body for a ViewFold kernel. Mirrors
+/// the legacy fold-kernel pattern, including the anchor/ids
+/// `unwrap_or(primary)` fallback so the BGL slot is always live even
+/// when the view shares storage across slots.
+///
+/// # Limitations
+///
+/// - **Dispatch is a placeholder direct dispatch — real
+///   indirect-dispatch wiring is a Task 5.7 concern.** The cascade
+///   tail / per-fold indirect-args buffer (`event_tail` here) is the
+///   eventual source for `dispatch_workgroups_indirect`; today the
+///   record body emits the agent-cap-bounded direct dispatch every
+///   other kernel uses. Switchover lands at Task 5.7.
+/// - **`agent_cap` parameter is unused for ViewFold.** Indirect
+///   dispatch will resolve event count via the indirect-args buffer;
+///   the `agent_cap` parameter is suppressed via `let _ = agent_cap;`
+///   to silence unused-variable warnings.
+fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "    fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, bindings: &{pascal}Bindings<'_>, agent_cap: u32) {{\n",
+        pascal = spec.pascal
+    ));
+    out.push_str("        // Resolve view-handle slots: anchor/ids fall back to primary when the\n");
+    out.push_str("        // view doesn't expose dedicated buffers (the BGL slot still has to be\n");
+    out.push_str("        // live; rebinding primary is a no-op safe choice).\n");
+    out.push_str("        let primary_buf = bindings.view_storage_primary;\n");
+    out.push_str("        let anchor_buf = bindings.view_storage_anchor.unwrap_or(primary_buf);\n");
+    out.push_str("        let ids_buf = bindings.view_storage_ids.unwrap_or(primary_buf);\n");
+    out.push_str(&format!(
+        "        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n            \
+             label: Some(\"engine_gpu_rules::{name}::bg\"),\n            \
+             layout: &self.bgl,\n            \
+             entries: &[\n",
+        name = spec.name
+    ));
+    // BindGroupEntry list — each ViewFold slot in fixed order. The
+    // primary/anchor/ids slots reference the locals computed above;
+    // event_ring/tail/sim_cfg/cfg pull straight from `bindings`.
+    out.push_str(
+        "                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },\n",
+    );
+    out.push_str(
+        "                wgpu::BindGroupEntry { binding: 1, resource: bindings.event_tail.as_entire_binding() },\n",
+    );
+    out.push_str(
+        "                wgpu::BindGroupEntry { binding: 2, resource: primary_buf.as_entire_binding() },\n",
+    );
+    out.push_str(
+        "                wgpu::BindGroupEntry { binding: 3, resource: anchor_buf.as_entire_binding() },\n",
+    );
+    out.push_str(
+        "                wgpu::BindGroupEntry { binding: 4, resource: ids_buf.as_entire_binding() },\n",
+    );
+    out.push_str(
+        "                wgpu::BindGroupEntry { binding: 5, resource: bindings.sim_cfg.as_entire_binding() },\n",
+    );
+    out.push_str(
+        "                wgpu::BindGroupEntry { binding: 6, resource: bindings.cfg.as_entire_binding() },\n",
+    );
+    out.push_str("            ],\n        });\n");
+    out.push_str(&format!(
+        "        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {{\n            \
+             label: Some(\"engine_gpu_rules::{name}::pass\"),\n            \
+             timestamp_writes: None,\n        \
+             }});\n",
+        name = spec.name
+    ));
+    out.push_str("        pass.set_pipeline(&self.pipeline);\n");
+    out.push_str("        pass.set_bind_group(0, &bg, &[]);\n");
+    out.push_str("        // Placeholder dispatch — real indirect-args wiring lands in Task 5.7.\n");
+    out.push_str("        // Today's direct dispatch over `agent_cap` matches the legacy stub\n");
+    out.push_str("        // form so the kernel records cleanly without the indirect-buffer\n");
+    out.push_str("        // plumbing the cascade-driven shape needs.\n");
+    out.push_str("        let _ = agent_cap;\n");
+    out.push_str("        pass.dispatch_workgroups(1, 1, 1);\n");
+    out.push_str("    }\n");
+    out
 }
 
 /// Pick the `pass.dispatch_workgroups(...)` line for a kernel based on
@@ -1460,5 +1720,335 @@ mod tests {
         for name in &artifacts.kernel_index {
             assert!(seen.insert(name.clone()), "duplicate name in index: {name}");
         }
+    }
+
+    // ---- 13. ViewFold body parity (Task 5.3) ----
+
+    /// Helper: build a ViewFold op for `view` triggered by `event_kind`.
+    fn view_fold_op(
+        prog: &mut CgProgram,
+        view: crate::cg::data_handle::ViewId,
+        event_kind: EventKindId,
+        ring: EventRingId,
+    ) -> OpId {
+        let one = push_expr(prog, CgExpr::Lit(LitValue::F32(1.0)));
+        let assign = push_stmt(
+            prog,
+            CgStmt::Assign {
+                target: DataHandle::ViewStorage {
+                    view,
+                    slot: crate::cg::data_handle::ViewStorageSlot::Primary,
+                },
+                value: one,
+            },
+        );
+        let body = push_list(prog, CgStmtList { stmts: vec![assign] });
+        let kind = ComputeOpKind::ViewFold {
+            view,
+            on_event: event_kind,
+            body,
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerEvent { source_ring: ring },
+            Span::dummy(),
+            prog,
+            prog,
+            prog,
+        );
+        push_op(prog, op)
+    }
+
+    /// ViewFold rust module emits the legacy bindings struct shape:
+    /// anchor/ids slots are `Option<&'a wgpu::Buffer>`.
+    #[test]
+    fn view_fold_rust_module_uses_optional_anchor_ids_fields() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".into());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let schedule = one_stage(topology);
+        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
+
+        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
+        let rs = &artifacts.rust_files[&rs_key];
+
+        assert!(
+            rs.contains("pub view_storage_primary: &'a wgpu::Buffer,"),
+            "primary should be mandatory: {rs}"
+        );
+        assert!(
+            rs.contains("pub view_storage_anchor: Option<&'a wgpu::Buffer>,"),
+            "anchor should be optional: {rs}"
+        );
+        assert!(
+            rs.contains("pub view_storage_ids: Option<&'a wgpu::Buffer>,"),
+            "ids should be optional: {rs}"
+        );
+        assert!(
+            rs.contains("pub event_ring: &'a wgpu::Buffer,"),
+            "event_ring missing: {rs}"
+        );
+        assert!(
+            rs.contains("pub event_tail: &'a wgpu::Buffer,"),
+            "event_tail missing: {rs}"
+        );
+        assert!(
+            rs.contains("pub sim_cfg: &'a wgpu::Buffer,"),
+            "sim_cfg missing: {rs}"
+        );
+        assert!(rs.contains("pub cfg: &'a wgpu::Buffer,"), "cfg missing: {rs}");
+    }
+
+    /// ViewFold `bind()` body invokes the per-view resident accessor and
+    /// destructures the (primary, anchor, ids) tuple.
+    #[test]
+    fn view_fold_bind_method_calls_resident_accessor() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(5);
+        prog.interner.views.insert(5, "kin_fear".into());
+        prog.interner.event_kinds.insert(2, "FearSpread".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(2), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let schedule = one_stage(topology);
+        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
+
+        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
+        let rs = &artifacts.rust_files[&rs_key];
+
+        assert!(
+            rs.contains("let (primary, anchor, ids) = sources.resident.fold_view_kin_fear_handles();"),
+            "bind() body missing accessor call: {rs}"
+        );
+        assert!(
+            rs.contains("event_ring: &sources.resident.batch_events_ring,"),
+            "event_ring wiring missing: {rs}"
+        );
+        assert!(
+            rs.contains("view_storage_primary: primary,"),
+            "primary mapping missing: {rs}"
+        );
+        assert!(
+            rs.contains("view_storage_anchor: anchor,"),
+            "anchor mapping missing: {rs}"
+        );
+        assert!(
+            rs.contains("view_storage_ids: ids,"),
+            "ids mapping missing: {rs}"
+        );
+        assert!(
+            rs.contains("sim_cfg: sources.external.sim_cfg,"),
+            "sim_cfg wiring missing: {rs}"
+        );
+    }
+
+    /// ViewFold `record()` body has the anchor/ids `unwrap_or(primary)`
+    /// fallback before the BindGroup construction.
+    #[test]
+    fn view_fold_record_method_has_anchor_ids_fallback() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".into());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let schedule = one_stage(topology);
+        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
+
+        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
+        let rs = &artifacts.rust_files[&rs_key];
+
+        assert!(
+            rs.contains("let primary_buf = bindings.view_storage_primary;"),
+            "primary_buf binding missing: {rs}"
+        );
+        assert!(
+            rs.contains("let anchor_buf = bindings.view_storage_anchor.unwrap_or(primary_buf);"),
+            "anchor fallback missing: {rs}"
+        );
+        assert!(
+            rs.contains("let ids_buf = bindings.view_storage_ids.unwrap_or(primary_buf);"),
+            "ids fallback missing: {rs}"
+        );
+        // BindGroupEntry list points at primary_buf / anchor_buf / ids_buf
+        // rather than `bindings.view_storage_anchor` directly (which
+        // would be `Option<...>` at that point).
+        assert!(
+            rs.contains("resource: primary_buf.as_entire_binding()"),
+            "primary_buf bg-entry missing: {rs}"
+        );
+        assert!(
+            rs.contains("resource: anchor_buf.as_entire_binding()"),
+            "anchor_buf bg-entry missing: {rs}"
+        );
+        assert!(
+            rs.contains("resource: ids_buf.as_entire_binding()"),
+            "ids_buf bg-entry missing: {rs}"
+        );
+    }
+
+    /// ViewFold WGSL file has the cfg struct decl, 7 binding decls, and
+    /// the entry-point with the event_count gate.
+    #[test]
+    fn view_fold_wgsl_file_has_cfg_struct_and_event_count_gate() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".into());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let schedule = one_stage(topology);
+        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
+
+        let wgsl_key = format!("{}.wgsl", artifacts.kernel_index[0]);
+        let wgsl = &artifacts.wgsl_files[&wgsl_key];
+
+        // Cfg struct decl appears before the bindings.
+        assert!(
+            wgsl.contains("struct FoldThreatLevelAgentAttackedCfg { event_count: u32, tick: u32, _pad0: u32, _pad1: u32 };"),
+            "cfg struct decl missing: {wgsl}"
+        );
+        // 7 binding decls.
+        assert!(wgsl.contains("@binding(0) var<storage, read> event_ring"), "wgsl: {wgsl}");
+        assert!(wgsl.contains("@binding(1) var<storage, read> event_tail"), "wgsl: {wgsl}");
+        assert!(
+            wgsl.contains("@binding(2) var<storage, read_write> view_storage_primary"),
+            "wgsl: {wgsl}"
+        );
+        assert!(
+            wgsl.contains("@binding(3) var<storage, read_write> view_storage_anchor"),
+            "wgsl: {wgsl}"
+        );
+        assert!(
+            wgsl.contains("@binding(4) var<storage, read_write> view_storage_ids"),
+            "wgsl: {wgsl}"
+        );
+        assert!(wgsl.contains("@binding(5) var<storage, read> sim_cfg"), "wgsl: {wgsl}");
+        assert!(
+            wgsl.contains("@binding(6) var<uniform> cfg: FoldThreatLevelAgentAttackedCfg;"),
+            "wgsl: {wgsl}"
+        );
+        // Entry point + event_count gate.
+        assert!(
+            wgsl.contains("fn cs_fold_threat_level_agent_attacked"),
+            "entry point missing: {wgsl}"
+        );
+        assert!(wgsl.contains("let event_idx = gid.x;"), "wgsl: {wgsl}");
+        assert!(
+            wgsl.contains("if (event_idx >= cfg.event_count)"),
+            "event_count gate missing: {wgsl}"
+        );
+    }
+
+    /// ViewFold modules omit the standalone `<name>_bgl_entries` /
+    /// `_bind_group_entries` / `_build_cfg` helpers — the legacy
+    /// `crates/engine_gpu_rules/src/fold_<view>.rs` modules don't
+    /// expose them, and the generic lowerings would produce
+    /// `Option`-typed expressions that don't carry
+    /// `.as_entire_binding()`.
+    #[test]
+    fn view_fold_module_omits_standalone_helpers() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".into());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let schedule = one_stage(topology);
+        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
+
+        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
+        let rs = &artifacts.rust_files[&rs_key];
+
+        assert!(
+            !rs.contains("_bgl_entries() ->"),
+            "ViewFold should omit _bgl_entries: {rs}"
+        );
+        assert!(
+            !rs.contains("_bind_group_entries<"),
+            "ViewFold should omit _bind_group_entries: {rs}"
+        );
+        assert!(
+            !rs.contains("_build_cfg(state:"),
+            "ViewFold should omit _build_cfg: {rs}"
+        );
+        // Trait impl is still emitted, with the build_cfg METHOD.
+        assert!(
+            rs.contains("fn build_cfg(&self, state: &engine::state::SimState)"),
+            "build_cfg method should remain: {rs}"
+        );
+    }
+
+    /// Driver-roundtrip on the real DSL: every fold_*.rs / .wgsl
+    /// emitted via `Compilation::default() → lower → synthesize → emit`
+    /// (the empty-Compilation path) carries no ViewFold ops, so this
+    /// test seeds a synthetic ViewFold and confirms the pipeline-end
+    /// shape end-to-end.
+    #[test]
+    fn driver_emit_for_synthetic_view_fold_is_well_shaped() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".into());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let schedule = one_stage(topology);
+        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
+
+        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
+        let rs = &artifacts.rust_files[&rs_key];
+
+        // No panicking placeholders.
+        assert!(!rs.contains("unimplemented!"), "{rs}");
+        assert!(!rs.contains("todo!()"), "{rs}");
+        // The Kernel trait impl shape carries through.
+        assert!(
+            rs.contains("impl crate::Kernel for FoldThreatLevelAgentAttackedKernel"),
+            "{rs}"
+        );
+        // Cfg shape — Rust struct decl mirrors the WGSL decl.
+        assert!(
+            rs.contains("pub event_count: u32, pub tick: u32, pub _pad: [u32; 2]"),
+            "rust cfg shape: {rs}"
+        );
     }
 }
