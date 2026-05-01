@@ -93,7 +93,7 @@ use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PlumbingKind, SpatialQueryKi
 use crate::cg::program::CgProgram;
 use crate::cg::schedule::synthesis::KernelTopology;
 use crate::kernel_binding_ir::{
-    snake_to_pascal, AccessMode, BgSource, KernelBinding, KernelSpec,
+    snake_to_pascal, AccessMode, BgSource, KernelBinding, KernelKind, KernelSpec,
 };
 
 use super::wgsl_body::EmitError as InnerEmitError;
@@ -274,6 +274,7 @@ pub fn kernel_topology_to_spec_and_body(
             cfg_build_expr,
             cfg_struct_decl,
             bindings,
+            kind: KernelKind::ViewFold,
         };
         spec.validate()
             .map_err(|reason| KernelEmitError::InvalidKernelSpec { reason })?;
@@ -373,6 +374,7 @@ pub fn kernel_topology_to_spec_and_body(
         cfg_build_expr,
         cfg_struct_decl,
         bindings,
+        kind: KernelKind::Generic,
     };
 
     spec.validate()
@@ -1125,7 +1127,18 @@ fn build_view_fold_wgsl_body(
             compute_op_kind_short(&op.kind)
         )
         .expect("write to String never fails");
-        out.push_str(&fragment);
+        // Indent the lowered fragment by 4 spaces per line so the body
+        // sits at the same indent level as the preamble (event_idx,
+        // gate, _tick) and the per-op `// op#…` comment that labels it.
+        // The Task-4.1 lowering emits flush-left WGSL; without this
+        // re-indent the fragment would be visually misaligned under its
+        // comment.
+        let indented = fragment
+            .lines()
+            .map(|l| if l.is_empty() { String::new() } else { format!("    {l}") })
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str(&indented);
     }
 
     Ok(out)
@@ -2420,5 +2433,66 @@ mod tests {
             spec.cfg_build_expr,
             "FoldThreatLevelAgentAttackedCfg { event_count: 0, tick: state.tick, _pad: [0; 2] }"
         );
+    }
+
+    /// `KernelSpec::kind` is the canonical routing tag — ViewFold
+    /// topologies stamp `KernelKind::ViewFold`, every other kernel
+    /// shape stamps `KernelKind::Generic`. Pins the contract that
+    /// `cg/emit/program.rs` matches against.
+    #[test]
+    fn spec_kind_matches_topology() {
+        use crate::cg::data_handle::ViewId;
+
+        // ViewFold topology → KernelKind::ViewFold.
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
+        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        assert_eq!(spec.kind, KernelKind::ViewFold);
+
+        // MaskPredicate Split → Generic.
+        let mut prog2 = CgProgram::default();
+        let op2 = mask_op(&mut prog2, MaskId(0));
+        let topology2 = KernelTopology::Split {
+            op: op2,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx2 = EmitCtx::structural(&prog2);
+        let spec2 = kernel_topology_to_spec(&topology2, &prog2, &ctx2).unwrap();
+        assert_eq!(spec2.kind, KernelKind::Generic);
+
+        // Fused mask → Generic.
+        let mut prog3 = CgProgram::default();
+        let a = mask_op(&mut prog3, MaskId(0));
+        let b = mask_op(&mut prog3, MaskId(1));
+        let topology3 = KernelTopology::Fused {
+            ops: vec![a, b],
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx3 = EmitCtx::structural(&prog3);
+        let spec3 = kernel_topology_to_spec(&topology3, &prog3, &ctx3).unwrap();
+        assert_eq!(spec3.kind, KernelKind::Generic);
+
+        // Indirect (physics consumer) → Generic.
+        let mut prog4 = CgProgram::default();
+        let ring = EventRingId(1);
+        let prod = seed_indirect_op(&mut prog4, ring);
+        let cons = physics_op(&mut prog4, PhysicsRuleId(0), ring);
+        let topology4 = KernelTopology::Indirect {
+            producer: prod,
+            consumers: vec![cons],
+        };
+        let ctx4 = EmitCtx::structural(&prog4);
+        let spec4 = kernel_topology_to_spec(&topology4, &prog4, &ctx4).unwrap();
+        assert_eq!(spec4.kind, KernelKind::Generic);
     }
 }

@@ -11,7 +11,7 @@
 use std::fmt::Write;
 
 use crate::emit_kernel_module::emit_kernel_module_rs;
-use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelSpec};
+use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelKind, KernelSpec};
 
 /// Build the `KernelSpec` for the fused-mask kernel. Four bindings:
 /// agents (read), mask_bitmaps (atomic), sim_cfg (read), cfg (uniform).
@@ -62,6 +62,7 @@ fn fused_mask_spec() -> KernelSpec {
                 bg_source: BgSource::Cfg,
             },
         ],
+        kind: KernelKind::Generic,
     }
 }
 

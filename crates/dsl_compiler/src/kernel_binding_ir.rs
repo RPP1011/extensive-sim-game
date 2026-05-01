@@ -5,6 +5,37 @@
 //! structurally impossible because all four outputs derive from the
 //! same source.
 
+/// Coarse classification of a [`KernelSpec`]. Drives parallel routing
+/// in the program-level emitter (`cg/emit/program.rs`) — composers that
+/// need to fork between the legacy 7-binding ViewFold layout and the
+/// generic spec-driven path match on `spec.kind` instead of sniffing
+/// `spec.bindings` for a `BgSource::ViewHandle`. Mirrors (and is the
+/// canonical replacement for) the private `KernelKindClass` in
+/// `cg/emit/kernel.rs`'s classifier — that enum still exists but is
+/// stamped onto the spec as a `kind` tag at synthesis time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KernelKind {
+    /// Generic spec — the per-kernel layout is whatever the
+    /// handle-aggregation pipeline produced. Routing decisions in the
+    /// program emitter take the generic branch.
+    Generic,
+    /// Spec was synthesised by the ViewFold path; carries the legacy
+    /// 7-binding event-ring + view-storage tuple + sim_cfg + cfg
+    /// layout. Program-emitter composers fork to the ViewFold-specific
+    /// helpers (`compose_view_fold_*`).
+    ViewFold,
+}
+
+impl Default for KernelKind {
+    /// `Generic` is the safe default — legacy literal `KernelSpec`
+    /// constructors that haven't been threaded through the new tag
+    /// pick up `Generic`, matching the pre-tag program-emitter
+    /// fallthrough.
+    fn default() -> Self {
+        KernelKind::Generic
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccessMode {
     /// `var<storage, read>` / `bgl_storage(N, true)`
@@ -67,7 +98,7 @@ pub struct KernelBinding {
     pub bg_source: BgSource,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct KernelSpec {
     /// snake_case kernel name, e.g. "fold_standing".
     pub name: String,
@@ -85,6 +116,11 @@ pub struct KernelSpec {
     /// #[derive(Pod, Zeroable)]. Goes into the kernel module verbatim.
     pub cfg_struct_decl: String,
     pub bindings: Vec<KernelBinding>,
+    /// Coarse kernel classification — drives parallel routing in the
+    /// program-level emitter. Set by the synthesis pipeline in
+    /// `cg/emit/kernel.rs`; defaults to [`KernelKind::Generic`] for
+    /// hand-built spec literals (legacy emitters).
+    pub kind: KernelKind,
 }
 
 impl KernelSpec {
@@ -167,6 +203,7 @@ mod tests {
                   BgSource::External("agents".into())),
                 b(1, "cfg", AccessMode::Uniform, "DemoCfg", BgSource::Cfg),
             ],
+            kind: KernelKind::Generic,
         };
         assert!(spec.validate().is_ok());
     }
@@ -185,6 +222,7 @@ mod tests {
                   BgSource::External("agents".into())),
                 b(2, "cfg", AccessMode::Uniform, "DemoCfg", BgSource::Cfg),
             ],
+            kind: KernelKind::Generic,
         };
         assert!(spec.validate().is_err());
     }
@@ -204,6 +242,7 @@ mod tests {
                 b(1, "anchor", AccessMode::ReadWriteStorage, "array<u32>",
                   BgSource::AliasOf("not_a_field".into())),
             ],
+            kind: KernelKind::Generic,
         };
         assert!(spec.validate().is_err());
     }
@@ -214,5 +253,12 @@ mod tests {
         assert_eq!(snake_to_pascal("standing"), "Standing");
         assert_eq!(snake_to_pascal("kin_fear"), "KinFear");
         assert_eq!(snake_to_pascal("fused_mask"), "FusedMask");
+    }
+
+    #[test]
+    fn kind_default_is_generic() {
+        assert_eq!(KernelKind::default(), KernelKind::Generic);
+        let spec = KernelSpec::default();
+        assert_eq!(spec.kind, KernelKind::Generic);
     }
 }

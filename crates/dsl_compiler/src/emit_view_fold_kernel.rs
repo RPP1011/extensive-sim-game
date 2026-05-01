@@ -32,7 +32,7 @@
 use std::fmt::Write;
 
 use crate::ir::{StorageHint, ViewBodyIR, ViewIR, ViewKind};
-use crate::kernel_binding_ir::{snake_to_pascal, AccessMode, BgSource, KernelBinding, KernelSpec};
+use crate::kernel_binding_ir::{snake_to_pascal, AccessMode, BgSource, KernelBinding, KernelKind, KernelSpec};
 use crate::kernel_lowerings::lower_rust_bgl_entries;
 
 /// Event-pattern name → snake_case (matches the WGSL emitter's
@@ -222,6 +222,7 @@ pub fn fold_kernel_spec(view: &ViewIR) -> KernelSpec {
              pub struct Fold{pascal}Cfg {{ pub event_count: u32, pub tick: u32, pub _pad: [u32; 2] }}"
         ),
         bindings,
+        kind: KernelKind::ViewFold,
     }
 }
 

@@ -84,7 +84,7 @@ use std::fmt::Write as _;
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::program::CgProgram;
 use crate::cg::schedule::synthesis::{ComputeSchedule, KernelTopology};
-use crate::kernel_binding_ir::{snake_to_pascal, AccessMode, BgSource, KernelSpec};
+use crate::kernel_binding_ir::{snake_to_pascal, AccessMode, BgSource, KernelKind, KernelSpec};
 use crate::kernel_lowerings::{
     lower_rust_bg_entries, lower_rust_bindings_struct_fields, lower_wgsl_bindings,
 };
@@ -270,7 +270,7 @@ fn compose_wgsl_file(spec: &KernelSpec, body: &str, topology: &KernelTopology) -
     // struct (`{Pascal}Cfg { event_count, tick, _pad0, _pad1 }`); the
     // legacy fold WGSL files declare that struct inline before the
     // uniform binding so naga can resolve `cfg.event_count`.
-    if is_view_fold_spec(spec) {
+    if matches!(spec.kind, KernelKind::ViewFold) {
         out.push_str(&compose_view_fold_wgsl_cfg_struct(spec));
         out.push('\n');
     }
@@ -375,7 +375,7 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
         "pub struct {pascal}Bindings<'a> {{\n",
         pascal = spec.pascal
     ));
-    if is_view_fold_spec(spec) {
+    if matches!(spec.kind, KernelKind::ViewFold) {
         out.push_str(&compose_view_fold_bindings_struct_fields(spec));
     } else {
         out.push_str(&lower_rust_bindings_struct_fields(spec));
@@ -406,7 +406,7 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
     // would produce `Option`-typed expressions that don't carry
     // `.as_entire_binding()`. The Kernel trait impl above remains the
     // single entry point for ViewFold callers.
-    if !is_view_fold_spec(spec) {
+    if !matches!(spec.kind, KernelKind::ViewFold) {
         out.push_str(&format!(
             "pub fn {name}_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {{\n    \
              vec![\n",
@@ -501,7 +501,7 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology) -> St
     ));
 
     // bind()
-    if is_view_fold_spec(spec) {
+    if matches!(spec.kind, KernelKind::ViewFold) {
         out.push_str(&compose_view_fold_bind_method(spec));
     } else {
         out.push_str(&format!(
@@ -515,7 +515,7 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology) -> St
     }
 
     // record()
-    if is_view_fold_spec(spec) {
+    if matches!(spec.kind, KernelKind::ViewFold) {
         out.push_str(&compose_view_fold_record_method(spec));
     } else {
         out.push_str(&format!(
@@ -627,21 +627,13 @@ fn render_bg_source_expr(src: &BgSource, field: &str) -> String {
 // ViewFold-specific composition (Task 5.3)
 // ---------------------------------------------------------------------------
 
-/// Detect whether a [`KernelSpec`] was synthesised by Task 5.3's
-/// ViewFold path. The signal is the presence of any
-/// [`BgSource::ViewHandle`] binding — only ViewFold kernels emit
-/// those today, and the tag carries the per-view resident accessor
-/// name needed by the Task-5.4 handle-tuple destructure.
-fn is_view_fold_spec(spec: &KernelSpec) -> bool {
-    spec.bindings
-        .iter()
-        .any(|b| matches!(b.bg_source, BgSource::ViewHandle { .. }))
-}
-
 /// Pull the per-view resident accessor name from a ViewFold spec —
 /// every ViewHandle binding in the spec carries the same accessor by
 /// construction (see [`super::kernel::build_view_fold_bindings`]).
-/// Returns `None` if the spec is not a ViewFold spec.
+/// Returns `None` if no ViewHandle binding is present (which should
+/// only happen for non-ViewFold specs; routing decisions are now made
+/// against `spec.kind`, so this helper just walks the bindings to find
+/// the accessor string).
 fn view_fold_accessor(spec: &KernelSpec) -> Option<&str> {
     spec.bindings.iter().find_map(|b| match &b.bg_source {
         BgSource::ViewHandle { accessor, .. } => Some(accessor.as_str()),
@@ -668,6 +660,12 @@ fn view_fold_accessor(spec: &KernelSpec) -> Option<&str> {
 ///   by [`super::kernel::build_view_fold_bindings`]. A spec with a
 ///   different shape would silently produce a misaligned struct.
 fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
+    debug_assert_eq!(
+        spec.bindings.len(),
+        7,
+        "compose_view_fold_bindings_struct_fields: ViewFold spec must carry exactly 7 bindings; got {}",
+        spec.bindings.len()
+    );
     let mut out = String::new();
     for b in &spec.bindings {
         // Anchor/ids slots get Option<&'a wgpu::Buffer> per legacy
@@ -718,6 +716,12 @@ fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
 ///   the resident path always exposes these (see
 ///   `crates/engine_gpu_rules/src/resident_context.rs`).
 fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
+    debug_assert_eq!(
+        spec.bindings.len(),
+        7,
+        "compose_view_fold_bind_method: ViewFold spec must carry exactly 7 bindings; got {}",
+        spec.bindings.len()
+    );
     let accessor = view_fold_accessor(spec).expect("ViewFold spec must carry an accessor");
     let mut out = String::new();
     out.push_str(&format!(
@@ -764,6 +768,12 @@ fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
 ///   the `agent_cap` parameter is suppressed via `let _ = agent_cap;`
 ///   to silence unused-variable warnings.
 fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
+    debug_assert_eq!(
+        spec.bindings.len(),
+        7,
+        "compose_view_fold_record_method: ViewFold spec must carry exactly 7 bindings; got {}",
+        spec.bindings.len()
+    );
     let mut out = String::new();
     out.push_str(&format!(
         "    fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, bindings: &{pascal}Bindings<'_>, agent_cap: u32) {{\n",

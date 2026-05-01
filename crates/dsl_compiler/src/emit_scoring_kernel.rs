@@ -51,7 +51,7 @@ pub struct ViewSpecForEmit {
 /// scoring_out, sim_cfg, cfg. View bindings deferred (the WGSL body
 /// in `emit_scoring_wgsl::emit_scoring_wgsl_v2` doesn't read views).
 pub fn scoring_kernel_spec() -> crate::kernel_binding_ir::KernelSpec {
-    use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelSpec};
+    use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelKind, KernelSpec};
     KernelSpec {
         name: "scoring".into(),
         pascal: "Scoring".into(),
@@ -99,6 +99,7 @@ pub fn scoring_kernel_spec() -> crate::kernel_binding_ir::KernelSpec {
                 bg_source: BgSource::Cfg,
             },
         ],
+        kind: KernelKind::Generic,
     }
 }
 

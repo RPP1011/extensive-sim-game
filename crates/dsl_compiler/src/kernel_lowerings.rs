@@ -180,7 +180,7 @@ pub fn lower_rust_bind_body(spec: &KernelSpec) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelSpec};
+    use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelKind, KernelSpec};
 
     fn make_demo_spec() -> KernelSpec {
         KernelSpec {
@@ -213,6 +213,7 @@ mod tests {
                     bg_source: BgSource::Cfg,
                 },
             ],
+            kind: KernelKind::Generic,
         }
     }
 
@@ -298,6 +299,7 @@ mod tests {
                     bg_source: BgSource::AliasOf("primary".into()),
                 },
             ],
+            kind: KernelKind::Generic,
         };
         let fields = lower_rust_bindings_struct_fields(&spec);
         assert!(fields.contains("pub primary: &'a wgpu::Buffer,"));

@@ -221,7 +221,7 @@ pub fn emit_kernel_module_rs(spec: &KernelSpec) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelSpec};
+    use crate::kernel_binding_ir::{AccessMode, BgSource, KernelBinding, KernelKind, KernelSpec};
 
     fn make_demo_spec() -> KernelSpec {
         KernelSpec {
@@ -261,6 +261,7 @@ mod tests {
                     bg_source: BgSource::Cfg,
                 },
             ],
+            kind: KernelKind::Generic,
         }
     }
 
