@@ -719,47 +719,112 @@ git commit -m "feat(dsl_compiler/cg/emit): WGSL + Rust emission from ComputeSche
 
 Replace the legacy per-kernel emit modules with the CG pipeline.
 
-### Task 5.1: xtask wiring
+> **Acceptance gate is `parity_with_cpu`, NOT byte-equal source files.**
+>
+> Originally Phase 5 was framed around byte-for-byte parity with legacy emit. A 2026-04-29 audit (memo in this commit's notes) revealed:
+> - On `assets/sim/*.sim` the CG pipeline lowers 21 ops total (9 view_fold + 12 plumbing) and **0** mask/scoring/physics/spatial ops. 45 typed deferral diagnostics hit AST shapes the per-construct lowerings still defer (target binding, fielded `Emit`, namespace setters, `Let`, etc.).
+> - Byte-equality vs legacy emit cannot be evaluated against missing output. The plan's own qualifier ("where the existing emit was correct") was already conceding the legacy had bugs (fused_mask BGL drift, scoring drift, fold entry-name drift).
+> - Phase 6's actual gate is `parity_with_cpu`: GPU output equals CPU output. That is **behavioral parity**, not source-file parity.
+>
+> Phase 5 is reframed around two real constraints:
+>
+> 1. **API compatibility.** `engine_gpu_rules`'s public exports (the `Kernel` trait, per-kernel structs like `FusedMaskKernel`, cross-cutting types like `BindingSources`/`PingpongContext`/`Pool`/`ResidentContext`/`ExternalBuffers`/`TransientHandles`) must match what `engine_gpu` imports. Internal WGSL bodies and Rust impl details may differ.
+> 2. **Behavioral parity.** `gpu_pipeline_smoke` + `parity_with_cpu` (Phase 6) pass.
 
-Update `crates/xtask/src/compile_dsl_cmd.rs` to:
-1. Lower the resolved Compilation to a `CgProgram`.
-2. Synthesize a `ComputeSchedule` (default strategy).
-3. Emit via `emit_cg_program`.
-4. Write the output files.
+### Task 5.1: side-channel + parity harness
 
-- [ ] **Step 1-2: Wire + verify outputs match the existing per-kernel emit byte-for-byte (where the existing emit was correct)**
+Wire `compile-dsl` to ALSO emit via the CG pipeline into a side directory, NOT overwriting `engine_gpu_rules/src/`. Add an xtask subcommand that runs the CG-pipeline output through a behavioral parity check.
 
-For kernels where the legacy emit was wrong (fused_mask BGL drift, scoring drift, fold entry-name drift — all the pre-CG drifts we patched), the new emit's output is necessarily different. The diff is the migration.
+1. Update `crates/xtask/src/compile_dsl_cmd.rs` to accept `--cg-emit-into <dir>`. When set: run the CG pipeline (lower → synthesize_schedule(Default) → emit_cg_program), write `EmittedArtifacts` into the side directory.
+2. Add `cargo run --bin xtask -- compile-dsl-parity --cg-out <dir>` that:
+   - Builds `engine_gpu_rules` against the side-directory output instead of the legacy `engine_gpu_rules/src/`.
+   - Runs `parity_with_cpu` (or a CG-side variant) under `--features gpu`.
+   - Reports pass/fail.
+3. **No diff-to-legacy step.** The CG output may diverge textually; what matters is whether it runs and matches CPU.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 1: Implement `--cg-emit-into <dir>` flag.**
+- [ ] **Step 2: Implement parity harness command.**
+- [ ] **Step 3: Tests — verify the side-channel emits without panicking; the parity command surfaces typed errors when the CG output won't compile.**
+- [ ] **Step 4: Commit.** `feat(xtask): CG-pipeline side-channel + parity harness`
 
-### Task 5.2: Retire legacy emitters
+### Task 5.2: Bucket-1 blockers (API compatibility)
 
-After the CG pipeline produces the same outputs xtask needs:
+Without these, the CG pipeline's emitted Rust files won't compile against `engine_gpu_rules`'s extant runtime contract.
 
-- [ ] **Step 1: Mark every per-kernel emit module `#[deprecated]`**
+1. Emit `Kernel` trait impl per kernel module (struct + `impl crate::Kernel for <Pascal>Kernel { type Bindings; type Cfg; new; build_cfg; bind; record; }`).
+2. Emit `bgl_storage`/`bgl_uniform` cross-kernel helpers (or move to a shared helpers file).
+3. Emit `lib.rs` (kernel registry: `mod <name>;` + `pub use` per kernel + `pub trait Kernel { … }`).
+4. Replace structural kernel names (`cg_fused_mask_predicate_2`) with semantic names (`fused_mask`, `scoring`, `fold_<view>`, etc.) so file paths match.
 
-`emit_mask_kernel`, `emit_mask_wgsl`, `emit_scoring_kernel`, `emit_scoring_wgsl`, `emit_view_fold_kernel`, `emit_view_wgsl`'s fold emitters, `emit_movement_wgsl`, `emit_apply_actions_wgsl`, etc. — all the per-kernel writeln-pattern modules.
+- [ ] **Step 1-4: Implement + tests + commit.** `feat(dsl_compiler/cg/emit): API-compatible kernel module shape`
 
-- [ ] **Step 2: Verify no callers remain**
+### Task 5.3: ViewFold parity
 
-`grep -rn "dsl_compiler::emit_<old>" crates/` should return zero hits outside the deprecated modules' own files.
+The 9 view_fold ops are the only kind that lower from real DSL today. Close their parity gap (storage-hint-aware bodies, anchor/ids fallback in `bind()`, cfg shape per view). After this, the side-channel build of `engine_gpu_rules` should compile and the fold kernels should behaviorally match legacy.
 
-- [ ] **Step 3: Delete the deprecated modules**
+- [ ] **Step 1-3: Implement + tests + commit.** `feat(dsl_compiler/cg/emit): ViewFold body parity`
 
-The remaining emit code lives in `dsl_compiler::cg::emit` — one tree, structured.
+### Task 5.4: Cross-cutting modules
 
-- [ ] **Step 4: Commit**
+`BindingSources`, `ExternalBuffers`, `TransientHandles`, `PingpongContext`, `Pool`, `ResidentContext`, `Schedule`. These aggregate state across the program, are not per-kernel, and are imported by every kernel + by `engine_gpu`. Decide ownership:
+- **(a)** Port to the CG pipeline using the schedule's union-of-handles.
+- **(b)** Keep legacy emitters and accept the hybrid (CG owns kernels, legacy owns aggregates).
 
-```bash
-git commit -m "refactor(dsl_compiler): retire per-kernel emit modules; CG pipeline is canonical"
-```
+(a) is the cleanest endpoint. (b) is faster but locks in a long-term hybrid. **Choose (a).**
+
+- [ ] **Step 1-3: Implement + tests + commit.** `feat(dsl_compiler/cg/emit): cross-cutting module emission`
+
+### Task 5.5: AST coverage cleanup
+
+The largest single batch. Without these, mask/scoring/physics/spatial ops cannot lower from real DSL.
+
+1. `target` binding in `lower_field` (extends `LoweringCtx`).
+2. Fielded `Emit` lowering (driver-supplied event-field schema).
+3. `Let` binding (new `CgStmt::Let` variant or expression hoisting).
+4. Namespace setter call lowering (`agents.set_hp(t, x)` → `Emit { event, fields }`).
+5. `For` loop (the `cast` rule's `for op in abilities.effects(ab)`).
+6. Lazy view inlining at call sites.
+7. `NamespaceField` (`config.<…>` → `DataHandle::ConfigConst`).
+8. `EngagementQuery` driver routing (today only `KinQuery` selected).
+9. PerUnit modifier in scoring.
+10. Match (top-level expression) + Quantifier + Fold.
+
+- [ ] **Step 1-N: Implement + tests + commit.** Likely 5-10 commits, one per AST shape closed.
+
+### Task 5.6: Per-kind body lowering
+
+Implement real WGSL bodies for op kinds that today emit `// TODO(task-4.x)` comments:
+1. `MaskPredicate` (real predicate evaluation + per-mask bitmap word write — replace `atomicOr` placeholder).
+2. `ScoringArgmax` (per-row utility + per-action argmax + target resolution + output write).
+3. `SpatialQuery` (3 kinds: BuildHash, KinQuery, EngagementQuery — distinct bodies).
+4. `Plumbing` (per-`PlumbingKind` body — many of these don't yet have variants).
+
+- [ ] **Step 1-N: Implement + tests + commit.** Likely 4-8 commits, one per body.
+
+### Task 5.7: Switchover
+
+Replace xtask's legacy-emitter calls with `emit_cg_program` writes. Run `parity_with_cpu` (Phase 6 gate). If parity fails, fix the IR/lowering/schedule — NOT the test.
+
+- [ ] **Step 1-2: Switchover + parity gate.**
+- [ ] **Step 3: Commit.** `refactor(xtask): canonical compile-dsl emit is CG pipeline`
+
+### Task 5.8: Retire legacy emitters
+
+After switchover holds:
+
+- [ ] **Step 1: Mark every per-kernel emit module `#[deprecated]`.**
+
+`emit_mask_kernel`, `emit_mask_wgsl`, `emit_scoring_kernel`, `emit_scoring_wgsl`, `emit_view_fold_kernel`, `emit_view_wgsl`'s fold emitters, `emit_movement_wgsl`, `emit_apply_actions_wgsl`, etc.
+
+- [ ] **Step 2: Verify no callers remain.** `grep -rn "dsl_compiler::emit_<old>" crates/` outside the deprecated modules' own files.
+- [ ] **Step 3: Delete.** The remaining emit code lives in `dsl_compiler::cg::emit` — one tree, structured.
+- [ ] **Step 4: Commit.** `refactor(dsl_compiler): retire per-kernel emit modules; CG pipeline is canonical`
 
 ---
 
 ## Phase 6: Validation
 
-The compute graph IR is correct iff the emitted GPU pipeline produces output byte-equal to the CPU reference.
+The compute graph IR is correct iff the emitted GPU pipeline produces output byte-equal **to the CPU reference** (NOT to the legacy GPU emit). Phase 6 is the binary acceptance gate; Phase 5 textual divergence from legacy emit is acceptable as long as Phase 6 passes.
 
 - [ ] **Step 1: Run `gpu_pipeline_smoke`**
 
@@ -767,7 +832,7 @@ Must PASS — every kernel instantiates against its derived BGL.
 
 - [ ] **Step 2: Run `parity_with_cpu` under `--features gpu`**
 
-Must PASS without the CPU forward inside `step_batch`. This is the binary acceptance gate.
+Must PASS without the CPU forward inside `step_batch`. **This is the binary acceptance gate** — CPU output equals GPU output, byte-equal.
 
 If parity fails, the IR is missing something — fix the IR (or the lowering / schedule), NOT the test.
 
