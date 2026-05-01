@@ -270,41 +270,46 @@ pub struct DriverOutcome {
 // Phase 1 helpers — registry population
 // ---------------------------------------------------------------------------
 
-/// Allocate one [`EventKindId`] + one [`EventRingId`] per
-/// [`EventIR`] in source order. Returns the per-event-kind ring id
-/// table the per-construct lowerings consult to build their
-/// [`HandlerResolution`]s.
+/// Allocate one [`EventKindId`] per [`EventIR`] in source order, and
+/// allocate ONE shared [`EventRingId`] for every event kind. Returns
+/// the per-event-kind ring id table the per-construct lowerings
+/// consult to build their [`HandlerResolution`]s.
 ///
-/// The ring id allocation is symmetric to the kind id allocation —
-/// `EventKindId(i)` shares the same numeric `i` as
-/// `EventRingId(i)`. Cross-id confusion is structurally prevented by
-/// the typed newtypes; the parallel allocation is purely a
-/// convenience for the driver.
+/// All event kinds share `EventRingId(0)`, named `batch_events` on
+/// the interner. This mirrors the runtime contract: the
+/// resident-context owns ONE `batch_events_ring` buffer that carries
+/// every event tag interleaved (see
+/// `crates/engine_gpu_rules/src/resident_context.rs`). The earlier
+/// 1:1 [`EventKindId`]↔[`EventRingId`] allocation rule was a
+/// Phase-1 placeholder; per-kind ring identity is preserved at the
+/// WGSL level via the in-kernel `event.tag` decode, and the
+/// dispatch layer drives a single ring's tail count.
 fn populate_event_kinds(
     comp: &Compilation,
     ctx: &mut LoweringCtx<'_>,
     diagnostics: &mut Vec<LoweringError>,
 ) -> Vec<EventRingId> {
+    let shared_ring = EventRingId(0);
+    if let Err(e) = ctx
+        .builder
+        .intern_event_ring_name(shared_ring, "batch_events".to_string())
+    {
+        diagnostics.push(LoweringError::BuilderRejected {
+            error: e,
+            span: dsl_ast::ast::Span::dummy(),
+        });
+    }
+
     let mut ring_ids = Vec::with_capacity(comp.events.len());
     for (i, event) in comp.events.iter().enumerate() {
         let kind_id = EventKindId(i as u32);
-        let ring_id = EventRingId(i as u32);
-        ring_ids.push(ring_id);
+        ring_ids.push(shared_ring);
 
         ctx.register_event_kind(event.name.clone(), kind_id);
 
         if let Err(e) = ctx
             .builder
             .intern_event_kind_name(kind_id, event.name.clone())
-        {
-            diagnostics.push(LoweringError::BuilderRejected {
-                error: e,
-                span: event.span,
-            });
-        }
-        if let Err(e) = ctx
-            .builder
-            .intern_event_ring_name(ring_id, event.name.clone())
         {
             diagnostics.push(LoweringError::BuilderRejected {
                 error: e,
