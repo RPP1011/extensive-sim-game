@@ -527,11 +527,14 @@ pub fn synthesize_pool() -> String {
 ///
 /// # Limitations
 ///
-/// - **All entries today emit as `DispatchOp::Kernel`.** Detecting
-///   fixed-point loops requires walking the schedule's topology
-///   classifications which the CG pipeline doesn't yet thread through;
-///   `Indirect` topologies emit one entry per consumer (matching the
-///   legacy schedule structure).
+/// - **`FixedPoint::max_iter` is hardcoded to 8.** The legacy emitter
+///   uses the same value (see `crates/xtask/src/compile_dsl_cmd.rs:1283`).
+///   Threading a per-rule `@cascade(max_iter=N)` annotation through the
+///   IR is a future refinement.
+/// - **`Indirect::args_buf` is pinned to `BufferRef::ResidentIndirectArgs`.**
+///   The runtime currently routes all indirect-args buffers through
+///   that single variant; future plans that introduce per-consumer
+///   indirect args buffers would need IR-level metadata.
 /// - **Kernel naming routes through Task 5.2's
 ///   [`semantic_kernel_name_for_topology`].** Mismatches between the
 ///   schedule entries and the per-kernel module file names are
@@ -553,19 +556,20 @@ pub fn synthesize_schedule(schedule: &ComputeSchedule, prog: &CgProgram) -> Stri
     out.push_str("}\n");
     out.push('\n');
 
-    // Walk stages to collect kernel names in schedule order.
-    let mut entries: Vec<String> = Vec::new();
+    // Walk stages, classifying each topology into the dispatch-op
+    // variant it should emit (Kernel / FixedPoint / Indirect). Use
+    // the same naming helper the per-kernel emit uses, so schedule
+    // entries reference the actual emitted module names. Errors here
+    // are unreachable in practice (the per-kernel emit would have
+    // already failed); we defensively skip rather than panic.
+    let mut entries: Vec<ScheduleEntry> = Vec::new();
     for stage in &schedule.stages {
         for topology in &stage.kernels {
-            // Use the same naming helper the per-kernel emit uses, so
-            // schedule entries reference the actual emitted module
-            // names. Errors here are unreachable in practice (the
-            // per-kernel emit would have already failed); we
-            // defensively skip rather than panic.
-            match semantic_kernel_name_for_topology(topology, prog) {
-                Some(name) => entries.push(name),
+            let name = match semantic_kernel_name_for_topology(topology, prog) {
+                Some(n) => n,
                 None => continue,
-            }
+            };
+            entries.push(classify_topology_for_schedule(topology, &name, prog));
         }
     }
 
@@ -575,13 +579,123 @@ pub fn synthesize_schedule(schedule: &ComputeSchedule, prog: &CgProgram) -> Stri
     }
 
     out.push_str("pub const SCHEDULE: &[DispatchOp] = &[\n");
-    for name in &entries {
-        let pascal = snake_to_pascal(name);
-        writeln!(out, "    DispatchOp::Kernel(KernelKind::{pascal}),")
-            .expect("write to String");
+    for entry in &entries {
+        match entry {
+            ScheduleEntry::Kernel(name) => {
+                let pascal = snake_to_pascal(name);
+                writeln!(out, "    DispatchOp::Kernel(KernelKind::{pascal}),")
+                    .expect("write to String");
+            }
+            ScheduleEntry::FixedPoint { kernel, max_iter } => {
+                let pascal = snake_to_pascal(kernel);
+                writeln!(
+                    out,
+                    "    DispatchOp::FixedPoint {{ kernel: KernelKind::{pascal}, max_iter: {max_iter} }},"
+                )
+                .expect("write to String");
+            }
+            ScheduleEntry::Indirect { kernel, args_buf } => {
+                let pascal = snake_to_pascal(kernel);
+                writeln!(
+                    out,
+                    "    DispatchOp::Indirect {{ kernel: KernelKind::{pascal}, args_buf: BufferRef::{args_buf} }},"
+                )
+                .expect("write to String");
+            }
+        }
     }
     out.push_str("];\n");
     out
+}
+
+/// One entry in the synthesised schedule, paired with the dispatch-op
+/// shape it should emit. Used internally by [`synthesize_schedule`] and
+/// [`classify_topology_for_schedule`]; not part of the public API.
+enum ScheduleEntry {
+    Kernel(String),
+    FixedPoint { kernel: String, max_iter: u32 },
+    Indirect { kernel: String, args_buf: &'static str },
+}
+
+/// Decide which `DispatchOp` variant the synthesised SCHEDULE should
+/// emit for `topology` (already named `kernel_name`).
+///
+/// Today three rules apply:
+///
+/// 1. [`KernelTopology::Indirect`] producer/consumer pairs → the
+///    consumer-side dispatch is `DispatchOp::Indirect`, with
+///    `args_buf` pinned to `BufferRef::ResidentIndirectArgs` (the only
+///    `BufferRef` variant the runtime currently routes through). The
+///    producer (`SeedIndirectArgs` plumbing) emits its own kernel
+///    entry one stage earlier and keeps `DispatchOp::Kernel(...)`
+///    classification.
+///
+/// 2. [`KernelTopology::Split`] / [`KernelTopology::Fused`] whose body
+///    is a `ComputeOpKind::PhysicsRule` AND whose semantic name is
+///    `"physics"` → `DispatchOp::FixedPoint { max_iter: 8 }`. The
+///    `max_iter: 8` matches the legacy
+///    `crates/xtask/src/compile_dsl_cmd.rs:1283` value; threading
+///    a per-rule `@cascade(max_iter=N)` annotation through the IR is
+///    a future refinement.
+///
+/// 3. Everything else → `DispatchOp::Kernel(...)`.
+///
+/// **Why the kernel-name guard in rule 2.** Today every `PhysicsRule`
+/// op lowers to the kernel named `"physics"`. The guard is forward-
+/// looking: a future plan that splits PhysicsRule across multiple
+/// kernels would need explicit per-kernel FixedPoint metadata, and
+/// the guard surfaces that future work as an emit-time miss rather
+/// than a runtime correctness drift.
+fn classify_topology_for_schedule(
+    topology: &crate::cg::schedule::synthesis::KernelTopology,
+    kernel_name: &str,
+    prog: &CgProgram,
+) -> ScheduleEntry {
+    use crate::cg::schedule::synthesis::KernelTopology;
+    match topology {
+        KernelTopology::Indirect { .. } => ScheduleEntry::Indirect {
+            kernel: kernel_name.to_string(),
+            args_buf: "ResidentIndirectArgs",
+        },
+        KernelTopology::Split { op, .. } => {
+            if topology_op_is_physics_rule(prog, *op) && kernel_name == "physics" {
+                ScheduleEntry::FixedPoint {
+                    kernel: kernel_name.to_string(),
+                    max_iter: 8,
+                }
+            } else {
+                ScheduleEntry::Kernel(kernel_name.to_string())
+            }
+        }
+        KernelTopology::Fused { ops, .. } => {
+            // Classify on the FIRST op (today every fused kernel is
+            // single-op or has homogeneous classification — mixing
+            // PhysicsRule with non-PhysicsRule in one fused kernel
+            // would be a structural mismatch).
+            let primary_op_id = match ops.first() {
+                Some(o) => *o,
+                None => return ScheduleEntry::Kernel(kernel_name.to_string()),
+            };
+            if topology_op_is_physics_rule(prog, primary_op_id) && kernel_name == "physics" {
+                ScheduleEntry::FixedPoint {
+                    kernel: kernel_name.to_string(),
+                    max_iter: 8,
+                }
+            } else {
+                ScheduleEntry::Kernel(kernel_name.to_string())
+            }
+        }
+    }
+}
+
+/// Return true iff `op_id` indexes a [`ComputeOpKind::PhysicsRule`] op
+/// in `prog.ops`. Out-of-range indices and non-PhysicsRule kinds both
+/// yield false.
+fn topology_op_is_physics_rule(prog: &CgProgram, op_id: crate::cg::op::OpId) -> bool {
+    prog.ops
+        .get(op_id.0 as usize)
+        .map(|op| matches!(op.kind, ComputeOpKind::PhysicsRule { .. }))
+        .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1124,205 @@ mod tests {
         assert!(
             src.contains("pub const SCHEDULE: &[DispatchOp] = &[];"),
             "empty schedule should emit empty const: {src}"
+        );
+    }
+
+    // ---- 8b. schedule classification (Task 5.7 P3) ----
+
+    #[test]
+    fn classify_indirect_topology_emits_indirect_entry() {
+        // Indirect topology: producer = SeedIndirectArgs op, consumers
+        // are PerEvent ops. The classifier doesn't inspect producer/
+        // consumers — it just routes the topology to ScheduleEntry::Indirect.
+        let prog = CgProgram::default();
+        let topology = KernelTopology::Indirect {
+            producer: OpId(0),
+            consumers: vec![],
+        };
+        let entry = classify_topology_for_schedule(&topology, "any_kernel", &prog);
+        match entry {
+            ScheduleEntry::Indirect { kernel, args_buf } => {
+                assert_eq!(kernel, "any_kernel");
+                assert_eq!(args_buf, "ResidentIndirectArgs");
+            }
+            ScheduleEntry::Kernel(_) | ScheduleEntry::FixedPoint { .. } => {
+                panic!("Indirect topology must classify to ScheduleEntry::Indirect");
+            }
+        }
+    }
+
+    #[test]
+    fn classify_split_view_fold_emits_kernel_entry() {
+        // Split topology over a ViewFold op (not PhysicsRule) →
+        // DispatchOp::Kernel.
+        let (prog, op_id) = one_view_fold_program(3, "threat_level");
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let entry = classify_topology_for_schedule(&topology, "fold_threat_level", &prog);
+        match entry {
+            ScheduleEntry::Kernel(name) => {
+                assert_eq!(name, "fold_threat_level");
+            }
+            ScheduleEntry::FixedPoint { .. } | ScheduleEntry::Indirect { .. } => {
+                panic!("ViewFold Split topology must classify to ScheduleEntry::Kernel");
+            }
+        }
+    }
+
+    #[test]
+    fn classify_physics_rule_named_physics_emits_fixed_point() {
+        use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PhysicsRuleId, ReplayabilityFlag, Span};
+
+        let mut prog = CgProgram::default();
+        prog.interner
+            .event_kinds
+            .insert(7, "AgentAttacked".to_string());
+        let empty_list = CgStmtList { stmts: vec![] };
+        let list_id = CgStmtListId(prog.stmt_lists.len() as u32);
+        prog.stmt_lists.push(empty_list);
+
+        let physics_kind = ComputeOpKind::PhysicsRule {
+            rule: PhysicsRuleId(0),
+            on_event: EventKindId(7),
+            body: list_id,
+            replayable: ReplayabilityFlag::Replayable,
+        };
+        let physics_op = ComputeOp::new(
+            OpId(0),
+            physics_kind,
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = OpId(prog.ops.len() as u32);
+        prog.ops.push(physics_op);
+
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let entry = classify_topology_for_schedule(&topology, "physics", &prog);
+        match entry {
+            ScheduleEntry::FixedPoint { kernel, max_iter } => {
+                assert_eq!(kernel, "physics");
+                assert_eq!(max_iter, 8);
+            }
+            ScheduleEntry::Kernel(_) | ScheduleEntry::Indirect { .. } => {
+                panic!("PhysicsRule named `physics` must classify to FixedPoint");
+            }
+        }
+    }
+
+    #[test]
+    fn classify_physics_rule_with_other_name_emits_kernel() {
+        // Forward-looking: a PhysicsRule op whose kernel name is NOT
+        // "physics" must emit DispatchOp::Kernel rather than FixedPoint.
+        // Surfaces the future-work edge (per-kernel FixedPoint metadata)
+        // as a classification miss rather than a runtime drift.
+        use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PhysicsRuleId, ReplayabilityFlag, Span};
+
+        let mut prog = CgProgram::default();
+        prog.interner
+            .event_kinds
+            .insert(7, "AgentAttacked".to_string());
+        let empty_list = CgStmtList { stmts: vec![] };
+        let list_id = CgStmtListId(prog.stmt_lists.len() as u32);
+        prog.stmt_lists.push(empty_list);
+
+        let physics_kind = ComputeOpKind::PhysicsRule {
+            rule: PhysicsRuleId(0),
+            on_event: EventKindId(7),
+            body: list_id,
+            replayable: ReplayabilityFlag::Replayable,
+        };
+        let physics_op = ComputeOp::new(
+            OpId(0),
+            physics_kind,
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = OpId(prog.ops.len() as u32);
+        prog.ops.push(physics_op);
+
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let entry = classify_topology_for_schedule(&topology, "some_other_kernel", &prog);
+        match entry {
+            ScheduleEntry::Kernel(name) => {
+                assert_eq!(name, "some_other_kernel");
+            }
+            ScheduleEntry::FixedPoint { .. } | ScheduleEntry::Indirect { .. } => {
+                panic!("PhysicsRule with non-`physics` kernel name must classify to Kernel");
+            }
+        }
+    }
+
+    #[test]
+    fn schedule_indirect_topology_emits_indirect_dispatch_op() {
+        // Integration: full synthesize_schedule path should produce
+        // `DispatchOp::Indirect` text for an Indirect topology.
+        // We use a Plumbing::SeedIndirectArgs producer paired with a
+        // ViewFold consumer (the consumer side is what gets the
+        // Indirect dispatch op).
+        use crate::cg::data_handle::EventRingId;
+        use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PlumbingKind, Span};
+
+        // Start with a single-view program (gives us a consumer ViewFold op
+        // at index 0) and add a SeedIndirectArgs producer op.
+        let (mut prog, consumer_op_id) = one_view_fold_program(3, "threat_level");
+        let producer_kind = ComputeOpKind::Plumbing {
+            kind: PlumbingKind::SeedIndirectArgs {
+                ring: EventRingId(0),
+            },
+        };
+        let producer_op = ComputeOp::new(
+            OpId(prog.ops.len() as u32),
+            producer_kind,
+            DispatchShape::OneShot,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let producer_id = OpId(prog.ops.len() as u32);
+        prog.ops.push(producer_op);
+
+        let topology = KernelTopology::Indirect {
+            producer: producer_id,
+            consumers: vec![consumer_op_id],
+        };
+        let schedule = ComputeSchedule {
+            stages: vec![ComputeStage {
+                kernels: vec![topology],
+            }],
+        };
+        let src = synthesize_schedule(&schedule, &prog);
+        assert!(
+            src.contains("DispatchOp::Indirect"),
+            "Indirect topology must emit DispatchOp::Indirect: {src}"
+        );
+        assert!(
+            src.contains("BufferRef::ResidentIndirectArgs"),
+            "Indirect emit must reference ResidentIndirectArgs: {src}"
         );
     }
 
