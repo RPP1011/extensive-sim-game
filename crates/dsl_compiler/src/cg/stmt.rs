@@ -38,7 +38,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::data_handle::{CgExprId, DataHandle};
-use super::expr::{CgExpr, ExprArena};
+use super::expr::{CgExpr, CgTy, ExprArena};
 use super::op::EventKindId;
 
 // ---------------------------------------------------------------------------
@@ -238,6 +238,32 @@ pub enum CgStmt {
         scrutinee: CgExprId,
         arms: Vec<CgMatchArm>,
     },
+
+    /// Local binding statement — `let local_<N>: <ty> = <value>;`.
+    /// Lowered from `IrStmt::Let { name, local, value, span }` inside
+    /// physics rule bodies. The [`LocalId`] identifies the binder;
+    /// expression-tree references to the same local will resolve
+    /// through the lowering context's `local_ids` map once
+    /// `IrExpr::Local` resolution lands at the expression layer
+    /// (Task 5.5d).
+    ///
+    /// `value` is the bound expression; its CG-typed result must
+    /// match `ty`. Emit consults `ty` to declare the local in WGSL
+    /// (`let local_<N>: <wgsl-ty> = ...;`) and in Rust.
+    ///
+    /// # Limitations
+    ///
+    /// References to the bound local from later statements still
+    /// surface as
+    /// [`crate::cg::lower::LoweringError::UnsupportedLocalBinding`]
+    /// at the expression layer — wiring the read-side resolution is
+    /// Task 5.5d. Today's Let arm represents the binding
+    /// structurally; consumers are a follow-up.
+    Let {
+        local: LocalId,
+        value: CgExprId,
+        ty: CgTy,
+    },
 }
 
 impl fmt::Display for CgStmt {
@@ -270,6 +296,9 @@ impl fmt::Display for CgStmt {
                     write!(f, "{}", arm)?;
                 }
                 f.write_str("])")
+            }
+            CgStmt::Let { local, value, ty } => {
+                write!(f, "let({}: {} = expr#{})", local, ty, value.0)
             }
         }
     }
@@ -471,6 +500,16 @@ pub fn collect_stmt_dependencies(
             for arm in arms {
                 collect_list_dependencies(arm.body, exprs, stmts, lists, reads, writes);
             }
+        }
+        CgStmt::Let { value, .. } => {
+            // Let: walk the bound value expression for reads. The
+            // local binding itself is scoped within the enclosing
+            // op's body — locals don't surface as a structural read
+            // of any persisted data handle. Expression-level
+            // references to the local resolve once `IrExpr::Local`
+            // resolution lands (Task 5.5d); until then this walker
+            // only contributes the value's reads.
+            collect_expr_reads(*value, exprs, reads);
         }
     }
 }
@@ -971,6 +1010,57 @@ mod tests {
             "match(scrutinee=expr#5, arms=[arm(variant#0, [amount=local#0], body=stmts#1), arm(variant#1, [], body=stmts#2)])"
         );
         assert_roundtrip(&s);
+    }
+
+    #[test]
+    fn let_stmt_display_and_roundtrip() {
+        // CgStmt::Let { local, value, ty } pretty-prints in the canonical
+        // `let(<local>: <ty> = expr#<id>)` form and round-trips through
+        // serde without losing payload.
+        let s = CgStmt::Let {
+            local: LocalId(7),
+            value: CgExprId(11),
+            ty: CgTy::F32,
+        };
+        assert_eq!(format!("{}", s), "let(local#7: f32 = expr#11)");
+        assert_roundtrip(&s);
+    }
+
+    #[test]
+    fn collect_stmt_dependencies_let_walks_value_expression() {
+        // let local#0: f32 = (agent.self.hp + 1.0)
+        // Walker: Let.value's expression-tree reads → [agent.self.hp].
+        // The local binding itself is scoped — no persisted-handle
+        // read or write for it.
+        let exprs: Vec<CgExpr> = vec![
+            read_self_hp(), // 0
+            lit_f32(1.0),   // 1
+            CgExpr::Binary {
+                op: BinaryOp::AddF32,
+                lhs: CgExprId(0),
+                rhs: CgExprId(1),
+                ty: CgTy::F32,
+            }, // 2
+        ];
+        let stmts: Vec<CgStmt> = vec![CgStmt::Let {
+            local: LocalId(0),
+            value: CgExprId(2),
+            ty: CgTy::F32,
+        }];
+        let lists: Vec<CgStmtList> = vec![];
+        let mut reads = Vec::new();
+        let mut writes = Vec::new();
+        collect_stmt_dependencies(CgStmtId(0), &exprs, &stmts, &lists, &mut reads, &mut writes);
+        assert_eq!(
+            reads,
+            vec![DataHandle::AgentField {
+                field: AgentFieldId::Hp,
+                target: AgentRef::Self_,
+            }]
+        );
+        // No writes — `Let` introduces a local binding, no persisted
+        // data handle is mutated.
+        assert!(writes.is_empty(), "expected no writes, got {writes:?}");
     }
 
     #[test]

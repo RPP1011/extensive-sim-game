@@ -490,6 +490,19 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// A physics `Emit { event_name, fields }` carries a field name
+    /// the driver-supplied event-field schema (LoweringCtx
+    /// `event_field_indices`) does not know. The driver populates
+    /// the schema from each event variant's declared field list
+    /// (Task 5.7); a missing entry surfaces here with the resolved
+    /// [`crate::cg::op::EventKindId`] and the source-level field
+    /// name.
+    UnknownEventField {
+        event: crate::cg::op::EventKindId,
+        field_name: String,
+        span: Span,
+    },
+
     // -- Scoring pass (Task 2.5) -----------------------------------------
 
     /// A scoring row's `utility` expression (the score) type-checked to
@@ -1016,6 +1029,15 @@ impl fmt::Display for LoweringError {
                 f,
                 "physics#{} match at {}..{} has no arms — empty matches have no defined runtime behaviour",
                 rule.0, span.start, span.end
+            ),
+            LoweringError::UnknownEventField {
+                event,
+                field_name,
+                span,
+            } => write!(
+                f,
+                "lowering: emit field `{}` at {}..{} is not registered for event#{} in the event-field schema",
+                field_name, span.start, span.end, event.0
             ),
 
             // -- Scoring pass -----------------------------------------

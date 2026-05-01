@@ -899,6 +899,9 @@ fn walk_body_expr_subtrees(
                     }
                 }
             }
+            CgStmt::Let { value, .. } => {
+                validate_expr_subtree(arena, *value, op_id, expr_arena_len, errors);
+            }
         }
     }
 }
@@ -935,11 +938,13 @@ fn walk_list_id_ranges(
         // (Binary lhs/rhs etc.). This walk only handles list/stmt-id
         // ranges to avoid double-reporting expr defects.
         match stmt {
-            CgStmt::Assign { .. } | CgStmt::Emit { .. } => {
+            CgStmt::Assign { .. } | CgStmt::Emit { .. } | CgStmt::Let { .. } => {
                 // Nothing to range-check at the list-walk level —
                 // these statements only embed expr-ids and (for
                 // Assign) a target handle, all of which are validated
-                // elsewhere.
+                // elsewhere. `Let` carries only an expr-id payload
+                // plus a typed (LocalId, CgTy); the expr-id is caught
+                // by the expr-subtree walk.
             }
             CgStmt::If { then, else_, .. } => {
                 if then.0 >= list_arena_len {
@@ -1294,6 +1299,32 @@ fn type_check_list(
                     type_check_list(arm.body, op_id, prog, ctx, expr_arena_len, errors);
                 }
             }
+            CgStmt::Let { value, ty, .. } => {
+                // Type-check the bound value expression. The Let's
+                // declared `ty` must match the value expression's
+                // computed type — a mismatch surfaces as a typed
+                // `TypeMismatch` carrying a `ClaimedResultMismatch`.
+                if let Some(expr) = prog.exprs.get(value.0 as usize) {
+                    match type_check(expr, *value, ctx) {
+                        Ok(value_ty) => {
+                            if value_ty != *ty {
+                                errors.push(CgError::TypeMismatch {
+                                    op: op_id,
+                                    error: TypeError::ClaimedResultMismatch {
+                                        node: *value,
+                                        expected: *ty,
+                                        got: value_ty,
+                                    },
+                                });
+                            }
+                        }
+                        Err(err) => errors.push(CgError::TypeMismatch {
+                            op: op_id,
+                            error: err,
+                        }),
+                    }
+                }
+            }
         }
     }
 }
@@ -1363,6 +1394,11 @@ fn p6_walk_list(
             CgStmt::Emit { .. } => {
                 // Allowed — `Emit` is the P6 mutation channel.
             }
+            CgStmt::Let { .. } => {
+                // Allowed — `Let` introduces a local binding only;
+                // the binding has no AgentField write surface for
+                // P6 to police.
+            }
             CgStmt::If { then, else_, .. } => {
                 p6_walk_list(*then, op_id, kind_label, prog, errors);
                 if let Some(else_id) = else_ {
@@ -1425,7 +1461,7 @@ fn match_uniqueness_walk_list(
             continue;
         };
         match stmt {
-            CgStmt::Assign { .. } | CgStmt::Emit { .. } => {
+            CgStmt::Assign { .. } | CgStmt::Emit { .. } | CgStmt::Let { .. } => {
                 // Leaves — no nested bodies to descend into.
             }
             CgStmt::If { then, else_, .. } => {
@@ -3178,5 +3214,60 @@ mod tests {
                 "no MatchDuplicateVariant expected, got: {errs:?}"
             );
         }
+    }
+
+    /// well_formed validates `CgStmt::Let.value`'s expression-id
+    /// reference against the program's expression arena. An
+    /// out-of-range value id surfaces as
+    /// [`CgError::ExprIdOutOfRange`] (caught by the expr-subtree
+    /// walk this Task 5.5b extends to cover the `Let` arm).
+    #[test]
+    fn let_value_out_of_range_reports_expr_id_out_of_range() {
+        // Build a CgProgram with a `Let` whose `value` references a
+        // dangling expression id. We bypass `add_stmt`'s validation
+        // by mutating the arena directly — the well_formed pass is
+        // the gate.
+        use crate::cg::stmt::LocalId;
+        let mut b = CgProgramBuilder::new();
+        let real = b
+            .add_expr(CgExpr::Lit(LitValue::F32(1.0)))
+            .expect("add expr");
+        // Real Let pointing at an in-range expr (so `add_stmt` accepts).
+        let let_stmt = b
+            .add_stmt(CgStmt::Let {
+                local: LocalId(0),
+                value: real,
+                ty: CgTy::F32,
+            })
+            .expect("add Let");
+        let body = b
+            .add_stmt_list(CgStmtList::new(vec![let_stmt]))
+            .expect("body list");
+        b.add_op(
+            ComputeOpKind::PhysicsRule {
+                rule: PhysicsRuleId(0),
+                on_event: EventKindId(0),
+                body,
+                replayable: ReplayabilityFlag::NonReplayable,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .expect("add op");
+        let mut prog = b.finish();
+        // Now corrupt the Let's value id past the arena's end.
+        let dangling = CgExprId(prog.exprs.len() as u32 + 5);
+        if let CgStmt::Let { value, .. } = &mut prog.stmts[let_stmt.0 as usize] {
+            *value = dangling;
+        }
+        let errs = check_well_formed(&prog).expect_err("dangling Let.value");
+        assert!(
+            errs.iter().any(
+                |e| matches!(e, CgError::ExprIdOutOfRange { referenced, .. } if *referenced == dangling)
+            ),
+            "expected ExprIdOutOfRange for the dangling Let.value, got: {errs:?}"
+        );
     }
 }

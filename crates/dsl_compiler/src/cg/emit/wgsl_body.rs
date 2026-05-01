@@ -586,6 +586,20 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
             }
         }
         CgStmt::Match { scrutinee, arms } => lower_match_to_wgsl(*scrutinee, arms, ctx),
+        CgStmt::Let { local, value, ty } => {
+            // `let local_<N>: <wgsl-ty> = <value>;`. The local is
+            // visible to subsequent statements in the same body —
+            // their value-expressions resolve to `local_<N>` once
+            // `IrExpr::Local` resolution lands at the expression
+            // layer (Task 5.5d).
+            let v = lower_cg_expr_to_wgsl(*value, ctx)?;
+            Ok(format!(
+                "let local_{}: {} = {};",
+                local.0,
+                cg_ty_to_wgsl(*ty),
+                v
+            ))
+        }
     }
 }
 

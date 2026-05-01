@@ -89,6 +89,16 @@ pub struct LoweringCtx<'a> {
     /// **Distinct from [`Self::variant_ids`].** See its doc for the
     /// rationale.
     pub event_kind_ids: HashMap<String, EventKindId>,
+    /// Per-event field-name → field-index resolver, keyed on the
+    /// `(EventKindId, field_name)` pair. Populated by the driver
+    /// (Task 5.7) from each event variant's declared field list;
+    /// tests populate it directly via [`Self::register_event_field`].
+    /// Used by physics `Emit` lowering to resolve each
+    /// `IrFieldInit { name, value, .. }` to a typed
+    /// [`crate::cg::stmt::EventField`] with `(event, index)`. A
+    /// missing entry surfaces as
+    /// [`LoweringError::UnknownEventField`].
+    pub event_field_indices: HashMap<(EventKindId, String), u8>,
     /// AST [`LocalRef`] → typed [`LocalId`] resolver. Pattern binders
     /// resolved by the AST resolver carry a `LocalRef`; physics-pass
     /// `Match` lowering converts each binding's local through this
@@ -144,6 +154,7 @@ impl<'a> LoweringCtx<'a> {
             view_signatures: HashMap::new(),
             variant_ids: HashMap::new(),
             event_kind_ids: HashMap::new(),
+            event_field_indices: HashMap::new(),
             local_ids: HashMap::new(),
             action_ids: HashMap::new(),
             diagnostics: Vec::new(),
@@ -178,11 +189,52 @@ impl<'a> LoweringCtx<'a> {
         self.event_kind_ids.insert(name.into(), id)
     }
 
+    /// Register an `(EventKindId, field_name) → field_index` entry.
+    /// Used by physics `Emit` lowering to resolve each
+    /// `IrFieldInit { name, .. }` to a typed
+    /// [`crate::cg::stmt::EventField`] with `(event, index)`.
+    /// Driver populates the table from each event variant's
+    /// declared field list (in declaration order); tests populate
+    /// it directly. Returns the prior index if one was registered
+    /// for the same `(event, field_name)` pair (driver-side
+    /// duplicate).
+    pub fn register_event_field(
+        &mut self,
+        event: EventKindId,
+        field_name: impl Into<String>,
+        index: u8,
+    ) -> Option<u8> {
+        self.event_field_indices.insert((event, field_name.into()), index)
+    }
+
     /// Register an AST `LocalRef` → typed [`LocalId`] mapping. Returns
     /// the prior `LocalId` if one was registered for the same ref
     /// (driver-side duplicate).
     pub fn register_local(&mut self, ast_ref: LocalRef, id: LocalId) -> Option<LocalId> {
         self.local_ids.insert(ast_ref, id)
+    }
+
+    /// Allocate a fresh [`LocalId`] disjoint from every id already
+    /// present in [`Self::local_ids`]. Used by physics `Let` lowering
+    /// (Task 5.5b) to introduce a binding for `IrStmt::Let { local: ast_ref, .. }`
+    /// when the driver has not pre-registered the mapping. The
+    /// allocation strategy picks one past the maximum existing
+    /// `LocalId`, so successive calls produce a strictly increasing
+    /// sequence regardless of insertion order.
+    pub fn allocate_local(&mut self, ast_ref: LocalRef) -> LocalId {
+        // Pick max + 1 over the existing local ids. `0` for an empty
+        // map. Linear scan is fine: the per-handler local count is in
+        // the small single digits in real DSL.
+        let next = self
+            .local_ids
+            .values()
+            .map(|id| id.0)
+            .max()
+            .map(|m| m + 1)
+            .unwrap_or(0);
+        let id = LocalId(next);
+        self.local_ids.insert(ast_ref, id);
+        id
     }
 
     /// Register an action-name → typed [`ActionId`] mapping. Returns
@@ -469,7 +521,7 @@ fn add(
 /// Run [`type_check`] on the node at `id`, surfacing any failure as a
 /// typed [`LoweringError::TypeCheckFailure`]. Defers view-signature
 /// lookup to the in-context map (`ctx.view_signatures`).
-fn typecheck_node(
+pub(super) fn typecheck_node(
     ctx: &LoweringCtx<'_>,
     id: CgExprId,
     span: Span,

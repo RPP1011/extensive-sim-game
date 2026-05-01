@@ -815,6 +815,13 @@ impl CgProgramBuilder {
                 }
                 Ok(())
             }
+            CgStmt::Let { value, .. } => {
+                // The bound value's expression id must already exist
+                // in the arena. The `local` and `ty` payloads are
+                // arena-independent (typed ids + closed-set CgTy)
+                // and need no range check at insertion time.
+                self.check_expr_id(*value)
+            }
         }
     }
 

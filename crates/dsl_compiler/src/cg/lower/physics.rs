@@ -34,13 +34,15 @@
 //!
 //! # Statement-body coverage
 //!
-//! Today's `lower_physics` recognises three body-statement forms:
+//! Today's `lower_physics` recognises four body-statement forms:
 //!
 //! - `IrStmt::Emit { event, fields }` →
 //!   [`crate::cg::stmt::CgStmt::Emit`] (after resolving the event
-//!   name through [`LoweringCtx::event_kind_ids`] — the dedicated
-//!   event-kind registry, kept distinct from the sum-type variant
-//!   registry so the two id spaces can't silently alias).
+//!   name through [`LoweringCtx::event_kind_ids`] and each field
+//!   name through [`LoweringCtx::event_field_indices`] — both are
+//!   driver-populated registries; tests populate them directly).
+//!   Fielded emits (`emit EffectDamageApplied { actor: caster, ... }`)
+//!   light up as of Task 5.5b.
 //! - `IrStmt::If { cond, then_body, else_body }` →
 //!   [`crate::cg::stmt::CgStmt::If`] (with the cond expression
 //!   type-checked to `Bool`).
@@ -49,17 +51,21 @@
 //!   binders resolved via the driver-supplied
 //!   [`LoweringCtx::variant_ids`] / [`LoweringCtx::local_ids`]
 //!   maps).
+//! - `IrStmt::Let { name, local, value, .. }` →
+//!   [`crate::cg::stmt::CgStmt::Let`] (allocates a fresh
+//!   [`crate::cg::stmt::LocalId`] when the driver hasn't already
+//!   pre-registered the mapping; registers `local_ids[ast_ref] = id`
+//!   so the read-side resolution can reach it once Task 5.5d lands).
 //!
-//! Other AST statement shapes (`IrStmt::Let`, `IrStmt::For`,
-//! `IrStmt::Expr`, `IrStmt::SelfUpdate`, `IrStmt::BeliefObserve`)
-//! surface as typed [`LoweringError::UnsupportedPhysicsStmt`]
-//! deferrals. The plan body assigns `For` to a future task; `Let`
-//! requires local-binding resolution on the expression layer; bare
-//! `Expr` (namespace setter calls like `agents.set_hp(t, x)`) needs
-//! namespace lowering; `SelfUpdate` is forbidden in physics (the
+//! Other AST statement shapes (`IrStmt::For`, `IrStmt::Expr`,
+//! `IrStmt::SelfUpdate`, `IrStmt::BeliefObserve`) surface as typed
+//! [`LoweringError::UnsupportedPhysicsStmt`] deferrals. The plan
+//! body assigns `For` to a future task; bare `Expr` (namespace
+//! setter calls like `agents.set_hp(t, x)`) needs namespace
+//! lowering (Task 5.5c); `SelfUpdate` is forbidden in physics (the
 //! resolver permits it only inside fold bodies); `BeliefObserve`
 //! decomposes into a sequence of typed `Assign`s against the
-//! BeliefState SoA surface — both a separate task.
+//! BeliefState SoA surface — a separate task.
 //!
 //! # Field-index resolution
 //!
@@ -393,11 +399,12 @@ fn lower_stmt(
             arms,
             span,
         } => lower_match(rule_id, scrutinee, arms, *span, ctx),
-        IrStmt::Let { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
-            rule: rule_id,
-            ast_label: "Let",
-            span: *span,
-        }),
+        IrStmt::Let {
+            local,
+            value,
+            span,
+            ..
+        } => lower_let(rule_id, *local, value, *span, ctx),
         IrStmt::For { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
             rule: rule_id,
             ast_label: "For",
@@ -441,13 +448,23 @@ fn lower_stmt(
 /// the registry from the event surface; tests populate it
 /// directly via [`LoweringCtx::register_event_kind`].
 ///
-/// Today we ship the `Emit` lowering with `fields: vec![]` for
-/// payload-free emits (the chronicle-class shape) and refuse
-/// fielded emits until the driver wires the field-schema. An
-/// unknown event-name surfaces as
-/// [`LoweringError::UnknownMatchVariant`] (the closed-set name is
-/// reused to avoid widening the error vocabulary for a deferral
-/// that the same driver task lights up).
+/// As of Task 5.5b, fielded emits lower to `CgStmt::Emit { event,
+/// fields: Vec<(EventField, CgExprId)> }` — each
+/// `IrFieldInit { name, value }` resolves through
+/// [`LoweringCtx::event_field_indices`] (the per-event field-name →
+/// index registry) to a typed [`crate::cg::stmt::EventField`] with
+/// `(event, index)`, and `value` lowers via [`super::expr::lower_expr`].
+/// A missing field-index entry surfaces as
+/// [`LoweringError::UnknownEventField`]. An unknown event-name
+/// surfaces as [`LoweringError::UnknownMatchVariant`] (the closed-set
+/// name is reused to avoid widening the error vocabulary for a
+/// deferral that the same driver task lights up).
+///
+/// # Limitations
+///
+/// - The driver populates `event_field_indices` from the event
+///   variant's declared field list (Task 5.7); tests pre-populate
+///   the map directly via [`LoweringCtx::register_event_field`].
 fn lower_emit(
     rule_id: PhysicsRuleId,
     emit: &IrEmit,
@@ -463,27 +480,33 @@ fn lower_emit(
             span: emit.span,
         })?;
 
-    // Emit fields require name → index resolution against the
-    // event variant's declared field list; the driver's event
-    // registry owns that mapping. Until it's wired, fielded emits
-    // surface as deferrals — chronicle-class rules with no payload
-    // (`emit Foo {}`) lower cleanly.
-    if !emit.fields.is_empty() {
-        return Err(LoweringError::UnsupportedPhysicsStmt {
-            rule: rule_id,
-            ast_label: "Emit-fielded",
-            span: emit.span,
-        });
+    // Resolve each field name → typed (EventField, value-expr) pair.
+    // Field order matches the source AST (the `IrFieldInit` list);
+    // the schema entry pins the field's variant-relative index.
+    let mut cg_fields = Vec::with_capacity(emit.fields.len());
+    for field_init in &emit.fields {
+        let index = ctx
+            .event_field_indices
+            .get(&(event_kind, field_init.name.clone()))
+            .copied()
+            .ok_or_else(|| LoweringError::UnknownEventField {
+                event: event_kind,
+                field_name: field_init.name.clone(),
+                span: field_init.span,
+            })?;
+        let value_id = lower_expr(&field_init.value, ctx)?;
+        cg_fields.push((
+            crate::cg::stmt::EventField {
+                event: event_kind,
+                index,
+            },
+            value_id,
+        ));
     }
 
-    // Construct the typed `CgStmt::Emit`. Today's tests use
-    // payload-free emits; a future task will resolve each
-    // `IrFieldInit { name, value }` to `(EventField { event,
-    // index }, lowered_value_id)` once the driver supplies the
-    // event-schema map.
     let stmt = CgStmt::Emit {
         event: event_kind,
-        fields: Vec::new(),
+        fields: cg_fields,
     };
     push_stmt(stmt, emit.span, ctx)
 }
@@ -523,6 +546,53 @@ fn lower_if(
         cond: cond_id,
         then: then_list_id,
         else_: else_list_id,
+    };
+    push_stmt(stmt, span, ctx)
+}
+
+/// Lower an `IrStmt::Let { local, value, .. }` to `CgStmt::Let`.
+///
+/// Allocates a fresh [`crate::cg::stmt::LocalId`] for the binding
+/// (or reuses a driver-pre-registered one if present) and registers
+/// the AST `LocalRef → LocalId` mapping in
+/// [`LoweringCtx::local_ids`] so subsequent expression-tree
+/// references to the same binder can resolve through the same map
+/// once the read-side wiring lands.
+///
+/// # Limitations
+///
+/// References to the bound local from later statements still
+/// surface as
+/// [`LoweringError::UnsupportedLocalBinding`] at the expression
+/// layer — wiring the read-side resolution of `IrExpr::Local` is a
+/// separate task (5.5d). Today's `Let` arm represents the binding
+/// structurally; consumers (later statements that read the local)
+/// are a follow-up.
+fn lower_let(
+    _rule_id: PhysicsRuleId,
+    ast_local: dsl_ast::ir::LocalRef,
+    value: &dsl_ast::ir::IrExprNode,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgStmtId, LoweringError> {
+    // Lower the bound value expression first so the type-check has
+    // already run and the type is known before we declare the local.
+    let value_id = lower_expr(value, ctx)?;
+    let value_ty = super::expr::typecheck_node(ctx, value_id, value.span)?;
+
+    // Resolve the local id. If the driver pre-registered the
+    // mapping (the future shape), reuse it; otherwise allocate a
+    // fresh id and store it. Both paths leave `ctx.local_ids`
+    // populated for the read-side resolution to consult.
+    let local_id = match ctx.local_ids.get(&ast_local).copied() {
+        Some(id) => id,
+        None => ctx.allocate_local(ast_local),
+    };
+
+    let stmt = CgStmt::Let {
+        local: local_id,
+        value: value_id,
+        ty: value_ty,
     };
     push_stmt(stmt, span, ctx)
 }
@@ -717,14 +787,14 @@ mod tests {
 
     use dsl_ast::ast::Span as AstSpan;
     use dsl_ast::ir::{
-        IrEmit, IrEventPattern, IrExpr, IrExprNode, IrPatternBinding, IrPhysicsPattern, IrStmt,
-        IrStmtMatchArm, LocalRef, PhysicsHandlerIR, PhysicsIR,
+        IrEmit, IrEventPattern, IrExpr, IrExprNode, IrFieldInit, IrPatternBinding,
+        IrPhysicsPattern, IrStmt, IrStmtMatchArm, LocalRef, PhysicsHandlerIR, PhysicsIR,
     };
 
     use crate::cg::data_handle::EventRingId;
     use crate::cg::op::EventKindId;
     use crate::cg::program::CgProgramBuilder;
-    use crate::cg::stmt::{CgStmt, LocalId, VariantId};
+    use crate::cg::stmt::{CgStmt, EventField, LocalId, VariantId};
 
     // ---- helpers --------------------------------------------------------
 
@@ -1591,7 +1661,7 @@ mod tests {
                     assert_eq!(arms[0].variant, VariantId(0));
                     found_match_arm = true;
                 }
-                CgStmt::Assign { .. } | CgStmt::If { .. } => {
+                CgStmt::Assign { .. } | CgStmt::If { .. } | CgStmt::Let { .. } => {
                     // Other body shapes — not produced by this fixture.
                 }
             }
@@ -1641,6 +1711,259 @@ mod tests {
                 assert_eq!(span.end, 14);
             }
             other => panic!("expected UnknownMatchVariant for emit, got {other:?}"),
+        }
+    }
+
+    // ---- 14. Task 5.5b: Let binding lowering --------------------------
+
+    /// Smallest happy path for Task 5.5b's `IrStmt::Let` arm. The
+    /// body `let new_hp = 5.0` lowers to `CgStmt::Let { local,
+    /// value, ty: F32 }` with a freshly-allocated [`LocalId`] and
+    /// the value-expression's type.
+    #[test]
+    fn lowers_let_binding_to_cg_stmt_let() {
+        let new_hp_local = LocalRef(7);
+        let rule = rule_with_body(
+            "damage",
+            "EffectDamageApplied",
+            vec![IrStmt::Let {
+                name: "new_hp".to_string(),
+                local: new_hp_local,
+                value: lit_f32(5.0),
+                span: span(2, 12),
+            }],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let ops = lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect("Let lowers cleanly");
+        assert_eq!(ops.len(), 1);
+
+        // The driver/test pre-registers no LocalId for the binder, so
+        // physics-pass `Let` lowering allocated a fresh id and stored
+        // the mapping in the lowering ctx.
+        let allocated = *ctx
+            .local_ids
+            .get(&new_hp_local)
+            .expect("Let registered the LocalRef → LocalId mapping");
+
+        let prog = builder.finish();
+        // Body shape: a single `CgStmt::Let { ty: F32 }` whose value
+        // points at the F32 literal.
+        match &prog.stmts[0] {
+            CgStmt::Let { local, value: _, ty } => {
+                assert_eq!(*local, allocated);
+                assert_eq!(*ty, crate::cg::expr::CgTy::F32);
+            }
+            other => panic!("expected CgStmt::Let, got {other:?}"),
+        }
+    }
+
+    /// Driver-pre-registered `LocalRef → LocalId` mappings are
+    /// preserved by the Let arm — the arm reuses the existing id
+    /// instead of allocating a new one.
+    #[test]
+    fn lowers_let_binding_reuses_pre_registered_local_id() {
+        let new_hp_local = LocalRef(3);
+        let rule = rule_with_body(
+            "damage",
+            "EffectDamageApplied",
+            vec![IrStmt::Let {
+                name: "new_hp".to_string(),
+                local: new_hp_local,
+                value: lit_f32(0.0),
+                span: span(0, 5),
+            }],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // Driver pre-allocates the LocalId.
+        ctx.register_local(new_hp_local, LocalId(42));
+        lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect("Let lowers cleanly");
+        let prog = builder.finish();
+        match &prog.stmts[0] {
+            CgStmt::Let { local, .. } => assert_eq!(*local, LocalId(42)),
+            other => panic!("expected CgStmt::Let, got {other:?}"),
+        }
+    }
+
+    /// A `Let` nested inside an `If`-then body lowers cleanly — the
+    /// statement-list arm walks every shape, so deeper nesting is
+    /// structurally fine.
+    #[test]
+    fn lowers_let_inside_if_body() {
+        let inner_local = LocalRef(2);
+        let rule = rule_with_body(
+            "x",
+            "E",
+            vec![IrStmt::If {
+                cond: lit_bool(true),
+                then_body: vec![IrStmt::Let {
+                    name: "x".to_string(),
+                    local: inner_local,
+                    value: lit_f32(1.0),
+                    span: span(0, 5),
+                }],
+                else_body: None,
+                span: span(0, 30),
+            }],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect("Let-in-If lowers cleanly");
+        // Snapshot the local-id mapping before consuming the builder
+        // (the borrow checker would otherwise see ctx as held).
+        let local_was_registered = ctx.local_ids.contains_key(&inner_local);
+        drop(ctx);
+        let prog = builder.finish();
+        // The body contains a Let stmt nested under the If's then-arm.
+        let mut found_let = false;
+        for stmt in &prog.stmts {
+            if matches!(stmt, CgStmt::Let { .. }) {
+                found_let = true;
+            }
+        }
+        assert!(found_let, "expected a CgStmt::Let in the lowered program");
+        // And the LocalRef → LocalId mapping was registered.
+        assert!(local_was_registered, "Let arm registered the inner local");
+    }
+
+    // ---- 15. Task 5.5b: Fielded Emit lowering -------------------------
+
+    /// Fielded emits resolve each `IrFieldInit { name, value }` to a
+    /// typed `(EventField { event, index }, lowered_value_id)`
+    /// using the per-event field schema on `LoweringCtx::event_field_indices`.
+    #[test]
+    fn lowers_fielded_emit_with_event_field_schema() {
+        // Body: emit AgentDied { actor: 1.0, tick: 2.0 }
+        let rule = rule_with_body(
+            "damage",
+            "EffectDamageApplied",
+            vec![IrStmt::Emit(IrEmit {
+                event_name: "AgentDied".to_string(),
+                event: None,
+                fields: vec![
+                    IrFieldInit {
+                        name: "actor".to_string(),
+                        value: lit_f32(1.0),
+                        span: span(0, 0),
+                    },
+                    IrFieldInit {
+                        name: "tick".to_string(),
+                        value: lit_f32(2.0),
+                        span: span(0, 0),
+                    },
+                ],
+                span: span(0, 30),
+            })],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_event_kind("AgentDied", EventKindId(5));
+        // Driver populates the field schema in declaration order.
+        ctx.register_event_field(EventKindId(5), "actor", 0);
+        ctx.register_event_field(EventKindId(5), "tick", 1);
+        lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect("fielded Emit lowers cleanly");
+        let prog = builder.finish();
+        // The body contains an Emit with two typed fields, in source
+        // order, each pointing at the lowered value expression.
+        let emit = prog
+            .stmts
+            .iter()
+            .find_map(|s| match s {
+                CgStmt::Emit { event, fields } => Some((*event, fields.clone())),
+                _ => None,
+            })
+            .expect("expected a CgStmt::Emit");
+        assert_eq!(emit.0, EventKindId(5));
+        assert_eq!(emit.1.len(), 2);
+        assert_eq!(
+            emit.1[0].0,
+            EventField {
+                event: EventKindId(5),
+                index: 0,
+            }
+        );
+        assert_eq!(
+            emit.1[1].0,
+            EventField {
+                event: EventKindId(5),
+                index: 1,
+            }
+        );
+    }
+
+    /// A fielded emit whose field name has no entry in
+    /// `event_field_indices` surfaces as
+    /// [`LoweringError::UnknownEventField`] with the resolved
+    /// [`EventKindId`] and the source-level field name.
+    #[test]
+    fn rejects_fielded_emit_with_unknown_field() {
+        let rule = rule_with_body(
+            "damage",
+            "EffectDamageApplied",
+            vec![IrStmt::Emit(IrEmit {
+                event_name: "AgentDied".to_string(),
+                event: None,
+                fields: vec![IrFieldInit {
+                    name: "unregistered_field".to_string(),
+                    value: lit_f32(0.0),
+                    span: span(7, 25),
+                }],
+                span: span(0, 30),
+            })],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_event_kind("AgentDied", EventKindId(5));
+        // No `register_event_field` for `unregistered_field`.
+        let err = lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect_err("missing field index must fail");
+        match err {
+            LoweringError::UnknownEventField {
+                event,
+                field_name,
+                span,
+            } => {
+                assert_eq!(event, EventKindId(5));
+                assert_eq!(field_name, "unregistered_field");
+                assert_eq!(span.start, 7);
+                assert_eq!(span.end, 25);
+            }
+            other => panic!("expected UnknownEventField, got {other:?}"),
         }
     }
 }

@@ -827,7 +827,7 @@ fn collect_emits_in_list(list_id: CgStmtListId, prog: &CgProgram, out: &mut Vec<
                     collect_emits_in_list(arm.body, prog, out);
                 }
             }
-            CgStmt::Assign { .. } => {}
+            CgStmt::Assign { .. } | CgStmt::Let { .. } => {}
         }
     }
 }
