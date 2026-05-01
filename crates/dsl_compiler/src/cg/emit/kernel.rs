@@ -351,7 +351,7 @@ pub fn kernel_topology_to_spec_and_body(
     let mut typed_bindings: Vec<TypedBinding> = Vec::new();
     for (key, agg) in &handle_set {
         let canonical = canonical_handle(key, &agg.first_seen);
-        let Some(meta) = handle_to_binding_metadata(&canonical) else {
+        let Some(meta) = handle_to_binding_metadata(&canonical, prog) else {
             // Rng + ConfigConst route through the cfg uniform / inline
             // helpers, not as standalone bindings.
             continue;
@@ -626,7 +626,17 @@ struct BindingMetadata {
 /// conventions in `emit_mask_kernel`, `emit_scoring_kernel`, and
 /// `emit_view_fold_kernel` (see `# Limitations` on the module about
 /// the alignment scope).
-fn handle_to_binding_metadata(h: &DataHandle) -> Option<BindingMetadata> {
+///
+/// `prog` is consulted to resolve [`DataHandle::ViewStorage`] view
+/// names against the runtime `ResidentPathContext` field convention
+/// (`view_storage_<name>` for most views; special legacy aliases
+/// `standing_primary` / `memory_primary` for two views — see
+/// `cg/emit/cross_cutting.rs::resident_primary_field_for_view`).
+/// Heterogeneous-view ViewFold fusion produces multi-view bindings
+/// in one kernel; without the name-based remap, the generic emit
+/// path produces `view_<id>_<slot>` field references that don't
+/// resolve against the runtime resident context.
+fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<BindingMetadata> {
     match h {
         DataHandle::AgentField { field, target: _ } => Some(BindingMetadata {
             bg_source: BgSource::External("agents".into()),
@@ -634,7 +644,7 @@ fn handle_to_binding_metadata(h: &DataHandle) -> Option<BindingMetadata> {
             wgsl_ty: agent_field_wgsl_ty(field.ty()),
         }),
         DataHandle::ViewStorage { view, slot } => Some(BindingMetadata {
-            bg_source: BgSource::Resident(format!("view_{}_{}", view.0, view_slot_field(*slot))),
+            bg_source: BgSource::Resident(view_storage_resident_field(*view, *slot, prog)),
             base_access: AccessMode::ReadStorage,
             wgsl_ty: "array<u32>".into(),
         }),
@@ -787,6 +797,50 @@ fn view_slot_field(slot: ViewStorageSlot) -> &'static str {
         ViewStorageSlot::Ids => "ids",
         ViewStorageSlot::Counts => "counts",
         ViewStorageSlot::Cursors => "cursors",
+    }
+}
+
+/// Resolve a [`DataHandle::ViewStorage`] to the runtime
+/// `ResidentPathContext` field name. The emit pipeline produces
+/// per-view storage fields named `view_storage_<name>` for most
+/// views, with two legacy-aliased exceptions (`standing_primary`,
+/// `memory_primary`). Heterogeneous-view ViewFold fusion needs each
+/// view's binding to resolve against the runtime resident context;
+/// the structural `view_<id>_<slot>` form does not match any field
+/// the generated `ResidentPathContext` exposes.
+///
+/// Falls back to the structural `view_<id>_<slot>` form when the
+/// view name isn't interned. The slot is appended only when it
+/// would have been part of the structural form — `Primary` collapses
+/// to the bare `view_storage_<name>` field because that's the only
+/// slot the resident context exposes per view today.
+fn view_storage_resident_field(
+    view: crate::cg::data_handle::ViewId,
+    slot: ViewStorageSlot,
+    prog: &CgProgram,
+) -> String {
+    let name = match prog.interner.get_view_name(view) {
+        Some(n) => n.to_string(),
+        None => return format!("view_{}_{}", view.0, view_slot_field(slot)),
+    };
+    // Mirror `cross_cutting::resident_primary_field_for_view` for the
+    // primary slot — the legacy aliases (`standing_primary`,
+    // `memory_primary`) and the `engaged_with → standing_primary`
+    // fallback all live there. Non-primary slots aren't materialised
+    // on the resident context today; emit the structural fallback so
+    // a future emit-side migration sees a clear unresolved field name
+    // rather than silently aliasing onto a wrong buffer.
+    match slot {
+        ViewStorageSlot::Primary => match name.as_str() {
+            "standing" => "standing_primary".to_string(),
+            "memory" => "memory_primary".to_string(),
+            "engaged_with" => "standing_primary".to_string(),
+            other => format!("view_storage_{other}"),
+        },
+        ViewStorageSlot::Anchor
+        | ViewStorageSlot::Ids
+        | ViewStorageSlot::Counts
+        | ViewStorageSlot::Cursors => format!("view_{}_{}", view.0, view_slot_field(slot)),
     }
 }
 

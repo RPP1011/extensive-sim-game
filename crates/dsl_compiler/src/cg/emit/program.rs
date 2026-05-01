@@ -640,7 +640,13 @@ fn compose_bind_body(spec: &KernelSpec) -> String {
 /// it, so the helper stays defensive).
 fn render_bg_source_expr(src: &BgSource, field: &str) -> String {
     match src {
-        BgSource::Resident(f) => format!("sources.resident.{f}"),
+        // `ResidentPathContext` fields are owned `wgpu::Buffer`s (not
+        // references). Borrow at the use-site so the synthesized
+        // `Bindings { ... }` initializer matches the `&'a wgpu::Buffer`
+        // field type. The legacy ViewFold emit path bypasses this
+        // helper for its event_ring/event_tail bindings (it constructs
+        // the borrow inline at `compose_view_fold_bindings_init`).
+        BgSource::Resident(f) => format!("&sources.resident.{f}"),
         BgSource::Transient(f) => format!("sources.transient.{f}"),
         BgSource::External(f) => format!("sources.external.{f}"),
         // `Pool` fields are owned `wgpu::Buffer`s (not references) on
