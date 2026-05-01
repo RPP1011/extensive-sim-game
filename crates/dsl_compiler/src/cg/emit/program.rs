@@ -299,14 +299,15 @@ fn compose_wgsl_file(spec: &KernelSpec, body: &str, topology: &KernelTopology) -
     out.push_str("// Regenerate with `cargo run --bin xtask -- compile-dsl`.\n");
     out.push('\n');
 
-    // ViewFold kernels reference the cfg uniform via a named WGSL
-    // struct (`{Pascal}Cfg { event_count, tick, _pad0, _pad1 }`); the
-    // legacy fold WGSL files declare that struct inline before the
-    // uniform binding so naga can resolve `cfg.event_count`.
-    if matches!(spec.kind, KernelKind::ViewFold) {
-        out.push_str(&compose_view_fold_wgsl_cfg_struct(spec));
-        out.push('\n');
-    }
+    // The cfg uniform is referenced by name (e.g. `cfg: MaskHoldCfg`),
+    // so the WGSL must declare the matching struct inline before the
+    // uniform binding. Shape mirrors the Rust cfg_struct_decl:
+    //   ViewFold:  { event_count, tick, _pad0, _pad1 }
+    //   Generic:   { agent_cap, _pad0, _pad1, _pad2 }
+    // (WGSL doesn't accept `[u32; N]` array members in uniforms the way
+    // Rust does; the padding is unrolled into scalar `_padN` fields.)
+    out.push_str(&compose_wgsl_cfg_struct(spec));
+    out.push('\n');
 
     out.push_str(&lower_wgsl_bindings(spec));
     out.push('\n');
@@ -327,29 +328,35 @@ fn compose_wgsl_file(spec: &KernelSpec, body: &str, topology: &KernelTopology) -
     out
 }
 
-/// Emit the WGSL `struct {Pascal}Cfg { event_count: u32, tick: u32,
-/// _pad0: u32, _pad1: u32 };` declaration ViewFold kernels reference
-/// from the cfg uniform binding. Sourced directly from the cfg
-/// binding's WGSL type name; the WGSL field shape mirrors the Rust
-/// `{ event_count, tick, _pad: [u32; 2] }` cfg, expanded to four
-/// scalar fields because WGSL doesn't support array members in
-/// uniform-shaped structs the same way Rust does.
+/// Emit the WGSL `struct {Pascal}Cfg { ... };` declaration kernels
+/// reference from the cfg uniform binding. Sourced from the cfg
+/// binding's WGSL type name; field shape branches on
+/// [`KernelKind`] to mirror the Rust [`KernelSpec::cfg_struct_decl`]:
+///   - `ViewFold`: `{ event_count, tick, _pad0, _pad1 }`
+///   - `Generic`:  `{ agent_cap, _pad0, _pad1, _pad2 }`
+///
+/// WGSL doesn't accept `[u32; N]` array members in uniform-shaped
+/// structs the same way Rust does, so the padding is unrolled into
+/// scalar `_padN` fields.
 ///
 /// # Limitations
 ///
-/// - **Field shape is hard-coded to the ViewFold cfg.** Future
-///   per-kind cfg refinements will need to surface the WGSL struct
-///   decl from the kernel-spec layer rather than rebuilding it here.
-fn compose_view_fold_wgsl_cfg_struct(spec: &KernelSpec) -> String {
+/// - **Field shape is hard-coded per `KernelKind`.** As more kernel
+///   kinds land with bespoke cfgs (per-kind refinements anticipated by
+///   `build_generic_cfg_struct_decl`'s comment), the right move is to
+///   surface a `cfg_wgsl_decl` field from the kernel-spec layer rather
+///   than branching here.
+fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
     let cfg = spec
         .bindings
         .iter()
         .find(|b| matches!(b.bg_source, BgSource::Cfg))
-        .expect("ViewFold spec must carry a cfg binding");
-    format!(
-        "struct {ty} {{ event_count: u32, tick: u32, _pad0: u32, _pad1: u32 }};\n",
-        ty = cfg.wgsl_ty
-    )
+        .expect("KernelSpec must carry a cfg binding");
+    let fields = match spec.kind {
+        KernelKind::ViewFold => "event_count: u32, tick: u32, _pad0: u32, _pad1: u32",
+        KernelKind::Generic => "agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32",
+    };
+    format!("struct {ty} {{ {fields} }};\n", ty = cfg.wgsl_ty)
 }
 
 /// Compose a single `.rs` file from a [`KernelSpec`] + originating

@@ -799,30 +799,22 @@ impl GpuBackend {
         }
 
         match op {
-            DispatchOp::Kernel(KernelId::FusedAgentUnpack) =>
-                dispatch_kernel!(fused_agent_unpack_kernel_emitted, engine_gpu_rules::fused_agent_unpack::FusedAgentUnpackKernel, "engine_gpu_rules::fused_agent_unpack::cfg"),
-            DispatchOp::Kernel(KernelId::AlivePack) =>
-                dispatch_kernel!(alive_pack_kernel_emitted, engine_gpu_rules::alive_pack::AlivePackKernel, "engine_gpu_rules::alive_pack::cfg"),
-            DispatchOp::Kernel(KernelId::SpatialHash) =>
-                dispatch_kernel!(spatial_hash_kernel, engine_gpu_rules::spatial_hash::SpatialHashKernel, "engine_gpu_rules::spatial_hash::cfg"),
-            DispatchOp::Kernel(KernelId::SpatialKinQuery) =>
-                dispatch_kernel!(spatial_kin_query_kernel, engine_gpu_rules::spatial_kin_query::SpatialKinQueryKernel, "engine_gpu_rules::spatial_kin_query::cfg"),
-            DispatchOp::Kernel(KernelId::SpatialEngagementQuery) =>
-                dispatch_kernel!(spatial_engagement_query_kernel, engine_gpu_rules::spatial_engagement_query::SpatialEngagementQueryKernel, "engine_gpu_rules::spatial_engagement_query::cfg"),
-            DispatchOp::Kernel(KernelId::FusedMask) =>
-                dispatch_kernel!(fused_mask_kernel, engine_gpu_rules::fused_mask::FusedMaskKernel, "engine_gpu_rules::fused_mask::cfg"),
-            DispatchOp::Kernel(KernelId::MaskUnpack) =>
-                dispatch_kernel!(fused_mask_unpack_kernel, engine_gpu_rules::mask_unpack::MaskUnpackKernel, "engine_gpu_rules::mask_unpack::cfg"),
-            DispatchOp::Kernel(KernelId::PickAbility) =>
-                dispatch_kernel!(pick_ability_kernel, engine_gpu_rules::pick_ability::PickAbilityKernel, "engine_gpu_rules::pick_ability::cfg"),
-            DispatchOp::Kernel(KernelId::ApplyActions) =>
-                dispatch_kernel!(apply_actions_kernel, engine_gpu_rules::apply_actions::ApplyActionsKernel, "engine_gpu_rules::apply_actions::cfg"),
-            DispatchOp::Kernel(KernelId::Movement) =>
-                dispatch_kernel!(movement_kernel, engine_gpu_rules::movement::MovementKernel, "engine_gpu_rules::movement::cfg"),
-            DispatchOp::Kernel(KernelId::Scoring) =>
-                dispatch_kernel!(scoring_kernel, engine_gpu_rules::scoring::ScoringKernel, "engine_gpu_rules::scoring::cfg"),
-            DispatchOp::Kernel(KernelId::ScoringUnpack) =>
-                dispatch_kernel!(scoring_unpack_kernel, engine_gpu_rules::scoring_unpack::ScoringUnpackKernel, "engine_gpu_rules::scoring_unpack::cfg"),
+            DispatchOp::Kernel(KernelId::MaskHold) =>
+                dispatch_kernel!(mask_hold_kernel, engine_gpu_rules::mask_Hold::MaskHoldKernel, "engine_gpu_rules::mask_Hold::cfg"),
+            DispatchOp::Kernel(KernelId::MaskMoveToward) =>
+                dispatch_kernel!(mask_move_toward_kernel, engine_gpu_rules::mask_MoveToward::MaskMoveTowardKernel, "engine_gpu_rules::mask_MoveToward::cfg"),
+            DispatchOp::Kernel(KernelId::FusedMaskFlee) =>
+                dispatch_kernel!(fused_mask_flee_kernel, engine_gpu_rules::fused_mask_Flee::FusedMaskFleeKernel, "engine_gpu_rules::fused_mask_Flee::cfg"),
+            DispatchOp::Kernel(KernelId::FusedSpatialBuildHash) =>
+                dispatch_kernel!(fused_spatial_build_hash_kernel, engine_gpu_rules::fused_spatial_build_hash::FusedSpatialBuildHashKernel, "engine_gpu_rules::fused_spatial_build_hash::cfg"),
+            DispatchOp::Kernel(KernelId::UploadSimCfg) =>
+                dispatch_kernel!(upload_sim_cfg_kernel, engine_gpu_rules::upload_sim_cfg::UploadSimCfgKernel, "engine_gpu_rules::upload_sim_cfg::cfg"),
+            DispatchOp::Kernel(KernelId::PackAgents) =>
+                dispatch_kernel!(pack_agents_kernel, engine_gpu_rules::pack_agents::PackAgentsKernel, "engine_gpu_rules::pack_agents::cfg"),
+            DispatchOp::Kernel(KernelId::UnpackAgents) =>
+                dispatch_kernel!(unpack_agents_kernel, engine_gpu_rules::unpack_agents::UnpackAgentsKernel, "engine_gpu_rules::unpack_agents::cfg"),
+            DispatchOp::Kernel(KernelId::KickSnapshot) =>
+                dispatch_kernel!(kick_snapshot_kernel, engine_gpu_rules::kick_snapshot::KickSnapshotKernel, "engine_gpu_rules::kick_snapshot::cfg"),
             DispatchOp::Kernel(KernelId::FoldEngagedWith) =>
                 dispatch_kernel!(fold_engaged_with_kernel, engine_gpu_rules::fold_engaged_with::FoldEngagedWithKernel, "engine_gpu_rules::fold_engaged_with::cfg"),
             DispatchOp::Kernel(KernelId::FoldThreatLevel) =>
@@ -835,76 +827,17 @@ impl GpuBackend {
                 dispatch_kernel!(fold_pack_focus_kernel, engine_gpu_rules::fold_pack_focus::FoldPackFocusKernel, "engine_gpu_rules::fold_pack_focus::cfg"),
             DispatchOp::Kernel(KernelId::FoldRallyBoost) =>
                 dispatch_kernel!(fold_rally_boost_kernel, engine_gpu_rules::fold_rally_boost::FoldRallyBoostKernel, "engine_gpu_rules::fold_rally_boost::cfg"),
-            DispatchOp::Kernel(KernelId::FoldStanding) =>
-                dispatch_kernel!(fold_standing_kernel, engine_gpu_rules::fold_standing::FoldStandingKernel, "engine_gpu_rules::fold_standing::cfg"),
             DispatchOp::Kernel(KernelId::FoldMemory) =>
                 dispatch_kernel!(fold_memory_kernel, engine_gpu_rules::fold_memory::FoldMemoryKernel, "engine_gpu_rules::fold_memory::cfg"),
-            DispatchOp::Kernel(KernelId::AppendEvents) =>
-                dispatch_kernel!(append_events_kernel, engine_gpu_rules::append_events::AppendEventsKernel, "engine_gpu_rules::append_events::cfg"),
 
-            DispatchOp::FixedPoint { kernel: KernelId::Physics, max_iter } => {
-                use engine_gpu_rules::physics::{PhysicsCfg, PhysicsKernel as EmittedPhysicsKernel};
-
-                let kernel = self
-                    .resident
-                    .physics_kernel
-                    .get_or_insert_with(|| EmittedPhysicsKernel::new(&self.device));
-                for iter in 0..*max_iter {
-                    let transient_iter = TransientHandles {
-                        mask_bitmaps:                &pl.mask_bitmaps,
-                        mask_unpack_agents_input:    &pl.mask_unpack_agents_input,
-                        action_buf:                  &pl.action_buf,
-                        scoring_unpack_agents_input: &pl.scoring_unpack_agents_input,
-                        cascade_current_ring:        &pl.cascade_current_ring,
-                        cascade_current_tail:        &pl.cascade_current_tail,
-                        cascade_next_ring:           &pl.cascade_next_ring,
-                        cascade_next_tail:           &pl.cascade_next_tail,
-                        cascade_indirect_args:       &pl.cascade_indirect_args,
-                        fused_agent_unpack_input:    &pl.fused_agent_unpack_input,
-                        fused_agent_unpack_mask_soa: &pl.fused_agent_unpack_mask_soa,
-                        _phantom: std::marker::PhantomData,
-                    };
-                    let external_iter = ExternalBuffers {
-                        agents:           agents_buf,
-                        sim_cfg:          sim_cfg_ref,
-                        ability_registry: sim_cfg_ref,
-                        tag_values:       sim_cfg_ref,
-                        _phantom:         std::marker::PhantomData,
-                    };
-                    let sources_iter = BindingSources {
-                        resident:  &self.resident.path_ctx,
-                        pingpong:  &self.resident.pingpong_ctx,
-                        pool:      &self.resident.pool,
-                        transient: &transient_iter,
-                        external:  &external_iter,
-                    };
-                    let cfg = PhysicsCfg {
-                        agent_cap,
-                        iter_idx: iter,
-                        max_iter: *max_iter,
-                        event_ring_capacity: 4096,
-                    };
-                    let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("engine_gpu_rules::physics::cfg"),
-                        contents: bytemuck::cast_slice(&[cfg]),
-                        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    });
-                    let bindings = kernel.bind(&sources_iter, &cfg_buf);
-                    kernel.record(&self.device, encoder, &bindings, agent_cap);
-                }
-            }
-
-            DispatchOp::Indirect { kernel: KernelId::SeedIndirect, args_buf: _ } =>
-                dispatch_kernel!(seed_indirect_kernel, engine_gpu_rules::seed_indirect::SeedIndirectKernel, "engine_gpu_rules::seed_indirect::cfg"),
+            DispatchOp::Kernel(KernelId::SeedIndirect0) =>
+                dispatch_kernel!(seed_indirect_0_kernel, engine_gpu_rules::seed_indirect_0::SeedIndirect0Kernel, "engine_gpu_rules::seed_indirect_0::cfg"),
 
             // No-runtime-panic guarantee (P10): every variant the
             // SCHEDULE actually references is matched explicitly above.
             // Reaching these would be an emitter regression caught at
             // compile-time on the closed `KernelId` enum, well before
             // any binary ships.
-            DispatchOp::Kernel(other) => {
-                unreachable!("KernelId {other:?} has no dispatch arm; emitter regression")
-            }
             DispatchOp::FixedPoint { kernel: other, .. } => {
                 unreachable!("FixedPoint {other:?} has no dispatch arm")
             }
