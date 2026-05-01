@@ -96,7 +96,9 @@ use crate::cg::data_handle::{
     SpatialStorageKind, ViewStorageSlot,
 };
 use crate::cg::dispatch::DispatchShape;
-use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PlumbingKind, SpatialQueryKind};
+use crate::cg::op::{
+    ComputeOp, ComputeOpKind, OpId, PlumbingKind, ScoringId, ScoringRowOp, SpatialQueryKind,
+};
 use crate::cg::program::CgProgram;
 use crate::cg::schedule::synthesis::KernelTopology;
 use crate::kernel_binding_ir::{
@@ -1374,14 +1376,9 @@ fn lower_op_body(
         ComputeOpKind::ViewFold { body, .. } => {
             lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)
         }
-        ComputeOpKind::ScoringArgmax { scoring, rows } => Ok(format!(
-            "// TODO(task-4.x): scoring_argmax kernel body — \
-             scoring_id={0}, {1} rows.\n\
-             // The legacy emitter (emit_scoring_wgsl.rs) computes per-row \
-             utility, runs argmax, and writes (action, target, score) into scoring_output.",
-            scoring.0,
-            rows.len()
-        )),
+        ComputeOpKind::ScoringArgmax { scoring, rows } => {
+            lower_scoring_argmax_body(*scoring, rows, ctx)
+        }
         // Task 5.6c: per-kind dispatch into the SpatialQuery body
         // templates. Exhaustive over [`SpatialQueryKind`] — adding a
         // new variant forces an explicit body decision here.
@@ -1400,6 +1397,90 @@ fn lower_op_body(
         // [`KernelSpec`] layout (no spec-level renames).
         ComputeOpKind::Plumbing { kind } => Ok(plumbing_body_for_kind(kind)),
     }
+}
+
+// ---------------------------------------------------------------------------
+// ScoringArgmax body template (Task 5.6b)
+// ---------------------------------------------------------------------------
+
+/// Lower a `ScoringArgmax` op to its WGSL body fragment.
+///
+/// Body shape — single `DispatchShape::PerAgent` form:
+///
+/// 1. Initialise sentinel best (`best_utility = ~f32::MIN`,
+///    `best_action = 0u`, `best_target = NO_TARGET`).
+/// 2. Per row in source order: optional guard test, evaluate utility,
+///    optional target, strictly-greater compare-and-swap against the
+///    running best.
+/// 3. Write `(best_action, best_target, bitcast(best_utility), 0u)`
+///    into `scoring_output[agent_id * 4 + …]`.
+///
+/// Stride / sentinel constants are inlined (no module-scope `const`)
+/// so the fragment composes cleanly with sibling op bodies in a
+/// fused topology.
+fn lower_scoring_argmax_body(
+    scoring: ScoringId,
+    rows: &[ScoringRowOp],
+    ctx: &EmitCtx<'_>,
+) -> Result<String, KernelEmitError> {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    writeln!(
+        out,
+        "// scoring_argmax: scoring=#{}, {} rows.",
+        scoring.0,
+        rows.len()
+    )
+    .expect("write to String never fails");
+    out.push_str("var best_utility: f32 = -3.4028235e38;\n");
+    out.push_str("var best_action: u32 = 0u;\n");
+    out.push_str("var best_target: u32 = 0xFFFFFFFFu;\n\n");
+
+    for (i, row) in rows.iter().enumerate() {
+        let utility_wgsl = lower_cg_expr_to_wgsl(row.utility, ctx)?;
+        let target_wgsl = match row.target {
+            Some(target_id) => lower_cg_expr_to_wgsl(target_id, ctx)?,
+            None => "0xFFFFFFFFu".to_string(),
+        };
+        let action_lit = format!("{}u", row.action.0);
+
+        match row.guard {
+            Some(guard_id) => {
+                let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx)?;
+                writeln!(out, "// row {i}: action=#{} (guarded)", row.action.0).unwrap();
+                writeln!(out, "{{").unwrap();
+                writeln!(out, "    let guard_{i}: bool = {guard_wgsl};").unwrap();
+                writeln!(out, "    if (guard_{i}) {{").unwrap();
+                writeln!(out, "        let utility_{i}: f32 = {utility_wgsl};").unwrap();
+                writeln!(out, "        if (utility_{i} > best_utility) {{").unwrap();
+                writeln!(out, "            best_utility = utility_{i};").unwrap();
+                writeln!(out, "            best_action = {action_lit};").unwrap();
+                writeln!(out, "            best_target = {target_wgsl};").unwrap();
+                writeln!(out, "        }}").unwrap();
+                writeln!(out, "    }}").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
+            None => {
+                writeln!(out, "// row {i}: action=#{}", row.action.0).unwrap();
+                writeln!(out, "{{").unwrap();
+                writeln!(out, "    let utility_{i}: f32 = {utility_wgsl};").unwrap();
+                writeln!(out, "    if (utility_{i} > best_utility) {{").unwrap();
+                writeln!(out, "        best_utility = utility_{i};").unwrap();
+                writeln!(out, "        best_action = {action_lit};").unwrap();
+                writeln!(out, "        best_target = {target_wgsl};").unwrap();
+                writeln!(out, "    }}").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
+        }
+        out.push('\n');
+    }
+
+    out.push_str("let scoring_base: u32 = agent_id * 4u;\n");
+    out.push_str("scoring_output[scoring_base + 0u] = best_action;\n");
+    out.push_str("scoring_output[scoring_base + 1u] = best_target;\n");
+    out.push_str("scoring_output[scoring_base + 2u] = bitcast<u32>(best_utility);\n");
+    out.push_str("scoring_output[scoring_base + 3u] = 0u;");
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -2409,16 +2490,16 @@ mod tests {
         );
     }
 
-    // ---- 9. Scoring placeholder body ----
+    // ---- 9. Scoring argmax body (Task 5.6b) ----
 
     #[test]
-    fn scoring_op_emits_todo_placeholder_not_panic() {
+    fn scoring_argmax_emits_argmax_skeleton() {
         let mut prog = CgProgram::default();
-        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(0.0)));
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(2.5)));
         let kind = ComputeOpKind::ScoringArgmax {
-            scoring: ScoringId(0),
+            scoring: ScoringId(7),
             rows: vec![ScoringRowOp {
-                action: ActionId(0),
+                action: ActionId(3),
                 utility,
                 target: None,
                 guard: None,
@@ -2439,8 +2520,147 @@ mod tests {
             dispatch: DispatchShape::PerAgent,
         };
         let ctx = EmitCtx::structural(&prog);
-        let (_spec, body) = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
-        assert!(body.contains("TODO(task-4.x): scoring_argmax"), "body: {body}");
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        // Preamble + scoping + sentinel.
+        assert!(body.contains("agent_id = gid.x"), "body: {body}");
+        assert!(
+            body.contains("// scoring_argmax: scoring=#7, 1 rows."),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("var best_utility: f32 = -3.4028235e38;"),
+            "body: {body}"
+        );
+        assert!(body.contains("var best_action: u32 = 0u;"), "body: {body}");
+        assert!(
+            body.contains("var best_target: u32 = 0xFFFFFFFFu;"),
+            "body: {body}"
+        );
+
+        // Row block.
+        assert!(body.contains("// row 0: action=#3"), "body: {body}");
+        assert!(body.contains("let utility_0: f32 = 2.5"), "body: {body}");
+        assert!(
+            body.contains("if (utility_0 > best_utility)"),
+            "body: {body}"
+        );
+        assert!(body.contains("best_action = 3u;"), "body: {body}");
+        assert!(
+            body.contains("best_target = 0xFFFFFFFFu;"),
+            "body: {body}"
+        );
+
+        // Tail write into scoring_output, stride 4.
+        assert!(
+            body.contains("let scoring_base: u32 = agent_id * 4u;"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("scoring_output[scoring_base + 0u] = best_action;"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("scoring_output[scoring_base + 1u] = best_target;"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains(
+                "scoring_output[scoring_base + 2u] = bitcast<u32>(best_utility);"
+            ),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("scoring_output[scoring_base + 3u] = 0u;"),
+            "body: {body}"
+        );
+
+        // Placeholder text MUST be gone.
+        assert!(
+            !body.contains("TODO(task-4.x): scoring_argmax"),
+            "body still has placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn scoring_argmax_emits_per_row_blocks_with_guard() {
+        let mut prog = CgProgram::default();
+        let util_0 = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(1.0)));
+        let util_1 = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(4.0)));
+        let target_1 = push_expr(&mut prog, CgExpr::Lit(LitValue::U32(2)));
+        let t = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
+        let f = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(false)));
+        let guard_1 = push_expr(
+            &mut prog,
+            CgExpr::Binary {
+                op: crate::cg::expr::BinaryOp::And,
+                lhs: t,
+                rhs: f,
+                ty: CgTy::Bool,
+            },
+        );
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(0),
+            rows: vec![
+                ScoringRowOp {
+                    action: ActionId(0),
+                    utility: util_0,
+                    target: None,
+                    guard: None,
+                },
+                ScoringRowOp {
+                    action: ActionId(5),
+                    utility: util_1,
+                    target: Some(target_1),
+                    guard: Some(guard_1),
+                },
+            ],
+        };
+        let probe = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, probe);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        // Row 0 — unguarded, sentinel target.
+        assert!(body.contains("// row 0: action=#0"), "body: {body}");
+        assert!(body.contains("let utility_0: f32 = 1"), "body: {body}");
+        assert!(body.contains("best_action = 0u;"), "body: {body}");
+        assert!(
+            body.contains("best_target = 0xFFFFFFFFu;"),
+            "body: {body}"
+        );
+
+        // Row 1 — guarded, explicit target.
+        assert!(
+            body.contains("// row 1: action=#5 (guarded)"),
+            "body: {body}"
+        );
+        assert!(
+            body.contains("let guard_1: bool = (true && false);"),
+            "body: {body}"
+        );
+        assert!(body.contains("if (guard_1)"), "body: {body}");
+        assert!(body.contains("let utility_1: f32 = 4"), "body: {body}");
+        assert!(
+            body.contains("if (utility_1 > best_utility)"),
+            "body: {body}"
+        );
+        assert!(body.contains("best_action = 5u;"), "body: {body}");
+        assert!(body.contains("best_target = 2u;"), "body: {body}");
     }
 
     // ---- 10. Semantic kernel naming (Task 5.2) ----
