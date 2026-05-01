@@ -143,3 +143,66 @@ This file is the documentation. The 5.7 commits stand:
 Follow-up iterations should target the three buckets above. Bucket
 A2 (duplicate-field dedup) is the lowest-hanging fix; A3 (underscore
 prefix) is one-line; A1 is the substantial work.
+
+---
+
+## Iter-1 (2026-04-29) — A2 / A3 / A1 applied
+
+Patches A2, A3, A1 from `task5_7_iter1_patchspec.md` landed in this
+order:
+
+- A2: `d9a9b476` — dedup KernelSpec bindings by emitted name
+  (closes 6 errors: 3 × E0124 + 3 × E0062 on fused_mask_Flee).
+- A3: `8663b837` — `_agent_cap` for OneShot dispatch records
+  (closes 3 errors: unused `agent_cap` on upload_sim_cfg,
+  fused_seed_indirect_1, kick_snapshot).
+- A1: `501eab17` — remap CG bind() source paths to runtime
+  contract (closes 28 errors: numbered transient/pool field drift).
+  Also added `#![allow(non_snake_case)]` to the synthesized lib.rs
+  (per-mask Pascal-cased interner names propagate into kernel module
+  / function identifiers; properly snake-casing them is out of
+  scope) and borrowed Pool sources at the use-site (`&sources.pool.<f>`)
+  since runtime Pool fields are owned `wgpu::Buffer` (unlike
+  TransientHandles' `&'a wgpu::Buffer`).
+
+`cargo build -p engine_gpu_rules` (with `--cg-canonical` regen): **PASS**
+post all three patches.
+
+`cargo test -p dsl_compiler --lib`: 796 passing across all three
+patches.
+
+### Iter-1 smoke result
+
+`cargo test -p engine_gpu --features gpu --test gpu_pipeline_smoke`:
+**FAIL** (build error in `engine_gpu`, 69 errors).
+
+The smoke test cannot compile because `engine_gpu/src/lib.rs` (around
+line 836) directly references hardcoded `KernelId` variants from the
+LEGACY emit kernel index — `FoldRallyBoost`, `FoldStanding`,
+`FoldMemory`, `AppendEvents`, `Physics`, `SeedIndirect`, etc. The
+CG-canonical KernelId enum exposes a different, more granular set
+(`FoldRallyBoostRallyCall`, `FoldMemoryRecordMemory`,
+`FusedSeedIndirect1`, etc., per the per-event naming scheme noted
+above).
+
+This is a **separate bucket** from A1/A2/A3: a downstream consumer
+binding to the legacy kernel surface, not a CG-emitter drift. It
+falls outside iter-1's scope. Tracked for follow-up:
+
+- Bucket B1: `engine_gpu` consumer-side rename. Either (a) port
+  the dispatch graph to switch on the CG-emitted KernelId variants
+  directly, or (b) extend the CG emit's schedule.rs to thread
+  legacy-shaped KernelId aliases through the dispatch graph so
+  the consumer's match arms keep working. (a) is the cleaner long-
+  term path; (b) is the smaller diff for an iter-2 hotfix.
+
+### Iter-1 working-tree restoration
+
+The CG-canonical re-emit is for verification only — per spec, the
+engine_gpu_rules/src/* changes are NOT committed. After iter-1 the
+working tree is restored to the legacy emit by re-running
+`cargo run -p xtask --bin xtask -- compile-dsl` (without
+`--cg-canonical`) and `git clean` of any CG-only files
+(per-event-suffix kernel modules: `mask_Hold.{rs,wgsl}`,
+`fused_mask_Flee.{rs,wgsl}`, etc.). The three iter-1 commits stand
+on the dsl_compiler emitter only.
