@@ -248,6 +248,14 @@ pub struct CompileDslArgs {
     /// `<dir>/src/`. Does NOT replace the legacy emit; behavior of the
     /// other outputs is unchanged.
     ///
+    /// **Scratch-directory only.** Paths that resolve under
+    /// `crates/engine_gpu_rules/` are rejected with a typed
+    /// `ProductionPathReused` error before any I/O happens. The
+    /// side-channel's intent is a diagnostic surface separate from the
+    /// production overlay; pointing it at the legacy emitter's output
+    /// would race-overwrite (side-channel runs first, legacy second)
+    /// and silently subvert that contract.
+    ///
     /// # Limitations (Task 5.1, 2026-04-29)
     ///
     /// - The CG pipeline emits ~21 ops today (9 view_fold + 12
@@ -261,8 +269,8 @@ pub struct CompileDslArgs {
     ///   files. The companion `compile-dsl-parity` subcommand reports
     ///   which pieces are missing.
     /// - Lowering deferrals (typed `LoweringError`s from the Phase 2
-    ///   driver) are printed to stderr; the side-channel still emits
-    ///   the best-effort program.
+    ///   driver) are printed to stderr (via their `Display` impl); the
+    ///   side-channel still emits the best-effort program.
     #[arg(long, value_name = "DIR")]
     pub cg_emit_into: Option<PathBuf>,
 }

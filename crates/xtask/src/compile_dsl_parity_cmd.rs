@@ -63,6 +63,13 @@ pub fn run_compile_dsl_parity(args: CompileDslParityArgs) -> ExitCode {
 /// `is_complete()` is the ladder Tasks 5.2-5.7 climb. The current
 /// (Task 5.1) shape always returns `false` because of the documented
 /// missing pieces.
+///
+/// When the side-channel emit failed mid-pipeline (e.g. an
+/// `emit_cg_program` error in today's Task 5.1 state), `emit_cg_side_channel`
+/// drops a `_diagnostics.txt` next to where the kernels would have gone.
+/// That file is the truth source for what blocked the run; the static
+/// "missing pieces" map below is a structural fallback when no
+/// diagnostics file exists.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ParityReport {
     pub(crate) src_dir_exists: bool,
@@ -70,6 +77,14 @@ pub(crate) struct ParityReport {
     pub(crate) rs_count: usize,
     pub(crate) has_lib_rs: bool,
     pub(crate) has_cargo_toml: bool,
+    /// `true` when `<cg_out>/src/_diagnostics.txt` was found during the
+    /// probe. The side-channel writes this file when it fails mid-pipeline
+    /// — its presence means the structural "missing pieces" map is NOT
+    /// the right diagnostic to surface; `diagnostics_content` is.
+    pub(crate) has_diagnostics_txt: bool,
+    /// The verbatim contents of `<cg_out>/src/_diagnostics.txt` when
+    /// present. `None` when the file is absent OR could not be read.
+    pub(crate) diagnostics_content: Option<String>,
 }
 
 impl ParityReport {
@@ -129,18 +144,39 @@ pub(crate) fn probe_cg_overlay(cg_out: &Path) -> Result<ParityReport, String> {
     let has_lib_rs = src_dir.join("lib.rs").is_file();
     let has_cargo_toml = cg_out.join("Cargo.toml").is_file();
 
+    // Probe `<cg_out>/src/_diagnostics.txt` — the side-channel writes this
+    // when `emit_cg_program` fails. Its content is the actual blocker, so
+    // we capture it here and surface it ahead of the static
+    // "missing pieces" map in `print_report`. If the file exists but reads
+    // fail (permissions, etc.), we record `has_diagnostics_txt = true`
+    // with `diagnostics_content = None` so the report still notes the
+    // file's presence.
+    let diag_path = src_dir.join("_diagnostics.txt");
+    let has_diagnostics_txt = diag_path.is_file();
+    let diagnostics_content = if has_diagnostics_txt {
+        fs::read_to_string(&diag_path).ok()
+    } else {
+        None
+    };
+
     Ok(ParityReport {
         src_dir_exists,
         wgsl_count,
         rs_count,
         has_lib_rs,
         has_cargo_toml,
+        has_diagnostics_txt,
+        diagnostics_content,
     })
 }
 
-/// Print the report; one line per missing structural piece. Mirrors
-/// the shape `cargo check` will print when Task 5.7 wires the real
-/// overlay build.
+/// Print the report. When `_diagnostics.txt` is present, surface its
+/// content FIRST as the primary diagnostic — that file is the truth
+/// source for what blocked the side-channel emit, and the static
+/// "missing pieces" map below would otherwise mis-attribute the blocker
+/// to the wrong follow-up task. The static map is kept as a structural
+/// fallback for the no-diagnostics case (where the missing pieces are
+/// stable structural gaps Tasks 5.2 / 5.4 / 5.5 close).
 fn print_report(report: &ParityReport) {
     println!("compile-dsl-parity report:");
     println!("  src/ directory exists: {}", report.src_dir_exists);
@@ -148,9 +184,41 @@ fn print_report(report: &ParityReport) {
     println!("  *.rs files:   {}", report.rs_count);
     println!("  lib.rs:       {}", report.has_lib_rs);
     println!("  Cargo.toml:   {}", report.has_cargo_toml);
+    println!("  _diagnostics.txt: {}", report.has_diagnostics_txt);
+
+    // Primary diagnostic: when the side-channel left a `_diagnostics.txt`,
+    // print its content verbatim. This is what actually blocked the run
+    // (e.g. today's `KernelNameCollision: cg_indirect_view_fold_1`,
+    // closed by Task 5.2's semantic naming) — surfacing it ahead of the
+    // static map keeps the controller's "what to wire next" attribution
+    // honest.
+    if report.has_diagnostics_txt {
+        println!();
+        println!("  Side-channel diagnostics (from <cg_out>/src/_diagnostics.txt):");
+        match report.diagnostics_content.as_deref() {
+            Some(content) => {
+                for line in content.lines() {
+                    println!("    {line}");
+                }
+            }
+            None => {
+                println!("    (file present but unreadable — check filesystem permissions)");
+            }
+        }
+    }
+
     if !report.is_complete() {
         println!();
-        println!("  Missing pieces (closed by follow-up tasks):");
+        // When `_diagnostics.txt` is present, demote the static map to
+        // "supplementary context" — the diagnostics file already named
+        // the real blocker, so the structural gaps below are downstream
+        // consequences, not the thing to fix first.
+        let header = if report.has_diagnostics_txt {
+            "Structural gaps (supplementary; diagnostics above are the primary signal):"
+        } else {
+            "Missing pieces (closed by follow-up tasks):"
+        };
+        println!("  {header}");
         if !report.src_dir_exists {
             println!("    - src/ directory absent — re-run `compile-dsl --cg-emit-into <dir>`");
         }
@@ -213,6 +281,35 @@ mod tests {
         assert_eq!(report.rs_count, 0);
         assert!(!report.has_lib_rs);
         assert!(!report.has_cargo_toml);
+        assert!(!report.has_diagnostics_txt);
+        assert!(report.diagnostics_content.is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// When `<cg_out>/src/_diagnostics.txt` exists, the probe captures
+    /// its content verbatim. This is the truth-source surface the
+    /// parity report prints first (ahead of the structural "missing
+    /// pieces" map) — see `print_report`.
+    #[test]
+    fn probe_captures_diagnostics_txt_when_present() {
+        let dir = scratch_dir("diag_present");
+        fs::create_dir_all(dir.join("src")).unwrap();
+        let diag_body =
+            "CG-side-channel emit failed at the emit_cg_program step.\n\
+             Error:\nKernelNameCollision: cg_indirect_view_fold_1\n";
+        fs::write(dir.join("src").join("_diagnostics.txt"), diag_body).unwrap();
+
+        let report = probe_cg_overlay(&dir).expect("probe must succeed when diag file present");
+        assert!(report.has_diagnostics_txt, "diag flag must be set: {report:?}");
+        assert_eq!(
+            report.diagnostics_content.as_deref(),
+            Some(diag_body),
+            "diag content must round-trip verbatim"
+        );
+        // The diagnostics file alone doesn't make the report complete —
+        // structural pieces still missing.
+        assert!(!report.is_complete(), "diag-only dir is still incomplete: {report:?}");
+
         let _ = fs::remove_dir_all(&dir);
     }
 

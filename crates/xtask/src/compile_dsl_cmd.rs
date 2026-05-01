@@ -2378,26 +2378,40 @@ fn check_scaffolded_kinds(
 fn emit_cg_side_channel(
     comp: &dsl_compiler::ir::Compilation,
     dir: &Path,
-) -> Result<CgSideChannelStats, String> {
+) -> Result<CgSideChannelStats, CgSideChannelError> {
     use dsl_compiler::cg::emit::emit_cg_program;
     use dsl_compiler::cg::lower::lower_compilation_to_cg;
     use dsl_compiler::cg::schedule::{synthesize_schedule, ScheduleStrategy};
 
+    // Reject paths under `crates/engine_gpu_rules/`. The side-channel is
+    // a scratch surface; pointing it at the production overlay would
+    // race-overwrite the legacy emitter's output (side-channel runs
+    // first, legacy second — the end-state is correct but the
+    // intermediate state is dangerous and silently subverts the intent).
+    if path_resolves_into_engine_gpu_rules(dir) {
+        return Err(CgSideChannelError::ProductionPathReused {
+            path: dir.to_path_buf(),
+        });
+    }
+
     let src_dir = dir.join("src");
-    fs::create_dir_all(&src_dir)
-        .map_err(|e| format!("create_dir_all {}: {e}", src_dir.display()))?;
+    fs::create_dir_all(&src_dir).map_err(|e| CgSideChannelError::Io {
+        path: src_dir.clone(),
+        source: e.to_string(),
+    })?;
 
     let prog = match lower_compilation_to_cg(comp) {
         Ok(p) => p,
         Err(outcome) => {
             // Surface every typed deferral / non-fatal diagnostic so the
-            // controller can read what's still uncovered.
+            // controller can read what's still uncovered. Use the
+            // `Display` impl on `LoweringError` (cleaner than `Debug`).
             eprintln!(
                 "compile-dsl: cg-emit-into: lowering produced {} diagnostic(s):",
                 outcome.diagnostics.len()
             );
             for diag in &outcome.diagnostics {
-                eprintln!("  - {diag:?}");
+                eprintln!("  - {diag}");
             }
             // Proceed with the best-effort program — the side-channel is
             // a diagnostic surface, not a strict gate.
@@ -2413,11 +2427,15 @@ fn emit_cg_side_channel(
             synthesis.fusion_diagnostics.len(),
             synthesis.schedule_diagnostics.len(),
         );
+        // `FusionDiagnostic` / `ScheduleDiagnostic` carry a `message: String`
+        // populated by their producers as the human-readable rendering
+        // (see fusion.rs / synthesis.rs). Print that instead of the
+        // `Debug` form for cleaner controller-facing output.
         for d in &synthesis.fusion_diagnostics {
-            eprintln!("  - fusion: {d:?}");
+            eprintln!("  - fusion: {}", d.message);
         }
         for d in &synthesis.schedule_diagnostics {
-            eprintln!("  - schedule: {d:?}");
+            eprintln!("  - schedule: {}", d.message);
         }
     }
 
@@ -2440,11 +2458,14 @@ fn emit_cg_side_channel(
                      {e}\n",
                 ),
             );
-            return Err(format!("emit_cg_program: {e}"));
+            return Err(CgSideChannelError::EmitProgram(format!("{e}")));
         }
     };
 
-    write_cg_artifacts(&src_dir, &artifacts)?;
+    write_cg_artifacts(&src_dir, &artifacts).map_err(|msg| CgSideChannelError::Io {
+        path: src_dir.clone(),
+        source: msg,
+    })?;
 
     let stats = CgSideChannelStats {
         wgsl_files_written: artifacts.wgsl_files.len(),
@@ -2459,6 +2480,78 @@ fn emit_cg_side_channel(
         stats.kernel_index_len,
     );
     Ok(stats)
+}
+
+/// Typed error variants from [`emit_cg_side_channel`]. Replaces the prior
+/// `Result<_, String>` so callers (today the `compile-dsl` driver, in
+/// future the parity harness) can pattern-match on the failure mode
+/// instead of string-matching.
+#[derive(Debug)]
+enum CgSideChannelError {
+    /// The caller passed a `--cg-emit-into <dir>` path that resolves
+    /// inside `crates/engine_gpu_rules/`. Rejected up-front because the
+    /// side-channel is documented as a scratch surface; pointing it at
+    /// the production overlay would race-overwrite the legacy emitter's
+    /// output.
+    ProductionPathReused { path: PathBuf },
+    /// I/O failure (mkdir, write_cg_artifacts). `path` is the operation
+    /// target; `source` is the underlying error stringified.
+    Io { path: PathBuf, source: String },
+    /// `emit_cg_program` returned a typed error (today's expected
+    /// failure surface — `KernelNameCollision` until Task 5.2 lands).
+    /// Carries the `Display`-stringified inner error.
+    EmitProgram(String),
+}
+
+impl std::fmt::Display for CgSideChannelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CgSideChannelError::ProductionPathReused { path } => write!(
+                f,
+                "--cg-emit-into is scratch-directory only; refusing to emit into \
+                 a path under `crates/engine_gpu_rules/` (got {}). Pointing the \
+                 side-channel at the production overlay would race-overwrite the \
+                 legacy emitter's output.",
+                path.display()
+            ),
+            CgSideChannelError::Io { path, source } => {
+                write!(f, "I/O at {}: {source}", path.display())
+            }
+            CgSideChannelError::EmitProgram(msg) => write!(f, "emit_cg_program: {msg}"),
+        }
+    }
+}
+
+/// Returns `true` when `dir` resolves to (or under) `crates/engine_gpu_rules/`
+/// in the current workspace. Uses `canonicalize` when both paths exist;
+/// falls back to a string-component comparison when they don't (e.g. a
+/// fresh scratch path the caller hasn't created yet).
+///
+/// The string fallback is intentionally conservative: a path containing
+/// the literal `engine_gpu_rules` segment under `crates/` is rejected
+/// even when neither end is canonicalisable. False-positive risk is
+/// acceptable here because the flag is scratch-only by contract.
+fn path_resolves_into_engine_gpu_rules(dir: &Path) -> bool {
+    let production = Path::new("crates/engine_gpu_rules");
+
+    // Preferred path: when both ends canonicalize, an exact prefix match
+    // (or full equality) on the canonical form is the strongest check.
+    if let (Ok(canon_dir), Ok(canon_prod)) = (dir.canonicalize(), production.canonicalize()) {
+        return canon_dir == canon_prod || canon_dir.starts_with(&canon_prod);
+    }
+
+    // Fallback: walk components. Matches `crates/engine_gpu_rules`
+    // anywhere in the path (including under a workspace-relative form
+    // the caller hand-types). Returns false on plainly unrelated paths.
+    let mut prev_was_crates = false;
+    for comp in dir.components() {
+        let s = comp.as_os_str().to_string_lossy();
+        if prev_was_crates && s == "engine_gpu_rules" {
+            return true;
+        }
+        prev_was_crates = s == "crates";
+    }
+    false
 }
 
 /// Per-side-channel-emit accounting. Returned to keep tests readable;
@@ -2519,8 +2612,8 @@ mod cg_side_channel_tests {
     /// Empty Compilation lowers to an all-plumbing program; the CG
     /// emitter today returns a `KernelNameCollision` error on it (see
     /// `cg::emit::program::tests::driver_roundtrip_lowers_synthesizes_and_emits`).
-    /// The side-channel surfaces that as a `Display`-stringified
-    /// `Err`, NOT a panic — that's the contract this test pins.
+    /// The side-channel surfaces that as `CgSideChannelError::EmitProgram`,
+    /// NOT a panic — that's the contract this test pins.
     #[test]
     fn empty_compilation_surfaces_emit_error_as_display_string() {
         let comp = dsl_compiler::ir::Compilation::default();
@@ -2536,18 +2629,51 @@ mod cg_side_channel_tests {
                     "stats={stats:?} should record at least one kernel if emit succeeded"
                 );
             }
-            Err(msg) => {
-                // Pin the typed error path: the `Display` shape comes
-                // from `ProgramEmitError`. Today that's a structural
-                // collision on the empty-Compilation plumbing; the
-                // failure surface is a string, not a panic.
+            Err(CgSideChannelError::EmitProgram(msg)) => {
+                // Pin the typed error path: the inner string is the
+                // `Display`-stringified `ProgramEmitError`. Today that's
+                // a structural collision on the empty-Compilation
+                // plumbing.
                 assert!(
-                    msg.contains("emit_cg_program") || msg.contains("collision"),
-                    "expected typed emit-program error in message; got: {msg}"
+                    msg.contains("collision")
+                        || msg.contains("KernelNameCollision")
+                        || msg.contains("Collision"),
+                    "expected emit-program collision in message; got: {msg}"
                 );
+            }
+            Err(other) => {
+                panic!("unexpected error variant: {other:?}");
             }
         }
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `--cg-emit-into <crates/engine_gpu_rules>` is rejected up-front
+    /// with `CgSideChannelError::ProductionPathReused`. Pointing the
+    /// side-channel at the production overlay would race-overwrite the
+    /// legacy emitter's output (side-channel runs first, legacy second);
+    /// the typed error blocks that before any I/O happens.
+    #[test]
+    fn rejects_path_inside_engine_gpu_rules() {
+        let comp = dsl_compiler::ir::Compilation::default();
+        let prod_path = PathBuf::from("crates/engine_gpu_rules");
+        let result = emit_cg_side_channel(&comp, &prod_path);
+        match result {
+            Err(CgSideChannelError::ProductionPathReused { path }) => {
+                assert_eq!(path, prod_path, "echoed path must round-trip");
+            }
+            other => panic!("expected ProductionPathReused, got {other:?}"),
+        }
+
+        // Subpath form (`crates/engine_gpu_rules/scratch`) is also
+        // rejected — the path-component walk catches it even when the
+        // subdir doesn't yet exist on disk.
+        let sub = PathBuf::from("crates/engine_gpu_rules/scratch_subdir");
+        let result_sub = emit_cg_side_channel(&comp, &sub);
+        assert!(
+            matches!(result_sub, Err(CgSideChannelError::ProductionPathReused { .. })),
+            "subpath under engine_gpu_rules must be rejected; got {result_sub:?}"
+        );
     }
 
     /// Side-channel writes files into `<dir>/src/` and creates the
