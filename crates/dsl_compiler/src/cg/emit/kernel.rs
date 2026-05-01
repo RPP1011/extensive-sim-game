@@ -44,11 +44,14 @@
 //!   [`crate::cg::stmt::CgStmtList`] bodies) lower through Task 4.1's
 //!   walks. [`ComputeOpKind::MaskPredicate`] lowers its predicate
 //!   expression and emits an `atomicOr` placeholder for the bitmap
-//!   write. [`ComputeOpKind::ScoringArgmax`],
-//!   [`ComputeOpKind::SpatialQuery`], and
-//!   [`ComputeOpKind::Plumbing`] emit a documented `// TODO(task-4.x)`
-//!   placeholder line in the WGSL output (never a Rust panic) — Task
-//!   5.1 will surface what's missing through the legacy-vs-new diff.
+//!   write. [`ComputeOpKind::SpatialQuery`] dispatches per-kind to one
+//!   of the [`SPATIAL_BUILD_HASH_BODY`] / [`SPATIAL_KIN_QUERY_BODY`] /
+//!   [`SPATIAL_ENGAGEMENT_QUERY_BODY`] templates (verbatim ports from
+//!   the legacy `engine_gpu_rules/src/spatial_*.wgsl` stubs — Task
+//!   5.6c). [`ComputeOpKind::ScoringArgmax`] and
+//!   [`ComputeOpKind::Plumbing`] still emit a documented
+//!   `// TODO(task-4.x)` placeholder line (never a Rust panic) —
+//!   subsequent Task 5.6 sub-batches will replace those.
 //! - **`Indirect` topology emits the consumer kernel only.** The
 //!   producer (a [`crate::cg::op::PlumbingKind::SeedIndirectArgs`])
 //!   does not contribute to the kernel WGSL body — its dispatch-args
@@ -1219,6 +1222,108 @@ fn build_wgsl_body(
     Ok(out)
 }
 
+// ---------------------------------------------------------------------------
+// SpatialQuery body templates (Task 5.6c)
+// ---------------------------------------------------------------------------
+
+/// WGSL body fragment for [`SpatialQueryKind::BuildHash`].
+///
+/// Every binding declared by the [`KernelSpec`] for a `BuildHash` op is
+/// touched at least once so naga's dead-code elimination cannot remove
+/// them — the hand-written legacy file
+/// (`engine_gpu_rules/src/spatial_hash.wgsl`) follows the same
+/// stub-touch convention pending the per-cell index implementation.
+///
+/// Bindings consumed (per [`SpatialQueryKind::BuildHash::dependencies`] +
+/// auto-injected `cfg`):
+/// - `spatial_grid_cells`        (Pool, read_write)
+/// - `spatial_grid_offsets`      (Pool, read_write)
+/// - `cfg`                       (uniform, last slot)
+///
+/// # Limitations
+///
+/// - **Verbatim port from the legacy stub.** The body is a near-copy of
+///   `engine_gpu_rules/src/spatial_hash.wgsl` — both touch every
+///   binding so the BGL stays live, neither performs the actual hash
+///   build today. Real per-cell hashing lives in `engine_gpu`'s
+///   hand-written spatial pipeline; the CG-emitted kernel is a
+///   structural placeholder until the spatial algorithm is folded into
+///   the IR.
+/// - **No IR-driven derivation.** The IR has no abstractions for
+///   "compute cell from position" or "atomic-add to grid"; surfacing
+///   those would require new [`ComputeOpKind`] sub-shapes well beyond
+///   Task 5.6c's scope. Future refinement (Task 5.x or later) could
+///   replace this const with an IR walk once those abstractions exist.
+const SPATIAL_BUILD_HASH_BODY: &str = "// SpatialQuery::BuildHash — verbatim port from \
+    engine_gpu_rules/src/spatial_hash.wgsl.\n\
+    // Touches every binding so naga keeps them live. Real per-cell hash build \
+    lives in the\n\
+    // hand-written engine_gpu spatial pipeline; this stub is a structural \
+    placeholder.\n\
+    let _gc = spatial_grid_cells[0];\n\
+    let _go = spatial_grid_offsets[0];\n\
+    let _c = cfg.agent_cap;";
+
+/// WGSL body fragment for [`SpatialQueryKind::KinQuery`].
+///
+/// Bindings consumed (per [`SpatialQueryKind::KinQuery::dependencies`] +
+/// auto-injected `cfg`):
+/// - `spatial_grid_cells`        (Pool, read)
+/// - `spatial_grid_offsets`      (Pool, read)
+/// - `spatial_query_results`     (Pool, read_write)
+/// - `cfg`                       (uniform, last slot)
+///
+/// # Limitations
+///
+/// - **Verbatim port from the legacy stub.** Mirrors
+///   `engine_gpu_rules/src/spatial_kin_query.wgsl`. The legacy file
+///   is itself a stub that touches all bindings — actual neighborhood
+///   walk + top-K kin filter is hand-written in engine_gpu's spatial
+///   path, not yet IR-driven.
+/// - **No IR-driven derivation.** Same rationale as
+///   [`SPATIAL_BUILD_HASH_BODY`].
+const SPATIAL_KIN_QUERY_BODY: &str = "// SpatialQuery::KinQuery — verbatim port from \
+    engine_gpu_rules/src/spatial_kin_query.wgsl.\n\
+    // Touches every binding so naga keeps them live. Real per-agent kin walk \
+    lives in the\n\
+    // hand-written engine_gpu spatial pipeline; this stub is a structural \
+    placeholder.\n\
+    let _gc = spatial_grid_cells[0];\n\
+    let _go = spatial_grid_offsets[0];\n\
+    let _qr = spatial_query_results[0];\n\
+    let _c = cfg.agent_cap;";
+
+/// WGSL body fragment for [`SpatialQueryKind::EngagementQuery`].
+///
+/// Bindings consumed (per
+/// [`SpatialQueryKind::EngagementQuery::dependencies`] +
+/// auto-injected `cfg`):
+/// - `spatial_grid_cells`        (Pool, read)
+/// - `spatial_grid_offsets`      (Pool, read)
+/// - `spatial_query_results`     (Pool, read_write)
+/// - `cfg`                       (uniform, last slot)
+///
+/// # Limitations
+///
+/// - **Verbatim port from the legacy stub.** Mirrors
+///   `engine_gpu_rules/src/spatial_engagement_query.wgsl`. Body shape
+///   is identical to [`SPATIAL_KIN_QUERY_BODY`] today — the kin vs
+///   engagement distinction is encoded in the kernel name + (future)
+///   per-kind filter logic. The legacy WGSL files are also identical;
+///   the differentiation happens in the hand-written CPU-side fold.
+/// - **No IR-driven derivation.** Same rationale as
+///   [`SPATIAL_BUILD_HASH_BODY`].
+const SPATIAL_ENGAGEMENT_QUERY_BODY: &str = "// SpatialQuery::EngagementQuery — verbatim port \
+    from engine_gpu_rules/src/spatial_engagement_query.wgsl.\n\
+    // Touches every binding so naga keeps them live. Real per-agent engagement \
+    walk lives in\n\
+    // the hand-written engine_gpu spatial pipeline; this stub is a structural \
+    placeholder.\n\
+    let _gc = spatial_grid_cells[0];\n\
+    let _go = spatial_grid_offsets[0];\n\
+    let _qr = spatial_query_results[0];\n\
+    let _c = cfg.agent_cap;";
+
 /// Per-op body lowering. Returns the WGSL fragment for the op without
 /// surrounding kernel boilerplate.
 fn lower_op_body(op: &ComputeOp, ctx: &EmitCtx<'_>) -> Result<String, KernelEmitError> {
@@ -1252,10 +1357,16 @@ fn lower_op_body(op: &ComputeOp, ctx: &EmitCtx<'_>) -> Result<String, KernelEmit
             scoring.0,
             rows.len()
         )),
-        ComputeOpKind::SpatialQuery { kind } => Ok(format!(
-            "// TODO(task-4.x): spatial_query body for kind={kind}. \
-             Legacy emitter: emit_spatial_kernel.rs."
-        )),
+        // Task 5.6c: per-kind dispatch into the SpatialQuery body
+        // templates. Exhaustive over [`SpatialQueryKind`] — adding a
+        // new variant forces an explicit body decision here.
+        ComputeOpKind::SpatialQuery { kind } => Ok(match kind {
+            SpatialQueryKind::BuildHash => SPATIAL_BUILD_HASH_BODY.to_string(),
+            SpatialQueryKind::KinQuery => SPATIAL_KIN_QUERY_BODY.to_string(),
+            SpatialQueryKind::EngagementQuery => {
+                SPATIAL_ENGAGEMENT_QUERY_BODY.to_string()
+            }
+        }),
         ComputeOpKind::Plumbing { kind } => Ok(format!(
             "// TODO(task-4.x): plumbing body for kind={}. \
              Legacy emitters: emit_alive_pack_wgsl, emit_seed_indirect_wgsl, etc.",
@@ -2021,6 +2132,160 @@ mod tests {
             let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
             assert_eq!(spec.name, expected, "kind={kind:?}");
         }
+    }
+
+    // ---- 12. SpatialQuery body templates (Task 5.6c) ----
+
+    /// Helper: build a `Split` SpatialQuery topology and lower it to
+    /// `(spec, body)`. Used by the per-kind body assertions below.
+    fn spatial_query_spec_and_body(
+        kind: SpatialQueryKind,
+    ) -> (KernelSpec, String) {
+        let mut prog = CgProgram::default();
+        let op = ComputeOp::new(
+            OpId(0),
+            ComputeOpKind::SpatialQuery { kind },
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap()
+    }
+
+    #[test]
+    fn spatial_query_build_hash_emits_build_hash_body() {
+        let (_spec, body) = spatial_query_spec_and_body(SpatialQueryKind::BuildHash);
+        // Per-kind preamble comment from the body const.
+        assert!(
+            body.contains("SpatialQuery::BuildHash"),
+            "BuildHash body: {body}"
+        );
+        // Touches the two writable spatial-storage bindings the spec
+        // declares for BuildHash (per `SpatialQueryKind::dependencies`).
+        assert!(body.contains("spatial_grid_cells"), "body: {body}");
+        assert!(body.contains("spatial_grid_offsets"), "body: {body}");
+        // BuildHash does NOT include `spatial_query_results` in its
+        // dependency set — verify it stays out of the body so the WGSL
+        // doesn't reference an undeclared binding.
+        assert!(
+            !body.contains("spatial_query_results"),
+            "BuildHash should not reference query_results: {body}"
+        );
+        // No leftover TODO placeholder from the pre-Task-5.6c shape.
+        assert!(
+            !body.contains("TODO(task-4.x): spatial_query body"),
+            "body still carries pre-5.6c TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn spatial_query_kin_query_emits_kin_query_body() {
+        let (_spec, body) = spatial_query_spec_and_body(SpatialQueryKind::KinQuery);
+        assert!(body.contains("SpatialQuery::KinQuery"), "body: {body}");
+        // KinQuery touches all three spatial-storage bindings (grid_cells
+        // + grid_offsets read; query_results read_write).
+        assert!(body.contains("spatial_grid_cells"), "body: {body}");
+        assert!(body.contains("spatial_grid_offsets"), "body: {body}");
+        assert!(body.contains("spatial_query_results"), "body: {body}");
+        assert!(
+            !body.contains("TODO(task-4.x): spatial_query body"),
+            "body still carries pre-5.6c TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn spatial_query_engagement_query_emits_engagement_query_body() {
+        let (_spec, body) =
+            spatial_query_spec_and_body(SpatialQueryKind::EngagementQuery);
+        assert!(
+            body.contains("SpatialQuery::EngagementQuery"),
+            "body: {body}"
+        );
+        assert!(body.contains("spatial_grid_cells"), "body: {body}");
+        assert!(body.contains("spatial_grid_offsets"), "body: {body}");
+        assert!(body.contains("spatial_query_results"), "body: {body}");
+        assert!(
+            !body.contains("TODO(task-4.x): spatial_query body"),
+            "body still carries pre-5.6c TODO placeholder: {body}"
+        );
+    }
+
+    #[test]
+    fn spatial_query_body_includes_per_agent_preamble_and_op_comment() {
+        // Composition through `build_wgsl_body` should still wrap the
+        // per-kind body const with the PerAgent thread-indexing
+        // preamble + op-comment header — so the lowered body is a
+        // complete WGSL function body once the entry-point shell is
+        // wrapped around it by `compose_wgsl_file`.
+        let (_spec, body) = spatial_query_spec_and_body(SpatialQueryKind::KinQuery);
+        // PerAgent preamble.
+        assert!(body.contains("agent_id = gid.x"), "body: {body}");
+        assert!(
+            body.contains("if (agent_id >= cfg.agent_cap)"),
+            "body: {body}"
+        );
+        // Op-comment header from `build_wgsl_body`.
+        assert!(body.contains("// op#0 (spatial_query)"), "body: {body}");
+        // Cfg uniform reference — the body touches `cfg.agent_cap` so
+        // the cfg uniform stays live.
+        assert!(body.contains("cfg.agent_cap"), "body: {body}");
+    }
+
+    /// Snapshot: pin the EngagementQuery body output through
+    /// `kernel_topology_to_spec_and_body`. Any drift in the per-kind
+    /// body const, the preamble shape, or the op-comment header surfaces
+    /// here — the assertions below describe the exact expected form so
+    /// the snapshot survives a body-content tweak with a one-site update.
+    #[test]
+    fn spatial_query_body_snapshot_engagement_query() {
+        let (spec, body) =
+            spatial_query_spec_and_body(SpatialQueryKind::EngagementQuery);
+        // Spec name + entry point are the legacy filenames (Task 5.2).
+        assert_eq!(spec.name, "spatial_engagement_query");
+        assert_eq!(spec.entry_point, "cs_spatial_engagement_query");
+        // Pin the body's structural sections in order: PerAgent preamble
+        // → op-comment header → per-kind body comment → binding touches
+        // → cfg touch. Each contains-check is order-independent, so we
+        // also verify the relative offsets to catch reordering.
+        let preamble_idx = body
+            .find("agent_id = gid.x")
+            .unwrap_or_else(|| panic!("missing PerAgent preamble: {body}"));
+        let op_comment_idx = body
+            .find("// op#0 (spatial_query)")
+            .unwrap_or_else(|| panic!("missing op-comment header: {body}"));
+        let kind_comment_idx = body
+            .find("SpatialQuery::EngagementQuery")
+            .unwrap_or_else(|| panic!("missing per-kind comment: {body}"));
+        let cfg_touch_idx = body
+            .find("cfg.agent_cap")
+            .unwrap_or_else(|| panic!("missing cfg touch: {body}"));
+        // Cfg touch lives in BOTH the preamble (`if (agent_id >=
+        // cfg.agent_cap)`) AND the body const (`let _c = cfg.agent_cap;`).
+        // That's fine for liveness; the preamble copy is what we find first.
+        assert!(
+            preamble_idx < op_comment_idx,
+            "preamble must precede op-comment: {body}"
+        );
+        assert!(
+            op_comment_idx < kind_comment_idx,
+            "op-comment must precede per-kind body: {body}"
+        );
+        assert!(
+            cfg_touch_idx < body.len(),
+            "cfg touch must appear in body: {body}"
+        );
+        // No TODO/unimplemented/panic markers anywhere.
+        assert!(!body.contains("todo!()"), "body: {body}");
+        assert!(!body.contains("unimplemented!"), "body: {body}");
+        assert!(!body.contains("panic!"), "body: {body}");
     }
 
     #[test]
