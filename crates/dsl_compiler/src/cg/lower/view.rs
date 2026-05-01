@@ -241,12 +241,11 @@ pub fn lower_view(
     match (&ir.kind, &ir.body) {
         // ---- Lazy view path: no compute ops, name interned, return ----
         (ViewKind::Lazy, ViewBodyIR::Expr(_)) => {
-            // The lazy body is *not* lowered here. Call sites continue
-            // to use `BuiltinId::ViewCall { view }`; the driver
-            // (Task 2.7+) registers the view's typed signature into
-            // `ctx.view_signatures` and is responsible for any later
-            // inline expansion of the lazy body. See the module-level
-            // "Limitations" docstring.
+            // The lazy body is *not* lowered here. Call sites resolve
+            // through at-call-site inlining (Task 5.5c) consulting
+            // `ctx.lazy_view_bodies`, which the driver populated
+            // during Phase 1. See the module-level "Limitations"
+            // docstring.
             //
             // `handler_resolutions` MUST be empty for lazy views — they
             // have no fold handlers. The driver supplying entries here
@@ -281,6 +280,9 @@ pub fn lower_view(
                 });
             }
             intern_view_name(view_id, ir, ctx)?;
+            // Note: view signatures for materialized views are
+            // populated in Phase 1 (`populate_view_bodies_and_signatures`)
+            // — see driver.rs.
             lower_fold_handlers(
                 view_id,
                 *hint,

@@ -36,7 +36,7 @@ use std::fmt;
 use dsl_ast::ast::{BinOp, Span};
 use dsl_ast::ir::{Builtin, NamespaceId, ViewRef as AstViewRef};
 
-use crate::cg::data_handle::{MaskId, ViewId, ViewStorageSlot};
+use crate::cg::data_handle::{ConfigConstId, MaskId, ViewId, ViewStorageSlot};
 use crate::cg::expr::{CgTy, TypeError};
 use crate::cg::op::{ActionId, PhysicsRuleId, ScoringId, SpatialQueryKind};
 use crate::cg::program::BuilderError;
@@ -239,6 +239,21 @@ pub enum LoweringError {
     /// no expression-level CG lowering. `world.tick` and friends will
     /// arrive in later tasks once a concrete consumer needs them.
     UnsupportedNamespaceField {
+        ns: NamespaceId,
+        field: String,
+        span: Span,
+    },
+
+    /// `IrExpr::NamespaceField { ns: Config, field, .. }` whose
+    /// `(ns, field)` pair has no [`ConfigConstId`] in
+    /// [`super::expr::LoweringCtx::config_const_ids`]. Either the
+    /// driver's `populate_config_consts` walk missed an entry (driver
+    /// defect) or the source references a field declared in no
+    /// `config <Block> { ... }` block (resolver should have caught it,
+    /// but this surface stays defensive). Distinct from
+    /// [`Self::UnsupportedNamespaceField`], which now only fires for
+    /// non-`Config` namespace fields.
+    UnknownConfigField {
         ns: NamespaceId,
         field: String,
         span: Span,
@@ -692,6 +707,36 @@ pub enum LoweringError {
         /// after the call).
         new_id: ViewId,
     },
+
+    /// Two `(block, field)` pairs in `Compilation::configs` resolved
+    /// to the same registry key. Driver-side defect; last-write-wins
+    /// semantics in place. Mirrors
+    /// [`Self::DuplicateViewInRegistry`].
+    DuplicateConfigConstInRegistry {
+        key: String,
+        prior_id: ConfigConstId,
+        new_id: ConfigConstId,
+    },
+
+    /// A `@lazy` view body was registered twice for the same
+    /// [`ViewId`] — driver-side defect. Last-write-wins semantics in
+    /// place; surfacing the variant lets tests assert exclusive
+    /// allocation. Task 5.5c.
+    DuplicateLazyViewBodyRegistration {
+        view: ViewId,
+        span: Span,
+    },
+
+    /// A `@lazy` view call's argument count does not match the
+    /// registered body's parameter count. Surfaces during inlining
+    /// when [`super::expr::lower_view_call`] consults
+    /// [`super::expr::LoweringCtx::lazy_view_bodies`]. Task 5.5c.
+    ViewCallArityMismatch {
+        view: ViewId,
+        expected: usize,
+        got: usize,
+        span: Span,
+    },
 }
 
 /// Closed-set discriminant for which sub-expression of a scoring row
@@ -875,6 +920,14 @@ impl fmt::Display for LoweringError {
                 field,
                 span.start,
                 span.end
+            ),
+            LoweringError::UnknownConfigField { ns, field, span } => write!(
+                f,
+                "lowering: config field `{}.{}` at {}..{} has no ConfigConstId — driver registry missed it",
+                ns.name(),
+                field,
+                span.start,
+                span.end,
             ),
             LoweringError::BuilderRejected { error, span } => write!(
                 f,
@@ -1136,6 +1189,30 @@ impl fmt::Display for LoweringError {
                 f,
                 "lowering: duplicate view AstViewRef(#{}) in registry — prior ViewId(#{}), new ViewId(#{}) (last-write-wins)",
                 ast_ref.0, prior_id.0, new_id.0
+            ),
+            LoweringError::DuplicateConfigConstInRegistry {
+                key,
+                prior_id,
+                new_id,
+            } => write!(
+                f,
+                "lowering: duplicate config const `{}` in registry — prior ConfigConstId(#{}), new ConfigConstId(#{}) (last-write-wins)",
+                key, prior_id.0, new_id.0
+            ),
+            LoweringError::DuplicateLazyViewBodyRegistration { view, span } => write!(
+                f,
+                "lowering: lazy view body for ViewId(#{}) registered twice at {}..{} (driver defect)",
+                view.0, span.start, span.end
+            ),
+            LoweringError::ViewCallArityMismatch {
+                view,
+                expected,
+                got,
+                span,
+            } => write!(
+                f,
+                "lowering: view#{} call at {}..{} expected {} argument(s), got {}",
+                view.0, span.start, span.end, expected, got
             ),
         }
     }

@@ -68,40 +68,38 @@
 //!
 //! # Limitations
 //!
-//! - **Per-mask spatial query selection.** The driver picks
-//!   [`SpatialQueryKind::KinQuery`] for every mask with a `from
-//!   query.nearby_agents(...)` clause. Real mask kernels split
-//!   between `KinQuery` (kin / movement targets) and
-//!   `EngagementQuery` (engagement candidates); the per-mask
-//!   selection requires a richer AST analysis (the mask's predicate
-//!   references `is_hostile` / `agents.engaged_with` / etc.) that
-//!   no Task 2.x has wired. Picking `KinQuery` as the default
-//!   matches the conservative "default to the kin-team query"
-//!   shape every existing mask kernel implements. Refining this is
-//!   a Phase 3 concern.
+//! - **Per-mask spatial query selection.** The driver routes
+//!   from-bearing masks to [`SpatialQueryKind::EngagementQuery`]
+//!   when their predicate references engagement-flavoured access
+//!   patterns (`agents.is_hostile_to`, `agents.engaged_with`, or
+//!   any `IrExpr::ViewCall` — conservative widening; see
+//!   `predicate_uses_engagement_relationship`). All other
+//!   from-bearing masks route to [`SpatialQueryKind::KinQuery`].
+//!   Refining the ViewCall test to gate on the called view's name
+//!   is a follow-up — punted because no current counterexample
+//!   exists in `assets/sim/masks.sim`.
 //! - **No replayability annotation parsing.** Every physics rule
 //!   lowers with [`ReplayabilityFlag::Replayable`] today. The plan
 //!   defers `@phase(post)` parsing — a separate pass over the
 //!   rule's annotation list — to a follow-up; today the engine
 //!   side has only one phase.
-//! - **No view-call signature registration.** The driver allocates
-//!   [`ViewId`]s but does not populate
-//!   [`LoweringCtx::view_signatures`]. Lazy views referenced from
-//!   mask predicates / scoring expressions / fold bodies will fail
-//!   to type-check at the [`super::expr::lower_expr`] layer; the
-//!   failure surfaces as a typed deferral, not silently. Wiring the
-//!   signatures requires resolving each view's body to its
-//!   [`crate::cg::expr::CgTy`], which the Task 2.3 view pass does
-//!   not perform (lazy views are not body-lowered). The plan
-//!   carries this as Phase 3 schedule synthesis work.
+//! - **Lazy view inlining.** Lazy view bodies are captured into
+//!   [`super::expr::LoweringCtx::lazy_view_bodies`] during Phase 1
+//!   (see `populate_view_bodies_and_signatures`); call sites
+//!   inline the body via
+//!   [`super::expr::lower_expr`]'s `IrExpr::ViewCall` arm.
+//!   Materialized view signatures are populated in the same Phase
+//!   1 walk; downstream `BuiltinId::ViewCall { view }` lowerings
+//!   resolve through `ctx.view_signatures`.
 
 use std::collections::BTreeSet;
 
 use dsl_ast::ir::{
-    Compilation, EventRef, FoldHandlerIR, MaskIR, PhysicsIR, ViewBodyIR, ViewIR, ViewKind,
+    Compilation, EventRef, FoldHandlerIR, IrExpr, IrExprNode, MaskIR, NamespaceId, PhysicsIR,
+    ViewBodyIR, ViewIR, ViewKind,
 };
 
-use crate::cg::data_handle::{DataHandle, EventRingAccess, EventRingId, MaskId, ViewId};
+use crate::cg::data_handle::{ConfigConstId, DataHandle, EventRingAccess, EventRingId, MaskId, ViewId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
 use crate::cg::op::{
     ActionId, ComputeOp, ComputeOpKind, EventKindId, PhysicsRuleId, ReplayabilityFlag, ScoringId,
@@ -170,7 +168,9 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     let event_rings = populate_event_kinds(comp, &mut ctx, &mut diagnostics);
     populate_variants_from_enums(comp, &mut ctx, &mut diagnostics);
     populate_actions(comp, &mut ctx, &mut diagnostics);
+    populate_config_consts(comp, &mut ctx, &mut diagnostics);
     populate_views(comp, &mut ctx, &mut diagnostics);
+    populate_view_bodies_and_signatures(comp, &mut ctx, &mut diagnostics);
 
     // -- Phase 2: per-construct lowering --------------------------------
     lower_all_masks(comp, &mut ctx, &mut diagnostics);
@@ -433,6 +433,91 @@ fn populate_views(
     }
 }
 
+/// Allocate one [`ConfigConstId`] per (block, field) pair across
+/// every [`dsl_ast::ir::ConfigIR`] in source order, register each
+/// into `ctx.config_const_ids` keyed on
+/// `(NamespaceId::Config, "<block>.<field>")`, and intern the
+/// human-readable name on the builder for diagnostics +
+/// pretty-printing. The id allocation is deterministic — the
+/// flat numeric `i` reflects walk order.
+///
+/// A duplicate registration (same (block, field) pair across two
+/// `ConfigIR`s) is a driver-side defect; surfaced as a typed
+/// [`LoweringError::DuplicateConfigConstInRegistry`] diagnostic
+/// with last-write-wins semantics.
+fn populate_config_consts(
+    comp: &Compilation,
+    ctx: &mut LoweringCtx<'_>,
+    diagnostics: &mut Vec<LoweringError>,
+) {
+    let mut next_id: u32 = 0;
+    for cfg in &comp.configs {
+        for fld in &cfg.fields {
+            let id = ConfigConstId(next_id);
+            next_id += 1;
+            let key = format!("{}.{}", cfg.name, fld.name);
+            if let Some(prior) =
+                ctx.register_config_const(NamespaceId::Config, key.clone(), id)
+            {
+                diagnostics.push(LoweringError::DuplicateConfigConstInRegistry {
+                    key: key.clone(),
+                    prior_id: prior,
+                    new_id: id,
+                });
+            }
+            if let Err(e) = ctx.builder.intern_config_const_name(id, key) {
+                diagnostics.push(LoweringError::BuilderRejected {
+                    error: e,
+                    span: fld.span,
+                });
+            }
+        }
+    }
+}
+
+/// For every view in source order: capture lazy bodies into
+/// `ctx.lazy_view_bodies` (so `lower_view_call` can inline them at
+/// call sites), and register materialized view signatures into
+/// `ctx.view_signatures` (so the type checker can resolve
+/// `BuiltinId::ViewCall { view }` shapes). Task 5.5c.
+fn populate_view_bodies_and_signatures(
+    comp: &Compilation,
+    ctx: &mut LoweringCtx<'_>,
+    diagnostics: &mut Vec<LoweringError>,
+) {
+    for (i, view) in comp.views.iter().enumerate() {
+        let view_id = ViewId(i as u32);
+        match (&view.kind, &view.body) {
+            (ViewKind::Lazy, ViewBodyIR::Expr(body)) => {
+                let snapshot = super::expr::LazyViewSnapshot {
+                    param_locals: view.params.iter().map(|p| p.local).collect(),
+                    body: body.clone(),
+                };
+                if ctx.register_lazy_view_body(view_id, snapshot).is_some() {
+                    diagnostics.push(LoweringError::DuplicateLazyViewBodyRegistration {
+                        view: view_id,
+                        span: view.span,
+                    });
+                }
+            }
+            (ViewKind::Materialized(_), ViewBodyIR::Fold { .. }) => {
+                let arg_tys: Vec<crate::cg::expr::CgTy> = view
+                    .params
+                    .iter()
+                    .map(|p| super::expr::ir_type_to_cg_ty(&p.ty))
+                    .collect();
+                let result_ty = super::expr::ir_type_to_cg_ty(&view.return_ty);
+                ctx.register_view_signature(view_id, arg_tys, result_ty);
+            }
+            // Kind/body mismatches are reported at lower_view time
+            // with a structural diagnostic; the registry walk skips
+            // them so the diagnostic isn't doubled.
+            (ViewKind::Lazy, ViewBodyIR::Fold { .. })
+            | (ViewKind::Materialized(_), ViewBodyIR::Expr(_)) => {}
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Phase 2 helpers — per-construct lowering loops
 // ---------------------------------------------------------------------------
@@ -460,15 +545,119 @@ fn lower_all_masks(
     }
 }
 
-/// Pick the [`SpatialQueryKind`] for a mask. Today: `KinQuery` for
-/// every mask with a `from` clause, `None` otherwise. See the
-/// module-level "Limitations" docstring for why this is a
-/// conservative default.
+/// Pick the [`SpatialQueryKind`] for a mask. From-bearing masks
+/// route to [`SpatialQueryKind::EngagementQuery`] when their
+/// predicate references engagement-flavoured access patterns
+/// (`agents.is_hostile_to`, `agents.engaged_with`, or any
+/// `IrExpr::ViewCall` — conservative widening), otherwise
+/// [`SpatialQueryKind::KinQuery`]. Self-only masks return
+/// [`None`]. See the module-level "Limitations" docstring.
 fn mask_spatial_kind(mask: &MaskIR) -> Option<SpatialQueryKind> {
-    if mask.candidate_source.is_some() {
-        Some(SpatialQueryKind::KinQuery)
+    if mask.candidate_source.is_none() {
+        return None;
+    }
+    if predicate_uses_engagement_relationship(&mask.predicate) {
+        Some(SpatialQueryKind::EngagementQuery)
     } else {
-        None
+        Some(SpatialQueryKind::KinQuery)
+    }
+}
+
+/// Scan `expr` for any access pattern indicating an
+/// engagement-target relationship in the candidate filter:
+///
+/// - `agents.is_hostile_to(_, _)` (stdlib hostility check).
+/// - `agents.engaged_with(_)` (engagement read).
+/// - Any `IrExpr::ViewCall` (conservative widening — every
+///   from-bearing mask in `assets/sim/masks.sim` that calls a
+///   view does so to filter for hostility today; if a future
+///   mask uses a non-hostility view in its predicate, this
+///   routing widens to `EngagementQuery` rather than
+///   `KinQuery`. Refining the check to gate on the resolved
+///   view's name is a follow-up).
+fn predicate_uses_engagement_relationship(expr: &IrExprNode) -> bool {
+    match &expr.kind {
+        IrExpr::NamespaceCall { ns: NamespaceId::Agents, method, args }
+            if method == "is_hostile_to" || method == "engaged_with" =>
+        {
+            // Defensive: still walk args in case a nested signal
+            // matters; the OR with this match makes it redundant
+            // for today's masks but future predicates may stack.
+            let _ = args
+                .iter()
+                .any(|a| predicate_uses_engagement_relationship(&a.value));
+            true
+        }
+        IrExpr::ViewCall(_, args) => {
+            // Conservative: treat any ViewCall in the predicate as
+            // an engagement-flavoured filter. See doc above. Still
+            // recurse into args so a nested non-view engagement
+            // signal gets caught in compositions.
+            let _ = args
+                .iter()
+                .any(|a| predicate_uses_engagement_relationship(&a.value));
+            true
+        }
+        // Recurse into children for every shape that carries
+        // sub-expressions.
+        IrExpr::Field { base, .. } => predicate_uses_engagement_relationship(base),
+        IrExpr::Binary(_, l, r) => {
+            predicate_uses_engagement_relationship(l)
+                || predicate_uses_engagement_relationship(r)
+        }
+        IrExpr::Unary(_, a) => predicate_uses_engagement_relationship(a),
+        IrExpr::If { cond, then_expr, else_expr } => {
+            predicate_uses_engagement_relationship(cond)
+                || predicate_uses_engagement_relationship(then_expr)
+                || else_expr
+                    .as_ref()
+                    .map(|e| predicate_uses_engagement_relationship(e))
+                    .unwrap_or(false)
+        }
+        IrExpr::BuiltinCall(_, args)
+        | IrExpr::NamespaceCall { args, .. }
+        | IrExpr::VerbCall(_, args)
+        | IrExpr::UnresolvedCall(_, args) => args
+            .iter()
+            .any(|a| predicate_uses_engagement_relationship(&a.value)),
+        IrExpr::Index(l, r) | IrExpr::In(l, r) | IrExpr::Contains(l, r) => {
+            predicate_uses_engagement_relationship(l)
+                || predicate_uses_engagement_relationship(r)
+        }
+        IrExpr::List(items) | IrExpr::Tuple(items) => items
+            .iter()
+            .any(|e| predicate_uses_engagement_relationship(e)),
+        // Leaves and binder-introducing forms — no engagement
+        // signal can hide in them given today's predicate
+        // surface (the resolver rejects quantifiers / folds /
+        // matches in mask predicates).
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Local(_, _)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::View(_)
+        | IrExpr::Verb(_)
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::Quantifier { .. }
+        | IrExpr::Fold { .. }
+        | IrExpr::StructLit { .. }
+        | IrExpr::Ctor { .. }
+        | IrExpr::Match { .. }
+        | IrExpr::PerUnit { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
+        | IrExpr::AbilityOnCooldown(_)
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::Raw(_)
+        | IrExpr::BeliefsAccessor { .. }
+        | IrExpr::BeliefsConfidence { .. }
+        | IrExpr::BeliefsView { .. } => false,
     }
 }
 
@@ -1068,6 +1257,241 @@ mod tests {
         assert_eq!(
             dup_count, 1,
             "expected one DuplicateVariantInRegistry for `Damage`; got diagnostics: {diagnostics:?}"
+        );
+    }
+
+    // ---- Task 5.5c, Patch 1: populate_config_consts -----------------
+
+    /// Two ConfigIR blocks → 4 entries with ids 0..3 in source order.
+    #[test]
+    fn populate_config_consts_allocates_per_block_field_in_source_order() {
+        use dsl_ast::ast::{ConfigDefault, Span};
+        use dsl_ast::ir::{ConfigFieldIR, ConfigIR, IrType};
+
+        let mut comp = Compilation::default();
+        comp.configs.push(ConfigIR {
+            name: "combat".to_string(),
+            fields: vec![
+                ConfigFieldIR {
+                    name: "attack_range".to_string(),
+                    ty: IrType::F32,
+                    default: ConfigDefault::Float(1.0),
+                    span: Span::dummy(),
+                },
+                ConfigFieldIR {
+                    name: "aggro_range".to_string(),
+                    ty: IrType::F32,
+                    default: ConfigDefault::Float(2.0),
+                    span: Span::dummy(),
+                },
+            ],
+            annotations: Vec::new(),
+            span: Span::dummy(),
+        });
+        comp.configs.push(ConfigIR {
+            name: "movement".to_string(),
+            fields: vec![ConfigFieldIR {
+                name: "move_speed_mps".to_string(),
+                ty: IrType::F32,
+                default: ConfigDefault::Float(3.0),
+                span: Span::dummy(),
+            }],
+            annotations: Vec::new(),
+            span: Span::dummy(),
+        });
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let mut diagnostics: Vec<LoweringError> = Vec::new();
+        populate_config_consts(&comp, &mut ctx, &mut diagnostics);
+
+        assert!(diagnostics.is_empty(), "no diagnostics: {diagnostics:?}");
+        assert_eq!(ctx.config_const_ids.len(), 3);
+        assert_eq!(
+            ctx.config_const_ids
+                .get(&(NamespaceId::Config, "combat.attack_range".to_string())),
+            Some(&ConfigConstId(0))
+        );
+        assert_eq!(
+            ctx.config_const_ids
+                .get(&(NamespaceId::Config, "combat.aggro_range".to_string())),
+            Some(&ConfigConstId(1))
+        );
+        assert_eq!(
+            ctx.config_const_ids
+                .get(&(NamespaceId::Config, "movement.move_speed_mps".to_string())),
+            Some(&ConfigConstId(2))
+        );
+    }
+
+    /// Pre-seeding the registry surfaces a typed
+    /// DuplicateConfigConstInRegistry diagnostic.
+    #[test]
+    fn populate_config_consts_flags_duplicate_key() {
+        use dsl_ast::ast::{ConfigDefault, Span};
+        use dsl_ast::ir::{ConfigFieldIR, ConfigIR, IrType};
+
+        let mut comp = Compilation::default();
+        comp.configs.push(ConfigIR {
+            name: "combat".to_string(),
+            fields: vec![ConfigFieldIR {
+                name: "attack_range".to_string(),
+                ty: IrType::F32,
+                default: ConfigDefault::Float(1.0),
+                span: Span::dummy(),
+            }],
+            annotations: Vec::new(),
+            span: Span::dummy(),
+        });
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // Pre-seed a colliding entry.
+        ctx.register_config_const(
+            NamespaceId::Config,
+            "combat.attack_range".to_string(),
+            ConfigConstId(99),
+        );
+
+        let mut diagnostics: Vec<LoweringError> = Vec::new();
+        populate_config_consts(&comp, &mut ctx, &mut diagnostics);
+
+        let dup = diagnostics.iter().find_map(|d| match d {
+            LoweringError::DuplicateConfigConstInRegistry {
+                key,
+                prior_id,
+                new_id,
+            } => Some((key.clone(), prior_id.0, new_id.0)),
+            _ => None,
+        });
+        assert_eq!(
+            dup,
+            Some(("combat.attack_range".to_string(), 99, 0)),
+            "expected DuplicateConfigConstInRegistry; diagnostics: {diagnostics:?}"
+        );
+    }
+
+    // ---- Task 5.5c, Patch 3: mask_spatial_kind routing --------------
+
+    fn mk_mask(predicate_kind: IrExpr, has_from: bool) -> MaskIR {
+        use dsl_ast::ast::Span;
+        use dsl_ast::ir::{IrActionHead, IrActionHeadShape, IrExprNode};
+        MaskIR {
+            head: IrActionHead {
+                name: "M".to_string(),
+                shape: IrActionHeadShape::None,
+                span: Span::dummy(),
+            },
+            predicate: IrExprNode {
+                kind: predicate_kind,
+                span: Span::dummy(),
+            },
+            candidate_source: if has_from {
+                Some(IrExprNode {
+                    kind: IrExpr::NamespaceCall {
+                        ns: NamespaceId::Query,
+                        method: "nearby_agents".to_string(),
+                        args: Vec::new(),
+                    },
+                    span: Span::dummy(),
+                })
+            } else {
+                None
+            },
+            annotations: Vec::new(),
+            span: Span::dummy(),
+        }
+    }
+
+    #[test]
+    fn mask_spatial_kind_routes_engagement_for_is_hostile_to() {
+        let mask = mk_mask(
+            IrExpr::NamespaceCall {
+                ns: NamespaceId::Agents,
+                method: "is_hostile_to".to_string(),
+                args: Vec::new(),
+            },
+            true,
+        );
+        assert_eq!(
+            mask_spatial_kind(&mask),
+            Some(SpatialQueryKind::EngagementQuery)
+        );
+    }
+
+    #[test]
+    fn mask_spatial_kind_routes_engagement_for_view_call() {
+        use dsl_ast::ir::ViewRef;
+        let mask = mk_mask(IrExpr::ViewCall(ViewRef(0), Vec::new()), true);
+        assert_eq!(
+            mask_spatial_kind(&mask),
+            Some(SpatialQueryKind::EngagementQuery)
+        );
+    }
+
+    #[test]
+    fn mask_spatial_kind_routes_engagement_for_engaged_with() {
+        let mask = mk_mask(
+            IrExpr::NamespaceCall {
+                ns: NamespaceId::Agents,
+                method: "engaged_with".to_string(),
+                args: Vec::new(),
+            },
+            true,
+        );
+        assert_eq!(
+            mask_spatial_kind(&mask),
+            Some(SpatialQueryKind::EngagementQuery)
+        );
+    }
+
+    #[test]
+    fn mask_spatial_kind_routes_kin_for_alive_only() {
+        let mask = mk_mask(
+            IrExpr::NamespaceCall {
+                ns: NamespaceId::Agents,
+                method: "alive".to_string(),
+                args: Vec::new(),
+            },
+            true,
+        );
+        assert_eq!(mask_spatial_kind(&mask), Some(SpatialQueryKind::KinQuery));
+    }
+
+    #[test]
+    fn mask_spatial_kind_returns_none_when_no_candidate_source() {
+        let mask = mk_mask(IrExpr::LitBool(true), false);
+        assert_eq!(mask_spatial_kind(&mask), None);
+    }
+
+    #[test]
+    fn mask_spatial_kind_walks_into_binary_branches() {
+        // (alive && is_hostile_to) — engagement signal on rhs.
+        use dsl_ast::ast::{BinOp, Span};
+        use dsl_ast::ir::IrExprNode;
+        let alive = IrExprNode {
+            kind: IrExpr::NamespaceCall {
+                ns: NamespaceId::Agents,
+                method: "alive".to_string(),
+                args: Vec::new(),
+            },
+            span: Span::dummy(),
+        };
+        let hostile = IrExprNode {
+            kind: IrExpr::NamespaceCall {
+                ns: NamespaceId::Agents,
+                method: "is_hostile_to".to_string(),
+                args: Vec::new(),
+            },
+            span: Span::dummy(),
+        };
+        let mask = mk_mask(
+            IrExpr::Binary(BinOp::And, Box::new(alive), Box::new(hostile)),
+            true,
+        );
+        assert_eq!(
+            mask_spatial_kind(&mask),
+            Some(SpatialQueryKind::EngagementQuery)
         );
     }
 

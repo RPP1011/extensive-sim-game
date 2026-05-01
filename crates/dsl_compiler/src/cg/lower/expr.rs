@@ -28,7 +28,7 @@ use dsl_ast::ir::{
 };
 
 use crate::cg::data_handle::{
-    AgentFieldId, AgentFieldTy, AgentRef, CgExprId, DataHandle, RngPurpose, ViewId,
+    AgentFieldId, AgentFieldTy, AgentRef, CgExprId, ConfigConstId, DataHandle, RngPurpose, ViewId,
 };
 use crate::cg::expr::{
     data_handle_ty, type_check, BinaryOp, BuiltinId, CgExpr, CgTy, LitValue, NumericTy,
@@ -137,6 +137,42 @@ pub struct LoweringCtx<'a> {
     /// shape as other unbound receivers) so the driver-side invariant is
     /// enforced at every layer.
     pub target_local: bool,
+    /// `(NamespaceId::Config, "<block>.<field>")` → typed `ConfigConstId`
+    /// resolver. Populated by the driver's
+    /// [`super::driver::populate_config_consts`] walk over
+    /// `Compilation::configs` (one id per block × field, allocated in
+    /// source order). Used by `IrExpr::NamespaceField`'s expression
+    /// lowering to map a `config.<block>.<field>` access to
+    /// `Read(DataHandle::ConfigConst { id })`. An unknown
+    /// `(ns, field)` pair surfaces as
+    /// [`LoweringError::UnknownConfigField`]; the legacy
+    /// [`LoweringError::UnsupportedNamespaceField`] now only fires for
+    /// non-`Config` namespaces.
+    pub config_const_ids: HashMap<(NamespaceId, String), ConfigConstId>,
+    /// Captured `@lazy` view bodies for at-call-site inlining.
+    /// `ViewId` → snapshot. Populated by
+    /// [`super::view::lower_view`]'s lazy arm in Phase 2; consumed by
+    /// [`lower_view_call`]. A view absent from this map is materialized
+    /// — the call lowers through `BuiltinId::ViewCall { view }` as
+    /// before, with the type checker resolving against
+    /// `ctx.view_signatures`. Task 5.5c.
+    pub lazy_view_bodies: HashMap<ViewId, LazyViewSnapshot>,
+}
+
+/// Captured form of a `@lazy` view's resolved AST: enough to
+/// substitute its body at every call site without re-lowering the
+/// view declaration itself. Populated by
+/// [`super::view::lower_view`] on the lazy arm; consumed by
+/// [`lower_view_call`] when it observes a call to a lazy view.
+///
+/// `param_locals` is the i-th positional parameter's `LocalRef`,
+/// in declaration order. The substitution walk replaces every
+/// `IrExpr::Local(LocalRef, _)` whose ref appears in this slice
+/// with the matching positional argument expression.
+#[derive(Debug, Clone)]
+pub struct LazyViewSnapshot {
+    pub param_locals: Vec<LocalRef>,
+    pub body: IrExprNode,
 }
 
 impl<'a> LoweringCtx<'a> {
@@ -159,6 +195,8 @@ impl<'a> LoweringCtx<'a> {
             action_ids: HashMap::new(),
             diagnostics: Vec::new(),
             target_local: false,
+            config_const_ids: HashMap::new(),
+            lazy_view_bodies: HashMap::new(),
         }
     }
 
@@ -265,6 +303,35 @@ impl<'a> LoweringCtx<'a> {
     ) -> Option<(Vec<CgTy>, CgTy)> {
         self.view_signatures.insert(view_id, (args, result))
     }
+
+    /// Register a `(NamespaceId, "<block>.<field>")` → typed
+    /// [`ConfigConstId`] mapping. Returns the prior id if one was
+    /// registered for the same key (a duplicate is a driver-side
+    /// defect — surfacing it lets tests assert exclusive allocation).
+    ///
+    /// The driver populates this from
+    /// `Compilation::configs` in source order; tests populate it
+    /// directly. Used by `IrExpr::NamespaceField` lowering.
+    pub fn register_config_const(
+        &mut self,
+        ns: NamespaceId,
+        field: impl Into<String>,
+        id: ConfigConstId,
+    ) -> Option<ConfigConstId> {
+        self.config_const_ids.insert((ns, field.into()), id)
+    }
+
+    /// Register the captured body of a `@lazy` view for at-call-site
+    /// inlining. Returns the prior snapshot if one was registered for
+    /// the same id (driver-side defect). Used by
+    /// [`super::view::lower_view`]'s lazy arm.
+    pub fn register_lazy_view_body(
+        &mut self,
+        view_id: ViewId,
+        snapshot: LazyViewSnapshot,
+    ) -> Option<LazyViewSnapshot> {
+        self.lazy_view_bodies.insert(view_id, snapshot)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -360,14 +427,27 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
             lower_namespace_call(*ns, method.as_str(), args, span, ctx)
         }
         IrExpr::NamespaceField { ns, field, .. } => {
-            // No expression-level NamespaceField lowering is wired in
-            // Task 2.1. The op-level driver will lift `config.<…>`
-            // through a `ConfigConstId` later.
-            Err(LoweringError::UnsupportedNamespaceField {
-                ns: *ns,
-                field: field.clone(),
-                span,
-            })
+            // `config.<block>.<field>` (the only NamespaceField shape the
+            // resolver produces today — see `dsl_ast::ir` line 944) lowers
+            // to a typed `Read(ConfigConst { id })`. Other namespaces have
+            // no `NamespaceField` data path today; they keep the typed
+            // deferral. Task 5.5c.
+            if *ns == NamespaceId::Config {
+                match ctx.config_const_ids.get(&(*ns, field.clone())) {
+                    Some(id) => add(ctx, CgExpr::Read(DataHandle::ConfigConst { id: *id }), span),
+                    None => Err(LoweringError::UnknownConfigField {
+                        ns: *ns,
+                        field: field.clone(),
+                        span,
+                    }),
+                }
+            } else {
+                Err(LoweringError::UnsupportedNamespaceField {
+                    ns: *ns,
+                    field: field.clone(),
+                    span,
+                })
+            }
         }
         IrExpr::Namespace(_) => Err(LoweringError::UnsupportedAstNode {
             ast_label: "Namespace",
@@ -1125,6 +1205,33 @@ fn lower_view_call(
         .get(&ast_ref)
         .ok_or(LoweringError::UnknownView { ast_ref, span })?;
 
+    // Lazy-view inlining (Task 5.5c). When the driver registered a
+    // body snapshot for this view_id, substitute the body directly
+    // at the call site instead of emitting a `BuiltinId::ViewCall`.
+    // This sidesteps the `BuiltinSignature::ViewCall` type-check
+    // path for lazy views entirely — `view_signatures` only needs
+    // entries for materialized views (which still lower as
+    // `BuiltinId::ViewCall`).
+    if let Some(snapshot) = ctx.lazy_view_bodies.get(&view_id).cloned() {
+        if snapshot.param_locals.len() != args.len() {
+            return Err(LoweringError::ViewCallArityMismatch {
+                view: view_id,
+                expected: snapshot.param_locals.len(),
+                got: args.len(),
+                span,
+            });
+        }
+        // Build the binder map: i-th param's LocalRef → i-th arg's IrExprNode.
+        let mut binder_map: HashMap<LocalRef, IrExprNode> = HashMap::new();
+        for (param_local, call_arg) in snapshot.param_locals.iter().zip(args.iter()) {
+            binder_map.insert(*param_local, call_arg.value.clone());
+        }
+        // Substitute and lower the result.
+        let substituted = substitute_locals(&snapshot.body, &binder_map);
+        return lower_expr(&substituted, ctx);
+    }
+
+    // Materialized-view path: lower as a typed `BuiltinId::ViewCall`.
     let mut arg_ids = Vec::with_capacity(args.len());
     for a in args {
         let id = lower_expr(&a.value, ctx)?;
@@ -1147,6 +1254,201 @@ fn lower_view_call(
         },
         span,
     )
+}
+
+/// Walk `expr` and return a new `IrExprNode` where every
+/// `IrExpr::Local(local_ref, _)` whose ref appears in `binders`
+/// is replaced by `binders[&local_ref]`. Other shapes are walked
+/// recursively (children re-built with their substituted forms).
+/// Span is preserved from the original node at every level.
+///
+/// Used only by lazy-view inlining (Task 5.5c). The walk is
+/// exhaustive over `IrExpr`; literal / tag / ability / belief
+/// shapes that have no binder children are returned via clone
+/// without descent.
+fn substitute_locals(
+    expr: &IrExprNode,
+    binders: &HashMap<LocalRef, IrExprNode>,
+) -> IrExprNode {
+    let span = expr.span;
+    let kind = match &expr.kind {
+        IrExpr::Local(local_ref, _name) if binders.contains_key(local_ref) => {
+            // Substituted node carries the *callsite arg's* span,
+            // not the param-binder's span — that's deliberate: the
+            // diagnostic span for "operand is wrong type" should
+            // point at the call site's argument, not the view
+            // parameter declaration.
+            return binders[local_ref].clone();
+        }
+        IrExpr::Local(_, _) => expr.kind.clone(), // unbound local — pass through
+        IrExpr::Field { base, field_name, field } => IrExpr::Field {
+            base: Box::new(substitute_locals(base, binders)),
+            field_name: field_name.clone(),
+            field: *field,
+        },
+        IrExpr::Binary(op, l, r) => IrExpr::Binary(
+            *op,
+            Box::new(substitute_locals(l, binders)),
+            Box::new(substitute_locals(r, binders)),
+        ),
+        IrExpr::Unary(op, a) => IrExpr::Unary(*op, Box::new(substitute_locals(a, binders))),
+        IrExpr::If { cond, then_expr, else_expr } => IrExpr::If {
+            cond: Box::new(substitute_locals(cond, binders)),
+            then_expr: Box::new(substitute_locals(then_expr, binders)),
+            else_expr: else_expr
+                .as_ref()
+                .map(|e| Box::new(substitute_locals(e, binders))),
+        },
+        IrExpr::BuiltinCall(b, args) => IrExpr::BuiltinCall(
+            *b,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_locals(&a.value, binders),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::ViewCall(vr, args) => IrExpr::ViewCall(
+            *vr,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_locals(&a.value, binders),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::NamespaceCall { ns, method, args } => IrExpr::NamespaceCall {
+            ns: *ns,
+            method: method.clone(),
+            args: args
+                .iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_locals(&a.value, binders),
+                    span: a.span,
+                })
+                .collect(),
+        },
+        // Pass-through for shapes that carry no `IrExprNode` children
+        // we need to descend through.
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::View(_)
+        | IrExpr::Verb(_)
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::Raw(_) => expr.kind.clone(),
+        IrExpr::AbilityOnCooldown(inner) => {
+            IrExpr::AbilityOnCooldown(Box::new(substitute_locals(inner, binders)))
+        }
+        IrExpr::BeliefsAccessor { observer, target, field } => IrExpr::BeliefsAccessor {
+            observer: Box::new(substitute_locals(observer, binders)),
+            target: Box::new(substitute_locals(target, binders)),
+            field: field.clone(),
+        },
+        IrExpr::BeliefsConfidence { observer, target } => IrExpr::BeliefsConfidence {
+            observer: Box::new(substitute_locals(observer, binders)),
+            target: Box::new(substitute_locals(target, binders)),
+        },
+        IrExpr::BeliefsView { observer, view_name } => IrExpr::BeliefsView {
+            observer: Box::new(substitute_locals(observer, binders)),
+            view_name: view_name.clone(),
+        },
+        // Forms that *could* carry locals; descend into children.
+        IrExpr::Index(base, idx) => IrExpr::Index(
+            Box::new(substitute_locals(base, binders)),
+            Box::new(substitute_locals(idx, binders)),
+        ),
+        IrExpr::VerbCall(vr, args) => IrExpr::VerbCall(
+            *vr,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_locals(&a.value, binders),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::UnresolvedCall(name, args) => IrExpr::UnresolvedCall(
+            name.clone(),
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_locals(&a.value, binders),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::In(l, r) => IrExpr::In(
+            Box::new(substitute_locals(l, binders)),
+            Box::new(substitute_locals(r, binders)),
+        ),
+        IrExpr::Contains(l, r) => IrExpr::Contains(
+            Box::new(substitute_locals(l, binders)),
+            Box::new(substitute_locals(r, binders)),
+        ),
+        IrExpr::List(items) => IrExpr::List(
+            items.iter().map(|i| substitute_locals(i, binders)).collect(),
+        ),
+        IrExpr::Tuple(items) => IrExpr::Tuple(
+            items.iter().map(|i| substitute_locals(i, binders)).collect(),
+        ),
+        // Quantifier / Fold / Match / StructLit / Ctor / PerUnit:
+        // these introduce new binders that may shadow our map.
+        // Real lazy view bodies don't exercise these today (the
+        // canonical lazy views — is_hostile, is_stunned,
+        // slow_factor — use only Field, BuiltinCall,
+        // NamespaceCall, Binary, If, Lit). If a future lazy view
+        // does, the substituter must extend `binders` with a
+        // shadow-aware walk; until then, return the unchanged
+        // form so a stray reference to an outer local is
+        // visible to the failure path rather than silently
+        // miscompiled. Documented as a known limitation.
+        IrExpr::Quantifier { .. }
+        | IrExpr::Fold { .. }
+        | IrExpr::Match { .. }
+        | IrExpr::StructLit { .. }
+        | IrExpr::Ctor { .. }
+        | IrExpr::PerUnit { .. } => expr.kind.clone(),
+    };
+    IrExprNode { kind, span }
+}
+
+/// Map a `dsl_ast::ir::IrType` to its `CgTy` representation. Used
+/// by view-signature population (Task 5.5c). Falls back to
+/// `CgTy::U32` for shapes the current CG IR doesn't surface; if
+/// such a view's signature is consulted, the type checker will
+/// surface a mismatch downstream rather than the registration
+/// itself panicking.
+pub(super) fn ir_type_to_cg_ty(ty: &dsl_ast::ir::IrType) -> CgTy {
+    use dsl_ast::ir::IrType as T;
+    match ty {
+        T::Bool => CgTy::Bool,
+        T::U8 | T::U16 | T::U32 => CgTy::U32,
+        T::I8 | T::I16 | T::I32 => CgTy::I32,
+        T::F32 => CgTy::F32,
+        T::Vec3 => CgTy::Vec3F32,
+        T::AgentId => CgTy::AgentId,
+        // Tick-typed fields go through CgTy::Tick at the read
+        // layer; views don't return Tick today, but reserve the
+        // mapping for symmetry.
+        T::U64 | T::I64 | T::F64 => CgTy::U32, // narrowed (DSL surface is 32-bit)
+        // Falls through for unsupported shapes — the type checker
+        // will surface a mismatch when the registered signature
+        // is consulted; the registration itself shouldn't panic.
+        _ => CgTy::U32,
+    }
 }
 
 /// Lower an `IrExpr::NamespaceCall`. Most stdlib namespace calls don't
@@ -2176,7 +2478,7 @@ mod tests {
     }
 
     #[test]
-    fn namespace_field_typed_error() {
+    fn unsupported_non_config_namespace_field_typed_error() {
         let ast = node(IrExpr::NamespaceField {
             ns: NamespaceId::World,
             field: "tick".to_string(),
@@ -2187,6 +2489,132 @@ mod tests {
             err,
             LoweringError::UnsupportedNamespaceField { .. }
         ));
+    }
+
+    // ---- Config NamespaceField → ConfigConst (Task 5.5c, Patch 1) ----
+
+    #[test]
+    fn lowers_namespace_field_to_config_const() {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_config_const(
+            NamespaceId::Config,
+            "combat.attack_range".to_string(),
+            ConfigConstId(0),
+        );
+
+        let ast = node(IrExpr::NamespaceField {
+            ns: NamespaceId::Config,
+            field: "combat.attack_range".to_string(),
+            ty: dsl_ast::ir::IrType::F32,
+        });
+        let id = lower_expr(&ast, &mut ctx).unwrap();
+        let prog = builder.finish();
+        let node = &prog.exprs[id.0 as usize];
+        let s = pretty(node, &prog.exprs);
+        assert!(s.starts_with("(read config"), "got pretty: {s}");
+    }
+
+    #[test]
+    fn unknown_namespace_field_returns_typed_error() {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // No registry entries.
+        let ast = node(IrExpr::NamespaceField {
+            ns: NamespaceId::Config,
+            field: "combat.attack_range".to_string(),
+            ty: dsl_ast::ir::IrType::F32,
+        });
+        let err = lower_expr(&ast, &mut ctx).expect_err("must be typed error");
+        match err {
+            LoweringError::UnknownConfigField { ns, field, .. } => {
+                assert_eq!(ns, NamespaceId::Config);
+                assert_eq!(field, "combat.attack_range");
+            }
+            other => panic!("expected UnknownConfigField, got {other:?}"),
+        }
+    }
+
+    // ---- Lazy view inlining (Task 5.5c, Patch 2) ----
+
+    #[test]
+    fn inlines_lazy_view_at_call_site() {
+        // Lazy view body: just `LocalRef(0)` (the view's first param).
+        // Calling with `LitBool(true)` should inline the literal,
+        // bypassing `BuiltinId::ViewCall`.
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let ast_ref = AstViewRef(0);
+        let view_id = ViewId(0);
+        ctx.register_view(ast_ref, view_id);
+        let snapshot = LazyViewSnapshot {
+            param_locals: vec![LocalRef(0)],
+            body: node(IrExpr::Local(LocalRef(0), "a".to_string())),
+        };
+        ctx.register_lazy_view_body(view_id, snapshot);
+
+        let ast = node(IrExpr::ViewCall(
+            ast_ref,
+            vec![arg(node(IrExpr::LitBool(true)))],
+        ));
+        let id = lower_expr(&ast, &mut ctx).unwrap();
+        let prog = builder.finish();
+        let node = &prog.exprs[id.0 as usize];
+        // Should be the literal, not a builtin.view_call.
+        assert_eq!(pretty(node, &prog.exprs), "(lit true)");
+    }
+
+    #[test]
+    fn materialized_view_call_uses_builtin_view_call() {
+        // No lazy body registered → call falls through to the
+        // materialized BuiltinId::ViewCall path.
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let ast_ref = AstViewRef(0);
+        let view_id = ViewId(0);
+        ctx.register_view(ast_ref, view_id);
+        ctx.register_view_signature(view_id, vec![CgTy::AgentId], CgTy::F32);
+
+        let ast = node(IrExpr::ViewCall(
+            ast_ref,
+            vec![arg(field_self("engaged_with"))],
+        ));
+        let id = lower_expr(&ast, &mut ctx).unwrap();
+        let prog = builder.finish();
+        let node = &prog.exprs[id.0 as usize];
+        let s = pretty(node, &prog.exprs);
+        assert!(s.starts_with("(builtin.view_call."), "got: {s}");
+    }
+
+    #[test]
+    fn lazy_view_arity_mismatch_returns_typed_error() {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let ast_ref = AstViewRef(0);
+        let view_id = ViewId(0);
+        ctx.register_view(ast_ref, view_id);
+        // 2-param body, called with 1 arg.
+        let snapshot = LazyViewSnapshot {
+            param_locals: vec![LocalRef(0), LocalRef(1)],
+            body: node(IrExpr::Local(LocalRef(0), "a".to_string())),
+        };
+        ctx.register_lazy_view_body(view_id, snapshot);
+
+        let ast = node(IrExpr::ViewCall(
+            ast_ref,
+            vec![arg(node(IrExpr::LitBool(true)))],
+        ));
+        let err = lower_expr(&ast, &mut ctx).expect_err("arity mismatch");
+        match err {
+            LoweringError::ViewCallArityMismatch {
+                view, expected, got, ..
+            } => {
+                assert_eq!(view, view_id);
+                assert_eq!(expected, 2);
+                assert_eq!(got, 1);
+            }
+            other => panic!("expected ViewCallArityMismatch, got {other:?}"),
+        }
     }
 
     // ---- ViewCall ----
