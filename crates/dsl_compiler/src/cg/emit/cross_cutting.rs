@@ -87,6 +87,34 @@ const RESIDENT_FIXED_FIELDS: &[(&str, &str)] = &[
     ("batch_events_tail", "Batch event ring tail counter."),
 ];
 
+/// View names the scoring kernel binds in `bind()` order. Mirrors the
+/// legacy `scoring_view_binding_order` (the alphabetical-by-snake-name
+/// sort of materialised non-Lazy views that pass
+/// `emit_view_wgsl::classify_view`).
+///
+/// **Why hardcoded.** The CG IR's `prog.interner.views` includes
+/// every view the lowering pass touched, in interner order — a
+/// superset that includes aliased views (`standing`, `memory`,
+/// `engaged_with`) the legacy emitter excludes. Threading the
+/// classify-and-sort logic through the CG pipeline is a future
+/// refinement (the IR would carry a `materialised_for_scoring: bool`
+/// per-view flag); this hardcoded list closes the gap for Task 5.7
+/// without that plumbing.
+///
+/// Adding a new scoring view to the DSL: append the snake-name here
+/// AND ensure the view either (a) gets a `view_storage_<name>`
+/// resident field (the default) or (b) is added to
+/// `resident_primary_field_for_view`'s alias table. Failing to do
+/// either yields an emit-time `compile_error` or a wgpu validation
+/// panic at runtime — both are loud.
+const SCORING_VIEW_BINDING_ORDER: &[&str] = &[
+    "kin_fear",
+    "my_enemies",
+    "pack_focus",
+    "rally_boost",
+    "threat_level",
+];
+
 /// Resolve a materialised-view snake-name to the resident-field it
 /// aliases for the `fold_view_<name>_handles()` accessor's primary
 /// return.
@@ -247,10 +275,25 @@ pub fn synthesize_resident_context(prog: &CgProgram) -> String {
     out.push_str("    }\n\n");
 
     // scoring_view_buffers_slice() helper.
-    out.push_str("    /// Slice of per-view scoring buffers in materialised-view\n");
-    out.push_str("    /// interner order. Used by `ScoringKernel::bind()`.\n");
+    out.push_str("    /// Slice of per-view scoring buffers in `scoring_view_binding_order`.\n");
+    out.push_str("    /// Used by `ScoringKernel::bind()`.\n");
     out.push_str("    pub fn scoring_view_buffers_slice<'a>(&'a self) -> &'a [&'a wgpu::Buffer] {\n");
-    if view_names.is_empty() {
+
+    // Compute the intersection of `SCORING_VIEW_BINDING_ORDER` and the
+    // views actually materialised in `prog`. The legacy emitter walks
+    // `combined.views` and filters by `classify_view`; here we approximate
+    // by intersecting the hardcoded order with the IR's
+    // `view_names` set so the slice never references a view the program
+    // didn't materialise.
+    let materialised_set: std::collections::BTreeSet<&str> =
+        view_names.iter().map(String::as_str).collect();
+    let scoring_views: Vec<&str> = SCORING_VIEW_BINDING_ORDER
+        .iter()
+        .copied()
+        .filter(|n| materialised_set.contains(n))
+        .collect();
+
+    if scoring_views.is_empty() {
         out.push_str("        &[]\n");
     } else {
         out.push_str("        let v = self.scoring_view_buffers_cache.get_or_init(|| {\n");
@@ -258,7 +301,7 @@ pub fn synthesize_resident_context(prog: &CgProgram) -> String {
         out.push_str("            // `Self` does. The OnceLock is dropped together with `Self`,\n");
         out.push_str("            // so the 'static cast is sound for as long as the cache exists.\n");
         out.push_str("            let raw: Vec<&'static wgpu::Buffer> = vec![\n");
-        for view in &view_names {
+        for view in &scoring_views {
             let primary_field = resident_primary_field_for_view(view);
             writeln!(
                 out,
@@ -643,6 +686,54 @@ mod tests {
         (prog, op_id)
     }
 
+    /// Build a CgProgram materialising one ViewFold op per `(view_id, view_name)`
+    /// in `views`. Used by Patch 2 tests to verify SCORING_VIEW_BINDING_ORDER
+    /// drives the slice contents.
+    fn multi_view_fold_program(views: &[(u32, &str)]) -> CgProgram {
+        let mut prog = CgProgram::default();
+        prog.interner
+            .event_kinds
+            .insert(7, "AgentAttacked".to_string());
+        for (view_id, view_name) in views {
+            prog.interner.views.insert(*view_id, view_name.to_string());
+            let one = CgExpr::Lit(LitValue::F32(1.0));
+            let one_id = CgExprId(prog.exprs.len() as u32);
+            prog.exprs.push(one);
+            let assign = CgStmt::Assign {
+                target: DataHandle::ViewStorage {
+                    view: ViewId(*view_id),
+                    slot: ViewStorageSlot::Primary,
+                },
+                value: one_id,
+            };
+            let assign_id = CgStmtId(prog.stmts.len() as u32);
+            prog.stmts.push(assign);
+            let list = CgStmtList {
+                stmts: vec![assign_id],
+            };
+            let list_id = CgStmtListId(prog.stmt_lists.len() as u32);
+            prog.stmt_lists.push(list);
+            let kind = ComputeOpKind::ViewFold {
+                view: ViewId(*view_id),
+                on_event: EventKindId(7),
+                body: list_id,
+            };
+            let op = ComputeOp::new(
+                OpId(prog.ops.len() as u32),
+                kind,
+                DispatchShape::PerEvent {
+                    source_ring: EventRingId(0),
+                },
+                Span::dummy(),
+                &prog,
+                &prog,
+                &prog,
+            );
+            prog.ops.push(op);
+        }
+        prog
+    }
+
     // ---- 1. binding_sources ----
 
     #[test]
@@ -822,6 +913,66 @@ mod tests {
         assert!(
             src.contains("(&self.view_storage_threat_level, None, None)"),
             "non-aliased view's accessor body unchanged: {src}"
+        );
+    }
+
+    // ---- 7c. resident_context — scoring_view_buffers_slice (Task 5.7 P2) ----
+
+    #[test]
+    fn scoring_view_buffers_slice_uses_binding_order_subset() {
+        // Fixture: program materialises kin_fear, threat_level, and a
+        // non-scoring view some_other. Slice must list kin_fear before
+        // threat_level (binding order) and skip some_other entirely (not
+        // in SCORING_VIEW_BINDING_ORDER).
+        let prog = multi_view_fold_program(&[
+            (1, "kin_fear"),
+            (2, "threat_level"),
+            (99, "some_other"),
+        ]);
+
+        let src = synthesize_resident_context(&prog);
+
+        // Locate the scoring slice body.
+        let slice_start = src
+            .find("pub fn scoring_view_buffers_slice")
+            .expect("slice fn must exist");
+        let after_slice = &src[slice_start..];
+        // The body ends at the closing `}` of the function — find the
+        // next `\n    }\n` boundary.
+        let body_end = after_slice
+            .find("\n    }\n")
+            .expect("slice fn must have a closing brace");
+        let body = &after_slice[..body_end];
+
+        let kin_pos = body
+            .find("&self.view_storage_kin_fear")
+            .expect("kin_fear must appear in slice body");
+        let threat_pos = body
+            .find("&self.view_storage_threat_level")
+            .expect("threat_level must appear in slice body");
+        assert!(
+            kin_pos < threat_pos,
+            "kin_fear must precede threat_level: {body}"
+        );
+        assert!(
+            !body.contains("&self.view_storage_some_other"),
+            "some_other must NOT appear in slice body: {body}"
+        );
+    }
+
+    #[test]
+    fn scoring_view_buffers_slice_emits_empty_when_no_scoring_views_materialised() {
+        // Only an aliased view materialised — slice should be empty
+        // (standing is not in SCORING_VIEW_BINDING_ORDER).
+        let (prog, _) = one_view_fold_program(11, "standing");
+        let src = synthesize_resident_context(&prog);
+        let slice_start = src
+            .find("pub fn scoring_view_buffers_slice")
+            .expect("slice fn must exist");
+        let after = &src[slice_start..];
+        assert!(
+            after.contains("        &[]"),
+            "empty slice must be emitted when only aliased views materialised: {src}"
         );
     }
 
