@@ -551,9 +551,21 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology) -> St
     if matches!(spec.kind, KernelKind::ViewFold) {
         out.push_str(&compose_view_fold_record_method(spec));
     } else {
+        // OneShot dispatch resolves to `pass.dispatch_workgroups(1, 1, 1)`
+        // and never references `agent_cap` — emit the parameter as
+        // `_agent_cap` so the synthesized kernel module compiles under
+        // `-D unused-variables`. PerAgent / PerEvent / PerPair / PerWord
+        // all derive workgroup count from `agent_cap`. Mirrors the
+        // legacy `seed_indirect.rs` convention.
+        let cap_param = if dispatch_is_one_shot(topology) {
+            "_agent_cap"
+        } else {
+            "agent_cap"
+        };
         out.push_str(&format!(
-            "    fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, bindings: &{pascal}Bindings<'_>, agent_cap: u32) {{\n",
-            pascal = spec.pascal
+            "    fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, bindings: &{pascal}Bindings<'_>, {cap_param}: u32) {{\n",
+            pascal = spec.pascal,
+            cap_param = cap_param,
         ));
         out.push_str(&format!(
             "        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {{\n            \
@@ -867,6 +879,25 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     out.push_str("        pass.dispatch_workgroups(1, 1, 1);\n");
     out.push_str("    }\n");
     out
+}
+
+/// Whether the kernel's dispatch shape resolves to a single-workgroup
+/// (`OneShot`) call. Used by `compose_kernel_trait_impl` to decide
+/// whether the `record()` method's `agent_cap` parameter must be
+/// renamed to `_agent_cap` (OneShot's `dispatch_workgroups(1, 1, 1)`
+/// never references `agent_cap`, tripping the `-D unused-variables`
+/// gate). Mirrors the dispatch-shape selection in
+/// [`compose_dispatch_call`] — Indirect topology is fixed to PerEvent,
+/// which uses `agent_cap`.
+fn dispatch_is_one_shot(topology: &KernelTopology) -> bool {
+    let dispatch = match topology {
+        KernelTopology::Fused { dispatch, .. } => *dispatch,
+        KernelTopology::Split { dispatch, .. } => *dispatch,
+        KernelTopology::Indirect { .. } => DispatchShape::PerEvent {
+            source_ring: crate::cg::data_handle::EventRingId(0),
+        },
+    };
+    matches!(dispatch, DispatchShape::OneShot)
 }
 
 /// Pick the `pass.dispatch_workgroups(...)` line for a kernel based on
