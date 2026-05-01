@@ -87,6 +87,44 @@ const RESIDENT_FIXED_FIELDS: &[(&str, &str)] = &[
     ("batch_events_tail", "Batch event ring tail counter."),
 ];
 
+/// Resolve a materialised-view snake-name to the resident-field it
+/// aliases for the `fold_view_<name>_handles()` accessor's primary
+/// return.
+///
+/// Mirrors the legacy aliasing in `crates/xtask/src/compile_dsl_cmd.rs`
+/// (the `match name.as_str()` near line 1436): the `standing`,
+/// `memory`, and `engaged_with` views all live in two pre-existing
+/// resident fields (`standing_primary`, `memory_primary`); the
+/// remainder live under `view_storage_<name>`.
+///
+/// **Why this is a hardcoded table and not an IR property.** The legacy
+/// emitter folds three concerns into one alias decision:
+///   1. `standing` and `memory` use specialised storage shapes
+///      (SymmetricPairTopK, PerEntityRing) the CG IR doesn't yet
+///      surface as per-view storage-hint metadata.
+///   2. `engaged_with`'s `Agent`/`AgentId` return-type mismatch causes
+///      `classify_view` to reject it; the legacy fold kernel for it
+///      is dead code (gated off by default).
+///   3. Future plans (the `(a)` IR-level alias hint and `(c)` distinct
+///      buffers per view in `engine_gpu`) supersede this table.
+///
+/// This patch matches the legacy contract byte-for-byte so the
+/// switchover (Task 5.7 Patch 4) doesn't require an engine_gpu code
+/// change. The table is the load-bearing alias surface until one of
+/// the future plans lands.
+fn resident_primary_field_for_view(view_name: &str) -> String {
+    match view_name {
+        "standing" => "standing_primary".to_string(),
+        "memory" => "memory_primary".to_string(),
+        // `engaged_with`'s legacy fold falls back to `standing_primary`
+        // because `classify_view` rejects it (return-type mismatch).
+        // The dispatch is gated off by default, so this never runs in
+        // production today; the alias keeps emitted code compiling.
+        "engaged_with" => "standing_primary".to_string(),
+        other => format!("view_storage_{other}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -162,6 +200,14 @@ pub fn synthesize_resident_context(prog: &CgProgram) -> String {
         writeln!(out, "    pub {name}: wgpu::Buffer,").expect("write to String");
     }
     for view in &view_names {
+        // Skip per-view storage fields for views that alias to a
+        // pre-existing resident field (see
+        // `resident_primary_field_for_view`). Emitting both would
+        // double-allocate the placeholder and diverge from the legacy
+        // resident-context shape consumed by `engine_gpu`.
+        if !resident_primary_field_for_view(view).starts_with("view_storage_") {
+            continue;
+        }
         writeln!(
             out,
             "    /// Resident view storage for `{view}`."
@@ -187,7 +233,13 @@ pub fn synthesize_resident_context(prog: &CgProgram) -> String {
         emit_buffer_init(&mut out, name);
     }
     for view in &view_names {
-        let field = format!("view_storage_{view}");
+        // Aliased views (standing, memory, engaged_with) get their
+        // buffer from `RESIDENT_FIXED_FIELDS` — no per-view init.
+        // Mirrors the field-emit guard above.
+        let field = resident_primary_field_for_view(view);
+        if !field.starts_with("view_storage_") {
+            continue;
+        }
         emit_buffer_init(&mut out, &field);
     }
     out.push_str("            scoring_view_buffers_cache: std::sync::OnceLock::new(),\n");
@@ -207,9 +259,10 @@ pub fn synthesize_resident_context(prog: &CgProgram) -> String {
         out.push_str("            // so the 'static cast is sound for as long as the cache exists.\n");
         out.push_str("            let raw: Vec<&'static wgpu::Buffer> = vec![\n");
         for view in &view_names {
+            let primary_field = resident_primary_field_for_view(view);
             writeln!(
                 out,
-                "                unsafe {{ &*((&self.view_storage_{view}) as *const wgpu::Buffer) }},"
+                "                unsafe {{ &*((&self.{primary_field}) as *const wgpu::Buffer) }},"
             ).expect("write to String");
         }
         out.push_str("            ];\n");
@@ -245,9 +298,10 @@ pub fn synthesize_resident_context(prog: &CgProgram) -> String {
             out,
             "        // the module-level `# Limitations` on `cross_cutting.rs`."
         ).expect("write to String");
+        let primary_field = resident_primary_field_for_view(view);
         writeln!(
             out,
-            "        (&self.view_storage_{view}, None, None)"
+            "        (&self.{primary_field}, None, None)"
         ).expect("write to String");
         out.push_str("    }\n");
     }
@@ -706,6 +760,68 @@ mod tests {
         assert!(
             src.contains("FoldThreatLevelKernel"),
             "doc cross-link missing: {src}"
+        );
+    }
+
+    // ---- 7b. resident_context — view aliasing (Task 5.7 P1) ----
+
+    #[test]
+    fn resident_context_aliases_standing_to_standing_primary() {
+        let (prog, _) = one_view_fold_program(11, "standing");
+        let src = synthesize_resident_context(&prog);
+        assert!(
+            src.contains("pub fn fold_view_standing_handles<'a>"),
+            "accessor must exist: {src}"
+        );
+        assert!(
+            src.contains("(&self.standing_primary, None, None)"),
+            "standing must alias to standing_primary: {src}"
+        );
+        assert!(
+            !src.contains("pub view_storage_standing: wgpu::Buffer"),
+            "standing must NOT get its own view_storage field: {src}"
+        );
+    }
+
+    #[test]
+    fn resident_context_aliases_memory_to_memory_primary() {
+        let (prog, _) = one_view_fold_program(12, "memory");
+        let src = synthesize_resident_context(&prog);
+        assert!(
+            src.contains("(&self.memory_primary, None, None)"),
+            "memory must alias to memory_primary: {src}"
+        );
+        assert!(
+            !src.contains("pub view_storage_memory: wgpu::Buffer"),
+            "memory must NOT get its own view_storage field: {src}"
+        );
+    }
+
+    #[test]
+    fn resident_context_aliases_engaged_with_to_standing_primary() {
+        let (prog, _) = one_view_fold_program(13, "engaged_with");
+        let src = synthesize_resident_context(&prog);
+        assert!(
+            src.contains("(&self.standing_primary, None, None)"),
+            "engaged_with must alias to standing_primary: {src}"
+        );
+        assert!(
+            !src.contains("pub view_storage_engaged_with: wgpu::Buffer"),
+            "engaged_with must NOT get its own view_storage field: {src}"
+        );
+    }
+
+    #[test]
+    fn resident_context_non_aliased_view_keeps_view_storage_field() {
+        let (prog, _) = one_view_fold_program(14, "threat_level");
+        let src = synthesize_resident_context(&prog);
+        assert!(
+            src.contains("pub view_storage_threat_level: wgpu::Buffer"),
+            "non-aliased view must keep its view_storage_<name> field: {src}"
+        );
+        assert!(
+            src.contains("(&self.view_storage_threat_level, None, None)"),
+            "non-aliased view's accessor body unchanged: {src}"
         );
     }
 
