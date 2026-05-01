@@ -58,9 +58,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::cg::data_handle::{CycleEdgeKey, DataHandle, EventRingId};
+use crate::cg::data_handle::{CycleEdgeKey, DataHandle, EventRingId, ViewId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
-use crate::cg::op::OpId;
+use crate::cg::op::{ComputeOp, ComputeOpKind, OpId};
 use crate::cg::program::CgProgram;
 
 use super::topology::{topological_sort, DepGraph};
@@ -330,21 +330,14 @@ pub fn fusion_decisions(
 
         // Decide whether this op can join the current group, and if not,
         // why not.
-        let join_decision = match &current_shape {
-            None => JoinDecision::StartNewGroup,
-            Some(prev_shape) => {
-                if dispatch_shape_key(prev_shape) != dispatch_shape_key(&op.shape) {
-                    JoinDecision::SplitShape
-                } else if let Some(conflict_key) =
-                    current_writes.intersection(&op_writes).next().cloned()
-                {
-                    let handle = recover_handle_for_conflict(prog, &current_ops, &conflict_key);
-                    JoinDecision::SplitWrite(handle)
-                } else {
-                    JoinDecision::Join
-                }
-            }
-        };
+        let join_decision = decide_join(
+            prog,
+            &current_shape,
+            &current_ops,
+            &current_writes,
+            op,
+            &op_writes,
+        );
 
         match join_decision {
             JoinDecision::StartNewGroup => {
@@ -436,8 +429,334 @@ enum JoinDecision {
     /// don't match.
     SplitShape,
     /// Close the current group and start a new one — this op writes a
-    /// handle the current group already wrote.
+    /// handle the current group already wrote, or the two ops fall
+    /// into different fusion-ownership domains (cross-view ViewFold,
+    /// cross-replayability PhysicsRule). The carried handle is a
+    /// representative witness for the conflict — for a true WAW it's
+    /// the witnessed shared write; for a cross-domain split it's a
+    /// representative write from one of the two domains.
     SplitWrite(DataHandle),
+}
+
+/// Decide whether `op` can join the current in-progress group.
+///
+/// The eligibility rules layered on top of dispatch-shape equality and
+/// the WAW-write-conflict check (Task 3.2's original logic):
+///
+/// 1. **Cross-view ViewFold split** — two `ViewFold` ops on different
+///    views must split, even if their write sets are disjoint. They
+///    belong to different kernel-ownership domains.
+/// 2. **Cross-replayability PhysicsRule split** — two `PhysicsRule`
+///    ops with different `replayable` flags must split (replayable
+///    rules emit into the deterministic ring; non-replayable into the
+///    chronicle ring; fusing them across the boundary would mix
+///    determinism domains).
+/// 3. **Same-view ViewFold accumulator** — two `ViewFold` ops on the
+///    same view that WAW-conflict on that view's storage are a
+///    co-accumulator pattern, NOT a fusion blocker. Both handlers
+///    contribute to the same view storage; fusion is the *desired*
+///    outcome.
+fn decide_join(
+    prog: &CgProgram,
+    current_shape: &Option<DispatchShape>,
+    current_ops: &[OpId],
+    current_writes: &BTreeSet<CycleEdgeKey>,
+    op: &ComputeOp,
+    op_writes: &BTreeSet<CycleEdgeKey>,
+) -> JoinDecision {
+    let prev_shape = match current_shape {
+        Some(s) => s,
+        None => return JoinDecision::StartNewGroup,
+    };
+    if dispatch_shape_key(prev_shape) != dispatch_shape_key(&op.shape) {
+        return JoinDecision::SplitShape;
+    }
+    let prev_last_id = match current_ops.last().copied() {
+        Some(id) => id,
+        // current_shape is Some but current_ops is empty —
+        // unreachable in practice (the two are kept in lockstep);
+        // returning StartNewGroup keeps the branch total without
+        // a panic if a future refactor decouples them.
+        None => return JoinDecision::StartNewGroup,
+    };
+    let prev_op = match prog.ops.get(prev_last_id.0 as usize) {
+        Some(p) => p,
+        None => {
+            // Defensive: malformed graph slipped past
+            // `topological_sort`. Fall back to the conventional WAW
+            // check; cross-domain rules can't be evaluated without
+            // the prev op's kind.
+            return waw_check(prog, current_ops, current_writes, op_writes);
+        }
+    };
+    // Cross-domain split (rules 1 + 2) — fires regardless of write
+    // disjointness.
+    if let Some(decision) = cross_domain_split_decision(prev_op, op) {
+        return decision;
+    }
+    // Same-view ViewFold accumulator override (rule 3) and the
+    // conventional WAW-conflict check.
+    if let Some(conflict_key) = current_writes.intersection(op_writes).next().cloned() {
+        if same_view_view_fold_accumulator(prev_op, op, &conflict_key) {
+            JoinDecision::Join
+        } else {
+            let handle = recover_handle_for_conflict(prog, current_ops, &conflict_key);
+            JoinDecision::SplitWrite(handle)
+        }
+    } else {
+        JoinDecision::Join
+    }
+}
+
+/// Conventional WAW check — used as the defensive fallback inside
+/// [`decide_join`] when the prev op pointer can't be resolved.
+fn waw_check(
+    prog: &CgProgram,
+    current_ops: &[OpId],
+    current_writes: &BTreeSet<CycleEdgeKey>,
+    op_writes: &BTreeSet<CycleEdgeKey>,
+) -> JoinDecision {
+    if let Some(conflict_key) = current_writes.intersection(op_writes).next().cloned() {
+        let handle = recover_handle_for_conflict(prog, current_ops, &conflict_key);
+        JoinDecision::SplitWrite(handle)
+    } else {
+        JoinDecision::Join
+    }
+}
+
+/// If `prev` and `next` belong to incompatible fusion-ownership
+/// domains, return the corresponding split decision; otherwise return
+/// `None` (the conventional WAW check applies). The match is
+/// exhaustive over [`ComputeOpKind`] — every variant pair is
+/// considered explicitly.
+fn cross_domain_split_decision(
+    prev: &ComputeOp,
+    next: &ComputeOp,
+) -> Option<JoinDecision> {
+    match (&prev.kind, &next.kind) {
+        // Cross-view ViewFold split — different views are different
+        // kernel-ownership domains, even if writes don't intersect.
+        (
+            ComputeOpKind::ViewFold {
+                view: v1,
+                on_event: _,
+                body: _,
+            },
+            ComputeOpKind::ViewFold {
+                view: v2,
+                on_event: _,
+                body: _,
+            },
+        ) if v1 != v2 => Some(JoinDecision::SplitWrite(
+            cross_view_split_witness(prev, next, *v2),
+        )),
+        // Same-view ViewFolds: the WAW check (with the accumulator
+        // override) handles them.
+        (
+            ComputeOpKind::ViewFold { .. },
+            ComputeOpKind::ViewFold { .. },
+        ) => None,
+        // Cross-replayability PhysicsRule split — replayable and
+        // non-replayable rules emit into different rings and live
+        // in different determinism domains. Even if the bodies don't
+        // share writes, fusing across the boundary would mix
+        // determinism contracts.
+        (
+            ComputeOpKind::PhysicsRule {
+                rule: _,
+                on_event: _,
+                body: _,
+                replayable: r1,
+            },
+            ComputeOpKind::PhysicsRule {
+                rule: _,
+                on_event: _,
+                body: _,
+                replayable: r2,
+            },
+        ) if r1 != r2 => Some(JoinDecision::SplitWrite(
+            cross_replayability_split_witness(prev, next),
+        )),
+        // Same-replayability PhysicsRules: WAW check applies as usual.
+        (
+            ComputeOpKind::PhysicsRule { .. },
+            ComputeOpKind::PhysicsRule { .. },
+        ) => None,
+        // All other prev/next combinations defer to the conventional
+        // WAW check. List the remaining pairs explicitly so adding a
+        // new `ComputeOpKind` variant forces an explicit decision
+        // here (rather than silently inheriting the WAW-only fallback).
+        (ComputeOpKind::MaskPredicate { .. }, _)
+        | (ComputeOpKind::ScoringArgmax { .. }, _)
+        | (ComputeOpKind::SpatialQuery { .. }, _)
+        | (ComputeOpKind::Plumbing { .. }, _)
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::MaskPredicate { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::ScoringArgmax { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::PhysicsRule { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::SpatialQuery { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::Plumbing { .. })
+        | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::MaskPredicate { .. })
+        | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::ScoringArgmax { .. })
+        | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::ViewFold { .. })
+        | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::SpatialQuery { .. })
+        | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::Plumbing { .. }) => None,
+    }
+}
+
+/// True iff `prev` and `next` are both `ViewFold` ops on the same
+/// view AND `conflict_key` is a `ViewStorage` write on that view (any
+/// slot). Used by [`decide_join`] to convert a same-view-view-fold
+/// WAW into a fusion-permitting accumulator pattern.
+fn same_view_view_fold_accumulator(
+    prev: &ComputeOp,
+    next: &ComputeOp,
+    conflict_key: &CycleEdgeKey,
+) -> bool {
+    let view = match (&prev.kind, &next.kind) {
+        (
+            ComputeOpKind::ViewFold {
+                view: v1,
+                on_event: _,
+                body: _,
+            },
+            ComputeOpKind::ViewFold {
+                view: v2,
+                on_event: _,
+                body: _,
+            },
+        ) => {
+            if v1 == v2 {
+                *v1
+            } else {
+                return false;
+            }
+        }
+        // Any non-(ViewFold, ViewFold) pairing is by definition not
+        // a same-view ViewFold accumulator. Enumerate the prev-side
+        // and next-side variants so a future `ComputeOpKind` addition
+        // forces an explicit decision here.
+        (ComputeOpKind::MaskPredicate { .. }, _)
+        | (ComputeOpKind::ScoringArgmax { .. }, _)
+        | (ComputeOpKind::PhysicsRule { .. }, _)
+        | (ComputeOpKind::SpatialQuery { .. }, _)
+        | (ComputeOpKind::Plumbing { .. }, _)
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::MaskPredicate { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::ScoringArgmax { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::PhysicsRule { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::SpatialQuery { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::Plumbing { .. }) => return false,
+    };
+    match conflict_key {
+        CycleEdgeKey::Other(DataHandle::ViewStorage {
+            view: vh,
+            slot: _,
+        }) => *vh == view,
+        CycleEdgeKey::Other(DataHandle::AgentField { .. })
+        | CycleEdgeKey::Other(DataHandle::ConfigConst { .. })
+        | CycleEdgeKey::Other(DataHandle::MaskBitmap { .. })
+        | CycleEdgeKey::Other(DataHandle::ScoringOutput)
+        | CycleEdgeKey::Other(DataHandle::SpatialStorage { .. })
+        | CycleEdgeKey::Other(DataHandle::Rng { .. })
+        | CycleEdgeKey::Other(DataHandle::AliveBitmap)
+        | CycleEdgeKey::Other(DataHandle::IndirectArgs { .. })
+        | CycleEdgeKey::Other(DataHandle::AgentScratch { .. })
+        | CycleEdgeKey::Other(DataHandle::SimCfgBuffer)
+        | CycleEdgeKey::Other(DataHandle::SnapshotKick)
+        | CycleEdgeKey::Other(DataHandle::EventRing { .. })
+        | CycleEdgeKey::Ring(_) => false,
+    }
+}
+
+/// Synthesize a representative `DataHandle` for a cross-view
+/// ViewFold split. We prefer the *candidate's* first `ViewStorage`
+/// write (it exposes the new view), falling back to the prev op's
+/// first `ViewStorage` write, then to a synthetic `ViewStorage`
+/// keyed on `next_view` if neither op recorded any (defensive — the
+/// emitter always records at least one).
+fn cross_view_split_witness(
+    prev: &ComputeOp,
+    next: &ComputeOp,
+    next_view: ViewId,
+) -> DataHandle {
+    if let Some(h) = first_view_storage_write(next) {
+        return h;
+    }
+    if let Some(h) = first_view_storage_write(prev) {
+        return h;
+    }
+    DataHandle::ViewStorage {
+        view: next_view,
+        slot: crate::cg::data_handle::ViewStorageSlot::Primary,
+    }
+}
+
+/// Synthesize a representative `DataHandle` for a cross-replayability
+/// PhysicsRule split. Prefer the candidate's first `EventRing`
+/// `Append`, falling back to the prev op's first `EventRing`
+/// `Append`, then to the candidate's first write of any kind.
+fn cross_replayability_split_witness(
+    prev: &ComputeOp,
+    next: &ComputeOp,
+) -> DataHandle {
+    if let Some(h) = first_event_ring_append(next) {
+        return h;
+    }
+    if let Some(h) = first_event_ring_append(prev) {
+        return h;
+    }
+    if let Some(h) = next.writes.first() {
+        return h.clone();
+    }
+    if let Some(h) = prev.writes.first() {
+        return h.clone();
+    }
+    // Last-resort fallback: a synthetic indirect-args handle on
+    // ring 0. The PhysicsRule emitter always records at least one
+    // ring write via `record_write`, so this branch is unreachable
+    // in practice.
+    DataHandle::IndirectArgs {
+        ring: EventRingId(0),
+    }
+}
+
+fn first_view_storage_write(op: &ComputeOp) -> Option<DataHandle> {
+    op.writes.iter().find_map(|h| match h {
+        DataHandle::ViewStorage { .. } => Some(h.clone()),
+        DataHandle::AgentField { .. }
+        | DataHandle::ConfigConst { .. }
+        | DataHandle::MaskBitmap { .. }
+        | DataHandle::ScoringOutput
+        | DataHandle::SpatialStorage { .. }
+        | DataHandle::Rng { .. }
+        | DataHandle::AliveBitmap
+        | DataHandle::IndirectArgs { .. }
+        | DataHandle::AgentScratch { .. }
+        | DataHandle::SimCfgBuffer
+        | DataHandle::SnapshotKick
+        | DataHandle::EventRing { .. } => None,
+    })
+}
+
+fn first_event_ring_append(op: &ComputeOp) -> Option<DataHandle> {
+    op.writes.iter().find_map(|h| match h {
+        DataHandle::EventRing {
+            ring: _,
+            kind: crate::cg::data_handle::EventRingAccess::Append,
+        } => Some(h.clone()),
+        DataHandle::EventRing { .. }
+        | DataHandle::AgentField { .. }
+        | DataHandle::ViewStorage { .. }
+        | DataHandle::ConfigConst { .. }
+        | DataHandle::MaskBitmap { .. }
+        | DataHandle::ScoringOutput
+        | DataHandle::SpatialStorage { .. }
+        | DataHandle::Rng { .. }
+        | DataHandle::AliveBitmap
+        | DataHandle::IndirectArgs { .. }
+        | DataHandle::AgentScratch { .. }
+        | DataHandle::SimCfgBuffer
+        | DataHandle::SnapshotKick => None,
+    })
 }
 
 /// Close the in-progress group: build its [`FusionGroup`], emit a
@@ -568,12 +887,16 @@ mod tests {
 
     use crate::cg::data_handle::{
         AgentFieldId, AgentRef, AgentScratchKind, DataHandle, EventRingAccess, EventRingId, MaskId,
+        ViewId, ViewStorageSlot,
     };
     use crate::cg::dispatch::{DispatchShape, PerPairSource};
     use crate::cg::expr::{CgExpr, LitValue};
-    use crate::cg::op::{ComputeOpKind, OpId, PlumbingKind, Span, SpatialQueryKind};
+    use crate::cg::op::{
+        ComputeOpKind, EventKindId, OpId, PlumbingKind, ReplayabilityFlag, Span, SpatialQueryKind,
+    };
     use crate::cg::program::{CgProgram, CgProgramBuilder};
     use crate::cg::schedule::topology::dependency_graph;
+    use crate::cg::stmt::CgStmtList;
 
     // --- helpers -------------------------------------------------------
 
@@ -1268,6 +1591,256 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    // --- helpers for ViewFold / PhysicsRule fusion tests ---------------
+
+    /// Add a `ViewFold` op (empty body, no auto-derived writes) on the
+    /// given view + event kind. Tests inject view-storage writes via
+    /// `record_write` to simulate the body's effects without spinning
+    /// up a full statement tree.
+    fn add_view_fold_op(
+        builder: &mut CgProgramBuilder,
+        view: ViewId,
+        on_event: EventKindId,
+        ring: EventRingId,
+    ) -> OpId {
+        let body = builder.add_stmt_list(CgStmtList::new(vec![])).unwrap();
+        builder
+            .add_op(
+                ComputeOpKind::ViewFold {
+                    view,
+                    on_event,
+                    body,
+                },
+                DispatchShape::PerEvent { source_ring: ring },
+                Span::dummy(),
+            )
+            .unwrap()
+    }
+
+    /// Add a `PhysicsRule` op (empty body) on the given event kind +
+    /// replayability flag. The dispatch shape is `PerEvent` on the
+    /// given ring — `replayable` and non-`replayable` rules typically
+    /// share a ring under the iter-2 shared-event-ring policy.
+    fn add_physics_rule_op(
+        builder: &mut CgProgramBuilder,
+        rule: crate::cg::op::PhysicsRuleId,
+        on_event: EventKindId,
+        replayable: ReplayabilityFlag,
+        ring: EventRingId,
+    ) -> OpId {
+        let body = builder.add_stmt_list(CgStmtList::new(vec![])).unwrap();
+        builder
+            .add_op(
+                ComputeOpKind::PhysicsRule {
+                    rule,
+                    on_event,
+                    body,
+                    replayable,
+                },
+                DispatchShape::PerEvent { source_ring: ring },
+                Span::dummy(),
+            )
+            .unwrap()
+    }
+
+    fn view_primary_handle(view: ViewId) -> DataHandle {
+        DataHandle::ViewStorage {
+            view,
+            slot: ViewStorageSlot::Primary,
+        }
+    }
+
+    // --- 11. Same-view ViewFolds fuse despite WAW on view storage -----
+
+    #[test]
+    fn same_view_view_folds_fuse_despite_waw() {
+        // Two ViewFold handlers on the same view, both writing the
+        // view's `Primary` slot. Pre-iter3 this produced a WAW split;
+        // post-iter3 the same-view-accumulator rule overrides the
+        // WAW and the two handlers fuse into one Indirect group.
+        let mut b = CgProgramBuilder::new();
+        let ring = EventRingId(0);
+        let view = ViewId(3);
+        let v0 = add_view_fold_op(&mut b, view, EventKindId(0), ring);
+        let v1 = add_view_fold_op(&mut b, view, EventKindId(1), ring);
+        let mut prog = b.finish();
+        // Inject the WAW: both ops write view[#3].primary.
+        prog.ops[v0.0 as usize].record_write(view_primary_handle(view));
+        prog.ops[v1.0 as usize].record_write(view_primary_handle(view));
+
+        let deps = dependency_graph(&prog);
+        let (groups, diagnostics) = fusion_decisions(&prog, &deps);
+
+        // ONE Indirect group with both ops — the same-view-accumulator
+        // override converted the WAW into a fusion-allowing pattern.
+        assert_eq!(groups.len(), 1, "groups: {:?}", groups);
+        assert_eq!(groups[0].ops, vec![v0, v1]);
+        assert_eq!(
+            groups[0].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+
+        // No SplitWriteConflict diagnostic should fire — the WAW was
+        // legitimised by the accumulator rule.
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| matches!(d.kind, FusionDiagnosticKind::SplitWriteConflict { .. })),
+            "unexpected SplitWriteConflict in: {:?}",
+            diagnostics
+        );
+    }
+
+    // --- 12. Cross-view ViewFolds split into separate kernels ---------
+
+    #[test]
+    fn cross_view_view_folds_split_into_separate_kernels() {
+        // Two ViewFold ops on DIFFERENT views, sharing the same ring
+        // (so dispatch shapes match). Their write sets are disjoint
+        // (one writes view[#3], the other view[#4]). Pre-iter3 they
+        // would have fused (no WAW, same shape); post-iter3 the
+        // cross-view-domain rule splits them into separate Indirect
+        // singletons.
+        let mut b = CgProgramBuilder::new();
+        let ring = EventRingId(0);
+        let view_a = ViewId(3);
+        let view_b = ViewId(4);
+        let v0 = add_view_fold_op(&mut b, view_a, EventKindId(0), ring);
+        let v1 = add_view_fold_op(&mut b, view_b, EventKindId(0), ring);
+        let mut prog = b.finish();
+        prog.ops[v0.0 as usize].record_write(view_primary_handle(view_a));
+        prog.ops[v1.0 as usize].record_write(view_primary_handle(view_b));
+
+        let deps = dependency_graph(&prog);
+        let (groups, diagnostics) = fusion_decisions(&prog, &deps);
+
+        // Two singleton Indirect groups — cross-view rejection.
+        assert_eq!(groups.len(), 2, "groups: {:?}", groups);
+        assert_eq!(groups[0].ops, vec![v0]);
+        assert_eq!(groups[1].ops, vec![v1]);
+        assert_eq!(
+            groups[0].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+        assert_eq!(
+            groups[1].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+
+        // The cross-view split surfaces as a SplitWriteConflict
+        // diagnostic carrying a ViewStorage witness — no new
+        // diagnostic kind was added in iter-3, so cross-domain splits
+        // re-use the existing write-conflict variant with a
+        // representative handle.
+        let split = diagnostics
+            .iter()
+            .find(|d| matches!(d.kind, FusionDiagnosticKind::SplitWriteConflict { .. }))
+            .expect("expected SplitWriteConflict diagnostic");
+        match &split.kind {
+            FusionDiagnosticKind::SplitWriteConflict { handle } => {
+                // Witness should be a ViewStorage handle on one of the
+                // two views (we prefer the candidate's, i.e. view_b).
+                match handle {
+                    DataHandle::ViewStorage { view, slot: _ } => {
+                        assert!(
+                            *view == view_a || *view == view_b,
+                            "witness on unexpected view: {:?}",
+                            handle
+                        );
+                    }
+                    other => panic!("unexpected witness handle: {:?}", other),
+                }
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(split.ops, vec![v0, v1]);
+    }
+
+    // --- 13. Same-replayability PhysicsRule fuses (no cross split) ----
+
+    #[test]
+    fn same_replayability_physics_fuses() {
+        // Two PhysicsRule ops with the SAME replayable flag on the
+        // same ring, with disjoint writes. They share the dispatch
+        // shape and don't WAW-conflict, and the cross-replayability
+        // rule does NOT fire — so they fuse into one Indirect group.
+        let mut b = CgProgramBuilder::new();
+        let ring = EventRingId(0);
+        let p0 = add_physics_rule_op(
+            &mut b,
+            crate::cg::op::PhysicsRuleId(0),
+            EventKindId(0),
+            ReplayabilityFlag::Replayable,
+            ring,
+        );
+        let p1 = add_physics_rule_op(
+            &mut b,
+            crate::cg::op::PhysicsRuleId(1),
+            EventKindId(1),
+            ReplayabilityFlag::Replayable,
+            ring,
+        );
+        let prog = b.finish();
+
+        let deps = dependency_graph(&prog);
+        let (groups, _diagnostics) = fusion_decisions(&prog, &deps);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].ops, vec![p0, p1]);
+        assert_eq!(
+            groups[0].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+    }
+
+    // --- 14. Cross-replayability PhysicsRule splits -------------------
+
+    #[test]
+    fn cross_replayability_physics_dont_fuse() {
+        // Two PhysicsRule ops on the same ring + dispatch, with
+        // DIFFERENT replayable flags. Even if their writes are
+        // disjoint, replayable and non-replayable rules emit into
+        // different determinism domains — fusion is not allowed.
+        let mut b = CgProgramBuilder::new();
+        let ring = EventRingId(0);
+        let p0 = add_physics_rule_op(
+            &mut b,
+            crate::cg::op::PhysicsRuleId(0),
+            EventKindId(0),
+            ReplayabilityFlag::Replayable,
+            ring,
+        );
+        let p1 = add_physics_rule_op(
+            &mut b,
+            crate::cg::op::PhysicsRuleId(1),
+            EventKindId(1),
+            ReplayabilityFlag::NonReplayable,
+            ring,
+        );
+        let prog = b.finish();
+
+        let deps = dependency_graph(&prog);
+        let (groups, diagnostics) = fusion_decisions(&prog, &deps);
+        assert_eq!(groups.len(), 2, "groups: {:?}", groups);
+        assert_eq!(groups[0].ops, vec![p0]);
+        assert_eq!(groups[1].ops, vec![p1]);
+        assert_eq!(
+            groups[0].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+        assert_eq!(
+            groups[1].fusibility_classification,
+            FusibilityClass::Indirect
+        );
+
+        // Cross-replayability split surfaces as SplitWriteConflict
+        // (the iter-3 rules re-use the existing diagnostic kind).
+        let split = diagnostics
+            .iter()
+            .find(|d| matches!(d.kind, FusionDiagnosticKind::SplitWriteConflict { .. }))
+            .expect("expected SplitWriteConflict diagnostic");
+        assert_eq!(split.ops, vec![p0, p1]);
     }
 
     // --- bonus: EventRing write conflict via cycle_edge_key projection -
