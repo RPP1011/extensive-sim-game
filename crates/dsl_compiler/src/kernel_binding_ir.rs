@@ -54,7 +54,7 @@ pub enum AccessMode {
 /// Where the bind() construction reads its `&wgpu::Buffer` from.
 /// Mirrors the BindingSources struct's resident/transient/external/pool
 /// dispatch.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BgSource {
     /// `sources.resident.<field>` — for resident-path buffers (agents,
     /// view storage primaries, scoring_table, etc.)

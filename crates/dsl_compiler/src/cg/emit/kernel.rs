@@ -143,6 +143,18 @@ pub enum KernelEmitError {
         op_kind: &'static str,
         dispatch: String,
     },
+    /// Two distinct [`DataHandle`]s collapse to the same emitted
+    /// binding name (via `structural_binding_name`) but resolve to
+    /// different storage (different `wgsl_ty` or `bg_source`). Dedup
+    /// is only valid when the collapsed handles back the SAME
+    /// physical buffer; mismatches indicate a real bug in the
+    /// metadata / naming tables. Surfaced by the binding-dedup pass
+    /// in `kernel_topology_to_spec_and_body`.
+    BindingNameCollision {
+        name: String,
+        existing_ty: String,
+        new_ty: String,
+    },
 }
 
 impl fmt::Display for KernelEmitError {
@@ -161,6 +173,15 @@ impl fmt::Display for KernelEmitError {
             KernelEmitError::InvalidDispatchForOpKind { op_kind, dispatch } => write!(
                 f,
                 "{op_kind} op cannot lower under dispatch shape {dispatch}"
+            ),
+            KernelEmitError::BindingNameCollision {
+                name,
+                existing_ty,
+                new_ty,
+            } => write!(
+                f,
+                "binding name `{name}` collides on incompatible storage \
+                 (existing wgsl_ty `{existing_ty}`, new wgsl_ty `{new_ty}`)"
             ),
         }
     }
@@ -348,6 +369,47 @@ pub fn kernel_topology_to_spec_and_body(
     // 7. Sort bindings by their cycle-edge key for determinism.
     //    `BTreeMap` already iterates sorted, but `typed_bindings` is
     //    materialised post-filter so re-sort defensively.
+    typed_bindings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+
+    // 7b. Dedup by emitted binding name. Two distinct `DataHandle`s
+    //     can collapse to the same `structural_binding_name` (e.g. the
+    //     4-way `AgentField { field: Alive, target: Target(N) }` reads
+    //     in a 4-way fused mask kernel all map to `agent_alive`). The
+    //     binding identifies a STORAGE BUFFER, not a per-thread
+    //     access expression — so multiple cycle-edge entries that
+    //     name the same buffer must collapse to one binding for both
+    //     the Rust struct and the WGSL declaration to be well-formed.
+    //
+    //     The dedup is keyed on `name`. When two entries collide, the
+    //     access modes are merged via the `access_lattice_max` order
+    //     (Atomic > ReadWrite > Read > Uniform). The `wgsl_ty` /
+    //     `bg_source` MUST match — a mismatch means two genuinely
+    //     different storage buffers got the same name (a bug in the
+    //     metadata / naming tables), surfaced as
+    //     `KernelEmitError::BindingNameCollision`. The earliest
+    //     `sort_key` wins so deterministic ordering is preserved.
+    let mut dedup: BTreeMap<String, TypedBinding> = BTreeMap::new();
+    for tb in typed_bindings.into_iter() {
+        match dedup.get_mut(&tb.name) {
+            Some(existing) => {
+                if existing.wgsl_ty != tb.wgsl_ty || existing.bg_source != tb.bg_source {
+                    return Err(KernelEmitError::BindingNameCollision {
+                        name: tb.name,
+                        existing_ty: existing.wgsl_ty.clone(),
+                        new_ty: tb.wgsl_ty,
+                    });
+                }
+                existing.access = access_lattice_max(existing.access.clone(), tb.access);
+                if tb.sort_key < existing.sort_key {
+                    existing.sort_key = tb.sort_key;
+                }
+            }
+            None => {
+                dedup.insert(tb.name.clone(), tb);
+            }
+        }
+    }
+    let mut typed_bindings: Vec<TypedBinding> = dedup.into_values().collect();
     typed_bindings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
 
     // 8. Assign slots — data bindings 0..N, cfg uniform at slot N.
@@ -711,6 +773,34 @@ fn upgrade_access(base: AccessMode, was_written: bool) -> AccessMode {
         // Uniform never upgrades — the uniform-shaped buffers (sim_cfg
         // and the per-dispatch cfg) are never written from a kernel.
         AccessMode::Uniform => AccessMode::Uniform,
+    }
+}
+
+/// Lattice-max over [`AccessMode`]s, used by the binding-dedup pass to
+/// merge two access modes that collapse to the same emitted binding
+/// name (e.g. one read-side handle and one write-side handle of the
+/// same physical storage). The order, from most-permissive to least:
+///
+/// ```text
+///   AtomicStorage > ReadWriteStorage > ReadStorage > Uniform
+/// ```
+///
+/// `Uniform` only collides with itself in practice (uniform bindings
+/// have a distinct `BgSource::Cfg`/`External` shape), but is included
+/// for totality. Match arms are exhaustive over `AccessMode × AccessMode`.
+fn access_lattice_max(a: AccessMode, b: AccessMode) -> AccessMode {
+    fn rank(m: &AccessMode) -> u8 {
+        match m {
+            AccessMode::Uniform => 0,
+            AccessMode::ReadStorage => 1,
+            AccessMode::ReadWriteStorage => 2,
+            AccessMode::AtomicStorage => 3,
+        }
+    }
+    if rank(&a) >= rank(&b) {
+        a
+    } else {
+        b
     }
 }
 
