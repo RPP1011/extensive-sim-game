@@ -2567,8 +2567,11 @@ struct CgSideChannelStats {
 ///
 /// Each `wgsl_files[name]` is written as `<src_dir>/<name>` (the keys
 /// already carry the `.wgsl` extension), same for `rust_files[name]`
-/// with `.rs`. No `Cargo.toml` or `lib.rs` is synthesised in Task 5.1 —
-/// see the limitations docstring on `CompileDslArgs::cg_emit_into`.
+/// with `.rs`. As of Task 5.2, `rust_files` includes a `"lib.rs"` key
+/// (the synthesized kernel registry + Kernel trait + bgl helpers) —
+/// the xtask writes it verbatim as `<src_dir>/lib.rs`. `Cargo.toml` is
+/// still not synthesised; see the limitations docstring on
+/// `CompileDslArgs::cg_emit_into`.
 fn write_cg_artifacts(
     src_dir: &Path,
     artifacts: &dsl_compiler::cg::emit::EmittedArtifacts,
@@ -2609,11 +2612,14 @@ mod cg_side_channel_tests {
         dir
     }
 
-    /// Empty Compilation lowers to an all-plumbing program; the CG
-    /// emitter today returns a `KernelNameCollision` error on it (see
-    /// `cg::emit::program::tests::driver_roundtrip_lowers_synthesizes_and_emits`).
-    /// The side-channel surfaces that as `CgSideChannelError::EmitProgram`,
-    /// NOT a panic — that's the contract this test pins.
+    /// Empty Compilation lowers to an all-plumbing program. Pre-Task
+    /// 5.2 the CG emitter returned a `KernelNameCollision` here
+    /// (structural names ambiguated the per-plumbing-kind kernels);
+    /// Task 5.2's semantic naming gives each plumbing kind a distinct
+    /// name, so emit succeeds. The test still tolerates the error
+    /// branch defensively in case future ops re-introduce a real
+    /// collision — what matters is the error is surfaced typed, never
+    /// as a panic.
     #[test]
     fn empty_compilation_surfaces_emit_error_as_display_string() {
         let comp = dsl_compiler::ir::Compilation::default();
@@ -2621,19 +2627,22 @@ mod cg_side_channel_tests {
         let result = emit_cg_side_channel(&comp, &dir);
         match result {
             Ok(stats) => {
-                // If the CG pipeline ever stops colliding on the empty
-                // Compilation (Task 5.x semantic naming), this branch
-                // should produce a structurally-valid stats record.
+                // Task 5.2's semantic naming: emit succeeds with at
+                // least one kernel + the synthesized lib.rs (which the
+                // stats counts as a rust_files entry).
                 assert!(
                     stats.kernel_index_len > 0,
                     "stats={stats:?} should record at least one kernel if emit succeeded"
                 );
+                assert!(
+                    dir.join("src").join("lib.rs").exists(),
+                    "lib.rs must be written to <dir>/src/"
+                );
             }
             Err(CgSideChannelError::EmitProgram(msg)) => {
                 // Pin the typed error path: the inner string is the
-                // `Display`-stringified `ProgramEmitError`. Today that's
-                // a structural collision on the empty-Compilation
-                // plumbing.
+                // `Display`-stringified `ProgramEmitError`. Defensive
+                // — current expected outcome is `Ok`.
                 assert!(
                     msg.contains("collision")
                         || msg.contains("KernelNameCollision")

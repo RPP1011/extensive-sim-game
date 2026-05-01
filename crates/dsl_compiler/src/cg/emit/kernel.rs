@@ -29,11 +29,16 @@
 //!   per-op WGSL is concatenated as-is, leaving the WGSL compiler to
 //!   dedupe. A future task can hoist the shared reads into a kernel
 //!   preamble.
-//! - **Kernel naming is structural.** `cg_<topology>_<first_op>_<count>`
-//!   today (e.g. `cg_fused_mask_predicate_2`) — Task 5.1 may re-align
-//!   with the legacy emitters' semantic names (`fused_mask`, `scoring`,
-//!   `fold_<view>`) once the xtask wires this output and its actual
-//!   shape can be diffed against legacy emit.
+//! - **Kernel naming is semantic.** As of Task 5.2 the synthesized
+//!   names match the legacy emitter filenames: `fused_mask`,
+//!   `scoring`, `fold_<view>`, `physics_<rule>`,
+//!   `spatial_<query_kind>`, plus per-plumbing-kind names
+//!   (`alive_pack`, `seed_indirect_<ring>`, …). See
+//!   [`semantic_kernel_name`] for the full mapping table. Multi-op
+//!   fused kernels prefix the first op's name with `fused_`; collisions
+//!   surface as
+//!   [`super::program::ProgramEmitError::KernelNameCollision`] rather
+//!   than silently overwriting.
 //! - **Op-body lowering is partial.** Only [`ComputeOpKind::PhysicsRule`]
 //!   and [`ComputeOpKind::ViewFold`] (which carry real
 //!   [`crate::cg::stmt::CgStmtList`] bodies) lower through Task 4.1's
@@ -84,7 +89,7 @@ use crate::cg::data_handle::{
     ViewStorageSlot,
 };
 use crate::cg::dispatch::DispatchShape;
-use crate::cg::op::{ComputeOp, ComputeOpKind, OpId};
+use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PlumbingKind, SpatialQueryKind};
 use crate::cg::program::CgProgram;
 use crate::cg::schedule::synthesis::KernelTopology;
 use crate::kernel_binding_ir::{
@@ -275,10 +280,15 @@ pub fn kernel_topology_to_spec_and_body(
     //    materialised post-filter so re-sort defensively.
     typed_bindings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
 
-    // 5. Pick a structural kernel name from the topology shape +
-    //    leading op kind. See # Limitations: this is a placeholder.
-    let first_op = resolve_op(prog, body_ops[0])?;
-    let name = structural_kernel_name(kind_label, &first_op.kind, body_ops.len());
+    // 5. Pick a semantic kernel name aligned with the legacy emitter
+    //    filenames (`fused_mask`, `scoring`, `fold_<view>`, ...). See
+    //    `semantic_kernel_name` for the full mapping table.
+    let _ = kind_label;
+    let body_ops_resolved: Vec<&ComputeOp> = body_ops
+        .iter()
+        .map(|id| resolve_op(prog, *id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let name = semantic_kernel_name(&body_ops_resolved, prog);
     let pascal = snake_to_pascal(&name);
     let entry_point = format!("cs_{name}");
     let cfg_struct = format!("{pascal}Cfg");
@@ -619,11 +629,149 @@ fn structural_binding_name(h: &DataHandle) -> String {
     }
 }
 
-/// Structural kernel name. See `# Limitations` — Task 5.1 may align
-/// with the legacy semantic names.
-fn structural_kernel_name(kind_label: &str, first_op_kind: &ComputeOpKind, op_count: usize) -> String {
-    let op_short = compute_op_kind_short(first_op_kind);
-    format!("cg_{kind_label}_{op_short}_{op_count}")
+/// Pick the kernel's snake_case file name. Aligned with the legacy
+/// emitter filenames so the side-channel output drops directly into a
+/// CG-overlaid `engine_gpu_rules` crate.
+///
+/// Mapping:
+/// - Single [`ComputeOpKind::MaskPredicate`] → `mask_<name>` (interner
+///   lookup); falls back to `mask_<id>` when no name is interned.
+/// - Single [`ComputeOpKind::ScoringArgmax`] → `scoring`. (At most one
+///   scoring kernel per program today; the legacy emitter uses the
+///   bare name.)
+/// - Single [`ComputeOpKind::PhysicsRule`] → `physics_<rule>` (interner
+///   lookup); falls back to `physics_rule_<id>`.
+/// - Single [`ComputeOpKind::ViewFold`] →
+///   `fold_<view>_<event>` (both via interner lookup, event-kind name
+///   normalized PascalCase → snake_case via [`pascal_to_snake`]); the
+///   event suffix disambiguates handlers when one view subscribes to
+///   multiple events (e.g. `threat_level` folds both
+///   `AgentAttacked` and `EffectDamageApplied` and emits two distinct
+///   kernels). Falls back to `fold_view_<id>` / `fold_..._event_<id>`
+///   when the interner has no name.
+/// - Single [`ComputeOpKind::SpatialQuery`] → `spatial_<kind_label>`
+///   (`spatial_build_hash`, `spatial_kin_query`,
+///   `spatial_engagement_query`).
+/// - Single [`ComputeOpKind::Plumbing`] → per-kind name (`alive_pack`
+///   for `AliveBitmap`, `seed_indirect` for `SeedIndirectArgs`,
+///   `pack_agents` / `unpack_agents`, `drain_events`,
+///   `upload_sim_cfg`, `kick_snapshot`).
+/// - Multi-op fused kernel → `fused_<first_op_kernel_name>`.
+///
+/// # Limitations
+/// - The fused-kernel naming uses the FIRST op's name with a `fused_`
+///   prefix. With more than one op of the same kind in a fused kernel
+///   the prefix collapses ambiguity rather than spelling out every
+///   contributing op. Two distinct fused kernels with the same
+///   first-op name still collide; the
+///   [`super::program::ProgramEmitError::KernelNameCollision`] check
+///   surfaces that as a typed error rather than silently overwriting.
+/// - Plumbing variants `DrainEvents { ring }` and `SeedIndirectArgs
+///   { ring }` use a per-ring suffix (`drain_events_<ring>` /
+///   `seed_indirect_<ring>`) so distinct rings never collide. Without
+///   a ring-name interner the suffix is the numeric ring id.
+fn semantic_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> String {
+    debug_assert!(!body_ops.is_empty(), "semantic_kernel_name on empty ops");
+    if body_ops.len() == 1 {
+        return single_op_kernel_name(&body_ops[0].kind, prog);
+    }
+    // Fused kernel: prefix the first op's name with `fused_` (unless the
+    // first op already starts with `fused_`, in which case keep it).
+    let first = single_op_kernel_name(&body_ops[0].kind, prog);
+    if first.starts_with("fused_") {
+        first
+    } else {
+        format!("fused_{first}")
+    }
+}
+
+/// Snake_case kernel name for a single op (the building block of
+/// [`semantic_kernel_name`]).
+fn single_op_kernel_name(kind: &ComputeOpKind, prog: &CgProgram) -> String {
+    match kind {
+        ComputeOpKind::MaskPredicate { mask, .. } => match prog.interner.get_mask_name(*mask) {
+            Some(name) => format!("mask_{name}"),
+            None => format!("mask_{}", mask.0),
+        },
+        ComputeOpKind::ScoringArgmax { .. } => "scoring".to_string(),
+        ComputeOpKind::PhysicsRule { rule, .. } => {
+            // The physics rule's name is unique within the program's
+            // interner; PhysicsRule ops do not need an event-kind
+            // suffix to disambiguate (each `physics` rule produces a
+            // single op).
+            match prog.interner.get_physics_rule_name(*rule) {
+                Some(name) => format!("physics_{name}"),
+                None => format!("physics_rule_{}", rule.0),
+            }
+        }
+        ComputeOpKind::ViewFold {
+            view, on_event, ..
+        } => {
+            let view_part = match prog.interner.get_view_name(*view) {
+                Some(name) => format!("fold_{name}"),
+                None => format!("fold_view_{}", view.0),
+            };
+            // Suffix the event kind to disambiguate handlers when one
+            // view subscribes to multiple events (e.g. `threat_level`
+            // folds both `AgentAttacked` and `EffectDamageApplied`).
+            // The legacy emitter packs all handlers into one
+            // `fold_<view>` kernel; the CG pipeline's per-op lowering
+            // produces one Split kernel per handler today, so the
+            // names must diverge.
+            //
+            // Event-kind names in the interner are PascalCase
+            // (matching the DSL's `event Name { ... }` casing); they
+            // are normalized to snake_case here so the kernel
+            // filename and module name follow the legacy snake_case
+            // convention.
+            match prog.interner.get_event_kind_name(*on_event) {
+                Some(name) => format!("{view_part}_{}", pascal_to_snake(name)),
+                None => format!("{view_part}_event_{}", on_event.0),
+            }
+        }
+        ComputeOpKind::SpatialQuery { kind } => format!("spatial_{}", spatial_kind_name(*kind)),
+        ComputeOpKind::Plumbing { kind } => plumbing_kind_name(kind),
+    }
+}
+
+/// Lowercase + insert underscores before each uppercase letter
+/// boundary. Used to normalize PascalCase event-kind names from the
+/// interner into the snake_case convention every emitted kernel name
+/// follows. A leading uppercase letter does not produce a leading
+/// underscore.
+fn pascal_to_snake(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn spatial_kind_name(k: SpatialQueryKind) -> &'static str {
+    match k {
+        SpatialQueryKind::BuildHash => "build_hash",
+        SpatialQueryKind::KinQuery => "kin_query",
+        SpatialQueryKind::EngagementQuery => "engagement_query",
+    }
+}
+
+fn plumbing_kind_name(k: &PlumbingKind) -> String {
+    match k {
+        PlumbingKind::PackAgents => "pack_agents".to_string(),
+        PlumbingKind::UnpackAgents => "unpack_agents".to_string(),
+        PlumbingKind::AliveBitmap => "alive_pack".to_string(),
+        PlumbingKind::DrainEvents { ring } => format!("drain_events_{}", ring.0),
+        PlumbingKind::UploadSimCfg => "upload_sim_cfg".to_string(),
+        PlumbingKind::KickSnapshot => "kick_snapshot".to_string(),
+        PlumbingKind::SeedIndirectArgs { ring } => format!("seed_indirect_{}", ring.0),
+    }
 }
 
 /// Short snake_case label for a [`ComputeOpKind`] — used in kernel
@@ -1229,5 +1377,337 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         let (_spec, body) = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
         assert!(body.contains("TODO(task-4.x): scoring_argmax"), "body: {body}");
+    }
+
+    // ---- 10. Semantic kernel naming (Task 5.2) ----
+
+    #[test]
+    fn mask_predicate_uses_interner_name_when_present() {
+        let mut prog = CgProgram::default();
+        let mask = MaskId(2);
+        let op = mask_op(&mut prog, mask);
+        // Pretend lowering interned a name for this mask.
+        prog.interner.masks.insert(mask.0, "low_health".to_string());
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        assert_eq!(spec.name, "mask_low_health", "spec.name: {}", spec.name);
+        assert_eq!(spec.entry_point, "cs_mask_low_health");
+        assert_eq!(spec.cfg_struct, "MaskLowHealthCfg");
+    }
+
+    #[test]
+    fn mask_predicate_falls_back_to_id_when_no_interner_name() {
+        let mut prog = CgProgram::default();
+        let op = mask_op(&mut prog, MaskId(7));
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        assert_eq!(spec.name, "mask_7");
+    }
+
+    #[test]
+    fn scoring_argmax_emits_bare_scoring_name() {
+        let mut prog = CgProgram::default();
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(0.0)));
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(0),
+            rows: vec![ScoringRowOp {
+                action: ActionId(0),
+                utility,
+                target: None,
+                guard: None,
+            }],
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        assert_eq!(spec.name, "scoring");
+    }
+
+    #[test]
+    fn physics_rule_uses_interner_name_when_present() {
+        let mut prog = CgProgram::default();
+        let ring = EventRingId(0);
+        let op = physics_op(&mut prog, PhysicsRuleId(4), ring);
+        prog.interner
+            .physics_rules
+            .insert(4, "cast_apply".to_string());
+        let topology = KernelTopology::Split {
+            op,
+            dispatch: DispatchShape::PerEvent { source_ring: ring },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        assert_eq!(spec.name, "physics_cast_apply");
+    }
+
+    #[test]
+    fn pascal_to_snake_normalizes_event_kind_names() {
+        assert_eq!(pascal_to_snake("AgentAttacked"), "agent_attacked");
+        assert_eq!(
+            pascal_to_snake("EffectDamageApplied"),
+            "effect_damage_applied"
+        );
+        assert_eq!(pascal_to_snake("Foo"), "foo");
+        assert_eq!(pascal_to_snake("foo"), "foo");
+        assert_eq!(pascal_to_snake(""), "");
+    }
+
+    #[test]
+    fn view_fold_with_pascal_case_event_name_normalizes_to_snake_case() {
+        // Interner stores event-kind names PascalCase as authored in
+        // the DSL (`event AgentAttacked { ... }`). The kernel name
+        // suffix must be snake_case so the output filename / Rust
+        // module name follow the legacy convention.
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let body = push_list(&mut prog, CgStmtList { stmts: vec![] });
+        let kind = ComputeOpKind::ViewFold {
+            view: ViewId(3),
+            on_event: EventKindId(7),
+            body,
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner
+            .event_kinds
+            .insert(7, "AgentAttacked".to_string());
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        assert_eq!(spec.name, "fold_threat_level_agent_attacked");
+    }
+
+    #[test]
+    fn view_fold_uses_interner_name_with_event_suffix() {
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        let body = push_list(&mut prog, CgStmtList { stmts: vec![] });
+        let kind = ComputeOpKind::ViewFold {
+            view: ViewId(3),
+            on_event: EventKindId(7),
+            body,
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner
+            .event_kinds
+            .insert(7, "agent_attacked".to_string());
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        // Event kind suffix disambiguates multi-handler views.
+        assert_eq!(spec.name, "fold_threat_level_agent_attacked");
+    }
+
+    #[test]
+    fn view_fold_distinct_event_kinds_yield_distinct_kernel_names() {
+        // The DSL `threat_level` view in `assets/sim/views.sim` has
+        // two `on` handlers (`AgentAttacked`, `EffectDamageApplied`).
+        // Each lowers to its own ViewFold op; without the event-kind
+        // suffix both would collide on the kernel name. This test pins
+        // that they DO diverge.
+        use crate::cg::data_handle::ViewId;
+        let mut prog = CgProgram::default();
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner
+            .event_kinds
+            .insert(0, "agent_attacked".to_string());
+        prog.interner
+            .event_kinds
+            .insert(1, "effect_damage_applied".to_string());
+
+        let mk_fold = |prog: &mut CgProgram, ek: u32| -> OpId {
+            let body = push_list(prog, CgStmtList { stmts: vec![] });
+            let kind = ComputeOpKind::ViewFold {
+                view: ViewId(3),
+                on_event: EventKindId(ek),
+                body,
+            };
+            let op = ComputeOp::new(
+                OpId(0),
+                kind,
+                DispatchShape::PerEvent {
+                    source_ring: EventRingId(0),
+                },
+                Span::dummy(),
+                prog,
+                prog,
+                prog,
+            );
+            push_op(prog, op)
+        };
+        let a = mk_fold(&mut prog, 0);
+        let b = mk_fold(&mut prog, 1);
+        let ctx = EmitCtx::structural(&prog);
+        let spec_a = kernel_topology_to_spec(
+            &KernelTopology::Split {
+                op: a,
+                dispatch: DispatchShape::PerEvent {
+                    source_ring: EventRingId(0),
+                },
+            },
+            &prog,
+            &ctx,
+        )
+        .unwrap();
+        let spec_b = kernel_topology_to_spec(
+            &KernelTopology::Split {
+                op: b,
+                dispatch: DispatchShape::PerEvent {
+                    source_ring: EventRingId(1),
+                },
+            },
+            &prog,
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(spec_a.name, "fold_threat_level_agent_attacked");
+        assert_eq!(spec_b.name, "fold_threat_level_effect_damage_applied");
+        assert_ne!(spec_a.name, spec_b.name);
+    }
+
+    #[test]
+    fn spatial_query_kinds_map_to_legacy_filenames() {
+        use crate::cg::op::SpatialQueryKind;
+        for (kind, expected) in [
+            (SpatialQueryKind::BuildHash, "spatial_build_hash"),
+            (SpatialQueryKind::KinQuery, "spatial_kin_query"),
+            (SpatialQueryKind::EngagementQuery, "spatial_engagement_query"),
+        ] {
+            let mut prog = CgProgram::default();
+            let op = ComputeOp::new(
+                OpId(0),
+                ComputeOpKind::SpatialQuery { kind },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+                &prog,
+                &prog,
+                &prog,
+            );
+            let op_id = push_op(&mut prog, op);
+            let topology = KernelTopology::Split {
+                op: op_id,
+                dispatch: DispatchShape::PerAgent,
+            };
+            let ctx = EmitCtx::structural(&prog);
+            let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+            assert_eq!(spec.name, expected, "kind={kind:?}");
+        }
+    }
+
+    #[test]
+    fn plumbing_kinds_map_to_legacy_filenames() {
+        let cases = [
+            (PlumbingKind::PackAgents, "pack_agents"),
+            (PlumbingKind::UnpackAgents, "unpack_agents"),
+            (PlumbingKind::AliveBitmap, "alive_pack"),
+            (PlumbingKind::UploadSimCfg, "upload_sim_cfg"),
+            (PlumbingKind::KickSnapshot, "kick_snapshot"),
+            (
+                PlumbingKind::SeedIndirectArgs {
+                    ring: EventRingId(2),
+                },
+                "seed_indirect_2",
+            ),
+            (
+                PlumbingKind::DrainEvents {
+                    ring: EventRingId(5),
+                },
+                "drain_events_5",
+            ),
+        ];
+        for (kind, expected) in cases {
+            let mut prog = CgProgram::default();
+            let op = ComputeOp::new(
+                OpId(0),
+                ComputeOpKind::Plumbing { kind },
+                kind.dispatch_shape(),
+                Span::dummy(),
+                &prog,
+                &prog,
+                &prog,
+            );
+            let op_id = push_op(&mut prog, op);
+            let topology = KernelTopology::Split {
+                op: op_id,
+                dispatch: kind.dispatch_shape(),
+            };
+            let ctx = EmitCtx::structural(&prog);
+            let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+            assert_eq!(spec.name, expected, "plumbing kind={kind:?}");
+        }
+    }
+
+    #[test]
+    fn fused_multi_op_kernel_prefixes_with_fused() {
+        // Two MaskPredicate ops in one Fused topology — the kernel name
+        // gets a `fused_` prefix on the first op's semantic name.
+        let mut prog = CgProgram::default();
+        let m0 = mask_op(&mut prog, MaskId(0));
+        let m1 = mask_op(&mut prog, MaskId(1));
+        prog.interner.masks.insert(0, "low_hp".to_string());
+        prog.interner.masks.insert(1, "isolated".to_string());
+        let topology = KernelTopology::Fused {
+            ops: vec![m0, m1],
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
+        // Prefixed with `fused_` since the first op's name doesn't
+        // already start with `fused_`.
+        assert_eq!(spec.name, "fused_mask_low_hp", "spec.name: {}", spec.name);
     }
 }
