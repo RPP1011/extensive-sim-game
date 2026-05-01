@@ -112,10 +112,31 @@ pub struct LoweringCtx<'a> {
     /// later op-lowering passes can collect non-fatal rule-level
     /// diagnostics in the same context.
     pub diagnostics: Vec<LoweringError>,
+    /// Whether `target` is bound as the per-pair candidate in the
+    /// current lowering context.
+    ///
+    /// Set by op-level driver passes that lower a pair-bound construct
+    /// (`mask <Name>(target) from query.nearby_agents(...)` today;
+    /// Task 5.5b/c will extend this to per-pair scoring rows and
+    /// fold-body event binders). When `true`, `target.<field>` accesses
+    /// in the predicate / body resolve to a `Read(AgentField {
+    /// field, target: AgentRef::PerPairCandidate })` — see
+    /// [`AgentRef::PerPairCandidate`]'s docstring for the resolution
+    /// contract. When `false` (the default), any `target.<field>` access
+    /// surfaces as [`LoweringError::UnsupportedFieldBase`] (the same
+    /// shape as other unbound receivers) so the driver-side invariant is
+    /// enforced at every layer.
+    pub target_local: bool,
 }
 
 impl<'a> LoweringCtx<'a> {
     /// Construct a context with empty maps and no diagnostics.
+    ///
+    /// `target_local` defaults to `false`: `target.<field>` accesses
+    /// produce [`LoweringError::UnsupportedFieldBase`] until an
+    /// op-level driver pass sets the flag (today the pair-bound mask
+    /// driver in [`crate::cg::lower::mask`]; Task 5.5b/c will extend
+    /// this to per-pair scoring + fold-body event binders).
     pub fn new(builder: &'a mut CgProgramBuilder) -> Self {
         Self {
             builder,
@@ -126,6 +147,7 @@ impl<'a> LoweringCtx<'a> {
             local_ids: HashMap::new(),
             action_ids: HashMap::new(),
             diagnostics: Vec::new(),
+            target_local: false,
         }
     }
 
@@ -472,9 +494,24 @@ fn typecheck_node(
     type_check(node, id, &tc_ctx).map_err(|e| LoweringError::TypeCheckFailure { error: e, span })
 }
 
-/// Lower `<base>.<field_name>`. Today only the `self` base is wired —
-/// other bases (locals other than `self`, namespace fields,
-/// builder-receiver chains) surface as typed deferrals.
+/// Lower `<base>.<field_name>`. Today the wired bases are `self` (any
+/// dispatch shape) and `target` (only inside a pair-bound op — gated by
+/// [`LoweringCtx::target_local`]).
+///
+/// # Limitations
+///
+/// - `target.<field>` only resolves when [`LoweringCtx::target_local`]
+///   is `true`. The driver pass for pair-bound masks (today
+///   [`crate::cg::lower::mask::lower_mask`] when the dispatch shape is
+///   [`crate::cg::dispatch::DispatchShape::PerPair`]) sets the flag
+///   before lowering the predicate and restores it after; outside
+///   pair-bound contexts the same access surfaces as the typed
+///   [`LoweringError::UnsupportedFieldBase`] deferral so a stray
+///   `target` reference can't accidentally route through the per-pair
+///   candidate buffer.
+/// - Other bases (locals other than `self` / `target`, namespace
+///   fields, builder-receiver chains) surface as the same
+///   [`LoweringError::UnsupportedFieldBase`] typed deferral.
 fn lower_field(
     base: &IrExprNode,
     field_name: &str,
@@ -494,6 +531,28 @@ fn lower_field(
                 CgExpr::Read(DataHandle::AgentField {
                     field,
                     target: AgentRef::Self_,
+                }),
+                span,
+            )
+        }
+        IrExpr::Local(_, local_name) if local_name == "target" && ctx.target_local => {
+            // Pair-bound mask predicates (and, in 5.5b/c, scoring rows /
+            // fold bodies) bind `target` to the per-pair candidate. The
+            // emit layer (Task 4.x) resolves `AgentRef::PerPairCandidate`
+            // to the candidate buffer + per-thread offset implied by the
+            // dispatch shape's `PerPair { source }`; the IR layer just
+            // tags the read.
+            let field = AgentFieldId::from_snake(field_name).ok_or_else(|| {
+                LoweringError::UnknownAgentField {
+                    field_name: field_name.to_string(),
+                    span,
+                }
+            })?;
+            add(
+                ctx,
+                CgExpr::Read(DataHandle::AgentField {
+                    field,
+                    target: AgentRef::PerPairCandidate,
                 }),
                 span,
             )
@@ -1301,6 +1360,82 @@ mod tests {
         });
         let err = lower_to_string(&ast).unwrap_err();
         assert!(matches!(err, LoweringError::UnsupportedFieldBase { .. }));
+    }
+
+    // ---- target.<field> binding (Task 5.5a) ----
+
+    fn field_target(name: &str) -> IrExprNode {
+        node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(LocalRef(1), "target".to_string()))),
+            field_name: name.to_string(),
+            field: None,
+        })
+    }
+
+    #[test]
+    fn target_field_with_target_local_lowers_to_per_pair_candidate_read() {
+        // target.alive in a context where ctx.target_local is true
+        // resolves to `Read(AgentField { target: PerPairCandidate, .. })`.
+        let ast = field_target("alive");
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.target_local = true;
+        let id = lower_expr(&ast, &mut ctx).expect("lowers");
+        let prog = builder.finish();
+        let node_at = &prog.exprs[id.0 as usize];
+        // Expect: (read agent.per_pair_candidate.alive) under the
+        // `pretty` pretty-printer.
+        assert_eq!(
+            pretty(node_at, &prog.exprs),
+            "(read agent.per_pair_candidate.alive)"
+        );
+        // Confirm the typed handle shape exactly — Display goes through
+        // the `agent.per_pair_candidate.<field>` form.
+        match node_at {
+            CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                assert_eq!(*field, AgentFieldId::Alive);
+                assert_eq!(*target, AgentRef::PerPairCandidate);
+            }
+            other => panic!("unexpected lowered expr: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn target_field_without_target_local_rejects_with_unsupported_field_base() {
+        // Regression: outside a pair-bound context (`target_local =
+        // false`, the default), `target.<field>` must NOT route through
+        // `PerPairCandidate`. The lowering surfaces the same typed
+        // deferral as any other unbound receiver.
+        let ast = field_target("alive");
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // ctx.target_local left false (the default).
+        let err = lower_expr(&ast, &mut ctx).expect_err("must reject");
+        match err {
+            LoweringError::UnsupportedFieldBase { field_name, .. } => {
+                assert_eq!(field_name, "alive");
+            }
+            other => panic!("expected UnsupportedFieldBase, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn target_field_unknown_name_under_target_local_rejects_with_unknown_agent_field() {
+        // target.hp_pct in a target-bound context: the receiver is now
+        // recognised, but `hp_pct` isn't an `AgentFieldId`. The
+        // lowering surfaces the same `UnknownAgentField` defect as the
+        // `self.hp_pct` case — keeps the error surface symmetric.
+        let ast = field_target("hp_pct");
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.target_local = true;
+        let err = lower_expr(&ast, &mut ctx).expect_err("must reject");
+        match err {
+            LoweringError::UnknownAgentField { field_name, .. } => {
+                assert_eq!(field_name, "hp_pct");
+            }
+            other => panic!("expected UnknownAgentField, got {other:?}"),
+        }
     }
 
     // ---- The plan's specific rejection — `agent.alive < 5` ----

@@ -98,19 +98,22 @@ use super::expr::{lower_expr, LoweringCtx};
 ///
 /// # Limitations
 ///
-/// Today's expression lowering (Task 2.1) does not yet bind `target` as
-/// a local in pair-bound mask predicates. Masks like
-/// `MoveToward(target)` and `Attack(target)`, whose predicates
-/// reference `target.alive` or `target.pos`, surface as
-/// [`LoweringError::UnsupportedLocalBinding`]. The `target` binding
-/// lands in the driver task (2.6 spatial / 2.7 plumbing / 2.8
-/// end-to-end driver) which will extend the expression lowering's
-/// [`LoweringCtx`] to carry the per-pair candidate context.
+/// Pair-bound mask predicates that reference `target.<field>` (e.g.,
+/// `mask MoveToward(target) from query.nearby_agents(...)` whose
+/// predicate reads `target.alive` or `target.pos`) lower cleanly as of
+/// Task 5.5a: the lowering sets [`LoweringCtx::target_local`] before
+/// lowering the predicate so [`crate::cg::lower::expr::lower_field`]
+/// resolves `target.<field>` to a
+/// `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`. The
+/// emit layer (Task 4.x) is responsible for binding
+/// [`crate::cg::data_handle::AgentRef::PerPairCandidate`] to the
+/// candidate-side agent slot implied by the dispatch shape's
+/// `PerPair { source }` at codegen time.
 ///
-/// Likewise, parametric heads without an explicit `from` clause (e.g.,
+/// Parametric heads without an explicit `from` clause (e.g.,
 /// `mask Cast(ability: AbilityId)` from `assets/sim/masks.sim`) are
-/// rejected with [`LoweringError::UnsupportedMaskHeadShape`] until
-/// Task 2.6 adds the matching [`PerPairSource`] variant
+/// still rejected with [`LoweringError::UnsupportedMaskHeadShape`]
+/// until Task 2.6 adds the matching [`PerPairSource`] variant
 /// (e.g., `AbilityCatalog`).
 pub fn lower_mask(
     mask_id: MaskId,
@@ -142,7 +145,36 @@ pub fn lower_mask(
     // Step 2: lower the predicate body. Reuses the expression-level
     // lowering — the predicate is just a `IrExprNode` whose value
     // must be `Bool`.
-    let predicate_id = lower_expr(&ir.predicate, ctx)?;
+    //
+    // For pair-bound dispatch (`PerPair { source }`), bind `target` as
+    // the per-pair candidate context for the duration of the predicate
+    // lowering — `target.<field>` then resolves to a
+    // `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`
+    // via [`super::expr::lower_field`]. The previous flag value is
+    // restored after lowering so a recursive mask-inside-physics call
+    // (or any future driver pattern that nests lowerings) can't leak
+    // the binding upward.
+    //
+    // # Limitations
+    //
+    // The flag is a single boolean — it captures "is `target` bound
+    // here?" but not which dispatch shape's candidate context. Today
+    // only one pair-bound shape exists
+    // ([`crate::cg::dispatch::PerPairSource::SpatialQuery`]); when
+    // future shapes accrete (e.g., ability-catalog pairs in Task 2.6),
+    // the flag may need to grow into a typed enum tracking which
+    // candidate context is active. The current shape suffices for
+    // Task 5.5a (closing the per-pair mask predicate gap) and
+    // Task 5.5b/c (per-pair scoring / fold-body event binders) will
+    // tighten it as those land.
+    let prev_target_local = ctx.target_local;
+    let pair_bound = matches!(shape, DispatchShape::PerPair { .. });
+    if pair_bound {
+        ctx.target_local = true;
+    }
+    let predicate_result = lower_expr(&ir.predicate, ctx);
+    ctx.target_local = prev_target_local;
+    let predicate_id = predicate_result?;
 
     // Step 3: confirm the predicate type-checks to `Bool`. `lower_expr`
     // already type-checks the node it pushes, but its check is
@@ -500,6 +532,105 @@ mod tests {
             other => panic!("unexpected kind: {other:?}"),
         }
         assert_eq!(prog.interner.get_mask_name(MaskId(1)), Some("MoveToward"));
+    }
+
+    /// Pair-bound mask whose predicate references `target.alive`.
+    /// Confirms the Task 5.5a wiring: the dispatch shape is
+    /// `PerPair`, so `lower_mask` flips `ctx.target_local` for the
+    /// duration of predicate lowering, and `target.alive` resolves to
+    /// `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`.
+    #[test]
+    fn lowers_from_clause_pair_bound_predicate_with_target_field() {
+        // mask Attack(target)
+        //   from query.nearby_agents(self.pos, 20.0)
+        //   when target.alive
+        let target_alive = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(LocalRef(1), "target".to_string()))),
+            field_name: "alive".to_string(),
+            field: None,
+        });
+        let mask = MaskIR {
+            head: mask_head("Attack"),
+            candidate_source: Some(nearby_agents_call()),
+            predicate: target_alive,
+            annotations: vec![],
+            span: span(0, 0),
+        };
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // Pre-condition: the flag starts false.
+        assert!(!ctx.target_local);
+        let op_id = lower_mask(
+            MaskId(11),
+            Some(SpatialQueryKind::EngagementQuery),
+            &mask,
+            &mut ctx,
+        )
+        .expect("lowers");
+        // Post-condition: lower_mask restored the flag.
+        assert!(!ctx.target_local);
+
+        let prog = builder.finish();
+        let op = &prog.ops[op_id.0 as usize];
+        assert_eq!(
+            op.shape,
+            DispatchShape::PerPair {
+                source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
+            }
+        );
+        // Reads now include the per-pair-candidate.alive read.
+        assert!(
+            op.reads.contains(&DataHandle::AgentField {
+                field: AgentFieldId::Alive,
+                target: AgentRef::PerPairCandidate,
+            }),
+            "reads missing per-pair candidate alive: {:?}",
+            op.reads
+        );
+        assert_eq!(
+            op.writes,
+            vec![DataHandle::MaskBitmap { mask: MaskId(11) }]
+        );
+    }
+
+    /// Restoration test: the flag must be reset on the failure path
+    /// (predicate lowering errors out) just as it is on the happy path.
+    #[test]
+    fn target_local_restored_when_predicate_lowering_fails() {
+        // Pair-bound mask whose predicate is ill-typed (`target.hp` is
+        // f32, not Bool). The mask-level Bool check fires after the
+        // expression itself lowers cleanly, so the flag must already
+        // have been restored by the time we observe it post-call.
+        let target_hp = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(LocalRef(1), "target".to_string()))),
+            field_name: "hp".to_string(),
+            field: None,
+        });
+        let mask = MaskIR {
+            head: mask_head("BadAttack"),
+            candidate_source: Some(nearby_agents_call()),
+            predicate: target_hp,
+            annotations: vec![],
+            span: span(0, 0),
+        };
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.target_local = false;
+        let err = lower_mask(
+            MaskId(12),
+            Some(SpatialQueryKind::EngagementQuery),
+            &mask,
+            &mut ctx,
+        )
+        .expect_err("non-Bool predicate must reject");
+        assert!(matches!(
+            err,
+            LoweringError::MaskPredicateNotBool { .. }
+        ));
+        // Flag was restored even on the error path.
+        assert!(!ctx.target_local);
     }
 
     #[test]

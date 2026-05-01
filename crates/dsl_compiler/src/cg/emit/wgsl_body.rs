@@ -177,13 +177,18 @@ fn structural_handle_name(h: &DataHandle) -> String {
 }
 
 /// Identifier token for an [`AgentRef`]. `Target(expr_id)` maps to the
-/// placeholder `target_expr_<N>` per the module-level limitations note.
+/// placeholder `target_expr_<N>` per the module-level limitations note;
+/// [`AgentRef::PerPairCandidate`] maps to the placeholder
+/// `per_pair_candidate` until Task 4.x resolves it to the per-pair
+/// candidate buffer + per-thread offset implied by the surrounding
+/// [`crate::cg::dispatch::DispatchShape::PerPair`] shape.
 fn agent_ref_token(target: &AgentRef) -> String {
     match target {
         AgentRef::Self_ => "self".to_string(),
         AgentRef::Actor => "actor".to_string(),
         AgentRef::EventTarget => "event_target".to_string(),
         AgentRef::Target(id) => format!("target_expr_{}", id.0),
+        AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
     }
 }
 

@@ -404,7 +404,9 @@ impl fmt::Display for AgentFieldId {
 /// `PerAgent`, `Actor` and `EventTarget` for `PerEvent`. `Target` is
 /// computed: it carries a CgExpr id whose evaluation produces the
 /// agent slot to read or write (typically read out of a candidate
-/// buffer or scoring output).
+/// buffer or scoring output). `PerPairCandidate` names the implicit
+/// candidate side of a per-pair dispatch — see its docstring for the
+/// resolution contract.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum AgentRef {
     /// The dispatch's current agent (PerAgent shape).
@@ -416,6 +418,21 @@ pub enum AgentRef {
     Actor,
     /// The target of the current event.
     EventTarget,
+    /// The candidate side of a per-pair dispatch — `target` in DSL
+    /// surface (e.g., `mask MoveToward(target) from
+    /// query.nearby_agents(...)`'s predicate referencing
+    /// `target.alive`, `target.pos`, etc.).
+    ///
+    /// Carries no payload: the candidate's slot id is implicit in the
+    /// surrounding [`crate::cg::dispatch::DispatchShape::PerPair`]
+    /// shape's `source` (today
+    /// [`crate::cg::dispatch::PerPairSource::SpatialQuery`]). The IR
+    /// layer doesn't know which buffer / offset holds the candidate —
+    /// the emit layer (Task 4.x) resolves this from the dispatch shape
+    /// at codegen time. Compare to `Target(CgExprId)`, which carries a
+    /// concrete expression that must already evaluate to an `AgentId`
+    /// in the surrounding op's expression arena.
+    PerPairCandidate,
 }
 
 impl fmt::Display for AgentRef {
@@ -425,6 +442,7 @@ impl fmt::Display for AgentRef {
             AgentRef::Target(id) => write!(f, "target(#{})", id.0),
             AgentRef::Actor => f.write_str("actor"),
             AgentRef::EventTarget => f.write_str("event_target"),
+            AgentRef::PerPairCandidate => f.write_str("per_pair_candidate"),
         }
     }
 }
@@ -977,6 +995,20 @@ mod tests {
             target: AgentRef::Target(CgExprId(7)),
         };
         assert_eq!(format!("{}", h), "agent.target(#7).shield_hp");
+        assert_roundtrip(&h);
+    }
+
+    #[test]
+    fn agent_field_per_pair_candidate_display_and_roundtrip() {
+        // Pair-bound mask predicates surface `target.<field>` reads as
+        // `AgentField { target: AgentRef::PerPairCandidate, .. }`. Pin
+        // the rendered form + serde round-trip so structural snapshots
+        // and structured logs see the stable wire format.
+        let h = DataHandle::AgentField {
+            field: AgentFieldId::Alive,
+            target: AgentRef::PerPairCandidate,
+        };
+        assert_eq!(format!("{}", h), "agent.per_pair_candidate.alive");
         assert_roundtrip(&h);
     }
 

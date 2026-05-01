@@ -1028,7 +1028,10 @@ fn check_data_handle_consistency(
                     None
                 }
             }
-            AgentRef::Self_ | AgentRef::Actor | AgentRef::EventTarget => None,
+            AgentRef::Self_
+            | AgentRef::Actor
+            | AgentRef::EventTarget
+            | AgentRef::PerPairCandidate => None,
         },
         DataHandle::ViewStorage { .. }
         | DataHandle::EventRing { .. }
