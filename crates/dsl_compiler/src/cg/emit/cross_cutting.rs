@@ -653,10 +653,38 @@ fn classify_topology_for_schedule(
 ) -> ScheduleEntry {
     use crate::cg::schedule::synthesis::KernelTopology;
     match topology {
-        KernelTopology::Indirect { .. } => ScheduleEntry::Indirect {
-            kernel: kernel_name.to_string(),
-            args_buf: "ResidentIndirectArgs",
-        },
+        KernelTopology::Indirect { consumers, .. } => {
+            // ViewFold: legacy emits `Kernel(...)` directly. The
+            // consumer kernel reads `cfg.event_count` (populated
+            // from the indirect-args buffer at command-encode time)
+            // and uses a regular `dispatch_workgroups((agent_cap +
+            // 63) / 64, ...)` call — NOT
+            // `dispatch_workgroups_indirect`. Match that contract.
+            if kernel_name.starts_with("fold_") {
+                return ScheduleEntry::Kernel(kernel_name.to_string());
+            }
+            // PhysicsRule: legacy wraps physics dispatch in a single
+            // `FixedPoint(physics, max_iter=8)` entry; the inner
+            // dispatch is also a regular workgroup dispatch
+            // (cascade-physics A/B ring alternation handled by the
+            // runtime). The classifier consults
+            // `topology_op_is_physics_rule` to confirm the kernel
+            // really is a physics kernel before re-routing.
+            if (kernel_name == "physics" || kernel_name == "physics_post")
+                && consumers
+                    .iter()
+                    .any(|op| topology_op_is_physics_rule(prog, *op))
+            {
+                return ScheduleEntry::FixedPoint {
+                    kernel: kernel_name.to_string(),
+                    max_iter: 8,
+                };
+            }
+            ScheduleEntry::Indirect {
+                kernel: kernel_name.to_string(),
+                args_buf: "ResidentIndirectArgs",
+            }
+        }
         KernelTopology::Split { op, .. } => {
             if topology_op_is_physics_rule(prog, *op) && kernel_name == "physics" {
                 ScheduleEntry::FixedPoint {
@@ -1277,17 +1305,20 @@ mod tests {
     }
 
     #[test]
-    fn schedule_indirect_topology_emits_indirect_dispatch_op() {
-        // Integration: full synthesize_schedule path should produce
-        // `DispatchOp::Indirect` text for an Indirect topology.
-        // We use a Plumbing::SeedIndirectArgs producer paired with a
-        // ViewFold consumer (the consumer side is what gets the
-        // Indirect dispatch op).
+    fn schedule_indirect_topology_with_fold_consumer_emits_kernel_dispatch() {
+        // Post Task 5.7-iter2: an Indirect topology whose consumer
+        // is a ViewFold collapses to `DispatchOp::Kernel(...)` —
+        // the legacy fold dispatch reads `cfg.event_count` populated
+        // from the indirect-args buffer at command-encode time and
+        // uses a regular workgroup dispatch, NOT a
+        // `dispatch_workgroups_indirect` call. The producer side
+        // (SeedIndirectArgs) emits as its own
+        // `DispatchOp::Kernel(KernelId::FusedSeedIndirect_<ring>)`
+        // entry through the normal classifier path; the consumer
+        // collapses to `Kernel(KernelId::FoldThreatLevel)` here.
         use crate::cg::data_handle::EventRingId;
         use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PlumbingKind, Span};
 
-        // Start with a single-view program (gives us a consumer ViewFold op
-        // at index 0) and add a SeedIndirectArgs producer op.
         let (mut prog, consumer_op_id) = one_view_fold_program(3, "threat_level");
         let producer_kind = ComputeOpKind::Plumbing {
             kind: PlumbingKind::SeedIndirectArgs {
@@ -1317,13 +1348,54 @@ mod tests {
         };
         let src = synthesize_schedule(&schedule, &prog);
         assert!(
-            src.contains("DispatchOp::Indirect"),
-            "Indirect topology must emit DispatchOp::Indirect: {src}"
+            src.contains("DispatchOp::Kernel(KernelId::FoldThreatLevel)"),
+            "fold_-prefixed Indirect topology must collapse to Kernel(...) dispatch: {src}"
         );
+        // Negative: the fold consumer must NOT route through
+        // DispatchOp::Indirect — that's the legacy contract this
+        // patch restores.
         assert!(
-            src.contains("BufferRef::ResidentIndirectArgs"),
-            "Indirect emit must reference ResidentIndirectArgs: {src}"
+            !src.contains("DispatchOp::Indirect { kernel: KernelId::FoldThreatLevel"),
+            "fold_-prefixed Indirect topology must not emit DispatchOp::Indirect: {src}"
         );
+    }
+
+    #[test]
+    fn classify_indirect_topology_routes_fold_consumer_to_kernel() {
+        // Unit-level guard for the `kernel_name.starts_with("fold_")`
+        // fast-path in `classify_topology_for_schedule`. A fold
+        // consumer under an Indirect topology must classify to
+        // `ScheduleEntry::Kernel`, not `ScheduleEntry::Indirect`.
+        use crate::cg::op::{ComputeOp, ComputeOpKind, OpId, PlumbingKind, Span};
+        let (mut prog, consumer_op_id) = one_view_fold_program(3, "threat_level");
+        let producer_kind = ComputeOpKind::Plumbing {
+            kind: PlumbingKind::SeedIndirectArgs {
+                ring: EventRingId(0),
+            },
+        };
+        let producer_op = ComputeOp::new(
+            OpId(prog.ops.len() as u32),
+            producer_kind,
+            DispatchShape::OneShot,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let producer_id = OpId(prog.ops.len() as u32);
+        prog.ops.push(producer_op);
+
+        let topology = KernelTopology::Indirect {
+            producer: producer_id,
+            consumers: vec![consumer_op_id],
+        };
+        let entry = classify_topology_for_schedule(&topology, "fold_threat_level", &prog);
+        match entry {
+            ScheduleEntry::Kernel(name) => assert_eq!(name, "fold_threat_level"),
+            ScheduleEntry::Indirect { .. } | ScheduleEntry::FixedPoint { .. } => {
+                panic!("fold_-prefixed kernel must classify to Kernel(...)");
+            }
+        }
     }
 
     // ---- 9. Determinism ----
