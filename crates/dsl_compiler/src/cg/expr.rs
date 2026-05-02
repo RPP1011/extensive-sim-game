@@ -31,6 +31,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::data_handle::{CgExprId, DataHandle, RngPurpose, ViewId};
+use super::op::EventKindId;
 
 // ---------------------------------------------------------------------------
 // CgTy — compute-graph types
@@ -623,6 +624,33 @@ pub enum CgExpr {
         local: crate::cg::stmt::LocalId,
         ty: CgTy,
     },
+    /// Read a typed field from the current event's payload. Surfaces in
+    /// PerEvent-shaped op bodies (physics-rule + view-fold handlers)
+    /// where event-pattern bindings (`on EffectDamageApplied { actor: c,
+    /// target: t, amount: a }`) introduce locals whose values come from
+    /// the event record being processed by the current dispatch.
+    ///
+    /// Schema-driven: `event_kind` keys into
+    /// [`super::program::CgProgram::event_layouts`] to resolve
+    /// `(record_stride_u32, header_word_count, buffer_name,
+    /// field_offset)`. Today every kind shares one ring with stride 10
+    /// (2 header + 8 payload, sized for `AgentMoved` / `AgentFled`);
+    /// future per-kind ring fanout returns per-kind buffer + stride
+    /// without any IR shape change. The `field_index` is the field's
+    /// 0-based word offset within the event's payload (NOT including
+    /// the 2-word header).
+    ///
+    /// Lowering only constructs this variant inside
+    /// [`super::lower::physics::lower_one_handler`] (and the analogous
+    /// fold-handler lowering) when synthesizing a `CgStmt::Let` per
+    /// pattern binder. The well-formed pass flags `EventField` reads
+    /// in non-PerEvent op bodies as
+    /// [`super::well_formed::CgError::EventFieldInNonPerEventBody`].
+    EventField {
+        event_kind: EventKindId,
+        field_index: u32,
+        ty: CgTy,
+    },
 }
 
 /// Compute the type a `DataHandle` reads at. `Read(h)` has the type
@@ -744,6 +772,7 @@ impl CgExpr {
             CgExpr::AgentSelfId => CgTy::AgentId,
             CgExpr::PerPairCandidateId => CgTy::AgentId,
             CgExpr::ReadLocal { ty, .. } => *ty,
+            CgExpr::EventField { ty, .. } => *ty,
         }
     }
 }
@@ -847,6 +876,15 @@ fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::R
         CgExpr::AgentSelfId => write!(out, "(agent self_id)"),
         CgExpr::PerPairCandidateId => write!(out, "(agent per_pair_candidate_id)"),
         CgExpr::ReadLocal { local, ty } => write!(out, "(read_local {} {})", local, ty),
+        CgExpr::EventField {
+            event_kind,
+            field_index,
+            ty,
+        } => write!(
+            out,
+            "(event_field event#{} field#{} {})",
+            event_kind.0, field_index, ty
+        ),
     }
 }
 
@@ -1212,6 +1250,12 @@ pub fn type_check(
         CgExpr::AgentSelfId => Ok(CgTy::AgentId),
         CgExpr::PerPairCandidateId => Ok(CgTy::AgentId),
         CgExpr::ReadLocal { ty, .. } => Ok(*ty),
+        // EventField carries its own claimed type; the lowering pins
+        // this from the event's `FieldLayout::ty`. The well-formed pass
+        // separately verifies the schema entry exists for `(event_kind,
+        // field_index)`, so this arm just trusts the claimed type — a
+        // fabricated mismatch is a builder defect, not a typing one.
+        CgExpr::EventField { ty, .. } => Ok(*ty),
     }
 }
 

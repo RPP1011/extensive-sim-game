@@ -265,6 +265,60 @@ impl Interner {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Event payload layout — schema for `CgExpr::EventField`
+// ---------------------------------------------------------------------------
+
+/// Per-event-kind payload layout. Drives the WGSL emit for
+/// [`CgExpr::EventField`]: the emitter reads
+/// `(record_stride_u32, header_word_count, buffer_name, fields)`
+/// from this struct to produce `event_ring[event_idx * stride + header
+/// + offset]` accesses.
+///
+/// **Forward-compat with per-kind ring fanout.** Today every kind
+/// shares one ring (`event_ring`, stride 10 = 2 header + 8 payload,
+/// sized for `AgentMoved` / `AgentFled`). When an event variant blows
+/// past 8 payload words (e.g., `AgentSpawned` with template +
+/// equipment list, `EffectAreaApplied` with hit_targets[N],
+/// `MemoryRecorded` with embedding[16]), the runtime is expected to
+/// fanout to per-kind rings. The same emit then produces
+/// `event_ring_<kind>[event_idx * <kind_stride> + header + offset]`
+/// purely by the schema returning per-kind `record_stride_u32` and
+/// `buffer_name` — no IR shape change required.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventLayout {
+    /// u32 words per record. Today: 10 for every kind (= 2 header + 8
+    /// payload). Future per-kind ring fanout: per-kind value.
+    pub record_stride_u32: u32,
+    /// Header word count (kind tag + tick). Constant 2 across runtime
+    /// strategies — kept on the layout struct for symmetry and so a
+    /// future header-shape change is a single-edit migration.
+    pub header_word_count: u32,
+    /// WGSL identifier for the storage buffer this kind reads from.
+    /// Today: "event_ring" for every kind. Future: per-kind names like
+    /// "event_ring_AgentMoved".
+    pub buffer_name: String,
+    /// Field name → offset within payload (u32 words from start of
+    /// payload, NOT including header). `BTreeMap` keys keep the
+    /// `Display` / serde output deterministic across runs.
+    pub fields: BTreeMap<String, FieldLayout>,
+}
+
+/// Per-field layout entry within an [`EventLayout`].
+///
+/// `word_offset_in_payload` is the 0-based u32-word offset within the
+/// event's payload (NOT including the 2-word header). `word_count` is
+/// the number of u32 words this field occupies (1 for scalars, 3 for
+/// `Vec3F32`, 2 for `u64`-bearing fields like resource ids). `ty` is
+/// the [`super::expr::CgTy`] the WGSL emitter uses to pick the right
+/// access shape (raw u32, `bitcast<f32>`, `vec3<f32>(...)`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldLayout {
+    pub word_offset_in_payload: u32,
+    pub word_count: u32,
+    pub ty: super::expr::CgTy,
+}
+
 /// Helper — record a name in an interner table. Idempotent: passing
 /// the same id twice with the same name is a no-op. Conflicting names
 /// surface as [`BuilderError::DuplicateInternEntry`]. Used by every
@@ -456,6 +510,14 @@ pub struct CgProgram {
     pub interner: Interner,
     /// IR-level diagnostics (warnings, lints, fusion suggestions).
     pub diagnostics: Vec<CgDiagnostic>,
+    /// Per-event-kind payload layouts. Drives the WGSL emit for
+    /// [`super::expr::CgExpr::EventField`]: each entry resolves
+    /// `(record_stride_u32, header_word_count, buffer_name,
+    /// fields)` for the kind. Populated by the driver's
+    /// `populate_event_kinds` (via `LoweringCtx::event_layouts`);
+    /// consumed by `lower_cg_expr_to_wgsl`'s `EventField` arm.
+    /// Empty for programs that don't have event-pattern bindings.
+    pub event_layouts: BTreeMap<u32, EventLayout>,
 }
 
 impl CgProgram {
@@ -761,7 +823,8 @@ impl CgProgramBuilder {
             | CgExpr::Rng { .. }
             | CgExpr::AgentSelfId
             | CgExpr::PerPairCandidateId
-            | CgExpr::ReadLocal { .. } => Ok(()),
+            | CgExpr::ReadLocal { .. }
+            | CgExpr::EventField { .. } => Ok(()),
             CgExpr::Binary { lhs, rhs, .. } => {
                 self.check_expr_id(*lhs)?;
                 self.check_expr_id(*rhs)?;

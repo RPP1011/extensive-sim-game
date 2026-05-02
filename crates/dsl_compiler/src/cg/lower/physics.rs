@@ -136,7 +136,8 @@ use dsl_ast::ir::{
 };
 
 use crate::cg::dispatch::DispatchShape;
-use crate::cg::op::{ComputeOpKind, OpId, PhysicsRuleId};
+use crate::cg::expr::CgExpr;
+use crate::cg::op::{ComputeOpKind, EventKindId, OpId, PhysicsRuleId};
 use crate::cg::stmt::{CgMatchArm, CgStmt, CgStmtId, CgStmtList, MatchArmBinding};
 
 use super::error::LoweringError;
@@ -289,8 +290,34 @@ fn lower_one_handler(
         });
     }
 
+    // Synthesize a `CgStmt::Let` per event-pattern binder BEFORE
+    // walking the body. The handler's surface form is
+    //   on EffectDamageApplied { actor: c, target: t, amount: a } { ... }
+    // where `c`, `t`, `a` are `LocalRef`s introduced by the resolver
+    // and read inside the body. The IR's `lower_bare_local` chain
+    // resolves bare-local reads through `ctx.local_ids` + `ctx.local_tys`
+    // — so we make each binder a real `LocalId` whose value comes
+    // from a typed `CgExpr::EventField` keyed on the event's
+    // `field_index` + `field_ty` schema. After this prelude the
+    // existing body lowering walks the user-authored statements
+    // unchanged and every read of `c`/`t`/`a` resolves cleanly.
+    //
+    // Schema lookup goes through `ctx.event_layouts[on_event]`. A
+    // missing entry surfaces as `UnregisteredEventKindLayout`; a
+    // missing field within the layout (e.g. the binder named a field
+    // the event doesn't declare) surfaces as
+    // `UnregisteredEventField`.
+    let mut prelude_stmt_ids = synthesize_pattern_binding_lets(
+        rule_id,
+        resolution.event_kind,
+        handler.pattern.bindings(),
+        ctx,
+    )?;
+
     // Lower the handler body.
-    let stmt_ids = lower_stmt_list(rule_id, &handler.body, ctx)?;
+    let body_stmt_ids = lower_stmt_list(rule_id, &handler.body, ctx)?;
+    prelude_stmt_ids.extend(body_stmt_ids);
+    let stmt_ids = prelude_stmt_ids;
     let list = CgStmtList::new(stmt_ids);
     let body_list_id = ctx
         .builder
@@ -328,6 +355,159 @@ fn lower_one_handler(
     // [`crate::cg::op::ComputeOp::record_read`] post-construction.
 
     Ok(op_id)
+}
+
+/// Walk every event-pattern binder on the handler's `on <Event> { ...
+/// }` head, allocate a fresh [`crate::cg::stmt::LocalId`] per binder,
+/// resolve the binder's typed `(field_index, ty)` against the
+/// driver-supplied event-payload layout
+/// ([`super::expr::LoweringCtx::event_layouts`]), and synthesize one
+/// `CgStmt::Let { local, value: CgExpr::EventField{...}, ty }`
+/// statement per binder. Returns the synthesised stmt ids in
+/// declaration order.
+///
+/// The synthesised lets establish:
+/// - `ctx.local_ids[binder.value.local_ref] = LocalId(N)` — so every
+///   subsequent `IrExpr::Local(local_ref, _)` read inside the body
+///   resolves through `lower_bare_local` to `CgExpr::ReadLocal`.
+/// - `ctx.local_tys[LocalId(N)] = field_layout.ty` — so the read-side
+///   resolution can reconstruct the typed `CgExpr::ReadLocal { local,
+///   ty }` without re-walking the schema.
+///
+/// The Let value-side is `CgExpr::EventField { event_kind, field_index,
+/// ty }`, which at WGSL emit time becomes a schema-driven
+/// `event_ring[event_idx * RECORD_STRIDE + HEADER + FIELD_OFFSET]`
+/// access — see `lower_cg_expr_to_wgsl`'s `EventField` arm.
+///
+/// Today only the shorthand `IrPattern::Bind { name, local }` shape
+/// is supported (the only shape today's DSL produces); nested
+/// patterns surface as
+/// [`LoweringError::UnsupportedEventPatternBinding`].
+fn synthesize_pattern_binding_lets(
+    rule_id: PhysicsRuleId,
+    event_kind: EventKindId,
+    bindings: &[IrPatternBinding],
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<Vec<CgStmtId>, LoweringError> {
+    if bindings.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Snapshot the layout reference up front. Holding a borrow of
+    // `ctx.event_layouts` while mutating other ctx fields would
+    // double-borrow; clone the field map (small, ≤8 fields per
+    // event today) into a local owned table first.
+    let layout_fields = match ctx.event_layouts.get(&event_kind) {
+        Some(l) => l.fields.clone(),
+        None => {
+            // No layout registered for this kind. Surface a typed
+            // diagnostic instead of constructing an `EventField` whose
+            // schema lookup would fail at WGSL emit time.
+            return Err(LoweringError::UnregisteredEventKindLayout {
+                subject: super::error::PatternBindingSubject::Physics(rule_id),
+                event: event_kind,
+                span: bindings.first().map(|b| b.span).unwrap_or(Span::dummy()),
+            });
+        }
+    };
+
+    let mut stmt_ids = Vec::with_capacity(bindings.len());
+    for binding in bindings {
+        let (binder_local, _binder_name) = match &binding.value {
+            IrPattern::Bind { name, local } => (*local, name.clone()),
+            IrPattern::Struct { .. } => {
+                return Err(LoweringError::UnsupportedEventPatternBinding {
+                    subject: super::error::PatternBindingSubject::Physics(rule_id),
+                    field_name: binding.field.clone(),
+                    pattern_label: "Struct",
+                    span: binding.span,
+                });
+            }
+            IrPattern::Ctor { .. } => {
+                return Err(LoweringError::UnsupportedEventPatternBinding {
+                    subject: super::error::PatternBindingSubject::Physics(rule_id),
+                    field_name: binding.field.clone(),
+                    pattern_label: "Ctor",
+                    span: binding.span,
+                });
+            }
+            IrPattern::Expr(_) => {
+                return Err(LoweringError::UnsupportedEventPatternBinding {
+                    subject: super::error::PatternBindingSubject::Physics(rule_id),
+                    field_name: binding.field.clone(),
+                    pattern_label: "Expr",
+                    span: binding.span,
+                });
+            }
+            IrPattern::Wildcard => {
+                // Wildcards bind nothing — skip without synthesising
+                // a Let. The body cannot reference the field through a
+                // wildcard.
+                continue;
+            }
+        };
+
+        // Resolve the field's layout entry.
+        let field_layout = layout_fields.get(&binding.field).copied().ok_or_else(|| {
+            LoweringError::UnregisteredEventFieldLayout {
+                subject: super::error::PatternBindingSubject::Physics(rule_id),
+                event: event_kind,
+                field_name: binding.field.clone(),
+                span: binding.span,
+            }
+        })?;
+
+        // Allocate a fresh LocalId for the binder. Mirrors `lower_let`'s
+        // allocation strategy: pick an id past every existing one so
+        // subsequent allocations never collide.
+        let local_id = match ctx.local_ids.get(&binder_local).copied() {
+            Some(id) => id,
+            None => ctx.allocate_local(binder_local),
+        };
+
+        // Build the typed value-side expression. The well-formed pass
+        // re-checks the schema (`(event_kind, field_index)` exists +
+        // claimed type matches the layout's type) defensively at
+        // program level, so a synthetic IR with a mismatched ty still
+        // gets caught.
+        let value_expr = CgExpr::EventField {
+            event_kind,
+            field_index: field_layout.word_offset_in_payload,
+            ty: field_layout.ty,
+        };
+        let value_id = ctx
+            .builder
+            .add_expr(value_expr)
+            .map_err(|e| LoweringError::BuilderRejected {
+                error: e,
+                span: binding.span,
+            })?;
+        // Type-check is a no-op for `EventField` (the type is
+        // self-pinned), but we run it through the standard helper for
+        // symmetry with other expression pushes.
+        super::expr::typecheck_node(ctx, value_id, binding.span)?;
+
+        // Record the binder's CG type so bare-local reads
+        // (`IrExpr::Local(local_ref, _)`) inside the body resolve via
+        // `ctx.local_tys` to `CgExpr::ReadLocal { local, ty }`.
+        ctx.record_local_ty(local_id, field_layout.ty);
+
+        let stmt = CgStmt::Let {
+            local: local_id,
+            value: value_id,
+            ty: field_layout.ty,
+        };
+        let stmt_id = ctx
+            .builder
+            .add_stmt(stmt)
+            .map_err(|e| LoweringError::BuilderRejected {
+                error: e,
+                span: binding.span,
+            })?;
+        stmt_ids.push(stmt_id);
+    }
+
+    Ok(stmt_ids)
 }
 
 // ---------------------------------------------------------------------------
@@ -1925,6 +2105,87 @@ mod tests {
         );
     }
 
+    /// Task 1 of the CG Lowering Gap Closure plan: a top-of-body
+    /// `IrStmt::Let` followed by a fielded emit reading the bound
+    /// local must lower without an `UnsupportedLocalBinding`
+    /// diagnostic for the reader. Today the dispatcher routes
+    /// `IrStmt::Let` through `lower_let`, which both pushes
+    /// `CgStmt::Let` AND populates `ctx.local_ids` / `ctx.local_tys`
+    /// for the binding; a downstream `IrExpr::Local(local_ref, name)`
+    /// inside the emit's field-init then resolves through
+    /// `lower_bare_local` to `CgExpr::ReadLocal { local, ty }`.
+    ///
+    /// Surface analogue:
+    ///
+    /// ```text
+    /// physics record_damage @phase(event) {
+    ///   on AgentAttacked { actor: a, target: tgt, damage: amt } {
+    ///     let t = world.tick;          // top-of-body Let
+    ///     emit DamageRecorded {        // reads `t` in field init
+    ///       target: tgt,
+    ///       stamp: t,
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// The fixture below builds the IR directly (matching the
+    /// sibling `rule_with_body` style) so the test is hermetic
+    /// against the resolver / parser surface.
+    #[test]
+    fn lower_physics_handles_top_of_body_let_binding() {
+        let t_local = LocalRef(11);
+        let rule = rule_with_body(
+            "record_damage",
+            "AgentAttacked",
+            vec![
+                IrStmt::Let {
+                    name: "t".to_string(),
+                    local: t_local,
+                    value: lit_f32(7.0),
+                    span: span(0, 5),
+                },
+                IrStmt::Emit(IrEmit {
+                    event_name: "DamageRecorded".to_string(),
+                    event: None,
+                    fields: vec![IrFieldInit {
+                        name: "stamp".to_string(),
+                        // `t` reader: must lower via local_ids → ReadLocal.
+                        value: node(IrExpr::Local(t_local, "t".to_string())),
+                        span: span(20, 21),
+                    }],
+                    span: span(15, 35),
+                }),
+            ],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_event_kind("DamageRecorded", EventKindId(13));
+        ctx.register_event_field(EventKindId(13), "stamp", 0);
+
+        let result = lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        );
+
+        // Surface the diagnostic shape directly: the AIS hard-asserts
+        // that no `UnsupportedLocalBinding { name: "t" }` fires.
+        match &result {
+            Ok(_) => {}
+            Err(LoweringError::UnsupportedLocalBinding { name, .. }) if name == "t" => {
+                panic!(
+                    "let-bound `t` must lower without UnsupportedLocalBinding diagnostic; got {result:?}"
+                );
+            }
+            Err(other) => {
+                panic!("unexpected lowering error (not UnsupportedLocalBinding for `t`): {other:?}");
+            }
+        }
+    }
+
     /// A fielded emit whose field name has no entry in
     /// `event_field_indices` surfaces as
     /// [`LoweringError::UnknownEventField`] with the resolved
@@ -1969,6 +2230,204 @@ mod tests {
                 assert_eq!(span.end, 25);
             }
             other => panic!("expected UnknownEventField, got {other:?}"),
+        }
+    }
+
+    // ---- Task 1 (CG Lowering Gap Closure): event-pattern binding -------
+
+    /// Helper — build a single-handler `PhysicsIR` whose pattern carries
+    /// the supplied event-name + bindings, and whose body is the
+    /// supplied stmt list.
+    fn rule_with_pattern(
+        name: &str,
+        event_name: &str,
+        bindings: Vec<IrPatternBinding>,
+        body: Vec<IrStmt>,
+    ) -> PhysicsIR {
+        PhysicsIR {
+            name: name.to_string(),
+            handlers: vec![PhysicsHandlerIR {
+                pattern: IrPhysicsPattern::Kind(IrEventPattern {
+                    name: event_name.to_string(),
+                    event: None,
+                    bindings,
+                    span: span(0, 0),
+                }),
+                where_clause: None,
+                body,
+                span: span(0, 0),
+            }],
+            annotations: vec![],
+            cpu_only: false,
+            span: span(0, 0),
+        }
+    }
+
+    /// A bare local read inside the handler body resolves through the
+    /// synthesized event-pattern Lets — the binder's name is registered
+    /// via `register_local` in the synthesis pass and the read-side
+    /// `lower_bare_local` walks `local_ids` cleanly.
+    #[test]
+    fn lower_physics_handles_event_pattern_binding() {
+        use crate::cg::expr::{CgExpr, CgTy};
+        use crate::cg::program::{EventLayout, FieldLayout};
+
+        let target_local = LocalRef(20);
+
+        // Pattern: `on EffectDamageApplied { target: t }` — one binder.
+        let bindings = vec![IrPatternBinding {
+            field: "target".to_string(),
+            value: IrPattern::Bind {
+                name: "t".to_string(),
+                local: target_local,
+            },
+            span: span(0, 0),
+        }];
+
+        // Body: `emit ChronicleEntry { agent: t }` — reads the bound `t`.
+        let body = vec![IrStmt::Emit(IrEmit {
+            event_name: "ChronicleEntry".to_string(),
+            event: None,
+            fields: vec![IrFieldInit {
+                name: "agent".to_string(),
+                value: node(IrExpr::Local(target_local, "t".to_string())),
+                span: span(20, 21),
+            }],
+            span: span(15, 35),
+        })];
+
+        let rule = rule_with_pattern("test", "EffectDamageApplied", bindings, body);
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+
+        // Driver registers the dispatched event and the layout.
+        ctx.register_event_kind("EffectDamageApplied", EventKindId(7));
+        ctx.register_event_kind("ChronicleEntry", EventKindId(99));
+        ctx.register_event_field(EventKindId(99), "agent", 0);
+
+        let mut layout_fields = std::collections::BTreeMap::new();
+        layout_fields.insert(
+            "actor".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 0,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        layout_fields.insert(
+            "target".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 1,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        ctx.register_event_layout(
+            EventKindId(7),
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields: layout_fields,
+            },
+        );
+
+        // The standard_resolutions helper maps to EventKindId(7) — the
+        // Effect ring. Lower.
+        lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect("event-pattern binding lowers cleanly");
+
+        let prog = builder.finish();
+
+        // Find the synthesized Let in the body.
+        let let_stmt = prog
+            .stmts
+            .iter()
+            .find_map(|s| match s {
+                CgStmt::Let { local, value, ty } => Some((*local, *value, *ty)),
+                _ => None,
+            })
+            .expect("expected a CgStmt::Let synthesized for the binder");
+
+        // The Let's value-side is a CgExpr::EventField with the right
+        // (event_kind, field_index, ty).
+        let value_expr = &prog.exprs[let_stmt.1 .0 as usize];
+        match value_expr {
+            CgExpr::EventField {
+                event_kind,
+                field_index,
+                ty,
+            } => {
+                assert_eq!(*event_kind, EventKindId(7));
+                assert_eq!(*field_index, 1, "target is the second field (index 1)");
+                assert_eq!(*ty, CgTy::AgentId);
+            }
+            other => panic!("expected CgExpr::EventField, got {other:?}"),
+        }
+
+        // The Let's claimed type matches the field's CgTy.
+        assert_eq!(let_stmt.2, CgTy::AgentId);
+    }
+
+    /// A pattern binding whose layout entry is missing surfaces as
+    /// `UnregisteredEventFieldLayout` rather than silently producing
+    /// an `EventField` that fails at WGSL emit time.
+    #[test]
+    fn rejects_event_pattern_binding_with_missing_field_layout() {
+        use crate::cg::program::EventLayout;
+        use crate::cg::lower::error::PatternBindingSubject;
+
+        let local = LocalRef(30);
+        let bindings = vec![IrPatternBinding {
+            field: "phantom_field".to_string(),
+            value: IrPattern::Bind {
+                name: "x".to_string(),
+                local,
+            },
+            span: span(50, 60),
+        }];
+        let rule = rule_with_pattern("test", "EffectDamageApplied", bindings, vec![]);
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_event_kind("EffectDamageApplied", EventKindId(7));
+        // Layout exists, but `phantom_field` is not in it.
+        ctx.register_event_layout(
+            EventKindId(7),
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields: std::collections::BTreeMap::new(),
+            },
+        );
+
+        let err = lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect_err("missing field layout must fail");
+        match err {
+            LoweringError::UnregisteredEventFieldLayout {
+                subject,
+                event,
+                field_name,
+                span,
+            } => {
+                assert!(matches!(subject, PatternBindingSubject::Physics(PhysicsRuleId(0))));
+                assert_eq!(event, EventKindId(7));
+                assert_eq!(field_name, "phantom_field");
+                assert_eq!(span.start, 50);
+            }
+            other => panic!("expected UnregisteredEventFieldLayout, got {other:?}"),
         }
     }
 }

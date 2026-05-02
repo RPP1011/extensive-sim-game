@@ -167,6 +167,17 @@ pub struct LoweringCtx<'a> {
     /// `LocalRef → LocalId` (binder identity), this one carries
     /// `LocalId → CgTy` (binder type).
     pub local_tys: HashMap<LocalId, CgTy>,
+    /// Per-event-kind payload layouts. Populated by the driver's
+    /// `populate_event_kinds` walk over the event registry; consumed by
+    /// physics + view-fold handler lowering when synthesizing
+    /// `CgStmt::Let` for each event-pattern binding (the `actor: c,
+    /// target: t, amount: a` shape introduces three locals whose
+    /// values come from typed `CgExpr::EventField` reads keyed on this
+    /// schema). At `finish()` time the lowering driver copies this
+    /// table onto [`crate::cg::program::CgProgram::event_layouts`] so
+    /// the WGSL emit can resolve the layout per-kind without a
+    /// separate registry walk.
+    pub event_layouts: HashMap<EventKindId, super::super::program::EventLayout>,
 }
 
 /// Captured form of a `@lazy` view's resolved AST: enough to
@@ -208,6 +219,7 @@ impl<'a> LoweringCtx<'a> {
             config_const_ids: HashMap::new(),
             lazy_view_bodies: HashMap::new(),
             local_tys: HashMap::new(),
+            event_layouts: HashMap::new(),
         }
     }
 
@@ -254,6 +266,22 @@ impl<'a> LoweringCtx<'a> {
         index: u8,
     ) -> Option<u8> {
         self.event_field_indices.insert((event, field_name.into()), index)
+    }
+
+    /// Register the per-event-kind payload layout. Used by physics +
+    /// view-fold handler lowering when synthesizing `CgStmt::Let` for
+    /// each event-pattern binding (the binder's value comes from a
+    /// typed `CgExpr::EventField` keyed on the layout's `field_offset`
+    /// + `field_ty`). The driver populates this from the event registry
+    /// via `populate_event_kinds`; tests populate it directly. Returns
+    /// the prior layout if one was registered for the same kind
+    /// (driver-side duplicate).
+    pub fn register_event_layout(
+        &mut self,
+        event: EventKindId,
+        layout: super::super::program::EventLayout,
+    ) -> Option<super::super::program::EventLayout> {
+        self.event_layouts.insert(event, layout)
     }
 
     /// Register an AST `LocalRef` → typed [`LocalId`] mapping. Returns

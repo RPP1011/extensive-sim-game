@@ -438,12 +438,19 @@ pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<Dat
             collect_expr_reads(*then, exprs, out);
             collect_expr_reads(*else_, exprs, out);
         }
-        CgExpr::AgentSelfId | CgExpr::PerPairCandidateId | CgExpr::ReadLocal { .. } => {
+        CgExpr::AgentSelfId
+        | CgExpr::PerPairCandidateId
+        | CgExpr::ReadLocal { .. }
+        | CgExpr::EventField { .. } => {
             // Bare actor / candidate id reads + let-bound local reads
             // do not contribute structural reads of any persisted
             // `DataHandle`. The actor / candidate slot ids are
             // implicit in the dispatch shape; the let-bound local
-            // lives in the surrounding body's scope.
+            // lives in the surrounding body's scope. EventField
+            // payload reads are implicit in the dispatch shape's
+            // `source_ring` (the surrounding `DispatchShape::PerEvent`)
+            // — well_formed flags `EventField` in any other dispatch
+            // shape, so the read is structurally accounted for.
         }
     }
 }

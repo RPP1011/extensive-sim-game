@@ -535,6 +535,49 @@ pub enum LoweringError {
         span: Span,
     },
 
+    /// An event-pattern binding referenced an [`crate::cg::op::EventKindId`]
+    /// that has no entry in the lowering context's `event_layouts`
+    /// table. The driver populates the layout per kind in
+    /// `populate_event_kinds`; tests populate it directly via
+    /// [`super::expr::LoweringCtx::register_event_layout`]. A missing
+    /// entry surfaces as this typed defect rather than silently
+    /// producing an `EventField` that fails at WGSL emit time.
+    /// `subject` distinguishes physics-rule vs view-fold lowering
+    /// callers — both paths can synthesize event-pattern Lets.
+    UnregisteredEventKindLayout {
+        subject: PatternBindingSubject,
+        event: crate::cg::op::EventKindId,
+        span: Span,
+    },
+
+    /// An event-pattern binding named a field that the
+    /// [`crate::cg::program::EventLayout`] for the dispatched event
+    /// kind does not list. Mirrors `UnknownEventField` but on the
+    /// layout-side schema (the `fields: BTreeMap<String, FieldLayout>`
+    /// table) — a missing entry means either (a) the field type
+    /// mapped through `cg_ty_for_event_field` returned `None` (the
+    /// field is non-GPU-representable) or (b) the resolver accepted a
+    /// binder for a field not declared on the event. Either way the
+    /// pattern binding cannot lower.
+    UnregisteredEventFieldLayout {
+        subject: PatternBindingSubject,
+        event: crate::cg::op::EventKindId,
+        field_name: String,
+        span: Span,
+    },
+
+    /// An event-pattern binding's nested pattern shape was not the
+    /// shorthand `IrPattern::Bind { name, local }` form. Today only
+    /// shorthand binders (`actor: c, target: t, amount: a`) are
+    /// supported — nested patterns (`Damage { actor: Some(x), .. }`)
+    /// are a future task once a real DSL example surfaces.
+    UnsupportedEventPatternBinding {
+        subject: PatternBindingSubject,
+        field_name: String,
+        pattern_label: &'static str,
+        span: Span,
+    },
+
     // -- Scoring pass (Task 2.5) -----------------------------------------
 
     /// A scoring row's `utility` expression (the score) type-checked to
@@ -785,6 +828,27 @@ impl fmt::Display for ScoringRowSubject {
             ScoringRowSubject::Utility => f.write_str("utility"),
             ScoringRowSubject::Target => f.write_str("target"),
             ScoringRowSubject::Guard => f.write_str("guard"),
+        }
+    }
+}
+
+/// Discriminant for the lowering caller that produced a pattern-
+/// binding diagnostic. Both physics-rule (`on <Event> { ... }` heads)
+/// and view-fold (`on <Event> { self += ... }` heads) lowerings call
+/// `synthesize_pattern_binding_lets`; this enum names the offending
+/// caller so diagnostics can render the right `physics#N` / `view#N`
+/// prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PatternBindingSubject {
+    Physics(PhysicsRuleId),
+    View(ViewId),
+}
+
+impl fmt::Display for PatternBindingSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PatternBindingSubject::Physics(rule) => write!(f, "physics#{}", rule.0),
+            PatternBindingSubject::View(view) => write!(f, "view#{}", view.0),
         }
     }
 }
@@ -1113,6 +1177,35 @@ impl fmt::Display for LoweringError {
                 f,
                 "lowering: emit field `{}` at {}..{} is not registered for event#{} in the event-field schema",
                 field_name, span.start, span.end, event.0
+            ),
+            LoweringError::UnregisteredEventKindLayout {
+                subject,
+                event,
+                span,
+            } => write!(
+                f,
+                "{} pattern at {}..{} dispatches event#{} which has no payload layout (driver `populate_event_kinds` skipped this kind)",
+                subject, span.start, span.end, event.0
+            ),
+            LoweringError::UnregisteredEventFieldLayout {
+                subject,
+                event,
+                field_name,
+                span,
+            } => write!(
+                f,
+                "{} pattern binder `{}` at {}..{} is not registered in event#{}'s payload layout",
+                subject, field_name, span.start, span.end, event.0
+            ),
+            LoweringError::UnsupportedEventPatternBinding {
+                subject,
+                field_name,
+                pattern_label,
+                span,
+            } => write!(
+                f,
+                "{} pattern binder `{}` at {}..{} uses unsupported nested pattern shape `{}` (only shorthand `field: name` is wired today)",
+                subject, field_name, span.start, span.end, pattern_label
             ),
 
             // -- Scoring pass -----------------------------------------

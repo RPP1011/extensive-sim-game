@@ -221,6 +221,24 @@ pub enum CgError {
         variant: VariantId,
         span: Span,
     },
+
+    /// A [`super::expr::CgExpr::EventField`] appears in an op whose
+    /// dispatch shape is not [`super::dispatch::DispatchShape::PerEvent`].
+    /// `EventField` reads typed values out of the *current event's*
+    /// payload — the access form
+    /// `event_ring[event_idx * stride + header + offset]` is only
+    /// well-defined when `event_idx` is the surrounding kernel's
+    /// per-iteration event index, which only PerEvent dispatchers
+    /// bind. PerAgent / PerPair / OneShot kernels have no `event_idx`
+    /// in scope; a synthesised IR that smuggled an `EventField` into
+    /// such a body would compile to invalid WGSL.
+    EventFieldInNonPerEventBody {
+        op: OpId,
+        kind_label: &'static str,
+        shape_label: &'static str,
+        event_kind: super::op::EventKindId,
+        field_index: u32,
+    },
 }
 
 impl fmt::Display for HandleConsistencyReason {
@@ -358,6 +376,17 @@ impl fmt::Display for CgError {
                 f,
                 "op#{}: match arms duplicate {} (span {}..{})",
                 op.0, variant, span.start, span.end
+            ),
+            CgError::EventFieldInNonPerEventBody {
+                op,
+                kind_label,
+                shape_label,
+                event_kind,
+                field_index,
+            } => write!(
+                f,
+                "op#{}: EventField(event#{}, field#{}) in {} body with dispatch shape {} — only per_event dispatch binds `event_idx`",
+                op.0, event_kind.0, field_index, kind_label, shape_label
             ),
         }
     }
@@ -528,7 +557,8 @@ fn collect_subexpr_ids(arena: &[CgExpr], root: CgExprId, out: &mut Vec<CgExprId>
             | CgExpr::Rng { .. }
             | CgExpr::AgentSelfId
             | CgExpr::PerPairCandidateId
-            | CgExpr::ReadLocal { .. } => {}
+            | CgExpr::ReadLocal { .. }
+            | CgExpr::EventField { .. } => {}
         }
     }
 }
@@ -805,6 +835,10 @@ fn check_op(
     // --- Match arm uniqueness -----------------------------------------
 
     match_uniqueness_check_op(op, op_id, prog, errors);
+
+    // --- EventField scope: only legal in PerEvent-shaped bodies ------
+
+    event_field_scope_check_op(op, op_id, prog, errors);
 
     // --- Kind/shape compatibility ------------------------------------
 
@@ -1415,6 +1449,170 @@ fn p6_walk_list(
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EventField scope: only legal in PerEvent-shaped op bodies
+// ---------------------------------------------------------------------------
+
+/// Walk every expression reachable from this op's body and surface a
+/// [`CgError::EventFieldInNonPerEventBody`] diagnostic for any
+/// [`super::expr::CgExpr::EventField`] occurring in a non-PerEvent
+/// dispatch shape. Mirrors `p6_check_op` / `match_uniqueness_check_op`'s
+/// shape.
+///
+/// Bodies live on [`ComputeOpKind::PhysicsRule`] and
+/// [`ComputeOpKind::ViewFold`]; other kinds carry no statement bodies
+/// and are skipped. Mask predicates / scoring rows are expressions, not
+/// statements — `EventField` in those would still need this check, but
+/// today's lowering never constructs them outside of PerEvent op
+/// bodies (the synthesizer is invoked only inside physics + view-fold
+/// `lower_one_handler`, both PerEvent), so the body-walk is sufficient
+/// defense-in-depth.
+fn event_field_scope_check_op(
+    op: &ComputeOp,
+    op_id: OpId,
+    prog: &CgProgram,
+    errors: &mut Vec<CgError>,
+) {
+    let is_per_event = matches!(op.shape, DispatchShape::PerEvent { .. });
+    if is_per_event {
+        return;
+    }
+    let body = match &op.kind {
+        ComputeOpKind::PhysicsRule { body, .. } | ComputeOpKind::ViewFold { body, .. } => *body,
+        // No body to walk.
+        ComputeOpKind::MaskPredicate { .. }
+        | ComputeOpKind::ScoringArgmax { .. }
+        | ComputeOpKind::SpatialQuery { .. }
+        | ComputeOpKind::Plumbing { .. } => return,
+    };
+    let kind = kind_label(&op.kind);
+    let shape = DispatchShapeLabel::from_shape(&op.shape).snake();
+    event_field_scope_walk_list(body, op_id, kind, shape, prog, errors);
+}
+
+fn event_field_scope_walk_list(
+    list_id: CgStmtListId,
+    op_id: OpId,
+    kind_label: &'static str,
+    shape_label: &'static str,
+    prog: &CgProgram,
+    errors: &mut Vec<CgError>,
+) {
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return;
+    };
+    for stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        match stmt {
+            CgStmt::Assign { value, .. } => {
+                event_field_scope_walk_expr(*value, op_id, kind_label, shape_label, prog, errors);
+            }
+            CgStmt::Let { value, .. } => {
+                event_field_scope_walk_expr(*value, op_id, kind_label, shape_label, prog, errors);
+            }
+            CgStmt::Emit { fields, .. } => {
+                for (_, expr_id) in fields {
+                    event_field_scope_walk_expr(
+                        *expr_id,
+                        op_id,
+                        kind_label,
+                        shape_label,
+                        prog,
+                        errors,
+                    );
+                }
+            }
+            CgStmt::If { cond, then, else_ } => {
+                event_field_scope_walk_expr(*cond, op_id, kind_label, shape_label, prog, errors);
+                event_field_scope_walk_list(*then, op_id, kind_label, shape_label, prog, errors);
+                if let Some(else_id) = else_ {
+                    event_field_scope_walk_list(
+                        *else_id,
+                        op_id,
+                        kind_label,
+                        shape_label,
+                        prog,
+                        errors,
+                    );
+                }
+            }
+            CgStmt::Match { scrutinee, arms } => {
+                event_field_scope_walk_expr(
+                    *scrutinee,
+                    op_id,
+                    kind_label,
+                    shape_label,
+                    prog,
+                    errors,
+                );
+                for arm in arms {
+                    event_field_scope_walk_list(
+                        arm.body,
+                        op_id,
+                        kind_label,
+                        shape_label,
+                        prog,
+                        errors,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn event_field_scope_walk_expr(
+    expr_id: super::data_handle::CgExprId,
+    op_id: OpId,
+    kind_label: &'static str,
+    shape_label: &'static str,
+    prog: &CgProgram,
+    errors: &mut Vec<CgError>,
+) {
+    let Some(node) = prog.exprs.get(expr_id.0 as usize) else {
+        return;
+    };
+    match node {
+        CgExpr::EventField {
+            event_kind,
+            field_index,
+            ..
+        } => {
+            errors.push(CgError::EventFieldInNonPerEventBody {
+                op: op_id,
+                kind_label,
+                shape_label,
+                event_kind: *event_kind,
+                field_index: *field_index,
+            });
+        }
+        CgExpr::Binary { lhs, rhs, .. } => {
+            event_field_scope_walk_expr(*lhs, op_id, kind_label, shape_label, prog, errors);
+            event_field_scope_walk_expr(*rhs, op_id, kind_label, shape_label, prog, errors);
+        }
+        CgExpr::Unary { arg, .. } => {
+            event_field_scope_walk_expr(*arg, op_id, kind_label, shape_label, prog, errors);
+        }
+        CgExpr::Builtin { args, .. } => {
+            for a in args {
+                event_field_scope_walk_expr(*a, op_id, kind_label, shape_label, prog, errors);
+            }
+        }
+        CgExpr::Select { cond, then, else_, .. } => {
+            event_field_scope_walk_expr(*cond, op_id, kind_label, shape_label, prog, errors);
+            event_field_scope_walk_expr(*then, op_id, kind_label, shape_label, prog, errors);
+            event_field_scope_walk_expr(*else_, op_id, kind_label, shape_label, prog, errors);
+        }
+        CgExpr::Read(_)
+        | CgExpr::Lit(_)
+        | CgExpr::Rng { .. }
+        | CgExpr::AgentSelfId
+        | CgExpr::PerPairCandidateId
+        | CgExpr::ReadLocal { .. } => {}
     }
 }
 
@@ -3272,6 +3470,74 @@ mod tests {
                 |e| matches!(e, CgError::ExprIdOutOfRange { referenced, .. } if *referenced == dangling)
             ),
             "expected ExprIdOutOfRange for the dangling Let.value, got: {errs:?}"
+        );
+    }
+
+    // ---- Task 1 (CG Lowering Gap Closure): EventField scope check ----
+
+    /// `EventField` reads in a body whose op dispatches as
+    /// `PerAgent` are flagged as `EventFieldInNonPerEventBody`.
+    /// Mirrors the P6 + KindShapeMismatch defense-in-depth pattern —
+    /// the lowering only constructs `EventField` inside PerEvent
+    /// handlers, so this test pokes a synthetic IR through the gate.
+    #[test]
+    fn event_field_in_per_agent_body_flagged() {
+        // Build a ViewFold op with PerAgent shape (an illegal pairing
+        // by KindShapeMismatch — but our scope check fires
+        // independently for the EventField body content).
+        // To exercise EventField specifically we wrap the read in a
+        // legal-shape op kind that ALSO accepts PerAgent dispatch:
+        // unfortunately no kind allows EventField + non-PerEvent in
+        // the lowering. We construct a ViewFold + PerAgent (illegal
+        // kind/shape, but the scope check still fires before the
+        // KindShapeMismatch report).
+        let mut b = CgProgramBuilder::new();
+        let event_field_id = b
+            .add_expr(CgExpr::EventField {
+                event_kind: EventKindId(7),
+                field_index: 1,
+                ty: CgTy::AgentId,
+            })
+            .unwrap();
+        // Wrap the EventField in a Let so it's a legitimate body stmt.
+        let let_stmt = b
+            .add_stmt(CgStmt::Let {
+                local: crate::cg::stmt::LocalId(0),
+                value: event_field_id,
+                ty: CgTy::AgentId,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![let_stmt])).unwrap();
+        b.add_op(
+            ComputeOpKind::ViewFold {
+                view: ViewId(0),
+                on_event: EventKindId(0),
+                body,
+            },
+            // Deliberately PerAgent — wrong shape for ViewFold AND
+            // wrong shape for EventField scope. The latter is what we
+            // assert.
+            DispatchShape::PerAgent,
+            Span::dummy(),
+        )
+        .unwrap();
+        let prog = b.finish();
+
+        let errs = check_well_formed(&prog).expect_err("EventField scope flagged");
+        let scope_match = errs.iter().any(|e| {
+            matches!(
+                e,
+                CgError::EventFieldInNonPerEventBody {
+                    op: OpId(0),
+                    event_kind: EventKindId(7),
+                    field_index: 1,
+                    ..
+                }
+            )
+        });
+        assert!(
+            scope_match,
+            "expected EventFieldInNonPerEventBody, got: {errs:?}"
         );
     }
 }

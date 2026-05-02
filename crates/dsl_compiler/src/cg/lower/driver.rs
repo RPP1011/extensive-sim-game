@@ -92,20 +92,21 @@
 //!   1 walk; downstream `BuiltinId::ViewCall { view }` lowerings
 //!   resolve through `ctx.view_signatures`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use dsl_ast::ir::{
-    Compilation, EventRef, FoldHandlerIR, IrExpr, IrExprNode, MaskIR, NamespaceId, PhysicsIR,
-    ViewBodyIR, ViewIR, ViewKind,
+    Compilation, EventRef, FoldHandlerIR, IrExpr, IrExprNode, IrType, MaskIR, NamespaceId,
+    PhysicsIR, ViewBodyIR, ViewIR, ViewKind,
 };
 
 use crate::cg::data_handle::{ConfigConstId, DataHandle, EventRingAccess, EventRingId, MaskId, ViewId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
+use crate::cg::expr::CgTy;
 use crate::cg::op::{
     ActionId, ComputeOp, ComputeOpKind, EventKindId, PhysicsRuleId, ReplayabilityFlag, ScoringId,
     SpatialQueryKind,
 };
-use crate::cg::program::{CgProgram, CgProgramBuilder};
+use crate::cg::program::{CgProgram, CgProgramBuilder, EventLayout, FieldLayout};
 use crate::cg::stmt::{CgStmt, CgStmtListId, VariantId};
 use crate::cg::well_formed::check_well_formed;
 
@@ -236,7 +237,18 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
         diagnostics.push(e);
     }
 
-    let prog = builder.finish();
+    // Snapshot the per-kind layouts populated by `populate_event_kinds`
+    // BEFORE `finish` consumes the builder. The WGSL emit consults the
+    // program's `event_layouts` — copying here is the single hand-off
+    // from the lowering-time `LoweringCtx` to the post-finish program.
+    let event_layouts_snapshot: BTreeMap<u32, EventLayout> = ctx
+        .event_layouts
+        .iter()
+        .map(|(k, v)| (k.0, v.clone()))
+        .collect();
+
+    let mut prog = builder.finish();
+    prog.event_layouts = event_layouts_snapshot;
 
     if diagnostics.is_empty() {
         Ok(prog)
@@ -316,8 +328,129 @@ fn populate_event_kinds(
                 span: event.span,
             });
         }
+
+        // Populate per-event payload layout + field-index registry.
+        // The layout mirrors the runtime's `pack_event` source of truth
+        // at `crates/engine_gpu/src/event_ring.rs`: every `event_tag`-
+        // implied field (`tick`) plus the user-declared fields are
+        // packed into the payload in declaration order. Variable-width
+        // primitives (`Vec3` = 3 words, `u64`-bearing fields = 2 words)
+        // are mirrored from `pack_event` here so the WGSL emit reads
+        // the same layout the CPU writes.
+        //
+        // Today every kind shares the global stride 10 (2 header + 8
+        // payload — sized for `AgentMoved`/`AgentFled`); when the
+        // runtime moves to per-kind ring fanout, this is where the
+        // per-kind values populate.
+        let mut fields = BTreeMap::new();
+        let mut next_offset: u32 = 0;
+        for fld in &event.fields {
+            let (ty, word_count) = match cg_ty_for_event_field(&fld.ty) {
+                Some(p) => p,
+                None => {
+                    // Defer: an event field whose IrType has no GPU
+                    // representation (e.g. `String`, `List<...>`) is a
+                    // runtime-only event channel; the GPU pack table
+                    // wouldn't carry it either. Skip the field's entry
+                    // in the layout — emits referencing it surface as
+                    // a separate diagnostic via the existing
+                    // `event_field_indices` path.
+                    continue;
+                }
+            };
+            // Mirror `event_field_indices`: declaration-order index.
+            // Existing tests pre-register these; the driver here is
+            // additive — they can coexist.
+            let index_u8 = u8::try_from(fields.len()).unwrap_or(u8::MAX);
+            ctx.register_event_field(kind_id, fld.name.clone(), index_u8);
+            fields.insert(
+                fld.name.clone(),
+                FieldLayout {
+                    word_offset_in_payload: next_offset,
+                    word_count,
+                    ty,
+                },
+            );
+            next_offset += word_count;
+        }
+        // Implicit `tick: u32` is the second header word (index 1) —
+        // see `event_ring.rs::EventRecord` (kind, tick, payload). It is
+        // NOT a payload field, so it does not get a `FieldLayout` here;
+        // a body that reads `tick` would resolve through a different
+        // mechanism (today nothing reads it directly via the pattern
+        // binder surface — `tick` is implicit, never named in `on
+        // <Event> { ... }` bindings).
+        let layout = EventLayout {
+            // Today's runtime: shared ring with stride 10 (= 2 header
+            // + 8 payload words). See `crates/engine_gpu/src/event_ring.rs`
+            // PAYLOAD_WORDS = 8.
+            record_stride_u32: 10,
+            header_word_count: 2,
+            buffer_name: "event_ring".to_string(),
+            fields,
+        };
+        ctx.register_event_layout(kind_id, layout);
     }
     ring_ids
+}
+
+/// Map an [`IrType`] to a `(CgTy, word_count)` pair for event-field
+/// layout. `word_count` is the number of u32 words the CPU's
+/// `pack_event` writes for this field; the WGSL emit reads the same
+/// number of words back. Returns `None` for non-GPU-representable
+/// types (variable-length lists, strings) — those fields are skipped
+/// in the layout.
+///
+/// The mapping mirrors `pack_event` at
+/// `crates/engine_gpu/src/event_ring.rs`:
+/// - `AgentId`, `AbilityId`, `QuestId`, `ItemId`, `EventId`, `GroupId`
+///   → 1 word, `CgTy::AgentId` (single u32 slot for any opaque id).
+/// - `u8`, `u16`, `u32`, `i8`, `i16` → 1 word (CPU-side widening), `U32` / `I32`.
+/// - `f32` → 1 word, `F32`.
+/// - `vec3` → 3 words, `Vec3F32`.
+/// - `u64`, `i64` → 2 words via `split_u64`, `U32` (typed as low/high
+///   pair; the binder's lowering treats it as opaque u32 today —
+///   future: explicit `U64` CgTy variant).
+/// - User-declared `Enum { ... }` → 1 word, `U32`.
+/// - `String`, `List<...>`, `Optional<...>` → not GPU-representable
+///   today; layout omits them.
+fn cg_ty_for_event_field(ty: &IrType) -> Option<(CgTy, u32)> {
+    use IrType::*;
+    Some(match ty {
+        Bool => (CgTy::Bool, 1),
+        I8 | I16 | I32 => (CgTy::I32, 1),
+        U8 | U16 | U32 => (CgTy::U32, 1),
+        F32 => (CgTy::F32, 1),
+        Vec3 => (CgTy::Vec3F32, 3),
+        // Opaque ids — the CPU packs every one into a single u32 slot.
+        // The binder's CG type is `AgentId` for the agent ids the
+        // pattern names; `AbilityId` / `QuestId` etc. surface as
+        // `AgentId` at the IR level too because the IR's CgTy doesn't
+        // distinguish opaque-id flavours yet. This is intentional —
+        // type-safety on opaque ids is a separate concern from layout.
+        AgentId | AbilityId | ItemId | GroupId | QuestId | AuctionId | EventId => {
+            (CgTy::AgentId, 1)
+        }
+        // 64-bit fields are split into (lo, hi) by `split_u64` /
+        // `join_u64`. The IR's CgTy doesn't have a U64 variant; the
+        // binder reads only the low word as U32 today. A future
+        // pattern-binder request for the full u64 would surface as a
+        // separate concern (the runtime side already round-trips
+        // correctly via the two-word slot).
+        I64 | U64 => (CgTy::U32, 2),
+        // User enums are repr(u8) but widened to u32 at the slot
+        // boundary (see `EffectGoldTransfer`'s reason / kind_tag
+        // handling). One slot, U32-typed.
+        Enum { .. } => (CgTy::U32, 1),
+        // Non-representable: deliberately left for a future task to
+        // light up (no current event uses these in a payload binder).
+        F64 | String | SortedVec(..) | RingBuffer(..) | SmallVec(..) | Array(..)
+        | Optional(..) | Tuple(..) | List(..) | EntityRef(..) | EventRef(..) => return None,
+        // Resolver placeholders — `Unknown` is the un-typed default;
+        // `Named` is a forward-resolution stub. Neither has a stable
+        // GPU width.
+        Unknown | Named(_) => return None,
+    })
 }
 
 /// Allocate one [`VariantId`] per enum variant across every

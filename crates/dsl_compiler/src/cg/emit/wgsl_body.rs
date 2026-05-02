@@ -68,6 +68,7 @@ use crate::cg::data_handle::{
     SpatialStorageKind, ViewStorageSlot,
 };
 use crate::cg::expr::{BinaryOp, BuiltinId, CgExpr, CgTy, ExprArena, LitValue, NumericTy, UnaryOp};
+use crate::cg::op::EventKindId;
 use crate::cg::program::CgProgram;
 use crate::cg::stmt::{
     CgMatchArm, CgStmt, CgStmtId, CgStmtListId, EventField, MatchArmBinding, StmtArena,
@@ -280,6 +281,26 @@ pub enum EmitError {
         handle: DataHandle,
         reason: &'static str,
     },
+    /// A [`CgExpr::EventField`] referenced an [`EventKindId`] that has
+    /// no entry in [`CgProgram::event_layouts`]. The driver populates
+    /// the schema in `populate_event_kinds`; a missing entry is a
+    /// driver-side defect (or the program was constructed without the
+    /// driver). Surfaces as a typed emit error so callers can render
+    /// the offending kind id.
+    UnregisteredEventKind { kind: EventKindId },
+    /// A [`CgExpr::EventField`]'s claimed [`CgTy`] has no WGSL-emit
+    /// shape today. The runtime's `pack_event` source-of-truth at
+    /// `crates/engine_gpu/src/event_ring.rs` packs every event field
+    /// into a closed set of types (`AgentId`, `U32`, `I32`, `F32`,
+    /// `Vec3F32`, `Bool`, `Tick`); a `ViewKey<...>` field is structurally
+    /// nonsensical and surfaces here. Adding a new event-field type
+    /// means adding a matching arm in `lower_cg_expr_to_wgsl`'s
+    /// `EventField` branch.
+    EventFieldUnsupportedType {
+        kind: EventKindId,
+        field_index: u32,
+        got: CgTy,
+    },
 }
 
 impl fmt::Display for EmitError {
@@ -303,6 +324,20 @@ impl fmt::Display for EmitError {
             EmitError::UnsupportedHandle { handle, reason } => {
                 write!(f, "unsupported handle {handle}: {reason}")
             }
+            EmitError::UnregisteredEventKind { kind } => write!(
+                f,
+                "EventField references EventKindId(#{}) with no entry in event_layouts",
+                kind.0
+            ),
+            EmitError::EventFieldUnsupportedType {
+                kind,
+                field_index,
+                got,
+            } => write!(
+                f,
+                "EventField(event#{}, field#{}) has no WGSL emit shape for type {}",
+                kind.0, field_index, got
+            ),
         }
     }
 }
@@ -555,6 +590,58 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
         // Let-bound local — emit the `let local_<N>: <ty> = ...;` name
         // produced by `CgStmt::Let` emission.
         CgExpr::ReadLocal { local, ty: _ } => Ok(format!("local_{}", local.0)),
+        // Schema-driven access into the current event's payload. The
+        // surrounding PerEvent kernel template binds `event_idx` and
+        // selects `event_ring` (today the shared ring; future per-kind
+        // ring fanout swaps `buffer_name` per-kind without touching
+        // this emit shape). See `CgExpr::EventField` docs for the
+        // forward-compat contract.
+        CgExpr::EventField {
+            event_kind,
+            field_index,
+            ty,
+        } => {
+            let layout = ctx.prog.event_layouts.get(&event_kind.0).ok_or(
+                EmitError::UnregisteredEventKind {
+                    kind: *event_kind,
+                },
+            )?;
+            let total_offset = layout.header_word_count + field_index;
+            let buf = layout.buffer_name.as_str();
+            let stride = layout.record_stride_u32;
+            Ok(match ty {
+                CgTy::AgentId | CgTy::U32 | CgTy::Tick => {
+                    format!("{}[event_idx * {}u + {}u]", buf, stride, total_offset)
+                }
+                CgTy::I32 => format!(
+                    "bitcast<i32>({}[event_idx * {}u + {}u])",
+                    buf, stride, total_offset
+                ),
+                CgTy::F32 => format!(
+                    "bitcast<f32>({}[event_idx * {}u + {}u])",
+                    buf, stride, total_offset
+                ),
+                CgTy::Vec3F32 => format!(
+                    "vec3<f32>(bitcast<f32>({buf}[event_idx * {s}u + {o}u]), bitcast<f32>({buf}[event_idx * {s}u + {o2}u]), bitcast<f32>({buf}[event_idx * {s}u + {o3}u]))",
+                    buf = buf,
+                    s = stride,
+                    o = total_offset,
+                    o2 = total_offset + 1,
+                    o3 = total_offset + 2,
+                ),
+                CgTy::Bool => format!(
+                    "({}[event_idx * {}u + {}u] != 0u)",
+                    buf, stride, total_offset
+                ),
+                CgTy::ViewKey { .. } => {
+                    return Err(EmitError::EventFieldUnsupportedType {
+                        kind: *event_kind,
+                        field_index: *field_index,
+                        got: *ty,
+                    });
+                }
+            })
+        }
     }
 }
 
@@ -1917,5 +2004,110 @@ mod tests {
         assert_eq!(cg_ty_to_wgsl(CgTy::AgentId), "u32");
         assert_eq!(cg_ty_to_wgsl(CgTy::Tick), "u32");
         assert_eq!(cg_ty_to_wgsl(CgTy::ViewKey { view: ViewId(2) }), "u32");
+    }
+
+    // ---- Task 1 (CG Lowering Gap Closure): EventField emit ----
+
+    /// `CgExpr::EventField` produces a schema-driven access expression.
+    /// With the today-default layout (stride=10, header=2,
+    /// buffer="event_ring") and a `target` field at payload offset 1
+    /// typed as `AgentId`, the WGSL renders to
+    /// `event_ring[event_idx * 10u + 3u]`.
+    #[test]
+    fn event_field_emits_schema_driven_wgsl_access_for_agent_id() {
+        use crate::cg::program::{EventLayout, FieldLayout};
+        let mut prog = empty_prog();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "target".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 1,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        prog.event_layouts.insert(
+            7,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
+
+        let id = push_expr(
+            &mut prog,
+            CgExpr::EventField {
+                event_kind: EventKindId(7),
+                field_index: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField lowers");
+        assert_eq!(wgsl, "event_ring[event_idx * 10u + 3u]");
+    }
+
+    /// F32-typed `EventField` emits a `bitcast<f32>` access. The
+    /// payload word is u32 on the GPU side; `bitcast<f32>` reinterprets
+    /// the bit pattern as the typed float — same shape `pack_event`
+    /// writes via `f32::to_bits` on the CPU.
+    #[test]
+    fn event_field_emits_bitcast_for_f32() {
+        use crate::cg::program::{EventLayout, FieldLayout};
+        let mut prog = empty_prog();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "amount".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 2,
+                word_count: 1,
+                ty: CgTy::F32,
+            },
+        );
+        prog.event_layouts.insert(
+            3,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
+
+        let id = push_expr(
+            &mut prog,
+            CgExpr::EventField {
+                event_kind: EventKindId(3),
+                field_index: 2,
+                ty: CgTy::F32,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField F32 lowers");
+        assert_eq!(wgsl, "bitcast<f32>(event_ring[event_idx * 10u + 4u])");
+    }
+
+    /// An `EventField` whose `event_kind` has no entry in
+    /// `prog.event_layouts` surfaces as
+    /// `EmitError::UnregisteredEventKind`.
+    #[test]
+    fn event_field_unregistered_kind_surfaces_typed_error() {
+        let mut prog = empty_prog();
+        let id = push_expr(
+            &mut prog,
+            CgExpr::EventField {
+                event_kind: EventKindId(99),
+                field_index: 0,
+                ty: CgTy::AgentId,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let err = lower_cg_expr_to_wgsl(id, &ctx).expect_err("missing layout fails");
+        match err {
+            EmitError::UnregisteredEventKind { kind } => assert_eq!(kind, EventKindId(99)),
+            other => panic!("expected UnregisteredEventKind, got {other:?}"),
+        }
     }
 }
