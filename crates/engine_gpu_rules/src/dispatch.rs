@@ -20,7 +20,15 @@ pub struct KernelCache {
     pub fold_kin_fear: Option<crate::fold_kin_fear::FoldKinFearKernel>,
     pub fold_pack_focus: Option<crate::fold_pack_focus::FoldPackFocusKernel>,
     pub fold_rally_boost: Option<crate::fold_rally_boost::FoldRallyBoostKernel>,
-    pub fold_memory: Option<crate::fold_memory::FoldMemoryKernel>,
+    pub fold_standing: Option<crate::fold_standing::FoldStandingKernel>,
+    pub fused_fold_memory_record_memory: Option<crate::fused_fold_memory_record_memory::FusedFoldMemoryRecordMemoryKernel>,
+    pub physics_chronicle_attack: Option<crate::physics_chronicle_attack::PhysicsChronicleAttackKernel>,
+    pub physics_chronicle_engagement: Option<crate::physics_chronicle_engagement::PhysicsChronicleEngagementKernel>,
+    pub physics_chronicle_wound: Option<crate::physics_chronicle_wound::PhysicsChronicleWoundKernel>,
+    pub physics_chronicle_break: Option<crate::physics_chronicle_break::PhysicsChronicleBreakKernel>,
+    pub physics_chronicle_rout: Option<crate::physics_chronicle_rout::PhysicsChronicleRoutKernel>,
+    pub physics_chronicle_flee: Option<crate::physics_chronicle_flee::PhysicsChronicleFleeKernel>,
+    pub physics_chronicle_rally: Option<crate::physics_chronicle_rally::PhysicsChronicleRallyKernel>,
     pub fused_spatial_build_hash: Option<crate::fused_spatial_build_hash::FusedSpatialBuildHashKernel>,
     pub upload_sim_cfg: Option<crate::upload_sim_cfg::UploadSimCfgKernel>,
     pub pack_agents: Option<crate::pack_agents::PackAgentsKernel>,
@@ -144,11 +152,99 @@ pub fn dispatch_by_id(
             let bindings = kernel.bind(sources, &cfg_buf);
             kernel.record(device, encoder, &bindings, agent_cap);
         }
-        DispatchOp::Kernel(KernelId::FoldMemory) => {
-            let kernel = cache.fold_memory.get_or_insert_with(|| <crate::fold_memory::FoldMemoryKernel as Kernel>::new(device));
+        DispatchOp::Kernel(KernelId::FoldStanding) => {
+            let kernel = cache.fold_standing.get_or_insert_with(|| <crate::fold_standing::FoldStandingKernel as Kernel>::new(device));
             let cfg = kernel.build_cfg(state);
             let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("crate::fold_memory::cfg"),
+                label: Some("crate::fold_standing::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::FusedFoldMemoryRecordMemory) => {
+            let kernel = cache.fused_fold_memory_record_memory.get_or_insert_with(|| <crate::fused_fold_memory_record_memory::FusedFoldMemoryRecordMemoryKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::fused_fold_memory_record_memory::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::PhysicsChronicleAttack) => {
+            let kernel = cache.physics_chronicle_attack.get_or_insert_with(|| <crate::physics_chronicle_attack::PhysicsChronicleAttackKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::physics_chronicle_attack::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::PhysicsChronicleEngagement) => {
+            let kernel = cache.physics_chronicle_engagement.get_or_insert_with(|| <crate::physics_chronicle_engagement::PhysicsChronicleEngagementKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::physics_chronicle_engagement::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::PhysicsChronicleWound) => {
+            let kernel = cache.physics_chronicle_wound.get_or_insert_with(|| <crate::physics_chronicle_wound::PhysicsChronicleWoundKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::physics_chronicle_wound::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::PhysicsChronicleBreak) => {
+            let kernel = cache.physics_chronicle_break.get_or_insert_with(|| <crate::physics_chronicle_break::PhysicsChronicleBreakKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::physics_chronicle_break::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::PhysicsChronicleRout) => {
+            let kernel = cache.physics_chronicle_rout.get_or_insert_with(|| <crate::physics_chronicle_rout::PhysicsChronicleRoutKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::physics_chronicle_rout::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::PhysicsChronicleFlee) => {
+            let kernel = cache.physics_chronicle_flee.get_or_insert_with(|| <crate::physics_chronicle_flee::PhysicsChronicleFleeKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::physics_chronicle_flee::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::PhysicsChronicleRally) => {
+            let kernel = cache.physics_chronicle_rally.get_or_insert_with(|| <crate::physics_chronicle_rally::PhysicsChronicleRallyKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::physics_chronicle_rally::cfg"),
                 contents: bytemuck::cast_slice(&[cfg]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });

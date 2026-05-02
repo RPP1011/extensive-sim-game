@@ -49,7 +49,7 @@ fn cs_unpack_agents(@builtin(global_invocation_id) gid: vec3<u32>) {
 let agent_id = gid.x;
 if (agent_id >= cfg.agent_cap) { return; }
 
-// op#20 (plumbing)
+// op#29 (plumbing)
 // PlumbingKind::UnpackAgents — structural stub. Verbatim
 // port of engine_gpu_rules/src/fused_agent_unpack.wgsl (the
 // legacy file is itself a stub that touches every binding).

@@ -14,7 +14,15 @@ pub mod fold_my_enemies;
 pub mod fold_kin_fear;
 pub mod fold_pack_focus;
 pub mod fold_rally_boost;
-pub mod fold_memory;
+pub mod fold_standing;
+pub mod fused_fold_memory_record_memory;
+pub mod physics_chronicle_attack;
+pub mod physics_chronicle_engagement;
+pub mod physics_chronicle_wound;
+pub mod physics_chronicle_break;
+pub mod physics_chronicle_rout;
+pub mod physics_chronicle_flee;
+pub mod physics_chronicle_rally;
 pub mod fused_spatial_build_hash;
 pub mod upload_sim_cfg;
 pub mod pack_agents;
@@ -31,7 +39,15 @@ pub use fold_my_enemies::FoldMyEnemiesKernel;
 pub use fold_kin_fear::FoldKinFearKernel;
 pub use fold_pack_focus::FoldPackFocusKernel;
 pub use fold_rally_boost::FoldRallyBoostKernel;
-pub use fold_memory::FoldMemoryKernel;
+pub use fold_standing::FoldStandingKernel;
+pub use fused_fold_memory_record_memory::FusedFoldMemoryRecordMemoryKernel;
+pub use physics_chronicle_attack::PhysicsChronicleAttackKernel;
+pub use physics_chronicle_engagement::PhysicsChronicleEngagementKernel;
+pub use physics_chronicle_wound::PhysicsChronicleWoundKernel;
+pub use physics_chronicle_break::PhysicsChronicleBreakKernel;
+pub use physics_chronicle_rout::PhysicsChronicleRoutKernel;
+pub use physics_chronicle_flee::PhysicsChronicleFleeKernel;
+pub use physics_chronicle_rally::PhysicsChronicleRallyKernel;
 pub use fused_spatial_build_hash::FusedSpatialBuildHashKernel;
 pub use upload_sim_cfg::UploadSimCfgKernel;
 pub use pack_agents::PackAgentsKernel;
@@ -59,7 +75,15 @@ pub enum KernelId {
     FoldKinFear,
     FoldPackFocus,
     FoldRallyBoost,
-    FoldMemory,
+    FoldStanding,
+    FusedFoldMemoryRecordMemory,
+    PhysicsChronicleAttack,
+    PhysicsChronicleEngagement,
+    PhysicsChronicleWound,
+    PhysicsChronicleBreak,
+    PhysicsChronicleRout,
+    PhysicsChronicleFlee,
+    PhysicsChronicleRally,
     FusedSpatialBuildHash,
     UploadSimCfg,
     PackAgents,

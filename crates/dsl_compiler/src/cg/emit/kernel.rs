@@ -1060,10 +1060,12 @@ fn semantic_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> String {
     }
 
     // PhysicsRule analogue: a fused-or-singleton run of PhysicsRule
-    // ops with matching replayability collapses to `physics`
-    // (replayable) or `physics_post` (non-replayable). Mirrors the
-    // legacy `physics.rs` kernel module.
-    if let Some(name) = physics_rule_fused_kernel_name(body_ops) {
+    // ops with matching replayability collapses to a name encoding
+    // the contained rules. Mirrors the legacy `physics.rs` kernel
+    // module shape but disambiguates per-rule so distinct kernels do
+    // not collide when multiple physics rules lower into separate
+    // (singleton) PhysicsRule kernels.
+    if let Some(name) = physics_rule_fused_kernel_name(body_ops, prog) {
         return name;
     }
 
@@ -1109,18 +1111,36 @@ fn view_fold_fused_kernel_name(body_ops: &[&ComputeOp], prog: &CgProgram) -> Opt
     })
 }
 
-/// `Some("physics")` for a homogeneous Replayable PhysicsRule group;
-/// `Some("physics_post")` for a homogeneous NonReplayable group;
-/// `None` otherwise (mixed kinds, mixed replayability, or zero ops).
-fn physics_rule_fused_kernel_name(body_ops: &[&ComputeOp]) -> Option<String> {
-    let mut flag = None;
+/// `Some("physics_<rule>")` for a singleton PhysicsRule kernel;
+/// `Some("physics_<a>_and_<b>...")` for a multi-rule fused group with
+/// uniform replayability; `None` otherwise (mixed kinds, mixed
+/// replayability, or zero ops).
+///
+/// Per-rule naming is required because every physics rule lowers to
+/// its own (singleton) PhysicsRule kernel today: collapsing them all
+/// to `"physics"` / `"physics_post"` produced
+/// [`super::program::ProgramEmitError::KernelNameCollision`] once
+/// more than one rule lowered without diagnostics. The naming here
+/// agrees with the singleton path in [`single_op_kernel_name`] (which
+/// also uses `physics_<rule>`), so a single PhysicsRule kernel routed
+/// through either path produces the same name.
+fn physics_rule_fused_kernel_name(
+    body_ops: &[&ComputeOp],
+    prog: &CgProgram,
+) -> Option<String> {
+    // Collect distinct (rule_id, replayable) pairs from the body so
+    // the resulting kernel name reflects exactly which rules the
+    // kernel covers.
+    let mut rules: Vec<(crate::cg::PhysicsRuleId, ReplayabilityFlag)> = Vec::new();
     for op in body_ops {
         match &op.kind {
-            ComputeOpKind::PhysicsRule { replayable, .. } => match flag {
-                None => flag = Some(*replayable),
-                Some(prev) if prev == *replayable => {}
-                Some(_) => return None,
-            },
+            ComputeOpKind::PhysicsRule {
+                rule, replayable, ..
+            } => {
+                if !rules.iter().any(|(r, _)| r == rule) {
+                    rules.push((*rule, *replayable));
+                }
+            }
             ComputeOpKind::MaskPredicate { .. }
             | ComputeOpKind::ScoringArgmax { .. }
             | ComputeOpKind::ViewFold { .. }
@@ -1128,10 +1148,39 @@ fn physics_rule_fused_kernel_name(body_ops: &[&ComputeOp]) -> Option<String> {
             | ComputeOpKind::Plumbing { .. } => return None,
         }
     }
-    Some(match flag? {
-        ReplayabilityFlag::Replayable => "physics".to_string(),
-        ReplayabilityFlag::NonReplayable => "physics_post".to_string(),
-    })
+    if rules.is_empty() {
+        return None;
+    }
+    // Replayability must be uniform across the fused group — mixing
+    // replayable + non-replayable in one kernel breaks the cascade
+    // gate semantics, so surface as None and let the caller fall
+    // back to the structural `fused_<first>` name.
+    let first_flag = rules[0].1;
+    if !rules.iter().all(|(_, f)| *f == first_flag) {
+        return None;
+    }
+    // Single-rule case: match the singleton naming path so a
+    // PhysicsRule kernel produced via either route ends up with the
+    // same name.
+    if rules.len() == 1 {
+        let (rule_id, _) = rules[0];
+        return Some(match prog.interner.get_physics_rule_name(rule_id) {
+            Some(name) => format!("physics_{name}"),
+            None => format!("physics_rule_{}", rule_id.0),
+        });
+    }
+    // Multi-rule case: concatenate rule names with `_and_` so the
+    // kernel name encodes its membership.
+    let parts: Vec<String> = rules
+        .iter()
+        .map(|(rule_id, _)| {
+            prog.interner
+                .get_physics_rule_name(*rule_id)
+                .map(String::from)
+                .unwrap_or_else(|| format!("rule_{}", rule_id.0))
+        })
+        .collect();
+    Some(format!("physics_{}", parts.join("_and_")))
 }
 
 /// Snake_case kernel name for a single op (the building block of
@@ -3003,14 +3052,14 @@ mod tests {
     }
 
     #[test]
-    fn physics_rule_singleton_collapses_to_physics_kernel_name() {
-        // Post Task 5.7-iter2: a singleton (Replayable) PhysicsRule
-        // op resolves to the canonical `physics` kernel name. The
-        // legacy SCHEDULE wraps physics dispatch in a single
-        // FixedPoint(physics, max_iter=8); the kernel-naming layer
-        // matches that contract by collapsing every rule into the
-        // shared `physics` module regardless of the rule's per-rule
-        // interner name.
+    fn physics_rule_singleton_uses_per_rule_kernel_name() {
+        // A singleton (Replayable) PhysicsRule op resolves to
+        // `physics_<rule>`, where `<rule>` is the interner name. The
+        // earlier collapse-to-`physics` rule produced
+        // [`KernelNameCollision`] once more than one PhysicsRule
+        // lowered into its own (singleton) kernel, so the canonical
+        // name is now per-rule and agrees with
+        // [`single_op_kernel_name`].
         let mut prog = CgProgram::default();
         let ring = EventRingId(0);
         let op = physics_op(&mut prog, PhysicsRuleId(4), ring);
@@ -3023,7 +3072,7 @@ mod tests {
         };
         let ctx = EmitCtx::structural(&prog);
         let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
-        assert_eq!(spec.name, "physics");
+        assert_eq!(spec.name, "physics_cast_apply");
     }
 
     #[test]

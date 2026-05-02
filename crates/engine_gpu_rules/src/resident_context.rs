@@ -201,6 +201,14 @@ impl ResidentPathContext {
         (&self.view_storage_rally_boost, None, None)
     }
 
+    /// Returns (primary, anchor_opt, ids_opt) for the `standing` fold kernel.
+    /// Used by `FoldStandingKernel::bind()`.
+    pub fn fold_view_standing_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {
+        // Storage-hint-aware Some(...) arms are a future refinement; see
+        // the module-level `# Limitations` on `cross_cutting.rs`.
+        (&self.standing_primary, None, None)
+    }
+
     /// Returns (primary, anchor_opt, ids_opt) for the `memory` fold kernel.
     /// Used by `FoldMemoryKernel::bind()`.
     pub fn fold_view_memory_handles<'a>(&'a self) -> (&'a wgpu::Buffer, Option<&'a wgpu::Buffer>, Option<&'a wgpu::Buffer>) {

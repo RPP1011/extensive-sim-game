@@ -18,5 +18,7 @@ fn cs_fold_kin_fear(@builtin(global_invocation_id) gid: vec3<u32>) {
     let _tick = cfg.tick;
 
     // op#11 (view_fold)
+    let local_0: u32 = event_ring[event_idx * 10u + 2u];
+    let local_1: u32 = event_ring[event_idx * 10u + 3u];
     _ = (1.0);
 }
