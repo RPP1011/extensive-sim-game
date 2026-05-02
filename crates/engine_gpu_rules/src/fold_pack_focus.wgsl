@@ -18,5 +18,5 @@ fn cs_fold_pack_focus(@builtin(global_invocation_id) gid: vec3<u32>) {
     let _tick = cfg.tick;
 
     // op#12 (view_fold)
-    view_7_primary = 1.0;
+    _ = (1.0);
 }

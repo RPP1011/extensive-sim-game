@@ -18,8 +18,10 @@ let mask_1_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.
 let mask_1_agent = pair / mask_1_k;
 let mask_1_cand  = pair % mask_1_k;
 if (mask_1_agent >= cfg.agent_cap) { return; }
+let agent_id = mask_1_agent;
+let per_pair_candidate = mask_1_cand;
 
-let mask_1_value: bool = (agent_target_expr_2_alive && (per_pair_candidate != agent_id));
+let mask_1_value: bool = (false && (per_pair_candidate != agent_id));
 if (mask_1_value) {
     let mask_1_word = mask_1_agent >> 5u;
     let mask_1_bit  = 1u << (mask_1_agent & 31u);

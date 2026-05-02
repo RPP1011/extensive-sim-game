@@ -31,7 +31,7 @@ impl crate::Kernel for UploadSimCfgKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::upload_sim_cfg::bgl"),
             entries: &[
-                crate::bgl_uniform(0), // sim_cfg
+                crate::bgl_storage(0, false), // sim_cfg
                 crate::bgl_uniform(1), // cfg
             ],
         });
@@ -85,7 +85,7 @@ impl crate::Kernel for UploadSimCfgKernel {
 
 pub fn upload_sim_cfg_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     vec![
-                crate::bgl_uniform(0), // sim_cfg
+                crate::bgl_storage(0, false), // sim_cfg
                 crate::bgl_uniform(1), // cfg
     ]
 }

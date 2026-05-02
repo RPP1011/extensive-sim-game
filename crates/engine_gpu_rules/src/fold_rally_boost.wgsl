@@ -18,5 +18,5 @@ fn cs_fold_rally_boost(@builtin(global_invocation_id) gid: vec3<u32>) {
     let _tick = cfg.tick;
 
     // op#13 (view_fold)
-    view_8_primary = 1.0;
+    _ = (1.0);
 }

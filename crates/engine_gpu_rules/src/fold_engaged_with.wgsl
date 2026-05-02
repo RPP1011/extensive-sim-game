@@ -18,8 +18,8 @@ fn cs_fold_engaged_with(@builtin(global_invocation_id) gid: vec3<u32>) {
     let _tick = cfg.tick;
 
     // op#8 (view_fold)
-    view_4_primary = 1u;
+    _ = (1u);
 
     // op#9 (view_fold)
-    view_4_primary = 1u;
+    _ = (1u);
 }

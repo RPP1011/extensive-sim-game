@@ -18,8 +18,8 @@ fn cs_fold_threat_level(@builtin(global_invocation_id) gid: vec3<u32>) {
     let _tick = cfg.tick;
 
     // op#6 (view_fold)
-    view_3_primary = 1.0;
+    _ = (1.0);
 
     // op#7 (view_fold)
-    view_3_primary = 1.0;
+    _ = (1.0);
 }
