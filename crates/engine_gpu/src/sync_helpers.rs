@@ -148,6 +148,16 @@ pub fn unpack_agent_slots(state: &mut SimState, slots: &[GpuAgentSlot]) {
             AgentId::new(s.engaged_with)
         };
         state.set_agent_engaged_with(id, engaged);
+        // Phase 6 Task 4 (2026-04-30): propagate GPU-side position
+        // updates back to SimState. Without this, the Movement
+        // kernel's per-agent pos write into the resident agents
+        // buffer would never reach the host mirror — every parity
+        // readback would show GPU pos == spawn pos, regardless of
+        // GPU-side mutation. The pack side already serialises pos at
+        // line 109-111; this is the symmetric unpack edge.
+        if s.alive != 0 {
+            state.set_agent_pos(id, glam::Vec3::new(s.pos_x, s.pos_y, s.pos_z));
+        }
         if currently_alive && s.alive == 0 {
             state.kill_agent(id);
         }

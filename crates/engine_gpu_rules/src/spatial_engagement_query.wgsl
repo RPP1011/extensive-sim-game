@@ -13,7 +13,7 @@ fn cs_spatial_engagement_query(@builtin(global_invocation_id) gid: vec3<u32>) {
 let agent_id = gid.x;
 if (agent_id >= cfg.agent_cap) { return; }
 
-// op#28 (spatial_query)
+// op#27 (spatial_query)
 {
     // SpatialQuery::EngagementQuery — verbatim port from engine_gpu_rules/src/spatial_engagement_query.wgsl.
     // Touches every binding so naga keeps them live. Real per-agent engagement walk lives in

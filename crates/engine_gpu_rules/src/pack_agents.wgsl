@@ -49,7 +49,7 @@ fn cs_pack_agents(@builtin(global_invocation_id) gid: vec3<u32>) {
 let agent_id = gid.x;
 if (agent_id >= cfg.agent_cap) { return; }
 
-// op#30 (plumbing)
+// op#29 (plumbing)
 {
     // PlumbingKind::PackAgents — structural stub.
     // Real per-agent SoA->packed lowering needs a typed AgentSlotPack op

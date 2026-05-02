@@ -201,11 +201,41 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     // (cooldown ticking, stun expiry, need decay, regen, …) — each
     // becomes another `PhysicsRule { on_event: None }` op with its
     // own body template + reads/writes signature.
+    //
+    // **Phase 6 Task 4 (2026-04-30): Movement-as-rule synth deferred
+    // pending Scoring lowering**. The CG-emitted Movement op produces
+    // a placeholder kernel body (`MOVEMENT_BODY` const in
+    // `cg/emit/kernel.rs`) that touches its bindings but does not
+    // mutate position. Real position updates would require:
+    //   1. The IR to express vec3 deltas + action-conditional
+    //      branching (today there's no abstraction for either).
+    //   2. The BGL to bind the agents SoA as `array<u32>` (single
+    //      buffer, manual offset arithmetic) instead of the
+    //      per-AgentField shape `BindingMetadata` produces today
+    //      (`array<vec3<f32>>` aliases the same buffer at the wrong
+    //      stride).
+    //   3. Scoring to write real (action, target) tuples — today
+    //      `scoring.wgsl`'s body is a stub writing ACTION_HOLD.
+    //
+    // While (1) and (2) are tractable structural extensions, (3) is
+    // the upstream blocker: even with a perfect Movement WGSL body,
+    // every agent's action is `ACTION_HOLD` and Movement's
+    // conditional branch `if (action == ACTION_MOVE_TOWARD)` never
+    // fires. The Route C splice
+    // (`xtask::compile_dsl_cmd::route_c_movement`) carries a
+    // hand-written `movement.wgsl` with the real body shape; it sits
+    // at the end of the SCHEDULE and runs on the same
+    // `transient.action_buf` Scoring writes to.
+    //
+    // For Phase 6 Task 4 we drop the CG-emitted FusedMovement
+    // (placeholder, no-op) and rely on the Route C splice's Movement
+    // (real body, blocked on Scoring stub). When Scoring lowers for
+    // real (a follow-up Phase 6 task or its own plan), Movement-as-rule
+    // can be re-synthesised here with a real WGSL body.
+    let _ = synthesize_movement_op; // silence dead-code; keep helper for future re-enable
     if comp.scoring.is_empty() {
         // No scoring → no scoring_output to consume → no Movement.
         // (A pure-events test fixture would land here.)
-    } else if let Err(e) = synthesize_movement_op(&mut ctx) {
-        diagnostics.push(e);
     }
 
     // -- Phase 3: spatial-query synthesis -------------------------------
