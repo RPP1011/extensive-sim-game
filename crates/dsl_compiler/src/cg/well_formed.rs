@@ -240,28 +240,6 @@ pub enum CgError {
         word_offset_in_payload: u32,
     },
 
-    /// A [`SpatialQueryKind::FilteredWalk`]'s `filter` expression
-    /// type-checks to a type other than [`CgTy::Bool`]. The walk body
-    /// gates each cell on the filter predicate; a non-Bool filter would
-    /// produce invalid WGSL (the `if` condition must be boolean).
-    /// `op_index` is the index into `prog.ops`; `filter` is the
-    /// offending [`CgExprId`]; `got` is the actual type.
-    FilteredWalkFilterNotBool {
-        op_index: usize,
-        filter: CgExprId,
-        got: CgTy,
-    },
-
-    /// A [`SpatialQueryKind::FilteredWalk`]'s `filter` expression
-    /// failed to type-check. Wraps the [`TypeError`] returned by
-    /// [`type_check`]. `op_index` is the index into `prog.ops`;
-    /// `filter` is the offending [`CgExprId`]; `error` is the
-    /// underlying type-check failure.
-    FilteredWalkFilterTypeCheck {
-        op_index: usize,
-        filter: CgExprId,
-        error: TypeError,
-    },
 }
 
 impl fmt::Display for HandleConsistencyReason {
@@ -410,24 +388,6 @@ impl fmt::Display for CgError {
                 f,
                 "op#{}: EventField(event#{}, word_off#{}) in {} body with dispatch shape {} — only per_event dispatch binds `event_idx`",
                 op.0, event_kind.0, word_offset_in_payload, kind_label, shape_label
-            ),
-            CgError::FilteredWalkFilterNotBool {
-                op_index,
-                filter,
-                got,
-            } => write!(
-                f,
-                "op#{}: FilteredWalk filter expr#{} type-checks to {} (expected bool)",
-                op_index, filter.0, got
-            ),
-            CgError::FilteredWalkFilterTypeCheck {
-                op_index,
-                filter,
-                error,
-            } => write!(
-                f,
-                "op#{}: FilteredWalk filter expr#{} failed type-check: {}",
-                op_index, filter.0, error
             ),
         }
     }
@@ -1228,22 +1188,19 @@ fn type_check_op(
                     return;
                 };
                 match type_check(expr, *filter, ctx) {
-                    Ok(ty) => {
-                        if ty != CgTy::Bool {
-                            errors.push(CgError::FilteredWalkFilterNotBool {
-                                op_index: op_id.0 as usize,
-                                filter: *filter,
-                                got: ty,
-                            });
-                        }
-                    }
-                    Err(err) => {
-                        errors.push(CgError::FilteredWalkFilterTypeCheck {
-                            op_index: op_id.0 as usize,
-                            filter: *filter,
-                            error: err,
-                        });
-                    }
+                    Ok(ty) if ty == CgTy::Bool => {}
+                    Ok(ty) => errors.push(CgError::TypeMismatch {
+                        op: op_id,
+                        error: TypeError::ClaimedResultMismatch {
+                            node: *filter,
+                            expected: CgTy::Bool,
+                            got: ty,
+                        },
+                    }),
+                    Err(err) => errors.push(CgError::TypeMismatch {
+                        op: op_id,
+                        error: err,
+                    }),
                 }
             }
         }
@@ -3916,13 +3873,19 @@ mod tests {
         let found = errs.iter().any(|e| {
             matches!(
                 e,
-                CgError::FilteredWalkFilterNotBool { filter, .. }
-                    if *filter == filter_id
+                CgError::TypeMismatch {
+                    error: TypeError::ClaimedResultMismatch {
+                        node,
+                        expected: CgTy::Bool,
+                        got: CgTy::U32,
+                    },
+                    ..
+                } if *node == filter_id
             )
         });
         assert!(
             found,
-            "expected FilteredWalkFilterNotBool, got {errs:?}"
+            "expected TypeMismatch(ClaimedResultMismatch {{ expected: Bool, got: U32 }}), got {errs:?}"
         );
     }
 
@@ -3953,5 +3916,22 @@ mod tests {
             result.is_ok(),
             "bool-typed filter should be accepted, got {result:?}"
         );
+        // Defense-in-depth: even if `is_ok()` is satisfied trivially by an
+        // arm that fails to type-check at all, no TypeMismatch error
+        // should reference our filter id.
+        if let Err(errs) = &result {
+            for err in errs {
+                if let CgError::TypeMismatch {
+                    error: TypeError::ClaimedResultMismatch { node, .. },
+                    ..
+                } = err
+                {
+                    assert_ne!(
+                        *node, filter_id,
+                        "no TypeMismatch should reference our bool-typed filter"
+                    );
+                }
+            }
+        }
     }
 }

@@ -2072,4 +2072,30 @@ mod tests {
             other => panic!("expected PerPairCandidateId, got {other:?}"),
         }
     }
+
+    #[test]
+    fn lower_filter_for_mask_restores_target_local_on_lower_expr_failure() {
+        use crate::cg::program::CgProgramBuilder;
+        use dsl_ast::ir::{IrExpr, IrExprNode, LocalRef};
+
+        // `IrExpr::Local` with an unrecognized name (not "self" or "target")
+        // and no let-binding → `lower_bare_local` returns
+        // `LoweringError::UnsupportedLocalBinding`. This exercises the
+        // error path of `lower_filter_for_mask` without relying on any
+        // arena or upstream-resolver machinery.
+        let bad_expr = IrExprNode {
+            kind: IrExpr::Local(LocalRef(99), "undefined_local".to_string()),
+            span: dsl_ast::ast::Span::dummy(),
+        };
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        assert!(!ctx.target_local, "precondition: target_local starts false");
+
+        let result = lower_filter_for_mask(&bad_expr, &mut ctx);
+        assert!(result.is_err(), "lowering of undefined local should error");
+        // Flag must be restored to its prior value (false) even on the
+        // error path — the same save/restore contract as lower_mask.
+        assert!(!ctx.target_local, "target_local must be restored even on error");
+    }
 }
