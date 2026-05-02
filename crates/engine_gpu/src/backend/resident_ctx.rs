@@ -59,25 +59,11 @@ pub struct ResidentPathContext {
     pub pingpong_ctx: engine_gpu_rules::pingpong_context::PingPongContext,
     pub pool:         engine_gpu_rules::pool::Pool,
 
-    // Lazy-initialised emitted kernels. Each is built on first use via
-    // `<KernelTy>::new(&device)` and reused for the rest of the batch.
-    // Kernel set is the CG-emitted SCHEDULE — see `engine_gpu_rules::KernelId`.
-    pub mask_hold_kernel:                Option<engine_gpu_rules::mask_Hold::MaskHoldKernel>,
-    pub mask_move_toward_kernel:         Option<engine_gpu_rules::mask_MoveToward::MaskMoveTowardKernel>,
-    pub fused_mask_flee_kernel:          Option<engine_gpu_rules::fused_mask_Flee::FusedMaskFleeKernel>,
-    pub fold_engaged_with_kernel:        Option<engine_gpu_rules::fold_engaged_with::FoldEngagedWithKernel>,
-    pub fold_threat_level_kernel:        Option<engine_gpu_rules::fold_threat_level::FoldThreatLevelKernel>,
-    pub fold_kin_fear_kernel:            Option<engine_gpu_rules::fold_kin_fear::FoldKinFearKernel>,
-    pub fold_my_enemies_kernel:          Option<engine_gpu_rules::fold_my_enemies::FoldMyEnemiesKernel>,
-    pub fold_pack_focus_kernel:          Option<engine_gpu_rules::fold_pack_focus::FoldPackFocusKernel>,
-    pub fold_rally_boost_kernel:         Option<engine_gpu_rules::fold_rally_boost::FoldRallyBoostKernel>,
-    pub fold_memory_kernel:              Option<engine_gpu_rules::fold_memory::FoldMemoryKernel>,
-    pub fused_spatial_build_hash_kernel: Option<engine_gpu_rules::fused_spatial_build_hash::FusedSpatialBuildHashKernel>,
-    pub upload_sim_cfg_kernel:           Option<engine_gpu_rules::upload_sim_cfg::UploadSimCfgKernel>,
-    pub pack_agents_kernel:              Option<engine_gpu_rules::pack_agents::PackAgentsKernel>,
-    pub seed_indirect_0_kernel:          Option<engine_gpu_rules::seed_indirect_0::SeedIndirect0Kernel>,
-    pub unpack_agents_kernel:            Option<engine_gpu_rules::unpack_agents::UnpackAgentsKernel>,
-    pub kick_snapshot_kernel:            Option<engine_gpu_rules::kick_snapshot::KickSnapshotKernel>,
+    /// Lazy-initialised kernel cache — one slot per emitted kernel.
+    /// Synthesised by `dsl_compiler` (see
+    /// `engine_gpu_rules::dispatch::KernelCache`); fields are added
+    /// automatically as new kernels lower from the DSL.
+    pub kernel_cache: engine_gpu_rules::dispatch::KernelCache,
 
     /// Placeholder scratch buffers — one distinct buffer per
     /// `TransientHandles` field. The dispatch path uses these as
@@ -170,22 +156,7 @@ impl ResidentPathContext {
             path_ctx,
             pingpong_ctx,
             pool,
-            mask_hold_kernel:                None,
-            mask_move_toward_kernel:         None,
-            fused_mask_flee_kernel:          None,
-            fold_engaged_with_kernel:        None,
-            fold_threat_level_kernel:        None,
-            fold_kin_fear_kernel:            None,
-            fold_my_enemies_kernel:          None,
-            fold_pack_focus_kernel:          None,
-            fold_rally_boost_kernel:         None,
-            fold_memory_kernel:              None,
-            fused_spatial_build_hash_kernel: None,
-            upload_sim_cfg_kernel:           None,
-            pack_agents_kernel:              None,
-            seed_indirect_0_kernel:          None,
-            unpack_agents_kernel:            None,
-            kick_snapshot_kernel:            None,
+            kernel_cache: engine_gpu_rules::dispatch::KernelCache::default(),
             transient_placeholders: TransientPlaceholders::new(device),
         }
     }

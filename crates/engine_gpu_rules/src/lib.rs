@@ -46,6 +46,7 @@ pub mod transient_handles;
 pub mod pingpong_context;
 pub mod pool;
 pub mod schedule;
+pub mod dispatch;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum KernelId {

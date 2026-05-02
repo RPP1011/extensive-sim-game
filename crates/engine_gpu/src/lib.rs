@@ -725,12 +725,8 @@ impl GpuBackend {
     ) -> Result<(), ()> {
         use engine_gpu_rules::binding_sources::BindingSources;
         use engine_gpu_rules::external_buffers::ExternalBuffers;
-        use engine_gpu_rules::schedule::DispatchOp;
         use engine_gpu_rules::transient_handles::TransientHandles;
-        use engine_gpu_rules::{Kernel as _, KernelId};
-        use wgpu::util::DeviceExt as _;
 
-        let agent_cap = state.agent_cap();
         let agents_buf = self
             .resident
             .resident_agents_buf
@@ -743,16 +739,11 @@ impl GpuBackend {
             .expect("sim_cfg_buf ensured by ensure_resident_init");
 
         // Build transient/external aggregates ONCE per dispatch call.
-        // Every emitted kernel today is a no-op WGSL stub, so the
-        // binding values don't matter for behaviour, only for BGL
-        // type-check survival. The per-tick scratch allocation that
-        // T16 hoists isn't here yet, so each transient field points
-        // at a distinct 256-byte placeholder owned by
-        // `ResidentPathContext::transient_placeholders` — using a
-        // single shared placeholder triggers wgpu's
-        // "STORAGE_READ_ONLY/READ_WRITE conflicting usage" check
-        // when one kernel binds the same buffer in both rw and ro
-        // slots at the same dispatch.
+        // Each transient field points at a distinct 256-byte placeholder
+        // owned by `ResidentPathContext::transient_placeholders` — using
+        // a single shared placeholder triggers wgpu's
+        // "STORAGE_READ_ONLY/READ_WRITE conflicting usage" check when
+        // one kernel binds the same buffer in both rw and ro slots.
         let pl = &self.resident.transient_placeholders;
         let transient = TransientHandles {
             mask_bitmaps:                &pl.mask_bitmaps,
@@ -783,71 +774,18 @@ impl GpuBackend {
             external:  &external,
         };
 
-        macro_rules! dispatch_kernel {
-            ($field:ident, $kernel_ty:path, $label:expr) => {{
-                let kernel = self.resident.$field
-                    .get_or_insert_with(|| <$kernel_ty>::new(&self.device));
-                let cfg = kernel.build_cfg(state);
-                let cfg_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some($label),
-                    contents: bytemuck::cast_slice(&[cfg]),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
-                let bindings = kernel.bind(&sources, &cfg_buf);
-                kernel.record(&self.device, encoder, &bindings, agent_cap);
-            }};
-        }
-
-        match op {
-            DispatchOp::Kernel(KernelId::MaskHold) =>
-                dispatch_kernel!(mask_hold_kernel, engine_gpu_rules::mask_Hold::MaskHoldKernel, "engine_gpu_rules::mask_Hold::cfg"),
-            DispatchOp::Kernel(KernelId::MaskMoveToward) =>
-                dispatch_kernel!(mask_move_toward_kernel, engine_gpu_rules::mask_MoveToward::MaskMoveTowardKernel, "engine_gpu_rules::mask_MoveToward::cfg"),
-            DispatchOp::Kernel(KernelId::FusedMaskFlee) =>
-                dispatch_kernel!(fused_mask_flee_kernel, engine_gpu_rules::fused_mask_Flee::FusedMaskFleeKernel, "engine_gpu_rules::fused_mask_Flee::cfg"),
-            DispatchOp::Kernel(KernelId::FusedSpatialBuildHash) =>
-                dispatch_kernel!(fused_spatial_build_hash_kernel, engine_gpu_rules::fused_spatial_build_hash::FusedSpatialBuildHashKernel, "engine_gpu_rules::fused_spatial_build_hash::cfg"),
-            DispatchOp::Kernel(KernelId::UploadSimCfg) =>
-                dispatch_kernel!(upload_sim_cfg_kernel, engine_gpu_rules::upload_sim_cfg::UploadSimCfgKernel, "engine_gpu_rules::upload_sim_cfg::cfg"),
-            DispatchOp::Kernel(KernelId::PackAgents) =>
-                dispatch_kernel!(pack_agents_kernel, engine_gpu_rules::pack_agents::PackAgentsKernel, "engine_gpu_rules::pack_agents::cfg"),
-            DispatchOp::Kernel(KernelId::UnpackAgents) =>
-                dispatch_kernel!(unpack_agents_kernel, engine_gpu_rules::unpack_agents::UnpackAgentsKernel, "engine_gpu_rules::unpack_agents::cfg"),
-            DispatchOp::Kernel(KernelId::KickSnapshot) =>
-                dispatch_kernel!(kick_snapshot_kernel, engine_gpu_rules::kick_snapshot::KickSnapshotKernel, "engine_gpu_rules::kick_snapshot::cfg"),
-            DispatchOp::Kernel(KernelId::FoldEngagedWith) =>
-                dispatch_kernel!(fold_engaged_with_kernel, engine_gpu_rules::fold_engaged_with::FoldEngagedWithKernel, "engine_gpu_rules::fold_engaged_with::cfg"),
-            DispatchOp::Kernel(KernelId::FoldThreatLevel) =>
-                dispatch_kernel!(fold_threat_level_kernel, engine_gpu_rules::fold_threat_level::FoldThreatLevelKernel, "engine_gpu_rules::fold_threat_level::cfg"),
-            DispatchOp::Kernel(KernelId::FoldKinFear) =>
-                dispatch_kernel!(fold_kin_fear_kernel, engine_gpu_rules::fold_kin_fear::FoldKinFearKernel, "engine_gpu_rules::fold_kin_fear::cfg"),
-            DispatchOp::Kernel(KernelId::FoldMyEnemies) =>
-                dispatch_kernel!(fold_my_enemies_kernel, engine_gpu_rules::fold_my_enemies::FoldMyEnemiesKernel, "engine_gpu_rules::fold_my_enemies::cfg"),
-            DispatchOp::Kernel(KernelId::FoldPackFocus) =>
-                dispatch_kernel!(fold_pack_focus_kernel, engine_gpu_rules::fold_pack_focus::FoldPackFocusKernel, "engine_gpu_rules::fold_pack_focus::cfg"),
-            DispatchOp::Kernel(KernelId::FoldRallyBoost) =>
-                dispatch_kernel!(fold_rally_boost_kernel, engine_gpu_rules::fold_rally_boost::FoldRallyBoostKernel, "engine_gpu_rules::fold_rally_boost::cfg"),
-            DispatchOp::Kernel(KernelId::FoldMemory) =>
-                dispatch_kernel!(fold_memory_kernel, engine_gpu_rules::fold_memory::FoldMemoryKernel, "engine_gpu_rules::fold_memory::cfg"),
-
-            DispatchOp::Kernel(KernelId::SeedIndirect0) =>
-                dispatch_kernel!(seed_indirect_0_kernel, engine_gpu_rules::seed_indirect_0::SeedIndirect0Kernel, "engine_gpu_rules::seed_indirect_0::cfg"),
-
-            // No-runtime-panic guarantee (P10): every variant the
-            // SCHEDULE actually references is matched explicitly above.
-            // Reaching these would be an emitter regression caught at
-            // compile-time on the closed `KernelId` enum, well before
-            // any binary ships.
-            DispatchOp::FixedPoint { kernel: other, .. } => {
-                unreachable!("FixedPoint {other:?} has no dispatch arm")
-            }
-            DispatchOp::Indirect { kernel: other, .. } => {
-                unreachable!("Indirect {other:?} has no dispatch arm")
-            }
-            DispatchOp::GatedBy { kernel: other, .. } => {
-                unreachable!("GatedBy {other:?} has no dispatch arm")
-            }
-        }
+        // Single-call dispatch — the per-KernelId match arms are
+        // synthesised in `engine_gpu_rules::dispatch::dispatch_by_id` so
+        // the dispatch table moves in lockstep with `KernelId`. New
+        // kernels appear here automatically on regen.
+        engine_gpu_rules::dispatch::dispatch_by_id(
+            op,
+            &mut self.resident.kernel_cache,
+            &sources,
+            encoder,
+            &self.device,
+            state,
+        );
         Ok(())
     }
 

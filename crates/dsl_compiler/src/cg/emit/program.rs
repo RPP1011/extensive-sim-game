@@ -270,6 +270,10 @@ pub fn emit_cg_program(
         "schedule.rs".to_string(),
         super::cross_cutting::synthesize_schedule(schedule, prog),
     );
+    rust_files.insert(
+        "dispatch.rs".to_string(),
+        super::cross_cutting::synthesize_dispatch(&kernel_index),
+    );
 
     Ok(EmittedArtifacts {
         wgsl_files,
@@ -1027,6 +1031,7 @@ pub fn synthesize_lib_rs(kernel_index: &[String]) -> String {
     out.push_str("pub mod pingpong_context;\n");
     out.push_str("pub mod pool;\n");
     out.push_str("pub mod schedule;\n");
+    out.push_str("pub mod dispatch;\n");
     out.push('\n');
 
     // KernelId enum.
@@ -1295,10 +1300,11 @@ mod tests {
         let schedule = ComputeSchedule { stages: vec![] };
         let artifacts = emit_cg_program(&schedule, &prog).expect("empty schedule must succeed");
         assert!(artifacts.wgsl_files.is_empty(), "wgsl: {:?}", artifacts.wgsl_files);
-        // `lib.rs` + 7 cross-cutting modules = 8 entries, no per-kernel
-        // files.
+        // `lib.rs` + 8 cross-cutting modules = 9 entries, no per-kernel
+        // files. (Task C: dispatch.rs joins the cross-cutting set.)
         let mut expected: Vec<String> = vec![
             "binding_sources.rs",
+            "dispatch.rs",
             "external_buffers.rs",
             "lib.rs",
             "pingpong_context.rs",
@@ -1331,6 +1337,7 @@ mod tests {
             "pingpong_context",
             "pool",
             "schedule",
+            "dispatch",
         ] {
             assert!(
                 lib.contains(&format!("pub mod {cc};")),
@@ -1353,9 +1360,9 @@ mod tests {
         let artifacts = emit_cg_program(&schedule, &prog).expect("single split must succeed");
 
         assert_eq!(artifacts.wgsl_files.len(), 1);
-        // One per-kernel file + the synthesized `lib.rs` + 7
-        // cross-cutting modules (Task 5.4).
-        assert_eq!(artifacts.rust_files.len(), 1 + 1 + 7);
+        // One per-kernel file + the synthesized `lib.rs` + 8
+        // cross-cutting modules (Task 5.4 + Task C dispatch.rs).
+        assert_eq!(artifacts.rust_files.len(), 1 + 1 + 8);
         assert!(artifacts.rust_files.contains_key("lib.rs"));
         assert_eq!(artifacts.kernel_index.len(), 1);
 
@@ -1420,9 +1427,9 @@ mod tests {
         };
         let artifacts = emit_cg_program(&schedule, &prog).expect("multi-stage emit");
         assert_eq!(artifacts.wgsl_files.len(), 2);
-        // Two per-kernel files + the synthesized `lib.rs` + 7
-        // cross-cutting modules (Task 5.4).
-        assert_eq!(artifacts.rust_files.len(), 2 + 1 + 7);
+        // Two per-kernel files + the synthesized `lib.rs` + 8
+        // cross-cutting modules (Task 5.4 + Task C dispatch.rs).
+        assert_eq!(artifacts.rust_files.len(), 2 + 1 + 8);
         assert!(artifacts.rust_files.contains_key("lib.rs"));
         assert_eq!(artifacts.kernel_index.len(), 2);
 
@@ -1592,12 +1599,12 @@ mod tests {
             artifacts.kernel_index.len(),
             "one wgsl file per kernel"
         );
-        // Per-kernel rust files + the synthesized `lib.rs` + 7
-        // cross-cutting modules (Task 5.4).
+        // Per-kernel rust files + the synthesized `lib.rs` + 8
+        // cross-cutting modules (Task 5.4 + Task C dispatch.rs).
         assert_eq!(
             artifacts.rust_files.len(),
-            artifacts.kernel_index.len() + 1 + 7,
-            "one rust file per kernel + lib.rs + 7 cross-cutting modules"
+            artifacts.kernel_index.len() + 1 + 8,
+            "one rust file per kernel + lib.rs + 8 cross-cutting modules"
         );
         assert!(artifacts.rust_files.contains_key("lib.rs"), "lib.rs missing");
         for cc in [
@@ -1608,6 +1615,7 @@ mod tests {
             "pingpong_context.rs",
             "pool.rs",
             "schedule.rs",
+            "dispatch.rs",
         ] {
             assert!(
                 artifacts.rust_files.contains_key(cc),
