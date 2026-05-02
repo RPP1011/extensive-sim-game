@@ -28,6 +28,7 @@
 
 pub mod driver;
 pub mod error;
+pub mod event_binding;
 pub mod expr;
 pub mod mask;
 pub mod physics;

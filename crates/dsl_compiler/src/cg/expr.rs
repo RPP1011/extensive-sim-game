@@ -636,9 +636,15 @@ pub enum CgExpr {
     /// field_offset)`. Today every kind shares one ring with stride 10
     /// (2 header + 8 payload, sized for `AgentMoved` / `AgentFled`);
     /// future per-kind ring fanout returns per-kind buffer + stride
-    /// without any IR shape change. The `field_index` is the field's
-    /// 0-based word offset within the event's payload (NOT including
-    /// the 2-word header).
+    /// without any IR shape change. The `word_offset_in_payload` is
+    /// the field's 0-based u32-word offset within the event's payload
+    /// (NOT including the 2-word header). For an event like
+    /// `event Foo { a: Vec3, b: AgentId }`, the AgentId's
+    /// `word_offset_in_payload` is `3` (Vec3 occupies 3 u32 words),
+    /// not `1` — the value is a *word offset*, not a logical field
+    /// index. Mirrors the source-of-truth field name on
+    /// [`super::program::FieldLayout::word_offset_in_payload`] so the
+    /// IR carries the same vocabulary the layout schema uses.
     ///
     /// Lowering only constructs this variant inside
     /// [`super::lower::physics::lower_one_handler`] (and the analogous
@@ -648,7 +654,7 @@ pub enum CgExpr {
     /// [`super::well_formed::CgError::EventFieldInNonPerEventBody`].
     EventField {
         event_kind: EventKindId,
-        field_index: u32,
+        word_offset_in_payload: u32,
         ty: CgTy,
     },
 }
@@ -878,12 +884,12 @@ fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::R
         CgExpr::ReadLocal { local, ty } => write!(out, "(read_local {} {})", local, ty),
         CgExpr::EventField {
             event_kind,
-            field_index,
+            word_offset_in_payload,
             ty,
         } => write!(
             out,
-            "(event_field event#{} field#{} {})",
-            event_kind.0, field_index, ty
+            "(event_field event#{} word_off#{} {})",
+            event_kind.0, word_offset_in_payload, ty
         ),
     }
 }
@@ -1253,8 +1259,9 @@ pub fn type_check(
         // EventField carries its own claimed type; the lowering pins
         // this from the event's `FieldLayout::ty`. The well-formed pass
         // separately verifies the schema entry exists for `(event_kind,
-        // field_index)`, so this arm just trusts the claimed type — a
-        // fabricated mismatch is a builder defect, not a typing one.
+        // word_offset_in_payload)`, so this arm just trusts the
+        // claimed type — a fabricated mismatch is a builder defect,
+        // not a typing one.
         CgExpr::EventField { ty, .. } => Ok(*ty),
     }
 }

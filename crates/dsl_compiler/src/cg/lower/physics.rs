@@ -136,8 +136,7 @@ use dsl_ast::ir::{
 };
 
 use crate::cg::dispatch::DispatchShape;
-use crate::cg::expr::CgExpr;
-use crate::cg::op::{ComputeOpKind, EventKindId, OpId, PhysicsRuleId};
+use crate::cg::op::{ComputeOpKind, OpId, PhysicsRuleId};
 use crate::cg::stmt::{CgMatchArm, CgStmt, CgStmtId, CgStmtList, MatchArmBinding};
 
 use super::error::LoweringError;
@@ -298,8 +297,8 @@ fn lower_one_handler(
     // resolves bare-local reads through `ctx.local_ids` + `ctx.local_tys`
     // — so we make each binder a real `LocalId` whose value comes
     // from a typed `CgExpr::EventField` keyed on the event's
-    // `field_index` + `field_ty` schema. After this prelude the
-    // existing body lowering walks the user-authored statements
+    // `word_offset_in_payload` + `field_ty` schema. After this prelude
+    // the existing body lowering walks the user-authored statements
     // unchanged and every read of `c`/`t`/`a` resolves cleanly.
     //
     // Schema lookup goes through `ctx.event_layouts[on_event]`. A
@@ -307,8 +306,8 @@ fn lower_one_handler(
     // missing field within the layout (e.g. the binder named a field
     // the event doesn't declare) surfaces as
     // `UnregisteredEventField`.
-    let mut prelude_stmt_ids = synthesize_pattern_binding_lets(
-        rule_id,
+    let mut prelude_stmt_ids = super::event_binding::synthesize_pattern_binding_lets(
+        super::error::PatternBindingSubject::Physics(rule_id),
         resolution.event_kind,
         handler.pattern.bindings(),
         ctx,
@@ -355,159 +354,6 @@ fn lower_one_handler(
     // [`crate::cg::op::ComputeOp::record_read`] post-construction.
 
     Ok(op_id)
-}
-
-/// Walk every event-pattern binder on the handler's `on <Event> { ...
-/// }` head, allocate a fresh [`crate::cg::stmt::LocalId`] per binder,
-/// resolve the binder's typed `(field_index, ty)` against the
-/// driver-supplied event-payload layout
-/// ([`super::expr::LoweringCtx::event_layouts`]), and synthesize one
-/// `CgStmt::Let { local, value: CgExpr::EventField{...}, ty }`
-/// statement per binder. Returns the synthesised stmt ids in
-/// declaration order.
-///
-/// The synthesised lets establish:
-/// - `ctx.local_ids[binder.value.local_ref] = LocalId(N)` — so every
-///   subsequent `IrExpr::Local(local_ref, _)` read inside the body
-///   resolves through `lower_bare_local` to `CgExpr::ReadLocal`.
-/// - `ctx.local_tys[LocalId(N)] = field_layout.ty` — so the read-side
-///   resolution can reconstruct the typed `CgExpr::ReadLocal { local,
-///   ty }` without re-walking the schema.
-///
-/// The Let value-side is `CgExpr::EventField { event_kind, field_index,
-/// ty }`, which at WGSL emit time becomes a schema-driven
-/// `event_ring[event_idx * RECORD_STRIDE + HEADER + FIELD_OFFSET]`
-/// access — see `lower_cg_expr_to_wgsl`'s `EventField` arm.
-///
-/// Today only the shorthand `IrPattern::Bind { name, local }` shape
-/// is supported (the only shape today's DSL produces); nested
-/// patterns surface as
-/// [`LoweringError::UnsupportedEventPatternBinding`].
-fn synthesize_pattern_binding_lets(
-    rule_id: PhysicsRuleId,
-    event_kind: EventKindId,
-    bindings: &[IrPatternBinding],
-    ctx: &mut LoweringCtx<'_>,
-) -> Result<Vec<CgStmtId>, LoweringError> {
-    if bindings.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // Snapshot the layout reference up front. Holding a borrow of
-    // `ctx.event_layouts` while mutating other ctx fields would
-    // double-borrow; clone the field map (small, ≤8 fields per
-    // event today) into a local owned table first.
-    let layout_fields = match ctx.event_layouts.get(&event_kind) {
-        Some(l) => l.fields.clone(),
-        None => {
-            // No layout registered for this kind. Surface a typed
-            // diagnostic instead of constructing an `EventField` whose
-            // schema lookup would fail at WGSL emit time.
-            return Err(LoweringError::UnregisteredEventKindLayout {
-                subject: super::error::PatternBindingSubject::Physics(rule_id),
-                event: event_kind,
-                span: bindings.first().map(|b| b.span).unwrap_or(Span::dummy()),
-            });
-        }
-    };
-
-    let mut stmt_ids = Vec::with_capacity(bindings.len());
-    for binding in bindings {
-        let (binder_local, _binder_name) = match &binding.value {
-            IrPattern::Bind { name, local } => (*local, name.clone()),
-            IrPattern::Struct { .. } => {
-                return Err(LoweringError::UnsupportedEventPatternBinding {
-                    subject: super::error::PatternBindingSubject::Physics(rule_id),
-                    field_name: binding.field.clone(),
-                    pattern_label: "Struct",
-                    span: binding.span,
-                });
-            }
-            IrPattern::Ctor { .. } => {
-                return Err(LoweringError::UnsupportedEventPatternBinding {
-                    subject: super::error::PatternBindingSubject::Physics(rule_id),
-                    field_name: binding.field.clone(),
-                    pattern_label: "Ctor",
-                    span: binding.span,
-                });
-            }
-            IrPattern::Expr(_) => {
-                return Err(LoweringError::UnsupportedEventPatternBinding {
-                    subject: super::error::PatternBindingSubject::Physics(rule_id),
-                    field_name: binding.field.clone(),
-                    pattern_label: "Expr",
-                    span: binding.span,
-                });
-            }
-            IrPattern::Wildcard => {
-                // Wildcards bind nothing — skip without synthesising
-                // a Let. The body cannot reference the field through a
-                // wildcard.
-                continue;
-            }
-        };
-
-        // Resolve the field's layout entry.
-        let field_layout = layout_fields.get(&binding.field).copied().ok_or_else(|| {
-            LoweringError::UnregisteredEventFieldLayout {
-                subject: super::error::PatternBindingSubject::Physics(rule_id),
-                event: event_kind,
-                field_name: binding.field.clone(),
-                span: binding.span,
-            }
-        })?;
-
-        // Allocate a fresh LocalId for the binder. Mirrors `lower_let`'s
-        // allocation strategy: pick an id past every existing one so
-        // subsequent allocations never collide.
-        let local_id = match ctx.local_ids.get(&binder_local).copied() {
-            Some(id) => id,
-            None => ctx.allocate_local(binder_local),
-        };
-
-        // Build the typed value-side expression. The well-formed pass
-        // re-checks the schema (`(event_kind, field_index)` exists +
-        // claimed type matches the layout's type) defensively at
-        // program level, so a synthetic IR with a mismatched ty still
-        // gets caught.
-        let value_expr = CgExpr::EventField {
-            event_kind,
-            field_index: field_layout.word_offset_in_payload,
-            ty: field_layout.ty,
-        };
-        let value_id = ctx
-            .builder
-            .add_expr(value_expr)
-            .map_err(|e| LoweringError::BuilderRejected {
-                error: e,
-                span: binding.span,
-            })?;
-        // Type-check is a no-op for `EventField` (the type is
-        // self-pinned), but we run it through the standard helper for
-        // symmetry with other expression pushes.
-        super::expr::typecheck_node(ctx, value_id, binding.span)?;
-
-        // Record the binder's CG type so bare-local reads
-        // (`IrExpr::Local(local_ref, _)`) inside the body resolve via
-        // `ctx.local_tys` to `CgExpr::ReadLocal { local, ty }`.
-        ctx.record_local_ty(local_id, field_layout.ty);
-
-        let stmt = CgStmt::Let {
-            local: local_id,
-            value: value_id,
-            ty: field_layout.ty,
-        };
-        let stmt_id = ctx
-            .builder
-            .add_stmt(stmt)
-            .map_err(|e| LoweringError::BuilderRejected {
-                error: e,
-                span: binding.span,
-            })?;
-        stmt_ids.push(stmt_id);
-    }
-
-    Ok(stmt_ids)
 }
 
 // ---------------------------------------------------------------------------
@@ -2356,16 +2202,16 @@ mod tests {
             .expect("expected a CgStmt::Let synthesized for the binder");
 
         // The Let's value-side is a CgExpr::EventField with the right
-        // (event_kind, field_index, ty).
+        // (event_kind, word_offset_in_payload, ty).
         let value_expr = &prog.exprs[let_stmt.1 .0 as usize];
         match value_expr {
             CgExpr::EventField {
                 event_kind,
-                field_index,
+                word_offset_in_payload,
                 ty,
             } => {
                 assert_eq!(*event_kind, EventKindId(7));
-                assert_eq!(*field_index, 1, "target is the second field (index 1)");
+                assert_eq!(*word_offset_in_payload, 1, "target is at word offset 1");
                 assert_eq!(*ty, CgTy::AgentId);
             }
             other => panic!("expected CgExpr::EventField, got {other:?}"),

@@ -237,7 +237,7 @@ pub enum CgError {
         kind_label: &'static str,
         shape_label: &'static str,
         event_kind: super::op::EventKindId,
-        field_index: u32,
+        word_offset_in_payload: u32,
     },
 }
 
@@ -382,11 +382,11 @@ impl fmt::Display for CgError {
                 kind_label,
                 shape_label,
                 event_kind,
-                field_index,
+                word_offset_in_payload,
             } => write!(
                 f,
-                "op#{}: EventField(event#{}, field#{}) in {} body with dispatch shape {} — only per_event dispatch binds `event_idx`",
-                op.0, event_kind.0, field_index, kind_label, shape_label
+                "op#{}: EventField(event#{}, word_off#{}) in {} body with dispatch shape {} — only per_event dispatch binds `event_idx`",
+                op.0, event_kind.0, word_offset_in_payload, kind_label, shape_label
             ),
         }
     }
@@ -1579,7 +1579,7 @@ fn event_field_scope_walk_expr(
     match node {
         CgExpr::EventField {
             event_kind,
-            field_index,
+            word_offset_in_payload,
             ..
         } => {
             errors.push(CgError::EventFieldInNonPerEventBody {
@@ -1587,7 +1587,7 @@ fn event_field_scope_walk_expr(
                 kind_label,
                 shape_label,
                 event_kind: *event_kind,
-                field_index: *field_index,
+                word_offset_in_payload: *word_offset_in_payload,
             });
         }
         CgExpr::Binary { lhs, rhs, .. } => {
@@ -3495,7 +3495,7 @@ mod tests {
         let event_field_id = b
             .add_expr(CgExpr::EventField {
                 event_kind: EventKindId(7),
-                field_index: 1,
+                word_offset_in_payload: 1,
                 ty: CgTy::AgentId,
             })
             .unwrap();
@@ -3530,7 +3530,7 @@ mod tests {
                 CgError::EventFieldInNonPerEventBody {
                     op: OpId(0),
                     event_kind: EventKindId(7),
-                    field_index: 1,
+                    word_offset_in_payload: 1,
                     ..
                 }
             )

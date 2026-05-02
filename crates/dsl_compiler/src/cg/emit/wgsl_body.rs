@@ -298,7 +298,7 @@ pub enum EmitError {
     /// `EventField` branch.
     EventFieldUnsupportedType {
         kind: EventKindId,
-        field_index: u32,
+        word_offset_in_payload: u32,
         got: CgTy,
     },
 }
@@ -331,12 +331,12 @@ impl fmt::Display for EmitError {
             ),
             EmitError::EventFieldUnsupportedType {
                 kind,
-                field_index,
+                word_offset_in_payload,
                 got,
             } => write!(
                 f,
-                "EventField(event#{}, field#{}) has no WGSL emit shape for type {}",
-                kind.0, field_index, got
+                "EventField(event#{}, word_off#{}) has no WGSL emit shape for type {}",
+                kind.0, word_offset_in_payload, got
             ),
         }
     }
@@ -598,7 +598,7 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
         // forward-compat contract.
         CgExpr::EventField {
             event_kind,
-            field_index,
+            word_offset_in_payload,
             ty,
         } => {
             let layout = ctx.prog.event_layouts.get(&event_kind.0).ok_or(
@@ -606,7 +606,7 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                     kind: *event_kind,
                 },
             )?;
-            let total_offset = layout.header_word_count + field_index;
+            let total_offset = layout.header_word_count + word_offset_in_payload;
             let buf = layout.buffer_name.as_str();
             let stride = layout.record_stride_u32;
             Ok(match ty {
@@ -636,7 +636,7 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                 CgTy::ViewKey { .. } => {
                     return Err(EmitError::EventFieldUnsupportedType {
                         kind: *event_kind,
-                        field_index: *field_index,
+                        word_offset_in_payload: *word_offset_in_payload,
                         got: *ty,
                     });
                 }
@@ -2040,7 +2040,7 @@ mod tests {
             &mut prog,
             CgExpr::EventField {
                 event_kind: EventKindId(7),
-                field_index: 1,
+                word_offset_in_payload: 1,
                 ty: CgTy::AgentId,
             },
         );
@@ -2080,7 +2080,7 @@ mod tests {
             &mut prog,
             CgExpr::EventField {
                 event_kind: EventKindId(3),
-                field_index: 2,
+                word_offset_in_payload: 2,
                 ty: CgTy::F32,
             },
         );
@@ -2099,7 +2099,7 @@ mod tests {
             &mut prog,
             CgExpr::EventField {
                 event_kind: EventKindId(99),
-                field_index: 0,
+                word_offset_in_payload: 0,
                 ty: CgTy::AgentId,
             },
         );
@@ -2109,5 +2109,138 @@ mod tests {
             EmitError::UnregisteredEventKind { kind } => assert_eq!(kind, EventKindId(99)),
             other => panic!("expected UnregisteredEventKind, got {other:?}"),
         }
+    }
+
+    /// `Vec3F32`-typed `EventField` emits a 3-element `vec3<f32>(...)`
+    /// constructor with three independent `bitcast<f32>` reads at
+    /// `total_offset`, `total_offset+1`, `total_offset+2`. With
+    /// `header_word_count=2` and a Vec3F32 field at
+    /// `word_offset_in_payload=4` (stride=10), the first base is
+    /// `2 + 4 = 6`; the three accesses land at offsets `6`, `7`, `8`.
+    /// This is the most error-prone CgTy arm because the format
+    /// string carries `o2 = total_offset + 1` / `o3 = total_offset + 2`
+    /// arithmetic — locking the exact emitted form catches any future
+    /// drift in the offset arithmetic.
+    #[test]
+    fn event_field_emits_vec3f32_triple_bitcast() {
+        use crate::cg::program::{EventLayout, FieldLayout};
+        let mut prog = empty_prog();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "pos".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 4,
+                word_count: 3,
+                ty: CgTy::Vec3F32,
+            },
+        );
+        prog.event_layouts.insert(
+            5,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
+
+        let id = push_expr(
+            &mut prog,
+            CgExpr::EventField {
+                event_kind: EventKindId(5),
+                word_offset_in_payload: 4,
+                ty: CgTy::Vec3F32,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField Vec3F32 lowers");
+        assert_eq!(
+            wgsl,
+            "vec3<f32>(bitcast<f32>(event_ring[event_idx * 10u + 6u]), bitcast<f32>(event_ring[event_idx * 10u + 7u]), bitcast<f32>(event_ring[event_idx * 10u + 8u]))"
+        );
+    }
+
+    /// `Bool`-typed `EventField` emits a `(... != 0u)` predicate form.
+    /// The payload word is u32 on the GPU side; non-zero u32 reads as
+    /// `true`. With `header_word_count=2` and a Bool field at
+    /// `word_offset_in_payload=0` (stride=10), the read lands at offset
+    /// `2`, producing `(event_ring[event_idx * 10u + 2u] != 0u)`.
+    #[test]
+    fn event_field_emits_bool_predicate_form() {
+        use crate::cg::program::{EventLayout, FieldLayout};
+        let mut prog = empty_prog();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "flag".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 0,
+                word_count: 1,
+                ty: CgTy::Bool,
+            },
+        );
+        prog.event_layouts.insert(
+            6,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
+
+        let id = push_expr(
+            &mut prog,
+            CgExpr::EventField {
+                event_kind: EventKindId(6),
+                word_offset_in_payload: 0,
+                ty: CgTy::Bool,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField Bool lowers");
+        assert_eq!(wgsl, "(event_ring[event_idx * 10u + 2u] != 0u)");
+    }
+
+    /// `I32`-typed `EventField` emits a `bitcast<i32>` access. The
+    /// payload word is u32 on the GPU side; `bitcast<i32>` reinterprets
+    /// the bit pattern as the typed signed int — same shape
+    /// `pack_event` writes via `i32::to_ne_bytes`-style reinterpretation
+    /// on the CPU. With `header_word_count=2` and an I32 field at
+    /// `word_offset_in_payload=3` (stride=10), the read lands at offset
+    /// `5`.
+    #[test]
+    fn event_field_emits_i32_signed_cast() {
+        use crate::cg::program::{EventLayout, FieldLayout};
+        let mut prog = empty_prog();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "delta".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 3,
+                word_count: 1,
+                ty: CgTy::I32,
+            },
+        );
+        prog.event_layouts.insert(
+            8,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
+
+        let id = push_expr(
+            &mut prog,
+            CgExpr::EventField {
+                event_kind: EventKindId(8),
+                word_offset_in_payload: 3,
+                ty: CgTy::I32,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField I32 lowers");
+        assert_eq!(wgsl, "bitcast<i32>(event_ring[event_idx * 10u + 5u])");
     }
 }

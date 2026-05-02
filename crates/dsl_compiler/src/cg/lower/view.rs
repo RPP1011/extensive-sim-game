@@ -135,13 +135,11 @@
 //!   (Task 2.8 / driver-IR shape change).
 
 use dsl_ast::ir::{
-    DecayHint, FoldHandlerIR, IrPattern, IrPatternBinding, IrStmt, StorageHint, ViewBodyIR,
-    ViewIR, ViewKind,
+    DecayHint, FoldHandlerIR, IrStmt, StorageHint, ViewBodyIR, ViewIR, ViewKind,
 };
 
 use crate::cg::data_handle::{CgExprId, DataHandle, EventRingId, ViewId, ViewStorageSlot};
 use crate::cg::dispatch::DispatchShape;
-use crate::cg::expr::CgExpr;
 use crate::cg::op::{ComputeOpKind, EventKindId, OpId};
 use crate::cg::stmt::{CgStmt, CgStmtId, CgStmtList};
 
@@ -387,8 +385,12 @@ fn lower_one_handler(
     // CgExpr::EventField{..}, ty }` per binder, registers the
     // `LocalRef → LocalId` and `LocalId → CgTy` mappings on `ctx`,
     // and lets the body lowering walk unchanged.
-    let mut prelude_stmt_ids =
-        synthesize_pattern_binding_lets(view_id, resolution.event_kind, &handler.pattern.bindings, ctx)?;
+    let mut prelude_stmt_ids = super::event_binding::synthesize_pattern_binding_lets(
+        super::error::PatternBindingSubject::View(view_id),
+        resolution.event_kind,
+        &handler.pattern.bindings,
+        ctx,
+    )?;
 
     // Lower each statement in the handler body, then wrap the resulting
     // ids into a `CgStmtList`. The `lower_stmt` helper validates the
@@ -433,118 +435,6 @@ fn lower_one_handler(
     // [`crate::cg::op::ComputeOp::record_read`] post-construction.
 
     Ok(op_id)
-}
-
-/// Walk every event-pattern binder on the fold handler's `on <Event>`
-/// head, allocate a fresh [`crate::cg::stmt::LocalId`] per binder,
-/// resolve `(field_index, ty)` against the driver-supplied event-
-/// payload layout, and synthesize one `CgStmt::Let` per binder.
-/// Mirrors physics's `synthesize_pattern_binding_lets` — the only
-/// reason it isn't shared is that the two callers pass distinct
-/// subject ids (`PhysicsRuleId` vs `ViewId`) into diagnostics.
-fn synthesize_pattern_binding_lets(
-    view_id: ViewId,
-    event_kind: EventKindId,
-    bindings: &[IrPatternBinding],
-    ctx: &mut LoweringCtx<'_>,
-) -> Result<Vec<CgStmtId>, LoweringError> {
-    use super::error::PatternBindingSubject;
-
-    if bindings.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let layout_fields = match ctx.event_layouts.get(&event_kind) {
-        Some(l) => l.fields.clone(),
-        None => {
-            return Err(LoweringError::UnregisteredEventKindLayout {
-                subject: PatternBindingSubject::View(view_id),
-                event: event_kind,
-                span: bindings
-                    .first()
-                    .map(|b| b.span)
-                    .unwrap_or_else(dsl_ast::ast::Span::dummy),
-            });
-        }
-    };
-
-    let mut stmt_ids = Vec::with_capacity(bindings.len());
-    for binding in bindings {
-        let binder_local = match &binding.value {
-            IrPattern::Bind { name: _, local } => *local,
-            IrPattern::Struct { .. } => {
-                return Err(LoweringError::UnsupportedEventPatternBinding {
-                    subject: PatternBindingSubject::View(view_id),
-                    field_name: binding.field.clone(),
-                    pattern_label: "Struct",
-                    span: binding.span,
-                });
-            }
-            IrPattern::Ctor { .. } => {
-                return Err(LoweringError::UnsupportedEventPatternBinding {
-                    subject: PatternBindingSubject::View(view_id),
-                    field_name: binding.field.clone(),
-                    pattern_label: "Ctor",
-                    span: binding.span,
-                });
-            }
-            IrPattern::Expr(_) => {
-                return Err(LoweringError::UnsupportedEventPatternBinding {
-                    subject: PatternBindingSubject::View(view_id),
-                    field_name: binding.field.clone(),
-                    pattern_label: "Expr",
-                    span: binding.span,
-                });
-            }
-            IrPattern::Wildcard => continue,
-        };
-
-        let field_layout = layout_fields.get(&binding.field).copied().ok_or_else(|| {
-            LoweringError::UnregisteredEventFieldLayout {
-                subject: PatternBindingSubject::View(view_id),
-                event: event_kind,
-                field_name: binding.field.clone(),
-                span: binding.span,
-            }
-        })?;
-
-        let local_id = match ctx.local_ids.get(&binder_local).copied() {
-            Some(id) => id,
-            None => ctx.allocate_local(binder_local),
-        };
-
-        let value_expr = CgExpr::EventField {
-            event_kind,
-            field_index: field_layout.word_offset_in_payload,
-            ty: field_layout.ty,
-        };
-        let value_id = ctx
-            .builder
-            .add_expr(value_expr)
-            .map_err(|e| LoweringError::BuilderRejected {
-                error: e,
-                span: binding.span,
-            })?;
-        super::expr::typecheck_node(ctx, value_id, binding.span)?;
-
-        ctx.record_local_ty(local_id, field_layout.ty);
-
-        let stmt = CgStmt::Let {
-            local: local_id,
-            value: value_id,
-            ty: field_layout.ty,
-        };
-        let stmt_id = ctx
-            .builder
-            .add_stmt(stmt)
-            .map_err(|e| LoweringError::BuilderRejected {
-                error: e,
-                span: binding.span,
-            })?;
-        stmt_ids.push(stmt_id);
-    }
-
-    Ok(stmt_ids)
 }
 
 // ---------------------------------------------------------------------------
