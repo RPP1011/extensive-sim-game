@@ -30,7 +30,7 @@ pub struct KernelCache {
     pub physics_chronicle_rout: Option<crate::physics_chronicle_rout::PhysicsChronicleRoutKernel>,
     pub physics_chronicle_flee: Option<crate::physics_chronicle_flee::PhysicsChronicleFleeKernel>,
     pub physics_chronicle_rally: Option<crate::physics_chronicle_rally::PhysicsChronicleRallyKernel>,
-    pub fused_spatial_build_hash: Option<crate::fused_spatial_build_hash::FusedSpatialBuildHashKernel>,
+    pub fused_movement: Option<crate::fused_movement::FusedMovementKernel>,
     pub spatial_engagement_query: Option<crate::spatial_engagement_query::SpatialEngagementQueryKernel>,
     pub upload_sim_cfg: Option<crate::upload_sim_cfg::UploadSimCfgKernel>,
     pub pack_agents: Option<crate::pack_agents::PackAgentsKernel>,
@@ -266,11 +266,11 @@ pub fn dispatch_by_id(
             let bindings = kernel.bind(sources, &cfg_buf);
             kernel.record(device, encoder, &bindings, agent_cap);
         }
-        DispatchOp::Kernel(KernelId::FusedSpatialBuildHash) => {
-            let kernel = cache.fused_spatial_build_hash.get_or_insert_with(|| <crate::fused_spatial_build_hash::FusedSpatialBuildHashKernel as Kernel>::new(device));
+        DispatchOp::Kernel(KernelId::FusedMovement) => {
+            let kernel = cache.fused_movement.get_or_insert_with(|| <crate::fused_movement::FusedMovementKernel as Kernel>::new(device));
             let cfg = kernel.build_cfg(state);
             let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("crate::fused_spatial_build_hash::cfg"),
+                label: Some("crate::fused_movement::cfg"),
                 contents: bytemuck::cast_slice(&[cfg]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -574,11 +574,11 @@ pub fn dispatch_by_id(
             let bindings = kernel.bind(sources, &cfg_buf);
             kernel.record(device, encoder, &bindings, agent_cap);
         }
-        DispatchOp::Indirect { kernel: KernelId::FusedSpatialBuildHash, args_buf: _ } => {
-            let kernel = cache.fused_spatial_build_hash.get_or_insert_with(|| <crate::fused_spatial_build_hash::FusedSpatialBuildHashKernel as Kernel>::new(device));
+        DispatchOp::Indirect { kernel: KernelId::FusedMovement, args_buf: _ } => {
+            let kernel = cache.fused_movement.get_or_insert_with(|| <crate::fused_movement::FusedMovementKernel as Kernel>::new(device));
             let cfg = kernel.build_cfg(state);
             let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("crate::fused_spatial_build_hash::cfg"),
+                label: Some("crate::fused_movement::cfg"),
                 contents: bytemuck::cast_slice(&[cfg]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });

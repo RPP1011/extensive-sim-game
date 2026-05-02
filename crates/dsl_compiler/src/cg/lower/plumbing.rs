@@ -478,7 +478,7 @@ mod tests {
             .add_op(
                 ComputeOpKind::PhysicsRule {
                     rule: PhysicsRuleId(0),
-                    on_event: EventKindId(0),
+                    on_event: Some(EventKindId(0)),
                     body,
                     replayable: ReplayabilityFlag::Replayable,
                 },
@@ -530,7 +530,7 @@ mod tests {
             .add_op(
                 ComputeOpKind::PhysicsRule {
                     rule: PhysicsRuleId(0),
-                    on_event: EventKindId(0),
+                    on_event: Some(EventKindId(0)),
                     body,
                     replayable: ReplayabilityFlag::Replayable,
                 },
@@ -561,7 +561,7 @@ mod tests {
                 .add_op(
                     ComputeOpKind::PhysicsRule {
                         rule: PhysicsRuleId(0),
-                        on_event: EventKindId(0),
+                        on_event: Some(EventKindId(0)),
                         body,
                         replayable: ReplayabilityFlag::Replayable,
                     },
@@ -599,7 +599,7 @@ mod tests {
                 .add_op(
                     ComputeOpKind::PhysicsRule {
                         rule: PhysicsRuleId(0),
-                        on_event: EventKindId(0),
+                        on_event: Some(EventKindId(0)),
                         body,
                         replayable: ReplayabilityFlag::Replayable,
                     },
@@ -779,7 +779,7 @@ mod tests {
             .add_op(
                 ComputeOpKind::PhysicsRule {
                     rule: PhysicsRuleId(0),
-                    on_event: EventKindId(0),
+                    on_event: Some(EventKindId(0)),
                     body,
                     replayable: ReplayabilityFlag::Replayable,
                 },
@@ -828,7 +828,7 @@ mod tests {
             .add_op(
                 ComputeOpKind::PhysicsRule {
                     rule: PhysicsRuleId(0),
-                    on_event: EventKindId(0),
+                    on_event: Some(EventKindId(0)),
                     body,
                     replayable: ReplayabilityFlag::Replayable,
                 },

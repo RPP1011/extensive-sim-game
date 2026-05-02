@@ -444,7 +444,7 @@ fn cycle_gate_detects_event_ring_cycle() {
         .add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body: body_a,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -459,7 +459,7 @@ fn cycle_gate_detects_event_ring_cycle() {
         .add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(1),
-                on_event: EventKindId(1),
+                on_event: Some(EventKindId(1)),
                 body: body_b,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -536,7 +536,7 @@ fn cycle_gate_misses_event_ring_cycle_without_wiring() {
         .add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body: body_a,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -551,7 +551,7 @@ fn cycle_gate_misses_event_ring_cycle_without_wiring() {
         .add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(1),
-                on_event: EventKindId(1),
+                on_event: Some(EventKindId(1)),
                 body: body_b,
                 replayable: ReplayabilityFlag::Replayable,
             },

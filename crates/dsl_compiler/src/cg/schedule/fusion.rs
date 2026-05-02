@@ -1635,7 +1635,7 @@ mod tests {
             .add_op(
                 ComputeOpKind::PhysicsRule {
                     rule,
-                    on_event,
+                    on_event: Some(on_event),
                     body,
                     replayable,
                 },

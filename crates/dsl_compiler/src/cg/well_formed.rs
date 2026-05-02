@@ -448,18 +448,31 @@ fn kind_label(kind: &ComputeOpKind) -> &'static str {
 /// Allowed [`DispatchShapeLabel`]s for a given [`ComputeOpKind`].
 /// `MaskPredicate` accepts `PerAgent` (the dominant case) and `PerPair`
 /// (pair-masks driven by spatial neighborhoods). `ScoringArgmax` is
-/// `PerAgent` only. `PhysicsRule`/`ViewFold` are `PerEvent` only.
-/// `SpatialQuery`'s allowed shapes depend on the spatial-query kind:
-/// `BuildHash` is `PerAgent` (every agent is hashed); `KinQuery` /
-/// `EngagementQuery` are `PerAgent` (one query per agent — they write
-/// into the per-agent query-results scratch).
+/// `PerAgent` only. `PhysicsRule` accepts `PerEvent` for event-handler
+/// rules (`on_event = Some`) and `PerAgent` for per-agent sweeps
+/// (`on_event = None`, e.g. Movement; cooldown ticks; need decay).
+/// `ViewFold` is `PerEvent` only. `SpatialQuery`'s allowed shapes
+/// depend on the spatial-query kind: `BuildHash` is `PerAgent` (every
+/// agent is hashed); `KinQuery` / `EngagementQuery` are `PerAgent`
+/// (one query per agent — they write into the per-agent query-results
+/// scratch).
 fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel] {
     match kind {
         ComputeOpKind::MaskPredicate { .. } => {
             &[DispatchShapeLabel::PerAgent, DispatchShapeLabel::PerPair]
         }
         ComputeOpKind::ScoringArgmax { .. } => &[DispatchShapeLabel::PerAgent],
-        ComputeOpKind::PhysicsRule { .. } => &[DispatchShapeLabel::PerEvent],
+        // Two faces: event-handler dispatch when `on_event = Some(_)`,
+        // per-agent sweep dispatch when `on_event = None`. The
+        // shape-vs-on_event consistency check is a separate gate
+        // (a `Some(_)` rule with PerAgent shape, or a `None` rule with
+        // PerEvent shape, would pass this `&[..]` check but should
+        // surface as `KindShapeMismatch` — see `PhysicsRuleShapeMismatch`
+        // emit-time check, deferred until the second per-agent sweep
+        // arrives).
+        ComputeOpKind::PhysicsRule { .. } => {
+            &[DispatchShapeLabel::PerEvent, DispatchShapeLabel::PerAgent]
+        }
         ComputeOpKind::ViewFold { .. } => &[DispatchShapeLabel::PerEvent],
         ComputeOpKind::SpatialQuery { kind } => match kind {
             // BuildHash hashes every agent into the grid — per-agent
@@ -2060,7 +2073,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(7),
+                on_event: Some(EventKindId(7)),
                 body: physics_body,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -2167,7 +2180,7 @@ mod tests {
             id: OpId(0),
             kind: ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body: CgStmtListId(99),
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -2204,7 +2217,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -2384,7 +2397,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body: body_a,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -2397,7 +2410,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(1),
-                on_event: EventKindId(1),
+                on_event: Some(EventKindId(1)),
                 body: body_b,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -2509,7 +2522,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -2701,7 +2714,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -2795,7 +2808,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -3371,7 +3384,7 @@ mod tests {
             id: OpId(4),
             kind: ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body: body_list_id,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -3589,7 +3602,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body,
                 replayable: ReplayabilityFlag::NonReplayable,
             },
@@ -3649,7 +3662,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body,
                 replayable: ReplayabilityFlag::NonReplayable,
             },
@@ -3703,7 +3716,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body,
                 replayable: ReplayabilityFlag::NonReplayable,
             },

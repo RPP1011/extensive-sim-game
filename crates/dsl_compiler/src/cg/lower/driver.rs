@@ -99,7 +99,9 @@ use dsl_ast::ir::{
     PhysicsIR, ViewBodyIR, ViewIR, ViewKind,
 };
 
-use crate::cg::data_handle::{ConfigConstId, DataHandle, EventRingAccess, EventRingId, MaskId, ViewId};
+use crate::cg::data_handle::{
+    AgentFieldId, AgentRef, ConfigConstId, DataHandle, EventRingAccess, EventRingId, MaskId, ViewId,
+};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
 use crate::cg::expr::CgTy;
 use crate::cg::op::{
@@ -110,7 +112,7 @@ use crate::cg::program::{
     CgProgram, CgProgramBuilder, EventLayout, FieldDef, FieldLayout, MethodDef, NamespaceDef,
     NamespaceRegistry, WgslAccessForm,
 };
-use crate::cg::stmt::{CgStmt, CgStmtListId, VariantId};
+use crate::cg::stmt::{CgStmt, CgStmtList, CgStmtListId, VariantId};
 use crate::cg::well_formed::check_well_formed;
 
 use super::error::LoweringError;
@@ -182,6 +184,29 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     lower_all_views(comp, &event_rings, &mut ctx, &mut diagnostics);
     lower_all_physics(comp, &event_rings, &mut ctx, &mut diagnostics);
     lower_all_scoring(comp, &mut ctx, &mut diagnostics);
+
+    // -- Phase 2b: Movement synthesis (Phase 6 Task 3) ------------------
+    //
+    // Movement is a per-agent rule that consumes scoring's chosen
+    // action+target output and writes the agent's position. It is
+    // structurally a `PhysicsRule` op with `on_event = None`
+    // (PerAgent dispatch over the alive bitmap), distinct from the
+    // PerEvent physics rules `lower_all_physics` lowered above. The
+    // body is a hand-written WGSL fragment at emit time
+    // (`MOVEMENT_BODY` in cg/emit/kernel.rs); the op's reads/writes
+    // are recorded explicitly so the BGL synthesis sees the right
+    // bindings.
+    //
+    // The same shape generalizes to any future per-agent sweep
+    // (cooldown ticking, stun expiry, need decay, regen, …) — each
+    // becomes another `PhysicsRule { on_event: None }` op with its
+    // own body template + reads/writes signature.
+    if comp.scoring.is_empty() {
+        // No scoring → no scoring_output to consume → no Movement.
+        // (A pure-events test fixture would land here.)
+    } else if let Err(e) = synthesize_movement_op(&mut ctx) {
+        diagnostics.push(e);
+    }
 
     // -- Phase 3: spatial-query synthesis -------------------------------
     //
@@ -1136,6 +1161,119 @@ fn lower_all_scoring(
     }
 }
 
+/// Synthesize the Movement op: a per-agent
+/// [`ComputeOpKind::PhysicsRule`] (with `on_event = None`) that
+/// consumes scoring's chosen action+target output and updates each
+/// agent's position. The op carries an empty body; its WGSL emit is
+/// driven by the `MOVEMENT_BODY` template in `cg/emit/kernel.rs`,
+/// which reads from the structural buffer bindings derived from the
+/// op's `reads` / `writes` signature.
+///
+/// Allocates the next free [`PhysicsRuleId`] (one past the highest
+/// rule id allocated by `lower_all_physics`) and interns the rule
+/// name `"movement"` on the program's interner. Surfaces interner
+/// duplicate-name conflicts as
+/// [`LoweringError::BuilderRejected`].
+///
+/// Movement is `replayable` because the `AgentMoved` events it
+/// emits feed into the deterministic ring (the engagement_on_move
+/// physics rule and its descendants fold them into trace state).
+/// `AgentFled` shares the same ring; both are listed in
+/// `assets/sim/events.sim` as the canonical replayable surface.
+///
+/// # Phase 6 Task 3 contract
+///
+/// The op's `reads` set names every binding the WGSL body touches:
+/// - `ScoringOutput` (action + target lookup).
+/// - `AgentField { Pos, Self_ }` and `AgentField { Pos, Target(_) }`
+///   (self pos + target pos, the latter resolves through the
+///   structural placeholder until per-thread target resolution
+///   lands).
+/// - `AgentField { Alive, Self_ }` (dead-agent skip predicate).
+/// - `SimCfgBuffer` (read for tick + move_speed).
+///
+/// The `writes` set names:
+/// - `AgentField { Pos, Self_ }` (the per-agent position update).
+/// - `EventRing { ring: 0, kind: Append }` (AgentMoved /
+///   AgentFled emits land in the shared event ring).
+fn synthesize_movement_op(ctx: &mut LoweringCtx<'_>) -> Result<(), LoweringError> {
+    // Allocate the next PhysicsRuleId past whatever lower_all_physics
+    // already used. The interner's `physics_rules` map size is the
+    // high water mark — every PhysicsRuleId ever interned is keyed
+    // there.
+    let next_rule_id = PhysicsRuleId(
+        ctx.builder.program().interner.physics_rules.len() as u32,
+    );
+    ctx.builder
+        .intern_physics_rule_name(next_rule_id, "movement".to_string())
+        .map_err(|e| LoweringError::BuilderRejected {
+            error: e,
+            span: dsl_ast::ast::Span::dummy(),
+        })?;
+
+    // Empty body: the WGSL emit short-circuits PerAgent PhysicsRule
+    // to a hand-written `MOVEMENT_BODY` template, so no IR statements
+    // are required for emit fidelity. The op's `reads` / `writes`
+    // (recorded below via `record_read` / `record_write`) drive BGL
+    // synthesis.
+    let body = ctx
+        .builder
+        .add_stmt_list(CgStmtList::new(vec![]))
+        .map_err(|e| LoweringError::BuilderRejected {
+            error: e,
+            span: dsl_ast::ast::Span::dummy(),
+        })?;
+
+    let kind = ComputeOpKind::PhysicsRule {
+        rule: next_rule_id,
+        on_event: None,
+        body,
+        replayable: ReplayabilityFlag::Replayable,
+    };
+    let op_id = ctx
+        .builder
+        .add_op(kind, DispatchShape::PerAgent, dsl_ast::ast::Span::dummy())
+        .map_err(|e| LoweringError::BuilderRejected {
+            error: e,
+            span: dsl_ast::ast::Span::dummy(),
+        })?;
+
+    // Inject the structural reads + writes the WGSL body touches.
+    // The auto-walker can't see them (the body is empty) so this is
+    // the canonical seam — same shape as `wire_source_ring_reads`
+    // for PerEvent rules.
+    //
+    // **Runtime aliasing constraint** (Phase 6 Task 5 / 6 territory):
+    // every `AgentField { … }` handle structurally aliases onto the
+    // single resident `agents` buffer. wgpu rejects two bindings to
+    // the same buffer where one is read_only and the other is
+    // read_write in the same compute pass. Movement records ONLY
+    // `Pos` (a single read_write alias) here — the `Alive`-skip
+    // predicate the body needs is bounded by `cfg.agent_cap` at the
+    // PerAgent preamble layer (`if (agent_id >= cfg.agent_cap)
+    // { return; }`); the dead-agent case is one extra branch that
+    // doesn't change the buffer alias surface. This minimizes the
+    // alias footprint; future Apply-actions (Phase 6 Task 4) deals
+    // with the multi-AgentField alias issue at its layer.
+    //
+    // **EventRing append**: the `AgentMoved` / `AgentFled` events
+    // Movement should emit are NOT recorded here yet — adding a
+    // third binding (`event_ring`, atomic-rw) plus the ring-cycle
+    // edge it implies isn't gated cleanly by today's runtime
+    // cascade pipeline. The emit lands when Phase 6 Task 4
+    // (Apply-actions chain) ports the event-emit layer into CG.
+    let ops = ctx.builder.ops_mut();
+    let op = &mut ops[op_id.0 as usize];
+    op.record_read(DataHandle::ScoringOutput);
+    op.record_read(DataHandle::SimCfgBuffer);
+    op.record_write(DataHandle::AgentField {
+        field: AgentFieldId::Pos,
+        target: AgentRef::Self_,
+    });
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Phase 3 helpers — spatial-query synthesis
 // ---------------------------------------------------------------------------
@@ -1396,7 +1534,7 @@ mod tests {
             .add_op(
                 ComputeOpKind::PhysicsRule {
                     rule: PhysicsRuleId(0),
-                    on_event: EventKindId(0),
+                    on_event: Some(EventKindId(0)),
                     body,
                     replayable: ReplayabilityFlag::Replayable,
                 },

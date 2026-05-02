@@ -331,7 +331,7 @@ fn lower_one_handler(
     // body's `Assign` targets, expression reads, and Match arm bodies.
     let kind = ComputeOpKind::PhysicsRule {
         rule: rule_id,
-        on_event: resolution.event_kind,
+        on_event: Some(resolution.event_kind),
         body: body_list_id,
         replayable,
     };
@@ -932,7 +932,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(*rule, PhysicsRuleId(0));
-                assert_eq!(*on_event, EventKindId(7));
+                assert_eq!(*on_event, Some(EventKindId(7)));
                 assert_eq!(
                     *replayable,
                     ReplayabilityFlag::NonReplayable,

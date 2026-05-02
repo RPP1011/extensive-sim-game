@@ -1663,7 +1663,7 @@ mod tests {
             .add_op(
                 ComputeOpKind::PhysicsRule {
                     rule: PhysicsRuleId(0),
-                    on_event: EventKindId(0),
+                    on_event: Some(EventKindId(0)),
                     body: CgStmtListId(0),
                     replayable: ReplayabilityFlag::Replayable,
                 },
@@ -2110,7 +2110,7 @@ mod tests {
         b.add_op(
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body: physics_body,
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -2215,7 +2215,7 @@ program {
             .add_op(
                 ComputeOpKind::PhysicsRule {
                     rule: PhysicsRuleId(0),
-                    on_event: EventKindId(7),
+                    on_event: Some(EventKindId(7)),
                     body,
                     replayable: ReplayabilityFlag::Replayable,
                 },

@@ -461,8 +461,20 @@ pub enum ComputeOpKind {
         rows: Vec<ScoringRowOp>,
     },
 
-    /// Per-event handler. Lowered from `physics` rules. `body` is a
-    /// `CgStmtList` (sibling tree to `CgExpr` — assignments + emits).
+    /// Per-event handler OR per-agent rule. Lowered from `physics`
+    /// rules. `body` is a `CgStmtList` (sibling tree to `CgExpr` —
+    /// assignments + emits).
+    ///
+    /// `on_event` selects the dispatch shape variant:
+    /// - `Some(kind)` — PerEvent dispatch over the event ring (today's
+    ///   chronicle/damage/heal/etc. handlers; `@phase(event)` /
+    ///   `@phase(post)`).
+    /// - `None` — PerAgent dispatch over the alive bitmap. Used by
+    ///   the synthesized Movement rule (Phase 6 Task 3) and any
+    ///   future per-agent sweep (cooldown ticking, stun expiry,
+    ///   need decay, regen, …). The DSL surface for this is
+    ///   `@phase(per_agent)` (planned) — today the lowering driver
+    ///   synthesizes the sole instance directly.
     ///
     /// `replayable` propagates the constitution P7 flag from the IR.
     /// Replayable rules (`@phase(event)`) emit into the deterministic
@@ -473,7 +485,7 @@ pub enum ComputeOpKind {
     /// lowering so emit can sort the rule into the right ring.
     PhysicsRule {
         rule: PhysicsRuleId,
-        on_event: EventKindId,
+        on_event: Option<EventKindId>,
         body: CgStmtListId,
         replayable: ReplayabilityFlag,
     },
@@ -619,10 +631,14 @@ impl ComputeOpKind {
                 replayable,
                 ..
             } => {
+                let on_event_label = match on_event {
+                    Some(kind) => format!("#{}", kind.0),
+                    None => "per_agent".to_string(),
+                };
                 format!(
-                    "physics_rule(rule=#{}, on_event=#{}, replayable={})",
+                    "physics_rule(rule=#{}, on_event={}, replayable={})",
                     rule.0,
-                    on_event.0,
+                    on_event_label,
                     replayable.label()
                 )
             }
@@ -1060,7 +1076,7 @@ mod tests {
             .label(),
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(0),
+                on_event: Some(EventKindId(0)),
                 body: CgStmtListId(0),
                 replayable: ReplayabilityFlag::Replayable,
             }
@@ -1236,7 +1252,7 @@ mod tests {
         ];
         let kind = ComputeOpKind::PhysicsRule {
             rule: PhysicsRuleId(2),
-            on_event: EventKindId(7),
+            on_event: Some(EventKindId(7)),
             body: CgStmtListId(1),
             replayable: ReplayabilityFlag::Replayable,
         };
@@ -1597,7 +1613,7 @@ mod tests {
             },
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(1),
+                on_event: Some(EventKindId(1)),
                 body: CgStmtListId(0),
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -1653,7 +1669,7 @@ mod tests {
             OpId(0),
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(7),
+                on_event: Some(EventKindId(7)),
                 body: CgStmtListId(0),
                 replayable: ReplayabilityFlag::Replayable,
             },
@@ -1684,7 +1700,7 @@ mod tests {
             OpId(0),
             ComputeOpKind::PhysicsRule {
                 rule: PhysicsRuleId(0),
-                on_event: EventKindId(7),
+                on_event: Some(EventKindId(7)),
                 body: CgStmtListId(0),
                 replayable: ReplayabilityFlag::Replayable,
             },

@@ -1341,7 +1341,7 @@ mod tests {
 
         let physics_kind = ComputeOpKind::PhysicsRule {
             rule: PhysicsRuleId(0),
-            on_event: EventKindId(7),
+            on_event: Some(EventKindId(7)),
             body: list_id,
             replayable: ReplayabilityFlag::Replayable,
         };
@@ -1395,7 +1395,7 @@ mod tests {
 
         let physics_kind = ComputeOpKind::PhysicsRule {
             rule: PhysicsRuleId(0),
-            on_event: EventKindId(7),
+            on_event: Some(EventKindId(7)),
             body: list_id,
             replayable: ReplayabilityFlag::Replayable,
         };

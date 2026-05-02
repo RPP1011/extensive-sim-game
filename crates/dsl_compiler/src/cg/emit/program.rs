@@ -1286,7 +1286,7 @@ mod tests {
         let body = push_list(prog, CgStmtList { stmts: vec![assign] });
         let kind = ComputeOpKind::PhysicsRule {
             rule,
-            on_event: EventKindId(0),
+            on_event: Some(EventKindId(0)),
             body,
             replayable: ReplayabilityFlag::Replayable,
         };
