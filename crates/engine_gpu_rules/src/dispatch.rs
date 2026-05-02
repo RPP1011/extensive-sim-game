@@ -37,6 +37,8 @@ pub struct KernelCache {
     pub seed_indirect_0: Option<crate::seed_indirect_0::SeedIndirect0Kernel>,
     pub unpack_agents: Option<crate::unpack_agents::UnpackAgentsKernel>,
     pub kick_snapshot: Option<crate::kick_snapshot::KickSnapshotKernel>,
+    pub scoring: Option<crate::scoring::ScoringKernel>,
+    pub movement: Option<crate::movement::MovementKernel>,
 }
 
 /// Dispatch one [`crate::schedule::DispatchOp`] against the kernel
@@ -341,6 +343,28 @@ pub fn dispatch_by_id(
             let bindings = kernel.bind(sources, &cfg_buf);
             kernel.record(device, encoder, &bindings, agent_cap);
         }
+        DispatchOp::Kernel(KernelId::Scoring) => {
+            let kernel = cache.scoring.get_or_insert_with(|| <crate::scoring::ScoringKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::scoring::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Kernel(KernelId::Movement) => {
+            let kernel = cache.movement.get_or_insert_with(|| <crate::movement::MovementKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::movement::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
         DispatchOp::Indirect { kernel: KernelId::MaskHold, args_buf: _ } => {
             let kernel = cache.mask_hold.get_or_insert_with(|| <crate::mask_Hold::MaskHoldKernel as Kernel>::new(device));
             let cfg = kernel.build_cfg(state);
@@ -621,6 +645,28 @@ pub fn dispatch_by_id(
             let cfg = kernel.build_cfg(state);
             let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("crate::kick_snapshot::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Indirect { kernel: KernelId::Scoring, args_buf: _ } => {
+            let kernel = cache.scoring.get_or_insert_with(|| <crate::scoring::ScoringKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::scoring::cfg"),
+                contents: bytemuck::cast_slice(&[cfg]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let bindings = kernel.bind(sources, &cfg_buf);
+            kernel.record(device, encoder, &bindings, agent_cap);
+        }
+        DispatchOp::Indirect { kernel: KernelId::Movement, args_buf: _ } => {
+            let kernel = cache.movement.get_or_insert_with(|| <crate::movement::MovementKernel as Kernel>::new(device));
+            let cfg = kernel.build_cfg(state);
+            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("crate::movement::cfg"),
                 contents: bytemuck::cast_slice(&[cfg]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });

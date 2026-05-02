@@ -39,12 +39,12 @@ impl crate::Kernel for MovementKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::movement::bgl"),
             entries: &[
-                crate::fused_mask::bgl_storage(0, false), // agents (rw)
-                crate::fused_mask::bgl_storage(1, true),  // scoring
-                crate::fused_mask::bgl_storage(2, false), // event_ring_records (atomic append)
-                crate::fused_mask::bgl_storage(3, false), // event_ring_tail (atomic counter)
-                crate::fused_mask::bgl_storage(4, true),  // sim_cfg
-                crate::fused_mask::bgl_uniform(5),        // cfg
+                crate::bgl_storage(0, false), // agents (rw)
+                crate::bgl_storage(1, true),  // scoring
+                crate::bgl_storage(2, false), // event_ring_records (atomic append)
+                crate::bgl_storage(3, false), // event_ring_tail (atomic counter)
+                crate::bgl_storage(4, true),  // sim_cfg
+                crate::bgl_uniform(5),        // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

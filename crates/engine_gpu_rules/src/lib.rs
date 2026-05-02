@@ -31,6 +31,8 @@ pub mod pack_agents;
 pub mod seed_indirect_0;
 pub mod unpack_agents;
 pub mod kick_snapshot;
+pub mod scoring;
+pub mod movement;
 
 pub use mask_Hold::MaskHoldKernel;
 pub use mask_MoveToward::MaskMoveTowardKernel;
@@ -58,6 +60,8 @@ pub use pack_agents::PackAgentsKernel;
 pub use seed_indirect_0::SeedIndirect0Kernel;
 pub use unpack_agents::UnpackAgentsKernel;
 pub use kick_snapshot::KickSnapshotKernel;
+pub use scoring::ScoringKernel;
+pub use movement::MovementKernel;
 
 pub mod binding_sources;
 pub mod resident_context;
@@ -96,6 +100,8 @@ pub enum KernelId {
     SeedIndirect0,
     UnpackAgents,
     KickSnapshot,
+    Scoring,
+    Movement,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]

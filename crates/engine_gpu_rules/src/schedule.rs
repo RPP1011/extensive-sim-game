@@ -38,4 +38,6 @@ pub const SCHEDULE: &[DispatchOp] = &[
     DispatchOp::Kernel(KernelId::SeedIndirect0),
     DispatchOp::Kernel(KernelId::UnpackAgents),
     DispatchOp::Kernel(KernelId::KickSnapshot),
+    DispatchOp::Kernel(KernelId::Scoring),
+    DispatchOp::Kernel(KernelId::Movement),
 ];

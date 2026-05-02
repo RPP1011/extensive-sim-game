@@ -34,11 +34,11 @@ impl crate::Kernel for ScoringKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::scoring::bgl"),
             entries: &[
-                crate::fused_mask::bgl_storage(0, true), // agent_data
-                crate::fused_mask::bgl_storage(1, true), // mask_bitmaps
-                crate::fused_mask::bgl_storage(2, false), // scoring_out
-                crate::fused_mask::bgl_storage(3, true), // sim_cfg
-                crate::fused_mask::bgl_uniform(4), // cfg
+                crate::bgl_storage(0, true), // agent_data
+                crate::bgl_storage(1, true), // mask_bitmaps
+                crate::bgl_storage(2, false), // scoring_out
+                crate::bgl_storage(3, true), // sim_cfg
+                crate::bgl_uniform(4), // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
