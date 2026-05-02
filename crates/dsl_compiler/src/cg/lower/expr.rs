@@ -596,15 +596,32 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
             ast_label: "Match",
             span,
         }),
-        // PerUnit semantic simplification (Phase 6 Task 1):
-        // `<expr> per_unit <delta>` lowers as `expr * delta` per the
-        // AST docstring. The "iterate over each unit in the result"
-        // semantic that pertains inside scoring contexts is deferred
-        // — for view storage that's empty (smoke fixture, idle agents)
-        // the result is identical (0 * delta = 0). Closing the gap
-        // for richer fixtures requires per-unit-fold-over-view-storage
-        // IR primitive; tracked as future work.
-        IrExpr::PerUnit { expr, delta } => lower_binary(BinOp::Mul, expr, delta, span, ctx),
+        // PerUnit semantic simplification (Phase 6 Task 1, refined Task 2.5):
+        // `<expr> per_unit <delta>` lowers as `expr * delta` per the AST
+        // docstring. The "iterate over each unit in the result" semantic
+        // that pertains inside scoring contexts is deferred — for view
+        // storage that's empty (smoke fixture, idle agents) the result
+        // is identical (0 * delta = 0). Closing the gap for richer
+        // fixtures requires per-unit-fold-over-view-storage IR primitive;
+        // tracked as future work.
+        //
+        // Wildcard short-circuit: when `expr` contains a wildcard `_`
+        // (e.g. `view::threat_level(self, _) per_unit 0.01`), the inner
+        // view call has typed-mismatch issues because `_` substitutes as
+        // a u32 placeholder while the view signature expects an AgentId.
+        // The wildcard semantically means "iterate over all candidates
+        // and sum" — under the B1 simplification the per-unit fold is
+        // unperformed, so the contribution is 0 regardless. Short-circuit
+        // the entire PerUnit to a literal `0.0_f32` to avoid the
+        // type-mismatch path. Same semantic as the non-wildcard
+        // simplification (modifier contributes 0 for empty storage).
+        IrExpr::PerUnit { expr, delta } => {
+            if expr_contains_wildcard(expr) {
+                add(ctx, CgExpr::Lit(LitValue::F32(0.0)), span)
+            } else {
+                lower_binary(BinOp::Mul, expr, delta, span, ctx)
+            }
+        }
         IrExpr::AbilityTag { .. } => Err(LoweringError::UnsupportedAstNode {
             ast_label: "AbilityTag",
             span,
@@ -872,10 +889,105 @@ fn lower_bare_local(
     match name {
         "self" => add(ctx, CgExpr::AgentSelfId, span),
         "target" if ctx.target_local => add(ctx, CgExpr::PerPairCandidateId, span),
+        // Wildcard `_` is short-circuited at the PerUnit lowering level
+        // (see `IrExpr::PerUnit` arm in `lower_expr`). It should never
+        // reach `lower_bare_local` directly — if it does, that's a
+        // genuinely-unsupported context (e.g., bare wildcard outside a
+        // PerUnit-modified view call) which surfaces as the standard
+        // UnsupportedLocalBinding diagnostic. Future per-unit-fold
+        // semantic resolves wildcards in the fold-iteration variable
+        // binding instead.
         _ => Err(LoweringError::UnsupportedLocalBinding {
             name: name.to_string(),
             span,
         }),
+    }
+}
+
+/// True if `node` is a bare wildcard `_` (an `IrExpr::Local` with
+/// name `"_"`). Used by `lower_view_call` to short-circuit view calls
+/// with wildcard args to a typed zero literal. Sibling helper to
+/// [`expr_contains_wildcard`].
+fn is_wildcard_local(node: &IrExprNode) -> bool {
+    use dsl_ast::ir::IrExpr;
+    matches!(&node.kind, IrExpr::Local(_, name) if name == "_")
+}
+
+/// True if `node` (or any sub-expression) is an `IrExpr::Local` with
+/// name `"_"`. Used by the PerUnit lowering arm to short-circuit
+/// wildcard-bearing expressions to a literal 0.0 rather than
+/// attempting the (currently-broken) view-call-with-wildcard-arg path.
+/// See the `IrExpr::PerUnit` arm in `lower_expr` for the rationale.
+///
+/// Cheap recursive walk: the wildcard appears at most a few sites per
+/// PerUnit expression in practice, and the match is exhaustive over
+/// `IrExpr` so adding a new variant forces an explicit decision.
+fn expr_contains_wildcard(node: &IrExprNode) -> bool {
+    use dsl_ast::ir::IrExpr;
+    match &node.kind {
+        IrExpr::Local(_, name) => name == "_",
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::View(_)
+        | IrExpr::Verb(_)
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit { .. } => false,
+        IrExpr::Unary(_, e) => expr_contains_wildcard(e),
+        IrExpr::Binary(_, lhs, rhs)
+        | IrExpr::In(lhs, rhs)
+        | IrExpr::Contains(lhs, rhs)
+        | IrExpr::Index(lhs, rhs) => {
+            expr_contains_wildcard(lhs) || expr_contains_wildcard(rhs)
+        }
+        IrExpr::PerUnit { expr, delta } => {
+            expr_contains_wildcard(expr) || expr_contains_wildcard(delta)
+        }
+        IrExpr::Field { base, .. } => expr_contains_wildcard(base),
+        IrExpr::ViewCall(_, args)
+        | IrExpr::VerbCall(_, args)
+        | IrExpr::BuiltinCall(_, args)
+        | IrExpr::UnresolvedCall(_, args)
+        | IrExpr::NamespaceCall { args, .. } => {
+            args.iter().any(|a| expr_contains_wildcard(&a.value))
+        }
+        IrExpr::If { cond, then_expr, else_expr } => {
+            expr_contains_wildcard(cond)
+                || expr_contains_wildcard(then_expr)
+                || else_expr.as_ref().map_or(false, |e| expr_contains_wildcard(e))
+        }
+        IrExpr::Quantifier { iter, body, .. } => {
+            expr_contains_wildcard(iter) || expr_contains_wildcard(body)
+        }
+        IrExpr::Fold { iter, body, .. } => {
+            iter.as_ref().map_or(false, |i| expr_contains_wildcard(i))
+                || expr_contains_wildcard(body)
+        }
+        IrExpr::Match { scrutinee, arms } => {
+            expr_contains_wildcard(scrutinee)
+                || arms.iter().any(|arm| expr_contains_wildcard(&arm.body))
+        }
+        IrExpr::List(items) | IrExpr::Tuple(items) => {
+            items.iter().any(expr_contains_wildcard)
+        }
+        IrExpr::StructLit { fields, .. } => {
+            fields.iter().any(|f| expr_contains_wildcard(&f.value))
+        }
+        IrExpr::Ctor { args, .. } => args.iter().any(expr_contains_wildcard),
+        // Catch-all: any IrExpr variant not enumerated above is a leaf
+        // shape with no IrExprNode sub-expressions (AbilityRange, Raw,
+        // AbilityOnCooldown, etc.). They cannot contain a wildcard
+        // syntactically. If a future variant adds children, the match
+        // arm needs an explicit case — exhaustive checking will force
+        // the update.
+        _ => false,
     }
 }
 
@@ -1495,6 +1607,34 @@ fn lower_view_call(
         return lower_expr(&substituted, ctx);
     }
 
+    // Wildcard short-circuit (Phase 6 Task 2.5): if any arg is a bare
+    // wildcard `_`, the call is a per-unit-fold-over-all-candidates
+    // shape that the current IR doesn't represent. Rather than thread
+    // the wildcard through (which the type-checker rejects because the
+    // wildcard's typed-default substitution doesn't match the view's
+    // declared signature), short-circuit the whole view-call to a
+    // type-appropriate zero literal. Same B1 semantic as the
+    // PerUnit-with-wildcard short-circuit: empty view storage produces
+    // 0; the call's result is 0.
+    if args.iter().any(|a| is_wildcard_local(&a.value)) {
+        let result_ty = ctx
+            .view_signatures
+            .get(&view_id)
+            .map(|(_, r)| *r)
+            .unwrap_or(CgTy::F32);
+        let zero = match result_ty {
+            CgTy::F32 => CgExpr::Lit(LitValue::F32(0.0)),
+            CgTy::U32 => CgExpr::Lit(LitValue::U32(0)),
+            CgTy::AgentId => CgExpr::Lit(LitValue::AgentId(0)),
+            // Other typed defaults — fall through to F32(0) since views
+            // historically return numeric scalars. ViewKey shouldn't
+            // appear here (the registered-signature path returns a
+            // concrete type).
+            _ => CgExpr::Lit(LitValue::F32(0.0)),
+        };
+        return add(ctx, zero, span);
+    }
+
     // Materialized-view path: lower as a typed `BuiltinId::ViewCall`.
     let mut arg_ids = Vec::with_capacity(args.len());
     for a in args {
@@ -1704,6 +1844,16 @@ pub(super) fn ir_type_to_cg_ty(ty: &dsl_ast::ir::IrType) -> CgTy {
         T::F32 => CgTy::F32,
         T::Vec3 => CgTy::Vec3F32,
         T::AgentId => CgTy::AgentId,
+        // Entity references in the DSL surface as `Agent`, `Item`, etc.
+        // — they're typed AgentId-equivalents at the IR layer (the
+        // resolver maps the entity reference to its primary id type).
+        // Without this arm, view signatures like `(a: Agent, b: Agent)`
+        // would register as `(u32, u32)` via the fallthrough, then the
+        // type-checker rejects calls like `view::X(self, target)`
+        // because `self`/`target` lower to typed `AgentId`. (Phase 6
+        // Task 2.5: surfaced when wildcard short-circuit unblocked the
+        // type-check from running on real view-call sites.)
+        T::EntityRef(_) => CgTy::AgentId,
         // Tick-typed fields go through CgTy::Tick at the read
         // layer; views don't return Tick today, but reserve the
         // mapping for symmetry.

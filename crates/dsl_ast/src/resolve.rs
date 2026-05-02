@@ -38,6 +38,15 @@ mod stdlib {
             ("string", IrType::String),
             ("String", IrType::String),
             ("AgentId", IrType::AgentId),
+            // `Agent` as a type alias for AgentId. The DSL surface uses
+            // `Agent` for agent-typed parameters (`view threat_level(a:
+            // Agent, b: Agent) -> f32` etc.); without this entry,
+            // `Agent` falls through to IrType::Named("Agent") and the
+            // CG type-mapper widens it to u32, causing view-call type
+            // checks to fail when the call passes typed AgentId values.
+            // Phase 6 Task 2.5 surfaced this when wildcard short-circuit
+            // unblocked real view-call type-checks.
+            ("Agent", IrType::AgentId),
             ("ItemId", IrType::ItemId),
             ("GroupId", IrType::GroupId),
             ("QuestId", IrType::QuestId),
