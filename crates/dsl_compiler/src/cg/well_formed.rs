@@ -41,7 +41,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::cg::data_handle::{AgentRef, CgExprId, CycleEdgeKey, DataHandle};
+use crate::cg::data_handle::{AgentRef, CgExprId, CycleEdgeKey, DataHandle, ViewStorageSlot};
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::expr::{data_handle_ty, type_check, CgExpr, CgTy, TypeCheckCtx, TypeError};
 use crate::cg::op::{
@@ -1244,6 +1244,53 @@ fn type_check_row(
     }
 }
 
+/// Decide whether `value_ty` is type-compatible with assigning into a
+/// slot whose structural storage type is `expected_ty`.
+///
+/// The default rule is strict equality: `value_ty == expected_ty`.
+///
+/// **View-key relaxation.** When the target is
+/// `ViewStorage{slot: Primary, view}`, the structural type is
+/// `view_key<#view>` — a phantom over the view id. The runtime treats
+/// `view_key<T>` as `T` for primitive accumulator types (the storage
+/// IS the scalar at runtime; the phantom only fences calls). A fold
+/// body's `self += <scalar>` lowers correctly to a scalar value
+/// expression, but strict equality against `view_key<#view>` would
+/// always reject it. We relax: if `prog.view_signatures` carries a
+/// signature for `view`, accept `value_ty == sig.result` as an
+/// alternative to `value_ty == expected_ty`. The result type is the
+/// view's underlying scalar (registered by the lowering driver from
+/// the view declaration's return type — `f32` for `ThreatLevel`, `u32`
+/// for count-style views, `i32` for signed-delta accumulators, etc.).
+///
+/// Genuine type bugs (e.g., assigning a `Bool` to a `view_key<f32>`
+/// primary) are still rejected: neither structural equality nor scalar
+/// substitution holds.
+fn assign_type_compatible(
+    target: &DataHandle,
+    expected_ty: &CgTy,
+    value_ty: &CgTy,
+    prog: &CgProgram,
+) -> bool {
+    if value_ty == expected_ty {
+        return true;
+    }
+    // View-key relaxation: ViewStorage{Primary} accepts the view's
+    // underlying scalar type as a substitute for `view_key<#view>`.
+    if let DataHandle::ViewStorage {
+        view,
+        slot: ViewStorageSlot::Primary,
+    } = target
+    {
+        if let Some(sig) = prog.view_signatures.get(&view.0) {
+            if value_ty == &sig.result {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn type_check_list(
     list_id: CgStmtListId,
     op_id: OpId,
@@ -1271,7 +1318,7 @@ fn type_check_list(
                             // `TypeMismatch`, which wraps inner
                             // expression typing defects).
                             let expected = data_handle_ty(target);
-                            if value_ty != expected {
+                            if !assign_type_compatible(target, &expected, &value_ty, prog) {
                                 errors.push(CgError::AssignTypeMismatch {
                                     op: op_id,
                                     target: target.clone(),
@@ -2826,6 +2873,202 @@ mod tests {
                 got: CgTy::Bool,
             }),
             "missing AssignTypeMismatch in {:?}",
+            errs
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // 13b. View-key relaxation: scalar substitution against view's
+    //      Primary slot is accepted when the program's view signature
+    //      registers the matching scalar as the result type.
+    // -----------------------------------------------------------------
+
+    /// Fold body `view[#0].primary += 1.0f32` against `view_key<#0>`
+    /// is accepted when the program's view_signatures declares
+    /// view#0's result as `f32` (the underlying scalar).
+    #[test]
+    fn fold_body_f32_self_update_accepts_view_key_f32_primary() {
+        let mut b = CgProgramBuilder::new();
+        let val = b.add_expr(lit_f32(1.0)).unwrap();
+        let assign = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::ViewStorage {
+                    view: ViewId(0),
+                    slot: ViewStorageSlot::Primary,
+                },
+                value: val,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![assign])).unwrap();
+        b.add_op(
+            ComputeOpKind::ViewFold {
+                view: ViewId(0),
+                on_event: EventKindId(0),
+                body,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        // Register the view's underlying scalar type. Without this
+        // entry the relaxation rule would not trigger and the
+        // assertion below would fail.
+        let mut sigs = std::collections::BTreeMap::new();
+        sigs.insert(
+            0u32,
+            crate::cg::program::ViewSignature {
+                args: vec![CgTy::AgentId],
+                result: CgTy::F32,
+            },
+        );
+        b.set_view_signatures(sigs);
+        let prog = b.finish();
+        assert_eq!(
+            check_well_formed(&prog),
+            Ok(()),
+            "f32 += 1.0 against view_key<f32> primary should be accepted"
+        );
+    }
+
+    /// Symmetric to the f32 test: `+= 1u32` against a `view_key<u32>`
+    /// view is accepted.
+    #[test]
+    fn fold_body_u32_self_update_accepts_view_key_u32_primary() {
+        let mut b = CgProgramBuilder::new();
+        let val = b
+            .add_expr(CgExpr::Lit(LitValue::U32(1)))
+            .unwrap();
+        let assign = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::ViewStorage {
+                    view: ViewId(0),
+                    slot: ViewStorageSlot::Primary,
+                },
+                value: val,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![assign])).unwrap();
+        b.add_op(
+            ComputeOpKind::ViewFold {
+                view: ViewId(0),
+                on_event: EventKindId(0),
+                body,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        let mut sigs = std::collections::BTreeMap::new();
+        sigs.insert(
+            0u32,
+            crate::cg::program::ViewSignature {
+                args: vec![CgTy::AgentId],
+                result: CgTy::U32,
+            },
+        );
+        b.set_view_signatures(sigs);
+        let prog = b.finish();
+        assert_eq!(check_well_formed(&prog), Ok(()));
+    }
+
+    /// `+= 1i32` against a `view_key<i32>` view is accepted.
+    #[test]
+    fn fold_body_i32_self_update_accepts_view_key_i32_primary() {
+        let mut b = CgProgramBuilder::new();
+        let val = b
+            .add_expr(CgExpr::Lit(LitValue::I32(1)))
+            .unwrap();
+        let assign = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::ViewStorage {
+                    view: ViewId(0),
+                    slot: ViewStorageSlot::Primary,
+                },
+                value: val,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![assign])).unwrap();
+        b.add_op(
+            ComputeOpKind::ViewFold {
+                view: ViewId(0),
+                on_event: EventKindId(0),
+                body,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        let mut sigs = std::collections::BTreeMap::new();
+        sigs.insert(
+            0u32,
+            crate::cg::program::ViewSignature {
+                args: vec![CgTy::AgentId],
+                result: CgTy::I32,
+            },
+        );
+        b.set_view_signatures(sigs);
+        let prog = b.finish();
+        assert_eq!(check_well_formed(&prog), Ok(()));
+    }
+
+    /// Genuine type mismatch is still rejected: `Bool` value against
+    /// a `view_key<f32>` primary doesn't match either the structural
+    /// `view_key<#view>` shape or the registered scalar `f32`.
+    #[test]
+    fn fold_body_bool_self_update_rejected_against_view_key_f32_primary() {
+        let mut b = CgProgramBuilder::new();
+        let val = b.add_expr(lit_bool(true)).unwrap();
+        let assign = b
+            .add_stmt(CgStmt::Assign {
+                target: DataHandle::ViewStorage {
+                    view: ViewId(0),
+                    slot: ViewStorageSlot::Primary,
+                },
+                value: val,
+            })
+            .unwrap();
+        let body = b.add_stmt_list(CgStmtList::new(vec![assign])).unwrap();
+        b.add_op(
+            ComputeOpKind::ViewFold {
+                view: ViewId(0),
+                on_event: EventKindId(0),
+                body,
+            },
+            DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+            Span::dummy(),
+        )
+        .unwrap();
+        let mut sigs = std::collections::BTreeMap::new();
+        sigs.insert(
+            0u32,
+            crate::cg::program::ViewSignature {
+                args: vec![CgTy::AgentId],
+                result: CgTy::F32,
+            },
+        );
+        b.set_view_signatures(sigs);
+        let prog = b.finish();
+        let errs = check_well_formed(&prog).expect_err("Bool != F32 mismatch");
+        let expected_target = DataHandle::ViewStorage {
+            view: ViewId(0),
+            slot: ViewStorageSlot::Primary,
+        };
+        assert!(
+            errs.contains(&CgError::AssignTypeMismatch {
+                op: OpId(0),
+                target: expected_target,
+                expected: CgTy::ViewKey { view: ViewId(0) },
+                got: CgTy::Bool,
+            }),
+            "expected AssignTypeMismatch for Bool != view_key<f32>, got {:?}",
             errs
         );
     }

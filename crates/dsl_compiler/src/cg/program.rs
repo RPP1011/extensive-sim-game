@@ -320,6 +320,33 @@ pub struct FieldLayout {
 }
 
 // ---------------------------------------------------------------------------
+// View signature — typed `(args, result)` schema per materialized view
+// ---------------------------------------------------------------------------
+
+/// Typed signature for a materialized view: parameter types and result
+/// type. Used by [`super::well_formed::check_well_formed`] to resolve
+/// the underlying scalar type of a view's `Primary` storage slot — the
+/// slot's structural type is `view_key<#N>` (a phantom over the view id),
+/// but for the purpose of accepting fold-body assignments the runtime
+/// treats `view_key<T>` as `T`. Without this metadata the well-formed
+/// check sees `view_key<#N>` and rejects every fold body's `+= scalar`
+/// as a type mismatch even though the lowering correctly produced the
+/// scalar.
+///
+/// Populated by [`super::lower::driver::lower_compilation_to_cg`] from
+/// the materialized-view registration walk in
+/// `populate_view_bodies_and_signatures`. Empty for programs without
+/// materialized views.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ViewSignature {
+    /// Argument types in declaration order.
+    pub args: Vec<super::expr::CgTy>,
+    /// Result type — also the underlying scalar type of the view's
+    /// `Primary` storage slot.
+    pub result: super::expr::CgTy,
+}
+
+// ---------------------------------------------------------------------------
 // Namespace registry — schema for `CgExpr::NamespaceCall` / `NamespaceField`
 // ---------------------------------------------------------------------------
 
@@ -638,6 +665,17 @@ pub struct CgProgram {
     /// prelude-stub emission. Empty for programs that don't
     /// reference any registered namespace symbol.
     pub namespace_registry: NamespaceRegistry,
+    /// Per-view typed signature — `view_id → (arg_tys, result_ty)`
+    /// for every materialized view registered during lowering. The
+    /// result type is also the view's `Primary` storage slot's
+    /// underlying scalar type; consulted by
+    /// [`super::well_formed::check_well_formed`] when validating
+    /// fold-body `Assign(ViewStorage{Primary}, scalar)` shapes (the
+    /// view-key strict-equality relaxation rule). Populated by the
+    /// driver's `populate_view_bodies_and_signatures` (via
+    /// [`super::lower::expr::LoweringCtx::view_signatures`]). Empty
+    /// for programs that don't have materialized views.
+    pub view_signatures: BTreeMap<u32, ViewSignature>,
 }
 
 impl CgProgram {
@@ -1125,6 +1163,17 @@ impl CgProgramBuilder {
     /// added).
     pub fn program(&self) -> &CgProgram {
         &self.inner
+    }
+
+    /// Replace the in-progress program's `view_signatures` map. The
+    /// driver calls this once after registering materialized-view
+    /// signatures into [`super::lower::expr::LoweringCtx::view_signatures`]
+    /// and BEFORE the cycle-gate snapshot, so
+    /// [`super::well_formed::check_well_formed`]'s view-key relaxation
+    /// rule can consult the underlying scalar type while validating
+    /// fold-body `Assign(ViewStorage{Primary}, scalar)` shapes.
+    pub fn set_view_signatures(&mut self, sigs: BTreeMap<u32, ViewSignature>) {
+        self.inner.view_signatures = sigs;
     }
 
     /// Append-only seam for post-construction registry-resolved bindings

@@ -831,6 +831,20 @@ fn lower_binary(
     let lhs_ty = typecheck_node(ctx, lhs_id, lhs.span)?;
     let rhs_ty = typecheck_node(ctx, rhs_id, rhs.span)?;
 
+    // Signed/unsigned integer literal coercion. A non-negative DSL
+    // integer literal defaults to `LitValue::U32` at lowering time
+    // (see `IrExpr::LitInt`). When the other operand is an `I32`-
+    // typed non-literal (e.g., a signed event-field read like
+    // `delta: i32`), the resulting `i32 != 0u32` shape would be
+    // rejected as `BinaryOperandTyMismatch`. We coerce one side: if
+    // exactly ONE operand is a `U32` literal and the OTHER operand
+    // is `I32`-typed and non-literal, re-emit the literal as `I32`.
+    // The asymmetric requirement (literal vs. non-literal) keeps a
+    // genuine `i32_a != u32_b` mismatch (both non-literal) reported
+    // as a real typing bug rather than silently coerced away.
+    let (lhs_id, lhs_ty, rhs_id, rhs_ty) =
+        coerce_int_literal_to_signed(ctx, lhs_id, lhs_ty, rhs_id, rhs_ty, span)?;
+
     if lhs_ty != rhs_ty {
         return Err(LoweringError::BinaryOperandTyMismatch {
             op,
@@ -852,6 +866,73 @@ fn lower_binary(
         },
         span,
     )
+}
+
+/// Coerce a default-`U32` integer literal operand to `I32` when the
+/// peer operand is a non-literal `I32`. Returns the (possibly updated)
+/// `(lhs_id, lhs_ty, rhs_id, rhs_ty)` tuple.
+///
+/// Rationale: the DSL surface uses signed `i64` literal values; the
+/// CG layer narrows to `U32` for non-negative literals (see
+/// `IrExpr::LitInt`'s lowering). Patterns like `delta != 0` —
+/// where `delta: i32` reads as a signed event-field — need the `0`
+/// to lower as `I32` for the binary type-check to succeed. The
+/// coercion is intentionally narrow:
+///
+/// - Only `U32` → `I32`, not the symmetric direction (no operand we
+///   produce today defaults a literal to `I32` at lowering time).
+/// - Only when EXACTLY ONE operand is a `Lit` and the OTHER is
+///   non-`Lit`. Two non-literal `i32`/`u32` operands is a genuine
+///   typing bug and stays an error.
+/// - Only the literal value `0..=i32::MAX` survives the cast
+///   without truncation. Higher-magnitude literals would need
+///   explicit user-side typing; we leave them as `U32` so the
+///   downstream mismatch error stays visible.
+fn coerce_int_literal_to_signed(
+    ctx: &mut LoweringCtx<'_>,
+    lhs_id: CgExprId,
+    lhs_ty: CgTy,
+    rhs_id: CgExprId,
+    rhs_ty: CgTy,
+    span: Span,
+) -> Result<(CgExprId, CgTy, CgExprId, CgTy), LoweringError> {
+    // Only act on (I32, U32) or (U32, I32) operand-type pairs.
+    let (lhs_lit, rhs_lit) = {
+        let prog = ctx.builder.program();
+        let lhs_lit = prog
+            .exprs
+            .get(lhs_id.0 as usize)
+            .and_then(|e| match e {
+                CgExpr::Lit(LitValue::U32(v)) => Some(*v),
+                _ => None,
+            });
+        let rhs_lit = prog
+            .exprs
+            .get(rhs_id.0 as usize)
+            .and_then(|e| match e {
+                CgExpr::Lit(LitValue::U32(v)) => Some(*v),
+                _ => None,
+            });
+        (lhs_lit, rhs_lit)
+    };
+
+    // Case A: lhs is non-literal I32, rhs is U32 literal — coerce rhs.
+    if lhs_ty == CgTy::I32 && rhs_ty == CgTy::U32 && rhs_lit.is_some() && lhs_lit.is_none() {
+        let v = rhs_lit.unwrap();
+        if v <= i32::MAX as u32 {
+            let new_rhs = add(ctx, CgExpr::Lit(LitValue::I32(v as i32)), span)?;
+            return Ok((lhs_id, lhs_ty, new_rhs, CgTy::I32));
+        }
+    }
+    // Case B: rhs is non-literal I32, lhs is U32 literal — coerce lhs.
+    if rhs_ty == CgTy::I32 && lhs_ty == CgTy::U32 && lhs_lit.is_some() && rhs_lit.is_none() {
+        let v = lhs_lit.unwrap();
+        if v <= i32::MAX as u32 {
+            let new_lhs = add(ctx, CgExpr::Lit(LitValue::I32(v as i32)), span)?;
+            return Ok((new_lhs, CgTy::I32, rhs_id, rhs_ty));
+        }
+    }
+    Ok((lhs_id, lhs_ty, rhs_id, rhs_ty))
 }
 
 /// Pick the typed [`BinaryOp`] variant for a given AST op + operand
@@ -2007,6 +2088,83 @@ mod tests {
             } => {
                 assert_eq!(op, BinOp::Lt);
                 assert_eq!(lhs_ty, CgTy::Bool);
+                assert_eq!(rhs_ty, CgTy::U32);
+            }
+            other => panic!("expected BinaryOperandTyMismatch, got {other:?}"),
+        }
+    }
+
+    // ---- Signed/unsigned integer literal coercion ----
+
+    /// `delta != 0` where `delta: i32` (event-field shape) and `0`
+    /// defaults to `LitValue::U32` at lowering. The coercion in
+    /// `lower_binary` should re-emit the literal as `I32` so the
+    /// binary type-check accepts the shape.
+    #[test]
+    fn binary_i32_field_neq_u32_literal_coerces_literal_to_i32() {
+        // self.slow_factor_q8 (i16 -> CgTy::I32) != 0
+        let ast = node(IrExpr::Binary(
+            BinOp::NotEq,
+            Box::new(field_self("slow_factor_q8")),
+            Box::new(node(IrExpr::LitInt(0))),
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s, "(ne.i32 (read agent.self.slow_factor_q8) (lit 0i32))",
+            "expected i32-typed binary with literal coerced to I32, got {s:?}"
+        );
+    }
+
+    /// Symmetric: literal on lhs, i32 read on rhs.
+    #[test]
+    fn binary_u32_literal_gt_i32_field_coerces_literal_to_i32() {
+        // 0 > self.slow_factor_q8
+        let ast = node(IrExpr::Binary(
+            BinOp::Gt,
+            Box::new(node(IrExpr::LitInt(0))),
+            Box::new(field_self("slow_factor_q8")),
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s, "(gt.i32 (lit 0i32) (read agent.self.slow_factor_q8))",
+            "expected i32-typed binary with lhs literal coerced to I32, got {s:?}"
+        );
+    }
+
+    /// `delta > 0` (strict) — same i32-vs-u32 shape as the inequality
+    /// case; verifies the `Gt` branch that surfaced in the
+    /// post-Task-1 diagnostics.
+    #[test]
+    fn binary_i32_field_gt_u32_literal_coerces_literal_to_i32() {
+        let ast = node(IrExpr::Binary(
+            BinOp::Gt,
+            Box::new(field_self("slow_factor_q8")),
+            Box::new(node(IrExpr::LitInt(0))),
+        ));
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s, "(gt.i32 (read agent.self.slow_factor_q8) (lit 0i32))"
+        );
+    }
+
+    /// Two non-literal i32/u32 operands stay rejected — the
+    /// coercion intentionally fires only when one side is a
+    /// literal, so genuine field-vs-field mismatches surface as
+    /// typing bugs.
+    #[test]
+    fn binary_i32_field_neq_u32_field_still_rejected_when_neither_is_literal() {
+        // self.slow_factor_q8 (I32) != self.level (U32)
+        let ast = node(IrExpr::Binary(
+            BinOp::NotEq,
+            Box::new(field_self("slow_factor_q8")),
+            Box::new(field_self("level")),
+        ));
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::BinaryOperandTyMismatch {
+                lhs_ty, rhs_ty, ..
+            } => {
+                assert_eq!(lhs_ty, CgTy::I32);
                 assert_eq!(rhs_ty, CgTy::U32);
             }
             other => panic!("expected BinaryOperandTyMismatch, got {other:?}"),

@@ -228,6 +228,31 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     //
     // Ring edges (Phase 4) must be wired BEFORE this snapshot —
     // see the rationale on Phase 4.
+    //
+    // View signatures must be populated on the builder's program
+    // BEFORE the snapshot too — `check_well_formed`'s view-key
+    // relaxation rule (Task 5) consults `prog.view_signatures` when
+    // accepting `Assign(ViewStorage{Primary}, scalar)` shapes whose
+    // value is the underlying scalar (e.g., `f32 += 1.0` against
+    // `view_key<f32>`). Without this, the cycle gate would see the
+    // unpopulated registry and reject every materialized-view fold
+    // body's `+= scalar`.
+    let view_signatures_snapshot: BTreeMap<u32, crate::cg::program::ViewSignature> = ctx
+        .view_signatures
+        .iter()
+        .map(|(view_id, (args, result))| {
+            (
+                view_id.0,
+                crate::cg::program::ViewSignature {
+                    args: args.clone(),
+                    result: *result,
+                },
+            )
+        })
+        .collect();
+    ctx.builder
+        .set_view_signatures(view_signatures_snapshot.clone());
+
     let user_op_program = ctx.builder.program().clone();
     if let Err(errors) = check_well_formed(&user_op_program) {
         for cg_error in errors {
@@ -255,6 +280,9 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     let mut prog = builder.finish();
     prog.event_layouts = event_layouts_snapshot;
     prog.namespace_registry = namespace_registry_snapshot;
+    // `view_signatures` was set on the builder's program BEFORE the
+    // cycle gate (above); `finish()` preserves it. No re-snapshot
+    // needed here.
 
     if diagnostics.is_empty() {
         Ok(prog)
