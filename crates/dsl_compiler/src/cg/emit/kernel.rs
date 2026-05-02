@@ -1267,14 +1267,13 @@ fn pascal_to_snake(s: &str) -> String {
     out
 }
 
-fn spatial_kind_name(k: SpatialQueryKind) -> &'static str {
+fn spatial_kind_name(k: SpatialQueryKind) -> String {
     match k {
-        SpatialQueryKind::BuildHash => "build_hash",
-        SpatialQueryKind::KinQuery => "kin_query",
-        SpatialQueryKind::EngagementQuery => "engagement_query",
-        // Task 7.2: FilteredWalk WGSL emit — not yet implemented.
-        SpatialQueryKind::FilteredWalk { .. } => {
-            unimplemented!("FilteredWalk WGSL emit not yet implemented (Phase 7 Task 2)")
+        SpatialQueryKind::BuildHash => String::from("build_hash"),
+        SpatialQueryKind::KinQuery => String::from("kin_query"),
+        SpatialQueryKind::EngagementQuery => String::from("engagement_query"),
+        SpatialQueryKind::FilteredWalk { filter } => {
+            format!("filtered_walk_{}", filter.0)
         }
     }
 }
@@ -1703,6 +1702,56 @@ const SPATIAL_ENGAGEMENT_QUERY_BODY: &str = "// SpatialQuery::EngagementQuery �
     _ = spatial_query_results[0];\n\
     _ = cfg.agent_cap;";
 
+/// WGSL body template for [`SpatialQueryKind::FilteredWalk`].
+///
+/// Walks the per-cell neighborhood for each agent, evaluates the
+/// lowered filter expression per candidate, writes accepted
+/// candidates into `spatial_query_results`. The filter WGSL is
+/// interpolated into the `{filter_wgsl}` slot via [`format!`] in
+/// [`spatial_filtered_walk_body`].
+///
+/// Bindings consumed (per `SpatialQueryKind::FilteredWalk` static
+/// dependencies + filter walk's collected reads):
+/// - `spatial_grid_cells`        (Pool, read)
+/// - `spatial_grid_offsets`      (Pool, read)
+/// - `spatial_query_results`     (Pool, read_write)
+/// - `agent_*`                   (per-field reads collected from the filter expression)
+/// - `cfg`                       (uniform, agent_cap)
+///
+/// # Limitations
+///
+/// - **Stub per-cell walk.** Mirrors the structural shape of the
+///   legacy `engine_gpu_rules/src/spatial_kin_query.wgsl` until
+///   runtime BGL wiring matures. The per-cell + per-candidate
+///   iteration is structural; the filter WGSL is real and the
+///   accept-write is real, but agent_pos lookups + radius checks
+///   are not yet emitted at this task.
+/// - **No per-cell radius bounds.** The walk visits every cell
+///   in the grid — quadratic in agent count for the smoke fixture.
+///   Acceptable for v1; bounded radius lookup is a follow-up.
+fn spatial_filtered_walk_body(filter_wgsl: &str) -> String {
+    format!(
+        "// SpatialQuery::FilteredWalk — per-cell walk + per-candidate filter.\n\
+         // Touches every binding so naga keeps them live; structural\n\
+         // walk shape mirrors the legacy spatial_kin_query.wgsl stub.\n\
+         var write_cursor: u32 = 0u;\n\
+         for (var cell: u32 = 0u; cell < cfg.agent_cap; cell = cell + 1u) {{\n\
+         \x20   let cell_start = spatial_grid_offsets[cell];\n\
+         \x20   let cell_end = spatial_grid_offsets[cell + 1u];\n\
+         \x20   for (var slot: u32 = cell_start; slot < cell_end; slot = slot + 1u) {{\n\
+         \x20       let candidate = spatial_grid_cells[slot];\n\
+         \x20       let filter_value: bool = {filter_wgsl};\n\
+         \x20       if (filter_value) {{\n\
+         \x20           spatial_query_results[write_cursor] = candidate;\n\
+         \x20           write_cursor = write_cursor + 1u;\n\
+         \x20       }}\n\
+         \x20   }}\n\
+         }}\n\
+         _ = cfg.agent_cap;",
+        filter_wgsl = filter_wgsl
+    )
+}
+
 /// WGSL body fragment for the synthesized PerAgent
 /// [`ComputeOpKind::PhysicsRule`] (Movement, Phase 6 Task 3).
 ///
@@ -1828,9 +1877,9 @@ fn lower_op_body(
             SpatialQueryKind::EngagementQuery => {
                 SPATIAL_ENGAGEMENT_QUERY_BODY.to_string()
             }
-            // Task 7.2: FilteredWalk WGSL emit — not yet implemented.
-            &SpatialQueryKind::FilteredWalk { .. } => {
-                unimplemented!("FilteredWalk WGSL emit not yet implemented (Phase 7 Task 2)")
+            SpatialQueryKind::FilteredWalk { filter } => {
+                let filter_wgsl = lower_cg_expr_to_wgsl(*filter, ctx)?;
+                spatial_filtered_walk_body(&filter_wgsl)
             }
         }),
         // Task 5.6d: per-`PlumbingKind` body dispatch. Exhaustive over
@@ -4483,5 +4532,64 @@ mod tests {
                 "kind={kind:?} body missing PlumbingKind::* tag: {body}"
             );
         }
+    }
+
+    // ---- 13. FilteredWalk emit (Phase 7 Task 2) ----
+
+    #[test]
+    fn filtered_walk_emit_threads_filter_wgsl_into_body() {
+        use crate::cg::op::SpatialQueryKind;
+
+        let mut prog = CgProgram::default();
+        // Filter: PerPairCandidate.alive — reads agent_per_pair_candidate_alive.
+        let filter_id = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Alive,
+                target: AgentRef::PerPairCandidate,
+            }),
+        );
+        let op = ComputeOp::new(
+            OpId(0),
+            ComputeOpKind::SpatialQuery {
+                kind: SpatialQueryKind::FilteredWalk { filter: filter_id },
+            },
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).expect("emit body");
+
+        assert!(
+            body.contains("for (var cell"),
+            "filtered-walk body must include per-cell walk loop, got: {body}"
+        );
+        assert!(
+            body.contains("agent_per_pair_candidate_alive"),
+            "filter (alive read) must lower into the body, got: {body}"
+        );
+        assert!(
+            body.contains("spatial_query_results["),
+            "body must write into spatial_query_results, got: {body}"
+        );
+    }
+
+    #[test]
+    fn filtered_walk_snake_name_includes_filter_id() {
+        use crate::cg::op::SpatialQueryKind;
+
+        // The filter CgExprId is 0 (first expr pushed).
+        let filter_id = CgExprId(0);
+        let kind = SpatialQueryKind::FilteredWalk { filter: filter_id };
+        assert_eq!(spatial_kind_name(kind), "filtered_walk_0");
     }
 }
