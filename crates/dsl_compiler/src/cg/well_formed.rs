@@ -483,6 +483,11 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
             SpatialQueryKind::KinQuery | SpatialQueryKind::EngagementQuery => {
                 &[DispatchShapeLabel::PerAgent]
             }
+            // FilteredWalk runs one neighborhood walk per agent —
+            // same per-agent dispatch as Kin/EngagementQuery.
+            // Task 7.2 will wire the WGSL emit; shape is already
+            // decided here.
+            &SpatialQueryKind::FilteredWalk { .. } => &[DispatchShapeLabel::PerAgent],
         },
         // Plumbing kinds each have a single canonical dispatch shape,
         // pinned by `PlumbingKind::dispatch_shape`. The well-formed

@@ -18,8 +18,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::data_handle::{
-    AgentFieldId, AgentRef, AgentScratchKind, DataHandle, EventRingAccess, EventRingId, MaskId,
-    SpatialStorageKind, ViewId,
+    AgentFieldId, AgentRef, AgentScratchKind, CgExprId, DataHandle, EventRingAccess, EventRingId,
+    MaskId, SpatialStorageKind, ViewId,
 };
 use super::dispatch::DispatchShape;
 use super::expr::ExprArena;
@@ -143,10 +143,26 @@ pub enum SpatialQueryKind {
     BuildHash,
     /// Per-agent kin-of-team neighborhood walk — reads the grid,
     /// writes the per-agent query-results scratch.
+    ///
+    /// **DEPRECATED**: superseded by `FilteredWalk { filter }` once
+    /// the wolf-sim DSL fixtures migrate (Task 5). Variant remains
+    /// in the IR through Phase 7 to keep the additive migration
+    /// gate green; dropped in Task 6.
     KinQuery,
     /// Per-agent engagement-target neighborhood walk — reads the grid,
     /// writes the per-agent query-results scratch.
+    ///
+    /// **DEPRECATED**: see `KinQuery`.
     EngagementQuery,
+    /// Per-agent neighborhood walk filtered by a per-candidate
+    /// boolean expression. The filter is a `CgExprId` evaluated
+    /// per-candidate at WGSL emit time; the expression has access
+    /// to `self` (the querying agent) and the per-pair
+    /// `candidate` (bound via the same `LoweringCtx::target_local`
+    /// flag the per-pair mask predicate uses). Replaces the
+    /// domain-specific `KinQuery`/`EngagementQuery` variants;
+    /// see `docs/superpowers/plans/2026-05-01-phase-7-general-spatial-queries.md`.
+    FilteredWalk { filter: CgExprId },
 }
 
 impl SpatialQueryKind {
@@ -199,22 +215,38 @@ impl SpatialQueryKind {
                     kind: SpatialStorageKind::QueryResults,
                 }],
             ),
+            SpatialQueryKind::FilteredWalk { filter: _ } => (
+                vec![
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridCells,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridOffsets,
+                    },
+                ],
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::QueryResults,
+                }],
+            ),
         }
     }
 
     /// Stable snake_case label for pretty-printing.
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            SpatialQueryKind::BuildHash => "build_hash",
-            SpatialQueryKind::KinQuery => "kin_query",
-            SpatialQueryKind::EngagementQuery => "engagement_query",
+            SpatialQueryKind::BuildHash => String::from("build_hash"),
+            SpatialQueryKind::KinQuery => String::from("kin_query"),
+            SpatialQueryKind::EngagementQuery => String::from("engagement_query"),
+            SpatialQueryKind::FilteredWalk { filter } => {
+                format!("filtered_walk(filter=#{})", filter.0)
+            }
         }
     }
 }
 
 impl fmt::Display for SpatialQueryKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.label())
+        f.write_str(&self.label())
     }
 }
 
@@ -598,6 +630,9 @@ impl ComputeOpKind {
                 let (r, w) = kind.dependencies();
                 reads.extend(r);
                 writes.extend(w);
+                if let SpatialQueryKind::FilteredWalk { filter } = kind {
+                    collect_expr_reads(*filter, exprs, &mut reads);
+                }
             }
             ComputeOpKind::Plumbing { kind } => {
                 // Plumbing kinds carry their (reads, writes) signature
@@ -1720,5 +1755,84 @@ mod tests {
         assert!(op.reads.is_empty());
         op.record_read(src.clone());
         assert_eq!(op.reads, vec![src]);
+    }
+
+    // ---- FilteredWalk (Phase 7 Task 1) ----
+
+    #[test]
+    fn filtered_walk_dependencies_match_legacy_walk_signature() {
+        let kind = SpatialQueryKind::FilteredWalk {
+            filter: CgExprId(0),
+        };
+        let (r, w) = kind.dependencies();
+        assert_eq!(
+            r,
+            vec![
+                DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridCells,
+                },
+                DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridOffsets,
+                },
+            ]
+        );
+        assert_eq!(
+            w,
+            vec![DataHandle::SpatialStorage {
+                kind: SpatialStorageKind::QueryResults,
+            }]
+        );
+    }
+
+    #[test]
+    fn filtered_walk_label_includes_filter_id() {
+        let kind = SpatialQueryKind::FilteredWalk {
+            filter: CgExprId(7),
+        };
+        assert_eq!(kind.label(), "filtered_walk(filter=#7)");
+    }
+
+    #[test]
+    fn filtered_walk_op_includes_filter_expr_reads() {
+        use crate::cg::dispatch::DispatchShape;
+        use crate::cg::program::CgProgramBuilder;
+
+        let mut builder = CgProgramBuilder::new();
+        let filter_id = builder
+            .add_expr(CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::PerPairCandidate,
+            }))
+            .expect("filter expr pushes");
+
+        let op_id = builder
+            .add_op(
+                ComputeOpKind::SpatialQuery {
+                    kind: SpatialQueryKind::FilteredWalk { filter: filter_id },
+                },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+            )
+            .expect("op pushes");
+
+        let prog = builder.finish();
+        let op = &prog.ops[op_id.0 as usize];
+        assert!(
+            op.reads.contains(&DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::PerPairCandidate,
+            }),
+            "filter's agent_pos read should propagate to op.reads, got {:?}",
+            op.reads
+        );
+        assert!(
+            op.reads.iter().any(|h| matches!(
+                h,
+                DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridCells
+                }
+            )),
+            "static grid_cells read still present"
+        );
     }
 }

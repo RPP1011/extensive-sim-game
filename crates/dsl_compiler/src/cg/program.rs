@@ -60,7 +60,8 @@ use super::data_handle::{
 use super::dispatch::DispatchShape;
 use super::expr::{CgExpr, ExprArena};
 use super::op::{
-    ActionId, ComputeOp, ComputeOpKind, EventKindId, OpId, PhysicsRuleId, ScoringId, Span,
+    ActionId, ComputeOp, ComputeOpKind, EventKindId, OpId, PhysicsRuleId, ScoringId,
+    SpatialQueryKind, Span,
 };
 use super::stmt::{CgStmt, CgStmtId, CgStmtList, CgStmtListId, StmtArena, StmtListArena};
 
@@ -1138,7 +1139,12 @@ impl CgProgramBuilder {
             }
             ComputeOpKind::PhysicsRule { body, .. } => self.check_list_id(*body),
             ComputeOpKind::ViewFold { body, .. } => self.check_list_id(*body),
-            ComputeOpKind::SpatialQuery { .. } => Ok(()),
+            ComputeOpKind::SpatialQuery { kind } => {
+                if let SpatialQueryKind::FilteredWalk { filter } = kind {
+                    self.check_expr_id(*filter)?;
+                }
+                Ok(())
+            }
             // Plumbing kinds carry no `CgExprId` / `CgStmtListId`
             // references (every variant's reads/writes are sourced
             // from `PlumbingKind::dependencies()` as typed

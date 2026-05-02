@@ -1272,6 +1272,10 @@ fn spatial_kind_name(k: SpatialQueryKind) -> &'static str {
         SpatialQueryKind::BuildHash => "build_hash",
         SpatialQueryKind::KinQuery => "kin_query",
         SpatialQueryKind::EngagementQuery => "engagement_query",
+        // Task 7.2: FilteredWalk WGSL emit — not yet implemented.
+        SpatialQueryKind::FilteredWalk { .. } => {
+            unimplemented!("FilteredWalk WGSL emit not yet implemented (Phase 7 Task 2)")
+        }
     }
 }
 
@@ -1823,6 +1827,10 @@ fn lower_op_body(
             SpatialQueryKind::KinQuery => SPATIAL_KIN_QUERY_BODY.to_string(),
             SpatialQueryKind::EngagementQuery => {
                 SPATIAL_ENGAGEMENT_QUERY_BODY.to_string()
+            }
+            // Task 7.2: FilteredWalk WGSL emit — not yet implemented.
+            &SpatialQueryKind::FilteredWalk { .. } => {
+                unimplemented!("FilteredWalk WGSL emit not yet implemented (Phase 7 Task 2)")
             }
         }),
         // Task 5.6d: per-`PlumbingKind` body dispatch. Exhaustive over
