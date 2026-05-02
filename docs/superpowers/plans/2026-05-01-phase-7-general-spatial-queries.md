@@ -3,6 +3,8 @@
 > **Status: STUB.** Triggered by user observation (2026-05-01): "We want to rip kin out and support spatial hashes for other things. The target game is nothing like the wolf sim."
 >
 > The current IR bakes in two domain-specific spatial queries (`KinQuery`, `EngagementQuery`) that assume a faction-based combat model. This plan replaces them with a general spatial-query primitive driven by a filter expression.
+>
+> **Sibling plan**: [`2026-05-01-phase-8-cg-body-emit-parity.md`](./2026-05-01-phase-8-cg-body-emit-parity.md) closes the body-emit gap that drives `parity_with_cpu --features gpu` green. **Sequencing recommendation (per both plans): Phase 7 → Phase 8.** Phase 7's outputs invalidate the wolf-sim DSL fixtures; Phase 8 closes parity on the resulting target-game fixtures. The structural fixes in Phase 8 (Tasks 1-3) are fixture-independent and reusable across either order, but Phase 8's body-content tasks (4-7) are DSL-specific and benefit from being written once against the final fixtures Phase 7 produces.
 
 **Goal:** Replace `SpatialQueryKind::{KinQuery, EngagementQuery}` with a generic `FilteredWalk { filter: CgExprId }` so the IR doesn't pre-name domain concepts. Support arbitrary boolean filters at query-time without IR changes.
 
@@ -71,4 +73,5 @@ Per-candidate filter cost: a few WGSL instructions (bitcast + compare + branch).
 - Triggered by user discussion 2026-05-01 in the Phase 6 implementation thread.
 - Current `SpatialQueryKind` definition: `crates/dsl_compiler/src/cg/op.rs:140-150`.
 - Existing per-kind body templates: `crates/dsl_compiler/src/cg/emit/kernel.rs:1561-1601`.
-- Phase 6 plan stub (must land first): `docs/superpowers/plans/2026-05-01-phase-6-cg-decision-lowering.md`.
+- **Predecessor plan (must land first)**: [`2026-05-01-phase-6-cg-decision-lowering.md`](./2026-05-01-phase-6-cg-decision-lowering.md) — Tasks 1-5 done; structural IR + Movement-as-rule + namespace registry in place.
+- **Successor plan (depends on Phase 7's fixture work)**: [`2026-05-01-phase-8-cg-body-emit-parity.md`](./2026-05-01-phase-8-cg-body-emit-parity.md) — closes the body-emit gap to drive `parity_with_cpu --features gpu` green on the target-game fixtures Phase 7 produces.

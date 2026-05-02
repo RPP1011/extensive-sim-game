@@ -1,6 +1,10 @@
 # Phase 8: CG Body-Emit Closure → parity_with_cpu Green — Plan Stub
 
-> **Status: STUB.** Phase 6 (Tasks 1-5) shipped the structural IR + schema-layer + Movement-as-rule plumbing but parity stayed RED. The remaining work is the body-emit infrastructure: real WGSL bodies for masks, scoring, and movement that read/write the SoA correctly. Phase 5 Task 5's investigation (commit `5c334381`, no follow-up commit) characterized the seven blockers below; this stub captures them as a cohesive plan.
+> **Status: STUB.** Phase 6 (Tasks 1-5) shipped the structural IR + schema-layer + Movement-as-rule plumbing but parity stayed RED. The remaining work is the body-emit infrastructure: real WGSL bodies for masks, scoring, and movement that read/write the SoA correctly. Phase 6 Task 5's investigation (commit `5c334381`, no follow-up commit) characterized the seven blockers below; this stub captures them as a cohesive plan.
+>
+> **Sibling plan**: [`2026-05-01-phase-7-general-spatial-queries.md`](./2026-05-01-phase-7-general-spatial-queries.md) rips the wolf-sim-specific `KinQuery` / `EngagementQuery` IR variants out and replaces them with a predicate-driven `FilteredWalk { filter: CgExprId }`. Phase 7 also rebuilds the test fixtures around the target game (the wolf-sim DSL retires).
+>
+> **Sequencing recommendation: Phase 7 → Phase 8.** Phase 8's structural tasks (1-3) are fixture-independent and could land before Phase 7 if a green parity gate is needed earlier as a regression catcher. Phase 8's body-content tasks (4-7) are DSL-specific — best written once, against Phase 7's final fixture set.
 
 **Goal:** `parity_with_cpu_n4_t{1,10,100}` GREEN under `--features gpu` on the smoke fixture (or its target-game equivalent). At the end of Phase 8, the CG-emitted SCHEDULE produces real per-agent decisions and applies them, matching CPU output byte-for-byte.
 
@@ -93,7 +97,8 @@ If schedule pressure favors a green parity gate ASAP (regression-catcher value >
 
 ## References
 
-- Phase 6 plan: `docs/superpowers/plans/2026-05-01-phase-6-cg-decision-lowering.md` (Tasks 1-5 done — IR + schema in place; bodies are placeholders).
-- Phase 7 plan: `docs/superpowers/plans/2026-05-01-phase-7-general-spatial-queries.md` (kin removal, predicate-driven `FilteredWalk`).
+- **Predecessor plan**: [`2026-05-01-phase-6-cg-decision-lowering.md`](./2026-05-01-phase-6-cg-decision-lowering.md) — Tasks 1-5 done. IR + schema + Movement-as-rule + namespace registry in place; bodies are placeholders this plan replaces.
+- **Sibling plan (recommended to land before this one)**: [`2026-05-01-phase-7-general-spatial-queries.md`](./2026-05-01-phase-7-general-spatial-queries.md) — rips KinQuery/EngagementQuery, ships predicate-driven `FilteredWalk`. Rebuilds fixtures around the target game.
+- **Lowering-gap parent plan**: [`2026-05-01-cg-lowering-gap-closure.md`](./2026-05-01-cg-lowering-gap-closure.md) — closed at checkpoint (33/39 diagnostics + Movement-as-rule IR landed; Phase 8 closes the body-emit gap that the parent plan deferred).
 - Phase 6 Task 5 investigation transcript: in-session 2026-05-01 (subagent characterized all 7 blockers).
 - Reference body shape: `crates/engine_gpu_rules/src/movement.wgsl` (legacy splice; ~40 LOC of real position-update logic).

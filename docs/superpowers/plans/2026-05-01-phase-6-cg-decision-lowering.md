@@ -1,6 +1,15 @@
 # Phase 6: CG Decision-Chain Lowering — Plan Stub
 
-> **Status: STUB.** This plan captures the work deferred from `2026-05-01-cg-lowering-gap-closure.md` so `parity_with_cpu --features gpu` turns green for the smoke fixture (and beyond). The detailed task breakdown lives in a future expansion of this stub; today's content is the goal, the architectural shape, and the scope estimate.
+> **Status: Tasks 1-5 done, structural milestones complete (commits `1009beef` → `5c334381`).** IR + schema-layer + Movement-as-rule + namespace registry all landed. Tasks 4-5 investigation revealed parity stays RED because of seven body-emit blockers — captured in [`2026-05-01-phase-8-cg-body-emit-parity.md`](./2026-05-01-phase-8-cg-body-emit-parity.md). Phase 6's structural infrastructure is reusable across either Phase 7 (kin removal) or Phase 8 (parity-green).
+>
+> **Predecessor**: [`2026-05-01-cg-lowering-gap-closure.md`](./2026-05-01-cg-lowering-gap-closure.md) (closed at checkpoint, 33/39 lowering diagnostics).
+> **Successors**:
+> - [`2026-05-01-phase-7-general-spatial-queries.md`](./2026-05-01-phase-7-general-spatial-queries.md) — rip kin out, predicate-driven `FilteredWalk { filter }`. Rebuild fixtures around target game.
+> - [`2026-05-01-phase-8-cg-body-emit-parity.md`](./2026-05-01-phase-8-cg-body-emit-parity.md) — close the body-emit gap to drive parity green.
+>
+> **Sequencing recommendation: Phase 7 → Phase 8.** Phase 8's body-content tasks are DSL-specific; doing them after Phase 7's fixture rebuild avoids wolf-sim-specific work that would be replaced wholesale.
+
+> **Original goal preserved below for context.** The detailed task breakdown lives in a future expansion of this stub; today's content is the goal, the architectural shape, and the scope estimate.
 
 **Goal:** Close the CG-side decision/movement chain so the smoke fixture's parity gate (`parity_with_cpu_n4_t{1,10,100}`) turns green without legacy-emitter splicing. Specifically: emit real Scoring + Movement (and downstream apply/event) kernels driven by CG IR rather than the hand-written `emit_scoring_*` / `emit_movement_*` modules.
 
