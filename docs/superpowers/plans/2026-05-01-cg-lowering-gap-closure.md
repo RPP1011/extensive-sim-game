@@ -55,19 +55,22 @@
 
 ## Diagnostic Inventory (drives task decomposition)
 
-The 39 lowering diagnostics from `cargo run -p xtask --bin xtask -- compile-dsl --cg-canonical` cluster as:
+The lowering diagnostics from `cargo run -p xtask --bin xtask -- compile-dsl --cg-canonical` cluster as:
 
-| Category | Count | Cause | Tasks |
-|---|---|---|---|
-| Local binding not bound | 15 | Event-pattern binders (`actor: c`, `target: t`, `amount: a`, etc.) not synthesized into `CgStmt::Let` by `lower_one_handler`. Diagnosed by Task 1 v1 investigation (2026-05-01); see amendment in Task 1. | 1 |
-| Namespace call no expr-lowering | 3 | `agents.is_hostile_to()`, `abilities.is_known()`, `agents.engaged_with_or()` not routed in `lower_expr` | 4 |
-| View-fold type mismatch | 9 | `view[#N].primary expects view_key<#N>, got f32/u32` — fold value-expression type not matching view-key | 5, 6 |
-| Emit-field schema mismatch | 6 | `template_id` not registered for event#37 in event-field schema | 7 |
-| Virtual-field reads | 1 | `self.hp_pct` synthesized from `hp / max_hp` not lowered | 8 |
-| (B3 cleanup) | — | Re-evaluate remaining gaps; emit Movement / ApplyActions / etc. via existing lowering | 9, 10, 11 |
-| (Runtime gate) | — | Parity green | 12 |
+| Category | Original | Post-Task-1 | Cause | Tasks |
+|---|---|---|---|---|
+| Local binding not bound | 15 | **0** | Event-pattern binders not synthesized into `CgStmt::Let`. Closed by Task 1 (commit `f9068cb7`). | ✓ Done |
+| Emit-field schema mismatch | 6 | **0** | `template_id` not registered for event#37. Closed by Task 1 as side effect — `populate_event_kinds` now mirrors `pack_event` per-variant. | ✓ Done |
+| View-fold type mismatch | 9 | **10** | `view[#N].primary expects view_key<#N>, got f32/u32/i32` — fold value-expression type not matching view-key. +1 unmasked (op#14, view_key<#9> got i32) after Task 1. | 5, 6 |
+| Namespace call no expr-lowering | 3 | **3** | `agents.is_hostile_to()`, `agents.engaged_with_or()`, `query.nearest_hostile_to_or()` not routed in `lower_expr`. (`abilities.is_known()` from original count is gone — closed by Task 1; `query.nearest_*` newly visible.) | 4 |
+| **Namespace field no expr-lowering** | 0 | **3** | `world.tick` reads have no expression-level lowering — newly visible after Task 1 unmasked physics handlers. NEW category. | 4 (expanded) |
+| Virtual-field reads | 1 | **1** | `self.hp_pct` synthesized from `hp / max_hp` not lowered. | 8 |
+| **Binary type mismatch (i32 vs u32)** | 0 | **3** | `delta != 0`, `f > 0`, `a != 0` — signed event field compared to default-u32 literal. Predicted in Task 1's subagent report; was masked by binding errors before. NEW category. | 5 (expanded) |
+| (B3 cleanup) | — | — | Re-evaluate remaining gaps; emit Movement / ApplyActions / etc. via existing lowering | 9, 10, 11 |
+| (Runtime gate) | — | — | Parity green | 12 |
+| **Total** | **39** | **20** | — | — |
 
-> **Re-counted 2026-05-01 from `compile-dsl --cg-canonical 2>&1 | grep "local binding"`**: 15 diagnostics, not 10. The original count was sampled earlier in the session before the recent commits; the real total is higher because more event handlers landed.
+> **Re-counted 2026-05-01 post-Task-1 from `compile-dsl --cg-canonical 2>&1 | grep "lowering:"`**: 20 diagnostics across 5 categories. Task 1 closed 21 diagnostics in two categories (15 local-binding + 6 emit-field-schema, the latter as a side effect of populating layouts comprehensively). Two new categories surface (namespace-field + binary-type-mismatch) that were masked by the binding errors before. Task 7 is moot — preserved as a stub in the doc below but no implementation work needed.
 
 Task 1-8 close the diagnostic surface. Task 9-11 verify that the emitted SCHEDULE contains the kernels engine_gpu expects (Movement, ApplyActions, AppendEvents, AlivePack, FusedAgentUnpack, MaskUnpack, ScoringUnpack, FoldStanding, Physics, SpatialHash split, SpatialKinQuery, SpatialEngagementQuery). Task 12 is the parity gate.
 
@@ -299,11 +302,17 @@ Update this plan's Diagnostic Inventory table with the live count (commit the do
 
 ---
 
-## Task 4: Namespace-call expression lowering
+## Task 4: Namespace-call AND namespace-field expression lowering
+
+> **Scope expanded post-Task-3 (2026-05-01)**: original Task 4 covered 3 namespace-call sites (`agents.is_hostile_to`, `abilities.is_known`, `agents.engaged_with_or`). Post-Task-1 the surface is different: `abilities.is_known` is gone (closed by Task 1), `query.nearest_hostile_to_or()` is newly visible, and a sibling shape — namespace-FIELD reads like `world.tick` (3 sites) — also surfaced. Task 4's scope now includes both.
+
+**Sites to cover** (concrete from compile-dsl output, post-Task-1):
+- Calls (3): `agents.is_hostile_to(target)`, `agents.engaged_with_or(target, fallback)`, `query.nearest_hostile_to_or(...)`.
+- Fields (3 instances of 1 unique site): `world.tick` — global tick read.
 
 **Files:**
-- Modify: `crates/dsl_compiler/src/cg/lower/expr.rs::lower_expr` — add a `IrExpr::NamespaceCall { ns, method, args }` arm.
-- Modify: `crates/dsl_compiler/src/cg/expr.rs` — possibly extend `BuiltinId` to add `IsHostileTo`, `IsKnown`, `EngagedWithOr` if they're routed as builtins.
+- Modify: `crates/dsl_compiler/src/cg/lower/expr.rs::lower_expr` — add `IrExpr::NamespaceCall { ns, method, args }` and `IrExpr::NamespaceField { ns, field }` arms.
+- Modify: `crates/dsl_compiler/src/cg/expr.rs` — possibly extend `BuiltinId` to add `IsHostileTo`, `EngagedWithOr`, `NearestHostileToOr` if routed as builtins; add `WorldTick` (or treat as a Read of a synthesized DataHandle).
 - Test: `crates/dsl_compiler/src/cg/lower/expr.rs::tests`
 
 - [ ] **Step 1: Write the failing test for `agents.is_hostile_to(other)`**
@@ -351,12 +360,19 @@ git commit -m "feat(dsl_compiler): namespace-call expression lowering for agents
 
 ---
 
-## Task 5: View-key typing — accept scalar `+=` against view_key views
+## Task 5: View-key typing AND signed/unsigned binary-operand coercion
+
+> **Scope expanded post-Task-3 (2026-05-01)**: original Task 5 was scoped to view-key strict-equality (9 diagnostics, +1 unmasked → now 10 covering f32/u32/i32). A sibling type-system gap surfaced post-Task-1: 3 binary `NotEq`/`Gt` operations between i32 (signed event fields like `delta`/`f`/`a`) and u32 default literals fail with "mismatched operands". Both are typing-rule relaxations on closely related code, so they fold into Task 5.
+
+**Diagnostic counts after Task 5:**
+- View-fold-type: 10 → 0
+- Binary i32-vs-u32 mismatch: 3 → 0
 
 **Files:**
-- Modify: `crates/dsl_compiler/src/cg/well_formed.rs` — assign type-mismatch rule for `ViewStorage{slot: Primary}` targets.
-- Modify: `crates/dsl_compiler/src/cg/lower/view.rs::lower_stmt` (or upstream `validate_storage_slot`) — coerce `f32`/`u32` to `view_key<#N>` when the view's primary is the scalar accumulator slot.
-- Test: `crates/dsl_compiler/src/cg/well_formed.rs::tests` + `lower/view.rs::tests`
+- Modify: `crates/dsl_compiler/src/cg/well_formed.rs` — assign type-mismatch rule for `ViewStorage{slot: Primary}` targets; add scalar-substitution acceptance for `view_key<T>`. Also: relax binary-operand equality so signed/unsigned literals coerce to the lhs type when the rhs is a literal (not when both are non-literal — that genuinely is a programming bug).
+- Modify: `crates/dsl_compiler/src/cg/lower/view.rs::lower_stmt` (or upstream `validate_storage_slot`) — coerce `f32`/`u32`/`i32` to `view_key<#N>` when the view's primary is the scalar accumulator slot.
+- Modify: `crates/dsl_compiler/src/cg/lower/expr.rs::lower_binary` — when one operand is a u32 literal `0` and the other is i32, lower the literal as i32 instead of u32 (DSL-side default-literal coercion).
+- Test: `crates/dsl_compiler/src/cg/well_formed.rs::tests` + `lower/view.rs::tests` + `lower/expr.rs::tests`
 
 - [ ] **Step 1: Write a test exercising `f32 += 1.0` against a view with `view_key<f32>` primary**
 
@@ -440,7 +456,13 @@ git commit -m "feat(dsl_compiler): ViewStorage Assign lowers to slot-indexed ato
 
 ---
 
-## Task 7: Event-field schema — register `template_id`
+## Task 7: (MOOT — closed by Task 1)
+
+> Task 1's `populate_event_kinds` extension comprehensively mirrored `pack_event` for every event variant the runtime knows about, including `template_id`-bearing variants. The 6 emit-field-schema diagnostics that Task 7 was meant to address closed as a side effect. No implementation work needed; this slot is preserved for audit-trail continuity.
+>
+> If a future event variant adds a non-primitive field type that the schema collector doesn't recognize, this slot will be repopulated with a focused fix.
+
+## Task 7 (legacy spec, kept for audit): Event-field schema — register `template_id`
 
 **Files:**
 - Modify: `crates/dsl_compiler/src/cg/lower/driver.rs::populate_event_kinds` (or the event-field schema source)
