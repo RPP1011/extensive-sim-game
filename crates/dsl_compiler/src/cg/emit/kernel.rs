@@ -941,11 +941,17 @@ fn structural_binding_name(h: &DataHandle) -> String {
         DataHandle::ViewStorage { view, slot } => {
             format!("view_{}_{}", view.0, view_slot_field(*slot))
         }
-        DataHandle::EventRing { ring, kind: _ } => {
+        DataHandle::EventRing { ring: _, kind: _ } => {
             // Cycle-edge collapses access mode; one binding per ring
             // regardless of read/append/drain (the lowering uses the
-            // access mode to decide read vs atomicAdd).
-            format!("event_ring_{}", ring.0)
+            // access mode to decide read vs atomicAdd). Iter-2 unified
+            // every event kind to `EventRingId(0)`, so there's only
+            // one ring; drop the `_<ring.0>` suffix so the binding
+            // name `event_ring` matches the ViewFold preamble's
+            // canonical name and the schema's buffer_name. When the
+            // runtime moves to per-kind ring fanout, restore the suffix
+            // (and update `populate_event_kinds::buffer_name` in tandem).
+            "event_ring".to_string()
         }
         DataHandle::ConfigConst { id } => format!("config_{}", id.0),
         DataHandle::MaskBitmap { mask } => format!("mask_{}_bitmap", mask.0),
@@ -2034,13 +2040,15 @@ const ALIVE_BITMAP_BODY: &str = "// PlumbingKind::AliveBitmap — pack 32 alive 
 /// - **Binding-touch stub.** Touches `event_ring_<r>[0]` and
 ///   `cfg.agent_cap` to keep both declared bindings live.
 fn drain_events_body(ring_id: u32) -> String {
-    format!(
-        "// PlumbingKind::DrainEvents (ring={ring_id}) — host-side drain;\n\
+    let _ = ring_id;
+    // Iter-2 unification: single shared event ring named `event_ring`
+    // (no ring_id suffix). Body uses the structural binding name.
+    "// PlumbingKind::DrainEvents — host-side drain;\n\
         // the GPU-side kernel is a no-op binding-touch. Tail reset is\n\
         // issued from the CPU via queue.write_buffer (legacy parity).\n\
-        let _e = event_ring_{ring_id}[0];\n\
-        let _c = cfg.agent_cap;"
-    )
+        _ = event_ring[0];\n\
+        _ = cfg.agent_cap;"
+        .to_string()
 }
 
 /// WGSL body for [`PlumbingKind::UploadSimCfg`].
@@ -2120,15 +2128,18 @@ const KICK_SNAPSHOT_BODY: &str = "// PlumbingKind::KickSnapshot — flag the sna
 /// - **`CAP_WG` constant inlined.** 4096 mirrors the legacy ceiling;
 ///   surfacing it through the cfg uniform is a Task 5.7+ refinement.
 fn seed_indirect_args_body(ring_id: u32) -> String {
+    // Iter-2 unification: single shared event ring named `event_ring`
+    // (no ring_id suffix). The indirect_args buffer keeps its per-ring
+    // suffix because there's still one args buffer per ring (today
+    // single ring, so single buffer).
     format!(
         "// PlumbingKind::SeedIndirectArgs (ring={ring_id}) — adapted from\n\
         // engine_gpu_rules/src/seed_indirect.wgsl. Reads tail count from\n\
-        // event_ring_{ring_id}[0] (single-binding ring assumption — see\n\
-        // Limitations on `seed_indirect_args_body`); writes (wg, 1, 1)\n\
-        // into indirect_args_{ring_id} so the next per-event dispatch on\n\
-        // ring={ring_id} launches ceil(n/64) workgroups (capped at\n\
-        // CAP_WG=4096).\n\
-        let n = event_ring_{ring_id}[0];\n\
+        // event_ring[0] (post-iter-2 unified single ring); writes\n\
+        // (wg, 1, 1) into indirect_args_{ring_id} so the next per-event\n\
+        // dispatch on ring={ring_id} launches ceil(n/64) workgroups\n\
+        // (capped at CAP_WG=4096).\n\
+        let n = event_ring[0];\n\
         let req = (n + 63u) / 64u;\n\
         var wg: u32 = req;\n\
         if (wg > 4096u) {{ wg = 4096u; }}\n\
@@ -4190,12 +4201,14 @@ mod tests {
         let ring = EventRingId(7);
         let (_spec, body) =
             plumbing_spec_and_body(PlumbingKind::DrainEvents { ring });
+        // Iter-2 unification: body uses canonical `event_ring` binding
+        // name (no ring suffix). The header comment also drops the
+        // `(ring=N)` since the ring is implicit.
         assert!(
-            body.contains("PlumbingKind::DrainEvents (ring=7)"),
+            body.contains("PlumbingKind::DrainEvents"),
             "DrainEvents body: {body}"
         );
-        // Touches the ring binding (structural name `event_ring_<r>`).
-        assert!(body.contains("event_ring_7["), "body: {body}");
+        assert!(body.contains("event_ring["), "body: {body}");
         // PerEvent preamble from `thread_indexing_preamble`.
         assert!(body.contains("event_idx = gid.x"), "body: {body}");
         assert!(
@@ -4246,13 +4259,14 @@ mod tests {
         let ring = EventRingId(2);
         let (_spec, body) =
             plumbing_spec_and_body(PlumbingKind::SeedIndirectArgs { ring });
+        // Iter-2 unification: ring binding is `event_ring` (no suffix);
+        // indirect_args buffer keeps its per-ring suffix because there's
+        // still one args buffer per ring in the runtime.
         assert!(
             body.contains("PlumbingKind::SeedIndirectArgs (ring=2)"),
             "SeedIndirectArgs body: {body}"
         );
-        // Reads tail count from event_ring_<ring>[0]; writes (wg, 1, 1)
-        // to indirect_args_<ring>.
-        assert!(body.contains("event_ring_2[0]"), "body: {body}");
+        assert!(body.contains("event_ring[0]"), "body: {body}");
         assert!(body.contains("indirect_args_2[0] = wg"), "body: {body}");
         assert!(body.contains("indirect_args_2[1] = 1u"), "body: {body}");
         assert!(body.contains("indirect_args_2[2] = 1u"), "body: {body}");
@@ -4269,9 +4283,9 @@ mod tests {
     #[test]
     fn plumbing_seed_indirect_args_distinct_ring_ids_emit_distinct_bodies() {
         // Two SeedIndirectArgs ops on different rings should emit
-        // bodies that reference their ring id distinctly — the per-
-        // ring formatter `seed_indirect_args_body` must thread the
-        // ring id through every binding reference.
+        // bodies whose `indirect_args` references differ. The shared
+        // `event_ring` (post-iter-2 unification) reads identically for
+        // both — the distinction lives in the per-ring args buffer.
         let (_a, body_a) =
             plumbing_spec_and_body(PlumbingKind::SeedIndirectArgs {
                 ring: EventRingId(0),
@@ -4280,12 +4294,14 @@ mod tests {
             plumbing_spec_and_body(PlumbingKind::SeedIndirectArgs {
                 ring: EventRingId(3),
             });
-        assert!(body_a.contains("event_ring_0[0]"), "body_a: {body_a}");
+        // Both bodies read from the unified `event_ring`.
+        assert!(body_a.contains("event_ring[0]"), "body_a: {body_a}");
+        assert!(body_b.contains("event_ring[0]"), "body_b: {body_b}");
+        // Per-ring args buffer distinguishes them.
         assert!(body_a.contains("indirect_args_0["), "body_a: {body_a}");
-        assert!(!body_a.contains("event_ring_3"), "body_a leaked ring=3: {body_a}");
-        assert!(body_b.contains("event_ring_3[0]"), "body_b: {body_b}");
+        assert!(!body_a.contains("indirect_args_3"), "body_a leaked ring=3: {body_a}");
         assert!(body_b.contains("indirect_args_3["), "body_b: {body_b}");
-        assert!(!body_b.contains("event_ring_0"), "body_b leaked ring=0: {body_b}");
+        assert!(!body_b.contains("indirect_args_0"), "body_b leaked ring=0: {body_b}");
     }
 
     /// Snapshot: pin the `AliveBitmap` body output through

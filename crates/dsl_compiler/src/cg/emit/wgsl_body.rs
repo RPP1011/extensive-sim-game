@@ -830,19 +830,33 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
     }
 }
 
-/// Lower a [`CgStmt::Emit`] body. Placeholder shape per the module
-/// limitations note — Task 4.2 wires the real ring-append form.
+/// Lower a [`CgStmt::Emit`] body. **B1 no-op fallback**: the prior shape
+/// `emit_event_<N>(field_<I>: <expr>, ...)` used Rust-style named-arg
+/// syntax that's not valid WGSL — naga rejected every kernel that emits
+/// events. Until the runtime ring-append form lands (a future task that
+/// requires per-event-kind prelude functions + atomic ring append), emit
+/// a phony WGSL discard per field so the body parses and the trivial-
+/// fixture parity gate runs. For trivial fixtures the cascade event ring
+/// is empty so this code is dead at runtime; for non-trivial fixtures
+/// emitted events vanish, but that's the same B1 trade-off ViewStorage
+/// Assign uses (and the same task list — Tasks 9-11).
 fn lower_emit_to_wgsl(
     event_id: u32,
     fields: &[(EventField, CgExprId)],
     ctx: &EmitCtx,
 ) -> Result<String, EmitError> {
-    let mut parts = Vec::with_capacity(fields.len());
-    for (field, expr_id) in fields {
+    let mut out = String::new();
+    out.push_str(&format!("// emit event#{} (B1 phony discard — real ring-append pending)\n", event_id));
+    for (_field, expr_id) in fields {
         let v = lower_cg_expr_to_wgsl(*expr_id, ctx)?;
-        parts.push(format!("field_{}: {}", field.index, v));
+        out.push_str(&format!("_ = ({});\n", v));
     }
-    Ok(format!("emit_event_{}({});", event_id, parts.join(", ")))
+    // Drop trailing newline so callers can wrap with their own indent
+    // without doubled blank lines.
+    if out.ends_with('\n') {
+        out.pop();
+    }
+    Ok(out)
 }
 
 /// Lower a [`CgStmt::Match`] as a scrutinee-bound `if`-chain. WGSL's
@@ -1587,9 +1601,11 @@ mod tests {
             },
         );
         let ctx = EmitCtx::structural(&prog);
+        // B1 no-op fallback: per-field WGSL phony discards so the body
+        // parses; real ring-append form is a future task.
         assert_eq!(
             lower_cg_stmt_to_wgsl(s, &ctx).unwrap(),
-            "emit_event_7(field_0: agent_self_hp, field_1: 0.0);"
+            "// emit event#7 (B1 phony discard — real ring-append pending)\n_ = (agent_self_hp);\n_ = (0.0);"
         );
     }
 

@@ -695,11 +695,35 @@ pub fn synthesize_dispatch(kernel_index: &[String]) -> String {
         out.push_str("            kernel.record(device, encoder, &bindings, agent_cap);\n");
         out.push_str("        }\n");
     }
+    // Indirect dispatch: same kernel-cache + record path as `Kernel`, but
+    // matched on `DispatchOp::Indirect { kernel, args_buf: _ }`. The
+    // args_buf is forwarded by the schedule for runtime visibility but
+    // not consumed by `kernel.record()` today — the indirect-dispatch
+    // form is the runtime-format extension that the kernel's record()
+    // implementation will eventually plumb. Emit one arm per KernelId
+    // so adding a kernel auto-registers both Kernel + Indirect dispatch.
+    for name in kernel_index {
+        let pascal = snake_to_pascal(name);
+        let field = name.to_lowercase();
+        let label = format!("crate::{name}::cfg");
+        writeln!(out, "        DispatchOp::Indirect {{ kernel: KernelId::{pascal}, args_buf: _ }} => {{").unwrap();
+        writeln!(
+            out,
+            "            let kernel = cache.{field}.get_or_insert_with(|| <crate::{name}::{pascal}Kernel as Kernel>::new(device));"
+        )
+        .unwrap();
+        out.push_str("            let cfg = kernel.build_cfg(state);\n");
+        out.push_str("            let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {\n");
+        writeln!(out, "                label: Some(\"{label}\"),").unwrap();
+        out.push_str("                contents: bytemuck::cast_slice(&[cfg]),\n");
+        out.push_str("                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,\n");
+        out.push_str("            });\n");
+        out.push_str("            let bindings = kernel.bind(sources, &cfg_buf);\n");
+        out.push_str("            kernel.record(device, encoder, &bindings, agent_cap);\n");
+        out.push_str("        }\n");
+    }
     out.push_str("        DispatchOp::FixedPoint { kernel: other, .. } => {\n");
     out.push_str("            unreachable!(\"FixedPoint {other:?} not currently emitted by SCHEDULE\")\n");
-    out.push_str("        }\n");
-    out.push_str("        DispatchOp::Indirect { kernel: other, .. } => {\n");
-    out.push_str("            unreachable!(\"Indirect {other:?} not currently emitted by SCHEDULE\")\n");
     out.push_str("        }\n");
     out.push_str("        DispatchOp::GatedBy { kernel: other, .. } => {\n");
     out.push_str("            unreachable!(\"GatedBy {other:?} not currently emitted by SCHEDULE\")\n");

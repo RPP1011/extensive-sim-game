@@ -3,9 +3,8 @@
 
 struct PhysicsChronicleAttackCfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 
-@group(0) @binding(0) var<storage, read> event_ring_0: array<u32>;
-@group(0) @binding(1) var<storage, read_write> event_ring_37: array<atomic<u32>>;
-@group(0) @binding(2) var<uniform> cfg: PhysicsChronicleAttackCfg;
+@group(0) @binding(0) var<storage, read_write> event_ring: array<u32>;
+@group(0) @binding(1) var<uniform> cfg: PhysicsChronicleAttackCfg;
 
 @compute @workgroup_size(64)
 fn cs_physics_chronicle_attack(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -16,6 +15,9 @@ let event_idx = gid.x;
 {
     let local_2: u32 = event_ring[event_idx * 10u + 2u];
     let local_0: u32 = event_ring[event_idx * 10u + 3u];
-    emit_event_37(field_0: 2u, field_1: local_2, field_2: local_0);
+    // emit event#37 (B1 phony discard — real ring-append pending)
+    _ = (2u);
+    _ = (local_2);
+    _ = (local_0);
 }
 }

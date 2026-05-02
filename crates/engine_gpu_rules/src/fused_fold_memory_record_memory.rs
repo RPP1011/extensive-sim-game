@@ -9,8 +9,7 @@ pub struct FusedFoldMemoryRecordMemoryKernel {
 }
 
 pub struct FusedFoldMemoryRecordMemoryBindings<'a> {
-    pub event_ring_0: &'a wgpu::Buffer,
-    pub event_ring_37: &'a wgpu::Buffer,
+    pub event_ring: &'a wgpu::Buffer,
     pub view_10_primary: &'a wgpu::Buffer,
     pub cfg: &'a wgpu::Buffer,
 }
@@ -33,10 +32,9 @@ impl crate::Kernel for FusedFoldMemoryRecordMemoryKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::fused_fold_memory_record_memory::bgl"),
             entries: &[
-                crate::bgl_storage(0, true), // event_ring_0
-                crate::bgl_storage(1, false), // event_ring_37
-                crate::bgl_storage(2, false), // view_10_primary
-                crate::bgl_uniform(3), // cfg
+                crate::bgl_storage(0, false), // event_ring
+                crate::bgl_storage(1, false), // view_10_primary
+                crate::bgl_uniform(2), // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -63,8 +61,7 @@ impl crate::Kernel for FusedFoldMemoryRecordMemoryKernel {
     fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> FusedFoldMemoryRecordMemoryBindings<'a> {
         let _ = sources;
         FusedFoldMemoryRecordMemoryBindings {
-            event_ring_0: sources.transient.cascade_current_ring,
-            event_ring_37: sources.transient.cascade_next_ring,
+            event_ring: sources.transient.cascade_current_ring,
             view_10_primary: &sources.resident.memory_primary,
             cfg: cfg,
         }
@@ -75,10 +72,9 @@ impl crate::Kernel for FusedFoldMemoryRecordMemoryKernel {
             label: Some("engine_gpu_rules::fused_fold_memory_record_memory::bg"),
             layout: &self.bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring_0.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.event_ring_37.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.view_10_primary.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.view_10_primary.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() },
             ],
         });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -93,10 +89,9 @@ impl crate::Kernel for FusedFoldMemoryRecordMemoryKernel {
 
 pub fn fused_fold_memory_record_memory_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     vec![
-                crate::bgl_storage(0, true), // event_ring_0
-                crate::bgl_storage(1, false), // event_ring_37
-                crate::bgl_storage(2, false), // view_10_primary
-                crate::bgl_uniform(3), // cfg
+                crate::bgl_storage(0, false), // event_ring
+                crate::bgl_storage(1, false), // view_10_primary
+                crate::bgl_uniform(2), // cfg
     ]
 }
 
@@ -104,10 +99,9 @@ pub fn fused_fold_memory_record_memory_bind_group_entries<'a>(
     bindings: &'a FusedFoldMemoryRecordMemoryBindings<'a>,
 ) -> Vec<wgpu::BindGroupEntry<'a>> {
     vec![
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring_0.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.event_ring_37.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.view_10_primary.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.view_10_primary.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() },
     ]
 }
 

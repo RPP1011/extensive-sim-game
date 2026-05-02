@@ -3,9 +3,8 @@
 
 struct PhysicsChronicleFleeCfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 
-@group(0) @binding(0) var<storage, read> event_ring_0: array<u32>;
-@group(0) @binding(1) var<storage, read_write> event_ring_37: array<atomic<u32>>;
-@group(0) @binding(2) var<uniform> cfg: PhysicsChronicleFleeCfg;
+@group(0) @binding(0) var<storage, read_write> event_ring: array<u32>;
+@group(0) @binding(1) var<uniform> cfg: PhysicsChronicleFleeCfg;
 
 @compute @workgroup_size(64)
 fn cs_physics_chronicle_flee(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -15,6 +14,9 @@ let event_idx = gid.x;
 // op#23 (physics_rule)
 {
     let local_2: u32 = event_ring[event_idx * 10u + 2u];
-    emit_event_37(field_0: 7u, field_1: local_2, field_2: local_2);
+    // emit event#37 (B1 phony discard — real ring-append pending)
+    _ = (7u);
+    _ = (local_2);
+    _ = (local_2);
 }
 }

@@ -9,7 +9,7 @@ pub struct SeedIndirect0Kernel {
 }
 
 pub struct SeedIndirect0Bindings<'a> {
-    pub event_ring_0: &'a wgpu::Buffer,
+    pub event_ring: &'a wgpu::Buffer,
     pub indirect_args_0: &'a wgpu::Buffer,
     pub cfg: &'a wgpu::Buffer,
 }
@@ -32,7 +32,7 @@ impl crate::Kernel for SeedIndirect0Kernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::seed_indirect_0::bgl"),
             entries: &[
-                crate::bgl_storage(0, true), // event_ring_0
+                crate::bgl_storage(0, true), // event_ring
                 crate::bgl_storage(1, false), // indirect_args_0
                 crate::bgl_uniform(2), // cfg
             ],
@@ -61,7 +61,7 @@ impl crate::Kernel for SeedIndirect0Kernel {
     fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> SeedIndirect0Bindings<'a> {
         let _ = sources;
         SeedIndirect0Bindings {
-            event_ring_0: sources.transient.cascade_current_ring,
+            event_ring: sources.transient.cascade_current_ring,
             indirect_args_0: sources.transient.cascade_indirect_args,
             cfg: cfg,
         }
@@ -72,7 +72,7 @@ impl crate::Kernel for SeedIndirect0Kernel {
             label: Some("engine_gpu_rules::seed_indirect_0::bg"),
             layout: &self.bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring_0.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: bindings.indirect_args_0.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() },
             ],
@@ -89,7 +89,7 @@ impl crate::Kernel for SeedIndirect0Kernel {
 
 pub fn seed_indirect_0_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     vec![
-                crate::bgl_storage(0, true), // event_ring_0
+                crate::bgl_storage(0, true), // event_ring
                 crate::bgl_storage(1, false), // indirect_args_0
                 crate::bgl_uniform(2), // cfg
     ]
@@ -99,7 +99,7 @@ pub fn seed_indirect_0_bind_group_entries<'a>(
     bindings: &'a SeedIndirect0Bindings<'a>,
 ) -> Vec<wgpu::BindGroupEntry<'a>> {
     vec![
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring_0.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: bindings.indirect_args_0.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() },
     ]

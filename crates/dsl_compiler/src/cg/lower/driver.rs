@@ -392,6 +392,13 @@ fn populate_event_kinds(
             // PAYLOAD_WORDS = 8.
             record_stride_u32: 10,
             header_word_count: 2,
+            // Post-iter-2 every event kind reads from the shared
+            // `EventRingId(0)` ring; the structural namer drops the
+            // `_<ring.0>` suffix so the binding name `event_ring`
+            // matches the ViewFold preamble convention. When the
+            // runtime moves to per-kind ring fanout, this becomes
+            // `event_ring_<ring_id>` per kind (and the structural
+            // namer restores its suffix in tandem).
             buffer_name: "event_ring".to_string(),
             fields,
         };
@@ -1188,15 +1195,16 @@ fn collect_emit_destination_rings(prog: &CgProgram) -> Vec<(usize, EventRingId)>
         let Some(list_id) = body_list else { continue };
         let mut emits: Vec<EventKindId> = Vec::new();
         collect_emits_in_list(list_id, prog, &mut emits);
-        for kind in emits {
-            // Phase 1 allocates rings parallel to event kinds — see
-            // `populate_event_kinds`. The 1:1 mapping holds for every
-            // event in `comp.events`; an out-of-range
-            // `EventKindId(i)` would be a driver-side defect, but
-            // record_write tolerates the entry regardless (the
-            // well_formed gate would surface a writer-without-reader
-            // diagnostic separately).
-            out.push((op_index, EventRingId(kind.0)));
+        for _kind in emits {
+            // Iter-2 unification: every event kind shares the single
+            // `EventRingId(0)` ring (named `batch_events`). Pre-iter-2
+            // this allocated `EventRingId(kind.0)` per-kind, but the
+            // runtime has only one ring buffer; the per-kind ring ids
+            // produced bindings like `event_ring_37` that didn't match
+            // the unified `event_ring_0` source binding.
+            //
+            // See `populate_event_kinds` — `shared_ring = EventRingId(0)`.
+            out.push((op_index, EventRingId(0)));
         }
     }
     out

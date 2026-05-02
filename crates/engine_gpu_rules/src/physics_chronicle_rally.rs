@@ -9,8 +9,7 @@ pub struct PhysicsChronicleRallyKernel {
 }
 
 pub struct PhysicsChronicleRallyBindings<'a> {
-    pub event_ring_0: &'a wgpu::Buffer,
-    pub event_ring_37: &'a wgpu::Buffer,
+    pub event_ring: &'a wgpu::Buffer,
     pub cfg: &'a wgpu::Buffer,
 }
 
@@ -32,9 +31,8 @@ impl crate::Kernel for PhysicsChronicleRallyKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::physics_chronicle_rally::bgl"),
             entries: &[
-                crate::bgl_storage(0, true), // event_ring_0
-                crate::bgl_storage(1, false), // event_ring_37
-                crate::bgl_uniform(2), // cfg
+                crate::bgl_storage(0, false), // event_ring
+                crate::bgl_uniform(1), // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -61,8 +59,7 @@ impl crate::Kernel for PhysicsChronicleRallyKernel {
     fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> PhysicsChronicleRallyBindings<'a> {
         let _ = sources;
         PhysicsChronicleRallyBindings {
-            event_ring_0: sources.transient.cascade_current_ring,
-            event_ring_37: sources.transient.cascade_next_ring,
+            event_ring: sources.transient.cascade_current_ring,
             cfg: cfg,
         }
     }
@@ -72,9 +69,8 @@ impl crate::Kernel for PhysicsChronicleRallyKernel {
             label: Some("engine_gpu_rules::physics_chronicle_rally::bg"),
             layout: &self.bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring_0.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.event_ring_37.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.cfg.as_entire_binding() },
             ],
         });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -89,9 +85,8 @@ impl crate::Kernel for PhysicsChronicleRallyKernel {
 
 pub fn physics_chronicle_rally_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     vec![
-                crate::bgl_storage(0, true), // event_ring_0
-                crate::bgl_storage(1, false), // event_ring_37
-                crate::bgl_uniform(2), // cfg
+                crate::bgl_storage(0, false), // event_ring
+                crate::bgl_uniform(1), // cfg
     ]
 }
 
@@ -99,9 +94,8 @@ pub fn physics_chronicle_rally_bind_group_entries<'a>(
     bindings: &'a PhysicsChronicleRallyBindings<'a>,
 ) -> Vec<wgpu::BindGroupEntry<'a>> {
     vec![
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring_0.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.event_ring_37.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.cfg.as_entire_binding() },
     ]
 }
 

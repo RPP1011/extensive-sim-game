@@ -9,8 +9,7 @@ pub struct PhysicsChronicleWoundKernel {
 }
 
 pub struct PhysicsChronicleWoundBindings<'a> {
-    pub event_ring_0: &'a wgpu::Buffer,
-    pub event_ring_37: &'a wgpu::Buffer,
+    pub event_ring: &'a wgpu::Buffer,
     pub agent_hp: &'a wgpu::Buffer,
     pub agent_max_hp: &'a wgpu::Buffer,
     pub agent_alive: &'a wgpu::Buffer,
@@ -35,12 +34,11 @@ impl crate::Kernel for PhysicsChronicleWoundKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::physics_chronicle_wound::bgl"),
             entries: &[
-                crate::bgl_storage(0, true), // event_ring_0
-                crate::bgl_storage(1, false), // event_ring_37
-                crate::bgl_storage(2, true), // agent_hp
-                crate::bgl_storage(3, true), // agent_max_hp
-                crate::bgl_storage(4, true), // agent_alive
-                crate::bgl_uniform(5), // cfg
+                crate::bgl_storage(0, false), // event_ring
+                crate::bgl_storage(1, true), // agent_hp
+                crate::bgl_storage(2, true), // agent_max_hp
+                crate::bgl_storage(3, true), // agent_alive
+                crate::bgl_uniform(4), // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -67,8 +65,7 @@ impl crate::Kernel for PhysicsChronicleWoundKernel {
     fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> PhysicsChronicleWoundBindings<'a> {
         let _ = sources;
         PhysicsChronicleWoundBindings {
-            event_ring_0: sources.transient.cascade_current_ring,
-            event_ring_37: sources.transient.cascade_next_ring,
+            event_ring: sources.transient.cascade_current_ring,
             agent_hp: sources.external.agents,
             agent_max_hp: sources.external.agents,
             agent_alive: sources.external.agents,
@@ -81,12 +78,11 @@ impl crate::Kernel for PhysicsChronicleWoundKernel {
             label: Some("engine_gpu_rules::physics_chronicle_wound::bg"),
             layout: &self.bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring_0.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.event_ring_37.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.agent_hp.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.agent_max_hp.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: bindings.agent_alive.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.agent_hp.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: bindings.agent_max_hp.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: bindings.agent_alive.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: bindings.cfg.as_entire_binding() },
             ],
         });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -101,12 +97,11 @@ impl crate::Kernel for PhysicsChronicleWoundKernel {
 
 pub fn physics_chronicle_wound_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     vec![
-                crate::bgl_storage(0, true), // event_ring_0
-                crate::bgl_storage(1, false), // event_ring_37
-                crate::bgl_storage(2, true), // agent_hp
-                crate::bgl_storage(3, true), // agent_max_hp
-                crate::bgl_storage(4, true), // agent_alive
-                crate::bgl_uniform(5), // cfg
+                crate::bgl_storage(0, false), // event_ring
+                crate::bgl_storage(1, true), // agent_hp
+                crate::bgl_storage(2, true), // agent_max_hp
+                crate::bgl_storage(3, true), // agent_alive
+                crate::bgl_uniform(4), // cfg
     ]
 }
 
@@ -114,12 +109,11 @@ pub fn physics_chronicle_wound_bind_group_entries<'a>(
     bindings: &'a PhysicsChronicleWoundBindings<'a>,
 ) -> Vec<wgpu::BindGroupEntry<'a>> {
     vec![
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring_0.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.event_ring_37.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.agent_hp.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.agent_max_hp.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: bindings.agent_alive.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.event_ring.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.agent_hp.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: bindings.agent_max_hp.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: bindings.agent_alive.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: bindings.cfg.as_entire_binding() },
     ]
 }
 

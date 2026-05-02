@@ -3,7 +3,7 @@
 
 struct SeedIndirect0Cfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 
-@group(0) @binding(0) var<storage, read> event_ring_0: array<u32>;
+@group(0) @binding(0) var<storage, read> event_ring: array<u32>;
 @group(0) @binding(1) var<storage, read_write> indirect_args_0: array<u32>;
 @group(0) @binding(2) var<uniform> cfg: SeedIndirect0Cfg;
 
@@ -15,12 +15,11 @@ if (gid.x != 0u) { return; }
 {
     // PlumbingKind::SeedIndirectArgs (ring=0) — adapted from
     // engine_gpu_rules/src/seed_indirect.wgsl. Reads tail count from
-    // event_ring_0[0] (single-binding ring assumption — see
-    // Limitations on `seed_indirect_args_body`); writes (wg, 1, 1)
-    // into indirect_args_0 so the next per-event dispatch on
-    // ring=0 launches ceil(n/64) workgroups (capped at
-    // CAP_WG=4096).
-    let n = event_ring_0[0];
+    // event_ring[0] (post-iter-2 unified single ring); writes
+    // (wg, 1, 1) into indirect_args_0 so the next per-event
+    // dispatch on ring=0 launches ceil(n/64) workgroups
+    // (capped at CAP_WG=4096).
+    let n = event_ring[0];
     let req = (n + 63u) / 64u;
     var wg: u32 = req;
     if (wg > 4096u) { wg = 4096u; }
