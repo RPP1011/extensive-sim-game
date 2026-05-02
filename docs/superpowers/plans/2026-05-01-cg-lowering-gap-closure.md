@@ -59,13 +59,15 @@ The 39 lowering diagnostics from `cargo run -p xtask --bin xtask -- compile-dsl 
 
 | Category | Count | Cause | Tasks |
 |---|---|---|---|
-| Local binding not bound | 10 | `IrStmt::Let` not threaded into the rule body context (`ctx.local_ids` empty when `lower_bare_local` fires) | 1, 2, 3 |
+| Local binding not bound | 15 | Event-pattern binders (`actor: c`, `target: t`, `amount: a`, etc.) not synthesized into `CgStmt::Let` by `lower_one_handler`. Diagnosed by Task 1 v1 investigation (2026-05-01); see amendment in Task 1. | 1 |
 | Namespace call no expr-lowering | 3 | `agents.is_hostile_to()`, `abilities.is_known()`, `agents.engaged_with_or()` not routed in `lower_expr` | 4 |
 | View-fold type mismatch | 9 | `view[#N].primary expects view_key<#N>, got f32/u32` — fold value-expression type not matching view-key | 5, 6 |
 | Emit-field schema mismatch | 6 | `template_id` not registered for event#37 in event-field schema | 7 |
 | Virtual-field reads | 1 | `self.hp_pct` synthesized from `hp / max_hp` not lowered | 8 |
 | (B3 cleanup) | — | Re-evaluate remaining gaps; emit Movement / ApplyActions / etc. via existing lowering | 9, 10, 11 |
 | (Runtime gate) | — | Parity green | 12 |
+
+> **Re-counted 2026-05-01 from `compile-dsl --cg-canonical 2>&1 | grep "local binding"`**: 15 diagnostics, not 10. The original count was sampled earlier in the session before the recent commits; the real total is higher because more event handlers landed.
 
 Task 1-8 close the diagnostic surface. Task 9-11 verify that the emitted SCHEDULE contains the kernels engine_gpu expects (Movement, ApplyActions, AppendEvents, AlivePack, FusedAgentUnpack, MaskUnpack, ScoringUnpack, FoldStanding, Physics, SpatialHash split, SpatialKinQuery, SpatialEngagementQuery). Task 12 is the parity gate.
 
@@ -89,108 +91,195 @@ This plan touches existing files only. No new modules.
 
 ---
 
-## Task 1: Local-binding lowering for physics-rule body locals (top of body)
+## Task 1: Event-pattern binding lowering via `CgExpr::EventField` + schema-driven layout
+
+> **AIS amendment (2026-05-01)**: The original Task 1 hypothesis — that top-of-body `Let` statements skipped `lower_let` — was *wrong*. A read-only investigation by the first dispatch confirmed `lower_stmt` already routes `IrStmt::Let` to `lower_let` (`physics.rs:402-407`), `lower_let` populates `ctx.local_ids` + `local_tys`, and `lower_bare_local` resolves to `CgExpr::ReadLocal`. The infrastructure works. **The actual cause of all 15 `local binding ... is not bound` diagnostics is event-pattern bindings**: every diagnostic traced (spans 1190, 5847, 14084, 18756, 26654, 28526, 29131, 29993) resolves to a `t` / `actor` / `target` / `amount` / `delta` / `dead` introduced by an `on EffectXxx { actor: c, target: t, amount: a, ... }` event pattern, then read inside the handler body. `lower_one_handler` (`physics.rs:255`) jumps from intern-name straight into `lower_stmt_list` *without* walking `handler.pattern.bindings()`. Task 1 is rewritten below to address this real cause; Task 2 (originally for-loop body Let) is dropped — for-loop body Let lowering already works, and any `delta`-style diagnostic the original AIS ascribed to it is actually a pattern binding.
+
+**The real bug.** Event patterns introduce binders that map to typed values extracted from the event payload (`target: AgentId`, `actor: AgentId`, `amount: f32`, etc.). The IR has no shape today that represents "value extracted from the current event's payload" — so `lower_one_handler` can't synthesize the necessary `CgStmt::Let`s for each pattern binder. Once the value-side shape exists, the synthesis is mechanical: walk `handler.pattern.bindings()`, look up `(field_index, ty)` from the schema per binder, push `CgStmt::Let`, and the existing `local_ids` + `lower_bare_local` chain handles every read inside the body.
+
+**Schema-driven layout (forward-compat with per-kind ring fanout).** The runtime today uses one shared event ring with fixed stride = 10 u32 (2 header + 8 payload, sized for `AgentMoved`/`AgentFled` at 7 payload words with one word headroom — see `crates/engine_gpu/src/event_ring.rs:79-110`). Future events (e.g. `AgentSpawned` with template + equipment list, `EffectAreaApplied` with hit_targets[N], `MemoryRecorded` with embedding[16]) will blow past 8 payload words; padding everything to max-payload becomes prohibitively wasteful. The runtime is expected to move to **per-kind ring fanout** — one ring per event kind, each sized to its actual payload + frequency. The IR design here doesn't force the runtime change, but it makes it a local edit when the time comes: the schema is the layout authority, and the WGSL emit reads `(record_stride_u32, header_word_count, buffer_name, field_offsets)` per kind from the schema. Today every kind returns the uniform values (stride=10, header=2, buffer="event_ring"); future kinds return per-kind values without any IR shape change.
 
 **Files:**
-- Modify: `crates/dsl_compiler/src/cg/lower/physics.rs:lower_let` — already exists (Task 5.5b); ensure every physics-rule body's `IrStmt::Let` reaches it.
-- Modify: `crates/dsl_compiler/src/cg/lower/physics.rs::lower_physics` — verify the body walk visits every `IrStmt`, not just the `for body` head.
-- Test: `crates/dsl_compiler/src/cg/lower/physics.rs::tests` — add fixture exercising `let t = ...; let delta = ...;` in a physics body.
+- Modify: `crates/dsl_compiler/src/cg/expr.rs` — add `CgExpr::EventField { event_kind, field_index, ty }` variant; extend exhaustive matches across the codebase (~10 sites).
+- Modify: `crates/dsl_compiler/src/cg/lower/ctx.rs` (or wherever `LoweringCtx` lives) — add `event_layouts: HashMap<EventKindId, EventLayout>` field; populate in `populate_event_kinds`.
+- Modify: `crates/dsl_compiler/src/cg/lower/physics.rs::lower_one_handler` — walk `handler.pattern.bindings()`, synthesize `CgStmt::Let` per binder.
+- Modify: `crates/dsl_compiler/src/cg/emit/wgsl_body.rs::lower_cg_expr_to_wgsl` — add `EventField` arm, schema-driven access form.
+- Modify: `crates/dsl_compiler/src/cg/well_formed.rs` — add scope check that `EventField` only appears in PerEvent-shaped op bodies.
+- Test: `crates/dsl_compiler/src/cg/lower/physics.rs::tests`, `wgsl_body.rs::tests`, `well_formed.rs::tests`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add `CgExpr::EventField` variant + propagate exhaustive matches**
 
-Add to `lower/physics.rs::tests`:
+In `crates/dsl_compiler/src/cg/expr.rs`, extend the `CgExpr` enum:
 ```rust
-#[test]
-fn lower_physics_handles_top_of_body_let_binding() {
-    let mut prog = CgProgram::default();
-    // physics rule with `on Damage { let t = self.tick; emit X { stamp: t } }`
-    let comp = compile_str(
-        r#"
-        on event Damage(target: AgentId, amount: f32) {
-            let t = world.tick;
-            emit DamageRecorded { target: target, stamp: t };
-        }
-        "#,
-    ).expect("compile parses");
-    let mut ctx = LoweringCtx::new(&mut /* builder */);
-    let mut diags = Vec::new();
-    lower_all_physics(&comp, &[/*ring=0*/], &mut ctx, &mut diags);
-    assert!(diags.iter().all(|d| !matches!(d, LoweringError::UnsupportedLocalBinding { name, .. } if name == "t")),
-        "let-bound `t` must lower without UnsupportedLocalBinding diagnostic, got: {diags:?}");
+pub enum CgExpr {
+    // ... existing variants ...
+    /// Read a typed field from the current event's payload. Schema-
+    /// driven: `event_kind` keys into `LoweringCtx::event_layouts` to
+    /// resolve `(record_stride_u32, header_word_count, buffer_name,
+    /// field_offset)`. Per-kind ring fanout is forward-compatible —
+    /// today's emit produces `event_ring[event_idx * 10u + 2u + offset]`
+    /// for every kind; future schema returns per-kind buffer + stride
+    /// and the same emit produces `event_ring_<kind>[...]` naturally.
+    EventField {
+        event_kind: EventKindId,
+        field_index: u32,
+        ty: CgTy,
+    },
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+Run `cargo build -p dsl_compiler` and follow the exhaustiveness errors to update every match (likely `wgsl_body.rs::lower_cg_expr_to_wgsl`, `well_formed::type_check`, `op.rs::compute_dependencies`, possibly more — let the compiler enumerate them).
 
-Run: `cargo test -p dsl_compiler --lib lower_physics_handles_top_of_body_let_binding -- --nocapture`
-Expected: FAIL with "UnsupportedLocalBinding { name: \"t\", ... }".
+- [ ] **Step 2: Add `EventLayout` struct + `LoweringCtx::event_layouts`**
 
-- [ ] **Step 3: Investigate `lower_physics` body walk**
+In whatever file holds `LoweringCtx`:
+```rust
+#[derive(Debug, Clone)]
+pub struct EventLayout {
+    /// u32 words per record. Today: 10 for every kind (= 2 header + 8
+    /// payload). Future per-kind ring fanout: per-kind value.
+    pub record_stride_u32: u32,
+    /// Header word count (kind + tick). Constant across runtime
+    /// strategies — kept on the layout struct for symmetry.
+    pub header_word_count: u32,
+    /// WGSL identifier for the storage buffer this kind reads from.
+    /// Today: "event_ring" for every kind. Future: per-kind names like
+    /// "event_ring_AgentMoved".
+    pub buffer_name: String,
+    /// Field name → offset within payload (u32 words from start of
+    /// payload, NOT including header).
+    pub fields: BTreeMap<String, FieldLayout>,
+}
 
-Read `crates/dsl_compiler/src/cg/lower/physics.rs::lower_physics`. Identify whether `IrStmt::Let` arms are reached for top-of-body lets vs for-loop lets. The Task 5.5b lowering routes `Let` → `CgStmt::Let` + `ctx.register_local(...)`, so the failure means the walk doesn't reach the `Let` arm. Fix the walk. If `Let` IS reached but `register_local` isn't called for some reason, fix that.
+#[derive(Debug, Clone, Copy)]
+pub struct FieldLayout {
+    pub word_offset_in_payload: u32,
+    pub word_count: u32,
+    pub ty: CgTy,
+}
+```
 
-- [ ] **Step 4: Apply the smallest fix that makes the test pass**
+Add `event_layouts: HashMap<EventKindId, EventLayout>` to `LoweringCtx`, populate in `populate_event_kinds` (driver.rs) — for now every kind gets uniform `record_stride_u32: 10, header_word_count: 2, buffer_name: "event_ring".to_string()`, with `fields` derived from the AST event variant's field list.
 
-Likely edit: extend the body-iteration in `lower_physics::lower_rule_body` to dispatch each `IrStmt` through `lower_stmt`, including `Let`. Today it may special-case `For` and skip `Let` at the top level.
+Mirror the existing `pack_event` field layouts from `crates/engine_gpu/src/event_ring.rs:256+` — that's the runtime's source of truth for which payload words hold which fields per variant.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 3: Extend `lower_one_handler` to synthesize `CgStmt::Let` per pattern binder**
 
-Run: `cargo test -p dsl_compiler --lib lower_physics_handles_top_of_body_let_binding`
-Expected: PASS.
+In `lower_one_handler` (`physics.rs:255`), before `lower_stmt_list`:
+```rust
+for binding in handler.pattern.bindings() {
+    let layout = ctx.event_layouts.get(&event_kind_id)
+        .ok_or(LoweringError::UnregisteredEventKind { kind: event_kind_id })?;
+    let field = layout.fields.get(&binding.name)
+        .ok_or(LoweringError::UnregisteredEventField {
+            event: event_kind_id, field: binding.name.clone(),
+        })?;
+    let local_id = ctx.allocate_local();
+    let value_expr_id = add(ctx, CgExpr::EventField {
+        event_kind: event_kind_id,
+        field_index: field.word_offset_in_payload,
+        ty: field.ty,
+    }, binding.span)?;
+    let stmt = CgStmt::Let { local: local_id, value: value_expr_id, ty: field.ty };
+    builder.push_stmt(stmt);
+    ctx.register_local(binding.local_ref, local_id);
+    ctx.local_tys.insert(local_id, field.ty);
+}
+```
 
-- [ ] **Step 6: Run the full diagnostic count**
+(Adapt to the actual API shapes — `handler.pattern.bindings()` may be named differently in the AST. Verify the API name with `rg "bindings\b" crates/dsl_ast/src/`.)
 
-Run: `cargo run -p xtask --bin xtask -- compile-dsl --cg-canonical 2>&1 | grep "lowering: local binding" | wc -l`
-Expected: down from 10 (current) to ≤6 (the for-loop-bound and target-aliased ones survive; the top-of-body ones go away).
+- [ ] **Step 4: Add WGSL emit arm**
 
-- [ ] **Step 7: Commit**
+In `wgsl_body.rs::lower_cg_expr_to_wgsl`:
+```rust
+CgExpr::EventField { event_kind, field_index, ty } => {
+    let layout = ctx.event_layouts.get(event_kind)
+        .ok_or(EmitError::UnregisteredEventKind { kind: *event_kind })?;
+    let total_offset = layout.header_word_count + field_index;
+    let base = format!("event_idx * {}u + {}u", layout.record_stride_u32, total_offset);
+    Ok(match ty {
+        CgTy::AgentId | CgTy::U32 => format!("{}[{}]", layout.buffer_name, base),
+        CgTy::F32 => format!("bitcast<f32>({}[{}])", layout.buffer_name, base),
+        CgTy::Vec3 => format!(
+            "vec3<f32>(bitcast<f32>({buf}[event_idx * {s}u + {o}u]), bitcast<f32>({buf}[event_idx * {s}u + {o2}u]), bitcast<f32>({buf}[event_idx * {s}u + {o3}u]))",
+            buf = layout.buffer_name, s = layout.record_stride_u32,
+            o = total_offset, o2 = total_offset + 1, o3 = total_offset + 2,
+        ),
+        // ... other CgTy arms ...
+    })
+}
+```
+
+Note: `ctx.event_layouts` needs to be reachable from `EmitCtx`. If `EmitCtx` only carries `prog`, extend it to carry the layouts (or thread them through `prog` if natural).
+
+- [ ] **Step 5: Add well_formed scope check**
+
+In `well_formed.rs`, when walking an op body, track whether the surrounding op's `DispatchShape` is `PerEvent { .. }`. If `EventField` appears in a non-PerEvent body, surface as `CgError::EventFieldInNonPerEventBody { op_index }`.
+
+- [ ] **Step 6: Write tests**
+
+```rust
+#[test]
+fn event_pattern_binding_lowers_to_event_field_let() {
+    // Build a physics rule via test fixture:
+    //   on Damage { actor: c, target: t, amount: a } {
+    //     emit DamageRecorded { target: t, stamp: a };
+    //   }
+    // Lower; assert the synthesized CgStmt::Let sequence at the head of
+    // the body, each value being a CgExpr::EventField with the right
+    // (event_kind, field_index, ty).
+}
+
+#[test]
+fn event_field_emits_schema_driven_wgsl_access() {
+    // Lower a CgExpr::EventField{event_kind: 0, field_index: 1, ty: AgentId}
+    // with a uniform layout (stride=10, header=2). Assert WGSL is
+    // "event_ring[event_idx * 10u + 3u]".
+}
+
+#[test]
+fn event_field_in_per_agent_body_flagged_by_well_formed() {
+    // Construct an op with DispatchShape::PerAgent whose body reads
+    // EventField. Assert CgError::EventFieldInNonPerEventBody.
+}
+```
+
+- [ ] **Step 7: Run tests to verify**
+
+`cargo test -p dsl_compiler --lib`. The three new tests pass. All 801+ existing tests still pass.
+
+- [ ] **Step 8: Verify diagnostic count drops to 0**
 
 ```bash
-git add crates/dsl_compiler/src/cg/lower/physics.rs crates/engine_gpu_rules/
-git commit -m "fix(dsl_compiler): physics-rule top-of-body Let binding now lowers to CgStmt::Let"
+cargo run -p xtask --bin xtask -- compile-dsl --cg-canonical 2>&1 | grep "lowering: local binding" | wc -l
+```
+Expected: `0` (down from 15).
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add crates/dsl_compiler/src/cg/expr.rs \
+        crates/dsl_compiler/src/cg/lower/ctx.rs \
+        crates/dsl_compiler/src/cg/lower/physics.rs \
+        crates/dsl_compiler/src/cg/lower/driver.rs \
+        crates/dsl_compiler/src/cg/emit/wgsl_body.rs \
+        crates/dsl_compiler/src/cg/well_formed.rs \
+        crates/engine_gpu_rules/
+git commit -m "feat(dsl_compiler): event-pattern binding lowering via CgExpr::EventField (schema-driven layout)"
 ```
 
 ---
 
-## Task 2: Local-binding lowering for cast-rule `for` body locals
+## Task 2: (REMOVED — superseded by amended Task 1)
 
-**Files:**
-- Modify: `crates/dsl_compiler/src/cg/lower/physics.rs::lower_for` (likely NEW or extend existing for-handling)
-- Test: `crates/dsl_compiler/src/cg/lower/physics.rs::tests`
-
-- [ ] **Step 1: Write the failing test**
-
-Add a test exercising `for target in spatial_query(...) { let delta = ...; ... }`:
-```rust
-#[test]
-fn lower_physics_handles_for_loop_body_let() {
-    // physics rule with `for target in agents.engaged() { let delta = self.dmg; emit Hit { target, amount: delta } }`
-    // Compile and assert no UnsupportedLocalBinding diagnostics for `delta`.
-    // (Concrete fixture text — see Task 1 pattern.)
-}
-```
-
-- [ ] **Step 2: Verify it fails before the fix**
-
-`cargo test -p dsl_compiler --lib lower_physics_handles_for_loop_body_let`. Expected: FAIL.
-
-- [ ] **Step 3: Extend `lower_for` to thread body lets**
-
-The for-loop body walk needs the same `IrStmt::Let` arm as Task 1, plus the loop-binder (`for target in ...`) registers as a structural local pointing at the per-iteration target id (similar to `target` in mask predicates — likely a new `CgExpr::PerPairCandidateId` shape or a new `CgExpr::ForLoopTarget(id)`).
-
-- [ ] **Step 4: Verify pass + diagnostic count drop**
-
-`cargo test -p dsl_compiler --lib`. All 801+ pass. Diagnostic count for `local binding` drops by the for-bound count (likely 4-6 of the remaining).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git commit -m "fix(dsl_compiler): cast-rule for-loop body Let bindings + loop-binder lower"
-```
+> The original Task 2 (cast-rule for-loop body Let lowering) was based on the misdiagnosis that drove Task 1. The first-dispatch investigation confirmed `lower_let` and `lower_for` body walks already work; every `local binding` diagnostic is an event-pattern binding, addressed by Task 1's synthesis hook in `lower_one_handler`.
+>
+> If Task 3's checkpoint reveals any surviving local-binding diagnostic that isn't an event-pattern binding, this slot will be re-populated with a focused fix.
 
 ---
 
-## Task 3: Diagnostic inventory mid-point checkpoint
+## Task 3: Diagnostic inventory checkpoint (post-Task-1)
 
 **Files:** None (verification step).
 
@@ -198,15 +287,15 @@ git commit -m "fix(dsl_compiler): cast-rule for-loop body Let bindings + loop-bi
 
 Run: `cargo run -p xtask --bin xtask -- compile-dsl --cg-canonical 2>&1 | grep "lowering:" | sort | uniq -c | sort -rn`
 
-Expected: All 10 `local binding` diagnostics gone; remaining categories untouched (3 namespace-call, 9 view-fold-type, 6 emit-field-schema, 1 virtual-field).
+Expected after Task 1: All 15 `local binding` diagnostics gone; remaining categories untouched (3 namespace-call, 9 view-fold-type, 6 emit-field-schema, 1 virtual-field).
 
 - [ ] **Step 2: If any local-binding diagnostics survive, write a focused test**
 
-Pick one surviving diagnostic, write a minimal test reproducing it (Task 1 / Task 2 pattern), fix, commit.
+Pick one surviving diagnostic, write a minimal test reproducing it (Task 1 pattern: build the IR by hand or compile from a fixture, assert no `UnsupportedLocalBinding` for the named binder). Fix and commit. If the surviving diagnostic is structurally distinct from event-pattern bindings (e.g., a true for-loop body local that Task 1 didn't touch), this is where Task 2's slot gets re-populated with the focused fix — otherwise it stays empty.
 
-- [ ] **Step 3: Document the post-Task-1+2 diagnostic state**
+- [ ] **Step 3: Document the post-Task-1 diagnostic state**
 
-Update this plan's Diagnostic Inventory table with the live count (PR comment or amended commit). Don't commit a stale doc.
+Update this plan's Diagnostic Inventory table with the live count (commit the doc edit alongside any focused fix). Don't commit a stale doc.
 
 ---
 
