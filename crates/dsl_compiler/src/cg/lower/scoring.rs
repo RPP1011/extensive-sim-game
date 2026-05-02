@@ -65,14 +65,24 @@
 //! [`dsl_ast::ir::IrActionHeadShape::Positional`] (e.g.,
 //! `Attack(target) = …`), or
 //! [`dsl_ast::ir::IrActionHeadShape::Named`] (e.g.,
-//! `Cast(ability: AbilityId) = …`). Real DSL fixtures
-//! (`assets/sim/scoring.sim`) use `None` exclusively — the
-//! per-action argmax kernel resolves the target implicitly from the
-//! action kind. The lowering gates parametric shapes with
-//! [`LoweringError::UnsupportedScoringHeadShape`] (mirroring
-//! `lower_mask`'s `parametric_head_label` precedent) so a future
-//! row with binders fails loudly rather than silently dropping the
-//! parameters.
+//! `Cast(ability: AbilityId) = …`).
+//!
+//! Phase 6 Task 2 lights up the canonical positional shape:
+//! single-binder `(target: AgentId)` heads bind `target` to the
+//! per-pair candidate context for the row body's lowering. Bare
+//! `target` resolves to [`crate::cg::expr::CgExpr::PerPairCandidateId`]
+//! via `lower_bare_local`'s `target_local` arm; `target.<field>`
+//! resolves to `Read(AgentField { target: AgentRef::PerPairCandidate,
+//! .. })` via `lower_field`'s same-named arm. The flag is
+//! save/restored around the body lowering so adjacent rows don't
+//! observe a leaked binding (mirrors `lower_mask`'s protocol).
+//!
+//! Other parametric shapes still reject with
+//! [`LoweringError::UnsupportedScoringHeadShape`]: multi-binder
+//! positional heads, non-`target` positional names, non-`AgentId`
+//! positional types, and any `Named` head. The closed-set
+//! `head_label` payload (`"positional"` | `"named"`) keeps the
+//! diagnostic allocation-free.
 //!
 //! # Typed-error surface
 //!
@@ -88,12 +98,14 @@
 //!
 //! # Limitations
 //!
-//! - **`IrActionHead` shapes.** Today only `head.name` is consulted —
-//!   the `head.shape` (positional / named binders) is rejected by
-//!   [`LoweringError::UnsupportedScoringHeadShape`] (see the
-//!   "Action head-shape gate" section above). Per-ability rows that
-//!   reference `target.<field>` inside their `score` / `guard`
-//!   expressions will surface as
+//! - **`IrActionHead` shapes.** The canonical single-binder
+//!   `(target: AgentId)` positional shape lowers as of Phase 6
+//!   Task 2 (see the "Action head-shape gate" section). Other
+//!   shapes — `Named`, multi-binder positional, non-`target`
+//!   positional names, non-`AgentId` types — still surface as
+//!   [`LoweringError::UnsupportedScoringHeadShape`]. Per-ability
+//!   rows that reference `target.<field>` inside their `score` /
+//!   `guard` expressions will surface as
 //!   [`LoweringError::UnsupportedLocalBinding`] from the underlying
 //!   `lower_expr` until the driver task wires per-row local binding.
 //! - **Real-fixture coverage.** Hand-written scoring decls in
@@ -109,7 +121,7 @@
 //!   Phase 1 amendment to the [`ScoringRowOp`] shape.
 
 use dsl_ast::ast::Span;
-use dsl_ast::ir::{IrActionHeadShape, IrExprNode, PerAbilityRowIR, ScoringEntryIR, ScoringIR};
+use dsl_ast::ir::{IrActionHeadShape, IrExprNode, IrType, PerAbilityRowIR, ScoringEntryIR, ScoringIR};
 
 use crate::cg::data_handle::CgExprId;
 use crate::cg::dispatch::DispatchShape;
@@ -243,31 +255,98 @@ fn intern_scoring_name(
 /// Lower a standard scoring row (`Head = expr`) to a
 /// [`ScoringRowOp`] with `target = None, guard = None`.
 ///
-/// Gates parametric head shapes (`Positional` / `Named`) before
-/// action-id resolution — see
-/// [`LoweringError::UnsupportedScoringHeadShape`]. Real DSL fixtures
-/// use [`IrActionHeadShape::None`] exclusively; the gate is
-/// defense-in-depth so a future row with binders fails loudly rather
-/// than silently dropping the parameters.
+/// # Positional head binders (Phase 6 Task 2)
+///
+/// Rows like `Attack(target) = ...` carry an
+/// [`IrActionHeadShape::Positional`] head whose binder names a
+/// per-pair candidate (today: `target: AgentId`). The body's reads of
+/// `target` / `target.<field>` resolve against the per-pair candidate
+/// context — same shape as pair-bound mask predicates (see
+/// [`super::mask::lower_mask`]'s `target_local` flag). The lowering
+/// flips [`super::expr::LoweringCtx::target_local`] for the duration
+/// of `lower_expr` so:
+///
+/// - Bare `target` resolves through `lower_bare_local`'s step 3
+///   (`"target" if ctx.target_local`) to [`crate::cg::expr::CgExpr::PerPairCandidateId`].
+/// - `target.<field>` resolves through `lower_field`'s
+///   `Local(_, "target") if ctx.target_local` arm to
+///   `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`.
+///
+/// The flag is restored after the row body lowers so downstream rows
+/// (and any nested per-ability rows) don't observe a leaked binding.
+///
+/// # Rejected positional shapes
+///
+/// - **Non-`target` binder names** (e.g., a future `Attack(victim)`)
+///   surface as [`LoweringError::UnsupportedScoringHeadShape`] with
+///   `head_label = "positional"` — today's CG-IR surface only
+///   recognises the canonical `target` name (matching the legacy
+///   emit-side convention in `crate::emit_scoring::lower_entry`).
+/// - **Multi-binder positional heads** (`Attack(t, u)`) likewise
+///   reject — only the single-binder `target: AgentId` shape is
+///   wired today.
+/// - **Non-`AgentId` binder types** (e.g., `Cast(ability: AbilityId)`
+///   if a future row used it as a scoring head) reject too — the
+///   `PerPairCandidate` semantic only covers AgentId-typed candidate
+///   sides.
+/// - **`Named` heads** (`Cast(ability: AbilityId)`-style) remain
+///   rejected as before — there is no per-pair candidate semantic for
+///   non-positional binders.
 fn lower_standard_row(
     scoring_id: ScoringId,
     entry: &ScoringEntryIR,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<ScoringRowOp, LoweringError> {
-    if let Some(head_label) = parametric_scoring_head_label(&entry.head.shape) {
-        // Head-shape gate fires *before* action resolution — a
-        // parametric head may reference an action whose registry
-        // entry only knows the bare name. `action: None` signals
-        // "not yet resolved".
-        return Err(LoweringError::UnsupportedScoringHeadShape {
-            scoring: scoring_id,
-            action: None,
-            head_label,
-            span: entry.head.span,
-        });
-    }
+    // Positional head binders bind a per-pair candidate (today:
+    // `target: AgentId`). The body lowering flips `target_local` so
+    // `target.<field>` reads resolve against the candidate side.
+    // Other parametric shapes (`Named`, multi-binder positional,
+    // non-AgentId positional, non-`target` positional name) reject
+    // before action-id resolution — `action: None` signals the gate
+    // fired before resolution succeeded.
+    let positional_target_binder = match &entry.head.shape {
+        IrActionHeadShape::None => false,
+        IrActionHeadShape::Positional(binders) => {
+            // Today's CG-IR routing only recognises a single
+            // `target: AgentId` positional binder. Anything else
+            // surfaces the same typed gate as before.
+            let recognised = binders.len() == 1
+                && binders[0].0 == "target"
+                && binders[0].2 == IrType::AgentId;
+            if !recognised {
+                return Err(LoweringError::UnsupportedScoringHeadShape {
+                    scoring: scoring_id,
+                    action: None,
+                    head_label: "positional",
+                    span: entry.head.span,
+                });
+            }
+            true
+        }
+        IrActionHeadShape::Named(_) => {
+            return Err(LoweringError::UnsupportedScoringHeadShape {
+                scoring: scoring_id,
+                action: None,
+                head_label: "named",
+                span: entry.head.span,
+            });
+        }
+    };
+
     let action = resolve_action_id(scoring_id, &entry.head.name, entry.head.span, ctx)?;
-    let utility = lower_expr(&entry.expr, ctx)?;
+
+    // Bind `target` to the per-pair candidate context for the
+    // duration of the body lowering. Restore the flag after so
+    // downstream rows don't observe a leaked binding (mirrors
+    // `super::mask::lower_mask`'s save/restore protocol).
+    let prev_target_local = ctx.target_local;
+    if positional_target_binder {
+        ctx.target_local = true;
+    }
+    let utility_result = lower_expr(&entry.expr, ctx);
+    ctx.target_local = prev_target_local;
+    let utility = utility_result?;
+
     check_utility_f32(scoring_id, action, utility, entry.expr.span, ctx)?;
     Ok(ScoringRowOp {
         action,
@@ -336,22 +415,6 @@ fn resolve_action_id(
             name: name.to_string(),
             span,
         })
-}
-
-/// Return a `&'static str` tag for parametric scoring head shapes
-/// that today's argmax kernel cannot route. Returns `None` for
-/// [`IrActionHeadShape::None`] (the bare-name shape that real DSL
-/// fixtures use exclusively). Mirrors the precedent set by
-/// [`super::mask::parametric_head_label`] (private; same shape).
-///
-/// Closed-set tags (`"positional"` | `"named"`) keep the typed-error
-/// payload free of `String` allocations.
-fn parametric_scoring_head_label(shape: &IrActionHeadShape) -> Option<&'static str> {
-    match shape {
-        IrActionHeadShape::None => None,
-        IrActionHeadShape::Positional(_) => Some("positional"),
-        IrActionHeadShape::Named(_) => Some("named"),
-    }
 }
 
 /// Type-check `utility` resolves to `CgTy::F32`. Surfaces a non-F32
@@ -1095,16 +1158,18 @@ mod tests {
 
     // ---- 13c. Parametric scoring head shape gate ------------------------
 
+    /// Phase 6 Task 2: a non-`target` positional binder (e.g.,
+    /// `Attack(victim)`) is not yet routable — only the canonical
+    /// single-binder `(target: AgentId)` shape lowers. The typed
+    /// gate fires before action-id resolution per the variant doc.
     #[test]
-    fn rejects_positional_scoring_head_shape() {
-        // scoring { Attack(target) = 0.5 } — parametric head shape
-        // not routable today.
+    fn rejects_positional_scoring_head_with_non_target_name() {
         let ir = scoring_with(
             vec![ScoringEntryIR {
                 head: IrActionHead {
                     name: "Attack".to_string(),
                     shape: IrActionHeadShape::Positional(vec![(
-                        "target".to_string(),
+                        "victim".to_string(),
                         dsl_ast::ir::LocalRef(0),
                         dsl_ast::ir::IrType::AgentId,
                     )]),
@@ -1117,12 +1182,10 @@ mod tests {
         );
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
-        // Even with the action registered, the head-shape gate fires
-        // first.
         ctx.register_action("Attack", ActionId(9));
 
         let err = lower_scoring(ScoringId(0), &ir, &mut ctx)
-            .expect_err("positional head must be rejected");
+            .expect_err("non-`target` positional binder must be rejected");
         match err {
             LoweringError::UnsupportedScoringHeadShape {
                 scoring,
@@ -1131,8 +1194,6 @@ mod tests {
                 span,
             } => {
                 assert_eq!(scoring, ScoringId(0));
-                // Gate fires before resolution — `action: None` per the
-                // variant doc.
                 assert_eq!(action, None);
                 assert_eq!(head_label, "positional");
                 assert_eq!(span.start, 0);
@@ -1140,6 +1201,240 @@ mod tests {
             }
             other => panic!("expected UnsupportedScoringHeadShape, got {other:?}"),
         }
+    }
+
+    /// Phase 6 Task 2: a non-`AgentId` positional binder (e.g.,
+    /// `Attack(target: AbilityId)`) rejects too — the
+    /// `PerPairCandidate` semantic only covers AgentId-typed
+    /// candidate sides.
+    #[test]
+    fn rejects_positional_scoring_head_with_non_agent_id_type() {
+        let ir = scoring_with(
+            vec![ScoringEntryIR {
+                head: IrActionHead {
+                    name: "Cast".to_string(),
+                    shape: IrActionHeadShape::Positional(vec![(
+                        "target".to_string(),
+                        dsl_ast::ir::LocalRef(0),
+                        dsl_ast::ir::IrType::AbilityId,
+                    )]),
+                    span: span(0, 14),
+                },
+                expr: lit_f32(0.5),
+                span: span(0, 0),
+            }],
+            vec![],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_action("Cast", ActionId(7));
+
+        let err = lower_scoring(ScoringId(0), &ir, &mut ctx)
+            .expect_err("non-AgentId positional binder must be rejected");
+        match err {
+            LoweringError::UnsupportedScoringHeadShape {
+                scoring,
+                action,
+                head_label,
+                ..
+            } => {
+                assert_eq!(scoring, ScoringId(0));
+                assert_eq!(action, None);
+                assert_eq!(head_label, "positional");
+            }
+            other => panic!("expected UnsupportedScoringHeadShape, got {other:?}"),
+        }
+    }
+
+    /// Phase 6 Task 2: multi-binder positional heads (`Attack(t,
+    /// u)`) reject — only the single-binder shape is wired today.
+    #[test]
+    fn rejects_positional_scoring_head_with_multiple_binders() {
+        let ir = scoring_with(
+            vec![ScoringEntryIR {
+                head: IrActionHead {
+                    name: "Attack".to_string(),
+                    shape: IrActionHeadShape::Positional(vec![
+                        (
+                            "target".to_string(),
+                            dsl_ast::ir::LocalRef(0),
+                            dsl_ast::ir::IrType::AgentId,
+                        ),
+                        (
+                            "secondary".to_string(),
+                            dsl_ast::ir::LocalRef(1),
+                            dsl_ast::ir::IrType::AgentId,
+                        ),
+                    ]),
+                    span: span(0, 24),
+                },
+                expr: lit_f32(0.5),
+                span: span(0, 0),
+            }],
+            vec![],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_action("Attack", ActionId(9));
+
+        let err = lower_scoring(ScoringId(0), &ir, &mut ctx)
+            .expect_err("multi-binder positional head must be rejected");
+        match err {
+            LoweringError::UnsupportedScoringHeadShape {
+                scoring,
+                action,
+                head_label,
+                ..
+            } => {
+                assert_eq!(scoring, ScoringId(0));
+                assert_eq!(action, None);
+                assert_eq!(head_label, "positional");
+            }
+            other => panic!("expected UnsupportedScoringHeadShape, got {other:?}"),
+        }
+    }
+
+    /// Phase 6 Task 2: `Named` heads (`Cast(ability: AbilityId)`-
+    /// style) still reject — there is no per-pair candidate
+    /// semantic for non-positional binders.
+    #[test]
+    fn rejects_named_scoring_head_shape() {
+        let ir = scoring_with(
+            vec![ScoringEntryIR {
+                head: IrActionHead {
+                    name: "Cast".to_string(),
+                    shape: IrActionHeadShape::Named(vec![]),
+                    span: span(0, 14),
+                },
+                expr: lit_f32(0.5),
+                span: span(0, 0),
+            }],
+            vec![],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_action("Cast", ActionId(7));
+
+        let err = lower_scoring(ScoringId(0), &ir, &mut ctx)
+            .expect_err("named head must be rejected");
+        match err {
+            LoweringError::UnsupportedScoringHeadShape {
+                scoring,
+                action,
+                head_label,
+                ..
+            } => {
+                assert_eq!(scoring, ScoringId(0));
+                assert_eq!(action, None);
+                assert_eq!(head_label, "named");
+            }
+            other => panic!("expected UnsupportedScoringHeadShape, got {other:?}"),
+        }
+    }
+
+    // ---- 13c.2. Phase 6 Task 2: positional `target` lowers --------------
+
+    /// Canonical `Attack(target) = ...` row lowers cleanly: the row
+    /// body's `target.<field>` reads resolve against
+    /// [`AgentRef::PerPairCandidate`] (mirrors pair-bound mask
+    /// lowering's `target_local` semantic).
+    #[test]
+    fn lower_scoring_positional_target_binder_resolves_to_per_pair_candidate() {
+        // scoring { Attack(target) = if target.alive { 0.5 } else { 0.0 } }
+        let target_alive = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(
+                dsl_ast::ir::LocalRef(0),
+                "target".to_string(),
+            ))),
+            field_name: "alive".to_string(),
+            field: None,
+        });
+        let utility = node(IrExpr::If {
+            cond: Box::new(target_alive),
+            then_expr: Box::new(lit_f32(0.5)),
+            else_expr: Some(Box::new(lit_f32(0.0))),
+        });
+
+        let ir = scoring_with(
+            vec![ScoringEntryIR {
+                head: IrActionHead {
+                    name: "Attack".to_string(),
+                    shape: IrActionHeadShape::Positional(vec![(
+                        "target".to_string(),
+                        dsl_ast::ir::LocalRef(0),
+                        dsl_ast::ir::IrType::AgentId,
+                    )]),
+                    span: span(0, 14),
+                },
+                expr: utility,
+                span: span(0, 0),
+            }],
+            vec![],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_action("Attack", ActionId(9));
+
+        let op_id = lower_scoring(ScoringId(0), &ir, &mut ctx)
+            .expect("canonical Attack(target) row must lower");
+        let prog = builder.finish();
+
+        // The row body's `target.alive` read must surface as a
+        // `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`
+        // in the op's collected reads. That's the contract Phase 6
+        // Task 2 unblocks.
+        let reads = &prog.ops[op_id.0 as usize].reads;
+        assert!(
+            reads.contains(&DataHandle::AgentField {
+                field: AgentFieldId::Alive,
+                target: AgentRef::PerPairCandidate,
+            }),
+            "expected per-pair-candidate `target.alive` read, got {:?}",
+            reads
+        );
+    }
+
+    /// `target_local` is restored after the row body lowers — adjacent
+    /// non-positional rows must NOT see the per-pair binding leak.
+    /// Mirrors `super::mask::lower_mask`'s save/restore protocol.
+    #[test]
+    fn target_local_restored_after_positional_row_body() {
+        // scoring {
+        //   Attack(target) = 0.5    (positional — flips target_local)
+        //   Hold = 0.1              (None — must NOT see the leak)
+        // }
+        let ir = scoring_with(
+            vec![
+                ScoringEntryIR {
+                    head: IrActionHead {
+                        name: "Attack".to_string(),
+                        shape: IrActionHeadShape::Positional(vec![(
+                            "target".to_string(),
+                            dsl_ast::ir::LocalRef(0),
+                            dsl_ast::ir::IrType::AgentId,
+                        )]),
+                        span: span(0, 14),
+                    },
+                    expr: lit_f32(0.5),
+                    span: span(0, 0),
+                },
+                standard_entry("Hold", lit_f32(0.1)),
+            ],
+            vec![],
+        );
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_action("Attack", ActionId(9));
+        ctx.register_action("Hold", ActionId(0));
+
+        // Pre-condition: the entrant ctx has `target_local = false`.
+        assert!(!ctx.target_local);
+        lower_scoring(ScoringId(0), &ir, &mut ctx).expect("lowers");
+        // Post-condition: the flag is restored after every row.
+        assert!(
+            !ctx.target_local,
+            "target_local must restore to its prior value after a positional row body lowers"
+        );
     }
 
     #[test]
