@@ -537,7 +537,30 @@ git commit -m "feat(dsl_compiler): virtual field hp_pct lowers to hp / max_hp"
 
 ---
 
-## Task 9: Inventory the post-fix kernel set vs engine_gpu's expectations
+## Task 9: Inventory checkpoint — POST-TASK-1/4/5/8 STATE (2026-05-01)
+
+> **Inventory complete (commit `cf471517`).** SCHEDULE has 26 kernels. 33 of 39 original lowering diagnostics closed (the remaining 1 is a pre-existing cycle-detector warning, structurally separate from this plan).
+>
+> **SCHEDULE today (26 kernels):**
+> - Masks (4): MaskAttack, MaskHold, MaskMoveToward, FusedMaskFlee
+> - Folds (7): FoldEngagedWith, FoldKinFear, FoldMyEnemies, FoldPackFocus, FoldRallyBoost, FoldStanding, FoldThreatLevel
+> - Physics chronicles (7, all Indirect): PhysicsChronicle{Attack, Break, Engagement, Flee, Rally, Rout, Wound}
+> - Spatial (2): FusedSpatialBuildHash, SpatialEngagementQuery
+> - Plumbing (5): UploadSimCfg, PackAgents, SeedIndirect0, UnpackAgents, KickSnapshot
+> - Indirect-fold (1): FusedFoldMemoryRecordMemory
+>
+> **Genuinely missing (the decision/action chain that drives parity divergence):**
+> - **Scoring / PickAbility** — per-agent action picker. The `ScoringArgmax` lowering exists in `cg/lower/scoring.rs` but no kernel named "scoring" emits in SCHEDULE; the scoring rules either (a) silently fuse into another kernel or (b) don't lower to `ComputeOps` yet.
+> - **ApplyActions** — write decided actions to agent SoA (HP changes, position deltas, status effects).
+> - **Movement** — physics rule applying movement deltas. Today's PhysicsChronicle* are chronicle-only (narrative event emit); the actual Movement physics rule isn't being emitted as a Movement kernel.
+> - **AppendEvents** — append derived events to the cascade ring beyond what cascade Indirect already does.
+> - **AlivePack / FusedAgentUnpack / MaskUnpack** — pack/unpack helpers between dispatch phases.
+>
+> **Why parity diverges (verified via `parity_with_cpu --features gpu`):** smoke fixture has 4 agents at ~10-unit distance. CPU's AI picks `MoveToward` (close-to-engage), CPU's Movement physics rule applies pos delta, agents close distance over the n_ticks. GPU's SCHEDULE has masks + folds + spatial-hash + chronicle-emit but no decision/movement chain → GPU agents stay at spawn position. Hence `pos_x_bits` divergence.
+>
+> **Scope of remaining work (Tasks 10-12):** multi-day work. Each missing kernel needs (a) a `ComputeOpKind` lowering (some exist, some need to be wired through), (b) a WGSL body template, (c) bind-source synthesis for new transient buffers (action_buf, scoring_output, etc.). Tasks 10 and 11's "skeleton" structure now has concrete content per the bullets above.
+
+## Task 9 (legacy spec, kept for audit): Inventory the post-fix kernel set vs engine_gpu's expectations
 
 **Files:** None (investigation step). Output: amended plan or new task entries.
 
