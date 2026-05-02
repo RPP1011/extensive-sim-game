@@ -10,11 +10,11 @@
 
 2. **`Positional` action-head lowering.** Scoring rules with a positional binder (`Attack(target) = ...`) currently route through `parametric_scoring_head_label` which rejects `IrActionHeadShape::Positional`. The fix follows Task 1's pattern (event-pattern bindings): in the scoring-row lowering, walk the action's pattern bindings, register `target` as a `LocalRef → LocalId` mapping, synthesize a `CgStmt::Let { local: target_local, value: <something>, ty: AgentId }`. The "value" depends on the surrounding dispatch shape — for `PerPair { source: SpatialQuery(_) }` rows the target is the per-pair candidate.
 
-3. **Movement-as-rule design.** Movement is structurally NOT a physics rule (it doesn't observe an event — it's a per-agent post-scoring sweep). Today's `ComputeOpKind` set has no shape for "per-agent dispatch reading scoring_output, no source event." Two options:
-   - (a) New `ComputeOpKind::ScoringApply { ... }` variant with `DispatchShape::PerAgent`, reading `ScoringOutput` and writing agent fields.
-   - (b) Extend `PhysicsRule` semantics to allow per-agent dispatch over the alive bitmap with no source event.
+3. **Movement-as-rule design — LOCKED to option (b).** Movement is structurally a "per-agent rule that reads decided actions and writes a field." The same pattern fits other future per-agent sweeps: cooldown ticking, stun/slow expiry, need decay, regen, queued-movement-target updates, voxel-local-pos integration. **The IR shape generalizes by extending `PhysicsRule` with an optional `source_event`** (or equivalent dispatch-shape selector that distinguishes PerEvent from PerAgent dispatch).
+   - When `source_event = Some(kind)` → existing PerEvent dispatch over the source ring (today's chronicle/damage/heal/etc. handlers).
+   - When `source_event = None` → PerAgent dispatch over the alive bitmap (Movement; future per-agent sweeps).
 
-   (a) is structurally cleaner but requires `cg/op.rs`, `cg/well_formed.rs`, `cg/emit/kernel.rs`, `cg/dispatch.rs` updates. (b) is a smaller surface but conflates two distinct execution models.
+   The DSL surfaces this with a phase annotation (`@phase(per_agent)` or similar) so future rules slot in without IR changes. Cost is minimal — one new variant field + one new phase tag — and avoids the "Movement is special" trap. Rejected option: a dedicated `ComputeOpKind::ScoringApply` variant. It's a narrower shape that only fits Movement; would need a refactor when the second per-agent sweep arrives. The user's question (2026-05-01): "Won't other vec3 fields eventually exist and potentially benefit from similar hyperoptimization?" anchors this decision.
 
 ## Tasks (skeleton)
 
@@ -22,7 +22,7 @@
 |---|---|---|---|
 | 1 | `PerUnit` lowering: design + implement | `cg/lower/expr.rs`, `cg/op.rs`, `cg/emit/wgsl_body.rs` | ~150 |
 | 2 | `Positional` action-head lowering | `cg/lower/scoring.rs`, `cg/lower/event_binding.rs` (reuse) | ~80 |
-| 3 | Movement-as-rule: pick (a) or (b), implement | `cg/op.rs`, `cg/lower/physics.rs` (or new `cg/lower/scoring_apply.rs`), `cg/emit/kernel.rs`, `cg/dispatch.rs` | ~300 |
+| 3 | Movement-as-rule via `PhysicsRule` extension (option b — LOCKED). Add optional `source_event` (or PerAgent dispatch shape selector); DSL `@phase(per_agent)` annotation; Movement body lowering reads scoring_output, writes pos. | `cg/op.rs`, `cg/lower/physics.rs`, `cg/emit/kernel.rs`, `cg/dispatch.rs`, `dsl_resolver` (phase tag) | ~250 |
 | 4 | Apply-actions chain (HP/state mutations from event handlers) | `cg/lower/physics.rs` (statement-level namespace-call lowering, mirror of Task 4) | ~200 |
 | 5 | Cleanup: retire Route C splice in `xtask/compile_dsl_cmd.rs` | `xtask/src/compile_dsl_cmd.rs` | -200 |
 | 6 | Parity gate green | `engine_gpu/tests/parity_with_cpu.rs` | 0 |
