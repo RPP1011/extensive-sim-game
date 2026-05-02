@@ -95,12 +95,12 @@ This plan touches existing files only. No new modules.
 
 > **AIS amendment (2026-05-01)**: The original Task 1 hypothesis — that top-of-body `Let` statements skipped `lower_let` — was *wrong*. A read-only investigation by the first dispatch confirmed `lower_stmt` already routes `IrStmt::Let` to `lower_let` (`physics.rs:402-407`), `lower_let` populates `ctx.local_ids` + `local_tys`, and `lower_bare_local` resolves to `CgExpr::ReadLocal`. The infrastructure works. **The actual cause of all 15 `local binding ... is not bound` diagnostics is event-pattern bindings**: every diagnostic traced (spans 1190, 5847, 14084, 18756, 26654, 28526, 29131, 29993) resolves to a `t` / `actor` / `target` / `amount` / `delta` / `dead` introduced by an `on EffectXxx { actor: c, target: t, amount: a, ... }` event pattern, then read inside the handler body. `lower_one_handler` (`physics.rs:255`) jumps from intern-name straight into `lower_stmt_list` *without* walking `handler.pattern.bindings()`. Task 1 is rewritten below to address this real cause; Task 2 (originally for-loop body Let) is dropped — for-loop body Let lowering already works, and any `delta`-style diagnostic the original AIS ascribed to it is actually a pattern binding.
 
-**The real bug.** Event patterns introduce binders that map to typed values extracted from the event payload (`target: AgentId`, `actor: AgentId`, `amount: f32`, etc.). The IR has no shape today that represents "value extracted from the current event's payload" — so `lower_one_handler` can't synthesize the necessary `CgStmt::Let`s for each pattern binder. Once the value-side shape exists, the synthesis is mechanical: walk `handler.pattern.bindings()`, look up `(field_index, ty)` from the schema per binder, push `CgStmt::Let`, and the existing `local_ids` + `lower_bare_local` chain handles every read inside the body.
+**The real bug.** Event patterns introduce binders that map to typed values extracted from the event payload (`target: AgentId`, `actor: AgentId`, `amount: f32`, etc.). The IR has no shape today that represents "value extracted from the current event's payload" — so `lower_one_handler` can't synthesize the necessary `CgStmt::Let`s for each pattern binder. Once the value-side shape exists, the synthesis is mechanical: walk `handler.pattern.bindings()`, look up `(word_offset_in_payload, ty)` from the schema per binder, push `CgStmt::Let`, and the existing `local_ids` + `lower_bare_local` chain handles every read inside the body.
 
 **Schema-driven layout (forward-compat with per-kind ring fanout).** The runtime today uses one shared event ring with fixed stride = 10 u32 (2 header + 8 payload, sized for `AgentMoved`/`AgentFled` at 7 payload words with one word headroom — see `crates/engine_gpu/src/event_ring.rs:79-110`). Future events (e.g. `AgentSpawned` with template + equipment list, `EffectAreaApplied` with hit_targets[N], `MemoryRecorded` with embedding[16]) will blow past 8 payload words; padding everything to max-payload becomes prohibitively wasteful. The runtime is expected to move to **per-kind ring fanout** — one ring per event kind, each sized to its actual payload + frequency. The IR design here doesn't force the runtime change, but it makes it a local edit when the time comes: the schema is the layout authority, and the WGSL emit reads `(record_stride_u32, header_word_count, buffer_name, field_offsets)` per kind from the schema. Today every kind returns the uniform values (stride=10, header=2, buffer="event_ring"); future kinds return per-kind values without any IR shape change.
 
 **Files:**
-- Modify: `crates/dsl_compiler/src/cg/expr.rs` — add `CgExpr::EventField { event_kind, field_index, ty }` variant; extend exhaustive matches across the codebase (~10 sites).
+- Modify: `crates/dsl_compiler/src/cg/expr.rs` — add `CgExpr::EventField { event_kind, word_offset_in_payload, ty }` variant; extend exhaustive matches across the codebase (~10 sites).
 - Modify: `crates/dsl_compiler/src/cg/lower/ctx.rs` (or wherever `LoweringCtx` lives) — add `event_layouts: HashMap<EventKindId, EventLayout>` field; populate in `populate_event_kinds`.
 - Modify: `crates/dsl_compiler/src/cg/lower/physics.rs::lower_one_handler` — walk `handler.pattern.bindings()`, synthesize `CgStmt::Let` per binder.
 - Modify: `crates/dsl_compiler/src/cg/emit/wgsl_body.rs::lower_cg_expr_to_wgsl` — add `EventField` arm, schema-driven access form.
@@ -122,7 +122,7 @@ pub enum CgExpr {
     /// and the same emit produces `event_ring_<kind>[...]` naturally.
     EventField {
         event_kind: EventKindId,
-        field_index: u32,
+        word_offset_in_payload: u32,
         ty: CgTy,
     },
 }
@@ -177,7 +177,7 @@ for binding in handler.pattern.bindings() {
     let local_id = ctx.allocate_local();
     let value_expr_id = add(ctx, CgExpr::EventField {
         event_kind: event_kind_id,
-        field_index: field.word_offset_in_payload,
+        word_offset_in_payload: field.word_offset_in_payload,
         ty: field.ty,
     }, binding.span)?;
     let stmt = CgStmt::Let { local: local_id, value: value_expr_id, ty: field.ty };
@@ -193,10 +193,10 @@ for binding in handler.pattern.bindings() {
 
 In `wgsl_body.rs::lower_cg_expr_to_wgsl`:
 ```rust
-CgExpr::EventField { event_kind, field_index, ty } => {
+CgExpr::EventField { event_kind, word_offset_in_payload, ty } => {
     let layout = ctx.event_layouts.get(event_kind)
         .ok_or(EmitError::UnregisteredEventKind { kind: *event_kind })?;
-    let total_offset = layout.header_word_count + field_index;
+    let total_offset = layout.header_word_count + word_offset_in_payload;
     let base = format!("event_idx * {}u + {}u", layout.record_stride_u32, total_offset);
     Ok(match ty {
         CgTy::AgentId | CgTy::U32 => format!("{}[{}]", layout.buffer_name, base),
@@ -228,12 +228,12 @@ fn event_pattern_binding_lowers_to_event_field_let() {
     //   }
     // Lower; assert the synthesized CgStmt::Let sequence at the head of
     // the body, each value being a CgExpr::EventField with the right
-    // (event_kind, field_index, ty).
+    // (event_kind, word_offset_in_payload, ty).
 }
 
 #[test]
 fn event_field_emits_schema_driven_wgsl_access() {
-    // Lower a CgExpr::EventField{event_kind: 0, field_index: 1, ty: AgentId}
+    // Lower a CgExpr::EventField{event_kind: 0, word_offset_in_payload: 1, ty: AgentId}
     // with a uniform layout (stride=10, header=2). Assert WGSL is
     // "event_ring[event_idx * 10u + 3u]".
 }
