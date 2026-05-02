@@ -279,12 +279,23 @@ fn resolve_dispatch_shape(
     }
 }
 
-/// Validate that the `from` clause expression has the recognised
-/// `query.nearby_agents(<pos>, <radius>)` shape. Emit and emit_mask
-/// already enforce the same constraint at the AST level for the
-/// existing direct-emit path; this lowering pass enforces it again
-/// inside the CG layer so a future caller (the driver, snapshots) gets
-/// the typed defect rather than a silent miscompile.
+/// Validate that the `from` clause expression has a recognised shape.
+///
+/// Two shapes are accepted:
+///   - `query.nearby_agents(<pos>, <radius>)` — the legacy direct-emit
+///     path. `emit` and `emit_mask` already enforce the same
+///     constraint at the AST level; this lowering pass mirrors it
+///     inside the CG layer so a future caller (the driver,
+///     snapshots) gets the typed defect rather than a silent
+///     miscompile.
+///   - `spatial.<name>(<args...>)` — Phase 7 Task 4. The
+///     `spatial_query <name>(self, candidate, …)` declaration
+///     supplies the per-pair filter; argument shape and arity are
+///     validated by the resolver against the registered
+///     declaration. Task 5 wires this through `mask_spatial_kind`
+///     to produce a `SpatialQueryKind::FilteredWalk`. Until then
+///     this arm is dead-code on the existing fixtures (no
+///     `from spatial.*` clause in `assets/sim/`).
 fn validate_from_clause_shape(
     mask_id: MaskId,
     source: &IrExprNode,
@@ -295,6 +306,7 @@ fn validate_from_clause_shape(
         {
             Ok(())
         }
+        IrExpr::NamespaceCall { ns: NamespaceId::Spatial, .. } => Ok(()),
         _ => Err(LoweringError::UnsupportedMaskFromClause {
             mask: mask_id,
             span: source.span,

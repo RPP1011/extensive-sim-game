@@ -126,6 +126,26 @@ pub enum ResolveError {
         reason: String,
         span: Span,
     },
+    /// A `spatial_query <name>(<params>) = ...` declaration's first
+    /// two positional binders are not named `self` and `candidate`.
+    /// Phase 7 Task 4 fixes the convention: `self` is the querying
+    /// agent and `candidate` is the per-pair neighbour the filter
+    /// inspects; downstream lowering (Task 5) reaches into the
+    /// `target_local` flag via the `candidate` binder.
+    SpatialQueryRequiresSelfCandidateBinders {
+        decl_name: String,
+        span: Span,
+    },
+    /// A `from spatial.<name>(...)` reference (or its
+    /// `spatial::<name>(...)` flat sibling) names a query no
+    /// `spatial_query <name>` declaration supplies. Phase 7 Task 4
+    /// surfaces this as a typed defect rather than a silent
+    /// `NamespaceCall` carry-through; the lowering pass needs a
+    /// resolved declaration.
+    UnknownSpatialQuery {
+        name: String,
+        span: Span,
+    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -244,6 +264,20 @@ impl std::fmt::Display for ResolveError {
                  recursion beyond `@terminating_in`-capped self-emission, no \
                  user-defined helpers, no `String` bindings; see \
                  compiler/spec.md §1.2)",
+                span.start, span.end
+            ),
+            ResolveError::SpatialQueryRequiresSelfCandidateBinders { decl_name, span } => write!(
+                f,
+                "spatial_query `{decl_name}` at bytes {}..{} must declare \
+                 its first two positional binders as `self` and `candidate` \
+                 (Phase 7 Task 4: `self` is the querying agent, `candidate` \
+                 the per-pair neighbour the filter inspects)",
+                span.start, span.end
+            ),
+            ResolveError::UnknownSpatialQuery { name, span } => write!(
+                f,
+                "unknown spatial_query `{name}` at bytes {}..{} \
+                 (no matching `spatial_query <name>` declaration found)",
                 span.start, span.end
             ),
         }
