@@ -721,23 +721,13 @@ fn lower_field(
     span: Span,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgExprId, LoweringError> {
-    match &base.kind {
-        IrExpr::Local(_, local_name) if local_name == "self" => {
-            let field = AgentFieldId::from_snake(field_name).ok_or_else(|| {
-                LoweringError::UnknownAgentField {
-                    field_name: field_name.to_string(),
-                    span,
-                }
-            })?;
-            add(
-                ctx,
-                CgExpr::Read(DataHandle::AgentField {
-                    field,
-                    target: AgentRef::Self_,
-                }),
-                span,
-            )
-        }
+    // Resolve the agent reference implied by the base expression. Today
+    // wired bases are `self` (every dispatch shape) and `target` inside
+    // a pair-bound op. Anything else falls through as the typed
+    // `UnsupportedFieldBase` deferral so a stray base reference can't
+    // accidentally route through the per-pair candidate buffer.
+    let target = match &base.kind {
+        IrExpr::Local(_, local_name) if local_name == "self" => AgentRef::Self_,
         IrExpr::Local(_, local_name) if local_name == "target" && ctx.target_local => {
             // Pair-bound mask predicates (and, in 5.5b/c, scoring rows /
             // fold bodies) bind `target` to the per-pair candidate. The
@@ -745,26 +735,94 @@ fn lower_field(
             // to the candidate buffer + per-thread offset implied by the
             // dispatch shape's `PerPair { source }`; the IR layer just
             // tags the read.
-            let field = AgentFieldId::from_snake(field_name).ok_or_else(|| {
-                LoweringError::UnknownAgentField {
-                    field_name: field_name.to_string(),
-                    span,
-                }
-            })?;
-            add(
-                ctx,
-                CgExpr::Read(DataHandle::AgentField {
-                    field,
-                    target: AgentRef::PerPairCandidate,
-                }),
-                span,
-            )
+            AgentRef::PerPairCandidate
         }
-        _ => Err(LoweringError::UnsupportedFieldBase {
+        _ => {
+            return Err(LoweringError::UnsupportedFieldBase {
+                field_name: field_name.to_string(),
+                span,
+            });
+        }
+    };
+
+    // Virtual fields: names that don't map to an `AgentFieldId` but
+    // synthesize a CG expression from real primitives. Today: `hp_pct`
+    // ⇒ `hp / max_hp`. Future entries (mana_pct, cooldown_progress,
+    // …) extend the dispatch below.
+    if let Some(synth) = lookup_virtual_field(field_name) {
+        return synth(target, span, ctx);
+    }
+
+    let field = AgentFieldId::from_snake(field_name).ok_or_else(|| {
+        LoweringError::UnknownAgentField {
             field_name: field_name.to_string(),
             span,
+        }
+    })?;
+    add(
+        ctx,
+        CgExpr::Read(DataHandle::AgentField { field, target }),
+        span,
+    )
+}
+
+/// Type alias for a virtual-field synthesizer. Each entry takes the
+/// resolved [`AgentRef`] (whatever `self`-or-`target` the original
+/// `IrExpr::Field` carried), the source [`Span`], and the lowering
+/// context, and produces the synthesized [`CgExprId`].
+type VirtualFieldSynth =
+    fn(AgentRef, Span, &mut LoweringCtx<'_>) -> Result<CgExprId, LoweringError>;
+
+/// Virtual fields synthesized from real `AgentField` primitives. Today
+/// the only entry is `hp_pct = hp / max_hp`; new virtuals
+/// (`mana_pct`, `cooldown_progress`, …) extend this table without
+/// touching `lower_field`'s control flow.
+const VIRTUAL_FIELDS: &[(&str, VirtualFieldSynth)] = &[("hp_pct", lower_hp_pct)];
+
+/// Lookup helper for [`VIRTUAL_FIELDS`]. Returns the synthesizer for a
+/// virtual field name, or `None` for real `AgentFieldId` names (which
+/// fall through to `AgentFieldId::from_snake` in [`lower_field`]).
+fn lookup_virtual_field(field_name: &str) -> Option<VirtualFieldSynth> {
+    VIRTUAL_FIELDS
+        .iter()
+        .find_map(|(name, synth)| (*name == field_name).then_some(*synth))
+}
+
+/// Synthesize `<target>.hp / <target>.max_hp` for `<target>.hp_pct`.
+/// Both reads carry the caller-supplied `target` so a per-pair
+/// `target.hp_pct` lowers to per-pair-candidate reads, and `self.hp_pct`
+/// lowers to self-reads.
+fn lower_hp_pct(
+    target: AgentRef,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    let lhs = add(
+        ctx,
+        CgExpr::Read(DataHandle::AgentField {
+            field: AgentFieldId::Hp,
+            target: target.clone(),
         }),
-    }
+        span,
+    )?;
+    let rhs = add(
+        ctx,
+        CgExpr::Read(DataHandle::AgentField {
+            field: AgentFieldId::MaxHp,
+            target,
+        }),
+        span,
+    )?;
+    add(
+        ctx,
+        CgExpr::Binary {
+            op: BinaryOp::DivF32,
+            lhs,
+            rhs,
+            ty: CgTy::F32,
+        },
+        span,
+    )
 }
 
 /// Lower a bare `IrExpr::Local(local_ref, name)` (no `.field` access)
@@ -1969,13 +2027,96 @@ mod tests {
 
     #[test]
     fn unknown_self_field_rejected() {
-        let ast = field_self("hp_pct");
+        // `nonexistent_field` is neither a real `AgentFieldId` nor a
+        // virtual field synthesizer — must surface as
+        // `UnknownAgentField`. (Historically this used `hp_pct`; that
+        // name is now a virtual field synthesized to `hp / max_hp`,
+        // covered by `self_hp_pct_synthesizes_hp_div_max_hp`.)
+        let ast = field_self("nonexistent_field");
         let err = lower_to_string(&ast).unwrap_err();
         match err {
             LoweringError::UnknownAgentField { field_name, .. } => {
-                assert_eq!(field_name, "hp_pct");
+                assert_eq!(field_name, "nonexistent_field");
             }
             other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    // ---- Virtual fields (Task 8 of the cg-lowering gap-closure plan) ----
+
+    #[test]
+    fn self_hp_pct_synthesizes_hp_div_max_hp() {
+        // `self.hp_pct` is a virtual field — no `AgentFieldId::HpPct`
+        // exists. The lowering synthesizes `Read(Hp) / Read(MaxHp)`,
+        // both targeting `AgentRef::Self_`.
+        let ast = field_self("hp_pct");
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let id = lower_expr(&ast, &mut ctx).expect("hp_pct synthesizes");
+        let prog = builder.finish();
+        let root = &prog.exprs[id.0 as usize];
+        // Pretty-printed canonical form: div.f32 of two agent-self reads.
+        assert_eq!(
+            pretty(root, &prog.exprs),
+            "(div.f32 (read agent.self.hp) (read agent.self.max_hp))"
+        );
+        // And the typed shape — both reads must target Self_, not the
+        // per-pair candidate.
+        match root {
+            CgExpr::Binary { op, lhs, rhs, ty } => {
+                assert_eq!(*op, BinaryOp::DivF32);
+                assert_eq!(*ty, CgTy::F32);
+                match &prog.exprs[lhs.0 as usize] {
+                    CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                        assert_eq!(*field, AgentFieldId::Hp);
+                        assert_eq!(*target, AgentRef::Self_);
+                    }
+                    other => panic!("unexpected lhs: {other:?}"),
+                }
+                match &prog.exprs[rhs.0 as usize] {
+                    CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                        assert_eq!(*field, AgentFieldId::MaxHp);
+                        assert_eq!(*target, AgentRef::Self_);
+                    }
+                    other => panic!("unexpected rhs: {other:?}"),
+                }
+            }
+            other => panic!("expected Binary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn target_hp_pct_synthesizes_per_pair_hp_div_max_hp() {
+        // Symmetry: in a pair-bound context, `target.hp_pct`
+        // synthesizes the same Div, both reads tagged
+        // `AgentRef::PerPairCandidate`.
+        let ast = field_target("hp_pct");
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.target_local = true;
+        let id = lower_expr(&ast, &mut ctx).expect("target.hp_pct synthesizes");
+        let prog = builder.finish();
+        let root = &prog.exprs[id.0 as usize];
+        match root {
+            CgExpr::Binary { op, lhs, rhs, ty } => {
+                assert_eq!(*op, BinaryOp::DivF32);
+                assert_eq!(*ty, CgTy::F32);
+                match &prog.exprs[lhs.0 as usize] {
+                    CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                        assert_eq!(*field, AgentFieldId::Hp);
+                        assert_eq!(*target, AgentRef::PerPairCandidate);
+                    }
+                    other => panic!("unexpected lhs: {other:?}"),
+                }
+                match &prog.exprs[rhs.0 as usize] {
+                    CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                        assert_eq!(*field, AgentFieldId::MaxHp);
+                        assert_eq!(*target, AgentRef::PerPairCandidate);
+                    }
+                    other => panic!("unexpected rhs: {other:?}"),
+                }
+            }
+            other => panic!("expected Binary, got {other:?}"),
         }
     }
 
@@ -2049,18 +2190,21 @@ mod tests {
 
     #[test]
     fn target_field_unknown_name_under_target_local_rejects_with_unknown_agent_field() {
-        // target.hp_pct in a target-bound context: the receiver is now
-        // recognised, but `hp_pct` isn't an `AgentFieldId`. The
-        // lowering surfaces the same `UnknownAgentField` defect as the
-        // `self.hp_pct` case — keeps the error surface symmetric.
-        let ast = field_target("hp_pct");
+        // target.<bogus> in a target-bound context: the receiver is
+        // now recognised, but the field name is neither a real
+        // `AgentFieldId` nor a virtual field. The lowering surfaces
+        // the same `UnknownAgentField` defect as the self-side case —
+        // keeps the error surface symmetric. (Historically this used
+        // `hp_pct`; that name is now a virtual field — see
+        // `target_hp_pct_synthesizes_per_pair_hp_div_max_hp`.)
+        let ast = field_target("nonexistent_field");
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
         ctx.target_local = true;
         let err = lower_expr(&ast, &mut ctx).expect_err("must reject");
         match err {
             LoweringError::UnknownAgentField { field_name, .. } => {
-                assert_eq!(field_name, "hp_pct");
+                assert_eq!(field_name, "nonexistent_field");
             }
             other => panic!("expected UnknownAgentField, got {other:?}"),
         }
@@ -3316,7 +3460,10 @@ mod tests {
 
     #[test]
     fn lowering_error_carries_node_span() {
-        let mut bad = field_self("hp_pct");
+        // Span propagation through `UnknownAgentField`. Use a name
+        // that's neither a real `AgentFieldId` nor a virtual field —
+        // `hp_pct` was the historical choice but is now synthesized.
+        let mut bad = field_self("nonexistent_field");
         bad.span = span(11, 22);
         let err = lower_to_string(&bad).unwrap_err();
         match err {

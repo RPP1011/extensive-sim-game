@@ -784,10 +784,12 @@ mod tests {
 
     #[test]
     fn predicate_lowering_failure_propagates() {
-        // `self.hp_pct` — not a registered AgentFieldId, so lower_expr
-        // returns UnknownAgentField. After the unification, the mask
-        // pass propagates it unchanged via `?` (no wrapper variant).
-        let mut bad = field_self("hp_pct");
+        // `self.<bogus>` — not a registered AgentFieldId nor a virtual
+        // field, so lower_expr returns UnknownAgentField. After the
+        // unification, the mask pass propagates it unchanged via `?`
+        // (no wrapper variant). Historically used `hp_pct`; that name
+        // is now a virtual field synthesized to `hp / max_hp`.
+        let mut bad = field_self("nonexistent_field");
         bad.span = span(3, 9);
         let mask = MaskIR {
             head: mask_head("Bad"),
@@ -802,7 +804,7 @@ mod tests {
         let err = lower_mask(MaskId(0), None, &mask, &mut ctx).expect_err("unknown field");
         match err {
             LoweringError::UnknownAgentField { field_name, .. } => {
-                assert_eq!(field_name, "hp_pct");
+                assert_eq!(field_name, "nonexistent_field");
             }
             other => panic!("expected UnknownAgentField, got {other:?}"),
         }
