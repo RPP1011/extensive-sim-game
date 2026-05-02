@@ -11,7 +11,9 @@ fn cs_upload_sim_cfg(@builtin(global_invocation_id) gid: vec3<u32>) {
 if (gid.x != 0u) { return; }
 
 // op#28 (plumbing)
-// PlumbingKind::UploadSimCfg — host-side upload (queue.
-// write_buffer). Body is a no-op; the spec declares sim_cfg as
-// a Uniform binding which is read-only inside the shader.
+{
+    // PlumbingKind::UploadSimCfg — host-side upload (queue.
+    // write_buffer). Body is a no-op; the spec declares sim_cfg as
+    // a Uniform binding which is read-only inside the shader.
+}
 }

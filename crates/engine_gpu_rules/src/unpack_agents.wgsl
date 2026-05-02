@@ -50,10 +50,12 @@ let agent_id = gid.x;
 if (agent_id >= cfg.agent_cap) { return; }
 
 // op#31 (plumbing)
-// PlumbingKind::UnpackAgents — structural stub. Verbatim
-// port of engine_gpu_rules/src/fused_agent_unpack.wgsl (the
-// legacy file is itself a stub that touches every binding).
-let _as = agent_scratch_packed[0];
-let _ap = agent_pos[agent_id];
-let _c = cfg.agent_cap;
+{
+    // PlumbingKind::UnpackAgents — structural stub. Verbatim
+    // port of engine_gpu_rules/src/fused_agent_unpack.wgsl (the
+    // legacy file is itself a stub that touches every binding).
+    let _as = agent_scratch_packed[0];
+    let _ap = agent_pos[agent_id];
+    let _c = cfg.agent_cap;
+}
 }

@@ -18,7 +18,9 @@ fn cs_fold_rally_boost(@builtin(global_invocation_id) gid: vec3<u32>) {
     let tick = cfg.tick;
 
     // op#14 (view_fold)
-    let local_0: u32 = event_ring[event_idx * 10u + 2u];
-    let local_1: u32 = event_ring[event_idx * 10u + 3u];
-    _ = (1.0);
+    {
+        let local_0: u32 = event_ring[event_idx * 10u + 2u];
+        let local_1: u32 = event_ring[event_idx * 10u + 3u];
+        _ = (1.0);
+    }
 }

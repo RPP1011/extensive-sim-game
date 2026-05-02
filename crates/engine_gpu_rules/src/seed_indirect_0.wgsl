@@ -12,18 +12,20 @@ fn cs_seed_indirect_0(@builtin(global_invocation_id) gid: vec3<u32>) {
 if (gid.x != 0u) { return; }
 
 // op#30 (plumbing)
-// PlumbingKind::SeedIndirectArgs (ring=0) — adapted from
-// engine_gpu_rules/src/seed_indirect.wgsl. Reads tail count from
-// event_ring_0[0] (single-binding ring assumption — see
-// Limitations on `seed_indirect_args_body`); writes (wg, 1, 1)
-// into indirect_args_0 so the next per-event dispatch on
-// ring=0 launches ceil(n/64) workgroups (capped at
-// CAP_WG=4096).
-let n = event_ring_0[0];
-let req = (n + 63u) / 64u;
-var wg: u32 = req;
-if (wg > 4096u) { wg = 4096u; }
-indirect_args_0[0] = wg;
-indirect_args_0[1] = 1u;
-indirect_args_0[2] = 1u;
+{
+    // PlumbingKind::SeedIndirectArgs (ring=0) — adapted from
+    // engine_gpu_rules/src/seed_indirect.wgsl. Reads tail count from
+    // event_ring_0[0] (single-binding ring assumption — see
+    // Limitations on `seed_indirect_args_body`); writes (wg, 1, 1)
+    // into indirect_args_0 so the next per-event dispatch on
+    // ring=0 launches ceil(n/64) workgroups (capped at
+    // CAP_WG=4096).
+    let n = event_ring_0[0];
+    let req = (n + 63u) / 64u;
+    var wg: u32 = req;
+    if (wg > 4096u) { wg = 4096u; }
+    indirect_args_0[0] = wg;
+    indirect_args_0[1] = 1u;
+    indirect_args_0[2] = 1u;
+}
 }

@@ -16,34 +16,42 @@ let agent_id = gid.x;
 if (agent_id >= cfg.agent_cap) { return; }
 
 // op#2 (mask_predicate)
-let mask_2_value: bool = false;
-if (mask_2_value) {
-    let mask_2_word = agent_id >> 5u;
-    let mask_2_bit  = 1u << (agent_id & 31u);
-    atomicOr(&mask_2_bitmap[mask_2_word], mask_2_bit);
+{
+    let mask_2_value: bool = false;
+    if (mask_2_value) {
+        let mask_2_word = agent_id >> 5u;
+        let mask_2_bit  = 1u << (agent_id & 31u);
+        atomicOr(&mask_2_bitmap[mask_2_word], mask_2_bit);
+    }
 }
 
 // op#3 (mask_predicate)
-let mask_3_value: bool = false;
-if (mask_3_value) {
-    let mask_3_word = agent_id >> 5u;
-    let mask_3_bit  = 1u << (agent_id & 31u);
-    atomicOr(&mask_3_bitmap[mask_3_word], mask_3_bit);
+{
+    let mask_3_value: bool = false;
+    if (mask_3_value) {
+        let mask_3_word = agent_id >> 5u;
+        let mask_3_bit  = 1u << (agent_id & 31u);
+        atomicOr(&mask_3_bitmap[mask_3_word], mask_3_bit);
+    }
 }
 
 // op#4 (mask_predicate)
-let mask_4_value: bool = false;
-if (mask_4_value) {
-    let mask_4_word = agent_id >> 5u;
-    let mask_4_bit  = 1u << (agent_id & 31u);
-    atomicOr(&mask_4_bitmap[mask_4_word], mask_4_bit);
+{
+    let mask_4_value: bool = false;
+    if (mask_4_value) {
+        let mask_4_word = agent_id >> 5u;
+        let mask_4_bit  = 1u << (agent_id & 31u);
+        atomicOr(&mask_4_bitmap[mask_4_word], mask_4_bit);
+    }
 }
 
 // op#5 (mask_predicate)
-let mask_5_value: bool = false;
-if (mask_5_value) {
-    let mask_5_word = agent_id >> 5u;
-    let mask_5_bit  = 1u << (agent_id & 31u);
-    atomicOr(&mask_5_bitmap[mask_5_word], mask_5_bit);
+{
+    let mask_5_value: bool = false;
+    if (mask_5_value) {
+        let mask_5_word = agent_id >> 5u;
+        let mask_5_bit  = 1u << (agent_id & 31u);
+        atomicOr(&mask_5_bitmap[mask_5_word], mask_5_bit);
+    }
 }
 }

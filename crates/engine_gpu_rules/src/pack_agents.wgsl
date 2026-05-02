@@ -50,11 +50,13 @@ let agent_id = gid.x;
 if (agent_id >= cfg.agent_cap) { return; }
 
 // op#29 (plumbing)
-// PlumbingKind::PackAgents — structural stub.
-// Real per-agent SoA->packed lowering needs a typed AgentSlotPack op
-// (Task 5.x); today this is a binding-touch stub that keeps the
-// declared agent + scratch BGL slots live.
-let _ap = agent_pos[agent_id];
-let _as = agent_scratch_packed[0];
-let _c = cfg.agent_cap;
+{
+    // PlumbingKind::PackAgents — structural stub.
+    // Real per-agent SoA->packed lowering needs a typed AgentSlotPack op
+    // (Task 5.x); today this is a binding-touch stub that keeps the
+    // declared agent + scratch BGL slots live.
+    let _ap = agent_pos[agent_id];
+    let _as = agent_scratch_packed[0];
+    let _c = cfg.agent_cap;
+}
 }

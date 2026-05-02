@@ -18,8 +18,10 @@ fn cs_fold_standing(@builtin(global_invocation_id) gid: vec3<u32>) {
     let tick = cfg.tick;
 
     // op#15 (view_fold)
-    let local_0: u32 = event_ring[event_idx * 10u + 2u];
-    let local_1: u32 = event_ring[event_idx * 10u + 3u];
-    let local_3: i32 = bitcast<i32>(event_ring[event_idx * 10u + 4u]);
-    _ = (local_3);
+    {
+        let local_0: u32 = event_ring[event_idx * 10u + 2u];
+        let local_1: u32 = event_ring[event_idx * 10u + 3u];
+        let local_3: i32 = bitcast<i32>(event_ring[event_idx * 10u + 4u]);
+        _ = (local_3);
+    }
 }

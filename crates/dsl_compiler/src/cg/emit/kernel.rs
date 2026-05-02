@@ -1509,18 +1509,23 @@ fn build_view_fold_wgsl_body(
             compute_op_kind_short(&op.kind)
         )
         .expect("write to String never fails");
-        // Indent the lowered fragment by 4 spaces per line so the body
-        // sits at the same indent level as the preamble (event_idx,
-        // gate, _tick) and the per-op `// op#…` comment that labels it.
-        // The Task-4.1 lowering emits flush-left WGSL; without this
-        // re-indent the fragment would be visually misaligned under its
-        // comment.
+        // Wrap the per-op body in `{ ... }` so locals declared by Task 1's
+        // event-pattern binding lowering (`let local_<N>: <ty> = ...;`)
+        // live in their own WGSL scope. Without these braces, two ops in
+        // the same fused kernel both emit `let local_0` at the function
+        // top level, which naga rejects as a redefinition. WGSL handles
+        // nested scopes cleanly, so siblings can each carry their own
+        // `local_0` without collision. Indent the fragment by 8 spaces:
+        // 4 for the kernel-body level (the brace lives at 4) plus 4 for
+        // the inner block. Keep the trailing brace at 4-space indent.
         let indented = fragment
             .lines()
-            .map(|l| if l.is_empty() { String::new() } else { format!("    {l}") })
+            .map(|l| if l.is_empty() { String::new() } else { format!("        {l}") })
             .collect::<Vec<_>>()
             .join("\n");
+        out.push_str("    {\n");
         out.push_str(&indented);
+        out.push_str("\n    }");
     }
 
     Ok(out)
@@ -1555,7 +1560,23 @@ fn build_wgsl_body(
         // Comment header per op for traceability.
         writeln!(out, "// op#{} ({})", op.id.0, compute_op_kind_short(&op.kind))
             .expect("write to String never fails");
-        out.push_str(&fragment);
+        // Wrap the per-op body in `{ ... }` so locals declared by Task 1's
+        // event-pattern binding lowering (`let local_<N>: <ty> = ...;`)
+        // live in their own WGSL scope. Without these braces, two ops in
+        // the same fused kernel both emit `let local_0` at the function
+        // top level, which naga rejects as a redefinition. WGSL handles
+        // nested scopes cleanly, so siblings can each carry their own
+        // `local_0` without collision. The brace itself sits flush-left
+        // (matching the comment header above it) and the body is
+        // indented one 4-space level inside.
+        let indented = fragment
+            .lines()
+            .map(|l| if l.is_empty() { String::new() } else { format!("    {l}") })
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str("{\n");
+        out.push_str(&indented);
+        out.push_str("\n}");
     }
 
     Ok(out)
@@ -3789,6 +3810,122 @@ mod tests {
         let (_spec, body) = kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
         let op_count = body.matches("// op#").count();
         assert_eq!(op_count, 2, "body: {body}");
+    }
+
+    /// Task 1.5 — per-op brace scoping. When two view_fold handlers fuse
+    /// into one kernel, each handler's pattern-binding `Let` synthesis
+    /// emits its own `let local_<N>: <ty> = ...;` at the head of its
+    /// body. Without per-op brace wrapping, both bodies declare
+    /// `let local_0` at the function top level — naga rejects this as a
+    /// redefinition. Wrapping each per-op body in `{ ... }` puts each
+    /// op's locals in its own WGSL scope, eliminating the collision.
+    ///
+    /// This test pins the brace structure: the rendered body for a
+    /// fused two-op view_fold kernel must contain two `{ ... let local_0`
+    /// occurrences (one per op), proving the scoping isolates them.
+    #[test]
+    fn fused_kernel_body_wraps_each_op_in_braces() {
+        use crate::cg::data_handle::ViewId;
+        use crate::cg::stmt::LocalId;
+
+        // Helper — build a view_fold op whose body starts with a `Let`
+        // binding `let local_0: u32 = 1u;` followed by the canonical
+        // `_ = (1.0)` ViewStorage assign. Both ops in the topology bind
+        // `LocalId(0)`, mirroring the way Task 1's pattern-binding
+        // lowering synthesises one Let per binder per handler — fused
+        // handlers thus collide on the same local id.
+        fn view_fold_op_with_let(
+            prog: &mut CgProgram,
+            view: ViewId,
+            event_kind: EventKindId,
+            ring: EventRingId,
+        ) -> OpId {
+            let one_u = push_expr(prog, CgExpr::Lit(LitValue::U32(1)));
+            let let_stmt = push_stmt(
+                prog,
+                CgStmt::Let {
+                    local: LocalId(0),
+                    value: one_u,
+                    ty: CgTy::U32,
+                },
+            );
+            let one_f = push_expr(prog, CgExpr::Lit(LitValue::F32(1.0)));
+            let assign = push_stmt(
+                prog,
+                CgStmt::Assign {
+                    target: DataHandle::ViewStorage {
+                        view,
+                        slot: crate::cg::data_handle::ViewStorageSlot::Primary,
+                    },
+                    value: one_f,
+                },
+            );
+            let body = push_list(
+                prog,
+                CgStmtList {
+                    stmts: vec![let_stmt, assign],
+                },
+            );
+            let kind = ComputeOpKind::ViewFold {
+                view,
+                on_event: event_kind,
+                body,
+            };
+            let op = ComputeOp::new(
+                OpId(0),
+                kind,
+                DispatchShape::PerEvent { source_ring: ring },
+                Span::dummy(),
+                prog,
+                prog,
+                prog,
+            );
+            push_op(prog, op)
+        }
+
+        let mut prog = CgProgram::default();
+        let view = ViewId(3);
+        prog.interner.views.insert(3, "threat_level".to_string());
+        prog.interner.event_kinds.insert(0, "AgentAttacked".into());
+        prog.interner
+            .event_kinds
+            .insert(1, "EffectDamageApplied".into());
+        let op_a = view_fold_op_with_let(&mut prog, view, EventKindId(0), EventRingId(0));
+        let op_b = view_fold_op_with_let(&mut prog, view, EventKindId(1), EventRingId(0));
+        let topology = KernelTopology::Fused {
+            ops: vec![op_a, op_b],
+            dispatch: DispatchShape::PerEvent {
+                source_ring: EventRingId(0),
+            },
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        // Both ops emit `let local_0: u32 = 1u;`. Without brace
+        // wrapping these collide. Sanity: the rendered body contains
+        // exactly two `let local_0` occurrences (one per op).
+        assert_eq!(
+            body.matches("let local_0").count(),
+            2,
+            "body: {body}"
+        );
+        // Each occurrence must be wrapped in its own `{ ... }` block —
+        // i.e. an open brace appears between the op-comment header and
+        // the `let local_0` line. We pin this by counting `{\n`-then-
+        // (possibly indented)-`let local_0` pairs. Two such pairs prove
+        // the per-op scoping.
+        let scoped_lets = body.matches("{\n        let local_0").count();
+        assert_eq!(
+            scoped_lets, 2,
+            "expected two scoped `let local_0` blocks; body:\n{body}"
+        );
+        // And every per-op block closes — the body has at least two
+        // `\n    }` closers (one per op).
+        assert!(
+            body.matches("\n    }").count() >= 2,
+            "expected at least two `}}` closers; body:\n{body}"
+        );
     }
 
     /// ViewFold falls back to `view_<id>` when the interner has no

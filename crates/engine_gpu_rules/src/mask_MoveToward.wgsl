@@ -13,18 +13,20 @@ let pair = gid.x;
 // PerPair: agent + cand resolution computed against per_pair_candidates.
 
 // op#1 (mask_predicate)
-// PerPair MaskPredicate — derive (agent, cand) from `pair`.
-let mask_1_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.
-let mask_1_agent = pair / mask_1_k;
-let mask_1_cand  = pair % mask_1_k;
-if (mask_1_agent >= cfg.agent_cap) { return; }
-let agent_id = mask_1_agent;
-let per_pair_candidate = mask_1_cand;
+{
+    // PerPair MaskPredicate — derive (agent, cand) from `pair`.
+    let mask_1_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.
+    let mask_1_agent = pair / mask_1_k;
+    let mask_1_cand  = pair % mask_1_k;
+    if (mask_1_agent >= cfg.agent_cap) { return; }
+    let agent_id = mask_1_agent;
+    let per_pair_candidate = mask_1_cand;
 
-let mask_1_value: bool = (false && (per_pair_candidate != agent_id));
-if (mask_1_value) {
-    let mask_1_word = mask_1_agent >> 5u;
-    let mask_1_bit  = 1u << (mask_1_agent & 31u);
-    atomicOr(&mask_1_bitmap[mask_1_word], mask_1_bit);
+    let mask_1_value: bool = (false && (per_pair_candidate != agent_id));
+    if (mask_1_value) {
+        let mask_1_word = mask_1_agent >> 5u;
+        let mask_1_bit  = 1u << (mask_1_agent & 31u);
+        atomicOr(&mask_1_bitmap[mask_1_word], mask_1_bit);
+    }
 }
 }

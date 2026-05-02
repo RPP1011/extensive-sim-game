@@ -13,10 +13,12 @@ let agent_id = gid.x;
 if (agent_id >= cfg.agent_cap) { return; }
 
 // op#0 (mask_predicate)
-let mask_0_value: bool = false;
-if (mask_0_value) {
-    let mask_0_word = agent_id >> 5u;
-    let mask_0_bit  = 1u << (agent_id & 31u);
-    atomicOr(&mask_0_bitmap[mask_0_word], mask_0_bit);
+{
+    let mask_0_value: bool = false;
+    if (mask_0_value) {
+        let mask_0_word = agent_id >> 5u;
+        let mask_0_bit  = 1u << (agent_id & 31u);
+        atomicOr(&mask_0_bitmap[mask_0_word], mask_0_bit);
+    }
 }
 }

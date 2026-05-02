@@ -11,7 +11,9 @@ fn cs_kick_snapshot(@builtin(global_invocation_id) gid: vec3<u32>) {
 if (gid.x != 0u) { return; }
 
 // op#32 (plumbing)
-// PlumbingKind::KickSnapshot — flag the snapshot_kick slot;
-// host-side snapshot pipeline observes the flag post-tick.
-atomicStore(&snapshot_kick[0], 1u);
+{
+    // PlumbingKind::KickSnapshot — flag the snapshot_kick slot;
+    // host-side snapshot pipeline observes the flag post-tick.
+    atomicStore(&snapshot_kick[0], 1u);
+}
 }

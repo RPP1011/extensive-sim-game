@@ -16,18 +16,20 @@ let pair = gid.x;
 // PerPair: agent + cand resolution computed against per_pair_candidates.
 
 // op#6 (mask_predicate)
-// PerPair MaskPredicate — derive (agent, cand) from `pair`.
-let mask_6_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.
-let mask_6_agent = pair / mask_6_k;
-let mask_6_cand  = pair % mask_6_k;
-if (mask_6_agent >= cfg.agent_cap) { return; }
-let agent_id = mask_6_agent;
-let per_pair_candidate = mask_6_cand;
+{
+    // PerPair MaskPredicate — derive (agent, cand) from `pair`.
+    let mask_6_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.
+    let mask_6_agent = pair / mask_6_k;
+    let mask_6_cand  = pair % mask_6_k;
+    if (mask_6_agent >= cfg.agent_cap) { return; }
+    let agent_id = mask_6_agent;
+    let per_pair_candidate = mask_6_cand;
 
-let mask_6_value: bool = ((false && agents_is_hostile_to(agent_id, per_pair_candidate)) && (distance(vec3<f32>(0.0), vec3<f32>(0.0)) < 2.0));
-if (mask_6_value) {
-    let mask_6_word = mask_6_agent >> 5u;
-    let mask_6_bit  = 1u << (mask_6_agent & 31u);
-    atomicOr(&mask_6_bitmap[mask_6_word], mask_6_bit);
+    let mask_6_value: bool = ((false && agents_is_hostile_to(agent_id, per_pair_candidate)) && (distance(vec3<f32>(0.0), vec3<f32>(0.0)) < 2.0));
+    if (mask_6_value) {
+        let mask_6_word = mask_6_agent >> 5u;
+        let mask_6_bit  = 1u << (mask_6_agent & 31u);
+        atomicOr(&mask_6_bitmap[mask_6_word], mask_6_bit);
+    }
 }
 }

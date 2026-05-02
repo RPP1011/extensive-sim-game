@@ -16,15 +16,17 @@ let event_idx = gid.x;
 // Indirect dispatch on event_ring_0; tail count bounds gid.x.
 
 // op#20 (physics_rule)
-let local_2: u32 = event_ring[event_idx * 10u + 2u];
-let local_0: u32 = event_ring[event_idx * 10u + 3u];
-if (false) {
-    let local_1: f32 = 0.0;
-    let local_3: f32 = 0.0;
-    if ((local_3 > 0.0)) {
-        let local_4: f32 = (local_1 / local_3);
-        if ((local_4 < 0.5)) {
-            emit_event_37(field_0: 4u, field_1: local_2, field_2: local_0);
+{
+    let local_2: u32 = event_ring[event_idx * 10u + 2u];
+    let local_0: u32 = event_ring[event_idx * 10u + 3u];
+    if (false) {
+        let local_1: f32 = 0.0;
+        let local_3: f32 = 0.0;
+        if ((local_3 > 0.0)) {
+            let local_4: f32 = (local_1 / local_3);
+            if ((local_4 < 0.5)) {
+                emit_event_37(field_0: 4u, field_1: local_2, field_2: local_0);
+            }
         }
     }
 }
