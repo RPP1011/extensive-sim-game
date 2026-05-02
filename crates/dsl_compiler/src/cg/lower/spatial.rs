@@ -440,4 +440,39 @@ mod tests {
             ]
         );
     }
+
+    // ---- 10. FilteredWalk round-trips through the lowering pass ----------
+
+    #[test]
+    fn filtered_walk_kind_round_trips_through_lowering() {
+        use crate::cg::expr::{CgExpr, LitValue};
+
+        let mut builder = CgProgramBuilder::new();
+        // Push a real Bool literal so validate_op_kind_refs accepts the
+        // filter id (it calls check_expr_id which requires the id to be
+        // in-range). CgExprId(0) is the first allocated id.
+        let filter_id = builder
+            .add_expr(CgExpr::Lit(LitValue::Bool(true)))
+            .expect("push lit expr");
+
+        let mut ctx = LoweringCtx::new(&mut builder);
+
+        let kind = SpatialQueryKind::FilteredWalk { filter: filter_id };
+        let ids = lower_spatial_queries(&[kind], &mut ctx).expect("lowers");
+        assert_eq!(ids.len(), 1);
+
+        let prog = builder.finish();
+        match prog.ops[0].kind {
+            ComputeOpKind::SpatialQuery {
+                kind: SpatialQueryKind::FilteredWalk { filter },
+            } => assert_eq!(filter, filter_id),
+            ref other => panic!("unexpected: {other:?}"),
+        }
+        assert_eq!(
+            prog.ops[0].writes,
+            vec![DataHandle::SpatialStorage {
+                kind: SpatialStorageKind::QueryResults
+            }]
+        );
+    }
 }

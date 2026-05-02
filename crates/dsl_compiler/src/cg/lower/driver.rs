@@ -100,7 +100,8 @@ use dsl_ast::ir::{
 };
 
 use crate::cg::data_handle::{
-    AgentFieldId, AgentRef, ConfigConstId, DataHandle, EventRingAccess, EventRingId, MaskId, ViewId,
+    AgentFieldId, AgentRef, ConfigConstId, CgExprId, DataHandle, EventRingAccess, EventRingId,
+    MaskId, ViewId,
 };
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
 use crate::cg::expr::CgTy;
@@ -116,7 +117,7 @@ use crate::cg::stmt::{CgStmt, CgStmtList, CgStmtListId, VariantId};
 use crate::cg::well_formed::check_well_formed;
 
 use super::error::LoweringError;
-use super::expr::LoweringCtx;
+use super::expr::{lower_expr, LoweringCtx};
 use super::mask::lower_mask;
 use super::physics::lower_physics;
 use super::plumbing::{lower_plumbing, synthesize_plumbing_ops};
@@ -882,6 +883,36 @@ fn lower_all_masks(
             diagnostics.push(e);
         }
     }
+}
+
+/// Lower a per-pair filter expression to a `CgExprId` with the
+/// per-pair candidate binder (`target` LocalRef → `PerPairCandidateId`)
+/// active for the duration of the lowering. Mirrors the
+/// `target_local` flag toggle in [`super::mask::lower_mask`] — the
+/// flag is restored before returning so a recursive lowering can't
+/// leak the binding upward.
+///
+/// Returns the lowered `CgExprId`. Type-validation that the filter
+/// is `Bool` happens later in `cg::well_formed` (the TypeCheckCtx
+/// wiring lives there); this helper is purely the lowering shim.
+///
+/// # Note
+///
+/// This helper has no caller today — Task 5 (Phase 7) will wire it
+/// in when DSL `spatial_query <name>(...) = <filter>` declarations
+/// are parsed and lowered. The `#[allow(dead_code)]` annotation
+/// suppresses the "function is never used" lint until that wiring
+/// lands.
+#[allow(dead_code)]
+fn lower_filter_for_mask(
+    expr: &IrExprNode,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    let prev = ctx.target_local;
+    ctx.target_local = true;
+    let result = lower_expr(expr, ctx);
+    ctx.target_local = prev;
+    result
 }
 
 /// Pick the [`SpatialQueryKind`] for a mask. From-bearing masks
@@ -2003,5 +2034,42 @@ mod tests {
             Some((0, 99, 0)),
             "expected DuplicateViewInRegistry(ast_ref=0, prior=99, new=0); got diagnostics: {diagnostics:?}"
         );
+    }
+
+    // ---- lower_filter_for_mask helper -------------------------------------
+
+    #[test]
+    fn lower_filter_for_mask_binds_target_to_per_pair_candidate() {
+        use crate::cg::expr::CgExpr;
+        use crate::cg::program::CgProgramBuilder;
+        use dsl_ast::ir::{IrExpr, IrExprNode, LocalRef};
+
+        // Filter expression: bare `target` local. With target_local=true,
+        // this should lower to CgExpr::PerPairCandidateId.
+        let target_local = IrExprNode {
+            kind: IrExpr::Local(LocalRef(0), "target".to_string()),
+            span: dsl_ast::ast::Span::dummy(),
+        };
+
+        let mut builder = CgProgramBuilder::new();
+        let filter_id = {
+            let mut ctx = LoweringCtx::new(&mut builder);
+            let id = lower_filter_for_mask(&target_local, &mut ctx)
+                .expect("lowers target to PerPairCandidateId");
+            // Helper must restore target_local to false on exit — verify
+            // while ctx is still in scope (before it drops / builder is freed).
+            assert!(
+                !ctx.target_local,
+                "target_local should be restored to false after lower_filter_for_mask"
+            );
+            id
+        };
+
+        let prog = builder.finish();
+        let node = &prog.exprs[filter_id.0 as usize];
+        match node {
+            CgExpr::PerPairCandidateId => {} // expected
+            other => panic!("expected PerPairCandidateId, got {other:?}"),
+        }
     }
 }

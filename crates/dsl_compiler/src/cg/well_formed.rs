@@ -239,6 +239,29 @@ pub enum CgError {
         event_kind: super::op::EventKindId,
         word_offset_in_payload: u32,
     },
+
+    /// A [`SpatialQueryKind::FilteredWalk`]'s `filter` expression
+    /// type-checks to a type other than [`CgTy::Bool`]. The walk body
+    /// gates each cell on the filter predicate; a non-Bool filter would
+    /// produce invalid WGSL (the `if` condition must be boolean).
+    /// `op_index` is the index into `prog.ops`; `filter` is the
+    /// offending [`CgExprId`]; `got` is the actual type.
+    FilteredWalkFilterNotBool {
+        op_index: usize,
+        filter: CgExprId,
+        got: CgTy,
+    },
+
+    /// A [`SpatialQueryKind::FilteredWalk`]'s `filter` expression
+    /// failed to type-check. Wraps the [`TypeError`] returned by
+    /// [`type_check`]. `op_index` is the index into `prog.ops`;
+    /// `filter` is the offending [`CgExprId`]; `error` is the
+    /// underlying type-check failure.
+    FilteredWalkFilterTypeCheck {
+        op_index: usize,
+        filter: CgExprId,
+        error: TypeError,
+    },
 }
 
 impl fmt::Display for HandleConsistencyReason {
@@ -387,6 +410,24 @@ impl fmt::Display for CgError {
                 f,
                 "op#{}: EventField(event#{}, word_off#{}) in {} body with dispatch shape {} — only per_event dispatch binds `event_idx`",
                 op.0, event_kind.0, word_offset_in_payload, kind_label, shape_label
+            ),
+            CgError::FilteredWalkFilterNotBool {
+                op_index,
+                filter,
+                got,
+            } => write!(
+                f,
+                "op#{}: FilteredWalk filter expr#{} type-checks to {} (expected bool)",
+                op_index, filter.0, got
+            ),
+            CgError::FilteredWalkFilterTypeCheck {
+                op_index,
+                filter,
+                error,
+            } => write!(
+                f,
+                "op#{}: FilteredWalk filter expr#{} failed type-check: {}",
+                op_index, filter.0, error
             ),
         }
     }
@@ -779,7 +820,12 @@ fn check_op(
                 );
             }
         }
-        ComputeOpKind::SpatialQuery { .. } => {}
+        ComputeOpKind::SpatialQuery { kind } => {
+            // FilteredWalk embeds a filter CgExprId — validate it exists.
+            if let SpatialQueryKind::FilteredWalk { filter } = kind {
+                validate_expr_subtree(arena, *filter, op_id, expr_arena_len, errors);
+            }
+        }
         // Plumbing kinds carry no embedded `CgExpr` / `CgStmt` — every
         // variant's reads/writes are typed `DataHandle`s sourced from
         // `PlumbingKind::dependencies()`. Nothing to walk.
@@ -1173,8 +1219,33 @@ fn type_check_op(
             // panic.
             type_check_list(*body, op_id, prog, ctx, expr_arena_len, errors);
         }
-        ComputeOpKind::SpatialQuery { .. } => {
-            // No expressions to type-check — kernel is built-in.
+        ComputeOpKind::SpatialQuery { kind } => {
+            // FilteredWalk embeds a filter expression — type-check it
+            // must resolve to `CgTy::Bool`. Other spatial-query kinds
+            // carry no embedded expressions.
+            if let SpatialQueryKind::FilteredWalk { filter } = kind {
+                let Some(expr) = prog.exprs.get(filter.0 as usize) else {
+                    return;
+                };
+                match type_check(expr, *filter, ctx) {
+                    Ok(ty) => {
+                        if ty != CgTy::Bool {
+                            errors.push(CgError::FilteredWalkFilterNotBool {
+                                op_index: op_id.0 as usize,
+                                filter: *filter,
+                                got: ty,
+                            });
+                        }
+                    }
+                    Err(err) => {
+                        errors.push(CgError::FilteredWalkFilterTypeCheck {
+                            op_index: op_id.0 as usize,
+                            filter: *filter,
+                            error: err,
+                        });
+                    }
+                }
+            }
         }
         ComputeOpKind::Plumbing { .. } => {
             // Plumbing kinds carry no embedded expressions; their
@@ -3811,6 +3882,76 @@ mod tests {
         assert!(
             scope_match,
             "expected EventFieldInNonPerEventBody, got: {errs:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // FilteredWalk filter type-gate
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn filtered_walk_with_non_bool_filter_rejected() {
+        use crate::cg::dispatch::DispatchShape;
+        use crate::cg::expr::LitValue;
+        use crate::cg::op::{ComputeOpKind, SpatialQueryKind};
+        use crate::cg::program::CgProgramBuilder;
+
+        let mut builder = CgProgramBuilder::new();
+        // Push a filter that is u32, not bool — should fail the gate.
+        let filter_id = builder
+            .add_expr(CgExpr::Lit(LitValue::U32(7)))
+            .expect("push lit");
+        builder
+            .add_op(
+                ComputeOpKind::SpatialQuery {
+                    kind: SpatialQueryKind::FilteredWalk { filter: filter_id },
+                },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+            )
+            .expect("push op");
+        let prog = builder.finish();
+
+        let errs = check_well_formed(&prog).expect_err("non-bool filter should fail");
+        let found = errs.iter().any(|e| {
+            matches!(
+                e,
+                CgError::FilteredWalkFilterNotBool { filter, .. }
+                    if *filter == filter_id
+            )
+        });
+        assert!(
+            found,
+            "expected FilteredWalkFilterNotBool, got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn filtered_walk_with_bool_filter_accepted() {
+        use crate::cg::dispatch::DispatchShape;
+        use crate::cg::expr::LitValue;
+        use crate::cg::op::{ComputeOpKind, SpatialQueryKind};
+        use crate::cg::program::CgProgramBuilder;
+
+        let mut builder = CgProgramBuilder::new();
+        let filter_id = builder
+            .add_expr(CgExpr::Lit(LitValue::Bool(true)))
+            .expect("push lit");
+        builder
+            .add_op(
+                ComputeOpKind::SpatialQuery {
+                    kind: SpatialQueryKind::FilteredWalk { filter: filter_id },
+                },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+            )
+            .expect("push op");
+        let prog = builder.finish();
+
+        let result = check_well_formed(&prog);
+        assert!(
+            result.is_ok(),
+            "bool-typed filter should be accepted, got {result:?}"
         );
     }
 }
