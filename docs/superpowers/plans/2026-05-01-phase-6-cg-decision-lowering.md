@@ -25,7 +25,14 @@
 | 3 | Movement-as-rule via `PhysicsRule` extension (option b — LOCKED). Add optional `source_event` (or PerAgent dispatch shape selector); DSL `@phase(per_agent)` annotation; Movement body lowering reads scoring_output, writes pos. | `cg/op.rs`, `cg/lower/physics.rs`, `cg/emit/kernel.rs`, `cg/dispatch.rs`, `dsl_resolver` (phase tag) | ~250 |
 | 4 | Apply-actions chain (HP/state mutations from event handlers) | `cg/lower/physics.rs` (statement-level namespace-call lowering, mirror of Task 4) | ~200 |
 | 5 | Cleanup: retire Route C splice in `xtask/compile_dsl_cmd.rs` | `xtask/src/compile_dsl_cmd.rs` | -200 |
-| 6 | Parity gate green | `engine_gpu/tests/parity_with_cpu.rs` | 0 |
+| 6 | Parity gate green + Movement emit-quality verification | `engine_gpu/tests/parity_with_cpu.rs`, new emit-shape test | 0+~50 |
+
+**Movement emit-quality acceptance criterion (added 2026-05-01)**: position is structurally privileged — spatial-hash + kin/engagement queries + distance builtins read `agent_pos` 5+ times per tick. The hand-written legacy Movement kernel may carry cache-friendly vec3 load patterns (single 12-byte read vs three scalar reads), branch-free MOVE_TOWARD/FLEE deltas, etc. Option (b) preserves the SoA contract and schedule ordering automatically (via reads/writes), but the emit-body quality is not automatic. Add a test that:
+- Loads the legacy `engine_gpu_rules/src/movement.wgsl` (pre-Phase-6 reference).
+- Loads the CG-emitted `movement.wgsl` post-Phase-6.
+- Compares structural shape: same `bitcast<f32>` count for pos reads, same atomicity (none today), same write pattern. Allows divergence on naming + comments but flags if vec3-load merging regresses.
+
+The user's question (2026-05-01) "we have optimizations built into movement as it is position based ... spatial queries heavily benefit from that and we assume it is always present" anchors this acceptance test: position's privileged role is the contract; emit-quality preserves it.
 
 **Total: ~530 LOC net** (730 added + 200 deleted), 4-7 days estimated.
 
