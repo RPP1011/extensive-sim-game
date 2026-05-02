@@ -1,5 +1,9 @@
 # CG Lowering Gap Closure Implementation Plan
 
+> **STATUS: Checkpoint reached at HEAD `7d566a92` (2026-05-01).** 33 of 39 original lowering diagnostics closed. Pipeline runs end-to-end on real GPU; `parity_with_cpu --features gpu` reaches per-agent fingerprint comparison. Real divergence on `pos_x_bits` remains because the spliced legacy scoring emitter (`emit_scoring_wgsl_v2`) is itself a stub writing `ACTION_HOLD` for every agent. **Closing parity green requires Phase 6 work** (extending CG to lower PerUnit + Positional action heads + Movement-as-rule), tracked separately. This plan is closed for implementation; remaining tasks (6, 11, 12) are deferred to Phase 6.
+>
+> **Net session work:** Tasks 1, 1.5, 3, 4, 5, 7, 8, 9, 10 done. Tasks 6, 11, 12 deferred. ~3500 LOC of dsl_compiler changes across 12 commits.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the AST → CG IR lowering gap so the compiler emits real WGSL bodies for every kernel the runtime needs, allowing `parity_with_cpu --features gpu` to turn green for the smoke fixture.
