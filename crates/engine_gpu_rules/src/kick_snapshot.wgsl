@@ -10,7 +10,7 @@ struct KickSnapshotCfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 fn cs_kick_snapshot(@builtin(global_invocation_id) gid: vec3<u32>) {
 if (gid.x != 0u) { return; }
 
-// op#30 (plumbing)
+// op#32 (plumbing)
 // PlumbingKind::KickSnapshot — flag the snapshot_kick slot;
 // host-side snapshot pipeline observes the flag post-tick.
 atomicStore(&snapshot_kick[0], 1u);

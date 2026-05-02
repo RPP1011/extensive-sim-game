@@ -441,7 +441,8 @@ pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<Dat
         CgExpr::AgentSelfId
         | CgExpr::PerPairCandidateId
         | CgExpr::ReadLocal { .. }
-        | CgExpr::EventField { .. } => {
+        | CgExpr::EventField { .. }
+        | CgExpr::NamespaceField { .. } => {
             // Bare actor / candidate id reads + let-bound local reads
             // do not contribute structural reads of any persisted
             // `DataHandle`. The actor / candidate slot ids are
@@ -451,6 +452,19 @@ pub fn collect_expr_reads(id: CgExprId, exprs: &dyn ExprArena, out: &mut Vec<Dat
             // `source_ring` (the surrounding `DispatchShape::PerEvent`)
             // — well_formed flags `EventField` in any other dispatch
             // shape, so the read is structurally accounted for.
+            // NamespaceField reads (e.g. `world.tick`) resolve to
+            // either kernel-preamble locals or uniform-bound fields
+            // per the `WgslAccessForm` registry — neither contributes
+            // a `DataHandle::*` read.
+        }
+        CgExpr::NamespaceCall { args, .. } => {
+            // Recurse into argument expressions; the call itself does
+            // not read any `DataHandle::*` (the WGSL emit produces a
+            // prelude function call whose body operates on its
+            // argument values).
+            for a in args {
+                collect_expr_reads(*a, exprs, out);
+            }
         }
     }
 }

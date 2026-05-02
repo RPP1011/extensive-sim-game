@@ -11,7 +11,7 @@ struct SeedIndirect0Cfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 fn cs_seed_indirect_0(@builtin(global_invocation_id) gid: vec3<u32>) {
 if (gid.x != 0u) { return; }
 
-// op#28 (plumbing)
+// op#30 (plumbing)
 // PlumbingKind::SeedIndirectArgs (ring=0) — adapted from
 // engine_gpu_rules/src/seed_indirect.wgsl. Reads tail count from
 // event_ring_0[0] (single-binding ring assumption — see

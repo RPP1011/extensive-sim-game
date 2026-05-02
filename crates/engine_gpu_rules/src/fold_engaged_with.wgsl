@@ -15,14 +15,14 @@ struct FoldEngagedWithCfg { event_count: u32, tick: u32, _pad0: u32, _pad1: u32 
 fn cs_fold_engaged_with(@builtin(global_invocation_id) gid: vec3<u32>) {
     let event_idx = gid.x;
     if (event_idx >= cfg.event_count) { return; }
-    let _tick = cfg.tick;
+    let tick = cfg.tick;
 
-    // op#8 (view_fold)
+    // op#9 (view_fold)
     let local_2: u32 = event_ring[event_idx * 10u + 2u];
     let local_0: u32 = event_ring[event_idx * 10u + 3u];
     _ = (1u);
 
-    // op#9 (view_fold)
+    // op#10 (view_fold)
     let local_2: u32 = event_ring[event_idx * 10u + 2u];
     let local_0: u32 = event_ring[event_idx * 10u + 3u];
     _ = (1u);

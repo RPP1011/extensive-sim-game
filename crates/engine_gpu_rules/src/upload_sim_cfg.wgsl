@@ -10,7 +10,7 @@ struct UploadSimCfgCfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 fn cs_upload_sim_cfg(@builtin(global_invocation_id) gid: vec3<u32>) {
 if (gid.x != 0u) { return; }
 
-// op#26 (plumbing)
+// op#28 (plumbing)
 // PlumbingKind::UploadSimCfg — host-side upload (queue.
 // write_buffer). Body is a no-op; the spec declares sim_cfg as
 // a Uniform binding which is read-only inside the shader.

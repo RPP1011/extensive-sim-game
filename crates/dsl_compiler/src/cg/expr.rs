@@ -30,6 +30,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use dsl_ast::ir::NamespaceId;
+
 use super::data_handle::{CgExprId, DataHandle, RngPurpose, ViewId};
 use super::op::EventKindId;
 
@@ -657,6 +659,41 @@ pub enum CgExpr {
         word_offset_in_payload: u32,
         ty: CgTy,
     },
+    /// Stdlib namespace-method call (e.g. `agents.is_hostile_to(target)`,
+    /// `agents.engaged_with_or(target, fallback)`,
+    /// `query.nearest_hostile_to_or(...)`). Schema-driven: `(ns,
+    /// method)` keys into [`super::program::CgProgram::namespace_registry`]
+    /// to resolve `(return_ty, arg_tys, wgsl_fn_name)`. Today's WGSL
+    /// emit produces `<wgsl_fn_name>(<arg1>, <arg2>, ...)`; the kernel
+    /// composer prepends a B1-stub prelude function for each distinct
+    /// `(ns, method)` referenced by the kernel. Real implementations
+    /// land in Task 9-11 territory (runtime-format work).
+    ///
+    /// Adding a new namespace method/field is a registry edit, not an IR
+    /// change. The lowering surface and emitter walks consult the
+    /// registry; only the registry's source-of-truth contents change.
+    NamespaceCall {
+        ns: NamespaceId,
+        method: String,
+        args: Vec<CgExprId>,
+        ty: CgTy,
+    },
+    /// Stdlib namespace-field read (e.g. `world.tick`). Schema-driven:
+    /// `(ns, field)` keys into
+    /// [`super::program::CgProgram::namespace_registry`] to resolve
+    /// `(ty, wgsl_access)`. Today's only entry is `world.tick`, which
+    /// resolves to a kernel-preamble local (`tick`) bound by the fold
+    /// kernel's preamble. The same shape supports
+    /// `WgslAccessForm::UniformField` for cfg-bound fields without an
+    /// IR change. Distinct from
+    /// [`Self::Read`] of [`DataHandle::ConfigConst`] (which is the
+    /// `config.<block>.<field>` shape and routes through a separate
+    /// interner).
+    NamespaceField {
+        ns: NamespaceId,
+        field: String,
+        ty: CgTy,
+    },
 }
 
 /// Compute the type a `DataHandle` reads at. `Read(h)` has the type
@@ -779,6 +816,8 @@ impl CgExpr {
             CgExpr::PerPairCandidateId => CgTy::AgentId,
             CgExpr::ReadLocal { ty, .. } => *ty,
             CgExpr::EventField { ty, .. } => *ty,
+            CgExpr::NamespaceCall { ty, .. } => *ty,
+            CgExpr::NamespaceField { ty, .. } => *ty,
         }
     }
 }
@@ -891,6 +930,23 @@ fn pretty_into(expr: &CgExpr, arena: &dyn ExprArena, out: &mut String) -> fmt::R
             "(event_field event#{} word_off#{} {})",
             event_kind.0, word_offset_in_payload, ty
         ),
+        CgExpr::NamespaceCall {
+            ns,
+            method,
+            args,
+            ty,
+        } => {
+            write!(out, "(ns_call {:?}.{} {}", ns, method, ty)?;
+            for a in args {
+                out.push(' ');
+                pretty_child(*a, arena, out)?;
+            }
+            out.push(')');
+            Ok(())
+        }
+        CgExpr::NamespaceField { ns, field, ty } => {
+            write!(out, "(ns_field {:?}.{} {})", ns, field, ty)
+        }
     }
 }
 
@@ -1263,6 +1319,15 @@ pub fn type_check(
         // claimed type — a fabricated mismatch is a builder defect,
         // not a typing one.
         CgExpr::EventField { ty, .. } => Ok(*ty),
+        // NamespaceCall / NamespaceField carry claimed types pinned by
+        // the registry-driven lowering. Operand types are not validated
+        // here — the lowering already type-checked each argument's
+        // expression; the registry's `arg_tys` schema is structural
+        // metadata for downstream emit, not a typing-rule input. A
+        // fabricated mismatch (claimed return type ≠ registry return
+        // type) is a builder defect, not a typing one.
+        CgExpr::NamespaceCall { ty, .. } => Ok(*ty),
+        CgExpr::NamespaceField { ty, .. } => Ok(*ty),
     }
 }
 

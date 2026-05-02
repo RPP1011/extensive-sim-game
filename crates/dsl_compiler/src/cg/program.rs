@@ -319,6 +319,117 @@ pub struct FieldLayout {
     pub ty: super::expr::CgTy,
 }
 
+// ---------------------------------------------------------------------------
+// Namespace registry — schema for `CgExpr::NamespaceCall` / `NamespaceField`
+// ---------------------------------------------------------------------------
+
+/// Registry of stdlib namespace methods + fields with their schema
+/// (return type, arg signature, WGSL emit form). The single source of
+/// truth for `CgExpr::NamespaceCall` and `CgExpr::NamespaceField`
+/// lowering and emission.
+///
+/// Adding a new namespace method or field is a registry edit (add an
+/// entry to `populate_namespace_registry` in `lower::driver`); it is
+/// **not** an IR change. The lowering and emit walks consult the
+/// registry; only the registry's contents change. Mirrors the
+/// schema-driven approach used for [`EventLayout`].
+///
+/// # Storage forms
+///
+/// Methods carry a [`MethodDef`] with the WGSL function name; the
+/// kernel composer prepends a B1-stub prelude function for each
+/// distinct `(ns, method)` pair referenced by the kernel body. Fields
+/// carry a [`FieldDef`] whose [`WgslAccessForm`] selects between
+/// preamble-locals (`world.tick` → bare `tick` identifier) and uniform
+/// fields (`config.combat.engagement_range` → `cfg.engagement_range`)
+/// without a new IR variant.
+///
+/// **Distinct from [`EventLayout`].** That struct is per-event-kind
+/// payload schema (offsets within a packed event record); this one is
+/// per-namespace symbol schema (return types + emit forms for stdlib
+/// callouts). They share no keys and no consumers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamespaceRegistry {
+    /// Per-namespace definitions. Keyed on the typed [`dsl_ast::ir::NamespaceId`]
+    /// (`Agents`, `Query`, `World`, …). Empty for programs that don't
+    /// reference any registered namespace symbol.
+    pub namespaces: BTreeMap<dsl_ast::ir::NamespaceId, NamespaceDef>,
+}
+
+/// Per-namespace symbol table.
+///
+/// `name` is the source-level namespace identifier (`"agents"`,
+/// `"query"`, `"world"`) — kept for diagnostics; the typed
+/// [`dsl_ast::ir::NamespaceId`] is the canonical key.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamespaceDef {
+    pub name: String,
+    /// Field name → field definition. Keyed on the source-level field
+    /// identifier (`"tick"` for `world.tick`).
+    pub fields: BTreeMap<String, FieldDef>,
+    /// Method name → method definition. Keyed on the source-level
+    /// method identifier (`"is_hostile_to"` for
+    /// `agents.is_hostile_to(target)`).
+    pub methods: BTreeMap<String, MethodDef>,
+}
+
+/// Field definition — schema for a `CgExpr::NamespaceField` lowering /
+/// emission.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldDef {
+    /// The result type of the field read.
+    pub ty: super::expr::CgTy,
+    /// How the WGSL emitter renders the field access.
+    pub wgsl_access: WgslAccessForm,
+}
+
+/// Method definition — schema for a `CgExpr::NamespaceCall` lowering /
+/// emission.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MethodDef {
+    /// The result type of the call.
+    pub return_ty: super::expr::CgTy,
+    /// The expected types of the call's positional arguments. Length
+    /// is the arity. Used by the lowering for arity validation; the
+    /// individual arg types are not enforced today (the type checker
+    /// already validated each arg expression's claimed type).
+    pub arg_tys: Vec<super::expr::CgTy>,
+    /// WGSL function name that the prelude provides (e.g.
+    /// `"agents_is_hostile_to"` for `agents.is_hostile_to`). The
+    /// kernel composer emits a B1-stub `fn <wgsl_fn_name>(...)` per
+    /// distinct method referenced by the kernel body.
+    pub wgsl_fn_name: String,
+    /// Source-level WGSL stub body returned for this method's B1
+    /// implementation (semantic no-op). The stub returns a typed
+    /// default (`false` for bool, `fallback` for AgentId, etc.) so the
+    /// shader compiles and the kernel runs without panicking; real
+    /// semantics arrive in Task 9-11 territory.
+    ///
+    /// The stub is the **complete function body** including the
+    /// surrounding `fn name(arg0: ty0, ...) -> ret { ... }` shape, so
+    /// the registry is the single source of truth for both signature
+    /// and stub. This avoids duplicating the type table in the kernel
+    /// composer.
+    pub wgsl_stub: String,
+}
+
+/// How the WGSL emitter renders a `CgExpr::NamespaceField` access.
+///
+/// Adding a new emit form is a one-line variant addition + a matching
+/// arm in `lower_cg_expr_to_wgsl`'s `NamespaceField` branch. The
+/// `wgsl_access` field on [`FieldDef`] selects the form per-field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WgslAccessForm {
+    /// Reference a kernel-preamble-bound local (e.g.
+    /// `let tick = cfg.tick;` followed by bare `tick` reads). The
+    /// kernel composer is responsible for emitting the preamble
+    /// `let` line; this form only names the resulting identifier.
+    PreambleLocal { local_name: String },
+    /// Reference a field on a uniform-bound struct, rendered as
+    /// `<binding>.<field>` (e.g. `cfg.engagement_range`).
+    UniformField { binding: String, field: String },
+}
+
 /// Helper — record a name in an interner table. Idempotent: passing
 /// the same id twice with the same name is a no-op. Conflicting names
 /// surface as [`BuilderError::DuplicateInternEntry`]. Used by every
@@ -518,6 +629,15 @@ pub struct CgProgram {
     /// consumed by `lower_cg_expr_to_wgsl`'s `EventField` arm.
     /// Empty for programs that don't have event-pattern bindings.
     pub event_layouts: BTreeMap<u32, EventLayout>,
+    /// Stdlib namespace registry — schema for
+    /// [`super::expr::CgExpr::NamespaceCall`] and
+    /// [`super::expr::CgExpr::NamespaceField`] lowering + emission.
+    /// Populated by the driver's `populate_namespace_registry`;
+    /// consumed by `lower_cg_expr_to_wgsl`'s namespace-call /
+    /// namespace-field arms and by the kernel composer's
+    /// prelude-stub emission. Empty for programs that don't
+    /// reference any registered namespace symbol.
+    pub namespace_registry: NamespaceRegistry,
 }
 
 impl CgProgram {
@@ -824,7 +944,8 @@ impl CgProgramBuilder {
             | CgExpr::AgentSelfId
             | CgExpr::PerPairCandidateId
             | CgExpr::ReadLocal { .. }
-            | CgExpr::EventField { .. } => Ok(()),
+            | CgExpr::EventField { .. }
+            | CgExpr::NamespaceField { .. } => Ok(()),
             CgExpr::Binary { lhs, rhs, .. } => {
                 self.check_expr_id(*lhs)?;
                 self.check_expr_id(*rhs)?;
@@ -843,6 +964,12 @@ impl CgProgramBuilder {
                 self.check_expr_id(*cond)?;
                 self.check_expr_id(*then)?;
                 self.check_expr_id(*else_)?;
+                Ok(())
+            }
+            CgExpr::NamespaceCall { args, .. } => {
+                for a in args {
+                    self.check_expr_id(*a)?;
+                }
                 Ok(())
             }
         }

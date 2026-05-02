@@ -178,6 +178,15 @@ pub struct LoweringCtx<'a> {
     /// the WGSL emit can resolve the layout per-kind without a
     /// separate registry walk.
     pub event_layouts: HashMap<EventKindId, super::super::program::EventLayout>,
+    /// Stdlib namespace registry — schema for `CgExpr::NamespaceCall`
+    /// and `CgExpr::NamespaceField` lowering. Populated by the driver's
+    /// `populate_namespace_registry`; consumed by `lower_namespace_call`
+    /// and the `IrExpr::NamespaceField` arm of `lower_expr`. At
+    /// `finish()` time the driver copies this onto
+    /// [`crate::cg::program::CgProgram::namespace_registry`] so the
+    /// WGSL emit can resolve return types + access forms without a
+    /// separate registry walk.
+    pub namespace_registry: super::super::program::NamespaceRegistry,
 }
 
 /// Captured form of a `@lazy` view's resolved AST: enough to
@@ -220,6 +229,7 @@ impl<'a> LoweringCtx<'a> {
             lazy_view_bodies: HashMap::new(),
             local_tys: HashMap::new(),
             event_layouts: HashMap::new(),
+            namespace_registry: super::super::program::NamespaceRegistry::default(),
         }
     }
 
@@ -471,10 +481,12 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
         }
         IrExpr::NamespaceField { ns, field, .. } => {
             // `config.<block>.<field>` (the only NamespaceField shape the
-            // resolver produces today — see `dsl_ast::ir` line 944) lowers
-            // to a typed `Read(ConfigConst { id })`. Other namespaces have
-            // no `NamespaceField` data path today; they keep the typed
-            // deferral. Task 5.5c.
+            // resolver produces today via the dedicated `Config`
+            // namespace) lowers to a typed `Read(ConfigConst { id })`.
+            // Other namespaces consult the schema-driven
+            // `namespace_registry` (Task 4 of the CG lowering gap
+            // closure plan) to lower `world.tick` and friends as
+            // typed `CgExpr::NamespaceField` nodes.
             if *ns == NamespaceId::Config {
                 match ctx.config_const_ids.get(&(*ns, field.clone())) {
                     Some(id) => add(ctx, CgExpr::Read(DataHandle::ConfigConst { id: *id }), span),
@@ -484,6 +496,22 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
                         span,
                     }),
                 }
+            } else if let Some(def) = ctx
+                .namespace_registry
+                .namespaces
+                .get(ns)
+                .and_then(|nd| nd.fields.get(field))
+            {
+                let ty = def.ty;
+                add(
+                    ctx,
+                    CgExpr::NamespaceField {
+                        ns: *ns,
+                        field: field.clone(),
+                        ty,
+                    },
+                    span,
+                )
             } else {
                 Err(LoweringError::UnsupportedNamespaceField {
                     ns: *ns,
@@ -1601,6 +1629,25 @@ fn lower_namespace_call(
             // `agents.<field>(<expr>)` — typed agent-field read where
             // the target slot is computed by `<expr>`. The DSL surfaces
             // this for cross-agent reads (`agents.hp(target)` etc.).
+            //
+            // **Registry-first dispatch**: if `(Agents, field)` is in
+            // the namespace registry (e.g.
+            // `agents.is_hostile_to(target)` registered as a
+            // single-arg method returning bool), the registry path
+            // wins. The agent-field read is the fallback for
+            // unregistered method names that match an `AgentFieldId`.
+            // This ordering means the registry is the source of truth
+            // for the symbol surface; falling back to agent-field
+            // resolution stays compatible with the DSL's existing
+            // `agents.hp(target)` shape.
+            if let Some(def) = ctx
+                .namespace_registry
+                .namespaces
+                .get(&ns)
+                .and_then(|nd| nd.methods.get(field))
+            {
+                return lower_registered_namespace_call(ns, field, args, span, ctx, def.clone());
+            }
             let target_expr = &args[0].value;
             let target_id = lower_expr(target_expr, ctx)?;
             let target_ty = typecheck_node(ctx, target_id, target_expr.span)?;
@@ -1630,12 +1677,66 @@ fn lower_namespace_call(
             let _ty = data_handle_ty(&handle);
             add(ctx, CgExpr::Read(handle), span)
         }
-        _ => Err(LoweringError::UnsupportedNamespaceCall {
+        _ => {
+            // Registry fallback: any `(ns, method)` pair registered in
+            // `namespace_registry` lowers to `CgExpr::NamespaceCall` —
+            // covers `agents.is_hostile_to`, `agents.engaged_with_or`,
+            // `query.nearest_hostile_to_or`, and any future namespace
+            // method whose schema is recorded in the registry.
+            if let Some(def) = ctx
+                .namespace_registry
+                .namespaces
+                .get(&ns)
+                .and_then(|nd| nd.methods.get(method))
+            {
+                return lower_registered_namespace_call(ns, method, args, span, ctx, def.clone());
+            }
+            Err(LoweringError::UnsupportedNamespaceCall {
+                ns,
+                method: method.to_string(),
+                span,
+            })
+        }
+    }
+}
+
+/// Lower a registered namespace-method call to a typed
+/// [`CgExpr::NamespaceCall`]. Validates arity against the registry
+/// schema; arg types are not enforced here (the type checker already
+/// validated each argument's claimed type). Used by both the
+/// `(Agents, _)` and the catch-all arms of
+/// [`lower_namespace_call`].
+fn lower_registered_namespace_call(
+    ns: NamespaceId,
+    method: &str,
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+    def: super::super::program::MethodDef,
+) -> Result<CgExprId, LoweringError> {
+    if args.len() != def.arg_tys.len() {
+        return Err(LoweringError::NamespaceCallArityMismatch {
             ns,
             method: method.to_string(),
+            expected: def.arg_tys.len(),
+            got: args.len(),
             span,
-        }),
+        });
     }
+    let mut arg_ids = Vec::with_capacity(args.len());
+    for a in args {
+        arg_ids.push(lower_expr(&a.value, ctx)?);
+    }
+    add(
+        ctx,
+        CgExpr::NamespaceCall {
+            ns,
+            method: method.to_string(),
+            args: arg_ids,
+            ty: def.return_ty,
+        },
+        span,
+    )
 }
 
 /// Confirm `AgentFieldTy` doesn't have a closed-set match arm gap. The
@@ -2580,6 +2681,154 @@ mod tests {
         assert!(matches!(
             err,
             LoweringError::UnsupportedNamespaceField { .. }
+        ));
+    }
+
+    // ---- Registry-driven namespace lowering (Task 4 of CG lowering gap closure) ----
+
+    /// Build a `LoweringCtx` whose namespace registry has the
+    /// `agents.is_hostile_to(a, b)` method registered. Mirrors the
+    /// driver's `populate_namespace_registry`. Used by the registry-
+    /// path tests below.
+    fn ctx_with_agents_is_hostile_to_registered<'a>(
+        builder: &'a mut CgProgramBuilder,
+    ) -> LoweringCtx<'a> {
+        use crate::cg::program::{MethodDef, NamespaceDef};
+        let mut ctx = LoweringCtx::new(builder);
+        let mut agents = NamespaceDef {
+            name: "agents".to_string(),
+            ..NamespaceDef::default()
+        };
+        agents.methods.insert(
+            "is_hostile_to".to_string(),
+            MethodDef {
+                return_ty: CgTy::Bool,
+                arg_tys: vec![CgTy::AgentId, CgTy::AgentId],
+                wgsl_fn_name: "agents_is_hostile_to".to_string(),
+                wgsl_stub: "fn agents_is_hostile_to(a: u32, b: u32) -> bool { return false; }"
+                    .to_string(),
+            },
+        );
+        ctx.namespace_registry
+            .namespaces
+            .insert(NamespaceId::Agents, agents);
+        ctx
+    }
+
+    #[test]
+    fn agents_is_hostile_to_registry_lowers_to_namespace_call() {
+        // `agents.is_hostile_to(self, self)` with the registry entry
+        // present → CgExpr::NamespaceCall { ns: Agents, method:
+        // "is_hostile_to", args: [self, self], ty: Bool }.
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = ctx_with_agents_is_hostile_to_registered(&mut builder);
+
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Agents,
+            method: "is_hostile_to".to_string(),
+            args: vec![arg(local_self()), arg(local_self())],
+        });
+        let id = lower_expr(&ast, &mut ctx).expect("lowers");
+        let prog = builder.finish();
+        let lowered = &prog.exprs[id.0 as usize];
+        match lowered {
+            CgExpr::NamespaceCall {
+                ns, method, args, ty,
+            } => {
+                assert_eq!(*ns, NamespaceId::Agents);
+                assert_eq!(method, "is_hostile_to");
+                assert_eq!(args.len(), 2);
+                assert_eq!(*ty, CgTy::Bool);
+            }
+            other => panic!("expected NamespaceCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn world_tick_registry_lowers_to_namespace_field() {
+        // `world.tick` with a `World.tick` field registered → typed
+        // `CgExpr::NamespaceField { ns: World, field: "tick", ty: U32 }`.
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        use crate::cg::program::{FieldDef, NamespaceDef, WgslAccessForm};
+        let mut world = NamespaceDef {
+            name: "world".to_string(),
+            ..NamespaceDef::default()
+        };
+        world.fields.insert(
+            "tick".to_string(),
+            FieldDef {
+                ty: CgTy::U32,
+                wgsl_access: WgslAccessForm::PreambleLocal {
+                    local_name: "tick".to_string(),
+                },
+            },
+        );
+        ctx.namespace_registry
+            .namespaces
+            .insert(NamespaceId::World, world);
+
+        let ast = node(IrExpr::NamespaceField {
+            ns: NamespaceId::World,
+            field: "tick".to_string(),
+            ty: dsl_ast::ir::IrType::U32,
+        });
+        let id = lower_expr(&ast, &mut ctx).expect("lowers");
+        let prog = builder.finish();
+        let lowered = &prog.exprs[id.0 as usize];
+        match lowered {
+            CgExpr::NamespaceField { ns, field, ty } => {
+                assert_eq!(*ns, NamespaceId::World);
+                assert_eq!(field, "tick");
+                assert_eq!(*ty, CgTy::U32);
+            }
+            other => panic!("expected NamespaceField, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn registered_namespace_call_arity_mismatch_typed_error() {
+        // `agents.is_hostile_to(self)` with a 2-arg registry entry →
+        // typed NamespaceCallArityMismatch.
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = ctx_with_agents_is_hostile_to_registered(&mut builder);
+
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Agents,
+            method: "is_hostile_to".to_string(),
+            args: vec![arg(local_self())],
+        });
+        let err = lower_expr(&ast, &mut ctx).expect_err("must reject");
+        match err {
+            LoweringError::NamespaceCallArityMismatch {
+                ns,
+                method,
+                expected,
+                got,
+                ..
+            } => {
+                assert_eq!(ns, NamespaceId::Agents);
+                assert_eq!(method, "is_hostile_to");
+                assert_eq!(expected, 2);
+                assert_eq!(got, 1);
+            }
+            other => panic!("expected NamespaceCallArityMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unregistered_query_call_falls_through_to_unsupported() {
+        // `query.nearest_hostile_to_or` with no registry entry →
+        // typed UnsupportedNamespaceCall (the catch-all arm).
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Query,
+            method: "nearest_hostile_to_or".to_string(),
+            args: vec![],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedNamespaceCall { .. }
         ));
     }
 

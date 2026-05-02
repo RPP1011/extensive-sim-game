@@ -553,12 +553,18 @@ fn collect_subexpr_ids(arena: &[CgExpr], root: CgExprId, out: &mut Vec<CgExprId>
                     stack.push(*target_expr);
                 }
             }
+            CgExpr::NamespaceCall { args, .. } => {
+                for a in args {
+                    stack.push(*a);
+                }
+            }
             CgExpr::Lit(_)
             | CgExpr::Rng { .. }
             | CgExpr::AgentSelfId
             | CgExpr::PerPairCandidateId
             | CgExpr::ReadLocal { .. }
-            | CgExpr::EventField { .. } => {}
+            | CgExpr::EventField { .. }
+            | CgExpr::NamespaceField { .. } => {}
         }
     }
 }
@@ -1607,12 +1613,18 @@ fn event_field_scope_walk_expr(
             event_field_scope_walk_expr(*then, op_id, kind_label, shape_label, prog, errors);
             event_field_scope_walk_expr(*else_, op_id, kind_label, shape_label, prog, errors);
         }
+        CgExpr::NamespaceCall { args, .. } => {
+            for a in args {
+                event_field_scope_walk_expr(*a, op_id, kind_label, shape_label, prog, errors);
+            }
+        }
         CgExpr::Read(_)
         | CgExpr::Lit(_)
         | CgExpr::Rng { .. }
         | CgExpr::AgentSelfId
         | CgExpr::PerPairCandidateId
-        | CgExpr::ReadLocal { .. } => {}
+        | CgExpr::ReadLocal { .. }
+        | CgExpr::NamespaceField { .. } => {}
     }
 }
 

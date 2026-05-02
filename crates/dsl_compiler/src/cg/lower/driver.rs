@@ -106,7 +106,10 @@ use crate::cg::op::{
     ActionId, ComputeOp, ComputeOpKind, EventKindId, PhysicsRuleId, ReplayabilityFlag, ScoringId,
     SpatialQueryKind,
 };
-use crate::cg::program::{CgProgram, CgProgramBuilder, EventLayout, FieldLayout};
+use crate::cg::program::{
+    CgProgram, CgProgramBuilder, EventLayout, FieldDef, FieldLayout, MethodDef, NamespaceDef,
+    NamespaceRegistry, WgslAccessForm,
+};
 use crate::cg::stmt::{CgStmt, CgStmtListId, VariantId};
 use crate::cg::well_formed::check_well_formed;
 
@@ -172,6 +175,7 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     populate_config_consts(comp, &mut ctx, &mut diagnostics);
     populate_views(comp, &mut ctx, &mut diagnostics);
     populate_view_bodies_and_signatures(comp, &mut ctx, &mut diagnostics);
+    populate_namespace_registry(&mut ctx);
 
     // -- Phase 2: per-construct lowering --------------------------------
     lower_all_masks(comp, &mut ctx, &mut diagnostics);
@@ -246,9 +250,11 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
         .iter()
         .map(|(k, v)| (k.0, v.clone()))
         .collect();
+    let namespace_registry_snapshot = ctx.namespace_registry.clone();
 
     let mut prog = builder.finish();
     prog.event_layouts = event_layouts_snapshot;
+    prog.namespace_registry = namespace_registry_snapshot;
 
     if diagnostics.is_empty() {
         Ok(prog)
@@ -451,6 +457,111 @@ fn cg_ty_for_event_field(ty: &IrType) -> Option<(CgTy, u32)> {
         // GPU width.
         Unknown | Named(_) => return None,
     })
+}
+
+/// Populate the stdlib namespace registry — schema for every
+/// [`super::super::expr::CgExpr::NamespaceCall`] /
+/// [`super::super::expr::CgExpr::NamespaceField`] the lowering may
+/// produce. The registry is the source of truth for return types +
+/// arg signatures + WGSL emit forms; adding a new namespace symbol is
+/// a one-edit-here change, not an IR shape change.
+///
+/// **B1 stubs (Task 4 of the CG lowering gap closure plan):** the WGSL
+/// stub bodies are semantic no-ops chosen so the shader compiles and
+/// the kernel runs without panicking. Real implementations are runtime-
+/// format work (Task 9-11 territory). The registered methods today are:
+///
+/// * `agents.is_hostile_to(target)` → `bool`. B1: returns `false`.
+///   Real semantics: `CreatureType::is_hostile_to` from `entities.sim`.
+/// * `agents.engaged_with_or(target, fallback)` → `AgentId`. B1:
+///   returns `fallback`. Real semantics: read the target's
+///   engagement slot, sentinel-coerce to `fallback` on `INVALID`.
+/// * `query.nearest_hostile_to_or(actor, range, fallback)` →
+///   `AgentId`. B1: returns `fallback`. Real semantics: spatial-
+///   query walk for nearest hostile, sentinel on miss.
+///
+/// And the registered fields:
+///
+/// * `world.tick` → `u32`. B1: kernel-preamble local `tick` (bound by
+///   the fold-kernel's `let tick = cfg.tick;` line). The view-fold
+///   preamble was renamed from `_tick` to `tick` so the access form
+///   resolves cleanly; non-fold kernels that read `world.tick` would
+///   need the same preamble entry, but today no non-fold kernel uses
+///   it.
+fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
+    let mut registry = NamespaceRegistry::default();
+
+    // -- agents namespace --
+    let mut agents = NamespaceDef {
+        name: "agents".to_string(),
+        ..NamespaceDef::default()
+    };
+    // `agents.is_hostile_to(a, b)` — verified against
+    // `assets/sim/views.sim:25` (`@lazy view is_hostile`):
+    //   `agents.is_hostile_to(a, b)`
+    // → 2 args, both AgentId. Returns `bool`.
+    agents.methods.insert(
+        "is_hostile_to".to_string(),
+        MethodDef {
+            return_ty: CgTy::Bool,
+            arg_tys: vec![CgTy::AgentId, CgTy::AgentId],
+            wgsl_fn_name: "agents_is_hostile_to".to_string(),
+            wgsl_stub: "fn agents_is_hostile_to(a: u32, b: u32) -> bool { return false; }"
+                .to_string(),
+        },
+    );
+    agents.methods.insert(
+        "engaged_with_or".to_string(),
+        MethodDef {
+            return_ty: CgTy::AgentId,
+            arg_tys: vec![CgTy::AgentId, CgTy::AgentId],
+            wgsl_fn_name: "agents_engaged_with_or".to_string(),
+            wgsl_stub:
+                "fn agents_engaged_with_or(target: u32, fallback: u32) -> u32 { return fallback; }"
+                    .to_string(),
+        },
+    );
+    registry.namespaces.insert(NamespaceId::Agents, agents);
+
+    // -- query namespace --
+    let mut query = NamespaceDef {
+        name: "query".to_string(),
+        ..NamespaceDef::default()
+    };
+    // `query.nearest_hostile_to_or(actor, range, fallback)` — verified
+    // against `assets/sim/physics.sim:441`:
+    //   `query.nearest_hostile_to_or(mover, config.combat.engagement_range, mover)`
+    // → 3 args: AgentId, F32, AgentId.
+    query.methods.insert(
+        "nearest_hostile_to_or".to_string(),
+        MethodDef {
+            return_ty: CgTy::AgentId,
+            arg_tys: vec![CgTy::AgentId, CgTy::F32, CgTy::AgentId],
+            wgsl_fn_name: "query_nearest_hostile_to_or".to_string(),
+            wgsl_stub:
+                "fn query_nearest_hostile_to_or(actor: u32, range: f32, fallback: u32) -> u32 { return fallback; }"
+                    .to_string(),
+        },
+    );
+    registry.namespaces.insert(NamespaceId::Query, query);
+
+    // -- world namespace --
+    let mut world = NamespaceDef {
+        name: "world".to_string(),
+        ..NamespaceDef::default()
+    };
+    world.fields.insert(
+        "tick".to_string(),
+        FieldDef {
+            ty: CgTy::U32,
+            wgsl_access: WgslAccessForm::PreambleLocal {
+                local_name: "tick".to_string(),
+            },
+        },
+    );
+    registry.namespaces.insert(NamespaceId::World, world);
+
+    ctx.namespace_registry = registry;
 }
 
 /// Allocate one [`VariantId`] per enum variant across every

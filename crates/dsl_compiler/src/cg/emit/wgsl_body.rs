@@ -301,6 +301,23 @@ pub enum EmitError {
         word_offset_in_payload: u32,
         got: CgTy,
     },
+    /// A [`CgExpr::NamespaceCall`] referenced an `(ns, method)` pair
+    /// that has no entry in [`CgProgram::namespace_registry`]. The
+    /// driver populates the registry in `populate_namespace_registry`;
+    /// a missing entry is a driver-side defect or a hand-built program
+    /// that bypassed the driver. Surfaces as a typed emit error so
+    /// callers can render the offending pair.
+    UnregisteredNamespaceMethod {
+        ns: dsl_ast::ir::NamespaceId,
+        method: String,
+    },
+    /// A [`CgExpr::NamespaceField`] referenced an `(ns, field)` pair
+    /// that has no entry in [`CgProgram::namespace_registry`]. Same
+    /// failure mode as [`Self::UnregisteredNamespaceMethod`].
+    UnregisteredNamespaceField {
+        ns: dsl_ast::ir::NamespaceId,
+        field: String,
+    },
 }
 
 impl fmt::Display for EmitError {
@@ -337,6 +354,16 @@ impl fmt::Display for EmitError {
                 f,
                 "EventField(event#{}, word_off#{}) has no WGSL emit shape for type {}",
                 kind.0, word_offset_in_payload, got
+            ),
+            EmitError::UnregisteredNamespaceMethod { ns, method } => write!(
+                f,
+                "NamespaceCall references {:?}.{} with no entry in namespace_registry",
+                ns, method
+            ),
+            EmitError::UnregisteredNamespaceField { ns, field } => write!(
+                f,
+                "NamespaceField references {:?}.{} with no entry in namespace_registry",
+                ns, field
             ),
         }
     }
@@ -639,6 +666,55 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                         word_offset_in_payload: *word_offset_in_payload,
                         got: *ty,
                     });
+                }
+            })
+        }
+        // Schema-driven stdlib namespace-method call (e.g.
+        // `agents.is_hostile_to(target)`). The kernel composer prepends
+        // a B1-stub prelude function for each `(ns, method)` referenced
+        // by the kernel body; here we just emit the function call.
+        CgExpr::NamespaceCall {
+            ns,
+            method,
+            args,
+            ty: _,
+        } => {
+            let def = ctx
+                .prog
+                .namespace_registry
+                .namespaces
+                .get(ns)
+                .and_then(|nd| nd.methods.get(method))
+                .ok_or(EmitError::UnregisteredNamespaceMethod {
+                    ns: *ns,
+                    method: method.clone(),
+                })?;
+            let mut parts = Vec::with_capacity(args.len());
+            for a in args {
+                parts.push(lower_cg_expr_to_wgsl(*a, ctx)?);
+            }
+            Ok(format!("{}({})", def.wgsl_fn_name, parts.join(", ")))
+        }
+        // Schema-driven stdlib namespace-field read (e.g. `world.tick`).
+        // Resolves to either a kernel-preamble local or a uniform-bound
+        // field per the registered `WgslAccessForm`.
+        CgExpr::NamespaceField { ns, field, ty: _ } => {
+            let def = ctx
+                .prog
+                .namespace_registry
+                .namespaces
+                .get(ns)
+                .and_then(|nd| nd.fields.get(field))
+                .ok_or(EmitError::UnregisteredNamespaceField {
+                    ns: *ns,
+                    field: field.clone(),
+                })?;
+            Ok(match &def.wgsl_access {
+                crate::cg::program::WgslAccessForm::PreambleLocal { local_name } => {
+                    local_name.clone()
+                }
+                crate::cg::program::WgslAccessForm::UniformField { binding, field } => {
+                    format!("{}.{}", binding, field)
                 }
             })
         }
@@ -2242,5 +2318,113 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("EventField I32 lowers");
         assert_eq!(wgsl, "bitcast<i32>(event_ring[event_idx * 10u + 5u])");
+    }
+
+    // ---- Task 4 (CG Lowering Gap Closure): NamespaceCall / NamespaceField emit ----
+
+    /// `CgExpr::NamespaceCall` emits a function call to the registry-
+    /// resolved `wgsl_fn_name` with each argument lowered in source
+    /// order. The kernel composer prepends a B1-stub prelude function
+    /// for the `(ns, method)` reference; the body itself is just the
+    /// call-form.
+    #[test]
+    fn namespace_call_emits_wgsl_fn_call_via_registry() {
+        use crate::cg::program::{MethodDef, NamespaceDef};
+        let mut prog = empty_prog();
+        let mut agents = NamespaceDef {
+            name: "agents".to_string(),
+            ..NamespaceDef::default()
+        };
+        agents.methods.insert(
+            "is_hostile_to".to_string(),
+            MethodDef {
+                return_ty: CgTy::Bool,
+                arg_tys: vec![CgTy::AgentId, CgTy::AgentId],
+                wgsl_fn_name: "agents_is_hostile_to".to_string(),
+                wgsl_stub: "fn agents_is_hostile_to(a: u32, b: u32) -> bool { return false; }"
+                    .to_string(),
+            },
+        );
+        prog.namespace_registry
+            .namespaces
+            .insert(dsl_ast::ir::NamespaceId::Agents, agents);
+
+        let arg_a = push_expr(&mut prog, CgExpr::AgentSelfId);
+        let arg_b = push_expr(&mut prog, CgExpr::PerPairCandidateId);
+        let id = push_expr(
+            &mut prog,
+            CgExpr::NamespaceCall {
+                ns: dsl_ast::ir::NamespaceId::Agents,
+                method: "is_hostile_to".to_string(),
+                args: vec![arg_a, arg_b],
+                ty: CgTy::Bool,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("NamespaceCall lowers");
+        assert_eq!(wgsl, "agents_is_hostile_to(agent_id, per_pair_candidate)");
+    }
+
+    /// `CgExpr::NamespaceField` with a `PreambleLocal` access form
+    /// emits the bare local identifier (`tick` for `world.tick`). The
+    /// kernel composer is responsible for binding the local in the
+    /// preamble (`let tick = cfg.tick;`); this emit just names it.
+    #[test]
+    fn namespace_field_preamble_local_emits_bare_identifier() {
+        use crate::cg::program::{FieldDef, NamespaceDef, WgslAccessForm};
+        let mut prog = empty_prog();
+        let mut world = NamespaceDef {
+            name: "world".to_string(),
+            ..NamespaceDef::default()
+        };
+        world.fields.insert(
+            "tick".to_string(),
+            FieldDef {
+                ty: CgTy::U32,
+                wgsl_access: WgslAccessForm::PreambleLocal {
+                    local_name: "tick".to_string(),
+                },
+            },
+        );
+        prog.namespace_registry
+            .namespaces
+            .insert(dsl_ast::ir::NamespaceId::World, world);
+
+        let id = push_expr(
+            &mut prog,
+            CgExpr::NamespaceField {
+                ns: dsl_ast::ir::NamespaceId::World,
+                field: "tick".to_string(),
+                ty: CgTy::U32,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_expr_to_wgsl(id, &ctx).expect("NamespaceField lowers");
+        assert_eq!(wgsl, "tick");
+    }
+
+    /// A `NamespaceCall` with no registry entry surfaces as
+    /// `EmitError::UnregisteredNamespaceMethod`.
+    #[test]
+    fn namespace_call_unregistered_method_surfaces_typed_error() {
+        let mut prog = empty_prog();
+        let id = push_expr(
+            &mut prog,
+            CgExpr::NamespaceCall {
+                ns: dsl_ast::ir::NamespaceId::Agents,
+                method: "missing_method".to_string(),
+                args: vec![],
+                ty: CgTy::Bool,
+            },
+        );
+        let ctx = EmitCtx::structural(&prog);
+        let err = lower_cg_expr_to_wgsl(id, &ctx).expect_err("missing method fails");
+        match err {
+            EmitError::UnregisteredNamespaceMethod { ns, method } => {
+                assert_eq!(ns, dsl_ast::ir::NamespaceId::Agents);
+                assert_eq!(method, "missing_method");
+            }
+            other => panic!("expected UnregisteredNamespaceMethod, got {other:?}"),
+        }
     }
 }

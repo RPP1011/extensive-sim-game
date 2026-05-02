@@ -1469,7 +1469,14 @@ fn build_view_fold_wgsl_body(
     let mut out = String::new();
     out.push_str("    let event_idx = gid.x;\n");
     out.push_str("    if (event_idx >= cfg.event_count) { return; }\n");
-    out.push_str("    let _tick = cfg.tick;\n\n");
+    // Bind `tick` (no underscore) so `CgExpr::NamespaceField { ns: World,
+    // field: "tick", access: PreambleLocal { local_name: "tick" } }` reads
+    // resolve to a kernel-local `tick` identifier. Even when the kernel
+    // body doesn't reference world.tick, WGSL's dead-code elimination
+    // drops the unused let binding silently — there's no compile cost to
+    // emitting it unconditionally. Source-of-truth for the binding name
+    // is `populate_namespace_registry` in `lower::driver`.
+    out.push_str("    let tick = cfg.tick;\n\n");
 
     for (i, op_id) in body_ops.iter().enumerate() {
         if i > 0 {

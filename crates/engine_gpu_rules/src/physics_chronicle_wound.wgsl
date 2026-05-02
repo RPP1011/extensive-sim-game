@@ -15,7 +15,7 @@ fn cs_physics_chronicle_wound(@builtin(global_invocation_id) gid: vec3<u32>) {
 let event_idx = gid.x;
 // Indirect dispatch on event_ring_0; tail count bounds gid.x.
 
-// op#19 (physics_rule)
+// op#20 (physics_rule)
 let local_2: u32 = event_ring[event_idx * 10u + 2u];
 let local_0: u32 = event_ring[event_idx * 10u + 3u];
 if (false) {

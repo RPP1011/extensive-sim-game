@@ -13,7 +13,7 @@ fn cs_fused_spatial_build_hash(@builtin(global_invocation_id) gid: vec3<u32>) {
 let agent_id = gid.x;
 if (agent_id >= cfg.agent_cap) { return; }
 
-// op#24 (spatial_query)
+// op#25 (spatial_query)
 // SpatialQuery::BuildHash — verbatim port from engine_gpu_rules/src/spatial_hash.wgsl.
 // Touches every binding so naga keeps them live. Real per-cell hash build lives in the
 // hand-written engine_gpu spatial pipeline; this stub is a structural placeholder.
@@ -21,7 +21,7 @@ _ = spatial_grid_cells[0];
 _ = spatial_grid_offsets[0];
 _ = cfg.agent_cap;
 
-// op#25 (spatial_query)
+// op#26 (spatial_query)
 // SpatialQuery::KinQuery — verbatim port from engine_gpu_rules/src/spatial_kin_query.wgsl.
 // Touches every binding so naga keeps them live. Real per-agent kin walk lives in the
 // hand-written engine_gpu spatial pipeline; this stub is a structural placeholder.

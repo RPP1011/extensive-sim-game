@@ -8,7 +8,7 @@
 //! Non-goals at this layer: validation (cycle / race / arity), desugaring,
 //! schema hashing, full type inference. See `docs/compiler/spec.md` §3.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::ast::{self, Annotation, BinOp, QuantKind, Span, UnOp};
 
@@ -930,7 +930,7 @@ pub struct MetricIR {
 /// spelled out in the compiler — they carry through unchanged for 1a.
 ///
 /// See `docs/dsl/stdlib.md` for the canonical reference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum NamespaceId {
     World,
     Cascade,

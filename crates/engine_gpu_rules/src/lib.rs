@@ -8,6 +8,7 @@
 pub mod mask_Hold;
 pub mod mask_MoveToward;
 pub mod fused_mask_Flee;
+pub mod mask_Attack;
 pub mod fold_threat_level;
 pub mod fold_engaged_with;
 pub mod fold_my_enemies;
@@ -24,6 +25,7 @@ pub mod physics_chronicle_rout;
 pub mod physics_chronicle_flee;
 pub mod physics_chronicle_rally;
 pub mod fused_spatial_build_hash;
+pub mod spatial_engagement_query;
 pub mod upload_sim_cfg;
 pub mod pack_agents;
 pub mod seed_indirect_0;
@@ -33,6 +35,7 @@ pub mod kick_snapshot;
 pub use mask_Hold::MaskHoldKernel;
 pub use mask_MoveToward::MaskMoveTowardKernel;
 pub use fused_mask_Flee::FusedMaskFleeKernel;
+pub use mask_Attack::MaskAttackKernel;
 pub use fold_threat_level::FoldThreatLevelKernel;
 pub use fold_engaged_with::FoldEngagedWithKernel;
 pub use fold_my_enemies::FoldMyEnemiesKernel;
@@ -49,6 +52,7 @@ pub use physics_chronicle_rout::PhysicsChronicleRoutKernel;
 pub use physics_chronicle_flee::PhysicsChronicleFleeKernel;
 pub use physics_chronicle_rally::PhysicsChronicleRallyKernel;
 pub use fused_spatial_build_hash::FusedSpatialBuildHashKernel;
+pub use spatial_engagement_query::SpatialEngagementQueryKernel;
 pub use upload_sim_cfg::UploadSimCfgKernel;
 pub use pack_agents::PackAgentsKernel;
 pub use seed_indirect_0::SeedIndirect0Kernel;
@@ -69,6 +73,7 @@ pub enum KernelId {
     MaskHold,
     MaskMoveToward,
     FusedMaskFlee,
+    MaskAttack,
     FoldThreatLevel,
     FoldEngagedWith,
     FoldMyEnemies,
@@ -85,6 +90,7 @@ pub enum KernelId {
     PhysicsChronicleFlee,
     PhysicsChronicleRally,
     FusedSpatialBuildHash,
+    SpatialEngagementQuery,
     UploadSimCfg,
     PackAgents,
     SeedIndirect0,
