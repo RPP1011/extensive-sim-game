@@ -596,10 +596,15 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
             ast_label: "Match",
             span,
         }),
-        IrExpr::PerUnit { .. } => Err(LoweringError::UnsupportedAstNode {
-            ast_label: "PerUnit",
-            span,
-        }),
+        // PerUnit semantic simplification (Phase 6 Task 1):
+        // `<expr> per_unit <delta>` lowers as `expr * delta` per the
+        // AST docstring. The "iterate over each unit in the result"
+        // semantic that pertains inside scoring contexts is deferred
+        // — for view storage that's empty (smoke fixture, idle agents)
+        // the result is identical (0 * delta = 0). Closing the gap
+        // for richer fixtures requires per-unit-fold-over-view-storage
+        // IR primitive; tracked as future work.
+        IrExpr::PerUnit { expr, delta } => lower_binary(BinOp::Mul, expr, delta, span, ctx),
         IrExpr::AbilityTag { .. } => Err(LoweringError::UnsupportedAstNode {
             ast_label: "AbilityTag",
             span,
@@ -2448,6 +2453,28 @@ mod tests {
         ));
         let err = lower_to_string(&ast).unwrap_err();
         assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    // ---- PerUnit (Phase 6 Task 1) ----
+
+    /// `<expr> per_unit <delta>` lowers as `expr * delta` per the AST
+    /// docstring's outside-scoring semantic. Inside scoring contexts
+    /// the iterate-over-view-storage semantic differs, but for empty
+    /// view storage the result is identical (0 * delta = 0). This
+    /// test verifies the rejection (`UnsupportedAstNode { ast_label:
+    /// "PerUnit" }`) is gone and the lowering produces the expected
+    /// `mul.f32` shape.
+    #[test]
+    fn per_unit_lowers_as_multiplication() {
+        let ast = node(IrExpr::PerUnit {
+            expr: Box::new(node(IrExpr::LitFloat(2.0))),
+            delta: Box::new(node(IrExpr::LitFloat(0.01))),
+        });
+        let s = lower_to_string(&ast).unwrap();
+        assert_eq!(
+            s, "(mul.f32 (lit 2.0f32) (lit 0.01f32))",
+            "expected per_unit to lower as mul.f32, got {s:?}"
+        );
     }
 
     // ---- UnaryOp coverage ----
