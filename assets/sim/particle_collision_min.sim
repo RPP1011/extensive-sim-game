@@ -53,5 +53,19 @@ physics MoveParticle @phase(per_agent) {
   on Tick {} {
     let new_pos = self.pos + self.vel * config.particles.damping;
     agents.set_pos(self, new_pos);
+    // Placeholder Collision emit — every particle emits one
+    // Collision event per tick targeting itself with a
+    // pos-derived impulse vector. Exercises the vec3 payload
+    // path (3-word atomicStore via bitcast<u32>) end-to-end.
+    // The proper DetectCollisions rule (per-pair spatial query
+    // gated on `self.id < other.id` + radius) lands when the
+    // per-pair `for other in spatial.<query>(self)` body iter
+    // surface lights up (different shape from the per-event
+    // body the design target uses).
+    emit Collision {
+      a:       self,
+      b:       self,
+      impulse: new_pos,
+    }
   }
 }
