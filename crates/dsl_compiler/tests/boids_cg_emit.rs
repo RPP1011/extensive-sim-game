@@ -54,14 +54,30 @@ fn boids_fixture_emits_wgsl() {
         artifacts.rust_files.len(),
         artifacts.kernel_index.len(),
     );
-    // Dump the physics_MoveBoid Rust module so we can see what shape
-    // the compiler currently emits — informs the engine::gpu API that
-    // the generated dispatch helpers will target.
-    if let Some(rs) = artifacts.rust_files.get("physics_MoveBoid.rs") {
-        println!("\n--- physics_MoveBoid.rs ---");
-        for line in rs.lines() {
-            println!("{line}");
+    // Audit dump — every file the compiler emits for boids today,
+    // with line count + first 12 lines for content character. Drives
+    // the drop-vs-keep audit when reshaping the emit to target
+    // `engine::gpu`.
+    println!("\n=== AUDIT: rust_files emitted for boids ===");
+    let mut rust_names: Vec<_> = artifacts.rust_files.keys().cloned().collect();
+    rust_names.sort();
+    for name in &rust_names {
+        let body = &artifacts.rust_files[name];
+        let lines: Vec<&str> = body.lines().collect();
+        println!("\n--- {name} ({} lines) ---", lines.len());
+        for (i, line) in lines.iter().take(12).enumerate() {
+            println!("{:>3}: {line}", i + 1);
         }
+        if lines.len() > 12 {
+            println!("... ({} more lines)", lines.len() - 12);
+        }
+    }
+    println!("\n=== AUDIT: wgsl_files emitted for boids ===");
+    let mut wgsl_names: Vec<_> = artifacts.wgsl_files.keys().cloned().collect();
+    wgsl_names.sort();
+    for name in &wgsl_names {
+        let body = &artifacts.wgsl_files[name];
+        println!("  {name} — {} lines", body.lines().count());
     }
     for name in &artifacts.kernel_index {
         println!("  kernel: {name}");

@@ -232,40 +232,23 @@ pub fn emit_cg_program(
         }
     }
 
-    // Synthesize lib.rs (kernel registry + Kernel trait + bgl_storage /
-    // bgl_uniform helpers). Stored under the `"lib.rs"` key (matching
-    // the per-kernel `<name>.rs` keys) so the xtask side-channel writes
-    // it as `<src>/lib.rs` verbatim.
+    // Synthesize lib.rs (per-kernel `pub mod` declarations only;
+    // Kernel trait + bgl helpers now live in `engine::gpu` —
+    // hand-written platform infrastructure, not compiler-emitted).
     rust_files.insert("lib.rs".to_string(), synthesize_lib_rs(&kernel_index));
 
-    // Synthesize the seven cross-cutting modules (Task 5.4). Each
-    // becomes a separate `<name>.rs` entry; the side-channel writer
-    // resolves them under `<src>/<name>.rs`. lib.rs declares each via
-    // `pub mod <name>;`.
-    rust_files.insert(
-        "binding_sources.rs".to_string(),
-        super::cross_cutting::synthesize_binding_sources(),
-    );
-    rust_files.insert(
-        "resident_context.rs".to_string(),
-        super::cross_cutting::synthesize_resident_context(prog),
-    );
-    rust_files.insert(
-        "external_buffers.rs".to_string(),
-        super::cross_cutting::synthesize_external_buffers(),
-    );
-    rust_files.insert(
-        "transient_handles.rs".to_string(),
-        super::cross_cutting::synthesize_transient_handles(),
-    );
-    rust_files.insert(
-        "pingpong_context.rs".to_string(),
-        super::cross_cutting::synthesize_pingpong_context(),
-    );
-    rust_files.insert(
-        "pool.rs".to_string(),
-        super::cross_cutting::synthesize_pool(),
-    );
+    // Synthesize the per-fixture cross-cutting modules. Each becomes
+    // a `<name>.rs` entry under `<crate>/src/generated/`; lib.rs
+    // declares each via `pub mod <name>;`.
+    //
+    // Phase 7 boids GPU pipeline (2026-05-02): dropped the wolf-sim-
+    // shaped runtime container synthesizers — `binding_sources`,
+    // `resident_context`, `external_buffers`, `transient_handles`,
+    // `pingpong_context`, `pool`. Per-fixture runtime crates own
+    // their own buffers and construct each kernel's `Bindings`
+    // directly with explicit `&wgpu::Buffer` refs; the deleted
+    // containers were a wolf-sim-runtime-specific aggregation pattern
+    // that doesn't fit per-field-buffer fixtures like boids.
     rust_files.insert(
         "schedule.rs".to_string(),
         super::cross_cutting::synthesize_schedule(schedule, prog),

@@ -70,11 +70,13 @@ pub mod kernel;
 pub mod program;
 pub mod wgsl_body;
 
-pub use cross_cutting::{
-    synthesize_binding_sources, synthesize_external_buffers, synthesize_pingpong_context,
-    synthesize_pool, synthesize_resident_context, synthesize_schedule as synthesize_schedule_module,
-    synthesize_transient_handles,
-};
+// Phase 7 boids GPU pipeline (2026-05-02): the wolf-sim runtime
+// container synthesizers (binding_sources / resident_context /
+// external_buffers / transient_handles / pingpong_context / pool)
+// were dropped from program.rs's emit set. Their fns still exist in
+// cross_cutting.rs for now (delete in a follow-up cleanup) but are
+// no longer re-exported.
+pub use cross_cutting::synthesize_schedule as synthesize_schedule_module;
 pub use kernel::{
     kernel_topology_to_spec, kernel_topology_to_spec_and_body, semantic_kernel_name_for_topology,
     KernelEmitError,
