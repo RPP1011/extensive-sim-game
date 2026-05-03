@@ -381,6 +381,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
+name = "crowd_navigation_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1546,6 +1559,7 @@ name = "sim_app"
 version = "0.1.0"
 dependencies = [
  "boids_runtime",
+ "crowd_navigation_runtime",
  "engine",
  "glam",
  "particle_collision_runtime",

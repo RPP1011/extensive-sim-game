@@ -1,0 +1,29 @@
+// crowd_navigation_min — incremental working fixture for the
+// per-agent state-machine + group-cohesion design. The full target
+// lives at `crowd_navigation.sim` and stays untouched as the spec;
+// this minimal companion grows by COPYING surfaces over until they
+// match.
+//
+// Stage 0 (current): single Walker entity + per-agent integrator.
+// Subsequent stages will copy: GoalReached/NewGroupGoal/Stuck event
+// declarations, @materialized view storing per-walker mode, group
+// memberships + leader-driven goal updates, utility-backend scoring,
+// hierarchical invariants.
+
+event Tick { }
+
+entity Walker : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config crowd {
+  speed: f32 = 0.7,
+}
+
+physics MoveWalker @phase(per_agent) {
+  on Tick {} {
+    let new_pos = self.pos + self.vel * config.crowd.speed;
+    agents.set_pos(self, new_pos);
+  }
+}
