@@ -473,7 +473,9 @@ fn group_to_topology(
                 DispatchShape::PerAgent
                 | DispatchShape::PerPair { .. }
                 | DispatchShape::OneShot
-                | DispatchShape::PerWord => unreachable!(
+                | DispatchShape::PerWord
+                | DispatchShape::PerCell
+                | DispatchShape::PerScanChunk => unreachable!(
                     "FusibilityClass::Indirect groups always carry \
                      DispatchShape::PerEvent (see super::fusion::classify)"
                 ),

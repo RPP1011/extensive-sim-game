@@ -81,6 +81,24 @@ pub const PER_WORD_WORKGROUP_X: u32 = 64;
 /// alive flags.
 pub const PER_WORD_BITS: u32 = 32;
 
+/// Workgroup x-dim for [`DispatchShape::PerCell`]. Pinned to
+/// `crate::cg::emit::spatial::MAX_PER_CELL` so each spatial-grid cell
+/// maps to exactly one workgroup of that many lanes, with one lane per
+/// home-cell agent slot. The tiled-MoveBoid emit relies on this
+/// equality to schedule one thread per home-cell agent and let the
+/// remaining lanes participate in the cooperative tile load.
+///
+/// Tracks `MAX_PER_CELL` — must stay in sync. Today both are 32.
+pub const PER_CELL_WORKGROUP_X: u32 = 32;
+
+/// Workgroup x-dim for [`DispatchShape::PerScanChunk`]. The parallel
+/// prefix-scan over `spatial_grid_offsets` partitions `num_cells` into
+/// chunks of this many cells, with one workgroup per chunk and one
+/// thread per cell. 256 is the wgpu default
+/// `max_compute_invocations_per_workgroup` lower bound, so kernels at
+/// this size build on every adapter without bumping limits.
+pub const PER_SCAN_CHUNK_WORKGROUP_X: u32 = 256;
+
 /// How a compute op's threads are laid out.
 ///
 /// The variants describe *what* drives the count and indexing — agent
@@ -115,6 +133,38 @@ pub enum DispatchShape {
     /// = ceil(agent_cap / 32). Used for alive bitmap pack and mask
     /// compaction.
     PerWord,
+
+    /// One workgroup per spatial-grid cell, with `MAX_PER_CELL` lanes
+    /// per workgroup. Used by the tiled-MoveBoid emit (Layer 1 of the
+    /// boids perf plan): each workgroup handles a "home cell", lanes
+    /// 0..27 cooperatively load the surrounding 27 cells' agent
+    /// pos/vel into `var<workgroup>` shared memory, then every lane
+    /// processes one home-cell agent by walking the cached tile
+    /// instead of re-reading global memory. Trades a fixed dispatch
+    /// over `num_cells` workgroups (≈ `GRID_DIM³` ≈ 10k for boids
+    /// defaults) for a ~5-10× reduction in inner-loop memory
+    /// bandwidth on the dominant kernel.
+    ///
+    /// Empty cells (no agents) early-exit at the workgroup preamble;
+    /// the over-dispatch is bounded by `num_cells` regardless of agent
+    /// population. A future optimization compacts the non-empty cell
+    /// list and switches to indirect dispatch — see
+    /// [`super::data_handle::SpatialStorageKind::NonemptyCells`] +
+    /// [`super::op::SpatialQueryKind::CompactNonemptyCells`] (added
+    /// alongside this shape but currently inert).
+    PerCell,
+
+    /// One workgroup per `PER_SCAN_CHUNK_WORKGROUP_X`-sized chunk of
+    /// `num_cells`, with one lane per cell. Drives the parallel
+    /// prefix scan over `spatial_grid_offsets`: phase 2a
+    /// (`BuildHashScanLocal`) and phase 2c (`BuildHashScanAdd`) both
+    /// dispatch under this shape so the `(workgroup_id, local_id)`
+    /// pair maps directly to `(chunk_id, cell_within_chunk)`. The
+    /// dispatch count is `ceil(num_cells / PER_SCAN_CHUNK_WORKGROUP_X)`
+    /// (~42 workgroups for boids' 22³=10 648 grid). Out-of-range
+    /// lanes (`chunk_base + lane >= num_cells`) participate with
+    /// count = 0 inside the scan and skip their slot writes.
+    PerScanChunk,
 }
 
 /// What drives the per-agent candidate list for a [`DispatchShape::PerPair`]
@@ -148,6 +198,8 @@ impl fmt::Display for DispatchShape {
             DispatchShape::PerPair { source } => write!(f, "per_pair({})", source),
             DispatchShape::OneShot => f.write_str("one_shot"),
             DispatchShape::PerWord => f.write_str("per_word"),
+            DispatchShape::PerCell => f.write_str("per_cell"),
+            DispatchShape::PerScanChunk => f.write_str("per_scan_chunk"),
         }
     }
 }
@@ -269,6 +321,23 @@ pub enum ThreadIndexing {
     /// `let word = gid.x; let num_words = (agent_cap + 31u) >> 5u; if
     /// (word >= num_words) { return; }` — alive-bitmap pack.
     PerAgentWord,
+    /// `let home_cell = workgroup_id.x; let lane =
+    /// local_invocation_id.x;` plus a cooperative-tile-load preamble
+    /// composed by the tiled-MoveBoid emit. The kernel-emit's
+    /// `thread_indexing_preamble` is empty for this variant (the
+    /// preamble lives entirely in the tiled body builder so it can
+    /// inline the `var<workgroup>` decls + the cooperative-load
+    /// nested loops without re-deriving the spatial constants).
+    PerCellWorkgroup,
+    /// `let chunk_id = workgroup_id.x; let lane =
+    /// local_invocation_id.x; let cell = chunk_id *
+    /// PER_SCAN_CHUNK_WORKGROUP_X + lane;`. Used by the parallel
+    /// prefix-scan phases. Per-cell bounds checks (`if (cell >=
+    /// num_cells) ...`) live inside the per-op body because the
+    /// scan still wants every lane to participate in the in-shared-
+    /// memory Hillis-Steele reduction (out-of-range lanes contribute
+    /// count = 0 but stay through every barrier).
+    PerScanChunkLane,
 }
 
 impl fmt::Display for ThreadIndexing {
@@ -281,6 +350,8 @@ impl fmt::Display for ThreadIndexing {
             } => write!(f, "per_pair_slot(k={})", candidates_per_agent),
             ThreadIndexing::SingleThread => f.write_str("single_thread"),
             ThreadIndexing::PerAgentWord => f.write_str("per_agent_word"),
+            ThreadIndexing::PerCellWorkgroup => f.write_str("per_cell_workgroup"),
+            ThreadIndexing::PerScanChunkLane => f.write_str("per_scan_chunk_lane"),
         }
     }
 }
@@ -305,6 +376,8 @@ impl DispatchShape {
             DispatchShape::PerPair { .. } => WorkgroupSize::linear(PER_PAIR_WORKGROUP_X),
             DispatchShape::OneShot => WorkgroupSize::linear(ONE_SHOT_WORKGROUP_X),
             DispatchShape::PerWord => WorkgroupSize::linear(PER_WORD_WORKGROUP_X),
+            DispatchShape::PerCell => WorkgroupSize::linear(PER_CELL_WORKGROUP_X),
+            DispatchShape::PerScanChunk => WorkgroupSize::linear(PER_SCAN_CHUNK_WORKGROUP_X),
         }
     }
 
@@ -350,6 +423,36 @@ impl DispatchShape {
                     z: 1,
                 }
             }
+            DispatchShape::PerCell => {
+                // One workgroup per spatial-grid cell. The cell count
+                // is fixed by the per-fixture spatial-grid configuration
+                // (see `crate::cg::emit::spatial::num_cells`); ctx
+                // doesn't carry it, so we look it up directly. The
+                // workgroup_size is `PER_CELL_WORKGROUP_X` (=
+                // MAX_PER_CELL), and we want one workgroup per cell, so
+                // the dispatch x is just `num_cells` (no div_ceil
+                // needed — the kernel binds wgid.x to home_cell
+                // directly).
+                let num_cells = crate::cg::emit::spatial::num_cells();
+                DispatchCount::Direct {
+                    x: num_cells,
+                    y: 1,
+                    z: 1,
+                }
+            }
+            DispatchShape::PerScanChunk => {
+                // ceil(num_cells / chunk_size) workgroups, one per
+                // scan chunk. The cell count is sourced directly
+                // from the per-fixture spatial-grid configuration so
+                // the dispatch + the WGSL `const NUM_CELLS = ...`
+                // never drift.
+                let num_cells = crate::cg::emit::spatial::num_cells();
+                DispatchCount::Direct {
+                    x: num_cells.div_ceil(wg_x),
+                    y: 1,
+                    z: 1,
+                }
+            }
         }
     }
 
@@ -383,6 +486,8 @@ impl DispatchShape {
             },
             DispatchShape::OneShot => ThreadIndexing::SingleThread,
             DispatchShape::PerWord => ThreadIndexing::PerAgentWord,
+            DispatchShape::PerCell => ThreadIndexing::PerCellWorkgroup,
+            DispatchShape::PerScanChunk => ThreadIndexing::PerScanChunkLane,
         }
     }
 }
@@ -420,26 +525,7 @@ mod tests {
         assert_roundtrip(&s);
     }
 
-    #[test]
-    fn per_pair_kin_display_and_roundtrip() {
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        assert_eq!(format!("{}", s), "per_pair(spatial_query(kin_query))");
-        assert_roundtrip(&s);
-    }
 
-    #[test]
-    fn per_pair_engagement_display_and_roundtrip() {
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
-        };
-        assert_eq!(
-            format!("{}", s),
-            "per_pair(spatial_query(engagement_query))"
-        );
-        assert_roundtrip(&s);
-    }
 
     #[test]
     fn one_shot_display_and_roundtrip() {
@@ -477,17 +563,12 @@ mod tests {
     // Task 1.4 — workgroup_size / dispatch_count / thread_indexing.
     // -----------------------------------------------------------------------
 
+    #[allow(dead_code)] // unused after legacy variants dropped
     fn all_shapes() -> Vec<DispatchShape> {
         vec![
             DispatchShape::PerAgent,
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),
-            },
-            DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-            },
-            DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
             },
             DispatchShape::OneShot,
             DispatchShape::PerWord,
@@ -514,13 +595,6 @@ mod tests {
         assert_eq!(s.workgroup_size(), WorkgroupSize::linear(64));
     }
 
-    #[test]
-    fn workgroup_size_per_pair_matches_emit() {
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        assert_eq!(s.workgroup_size(), WorkgroupSize::linear(64));
-    }
 
     #[test]
     fn workgroup_size_one_shot_matches_emit() {
@@ -615,88 +689,10 @@ mod tests {
 
     // --- dispatch_count: PerPair ------------------------------------------
 
-    #[test]
-    fn dispatch_count_per_pair_typical() {
-        // 1024 agents × 8 candidates = 8192 pairs / 64 = 128 groups.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: 1024,
-            per_pair_candidates: 8,
-        };
-        let count = s.dispatch_count(&ctx);
-        assert_eq!(
-            count,
-            DispatchCount::Direct {
-                x: 128,
-                y: 1,
-                z: 1
-            }
-        );
-    }
 
-    #[test]
-    fn dispatch_count_per_pair_partial_workgroup() {
-        // 10 agents × 7 candidates = 70 pairs / 64 = 2 groups.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: 10,
-            per_pair_candidates: 7,
-        };
-        let count = s.dispatch_count(&ctx);
-        assert_eq!(count, DispatchCount::Direct { x: 2, y: 1, z: 1 });
-    }
 
-    #[test]
-    fn dispatch_count_per_pair_zero_candidates_is_zero_work() {
-        // Zero candidates → zero pairs → zero workgroups. No panic.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: 200_000,
-            per_pair_candidates: 0,
-        };
-        let count = s.dispatch_count(&ctx);
-        assert_eq!(count, DispatchCount::Direct { x: 0, y: 1, z: 1 });
-    }
 
-    #[test]
-    fn dispatch_count_per_pair_zero_agents_is_zero_work() {
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: 0,
-            per_pair_candidates: 32,
-        };
-        let count = s.dispatch_count(&ctx);
-        assert_eq!(count, DispatchCount::Direct { x: 0, y: 1, z: 1 });
-    }
 
-    #[test]
-    fn dispatch_count_per_pair_saturates_on_overflow() {
-        // u32 multiply overflow — saturating_mul caps at u32::MAX,
-        // div_ceil(MAX, 64) is well-defined. No panic, no UB.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: u32::MAX,
-            per_pair_candidates: u32::MAX,
-        };
-        let count = s.dispatch_count(&ctx);
-        // u32::MAX.div_ceil(64) — the exact value matters less than
-        // "no panic, in-range".
-        let DispatchCount::Direct { x, y, z } = count else {
-            panic!("expected Direct, got {count:?}");
-        };
-        assert_eq!((y, z), (1, 1));
-        assert!(x > 0);
-    }
 
     // --- dispatch_count: OneShot ------------------------------------------
 
@@ -784,21 +780,6 @@ mod tests {
         assert_eq!(s.thread_indexing(), ThreadIndexing::PerEventSlot);
     }
 
-    #[test]
-    fn thread_indexing_per_pair_default_candidates_is_one() {
-        // Emit replaces the default with the resolved kin/eng cap;
-        // the IR's helper returns 1 so the variant is well-formed
-        // for snapshots and round-trips.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        assert_eq!(
-            s.thread_indexing(),
-            ThreadIndexing::PerPairSlot {
-                candidates_per_agent: 1
-            }
-        );
-    }
 
     #[test]
     fn thread_indexing_one_shot() {

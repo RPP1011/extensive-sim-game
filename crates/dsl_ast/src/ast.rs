@@ -57,6 +57,7 @@ pub enum Decl {
     Probe(ProbeDecl),
     Metric(MetricBlock),
     Config(ConfigDecl),
+    SpatialQuery(SpatialQueryDecl),
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +256,38 @@ pub enum ViewBody {
         handlers: Vec<FoldHandler>,
         clamp: Option<(Expr, Expr)>,
     },
+}
+
+/// `spatial_query <name>(self, candidate, <typed-args>) = <filter_expr>`.
+///
+/// Declares a named per-candidate filter for spatial walks. The first
+/// two positional binders MUST be `self` (the querying agent) and
+/// `candidate` (the per-pair neighbour under inspection); the
+/// resolver enforces the convention. Remaining params are typed
+/// value args substituted at the call site (e.g.
+/// `from spatial.nearby_in_radius(self, config.movement.max_move_radius)`).
+///
+/// Note the call-site arity convention (Phase 7 Task 4 Adjustment A):
+/// the from-clause passes `(self, value_args...)` only — `candidate`
+/// is implicit and binds positionally to the per-iteration spatial-walk
+/// neighbour at lowering time. Mask action-head binders such as
+/// `target` cannot be passed as call-site arguments because they are
+/// bound AFTER the from-clause is resolved.
+///
+/// The filter is a single expression (Bool — well_formed gate from
+/// Phase 7 Task 3 enforces the type once lowered to CG). No `{}`
+/// block; mirrors the verb `name(...) = action ...` shape.
+///
+/// Lowering produces a `CgExprId` filter for the IR's
+/// `SpatialQueryKind::FilteredWalk`. See
+/// `docs/superpowers/plans/2026-05-01-phase-7-general-spatial-queries.md`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SpatialQueryDecl {
+    pub annotations: Vec<Annotation>,
+    pub name: String,
+    pub params: Vec<Param>,
+    pub filter: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

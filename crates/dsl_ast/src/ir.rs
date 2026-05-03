@@ -37,6 +37,7 @@ ref_newtype!(ProbeRef);
 ref_newtype!(MetricRef);
 ref_newtype!(ConfigRef);
 ref_newtype!(LocalRef);
+ref_newtype!(SpatialQueryRef);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct FieldRef {
@@ -819,6 +820,26 @@ pub struct IrParam {
     pub span: Span,
 }
 
+/// Resolved `spatial_query <name>(self, candidate, <args>) = <filter>`
+/// declaration (Phase 7 Task 4).
+///
+/// Mirrors `ViewIR` (name + LocalRef-bound params + body), with two
+/// shape narrowings:
+///   - No `return_ty`: the filter is implicitly Bool. The CG
+///     well_formed gate (Phase 7 Task 3) enforces the type once the
+///     filter expression lowers into the `SpatialQueryKind::FilteredWalk`
+///     op.
+///   - No `kind` discriminator: every spatial_query is structurally a
+///     `FilteredWalk` once constructed.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SpatialQueryIR {
+    pub name: String,
+    pub params: Vec<IrParam>,
+    pub filter: IrExprNode,
+    pub annotations: Vec<Annotation>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ViewBodyIR {
     Expr(IrExprNode),
@@ -939,6 +960,12 @@ pub enum NamespaceId {
     Action,
     Rng,
     Query,
+    /// `spatial::<name>(...)` / `spatial.<name>(...)` — references to
+    /// declared `spatial_query` filters. Resolved against
+    /// `Compilation::spatial_queries` by the resolver; lowering
+    /// (Phase 7 Task 5) substitutes the filter expression into the
+    /// owning mask's `SpatialQueryKind::FilteredWalk`.
+    Spatial,
     Voxel,
     /// Runtime-tunable constants declared via `config <Name> { ... }` blocks.
     /// `config.<block>.<field>` is a two-hop lookup against `ConfigIR`;
@@ -1025,6 +1052,7 @@ impl NamespaceId {
             NamespaceId::Action => "action",
             NamespaceId::Rng => "rng",
             NamespaceId::Query => "query",
+            NamespaceId::Spatial => "spatial",
             NamespaceId::Voxel => "voxel",
             NamespaceId::Config => "config",
             NamespaceId::View => "view",
@@ -1090,6 +1118,10 @@ pub enum Builtin {
     /// expiry ticks (`tick + duration_ticks`) without reaching for a
     /// method-call syntax the DSL doesn't otherwise expose.
     SaturatingAdd,
+    /// `vec3(x, y, z)` — construct a Vec3 from three scalar components.
+    /// All three operands are F32; result is Vec3F32. The lone vec3
+    /// literal form supported by the DSL today.
+    Vec3,
 }
 
 impl Builtin {
@@ -1115,6 +1147,7 @@ impl Builtin {
             Builtin::Log10 => "log10",
             Builtin::Sqrt => "sqrt",
             Builtin::SaturatingAdd => "saturating_add",
+            Builtin::Vec3 => "vec3",
         }
     }
 
@@ -1125,6 +1158,7 @@ impl Builtin {
             Builtin::Distance | Builtin::PlanarDistance | Builtin::ZSeparation => Some(2),
             Builtin::Entity => Some(1),
             Builtin::Clamp => Some(3),
+            Builtin::Vec3 => Some(3),
             Builtin::Abs
             | Builtin::Floor
             | Builtin::Ceil
@@ -1172,5 +1206,17 @@ pub struct Compilation {
     pub probes: Vec<ProbeIR>,
     pub metrics: Vec<MetricIR>,
     pub configs: Vec<ConfigIR>,
+    /// Resolved `spatial_query <name>(self, candidate, …) = <filter>`
+    /// declarations (Phase 7 Task 4). Filter expressions are consumed
+    /// by `cg/lower/mask.rs` once the from-clause refactor (Task 5)
+    /// lands. `Vec<_>` to match the `views` convention; the symbol
+    /// table carries the name → index lookup.
+    ///
+    /// `skip_serializing_if` keeps the JSON snapshot stable for
+    /// fixtures that don't declare any spatial_query — Task 4 lands
+    /// the surface; Task 5 refactors fixtures to use it. The IR
+    /// shape stays additive on the snapshot side.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spatial_queries: Vec<SpatialQueryIR>,
     pub spans: SpanTable,
 }

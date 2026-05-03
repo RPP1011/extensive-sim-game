@@ -16,14 +16,26 @@ safetensors = "0.4"
 rayon = "1.10"
 sha2 = "0.10"
 contracts = "0.6"
+# wgpu pinned to =26.0.1; matches naga 26.0.0 used by dsl_compiler's
+# WGSL emit + validation. Pulled into engine because engine owns the
+# platform layer (GpuContext, Kernel trait, BGL helpers in
+# `engine::gpu`); the SDL-style split has the engine carrying wgpu so
+# downstream per-fixture runtime crates only depend on engine.
+wgpu = "=26.0.1"
+# pollster gives a sync `block_on` so non-async callers (e.g.,
+# `boids_runtime::BoidsState::new`) can construct GpuContext without
+# pulling in a full async runtime.
+pollster = "0.4"
+bytemuck = { version = "1.16", features = ["derive"] }
 # DSL IR interpreter — optional; only pulled in under `interpreted-rules`.
 dsl_ast = { path = "../dsl_ast", optional = true }
 
 [dev-dependencies]
 trybuild = "1"
 engine_data = { path = "../engine_data" }
-engine_rules = { path = "../engine_rules" }
-engine_gpu = { path = "../engine_gpu" }
+# engine_rules + engine_gpu were deleted in the Phase 7 wolf-sim wipe
+# (2026-05-02). Tests that depended on them have been removed alongside
+# the deletes; surviving engine tests use only `engine` + `engine_data`.
 insta = { version = "1.41", features = ["yaml"] }
 proptest = "1.5"
 dhat = "0.3"

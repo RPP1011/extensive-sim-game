@@ -26,6 +26,7 @@ const ALLOWED_TOP_LEVEL: &[&str] = &[
     "rng.rs",
     "schema_hash.rs",
     "scratch.rs",
+    "sim_trait.rs",
     "spatial.rs",
     // step.rs: compile-only unimplemented!() stubs so #[ignore]d tests that
     // still import engine::step::* compile. Pending Task 11 cleanup — once
@@ -47,6 +48,11 @@ const ALLOWED_DIRS: &[&str] = &[
     // without a circular dep. ADR pending (P1b port, 2026-04-25).
     "evaluator",
     "event",
+    // gpu/: wgpu platform primitives (GpuContext, Kernel trait, BGL
+    // helpers). Sim-agnostic; per-fixture runtime crates' generated
+    // dispatch modules `impl engine::gpu::Kernel` against this surface.
+    // Phase 7 boids GPU pipeline (2026-05-02).
+    "gpu",
     "invariant",
     "obs",
     "policy",

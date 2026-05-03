@@ -13,6 +13,12 @@ pub mod debug;
 pub mod channel;
 pub mod creature;
 pub mod event;
+/// `gpu` — sim-agnostic GPU platform primitives. `GpuContext` (wgpu
+/// device + queue), `Kernel` trait, BGL-entry helpers. Per-fixture
+/// runtime crates depend on engine and `impl engine::gpu::Kernel`
+/// against this surface; engine itself knows nothing about specific
+/// fixtures.
+pub mod gpu;
 pub mod ids;
 pub mod invariant;
 pub mod mask;
@@ -27,6 +33,9 @@ pub mod schema_hash;
 /// survives as a storage primitive. Rule-aware tick logic lives in
 /// `engine_rules::step` once Task 11 lands.
 pub mod scratch;
+/// `CompiledSim` trait — the uniform interface per-fixture runtime crates
+/// expose to the generic application layer. See module doc for the contract.
+pub mod sim_trait;
 /// Compile-only unimplemented!() stubs for `step`, `step_full`, etc. so the
 /// many `#[ignore]`d tests that still import `engine::step::*` compile cleanly.
 /// Remove this module when Task 11 lands and test imports migrate to
@@ -41,6 +50,8 @@ pub mod trajectory;
 pub mod view;
 
 pub use backend::ComputeBackend;
+pub use gpu::{bgl_storage, bgl_uniform, GpuContext, GpuContextError, Kernel};
+pub use sim_trait::CompiledSim;
 /// Re-export SimScratch from its new home so call sites that previously
 /// wrote `engine::step::SimScratch` can be updated to `engine::scratch::SimScratch`.
 pub use scratch::SimScratch;

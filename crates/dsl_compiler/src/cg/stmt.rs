@@ -264,6 +264,97 @@ pub enum CgStmt {
         value: CgExprId,
         ty: CgTy,
     },
+
+    /// N² fold over alive agents — produces a single accumulator value
+    /// by walking every agent slot and (optionally filtered) summing a
+    /// per-candidate projection.
+    ///
+    /// Lowered from `IrExpr::Fold { kind: Sum|Count, binder, iter:
+    /// agents, body }`. The fold expression itself returns a
+    /// [`CgExpr::ReadLocal`] reading `acc_local`; this stmt is
+    /// injected before the consumer (via the lowering context's
+    /// `pending_pre_stmts` buffer) so the value is already populated
+    /// at the read site.
+    ///
+    /// # WGSL emit shape
+    ///
+    /// ```text
+    /// var local_<acc_local>: <acc_ty> = <init>;
+    /// for (var per_pair_candidate: u32 = 0u; per_pair_candidate < cfg.agent_cap; per_pair_candidate = per_pair_candidate + 1u) {
+    ///     local_<acc_local> = local_<acc_local> + <projection>;
+    /// }
+    /// ```
+    ///
+    /// Where the projection is whatever the fold body resolved to —
+    /// for Count, it's `select(0i, 1i, body)` (body is the predicate);
+    /// for Sum, it's `body` directly (body is the projection). The
+    /// emit layer assembles the boolean projection at lowering time
+    /// (Task 33), so this stmt only sees the final WGSL-level
+    /// "addend" expression.
+    ///
+    /// # Loop variable
+    ///
+    /// The implicit loop variable is named `per_pair_candidate` —
+    /// reused from the existing pair-bound emit convention so reads
+    /// of `binder.<field>` inside the body lower to
+    /// `DataHandle::AgentField { target: AgentRef::PerPairCandidate }`
+    /// without inventing a parallel naming scheme. Folds inside
+    /// pair-bound contexts (mask predicates etc.) would shadow the
+    /// outer pair-candidate; today the boids fixture does not nest
+    /// folds inside pair-bound contexts, so the shadow is benign and
+    /// well-formed. If a future fixture nests them, the emit will
+    /// need to allocate a fresh loop-var name per ForEachAgent.
+    ForEachAgent {
+        acc_local: LocalId,
+        acc_ty: CgTy,
+        init: CgExprId,
+        projection: CgExprId,
+    },
+
+    /// **Spatial-grid-bounded** fold over agents. Same shape as
+    /// [`Self::ForEachAgent`] but the walk visits only the cells
+    /// inside `radius_cells` of `self`'s cell — for the boids
+    /// fixture's perception-radius fold, that's the 3³=27
+    /// neighborhood (`radius_cells = 1`). The host pre-populates
+    /// `spatial_grid_offsets` / `spatial_grid_cells` via the
+    /// `SpatialQuery::BuildHash` kernel earlier in the schedule.
+    ///
+    /// # WGSL emit shape
+    ///
+    /// ```text
+    /// var local_<acc_local>: <acc_ty> = <init>;
+    /// let self_cell_xyz = pos_to_cell_xyz(agent_pos[agent_id]);
+    /// for (var dz: i32 = -<radius>; dz <= <radius>; dz = dz + 1) {
+    ///   for (var dy: i32 = -<radius>; dy <= <radius>; dy = dy + 1) {
+    ///     for (var dx: i32 = -<radius>; dx <= <radius>; dx = dx + 1) {
+    ///       let cell = cell_index(...);
+    ///       let count = min(atomicLoad(&spatial_grid_offsets[cell]),
+    ///                       SPATIAL_MAX_PER_CELL);
+    ///       for (var i: u32 = 0u; i < count; i = i + 1u) {
+    ///         let per_pair_candidate =
+    ///           spatial_grid_cells[cell * SPATIAL_MAX_PER_CELL + i];
+    ///         local_<acc_local> = local_<acc_local> + <projection>;
+    ///       }
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// # Cell radius
+    ///
+    /// `radius_cells` is the inclusive half-width of the cell
+    /// neighborhood — `1` walks 27 cells, `2` walks 125. For boids,
+    /// `CELL_SIZE` is set equal to `perception_radius`, so a single-
+    /// cell radius covers every potential neighbor. Larger fold
+    /// radii (relative to `CELL_SIZE`) bump this up at the lowering
+    /// site.
+    ForEachNeighbor {
+        acc_local: LocalId,
+        acc_ty: CgTy,
+        init: CgExprId,
+        projection: CgExprId,
+        radius_cells: u32,
+    },
 }
 
 impl fmt::Display for CgStmt {
@@ -299,6 +390,31 @@ impl fmt::Display for CgStmt {
             }
             CgStmt::Let { local, value, ty } => {
                 write!(f, "let({}: {} = expr#{})", local, ty, value.0)
+            }
+            CgStmt::ForEachAgent {
+                acc_local,
+                acc_ty,
+                init,
+                projection,
+            } => {
+                write!(
+                    f,
+                    "for_each_agent(acc={}: {}, init=expr#{}, proj=expr#{})",
+                    acc_local, acc_ty, init.0, projection.0
+                )
+            }
+            CgStmt::ForEachNeighbor {
+                acc_local,
+                acc_ty,
+                init,
+                projection,
+                radius_cells,
+            } => {
+                write!(
+                    f,
+                    "for_each_neighbor(acc={}: {}, init=expr#{}, proj=expr#{}, r={})",
+                    acc_local, acc_ty, init.0, projection.0, radius_cells
+                )
             }
         }
     }
@@ -538,6 +654,45 @@ pub fn collect_stmt_dependencies(
             // resolution lands (Task 5.5d); until then this walker
             // only contributes the value's reads.
             collect_expr_reads(*value, exprs, reads);
+        }
+        CgStmt::ForEachAgent {
+            init, projection, ..
+        } => {
+            // Walks every alive agent slot and accumulates a
+            // projection. The projection's AgentField reads are
+            // captured via collect_expr_reads; the walk itself reads
+            // `agent_pos[agent_id]` for the bounds check, but that's
+            // already declared elsewhere by the enclosing per-agent
+            // op (it reads agent_pos for agent_id resolution).
+            collect_expr_reads(*init, exprs, reads);
+            collect_expr_reads(*projection, exprs, reads);
+        }
+        CgStmt::ForEachNeighbor {
+            init, projection, ..
+        } => {
+            // Same shape as ForEachAgent for expr reads, plus three
+            // structural reads for the spatial bindings the WGSL
+            // emit walks: `spatial_grid_starts[cell..cell+1]` for
+            // the start/end of each cell's slice in
+            // `spatial_grid_cells`, and `spatial_grid_offsets`
+            // (still bound, atomic-counted in the build, used by
+            // the diagnostic kernel and as the cooperative-load
+            // gate). Surfacing them here is what tells the kernel-
+            // emit's BGL composer to bind the spatial buffers AND
+            // tells the schedule synthesizer this op is a spatial-
+            // query consumer (so the three counting-sort phases
+            // get dispatched before it).
+            collect_expr_reads(*init, exprs, reads);
+            collect_expr_reads(*projection, exprs, reads);
+            reads.push(DataHandle::SpatialStorage {
+                kind: super::data_handle::SpatialStorageKind::GridCells,
+            });
+            reads.push(DataHandle::SpatialStorage {
+                kind: super::data_handle::SpatialStorageKind::GridOffsets,
+            });
+            reads.push(DataHandle::SpatialStorage {
+                kind: super::data_handle::SpatialStorageKind::GridStarts,
+            });
         }
     }
 }

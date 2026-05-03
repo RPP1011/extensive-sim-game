@@ -16,12 +16,112 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::emit_entity;
+use dsl_ast::ast;
+
 use crate::ir::{
-    ConfigIR, DecayUnit, EntityIR, EnumIR, EventIR, EventTagIR, IrExpr, IrExprNode, IrPattern,
-    IrPatternBinding, IrPhysicsPattern, IrStmt, IrType, PhysicsHandlerIR, PhysicsIR, ScoringIR,
-    StorageHint, ViewBodyIR, ViewIR, ViewKind,
+    ConfigIR, DecayUnit, EntityFieldValueIR, EntityIR, EnumIR, EventIR, EventTagIR, IrExpr,
+    IrExprNode, IrPattern, IrPatternBinding, IrPhysicsPattern, IrStmt, IrType, PhysicsHandlerIR,
+    PhysicsIR, ScoringIR, StorageHint, ViewBodyIR, ViewIR, ViewKind,
 };
+
+// Phase 7 wolf-sim wipe (2026-05-02): the entity schema-hash projection was
+// inlined here from the now-deleted `schema_hash_input`. The
+// projection is pure logic over `EntityIR`; lives here because the schema
+// hasher is its sole consumer.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SchemaHashRow {
+    entity: String,
+    root: String,
+    field: String,
+    tag: String,
+}
+
+fn schema_hash_input(entities: &[EntityIR]) -> Vec<SchemaHashRow> {
+    let mut rows: Vec<SchemaHashRow> = Vec::new();
+    for e in entities {
+        let root = match e.root {
+            ast::EntityRoot::Agent => "Agent",
+            ast::EntityRoot::Item => "Item",
+            ast::EntityRoot::Group => "Group",
+        };
+        rows.push(SchemaHashRow {
+            entity: e.name.clone(),
+            root: root.to_string(),
+            field: "_root".into(),
+            tag: format!("root:{}", root),
+        });
+        for f in &e.fields {
+            append_field_rows(&e.name, root, &f.name, &f.value, &mut rows);
+        }
+    }
+    rows
+}
+
+fn append_field_rows(
+    entity: &str,
+    root: &str,
+    prefix: &str,
+    value: &EntityFieldValueIR,
+    rows: &mut Vec<SchemaHashRow>,
+) {
+    match value {
+        EntityFieldValueIR::Type(t) => {
+            rows.push(SchemaHashRow {
+                entity: entity.into(),
+                root: root.into(),
+                field: prefix.into(),
+                tag: type_tag_for_hash(t),
+            });
+        }
+        EntityFieldValueIR::StructLiteral { ty, fields } => {
+            rows.push(SchemaHashRow {
+                entity: entity.into(),
+                root: root.into(),
+                field: prefix.into(),
+                tag: format!("struct:{}", type_tag_for_hash(ty)),
+            });
+            for sub in fields {
+                let sub_prefix = format!("{}.{}", prefix, sub.name);
+                append_field_rows(entity, root, &sub_prefix, &sub.value, rows);
+            }
+        }
+        EntityFieldValueIR::List(items) => {
+            rows.push(SchemaHashRow {
+                entity: entity.into(),
+                root: root.into(),
+                field: prefix.into(),
+                tag: format!("list:{}", items.len()),
+            });
+        }
+        EntityFieldValueIR::Expr(_) => {
+            rows.push(SchemaHashRow {
+                entity: entity.into(),
+                root: root.into(),
+                field: prefix.into(),
+                tag: "expr".into(),
+            });
+        }
+    }
+}
+
+fn type_tag_for_hash(t: &IrType) -> String {
+    match t {
+        IrType::Bool => "bool".into(),
+        IrType::I8 => "i8".into(),
+        IrType::U8 => "u8".into(),
+        IrType::I16 => "i16".into(),
+        IrType::U16 => "u16".into(),
+        IrType::I32 => "i32".into(),
+        IrType::U32 => "u32".into(),
+        IrType::F32 => "f32".into(),
+        IrType::AgentId => "AgentId".into(),
+        IrType::Vec3 => "Vec3".into(),
+        IrType::String => "String".into(),
+        IrType::Named(n) => format!("Named:{n}"),
+        other => format!("{other:?}"),
+    }
+}
 
 pub fn event_hash(events: &[EventIR]) -> [u8; 32] {
     let mut sorted: Vec<&EventIR> = events.iter().collect();
@@ -135,11 +235,11 @@ pub fn rules_hash(
 /// Hash the entity state-layout surface. Entities are sorted by name for
 /// reorder stability; within an entity, fields keep their source order
 /// (field order drives struct layout). The tag-projection is delegated to
-/// `emit_entity::schema_hash_input` so the hasher stays agnostic of the
+/// `schema_hash_input` so the hasher stays agnostic of the
 /// exact IR shape — any future entity-IR extension only touches that
 /// projection.
 pub fn state_hash(entities: &[EntityIR]) -> [u8; 32] {
-    let rows = emit_entity::schema_hash_input(entities);
+    let rows = schema_hash_input(entities);
     // Sort rows by entity name. Rows for the same entity stay contiguous in
     // their emission (source-preserved) order — field order within an entity
     // drives the emitted struct layout.

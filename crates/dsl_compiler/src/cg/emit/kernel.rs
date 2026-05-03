@@ -699,22 +699,93 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
             // `query_results`) used internally to the structural
             // binding namespace must rename to the contract-side
             // identifiers for the `bind()` source path.
-            let (field, base_access) = match kind {
-                SpatialStorageKind::GridCells => {
-                    ("spatial_grid_cells".to_string(), AccessMode::ReadStorage)
-                }
-                SpatialStorageKind::GridOffsets => {
-                    ("spatial_grid_offsets".to_string(), AccessMode::ReadStorage)
-                }
+            //
+            // GridOffsets is atomic across the whole pipeline:
+            //   - BuildHash uses atomicAdd to allocate per-cell slots
+            //     (bounded counting-sort variant, MAX_PER_CELL caps
+            //     each cell's population).
+            //   - Consumers (per-agent kernels with ForEachNeighbor)
+            //     read the count via atomicLoad. Both surfaces share
+            //     the same WGSL binding type `array<atomic<u32>>`.
+            // GridCells is non-atomic: the atomic on offsets gives
+            //   each writer a unique slot index, so the slot write
+            //   itself is conflict-free.
+            let (field, base_access, wgsl_ty) = match kind {
+                SpatialStorageKind::GridCells => (
+                    "spatial_grid_cells".to_string(),
+                    AccessMode::ReadStorage,
+                    "array<u32>".to_string(),
+                ),
+                SpatialStorageKind::GridOffsets => (
+                    "spatial_grid_offsets".to_string(),
+                    AccessMode::AtomicStorage,
+                    "u32".to_string(),
+                ),
                 SpatialStorageKind::QueryResults => (
                     "spatial_query_results".to_string(),
                     AccessMode::ReadWriteStorage,
+                    "array<u32>".to_string(),
+                ),
+                // NonemptyCells: written by the CompactNonemptyCells
+                // kernel (each non-empty cell atomicAdds into the
+                // count, then writes its cell index at the returned
+                // slot). The atomic is on the *count* (held in
+                // NonemptyCellsIndirectArgs[0]); the cells array
+                // itself is conflict-free under the atomic-allocated
+                // slot indices, so non-atomic ReadWrite suffices.
+                // Consumer (tiled MoveBoid) reads it as a plain
+                // u32 array indexed by `wgid.x`.
+                SpatialStorageKind::NonemptyCells => (
+                    "spatial_nonempty_cells".to_string(),
+                    AccessMode::ReadWriteStorage,
+                    "array<u32>".to_string(),
+                ),
+                // NonemptyCellsIndirectArgs holds the (count, 1, 1)
+                // tuple consumed by `dispatch_workgroups_indirect`.
+                // Slot 0 is atomic (CompactNonemptyCells uses
+                // atomicAdd to assign slots); slots 1 & 2 are written
+                // once at construction (or by the same kernel) as the
+                // constants `1u`. Atomic access on the buffer is
+                // necessary to satisfy WGSL's per-binding type rule.
+                SpatialStorageKind::NonemptyCellsIndirectArgs => (
+                    "spatial_nonempty_indirect_args".to_string(),
+                    AccessMode::AtomicStorage,
+                    "u32".to_string(),
+                ),
+                // GridStarts: prefix-scan output. The new parallel
+                // scan writes it cooperatively from many lanes
+                // (phase 2a writes per-chunk inclusive prefix; phase
+                // 2c adds the chunk base in place). Each cell slot
+                // is touched by exactly one lane in each phase, so
+                // the writes are conflict-free without atomics —
+                // the storage stays plain `array<u32>`. Consumers
+                // (BuildHashScatter + tiled MoveBoid) only read.
+                // Size on the runtime side is `num_cells + 1` u32s;
+                // the WGSL type doesn't bake in the length, so the
+                // per-fixture runtime is the source of truth.
+                SpatialStorageKind::GridStarts => (
+                    "spatial_grid_starts".to_string(),
+                    AccessMode::ReadStorage,
+                    "array<u32>".to_string(),
+                ),
+                // ChunkSums: cross-workgroup carry buffer for the
+                // parallel prefix scan. Written by phase 2a (each
+                // chunk's last lane stores the chunk total),
+                // exclusive-scanned in place by phase 2b, read by
+                // phase 2c. Non-atomic — single writer per slot in
+                // every phase. Sized
+                // `ceil(num_cells / PER_SCAN_CHUNK_WORKGROUP_X)` on
+                // the runtime side.
+                SpatialStorageKind::ChunkSums => (
+                    "spatial_chunk_sums".to_string(),
+                    AccessMode::ReadStorage,
+                    "array<u32>".to_string(),
                 ),
             };
             Some(BindingMetadata {
                 bg_source: BgSource::Pool(field),
                 base_access,
-                wgsl_ty: "array<u32>".into(),
+                wgsl_ty,
             })
         }
         DataHandle::Rng { .. } => None,
@@ -925,7 +996,7 @@ struct TypedBinding {
 
 /// Render a [`DataHandle`] as a deterministic snake_case binding name.
 /// Mirrors the inner-walk's structural-handle convention so a kernel
-/// body referring to `agent_self_hp` resolves through this binding's
+/// body referring to `agent_hp[agent_id]` resolves through this binding's
 /// declared name.
 ///
 /// For `AgentField`, we drop the `target` discriminator from the
@@ -960,6 +1031,12 @@ fn structural_binding_name(h: &DataHandle) -> String {
             SpatialStorageKind::GridCells => "spatial_grid_cells".into(),
             SpatialStorageKind::GridOffsets => "spatial_grid_offsets".into(),
             SpatialStorageKind::QueryResults => "spatial_query_results".into(),
+            SpatialStorageKind::NonemptyCells => "spatial_nonempty_cells".into(),
+            SpatialStorageKind::NonemptyCellsIndirectArgs => {
+                "spatial_nonempty_indirect_args".into()
+            }
+            SpatialStorageKind::GridStarts => "spatial_grid_starts".into(),
+            SpatialStorageKind::ChunkSums => "spatial_chunk_sums".into(),
         },
         DataHandle::Rng { purpose } => format!("rng_{}", purpose.snake()),
         DataHandle::AliveBitmap => "alive_bitmap".into(),
@@ -1267,11 +1344,20 @@ fn pascal_to_snake(s: &str) -> String {
     out
 }
 
-fn spatial_kind_name(k: SpatialQueryKind) -> &'static str {
+fn spatial_kind_name(k: SpatialQueryKind) -> String {
     match k {
-        SpatialQueryKind::BuildHash => "build_hash",
-        SpatialQueryKind::KinQuery => "kin_query",
-        SpatialQueryKind::EngagementQuery => "engagement_query",
+        SpatialQueryKind::BuildHash => String::from("build_hash"),
+        SpatialQueryKind::FilteredWalk { filter } => {
+            format!("filtered_walk_{}", filter.0)
+        }
+        SpatialQueryKind::CompactNonemptyCells => {
+            String::from("compact_nonempty_cells")
+        }
+        SpatialQueryKind::BuildHashCount => String::from("build_hash_count"),
+        SpatialQueryKind::BuildHashScanLocal => String::from("build_hash_scan_local"),
+        SpatialQueryKind::BuildHashScanCarry => String::from("build_hash_scan_carry"),
+        SpatialQueryKind::BuildHashScanAdd => String::from("build_hash_scan_add"),
+        SpatialQueryKind::BuildHashScatter => String::from("build_hash_scatter"),
     }
 }
 
@@ -1562,9 +1648,30 @@ fn build_wgsl_body(
 ) -> Result<String, KernelEmitError> {
     let mut out = String::new();
 
+    // Stash the dispatch on the emit context so the body emit (and
+    // any nested per-stmt emits) can pick a tile-walk WGSL form when
+    // appropriate — see EmitCtx::dispatch's docstring. Restore the
+    // prior value on exit so caller-context isn't clobbered (today
+    // the prior value is always None, but defensive scoping makes
+    // future re-entry safe).
+    let prior_dispatch = ctx.dispatch.replace(Some(*dispatch));
+
     // Per-thread preamble — mirrors `ThreadIndexing` shape.
     write!(out, "{}", thread_indexing_preamble(dispatch))
         .expect("write to String never fails");
+
+    // Tiled-MoveBoid preamble: when the kernel is dispatched
+    // PerCell, every workgroup cooperates on a tile load before any
+    // per-op body runs. The tile load is emitted ONCE here so that
+    // multiple ForEachNeighbor stmts in the body all walk the same
+    // pre-loaded tile. The matching `var<workgroup>` decls land at
+    // module scope via `compose_wgsl_file`; this fragment only adds
+    // the runtime cooperative-load loop + `workgroupBarrier` + per-
+    // lane home-cell bounds check + agent_id fetch.
+    if matches!(dispatch, DispatchShape::PerCell) {
+        write!(out, "{}", tiled_per_cell_preamble())
+            .expect("write to String never fails");
+    }
 
     for (i, op_id) in body_ops.iter().enumerate() {
         if i > 0 {
@@ -1594,7 +1701,100 @@ fn build_wgsl_body(
         out.push_str("\n}");
     }
 
+    // Tiled-MoveBoid kernels open a `for (var _home_iter ...)` loop
+    // in their preamble (see `tiled_per_cell_preamble`) so each lane
+    // can process more than one home agent at high density. Close
+    // the matching brace here, *after* every per-op body has been
+    // emitted, so the loop body covers the full physics computation.
+    if matches!(dispatch, DispatchShape::PerCell) {
+        out.push_str("\n}");
+    }
+
+    // Restore prior dispatch.
+    ctx.dispatch.set(prior_dispatch);
+
     Ok(out)
+}
+
+/// Cooperative tile-load preamble for [`DispatchShape::PerCell`]
+/// kernels. Emitted once at the top of the kernel body (before any
+/// per-op body) so every fold inside the body walks the same
+/// pre-loaded tile of the 27-cell neighborhood.
+///
+/// The preamble assumes the kernel's `@compute @workgroup_size(...)`
+/// + module-level `var<workgroup>` declarations have already been
+/// emitted by [`super::program::compose_wgsl_file`] (see its
+/// PerCell branch). It writes:
+/// 1. `let home_cell = workgroup_id.x; let lane = local_invocation_id.x;`
+/// 2. Decode `home_cell` into `(home_cx, home_cy, home_cz)` integer
+///    cell coordinates.
+/// 3. Each lane in `0..27` cooperatively loads one neighbor cell's
+///    pos/vel slots into `tile_pos[lane * MAX]` / `tile_vel[lane * MAX]`,
+///    plus a `tile_count[lane]` for the per-cell agent count.
+/// 4. `workgroupBarrier()` so every lane sees the populated tile.
+/// 5. Per-lane home-cell bounds check (early-return if the lane
+///    doesn't correspond to a populated home-cell slot).
+/// 6. `let agent_id = spatial_grid_cells[home_cell * MAX + lane]`.
+///
+/// Each lane in `27..MAX_PER_CELL` participates in the load (no-op
+/// branches just skip), then the home-cell bounds check filters them
+/// out before any sim work.
+fn tiled_per_cell_preamble() -> String {
+    // After the three-phase counting sort, `spatial_grid_starts[c]`
+    // is cell `c`'s start position in `spatial_grid_cells` and
+    // `starts[c+1] - starts[c]` is the cell's count. The tile-load
+    // still caps at SPATIAL_MAX_PER_CELL (the workgroup-shared
+    // memory budget for the tile arrays), so cells with more than
+    // MAX_PER_CELL agents truncate at the tile-load boundary
+    // *visible to that workgroup's neighbors* — but they're NOT
+    // dropped from the spatial structure itself (the
+    // counting-sort layout is uncapped). The diagnostic kernel
+    // surfaces tile-truncation as the dropped_agents stat now
+    // computed against MAX_PER_CELL, which is the right knob to
+    // bump or split into multi-pass tile loads.
+    "let home_cell = workgroup_id.x;\n\
+     let lane = local_invocation_id.x;\n\
+     let home_cz = home_cell / (SPATIAL_GRID_DIM * SPATIAL_GRID_DIM);\n\
+     let home_cy = (home_cell / SPATIAL_GRID_DIM) % SPATIAL_GRID_DIM;\n\
+     let home_cx = home_cell % SPATIAL_GRID_DIM;\n\
+     // Cooperative tile load: lanes 0..27 each load one neighbor\n\
+     // cell. Lanes 27..MAX_PER_CELL skip the load (no-op).\n\
+     if (lane < 27u) {\n\
+     \x20   let nbr = lane;\n\
+     \x20   let dz = i32(nbr / 9u) - 1;\n\
+     \x20   let dy = i32((nbr / 3u) % 3u) - 1;\n\
+     \x20   let dx = i32(nbr % 3u) - 1;\n\
+     \x20   let _nbr_cell = cell_index(\n\
+     \x20       i32(home_cx) + dx,\n\
+     \x20       i32(home_cy) + dy,\n\
+     \x20       i32(home_cz) + dz,\n\
+     \x20   );\n\
+     \x20   let _nbr_start = spatial_grid_starts[_nbr_cell];\n\
+     \x20   let _nbr_end = spatial_grid_starts[_nbr_cell + 1u];\n\
+     \x20   let _nbr_count = min(_nbr_end - _nbr_start, SPATIAL_MAX_PER_CELL);\n\
+     \x20   tile_count[nbr] = _nbr_count;\n\
+     \x20   let _dst_base = nbr * SPATIAL_MAX_PER_CELL;\n\
+     \x20   for (var i: u32 = 0u; i < _nbr_count; i = i + 1u) {\n\
+     \x20       let _aid = spatial_grid_cells[_nbr_start + i];\n\
+     \x20       tile_pos[_dst_base + i] = agent_pos[_aid];\n\
+     \x20       tile_vel[_dst_base + i] = agent_vel[_aid];\n\
+     \x20   }\n\
+     }\n\
+     workgroupBarrier();\n\
+     let _home_start = spatial_grid_starts[home_cell];\n\
+     let _home_end = spatial_grid_starts[home_cell + 1u];\n\
+     let _home_count = _home_end - _home_start;\n\
+     // Multi-iteration home-agent loop: each lane processes home\n\
+     // agents at offsets `{lane, lane + WG, lane + 2*WG, ...}` up to\n\
+     // _home_count. With workgroup_size = MAX_PER_CELL = 32 and a\n\
+     // home cell holding (say) 94 agents, lane 0 sees agents\n\
+     // {0, 32, 64}, lane 1 sees {1, 33, 65}, etc. — every home\n\
+     // agent gets processed regardless of cell density. The matching\n\
+     // close brace is appended by `build_wgsl_body`'s tail when\n\
+     // the dispatch is PerCell.\n\
+     for (var _home_iter: u32 = lane; _home_iter < _home_count; _home_iter = _home_iter + SPATIAL_MAX_PER_CELL) {\n\
+     let agent_id = spatial_grid_cells[_home_start + _home_iter];\n\n"
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -1629,134 +1829,237 @@ fn build_wgsl_body(
 ///   those would require new [`ComputeOpKind`] sub-shapes well beyond
 ///   Task 5.6c's scope. Future refinement (Task 5.x or later) could
 ///   replace this const with an IR walk once those abstractions exist.
-const SPATIAL_BUILD_HASH_BODY: &str = "// SpatialQuery::BuildHash — verbatim port from \
-    engine_gpu_rules/src/spatial_hash.wgsl.\n\
-    // Touches every binding so naga keeps them live. Real per-cell hash build \
-    lives in the\n\
-    // hand-written engine_gpu spatial pipeline; this stub is a structural \
-    placeholder.\n\
-    _ = spatial_grid_cells[0];\n\
-    _ = spatial_grid_offsets[0];\n\
-    _ = cfg.agent_cap;";
-
-/// WGSL body fragment for [`SpatialQueryKind::KinQuery`].
+/// WGSL body template for [`SpatialQueryKind::BuildHash`].
 ///
-/// Bindings consumed (per [`SpatialQueryKind::KinQuery::dependencies`] +
-/// auto-injected `cfg`):
+/// **Real bounded-list counting sort** — per-agent dispatch.
+///
+/// Each agent computes its cell, atomic-fetch-adds into the cell's
+/// count, and (if the cell hasn't overflowed `MAX_PER_CELL`) writes
+/// its agent_id into that slot. Cells with more than
+/// `SPATIAL_MAX_PER_CELL` agents silently drop the overflow — the
+/// dropped agents are absent from spatial-query results until the
+/// host clears the offsets buffer next tick.
+///
+/// # Pre-condition
+///
+/// The host MUST clear `spatial_grid_offsets` to all-zero before
+/// dispatching this kernel each tick (e.g. via
+/// `queue.write_buffer(spatial_grid_offsets, 0, &zeros)`). Without
+/// the clear, atomicAdd accumulates across ticks and slot indices
+/// diverge from per-cell counts.
+///
+/// # Bindings consumed
+/// - `agent_pos`            (read; resolves to `agent_pos[agent_id]`)
+/// - `spatial_grid_cells`   (read_write; flat slot array, sized
+///   `num_cells * MAX_PER_CELL`)
+/// - `spatial_grid_offsets` (atomic; per-cell count, sized
+///   `num_cells`)
+/// - `cfg`                  (uniform, agent_cap)
+///
+/// The constants + `pos_to_cell` helper land via
+/// [`super::spatial::compose_spatial_prelude`] which fires whenever
+/// `spatial_grid_*` appears in the body — already true here.
+const SPATIAL_BUILD_HASH_BODY: &str = "let cell = pos_to_cell(agent_pos[agent_id]);\n\
+    let slot = atomicAdd(&spatial_grid_offsets[cell], 1u);\n\
+    if (slot < SPATIAL_MAX_PER_CELL) {\n\
+    \x20   spatial_grid_cells[cell * SPATIAL_MAX_PER_CELL + slot] = agent_id;\n\
+    }";
+
+/// Real counting sort, **phase 1** (`SpatialQueryKind::BuildHashCount`).
+///
+/// Per-agent dispatch: each agent computes its cell and atomic-
+/// increments `spatial_grid_offsets[cell]`. After this kernel the
+/// offsets buffer holds the *raw count* of agents per cell. No
+/// truncation — every agent contributes regardless of cell density.
+///
+/// **Pre-condition**: the host clears `spatial_grid_offsets` to zero
+/// before dispatch (the boids_runtime `step()` does this via a
+/// `copy_buffer_to_buffer` from a pre-allocated zero source).
+const SPATIAL_BUILD_HASH_COUNT_BODY: &str =
+    "let cell = pos_to_cell(agent_pos[agent_id]);\n\
+     atomicAdd(&spatial_grid_offsets[cell], 1u);";
+
+/// Real counting sort, **phase 2a — workgroup-local scan**
+/// (`SpatialQueryKind::BuildHashScanLocal`).
+///
+/// PerScanChunk dispatch: each workgroup owns one
+/// `PER_SCAN_CHUNK_WORKGROUP_X`-sized cell chunk. The body performs
+/// a Hillis-Steele inclusive scan in workgroup-shared memory,
+/// writes the per-chunk inclusive prefix to
+/// `spatial_grid_starts[chunk_base + lane + 1]`, and writes the
+/// chunk's total to `spatial_chunk_sums[chunk_id]`. Lane 0 of
+/// workgroup 0 also writes `spatial_grid_starts[0] = 0u`.
+///
+/// `var<workgroup>` shared memory holds 256 × u32 = 1 KiB —
+/// well under any adapter's per-workgroup memory budget.
+///
+/// Out-of-range cells (`chunk_base + lane >= num_cells`) read 0
+/// and skip their slot writes.
+fn spatial_build_hash_scan_local_body() -> String {
+    let chunk = crate::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+    let n = crate::cg::emit::spatial::num_cells();
+    format!(
+        "// Hillis-Steele inclusive scan in workgroup-shared memory.\n\
+         // The shared array's bounds + the chunk size are both\n\
+         // PER_SCAN_CHUNK_WORKGROUP_X ({chunk}) so every lane has\n\
+         // exactly one slot.\n\
+         let cell = chunk_id * {chunk}u + lane;\n\
+         // Out-of-range lanes contribute 0 to the scan but still\n\
+         // participate in every barrier — the Hillis-Steele algorithm\n\
+         // requires uniform control flow across the workgroup.\n\
+         var v: u32 = 0u;\n\
+         if (cell < {n}u) {{\n\
+         \x20   v = atomicLoad(&spatial_grid_offsets[cell]);\n\
+         }}\n\
+         scan_shared[lane] = v;\n\
+         workgroupBarrier();\n\
+         // log2({chunk}) iterations of double-and-add.\n\
+         for (var step: u32 = 1u; step < {chunk}u; step = step << 1u) {{\n\
+         \x20   var added: u32 = scan_shared[lane];\n\
+         \x20   if (lane >= step) {{\n\
+         \x20       added = added + scan_shared[lane - step];\n\
+         \x20   }}\n\
+         \x20   workgroupBarrier();\n\
+         \x20   scan_shared[lane] = added;\n\
+         \x20   workgroupBarrier();\n\
+         }}\n\
+         // Now scan_shared[lane] = inclusive sum over lanes [0..=lane].\n\
+         // Write per-chunk inclusive prefix to grid_starts[cell+1] for\n\
+         // in-range cells (the +1 shift turns inclusive→exclusive at\n\
+         // the next position, matching the serial scan's output).\n\
+         if (cell < {n}u) {{\n\
+         \x20   spatial_grid_starts[cell + 1u] = scan_shared[lane];\n\
+         }}\n\
+         // Lane 0 of workgroup 0 sets the leading exclusive 0.\n\
+         if (chunk_id == 0u && lane == 0u) {{\n\
+         \x20   spatial_grid_starts[0u] = 0u;\n\
+         }}\n\
+         // Last lane in each workgroup records the chunk's total.\n\
+         if (lane == {chunk}u - 1u) {{\n\
+         \x20   spatial_chunk_sums[chunk_id] = scan_shared[lane];\n\
+         }}",
+        chunk = chunk,
+        n = n,
+    )
+}
+
+/// Real counting sort, **phase 2b — cross-workgroup carry**
+/// (`SpatialQueryKind::BuildHashScanCarry`).
+///
+/// OneShot dispatch (single thread). Serially exclusive-scans
+/// `spatial_chunk_sums` in place: each entry overwritten with the
+/// sum of all preceding chunk totals. After this kernel,
+/// `chunk_sums[chunk_id]` is the global offset to add to every
+/// `grid_starts` entry the chunk owns.
+///
+/// `num_chunks = ceil(num_cells / PER_SCAN_CHUNK_WORKGROUP_X)` —
+/// 42 for boids' 22³=10 648 grid; 256 even at 16M cells. The
+/// serial loop is microseconds at this scale.
+fn spatial_build_hash_scan_carry_body() -> String {
+    let chunk = crate::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+    let n = crate::cg::emit::spatial::num_cells();
+    let num_chunks = n.div_ceil(chunk);
+    format!(
+        "// Serial exclusive scan over the (small) chunk_sums buffer.\n\
+         var running: u32 = 0u;\n\
+         for (var i: u32 = 0u; i < {num_chunks}u; i = i + 1u) {{\n\
+         \x20   let v = spatial_chunk_sums[i];\n\
+         \x20   spatial_chunk_sums[i] = running;\n\
+         \x20   running = running + v;\n\
+         }}",
+        num_chunks = num_chunks,
+    )
+}
+
+/// Real counting sort, **phase 2c — add per-chunk base**
+/// (`SpatialQueryKind::BuildHashScanAdd`).
+///
+/// PerScanChunk dispatch (same shape as phase 2a). Each lane reads
+/// the chunk base from `spatial_chunk_sums[chunk_id]` and adds it
+/// to its `spatial_grid_starts[cell + 1]` slot, where `cell =
+/// chunk_id * PER_SCAN_CHUNK_WORKGROUP_X + lane`. Also resets
+/// `spatial_grid_offsets[cell]` to zero so phase 3 can reuse it as
+/// a write cursor (mirrors the serial scan's combined behaviour).
+///
+/// Lane `cell == num_cells - 1` (the very last in-range lane) ends
+/// up with `starts[num_cells] = total agent count`, which the
+/// tiled-MoveBoid kernel + scatter consume.
+fn spatial_build_hash_scan_add_body() -> String {
+    let chunk = crate::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+    let n = crate::cg::emit::spatial::num_cells();
+    format!(
+        "let cell = chunk_id * {chunk}u + lane;\n\
+         if (cell >= {n}u) {{ return; }}\n\
+         let base = spatial_chunk_sums[chunk_id];\n\
+         spatial_grid_starts[cell + 1u] = spatial_grid_starts[cell + 1u] + base;\n\
+         atomicStore(&spatial_grid_offsets[cell], 0u);",
+        chunk = chunk,
+        n = n,
+    )
+}
+
+/// Real counting sort, **phase 3** (`SpatialQueryKind::BuildHashScatter`).
+///
+/// Per-agent dispatch: each agent computes its cell again, claims a
+/// per-cell slot via `atomicAdd(&offsets[cell], 1u)` (offsets reset
+/// to zero by phase 2; here it acts as a write cursor in
+/// `[0 .. count)`), then writes its id at the absolute slot
+/// `starts[cell] + local_slot` in `spatial_grid_cells`. After this
+/// kernel `spatial_grid_cells` holds every agent id grouped by cell.
+const SPATIAL_BUILD_HASH_SCATTER_BODY: &str =
+    "let cell = pos_to_cell(agent_pos[agent_id]);\n\
+     let local_slot = atomicAdd(&spatial_grid_offsets[cell], 1u);\n\
+     spatial_grid_cells[spatial_grid_starts[cell] + local_slot] = agent_id;";
+
+/// WGSL body template for [`SpatialQueryKind::FilteredWalk`].
+///
+/// Walks the per-cell neighborhood for each agent, evaluates the
+/// lowered filter expression per candidate, writes accepted
+/// candidates into `spatial_query_results`. The filter WGSL is
+/// interpolated into the `{filter_wgsl}` slot via [`format!`] in
+/// [`spatial_filtered_walk_body`].
+///
+/// Bindings consumed (per `SpatialQueryKind::FilteredWalk` static
+/// dependencies + filter walk's collected reads):
 /// - `spatial_grid_cells`        (Pool, read)
 /// - `spatial_grid_offsets`      (Pool, read)
 /// - `spatial_query_results`     (Pool, read_write)
-/// - `cfg`                       (uniform, last slot)
+/// - `agent_*`                   (per-field reads collected from the filter expression)
+/// - `cfg`                       (uniform, agent_cap)
 ///
 /// # Limitations
 ///
-/// - **Verbatim port from the legacy stub.** Mirrors
-///   `engine_gpu_rules/src/spatial_kin_query.wgsl`. The legacy file
-///   is itself a stub that touches all bindings — actual neighborhood
-///   walk + top-K kin filter is hand-written in engine_gpu's spatial
-///   path, not yet IR-driven.
-/// - **No IR-driven derivation.** Same rationale as
-///   [`SPATIAL_BUILD_HASH_BODY`].
-const SPATIAL_KIN_QUERY_BODY: &str = "// SpatialQuery::KinQuery — verbatim port from \
-    engine_gpu_rules/src/spatial_kin_query.wgsl.\n\
-    // Touches every binding so naga keeps them live. Real per-agent kin walk \
-    lives in the\n\
-    // hand-written engine_gpu spatial pipeline; this stub is a structural \
-    placeholder.\n\
-    _ = spatial_grid_cells[0];\n\
-    _ = spatial_grid_offsets[0];\n\
-    _ = spatial_query_results[0];\n\
-    _ = cfg.agent_cap;";
-
-/// WGSL body fragment for [`SpatialQueryKind::EngagementQuery`].
-///
-/// Bindings consumed (per
-/// [`SpatialQueryKind::EngagementQuery::dependencies`] +
-/// auto-injected `cfg`):
-/// - `spatial_grid_cells`        (Pool, read)
-/// - `spatial_grid_offsets`      (Pool, read)
-/// - `spatial_query_results`     (Pool, read_write)
-/// - `cfg`                       (uniform, last slot)
-///
-/// # Limitations
-///
-/// - **Verbatim port from the legacy stub.** Mirrors
-///   `engine_gpu_rules/src/spatial_engagement_query.wgsl`. Body shape
-///   is identical to [`SPATIAL_KIN_QUERY_BODY`] today — the kin vs
-///   engagement distinction is encoded in the kernel name + (future)
-///   per-kind filter logic. The legacy WGSL files are also identical;
-///   the differentiation happens in the hand-written CPU-side fold.
-/// - **No IR-driven derivation.** Same rationale as
-///   [`SPATIAL_BUILD_HASH_BODY`].
-const SPATIAL_ENGAGEMENT_QUERY_BODY: &str = "// SpatialQuery::EngagementQuery — verbatim port \
-    from engine_gpu_rules/src/spatial_engagement_query.wgsl.\n\
-    // Touches every binding so naga keeps them live. Real per-agent engagement \
-    walk lives in\n\
-    // the hand-written engine_gpu spatial pipeline; this stub is a structural \
-    placeholder.\n\
-    _ = spatial_grid_cells[0];\n\
-    _ = spatial_grid_offsets[0];\n\
-    _ = spatial_query_results[0];\n\
-    _ = cfg.agent_cap;";
-
-/// WGSL body fragment for the synthesized PerAgent
-/// [`ComputeOpKind::PhysicsRule`] (Movement, Phase 6 Task 3).
-///
-/// Bindings consumed (per the recorded `(reads, writes)` signature
-/// in `cg/lower/driver.rs::synthesize_movement_op`):
-/// - `agent_pos`        — read + write (per-agent vec3 update).
-/// - `agent_alive`      — read (skip dead agents).
-/// - `scoring_output`   — read (action + target).
-/// - `sim_cfg`          — read (move_speed, tick).
-/// - `event_ring`       — append (AgentMoved / AgentFled).
-/// - `cfg`              — uniform (agent_cap).
-///
-/// # Limitations
-///
-/// - **Verbatim port from the legacy stub.** Mirrors the structural
-///   shape of `engine_gpu_rules/src/movement.wgsl` (the legacy
-///   hand-written movement kernel that the Route C splice produces).
-///   This template touches every binding so naga keeps them live;
-///   the actual per-agent position update + AgentMoved emit is
-///   stubbed pending runtime BGL wiring (KernelSpec → engine_gpu
-///   bind-source mapping). Position writes here are conditional on
-///   the action read but always non-mutating in the stub form
-///   (the `var<storage, read_write> agents` binding is touched via
-///   `_ = agents[0u]` to keep the BGL live; real position mutation
-///   needs the per-field SoA offsets the runtime carries, which the
-///   IR's structural-naming pass doesn't synthesize today).
-/// - **No IR-driven derivation.** Same rationale as
-///   [`SPATIAL_BUILD_HASH_BODY`]: the IR has no abstractions for
-///   per-agent vec3 deltas with action-conditional branches; future
-///   Phase 6 / Phase 7 work could replace this const with an IR
-///   walk once those abstractions exist (Task 4: Apply-actions
-///   chain, in particular).
-const MOVEMENT_BODY: &str = "// PhysicsRule (PerAgent, on_event=None) — Movement \
-    (Phase 6 Task 3).\n\
-    // Structural placeholder body. Touches every binding the recorded \
-    (reads, writes)\n\
-    // signature names so naga keeps them live; the real per-agent \
-    position update +\n\
-    // AgentMoved emit lives in the hand-written engine_gpu_rules \
-    movement.wgsl splice\n\
-    // (Route C) until the Apply-actions chain (Phase 6 Task 4) and \
-    runtime BGL wiring\n\
-    // (Phase 6 Task 5) land.\n\
-    //\n\
-    // Binding shapes (via handle_to_binding_metadata):\n\
-    //   agent_pos:        array<vec3<f32>>     (rw — sole AgentField alias)\n\
-    //   scoring_output:   array<u32>           (read; stride 4 per agent)\n\
-    //   sim_cfg:          array<u32>           (read)\n\
-    //   cfg:              uniform              (agent_cap)\n\
-    //\n\
-    // Single-AgentField binding shape avoids the runtime\n\
-    // STORAGE_READ_ONLY/READ_WRITE conflict every multi-AgentField CG\n\
-    // PhysicsRule kernel triggers; see synthesize_movement_op's docs.\n\
-    let _scoring_action = scoring_output[agent_id * 4u + 0u];\n\
-    let _scoring_target = scoring_output[agent_id * 4u + 1u];\n\
-    let _agent_self_pos = agent_pos[agent_id];\n\
-    let _sim_cfg_v = sim_cfg[0u];\n\
-    let _cap = cfg.agent_cap;";
+/// - **Stub per-cell walk.** Mirrors the structural shape of the
+///   legacy `engine_gpu_rules/src/spatial_kin_query.wgsl` until
+///   runtime BGL wiring matures. The per-cell + per-candidate
+///   iteration is structural; the filter WGSL is real and the
+///   accept-write is real, but agent_pos lookups + radius checks
+///   are not yet emitted at this task.
+/// - **No per-cell radius bounds.** The walk visits every cell
+///   in the grid — quadratic in agent count for the smoke fixture.
+///   Acceptable for v1; bounded radius lookup is a follow-up.
+fn spatial_filtered_walk_body(filter_wgsl: &str) -> String {
+    format!(
+        "// SpatialQuery::FilteredWalk — per-cell walk + per-candidate filter.\n\
+         // Touches every binding so naga keeps them live; structural\n\
+         // walk shape mirrors the legacy spatial_kin_query.wgsl stub.\n\
+         var write_cursor: u32 = 0u;\n\
+         for (var cell: u32 = 0u; cell < cfg.agent_cap; cell = cell + 1u) {{\n\
+         \x20   let cell_start = spatial_grid_offsets[cell];\n\
+         \x20   let cell_end = spatial_grid_offsets[cell + 1u];\n\
+         \x20   for (var slot: u32 = cell_start; slot < cell_end; slot = slot + 1u) {{\n\
+         \x20       let candidate = spatial_grid_cells[slot];\n\
+         \x20       let filter_value: bool = {filter_wgsl};\n\
+         \x20       if (filter_value) {{\n\
+         \x20           spatial_query_results[write_cursor] = candidate;\n\
+         \x20           write_cursor = write_cursor + 1u;\n\
+         \x20       }}\n\
+         \x20   }}\n\
+         }}\n\
+         _ = cfg.agent_cap;",
+        filter_wgsl = filter_wgsl
+    )
+}
 
 /// Per-op body lowering. Returns the WGSL fragment for the op without
 /// surrounding kernel boilerplate. `dispatch` carries the kernel's
@@ -1780,34 +2083,23 @@ fn lower_op_body(
                 }
                 DispatchShape::PerEvent { .. }
                 | DispatchShape::OneShot
-                | DispatchShape::PerWord => Err(KernelEmitError::InvalidDispatchForOpKind {
+                | DispatchShape::PerWord
+                | DispatchShape::PerCell
+                | DispatchShape::PerScanChunk => Err(KernelEmitError::InvalidDispatchForOpKind {
                     op_kind: "MaskPredicate",
                     dispatch: format!("{dispatch}"),
                 }),
             }
         }
-        ComputeOpKind::PhysicsRule {
-            on_event, body, ..
-        } => {
-            // PerAgent PhysicsRule (on_event = None) is a per-agent
-            // sweep. Today the canonical instance is Movement
-            // (Phase 6 Task 3): reads scoring_output, conditionally
-            // updates `agent_pos` based on the chosen action.
-            // Emit a hand-written body fragment that mirrors the
-            // legacy `engine_gpu_rules/src/movement.wgsl` shape so
-            // the structural emit-quality contract (vec3 load
-            // patterns, branch-free direction deltas) is preserved.
-            //
-            // Future per-agent sweeps (cooldown ticks, stun expiry,
-            // need decay, regen) will dispatch through the CgStmt
-            // walk here once their bodies are expressible in IR.
-            // Until then, on_event=None is the per-rule template
-            // selector.
-            if on_event.is_none() {
-                Ok(MOVEMENT_BODY.to_string())
-            } else {
-                lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)
-            }
+        ComputeOpKind::PhysicsRule { body, .. } => {
+            // Both per-event (on_event = Some) and per-agent
+            // (on_event = None) PhysicsRules walk their CgStmtList
+            // body via the same lowering path. The kernel preamble
+            // differs by dispatch shape (per-agent binds `agent_id`
+            // — Phase 6 Task 3; per-event binds `event_idx` plus
+            // per-event payload locals), but the body itself is just
+            // a list of CG statements either way.
+            lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)
         }
         ComputeOpKind::ViewFold { body, .. } => {
             lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)
@@ -1820,10 +2112,23 @@ fn lower_op_body(
         // new variant forces an explicit body decision here.
         ComputeOpKind::SpatialQuery { kind } => Ok(match kind {
             SpatialQueryKind::BuildHash => SPATIAL_BUILD_HASH_BODY.to_string(),
-            SpatialQueryKind::KinQuery => SPATIAL_KIN_QUERY_BODY.to_string(),
-            SpatialQueryKind::EngagementQuery => {
-                SPATIAL_ENGAGEMENT_QUERY_BODY.to_string()
+            SpatialQueryKind::FilteredWalk { filter } => {
+                let filter_wgsl = lower_cg_expr_to_wgsl(*filter, ctx)?;
+                spatial_filtered_walk_body(&filter_wgsl)
             }
+            SpatialQueryKind::CompactNonemptyCells => {
+                "// SpatialQuery::CompactNonemptyCells — placeholder; \
+                 see SpatialQueryKind::CompactNonemptyCells docs.\n\
+                 _ = spatial_grid_offsets;\n\
+                 _ = spatial_nonempty_cells;\n\
+                 _ = spatial_nonempty_indirect_args;"
+                    .to_string()
+            }
+            SpatialQueryKind::BuildHashCount => SPATIAL_BUILD_HASH_COUNT_BODY.to_string(),
+            SpatialQueryKind::BuildHashScanLocal => spatial_build_hash_scan_local_body(),
+            SpatialQueryKind::BuildHashScanCarry => spatial_build_hash_scan_carry_body(),
+            SpatialQueryKind::BuildHashScanAdd => spatial_build_hash_scan_add_body(),
+            SpatialQueryKind::BuildHashScatter => SPATIAL_BUILD_HASH_SCATTER_BODY.to_string(),
         }),
         // Task 5.6d: per-`PlumbingKind` body dispatch. Exhaustive over
         // every variant so adding a new kind forces an explicit body
@@ -2298,6 +2603,31 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
              if (word_idx >= num_words) { return; }\n\n"
                 .to_string()
         }
+        DispatchShape::PerCell => {
+            // PerCell: the entry point uses `(workgroup_id,
+            // local_invocation_id)` instead of `global_invocation_id`.
+            // The full preamble (cooperative tile load + barrier +
+            // per-lane home-cell bounds check) is composed by the
+            // tiled-MoveBoid emit path, not by the generic
+            // thread_indexing_preamble — that path inlines the
+            // var<workgroup> tile arrays and the spatial-grid
+            // index decode. We emit nothing here so the surrounding
+            // body composer doesn't double-prefix.
+            String::new()
+        }
+        DispatchShape::PerScanChunk => {
+            // PerScanChunk: chunk_id is the workgroup index, lane
+            // is the local thread within the workgroup. The body
+            // computes its absolute cell index as
+            // `chunk_id * CHUNK + lane` and bounds-checks against
+            // num_cells inside the body (not here) so the scan
+            // body can keep all 256 lanes participating in the
+            // shared-memory Hillis-Steele reduction even when the
+            // last chunk has out-of-range lanes.
+            "let chunk_id = workgroup_id.x;\n\
+             let lane = local_invocation_id.x;\n\n"
+                .to_string()
+        }
     }
 }
 
@@ -2722,8 +3052,8 @@ mod tests {
         assert!(body.contains("// op#"), "body: {body}");
         assert!(body.contains("mask_5_bitmap"), "body: {body}");
         // The lowered predicate text from Task 4.1's expr walker
-        // should appear: `(agent_self_hp < 5.0)`.
-        assert!(body.contains("agent_self_hp < 5.0"), "body: {body}");
+        // should appear: `(agent_hp[agent_id] < 5.0)`.
+        assert!(body.contains("agent_hp[agent_id] < 5.0"), "body: {body}");
     }
 
     // ---- 8b. MaskPredicate body (Task 5.6a) ----
@@ -2768,64 +3098,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mask_predicate_per_pair_body_derives_agent_from_pair_and_writes_per_agent_bit() {
-        use crate::cg::dispatch::PerPairSource;
-        let mut prog = CgProgram::default();
-        let lit_true = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
-        let kind = ComputeOpKind::MaskPredicate {
-            mask: MaskId(11),
-            predicate: lit_true,
-        };
-        let pair_dispatch = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let op = ComputeOp::new(
-            OpId(0),
-            kind,
-            pair_dispatch,
-            Span::dummy(),
-            &prog,
-            &prog,
-            &prog,
-        );
-        let op_id = push_op(&mut prog, op);
-        let topology = KernelTopology::Split {
-            op: op_id,
-            dispatch: pair_dispatch,
-        };
-        let ctx = EmitCtx::structural(&prog);
-        let (_spec, body) =
-            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
-
-        assert!(body.contains("let pair = gid.x;"), "body: {body}");
-        assert!(body.contains("let mask_11_k = 1u;"), "body: {body}");
-        assert!(
-            body.contains("let mask_11_agent = pair / mask_11_k;"),
-            "body: {body}"
-        );
-        assert!(
-            body.contains("let mask_11_cand  = pair % mask_11_k;"),
-            "body: {body}"
-        );
-        assert!(
-            body.contains("if (mask_11_agent >= cfg.agent_cap) { return; }"),
-            "body: {body}"
-        );
-        assert!(body.contains("let mask_11_value: bool = true;"), "body: {body}");
-        assert!(
-            body.contains("let mask_11_word = mask_11_agent >> 5u;"),
-            "body: {body}"
-        );
-        assert!(
-            body.contains("let mask_11_bit  = 1u << (mask_11_agent & 31u);"),
-            "body: {body}"
-        );
-        assert!(
-            body.contains("atomicOr(&mask_11_bitmap[mask_11_word], mask_11_bit);"),
-            "body: {body}"
-        );
-    }
 
     #[test]
     fn mask_predicate_under_unsupported_dispatch_shape_errors() {
@@ -2886,59 +3158,6 @@ mod tests {
         assert!(!body.contains("\nlet word ="), "body: {body}");
     }
 
-    #[test]
-    fn mask_predicate_per_pair_body_passes_through_per_pair_candidate_target_read() {
-        use crate::cg::dispatch::PerPairSource;
-        let mut prog = CgProgram::default();
-        // Predicate: `target.hp < 5.0` (read of PerPairCandidate's hp).
-        let target_hp = push_expr(
-            &mut prog,
-            CgExpr::Read(DataHandle::AgentField {
-                field: AgentFieldId::Hp,
-                target: AgentRef::PerPairCandidate,
-            }),
-        );
-        let five = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(5.0)));
-        let lt = push_expr(
-            &mut prog,
-            CgExpr::Binary {
-                op: crate::cg::expr::BinaryOp::LtF32,
-                lhs: target_hp,
-                rhs: five,
-                ty: CgTy::Bool,
-            },
-        );
-        let kind = ComputeOpKind::MaskPredicate {
-            mask: MaskId(9),
-            predicate: lt,
-        };
-        let pair_dispatch = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let op = ComputeOp::new(
-            OpId(0),
-            kind,
-            pair_dispatch,
-            Span::dummy(),
-            &prog,
-            &prog,
-            &prog,
-        );
-        let op_id = push_op(&mut prog, op);
-        let topology = KernelTopology::Split {
-            op: op_id,
-            dispatch: pair_dispatch,
-        };
-        let ctx = EmitCtx::structural(&prog);
-        let (_spec, body) =
-            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
-
-        // The placeholder identifier from wgsl_body.rs flows through.
-        assert!(
-            body.contains("agent_per_pair_candidate_hp"),
-            "body: {body}"
-        );
-    }
 
     // ---- 9. Scoring argmax body (Task 5.6b) ----
 
@@ -3381,34 +3600,6 @@ mod tests {
         assert_eq!(spec_b.name, "fold_threat_level");
     }
 
-    #[test]
-    fn spatial_query_kinds_map_to_legacy_filenames() {
-        use crate::cg::op::SpatialQueryKind;
-        for (kind, expected) in [
-            (SpatialQueryKind::BuildHash, "spatial_build_hash"),
-            (SpatialQueryKind::KinQuery, "spatial_kin_query"),
-            (SpatialQueryKind::EngagementQuery, "spatial_engagement_query"),
-        ] {
-            let mut prog = CgProgram::default();
-            let op = ComputeOp::new(
-                OpId(0),
-                ComputeOpKind::SpatialQuery { kind },
-                DispatchShape::PerAgent,
-                Span::dummy(),
-                &prog,
-                &prog,
-                &prog,
-            );
-            let op_id = push_op(&mut prog, op);
-            let topology = KernelTopology::Split {
-                op: op_id,
-                dispatch: DispatchShape::PerAgent,
-            };
-            let ctx = EmitCtx::structural(&prog);
-            let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
-            assert_eq!(spec.name, expected, "kind={kind:?}");
-        }
-    }
 
     // ---- 12. SpatialQuery body templates (Task 5.6c) ----
 
@@ -3439,11 +3630,11 @@ mod tests {
     #[test]
     fn spatial_query_build_hash_emits_build_hash_body() {
         let (_spec, body) = spatial_query_spec_and_body(SpatialQueryKind::BuildHash);
-        // Per-kind preamble comment from the body const.
-        assert!(
-            body.contains("SpatialQuery::BuildHash"),
-            "BuildHash body: {body}"
-        );
+        // Real counting-sort populate — calls pos_to_cell + atomicAdd
+        // on per-cell offsets, then writes the agent_id into the
+        // computed slot. The pre-Task-5.6c stub-comment is gone.
+        assert!(body.contains("pos_to_cell"), "body: {body}");
+        assert!(body.contains("atomicAdd"), "body: {body}");
         // Touches the two writable spatial-storage bindings the spec
         // declares for BuildHash (per `SpatialQueryKind::dependencies`).
         assert!(body.contains("spatial_grid_cells"), "body: {body}");
@@ -3462,107 +3653,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn spatial_query_kin_query_emits_kin_query_body() {
-        let (_spec, body) = spatial_query_spec_and_body(SpatialQueryKind::KinQuery);
-        assert!(body.contains("SpatialQuery::KinQuery"), "body: {body}");
-        // KinQuery touches all three spatial-storage bindings (grid_cells
-        // + grid_offsets read; query_results read_write).
-        assert!(body.contains("spatial_grid_cells"), "body: {body}");
-        assert!(body.contains("spatial_grid_offsets"), "body: {body}");
-        assert!(body.contains("spatial_query_results"), "body: {body}");
-        assert!(
-            !body.contains("TODO(task-4.x): spatial_query body"),
-            "body still carries pre-5.6c TODO placeholder: {body}"
-        );
-    }
 
-    #[test]
-    fn spatial_query_engagement_query_emits_engagement_query_body() {
-        let (_spec, body) =
-            spatial_query_spec_and_body(SpatialQueryKind::EngagementQuery);
-        assert!(
-            body.contains("SpatialQuery::EngagementQuery"),
-            "body: {body}"
-        );
-        assert!(body.contains("spatial_grid_cells"), "body: {body}");
-        assert!(body.contains("spatial_grid_offsets"), "body: {body}");
-        assert!(body.contains("spatial_query_results"), "body: {body}");
-        assert!(
-            !body.contains("TODO(task-4.x): spatial_query body"),
-            "body still carries pre-5.6c TODO placeholder: {body}"
-        );
-    }
 
-    #[test]
-    fn spatial_query_body_includes_per_agent_preamble_and_op_comment() {
-        // Composition through `build_wgsl_body` should still wrap the
-        // per-kind body const with the PerAgent thread-indexing
-        // preamble + op-comment header — so the lowered body is a
-        // complete WGSL function body once the entry-point shell is
-        // wrapped around it by `compose_wgsl_file`.
-        let (_spec, body) = spatial_query_spec_and_body(SpatialQueryKind::KinQuery);
-        // PerAgent preamble.
-        assert!(body.contains("agent_id = gid.x"), "body: {body}");
-        assert!(
-            body.contains("if (agent_id >= cfg.agent_cap)"),
-            "body: {body}"
-        );
-        // Op-comment header from `build_wgsl_body`.
-        assert!(body.contains("// op#0 (spatial_query)"), "body: {body}");
-        // Cfg uniform reference — the body touches `cfg.agent_cap` so
-        // the cfg uniform stays live.
-        assert!(body.contains("cfg.agent_cap"), "body: {body}");
-    }
 
     /// Snapshot: pin the EngagementQuery body output through
     /// `kernel_topology_to_spec_and_body`. Any drift in the per-kind
     /// body const, the preamble shape, or the op-comment header surfaces
     /// here — the assertions below describe the exact expected form so
     /// the snapshot survives a body-content tweak with a one-site update.
-    #[test]
-    fn spatial_query_body_snapshot_engagement_query() {
-        let (spec, body) =
-            spatial_query_spec_and_body(SpatialQueryKind::EngagementQuery);
-        // Spec name + entry point are the legacy filenames (Task 5.2).
-        assert_eq!(spec.name, "spatial_engagement_query");
-        assert_eq!(spec.entry_point, "cs_spatial_engagement_query");
-        // Pin the body's structural sections in order: PerAgent preamble
-        // → op-comment header → per-kind body comment → binding touches
-        // → cfg touch. Each contains-check is order-independent, so we
-        // also verify the relative offsets to catch reordering.
-        let preamble_idx = body
-            .find("agent_id = gid.x")
-            .unwrap_or_else(|| panic!("missing PerAgent preamble: {body}"));
-        let op_comment_idx = body
-            .find("// op#0 (spatial_query)")
-            .unwrap_or_else(|| panic!("missing op-comment header: {body}"));
-        let kind_comment_idx = body
-            .find("SpatialQuery::EngagementQuery")
-            .unwrap_or_else(|| panic!("missing per-kind comment: {body}"));
-        let cfg_touch_idx = body
-            .find("cfg.agent_cap")
-            .unwrap_or_else(|| panic!("missing cfg touch: {body}"));
-        // Cfg touch lives in BOTH the preamble (`if (agent_id >=
-        // cfg.agent_cap)`) AND the body const (`let _c = cfg.agent_cap;`).
-        // That's fine for liveness; the preamble copy is what we find first.
-        assert!(
-            preamble_idx < op_comment_idx,
-            "preamble must precede op-comment: {body}"
-        );
-        assert!(
-            op_comment_idx < kind_comment_idx,
-            "op-comment must precede per-kind body: {body}"
-        );
-        assert!(
-            cfg_touch_idx < body.len(),
-            "cfg touch must appear in body: {body}"
-        );
-        // No TODO/unimplemented/panic markers anywhere.
-        assert!(!body.contains("todo!()"), "body: {body}");
-        assert!(!body.contains("unimplemented!"), "body: {body}");
-        assert!(!body.contains("panic!"), "body: {body}");
-    }
 
     #[test]
     fn plumbing_kinds_map_to_legacy_filenames() {
@@ -4475,5 +4573,64 @@ mod tests {
                 "kind={kind:?} body missing PlumbingKind::* tag: {body}"
             );
         }
+    }
+
+    // ---- 13. FilteredWalk emit (Phase 7 Task 2) ----
+
+    #[test]
+    fn filtered_walk_emit_threads_filter_wgsl_into_body() {
+        use crate::cg::op::SpatialQueryKind;
+
+        let mut prog = CgProgram::default();
+        // Filter: PerPairCandidate.alive — reads agent_alive[per_pair_candidate].
+        let filter_id = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Alive,
+                target: AgentRef::PerPairCandidate,
+            }),
+        );
+        let op = ComputeOp::new(
+            OpId(0),
+            ComputeOpKind::SpatialQuery {
+                kind: SpatialQueryKind::FilteredWalk { filter: filter_id },
+            },
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).expect("emit body");
+
+        assert!(
+            body.contains("for (var cell"),
+            "filtered-walk body must include per-cell walk loop, got: {body}"
+        );
+        assert!(
+            body.contains("agent_alive[per_pair_candidate]"),
+            "filter (alive read) must lower into the body, got: {body}"
+        );
+        assert!(
+            body.contains("spatial_query_results["),
+            "body must write into spatial_query_results, got: {body}"
+        );
+    }
+
+    #[test]
+    fn filtered_walk_snake_name_includes_filter_id() {
+        use crate::cg::op::SpatialQueryKind;
+
+        // The filter CgExprId is 0 (first expr pushed).
+        let filter_id = CgExprId(0);
+        let kind = SpatialQueryKind::FilteredWalk { filter: filter_id };
+        assert_eq!(spatial_kind_name(kind), "filtered_walk_0");
     }
 }

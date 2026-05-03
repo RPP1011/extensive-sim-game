@@ -249,13 +249,31 @@ pub fn dependency_graph(prog: &CgProgram) -> DepGraph {
     // Walk every consumer's reads, look up writers of the same
     // projected handle, add edges (skipping self-edges per the
     // event-fold convention).
+    //
+    // Reads INTO a SpatialQuery op are also skipped: the per-tick
+    // BuildHash kernel reads the prior-tick agent positions that
+    // every per-agent rule overwrote at the end of last tick. The
+    // edge from "writer of agent_pos" → "BuildHash" is a cross-tick
+    // edge (BuildHash sees prior-tick state), not a same-tick
+    // dependency. Without this skip, any per-agent rule that writes
+    // pos AND uses the spatial grid forms a 2-op cycle in the dep
+    // graph; topo falls back to source order and fusion misorders
+    // BuildHash relative to its consumers.
     for (op_index, op) in prog.ops.iter().enumerate() {
         let consumer = OpId(op_index as u32);
+        let consumer_is_spatial_build = matches!(
+            op.kind,
+            crate::cg::op::ComputeOpKind::SpatialQuery { .. }
+        );
         for r in &op.reads {
             let key = r.cycle_edge_key();
             if let Some(producers) = writers.get(&key) {
                 for &producer in producers {
                     if producer == consumer {
+                        continue;
+                    }
+                    if consumer_is_spatial_build {
+                        // Cross-tick read (see comment above).
                         continue;
                     }
                     edges.entry(producer).or_default().insert(consumer);

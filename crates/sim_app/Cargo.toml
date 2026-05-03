@@ -1,0 +1,23 @@
+[package]
+name = "sim_app"
+version = "0.1.0"
+edition = "2021"
+
+# Generic application crate. Drives any compiled-sim runtime through
+# the `engine::CompiledSim` trait — no per-fixture types are imported
+# here. Switching from boids to a future fixture means changing the
+# `package = "..."` rename below to the target's runtime crate name;
+# nothing in src/ needs to change.
+
+[dependencies]
+engine = { path = "../engine" }
+glam = "0.29"
+
+# The active per-fixture runtime, aliased to a fixture-agnostic name
+# so src/main.rs stays sim-agnostic. ↓ THIS LINE is the one-value
+# switch when changing fixtures.
+sim_runtime = { path = "../boids_runtime", package = "boids_runtime" }
+
+[[bin]]
+name = "sim_app"
+path = "src/main.rs"

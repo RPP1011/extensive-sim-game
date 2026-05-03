@@ -1,42 +1,14 @@
 [workspace]
-members = [".", "crates/tactical_sim", "crates/engine", "crates/engine_data", "crates/engine_rules", "crates/engine_gpu", "crates/engine_gpu_rules", "crates/viz", "crates/dsl_ast", "crates/dsl_compiler", "crates/xtask"]
-exclude = ["crates/world_sim_bench"]
+members = ["crates/boids_runtime", "crates/dsl_ast", "crates/dsl_compiler", "crates/engine", "crates/engine_data", "crates/engine_gpu_rules", "crates/sim_app"]
+exclude = ["crates/world_sim_bench", "crates/ability_operator", "crates/ability-vae", "crates/combat-trainer"]
+resolver = "2"
 
-
-[package]
-name = "game"
-version = "0.1.0"
-edition = "2021"
-autobins = false
-
-
-[features]
-default = []
-app = ["voxel_engine/app-harness", "dep:winit"]
-# GPU megakernel backend (task #159 / plan: docs/plans/gpu_megakernel_plan.md).
-# Pulls in the `engine_gpu` crate, which holds the (Phase 0: stub) GPU tick
-# driver. Default builds omit it entirely so `cargo build` stays dep-clean —
-# in Phase 1+ this feature gates the wgpu/naga dependency tree as well.
-gpu = ["dep:engine_gpu", "engine_gpu/gpu"]
-
-[dependencies]
-voxel_engine = { path = "/home/ricky/Projects/voxel_engine" }
-winit = { version = "0.30", optional = true }
-# GPU backend — opt-in via the `gpu` feature. Stays completely out of the
-# default build graph; Phase 0 adds only this line + the feature flag.
-engine_gpu = { path = "crates/engine_gpu", optional = true }
-
-[dev-dependencies]
-proptest = "1.6"
-
-[profile.release]
-# LTO lets the compiler inline across the voxel_engine crate boundary,
-# which matters a lot for the hot render loop: bulk_touch_all_loaded,
-# pool_generation, and the camera accessors all cross-crate calls that
-# are ~1 cycle bodies but cost a call+return without LTO. At 20 M+ FPS
-# (~48 ns/frame), a couple of eliminated function calls per frame is
-# worth the extra link time. `thin` captures most of fat's benefit
-# with less link time and better i-cache locality (fat sometimes
-# hurts at this perf level by inlining too aggressively).
-lto = "thin"
-codegen-units = 1
+# Phase 7 wolf-sim wipe (2026-05-02): the heaviest deletes — engine_gpu,
+# engine_rules, viz, tactical_sim, xtask, src/, plus all legacy emitters
+# under crates/dsl_compiler/src/emit_*.rs — stayed gone. `engine` and
+# `engine_data` were restored on 2026-05-02 (commit TBD): they hold the
+# general data-structure infrastructure (Agent SoA, event ring, snapshot,
+# spatial hash, RNG) the new minimum DSL fixture needs to actually run.
+# They are coupled to the wolf-sim type set today (CreatureType,
+# wolf-flavored Event variants); trim toward the new fixture as the
+# compiler-emitted output catches up.

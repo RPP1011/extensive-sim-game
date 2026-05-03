@@ -1,6 +1,0 @@
-// Trailing-annotation forms — exercises all four positions accepted by the
-// decl-loop's annotation handling.
-event A { x: i32 } @replayable
-event B { y: f32 } @replayable @traced
-@replayable event C { z: u64 }
-@replayable event D { a: bool } @traced

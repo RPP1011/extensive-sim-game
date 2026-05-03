@@ -84,6 +84,8 @@ mod stdlib {
         symbols.builtins.insert("log10".into(), Builtin::Log10);
         symbols.builtins.insert("sqrt".into(), Builtin::Sqrt);
         symbols.builtins.insert("saturating_add".into(), Builtin::SaturatingAdd);
+        // Vec3 constructor. Three-arg call returning Vec3F32; operands are F32.
+        symbols.builtins.insert("vec3".into(), Builtin::Vec3);
 
         // Typed namespaces. Each has its own field / method schema below.
         for (name, id) in [
@@ -94,6 +96,12 @@ mod stdlib {
             ("action", NamespaceId::Action),
             ("rng", NamespaceId::Rng),
             ("query", NamespaceId::Query),
+            // `spatial.<name>(...)` — references to declared
+            // `spatial_query <name>` filters (Phase 7 Task 4).
+            // Method dispatch checks `symbols.spatial_queries`; an
+            // unknown name surfaces `UnknownSpatialQuery` rather
+            // than carrying through as an opaque `NamespaceCall`.
+            ("spatial", NamespaceId::Spatial),
             ("voxel", NamespaceId::Voxel),
             ("config", NamespaceId::Config),
             // `view::<name>(...)` disambiguation namespace. The resolver
@@ -270,6 +278,12 @@ mod stdlib {
             // `docs/dsl/stdlib.md` for the canonical signatures.
             (NamespaceId::Agents, "alive") => Some((1, IrType::Bool)),
             (NamespaceId::Agents, "pos") => Some((1, IrType::Vec3)),
+            // Phase-7-post-nuke unlock #3: vec3 read + write surface so
+            // physics bodies can mutate per-agent position / velocity.
+            // Companion to `pos`; written by `set_pos` / `set_vel`.
+            (NamespaceId::Agents, "vel") => Some((1, IrType::Vec3)),
+            (NamespaceId::Agents, "set_pos") => Some((2, IrType::Unknown)),
+            (NamespaceId::Agents, "set_vel") => Some((2, IrType::Unknown)),
             (NamespaceId::Agents, "hp") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "max_hp") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "shield_hp") => Some((1, IrType::F32)),
@@ -541,6 +555,15 @@ pub struct SymbolTable {
     pub scoring: HashMap<String, ScoringRef>,
     pub views: HashMap<String, ViewRef>,
     pub verbs: HashMap<String, VerbRef>,
+    /// `spatial_query <name>(...)` declarations registered in pass 1.
+    /// `from spatial.<name>(...)` references resolve against this map
+    /// (Phase 7 Task 4). Pre-populated so pass 2 can route the
+    /// dotted/`::`-flat call shapes through `NamespaceCall { ns:
+    /// Spatial, method: <name>, … }` and surface unknown names as
+    /// `ResolveError::UnknownSpatialQuery`. Name → index into
+    /// `Compilation::spatial_queries`, matching the `views` /
+    /// `verbs` convention.
+    pub spatial_queries: HashMap<String, SpatialQueryRef>,
     pub invariants: HashMap<String, InvariantRef>,
     pub probes: HashMap<String, ProbeRef>,
     pub metrics: HashMap<String, MetricRef>,
@@ -946,6 +969,28 @@ fn collect(
                 // Queries are not a milestone-1a surface yet. Skip silently;
                 // 1b will handle.
             }
+            Decl::SpatialQuery(d) => {
+                // Phase 7 Task 4. Pass-1 reserves the slot + records
+                // the name; pass-2 fills the resolved filter expr.
+                check_dup(symbols, "spatial_query", &d.name, d.span, |s| {
+                    s.spatial_queries.contains_key(&d.name)
+                })?;
+                let idx = push_idx(comp.spatial_queries.len(), "spatial_query")?;
+                symbols
+                    .spatial_queries
+                    .insert(d.name.clone(), SpatialQueryRef(idx));
+                symbols.record_first("spatial_query", &d.name, d.span);
+                comp.spatial_queries.push(SpatialQueryIR {
+                    name: d.name.clone(),
+                    params: Vec::new(),
+                    filter: IrExprNode {
+                        kind: IrExpr::LitBool(true),
+                        span: d.span,
+                    },
+                    annotations: d.annotations.clone(),
+                    span: d.span,
+                });
+            }
         }
     }
     Ok(())
@@ -993,6 +1038,7 @@ fn resolve_bodies(
     let mut invariant_idx = 0;
     let mut probe_idx = 0;
     let mut metric_start_idx = 0usize;
+    let mut spatial_query_idx = 0;
 
     for decl in &program.decls {
         match decl {
@@ -1337,6 +1383,28 @@ fn resolve_bodies(
                 // No body expressions to lower.
             }
             Decl::Query(_) => {}
+            Decl::SpatialQuery(d) => {
+                // Phase 7 Task 4. Mirrors the `Decl::View` arm: fresh
+                // scope, bind params (the first two of which MUST be
+                // `self` and `candidate`; surface a typed error
+                // otherwise), resolve the filter, fill the reserved
+                // IR slot.
+                if d.params.len() < 2
+                    || d.params[0].name != "self"
+                    || d.params[1].name != "candidate"
+                {
+                    return Err(ResolveError::SpatialQueryRequiresSelfCandidateBinders {
+                        decl_name: d.name.clone(),
+                        span: d.span,
+                    });
+                }
+                let mut scope = LocalScope::new();
+                let params = resolve_params(&d.params, &mut scope, symbols);
+                let filter = resolve_expr(&d.filter, &mut scope, symbols)?;
+                comp.spatial_queries[spatial_query_idx].params = params;
+                comp.spatial_queries[spatial_query_idx].filter = filter;
+                spatial_query_idx += 1;
+            }
         }
     }
     Ok(())
@@ -2196,6 +2264,24 @@ fn resolve_call(
                             return Ok(IrExpr::ViewCall(*view_ref, ir_args));
                         }
                     }
+                    // `spatial.<name>(...)` — Phase 7 Task 4. Reject the
+                    // call eagerly when no `spatial_query <name>`
+                    // declaration backs it; lowering (Task 5) needs a
+                    // resolved declaration, so silent carry-through
+                    // would just defer a defect.
+                    if *ns == NamespaceId::Spatial {
+                        if !symbols.spatial_queries.contains_key(method) {
+                            return Err(ResolveError::UnknownSpatialQuery {
+                                name: method.clone(),
+                                span,
+                            });
+                        }
+                        return Ok(IrExpr::NamespaceCall {
+                            ns: NamespaceId::Spatial,
+                            method: method.clone(),
+                            args: ir_args,
+                        });
+                    }
                     // Arity is informational here; 1a doesn't surface it as
                     // an error. 1b will compare `ir_args.len()` against
                     // `stdlib::method_sig(ns, method).0`.
@@ -2238,6 +2324,21 @@ fn resolve_call(
         if let Some((ns_name, method)) = name.split_once("::") {
             if scope.lookup(ns_name).is_none() {
                 if let Some(ns) = symbols.stdlib_namespaces.get(ns_name) {
+                    // `spatial::<name>(...)` — Phase 7 Task 4. Same
+                    // eager-reject behaviour as the dotted form.
+                    if *ns == NamespaceId::Spatial {
+                        if !symbols.spatial_queries.contains_key(method) {
+                            return Err(ResolveError::UnknownSpatialQuery {
+                                name: method.to_string(),
+                                span,
+                            });
+                        }
+                        return Ok(IrExpr::NamespaceCall {
+                            ns: NamespaceId::Spatial,
+                            method: method.to_string(),
+                            args: ir_args,
+                        });
+                    }
                     let _ = stdlib::method_sig(*ns, method);
                     return Ok(IrExpr::NamespaceCall {
                         ns: *ns,

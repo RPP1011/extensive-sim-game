@@ -175,6 +175,17 @@ pub enum AgentFieldId {
     GridId,
     LocalPos,
     MoveTarget,
+
+    // --- Phase 7 boids fixture ---
+    /// Per-agent velocity (vec3). Added 2026-05-02 so `boids.sim`'s
+    /// `entity Boid : Agent { pos: vec3, vel: vec3 }` declaration can
+    /// resolve `self.vel` reads through the `IrExpr::Field` lowering.
+    /// The wolf-sim AgentSoA has no velocity slot today; per-fixture
+    /// runtime crates that don't need engine's SoA at all (e.g.
+    /// `boids_runtime`'s own `Vec<Vec3>` storage) ignore this entry.
+    /// When/if the wolf-sim runtime ever wants velocity, this is the
+    /// canonical name.
+    Vel,
 }
 
 impl AgentFieldId {
@@ -201,8 +212,8 @@ impl AgentFieldId {
             // bool — alive flag
             Alive => AgentFieldTy::Bool,
 
-            // Vec3 — position
-            Pos => AgentFieldTy::Vec3,
+            // Vec3 — position + velocity
+            Pos | Vel => AgentFieldTy::Vec3,
 
             // 8-bit packed enum tag
             MovementMode => AgentFieldTy::EnumU8,
@@ -217,6 +228,9 @@ impl AgentFieldId {
             LocalPos | MoveTarget => AgentFieldTy::Vec3,
         }
     }
+
+    // (Vel is included in the `Pos | Vel => Vec3` arm above; no
+    // additional entry needed here.)
 
     /// Stable snake_case name, used by `Display` and by external tools
     /// that need a human-readable handle. Matches the SoA field name
@@ -263,6 +277,7 @@ impl AgentFieldId {
             GridId => "grid_id",
             LocalPos => "local_pos",
             MoveTarget => "move_target",
+            Vel => "vel",
         }
     }
 
@@ -317,6 +332,7 @@ impl AgentFieldId {
             GridId,
             LocalPos,
             MoveTarget,
+            Vel,
         ]
     }
 
@@ -383,6 +399,7 @@ impl AgentFieldId {
             "grid_id" => GridId,
             "local_pos" => LocalPos,
             "move_target" => MoveTarget,
+            "vel" => Vel,
             _ => return None,
         })
     }
@@ -554,6 +571,39 @@ pub enum SpatialStorageKind {
     /// `spatial_query_results` — scratch buffer holding the result
     /// of one nearest-neighbor / nearby-agents query.
     QueryResults,
+    /// `spatial_grid_starts` — exclusive prefix-scan of the per-cell
+    /// counts. Sized `array<u32>` of length `num_cells + 1`. After
+    /// the spatial-hash build (Count → Scan → Scatter), `starts[i]`
+    /// is the index in `GridCells` where cell `i`'s agent ids begin,
+    /// and `starts[i+1] - starts[i]` is the cell's count. The new
+    /// counting-sort path uses this for unbounded per-cell capacity
+    /// (replacing the bounded-list `cell * MAX + slot` indexing of
+    /// the prior scheme).
+    GridStarts,
+    /// `spatial_nonempty_cells` — compact list of cell indices
+    /// whose `GridOffsets[cell] > 0` after BuildHash. Sized
+    /// `array<u32>` of length `num_cells` (worst-case if every
+    /// cell has at least one agent). Populated by the
+    /// `SpatialQueryKind::CompactNonemptyCells` kernel each tick;
+    /// consumed by per-cell tiled-MoveBoid kernels via
+    /// `nonempty_cells[wgid.x]` in the dispatch preamble.
+    NonemptyCells,
+    /// `spatial_nonempty_indirect_args` — three `u32`s `[count, 1, 1]`
+    /// formatted for `dispatch_workgroups_indirect`. Populated by
+    /// `CompactNonemptyCells` (writes the final atomic count plus
+    /// the constants `1, 1`); consumed by the tiled-MoveBoid kernel
+    /// dispatch as the indirect-args buffer. Lets the runtime avoid
+    /// a round-trip readback on the count.
+    NonemptyCellsIndirectArgs,
+    /// `spatial_chunk_sums` — per-workgroup-chunk total used by the
+    /// parallel prefix-scan pipeline. Sized
+    /// `array<u32>` of length `ceil(num_cells / SCAN_CHUNK_SIZE)`
+    /// (~42 entries for boids' 22³=10 648 grid at 256-cell chunks).
+    /// Phase 2a (`BuildHashScanLocal`) writes each chunk's total
+    /// into its slot; phase 2b (`BuildHashScanCarry`) overwrites in
+    /// place with an exclusive prefix; phase 2c
+    /// (`BuildHashScanAdd`) reads the per-chunk base.
+    ChunkSums,
 }
 
 impl fmt::Display for SpatialStorageKind {
@@ -562,6 +612,12 @@ impl fmt::Display for SpatialStorageKind {
             SpatialStorageKind::GridCells => f.write_str("grid_cells"),
             SpatialStorageKind::GridOffsets => f.write_str("grid_offsets"),
             SpatialStorageKind::QueryResults => f.write_str("query_results"),
+            SpatialStorageKind::NonemptyCells => f.write_str("nonempty_cells"),
+            SpatialStorageKind::NonemptyCellsIndirectArgs => {
+                f.write_str("nonempty_indirect_args")
+            }
+            SpatialStorageKind::GridStarts => f.write_str("grid_starts"),
+            SpatialStorageKind::ChunkSums => f.write_str("chunk_sums"),
         }
     }
 }
@@ -1371,10 +1427,12 @@ mod tests {
                 "all_variants entry {v:?} did not round-trip through snake"
             );
         }
-        // A spot-check on count — the enum has 38 variants today; if a
-        // new variant lands and `all_variants` isn't updated, this
-        // assertion fails before the round-trip loop above can.
-        assert_eq!(all.len(), 38);
+        // A spot-check on count — the enum has 39 variants today (38
+        // wolf-sim baseline + Vel added 2026-05-02 for the Boids
+        // fixture); if a new variant lands and `all_variants` isn't
+        // updated, this assertion fails before the round-trip loop
+        // above can.
+        assert_eq!(all.len(), 39);
     }
 
     #[test]

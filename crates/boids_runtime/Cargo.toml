@@ -1,0 +1,37 @@
+[package]
+name = "boids_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/boids.sim`. Hand-written
+# orchestration glue (`BoidsState`, `make_sim()`, `impl CompiledSim`)
+# wraps compiler-emitted dispatch modules. The compiler invocation
+# happens at compile time via build.rs — outputs land in OUT_DIR and
+# are pulled into lib.rs via `include!`. Editing boids.sim triggers a
+# build.rs re-run; engine + dsl_compiler don't rebuild.
+#
+# Per the {DSL_SIM_FILE_NAME}_runtime naming rule, this crate is
+# paired 1:1 with `assets/sim/boids.sim`. A future `cellular.sim`
+# fixture would live in `crates/cellular_runtime/` with the same
+# build.rs / src/lib.rs shape (different DSL inputs and orchestration
+# state).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+# Pulled in alongside the build-dep so per-tick dispatch can reference
+# the same spatial-grid constants the kernels are compiled against.
+# Avoids drift between buffer sizing (here) and pos_to_cell math
+# (compiled into the WGSL).
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+# dsl_compiler runs at compile time to regenerate the per-kernel
+# dispatch modules + WGSL files from `assets/sim/boids.sim`. dsl_ast
+# pulled in for resolve.
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

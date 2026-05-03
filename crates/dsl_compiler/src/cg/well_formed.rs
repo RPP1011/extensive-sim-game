@@ -239,6 +239,7 @@ pub enum CgError {
         event_kind: super::op::EventKindId,
         word_offset_in_payload: u32,
     },
+
 }
 
 impl fmt::Display for HandleConsistencyReason {
@@ -406,6 +407,8 @@ enum DispatchShapeLabel {
     PerPair,
     OneShot,
     PerWord,
+    PerCell,
+    PerScanChunk,
 }
 
 impl DispatchShapeLabel {
@@ -416,6 +419,8 @@ impl DispatchShapeLabel {
             DispatchShape::PerPair { .. } => DispatchShapeLabel::PerPair,
             DispatchShape::OneShot => DispatchShapeLabel::OneShot,
             DispatchShape::PerWord => DispatchShapeLabel::PerWord,
+            DispatchShape::PerCell => DispatchShapeLabel::PerCell,
+            DispatchShape::PerScanChunk => DispatchShapeLabel::PerScanChunk,
         }
     }
 
@@ -426,6 +431,8 @@ impl DispatchShapeLabel {
             DispatchShapeLabel::PerPair => "per_pair",
             DispatchShapeLabel::OneShot => "one_shot",
             DispatchShapeLabel::PerWord => "per_word",
+            DispatchShapeLabel::PerCell => "per_cell",
+            DispatchShapeLabel::PerScanChunk => "per_scan_chunk",
         }
     }
 }
@@ -470,19 +477,35 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
         // surface as `KindShapeMismatch` — see `PhysicsRuleShapeMismatch`
         // emit-time check, deferred until the second per-agent sweep
         // arrives).
-        ComputeOpKind::PhysicsRule { .. } => {
-            &[DispatchShapeLabel::PerEvent, DispatchShapeLabel::PerAgent]
-        }
+        // PhysicsRule allows PerCell too (the tiled-MoveBoid kernel
+        // shape introduced for boids' spatial-walk optimization).
+        ComputeOpKind::PhysicsRule { .. } => &[
+            DispatchShapeLabel::PerEvent,
+            DispatchShapeLabel::PerAgent,
+            DispatchShapeLabel::PerCell,
+        ],
         ComputeOpKind::ViewFold { .. } => &[DispatchShapeLabel::PerEvent],
         ComputeOpKind::SpatialQuery { kind } => match kind {
             // BuildHash hashes every agent into the grid — per-agent
             // dispatch.
             SpatialQueryKind::BuildHash => &[DispatchShapeLabel::PerAgent],
-            // Kin/engagement queries run one walk per agent and write
-            // the per-agent query-results scratch.
-            SpatialQueryKind::KinQuery | SpatialQueryKind::EngagementQuery => {
-                &[DispatchShapeLabel::PerAgent]
-            }
+            // FilteredWalk runs one neighborhood walk per agent.
+            SpatialQueryKind::FilteredWalk { .. } => &[DispatchShapeLabel::PerAgent],
+            // CompactNonemptyCells scans every cell — per-agent
+            // dispatch with `agent_cap` reinterpreted as `num_cells`
+            // (see SpatialQueryKind::CompactNonemptyCells docs).
+            SpatialQueryKind::CompactNonemptyCells => &[DispatchShapeLabel::PerAgent],
+            // Real counting sort phases:
+            //   - Count and Scatter: per-agent (one thread per agent).
+            //   - ScanLocal/ScanAdd: PerScanChunk (one workgroup per
+            //     256-cell chunk; one lane per cell).
+            //   - ScanCarry: OneShot (serial fix-up over the small
+            //     chunk_sums buffer).
+            SpatialQueryKind::BuildHashCount => &[DispatchShapeLabel::PerAgent],
+            SpatialQueryKind::BuildHashScanLocal => &[DispatchShapeLabel::PerScanChunk],
+            SpatialQueryKind::BuildHashScanCarry => &[DispatchShapeLabel::OneShot],
+            SpatialQueryKind::BuildHashScanAdd => &[DispatchShapeLabel::PerScanChunk],
+            SpatialQueryKind::BuildHashScatter => &[DispatchShapeLabel::PerAgent],
         },
         // Plumbing kinds each have a single canonical dispatch shape,
         // pinned by `PlumbingKind::dispatch_shape`. The well-formed
@@ -774,7 +797,12 @@ fn check_op(
                 );
             }
         }
-        ComputeOpKind::SpatialQuery { .. } => {}
+        ComputeOpKind::SpatialQuery { kind } => {
+            // FilteredWalk embeds a filter CgExprId — validate it exists.
+            if let SpatialQueryKind::FilteredWalk { filter } = kind {
+                validate_expr_subtree(arena, *filter, op_id, expr_arena_len, errors);
+            }
+        }
         // Plumbing kinds carry no embedded `CgExpr` / `CgStmt` — every
         // variant's reads/writes are typed `DataHandle`s sourced from
         // `PlumbingKind::dependencies()`. Nothing to walk.
@@ -959,6 +987,15 @@ fn walk_body_expr_subtrees(
             CgStmt::Let { value, .. } => {
                 validate_expr_subtree(arena, *value, op_id, expr_arena_len, errors);
             }
+            CgStmt::ForEachAgent {
+                init, projection, ..
+            }
+            | CgStmt::ForEachNeighbor {
+                init, projection, ..
+            } => {
+                validate_expr_subtree(arena, *init, op_id, expr_arena_len, errors);
+                validate_expr_subtree(arena, *projection, op_id, expr_arena_len, errors);
+            }
         }
     }
 }
@@ -995,13 +1032,18 @@ fn walk_list_id_ranges(
         // (Binary lhs/rhs etc.). This walk only handles list/stmt-id
         // ranges to avoid double-reporting expr defects.
         match stmt {
-            CgStmt::Assign { .. } | CgStmt::Emit { .. } | CgStmt::Let { .. } => {
+            CgStmt::Assign { .. }
+            | CgStmt::Emit { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => {
                 // Nothing to range-check at the list-walk level —
                 // these statements only embed expr-ids and (for
                 // Assign) a target handle, all of which are validated
-                // elsewhere. `Let` carries only an expr-id payload
-                // plus a typed (LocalId, CgTy); the expr-id is caught
-                // by the expr-subtree walk.
+                // elsewhere. `Let` / `ForEachAgent` / `ForEachNeighbor`
+                // carry expr-id payloads plus typed (LocalId, CgTy)
+                // data; the expr-ids are caught by the expr-subtree
+                // walk.
             }
             CgStmt::If { then, else_, .. } => {
                 if then.0 >= list_arena_len {
@@ -1168,8 +1210,30 @@ fn type_check_op(
             // panic.
             type_check_list(*body, op_id, prog, ctx, expr_arena_len, errors);
         }
-        ComputeOpKind::SpatialQuery { .. } => {
-            // No expressions to type-check — kernel is built-in.
+        ComputeOpKind::SpatialQuery { kind } => {
+            // FilteredWalk embeds a filter expression — type-check it
+            // must resolve to `CgTy::Bool`. Other spatial-query kinds
+            // carry no embedded expressions.
+            if let SpatialQueryKind::FilteredWalk { filter } = kind {
+                let Some(expr) = prog.exprs.get(filter.0 as usize) else {
+                    return;
+                };
+                match type_check(expr, *filter, ctx) {
+                    Ok(ty) if ty == CgTy::Bool => {}
+                    Ok(ty) => errors.push(CgError::TypeMismatch {
+                        op: op_id,
+                        error: TypeError::ClaimedResultMismatch {
+                            node: *filter,
+                            expected: CgTy::Bool,
+                            got: ty,
+                        },
+                    }),
+                    Err(err) => errors.push(CgError::TypeMismatch {
+                        op: op_id,
+                        error: err,
+                    }),
+                }
+            }
         }
         ComputeOpKind::Plumbing { .. } => {
             // Plumbing kinds carry no embedded expressions; their
@@ -1429,6 +1493,46 @@ fn type_check_list(
                     }
                 }
             }
+            CgStmt::ForEachAgent {
+                init,
+                acc_ty,
+                projection,
+                ..
+            }
+            | CgStmt::ForEachNeighbor {
+                init,
+                acc_ty,
+                projection,
+                ..
+            } => {
+                // Type-check init + projection. Both must agree with
+                // the declared accumulator type — projection because
+                // it's added into the accumulator each iteration,
+                // init because it's the accumulator's starting value.
+                for (expr_id, role) in [(*init, "init"), (*projection, "projection")] {
+                    if let Some(expr) = prog.exprs.get(expr_id.0 as usize) {
+                        match type_check(expr, expr_id, ctx) {
+                            Ok(value_ty) => {
+                                if value_ty != *acc_ty {
+                                    let _ = role;
+                                    errors.push(CgError::TypeMismatch {
+                                        op: op_id,
+                                        error: TypeError::ClaimedResultMismatch {
+                                            node: expr_id,
+                                            expected: *acc_ty,
+                                            got: value_ty,
+                                        },
+                                    });
+                                }
+                            }
+                            Err(err) => errors.push(CgError::TypeMismatch {
+                                op: op_id,
+                                error: err,
+                            }),
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1438,7 +1542,19 @@ fn type_check_list(
 /// Mask predicates / scoring argmax / physics rules / spatial queries
 /// must use `Emit` to write through events.
 fn p6_check_op(op: &ComputeOp, op_id: OpId, prog: &CgProgram, errors: &mut Vec<CgError>) {
-    let allow_agent_field_writes = matches!(op.kind, ComputeOpKind::ViewFold { .. });
+    let allow_agent_field_writes = matches!(op.kind, ComputeOpKind::ViewFold { .. })
+        // Per-agent physics rules (`on_event = None`, e.g. Movement,
+        // Boids' MoveBoid, future cooldown-tick / stun-expiry / regen
+        // sweeps) ARE the documented kernel API for per-tick state
+        // changes — P6 calls out "direct field writes OUTSIDE the
+        // documented kernel API"; inside it, AgentField writes are
+        // exactly the point of the dispatch shape. Per-event physics
+        // rules still go through the strict check (they should emit
+        // events for cross-agent communication, not write directly).
+        || matches!(
+            op.kind,
+            ComputeOpKind::PhysicsRule { on_event: None, .. }
+        );
     if allow_agent_field_writes {
         return;
     }
@@ -1502,6 +1618,13 @@ fn p6_walk_list(
                 // Allowed — `Let` introduces a local binding only;
                 // the binding has no AgentField write surface for
                 // P6 to police.
+            }
+            CgStmt::ForEachAgent { .. } | CgStmt::ForEachNeighbor { .. } => {
+                // Allowed — both fold variants only write to their
+                // body-scoped accumulator local. AgentField writes
+                // never appear inside their child expressions
+                // (they're lowered as `Read(AgentField)` reads only);
+                // the statements carry no nested stmt-list to walk.
             }
             CgStmt::If { then, else_, .. } => {
                 p6_walk_list(*then, op_id, kind_label, prog, errors);
@@ -1580,6 +1703,18 @@ fn event_field_scope_walk_list(
             }
             CgStmt::Let { value, .. } => {
                 event_field_scope_walk_expr(*value, op_id, kind_label, shape_label, prog, errors);
+            }
+            CgStmt::ForEachAgent { init, projection, .. }
+            | CgStmt::ForEachNeighbor { init, projection, .. } => {
+                event_field_scope_walk_expr(*init, op_id, kind_label, shape_label, prog, errors);
+                event_field_scope_walk_expr(
+                    *projection,
+                    op_id,
+                    kind_label,
+                    shape_label,
+                    prog,
+                    errors,
+                );
             }
             CgStmt::Emit { fields, .. } => {
                 for (_, expr_id) in fields {
@@ -1735,7 +1870,11 @@ fn match_uniqueness_walk_list(
             continue;
         };
         match stmt {
-            CgStmt::Assign { .. } | CgStmt::Emit { .. } | CgStmt::Let { .. } => {
+            CgStmt::Assign { .. }
+            | CgStmt::Emit { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => {
                 // Leaves — no nested bodies to descend into.
             }
             CgStmt::If { then, else_, .. } => {
@@ -1809,11 +1948,29 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
     let mut adj: Vec<BTreeSet<u32>> = vec![BTreeSet::new(); n];
     for (op_index, op) in prog.ops.iter().enumerate() {
         let consumer = OpId(op_index as u32);
+        // SpatialQuery ops (e.g. BuildHash) always consume *prior-tick*
+        // agent state to build the per-tick spatial index; downstream
+        // per-agent kernels then write the new positions for the next
+        // tick. Treating reads into a SpatialQuery as prior-tick edges
+        // (analogous to the self-edge skip already applied above)
+        // prevents the BuildHash ⇄ physics cycle that arises when the
+        // physics kernel both writes positions and reads the spatial
+        // grid. The single-tick ordering is still enforced via the
+        // SpatialStorage write-before-read edge, which remains live.
+        let consumer_is_spatial_build = matches!(
+            op.kind,
+            crate::cg::op::ComputeOpKind::SpatialQuery { .. }
+        );
         for r in &op.reads {
             if let Some(producers) = writers.get(&r.cycle_edge_key()) {
                 for &producer in producers {
                     if producer == consumer {
                         // Self-edge — not a cycle (event-fold pattern).
+                        continue;
+                    }
+                    if consumer_is_spatial_build {
+                        // Cross-tick read into a per-tick rebuild —
+                        // see the comment above.
                         continue;
                     }
                     adj[producer.0 as usize].insert(consumer.0);
@@ -3807,5 +3964,98 @@ mod tests {
             scope_match,
             "expected EventFieldInNonPerEventBody, got: {errs:?}"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // FilteredWalk filter type-gate
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn filtered_walk_with_non_bool_filter_rejected() {
+        use crate::cg::dispatch::DispatchShape;
+        use crate::cg::expr::LitValue;
+        use crate::cg::op::{ComputeOpKind, SpatialQueryKind};
+        use crate::cg::program::CgProgramBuilder;
+
+        let mut builder = CgProgramBuilder::new();
+        // Push a filter that is u32, not bool — should fail the gate.
+        let filter_id = builder
+            .add_expr(CgExpr::Lit(LitValue::U32(7)))
+            .expect("push lit");
+        builder
+            .add_op(
+                ComputeOpKind::SpatialQuery {
+                    kind: SpatialQueryKind::FilteredWalk { filter: filter_id },
+                },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+            )
+            .expect("push op");
+        let prog = builder.finish();
+
+        let errs = check_well_formed(&prog).expect_err("non-bool filter should fail");
+        let found = errs.iter().any(|e| {
+            matches!(
+                e,
+                CgError::TypeMismatch {
+                    error: TypeError::ClaimedResultMismatch {
+                        node,
+                        expected: CgTy::Bool,
+                        got: CgTy::U32,
+                    },
+                    ..
+                } if *node == filter_id
+            )
+        });
+        assert!(
+            found,
+            "expected TypeMismatch(ClaimedResultMismatch {{ expected: Bool, got: U32 }}), got {errs:?}"
+        );
+    }
+
+    #[test]
+    fn filtered_walk_with_bool_filter_accepted() {
+        use crate::cg::dispatch::DispatchShape;
+        use crate::cg::expr::LitValue;
+        use crate::cg::op::{ComputeOpKind, SpatialQueryKind};
+        use crate::cg::program::CgProgramBuilder;
+
+        let mut builder = CgProgramBuilder::new();
+        let filter_id = builder
+            .add_expr(CgExpr::Lit(LitValue::Bool(true)))
+            .expect("push lit");
+        builder
+            .add_op(
+                ComputeOpKind::SpatialQuery {
+                    kind: SpatialQueryKind::FilteredWalk { filter: filter_id },
+                },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+            )
+            .expect("push op");
+        let prog = builder.finish();
+
+        let result = check_well_formed(&prog);
+        assert!(
+            result.is_ok(),
+            "bool-typed filter should be accepted, got {result:?}"
+        );
+        // Defense-in-depth: even if `is_ok()` is satisfied trivially by an
+        // arm that fails to type-check at all, no TypeMismatch error
+        // should reference our filter id.
+        if let Err(errs) = &result {
+            for err in errs {
+                if let CgError::TypeMismatch {
+                    error: TypeError::ClaimedResultMismatch { node, .. },
+                    ..
+                } = err
+                {
+                    assert_ne!(
+                        *node, filter_id,
+                        "no TypeMismatch should reference our bool-typed filter"
+                    );
+                }
+            }
+        }
     }
 }

@@ -18,8 +18,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::data_handle::{
-    AgentFieldId, AgentRef, AgentScratchKind, DataHandle, EventRingAccess, EventRingId, MaskId,
-    SpatialStorageKind, ViewId,
+    AgentFieldId, AgentRef, AgentScratchKind, CgExprId, DataHandle, EventRingAccess, EventRingId,
+    MaskId, SpatialStorageKind, ViewId,
 };
 use super::dispatch::DispatchShape;
 use super::expr::ExprArena;
@@ -138,15 +138,91 @@ impl fmt::Display for ReplayabilityFlag {
 /// [`SpatialQueryKind::dependencies`].
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SpatialQueryKind {
-    /// Build the per-cell agent index — reads agents (positions),
-    /// writes the cell + offset arrays.
+    /// **Bounded counting-sort populate** (legacy). Per-agent dispatch
+    /// that atomic-increments per-cell counts and writes agent ids
+    /// into `cell * MAX_PER_CELL + slot` if `slot < MAX_PER_CELL`;
+    /// otherwise the agent is silently dropped. Kept for back-compat
+    /// with the old spatial-walk shape; the new tiled-MoveBoid path
+    /// uses the three-phase real counting sort
+    /// (`BuildHashCount` → `BuildHashScanLocal` →
+    /// `BuildHashScanCarry` → `BuildHashScanAdd` → `BuildHashScatter`)
+    /// instead — no per-cell cap, no drops.
     BuildHash,
-    /// Per-agent kin-of-team neighborhood walk — reads the grid,
-    /// writes the per-agent query-results scratch.
-    KinQuery,
-    /// Per-agent engagement-target neighborhood walk — reads the grid,
-    /// writes the per-agent query-results scratch.
-    EngagementQuery,
+    /// **Real counting sort, phase 1**. Per-agent dispatch:
+    /// `atomicAdd(&grid_offsets[pos_to_cell(agent_pos[id])], 1u)`.
+    /// After this kernel, `grid_offsets[c]` holds the *count* of
+    /// agents that hash into cell `c`. Phase 2 (the three scan
+    /// kernels) converts those counts into exclusive-prefix
+    /// `grid_starts`.
+    BuildHashCount,
+    /// **Real counting sort, phase 2a — workgroup-local scan**.
+    /// One thread per cell, dispatched as `ceil(num_cells / 256)`
+    /// workgroups of 256 threads. Each workgroup performs a
+    /// Hillis-Steele inclusive scan over its 256-cell chunk's
+    /// counts in `grid_offsets`, writes the per-chunk inclusive
+    /// prefix into `grid_starts[chunk_base + lane + 1]`, and
+    /// records the chunk's total in
+    /// `chunk_sums[wg_id]`. Lane 0 of workgroup 0 also writes
+    /// `starts[0] = 0u`.
+    ///
+    /// Out-of-range cells (`chunk_base + lane >= num_cells`)
+    /// participate in the scan with count = 0, so the result for
+    /// in-range entries is unaffected. The scan reads
+    /// `atomicLoad(&grid_offsets[i])` to interoperate with phase 1's
+    /// atomic accumulator.
+    BuildHashScanLocal,
+    /// **Real counting sort, phase 2b — cross-workgroup carry**.
+    /// OneShot dispatch (single workgroup of one thread). Serially
+    /// scans the small `chunk_sums` buffer (~42 entries for boids'
+    /// 10 648-cell grid) into an exclusive prefix in place: the
+    /// first entry becomes 0, each subsequent entry becomes the sum
+    /// of all preceding chunk totals. Phase 2c then adds this
+    /// per-chunk base to every entry in the chunk.
+    ///
+    /// Single-threaded because the chunk count is tiny (≤ 256 for
+    /// any plausible num_cells); a parallel scan over so few
+    /// entries would lose more to barrier overhead than the serial
+    /// loop costs.
+    BuildHashScanCarry,
+    /// **Real counting sort, phase 2c — add per-chunk base**.
+    /// Same dispatch as `BuildHashScanLocal`. Each thread reads
+    /// `chunk_sums[wg_id]` and adds it to its
+    /// `grid_starts[chunk_base + lane + 1]` slot. Also resets
+    /// `grid_offsets[chunk_base + lane]` to zero (mirrors the
+    /// serial scan's combined scan + reset behaviour) so phase 3
+    /// can reuse offsets as a per-cell write cursor.
+    ///
+    /// After this kernel completes, `grid_starts` holds the
+    /// exclusive prefix scan of the per-cell counts (sized
+    /// `num_cells + 1`, with `starts[num_cells]` equal to total
+    /// agent count).
+    BuildHashScanAdd,
+    /// **Real counting sort, phase 3**. Per-agent dispatch:
+    /// `let local = atomicAdd(&grid_offsets[cell], 1u);
+    ///  grid_cells[grid_starts[cell] + local] = agent_id`. After
+    /// this kernel `grid_cells` holds every agent id grouped by
+    /// cell, with cell `c`'s slice in `grid_cells[grid_starts[c] ..
+    /// grid_starts[c+1]]`. `grid_offsets[c]` after this kernel
+    /// equals the cell's count again (since the cursor incremented
+    /// from 0 to count).
+    BuildHashScatter,
+    /// Per-agent neighborhood walk filtered by a per-candidate
+    /// boolean expression. The filter is a `CgExprId` evaluated
+    /// per-candidate at WGSL emit time; the expression has access
+    /// to `self` (the querying agent) and the per-pair `candidate`
+    /// (bound via the same `LoweringCtx::target_local` flag the
+    /// per-pair mask predicate uses). See
+    /// `docs/superpowers/plans/2026-05-01-phase-7-general-spatial-queries.md`.
+    FilteredWalk { filter: CgExprId },
+    /// Per-cell scan that compacts the non-empty cells (those with
+    /// `GridOffsets[cell] > 0` after `BuildHash`) into the
+    /// `NonemptyCells` array, plus the dispatch tuple for the
+    /// downstream tiled MoveBoid into `NonemptyCellsIndirectArgs`.
+    /// Per-cell dispatch shape (`grid_dim^3` workgroups). Lets the
+    /// tiled-MoveBoid kernel skip empty cells entirely and dispatch
+    /// only over the populated subset via
+    /// `dispatch_workgroups_indirect`.
+    CompactNonemptyCells,
 }
 
 impl SpatialQueryKind {
@@ -163,17 +239,92 @@ impl SpatialQueryKind {
     pub fn dependencies(self) -> (Vec<DataHandle>, Vec<DataHandle>) {
         match self {
             SpatialQueryKind::BuildHash => (
+                vec![DataHandle::AgentField {
+                    field: super::data_handle::AgentFieldId::Pos,
+                    target: super::data_handle::AgentRef::Self_,
+                }],
+                vec![
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridCells,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridOffsets,
+                    },
+                ],
+            ),
+            // Real counting sort, phase 1: reads agent positions,
+            // atomic-increments per-cell counts in GridOffsets.
+            SpatialQueryKind::BuildHashCount => (
+                vec![DataHandle::AgentField {
+                    field: super::data_handle::AgentFieldId::Pos,
+                    target: super::data_handle::AgentRef::Self_,
+                }],
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridOffsets,
+                }],
+            ),
+            // Phase 2a: workgroup-local scan. Reads counts from
+            // GridOffsets (atomic), writes per-chunk inclusive prefix
+            // into GridStarts, writes chunk totals into ChunkSums.
+            SpatialQueryKind::BuildHashScanLocal => (
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridOffsets,
+                }],
+                vec![
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridStarts,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::ChunkSums,
+                    },
+                ],
+            ),
+            // Phase 2b: serial scan of chunk_sums into an exclusive
+            // prefix in place. Single-thread OneShot.
+            SpatialQueryKind::BuildHashScanCarry => (
                 vec![],
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::ChunkSums,
+                }],
+            ),
+            // Phase 2c: add per-chunk base from ChunkSums to each
+            // GridStarts entry the chunk owns; also reset GridOffsets
+            // so phase 3 can reuse it as a write cursor.
+            SpatialQueryKind::BuildHashScanAdd => (
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::ChunkSums,
+                }],
                 vec![
                     DataHandle::SpatialStorage {
-                        kind: SpatialStorageKind::GridCells,
+                        kind: SpatialStorageKind::GridStarts,
                     },
                     DataHandle::SpatialStorage {
                         kind: SpatialStorageKind::GridOffsets,
                     },
                 ],
             ),
-            SpatialQueryKind::KinQuery => (
+            // Phase 3: reads positions + starts; uses GridOffsets as
+            // a write cursor; writes sorted agent ids into GridCells.
+            SpatialQueryKind::BuildHashScatter => (
+                vec![
+                    DataHandle::AgentField {
+                        field: super::data_handle::AgentFieldId::Pos,
+                        target: super::data_handle::AgentRef::Self_,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridStarts,
+                    },
+                ],
+                vec![
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridOffsets,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridCells,
+                    },
+                ],
+            ),
+            SpatialQueryKind::FilteredWalk { filter: _ } => (
                 vec![
                     DataHandle::SpatialStorage {
                         kind: SpatialStorageKind::GridCells,
@@ -186,35 +337,48 @@ impl SpatialQueryKind {
                     kind: SpatialStorageKind::QueryResults,
                 }],
             ),
-            SpatialQueryKind::EngagementQuery => (
+            // Reads `GridOffsets` (atomicLoad of per-cell counts);
+            // writes `NonemptyCells` + `NonemptyCellsIndirectArgs`
+            // (atomicAdd into the indirect-args' count slot to
+            // allocate output positions).
+            SpatialQueryKind::CompactNonemptyCells => (
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridOffsets,
+                }],
                 vec![
                     DataHandle::SpatialStorage {
-                        kind: SpatialStorageKind::GridCells,
+                        kind: SpatialStorageKind::NonemptyCells,
                     },
                     DataHandle::SpatialStorage {
-                        kind: SpatialStorageKind::GridOffsets,
+                        kind: SpatialStorageKind::NonemptyCellsIndirectArgs,
                     },
                 ],
-                vec![DataHandle::SpatialStorage {
-                    kind: SpatialStorageKind::QueryResults,
-                }],
             ),
         }
     }
 
     /// Stable snake_case label for pretty-printing.
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> String {
         match self {
-            SpatialQueryKind::BuildHash => "build_hash",
-            SpatialQueryKind::KinQuery => "kin_query",
-            SpatialQueryKind::EngagementQuery => "engagement_query",
+            SpatialQueryKind::BuildHash => String::from("build_hash"),
+            SpatialQueryKind::FilteredWalk { filter } => {
+                format!("filtered_walk(filter=#{})", filter.0)
+            }
+            SpatialQueryKind::CompactNonemptyCells => {
+                String::from("compact_nonempty_cells")
+            }
+            SpatialQueryKind::BuildHashCount => String::from("build_hash_count"),
+            SpatialQueryKind::BuildHashScanLocal => String::from("build_hash_scan_local"),
+            SpatialQueryKind::BuildHashScanCarry => String::from("build_hash_scan_carry"),
+            SpatialQueryKind::BuildHashScanAdd => String::from("build_hash_scan_add"),
+            SpatialQueryKind::BuildHashScatter => String::from("build_hash_scatter"),
         }
     }
 }
 
 impl fmt::Display for SpatialQueryKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.label())
+        f.write_str(&self.label())
     }
 }
 
@@ -598,6 +762,9 @@ impl ComputeOpKind {
                 let (r, w) = kind.dependencies();
                 reads.extend(r);
                 writes.extend(w);
+                if let SpatialQueryKind::FilteredWalk { filter } = kind {
+                    collect_expr_reads(*filter, exprs, &mut reads);
+                }
             }
             ComputeOpKind::Plumbing { kind } => {
                 // Plumbing kinds carry their (reads, writes) signature
@@ -838,23 +1005,21 @@ mod tests {
 
     // ---- SpatialQueryKind ----
 
-    #[test]
-    fn spatial_query_kind_display_and_roundtrip() {
-        let cases = [
-            (SpatialQueryKind::BuildHash, "build_hash"),
-            (SpatialQueryKind::KinQuery, "kin_query"),
-            (SpatialQueryKind::EngagementQuery, "engagement_query"),
-        ];
-        for (kind, expected) in cases {
-            assert_eq!(format!("{}", kind), expected);
-            assert_roundtrip(&kind);
-        }
-    }
 
     #[test]
     fn spatial_query_kind_dependencies_build_hash() {
+        // BuildHash now reads `agent_pos` (it computes each agent's
+        // cell from its position) — declared as a structural read so
+        // the BGL composer binds `agent_pos` to the kernel.
         let (r, w) = SpatialQueryKind::BuildHash.dependencies();
-        assert!(r.is_empty());
+        use crate::cg::data_handle::{AgentFieldId, AgentRef};
+        assert_eq!(
+            r,
+            vec![DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::Self_,
+            }]
+        );
         assert_eq!(
             w,
             vec![
@@ -868,29 +1033,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn spatial_query_kind_dependencies_kin_query() {
-        let (r, w) = SpatialQueryKind::KinQuery.dependencies();
-        assert_eq!(r.len(), 2);
-        assert_eq!(
-            w,
-            vec![DataHandle::SpatialStorage {
-                kind: SpatialStorageKind::QueryResults,
-            }]
-        );
-    }
 
-    #[test]
-    fn spatial_query_kind_dependencies_engagement_query() {
-        let (r, w) = SpatialQueryKind::EngagementQuery.dependencies();
-        assert_eq!(r.len(), 2);
-        assert_eq!(
-            w,
-            vec![DataHandle::SpatialStorage {
-                kind: SpatialStorageKind::QueryResults,
-            }]
-        );
-    }
 
     // ---- PlumbingKind (Task 2.7) ----
 
@@ -1340,23 +1483,6 @@ mod tests {
         assert!(w.is_empty(), "expected no writes, got {w:?}");
     }
 
-    #[test]
-    fn spatial_query_kind_op_deps_match_kind_signature() {
-        let exprs: Vec<CgExpr> = vec![];
-        let stmts: Vec<CgStmt> = vec![];
-        let lists: Vec<CgStmtList> = vec![];
-        for kind in [
-            SpatialQueryKind::BuildHash,
-            SpatialQueryKind::KinQuery,
-            SpatialQueryKind::EngagementQuery,
-        ] {
-            let op_kind = ComputeOpKind::SpatialQuery { kind };
-            let (op_r, op_w) = op_kind.compute_dependencies(&exprs, &stmts, &lists);
-            let (k_r, k_w) = kind.dependencies();
-            assert_eq!(op_r, k_r);
-            assert_eq!(op_w, k_w);
-        }
-    }
 
     #[test]
     fn plumbing_kind_op_deps_match_kind_signature() {
@@ -1720,5 +1846,84 @@ mod tests {
         assert!(op.reads.is_empty());
         op.record_read(src.clone());
         assert_eq!(op.reads, vec![src]);
+    }
+
+    // ---- FilteredWalk (Phase 7 Task 1) ----
+
+    #[test]
+    fn filtered_walk_dependencies_match_legacy_walk_signature() {
+        let kind = SpatialQueryKind::FilteredWalk {
+            filter: CgExprId(0),
+        };
+        let (r, w) = kind.dependencies();
+        assert_eq!(
+            r,
+            vec![
+                DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridCells,
+                },
+                DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridOffsets,
+                },
+            ]
+        );
+        assert_eq!(
+            w,
+            vec![DataHandle::SpatialStorage {
+                kind: SpatialStorageKind::QueryResults,
+            }]
+        );
+    }
+
+    #[test]
+    fn filtered_walk_label_includes_filter_id() {
+        let kind = SpatialQueryKind::FilteredWalk {
+            filter: CgExprId(7),
+        };
+        assert_eq!(kind.label(), "filtered_walk(filter=#7)");
+    }
+
+    #[test]
+    fn filtered_walk_op_includes_filter_expr_reads() {
+        use crate::cg::dispatch::DispatchShape;
+        use crate::cg::program::CgProgramBuilder;
+
+        let mut builder = CgProgramBuilder::new();
+        let filter_id = builder
+            .add_expr(CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::PerPairCandidate,
+            }))
+            .expect("filter expr pushes");
+
+        let op_id = builder
+            .add_op(
+                ComputeOpKind::SpatialQuery {
+                    kind: SpatialQueryKind::FilteredWalk { filter: filter_id },
+                },
+                DispatchShape::PerAgent,
+                Span::dummy(),
+            )
+            .expect("op pushes");
+
+        let prog = builder.finish();
+        let op = &prog.ops[op_id.0 as usize];
+        assert!(
+            op.reads.contains(&DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::PerPairCandidate,
+            }),
+            "filter's agent_pos read should propagate to op.reads, got {:?}",
+            op.reads
+        );
+        assert!(
+            op.reads.iter().any(|h| matches!(
+                h,
+                DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridCells
+                }
+            )),
+            "static grid_cells read still present"
+        );
     }
 }

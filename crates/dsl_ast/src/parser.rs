@@ -113,6 +113,7 @@ fn decl_annotations_mut(d: &mut Decl) -> Option<&mut Vec<Annotation>> {
         Decl::Probe(x) => &mut x.annotations,
         Decl::Metric(x) => &mut x.annotations,
         Decl::Config(x) => &mut x.annotations,
+        Decl::SpatialQuery(x) => &mut x.annotations,
         // `query` does not currently accept annotations on the decl; trailing
         // `@`s after a `query` will fall through to the orphan-annotation
         // error path on the next iteration.
@@ -136,6 +137,7 @@ fn decl_span_mut(d: &mut Decl) -> &mut Span {
         Decl::Metric(x) => &mut x.span,
         Decl::Config(x) => &mut x.span,
         Decl::Query(x) => &mut x.span,
+        Decl::SpatialQuery(x) => &mut x.span,
     }
 }
 
@@ -164,10 +166,13 @@ fn decl(c: &mut Cursor) -> PResult<Decl> {
         Some("probe") => probe_decl(c, annotations, start).map(Decl::Probe),
         Some("metric") => metric_block(c, annotations, start).map(Decl::Metric),
         Some("config") => config_decl(c, annotations, start).map(Decl::Config),
+        Some("spatial_query") => {
+            spatial_query_decl(c, annotations, start).map(Decl::SpatialQuery)
+        }
         _ => Err(ParseErr::at(
             here(c),
             format!(
-                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config); got `{}`",
+                "expected top-level declaration (entity, event, event_tag, enum, view, query, physics, mask, verb, scoring, invariant, probe, metric, config, spatial_query); got `{}`",
                 peek_word_for_error(c)
             ),
         )),
@@ -633,6 +638,33 @@ fn view_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PRes
     c.skip_ws();
     expect_char(c, '}').map_err(|e| e.with_context("parsing view body `}`"))?;
     Ok(ViewDecl { annotations, name, params, return_ty, body, span: Span::new(start, c.pos) })
+}
+
+/// Parse `spatial_query <name>(<params>) = <filter_expr>`.
+///
+/// Mirrors `verb_decl` (the closest sibling: also `name(params) =
+/// <body>`); the body is a single expression (Bool — well_formed
+/// gates it once lowered to CG). Phase 7 Task 4.
+fn spatial_query_decl(
+    c: &mut Cursor,
+    annotations: Vec<Annotation>,
+    start: usize,
+) -> PResult<SpatialQueryDecl> {
+    expect_keyword(c, "spatial_query")
+        .map_err(|e| e.with_context("parsing `spatial_query` declaration"))?;
+    let name = ident(c).map_err(|e| e.with_context("parsing spatial_query name"))?;
+    let params = parse_params(c)?;
+    c.skip_ws();
+    expect_char(c, '=').map_err(|e| e.with_context("parsing spatial_query `=`"))?;
+    c.skip_ws();
+    let filter = parse_expr(c)?;
+    Ok(SpatialQueryDecl {
+        annotations,
+        name,
+        params,
+        filter,
+        span: Span::new(start, c.pos),
+    })
 }
 
 fn parse_view_body(c: &mut Cursor) -> PResult<ViewBody> {

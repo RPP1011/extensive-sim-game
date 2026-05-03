@@ -2,19 +2,18 @@
 name = "engine_gpu_rules"
 version = "0.1.0"
 edition = "2021"
-build = "build.rs"
+
+# Phase 7 wolf-sim wipe (2026-05-02): the wolf-sim engine + engine_data
+# dependencies were dropped along with the runtime crates. The crate
+# survives as the regen target for `compile-dsl --cg-canonical`'s
+# WGSL/Rust kernel output. Until a new DSL fixture is built, `lib.rs`
+# is an empty placeholder. When the new fixture lands, this Cargo.toml
+# may need to add back deps for the runtime types the regenerated code
+# references (likely `bytemuck`, `wgpu`, plus a successor for the
+# state/scratch types previously in `engine_data`).
 
 [dependencies]
-engine = { path = "../engine" }
-engine_data = { path = "../engine_data" }
-bytemuck = { version = "1.16", features = ["derive"] }
-wgpu = "=26.0.1"
 
 [features]
 default = []
-# Mirror of engine_gpu's gpu feature; pulls in wgpu-touching code paths.
 gpu = []
-
-[dev-dependencies]
-sha2 = "0.10"
-naga = { version = "=26.0.0", features = ["wgsl-in"] }

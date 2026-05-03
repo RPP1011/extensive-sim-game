@@ -1,0 +1,155 @@
+// Boids — Reynolds-style flocking fixture (Phase 7 follow-up to the
+// minimum-viable shape from 2026-05-02).
+//
+// Every Boid each tick reads its neighborhood (N²-walk over `agents`)
+// and updates its own velocity by blending the three classical
+// steering rules — cohesion (toward the centroid), alignment (match
+// average velocity), separation (push away from very-close peers) —
+// then integrates position from the new velocity.
+//
+// What this exercises in the compiler today:
+//   - entity declaration with vec3 fields
+//   - lazy view + nested `sum(...)` folds over agents (the N²-fold
+//     CgStmt::ForEachAgent path lit up alongside this fixture)
+//   - per-agent physics rule with `@phase(per_agent)`
+//   - `if cond { vec3 } else { vec3 }` projections inside fold bodies
+//     (the where-body slot doubles as the projection — there's no
+//     separate `:projection` syntax, so we use ternary inside the body)
+//   - vec3 by-scalar arithmetic (`force * weight`, `sum / count`)
+//
+// What this does NOT exercise end-to-end:
+//   - The declared `spatial_query nearby_other` is unused — the folds
+//     walk all `agents` slots (O(N²) per tick). The query stays in the
+//     fixture as the future surface that will let the same `sum(...)`
+//     forms compile to a bounded spatial walk.
+//   - `count(...)` would be the natural way to express neighborhood
+//     count, but it returns i32 — no i32→f32 cast surface today, so
+//     we use `sum(... ? 1.0 : 0.0)` to get a directly-divisible f32
+//     denominator. Adding an i32→f32 cast would simplify the body.
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+// Per-tick driver event. Carries no payload — the implicit `tick: u32`
+// field every event receives is enough. The `physics MoveBoid` rule
+// uses `on Tick {} { ... }` as a syntactic placeholder so the parser's
+// mandatory `on <pattern>` clause is satisfied; the `@phase(per_agent)`
+// annotation overrides per-event dispatch with per-agent dispatch, so
+// no `Tick` events ever actually fire — `Tick` exists purely so the
+// resolver can look up the event name in the registry.
+event Tick { }
+
+// ---------------------------------------------------------------------------
+// Entity
+// ---------------------------------------------------------------------------
+
+// One Boid per agent slot. Position + velocity is the entire state.
+entity Boid : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// ---------------------------------------------------------------------------
+// Spatial filter
+// ---------------------------------------------------------------------------
+
+// Accept any other agent. The body template walks every cell today;
+// radius-bounded walks land when the spatial-walk emit grows beyond
+// the v1 stub (cg/emit/kernel.rs::spatial_filtered_walk_body).
+spatial_query nearby_other(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+config flock {
+  perception_radius: f32 = 6.0,
+  separation_radius: f32 = 1.5,
+  max_speed: f32         = 0.4,
+  alignment_weight: f32  = 1.0,
+  cohesion_weight: f32   = 0.6,
+  separation_weight: f32 = 1.4,
+}
+
+// ---------------------------------------------------------------------------
+// Derived neighborhood quantity (lazy view)
+// ---------------------------------------------------------------------------
+
+// Number of perceived neighbors. The only steering quantity v1 expresses
+// in pure-DSL is the count — vec3 sums (centroid, average velocity,
+// separation force) need a `sum_vec3`-style builtin or a view-fold
+// surface that's still a follow-up.
+view neighbor_count(self: Agent) -> i32 {
+  count(other in agents where
+    other != self
+    && distance(self.pos, other.pos) < config.flock.perception_radius)
+}
+
+// ---------------------------------------------------------------------------
+// Per-tick physics
+// ---------------------------------------------------------------------------
+
+// One per-agent sweep per tick — Reynolds steering composition.
+physics MoveBoid @phase(per_agent) {
+  on Tick {} {
+    // ---- Neighborhood denominator -----------------------------------------
+    //
+    // Number of perception-radius neighbors as f32 (so we can divide
+    // vec3 sums directly). The `+ 1.0` keeps the divide safe when an
+    // agent has no neighbors — it falls back to "average over self" =
+    // self.pos / self.vel, producing zero steering delta. count(...)
+    // would be i32; until an i32→f32 cast surface exists, this
+    // 1.0/0.0 sum is the cheapest way to get a divisible f32.
+    let n_safe = sum(other in spatial.nearby_other(self) where
+      if (other != self)
+         && (distance(self.pos, other.pos) < config.flock.perception_radius) {
+        1.0
+      } else {
+        0.0
+      }) + 1.0;
+
+    // ---- Cohesion: steer toward the centroid of perception neighbors -----
+    let centroid_sum = sum(other in spatial.nearby_other(self) where
+      if (other != self)
+         && (distance(self.pos, other.pos) < config.flock.perception_radius) {
+        other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let centroid = centroid_sum / n_safe;
+    let cohesion_force = (centroid - self.pos) * config.flock.cohesion_weight;
+
+    // ---- Alignment: steer toward the average velocity of those neighbors -
+    let velocity_sum = sum(other in spatial.nearby_other(self) where
+      if (other != self)
+         && (distance(self.pos, other.pos) < config.flock.perception_radius) {
+        other.vel
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let avg_vel = velocity_sum / n_safe;
+    let alignment_force = (avg_vel - self.vel) * config.flock.alignment_weight;
+
+    // ---- Separation: push away from very-close peers ---------------------
+    //
+    // No divide — magnitude scales naturally with proximity (each
+    // close neighbor contributes a `(self.pos - other.pos)` vector,
+    // larger when other is closer because the gating filter uses
+    // `separation_radius` rather than reciprocal-distance weighting).
+    let separation_force = sum(other in spatial.nearby_other(self) where
+      if (other != self)
+         && (distance(self.pos, other.pos) < config.flock.separation_radius) {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      }) * config.flock.separation_weight;
+
+    let new_vel = self.vel + cohesion_force + alignment_force + separation_force;
+    let new_pos = self.pos + new_vel;
+
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}

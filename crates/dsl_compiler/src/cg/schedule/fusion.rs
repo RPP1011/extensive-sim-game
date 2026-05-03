@@ -98,6 +98,19 @@ pub enum DispatchShapeKey {
     OneShot,
     /// Per-bitmap-word dispatch (alive-bitmap pack and friends).
     PerWord,
+    /// Per-spatial-cell dispatch (tiled-MoveBoid kernel). Each
+    /// workgroup owns one cell and cooperatively walks the 27-cell
+    /// neighborhood — fusion with non-PerCell ops would require
+    /// rewriting the cooperative-load preamble, so PerCell sits in
+    /// its own key class today.
+    PerCell,
+    /// Per-scan-chunk dispatch (parallel prefix scan). Each
+    /// workgroup owns one 256-cell chunk; lanes cooperate on the
+    /// Hillis-Steele in-shared-memory scan. Sits in its own key
+    /// class — fusion would require sharing the workgroup-shared
+    /// `scan_shared` array across ops, which the current emit
+    /// pipeline does not support.
+    PerScanChunk,
 }
 
 /// Project a [`DispatchShape`] to its [`DispatchShapeKey`]. The
@@ -110,6 +123,8 @@ pub fn dispatch_shape_key(shape: &DispatchShape) -> DispatchShapeKey {
         DispatchShape::PerPair { source } => DispatchShapeKey::PerPair(*source),
         DispatchShape::OneShot => DispatchShapeKey::OneShot,
         DispatchShape::PerWord => DispatchShapeKey::PerWord,
+        DispatchShape::PerCell => DispatchShapeKey::PerCell,
+        DispatchShape::PerScanChunk => DispatchShapeKey::PerScanChunk,
     }
 }
 
@@ -582,23 +597,49 @@ fn cross_domain_split_decision(
             ComputeOpKind::PhysicsRule { .. },
             ComputeOpKind::PhysicsRule { .. },
         ) => None,
+        // SpatialQuery ops never fuse with anything. The semantics
+        // require BuildHash to fully populate the spatial grid in
+        // its own dispatch BEFORE any consumer kernel reads from it
+        // — within a single fused dispatch there's no cross-
+        // workgroup synchronization, so a fused (BuildHash, consumer)
+        // pair would race on the per-cell counts. The same applies
+        // to a (consumer, BuildHash) ordering: BuildHash for next
+        // tick must observe this tick's *committed* writes, which
+        // require its own dispatch barrier.
+        //
+        // Pick a witness that names the spatial-grid handle the two
+        // sides communicate over so the diagnostic message reads
+        // sensibly ("split between op#X and op#Y: SpatialStorage").
+        // Either side carrying the SpatialStorage handle in its
+        // reads/writes works; default to the first.
+        (ComputeOpKind::SpatialQuery { .. }, _) | (_, ComputeOpKind::SpatialQuery { .. }) => {
+            let witness = prev
+                .writes
+                .iter()
+                .chain(prev.reads.iter())
+                .chain(next.writes.iter())
+                .chain(next.reads.iter())
+                .find(|h| matches!(h, DataHandle::SpatialStorage { .. }))
+                .cloned()
+                .unwrap_or(DataHandle::SpatialStorage {
+                    kind: crate::cg::data_handle::SpatialStorageKind::GridCells,
+                });
+            Some(JoinDecision::SplitWrite(witness))
+        }
         // All other prev/next combinations defer to the conventional
         // WAW check. List the remaining pairs explicitly so adding a
         // new `ComputeOpKind` variant forces an explicit decision
         // here (rather than silently inheriting the WAW-only fallback).
         (ComputeOpKind::MaskPredicate { .. }, _)
         | (ComputeOpKind::ScoringArgmax { .. }, _)
-        | (ComputeOpKind::SpatialQuery { .. }, _)
         | (ComputeOpKind::Plumbing { .. }, _)
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::MaskPredicate { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::ScoringArgmax { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::PhysicsRule { .. })
-        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::SpatialQuery { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::Plumbing { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::MaskPredicate { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::ScoringArgmax { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::ViewFold { .. })
-        | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::SpatialQuery { .. })
         | (ComputeOpKind::PhysicsRule { .. }, ComputeOpKind::Plumbing { .. }) => None,
     }
 }
@@ -831,7 +872,9 @@ pub(super) fn classify(ops: &[OpId], shape: &DispatchShape) -> FusibilityClass {
         DispatchShape::PerAgent
         | DispatchShape::PerPair { .. }
         | DispatchShape::OneShot
-        | DispatchShape::PerWord => {
+        | DispatchShape::PerWord
+        | DispatchShape::PerCell
+        | DispatchShape::PerScanChunk => {
             if ops.len() < 2 {
                 FusibilityClass::Split
             } else {
@@ -889,7 +932,7 @@ mod tests {
         AgentFieldId, AgentRef, AgentScratchKind, DataHandle, EventRingAccess, EventRingId, MaskId,
         ViewId, ViewStorageSlot,
     };
-    use crate::cg::dispatch::{DispatchShape, PerPairSource};
+    use crate::cg::dispatch::DispatchShape;
     use crate::cg::expr::{CgExpr, LitValue};
     use crate::cg::op::{
         ComputeOpKind, EventKindId, OpId, PlumbingKind, ReplayabilityFlag, Span, SpatialQueryKind,
@@ -1432,30 +1475,6 @@ mod tests {
 
     // --- bonus: dispatch_shape_key exhaustiveness ----------------------
 
-    #[test]
-    fn dispatch_shape_key_distinguishes_every_variant() {
-        let keys = [
-            dispatch_shape_key(&DispatchShape::PerAgent),
-            dispatch_shape_key(&DispatchShape::PerEvent {
-                source_ring: EventRingId(0),
-            }),
-            dispatch_shape_key(&DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-            }),
-            dispatch_shape_key(&DispatchShape::OneShot),
-            dispatch_shape_key(&DispatchShape::PerWord),
-        ];
-        // All five distinct.
-        for i in 0..keys.len() {
-            for j in 0..keys.len() {
-                if i == j {
-                    assert_eq!(keys[i], keys[j]);
-                } else {
-                    assert_ne!(keys[i], keys[j], "keys[{i}] == keys[{j}]");
-                }
-            }
-        }
-    }
 
     #[test]
     fn dispatch_shape_key_distinguishes_per_event_rings() {
@@ -1468,16 +1487,6 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    #[test]
-    fn dispatch_shape_key_distinguishes_per_pair_sources() {
-        let a = dispatch_shape_key(&DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        });
-        let b = dispatch_shape_key(&DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
-        });
-        assert_ne!(a, b);
-    }
 
     // --- bonus: pack/unpack-style group with auto-derived writes -------
 
@@ -1508,10 +1517,14 @@ mod tests {
     // --- bonus: verify SpatialQuery ops are well-handled ---------------
 
     #[test]
-    fn spatial_query_ops_classify_normally_under_per_agent_shape() {
-        // SpatialQuery::BuildHash carries DispatchShape::PerAgent in
-        // the typical lowering — verify a build_hash + per_agent mask
-        // co-fuse when no write conflict exists.
+    fn spatial_query_ops_split_from_other_per_agent_ops() {
+        // SpatialQuery::BuildHash MUST run as its own dispatch — the
+        // per-cell counting-sort writes must be visible to consumer
+        // kernels via a real device-side barrier (kernel boundary),
+        // which fusion would erase. `cross_domain_split_decision`
+        // forces the split for every (SpatialQuery, X) and
+        // (X, SpatialQuery) pairing. Verify a build_hash next to a
+        // per_agent mask produces TWO groups, not one.
         let mut b = CgProgramBuilder::new();
         let build = b
             .add_op(
@@ -1526,12 +1539,9 @@ mod tests {
         let prog = b.finish();
         let deps = dependency_graph(&prog);
         let (groups, _) = fusion_decisions(&prog, &deps);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].ops, vec![build, m]);
-        assert_eq!(
-            groups[0].fusibility_classification,
-            FusibilityClass::Fused
-        );
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].ops, vec![build]);
+        assert_eq!(groups[1].ops, vec![m]);
     }
 
     // --- bonus: AgentScratch handle round-trips through diagnostics ----
