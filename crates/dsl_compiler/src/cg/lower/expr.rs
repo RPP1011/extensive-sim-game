@@ -1260,19 +1260,24 @@ fn pick_binary_op(op: BinOp, ty: CgTy, span: Span) -> Result<BinaryOp, LoweringE
             })
         }
 
-        // Arithmetic — F32, U32, I32 only.
+        // Arithmetic — F32, U32, I32, plus Vec3 (componentwise +/-).
         (BinOp::Add, CgTy::F32) => Ok(BinaryOp::AddF32),
         (BinOp::Add, CgTy::U32) => Ok(BinaryOp::AddU32),
         (BinOp::Add, CgTy::I32) => Ok(BinaryOp::AddI32),
+        (BinOp::Add, CgTy::Vec3F32) => Ok(BinaryOp::AddVec3),
         (BinOp::Sub, CgTy::F32) => Ok(BinaryOp::SubF32),
         (BinOp::Sub, CgTy::U32) => Ok(BinaryOp::SubU32),
         (BinOp::Sub, CgTy::I32) => Ok(BinaryOp::SubI32),
+        (BinOp::Sub, CgTy::Vec3F32) => Ok(BinaryOp::SubVec3),
         (BinOp::Mul, CgTy::F32) => Ok(BinaryOp::MulF32),
         (BinOp::Mul, CgTy::U32) => Ok(BinaryOp::MulU32),
         (BinOp::Mul, CgTy::I32) => Ok(BinaryOp::MulI32),
         (BinOp::Div, CgTy::F32) => Ok(BinaryOp::DivF32),
         (BinOp::Div, CgTy::U32) => Ok(BinaryOp::DivU32),
         (BinOp::Div, CgTy::I32) => Ok(BinaryOp::DivI32),
+        // Vec3 mul/div not yet supported — boids steering uses only +/-
+        // today. When weighted-sum forms (`alignment * weight + ...`)
+        // arrive, add Vec3-by-scalar variants here.
         (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div, _) => {
             Err(LoweringError::IllTypedExpression {
                 expected: CgTy::F32,

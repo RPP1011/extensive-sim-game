@@ -169,6 +169,15 @@ pub enum BinaryOp {
     MulI32,
     DivI32,
 
+    // --- Vec3 arithmetic (Phase 7 boids fixture) ---
+    //
+    // Componentwise vec3+vec3 → vec3 and vec3-vec3 → vec3 — the two
+    // shapes the boids steering math needs (`self.vel + zero_steer`,
+    // `centroid - self.pos`). Scalar×vec3 is deferred until a fixture
+    // actually needs weighted steering deltas.
+    AddVec3,
+    SubVec3,
+
     // --- Ordered comparisons ---
     //
     // No `*Tick` variants — tick stamps are represented as `u32` once
@@ -221,6 +230,7 @@ impl BinaryOp {
             AddI32 | SubI32 | MulI32 | DivI32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32 | NeI32 => {
                 CgTy::I32
             }
+            AddVec3 | SubVec3 => CgTy::Vec3F32,
             EqAgentId | NeAgentId => CgTy::AgentId,
             EqBool | NeBool | And | Or => CgTy::Bool,
         }
@@ -233,6 +243,7 @@ impl BinaryOp {
             AddF32 | SubF32 | MulF32 | DivF32 => CgTy::F32,
             AddU32 | SubU32 | MulU32 | DivU32 => CgTy::U32,
             AddI32 | SubI32 | MulI32 | DivI32 => CgTy::I32,
+            AddVec3 | SubVec3 => CgTy::Vec3F32,
             // Every comparison and logical op produces `Bool`.
             LtF32 | LeF32 | GtF32 | GeF32 | EqF32 | NeF32 | LtU32 | LeU32 | GtU32 | GeU32
             | EqU32 | NeU32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32 | NeI32 | EqAgentId
@@ -258,6 +269,8 @@ impl BinaryOp {
             SubI32 => "sub.i32",
             MulI32 => "mul.i32",
             DivI32 => "div.i32",
+            AddVec3 => "add.vec3",
+            SubVec3 => "sub.vec3",
             LtF32 => "lt.f32",
             LeF32 => "le.f32",
             GtF32 => "gt.f32",

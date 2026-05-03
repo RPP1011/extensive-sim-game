@@ -381,8 +381,8 @@ impl std::error::Error for EmitError {}
 fn binary_op_to_wgsl(op: BinaryOp) -> &'static str {
     use BinaryOp::*;
     match op {
-        AddF32 | AddU32 | AddI32 => "+",
-        SubF32 | SubU32 | SubI32 => "-",
+        AddF32 | AddU32 | AddI32 | AddVec3 => "+",
+        SubF32 | SubU32 | SubI32 | SubVec3 => "-",
         MulF32 | MulU32 | MulI32 => "*",
         DivF32 | DivU32 | DivI32 => "/",
         LtF32 | LtU32 | LtI32 => "<",
