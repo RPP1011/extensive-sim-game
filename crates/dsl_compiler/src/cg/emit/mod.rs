@@ -68,6 +68,11 @@
 pub mod cross_cutting;
 pub mod kernel;
 pub mod program;
+/// Spatial-grid configuration shared between compiler emit and per-
+/// fixture runtime crates. See `spatial::compose_spatial_prelude` for
+/// the kernel-side WGSL prelude; runtime crates consume `cells_bytes`
+/// / `offsets_bytes` / `num_cells` to size their `wgpu::Buffer`s.
+pub mod spatial;
 pub mod wgsl_body;
 
 // Phase 7 boids GPU pipeline (2026-05-02): the wolf-sim runtime

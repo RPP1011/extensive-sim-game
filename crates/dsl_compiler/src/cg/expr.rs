@@ -177,6 +177,18 @@ pub enum BinaryOp {
     // actually needs weighted steering deltas.
     AddVec3,
     SubVec3,
+    /// Asymmetric: lhs is `vec3<f32>`, rhs is `f32`; result is the
+    /// per-component product `lhs * rhs`. WGSL emits this natively as
+    /// `(vec3 * f32)`. Used by boids steering for weighted force
+    /// composition (`alignment_force * alignment_weight`, etc.). The
+    /// type-checker reads the asymmetric `(Vec3F32, F32)` operand
+    /// pair from [`Self::operand_tys`].
+    MulVec3ByF32,
+    /// Asymmetric: lhs is `vec3<f32>`, rhs is `f32`; result is the
+    /// per-component quotient `lhs / rhs`. WGSL emits this natively
+    /// as `(vec3 / f32)`. Used by boids cohesion / alignment for
+    /// "average position / velocity over neighborhood" — sum / count.
+    DivVec3ByF32,
 
     // --- Ordered comparisons ---
     //
@@ -230,9 +242,26 @@ impl BinaryOp {
             AddI32 | SubI32 | MulI32 | DivI32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32 | NeI32 => {
                 CgTy::I32
             }
-            AddVec3 | SubVec3 => CgTy::Vec3F32,
+            AddVec3 | SubVec3 | MulVec3ByF32 | DivVec3ByF32 => CgTy::Vec3F32,
             EqAgentId | NeAgentId => CgTy::AgentId,
             EqBool | NeBool | And | Or => CgTy::Bool,
+        }
+    }
+
+    /// Operand-pair types — `(lhs_ty, rhs_ty)`. For symmetric ops
+    /// returns `(operand_ty(), operand_ty())`; for the asymmetric
+    /// vec3-by-scalar ops returns `(Vec3F32, F32)`. The type checker
+    /// (and any future rewriter) consults this rather than
+    /// [`Self::operand_ty`] when it needs each operand's expected
+    /// type independently.
+    pub fn operand_tys(self) -> (CgTy, CgTy) {
+        use BinaryOp::*;
+        match self {
+            MulVec3ByF32 | DivVec3ByF32 => (CgTy::Vec3F32, CgTy::F32),
+            _ => {
+                let t = self.operand_ty();
+                (t, t)
+            }
         }
     }
 
@@ -243,7 +272,7 @@ impl BinaryOp {
             AddF32 | SubF32 | MulF32 | DivF32 => CgTy::F32,
             AddU32 | SubU32 | MulU32 | DivU32 => CgTy::U32,
             AddI32 | SubI32 | MulI32 | DivI32 => CgTy::I32,
-            AddVec3 | SubVec3 => CgTy::Vec3F32,
+            AddVec3 | SubVec3 | MulVec3ByF32 | DivVec3ByF32 => CgTy::Vec3F32,
             // Every comparison and logical op produces `Bool`.
             LtF32 | LeF32 | GtF32 | GeF32 | EqF32 | NeF32 | LtU32 | LeU32 | GtU32 | GeU32
             | EqU32 | NeU32 | LtI32 | LeI32 | GtI32 | GeI32 | EqI32 | NeI32 | EqAgentId
@@ -271,6 +300,8 @@ impl BinaryOp {
             DivI32 => "div.i32",
             AddVec3 => "add.vec3",
             SubVec3 => "sub.vec3",
+            MulVec3ByF32 => "mul.vec3.f32",
+            DivVec3ByF32 => "div.vec3.f32",
             LtF32 => "lt.f32",
             LeF32 => "le.f32",
             GtF32 => "gt.f32",
@@ -791,6 +822,16 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
         H::SpatialStorage { kind } => match kind {
             SpatialStorageKind::GridCells | SpatialStorageKind::QueryResults => CgTy::AgentId,
             SpatialStorageKind::GridOffsets => CgTy::U32,
+            // NonemptyCells holds compact cell indices, NonemptyCellsIndirectArgs
+            // holds dispatch tuples, GridStarts holds prefix-scan
+            // outputs — all u32 from the DSL's perspective. None of
+            // these is read via DSL surface (the tiled MoveBoid emit
+            // reads them through fixed WGSL templates, not via
+            // `read(SpatialStorage{kind})`); the type annotation here
+            // keeps the closed-set match exhaustive.
+            SpatialStorageKind::NonemptyCells
+            | SpatialStorageKind::NonemptyCellsIndirectArgs
+            | SpatialStorageKind::GridStarts => CgTy::U32,
         },
         H::Rng { .. } => CgTy::U32,
         // Plumbing-only handles. These are touched only by
@@ -1194,20 +1235,20 @@ pub fn type_check(
             })?;
             let lhs_ty = type_check(lhs_node, *lhs, ctx)?;
             let rhs_ty = type_check(rhs_node, *rhs, ctx)?;
-            let want = op.operand_ty();
-            if lhs_ty != want {
+            let (want_lhs, want_rhs) = op.operand_tys();
+            if lhs_ty != want_lhs {
                 return Err(TypeError::OperandMismatch {
                     node: node_id,
                     operand_index: 0,
-                    expected: want,
+                    expected: want_lhs,
                     got: lhs_ty,
                 });
             }
-            if rhs_ty != want {
+            if rhs_ty != want_rhs {
                 return Err(TypeError::OperandMismatch {
                     node: node_id,
                     operand_index: 1,
-                    expected: want,
+                    expected: want_rhs,
                     got: rhs_ty,
                 });
             }

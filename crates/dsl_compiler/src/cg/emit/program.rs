@@ -201,6 +201,8 @@ pub fn emit_cg_program(
     let ctx = EmitCtx {
         prog,
         naming: HandleNamingStrategy::Structural,
+        tile_walk_index: std::cell::RefCell::new(None),
+        dispatch: std::cell::Cell::new(None),
     };
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {
@@ -304,6 +306,37 @@ fn compose_wgsl_file(
     out.push_str(&lower_wgsl_bindings(spec));
     out.push('\n');
 
+    // Emit `const config_<id>: f32 = <value>;` for every config-const
+    // referenced in the kernel body. The substring scan keys on
+    // `config_<id>` (the WGSL identifier `lower_cg_expr_to_wgsl`
+    // produces for `CgExpr::Read(DataHandle::ConfigConst { id })`).
+    // Today every config field defaults to a numeric literal (Boids'
+    // `flock` block), so a single-pass `f32` emission covers it; non-
+    // numeric defaults skip silently because no kernel references
+    // them. Sorted by id for deterministic output.
+    let mut emitted_consts = false;
+    for (id, value) in &prog.config_const_values {
+        let needle = format!("config_{}", id);
+        if body.contains(&needle) {
+            out.push_str(&format!("const config_{}: f32 = {:?};\n", id, value));
+            emitted_consts = true;
+        }
+    }
+    if emitted_consts {
+        out.push('\n');
+    }
+
+    // Spatial-grid prelude: constants + pos_to_cell / cell_index
+    // helpers, emitted only when the body touches a spatial binding.
+    // The same constants are mirrored on the runtime side
+    // (`crate::cg::emit::spatial::{CELL_SIZE,WORLD_HALF_EXTENT,...}`)
+    // so per-fixture runtime crates can size matching wgpu buffers
+    // without re-deriving the values from the WGSL.
+    let spatial_prelude = super::spatial::compose_spatial_prelude(body);
+    if !spatial_prelude.is_empty() {
+        out.push_str(&spatial_prelude);
+    }
+
     // Emit B1-stub prelude functions for every namespace method whose
     // WGSL function name appears in this kernel's body. The registry
     // (`prog.namespace_registry`) is the source of truth for both the
@@ -318,13 +351,62 @@ fn compose_wgsl_file(
         out.push('\n');
     }
 
+    // PerCell topologies (today only the tiled-MoveBoid kernel)
+    // need module-level `var<workgroup>` declarations for the
+    // cooperative tile arrays — they're shared across all lanes of
+    // the workgroup but addressed per-lane inside the kernel body.
+    // Sized for a 27-cell × MAX_PER_CELL neighborhood (= 864 entries
+    // for boids' defaults). The kernel preamble + per-fold inner
+    // walk both reference these symbols by name (`tile_pos`,
+    // `tile_vel`, `tile_count`); emitting the decls here keeps them
+    // alongside the matching `@compute @workgroup_size` header
+    // without smuggling a `var<workgroup>` mid-body (illegal in WGSL).
+    let is_per_cell = matches!(topology_dispatch_shape(topology), DispatchShape::PerCell);
+    if is_per_cell {
+        // The tile-array size derives from `MAX_PER_CELL` so a knob
+        // change in `crate::cg::emit::spatial` flows through here
+        // without a separate edit. The 27 stays a literal — it's a
+        // structural property of "3³ neighborhood" the tile-walk emit
+        // hardcodes too, and surfacing it as a constant would just
+        // make both sites read the same magic number.
+        let max_per_cell = super::spatial::MAX_PER_CELL;
+        let total_slots = 27 * max_per_cell;
+        out.push_str(&format!(
+            "// Workgroup-local tile arrays for the 27-cell neighborhood.\n\
+             // Sized for SPATIAL_MAX_PER_CELL (= {max}) slots per cell × 27\n\
+             // cells = {total} entries each. tile_count holds the per-cell\n\
+             // population; tile_pos/tile_vel mirror the agent fields the\n\
+             // body's projections read via per_pair_candidate.\n\
+             var<workgroup> tile_count: array<u32, 27>;\n\
+             var<workgroup> tile_pos: array<vec3<f32>, 27 * {max}>;\n\
+             var<workgroup> tile_vel: array<vec3<f32>, 27 * {max}>;\n\n",
+            max = max_per_cell,
+            total = total_slots,
+        ));
+    }
+
     let workgroup_x = topology_workgroup_size_x(topology);
 
-    out.push_str(&format!(
-        "@compute @workgroup_size({workgroup_x})\n\
-         fn {entry}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n",
-        entry = spec.entry_point
-    ));
+    if is_per_cell {
+        // PerCell entry point: take `workgroup_id` + `local_invocation_id`
+        // instead of the usual `global_invocation_id`. The body's
+        // `tiled_per_cell_preamble` (in kernel.rs) reads these to
+        // derive `home_cell` and `lane`.
+        out.push_str(&format!(
+            "@compute @workgroup_size({workgroup_x})\n\
+             fn {entry}(\n\
+             \x20   @builtin(workgroup_id) workgroup_id: vec3<u32>,\n\
+             \x20   @builtin(local_invocation_id) local_invocation_id: vec3<u32>,\n\
+             ) {{\n",
+            entry = spec.entry_point
+        ));
+    } else {
+        out.push_str(&format!(
+            "@compute @workgroup_size({workgroup_x})\n\
+             fn {entry}(@builtin(global_invocation_id) gid: vec3<u32>) {{\n",
+            entry = spec.entry_point
+        ));
+    }
     out.push_str(body);
     if !body.ends_with('\n') {
         out.push('\n');
@@ -332,6 +414,21 @@ fn compose_wgsl_file(
     out.push_str("}\n");
 
     out
+}
+
+/// Pull the dispatch shape off a topology — handles all variants by
+/// returning the per-stage shape stored on the topology. Used by
+/// `compose_wgsl_file` to switch between the standard
+/// `global_invocation_id` entry point and the PerCell
+/// `(workgroup_id, local_invocation_id)` form.
+fn topology_dispatch_shape(topology: &KernelTopology) -> DispatchShape {
+    match topology {
+        KernelTopology::Fused { dispatch, .. } => *dispatch,
+        KernelTopology::Split { dispatch, .. } => *dispatch,
+        KernelTopology::Indirect { .. } => DispatchShape::PerEvent {
+            source_ring: crate::cg::data_handle::EventRingId(0),
+        },
+    }
 }
 
 /// Walk the kernel `body` for substrings naming registered namespace-
@@ -966,6 +1063,19 @@ fn compose_dispatch_call(topology: &KernelTopology) -> String {
             wg_x = wg_x,
             wg_x_minus_one = wg_x - 1
         ),
+        DispatchShape::PerCell => {
+            // PerCell: one workgroup per spatial-grid cell. The cell
+            // count is fixed at compile time (see
+            // `crate::cg::emit::spatial::num_cells`); inline the
+            // constant here so the dispatch call doesn't depend on
+            // any runtime parameter and the per-fixture runtime
+            // doesn't have to thread `num_cells` through.
+            let n = crate::cg::emit::spatial::num_cells();
+            format!(
+                "        pass.dispatch_workgroups({}u32, 1, 1);\n",
+                n
+            )
+        }
     }
 }
 

@@ -811,6 +811,24 @@ fn populate_config_consts(
                     span: fld.span,
                 });
             }
+            // Capture the literal default into the program's
+            // `config_const_values` map so the WGSL emit can produce
+            // an inline `const config_<id>: f32 = <value>;` for every
+            // referenced const. Today F32-only — boids' fixture is
+            // all-float and the parser surface accepts numeric forms
+            // the cast can compress to f32; non-numeric defaults
+            // (Bool / String) skip silently because no compute kernel
+            // references them.
+            use dsl_ast::ast::ConfigDefault;
+            let value: Option<f32> = match &fld.default {
+                ConfigDefault::Float(v) => Some(*v as f32),
+                ConfigDefault::Int(v) => Some(*v as f32),
+                ConfigDefault::Uint(v) => Some(*v as f32),
+                ConfigDefault::Bool(_) | ConfigDefault::String(_) => None,
+            };
+            if let Some(v) = value {
+                ctx.builder.set_config_const_value(id, v);
+            }
         }
     }
 }
@@ -1501,21 +1519,48 @@ fn synthesize_movement_op(ctx: &mut LoweringCtx<'_>) -> Result<(), LoweringError
 /// exists.
 fn collect_required_spatial_kinds(prog: &CgProgram) -> Vec<SpatialQueryKind> {
     let mut consumers: BTreeSet<SpatialQueryKind> = BTreeSet::new();
+    let mut needs_build_hash = false;
     for op in &prog.ops {
         if let DispatchShape::PerPair {
             source: PerPairSource::SpatialQuery(kind),
         } = op.shape
         {
             consumers.insert(kind);
+            needs_build_hash = true;
+        }
+        // ForEachNeighbor consumers: any op (typically a per-agent
+        // PhysicsRule) that surfaces a `SpatialStorage` read in its
+        // dependency walk needs the spatial grid populated. The
+        // ForEachNeighbor stmt's body-walk
+        // (`collect_list_dependencies`) pushes
+        // `DataHandle::SpatialStorage { GridCells/GridOffsets }` as
+        // structural reads, so we detect them here regardless of the
+        // op's dispatch shape.
+        if op.reads.iter().any(|h| matches!(
+            h,
+            crate::cg::data_handle::DataHandle::SpatialStorage { .. }
+        )) {
+            needs_build_hash = true;
         }
     }
 
-    if consumers.is_empty() {
+    if !needs_build_hash {
         return Vec::new();
     }
 
-    let mut kinds = Vec::with_capacity(consumers.len() + 1);
-    kinds.push(SpatialQueryKind::BuildHash);
+    // Real counting sort: schedule the three phases in dependency
+    // order before any consumer. The bounded `BuildHash` legacy
+    // variant is no longer scheduled — the new three-phase build
+    // produces an uncapped per-cell layout that the tiled-MoveBoid
+    // emit consumes via `spatial_grid_starts[c..c+1]` slicing.
+    // Pre-existing FilteredWalk consumers (the wolf-sim mask flow,
+    // currently dormant in this fixture) were also wired against
+    // the bounded layout; if a fixture re-enables them, they need
+    // to be ported to the new starts/cells layout too.
+    let mut kinds = Vec::with_capacity(consumers.len() + 3);
+    kinds.push(SpatialQueryKind::BuildHashCount);
+    kinds.push(SpatialQueryKind::BuildHashScan);
+    kinds.push(SpatialQueryKind::BuildHashScatter);
     for k in consumers {
         kinds.push(k);
     }
@@ -1650,7 +1695,10 @@ fn collect_emits_in_list(list_id: CgStmtListId, prog: &CgProgram, out: &mut Vec<
                     collect_emits_in_list(arm.body, prog, out);
                 }
             }
-            CgStmt::Assign { .. } | CgStmt::Let { .. } => {}
+            CgStmt::Assign { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => {}
         }
     }
 }

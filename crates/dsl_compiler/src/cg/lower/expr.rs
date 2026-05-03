@@ -36,7 +36,7 @@ use crate::cg::expr::{
 };
 use crate::cg::op::{ActionId, EventKindId};
 use crate::cg::program::CgProgramBuilder;
-use crate::cg::stmt::{LocalId, VariantId};
+use crate::cg::stmt::{CgStmt, LocalId, VariantId};
 
 pub use super::error::LoweringError;
 
@@ -187,6 +187,29 @@ pub struct LoweringCtx<'a> {
     /// WGSL emit can resolve return types + access forms without a
     /// separate registry walk.
     pub namespace_registry: super::super::program::NamespaceRegistry,
+    /// Statements an in-flight expression lowering wants prepended to
+    /// the surrounding statement list. The N²-fold lowering uses this:
+    /// `IrExpr::Fold { Sum|Count, ... }` allocates a [`CgStmt::ForEachAgent`]
+    /// for the accumulator loop and pushes its id here, then returns a
+    /// [`crate::cg::expr::CgExpr::ReadLocal`] that reads the just-
+    /// populated accumulator. The driver-level `lower_stmt_list` (in
+    /// `physics.rs`) drains this buffer before each child stmt so the
+    /// fold loop runs ahead of its consumer in source order.
+    pub pending_pre_stmts: Vec<crate::cg::stmt::CgStmtId>,
+    /// Source-level name of the binder bound by the innermost active
+    /// fold (if any). Set by the fold lowering before lowering the
+    /// projection expression and cleared after; consumed by
+    /// [`lower_field`] / [`lower_bare_local`] so reads of `<binder>` /
+    /// `<binder>.<field>` resolve to [`AgentRef::PerPairCandidate`] /
+    /// [`crate::cg::expr::CgExpr::PerPairCandidateId`] just like the
+    /// existing pair-bound surfaces. `None` outside a fold context.
+    ///
+    /// Single-slot rather than a stack because today's fixtures don't
+    /// nest folds; a future fixture that does (`sum(other in agents :
+    /// sum(third in agents : ...))`) would need this to grow into a
+    /// stack and the fold lowering to save / restore around the
+    /// nested call.
+    pub fold_binder_name: Option<String>,
 }
 
 /// Captured form of a `@lazy` view's resolved AST: enough to
@@ -230,6 +253,8 @@ impl<'a> LoweringCtx<'a> {
             local_tys: HashMap::new(),
             event_layouts: HashMap::new(),
             namespace_registry: super::super::program::NamespaceRegistry::default(),
+            pending_pre_stmts: Vec::new(),
+            fold_binder_name: None,
         }
     }
 
@@ -309,13 +334,19 @@ impl<'a> LoweringCtx<'a> {
     /// `LocalId`, so successive calls produce a strictly increasing
     /// sequence regardless of insertion order.
     pub fn allocate_local(&mut self, ast_ref: LocalRef) -> LocalId {
-        // Pick max + 1 over the existing local ids. `0` for an empty
-        // map. Linear scan is fine: the per-handler local count is in
-        // the small single digits in real DSL.
+        // Pick max + 1 over both registries: AST-bound locals
+        // (`local_ids`) AND typed-only accumulator locals
+        // (`local_tys`-only entries are produced by the N²-fold
+        // lowering, which allocates anonymous `LocalId`s for fold
+        // accumulators without a corresponding `LocalRef`). Without
+        // chaining `local_tys` keys here, a fold accumulator allocated
+        // before a user `let` would share its id and the WGSL emit
+        // would produce `let local_0: ... = local_0;` aliasing.
         let next = self
             .local_ids
             .values()
             .map(|id| id.0)
+            .chain(self.local_tys.keys().map(|id| id.0))
             .max()
             .map(|m| m + 1)
             .unwrap_or(0);
@@ -630,11 +661,29 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
         // Future fixtures wanting `sum_vec3(...)` etc. surface as their
         // own `UnsupportedAstNode` deferrals here; extend the match
         // when a real consumer arrives.
-        IrExpr::Fold { kind, .. } => {
+        // N²-fold over `agents` — Sum-projection or Count-predicate
+        // shape, lowered as a `CgStmt::ForEachAgent` injected via
+        // `pending_pre_stmts` plus a `CgExpr::ReadLocal` reading the
+        // populated accumulator. See `lower_fold_over_agents` for the
+        // shape contract. Min/Max remain UnsupportedAstNode until a
+        // fixture asks for them — they require a different
+        // accumulator init (NEG_INFINITY / INFINITY) and per-iteration
+        // op (max / min instead of `+`), so the same scaffolding
+        // generalises easily but isn't useful today.
+        IrExpr::Fold { kind, binder_name, iter, body, .. } => {
             use dsl_ast::ast::FoldKind;
             match kind {
-                FoldKind::Count => add(ctx, CgExpr::Lit(LitValue::I32(0)), span),
-                FoldKind::Sum | FoldKind::Min | FoldKind::Max => {
+                FoldKind::Count | FoldKind::Sum => {
+                    lower_fold_over_agents(
+                        *kind,
+                        binder_name.as_deref(),
+                        iter.as_deref(),
+                        body,
+                        span,
+                        ctx,
+                    )
+                }
+                FoldKind::Min | FoldKind::Max => {
                     Err(LoweringError::UnsupportedAstNode {
                         ast_label: "Fold",
                         span,
@@ -838,6 +887,19 @@ fn lower_field(
             // user-visible identifiers.
             AgentRef::PerPairCandidate
         }
+        IrExpr::Local(_, local_name)
+            if ctx.fold_binder_name.as_deref() == Some(local_name.as_str()) =>
+        {
+            // N²-fold body: the user-named binder (e.g. `other` in
+            // `sum(other in agents where ... : other.pos)`) resolves
+            // to the per-iteration loop variable, which the
+            // `CgStmt::ForEachAgent` WGSL emit declares as
+            // `per_pair_candidate`. Sharing AgentRef::PerPairCandidate
+            // means `binder.<field>` reads route through the same
+            // `agent_<field>[per_pair_candidate]` access shape the
+            // pair-bound contexts already use.
+            AgentRef::PerPairCandidate
+        }
         _ => {
             return Err(LoweringError::UnsupportedFieldBase {
                 field_name: field_name.to_string(),
@@ -977,6 +1039,12 @@ fn lower_bare_local(
         "target" | "candidate" if ctx.target_local => {
             add(ctx, CgExpr::PerPairCandidateId, span)
         }
+        // N²-fold body bare-binder read (`other != self` etc.). The
+        // user-named binder resolves to the per-iteration loop
+        // variable, mirroring the field-access path in `lower_field`.
+        n if ctx.fold_binder_name.as_deref() == Some(n) => {
+            add(ctx, CgExpr::PerPairCandidateId, span)
+        }
         // Wildcard `_` is short-circuited at the PerUnit lowering level
         // (see `IrExpr::PerUnit` arm in `lower_expr`). It should never
         // reach `lower_bare_local` directly — if it does, that's a
@@ -1108,6 +1176,16 @@ fn lower_binary(
     let (lhs_id, lhs_ty, rhs_id, rhs_ty) =
         coerce_int_literal_to_signed(ctx, lhs_id, lhs_ty, rhs_id, rhs_ty, span)?;
 
+    // Asymmetric Vec3-by-scalar arithmetic: `vec3 * f32` /
+    // `f32 * vec3` / `vec3 / f32`. WGSL handles these natively; we
+    // pick the typed Mul/DivVec3ByF32 variant with the vec3 always
+    // on the lhs (commute scalar*vec to vec*scalar at lowering
+    // time). Falls through to the symmetric path below if neither
+    // operand pair matches.
+    if let Some(id) = try_lower_vec3_scalar(op, lhs_id, lhs_ty, rhs_id, rhs_ty, span, ctx)? {
+        return Ok(id);
+    }
+
     if lhs_ty != rhs_ty {
         return Err(LoweringError::BinaryOperandTyMismatch {
             op,
@@ -1129,6 +1207,50 @@ fn lower_binary(
         },
         span,
     )
+}
+
+/// Try to lower a `vec3 * f32` / `f32 * vec3` / `vec3 / f32` binary
+/// expression to its typed asymmetric variant
+/// (`MulVec3ByF32` / `DivVec3ByF32`). Returns `Ok(Some(id))` when
+/// the pattern matched and the typed binary node is now in the
+/// arena; `Ok(None)` otherwise (the caller falls through to the
+/// symmetric path). The `f32 * vec3` form commutes the operands so
+/// vec3 is always on the lhs of the emitted `MulVec3ByF32`.
+fn try_lower_vec3_scalar(
+    op: BinOp,
+    lhs_id: CgExprId,
+    lhs_ty: CgTy,
+    rhs_id: CgExprId,
+    rhs_ty: CgTy,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<Option<CgExprId>, LoweringError> {
+    let cg_op = match (op, lhs_ty, rhs_ty) {
+        (BinOp::Mul, CgTy::Vec3F32, CgTy::F32) | (BinOp::Mul, CgTy::F32, CgTy::Vec3F32) => {
+            BinaryOp::MulVec3ByF32
+        }
+        (BinOp::Div, CgTy::Vec3F32, CgTy::F32) => BinaryOp::DivVec3ByF32,
+        // Div the other way (`f32 / vec3`) is component-divide-into-
+        // scalar, semantically distinct and not needed by the boids
+        // fixture; skip until a real consumer arrives.
+        _ => return Ok(None),
+    };
+    let (vec_id, scalar_id) = if lhs_ty == CgTy::Vec3F32 {
+        (lhs_id, rhs_id)
+    } else {
+        (rhs_id, lhs_id)
+    };
+    let id = add(
+        ctx,
+        CgExpr::Binary {
+            op: cg_op,
+            lhs: vec_id,
+            rhs: scalar_id,
+            ty: CgTy::Vec3F32,
+        },
+        span,
+    )?;
+    Ok(Some(id))
 }
 
 /// Coerce a default-`U32` integer literal operand to `I32` when the
@@ -1992,6 +2114,213 @@ pub(super) fn ir_type_to_cg_ty(ty: &dsl_ast::ir::IrType) -> CgTy {
 ///   given by a sub-expression. The sub-expression must already lower
 ///   to an `AgentId`-typed `CgExpr`.
 ///
+/// Lower a `count(<binder> in agents where <pred>)` or
+/// `sum(<binder> in agents where <projection>)` fold to a
+/// [`CgStmt::ForEachAgent`] (pushed onto `pending_pre_stmts`) plus a
+/// [`CgExpr::ReadLocal`] reading the populated accumulator.
+///
+/// # Why this is N²
+///
+/// Today the loop walks every agent slot (`for i in 0..agent_cap`).
+/// No spatial index, no early-out — each fold over `agents` runs in
+/// O(N) per fold-evaluating thread, so a per-agent rule that contains
+/// k folds runs in O(k · N) per agent and O(k · N²) per tick. Fine
+/// for the boids fixture at thousand-scale agent counts; the
+/// declared `spatial_query nearby_other` in `boids.sim` is the
+/// future surface that will let this same DSL form lower to a
+/// bounded walk over a spatial hash instead.
+///
+/// # Type rules
+///
+/// - **Sum**: the `body` is the projection. Its computed CG type is
+///   the accumulator type; init is the type's zero literal. Today
+///   I32 / F32 / Vec3F32 are supported (matching the `+` operator
+///   coverage in `lower_binary`).
+/// - **Count**: the `body` is the predicate (Bool-typed). The
+///   accumulator is I32; the per-iteration projection is
+///   `select(0i, 1i, body)` so the loop sums 1 for each true case.
+///
+/// # Source-level binder
+///
+/// `binder_name` is captured from `IrExpr::Fold::binder_name` (the
+/// surface identifier) and pushed onto `ctx.fold_binder_name` for the
+/// duration of the body lowering, so reads of `<binder>.<field>`
+/// inside the body resolve via [`AgentRef::PerPairCandidate`].
+/// Restored on return.
+fn lower_fold_over_agents(
+    kind: dsl_ast::ast::FoldKind,
+    binder_name: Option<&str>,
+    iter: Option<&IrExprNode>,
+    body: &IrExprNode,
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    use dsl_ast::ast::FoldKind;
+
+    let binder = binder_name.ok_or(LoweringError::UnsupportedAstNode {
+        ast_label: "Fold (no binder)",
+        span,
+    })?;
+
+    // Two recognised iter shapes:
+    //
+    // - `agents` — the unbounded N²-walk path lowered to
+    //   `CgStmt::ForEachAgent`. Visits every alive agent slot.
+    // - `spatial.<method>(self, ...)` — the bounded spatial-grid walk
+    //   path lowered to `CgStmt::ForEachNeighbor`. Visits only the
+    //   3³=27 cells surrounding the calling agent's cell. Today the
+    //   `<method>` name is informational (any registered
+    //   spatial_query is accepted); the cell-radius is hard-coded to
+    //   1 because the runtime sizes its CELL_SIZE constant equal to
+    //   the per-fixture perception radius. A future surface will
+    //   thread the radius from the call args.
+    let spatial_mode = match iter.map(|n| &n.kind) {
+        Some(IrExpr::Namespace(NamespaceId::Agents)) => false,
+        Some(IrExpr::NamespaceCall { ns: NamespaceId::Spatial, .. }) => true,
+        _ => {
+            return Err(LoweringError::UnsupportedAstNode {
+                ast_label: "Fold (iter is not `agents` or `spatial.<query>`)",
+                span,
+            });
+        }
+    };
+
+    // Push the binder onto the fold-binder slot so body reads of
+    // `<binder>` / `<binder>.<field>` resolve to per-pair candidate.
+    let prev_binder = ctx.fold_binder_name.replace(binder.to_string());
+
+    // Lower the body. For Count, body is a Bool predicate; for Sum,
+    // body is the projection (any numeric / vec type).
+    let body_id = lower_expr(body, ctx)?;
+    let body_ty = typecheck_node(ctx, body_id, span)?;
+
+    // Build the (acc_ty, init, projection) triple per fold kind.
+    let (acc_ty, init_id, projection_id) = match kind {
+        FoldKind::Count => {
+            // Count expects a Bool predicate. Reject otherwise.
+            if body_ty != CgTy::Bool {
+                ctx.fold_binder_name = prev_binder;
+                return Err(LoweringError::TypeCheckFailure {
+                    error: TypeError::ClaimedResultMismatch {
+                        node: body_id,
+                        expected: CgTy::Bool,
+                        got: body_ty,
+                    },
+                    span,
+                });
+            }
+            let zero = add(ctx, CgExpr::Lit(LitValue::I32(0)), span)?;
+            let one = add(ctx, CgExpr::Lit(LitValue::I32(1)), span)?;
+            let proj = add(
+                ctx,
+                CgExpr::Select {
+                    cond: body_id,
+                    then: one,
+                    else_: zero,
+                    ty: CgTy::I32,
+                },
+                span,
+            )?;
+            let init = add(ctx, CgExpr::Lit(LitValue::I32(0)), span)?;
+            (CgTy::I32, init, proj)
+        }
+        FoldKind::Sum => {
+            let init = match body_ty {
+                CgTy::I32 => add(ctx, CgExpr::Lit(LitValue::I32(0)), span)?,
+                CgTy::F32 => add(ctx, CgExpr::Lit(LitValue::F32(0.0)), span)?,
+                CgTy::Vec3F32 => add(
+                    ctx,
+                    CgExpr::Lit(LitValue::Vec3F32 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    }),
+                    span,
+                )?,
+                other => {
+                    ctx.fold_binder_name = prev_binder;
+                    return Err(LoweringError::TypeCheckFailure {
+                        error: TypeError::ClaimedResultMismatch {
+                            node: body_id,
+                            expected: CgTy::F32,
+                            got: other,
+                        },
+                        span,
+                    });
+                }
+            };
+            (body_ty, init, body_id)
+        }
+        FoldKind::Min | FoldKind::Max => {
+            // Filtered out by the caller; defensive.
+            ctx.fold_binder_name = prev_binder;
+            return Err(LoweringError::UnsupportedAstNode {
+                ast_label: "Fold (Min/Max)",
+                span,
+            });
+        }
+    };
+
+    // Restore prior fold binder before exiting.
+    ctx.fold_binder_name = prev_binder;
+
+    // Allocate a fresh accumulator local. Pick max-existing + 1 over
+    // both the AST-bound locals (`local_ids`) and the typed-local map
+    // (`local_tys`) so the id is disjoint from both registries.
+    let next_id = ctx
+        .local_ids
+        .values()
+        .map(|id| id.0)
+        .chain(ctx.local_tys.keys().map(|id| id.0))
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(0);
+    let acc_local = LocalId(next_id);
+    ctx.record_local_ty(acc_local, acc_ty);
+
+    // Push the fold loop onto pending pre-stmts so the surrounding
+    // stmt-list driver injects it before the consumer of this fold's
+    // result. Variant choice: spatial-iter folds become
+    // ForEachNeighbor (bounded 27-cell walk); plain-`agents` folds
+    // become ForEachAgent (unbounded N² walk).
+    let stmt = if spatial_mode {
+        CgStmt::ForEachNeighbor {
+            acc_local,
+            acc_ty,
+            init: init_id,
+            projection: projection_id,
+            // Hard-coded cell-radius for v1: CELL_SIZE is sized to
+            // match the per-fixture perception radius, so a single-
+            // cell neighborhood (3³ cells) covers everything inside
+            // that radius. Larger fold radii would bump this.
+            radius_cells: 1,
+        }
+    } else {
+        CgStmt::ForEachAgent {
+            acc_local,
+            acc_ty,
+            init: init_id,
+            projection: projection_id,
+        }
+    };
+    let stmt_id = ctx
+        .builder
+        .add_stmt(stmt)
+        .map_err(|e| LoweringError::BuilderRejected { error: e, span })?;
+    ctx.pending_pre_stmts.push(stmt_id);
+
+    // Return a read of the accumulator. Consumers (Let, Assign,
+    // Binary, …) pick this up as a normal CgExpr.
+    add(
+        ctx,
+        CgExpr::ReadLocal {
+            local: acc_local,
+            ty: acc_ty,
+        },
+        span,
+    )
+}
+
 /// All other namespace/method pairs surface as
 /// [`LoweringError::UnsupportedNamespaceCall`] for now.
 fn lower_namespace_call(
@@ -3703,46 +4032,61 @@ mod tests {
         ));
     }
 
-    /// `FoldKind::Sum` / `Min` / `Max` still surface as
-    /// `UnsupportedAstNode { ast_label: "Fold" }` deferrals — only
-    /// `Count` is wired in the `Fold` arm of `lower_expr` today (the
-    /// minimum the Boids fixture's `neighbor_count` lazy view needs).
+    /// `FoldKind::Min` / `Max` still surface as
+    /// `UnsupportedAstNode` deferrals — Sum + Count are wired through
+    /// the N²-fold `CgStmt::ForEachAgent` path; Min/Max would need
+    /// distinct accumulator init (NEG_INFINITY / INFINITY) and a
+    /// per-iteration reduction op different from `+`. No fixture
+    /// asks for them yet.
     #[test]
-    fn fold_sum_unsupported() {
-        let ast = node(IrExpr::Fold {
-            kind: dsl_ast::ast::FoldKind::Sum,
-            binder: None,
-            binder_name: None,
-            iter: None,
-            body: Box::new(node(IrExpr::LitInt(1))),
-        });
-        let err = lower_to_string(&ast).unwrap_err();
-        assert!(matches!(
-            err,
-            LoweringError::UnsupportedAstNode {
-                ast_label: "Fold",
-                ..
-            }
-        ));
+    fn fold_min_max_unsupported() {
+        for kind in [dsl_ast::ast::FoldKind::Min, dsl_ast::ast::FoldKind::Max] {
+            let ast = node(IrExpr::Fold {
+                kind,
+                binder: Some(LocalRef(0)),
+                binder_name: Some("x".to_string()),
+                iter: Some(Box::new(node(IrExpr::Namespace(NamespaceId::Agents)))),
+                body: Box::new(node(IrExpr::LitFloat(1.0))),
+            });
+            let err = lower_to_string(&ast).unwrap_err();
+            assert!(
+                matches!(err, LoweringError::UnsupportedAstNode { ast_label, .. } if ast_label.starts_with("Fold")),
+                "Min/Max should defer; got: {err:?}"
+            );
+        }
     }
 
-    /// `FoldKind::Count` short-circuits to a typed `LitValue::I32(0)`.
-    /// Per the inline arm docstring this is a B1 placeholder — the real
-    /// fold loop emit lands when a kernel actually consumes a count
-    /// result (today no kernel does; `MOVEMENT_BODY` is the only
-    /// downstream consumer of Boids' `neighbor_count` view and is
-    /// itself a hand-written placeholder).
+    /// `FoldKind::Count` over `agents` lowers to a `CgStmt::ForEachAgent`
+    /// (pushed to `pending_pre_stmts`) plus a `CgExpr::ReadLocal`
+    /// reading the populated accumulator. The expression's pretty-
+    /// printed form is just the read; the loop is one stmt-arena entry
+    /// over.
     #[test]
-    fn fold_count_lowers_to_zero_literal() {
+    fn fold_count_lowers_to_for_each_agent() {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
         let ast = node(IrExpr::Fold {
             kind: dsl_ast::ast::FoldKind::Count,
-            binder: None,
-            binder_name: None,
-            iter: None,
+            binder: Some(LocalRef(0)),
+            binder_name: Some("x".to_string()),
+            iter: Some(Box::new(node(IrExpr::Namespace(NamespaceId::Agents)))),
             body: Box::new(node(IrExpr::LitBool(true))),
         });
-        let s = lower_to_string(&ast).expect("Count fold lowers");
-        assert_eq!(s, "(lit 0i32)");
+        let id = lower_expr(&ast, &mut ctx).expect("Count fold lowers");
+        // The ForEachAgent stmt was pushed onto pending_pre_stmts.
+        assert_eq!(
+            ctx.pending_pre_stmts.len(),
+            1,
+            "ForEachAgent stmt must land on pending_pre_stmts"
+        );
+        let prog = builder.finish();
+        let read = &prog.exprs[id.0 as usize];
+        // The fold expression evaluates to a ReadLocal of the
+        // accumulator local (typed I32).
+        assert!(
+            matches!(read, CgExpr::ReadLocal { ty: CgTy::I32, .. }),
+            "Count fold expr must read i32 accumulator; got: {read:?}"
+        );
     }
 
     #[test]

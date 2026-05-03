@@ -365,8 +365,22 @@ fn lower_one_handler(
     // Build the op. `add_op` validates every reference (the body list
     // id) and runs the auto-walker to populate reads/writes from the
     // body's `Assign` targets, expression reads, and Match arm bodies.
+    //
+    // Tile-eligibility upgrade: per-agent rules whose bodies consist
+    // exclusively of pure ForEachNeighbor folds (plus Lets and
+    // agents.set_* Assigns) get retagged to DispatchShape::PerCell so
+    // the WGSL emit produces the cooperative-tile-load form. The
+    // detection runs against the just-built body — every fold's
+    // init/projection is already populated, so `is_tile_eligible_body`
+    // can walk the stmt list without further driver work.
     let (on_event, shape) = if per_agent {
-        (None, DispatchShape::PerAgent)
+        let prog = ctx.builder.program();
+        let shape = if is_tile_eligible_body(body_list_id, prog) {
+            DispatchShape::PerCell
+        } else {
+            DispatchShape::PerAgent
+        };
+        (None, shape)
     } else {
         (
             Some(resolution.event_kind),
@@ -422,6 +436,18 @@ fn lower_stmt_list(
     let mut ids = Vec::with_capacity(body.len());
     for stmt in body {
         let id = lower_stmt(rule_id, stmt, ctx)?;
+        // Drain any fold-injected pre-statements that the inner expression
+        // lowering produced (e.g. `CgStmt::ForEachAgent` for an N²-fold).
+        // They run *before* the just-emitted `id` so the fold accumulator
+        // is populated by the time the consumer reads it. The drain is
+        // post-stmt: the children-first walk inside `lower_stmt`/
+        // `lower_expr` pushes pre-stmt ids onto `pending_pre_stmts` as
+        // it encounters folds; once `lower_stmt` returns, we splice
+        // them in front of the consumer in source order.
+        if !ctx.pending_pre_stmts.is_empty() {
+            let pre = std::mem::take(&mut ctx.pending_pre_stmts);
+            ids.extend(pre);
+        }
         ids.push(id);
     }
     Ok(ids)
@@ -932,6 +958,69 @@ fn push_stmt(
     ctx.builder
         .add_stmt(stmt)
         .map_err(|e| LoweringError::BuilderRejected { error: e, span })
+}
+
+/// True iff every stmt in `list_id` is "tile-eligible" — meaning the
+/// per-agent kernel can be re-tagged from `DispatchShape::PerAgent` to
+/// `DispatchShape::PerCell` without changing semantics.
+///
+/// Eligibility rules:
+/// - The list contains at least one `ForEachNeighbor` (otherwise
+///   tiling would add the cooperative-load preamble for nothing).
+/// - Every `ForEachNeighbor`'s `init` and `projection` are pure (no
+///   `ReadLocal`) — the WGSL emit hoists every fold above any
+///   intervening `Let` stmts in tile mode, so a fold reading a
+///   prior local would emit a forward reference.
+/// - No `ForEachAgent` (the unbounded N² walk) — its presence means
+///   the user opted out of spatial bounding for at least one fold
+///   and the kernel would still pay O(N²) regardless of tiling.
+/// - No `If` / `Match` / `Emit` stmts at the body's top level
+///   (conservative — these surfaces don't appear in boids today and
+///   would need additional analysis to confirm tile-safety).
+/// - `Let` and `Assign` are unrestricted: they execute *after* the
+///   hoisted folds and can reference any accumulator local.
+///
+/// Walks only the supplied list — does not recurse into nested
+/// stmt-lists (no `If`/`Match` permitted at top level, so there are
+/// no nested lists to walk).
+fn is_tile_eligible_body(
+    list_id: crate::cg::stmt::CgStmtListId,
+    prog: &crate::cg::program::CgProgram,
+) -> bool {
+    use crate::cg::emit::wgsl_body::expr_is_pure_for_hoisting_in_prog;
+    let list = match prog.stmt_lists.get(list_id.0 as usize) {
+        Some(l) => l,
+        None => return false,
+    };
+    let mut has_for_each_neighbor = false;
+    for stmt_id in &list.stmts {
+        let stmt = match prog.stmts.get(stmt_id.0 as usize) {
+            Some(s) => s,
+            None => return false,
+        };
+        match stmt {
+            CgStmt::ForEachNeighbor { init, projection, .. } => {
+                if !expr_is_pure_for_hoisting_in_prog(*init, prog)
+                    || !expr_is_pure_for_hoisting_in_prog(*projection, prog)
+                {
+                    return false;
+                }
+                has_for_each_neighbor = true;
+            }
+            CgStmt::Let { .. } | CgStmt::Assign { .. } => {
+                // Allowed — these run after the hoisted folds and may
+                // freely reference accumulator locals or write to
+                // agent fields (set_pos / set_vel).
+            }
+            CgStmt::ForEachAgent { .. }
+            | CgStmt::If { .. }
+            | CgStmt::Match { .. }
+            | CgStmt::Emit { .. } => {
+                return false;
+            }
+        }
+    }
+    has_for_each_neighbor
 }
 
 // ---------------------------------------------------------------------------
@@ -1818,7 +1907,11 @@ mod tests {
                     assert_eq!(arms[0].variant, VariantId(0));
                     found_match_arm = true;
                 }
-                CgStmt::Assign { .. } | CgStmt::If { .. } | CgStmt::Let { .. } => {
+                CgStmt::Assign { .. }
+                | CgStmt::If { .. }
+                | CgStmt::Let { .. }
+                | CgStmt::ForEachAgent { .. }
+                | CgStmt::ForEachNeighbor { .. } => {
                     // Other body shapes — not produced by this fixture.
                 }
             }

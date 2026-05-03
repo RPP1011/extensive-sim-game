@@ -138,9 +138,40 @@ impl fmt::Display for ReplayabilityFlag {
 /// [`SpatialQueryKind::dependencies`].
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum SpatialQueryKind {
-    /// Build the per-cell agent index — reads agents (positions),
-    /// writes the cell + offset arrays.
+    /// **Bounded counting-sort populate** (legacy). Per-agent dispatch
+    /// that atomic-increments per-cell counts and writes agent ids
+    /// into `cell * MAX_PER_CELL + slot` if `slot < MAX_PER_CELL`;
+    /// otherwise the agent is silently dropped. Kept for back-compat
+    /// with the old spatial-walk shape; the new tiled-MoveBoid path
+    /// uses the three-phase real counting sort
+    /// (`BuildHashCount` → `BuildHashScan` → `BuildHashScatter`)
+    /// instead — no per-cell cap, no drops, but three dispatches per
+    /// tick rather than one.
     BuildHash,
+    /// **Real counting sort, phase 1**. Per-agent dispatch:
+    /// `atomicAdd(&grid_offsets[pos_to_cell(agent_pos[id])], 1u)`.
+    /// After this kernel, `grid_offsets[c]` holds the *count* of
+    /// agents that hash into cell `c`. Phase 2 (`BuildHashScan`)
+    /// converts those counts into starts.
+    BuildHashCount,
+    /// **Real counting sort, phase 2**. OneShot dispatch: a single
+    /// thread serially scans `grid_offsets` (per-cell counts) into
+    /// `grid_starts` (cumulative starts, sized `num_cells + 1`),
+    /// then resets `grid_offsets` to zero so phase 3 can re-use it
+    /// as the per-cell write cursor. Serial because a parallel-scan
+    /// implementation in WGSL is non-trivial and `num_cells` (~10k
+    /// for boids) is small enough that a single-threaded scan
+    /// finishes in microseconds.
+    BuildHashScan,
+    /// **Real counting sort, phase 3**. Per-agent dispatch:
+    /// `let local = atomicAdd(&grid_offsets[cell], 1u);
+    ///  grid_cells[grid_starts[cell] + local] = agent_id`. After
+    /// this kernel `grid_cells` holds every agent id grouped by
+    /// cell, with cell `c`'s slice in `grid_cells[grid_starts[c] ..
+    /// grid_starts[c+1]]`. `grid_offsets[c]` after this kernel
+    /// equals the cell's count again (since the cursor incremented
+    /// from 0 to count).
+    BuildHashScatter,
     /// Per-agent neighborhood walk filtered by a per-candidate
     /// boolean expression. The filter is a `CgExprId` evaluated
     /// per-candidate at WGSL emit time; the expression has access
@@ -149,6 +180,15 @@ pub enum SpatialQueryKind {
     /// per-pair mask predicate uses). See
     /// `docs/superpowers/plans/2026-05-01-phase-7-general-spatial-queries.md`.
     FilteredWalk { filter: CgExprId },
+    /// Per-cell scan that compacts the non-empty cells (those with
+    /// `GridOffsets[cell] > 0` after `BuildHash`) into the
+    /// `NonemptyCells` array, plus the dispatch tuple for the
+    /// downstream tiled MoveBoid into `NonemptyCellsIndirectArgs`.
+    /// Per-cell dispatch shape (`grid_dim^3` workgroups). Lets the
+    /// tiled-MoveBoid kernel skip empty cells entirely and dispatch
+    /// only over the populated subset via
+    /// `dispatch_workgroups_indirect`.
+    CompactNonemptyCells,
 }
 
 impl SpatialQueryKind {
@@ -165,13 +205,60 @@ impl SpatialQueryKind {
     pub fn dependencies(self) -> (Vec<DataHandle>, Vec<DataHandle>) {
         match self {
             SpatialQueryKind::BuildHash => (
-                vec![],
+                vec![DataHandle::AgentField {
+                    field: super::data_handle::AgentFieldId::Pos,
+                    target: super::data_handle::AgentRef::Self_,
+                }],
                 vec![
                     DataHandle::SpatialStorage {
                         kind: SpatialStorageKind::GridCells,
                     },
                     DataHandle::SpatialStorage {
                         kind: SpatialStorageKind::GridOffsets,
+                    },
+                ],
+            ),
+            // Real counting sort, phase 1: reads agent positions,
+            // atomic-increments per-cell counts in GridOffsets.
+            SpatialQueryKind::BuildHashCount => (
+                vec![DataHandle::AgentField {
+                    field: super::data_handle::AgentFieldId::Pos,
+                    target: super::data_handle::AgentRef::Self_,
+                }],
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridOffsets,
+                }],
+            ),
+            // Phase 2: scans counts → starts, resets counts.
+            SpatialQueryKind::BuildHashScan => (
+                vec![],
+                vec![
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridOffsets,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridStarts,
+                    },
+                ],
+            ),
+            // Phase 3: reads positions + starts; uses GridOffsets as
+            // a write cursor; writes sorted agent ids into GridCells.
+            SpatialQueryKind::BuildHashScatter => (
+                vec![
+                    DataHandle::AgentField {
+                        field: super::data_handle::AgentFieldId::Pos,
+                        target: super::data_handle::AgentRef::Self_,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridStarts,
+                    },
+                ],
+                vec![
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridOffsets,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridCells,
                     },
                 ],
             ),
@@ -188,6 +275,23 @@ impl SpatialQueryKind {
                     kind: SpatialStorageKind::QueryResults,
                 }],
             ),
+            // Reads `GridOffsets` (atomicLoad of per-cell counts);
+            // writes `NonemptyCells` + `NonemptyCellsIndirectArgs`
+            // (atomicAdd into the indirect-args' count slot to
+            // allocate output positions).
+            SpatialQueryKind::CompactNonemptyCells => (
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridOffsets,
+                }],
+                vec![
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::NonemptyCells,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::NonemptyCellsIndirectArgs,
+                    },
+                ],
+            ),
         }
     }
 
@@ -198,6 +302,12 @@ impl SpatialQueryKind {
             SpatialQueryKind::FilteredWalk { filter } => {
                 format!("filtered_walk(filter=#{})", filter.0)
             }
+            SpatialQueryKind::CompactNonemptyCells => {
+                String::from("compact_nonempty_cells")
+            }
+            SpatialQueryKind::BuildHashCount => String::from("build_hash_count"),
+            SpatialQueryKind::BuildHashScan => String::from("build_hash_scan"),
+            SpatialQueryKind::BuildHashScatter => String::from("build_hash_scatter"),
         }
     }
 }
@@ -834,8 +944,18 @@ mod tests {
 
     #[test]
     fn spatial_query_kind_dependencies_build_hash() {
+        // BuildHash now reads `agent_pos` (it computes each agent's
+        // cell from its position) — declared as a structural read so
+        // the BGL composer binds `agent_pos` to the kernel.
         let (r, w) = SpatialQueryKind::BuildHash.dependencies();
-        assert!(r.is_empty());
+        use crate::cg::data_handle::{AgentFieldId, AgentRef};
+        assert_eq!(
+            r,
+            vec![DataHandle::AgentField {
+                field: AgentFieldId::Pos,
+                target: AgentRef::Self_,
+            }]
+        );
         assert_eq!(
             w,
             vec![

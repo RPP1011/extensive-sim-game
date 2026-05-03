@@ -67,7 +67,11 @@ pub trait CompiledSim {
     fn agent_count(&self) -> u32;
 
     /// Per-agent world position, indexed by agent slot. The slice's
-    /// length must equal [`Self::agent_count`]. Lifetime ties to the
-    /// `&self` borrow so callers can read without copying.
-    fn positions(&self) -> &[Vec3];
+    /// length must equal [`Self::agent_count`].
+    ///
+    /// Takes `&mut self` because GPU-backed implementations need to
+    /// drive a readback (encode pos→staging copy + map+await) before a
+    /// host-readable slice exists. CPU implementations that already
+    /// keep host-side `Vec<Vec3>` ignore the mutability.
+    fn positions(&mut self) -> &[Vec3];
 }

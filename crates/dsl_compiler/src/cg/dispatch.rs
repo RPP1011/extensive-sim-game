@@ -81,6 +81,16 @@ pub const PER_WORD_WORKGROUP_X: u32 = 64;
 /// alive flags.
 pub const PER_WORD_BITS: u32 = 32;
 
+/// Workgroup x-dim for [`DispatchShape::PerCell`]. Pinned to
+/// `crate::cg::emit::spatial::MAX_PER_CELL` so each spatial-grid cell
+/// maps to exactly one workgroup of that many lanes, with one lane per
+/// home-cell agent slot. The tiled-MoveBoid emit relies on this
+/// equality to schedule one thread per home-cell agent and let the
+/// remaining lanes participate in the cooperative tile load.
+///
+/// Tracks `MAX_PER_CELL` — must stay in sync. Today both are 32.
+pub const PER_CELL_WORKGROUP_X: u32 = 32;
+
 /// How a compute op's threads are laid out.
 ///
 /// The variants describe *what* drives the count and indexing — agent
@@ -115,6 +125,26 @@ pub enum DispatchShape {
     /// = ceil(agent_cap / 32). Used for alive bitmap pack and mask
     /// compaction.
     PerWord,
+
+    /// One workgroup per spatial-grid cell, with `MAX_PER_CELL` lanes
+    /// per workgroup. Used by the tiled-MoveBoid emit (Layer 1 of the
+    /// boids perf plan): each workgroup handles a "home cell", lanes
+    /// 0..27 cooperatively load the surrounding 27 cells' agent
+    /// pos/vel into `var<workgroup>` shared memory, then every lane
+    /// processes one home-cell agent by walking the cached tile
+    /// instead of re-reading global memory. Trades a fixed dispatch
+    /// over `num_cells` workgroups (≈ `GRID_DIM³` ≈ 10k for boids
+    /// defaults) for a ~5-10× reduction in inner-loop memory
+    /// bandwidth on the dominant kernel.
+    ///
+    /// Empty cells (no agents) early-exit at the workgroup preamble;
+    /// the over-dispatch is bounded by `num_cells` regardless of agent
+    /// population. A future optimization compacts the non-empty cell
+    /// list and switches to indirect dispatch — see
+    /// [`super::data_handle::SpatialStorageKind::NonemptyCells`] +
+    /// [`super::op::SpatialQueryKind::CompactNonemptyCells`] (added
+    /// alongside this shape but currently inert).
+    PerCell,
 }
 
 /// What drives the per-agent candidate list for a [`DispatchShape::PerPair`]
@@ -148,6 +178,7 @@ impl fmt::Display for DispatchShape {
             DispatchShape::PerPair { source } => write!(f, "per_pair({})", source),
             DispatchShape::OneShot => f.write_str("one_shot"),
             DispatchShape::PerWord => f.write_str("per_word"),
+            DispatchShape::PerCell => f.write_str("per_cell"),
         }
     }
 }
@@ -269,6 +300,14 @@ pub enum ThreadIndexing {
     /// `let word = gid.x; let num_words = (agent_cap + 31u) >> 5u; if
     /// (word >= num_words) { return; }` — alive-bitmap pack.
     PerAgentWord,
+    /// `let home_cell = workgroup_id.x; let lane =
+    /// local_invocation_id.x;` plus a cooperative-tile-load preamble
+    /// composed by the tiled-MoveBoid emit. The kernel-emit's
+    /// `thread_indexing_preamble` is empty for this variant (the
+    /// preamble lives entirely in the tiled body builder so it can
+    /// inline the `var<workgroup>` decls + the cooperative-load
+    /// nested loops without re-deriving the spatial constants).
+    PerCellWorkgroup,
 }
 
 impl fmt::Display for ThreadIndexing {
@@ -281,6 +320,7 @@ impl fmt::Display for ThreadIndexing {
             } => write!(f, "per_pair_slot(k={})", candidates_per_agent),
             ThreadIndexing::SingleThread => f.write_str("single_thread"),
             ThreadIndexing::PerAgentWord => f.write_str("per_agent_word"),
+            ThreadIndexing::PerCellWorkgroup => f.write_str("per_cell_workgroup"),
         }
     }
 }
@@ -305,6 +345,7 @@ impl DispatchShape {
             DispatchShape::PerPair { .. } => WorkgroupSize::linear(PER_PAIR_WORKGROUP_X),
             DispatchShape::OneShot => WorkgroupSize::linear(ONE_SHOT_WORKGROUP_X),
             DispatchShape::PerWord => WorkgroupSize::linear(PER_WORD_WORKGROUP_X),
+            DispatchShape::PerCell => WorkgroupSize::linear(PER_CELL_WORKGROUP_X),
         }
     }
 
@@ -350,6 +391,23 @@ impl DispatchShape {
                     z: 1,
                 }
             }
+            DispatchShape::PerCell => {
+                // One workgroup per spatial-grid cell. The cell count
+                // is fixed by the per-fixture spatial-grid configuration
+                // (see `crate::cg::emit::spatial::num_cells`); ctx
+                // doesn't carry it, so we look it up directly. The
+                // workgroup_size is `PER_CELL_WORKGROUP_X` (=
+                // MAX_PER_CELL), and we want one workgroup per cell, so
+                // the dispatch x is just `num_cells` (no div_ceil
+                // needed — the kernel binds wgid.x to home_cell
+                // directly).
+                let num_cells = crate::cg::emit::spatial::num_cells();
+                DispatchCount::Direct {
+                    x: num_cells,
+                    y: 1,
+                    z: 1,
+                }
+            }
         }
     }
 
@@ -383,6 +441,7 @@ impl DispatchShape {
             },
             DispatchShape::OneShot => ThreadIndexing::SingleThread,
             DispatchShape::PerWord => ThreadIndexing::PerAgentWord,
+            DispatchShape::PerCell => ThreadIndexing::PerCellWorkgroup,
         }
     }
 }

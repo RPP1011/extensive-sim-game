@@ -646,6 +646,12 @@ pub fn synthesize_dispatch(kernel_index: &[String]) -> String {
     out.push_str("//! at each per-kernel dispatch helper's call site.\n");
     out.push('\n');
 
+    // Bring the Kernel trait into scope so `kernel.record(...)`
+    // resolves below — `record` is a trait method, not an inherent
+    // one, so without this import the per-kernel dispatch helpers
+    // would fail to compile in any downstream crate.
+    out.push_str("use engine::gpu::Kernel as _;\n\n");
+
     // KernelCache struct — one Option<XxxKernel> per emitted kernel.
     out.push_str("/// Lazy-initialised kernel cache. One slot per emitted kernel;\n");
     out.push_str("/// populated on first dispatch via\n");

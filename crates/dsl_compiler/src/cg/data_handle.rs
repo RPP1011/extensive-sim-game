@@ -571,6 +571,30 @@ pub enum SpatialStorageKind {
     /// `spatial_query_results` — scratch buffer holding the result
     /// of one nearest-neighbor / nearby-agents query.
     QueryResults,
+    /// `spatial_grid_starts` — exclusive prefix-scan of the per-cell
+    /// counts. Sized `array<u32>` of length `num_cells + 1`. After
+    /// the spatial-hash build (Count → Scan → Scatter), `starts[i]`
+    /// is the index in `GridCells` where cell `i`'s agent ids begin,
+    /// and `starts[i+1] - starts[i]` is the cell's count. The new
+    /// counting-sort path uses this for unbounded per-cell capacity
+    /// (replacing the bounded-list `cell * MAX + slot` indexing of
+    /// the prior scheme).
+    GridStarts,
+    /// `spatial_nonempty_cells` — compact list of cell indices
+    /// whose `GridOffsets[cell] > 0` after BuildHash. Sized
+    /// `array<u32>` of length `num_cells` (worst-case if every
+    /// cell has at least one agent). Populated by the
+    /// `SpatialQueryKind::CompactNonemptyCells` kernel each tick;
+    /// consumed by per-cell tiled-MoveBoid kernels via
+    /// `nonempty_cells[wgid.x]` in the dispatch preamble.
+    NonemptyCells,
+    /// `spatial_nonempty_indirect_args` — three `u32`s `[count, 1, 1]`
+    /// formatted for `dispatch_workgroups_indirect`. Populated by
+    /// `CompactNonemptyCells` (writes the final atomic count plus
+    /// the constants `1, 1`); consumed by the tiled-MoveBoid kernel
+    /// dispatch as the indirect-args buffer. Lets the runtime avoid
+    /// a round-trip readback on the count.
+    NonemptyCellsIndirectArgs,
 }
 
 impl fmt::Display for SpatialStorageKind {
@@ -579,6 +603,11 @@ impl fmt::Display for SpatialStorageKind {
             SpatialStorageKind::GridCells => f.write_str("grid_cells"),
             SpatialStorageKind::GridOffsets => f.write_str("grid_offsets"),
             SpatialStorageKind::QueryResults => f.write_str("query_results"),
+            SpatialStorageKind::NonemptyCells => f.write_str("nonempty_cells"),
+            SpatialStorageKind::NonemptyCellsIndirectArgs => {
+                f.write_str("nonempty_indirect_args")
+            }
+            SpatialStorageKind::GridStarts => f.write_str("grid_starts"),
         }
     }
 }

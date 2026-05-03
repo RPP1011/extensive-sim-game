@@ -106,20 +106,21 @@ fn boids_fixture_resolves() {
 /// Phase 7 follow-up: the `neighbor_count` lazy view body in
 /// `assets/sim/boids.sim` is a `count(other in agents where ...)`
 /// comprehension that the resolver shapes as
-/// `IrExpr::Fold { kind: FoldKind::Count, .. }`.
-///
-/// Pre-implementation: lowering this body through `lower_expr` returns
-/// `LoweringError::UnsupportedAstNode { ast_label: "Fold", .. }`.
-/// Post-implementation: lowering succeeds and produces a `CgExprId`.
+/// `IrExpr::Fold { kind: FoldKind::Count, .. }`. With the N²-fold
+/// CgStmt::ForEachAgent path lit up alongside this fixture, the
+/// body lowers to a real ForEachAgent stmt + ReadLocal expression.
 ///
 /// We exercise the view body directly rather than going through the
 /// full driver because the physics-handler path bounces off
 /// `UnresolvedEventPattern { event_name: "Tick" }` first (Tick wiring
 /// is a separate, future surface). Direct `lower_expr` invocation
-/// pins the Fold contract without coupling to that unrelated layer.
+/// pins the Fold contract without coupling to that unrelated layer —
+/// but the body references `config.flock.perception_radius`, so we
+/// register the matching ConfigConstId by hand before lowering.
 #[test]
 fn boids_fixture_lowers_count_fold() {
-    use dsl_ast::ir::ViewBodyIR;
+    use dsl_ast::ir::{NamespaceId, ViewBodyIR};
+    use dsl_compiler::cg::data_handle::ConfigConstId;
     use dsl_compiler::cg::lower::expr::{lower_expr, LoweringCtx};
     use dsl_compiler::cg::program::CgProgramBuilder;
 
@@ -139,6 +140,22 @@ fn boids_fixture_lowers_count_fold() {
 
     let mut builder = CgProgramBuilder::new();
     let mut ctx = LoweringCtx::new(&mut builder);
+
+    // Register every config const the boids fixture references in source
+    // order — the count fold's body reads `config.flock.perception_radius`,
+    // and other views/rules in the fixture read other fields in the same
+    // block; the standalone driver-less harness has to populate the
+    // registry by hand.
+    for (i, cfg) in comp.configs.iter().enumerate() {
+        for (j, fld) in cfg.fields.iter().enumerate() {
+            // Stable id: walk-order index across blocks. For a single-
+            // block fixture (today's boids.sim) the block index is
+            // zero so per-field id is `j`.
+            let _ = i;
+            let key = format!("{}.{}", cfg.name, fld.name);
+            ctx.register_config_const(NamespaceId::Config, key, ConfigConstId(j as u32));
+        }
+    }
 
     let result = lower_expr(body, &mut ctx);
 

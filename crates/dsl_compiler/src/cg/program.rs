@@ -677,6 +677,19 @@ pub struct CgProgram {
     /// [`super::lower::expr::LoweringCtx::view_signatures`]). Empty
     /// for programs that don't have materialized views.
     pub view_signatures: BTreeMap<u32, ViewSignature>,
+    /// Per-`ConfigConstId` literal default value, harvested from the
+    /// resolved DSL `config <block> { <field>: <ty> = <default>, ... }`
+    /// declarations by the driver's `populate_config_consts`. Populated
+    /// in id-allocation order; serialised + emitted as inline WGSL
+    /// `const config_<id>: f32 = <value>;` declarations at the top of
+    /// each kernel that references the id (today F32 only — Boids only
+    /// uses float configs and the parser surface accepts numeric forms
+    /// the cast can compress to f32). The runtime side stays inert for
+    /// these consts: they're baked into the WGSL at compile time
+    /// rather than passed via a runtime UBO. Per-tick / runtime-tunable
+    /// config goes through a future cfg-uniform extension; today every
+    /// config field is a compile-time constant.
+    pub config_const_values: BTreeMap<u32, f32>,
 }
 
 impl CgProgram {
@@ -904,6 +917,16 @@ impl CgProgramBuilder {
             name.into(),
         )
     }
+    /// Record the literal default value for a config const id. Used
+    /// by the WGSL emit's inline `const config_<id>: f32 = <v>;`
+    /// declarations. Inserts (or overwrites) the entry — the driver
+    /// only calls this once per id during `populate_config_consts`,
+    /// so overwrites would only happen if a downstream pass mutates
+    /// the same id with a new value, which is intentional last-write
+    /// semantics.
+    pub fn set_config_const_value(&mut self, id: ConfigConstId, value: f32) {
+        self.inner.config_const_values.insert(id.0, value);
+    }
     pub fn intern_event_ring_name(
         &mut self,
         id: EventRingId,
@@ -1055,6 +1078,20 @@ impl CgProgramBuilder {
                 // arena-independent (typed ids + closed-set CgTy)
                 // and need no range check at insertion time.
                 self.check_expr_id(*value)
+            }
+            CgStmt::ForEachAgent {
+                init, projection, ..
+            }
+            | CgStmt::ForEachNeighbor {
+                init, projection, ..
+            } => {
+                // Both child expression ids (the accumulator's initial
+                // value and the per-candidate projection added inside
+                // the loop) must already exist in the arena. The
+                // `acc_local` LocalId is arena-independent; `acc_ty`
+                // is closed-set CgTy.
+                self.check_expr_id(*init)?;
+                self.check_expr_id(*projection)
             }
         }
     }
@@ -2154,7 +2191,7 @@ program {
         op#1 kind=scoring_argmax(scoring=#0, rows=1) shape=per_agent reads=[] writes=[scoring.output],
         op#2 kind=physics_rule(rule=#0, on_event=#0, replayable=replayable) shape=per_event(ring=#0) reads=[] writes=[agent.self.hp],
         op#3 kind=view_fold(view=#0, on_event=#0) shape=per_event(ring=#0) reads=[agent.self.hp] writes=[view[#0].primary],
-        op#4 kind=spatial_query(build_hash) shape=per_agent reads=[] writes=[spatial.grid_cells, spatial.grid_offsets],
+        op#4 kind=spatial_query(build_hash) shape=per_agent reads=[agent.self.pos] writes=[spatial.grid_cells, spatial.grid_offsets],
     ],
 }";
         assert_eq!(printed, expected, "actual output:\n{}", printed);

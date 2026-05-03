@@ -167,9 +167,15 @@ pub fn lower_spatial_queries(
     let mut op_ids = Vec::with_capacity(kinds.len());
     for &kind in kinds {
         let computekind = ComputeOpKind::SpatialQuery { kind };
+        // BuildHashScan runs single-threaded (serial scan over all
+        // cells); every other spatial-query kind is per-agent today.
+        let shape = match kind {
+            SpatialQueryKind::BuildHashScan => DispatchShape::OneShot,
+            _ => DispatchShape::PerAgent,
+        };
         let op_id = ctx
             .builder
-            .add_op(computekind, DispatchShape::PerAgent, Span::dummy())
+            .add_op(computekind, shape, Span::dummy())
             .map_err(|e| LoweringError::BuilderRejected {
                 error: e,
                 span: Span::dummy(),
@@ -242,8 +248,10 @@ mod tests {
 
     #[test]
     fn snapshot_build_hash_op_display() {
-        // Companion snapshot pinning `BuildHash`'s shape — empty reads,
-        // grid_cells + grid_offsets writes. Catches a regression in the
+        // Companion snapshot pinning `BuildHash`'s shape: reads
+        // `agent.self.pos` (the position the per-cell hash bucket is
+        // computed from), writes `spatial.grid_cells` +
+        // `spatial.grid_offsets`. Catches a regression in the
         // dependencies table or in the `DataHandle` Display impl.
         let mut builder = CgProgramBuilder::new();
         let mut ctx = LoweringCtx::new(&mut builder);
@@ -251,7 +259,7 @@ mod tests {
         let prog = builder.finish();
         assert_eq!(
             format!("{}", prog.ops[0]),
-            "op#0 kind=spatial_query(build_hash) shape=per_agent reads=[] writes=[spatial.grid_cells, spatial.grid_offsets]"
+            "op#0 kind=spatial_query(build_hash) shape=per_agent reads=[agent.self.pos] writes=[spatial.grid_cells, spatial.grid_offsets]"
         );
     }
 

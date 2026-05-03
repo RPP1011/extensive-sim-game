@@ -108,6 +108,31 @@ pub struct EmitCtx<'a> {
     pub prog: &'a CgProgram,
     /// Strategy for printing a [`DataHandle`] as a WGSL identifier.
     pub naming: HandleNamingStrategy,
+    /// When set, every emit of `Read(AgentField { target: PerPairCandidate, .. })`
+    /// for `Pos` / `Vel` redirects to the workgroup-local tile arrays
+    /// (`tile_pos[<index>]` / `tile_vel[<index>]`) using the
+    /// expression in this `Cell` as the index. Used by the tiled
+    /// MoveBoid emit (DispatchShape::PerCell) to swap the inner-loop
+    /// global-memory reads for shared-memory lookups. Cleared
+    /// (`String::new()`) outside the inner walk so other emit
+    /// contexts (cell-walk, agent-walk, etc.) keep their default
+    /// `agent_<field>[per_pair_candidate]` indexing.
+    ///
+    /// Interior mutability (`std::cell::RefCell`) keeps the EmitCtx
+    /// shareable behind `&` — the existing emit fns thread `&EmitCtx`
+    /// throughout, and routing every signature through `&mut` would
+    /// touch dozens of call sites for a pure emit-time scratch flag.
+    pub tile_walk_index: std::cell::RefCell<Option<String>>,
+    /// Dispatch shape of the kernel currently being emitted, set by
+    /// `lower_op_body` before each per-op body emit. Exists so the
+    /// downstream `ForEachNeighbor` / fused-fold emitters can pick a
+    /// tile-walk WGSL form when the enclosing kernel is
+    /// [`crate::cg::dispatch::DispatchShape::PerCell`] vs the
+    /// default cell-walk form for `PerAgent`. `None` means the
+    /// emitter is being driven by a test or harness that doesn't
+    /// route through `lower_op_body` — those paths stay on the
+    /// default per-agent shape.
+    pub dispatch: std::cell::Cell<Option<crate::cg::dispatch::DispatchShape>>,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -117,6 +142,8 @@ impl<'a> EmitCtx<'a> {
         Self {
             prog,
             naming: HandleNamingStrategy::Structural,
+            tile_walk_index: std::cell::RefCell::new(None),
+            dispatch: std::cell::Cell::new(None),
         }
     }
 
@@ -245,6 +272,9 @@ fn spatial_storage_token(kind: SpatialStorageKind) -> &'static str {
         SpatialStorageKind::GridCells => "grid_cells",
         SpatialStorageKind::GridOffsets => "grid_offsets",
         SpatialStorageKind::QueryResults => "query_results",
+        SpatialStorageKind::NonemptyCells => "nonempty_cells",
+        SpatialStorageKind::NonemptyCellsIndirectArgs => "nonempty_indirect_args",
+        SpatialStorageKind::GridStarts => "grid_starts",
     }
 }
 
@@ -412,8 +442,8 @@ fn binary_op_to_wgsl(op: BinaryOp) -> &'static str {
     match op {
         AddF32 | AddU32 | AddI32 | AddVec3 => "+",
         SubF32 | SubU32 | SubI32 | SubVec3 => "-",
-        MulF32 | MulU32 | MulI32 => "*",
-        DivF32 | DivU32 | DivI32 => "/",
+        MulF32 | MulU32 | MulI32 | MulVec3ByF32 => "*",
+        DivF32 | DivU32 | DivI32 | DivVec3ByF32 => "/",
         LtF32 | LtU32 | LtI32 => "<",
         LeF32 | LeU32 | LeI32 => "<=",
         GtF32 | GtU32 | GtI32 => ">",
@@ -590,12 +620,68 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                 if matches!(target, AgentRef::Target(_)) {
                     return Ok(b1_default_for_field_ty(field.ty()).to_string());
                 }
+                // Tile-walk substitution: when the tiled-MoveBoid emit
+                // path is active and we're inside its inner cell-walk
+                // loop, every `Pos` / `Vel` read keyed on
+                // `PerPairCandidate` redirects to the workgroup-local
+                // tile array (`tile_pos[<index>]` / `tile_vel[<index>]`)
+                // instead of the global `agent_pos[per_pair_candidate]`.
+                // The tile-walk index is set in the inner-loop preamble
+                // emitted by `build_tiled_per_cell_wgsl_body` and
+                // cleared on exit. Other AgentField targets (Self_,
+                // EventTarget, Actor) keep the default global-memory
+                // access — only the per-candidate reads benefit from
+                // the tile.
+                if matches!(target, AgentRef::PerPairCandidate) {
+                    if let Some(idx_expr) = ctx.tile_walk_index.borrow().as_ref() {
+                        match field {
+                            AgentFieldId::Pos => {
+                                return Ok(format!("tile_pos[{idx_expr}]"));
+                            }
+                            AgentFieldId::Vel => {
+                                return Ok(format!("tile_vel[{idx_expr}]"));
+                            }
+                            // Other fields fall through — the tile
+                            // only mirrors pos+vel today (the boids
+                            // fixture's projections only read those
+                            // two via per_pair_candidate). A future
+                            // fixture that reads `agent_<other>[
+                            // per_pair_candidate]` inside a tiled
+                            // ForEachNeighbor would need to extend the
+                            // tile arrays; until then the default
+                            // global access stays correct (just slow).
+                            _ => {}
+                        }
+                    }
+                }
                 return Ok(agent_field_access(*field, target));
             }
             Ok(ctx.handle_name(handle))
         }
         CgExpr::Lit(v) => Ok(lower_literal(v)),
         CgExpr::Binary { op, lhs, rhs, ty: _ } => {
+            // Peephole: `distance(a, b) <op> r` where <op> is an
+            // ordered comparison rewrites to `dot(d, d) <op> r*r`
+            // (where `d = a - b`). Avoids the `sqrt` inside
+            // `distance(...)`. Same semantics whenever `r >= 0`,
+            // which is the only case sim radii hit (perception /
+            // separation radii are always positive). When the peephole
+            // doesn't apply we fall through to the generic
+            // `(<lhs> <op> <rhs>)` form.
+            //
+            // The rewrite duplicates `a` and `b` in the emitted
+            // expression so the WGSL compiler can CSE them; this is
+            // safe as long as both are pure (no side-effects, no
+            // mutation between reads). For boids the operands are
+            // always `agent_pos[agent_id]` / `agent_pos[per_pair_candidate]`
+            // — pure storage reads, trivially CSE-able. We assert
+            // pureness via `expr_is_pure_for_hoisting` rather than
+            // emitting a let-binding (WGSL has no expression-position
+            // let-binding short of a synthetic block, which would
+            // break the surrounding statement composition).
+            if let Some(rewritten) = try_rewrite_distance_compare(*op, *lhs, *rhs, ctx)? {
+                return Ok(rewritten);
+            }
             let l = lower_cg_expr_to_wgsl(*lhs, ctx)?;
             let r = lower_cg_expr_to_wgsl(*rhs, ctx)?;
             Ok(format!("({} {} {})", l, binary_op_to_wgsl(*op), r))
@@ -871,6 +957,49 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
                 v
             ))
         }
+        CgStmt::ForEachNeighbor { .. } => {
+            // Singleton path — defer to the multi-accumulator helper
+            // with a one-element vec. This keeps a single emitter
+            // covering both the standalone case (a fold whose
+            // siblings aren't fusable) and the fused case (a run of
+            // adjacent ForEachNeighbor stmts collapsed in
+            // `lower_cg_stmt_list_to_wgsl`). The helper does not
+            // dedup or reorder; it walks the supplied list and emits
+            // an accumulator-update line per slot inside the inner
+            // loop in the order given.
+            emit_fused_for_each_neighbor(&[node], ctx)
+        }
+        CgStmt::ForEachAgent {
+            acc_local,
+            acc_ty,
+            init,
+            projection,
+        } => {
+            // var local_<N>: <ty> = <init>;
+            // for (var per_pair_candidate: u32 = 0u; per_pair_candidate < cfg.agent_cap; ...) {
+            //     local_<N> = local_<N> + <projection>;
+            // }
+            //
+            // The loop variable name `per_pair_candidate` matches the
+            // existing pair-bound emit convention so reads of
+            // `binder.<field>` inside the projection lower to
+            // `agent_<field>[per_pair_candidate]` via
+            // `AgentRef::PerPairCandidate`. Subsequent reads of the
+            // accumulator surface as `CgExpr::ReadLocal { local: acc_local }`
+            // and emit as `local_<N>` — a `var` reads the same as a
+            // `let` at the WGSL access site.
+            let init_wgsl = lower_cg_expr_to_wgsl(*init, ctx)?;
+            let proj_wgsl = lower_cg_expr_to_wgsl(*projection, ctx)?;
+            let ty_wgsl = cg_ty_to_wgsl(*acc_ty);
+            let n = acc_local.0;
+            let body = format!(
+                "var local_{n}: {ty_wgsl} = {init_wgsl};\n\
+                 for (var per_pair_candidate: u32 = 0u; per_pair_candidate < cfg.agent_cap; per_pair_candidate = per_pair_candidate + 1u) {{\n\
+                 \x20\x20\x20\x20local_{n} = (local_{n} + ({proj_wgsl}));\n\
+                 }}"
+            );
+            Ok(body)
+        }
     }
 }
 
@@ -991,11 +1120,358 @@ pub fn lower_cg_stmt_list_to_wgsl(
             arena_len,
         },
     )?;
-    let mut parts = Vec::with_capacity(list.stmts.len());
-    for stmt_id in &list.stmts {
-        parts.push(lower_cg_stmt_to_wgsl(*stmt_id, ctx)?);
+
+    // Fold-fusion pre-pass: collect every `ForEachNeighbor` in the
+    // list whose `init` + `projection` are pure (no `ReadLocal`
+    // dependencies on prior stmts). Pure folds can be hoisted to the
+    // front of the list and emitted as one fused walk; the remaining
+    // stmts (Let / Assign / etc.) follow in source order. The
+    // accumulator locals every fold writes are still available for
+    // the deferred stmts because hoisting only moves them
+    // _earlier_ in execution. See `emit_fused_for_each_neighbor`'s
+    // docstring for why this matters: a single walk replaces N
+    // redundant 27-cell traversals + agent_pos lookups, the dominant
+    // memory-bandwidth cost in boids-style bodies.
+    //
+    // A fold whose projection reads a `ReadLocal` cannot be safely
+    // hoisted — the bound local lives on a `Let` stmt that comes
+    // before the fold in source order; moving the fold up would
+    // reference an undeclared `local_<N>`. Such folds stay in their
+    // original position and emit as singletons.
+    //
+    // Folds with mixed `radius_cells` cannot share a single walk
+    // (the loop bounds differ), so we partition by radius too.
+    // Today every spatial fold uses `radius_cells = 1`, so the
+    // partition is single-element in practice.
+    let mut hoistable: std::collections::BTreeMap<u32, Vec<&CgStmt>> =
+        std::collections::BTreeMap::new();
+    let mut residual: Vec<usize> = Vec::with_capacity(list.stmts.len());
+    for (idx, stmt_id) in list.stmts.iter().enumerate() {
+        let stmt_node = <CgProgram as StmtArena>::get(ctx.prog, *stmt_id).ok_or(
+            EmitError::StmtIdOutOfRange {
+                id: *stmt_id,
+                arena_len: ctx.prog.stmts.len() as u32,
+            },
+        )?;
+        if let CgStmt::ForEachNeighbor {
+            radius_cells,
+            init,
+            projection,
+            ..
+        } = stmt_node
+        {
+            if expr_is_pure_for_hoisting(*init, ctx)
+                && expr_is_pure_for_hoisting(*projection, ctx)
+            {
+                hoistable.entry(*radius_cells).or_default().push(stmt_node);
+                continue;
+            }
+        }
+        residual.push(idx);
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    // Emit the fused walks first, partitioned by radius for
+    // deterministic output (BTreeMap iteration is sorted).
+    for (_radius, folds) in &hoistable {
+        parts.push(emit_fused_for_each_neighbor(folds, ctx)?);
+    }
+    // Then the residual stmts (everything not hoisted) in their
+    // original order. Each is emitted via the per-stmt path which
+    // handles its own (non-fused) ForEachNeighbor singleton case.
+    for idx in residual {
+        let stmt_id = list.stmts[idx];
+        parts.push(lower_cg_stmt_to_wgsl(stmt_id, ctx)?);
     }
     Ok(parts.join("\n"))
+}
+
+/// Try the `distance(a, b) <cmp> r` → `dot(d, d) <cmp> r*r` peephole
+/// rewrite. Returns `Ok(Some(wgsl))` when the pattern matches and the
+/// rewrite is safe; `Ok(None)` when the binary should fall through to
+/// the generic emit path.
+///
+/// **Pattern**: lhs is `Builtin { fn_id: Distance, args: [a, b] }`
+/// and op is one of `LtF32` / `LeF32` / `GtF32` / `GeF32`. Both `a`
+/// and `b` must be pure (re-evaluating them is correct and cheap)
+/// AND the comparison's `rhs` must also be pure (it gets squared, so
+/// `r * r` would re-evaluate `r` once).
+///
+/// **Why pureness matters**: WGSL has no expression-position
+/// `let`-binding, so we inline the operands twice (`a-b` and `a-b`
+/// inside `dot`). Re-evaluation is fine for pure reads but would
+/// double-fire any side effect or atomic.
+///
+/// **Soundness**: `||a-b||² < r²` is equivalent to `||a-b|| < r`
+/// when `r >= 0`. Sim radii are always positive (perception /
+/// separation / view radii are config-const f32s with positive
+/// defaults); we don't gate on a runtime sign check. If a future
+/// fixture introduces a negative-radius compare (semantically
+/// `false` for any agent pair, since distance is non-negative),
+/// the peephole would silently flip results — flag this in the
+/// caller's contract if the radius can ever be < 0.
+fn try_rewrite_distance_compare(
+    op: BinaryOp,
+    lhs: CgExprId,
+    rhs: CgExprId,
+    ctx: &EmitCtx,
+) -> Result<Option<String>, EmitError> {
+    use BinaryOp::*;
+    if !matches!(op, LtF32 | LeF32 | GtF32 | GeF32) {
+        return Ok(None);
+    }
+    let lhs_node = match <CgProgram as ExprArena>::get(ctx.prog, lhs) {
+        Some(n) => n,
+        None => return Ok(None),
+    };
+    let (a, b) = match lhs_node {
+        CgExpr::Builtin {
+            fn_id: BuiltinId::Distance,
+            args,
+            ..
+        } if args.len() == 2 => (args[0], args[1]),
+        _ => return Ok(None),
+    };
+    if !expr_is_pure_for_hoisting(a, ctx)
+        || !expr_is_pure_for_hoisting(b, ctx)
+        || !expr_is_pure_for_hoisting(rhs, ctx)
+    {
+        return Ok(None);
+    }
+    let a_wgsl = lower_cg_expr_to_wgsl(a, ctx)?;
+    let b_wgsl = lower_cg_expr_to_wgsl(b, ctx)?;
+    let r_wgsl = lower_cg_expr_to_wgsl(rhs, ctx)?;
+    let cmp = binary_op_to_wgsl(op);
+    // dot((a)-(b), (a)-(b)) <cmp> ((r)*(r))
+    Ok(Some(format!(
+        "(dot(({a}) - ({b}), ({a}) - ({b})) {cmp} (({r}) * ({r})))",
+        a = a_wgsl,
+        b = b_wgsl,
+        r = r_wgsl,
+        cmp = cmp,
+    )))
+}
+
+/// True iff the expression rooted at `expr_id` reads only structural
+/// values (`AgentField`, `ConfigConst`, `Lit`, `AgentSelfId`,
+/// `PerPairCandidateId`) and not any `ReadLocal`. Used by the
+/// fold-fusion pre-pass to decide whether a `ForEachNeighbor` can be
+/// hoisted past intervening `Let` stmts. A fold whose projection
+/// references a `ReadLocal` is bound to a sibling `Let`'s
+/// `local_<N>`; moving the fold ahead of that `Let` would emit
+/// WGSL that references an undeclared local.
+fn expr_is_pure_for_hoisting(expr_id: CgExprId, ctx: &EmitCtx) -> bool {
+    expr_is_pure_for_hoisting_in_prog(expr_id, ctx.prog)
+}
+
+/// Same predicate as [`expr_is_pure_for_hoisting`] but driven directly
+/// off a [`CgProgram`] — usable from non-emit contexts (e.g. lowering
+/// passes that need to decide tile-eligibility before any emit context
+/// exists). The two share the same recursive structure; this is the
+/// CG-program-arena form.
+pub fn expr_is_pure_for_hoisting_in_prog(expr_id: CgExprId, prog: &CgProgram) -> bool {
+    let Some(node) = <CgProgram as ExprArena>::get(prog, expr_id) else {
+        return false;
+    };
+    match node {
+        CgExpr::ReadLocal { .. } => false,
+        CgExpr::Read(_)
+        | CgExpr::Lit(_)
+        | CgExpr::Rng { .. }
+        | CgExpr::AgentSelfId
+        | CgExpr::PerPairCandidateId
+        | CgExpr::EventField { .. }
+        | CgExpr::NamespaceField { .. } => true,
+        CgExpr::Binary { lhs, rhs, .. } => {
+            expr_is_pure_for_hoisting_in_prog(*lhs, prog)
+                && expr_is_pure_for_hoisting_in_prog(*rhs, prog)
+        }
+        CgExpr::Unary { arg, .. } => expr_is_pure_for_hoisting_in_prog(*arg, prog),
+        CgExpr::Builtin { args, .. } => args
+            .iter()
+            .all(|a| expr_is_pure_for_hoisting_in_prog(*a, prog)),
+        CgExpr::Select {
+            cond, then, else_, ..
+        } => {
+            expr_is_pure_for_hoisting_in_prog(*cond, prog)
+                && expr_is_pure_for_hoisting_in_prog(*then, prog)
+                && expr_is_pure_for_hoisting_in_prog(*else_, prog)
+        }
+        CgExpr::NamespaceCall { args, .. } => args
+            .iter()
+            .all(|a| expr_is_pure_for_hoisting_in_prog(*a, prog)),
+    }
+}
+
+/// Emit one cell-walk that updates every accumulator in `folds` (each
+/// a `CgStmt::ForEachNeighbor`). All entries must share the same
+/// `radius_cells` — the caller (`lower_cg_stmt_list_to_wgsl`) checks
+/// this invariant when greedy-grouping adjacent fold stmts. Used for
+/// both the singleton case (one fold, equivalent to the prior emit)
+/// and the fused case (multiple folds collapsed into one walk).
+///
+/// # Why fuse
+///
+/// The dominant cost in a boids-style body is the inner-loop
+/// dereferences (`spatial_grid_cells[..]`, `agent_pos[per_pair_candidate]`)
+/// and the `distance` compare inside each projection. With N
+/// independent folds, every neighbor pays for those N times even
+/// though the cell walk and `per_pair_candidate` stream are
+/// identical. Fusing collapses to one walk + one stream, with N
+/// projection updates per neighbor — a near-N× reduction in memory
+/// traffic on the dominant axis.
+///
+/// The acc init (`var local_<N>: <ty> = <init>`) lands BEFORE the
+/// nested loops; the per-neighbor accumulator updates land inside
+/// the innermost loop in source order. Each accumulator's projection
+/// expression resolves independently against the shared
+/// `per_pair_candidate` binding.
+fn emit_fused_for_each_neighbor(
+    folds: &[&CgStmt],
+    ctx: &EmitCtx,
+) -> Result<String, EmitError> {
+    debug_assert!(!folds.is_empty(), "caller groups at least one fold");
+    let radius = match folds[0] {
+        CgStmt::ForEachNeighbor { radius_cells, .. } => *radius_cells as i32,
+        _ => unreachable!("caller restricts to ForEachNeighbor"),
+    };
+
+    // Are we emitting inside a tiled-MoveBoid kernel
+    // (DispatchShape::PerCell)? If so, the surrounding kernel
+    // preamble (in `kernel.rs::tiled_per_cell_preamble`) has already
+    // populated `tile_pos` / `tile_vel` / `tile_count` workgroup
+    // arrays. We emit a single per-lane walk over those arrays, and
+    // engage the agent_field_access tile substitution (so each
+    // projection's `agent_pos[per_pair_candidate]` reads land on
+    // `tile_pos[<tile-index>]` instead of global memory). The
+    // cell-walk path (the else branch below) keeps the original
+    // 27-cell global-memory walk for non-tiled kernels.
+    let is_tiled = matches!(
+        ctx.dispatch.get(),
+        Some(crate::cg::dispatch::DispatchShape::PerCell)
+    );
+
+    // Pre-render every fold's init expression. We hold off on the
+    // projection until we know whether to enter tile-walk mode, so
+    // the substitution into tile_pos / tile_vel happens correctly.
+    let mut prepared: Vec<(u32, String, String, CgExprId)> = Vec::with_capacity(folds.len());
+    for f in folds {
+        match f {
+            CgStmt::ForEachNeighbor {
+                acc_local,
+                acc_ty,
+                init,
+                projection,
+                ..
+            } => {
+                let init_wgsl = lower_cg_expr_to_wgsl(*init, ctx)?;
+                let ty_wgsl = cg_ty_to_wgsl(*acc_ty);
+                prepared.push((acc_local.0, ty_wgsl, init_wgsl, *projection));
+            }
+            _ => unreachable!("caller restricts to ForEachNeighbor"),
+        }
+    }
+
+    // var local_<N>: <ty> = <init>;  (one line per fold, top-level)
+    let mut head = String::new();
+    for (n, ty_wgsl, init_wgsl, _) in &prepared {
+        head.push_str(&format!("var local_{n}: {ty_wgsl} = {init_wgsl};\n"));
+    }
+
+    if is_tiled {
+        // Tile-walk: lanes process one home agent each (already
+        // bound to `agent_id` by the per-cell preamble). The fold
+        // walks the 27 neighbor slots loaded into `tile_*` by the
+        // workgroup. Engaging `ctx.tile_walk_index` inside the inner
+        // loop redirects every `agent_pos[per_pair_candidate]` /
+        // `agent_vel[per_pair_candidate]` projection read to the
+        // workgroup-local tile.
+        //
+        // `_tile_idx = nbr_lane * SPATIAL_MAX_PER_CELL + _i` is the
+        // shared expression both projections agree on; the
+        // substitution emit reads it from the tile_walk_index
+        // RefCell.
+        let prior_idx = ctx
+            .tile_walk_index
+            .replace(Some("_tile_idx".to_string()));
+        let mut updates = String::new();
+        for (n, _, _, projection_id) in &prepared {
+            let proj_wgsl = lower_cg_expr_to_wgsl(*projection_id, ctx)?;
+            updates.push_str(&format!(
+                "            local_{n} = (local_{n} + ({proj_wgsl}));\n"
+            ));
+        }
+        ctx.tile_walk_index.replace(prior_idx);
+
+        // Iterate over the 27 cells in the tile. We still need
+        // `per_pair_candidate` for the projection's `!= self` check
+        // and any other AgentId reads — the tile doesn't store ids
+        // (they'd take another 3 KB of workgroup memory we'd rather
+        // not spend), so we re-read from spatial_grid_cells. That's
+        // one global read per inner iteration, which the per-tile
+        // pos/vel cache offsets several-fold.
+        let body = format!(
+            "{head}{{\n\
+             \x20   for (var nbr_lane: u32 = 0u; nbr_lane < 27u; nbr_lane = nbr_lane + 1u) {{\n\
+             \x20       let _nbr_count = tile_count[nbr_lane];\n\
+             \x20       let _dz = i32(nbr_lane / 9u) - 1;\n\
+             \x20       let _dy = i32((nbr_lane / 3u) % 3u) - 1;\n\
+             \x20       let _dx = i32(nbr_lane % 3u) - 1;\n\
+             \x20       let _nbr_cell = cell_index(\n\
+             \x20           i32(home_cx) + _dx,\n\
+             \x20           i32(home_cy) + _dy,\n\
+             \x20           i32(home_cz) + _dz,\n\
+             \x20       );\n\
+             \x20       let _nbr_start = spatial_grid_starts[_nbr_cell];\n\
+             \x20       for (var _i: u32 = 0u; _i < _nbr_count; _i = _i + 1u) {{\n\
+             \x20           let per_pair_candidate = spatial_grid_cells[_nbr_start + _i];\n\
+             \x20           let _tile_idx = nbr_lane * SPATIAL_MAX_PER_CELL + _i;\n\
+             {updates}\
+             \x20       }}\n\
+             \x20   }}\n\
+             }}",
+            head = head,
+            updates = updates,
+        );
+        Ok(body)
+    } else {
+        // Cell-walk (per-agent dispatch fallback): emit the original
+        // 27-cell global-memory walk. Projections render against
+        // global agent_pos / agent_vel reads (no tile substitution).
+        let mut updates = String::new();
+        for (n, _, _, projection_id) in &prepared {
+            let proj_wgsl = lower_cg_expr_to_wgsl(*projection_id, ctx)?;
+            updates.push_str(&format!(
+                "                    local_{n} = (local_{n} + ({proj_wgsl}));\n"
+            ));
+        }
+        let body = format!(
+            "{head}{{\n\
+             \x20   let _self_cell_f = (agent_pos[agent_id] + vec3<f32>(SPATIAL_WORLD_HALF_EXTENT)) / SPATIAL_CELL_SIZE;\n\
+             \x20   let _max_idx = i32(SPATIAL_GRID_DIM) - 1;\n\
+             \x20   let _self_cx = clamp(i32(max(_self_cell_f.x, 0.0)), 0, _max_idx);\n\
+             \x20   let _self_cy = clamp(i32(max(_self_cell_f.y, 0.0)), 0, _max_idx);\n\
+             \x20   let _self_cz = clamp(i32(max(_self_cell_f.z, 0.0)), 0, _max_idx);\n\
+             \x20   for (var dz: i32 = -{r}; dz <= {r}; dz = dz + 1) {{\n\
+             \x20       for (var dy: i32 = -{r}; dy <= {r}; dy = dy + 1) {{\n\
+             \x20           for (var dx: i32 = -{r}; dx <= {r}; dx = dx + 1) {{\n\
+             \x20               let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);\n\
+             \x20               let _start = spatial_grid_starts[_cell];\n\
+             \x20               let _end = spatial_grid_starts[_cell + 1u];\n\
+             \x20               for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {{\n\
+             \x20                   let per_pair_candidate = spatial_grid_cells[_i];\n\
+             {updates}\
+             \x20               }}\n\
+             \x20           }}\n\
+             \x20       }}\n\
+             \x20   }}\n\
+             }}",
+            r = radius,
+            head = head,
+            updates = updates,
+        );
+        Ok(body)
+    }
 }
 
 // ---------------------------------------------------------------------------
