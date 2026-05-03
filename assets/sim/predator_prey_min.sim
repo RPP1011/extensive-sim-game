@@ -75,6 +75,22 @@ sort_by distance(self, _) limit 1 {
   candidate != self
 }
 
+// Materialized: per-predator kill count, fed by Killed events.
+//
+// Stage 5 declares the view; nothing emits Killed yet (Stage 7's
+// StrikePrey is the intended emitter). Without an emitter the
+// per-agent storage stays at the initial value (0.0). The Stage 6
+// `@decay(rate = 0.95, per = tick)` annotation is intentionally
+// omitted — landing decay needs the @materialized storage cycle
+// (allocate buffer, run anchor-pattern decay each tick) which is the
+// sub-stage's whole point.
+@materialized(on_event = [Killed])
+view kill_count(by: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { by: predator } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
 physics MoveAlive @phase(per_agent) {
   on Tick {} where (self.alive) {
     let new_pos = self.pos + self.vel * config.hunt.step_scale;
