@@ -75,16 +75,18 @@ sort_by distance(self, _) limit 1 {
   candidate != self
 }
 
-// Materialized: per-predator kill count, fed by Killed events.
+// Materialized + decaying: per-predator kill count, fed by Killed
+// events, decaying at 0.95/tick so a recently-prolific hunter ranks
+// higher than one that killed long ago. The decay is the
+// anchor-pattern reduction the engine schedules each tick before
+// the event-fold replays the per-tick deltas.
 //
-// Stage 5 declares the view; nothing emits Killed yet (Stage 7's
-// StrikePrey is the intended emitter). Without an emitter the
-// per-agent storage stays at the initial value (0.0). The Stage 6
-// `@decay(rate = 0.95, per = tick)` annotation is intentionally
-// omitted — landing decay needs the @materialized storage cycle
-// (allocate buffer, run anchor-pattern decay each tick) which is the
-// sub-stage's whole point.
+// Stage 5 added the view; Stage 6 layers the @decay annotation on
+// top. Nothing emits Killed yet (Stage 7's StrikePrey is the
+// intended emitter); without emits the storage stays at 0 and the
+// decay multiplications are no-ops, but the kernel is still emitted.
 @materialized(on_event = [Killed])
+@decay(rate = 0.95, per = tick)
 view kill_count(by: Agent) -> f32 {
   initial: 0.0,
   on Killed { by: predator } { self += 1.0 }
