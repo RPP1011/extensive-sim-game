@@ -1,0 +1,15 @@
+[package]
+name = "boids_runtime"
+version = "0.1.0"
+edition = "2021"
+
+# Per-fixture runtime crate for `assets/sim/boids.sim`. Today this is
+# hand-written; eventually compiler-emitted from boids.sim with the
+# same crate name (the {DSL_SIM_FILE_NAME}_runtime convention). The
+# external surface — `BoidsState` + `make_sim()` factory + `impl
+# CompiledSim` — is the contract the application crate (`sim_app`)
+# depends on.
+
+[dependencies]
+engine = { path = "../engine" }
+glam = "0.29"

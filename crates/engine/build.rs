@@ -26,6 +26,7 @@ const ALLOWED_TOP_LEVEL: &[&str] = &[
     "rng.rs",
     "schema_hash.rs",
     "scratch.rs",
+    "sim_trait.rs",
     "spatial.rs",
     // step.rs: compile-only unimplemented!() stubs so #[ignore]d tests that
     // still import engine::step::* compile. Pending Task 11 cleanup — once

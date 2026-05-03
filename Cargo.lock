@@ -115,6 +115,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "boids_runtime"
+version = "0.1.0"
+dependencies = [
+ "engine",
+ "glam",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1126,6 +1134,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "sim_app"
+version = "0.1.0"
+dependencies = [
+ "boids_runtime",
+ "engine",
+ "glam",
 ]
 
 [[package]]
