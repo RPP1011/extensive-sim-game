@@ -99,3 +99,32 @@ physics MoveAlive @phase(per_agent) {
     agents.set_pos(self, new_pos);
   }
 }
+
+// Per-event chronicle handler — fires once per Killed event landed
+// last tick, emits a DeathCry record (Stage 8 will route to a
+// non-replayable ring with a String payload). Stage 7 lands the
+// PerEvent dispatch shape itself: `on Killed { ... } { emit ... }`
+// without a per-handler where, so every Killed event triggers a
+// DeathCry. Without an actual emit of Killed today the kernel runs
+// against an empty ring.
+@phase(post)
+physics ChronicleDeath {
+  on Killed { by: hunter, prey: victim, pos: _ } {
+    emit DeathCry {
+      victim: victim,
+      killer: hunter,
+      // utterance: "..." copies in at Stage 8 once the
+      // non-replayable / String-payload chronicle ring lands.
+    }
+  }
+}
+
+// Non-replayable chronicle event. Stage 8 will route this to a
+// distinct ring; Stage 7 declares it so ChronicleDeath has a target.
+// Stage 7: the GPU-emittable subset (victim, killer). Stage 8 adds
+// `utterance: String` + the @non_replayable / @traced annotations to
+// route this to the chronicle ring with prose payloads.
+event DeathCry {
+  victim: AgentId,
+  killer: AgentId,
+}
