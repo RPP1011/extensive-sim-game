@@ -1086,24 +1086,146 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
 /// is empty so this code is dead at runtime; for non-trivial fixtures
 /// emitted events vanish, but that's the same B1 trade-off ViewStorage
 /// Assign uses (and the same task list — Tasks 9-11).
+/// Lower a `CgStmt::Emit` to a real WGSL ring-append: atomicAdd a
+/// slot off `event_tail`, then write the tag + tick + payload words
+/// to `event_ring[slot * stride + offset]`. Bounds-checked against
+/// `event_ring_cap` so a producer that overflows the ring drops the
+/// event silently (the runtime's per-tick clear ensures the ring
+/// holds at most one tick's worth of events; if the cap is hit the
+/// fixture is producing more events than configured for).
+///
+/// Bindings touched:
+///   - `event_ring`: `var<storage, read_write> array<u32>`
+///   - `event_tail`: `var<storage, read_write> atomic<u32>`
+///   - kernel preamble-bound `tick: u32` (header word 1)
+///
+/// The PhysicsRule op's reads/writes table must record EventRing
+/// (Append) + EventTail so the binding-generator includes both
+/// bindings; without that the WGSL emitted here references undeclared
+/// identifiers. See `cg/lower/physics.rs::lower_emit` for the
+/// op-side metadata wire-up (Phase-8 task piece 2).
 fn lower_emit_to_wgsl(
     event_id: u32,
     fields: &[(EventField, CgExprId)],
     ctx: &EmitCtx,
 ) -> Result<String, EmitError> {
+    let kind = crate::cg::op::EventKindId(event_id);
+    let layout = ctx
+        .prog
+        .event_layouts
+        .get(&event_id)
+        .ok_or(EmitError::UnregisteredEventKind { kind })?;
+    let stride = layout.record_stride_u32;
+    let header = layout.header_word_count;
+    let buf = layout.buffer_name.as_str();
+    let ordered = layout.fields_in_declaration_order();
+
+    // Pre-evaluate every payload value-expr BEFORE touching the
+    // tail counter. Lowering a value may emit auxiliary `let`s into
+    // the surrounding stmt list (fold pre-pass) — doing it before
+    // the atomicAdd keeps the slot-acquired window short and avoids
+    // double-evaluating the expression in the bounds-check vs the
+    // commit branch.
+    let mut field_writes: Vec<String> = Vec::with_capacity(fields.len());
+    for (field_ref, expr_id) in fields {
+        let layout_entry = ordered
+            .get(field_ref.index as usize)
+            .ok_or(EmitError::UnregisteredEventKind { kind })?;
+        let (_name, fl) = layout_entry;
+        let value_wgsl = lower_cg_expr_to_wgsl(*expr_id, ctx)?;
+        let off = header + fl.word_offset_in_payload;
+        match fl.ty {
+            CgTy::AgentId | CgTy::U32 | CgTy::Tick => {
+                field_writes.push(format!(
+                    "    {buf}[slot * {stride}u + {off}u] = ({value_wgsl});",
+                ));
+            }
+            CgTy::I32 => {
+                field_writes.push(format!(
+                    "    {buf}[slot * {stride}u + {off}u] = bitcast<u32>({value_wgsl});",
+                ));
+            }
+            CgTy::F32 => {
+                field_writes.push(format!(
+                    "    {buf}[slot * {stride}u + {off}u] = bitcast<u32>({value_wgsl});",
+                ));
+            }
+            CgTy::Vec3F32 => {
+                // Materialize the value into a temp so we don't
+                // re-evaluate the source expression three times.
+                // `slot_<event>_<index>_v` keeps the temp name
+                // collision-free across multiple emits in the same
+                // body; ids are unique-per-emit-site within a
+                // program (the field index is per-event-kind, not
+                // global, but combined with event_id it's unique
+                // per (kind, field) pair).
+                let tmp = format!("_emit_v_{}_{}", event_id, field_ref.index);
+                field_writes.push(format!("    let {tmp}: vec3<f32> = ({value_wgsl});"));
+                field_writes.push(format!(
+                    "    {buf}[slot * {stride}u + {off}u] = bitcast<u32>({tmp}.x);",
+                ));
+                field_writes.push(format!(
+                    "    {buf}[slot * {stride}u + {off2}u] = bitcast<u32>({tmp}.y);",
+                    off2 = off + 1,
+                ));
+                field_writes.push(format!(
+                    "    {buf}[slot * {stride}u + {off3}u] = bitcast<u32>({tmp}.z);",
+                    off3 = off + 2,
+                ));
+            }
+            CgTy::Bool => {
+                field_writes.push(format!(
+                    "    {buf}[slot * {stride}u + {off}u] = select(0u, 1u, ({value_wgsl}));",
+                ));
+            }
+            CgTy::ViewKey { .. } => {
+                return Err(EmitError::EventFieldUnsupportedType {
+                    kind,
+                    word_offset_in_payload: fl.word_offset_in_payload,
+                    got: fl.ty,
+                });
+            }
+        }
+    }
+
+    // Wrap the ring-append in `{ … }` so the `slot` let doesn't
+    // collide with sibling emits. `event_ring_cap` is supplied as a
+    // wgsl const by the kernel preamble (todo: thread through
+    // PhysicsRule cfg uniform). For now hardcode 65536 slots — the
+    // runtime allocates that many u32-words / stride.
     let mut out = String::new();
-    out.push_str(&format!("// emit event#{} (B1 phony discard — real ring-append pending)\n", event_id));
-    for (_field, expr_id) in fields {
-        let v = lower_cg_expr_to_wgsl(*expr_id, ctx)?;
-        out.push_str(&format!("_ = ({});\n", v));
+    out.push_str(&format!("// emit event#{event_id} ({} fields)\n", fields.len()));
+    out.push_str("{\n");
+    out.push_str("    let slot = atomicAdd(&event_tail, 1u);\n");
+    // Bounds check — silently drop if ring full. Stride*65536 = 640k
+    // u32-words at the default cap; runtime sizing is the
+    // event_ring buffer length / stride.
+    out.push_str(&format!(
+        "    if (slot < {}u) {{\n",
+        DEFAULT_EVENT_RING_CAP_SLOTS
+    ));
+    out.push_str(&format!(
+        "        {buf}[slot * {stride}u + 0u] = {event_id}u;\n"
+    ));
+    out.push_str(&format!(
+        "        {buf}[slot * {stride}u + 1u] = tick;\n"
+    ));
+    for line in &field_writes {
+        // Each `field_writes` entry already starts with 4-space
+        // indent; bump to 8 for the nested-if scope.
+        out.push_str(&format!("    {line}\n"));
     }
-    // Drop trailing newline so callers can wrap with their own indent
-    // without doubled blank lines.
-    if out.ends_with('\n') {
-        out.pop();
-    }
+    out.push_str("    }\n");
+    out.push_str("}");
     Ok(out)
 }
+
+/// Default event-ring slot capacity — 65 536 events per tick. The
+/// runtime sizes the `event_ring` buffer to `cap * stride * 4` bytes;
+/// the WGSL emitter bounds-checks `slot < cap` to silently drop
+/// overflow producers. A future tunable would thread this through the
+/// per-rule cfg uniform.
+const DEFAULT_EVENT_RING_CAP_SLOTS: u32 = 65_536;
 
 /// Lower a [`CgStmt::Match`] as a scrutinee-bound `if`-chain. WGSL's
 /// `switch` would be a future-tense option; today the chain is the
@@ -2171,7 +2293,37 @@ mod tests {
 
     #[test]
     fn lower_emit_stmt() {
+        use crate::cg::program::{EventLayout, FieldLayout};
         let mut prog = empty_prog();
+        // Real ring-append needs an event layout to resolve field
+        // indices to (offset, ty). Two F32 fields at consecutive
+        // payload offsets (0, 1).
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "hp".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 0,
+                word_count: 1,
+                ty: CgTy::F32,
+            },
+        );
+        fields.insert(
+            "zero".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 1,
+                word_count: 1,
+                ty: CgTy::F32,
+            },
+        );
+        prog.event_layouts.insert(
+            7,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
         let hp = push_expr(
             &mut prog,
             CgExpr::Read(DataHandle::AgentField {
@@ -2203,11 +2355,25 @@ mod tests {
             },
         );
         let ctx = EmitCtx::structural(&prog);
-        // B1 no-op fallback: per-field WGSL phony discards so the body
-        // parses; real ring-append form is a future task.
-        assert_eq!(
-            lower_cg_stmt_to_wgsl(s, &ctx).unwrap(),
-            "// emit event#7 (B1 phony discard — real ring-append pending)\n_ = (agent_hp[agent_id]);\n_ = (0.0);"
+        let wgsl = lower_cg_stmt_to_wgsl(s, &ctx).unwrap();
+        // Real ring-append form: atomicAdd to event_tail, bounds-
+        // check, then tag/tick/payload writes. F32 fields wrap in
+        // bitcast<u32>.
+        assert!(
+            wgsl.contains("let slot = atomicAdd(&event_tail, 1u);"),
+            "expected atomicAdd-to-tail; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 0u] = 7u;"),
+            "expected tag (event id 7) write; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 2u] = bitcast<u32>(agent_hp[agent_id]);"),
+            "expected hp f32 bitcast write at offset 2; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 3u] = bitcast<u32>(0.0);"),
+            "expected zero f32 bitcast write at offset 3; got:\n{wgsl}"
         );
     }
 
@@ -3044,5 +3210,128 @@ mod tests {
             }
             other => panic!("expected UnregisteredNamespaceMethod, got {other:?}"),
         }
+    }
+
+    /// `CgStmt::Emit` lowers to a real ring-append: atomicAdd a slot
+    /// off `event_tail`, then write the tag + tick + payload words to
+    /// `event_ring[slot * stride + offset]`. Replaces the prior B1
+    /// phony-discard placeholder. The (event_kind, field index) lookup
+    /// resolves through `EventLayout::fields_in_declaration_order`.
+    ///
+    /// This test pins the WGSL shape directly via the per-stmt emit
+    /// path, independent of the kernel-binding generator (which still
+    /// needs to declare both `event_ring: array<u32>` and
+    /// `event_tail: atomic<u32>` for non-test compilation; tracked
+    /// separately).
+    #[test]
+    fn emit_lowers_to_ring_append_with_atomic_tail() {
+        use crate::cg::op::EventKindId;
+        use crate::cg::program::{EventLayout, FieldLayout};
+        use crate::cg::stmt::{CgStmt, EventField};
+
+        // Killed { by: AgentId, prey: AgentId, pos: Vec3F32 } — same
+        // shape predator_prey_min.sim's Killed declares.
+        let mut prog = empty_prog();
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(
+            "by".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 0,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        fields.insert(
+            "prey".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 1,
+                word_count: 1,
+                ty: CgTy::AgentId,
+            },
+        );
+        fields.insert(
+            "pos".to_string(),
+            FieldLayout {
+                word_offset_in_payload: 2,
+                word_count: 3,
+                ty: CgTy::Vec3F32,
+            },
+        );
+        prog.event_layouts.insert(
+            1,
+            EventLayout {
+                record_stride_u32: 10,
+                header_word_count: 2,
+                buffer_name: "event_ring".to_string(),
+                fields,
+            },
+        );
+
+        let by_value = push_expr(&mut prog, CgExpr::AgentSelfId);
+        let prey_value = push_expr(&mut prog, CgExpr::AgentSelfId);
+        let pos_value = push_expr(
+            &mut prog,
+            CgExpr::Lit(LitValue::Vec3F32 { x: 1.0, y: 2.0, z: 3.0 }),
+        );
+        let stmt = CgStmt::Emit {
+            event: EventKindId(1),
+            fields: vec![
+                (EventField { event: EventKindId(1), index: 0 }, by_value),
+                (EventField { event: EventKindId(1), index: 1 }, prey_value),
+                (EventField { event: EventKindId(1), index: 2 }, pos_value),
+            ],
+        };
+        let stmt_id = push_stmt(&mut prog, stmt);
+        let ctx = EmitCtx::structural(&prog);
+        let wgsl = lower_cg_stmt_to_wgsl(stmt_id, &ctx).expect("Emit lowers");
+
+        // Atomic-add the slot off event_tail.
+        assert!(
+            wgsl.contains("let slot = atomicAdd(&event_tail, 1u);"),
+            "expected atomicAdd-to-tail; got:\n{wgsl}"
+        );
+        // Bounds check before commit.
+        assert!(
+            wgsl.contains("if (slot < 65536u)"),
+            "expected slot bounds check; got:\n{wgsl}"
+        );
+        // Tag write at offset 0 (event_id is 1).
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 0u] = 1u;"),
+            "expected tag write at offset 0; got:\n{wgsl}"
+        );
+        // Tick write at offset 1.
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 1u] = tick;"),
+            "expected tick write at offset 1; got:\n{wgsl}"
+        );
+        // by AgentId at payload offset 0 (header+0 = 2).
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 2u] = (agent_id);"),
+            "expected `by` at offset 2; got:\n{wgsl}"
+        );
+        // prey AgentId at payload offset 1 (header+1 = 3).
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 3u] = (agent_id);"),
+            "expected `prey` at offset 3; got:\n{wgsl}"
+        );
+        // Vec3 pos with bitcast<u32>(.x/.y/.z) at offsets 4/5/6.
+        assert!(
+            wgsl.contains("bitcast<u32>(_emit_v_1_2.x)"),
+            "expected vec3 .x bitcast; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 4u] = bitcast<u32>(_emit_v_1_2.x);"),
+            "expected vec3 .x at offset 4; got:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("event_ring[slot * 10u + 6u] = bitcast<u32>(_emit_v_1_2.z);"),
+            "expected vec3 .z at offset 6; got:\n{wgsl}"
+        );
+        // No phony discard left over from the old B1 placeholder.
+        assert!(
+            !wgsl.contains("_ = ("),
+            "phony discard should be gone; got:\n{wgsl}"
+        );
     }
 }
