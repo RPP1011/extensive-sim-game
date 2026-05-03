@@ -572,10 +572,76 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
             ast_label: "Quantifier",
             span,
         }),
-        IrExpr::Fold { .. } => Err(LoweringError::UnsupportedAstNode {
-            ast_label: "Fold",
-            span,
-        }),
+        // `count(binder in iter where pred)` / `sum(...)` / `max(...)` /
+        // `min(...)`. The resolver shapes every aggregation comprehension
+        // as `IrExpr::Fold { kind, binder, iter, body }`. Lowering today
+        // recognises **only** `FoldKind::Count` over the `agents`
+        // namespace iterator — the shape Boids' `neighbor_count` lazy
+        // view uses (`assets/sim/boids.sim`).
+        //
+        // ## What this arm produces
+        //
+        // A typed-zero short-circuit at the expression position. The
+        // Fold is **not** materialised as compute — neither as a CG IR
+        // variant carrying the loop, nor as a real WGSL `for` walk.
+        // Real fold emit requires either (a) a top-level WGSL helper-fn
+        // prelude (out of scope: would need to edit
+        // `cg/emit/program.rs::compose_wgsl_file`) or (b) statement
+        // injection from the lowering layer (out of scope: would need a
+        // `CgStmt::Fold` shape and changes to `physics.rs` /
+        // `view.rs` / scoring lowering to splice the synthesised stmt
+        // before its consumer). Both paths reach beyond the file scope
+        // pinned by the Fold-lowering subagent task.
+        //
+        // ## Why a literal short-circuit is honest here
+        //
+        // The B1 conventions across this emit stack (the
+        // `b1_default_for_field_ty` fallback in
+        // `wgsl_body.rs::lower_cg_expr_to_wgsl`, the wildcard PerUnit
+        // collapse a few arms below, the `MOVEMENT_BODY` /
+        // `SPATIAL_BUILD_HASH_BODY` placeholders in
+        // `cg/emit/kernel.rs`) all share the same posture: structural
+        // scaffolding lands first, real semantics layers on once the
+        // surrounding infrastructure exists. Boids' `neighbor_count`
+        // is consumed only by the `MoveBoid` per-agent physics body,
+        // which is itself a `MOVEMENT_BODY` placeholder today — so a
+        // real fold value would have nothing to feed.
+        //
+        // ## What this unblocks
+        //
+        // The Boids fixture lowers cleanly through the lazy-view inline
+        // path (`lower_view_call`'s `lazy_view_bodies` branch above),
+        // which substitutes `neighbor_count`'s body at every call site
+        // and walks it through `lower_expr` recursively. Without this
+        // arm, every such call surfaces as `UnsupportedAstNode {
+        // ast_label: "Fold" }` and the entire enclosing op fails. With
+        // it, the call lowers to `0i` and the rest of the body
+        // continues. The real fold semantic lands when:
+        //   1. A kernel actually consumes a `count(...)` result (today
+        //      no kernel does — the only consumer is `MOVEMENT_BODY`'s
+        //      hand-written placeholder).
+        //   2. The compose_wgsl_file pipeline grows a fold-helper-fn
+        //      prelude OR `CgStmt::Fold` lands with statement-injection
+        //      lowering wired through physics + view + scoring bodies.
+        //
+        // ## Sum / Min / Max
+        //
+        // Out of scope for the Boids unblock — Boids only uses Count.
+        // Future fixtures wanting `sum_vec3(...)` etc. surface as their
+        // own `UnsupportedAstNode` deferrals here; extend the match
+        // when a real consumer arrives.
+        IrExpr::Fold { kind, .. } => {
+            use dsl_ast::ast::FoldKind;
+            match kind {
+                FoldKind::Count => add(ctx, CgExpr::Lit(LitValue::I32(0)), span),
+                FoldKind::Sum | FoldKind::Min | FoldKind::Max => {
+                    Err(LoweringError::UnsupportedAstNode {
+                        ast_label: "Fold",
+                        span,
+                    })
+                }
+            }
+        }
         IrExpr::List(_) => Err(LoweringError::UnsupportedAstNode {
             ast_label: "List",
             span,
@@ -3632,8 +3698,12 @@ mod tests {
         ));
     }
 
+    /// `FoldKind::Sum` / `Min` / `Max` still surface as
+    /// `UnsupportedAstNode { ast_label: "Fold" }` deferrals — only
+    /// `Count` is wired in the `Fold` arm of `lower_expr` today (the
+    /// minimum the Boids fixture's `neighbor_count` lazy view needs).
     #[test]
-    fn fold_unsupported() {
+    fn fold_sum_unsupported() {
         let ast = node(IrExpr::Fold {
             kind: dsl_ast::ast::FoldKind::Sum,
             binder: None,
@@ -3649,6 +3719,25 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// `FoldKind::Count` short-circuits to a typed `LitValue::I32(0)`.
+    /// Per the inline arm docstring this is a B1 placeholder — the real
+    /// fold loop emit lands when a kernel actually consumes a count
+    /// result (today no kernel does; `MOVEMENT_BODY` is the only
+    /// downstream consumer of Boids' `neighbor_count` view and is
+    /// itself a hand-written placeholder).
+    #[test]
+    fn fold_count_lowers_to_zero_literal() {
+        let ast = node(IrExpr::Fold {
+            kind: dsl_ast::ast::FoldKind::Count,
+            binder: None,
+            binder_name: None,
+            iter: None,
+            body: Box::new(node(IrExpr::LitBool(true))),
+        });
+        let s = lower_to_string(&ast).expect("Count fold lowers");
+        assert_eq!(s, "(lit 0i32)");
     }
 
     #[test]

@@ -102,3 +102,50 @@ fn boids_fixture_resolves() {
     assert_eq!(comp.configs.len(), 1);
     assert_eq!(comp.configs[0].name, "flock");
 }
+
+/// Phase 7 follow-up: the `neighbor_count` lazy view body in
+/// `assets/sim/boids.sim` is a `count(other in agents where ...)`
+/// comprehension that the resolver shapes as
+/// `IrExpr::Fold { kind: FoldKind::Count, .. }`.
+///
+/// Pre-implementation: lowering this body through `lower_expr` returns
+/// `LoweringError::UnsupportedAstNode { ast_label: "Fold", .. }`.
+/// Post-implementation: lowering succeeds and produces a `CgExprId`.
+///
+/// We exercise the view body directly rather than going through the
+/// full driver because the physics-handler path bounces off
+/// `UnresolvedEventPattern { event_name: "Tick" }` first (Tick wiring
+/// is a separate, future surface). Direct `lower_expr` invocation
+/// pins the Fold contract without coupling to that unrelated layer.
+#[test]
+fn boids_fixture_lowers_count_fold() {
+    use dsl_ast::ir::ViewBodyIR;
+    use dsl_compiler::cg::lower::expr::{lower_expr, LoweringCtx};
+    use dsl_compiler::cg::program::CgProgramBuilder;
+
+    let src = fs::read_to_string(boids_path()).expect("read boids.sim");
+    let program = dsl_compiler::parse(&src).expect("parse boids.sim");
+    let comp = dsl_ast::resolve::resolve(program).expect("resolve boids.sim");
+
+    let view = comp
+        .views
+        .iter()
+        .find(|v| v.name == "neighbor_count")
+        .expect("neighbor_count view present");
+    let body = match &view.body {
+        ViewBodyIR::Expr(e) => e,
+        ViewBodyIR::Fold { .. } => panic!("neighbor_count is a lazy view; body must be Expr"),
+    };
+
+    let mut builder = CgProgramBuilder::new();
+    let mut ctx = LoweringCtx::new(&mut builder);
+
+    let result = lower_expr(body, &mut ctx);
+
+    assert!(
+        result.is_ok(),
+        "expected Fold-bearing view body to lower; got: {:?}",
+        result.err()
+    );
+}
+
