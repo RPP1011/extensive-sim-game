@@ -14,7 +14,7 @@
 //!   Both `Hare` and `Wolf` agent types share the same SoA layout (the
 //!   compiler today doesn't distinguish them at the buffer level —
 //!   that comes with PP Stage 1's per-handler where-clause split).
-//! - One per-tick dispatch: `physics_MoveAll` (the trivial integrator
+//! - One per-tick dispatch: `physics_MoveAlive` (the trivial integrator
 //!   in `predator_prey_min.sim`).
 //! - Position readback on demand for visualisation / smoke tests.
 //!
@@ -63,6 +63,12 @@ pub struct PredatorPreyState {
     gpu: GpuContext,
     pos_buf: wgpu::Buffer,
     vel_buf: wgpu::Buffer,
+    /// Per-agent `alive` flag — `array<u32>` of length `agent_count`,
+    /// initialised to 1 for every slot. The Stage 1 fixture's
+    /// `where (self.alive)` clause reads this; later stages with
+    /// despawn semantics will flip slots to 0 via emitted `Despawned`
+    /// events.
+    alive_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
     pos_staging: wgpu::Buffer,
 
@@ -135,7 +141,15 @@ impl PredatorPreyState {
             contents: bytemuck::cast_slice(&vel_padded),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
-        let cfg = physics_MoveAll::PhysicsMoveAllCfg {
+        // Every slot starts alive (1u32). Future stages with despawn
+        // semantics flip individual slots to 0 via emitted events.
+        let alive_init: Vec<u32> = vec![1u32; n];
+        let alive_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("predator_prey_runtime::alive"),
+            contents: bytemuck::cast_slice(&alive_init),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let cfg = physics_MoveAlive::PhysicsMoveAliveCfg {
             agent_cap: agent_count,
             _pad: [0; 3],
         };
@@ -155,6 +169,7 @@ impl PredatorPreyState {
             gpu,
             pos_buf,
             vel_buf,
+            alive_buf,
             cfg_buf,
             pos_staging,
             cache: dispatch::KernelCache::default(),
@@ -218,12 +233,13 @@ impl CompiledSim for PredatorPreyState {
             },
         );
 
-        let bindings = physics_MoveAll::PhysicsMoveAllBindings {
+        let bindings = physics_MoveAlive::PhysicsMoveAliveBindings {
             agent_pos: &self.pos_buf,
+            agent_alive: &self.alive_buf,
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
-        dispatch::dispatch_physics_moveall(
+        dispatch::dispatch_physics_movealive(
             &mut self.cache,
             &bindings,
             &self.gpu.device,

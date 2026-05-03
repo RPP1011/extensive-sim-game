@@ -230,7 +230,16 @@ fn agent_field_access(field: AgentFieldId, target: &AgentRef) -> String {
         AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
         AgentRef::Target(id) => format!("target_expr_{}", id.0),
     };
-    format!("agent_{}[{}]", field.snake(), index)
+    let raw = format!("agent_{}[{}]", field.snake(), index);
+    // Bool fields are stored as `array<u32>` on the GPU (boolean
+    // storage isn't host-shareable in WGSL, see `kernel.rs`'s
+    // `AgentFieldTy::Bool => "array<u32>"`); coerce back to bool at
+    // every read site so the WGSL type-checker accepts the value in
+    // bool position (`if`, `&&`, `!`, etc.).
+    match field.ty() {
+        AgentFieldTy::Bool => format!("({raw} != 0u)"),
+        _ => raw,
+    }
 }
 
 /// Identifier token for an [`AgentRef`]. `Target(expr_id)` maps to the
@@ -1704,7 +1713,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(not_alive, &ctx).unwrap(),
-            "(!agent_alive[agent_id])"
+            "(!(agent_alive[agent_id] != 0u))"
         );
 
         // abs(slow_factor_q8)
@@ -1899,7 +1908,7 @@ mod tests {
                     field: AgentFieldId::Alive,
                     target: AgentRef::EventTarget,
                 },
-                "agent_alive[event_target_id]",
+                "(agent_alive[event_target_id] != 0u)",
             ),
             (
                 // B1 no-op fallback: AgentRef::Target reads to a typed

@@ -6,10 +6,28 @@
 // the full file, we delete this and rename — at which point all
 // stages are done.
 //
-// Stage 0 (current): two entities + one shared per-agent integrator.
-// Stage 1 will copy the per-handler `where self.creature_type == ...`
-// split — until that lands, two PerAgent rules both calling set_pos
-// surface as a write-write cycle in the schedule.
+// Stage 1 (current): single physics rule guarded by a per-handler
+// `where (self.alive)` clause. The where-clause CG lowering wraps
+// the body in `if (cond) { ... }` so non-matching agents skip every
+// statement. The full design target's `where (self.creature_type ==
+// Hare)` form (and the corresponding two-rule split between MoveHare
+// + MoveWolf) needs three more compiler pieces:
+//
+//   1. `IrExpr::Entity(EntityRef)` → discriminant-constant lowering
+//      (currently surfaces as `UnsupportedAstNode { ast_label: "Entity" }`).
+//   2. `AgentField::CreatureType` (`OptEnumU32`) ↔ `u32` literal
+//      comparison surface.
+//   3. Two-rule PerAgent cycle resolution: today two PerAgent rules
+//      both writing `pos` (or even reading the other's writes) form
+//      a write-write SCC in `well_formed::detect_cycles`, regardless
+//      of whether the where-clauses are runtime-disjoint. The cycle
+//      goes away once the schedule synthesizer can either (a) merge
+//      mutually-exclusive rules into one PerAgent op with branching,
+//      or (b) be told to skip the SCC when where-clauses are proven
+//      disjoint at compile time.
+//
+// Each of those is a focused follow-up sub-stage. Stage 2 then layers
+// per-event ring allocation on top.
 
 event Tick { }
 
@@ -27,8 +45,8 @@ config hunt {
   step_scale: f32 = 0.5,
 }
 
-physics MoveAll @phase(per_agent) {
-  on Tick {} {
+physics MoveAlive @phase(per_agent) {
+  on Tick {} where (self.alive) {
     let new_pos = self.pos + self.vel * config.hunt.step_scale;
     agents.set_pos(self, new_pos);
   }
