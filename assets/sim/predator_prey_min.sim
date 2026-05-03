@@ -55,7 +55,24 @@ entity Wolf : Agent {
 }
 
 config hunt {
-  step_scale: f32 = 0.5,
+  step_scale:    f32 = 0.5,
+  strike_radius: f32 = 1.5,
+}
+
+// Spatial filter for prey within strike distance. The compiler routes
+// this through the spatial-grid hash; @top_k(1) means only the single
+// closest candidate is considered.
+//
+// Stage 3 declares the query; no rule consumes it yet (the emit-side
+// StrikePrey lives at Stage 7, when PerEvent + emit on Killed lands).
+// Until then, the query is exercised at parse + resolve + (where
+// possible) lower; the unused-but-declared shape is the same one
+// boids.sim's `spatial_query nearby_other` follows.
+@spatial(radius = 1.5, kind = [Agent])
+@top_k(1)
+query closest_prey(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 1 {
+  candidate != self
 }
 
 physics MoveAlive @phase(per_agent) {

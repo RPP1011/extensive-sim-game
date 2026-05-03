@@ -981,9 +981,37 @@ fn collect(
                     span: d.span,
                 });
             }
-            Decl::Query(_) => {
-                // Queries are not a milestone-1a surface yet. Skip silently;
-                // 1b will handle.
+            Decl::Query(d) => {
+                // The modern `query <name>(...) -> ... sort_by ... limit
+                // ... { <body> }` surface registers as a SpatialQueryIR
+                // alongside the legacy `spatial_query <name>(...) =
+                // <expr>` form. Pass-1 reserves the symbol slot + carries
+                // the annotations (so `@top_k(K)` and `@spatial(...)` are
+                // visible to consumers). The richer fields (sort_by,
+                // limit, return_ty, body filter) lower in pass-2 once a
+                // physics rule consumes the query — until then the
+                // placeholder filter `LitBool(true)` mirrors the
+                // SpatialQueryIR pass-1 convention. Stage 3 lock-in:
+                // declared queries appear in `comp.spatial_queries` even
+                // before any consumer wires them.
+                check_dup(symbols, "spatial_query", &d.name, d.span, |s| {
+                    s.spatial_queries.contains_key(&d.name)
+                })?;
+                let idx = push_idx(comp.spatial_queries.len(), "spatial_query")?;
+                symbols
+                    .spatial_queries
+                    .insert(d.name.clone(), SpatialQueryRef(idx));
+                symbols.record_first("spatial_query", &d.name, d.span);
+                comp.spatial_queries.push(SpatialQueryIR {
+                    name: d.name.clone(),
+                    params: Vec::new(),
+                    filter: IrExprNode {
+                        kind: IrExpr::LitBool(true),
+                        span: d.span,
+                    },
+                    annotations: d.annotations.clone(),
+                    span: d.span,
+                });
             }
             Decl::SpatialQuery(d) => {
                 // Phase 7 Task 4. Pass-1 reserves the slot + records
