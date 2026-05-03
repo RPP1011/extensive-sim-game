@@ -1,8 +1,9 @@
-//! Stage 7 lock-in: predator_prey_min.sim's `ChronicleDeath` PerEvent
-//! physics rule lowers + emits a kernel. The rule lacks a per-handler
-//! `where` (so every Killed event triggers a DeathCry emit), and the
-//! emit body's payload fields are all GPU-emittable (Stage 8 adds the
-//! String `utterance` after the chronicle ring lands).
+//! Stage 7/8 lock-in: predator_prey_min.sim's `ChronicleDeath`
+//! PerEvent physics rule lives on the host side (`@cpu_only` tag, set
+//! at Stage 8 so the String `utterance` payload is allowed). The rule
+//! resolves cleanly + the DeathCry event is registered, but no GPU
+//! kernel emits for it (cpu_only rules are filtered out of the CG
+//! lowering driver — `lower_all_physics` skips them).
 
 #[test]
 fn predator_prey_min_chronicle_death_emits_kernel() {
@@ -26,7 +27,11 @@ fn predator_prey_min_chronicle_death_emits_kernel() {
         "DeathCry event should resolve"
     );
 
-    // Schedule emits a `physics_ChronicleDeath` kernel.
+    // Stage 8 made ChronicleDeath @cpu_only — its body emits a
+    // String chronicle, so no GPU kernel lowers. Verify the CG
+    // pipeline still emits cleanly (the rule's existence shouldn't
+    // poison the GPU emit) and that no `physics_ChronicleDeath`
+    // kernel appears in the artifact index.
     let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp).expect("CG lower");
     let sched = dsl_compiler::cg::schedule::synthesize_schedule(
         &cg,
@@ -35,8 +40,16 @@ fn predator_prey_min_chronicle_death_emits_kernel() {
     let arts = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
         .expect("emit predator_prey_min CG program");
     assert!(
-        arts.kernel_index.iter().any(|n| n == "physics_ChronicleDeath"),
-        "expected physics_ChronicleDeath kernel; got {:?}",
+        arts.kernel_index.iter().all(|n| n != "physics_ChronicleDeath"),
+        "ChronicleDeath is @cpu_only — should NOT appear in GPU kernel index; got {:?}",
         arts.kernel_index
     );
+
+    // Confirm the cpu_only flag is set on the resolved rule.
+    let rule = comp
+        .physics
+        .iter()
+        .find(|p| p.name == "ChronicleDeath")
+        .expect("ChronicleDeath physics rule");
+    assert!(rule.cpu_only, "ChronicleDeath should be cpu_only");
 }
