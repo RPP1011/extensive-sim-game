@@ -925,7 +925,7 @@ struct TypedBinding {
 
 /// Render a [`DataHandle`] as a deterministic snake_case binding name.
 /// Mirrors the inner-walk's structural-handle convention so a kernel
-/// body referring to `agent_self_hp` resolves through this binding's
+/// body referring to `agent_hp[agent_id]` resolves through this binding's
 /// declared name.
 ///
 /// For `AgentField`, we drop the `target` discriminator from the
@@ -2641,8 +2641,8 @@ mod tests {
         assert!(body.contains("// op#"), "body: {body}");
         assert!(body.contains("mask_5_bitmap"), "body: {body}");
         // The lowered predicate text from Task 4.1's expr walker
-        // should appear: `(agent_self_hp < 5.0)`.
-        assert!(body.contains("agent_self_hp < 5.0"), "body: {body}");
+        // should appear: `(agent_hp[agent_id] < 5.0)`.
+        assert!(body.contains("agent_hp[agent_id] < 5.0"), "body: {body}");
     }
 
     // ---- 8b. MaskPredicate body (Task 5.6a) ----
@@ -4171,7 +4171,7 @@ mod tests {
         use crate::cg::op::SpatialQueryKind;
 
         let mut prog = CgProgram::default();
-        // Filter: PerPairCandidate.alive — reads agent_per_pair_candidate_alive.
+        // Filter: PerPairCandidate.alive — reads agent_alive[per_pair_candidate].
         let filter_id = push_expr(
             &mut prog,
             CgExpr::Read(DataHandle::AgentField {
@@ -4204,7 +4204,7 @@ mod tests {
             "filtered-walk body must include per-cell walk loop, got: {body}"
         );
         assert!(
-            body.contains("agent_per_pair_candidate_alive"),
+            body.contains("agent_alive[per_pair_candidate]"),
             "filter (alive read) must lower into the body, got: {body}"
         );
         assert!(

@@ -23,7 +23,7 @@
 //!
 //! - **Naming strategy.** Today only [`HandleNamingStrategy::Structural`]
 //!   is implemented. Each [`DataHandle`] prints as a deterministic
-//!   identifier-shaped name (`agent_self_hp`, `view_3_primary`,
+//!   identifier-shaped name (`agent_hp[agent_id]`, `view_3_primary`,
 //!   `mask_2_bitmap`, …) — useful for snapshot tests and as a
 //!   placeholder until BGL slot assignment lands. Task 4.2 will plug in
 //!   a slot-aware strategy that emits the actual buffer access form
@@ -64,8 +64,8 @@
 use std::fmt;
 
 use crate::cg::data_handle::{
-    AgentFieldTy, AgentRef, AgentScratchKind, CgExprId, DataHandle, EventRingAccess, RngPurpose,
-    SpatialStorageKind, ViewStorageSlot,
+    AgentFieldId, AgentFieldTy, AgentRef, AgentScratchKind, CgExprId, DataHandle, EventRingAccess,
+    RngPurpose, SpatialStorageKind, ViewStorageSlot,
 };
 use crate::cg::expr::{BinaryOp, BuiltinId, CgExpr, CgTy, ExprArena, LitValue, NumericTy, UnaryOp};
 use crate::cg::op::EventKindId;
@@ -87,7 +87,7 @@ use crate::cg::stmt::{
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum HandleNamingStrategy {
     /// Each handle prints as a deterministic identifier-shaped name
-    /// (`agent_self_hp`, `view_3_primary`, `mask_2_bitmap`,
+    /// (`agent_hp[agent_id]`, `view_3_primary`, `mask_2_bitmap`,
     /// `event_ring_5_read`, `rng_action`, …). The shape mirrors
     /// [`DataHandle::Display`]'s output but stripped down to
     /// WGSL-valid identifier characters (`[A-Za-z0-9_]` only). Used by
@@ -175,6 +175,35 @@ fn structural_handle_name(h: &DataHandle) -> String {
         DataHandle::SimCfgBuffer => "sim_cfg_buffer".to_string(),
         DataHandle::SnapshotKick => "snapshot_kick".to_string(),
     }
+}
+
+/// Render `agent_<field>[<index_expr>]` — the indexed access on the
+/// shared SoA binding for `DataHandle::AgentField { field, target }`.
+///
+/// The index expression depends on the agent-ref:
+///   - `Self_` → `agent_id` (kernel-bound for PerAgent dispatch)
+///   - `EventTarget` → `event_target_id` (PerEvent preamble-bound)
+///   - `PerPairCandidate` → `per_pair_candidate` (PerPair preamble-bound)
+///   - `Actor` → `actor_id` (PerEvent preamble-bound)
+///
+/// `Target(_)` is NOT handled here — callers fall back to a typed-
+/// default literal (read) or a phony discard (assign) for that case
+/// because the per-thread target index isn't threaded into kernel-
+/// local scope yet (Phase 8 follow-up).
+///
+/// The binding side (`structural_binding_name` in `cg/emit/kernel.rs`)
+/// already drops the agent-ref discriminator and uses just
+/// `agent_<field>` — so the body's indexed access lines up against
+/// the declared `array<...>` binding without naming drift.
+fn agent_field_access(field: AgentFieldId, target: &AgentRef) -> String {
+    let index = match target {
+        AgentRef::Self_ => "agent_id".to_string(),
+        AgentRef::EventTarget => "event_target_id".to_string(),
+        AgentRef::Actor => "actor_id".to_string(),
+        AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
+        AgentRef::Target(id) => format!("target_expr_{}", id.0),
+    };
+    format!("agent_{}[{}]", field.snake(), index)
 }
 
 /// Identifier token for an [`AgentRef`]. `Target(expr_id)` maps to the
@@ -547,22 +576,21 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
     )?;
     match node {
         CgExpr::Read(handle) => {
-            // B1 no-op fallback: an `AgentField{target: Target(_)}` read
-            // names a per-thread runtime agent index that the structural
-            // strategy can't resolve (the target expression is in a
-            // sibling op, not yet threaded into the kernel-local scope).
-            // Path B's slot-aware lowering replaces this with a real
-            // buffer access; until then emit a typed-default literal so
-            // the WGSL parses and the trivial-fixture parity gate runs.
-            // Mask predicates evaluate to `false` (no bit set), fold
-            // bodies iterate `0..event_count == 0` so the discard
-            // statement is dead code at runtime.
-            if let DataHandle::AgentField {
-                target: AgentRef::Target(_),
-                field,
-            } = handle
-            {
-                return Ok(b1_default_for_field_ty(field.ty()).to_string());
+            // AgentField reads emit an indexed access on the shared
+            // SoA binding (`agent_<field>[<index>]`). The index
+            // expression depends on the agent-ref:
+            //   Self_ → kernel-bound `agent_id`
+            //   EventTarget → preamble-bound `event_target_id`
+            //   PerPairCandidate → preamble-bound `per_pair_candidate`
+            //   Actor → preamble-bound `actor_id`
+            //   Target(_) → still a B1 typed-default fallback —
+            //     the per-thread target index isn't yet threaded
+            //     into kernel-local scope (Phase 8 follow-up).
+            if let DataHandle::AgentField { field, target } = handle {
+                if matches!(target, AgentRef::Target(_)) {
+                    return Ok(b1_default_for_field_ty(field.ty()).to_string());
+                }
+                return Ok(agent_field_access(*field, target));
             }
             Ok(ctx.handle_name(handle))
         }
@@ -789,6 +817,19 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
             if let DataHandle::ViewStorage { .. } = target {
                 let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;
                 return Ok(format!("_ = ({});", rhs));
+            }
+            // AgentField writes emit indexed access on the shared SoA
+            // binding (`agent_<field>[<index>] = <value>`). See the
+            // matching Read arm above for the agent-ref → index map.
+            // Target(_) writes fall back to a phony discard until the
+            // per-thread target index threading lands.
+            if let DataHandle::AgentField { field, target: agent_ref } = target {
+                let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;
+                if matches!(agent_ref, AgentRef::Target(_)) {
+                    return Ok(format!("_ = ({});", rhs));
+                }
+                let lhs = agent_field_access(*field, agent_ref);
+                return Ok(format!("{} = {};", lhs, rhs));
             }
             let lhs = ctx.handle_name(target);
             let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;
@@ -1084,7 +1125,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(add, &ctx).unwrap(),
-            "(agent_self_hp + 1.0)"
+            "(agent_hp[agent_id] + 1.0)"
         );
 
         // (hp < 5.0)
@@ -1101,7 +1142,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(lt, &ctx).unwrap(),
-            "(agent_self_hp < 5.0)"
+            "(agent_hp[agent_id] < 5.0)"
         );
 
         // (true && false)
@@ -1165,7 +1206,7 @@ mod tests {
             },
         );
         let ctx = EmitCtx::structural(&prog);
-        assert_eq!(lower_cg_expr_to_wgsl(neg, &ctx).unwrap(), "(-agent_self_hp)");
+        assert_eq!(lower_cg_expr_to_wgsl(neg, &ctx).unwrap(), "(-agent_hp[agent_id])");
 
         // !alive
         let alive = push_expr(
@@ -1186,7 +1227,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(not_alive, &ctx).unwrap(),
-            "(!agent_self_alive)"
+            "(!agent_alive[agent_id])"
         );
 
         // abs(slow_factor_q8)
@@ -1208,7 +1249,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(abs, &ctx).unwrap(),
-            "abs(agent_self_slow_factor_q8)"
+            "abs(agent_slow_factor_q8[agent_id])"
         );
 
         // sqrt(2.0)
@@ -1243,7 +1284,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(norm, &ctx).unwrap(),
-            "normalize(agent_self_pos)"
+            "normalize(agent_pos[agent_id])"
         );
     }
 
@@ -1278,7 +1319,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(dist, &ctx).unwrap(),
-            "distance(agent_self_pos, agent_actor_pos)"
+            "distance(agent_pos[agent_id], agent_pos[actor_id])"
         );
 
         // min_f32(1.0, 2.0)
@@ -1319,7 +1360,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(cl, &ctx).unwrap(),
-            "clamp_u32(agent_self_level, 1u, 99u)"
+            "clamp_u32(agent_level[agent_id], 1u, 99u)"
         );
 
         // view_2_get(self_pos)
@@ -1334,7 +1375,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(vc, &ctx).unwrap(),
-            "view_2_get(agent_self_pos)"
+            "view_2_get(agent_pos[agent_id])"
         );
 
         // saturating_add_u32 spot-check
@@ -1367,21 +1408,21 @@ mod tests {
                     field: AgentFieldId::Hp,
                     target: AgentRef::Self_,
                 },
-                "agent_self_hp",
+                "agent_hp[agent_id]",
             ),
             (
                 DataHandle::AgentField {
                     field: AgentFieldId::Pos,
                     target: AgentRef::Actor,
                 },
-                "agent_actor_pos",
+                "agent_pos[actor_id]",
             ),
             (
                 DataHandle::AgentField {
                     field: AgentFieldId::Alive,
                     target: AgentRef::EventTarget,
                 },
-                "agent_event_target_alive",
+                "agent_alive[event_target_id]",
             ),
             (
                 // B1 no-op fallback: AgentRef::Target reads to a typed
@@ -1503,7 +1544,7 @@ mod tests {
     #[test]
     fn lower_select_emits_wgsl_select_with_false_first_order() {
         // select(true, hp, 0.0)
-        // → WGSL: select(0.0, agent_self_hp, true)  -- false_val FIRST.
+        // → WGSL: select(0.0, agent_hp[agent_id], true)  -- false_val FIRST.
         let mut prog = empty_prog();
         let cond = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
         let hp = push_expr(
@@ -1526,7 +1567,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_expr_to_wgsl(sel, &ctx).unwrap(),
-            "select(0.0, agent_self_hp, true)"
+            "select(0.0, agent_hp[agent_id], true)"
         );
     }
 
@@ -1566,7 +1607,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_stmt_to_wgsl(s, &ctx).unwrap(),
-            "agent_self_hp = (agent_self_hp + 1.0);"
+            "agent_hp[agent_id] = (agent_hp[agent_id] + 1.0);"
         );
     }
 
@@ -1608,7 +1649,7 @@ mod tests {
         // parses; real ring-append form is a future task.
         assert_eq!(
             lower_cg_stmt_to_wgsl(s, &ctx).unwrap(),
-            "// emit event#7 (B1 phony discard — real ring-append pending)\n_ = (agent_self_hp);\n_ = (0.0);"
+            "// emit event#7 (B1 phony discard — real ring-append pending)\n_ = (agent_hp[agent_id]);\n_ = (0.0);"
         );
     }
 
@@ -1663,11 +1704,11 @@ mod tests {
         let with_else = lower_cg_stmt_to_wgsl(if_with_else, &ctx).unwrap();
         assert_eq!(
             with_else,
-            "if (true) {\n    agent_self_hp = 1.0;\n} else {\n    agent_self_hp = 0.0;\n}"
+            "if (true) {\n    agent_hp[agent_id] = 1.0;\n} else {\n    agent_hp[agent_id] = 0.0;\n}"
         );
 
         let no_else = lower_cg_stmt_to_wgsl(if_no_else, &ctx).unwrap();
-        assert_eq!(no_else, "if (true) {\n    agent_self_hp = 1.0;\n}");
+        assert_eq!(no_else, "if (true) {\n    agent_hp[agent_id] = 1.0;\n}");
     }
 
     #[test]
@@ -1730,20 +1771,20 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         let out = lower_cg_stmt_to_wgsl(match_stmt, &ctx).unwrap();
         // Scrutinee `hp` has CgExprId(0) → binding name `_scrut_0`.
-        let expected = "let _scrut_0 = agent_self_hp;\n\
+        let expected = "let _scrut_0 = agent_hp[agent_id];\n\
                         if (_scrut_0.tag == VARIANT_0u) { /* bindings: amount=local_0 from _scrut_0.amount */\n\
-                        \x20\x20\x20\x20agent_self_hp = 1.0;\n\
+                        \x20\x20\x20\x20agent_hp[agent_id] = 1.0;\n\
                         } else if (_scrut_0.tag == VARIANT_1u) {\n\
-                        \x20\x20\x20\x20agent_self_hp = 0.0;\n\
+                        \x20\x20\x20\x20agent_hp[agent_id] = 0.0;\n\
                         }";
         assert_eq!(out, expected);
     }
 
     /// Non-identifier scrutinee — verify the `let _scrut_<N> = (...);`
     /// binding makes the emission valid even when the scrutinee lowers
-    /// to a parenthesised expression like `(agent_self_hp + 1.0)`.
+    /// to a parenthesised expression like `(agent_hp[agent_id] + 1.0)`.
     /// Without the binding, the old shape produced
-    /// `((agent_self_hp + 1.0)_tag) == ...` which is invalid WGSL.
+    /// `((agent_hp[agent_id] + 1.0)_tag) == ...` which is invalid WGSL.
     #[test]
     fn lower_match_with_non_identifier_scrutinee_binds_local() {
         let mut prog = empty_prog();
@@ -1755,7 +1796,7 @@ mod tests {
             }),
         );
         let one = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(1.0)));
-        // Scrutinee is `hp + 1.0` — lowers to `(agent_self_hp + 1.0)`.
+        // Scrutinee is `hp + 1.0` — lowers to `(agent_hp[agent_id] + 1.0)`.
         let scrutinee_expr = push_expr(
             &mut prog,
             CgExpr::Binary {
@@ -1791,9 +1832,9 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         let out = lower_cg_stmt_to_wgsl(match_stmt, &ctx).unwrap();
         // scrutinee_expr is the third pushed expression → CgExprId(2).
-        let expected = "let _scrut_2 = (agent_self_hp + 1.0);\n\
+        let expected = "let _scrut_2 = (agent_hp[agent_id] + 1.0);\n\
                         if (_scrut_2.tag == VARIANT_0u) {\n\
-                        \x20\x20\x20\x20agent_self_hp = 0.0;\n\
+                        \x20\x20\x20\x20agent_hp[agent_id] = 0.0;\n\
                         }";
         assert_eq!(out, expected);
     }
@@ -1874,8 +1915,8 @@ mod tests {
         assert_eq!(
             lower_cg_expr_to_wgsl(sel, &ctx).unwrap(),
             "select(0.0, \
-             clamp_f32(distance(agent_self_pos, agent_actor_pos), 0.0, 100.0), \
-             (agent_self_hp < 5.0))"
+             clamp_f32(distance(agent_pos[agent_id], agent_pos[actor_id]), 0.0, 100.0), \
+             (agent_hp[agent_id] < 5.0))"
         );
     }
 
@@ -2075,7 +2116,7 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         assert_eq!(
             lower_cg_stmt_list_to_wgsl(list, &ctx).unwrap(),
-            "agent_self_hp = 1.0;\nagent_self_shield_hp = 2.0;"
+            "agent_hp[agent_id] = 1.0;\nagent_shield_hp[agent_id] = 2.0;"
         );
     }
 
