@@ -408,6 +408,7 @@ enum DispatchShapeLabel {
     OneShot,
     PerWord,
     PerCell,
+    PerScanChunk,
 }
 
 impl DispatchShapeLabel {
@@ -419,6 +420,7 @@ impl DispatchShapeLabel {
             DispatchShape::OneShot => DispatchShapeLabel::OneShot,
             DispatchShape::PerWord => DispatchShapeLabel::PerWord,
             DispatchShape::PerCell => DispatchShapeLabel::PerCell,
+            DispatchShape::PerScanChunk => DispatchShapeLabel::PerScanChunk,
         }
     }
 
@@ -430,6 +432,7 @@ impl DispatchShapeLabel {
             DispatchShapeLabel::OneShot => "one_shot",
             DispatchShapeLabel::PerWord => "per_word",
             DispatchShapeLabel::PerCell => "per_cell",
+            DispatchShapeLabel::PerScanChunk => "per_scan_chunk",
         }
     }
 }
@@ -494,9 +497,14 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
             SpatialQueryKind::CompactNonemptyCells => &[DispatchShapeLabel::PerAgent],
             // Real counting sort phases:
             //   - Count and Scatter: per-agent (one thread per agent).
-            //   - Scan: OneShot (single-threaded serial scan).
+            //   - ScanLocal/ScanAdd: PerScanChunk (one workgroup per
+            //     256-cell chunk; one lane per cell).
+            //   - ScanCarry: OneShot (serial fix-up over the small
+            //     chunk_sums buffer).
             SpatialQueryKind::BuildHashCount => &[DispatchShapeLabel::PerAgent],
-            SpatialQueryKind::BuildHashScan => &[DispatchShapeLabel::OneShot],
+            SpatialQueryKind::BuildHashScanLocal => &[DispatchShapeLabel::PerScanChunk],
+            SpatialQueryKind::BuildHashScanCarry => &[DispatchShapeLabel::OneShot],
+            SpatialQueryKind::BuildHashScanAdd => &[DispatchShapeLabel::PerScanChunk],
             SpatialQueryKind::BuildHashScatter => &[DispatchShapeLabel::PerAgent],
         },
         // Plumbing kinds each have a single canonical dispatch shape,

@@ -361,7 +361,25 @@ fn compose_wgsl_file(
     // `tile_vel`, `tile_count`); emitting the decls here keeps them
     // alongside the matching `@compute @workgroup_size` header
     // without smuggling a `var<workgroup>` mid-body (illegal in WGSL).
-    let is_per_cell = matches!(topology_dispatch_shape(topology), DispatchShape::PerCell);
+    let dispatch_shape = topology_dispatch_shape(topology);
+    let is_per_cell = matches!(dispatch_shape, DispatchShape::PerCell);
+    let is_per_scan_chunk = matches!(dispatch_shape, DispatchShape::PerScanChunk);
+    if is_per_scan_chunk {
+        // PerScanChunk topologies (parallel prefix-scan kernels)
+        // share a 256-entry workgroup-local buffer holding the
+        // Hillis-Steele scan working set. Sized to match
+        // `PER_SCAN_CHUNK_WORKGROUP_X` so every lane has exactly
+        // one slot — keep the constant in sync if the chunk size
+        // is ever bumped.
+        let chunk = crate::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+        out.push_str(&format!(
+            "// Workgroup-local scratch for the Hillis-Steele scan.\n\
+             // One u32 per lane; total = {chunk} × 4 = {bytes} B.\n\
+             var<workgroup> scan_shared: array<u32, {chunk}>;\n\n",
+            chunk = chunk,
+            bytes = chunk * 4,
+        ));
+    }
     if is_per_cell {
         // The tile-array size derives from `MAX_PER_CELL` so a knob
         // change in `crate::cg::emit::spatial` flows through here
@@ -387,11 +405,13 @@ fn compose_wgsl_file(
 
     let workgroup_x = topology_workgroup_size_x(topology);
 
-    if is_per_cell {
-        // PerCell entry point: take `workgroup_id` + `local_invocation_id`
-        // instead of the usual `global_invocation_id`. The body's
-        // `tiled_per_cell_preamble` (in kernel.rs) reads these to
-        // derive `home_cell` and `lane`.
+    if is_per_cell || is_per_scan_chunk {
+        // PerCell + PerScanChunk entry points: take `workgroup_id`
+        // + `local_invocation_id` instead of the usual
+        // `global_invocation_id`. The body's per-shape preamble
+        // (PerCell: `tiled_per_cell_preamble`; PerScanChunk:
+        // `thread_indexing_preamble`) reads these to derive its
+        // working indices.
         out.push_str(&format!(
             "@compute @workgroup_size({workgroup_x})\n\
              fn {entry}(\n\
@@ -1074,6 +1094,17 @@ fn compose_dispatch_call(topology: &KernelTopology) -> String {
             format!(
                 "        pass.dispatch_workgroups({}u32, 1, 1);\n",
                 n
+            )
+        }
+        DispatchShape::PerScanChunk => {
+            // PerScanChunk: ceil(num_cells / chunk_size) workgroups.
+            // Both inputs are compile-time constants, so inline the
+            // result.
+            let n = crate::cg::emit::spatial::num_cells();
+            let chunks = n.div_ceil(wg_x);
+            format!(
+                "        pass.dispatch_workgroups({}u32, 1, 1);\n",
+                chunks
             )
         }
     }

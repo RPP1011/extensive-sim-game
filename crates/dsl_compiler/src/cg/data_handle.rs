@@ -595,6 +595,15 @@ pub enum SpatialStorageKind {
     /// dispatch as the indirect-args buffer. Lets the runtime avoid
     /// a round-trip readback on the count.
     NonemptyCellsIndirectArgs,
+    /// `spatial_chunk_sums` — per-workgroup-chunk total used by the
+    /// parallel prefix-scan pipeline. Sized
+    /// `array<u32>` of length `ceil(num_cells / SCAN_CHUNK_SIZE)`
+    /// (~42 entries for boids' 22³=10 648 grid at 256-cell chunks).
+    /// Phase 2a (`BuildHashScanLocal`) writes each chunk's total
+    /// into its slot; phase 2b (`BuildHashScanCarry`) overwrites in
+    /// place with an exclusive prefix; phase 2c
+    /// (`BuildHashScanAdd`) reads the per-chunk base.
+    ChunkSums,
 }
 
 impl fmt::Display for SpatialStorageKind {
@@ -608,6 +617,7 @@ impl fmt::Display for SpatialStorageKind {
                 f.write_str("nonempty_indirect_args")
             }
             SpatialStorageKind::GridStarts => f.write_str("grid_starts"),
+            SpatialStorageKind::ChunkSums => f.write_str("chunk_sums"),
         }
     }
 }

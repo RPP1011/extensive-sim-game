@@ -117,10 +117,18 @@ pub struct BoidsState {
     /// sized `num_cells + 1`. `starts[c]` is cell `c`'s position in
     /// `spatial_grid_cells`; `starts[c + 1] - starts[c]` is the
     /// cell's count. The trailing `starts[num_cells]` equals
-    /// `agent_cap` (every agent ended up somewhere). Written by
-    /// phase 2 (BuildHashScan); read by phase 3 (BuildHashScatter)
-    /// + the tiled-MoveBoid cooperative load + walk.
+    /// `agent_cap` (every agent ended up somewhere). Written
+    /// cooperatively by the parallel scan (phases 2a + 2c); read by
+    /// phase 3 (BuildHashScatter) + the tiled-MoveBoid cooperative
+    /// load + walk.
     spatial_grid_starts: wgpu::Buffer,
+    /// Per-workgroup-chunk total used by the parallel prefix scan —
+    /// `array<u32>` sized `ceil(num_cells / SCAN_CHUNK_SIZE)` (~42
+    /// entries for boids' 22³=10 648 grid at 256-cell chunks).
+    /// Phase 2a writes each chunk's total; phase 2b serial-scans it
+    /// in place into an exclusive prefix; phase 2c reads the
+    /// per-chunk base.
+    spatial_chunk_sums: wgpu::Buffer,
     /// Pre-allocated zero buffer used as the COPY_SRC for the per-
     /// tick offsets clear. Sized to match `spatial_grid_offsets`.
     /// Allocated once at construction; cheaper than rebuilding a
@@ -426,6 +434,21 @@ impl BoidsState {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // Parallel prefix-scan carry buffer. Sized to one u32 per
+        // scan chunk (`PER_SCAN_CHUNK_WORKGROUP_X` cells per chunk).
+        // The scan sequence (Local → Carry → Add) writes/reads every
+        // slot before any consumer touches it, so the buffer doesn't
+        // need a per-tick clear — the runtime allocation can stay
+        // uninitialized.
+        let chunk_size = dsl_compiler::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+        let num_chunks = (sp::num_cells()).div_ceil(chunk_size);
+        let chunk_sums_size = (num_chunks as u64) * 4;
+        let spatial_chunk_sums = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("boids_runtime::spatial_chunk_sums"),
+            size: chunk_sums_size,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         // Per-tick zero-clear source for offsets. `write_buffer`
         // would also work but allocating a `Vec<u32; num_cells>`
         // every tick churns the host heap; a pre-built zero buffer
@@ -568,6 +591,7 @@ impl BoidsState {
             spatial_grid_cells,
             spatial_grid_offsets,
             spatial_grid_starts,
+            spatial_chunk_sums,
             spatial_offsets_zero,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
@@ -765,18 +789,29 @@ impl CompiledSim for BoidsState {
             encoder.write_timestamp(&t.query_set, 1);
         }
 
-        // (2) Three-phase real counting sort:
-        //     2a. BuildHashCount   — per-agent atomicAdd into offsets
-        //     2b. BuildHashScan    — single-thread serial prefix scan
-        //         offsets → starts; resets offsets to zero
-        //     2c. BuildHashScatter — per-agent atomicAdd on offsets
-        //         (now write cursor) → write agent_id into
-        //         cells[starts[cell] + local_slot]
+        // (2) Five-kernel real counting sort:
+        //     2a. BuildHashCount      — per-agent atomicAdd into offsets
+        //     2b. BuildHashScanLocal  — workgroup-local Hillis-Steele
+        //                               scan over each 256-cell chunk;
+        //                               writes per-chunk inclusive
+        //                               prefix to starts and chunk
+        //                               total to chunk_sums
+        //     2c. BuildHashScanCarry  — single-thread exclusive scan
+        //                               over chunk_sums in place
+        //     2d. BuildHashScanAdd    — adds chunk_sums[chunk_id] to
+        //                               every starts entry in the
+        //                               chunk; resets offsets to zero
+        //                               so phase 3 can reuse it as a
+        //                               write cursor
+        //     2e. BuildHashScatter    — per-agent atomicAdd on offsets
+        //                               (now write cursor) → write
+        //                               agent_id into
+        //                               cells[starts[cell] + local_slot]
         //
-        // wgpu's command-buffer ordering serialises the three
-        // dispatches against one another (same encoder + adjacent
-        // compute passes). After the scatter, `cells` holds every
-        // agent id grouped by cell, with no per-cell capacity cap.
+        // wgpu's command-buffer ordering serialises the dispatches
+        // against one another (same encoder + adjacent compute
+        // passes). After the scatter, `cells` holds every agent id
+        // grouped by cell, with no per-cell capacity cap.
         let count_bindings = spatial_build_hash_count::SpatialBuildHashCountBindings {
             agent_pos: &self.pos_buf,
             spatial_grid_offsets: &self.spatial_grid_offsets,
@@ -789,14 +824,42 @@ impl CompiledSim for BoidsState {
             &mut encoder,
             self.agent_count,
         );
-        let scan_bindings = spatial_build_hash_scan::SpatialBuildHashScanBindings {
-            spatial_grid_offsets: &self.spatial_grid_offsets,
-            spatial_grid_starts: &self.spatial_grid_starts,
-            cfg: &self.cfg_buf,
-        };
-        dispatch::dispatch_spatial_build_hash_scan(
+        let scan_local_bindings =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
+                spatial_grid_offsets: &self.spatial_grid_offsets,
+                spatial_grid_starts: &self.spatial_grid_starts,
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.cfg_buf,
+            };
+        dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache,
-            &scan_bindings,
+            &scan_local_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scan_carry_bindings =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.cfg_buf,
+            };
+        dispatch::dispatch_spatial_build_hash_scan_carry(
+            &mut self.cache,
+            &scan_carry_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scan_add_bindings =
+            spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
+                spatial_grid_offsets: &self.spatial_grid_offsets,
+                spatial_grid_starts: &self.spatial_grid_starts,
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.cfg_buf,
+            };
+        dispatch::dispatch_spatial_build_hash_scan_add(
+            &mut self.cache,
+            &scan_add_bindings,
             &self.gpu.device,
             &mut encoder,
             self.agent_count,

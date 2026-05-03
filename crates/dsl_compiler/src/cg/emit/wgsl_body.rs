@@ -275,6 +275,7 @@ fn spatial_storage_token(kind: SpatialStorageKind) -> &'static str {
         SpatialStorageKind::NonemptyCells => "nonempty_cells",
         SpatialStorageKind::NonemptyCellsIndirectArgs => "nonempty_indirect_args",
         SpatialStorageKind::GridStarts => "grid_starts",
+        SpatialStorageKind::ChunkSums => "chunk_sums",
     }
 }
 

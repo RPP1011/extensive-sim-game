@@ -144,25 +144,59 @@ pub enum SpatialQueryKind {
     /// otherwise the agent is silently dropped. Kept for back-compat
     /// with the old spatial-walk shape; the new tiled-MoveBoid path
     /// uses the three-phase real counting sort
-    /// (`BuildHashCount` → `BuildHashScan` → `BuildHashScatter`)
-    /// instead — no per-cell cap, no drops, but three dispatches per
-    /// tick rather than one.
+    /// (`BuildHashCount` → `BuildHashScanLocal` →
+    /// `BuildHashScanCarry` → `BuildHashScanAdd` → `BuildHashScatter`)
+    /// instead — no per-cell cap, no drops.
     BuildHash,
     /// **Real counting sort, phase 1**. Per-agent dispatch:
     /// `atomicAdd(&grid_offsets[pos_to_cell(agent_pos[id])], 1u)`.
     /// After this kernel, `grid_offsets[c]` holds the *count* of
-    /// agents that hash into cell `c`. Phase 2 (`BuildHashScan`)
-    /// converts those counts into starts.
+    /// agents that hash into cell `c`. Phase 2 (the three scan
+    /// kernels) converts those counts into exclusive-prefix
+    /// `grid_starts`.
     BuildHashCount,
-    /// **Real counting sort, phase 2**. OneShot dispatch: a single
-    /// thread serially scans `grid_offsets` (per-cell counts) into
-    /// `grid_starts` (cumulative starts, sized `num_cells + 1`),
-    /// then resets `grid_offsets` to zero so phase 3 can re-use it
-    /// as the per-cell write cursor. Serial because a parallel-scan
-    /// implementation in WGSL is non-trivial and `num_cells` (~10k
-    /// for boids) is small enough that a single-threaded scan
-    /// finishes in microseconds.
-    BuildHashScan,
+    /// **Real counting sort, phase 2a — workgroup-local scan**.
+    /// One thread per cell, dispatched as `ceil(num_cells / 256)`
+    /// workgroups of 256 threads. Each workgroup performs a
+    /// Hillis-Steele inclusive scan over its 256-cell chunk's
+    /// counts in `grid_offsets`, writes the per-chunk inclusive
+    /// prefix into `grid_starts[chunk_base + lane + 1]`, and
+    /// records the chunk's total in
+    /// `chunk_sums[wg_id]`. Lane 0 of workgroup 0 also writes
+    /// `starts[0] = 0u`.
+    ///
+    /// Out-of-range cells (`chunk_base + lane >= num_cells`)
+    /// participate in the scan with count = 0, so the result for
+    /// in-range entries is unaffected. The scan reads
+    /// `atomicLoad(&grid_offsets[i])` to interoperate with phase 1's
+    /// atomic accumulator.
+    BuildHashScanLocal,
+    /// **Real counting sort, phase 2b — cross-workgroup carry**.
+    /// OneShot dispatch (single workgroup of one thread). Serially
+    /// scans the small `chunk_sums` buffer (~42 entries for boids'
+    /// 10 648-cell grid) into an exclusive prefix in place: the
+    /// first entry becomes 0, each subsequent entry becomes the sum
+    /// of all preceding chunk totals. Phase 2c then adds this
+    /// per-chunk base to every entry in the chunk.
+    ///
+    /// Single-threaded because the chunk count is tiny (≤ 256 for
+    /// any plausible num_cells); a parallel scan over so few
+    /// entries would lose more to barrier overhead than the serial
+    /// loop costs.
+    BuildHashScanCarry,
+    /// **Real counting sort, phase 2c — add per-chunk base**.
+    /// Same dispatch as `BuildHashScanLocal`. Each thread reads
+    /// `chunk_sums[wg_id]` and adds it to its
+    /// `grid_starts[chunk_base + lane + 1]` slot. Also resets
+    /// `grid_offsets[chunk_base + lane]` to zero (mirrors the
+    /// serial scan's combined scan + reset behaviour) so phase 3
+    /// can reuse offsets as a per-cell write cursor.
+    ///
+    /// After this kernel completes, `grid_starts` holds the
+    /// exclusive prefix scan of the per-cell counts (sized
+    /// `num_cells + 1`, with `starts[num_cells]` equal to total
+    /// agent count).
+    BuildHashScanAdd,
     /// **Real counting sort, phase 3**. Per-agent dispatch:
     /// `let local = atomicAdd(&grid_offsets[cell], 1u);
     ///  grid_cells[grid_starts[cell] + local] = agent_id`. After
@@ -229,15 +263,43 @@ impl SpatialQueryKind {
                     kind: SpatialStorageKind::GridOffsets,
                 }],
             ),
-            // Phase 2: scans counts → starts, resets counts.
-            SpatialQueryKind::BuildHashScan => (
-                vec![],
+            // Phase 2a: workgroup-local scan. Reads counts from
+            // GridOffsets (atomic), writes per-chunk inclusive prefix
+            // into GridStarts, writes chunk totals into ChunkSums.
+            SpatialQueryKind::BuildHashScanLocal => (
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::GridOffsets,
+                }],
                 vec![
                     DataHandle::SpatialStorage {
-                        kind: SpatialStorageKind::GridOffsets,
+                        kind: SpatialStorageKind::GridStarts,
                     },
                     DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::ChunkSums,
+                    },
+                ],
+            ),
+            // Phase 2b: serial scan of chunk_sums into an exclusive
+            // prefix in place. Single-thread OneShot.
+            SpatialQueryKind::BuildHashScanCarry => (
+                vec![],
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::ChunkSums,
+                }],
+            ),
+            // Phase 2c: add per-chunk base from ChunkSums to each
+            // GridStarts entry the chunk owns; also reset GridOffsets
+            // so phase 3 can reuse it as a write cursor.
+            SpatialQueryKind::BuildHashScanAdd => (
+                vec![DataHandle::SpatialStorage {
+                    kind: SpatialStorageKind::ChunkSums,
+                }],
+                vec![
+                    DataHandle::SpatialStorage {
                         kind: SpatialStorageKind::GridStarts,
+                    },
+                    DataHandle::SpatialStorage {
+                        kind: SpatialStorageKind::GridOffsets,
                     },
                 ],
             ),
@@ -306,7 +368,9 @@ impl SpatialQueryKind {
                 String::from("compact_nonempty_cells")
             }
             SpatialQueryKind::BuildHashCount => String::from("build_hash_count"),
-            SpatialQueryKind::BuildHashScan => String::from("build_hash_scan"),
+            SpatialQueryKind::BuildHashScanLocal => String::from("build_hash_scan_local"),
+            SpatialQueryKind::BuildHashScanCarry => String::from("build_hash_scan_carry"),
+            SpatialQueryKind::BuildHashScanAdd => String::from("build_hash_scan_add"),
             SpatialQueryKind::BuildHashScatter => String::from("build_hash_scatter"),
         }
     }

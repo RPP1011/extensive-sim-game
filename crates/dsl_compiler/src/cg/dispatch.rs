@@ -91,6 +91,14 @@ pub const PER_WORD_BITS: u32 = 32;
 /// Tracks `MAX_PER_CELL` — must stay in sync. Today both are 32.
 pub const PER_CELL_WORKGROUP_X: u32 = 32;
 
+/// Workgroup x-dim for [`DispatchShape::PerScanChunk`]. The parallel
+/// prefix-scan over `spatial_grid_offsets` partitions `num_cells` into
+/// chunks of this many cells, with one workgroup per chunk and one
+/// thread per cell. 256 is the wgpu default
+/// `max_compute_invocations_per_workgroup` lower bound, so kernels at
+/// this size build on every adapter without bumping limits.
+pub const PER_SCAN_CHUNK_WORKGROUP_X: u32 = 256;
+
 /// How a compute op's threads are laid out.
 ///
 /// The variants describe *what* drives the count and indexing — agent
@@ -145,6 +153,18 @@ pub enum DispatchShape {
     /// [`super::op::SpatialQueryKind::CompactNonemptyCells`] (added
     /// alongside this shape but currently inert).
     PerCell,
+
+    /// One workgroup per `PER_SCAN_CHUNK_WORKGROUP_X`-sized chunk of
+    /// `num_cells`, with one lane per cell. Drives the parallel
+    /// prefix scan over `spatial_grid_offsets`: phase 2a
+    /// (`BuildHashScanLocal`) and phase 2c (`BuildHashScanAdd`) both
+    /// dispatch under this shape so the `(workgroup_id, local_id)`
+    /// pair maps directly to `(chunk_id, cell_within_chunk)`. The
+    /// dispatch count is `ceil(num_cells / PER_SCAN_CHUNK_WORKGROUP_X)`
+    /// (~42 workgroups for boids' 22³=10 648 grid). Out-of-range
+    /// lanes (`chunk_base + lane >= num_cells`) participate with
+    /// count = 0 inside the scan and skip their slot writes.
+    PerScanChunk,
 }
 
 /// What drives the per-agent candidate list for a [`DispatchShape::PerPair`]
@@ -179,6 +199,7 @@ impl fmt::Display for DispatchShape {
             DispatchShape::OneShot => f.write_str("one_shot"),
             DispatchShape::PerWord => f.write_str("per_word"),
             DispatchShape::PerCell => f.write_str("per_cell"),
+            DispatchShape::PerScanChunk => f.write_str("per_scan_chunk"),
         }
     }
 }
@@ -308,6 +329,15 @@ pub enum ThreadIndexing {
     /// inline the `var<workgroup>` decls + the cooperative-load
     /// nested loops without re-deriving the spatial constants).
     PerCellWorkgroup,
+    /// `let chunk_id = workgroup_id.x; let lane =
+    /// local_invocation_id.x; let cell = chunk_id *
+    /// PER_SCAN_CHUNK_WORKGROUP_X + lane;`. Used by the parallel
+    /// prefix-scan phases. Per-cell bounds checks (`if (cell >=
+    /// num_cells) ...`) live inside the per-op body because the
+    /// scan still wants every lane to participate in the in-shared-
+    /// memory Hillis-Steele reduction (out-of-range lanes contribute
+    /// count = 0 but stay through every barrier).
+    PerScanChunkLane,
 }
 
 impl fmt::Display for ThreadIndexing {
@@ -321,6 +351,7 @@ impl fmt::Display for ThreadIndexing {
             ThreadIndexing::SingleThread => f.write_str("single_thread"),
             ThreadIndexing::PerAgentWord => f.write_str("per_agent_word"),
             ThreadIndexing::PerCellWorkgroup => f.write_str("per_cell_workgroup"),
+            ThreadIndexing::PerScanChunkLane => f.write_str("per_scan_chunk_lane"),
         }
     }
 }
@@ -346,6 +377,7 @@ impl DispatchShape {
             DispatchShape::OneShot => WorkgroupSize::linear(ONE_SHOT_WORKGROUP_X),
             DispatchShape::PerWord => WorkgroupSize::linear(PER_WORD_WORKGROUP_X),
             DispatchShape::PerCell => WorkgroupSize::linear(PER_CELL_WORKGROUP_X),
+            DispatchShape::PerScanChunk => WorkgroupSize::linear(PER_SCAN_CHUNK_WORKGROUP_X),
         }
     }
 
@@ -408,6 +440,19 @@ impl DispatchShape {
                     z: 1,
                 }
             }
+            DispatchShape::PerScanChunk => {
+                // ceil(num_cells / chunk_size) workgroups, one per
+                // scan chunk. The cell count is sourced directly
+                // from the per-fixture spatial-grid configuration so
+                // the dispatch + the WGSL `const NUM_CELLS = ...`
+                // never drift.
+                let num_cells = crate::cg::emit::spatial::num_cells();
+                DispatchCount::Direct {
+                    x: num_cells.div_ceil(wg_x),
+                    y: 1,
+                    z: 1,
+                }
+            }
         }
     }
 
@@ -442,6 +487,7 @@ impl DispatchShape {
             DispatchShape::OneShot => ThreadIndexing::SingleThread,
             DispatchShape::PerWord => ThreadIndexing::PerAgentWord,
             DispatchShape::PerCell => ThreadIndexing::PerCellWorkgroup,
+            DispatchShape::PerScanChunk => ThreadIndexing::PerScanChunkLane,
         }
     }
 }
