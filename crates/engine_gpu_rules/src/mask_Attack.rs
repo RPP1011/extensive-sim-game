@@ -9,8 +9,6 @@ pub struct MaskAttackKernel {
 }
 
 pub struct MaskAttackBindings<'a> {
-    pub agent_pos: &'a wgpu::Buffer,
-    pub agent_alive: &'a wgpu::Buffer,
     pub mask_6_bitmap: &'a wgpu::Buffer,
     pub cfg: &'a wgpu::Buffer,
 }
@@ -33,10 +31,8 @@ impl crate::Kernel for MaskAttackKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::mask_Attack::bgl"),
             entries: &[
-                crate::bgl_storage(0, true), // agent_pos
-                crate::bgl_storage(1, true), // agent_alive
-                crate::bgl_storage(2, false), // mask_6_bitmap
-                crate::bgl_uniform(3), // cfg
+                crate::bgl_storage(0, false), // mask_6_bitmap
+                crate::bgl_uniform(1), // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -63,8 +59,6 @@ impl crate::Kernel for MaskAttackKernel {
     fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> MaskAttackBindings<'a> {
         let _ = sources;
         MaskAttackBindings {
-            agent_pos: sources.external.agents,
-            agent_alive: sources.external.agents,
             mask_6_bitmap: sources.transient.mask_bitmaps,
             cfg: cfg,
         }
@@ -75,10 +69,8 @@ impl crate::Kernel for MaskAttackKernel {
             label: Some("engine_gpu_rules::mask_Attack::bg"),
             layout: &self.bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.agent_pos.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.agent_alive.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.mask_6_bitmap.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.mask_6_bitmap.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.cfg.as_entire_binding() },
             ],
         });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -93,10 +85,8 @@ impl crate::Kernel for MaskAttackKernel {
 
 pub fn mask_Attack_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     vec![
-                crate::bgl_storage(0, true), // agent_pos
-                crate::bgl_storage(1, true), // agent_alive
-                crate::bgl_storage(2, false), // mask_6_bitmap
-                crate::bgl_uniform(3), // cfg
+                crate::bgl_storage(0, false), // mask_6_bitmap
+                crate::bgl_uniform(1), // cfg
     ]
 }
 
@@ -104,10 +94,8 @@ pub fn mask_Attack_bind_group_entries<'a>(
     bindings: &'a MaskAttackBindings<'a>,
 ) -> Vec<wgpu::BindGroupEntry<'a>> {
     vec![
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.agent_pos.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.agent_alive.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.mask_6_bitmap.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.mask_6_bitmap.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.cfg.as_entire_binding() },
     ]
 }
 

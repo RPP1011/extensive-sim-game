@@ -32,7 +32,7 @@ pub const SCHEDULE: &[DispatchOp] = &[
     DispatchOp::Indirect { kernel: KernelId::PhysicsChronicleFlee, args_buf: BufferRef::ResidentIndirectArgs },
     DispatchOp::Indirect { kernel: KernelId::PhysicsChronicleRally, args_buf: BufferRef::ResidentIndirectArgs },
     DispatchOp::Kernel(KernelId::FusedSpatialBuildHash),
-    DispatchOp::Kernel(KernelId::SpatialEngagementQuery),
+    DispatchOp::Kernel(KernelId::SpatialFilteredWalk30),
     DispatchOp::Kernel(KernelId::UploadSimCfg),
     DispatchOp::Kernel(KernelId::PackAgents),
     DispatchOp::Kernel(KernelId::SeedIndirect0),

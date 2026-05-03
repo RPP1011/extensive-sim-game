@@ -9,7 +9,6 @@ pub struct MaskMoveTowardKernel {
 }
 
 pub struct MaskMoveTowardBindings<'a> {
-    pub agent_alive: &'a wgpu::Buffer,
     pub mask_1_bitmap: &'a wgpu::Buffer,
     pub cfg: &'a wgpu::Buffer,
 }
@@ -32,9 +31,8 @@ impl crate::Kernel for MaskMoveTowardKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::mask_MoveToward::bgl"),
             entries: &[
-                crate::bgl_storage(0, true), // agent_alive
-                crate::bgl_storage(1, false), // mask_1_bitmap
-                crate::bgl_uniform(2), // cfg
+                crate::bgl_storage(0, false), // mask_1_bitmap
+                crate::bgl_uniform(1), // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -61,7 +59,6 @@ impl crate::Kernel for MaskMoveTowardKernel {
     fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> MaskMoveTowardBindings<'a> {
         let _ = sources;
         MaskMoveTowardBindings {
-            agent_alive: sources.external.agents,
             mask_1_bitmap: sources.transient.mask_bitmaps,
             cfg: cfg,
         }
@@ -72,9 +69,8 @@ impl crate::Kernel for MaskMoveTowardKernel {
             label: Some("engine_gpu_rules::mask_MoveToward::bg"),
             layout: &self.bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.agent_alive.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.mask_1_bitmap.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.mask_1_bitmap.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.cfg.as_entire_binding() },
             ],
         });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -89,9 +85,8 @@ impl crate::Kernel for MaskMoveTowardKernel {
 
 pub fn mask_MoveToward_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     vec![
-                crate::bgl_storage(0, true), // agent_alive
-                crate::bgl_storage(1, false), // mask_1_bitmap
-                crate::bgl_uniform(2), // cfg
+                crate::bgl_storage(0, false), // mask_1_bitmap
+                crate::bgl_uniform(1), // cfg
     ]
 }
 
@@ -99,9 +94,8 @@ pub fn mask_MoveToward_bind_group_entries<'a>(
     bindings: &'a MaskMoveTowardBindings<'a>,
 ) -> Vec<wgpu::BindGroupEntry<'a>> {
     vec![
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.agent_alive.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.mask_1_bitmap.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.mask_1_bitmap.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.cfg.as_entire_binding() },
     ]
 }
 

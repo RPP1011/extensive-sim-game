@@ -3,12 +3,8 @@
 
 struct MaskAttackCfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 
-@group(0) @binding(0) var<storage, read> agent_pos: array<vec3<f32>>;
-@group(0) @binding(1) var<storage, read> agent_alive: array<u32>;
-@group(0) @binding(2) var<storage, read_write> mask_6_bitmap: array<atomic<u32>>;
-@group(0) @binding(3) var<uniform> cfg: MaskAttackCfg;
-
-fn agents_is_hostile_to(a: u32, b: u32) -> bool { return false; }
+@group(0) @binding(0) var<storage, read_write> mask_6_bitmap: array<atomic<u32>>;
+@group(0) @binding(1) var<uniform> cfg: MaskAttackCfg;
 
 @compute @workgroup_size(64)
 fn cs_mask_Attack(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -25,7 +21,7 @@ let pair = gid.x;
     let agent_id = mask_6_agent;
     let per_pair_candidate = mask_6_cand;
 
-    let mask_6_value: bool = ((false && agents_is_hostile_to(agent_id, per_pair_candidate)) && (distance(vec3<f32>(0.0), vec3<f32>(0.0)) < 2.0));
+    let mask_6_value: bool = true;
     if (mask_6_value) {
         let mask_6_word = mask_6_agent >> 5u;
         let mask_6_bit  = 1u << (mask_6_agent & 31u);

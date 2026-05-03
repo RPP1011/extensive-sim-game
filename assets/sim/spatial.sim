@@ -1,0 +1,25 @@
+// Spatial-query filter declarations.
+//
+// Each declaration names a per-candidate boolean filter; masks reference
+// the filter via `from spatial.<name>(args)`. The first two params are
+// the fixed `self` / `candidate` binders (`self` is the querying agent;
+// `candidate` is the per-iteration spatial-walk neighbor). Remaining
+// params are typed value args substituted from the call site.
+//
+// Per Phase 7's call-site arity convention, masks pass only `self` (and
+// any value args) at the call site — `candidate` binds positionally
+// inside the spatial_query body to whatever the spatial walk produces.
+// Mask action-head binders like `target` are bound AFTER the from-clause
+// resolves, so they cannot be passed as call-site arguments.
+
+// Used by mask MoveToward — accepts every alive agent except self.
+spatial_query nearby_alive_other(self: AgentId, candidate: AgentId) =
+  agents.alive(candidate) && candidate != self
+
+// Used by mask Attack — accepts hostile, alive candidates within melee
+// range. The melee distance is hardcoded at 2.0 for now; spatial-walk
+// radius bounding is a follow-up.
+spatial_query nearby_hostile_in_melee(self: AgentId, candidate: AgentId) =
+  agents.alive(candidate)
+  && is_hostile(self, candidate)
+  && distance(agents.pos(self), agents.pos(candidate)) < 2.0

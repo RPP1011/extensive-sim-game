@@ -3,10 +3,11 @@
 
 struct FusedSpatialBuildHashCfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 
-@group(0) @binding(0) var<storage, read_write> spatial_grid_cells: array<u32>;
-@group(0) @binding(1) var<storage, read_write> spatial_grid_offsets: array<u32>;
-@group(0) @binding(2) var<storage, read_write> spatial_query_results: array<u32>;
-@group(0) @binding(3) var<uniform> cfg: FusedSpatialBuildHashCfg;
+@group(0) @binding(0) var<storage, read> agent_alive: array<u32>;
+@group(0) @binding(1) var<storage, read_write> spatial_grid_cells: array<u32>;
+@group(0) @binding(2) var<storage, read_write> spatial_grid_offsets: array<u32>;
+@group(0) @binding(3) var<storage, read_write> spatial_query_results: array<u32>;
+@group(0) @binding(4) var<uniform> cfg: FusedSpatialBuildHashCfg;
 
 @compute @workgroup_size(64)
 fn cs_fused_spatial_build_hash(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -25,12 +26,22 @@ if (agent_id >= cfg.agent_cap) { return; }
 
 // op#26 (spatial_query)
 {
-    // SpatialQuery::KinQuery — verbatim port from engine_gpu_rules/src/spatial_kin_query.wgsl.
-    // Touches every binding so naga keeps them live. Real per-agent kin walk lives in the
-    // hand-written engine_gpu spatial pipeline; this stub is a structural placeholder.
-    _ = spatial_grid_cells[0];
-    _ = spatial_grid_offsets[0];
-    _ = spatial_query_results[0];
+    // SpatialQuery::FilteredWalk — per-cell walk + per-candidate filter.
+    // Touches every binding so naga keeps them live; structural
+    // walk shape mirrors the legacy spatial_kin_query.wgsl stub.
+    var write_cursor: u32 = 0u;
+    for (var cell: u32 = 0u; cell < cfg.agent_cap; cell = cell + 1u) {
+        let cell_start = spatial_grid_offsets[cell];
+        let cell_end = spatial_grid_offsets[cell + 1u];
+        for (var slot: u32 = cell_start; slot < cell_end; slot = slot + 1u) {
+            let candidate = spatial_grid_cells[slot];
+            let filter_value: bool = (false && (per_pair_candidate != agent_id));
+            if (filter_value) {
+                spatial_query_results[write_cursor] = candidate;
+                write_cursor = write_cursor + 1u;
+            }
+        }
+    }
     _ = cfg.agent_cap;
 }
 }

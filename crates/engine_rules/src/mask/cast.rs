@@ -7,6 +7,7 @@ use engine::state::SimState;
 
 /// Predicate: can `self_id` issue this mask's action head against the given target?
 /// Lowered from `mask Cast` in `assets/sim/masks.sim`.
+#[allow(unused_variables)]
 pub fn mask_cast(state: &SimState, self_id: AgentId, ability: engine::ability::AbilityId) -> bool {
     if !(state.agent_alive(self_id)) {
         return false;

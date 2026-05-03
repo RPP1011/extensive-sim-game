@@ -40,25 +40,32 @@ use std::fmt::Write;
 
 use crate::ast::{BinOp, UnOp};
 use crate::ir::{
-    Builtin, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, IrType, MaskIR, NamespaceId,
-    ViewIR, ViewKind, ViewRef,
+    Builtin, IrActionHeadShape, IrCallArg, IrExpr, IrExprNode, IrFieldInit, IrMatchArm, IrType,
+    MaskIR, NamespaceId, SpatialQueryIR, ViewIR, ViewKind, ViewRef,
 };
 
 /// Emission context shared across mask lowering. Carries the enclosing
 /// `views: &[ViewIR]` slice so `ViewCall(ViewRef, args)` can dispatch to
 /// the correct generated symbol (`crate::generated::views::<name>(...)`
-/// for `@lazy`, `state.views.<name>.get(...)` for `@materialized`).
+/// for `@lazy`, `state.views.<name>.get(...)` for `@materialized`), plus
+/// the `spatial_queries: &[SpatialQueryIR]` slice (Phase 7 Task 5) so the
+/// candidate enumerator can resolve `from spatial.<name>(args)` sources
+/// to their registered filter expressions.
 #[derive(Debug, Clone, Copy)]
 pub struct EmitContext<'a> {
     pub views: &'a [ViewIR],
+    pub spatial_queries: &'a [SpatialQueryIR],
 }
 
 impl<'a> EmitContext<'a> {
     pub const fn empty() -> Self {
-        Self { views: &[] }
+        Self { views: &[], spatial_queries: &[] }
     }
     fn view(&self, ViewRef(idx): ViewRef) -> Option<&ViewIR> {
         self.views.get(idx as usize)
+    }
+    fn spatial_query(&self, name: &str) -> Option<&SpatialQueryIR> {
+        self.spatial_queries.iter().find(|s| s.name == name)
     }
 }
 
@@ -274,6 +281,14 @@ fn emit_predicate_fn(
         )
         .unwrap();
     }
+    // Phase 7 Task 5: masks with `from spatial.<name>(...)` plus a
+    // `when true` predicate emit a body that doesn't reference `state`
+    // / `self_id` / `target` (the candidate-side filtering moved into
+    // the spatial_query). Suppress unused-variable warnings on the
+    // predicate fn so trivially-true predicates compile under the
+    // workspace's `-D warnings`. Cheap to apply unconditionally — the
+    // attribute is a no-op when the body does reference its params.
+    writeln!(out, "#[allow(unused_variables)]").unwrap();
     writeln!(out, "pub fn {fn_name}({}) -> bool {{", params.join(", ")).unwrap();
     emit_predicate_body(out, &mask.predicate, ctx)?;
     writeln!(out, "}}").unwrap();
@@ -319,7 +334,27 @@ fn emit_candidate_enumerator_fn(
         }
     };
 
-    // v1: only `query.nearby_agents(<pos>, <radius>)` recognised.
+    // Source dispatch:
+    //   * Legacy `from query.nearby_agents(<pos>, <radius>)` — emit a
+    //     spatial-bounded loop using `state.spatial().within_radius(...)`.
+    //   * Phase 7 `from spatial.<name>(args)` — look up the registered
+    //     spatial_query decl, substitute call-site value-args into its
+    //     filter, walk every alive agent, and apply the filter as the
+    //     per-candidate guard.
+    if matches!(&source.kind, IrExpr::NamespaceCall { ns, method, .. }
+        if *ns == NamespaceId::Spatial)
+    {
+        return emit_candidate_enumerator_fn_spatial(
+            out,
+            mask,
+            ctx,
+            emit_doc,
+            target_binding,
+        );
+    }
+
+    // v1: only `query.nearby_agents(<pos>, <radius>)` recognised in the
+    // legacy branch.
     let (pos_expr, radius_expr) = match &source.kind {
         IrExpr::NamespaceCall { ns, method, args }
             if *ns == NamespaceId::Query && method == "nearby_agents" && args.len() == 2 =>
@@ -328,7 +363,8 @@ fn emit_candidate_enumerator_fn(
         }
         _ => {
             return Err(EmitError::Unsupported(format!(
-                "mask `{}` `from` clause: expected `query.nearby_agents(<pos>, <radius>)`",
+                "mask `{}` `from` clause: expected `query.nearby_agents(<pos>, <radius>)` or \
+                 `spatial.<name>(args)`",
                 mask.head.name
             )));
         }
@@ -388,6 +424,410 @@ fn emit_candidate_enumerator_fn(
     writeln!(out, "{pad}}}").unwrap();
     writeln!(out, "}}").unwrap();
     Ok(())
+}
+
+/// Phase 7 Task 5 — emit a candidate enumerator for the new
+/// `from spatial.<name>(args)` source. Resolves the named
+/// `spatial_query` decl, substitutes the call-site value-args into the
+/// filter, and emits a loop over every alive agent that applies the
+/// substituted filter as the per-candidate guard.
+///
+/// Today the enumeration is unbounded (every alive agent except `self`
+/// is visited); a bounded radius variant is a follow-up — see the
+/// migration notes on the refactored masks in
+/// `assets/sim/masks.sim`.
+///
+/// `target_binding` is the action-head's binder name (e.g. `target`
+/// for `mask MoveToward(target)`). The filter expression's
+/// `candidate` LocalRef is renamed to that binder name before
+/// lowering so the existing emit-side `IrExpr::Local(_, name)`
+/// resolution (which expects either `self` or the target-binding
+/// name) routes correctly without growing a `candidate` arm.
+fn emit_candidate_enumerator_fn_spatial(
+    out: &mut String,
+    mask: &MaskIR,
+    ctx: EmitContext<'_>,
+    emit_doc: bool,
+    target_binding: &str,
+) -> Result<(), EmitError> {
+    let source = mask.candidate_source.as_ref().expect(
+        "emit_candidate_enumerator_fn_spatial called with mask.candidate_source = None",
+    );
+    let (method, args) = match &source.kind {
+        IrExpr::NamespaceCall {
+            ns: NamespaceId::Spatial,
+            method,
+            args,
+        } => (method.as_str(), args.as_slice()),
+        _ => unreachable!("dispatched here only for Spatial namespace"),
+    };
+
+    let decl = ctx.spatial_query(method).ok_or_else(|| {
+        EmitError::Unsupported(format!(
+            "mask `{}`: unknown spatial_query `spatial.{method}`",
+            mask.head.name
+        ))
+    })?;
+
+    // Substitute call-site value-args (LocalRef >= 2 — `self`/`candidate`
+    // are bound implicitly) and rename the `candidate` binder name to
+    // the mask's action-head target binder so the existing legacy
+    // emitter's `IrExpr::Local(_, name)` resolution (which routes
+    // `self → self_id` and otherwise emits `name`) produces the right
+    // identifier inside the loop body.
+    let filter = substitute_and_rename_candidate(&decl.filter, args, target_binding);
+
+    let fn_name = format!("mask_{}_candidates", snake_case(&mask.head.name));
+    let micro_variant = &mask.head.name;
+
+    // Hoist `agents.pos(<local>)` reads into prelude bindings so the
+    // emitted clauses stay short (rustfmt stability — see module
+    // docstring). The hoist walker visits the whole filter expression.
+    let mut hoisted: Vec<String> = Vec::new();
+    collect_pos_hoists(&filter, &mut hoisted);
+
+    let pad = " ".repeat(BASE_INDENT);
+    let inner_pad = " ".repeat(BASE_INDENT + 4);
+    if emit_doc {
+        writeln!(
+            out,
+            "/// Candidate enumerator. Walks every alive agent and keeps those passing the"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "/// `spatial.{method}` filter. Phase 7 Task 5 wired this in via the new"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "/// `spatial_query <name>(self, candidate, ...) = <filter>` declaration surface."
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "pub fn {fn_name}(state: &SimState, self_id: AgentId, out: &mut TargetMask) {{"
+    )
+    .unwrap();
+    // Hoist `self`-keyed pos reads outside the loop; per-target pos
+    // reads stay inside.
+    let target_hoists: Vec<String> =
+        hoisted.iter().filter(|n| *n == target_binding).cloned().collect();
+    let outer_hoists: Vec<String> =
+        hoisted.iter().filter(|n| *n != target_binding).cloned().collect();
+    for local in &outer_hoists {
+        let arg = if local == "self" { "self_id".to_string() } else { local.clone() };
+        let binding = pos_binding_name(local);
+        writeln!(
+            out,
+            "{pad}let {binding} = state.agent_pos({arg}).unwrap_or(glam::Vec3::ZERO);"
+        )
+        .unwrap();
+    }
+    writeln!(out, "{pad}for {target_binding} in state.agents_alive() {{").unwrap();
+    writeln!(
+        out,
+        "{inner_pad}if {target_binding} == self_id {{ continue; }}"
+    )
+    .unwrap();
+    for local in &target_hoists {
+        let binding = pos_binding_name(local);
+        writeln!(
+            out,
+            "{inner_pad}let {binding} = state.agent_pos({local}).unwrap_or(glam::Vec3::ZERO);"
+        )
+        .unwrap();
+    }
+    // Emit the substituted filter as a chain of `if !<clause> { continue; }`
+    // guards (split on top-level `&&` for short-circuit readability —
+    // mirrors `emit_predicate_body`).
+    let mut clauses: Vec<&IrExprNode> = Vec::new();
+    flatten_and(&filter, &mut clauses);
+    for clause in &clauses {
+        let cond = lower_clause(clause, &hoisted, ctx)?;
+        writeln!(out, "{inner_pad}if !{cond} {{ continue; }}").unwrap();
+    }
+    writeln!(
+        out,
+        "{inner_pad}out.push(self_id, engine::mask::MicroKind::{micro_variant}, {target_binding});"
+    )
+    .unwrap();
+    writeln!(out, "{pad}}}").unwrap();
+    writeln!(out, "}}").unwrap();
+    Ok(())
+}
+
+/// Substitute `LocalRef(i)` for `i >= 2` with the corresponding
+/// call-site value-arg expression, AND rename `candidate`-named locals
+/// to `target_binding`. Mirrors the structure of
+/// `cg::lower::driver::walk_substitute` but the legacy emitter wants
+/// source-name renaming on top of the substitution because its
+/// `IrExpr::Local(_, name)` lowering keys on `name` rather than the
+/// `LocalRef` id (Phase 7 Task 5 — the CG path keys on `target_local`,
+/// the legacy CPU path keys on the source name).
+fn substitute_and_rename_candidate(
+    node: &IrExprNode,
+    value_args: &[IrCallArg],
+    target_binding: &str,
+) -> IrExprNode {
+    let new_kind = match &node.kind {
+        IrExpr::Local(local_ref, name) => {
+            if local_ref.0 >= 2 {
+                let idx = (local_ref.0 - 2) as usize;
+                if idx < value_args.len() {
+                    return substitute_and_rename_candidate(
+                        &value_args[idx].value,
+                        &[],
+                        target_binding,
+                    );
+                }
+            }
+            let new_name = if name == "candidate" {
+                target_binding.to_string()
+            } else {
+                name.clone()
+            };
+            IrExpr::Local(*local_ref, new_name)
+        }
+        IrExpr::Field { base, field_name, field } => IrExpr::Field {
+            base: Box::new(substitute_and_rename_candidate(base, value_args, target_binding)),
+            field_name: field_name.clone(),
+            field: field.clone(),
+        },
+        IrExpr::Index(lhs, rhs) => IrExpr::Index(
+            Box::new(substitute_and_rename_candidate(lhs, value_args, target_binding)),
+            Box::new(substitute_and_rename_candidate(rhs, value_args, target_binding)),
+        ),
+        IrExpr::Binary(op, lhs, rhs) => IrExpr::Binary(
+            *op,
+            Box::new(substitute_and_rename_candidate(lhs, value_args, target_binding)),
+            Box::new(substitute_and_rename_candidate(rhs, value_args, target_binding)),
+        ),
+        IrExpr::Unary(op, inner) => IrExpr::Unary(
+            *op,
+            Box::new(substitute_and_rename_candidate(inner, value_args, target_binding)),
+        ),
+        IrExpr::In(lhs, rhs) => IrExpr::In(
+            Box::new(substitute_and_rename_candidate(lhs, value_args, target_binding)),
+            Box::new(substitute_and_rename_candidate(rhs, value_args, target_binding)),
+        ),
+        IrExpr::Contains(lhs, rhs) => IrExpr::Contains(
+            Box::new(substitute_and_rename_candidate(lhs, value_args, target_binding)),
+            Box::new(substitute_and_rename_candidate(rhs, value_args, target_binding)),
+        ),
+        IrExpr::ViewCall(vr, args) => IrExpr::ViewCall(
+            *vr,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_and_rename_candidate(
+                        &a.value,
+                        value_args,
+                        target_binding,
+                    ),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::VerbCall(vr, args) => IrExpr::VerbCall(
+            *vr,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_and_rename_candidate(
+                        &a.value,
+                        value_args,
+                        target_binding,
+                    ),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::BuiltinCall(b, args) => IrExpr::BuiltinCall(
+            *b,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_and_rename_candidate(
+                        &a.value,
+                        value_args,
+                        target_binding,
+                    ),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::UnresolvedCall(name, args) => IrExpr::UnresolvedCall(
+            name.clone(),
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_and_rename_candidate(
+                        &a.value,
+                        value_args,
+                        target_binding,
+                    ),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::NamespaceCall { ns, method, args } => IrExpr::NamespaceCall {
+            ns: *ns,
+            method: method.clone(),
+            args: args
+                .iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: substitute_and_rename_candidate(
+                        &a.value,
+                        value_args,
+                        target_binding,
+                    ),
+                    span: a.span,
+                })
+                .collect(),
+        },
+        IrExpr::List(items) => IrExpr::List(
+            items
+                .iter()
+                .map(|i| substitute_and_rename_candidate(i, value_args, target_binding))
+                .collect(),
+        ),
+        IrExpr::Tuple(items) => IrExpr::Tuple(
+            items
+                .iter()
+                .map(|i| substitute_and_rename_candidate(i, value_args, target_binding))
+                .collect(),
+        ),
+        IrExpr::StructLit { name, ctor, fields } => IrExpr::StructLit {
+            name: name.clone(),
+            ctor: ctor.clone(),
+            fields: fields
+                .iter()
+                .map(|f| IrFieldInit {
+                    name: f.name.clone(),
+                    value: substitute_and_rename_candidate(
+                        &f.value,
+                        value_args,
+                        target_binding,
+                    ),
+                    span: f.span,
+                })
+                .collect(),
+        },
+        IrExpr::Ctor { name, ctor, args } => IrExpr::Ctor {
+            name: name.clone(),
+            ctor: ctor.clone(),
+            args: args
+                .iter()
+                .map(|a| substitute_and_rename_candidate(a, value_args, target_binding))
+                .collect(),
+        },
+        IrExpr::Match { scrutinee, arms } => IrExpr::Match {
+            scrutinee: Box::new(substitute_and_rename_candidate(
+                scrutinee,
+                value_args,
+                target_binding,
+            )),
+            arms: arms
+                .iter()
+                .map(|arm| IrMatchArm {
+                    pattern: arm.pattern.clone(),
+                    body: substitute_and_rename_candidate(&arm.body, value_args, target_binding),
+                    span: arm.span,
+                })
+                .collect(),
+        },
+        IrExpr::If { cond, then_expr, else_expr } => IrExpr::If {
+            cond: Box::new(substitute_and_rename_candidate(cond, value_args, target_binding)),
+            then_expr: Box::new(substitute_and_rename_candidate(
+                then_expr,
+                value_args,
+                target_binding,
+            )),
+            else_expr: else_expr.as_ref().map(|e| {
+                Box::new(substitute_and_rename_candidate(e, value_args, target_binding))
+            }),
+        },
+        IrExpr::PerUnit { expr, delta } => IrExpr::PerUnit {
+            expr: Box::new(substitute_and_rename_candidate(expr, value_args, target_binding)),
+            delta: Box::new(substitute_and_rename_candidate(delta, value_args, target_binding)),
+        },
+        IrExpr::Quantifier { kind, binder, binder_name, iter, body } => IrExpr::Quantifier {
+            kind: *kind,
+            binder: *binder,
+            binder_name: binder_name.clone(),
+            iter: Box::new(substitute_and_rename_candidate(iter, value_args, target_binding)),
+            body: Box::new(substitute_and_rename_candidate(body, value_args, target_binding)),
+        },
+        IrExpr::Fold { kind, binder, binder_name, iter, body } => IrExpr::Fold {
+            kind: kind.clone(),
+            binder: *binder,
+            binder_name: binder_name.clone(),
+            iter: iter
+                .as_ref()
+                .map(|i| Box::new(substitute_and_rename_candidate(i, value_args, target_binding))),
+            body: Box::new(substitute_and_rename_candidate(body, value_args, target_binding)),
+        },
+        IrExpr::AbilityOnCooldown(inner) => IrExpr::AbilityOnCooldown(Box::new(
+            substitute_and_rename_candidate(inner, value_args, target_binding),
+        )),
+        IrExpr::BeliefsAccessor { observer, target, field } => IrExpr::BeliefsAccessor {
+            observer: Box::new(substitute_and_rename_candidate(
+                observer,
+                value_args,
+                target_binding,
+            )),
+            target: Box::new(substitute_and_rename_candidate(
+                target,
+                value_args,
+                target_binding,
+            )),
+            field: field.clone(),
+        },
+        IrExpr::BeliefsConfidence { observer, target } => IrExpr::BeliefsConfidence {
+            observer: Box::new(substitute_and_rename_candidate(
+                observer,
+                value_args,
+                target_binding,
+            )),
+            target: Box::new(substitute_and_rename_candidate(
+                target,
+                value_args,
+                target_binding,
+            )),
+        },
+        IrExpr::BeliefsView { observer, view_name } => IrExpr::BeliefsView {
+            observer: Box::new(substitute_and_rename_candidate(
+                observer,
+                value_args,
+                target_binding,
+            )),
+            view_name: view_name.clone(),
+        },
+        // Leaves with no nested IrExprNode — clone.
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::View(_)
+        | IrExpr::Verb(_)
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
+        | IrExpr::Raw(_) => node.kind.clone(),
+    };
+    IrExprNode {
+        kind: new_kind,
+        span: node.span,
+    }
 }
 
 /// Short human-readable summary of the `from` clause for the generated
@@ -1255,7 +1695,7 @@ mod tests {
             span: span(),
         };
         let views = vec![lazy_view];
-        let ctx = EmitContext { views: &views };
+        let ctx = EmitContext { views: &views, spatial_queries: &[] };
 
         let self_local = local("self", 0);
         let target_local = local("target", 1);
@@ -1345,7 +1785,7 @@ mod tests {
             span: span(),
         };
         let views = vec![mat_view];
-        let ctx = EmitContext { views: &views };
+        let ctx = EmitContext { views: &views, spatial_queries: &[] };
 
         // `view::threat_level(self, target) > 0.0` as the mask predicate.
         let self_local = local("self", 0);

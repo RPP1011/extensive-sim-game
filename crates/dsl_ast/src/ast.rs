@@ -265,8 +265,14 @@ pub enum ViewBody {
 /// `candidate` (the per-pair neighbour under inspection); the
 /// resolver enforces the convention. Remaining params are typed
 /// value args substituted at the call site (e.g.
-/// `from spatial.nearby_in_radius(self, target,
-/// config.movement.max_move_radius)`).
+/// `from spatial.nearby_in_radius(self, config.movement.max_move_radius)`).
+///
+/// Note the call-site arity convention (Phase 7 Task 4 Adjustment A):
+/// the from-clause passes `(self, value_args...)` only — `candidate`
+/// is implicit and binds positionally to the per-iteration spatial-walk
+/// neighbour at lowering time. Mask action-head binders such as
+/// `target` cannot be passed as call-site arguments because they are
+/// bound AFTER the from-clause is resolved.
 ///
 /// The filter is a single expression (Bool — well_formed gate from
 /// Phase 7 Task 3 enforces the type once lowered to CG). No `{}`

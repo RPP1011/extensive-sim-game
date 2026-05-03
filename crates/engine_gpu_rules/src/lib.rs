@@ -25,7 +25,7 @@ pub mod physics_chronicle_rout;
 pub mod physics_chronicle_flee;
 pub mod physics_chronicle_rally;
 pub mod fused_spatial_build_hash;
-pub mod spatial_engagement_query;
+pub mod spatial_filtered_walk_30;
 pub mod upload_sim_cfg;
 pub mod pack_agents;
 pub mod seed_indirect_0;
@@ -54,7 +54,7 @@ pub use physics_chronicle_rout::PhysicsChronicleRoutKernel;
 pub use physics_chronicle_flee::PhysicsChronicleFleeKernel;
 pub use physics_chronicle_rally::PhysicsChronicleRallyKernel;
 pub use fused_spatial_build_hash::FusedSpatialBuildHashKernel;
-pub use spatial_engagement_query::SpatialEngagementQueryKernel;
+pub use spatial_filtered_walk_30::SpatialFilteredWalk30Kernel;
 pub use upload_sim_cfg::UploadSimCfgKernel;
 pub use pack_agents::PackAgentsKernel;
 pub use seed_indirect_0::SeedIndirect0Kernel;
@@ -94,7 +94,7 @@ pub enum KernelId {
     PhysicsChronicleFlee,
     PhysicsChronicleRally,
     FusedSpatialBuildHash,
-    SpatialEngagementQuery,
+    SpatialFilteredWalk30,
     UploadSimCfg,
     PackAgents,
     SeedIndirect0,

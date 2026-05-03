@@ -31,7 +31,7 @@ pub struct KernelCache {
     pub physics_chronicle_flee: Option<crate::physics_chronicle_flee::PhysicsChronicleFleeKernel>,
     pub physics_chronicle_rally: Option<crate::physics_chronicle_rally::PhysicsChronicleRallyKernel>,
     pub fused_spatial_build_hash: Option<crate::fused_spatial_build_hash::FusedSpatialBuildHashKernel>,
-    pub spatial_engagement_query: Option<crate::spatial_engagement_query::SpatialEngagementQueryKernel>,
+    pub spatial_filtered_walk_30: Option<crate::spatial_filtered_walk_30::SpatialFilteredWalk30Kernel>,
     pub upload_sim_cfg: Option<crate::upload_sim_cfg::UploadSimCfgKernel>,
     pub pack_agents: Option<crate::pack_agents::PackAgentsKernel>,
     pub seed_indirect_0: Option<crate::seed_indirect_0::SeedIndirect0Kernel>,
@@ -277,11 +277,11 @@ pub fn dispatch_by_id(
             let bindings = kernel.bind(sources, &cfg_buf);
             kernel.record(device, encoder, &bindings, agent_cap);
         }
-        DispatchOp::Kernel(KernelId::SpatialEngagementQuery) => {
-            let kernel = cache.spatial_engagement_query.get_or_insert_with(|| <crate::spatial_engagement_query::SpatialEngagementQueryKernel as Kernel>::new(device));
+        DispatchOp::Kernel(KernelId::SpatialFilteredWalk30) => {
+            let kernel = cache.spatial_filtered_walk_30.get_or_insert_with(|| <crate::spatial_filtered_walk_30::SpatialFilteredWalk30Kernel as Kernel>::new(device));
             let cfg = kernel.build_cfg(state);
             let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("crate::spatial_engagement_query::cfg"),
+                label: Some("crate::spatial_filtered_walk_30::cfg"),
                 contents: bytemuck::cast_slice(&[cfg]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
@@ -585,11 +585,11 @@ pub fn dispatch_by_id(
             let bindings = kernel.bind(sources, &cfg_buf);
             kernel.record(device, encoder, &bindings, agent_cap);
         }
-        DispatchOp::Indirect { kernel: KernelId::SpatialEngagementQuery, args_buf: _ } => {
-            let kernel = cache.spatial_engagement_query.get_or_insert_with(|| <crate::spatial_engagement_query::SpatialEngagementQueryKernel as Kernel>::new(device));
+        DispatchOp::Indirect { kernel: KernelId::SpatialFilteredWalk30, args_buf: _ } => {
+            let kernel = cache.spatial_filtered_walk_30.get_or_insert_with(|| <crate::spatial_filtered_walk_30::SpatialFilteredWalk30Kernel as Kernel>::new(device));
             let cfg = kernel.build_cfg(state);
             let cfg_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("crate::spatial_engagement_query::cfg"),
+                label: Some("crate::spatial_filtered_walk_30::cfg"),
                 contents: bytemuck::cast_slice(&[cfg]),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });

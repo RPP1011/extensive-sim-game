@@ -3,26 +3,23 @@ use engine::ids::AgentId;
 use engine::mask::TargetMask;
 use engine::state::SimState;
 
+#[allow(unused_variables)]
 pub fn mask_move_toward(state: &SimState, self_id: AgentId, target: AgentId) -> bool {
-    if !(state.agent_alive(target)) {
-        return false;
-    }
-    if !(target != self_id) {
+    if !(true) {
         return false;
     }
     true
 }
 
 pub fn mask_move_toward_candidates(state: &SimState, self_id: AgentId, out: &mut TargetMask) {
-    let self_pos = state.agent_pos(self_id).unwrap_or(glam::Vec3::ZERO);
-    let pos = self_pos;
-    let radius = state.config.movement.max_move_radius;
-    let spatial = state.spatial();
-    for target in spatial.within_radius(state, pos, radius) {
+    for target in state.agents_alive() {
         if target == self_id {
             continue;
         }
-        if !mask_move_toward(state, self_id, target) {
+        if !(state.agent_alive(target)) {
+            continue;
+        }
+        if !(target != self_id) {
             continue;
         }
         out.push(self_id, engine::mask::MicroKind::MoveToward, target);

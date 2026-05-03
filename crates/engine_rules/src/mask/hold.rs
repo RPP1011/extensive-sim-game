@@ -2,6 +2,7 @@
 use engine::ids::AgentId;
 use engine::state::SimState;
 
+#[allow(unused_variables)]
 pub fn mask_hold(state: &SimState, self_id: AgentId) -> bool {
     if !(state.agent_alive(self_id)) {
         return false;

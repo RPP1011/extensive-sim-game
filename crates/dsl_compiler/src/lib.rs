@@ -254,7 +254,10 @@ pub fn emit_with_per_kind_sources(
     // The per-decl emitters panic via `Err` until their milestones land;
     // the aggregators produce valid empty output so the scaffold compiles
     // without any masks / scoring / entities in scope.
-    let mask_ctx = emit_mask::EmitContext { views: &comp.views };
+    let mask_ctx = emit_mask::EmitContext {
+        views: &comp.views,
+        spatial_queries: &comp.spatial_queries,
+    };
     let mut rust_mask_modules: Vec<(String, String)> = Vec::with_capacity(comp.masks.len());
     for mask in &comp.masks {
         let stem = snake_case(&mask.head.name);

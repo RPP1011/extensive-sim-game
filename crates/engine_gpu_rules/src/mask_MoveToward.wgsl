@@ -3,9 +3,8 @@
 
 struct MaskMoveTowardCfg { agent_cap: u32, _pad0: u32, _pad1: u32, _pad2: u32 };
 
-@group(0) @binding(0) var<storage, read> agent_alive: array<u32>;
-@group(0) @binding(1) var<storage, read_write> mask_1_bitmap: array<atomic<u32>>;
-@group(0) @binding(2) var<uniform> cfg: MaskMoveTowardCfg;
+@group(0) @binding(0) var<storage, read_write> mask_1_bitmap: array<atomic<u32>>;
+@group(0) @binding(1) var<uniform> cfg: MaskMoveTowardCfg;
 
 @compute @workgroup_size(64)
 fn cs_mask_MoveToward(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -22,7 +21,7 @@ let pair = gid.x;
     let agent_id = mask_1_agent;
     let per_pair_candidate = mask_1_cand;
 
-    let mask_1_value: bool = (false && (per_pair_candidate != agent_id));
+    let mask_1_value: bool = true;
     if (mask_1_value) {
         let mask_1_word = mask_1_agent >> 5u;
         let mask_1_bit  = 1u << (mask_1_agent & 31u);

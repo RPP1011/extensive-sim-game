@@ -9,6 +9,7 @@ pub struct FusedSpatialBuildHashKernel {
 }
 
 pub struct FusedSpatialBuildHashBindings<'a> {
+    pub agent_alive: &'a wgpu::Buffer,
     pub spatial_grid_cells: &'a wgpu::Buffer,
     pub spatial_grid_offsets: &'a wgpu::Buffer,
     pub spatial_query_results: &'a wgpu::Buffer,
@@ -33,10 +34,11 @@ impl crate::Kernel for FusedSpatialBuildHashKernel {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("engine_gpu_rules::fused_spatial_build_hash::bgl"),
             entries: &[
-                crate::bgl_storage(0, false), // spatial_grid_cells
-                crate::bgl_storage(1, false), // spatial_grid_offsets
-                crate::bgl_storage(2, false), // spatial_query_results
-                crate::bgl_uniform(3), // cfg
+                crate::bgl_storage(0, true), // agent_alive
+                crate::bgl_storage(1, false), // spatial_grid_cells
+                crate::bgl_storage(2, false), // spatial_grid_offsets
+                crate::bgl_storage(3, false), // spatial_query_results
+                crate::bgl_uniform(4), // cfg
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -63,6 +65,7 @@ impl crate::Kernel for FusedSpatialBuildHashKernel {
     fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> FusedSpatialBuildHashBindings<'a> {
         let _ = sources;
         FusedSpatialBuildHashBindings {
+            agent_alive: sources.external.agents,
             spatial_grid_cells: &sources.pool.spatial_grid_cells,
             spatial_grid_offsets: &sources.pool.spatial_grid_offsets,
             spatial_query_results: &sources.pool.spatial_query_results,
@@ -75,10 +78,11 @@ impl crate::Kernel for FusedSpatialBuildHashKernel {
             label: Some("engine_gpu_rules::fused_spatial_build_hash::bg"),
             layout: &self.bgl,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.spatial_grid_cells.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.spatial_grid_offsets.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.spatial_query_results.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.agent_alive.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.spatial_grid_cells.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: bindings.spatial_grid_offsets.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: bindings.spatial_query_results.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: bindings.cfg.as_entire_binding() },
             ],
         });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -93,10 +97,11 @@ impl crate::Kernel for FusedSpatialBuildHashKernel {
 
 pub fn fused_spatial_build_hash_bgl_entries() -> Vec<wgpu::BindGroupLayoutEntry> {
     vec![
-                crate::bgl_storage(0, false), // spatial_grid_cells
-                crate::bgl_storage(1, false), // spatial_grid_offsets
-                crate::bgl_storage(2, false), // spatial_query_results
-                crate::bgl_uniform(3), // cfg
+                crate::bgl_storage(0, true), // agent_alive
+                crate::bgl_storage(1, false), // spatial_grid_cells
+                crate::bgl_storage(2, false), // spatial_grid_offsets
+                crate::bgl_storage(3, false), // spatial_query_results
+                crate::bgl_uniform(4), // cfg
     ]
 }
 
@@ -104,10 +109,11 @@ pub fn fused_spatial_build_hash_bind_group_entries<'a>(
     bindings: &'a FusedSpatialBuildHashBindings<'a>,
 ) -> Vec<wgpu::BindGroupEntry<'a>> {
     vec![
-                wgpu::BindGroupEntry { binding: 0, resource: bindings.spatial_grid_cells.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: bindings.spatial_grid_offsets.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: bindings.spatial_query_results.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: bindings.cfg.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 0, resource: bindings.agent_alive.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: bindings.spatial_grid_cells.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: bindings.spatial_grid_offsets.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: bindings.spatial_query_results.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: bindings.cfg.as_entire_binding() },
     ]
 }
 

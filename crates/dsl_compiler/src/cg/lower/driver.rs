@@ -95,8 +95,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dsl_ast::ir::{
-    Compilation, EventRef, FoldHandlerIR, IrExpr, IrExprNode, IrType, MaskIR, NamespaceId,
-    PhysicsIR, ViewBodyIR, ViewIR, ViewKind,
+    Compilation, EventRef, FoldHandlerIR, IrCallArg, IrExpr, IrExprNode, IrType, MaskIR,
+    NamespaceId, PhysicsIR, ViewBodyIR, ViewIR, ViewKind,
 };
 
 use crate::cg::data_handle::{
@@ -878,7 +878,7 @@ fn lower_all_masks(
 ) {
     for (i, mask) in comp.masks.iter().enumerate() {
         let mask_id = MaskId(i as u32);
-        let spatial_kind = mask_spatial_kind(mask);
+        let spatial_kind = mask_spatial_kind(mask, comp, ctx);
         if let Err(e) = lower_mask(mask_id, spatial_kind, mask, ctx) {
             diagnostics.push(e);
         }
@@ -886,24 +886,20 @@ fn lower_all_masks(
 }
 
 /// Lower a per-pair filter expression to a `CgExprId` with the
-/// per-pair candidate binder (`target` LocalRef → `PerPairCandidateId`)
-/// active for the duration of the lowering. Mirrors the
-/// `target_local` flag toggle in [`super::mask::lower_mask`] — the
-/// flag is restored before returning so a recursive lowering can't
-/// leak the binding upward.
+/// per-pair candidate binder (`target` / `candidate` LocalRef →
+/// `PerPairCandidateId`) active for the duration of the lowering.
+/// Mirrors the `target_local` flag toggle in
+/// [`super::mask::lower_mask`] — the flag is restored before returning
+/// so a recursive lowering can't leak the binding upward.
 ///
 /// Returns the lowered `CgExprId`. Type-validation that the filter
 /// is `Bool` happens later in `cg::well_formed` (the TypeCheckCtx
 /// wiring lives there); this helper is purely the lowering shim.
 ///
-/// # Note
-///
-/// This helper has no caller today — Task 5 (Phase 7) will wire it
-/// in when DSL `spatial_query <name>(...) = <filter>` declarations
-/// are parsed and lowered. The `#[allow(dead_code)]` annotation
-/// suppresses the "function is never used" lint until that wiring
-/// lands.
-#[allow(dead_code)]
+/// Phase 7 Task 5 wired this into [`mask_spatial_kind`]: the
+/// `from spatial.<name>(args)` mask source resolves the named
+/// `spatial_query` decl, substitutes the call-site value-args via
+/// [`walk_substitute`], then lowers the filter expression here.
 fn lower_filter_for_mask(
     expr: &IrExprNode,
     ctx: &mut LoweringCtx<'_>,
@@ -915,21 +911,276 @@ fn lower_filter_for_mask(
     result
 }
 
-/// Pick the [`SpatialQueryKind`] for a mask. From-bearing masks
-/// route to [`SpatialQueryKind::EngagementQuery`] when their
-/// predicate references engagement-flavoured access patterns
-/// (`agents.is_hostile_to`, `agents.engaged_with`, or any
-/// `IrExpr::ViewCall` — conservative widening), otherwise
-/// [`SpatialQueryKind::KinQuery`]. Self-only masks return
-/// [`None`]. See the module-level "Limitations" docstring.
-fn mask_spatial_kind(mask: &MaskIR) -> Option<SpatialQueryKind> {
-    if mask.candidate_source.is_none() {
-        return None;
+/// Substitute call-site value-args into a `spatial_query` filter
+/// expression. Walks the IR tree, replacing each
+/// `IrExpr::Local(LocalRef(i), _)` for `i >= 2` (value-args, since
+/// `LocalRef(0) = self` and `LocalRef(1) = candidate`) with the
+/// corresponding call-site argument expression.
+///
+/// `self` (`LocalRef(0)`) and `candidate` (`LocalRef(1)`) are NOT
+/// substituted. They are bound by the lowering layer at filter-lower
+/// time: [`lower_filter_for_mask`] sets `ctx.target_local = true`,
+/// so `target` / `candidate` LocalRef reads resolve to
+/// `CgExpr::PerPairCandidateId` and `self` resolves to
+/// `CgExpr::AgentSelfId` via the standard lowering path.
+///
+/// Per Phase 7's call-site arity convention (Task 4 Adjustment A),
+/// the call site at `from spatial.<name>(args)` passes
+/// `(self, value_args...)` — `candidate` is not a call-site arg.
+/// So `value_args` here corresponds to LocalRef(2..), indexed
+/// sequentially. (Today every wolf-sim spatial_query has zero
+/// value-args, so this loop is a no-op; the substitution machinery
+/// is wired so that future `spatial.nearby_in_radius(self, radius)`
+/// uses just work.)
+///
+/// Walk is fully exhaustive over [`IrExpr`]: every variant carrying
+/// nested `IrExprNode` recurses; leaf variants clone. No new binders
+/// are introduced inside spatial_query filters today (the resolver
+/// rejects `for` / `let` / `match` inside the filter expression),
+/// but the recursive structure tolerates them by passing
+/// `value_args` straight through — a stray binder would just be
+/// re-checked against the same value-arg slice.
+fn walk_substitute(node: &IrExprNode, value_args: &[IrCallArg]) -> IrExprNode {
+    let new_kind = match &node.kind {
+        IrExpr::Local(local_ref, name) => {
+            // Substitute LocalRef(2..) with the corresponding value
+            // arg. LocalRef(0)=self / LocalRef(1)=candidate are not
+            // substituted — they fall through and get resolved by
+            // `lower_expr` (self → AgentSelfId; candidate → PerPair
+            // when `ctx.target_local` is set).
+            if local_ref.0 >= 2 {
+                let idx = (local_ref.0 - 2) as usize;
+                if idx < value_args.len() {
+                    return value_args[idx].value.clone();
+                }
+            }
+            IrExpr::Local(*local_ref, name.clone())
+        }
+        IrExpr::Field { base, field_name, field } => IrExpr::Field {
+            base: Box::new(walk_substitute(base, value_args)),
+            field_name: field_name.clone(),
+            field: field.clone(),
+        },
+        IrExpr::Index(lhs, rhs) => IrExpr::Index(
+            Box::new(walk_substitute(lhs, value_args)),
+            Box::new(walk_substitute(rhs, value_args)),
+        ),
+        IrExpr::Binary(op, lhs, rhs) => IrExpr::Binary(
+            *op,
+            Box::new(walk_substitute(lhs, value_args)),
+            Box::new(walk_substitute(rhs, value_args)),
+        ),
+        IrExpr::Unary(op, inner) => {
+            IrExpr::Unary(*op, Box::new(walk_substitute(inner, value_args)))
+        }
+        IrExpr::In(lhs, rhs) => IrExpr::In(
+            Box::new(walk_substitute(lhs, value_args)),
+            Box::new(walk_substitute(rhs, value_args)),
+        ),
+        IrExpr::Contains(lhs, rhs) => IrExpr::Contains(
+            Box::new(walk_substitute(lhs, value_args)),
+            Box::new(walk_substitute(rhs, value_args)),
+        ),
+        IrExpr::Quantifier { kind, binder, binder_name, iter, body } => IrExpr::Quantifier {
+            kind: *kind,
+            binder: *binder,
+            binder_name: binder_name.clone(),
+            iter: Box::new(walk_substitute(iter, value_args)),
+            body: Box::new(walk_substitute(body, value_args)),
+        },
+        IrExpr::Fold { kind, binder, binder_name, iter, body } => IrExpr::Fold {
+            kind: kind.clone(),
+            binder: *binder,
+            binder_name: binder_name.clone(),
+            iter: iter.as_ref().map(|i| Box::new(walk_substitute(i, value_args))),
+            body: Box::new(walk_substitute(body, value_args)),
+        },
+        IrExpr::List(items) => IrExpr::List(
+            items.iter().map(|i| walk_substitute(i, value_args)).collect(),
+        ),
+        IrExpr::Tuple(items) => IrExpr::Tuple(
+            items.iter().map(|i| walk_substitute(i, value_args)).collect(),
+        ),
+        IrExpr::ViewCall(vr, args) => IrExpr::ViewCall(
+            *vr,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: walk_substitute(&a.value, value_args),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::VerbCall(vr, args) => IrExpr::VerbCall(
+            *vr,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: walk_substitute(&a.value, value_args),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::BuiltinCall(b, args) => IrExpr::BuiltinCall(
+            *b,
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: walk_substitute(&a.value, value_args),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::UnresolvedCall(name, args) => IrExpr::UnresolvedCall(
+            name.clone(),
+            args.iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: walk_substitute(&a.value, value_args),
+                    span: a.span,
+                })
+                .collect(),
+        ),
+        IrExpr::NamespaceCall { ns, method, args } => IrExpr::NamespaceCall {
+            ns: *ns,
+            method: method.clone(),
+            args: args
+                .iter()
+                .map(|a| IrCallArg {
+                    name: a.name.clone(),
+                    value: walk_substitute(&a.value, value_args),
+                    span: a.span,
+                })
+                .collect(),
+        },
+        IrExpr::StructLit { name, ctor, fields } => IrExpr::StructLit {
+            name: name.clone(),
+            ctor: ctor.clone(),
+            fields: fields
+                .iter()
+                .map(|f| dsl_ast::ir::IrFieldInit {
+                    name: f.name.clone(),
+                    value: walk_substitute(&f.value, value_args),
+                    span: f.span,
+                })
+                .collect(),
+        },
+        IrExpr::Ctor { name, ctor, args } => IrExpr::Ctor {
+            name: name.clone(),
+            ctor: ctor.clone(),
+            args: args.iter().map(|a| walk_substitute(a, value_args)).collect(),
+        },
+        IrExpr::Match { scrutinee, arms } => IrExpr::Match {
+            scrutinee: Box::new(walk_substitute(scrutinee, value_args)),
+            arms: arms
+                .iter()
+                .map(|arm| dsl_ast::ir::IrMatchArm {
+                    pattern: arm.pattern.clone(),
+                    body: walk_substitute(&arm.body, value_args),
+                    span: arm.span,
+                })
+                .collect(),
+        },
+        IrExpr::If { cond, then_expr, else_expr } => IrExpr::If {
+            cond: Box::new(walk_substitute(cond, value_args)),
+            then_expr: Box::new(walk_substitute(then_expr, value_args)),
+            else_expr: else_expr
+                .as_ref()
+                .map(|e| Box::new(walk_substitute(e, value_args))),
+        },
+        IrExpr::PerUnit { expr, delta } => IrExpr::PerUnit {
+            expr: Box::new(walk_substitute(expr, value_args)),
+            delta: Box::new(walk_substitute(delta, value_args)),
+        },
+        IrExpr::AbilityOnCooldown(inner) => {
+            IrExpr::AbilityOnCooldown(Box::new(walk_substitute(inner, value_args)))
+        }
+        IrExpr::BeliefsAccessor { observer, target, field } => IrExpr::BeliefsAccessor {
+            observer: Box::new(walk_substitute(observer, value_args)),
+            target: Box::new(walk_substitute(target, value_args)),
+            field: field.clone(),
+        },
+        IrExpr::BeliefsConfidence { observer, target } => IrExpr::BeliefsConfidence {
+            observer: Box::new(walk_substitute(observer, value_args)),
+            target: Box::new(walk_substitute(target, value_args)),
+        },
+        IrExpr::BeliefsView { observer, view_name } => IrExpr::BeliefsView {
+            observer: Box::new(walk_substitute(observer, value_args)),
+            view_name: view_name.clone(),
+        },
+        // Leaves carrying no nested `IrExprNode` — clone directly.
+        IrExpr::LitBool(_)
+        | IrExpr::LitInt(_)
+        | IrExpr::LitFloat(_)
+        | IrExpr::LitString(_)
+        | IrExpr::Event(_)
+        | IrExpr::Entity(_)
+        | IrExpr::View(_)
+        | IrExpr::Verb(_)
+        | IrExpr::Namespace(_)
+        | IrExpr::NamespaceField { .. }
+        | IrExpr::EnumVariant { .. }
+        | IrExpr::AbilityTag { .. }
+        | IrExpr::AbilityHint
+        | IrExpr::AbilityHintLit(_)
+        | IrExpr::AbilityRange
+        | IrExpr::Raw(_) => node.kind.clone(),
+    };
+    IrExprNode {
+        kind: new_kind,
+        span: node.span,
     }
-    if predicate_uses_engagement_relationship(&mask.predicate) {
-        Some(SpatialQueryKind::EngagementQuery)
-    } else {
-        Some(SpatialQueryKind::KinQuery)
+}
+
+/// Pick the [`SpatialQueryKind`] for a mask. Three routing branches:
+///
+/// 1. **Phase 7 — `from spatial.<name>(args)`** (the new
+///    general-spatial-queries surface). Look up the registered
+///    `spatial_query <name>(self, candidate, …)` decl in
+///    `comp.spatial_queries`, substitute the call-site value-args
+///    into the filter via [`walk_substitute`], lower with
+///    `target_local = true` via [`lower_filter_for_mask`], and wrap
+///    the resulting `CgExprId` in
+///    [`SpatialQueryKind::FilteredWalk`].
+/// 2. **Legacy — `from query.nearby_agents(...)`** (pre-Phase-7
+///    wolf-sim convention). Routes to
+///    [`SpatialQueryKind::EngagementQuery`] when the predicate
+///    references engagement-flavoured access patterns
+///    (`agents.is_hostile_to`, `agents.engaged_with`, any
+///    `IrExpr::ViewCall` — conservative widening), otherwise
+///    [`SpatialQueryKind::KinQuery`]. Phase 7 Task 6 will retire
+///    this branch once all wolf-sim masks have migrated; until
+///    then, the heuristic stays for backwards compat.
+/// 3. **No `from` clause** — returns `None` (resolves to
+///    [`DispatchShape::PerAgent`]).
+fn mask_spatial_kind(
+    mask: &MaskIR,
+    comp: &Compilation,
+    ctx: &mut LoweringCtx<'_>,
+) -> Option<SpatialQueryKind> {
+    let source = mask.candidate_source.as_ref()?;
+    match &source.kind {
+        IrExpr::NamespaceCall {
+            ns: NamespaceId::Spatial,
+            method,
+            args,
+        } => {
+            let decl = comp
+                .spatial_queries
+                .iter()
+                .find(|s| &s.name == method)?;
+            let filter_with_args = walk_substitute(&decl.filter, args);
+            let filter_id = lower_filter_for_mask(&filter_with_args, ctx).ok()?;
+            Some(SpatialQueryKind::FilteredWalk { filter: filter_id })
+        }
+        // Legacy heuristic — Phase 7 Task 6 will drop this branch.
+        _ => {
+            if predicate_uses_engagement_relationship(&mask.predicate) {
+                Some(SpatialQueryKind::EngagementQuery)
+            } else {
+                Some(SpatialQueryKind::KinQuery)
+            }
+        }
     }
 }
 
@@ -1887,6 +2138,15 @@ mod tests {
         }
     }
 
+    /// Helper: build an empty Compilation + LoweringCtx for the
+    /// `mask_spatial_kind` tests. The legacy heuristic branches don't
+    /// touch `comp.spatial_queries` or `ctx`, so a default builder is
+    /// safe; the new `from spatial.<name>` branch needs a registered
+    /// decl which the legacy-routing tests intentionally don't exercise.
+    fn mk_test_ctx() -> (Compilation, CgProgramBuilder) {
+        (Compilation::default(), CgProgramBuilder::new())
+    }
+
     #[test]
     fn mask_spatial_kind_routes_engagement_for_is_hostile_to() {
         let mask = mk_mask(
@@ -1897,8 +2157,10 @@ mod tests {
             },
             true,
         );
+        let (comp, mut builder) = mk_test_ctx();
+        let mut ctx = LoweringCtx::new(&mut builder);
         assert_eq!(
-            mask_spatial_kind(&mask),
+            mask_spatial_kind(&mask, &comp, &mut ctx),
             Some(SpatialQueryKind::EngagementQuery)
         );
     }
@@ -1907,8 +2169,10 @@ mod tests {
     fn mask_spatial_kind_routes_engagement_for_view_call() {
         use dsl_ast::ir::ViewRef;
         let mask = mk_mask(IrExpr::ViewCall(ViewRef(0), Vec::new()), true);
+        let (comp, mut builder) = mk_test_ctx();
+        let mut ctx = LoweringCtx::new(&mut builder);
         assert_eq!(
-            mask_spatial_kind(&mask),
+            mask_spatial_kind(&mask, &comp, &mut ctx),
             Some(SpatialQueryKind::EngagementQuery)
         );
     }
@@ -1923,8 +2187,10 @@ mod tests {
             },
             true,
         );
+        let (comp, mut builder) = mk_test_ctx();
+        let mut ctx = LoweringCtx::new(&mut builder);
         assert_eq!(
-            mask_spatial_kind(&mask),
+            mask_spatial_kind(&mask, &comp, &mut ctx),
             Some(SpatialQueryKind::EngagementQuery)
         );
     }
@@ -1939,13 +2205,20 @@ mod tests {
             },
             true,
         );
-        assert_eq!(mask_spatial_kind(&mask), Some(SpatialQueryKind::KinQuery));
+        let (comp, mut builder) = mk_test_ctx();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        assert_eq!(
+            mask_spatial_kind(&mask, &comp, &mut ctx),
+            Some(SpatialQueryKind::KinQuery)
+        );
     }
 
     #[test]
     fn mask_spatial_kind_returns_none_when_no_candidate_source() {
         let mask = mk_mask(IrExpr::LitBool(true), false);
-        assert_eq!(mask_spatial_kind(&mask), None);
+        let (comp, mut builder) = mk_test_ctx();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        assert_eq!(mask_spatial_kind(&mask, &comp, &mut ctx), None);
     }
 
     #[test]
@@ -1973,8 +2246,10 @@ mod tests {
             IrExpr::Binary(BinOp::And, Box::new(alive), Box::new(hostile)),
             true,
         );
+        let (comp, mut builder) = mk_test_ctx();
+        let mut ctx = LoweringCtx::new(&mut builder);
         assert_eq!(
-            mask_spatial_kind(&mask),
+            mask_spatial_kind(&mask, &comp, &mut ctx),
             Some(SpatialQueryKind::EngagementQuery)
         );
     }

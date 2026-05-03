@@ -750,13 +750,26 @@ fn lower_field(
     // accidentally route through the per-pair candidate buffer.
     let target = match &base.kind {
         IrExpr::Local(_, local_name) if local_name == "self" => AgentRef::Self_,
-        IrExpr::Local(_, local_name) if local_name == "target" && ctx.target_local => {
+        IrExpr::Local(_, local_name)
+            if (local_name == "target" || local_name == "candidate") && ctx.target_local =>
+        {
             // Pair-bound mask predicates (and, in 5.5b/c, scoring rows /
             // fold bodies) bind `target` to the per-pair candidate. The
             // emit layer (Task 4.x) resolves `AgentRef::PerPairCandidate`
             // to the candidate buffer + per-thread offset implied by the
             // dispatch shape's `PerPair { source }`; the IR layer just
             // tags the read.
+            //
+            // Phase 7 Task 5: spatial_query bodies bind their per-pair
+            // neighbour as `candidate` (the v1 convention for the new
+            // `spatial_query <name>(self, candidate, ...) = <filter>`
+            // surface). When such a body is lowered via
+            // `lower_filter_for_mask` (which sets `target_local = true`),
+            // a `candidate.<field>` access must also resolve to
+            // `PerPairCandidate`. Both names route here so existing
+            // wolf-sim source (`target.<field>`) and new spatial_query
+            // source (`candidate.<field>`) coexist without renaming
+            // user-visible identifiers.
             AgentRef::PerPairCandidate
         }
         _ => {
@@ -888,7 +901,16 @@ fn lower_bare_local(
     // Step 2-3: structural locals.
     match name {
         "self" => add(ctx, CgExpr::AgentSelfId, span),
-        "target" if ctx.target_local => add(ctx, CgExpr::PerPairCandidateId, span),
+        // Phase 7 Task 5: accept both `target` (the action-head binder
+        // name used by wolf-sim masks like `mask MoveToward(target) ...`)
+        // and `candidate` (the spatial_query body binder name from the
+        // new `spatial_query <name>(self, candidate, ...) = <filter>`
+        // surface). Both resolve to the per-pair candidate id when the
+        // pair-bound context is active. See the matching arm in
+        // `lower_field` for the field-access path.
+        "target" | "candidate" if ctx.target_local => {
+            add(ctx, CgExpr::PerPairCandidateId, span)
+        }
         // Wildcard `_` is short-circuited at the PerUnit lowering level
         // (see `IrExpr::PerUnit` arm in `lower_expr`). It should never
         // reach `lower_bare_local` directly — if it does, that's a

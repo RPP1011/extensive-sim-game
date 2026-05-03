@@ -34,19 +34,24 @@
 mask Hold when agents.alive(self)
 
 // MoveToward: target-bound — enumerates every alive-agent candidate
-// within `config.movement.max_move_radius` of `self`, excluding
-// `self`. Task 138 — the scorer argmaxes over the candidate list
-// produced by `mask_move_toward_candidates` rather than the retired
-// `nearest_other` heuristic. Task 144 — tightened the radius from
-// `combat.aggro_range` (50 m, scoped for threat awareness) down to a
-// bounded movement-specific knob so candidate enumeration scales with
-// local density rather than the whole alive set. In the
-// `mvp_acceptance` fixture (100 agents on a 50 m ring) the previous
-// radius produced N² candidates per tick; `max_move_radius = 20` cuts
-// that to a near-linear local neighbourhood.
+// (excluding `self`) via the `spatial.nearby_alive_other` filter.
+// Phase 7 Task 5 migrated this mask off the legacy
+// `query.nearby_agents` source onto the general
+// `spatial_query`-as-FilteredWalk surface. The candidate-side filter
+// (alive + not-self) lives in `spatial.sim::nearby_alive_other`; the
+// mask's `when` clause is trivially-true because the from-clause now
+// fully encapsulates the per-pair predicate.
+//
+// The `config.movement.max_move_radius` bound that previously sized
+// the enumeration radius is dropped at this layer — today's
+// FilteredWalk visits every spatial-grid cell. Reinstating the
+// bounded radius is a follow-up (Phase 7 walk bounding); the
+// observable behaviour change is that MoveToward sees more candidates
+// per tick on dense fixtures, which the scorer still narrows via
+// argmax.
 mask MoveToward(target)
-  from query.nearby_agents(agents.pos(self), config.movement.max_move_radius)
-  when agents.alive(target) && target != self
+  from spatial.nearby_alive_other(self)
+  when true
 
 // Flee: permissive — every alive agent is allowed to flee. The legacy
 // engine predicate additionally required a threat within aggro range,
@@ -68,15 +73,18 @@ mask Eat   when agents.alive(self)
 mask Drink when agents.alive(self)
 mask Rest  when agents.alive(self)
 
-// Attack: hostile target within melee range. Target-bound — enumerates
-// every candidate within `config.combat.attack_range` and filters each
-// through the predicate. Task 138 — scorer argmaxes over candidates,
-// no more `nearest_other` fallback.
+// Attack: hostile target within melee range. Phase 7 Task 5 migrated
+// the candidate filtering off the legacy `query.nearby_agents` source
+// onto `spatial.nearby_hostile_in_melee` (alive + hostile + within
+// 2.0 m). The melee distance is hardcoded inside the spatial_query
+// declaration today; threading it through `config.combat.attack_range`
+// requires the spatial_query value-arg substitution to accept config
+// expressions — followup. The mask's `when` clause is trivially-true
+// because the from-clause now fully encapsulates the per-pair
+// predicate.
 mask Attack(target)
-  from query.nearby_agents(agents.pos(self), config.combat.attack_range)
-  when agents.alive(target)
-    && is_hostile(self, target)
-    && distance(agents.pos(self), agents.pos(target)) < 2.0
+  from spatial.nearby_hostile_in_melee(self)
+  when true
 
 // Cast: caster-side preconditions for issuing any registered ability.
 // Task 157 migration — the retired `evaluate_cast_gate` conjunction
