@@ -1,0 +1,526 @@
+use crate::ids::AgentId;
+use crate::state::{MovementMode, SimState};
+use glam::Vec3;
+use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
+
+pub const CELL_SIZE: f32 = 16.0;
+
+/// Per-cell agent bucket. Inline `[AgentId; 4]` covers the common case where a
+/// 16×16 m cell holds at most a handful of walkers; the spill onto the heap
+/// only kicks in for crowded cells. AgentIds inside a bucket are stored in
+/// insertion order, with `swap_remove` on takedown — within-cell order can
+/// jumble, but query results are always sorted by `AgentId::raw()` before
+/// returning so callers see the same `Vec<AgentId>` regardless of bucket
+/// state.
+type CellBucket = SmallVec<[AgentId; 4]>;
+
+/// Incremental 2D-column spatial hash for ground-moving agents, with a
+/// movement-mode sidecar for non-walk agents (flyers, swimmers, climbers,
+/// fallers). Replaces the prior `BTreeMap<(i32,i32), Vec<(f32, AgentId)>>` +
+/// per-cell z-sort.
+///
+/// **Per-agent cell tracking** lets `update` early-out when the agent is still
+/// in the same cell *and* hasn't crossed the walk↔non-walk boundary —
+/// sub-cell movement (the overwhelmingly common case under typical agent
+/// speeds vs. the 16 m cell size) costs an array write and an `Eq` compare.
+/// Cell-crossing moves cost one `swap_remove` from the old bucket and one
+/// `push` to the new bucket. Every mutation is `O(1)` amortised — the
+/// `O(N)` rebuild in the old `build_from_slices` path is gone.
+///
+/// **Determinism contract.** `FxHashMap` (rustc-hash) is fixed-seeded by
+/// construction — same `(cx, cy)` always lands in the same bucket across
+/// runs. Within a bucket, `swap_remove` jumbles insertion order, but
+/// `within_radius` / `within_planar` sort their result by `AgentId::raw()`
+/// before returning, so callers observe a bit-identical `Vec<AgentId>`
+/// regardless of bucket order. (We deliberately do NOT use AHasher here —
+/// even with `BuildHasherDefault<AHasher>`, ahash's `runtime-rng` feature
+/// would seed the hasher from the OS RNG, breaking cross-run determinism.)
+pub struct SpatialHash {
+    /// (cx, cy) → walk-mode agents currently in that cell.
+    cells: FxHashMap<(i32, i32), CellBucket>,
+    /// `slot → Some(cell)` for walkers, `slot → None` for sidecar agents and
+    /// dead/never-spawned slots. Indexed by `(AgentId.raw() - 1) as usize`.
+    agent_cell: Vec<Option<(i32, i32)>>,
+    /// Non-walk agents (any `MovementMode != Walk`). Scanned linearly; the
+    /// per-tick population of flyers/swimmers/climbers/fallers is small in
+    /// practice, and the linear scan keeps the data-structure trivial.
+    sidecar: Vec<AgentId>,
+}
+
+#[inline]
+fn cell(x: f32, y: f32) -> (i32, i32) {
+    ((x / CELL_SIZE) as i32, (y / CELL_SIZE) as i32)
+}
+
+impl SpatialHash {
+    /// Construct an empty index sized for `cap` agent slots. Mutator calls
+    /// (`insert`, `remove`, `update`) are O(1) amortised — there is no
+    /// `build_from_slices` style bulk rebuild.
+    pub fn new(cap: u32) -> Self {
+        Self {
+            cells: FxHashMap::default(),
+            agent_cell: vec![None; cap as usize],
+            sidecar: Vec::new(),
+        }
+    }
+
+    /// Insert an agent. Caller is `SimState::spawn_agent` after the SoA fields
+    /// for `id` are written. Idempotency is the caller's contract: spawning
+    /// the same id twice without an intervening `remove` is a logic bug.
+    pub fn insert(&mut self, id: AgentId, pos: Vec3, mode: MovementMode) {
+        let slot = (id.raw() - 1) as usize;
+        if slot >= self.agent_cell.len() {
+            // Slot beyond cap. Mirrors the SoA's bounds-tolerant accessors.
+            return;
+        }
+        if mode == MovementMode::Walk {
+            let key = cell(pos.x, pos.y);
+            self.cells.entry(key).or_default().push(id);
+            self.agent_cell[slot] = Some(key);
+        } else {
+            self.sidecar.push(id);
+            self.agent_cell[slot] = None;
+        }
+    }
+
+    /// Remove an agent from whichever bucket / sidecar it currently lives in.
+    /// No-op when the slot wasn't tracked. Caller is `SimState::kill_agent`.
+    pub fn remove(&mut self, id: AgentId) {
+        let slot = (id.raw() - 1) as usize;
+        if slot >= self.agent_cell.len() {
+            return;
+        }
+        match self.agent_cell[slot] {
+            Some(key) => {
+                if let Some(bucket) = self.cells.get_mut(&key) {
+                    if let Some(pos_in_bucket) = bucket.iter().position(|&x| x == id) {
+                        bucket.swap_remove(pos_in_bucket);
+                        if bucket.is_empty() {
+                            self.cells.remove(&key);
+                        }
+                    }
+                }
+                self.agent_cell[slot] = None;
+            }
+            None => {
+                if let Some(pos_in_side) = self.sidecar.iter().position(|&x| x == id) {
+                    self.sidecar.swap_remove(pos_in_side);
+                }
+            }
+        }
+    }
+
+    /// Update an agent's recorded position / movement mode. Common case
+    /// (walk-mode agent moves within the same cell) is a no-op aside from
+    /// the cell-key compare. Cell-crossing moves are one `swap_remove` +
+    /// one `push`. Mode transitions across the walk↔non-walk boundary
+    /// move the agent from columns to sidecar (or vice versa).
+    pub fn update(&mut self, id: AgentId, new_pos: Vec3, new_mode: MovementMode) {
+        let slot = (id.raw() - 1) as usize;
+        if slot >= self.agent_cell.len() {
+            return;
+        }
+        let was_walk = self.agent_cell[slot].is_some();
+        let is_walk = new_mode == MovementMode::Walk;
+
+        match (was_walk, is_walk) {
+            (true, true) => {
+                let new_key = cell(new_pos.x, new_pos.y);
+                let old_key = self.agent_cell[slot].expect("was_walk implies Some");
+                if old_key == new_key {
+                    // Sub-cell move — fast path. Nothing changes.
+                    return;
+                }
+                // Cell crossing. Move from old bucket to new bucket.
+                if let Some(bucket) = self.cells.get_mut(&old_key) {
+                    if let Some(pos_in_bucket) = bucket.iter().position(|&x| x == id) {
+                        bucket.swap_remove(pos_in_bucket);
+                        if bucket.is_empty() {
+                            self.cells.remove(&old_key);
+                        }
+                    }
+                }
+                self.cells.entry(new_key).or_default().push(id);
+                self.agent_cell[slot] = Some(new_key);
+            }
+            (true, false) => {
+                // Walk → non-walk. Pull from columns, push to sidecar.
+                let old_key = self.agent_cell[slot].expect("was_walk implies Some");
+                if let Some(bucket) = self.cells.get_mut(&old_key) {
+                    if let Some(pos_in_bucket) = bucket.iter().position(|&x| x == id) {
+                        bucket.swap_remove(pos_in_bucket);
+                        if bucket.is_empty() {
+                            self.cells.remove(&old_key);
+                        }
+                    }
+                }
+                self.agent_cell[slot] = None;
+                self.sidecar.push(id);
+            }
+            (false, true) => {
+                // Non-walk → walk. Pull from sidecar, push to columns.
+                if let Some(pos_in_side) = self.sidecar.iter().position(|&x| x == id) {
+                    self.sidecar.swap_remove(pos_in_side);
+                }
+                let new_key = cell(new_pos.x, new_pos.y);
+                self.cells.entry(new_key).or_default().push(id);
+                self.agent_cell[slot] = Some(new_key);
+            }
+            (false, false) => {
+                // Stay in sidecar — no positional bookkeeping needed.
+            }
+        }
+    }
+
+    /// 3-D Euclidean radius query — fills `out` (cleared first) instead of
+    /// allocating. Walk agents are gathered from cells in the
+    /// `cell_reach_for_radius`-sized neighbourhood around `center`; non-walk
+    /// agents from the linear sidecar scan. Distance is checked against the
+    /// agent's *current* `state.agent_pos` (the index records cells, not raw
+    /// positions). `out` is sorted by `AgentId::raw()` ascending so callers
+    /// observe a bit-identical result regardless of bucket-internal ordering.
+    ///
+    /// Callers that own a `SimScratch` should pass `&mut scratch.neighbors_scratch`
+    /// to avoid a per-call heap allocation.
+    pub fn within_radius_into(
+        &self,
+        state: &SimState,
+        center: Vec3,
+        radius: f32,
+        out: &mut Vec<AgentId>,
+    ) {
+        out.clear();
+        let r2 = radius * radius;
+        let (cx, cy) = cell(center.x, center.y);
+        let cell_reach = cell_reach_for_radius(radius);
+
+        // Cell-rect scan. Nested loops emit no per-cell-key Vec.
+        for dx in -cell_reach..=cell_reach {
+            for dy in -cell_reach..=cell_reach {
+                let key = (cx + dx, cy + dy);
+                if let Some(bucket) = self.cells.get(&key) {
+                    for &id in bucket.iter() {
+                        if let Some(p) = state.agent_pos(id) {
+                            if (p - center).length_squared() <= r2 {
+                                out.push(id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for &id in &self.sidecar {
+            if let Some(p) = state.agent_pos(id) {
+                if (p - center).length_squared() <= r2 {
+                    out.push(id);
+                }
+            }
+        }
+
+        out.sort_unstable_by_key(|id| id.raw());
+    }
+
+    /// 3-D Euclidean radius query. Walk agents are gathered from cells in the
+    /// `cell_reach_for_radius`-sized neighbourhood around `center`; non-walk
+    /// agents from the linear sidecar scan. Distance is checked against the
+    /// agent's *current* `state.agent_pos` (the index records cells, not raw
+    /// positions). Returned `Vec<AgentId>` is sorted by `AgentId::raw()`
+    /// ascending so callers observe a bit-identical result regardless of
+    /// bucket-internal ordering.
+    ///
+    /// Prefer `within_radius_into` when a reusable scratch buffer is available
+    /// to avoid a per-call heap allocation.
+    pub fn within_radius(&self, state: &SimState, center: Vec3, radius: f32) -> Vec<AgentId> {
+        let mut hits = Vec::new();
+        self.within_radius_into(state, center, radius, &mut hits);
+        hits
+    }
+
+    /// XY-only radius query — fills `out` (cleared first) instead of
+    /// allocating. Z is ignored for both walkers and sidecar agents — useful
+    /// for area-of-effect logic that should apply across elevations within an
+    /// XY footprint.
+    ///
+    /// Callers that own a `SimScratch` should pass `&mut scratch.neighbors_scratch`
+    /// to avoid a per-call heap allocation.
+    pub fn within_planar_into(
+        &self,
+        state: &SimState,
+        center: Vec3,
+        radius: f32,
+        out: &mut Vec<AgentId>,
+    ) {
+        out.clear();
+        let r2 = radius * radius;
+        let (cx, cy) = cell(center.x, center.y);
+        let cell_reach = cell_reach_for_radius(radius);
+
+        for dx in -cell_reach..=cell_reach {
+            for dy in -cell_reach..=cell_reach {
+                let key = (cx + dx, cy + dy);
+                if let Some(bucket) = self.cells.get(&key) {
+                    for &id in bucket.iter() {
+                        if let Some(p) = state.agent_pos(id) {
+                            let ex = p.x - center.x;
+                            let ey = p.y - center.y;
+                            if ex * ex + ey * ey <= r2 {
+                                out.push(id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for &id in &self.sidecar {
+            if let Some(p) = state.agent_pos(id) {
+                let ex = p.x - center.x;
+                let ey = p.y - center.y;
+                if ex * ex + ey * ey <= r2 {
+                    out.push(id);
+                }
+            }
+        }
+
+        out.sort_unstable_by_key(|id| id.raw());
+    }
+
+    /// XY-only radius query. Z is ignored for both walkers and sidecar agents
+    /// — useful for area-of-effect logic that should apply across elevations
+    /// within an XY footprint.
+    ///
+    /// Prefer `within_planar_into` when a reusable scratch buffer is available
+    /// to avoid a per-call heap allocation.
+    pub fn within_planar(&self, state: &SimState, center: Vec3, radius: f32) -> Vec<AgentId> {
+        let mut hits = Vec::new();
+        self.within_planar_into(state, center, radius, &mut hits);
+        hits
+    }
+
+    /// Test-only accessor — the cell key currently assigned to an agent
+    /// slot, or `None` for sidecar / dead / never-spawned slots.
+    #[doc(hidden)]
+    pub fn cell_of_agent(&self, id: AgentId) -> Option<(i32, i32)> {
+        let slot = (id.raw() - 1) as usize;
+        self.agent_cell.get(slot).copied().flatten()
+    }
+
+    /// Test-only accessor — the count of distinct populated cells.
+    #[doc(hidden)]
+    pub fn populated_cell_count(&self) -> usize {
+        self.cells.len()
+    }
+
+    /// Test-only accessor — the current sidecar membership.
+    #[doc(hidden)]
+    pub fn sidecar_ids(&self) -> &[AgentId] {
+        &self.sidecar
+    }
+}
+
+/// Nearest-hostile spatial query — used by the DSL `engagement_on_move`
+/// physics rule (task 163). Returns the `AgentId` of the closest hostile
+/// within `radius` of `mover`, or `None` if nothing matches. Hostility is
+/// species-level (`CreatureType::is_hostile_to`); a dead / unspawned /
+/// out-of-range `mover` returns `None`.
+///
+/// Ties on distance are broken on raw `AgentId` ascending — matches the
+/// legacy hand-written `engagement::recompute_engagement_for` discipline
+/// (Task 163 moves that function to a DSL rule; the wolves+humans
+/// baseline pins the exact tie-break outcome so this helper must preserve
+/// it bit-for-bit). The iteration order over `SpatialHash::within_radius`
+/// is the same — that helper already sorts by raw id before returning, so
+/// "first candidate with equal distance wins" collapses to "lowest raw
+/// id wins".
+pub fn nearest_hostile_to(state: &SimState, mover: AgentId, radius: f32) -> Option<AgentId> {
+    if !state.agent_alive(mover) {
+        return None;
+    }
+    let pos = state.agent_pos(mover)?;
+    let ct = state.agent_creature_type(mover)?;
+    let spatial = state.spatial();
+    let mut best: Option<(AgentId, f32)> = None;
+    for other in spatial.within_radius(state, pos, radius) {
+        if other == mover {
+            continue;
+        }
+        let op = match state.agent_pos(other) {
+            Some(p) => p,
+            None => continue,
+        };
+        let oc = match state.agent_creature_type(other) {
+            Some(c) => c,
+            None => continue,
+        };
+        if !ct.is_hostile_to(oc) {
+            continue;
+        }
+        let d = pos.distance(op);
+        match best {
+            None => best = Some((other, d)),
+            Some((_, bd)) if d < bd => best = Some((other, d)),
+            Some((b, bd)) if (d - bd).abs() < f32::EPSILON && other.raw() < b.raw() => {
+                best = Some((other, d));
+            }
+            _ => {}
+        }
+    }
+    best.map(|(a, _)| a)
+}
+
+/// Same-species spatial scan — used by the DSL `fear_spread_on_death`
+/// physics rule (task 167). Returns every alive agent within `radius` of
+/// `center` whose `CreatureType` matches `center`'s, excluding `center`
+/// itself. Unspawned `center` (no recorded position / creature type) yields
+/// an empty `Vec`. Result is sorted on raw `AgentId` ascending (inherited
+/// from `SpatialHash::within_radius`'s sort discipline) so callers observe
+/// a bit-identical iteration order regardless of bucket-internal state.
+///
+/// **Dead-center contract.** Unlike `nearest_hostile_to`, this helper
+/// does NOT short-circuit on a dead center slot. The primary caller —
+/// the `fear_spread_on_death` physics rule — runs on `AgentDied` which
+/// fires AFTER `damage`'s `agents.kill(t)` call, so by the time the
+/// rule executes the center is already `!alive`. The pre-death position
+/// + creature type are still readable (`kill_agent` clears only the
+/// `hot_alive` bit and evicts from the spatial index), so the scan can
+/// still locate kin by the center's final recorded location. Callers
+/// that need a live-center invariant should check `agent_alive` at
+/// their call site.
+///
+/// The returned `Vec<AgentId>` is the `for`-loop iterable shape the DSL
+/// physics emitter expects — same pattern as `abilities.effects` yielding
+/// a `SmallVec<EffectOp>` for the cast dispatcher. Bounded by the cell-
+/// reach cap inside `SpatialHash::within_radius`, so the iteration is
+/// GPU-emittable-safe (resolve.rs:2897 accepts `NamespaceCall` as a
+/// bounded iter source).
+pub fn nearby_kin(state: &SimState, center: AgentId, radius: f32) -> Vec<AgentId> {
+    let pos = match state.agent_pos(center) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let ct = match state.agent_creature_type(center) {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+    let spatial = state.spatial();
+    let mut out: Vec<AgentId> = Vec::new();
+    for other in spatial.within_radius(state, pos, radius) {
+        if other == center {
+            continue;
+        }
+        // `within_radius` can return dead / sidecar slots; skip dead
+        // neighbours so survivors don't get a phantom kin from a
+        // previously-killed agent whose position record still lives.
+        if !state.agent_alive(other) {
+            continue;
+        }
+        let oc = match state.agent_creature_type(other) {
+            Some(c) => c,
+            None => continue,
+        };
+        if oc == ct {
+            out.push(other);
+        }
+    }
+    out
+}
+
+/// Flee-direction primitive with same-species kin attraction — the
+/// movement-bias helper behind the Deer-herding behaviour (task 177).
+///
+/// Returns a **unit vector** blended from:
+///   - `away = (self_pos - threat_pos).normalize_or_zero()` — the
+///     pre-177 pure-away flee direction, and
+///   - `toward_kin = (kin_centroid - self_pos).normalize_or_zero()` —
+///     the unit vector pointing from the fleeing agent to the centroid
+///     of same-species neighbours within `kin_radius` (filtered through
+///     `nearby_kin`).
+///
+/// Blend shape: `normalize(away + kin_weight * toward_kin)`. The
+/// normalization step means `kin_weight > 1.0` never fully overrides
+/// the threat term — `away` always contributes at magnitude 1, so the
+/// result is at most `acos(-kin_weight / √(1 + kin_weight²))` degrees
+/// away from pure-away (for kin_weight = 0.5 the max tilt is ~27°).
+/// The design memo's `deer_herding_with_threat_in_middle` corner case
+/// relies on this: a kin cluster on the far side of the threat tilts
+/// direction but cannot flip it "into the wolf".
+///
+/// Degenerate returns (match the pre-177 `(self_pos -
+/// threat_pos).normalize_or_zero()` semantics exactly):
+///   - `self_pos == threat_pos` → zero vector (caller's Flee arm
+///     no-ops, same as today).
+///   - No live kin within `kin_radius` → pure `away` (kin term is
+///     zero; blend normalizes to `away`).
+///   - Kin centroid collapses onto `self_pos` → `toward_kin` is zero;
+///     falls through to pure `away`.
+///   - `kin_weight <= 0.0` → pure `away` (caller asked for no bias).
+///
+/// Determinism: `nearby_kin` sorts its result by raw AgentId and
+/// iteration order over the returned slice is deterministic; the
+/// centroid is an associative f32 sum across that fixed order.
+/// No RNG. No cache-order dependence.
+///
+/// Species scoping happens inside `nearby_kin` — only agents whose
+/// `CreatureType` matches `agent`'s are counted, so "kin" is a
+/// species-level concept (a deer's kin are other deer; a wolf's kin
+/// are other wolves). The primitive itself is species-agnostic.
+pub fn flee_direction_with_kin_bias(
+    state: &SimState,
+    agent: AgentId,
+    threat_pos: Vec3,
+    kin_weight: f32,
+    kin_radius: f32,
+) -> Vec3 {
+    let self_pos = match state.agent_pos(agent) {
+        Some(p) => p,
+        None => return Vec3::ZERO,
+    };
+    let away = (self_pos - threat_pos).normalize_or_zero();
+    // Caller asked for no bias, or the threat is co-located with the
+    // agent (degenerate case the pre-177 step.rs already no-ops on).
+    if kin_weight <= 0.0 || away.length_squared() == 0.0 {
+        return away;
+    }
+    let kin = nearby_kin(state, agent, kin_radius);
+    if kin.is_empty() {
+        return away;
+    }
+    let mut sum = Vec3::ZERO;
+    let mut count = 0u32;
+    for k in &kin {
+        if let Some(p) = state.agent_pos(*k) {
+            sum += p;
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return away;
+    }
+    let centroid = sum / (count as f32);
+    let toward_kin = (centroid - self_pos).normalize_or_zero();
+    // Blend + normalize. `away` contributes magnitude 1; kin contributes
+    // up to `kin_weight`. If both directions happened to cancel exactly
+    // (kin_weight=1 and kin centroid exactly on the threat-toward ray)
+    // the sum is zero — fall back to pure away, preserving the
+    // "always flees when a threat exists" invariant.
+    let blended = away + toward_kin * kin_weight;
+    let normalized = blended.normalize_or_zero();
+    if normalized.length_squared() == 0.0 {
+        away
+    } else {
+        normalized
+    }
+}
+
+/// Number of cell steps in each cardinal direction the query must scan
+/// to guarantee no in-range walker is missed. For `radius <= CELL_SIZE`
+/// this is 1 (the original 3×3 neighbourhood); grows linearly with
+/// `radius`. Capped at 256 cells to prevent runaway scans on pathological
+/// radii (256 × 16 m = 4096 m spans 65536 cells).
+fn cell_reach_for_radius(radius: f32) -> i32 {
+    if radius <= 0.0 { return 0; }
+    let cells = (radius / CELL_SIZE).ceil() as i32;
+    cells.clamp(1, 256)
+}

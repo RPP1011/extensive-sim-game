@@ -1,13 +1,14 @@
 [workspace]
-members = ["crates/dsl_ast", "crates/dsl_compiler", "crates/engine_gpu_rules"]
+members = ["crates/dsl_ast", "crates/dsl_compiler", "crates/engine", "crates/engine_data", "crates/engine_gpu_rules"]
 exclude = ["crates/world_sim_bench", "crates/ability_operator", "crates/ability-vae", "crates/combat-trainer"]
 resolver = "2"
 
-# Phase 7 wolf-sim wipe (2026-05-02): deleted the wolf-sim runtime crates
-# (`engine`, `engine_data`, `engine_gpu`, `engine_rules`, `viz`,
-# `tactical_sim`, `xtask`) and the root bevy game (`src/`). The compiler
-# (`dsl_ast` + `dsl_compiler`) stands alone with `engine_gpu_rules` as
-# its empty kernel-output target. A new minimal DSL fixture (Boids /
-# random-walk / etc.) under `assets/sim/` will exercise the compiler;
-# downstream consumer crates rebuild against the new fixture's emitted
-# output in a future session.
+# Phase 7 wolf-sim wipe (2026-05-02): the heaviest deletes — engine_gpu,
+# engine_rules, viz, tactical_sim, xtask, src/, plus all legacy emitters
+# under crates/dsl_compiler/src/emit_*.rs — stayed gone. `engine` and
+# `engine_data` were restored on 2026-05-02 (commit TBD): they hold the
+# general data-structure infrastructure (Agent SoA, event ring, snapshot,
+# spatial hash, RNG) the new minimum DSL fixture needs to actually run.
+# They are coupled to the wolf-sim type set today (CreatureType,
+# wolf-flavored Event variants); trim toward the new fixture as the
+# compiler-emitted output catches up.

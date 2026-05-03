@@ -1,0 +1,56 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+# engine_data retained as a regular dep ONLY for chronicle.rs until Plan B2
+# migrates chronicle to emitted DSL (Spec B' §4.2). Drop this line in Task B2.
+engine_data = { path = "../engine_data" }
+glam = "0.29"
+smallvec = "1.13"
+ahash = "0.8"
+rustc-hash = "2.1"
+safetensors = "0.4"
+rayon = "1.10"
+sha2 = "0.10"
+contracts = "0.6"
+# DSL IR interpreter — optional; only pulled in under `interpreted-rules`.
+dsl_ast = { path = "../dsl_ast", optional = true }
+
+[dev-dependencies]
+trybuild = "1"
+engine_data = { path = "../engine_data" }
+# engine_rules + engine_gpu were deleted in the Phase 7 wolf-sim wipe
+# (2026-05-02). Tests that depended on them have been removed alongside
+# the deletes; surviving engine tests use only `engine` + `engine_data`.
+insta = { version = "1.41", features = ["yaml"] }
+proptest = "1.5"
+dhat = "0.3"
+criterion = "0.5"
+hex = "0.4"
+
+[[bench]]
+name = "tick_throughput"
+harness = false
+
+[features]
+default = []
+dhat-heap = []
+# Enables the Theory-of-Mind subsystem: cold_beliefs SoA field, belief-decay
+# Phase 5b, BeliefObserve cascade rules, and belief-predicate scoring arms.
+# Zero cost when off — the field and all call sites are removed by the compiler.
+theory-of-mind = []
+# Elide all contracts::{invariant, requires, ensures} attributes. Useful for
+# benchmarking when the debug-build contract overhead is under measurement.
+# When this feature is on, the engine behaves as if compiled in release mode
+# w.r.t. contract checks.
+no-contracts = ["contracts/disable_contracts"]
+# Route mask, scoring, cascade, and view-fold dispatch through the DSL IR
+# interpreter (dsl_ast) instead of the compiler-emitted generated code.
+# Default build uses the compiled path as before; this feature enables the
+# dev-loop promise of "edit .sim, see result without cargo rebuild."
+# Parity gate: `cargo test -p engine --features interpreted-rules` must
+# produce byte-identical replayable_sha256 against the committed baseline.
+interpreted-rules = ["dep:dsl_ast"]
