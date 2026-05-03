@@ -50,5 +50,12 @@ physics MoveWalker @phase(per_agent) {
   on Tick {} {
     let new_pos = self.pos + self.vel * config.crowd.speed;
     agents.set_pos(self, new_pos);
+    // Placeholder Stuck emit — every walker emits one Stuck event
+    // per tick targeting itself with a tick-counter. Exercises the
+    // scalar `u32` payload path in the WGSL emit body. The proper
+    // stuck-detection rule (per-walker progress check across N
+    // ticks) lands when the per-walker velocity-magnitude reduce
+    // surface lights up.
+    emit Stuck { walker: self, ticks: 1 }
   }
 }

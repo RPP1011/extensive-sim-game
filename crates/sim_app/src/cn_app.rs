@@ -33,6 +33,33 @@ fn main() {
         sim.tick(),
         sim.agent_count(),
     );
+
+    // Read back per-walker stuck_count accumulator. The placeholder
+    // MoveWalker emit fires Stuck { walker: self, ticks: 1 } each
+    // tick — the view's single `on Stuck { walker: agent }` handler
+    // matches every event's walker, so each walker slot increments
+    // by 1 per tick.
+    let sc = sim.stuck_counts();
+    let mut total = 0.0_f32;
+    let mut min = f32::INFINITY;
+    let mut max = 0.0_f32;
+    for &v in sc {
+        total += v;
+        min = min.min(v);
+        max = max.max(v);
+    }
+    let mean = total / AGENT_COUNT as f32;
+    let expected = TICKS as f32;
+    println!(
+        "cn_app: stuck_count — total={:.2} (expected {}); \
+         per-slot min={:.2} mean={:.2} max={:.2} (expected ~{:.0} each)",
+        total,
+        AGENT_COUNT as f32 * expected,
+        min,
+        mean,
+        max,
+        expected,
+    );
 }
 
 fn log_sample(sim: &mut CrowdNavigationState) {
