@@ -438,6 +438,22 @@ mod stdlib {
             (NamespaceId::Query, "nearby_kin") => {
                 Some((2, IrType::List(Box::new(IrType::AgentId))))
             }
+            // Top-K topological neighbour query — sibling of `nearby_kin`.
+            // Returns up to `k` same-species neighbours of `center`
+            // sorted ascending by distance (ties broken on raw
+            // `AgentId`), drawn from candidates inside `max_radius`.
+            // Signature:
+            //   `nearest_k(center: AgentId, k: u32 literal, max_radius: f32)
+            //    -> List<AgentId>`
+            // The `k` argument MUST be a non-negative integer literal so
+            // the GPU emitter (planned, see PP Stage 3 / task #62) can
+            // bake the heap size into a compile-time `array<u32, K>`.
+            // CPU lowering: `crate::spatial::nearest_k(state, ...)`.
+            // Used for topological neighbour patterns (Ballerini-style
+            // flocking, K-closest threat assessment, etc.).
+            (NamespaceId::Query, "nearest_k") => {
+                Some((3, IrType::List(Box::new(IrType::AgentId))))
+            }
             // -------------------------------------------------------------
             // Roadmap §1 — Memberships. Predicates on `cold_memberships`.
             // All return bool. The `kind` arg of `is_group_member` would

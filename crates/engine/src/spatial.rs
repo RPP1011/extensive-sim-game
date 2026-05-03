@@ -427,6 +427,94 @@ pub fn nearby_kin(state: &SimState, center: AgentId, radius: f32) -> Vec<AgentId
     out
 }
 
+/// Top-K topological neighbour query — sibling of `nearby_kin` for
+/// "K closest" rather than "all within radius" patterns. Returns up
+/// to `k` alive same-species neighbours of `center`, sorted ascending
+/// by distance to `center`, drawn from the candidate set inside
+/// `max_radius`. Ties on distance are broken on raw `AgentId`
+/// ascending — same discipline as `nearest_hostile_to`.
+///
+/// `max_radius` bounds the spatial-hash walk so the cost is always
+/// `O(cells × cell_cap)` rather than the full scene; pass a value
+/// large enough that the K nearest are guaranteed to live inside it
+/// for your use case. Returns fewer than `k` results if the candidate
+/// set is smaller (e.g. lone agent in an empty field).
+///
+/// Determinism: insertion-sorted by `(distance, raw_id)`, so the
+/// returned order is identical across runs and platforms; the GPU
+/// per-thread heap walk (planned, see PP Stage 3 / task #62) will
+/// share the same key.
+pub fn nearest_k(
+    state: &SimState,
+    center: AgentId,
+    k: u32,
+    max_radius: f32,
+) -> Vec<AgentId> {
+    if k == 0 {
+        return Vec::new();
+    }
+    let pos = match state.agent_pos(center) {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let ct = match state.agent_creature_type(center) {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+    let spatial = state.spatial();
+    let k = k as usize;
+    // Bounded heap: K-element insertion-sorted vector by (dist, raw_id).
+    // Mirrors the planned WGSL emitter's per-thread `var<function>`
+    // array shape so CPU and GPU surface the same neighbour ordering
+    // bit-for-bit.
+    let mut heap: Vec<(f32, AgentId)> = Vec::with_capacity(k + 1);
+    for other in spatial.within_radius(state, pos, max_radius) {
+        if other == center {
+            continue;
+        }
+        if !state.agent_alive(other) {
+            continue;
+        }
+        let oc = match state.agent_creature_type(other) {
+            Some(c) => c,
+            None => continue,
+        };
+        if oc != ct {
+            continue;
+        }
+        let op = match state.agent_pos(other) {
+            Some(p) => p,
+            None => continue,
+        };
+        let d = pos.distance(op);
+        let key = (d, other);
+        if heap.len() < k {
+            insert_sorted_topk(&mut heap, key);
+        } else if compare_topk_key(key, *heap.last().unwrap()).is_lt() {
+            heap.pop();
+            insert_sorted_topk(&mut heap, key);
+        }
+    }
+    heap.into_iter().map(|(_, id)| id).collect()
+}
+
+/// Compare two `(distance, raw_id)` keys with the same ordering the
+/// GPU heap-walk uses: smaller distance first, ties broken on raw id
+/// ascending so the GPU and CPU produce identical neighbour sets.
+fn compare_topk_key(a: (f32, AgentId), b: (f32, AgentId)) -> std::cmp::Ordering {
+    a.0.partial_cmp(&b.0)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| a.1.raw().cmp(&b.1.raw()))
+}
+
+fn insert_sorted_topk(heap: &mut Vec<(f32, AgentId)>, key: (f32, AgentId)) {
+    let pos = heap
+        .iter()
+        .position(|&existing| compare_topk_key(key, existing).is_lt())
+        .unwrap_or(heap.len());
+    heap.insert(pos, key);
+}
+
 /// Flee-direction primitive with same-species kin attraction — the
 /// movement-bias helper behind the Deer-herding behaviour (task 177).
 ///
