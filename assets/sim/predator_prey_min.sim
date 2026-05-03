@@ -31,6 +31,19 @@
 
 event Tick { }
 
+// Replayable: the kill is part of the deterministic sim record. View-folds
+// + downstream `count_kills` consumers reduce off this ring.
+@replayable
+@gpu_amenable
+event Killed {
+  by:    AgentId,
+  prey:  AgentId,
+  // Position of the kill — useful for spatial views (e.g. "killing field"
+  // density heatmap). Carries vec3 not because the event-fold needs it,
+  // but because @traced consumers want to render it.
+  pos:   vec3,
+}
+
 entity Hare : Agent {
   pos: vec3,
   vel: vec3,
