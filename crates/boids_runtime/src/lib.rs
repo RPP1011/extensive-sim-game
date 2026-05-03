@@ -302,15 +302,48 @@ impl BoidsState {
     /// PCG RNG (P5: `per_agent_u32(seed, agent_id, tick=0, purpose)`).
     /// Allocates GPU storage / staging buffers sized for `agent_count`
     /// and uploads the initial host data.
+    ///
+    /// Auto-derives the initial-spread half-extent from `agent_count` so
+    /// the average spatial-grid density stays around one agent per cell
+    /// (well below `MAX_PER_CELL`). See [`Self::new_with_spread`] for
+    /// the override path used when a fixture wants a specific cube size
+    /// (e.g. visual flocking demos that need a tight starting cluster).
     pub fn new(seed: u64, agent_count: u32) -> Self {
+        Self::new_with_spread(seed, agent_count, None)
+    }
+
+    /// Construct with an explicit `spread` override (`Some(half_extent)`)
+    /// or fall back to density-derived auto-spread when `None`.
+    ///
+    /// **Auto-spread formula** (active when `spread = None`):
+    /// ```text
+    /// spread = clamp(cbrt(agent_count) * (CELL_SIZE / 2),
+    ///                CELL_SIZE / 2,
+    ///                WORLD_HALF_EXTENT)
+    /// ```
+    /// Rationale: the swarm fills a cube whose side length is
+    /// `cbrt(N) * CELL_SIZE`, i.e. `cbrt(N)` cells per axis, giving a
+    /// uniform-distribution average density of ~1 agent per cell. For
+    /// counts that would overflow the world (`cbrt(N) * CELL_SIZE / 2 >
+    /// WORLD_HALF_EXTENT`, i.e. roughly `N > grid_dim^3 ≈ 10k` at the
+    /// current 128-unit world), spread saturates at `WORLD_HALF_EXTENT`
+    /// — agents fill the entire world and density rises with N. The
+    /// proper fix at >10k is to grow the world (deferred); this
+    /// constructor at least keeps small-N caps comfortable and
+    /// matches the spatial-grid `MAX_PER_CELL` budget at boids' usual
+    /// scale.
+    ///
+    /// Lower bound `CELL_SIZE / 2` (= 3.0) prevents the pathological
+    /// `N ≤ 1` collapse to zero spread.
+    pub fn new_with_spread(seed: u64, agent_count: u32, spread: Option<f32>) -> Self {
         let n = agent_count as usize;
+        let spread = spread.unwrap_or_else(|| Self::auto_spread(agent_count));
         let mut pos_host: Vec<Vec3> = Vec::with_capacity(n);
         let mut pos_padded: Vec<Vec3Padded> = Vec::with_capacity(n);
         let mut vel_padded: Vec<Vec3Padded> = Vec::with_capacity(n);
         for slot in 0..agent_count {
             let agent_id = AgentId::new(slot + 1)
                 .expect("slot+1 is non-zero by construction");
-            let spread = 8.0_f32;
             let nudge = 0.05_f32;
             let p = Vec3::new(
                 normalise(per_agent_u32(seed, agent_id, 0, b"boid_init_pos_x")) * spread,
@@ -632,6 +665,18 @@ impl BoidsState {
     #[allow(dead_code)]
     pub(crate) fn seed(&self) -> u64 {
         self.seed
+    }
+
+    /// Density-aware initial-spread half-extent, derived from
+    /// `agent_count` so the spatial-grid average occupancy stays near
+    /// one agent per cell. See [`Self::new_with_spread`] for the
+    /// formula's docstring + rationale. Exposed (`pub`) so the bench
+    /// harness can print the chosen spread per cap.
+    pub fn auto_spread(agent_count: u32) -> f32 {
+        use dsl_compiler::cg::emit::spatial as sp;
+        let n = agent_count.max(1) as f32;
+        let target = n.cbrt() * (sp::CELL_SIZE * 0.5);
+        target.clamp(sp::CELL_SIZE * 0.5, sp::WORLD_HALF_EXTENT)
     }
 
     /// Encode a `pos_buf → pos_staging` copy, submit, block on
