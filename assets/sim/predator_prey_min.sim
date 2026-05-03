@@ -93,6 +93,20 @@ view kill_count(by: Agent) -> f32 {
   clamp: [0.0, 1000.0],
 }
 
+// Pair-storage materialized view: how aggressive predator `a` has
+// been toward prey `b` recently. Stage 9 layers the pair-storage
+// shape on top of Stage 5/6's per-agent + decay infrastructure.
+// Per-handler `where` (`predator == a && victim == b`) is trimmed
+// because the fold-handler parser doesn't accept where today (same
+// constraint that affected kill_count).
+@materialized(on_event = [Killed], storage = pair_map)
+@decay(rate = 0.98, per = tick)
+view predator_focus(a: Agent, b: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { by: predator, prey: victim } { self += 1.0 }
+  clamp: [0.0, 100.0],
+}
+
 physics MoveAlive @phase(per_agent) {
   on Tick {} where (self.alive) {
     let new_pos = self.pos + self.vel * config.hunt.step_scale;
