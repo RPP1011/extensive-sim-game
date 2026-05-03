@@ -2249,8 +2249,22 @@ fn parse_expr_bounded(c: &mut Cursor, stop: impl Fn(&Cursor) -> bool) -> PResult
 fn parse_binary(c: &mut Cursor, min_prec: u8, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
     let mut lhs = parse_unary(c, stop)?;
     loop {
+        // Checkpoint BEFORE skip_ws so we can rewind when no operator
+        // follows. Otherwise `parse_binary` for `candidate != self`
+        // (in a `spatial_query <name>(...) = <expr>` filter) leaves
+        // the cursor past the trailing newline + comments at the
+        // start of the NEXT decl's `@annotation`, and the top-level
+        // `absorb_trailing_annotations` then mis-attaches that
+        // annotation to the spatial_query (it skips only inline ws,
+        // so it sees `@` right at cursor and absorbs it as trailing).
+        // Rewinding restores the cursor to right-after-LHS so the
+        // top-level decl loop's parse_annotations picks up the @ as
+        // a leading annotation on the next decl. Same fix applies to
+        // every parse_expr caller whose decl boundary is line-based.
+        let pre_ws = c.pos;
         c.skip_ws();
         if stop(c) {
+            c.pos = pre_ws;
             break;
         }
         // Normalize Unicode operators lazily.
@@ -2346,6 +2360,16 @@ fn parse_binary(c: &mut Cursor, min_prec: u8, stop: &dyn Fn(&Cursor) -> bool) ->
             };
             continue;
         }
+        // No operator matched at this level — rewind the leading
+        // skip_ws so the cursor sits right after the LHS rather than
+        // at the next non-op token. Critical for line-bounded callers
+        // like `spatial_query <name>(...) = <expr>` where the next
+        // line starts a fresh decl: leaving the cursor on the next
+        // decl's `@annotation` triggers the trailing-annotation
+        // absorber to mis-attach it. (The precedence-mismatch breaks
+        // above do NOT rewind — a real operator IS at the cursor
+        // and the outer recursion needs to see it.)
+        c.pos = pre_ws;
         break;
     }
     Ok(lhs)
@@ -2622,7 +2646,13 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
         name.push_str("::");
         name.push_str(&next);
     }
-    // Ctor-style call with `(`, or record-style with `{`.
+    // Ctor-style call with `(`, or record-style with `{`. Rewind
+    // the leading skip_ws when neither shape matches so a bare
+    // identifier doesn't leave the cursor past trailing whitespace
+    // + comments. Critical when the next decl starts on a new line
+    // with `@annotation` — `absorb_trailing_annotations` would
+    // otherwise mis-attach it as trailing on the current decl.
+    let post_ident = c.pos;
     c.skip_ws();
     if c.starts_with_char('(') {
         c.bump(1);
@@ -2691,14 +2721,29 @@ fn parse_atom(c: &mut Cursor, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
             return parse_postfix(c, node, stop);
         }
     }
+    // Bare identifier — no Ctor/Struct postfix matched. Restore the
+    // cursor to the position right after the identifier (rewinding
+    // the speculative skip_ws above) so the span ends cleanly and
+    // any trailing whitespace/newline/comment is left for the outer
+    // decl boundary to handle.
+    c.pos = post_ident;
     let node = Expr { kind: ExprKind::Ident(name), span: Span::new(start, c.pos) };
     parse_postfix(c, node, stop)
 }
 
 fn parse_postfix(c: &mut Cursor, mut expr: Expr, stop: &dyn Fn(&Cursor) -> bool) -> PResult<Expr> {
     loop {
+        // Same rewind discipline as `parse_binary`: checkpoint
+        // before skip_ws so when no postfix matches we don't leave
+        // the cursor past trailing newlines + comments. Otherwise
+        // `parse_atom("self")` → parse_postfix skips past the
+        // newline at the end of the expression and lands on the
+        // next decl's `@annotation`, which then gets misattached
+        // by `absorb_trailing_annotations`.
+        let pre_ws = c.pos;
         c.skip_ws();
         if stop(c) {
+            c.pos = pre_ws;
             break;
         }
         if c.starts_with_char('.') {
@@ -2734,6 +2779,10 @@ fn parse_postfix(c: &mut Cursor, mut expr: Expr, stop: &dyn Fn(&Cursor) -> bool)
             expr = Expr { kind: ExprKind::Call(Box::new(expr), args), span };
             continue;
         }
+        // No postfix matched — rewind so the cursor doesn't sit
+        // past trailing whitespace + comments. See the loop-top
+        // comment for the rationale.
+        c.pos = pre_ws;
         break;
     }
     Ok(expr)
