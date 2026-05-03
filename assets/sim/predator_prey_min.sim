@@ -173,6 +173,15 @@ physics MoveHare @phase(per_agent) {
 
 // Wolves chase — sum (other.pos - self.pos) pull-toward vectors
 // over every Hare. Same fold shape, opposite direction + speed.
+//
+// Future: emit Killed events from this rule once the runtime wires
+// up the event ring + fold dispatch chain. The compiler-side emit
+// surface works (uncomment the `emit Killed { … }` line below to
+// verify physics_MoveWolf gains an event_ring binding); the runtime
+// piece is the lift — see pp_runtime/src/lib.rs for the missing
+// event_ring/event_tail/view_storage allocation + the per-tick
+// MoveWolf → seed_indirect_0 → fold_kill_count → fold_predator_focus
+// dispatch chain (mirrors the design target's PerEvent shape).
 physics MoveWolf @phase(per_agent) {
   on Tick {} where (self.creature_type == Wolf) {
     let chase_force = sum(other in agents where
@@ -185,6 +194,7 @@ physics MoveWolf @phase(per_agent) {
     let new_pos = self.pos + new_vel * config.hunt.predator_speed;
     agents.set_vel(self, new_vel);
     agents.set_pos(self, new_pos);
+    // emit Killed { by: self, prey: self, pos: new_pos }
   }
 }
 
