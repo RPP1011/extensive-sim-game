@@ -349,8 +349,18 @@ pub fn kernel_topology_to_spec_and_body(
     //    handle is binding-relevant — Rng / ConfigConst are not). Skip
     //    handles that have no binding metadata.
     let mut typed_bindings: Vec<TypedBinding> = Vec::new();
+    let mut needs_event_tail = false;
     for (key, agg) in &handle_set {
         let canonical = canonical_handle(key, &agg.first_seen);
+        // Detect EventRing-Append → kernel writes events, must also
+        // bind `event_tail: atomic<u32>` so the WGSL emit body's
+        // `atomicAdd(&event_tail, 1u)` resolves. The producer's
+        // `event_ring` binding stays as `array<atomic<u32>>` (slots
+        // are owned via the tail; writes use direct indexing rather
+        // than atomicStore — slot uniqueness is the synchronization).
+        if let DataHandle::EventRing { kind: EventRingAccess::Append, .. } = &canonical {
+            needs_event_tail = true;
+        }
         let Some(meta) = handle_to_binding_metadata(&canonical, prog) else {
             // Rng + ConfigConst route through the cfg uniform / inline
             // helpers, not as standalone bindings.
@@ -364,6 +374,30 @@ pub fn kernel_topology_to_spec_and_body(
             access,
             wgsl_ty: meta.wgsl_ty,
             bg_source: meta.bg_source,
+        });
+    }
+
+    // 6b. Synthesize a sibling `event_tail` binding when any op in
+    //     this kernel does `EventRing-Append`. The resident-context
+    //     field `batch_events_tail` is the source-of-truth single
+    //     atomic<u32> counter the runtime allocates alongside the
+    //     event ring; producer kernels atomicAdd against it to
+    //     acquire write slots.
+    //
+    //     Sort key uses a synthetic `Ring(EventRingId(u32::MAX))` so
+    //     the tail consistently sorts after any real ring-keyed
+    //     binding (deterministic ordering). Name "event_tail" is the
+    //     identifier the WGSL emit body in
+    //     `lower_emit_to_wgsl` references unconditionally.
+    if needs_event_tail {
+        typed_bindings.push(TypedBinding {
+            sort_key: crate::cg::data_handle::CycleEdgeKey::Ring(
+                crate::cg::data_handle::EventRingId(u32::MAX),
+            ),
+            name: "event_tail".to_string(),
+            access: AccessMode::AtomicStorage,
+            wgsl_ty: "u32".to_string(),
+            bg_source: BgSource::Resident("batch_events_tail".to_string()),
         });
     }
 

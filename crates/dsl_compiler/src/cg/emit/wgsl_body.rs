@@ -1126,6 +1126,12 @@ fn lower_emit_to_wgsl(
     // the atomicAdd keeps the slot-acquired window short and avoids
     // double-evaluating the expression in the bounds-check vs the
     // commit branch.
+    // The producer-side `event_ring` binding is `array<atomic<u32>>`
+    // (per `handle_to_binding_metadata` for EventRing-Append), so
+    // ring writes go through `atomicStore(&ring[idx], value)`. Slot
+    // ownership comes from the atomicAdd on `event_tail`, so the
+    // atomicStore here only needs to write into a slot we already
+    // own — no race vs. other producers.
     let mut field_writes: Vec<String> = Vec::with_capacity(fields.len());
     for (field_ref, expr_id) in fields {
         let layout_entry = ordered
@@ -1134,49 +1140,39 @@ fn lower_emit_to_wgsl(
         let (_name, fl) = layout_entry;
         let value_wgsl = lower_cg_expr_to_wgsl(*expr_id, ctx)?;
         let off = header + fl.word_offset_in_payload;
+        let store = |out: &mut Vec<String>, off: u32, val: String| {
+            out.push(format!(
+                "    atomicStore(&{buf}[slot * {stride}u + {off}u], {val});",
+            ));
+        };
         match fl.ty {
             CgTy::AgentId | CgTy::U32 | CgTy::Tick => {
-                field_writes.push(format!(
-                    "    {buf}[slot * {stride}u + {off}u] = ({value_wgsl});",
-                ));
+                store(&mut field_writes, off, format!("({value_wgsl})"));
             }
-            CgTy::I32 => {
-                field_writes.push(format!(
-                    "    {buf}[slot * {stride}u + {off}u] = bitcast<u32>({value_wgsl});",
-                ));
-            }
-            CgTy::F32 => {
-                field_writes.push(format!(
-                    "    {buf}[slot * {stride}u + {off}u] = bitcast<u32>({value_wgsl});",
-                ));
+            CgTy::I32 | CgTy::F32 => {
+                store(
+                    &mut field_writes,
+                    off,
+                    format!("bitcast<u32>({value_wgsl})"),
+                );
             }
             CgTy::Vec3F32 => {
-                // Materialize the value into a temp so we don't
-                // re-evaluate the source expression three times.
-                // `slot_<event>_<index>_v` keeps the temp name
-                // collision-free across multiple emits in the same
-                // body; ids are unique-per-emit-site within a
-                // program (the field index is per-event-kind, not
-                // global, but combined with event_id it's unique
-                // per (kind, field) pair).
+                // Materialize once so we don't re-evaluate the
+                // source vec3 expression three times across the
+                // .x/.y/.z stores.
                 let tmp = format!("_emit_v_{}_{}", event_id, field_ref.index);
-                field_writes.push(format!("    let {tmp}: vec3<f32> = ({value_wgsl});"));
-                field_writes.push(format!(
-                    "    {buf}[slot * {stride}u + {off}u] = bitcast<u32>({tmp}.x);",
-                ));
-                field_writes.push(format!(
-                    "    {buf}[slot * {stride}u + {off2}u] = bitcast<u32>({tmp}.y);",
-                    off2 = off + 1,
-                ));
-                field_writes.push(format!(
-                    "    {buf}[slot * {stride}u + {off3}u] = bitcast<u32>({tmp}.z);",
-                    off3 = off + 2,
-                ));
+                field_writes
+                    .push(format!("    let {tmp}: vec3<f32> = ({value_wgsl});"));
+                store(&mut field_writes, off, format!("bitcast<u32>({tmp}.x)"));
+                store(&mut field_writes, off + 1, format!("bitcast<u32>({tmp}.y)"));
+                store(&mut field_writes, off + 2, format!("bitcast<u32>({tmp}.z)"));
             }
             CgTy::Bool => {
-                field_writes.push(format!(
-                    "    {buf}[slot * {stride}u + {off}u] = select(0u, 1u, ({value_wgsl}));",
-                ));
+                store(
+                    &mut field_writes,
+                    off,
+                    format!("select(0u, 1u, ({value_wgsl}))"),
+                );
             }
             CgTy::ViewKey { .. } => {
                 return Err(EmitError::EventFieldUnsupportedType {
@@ -1196,19 +1192,23 @@ fn lower_emit_to_wgsl(
     let mut out = String::new();
     out.push_str(&format!("// emit event#{event_id} ({} fields)\n", fields.len()));
     out.push_str("{\n");
-    out.push_str("    let slot = atomicAdd(&event_tail, 1u);\n");
-    // Bounds check — silently drop if ring full. Stride*65536 = 640k
-    // u32-words at the default cap; runtime sizing is the
-    // event_ring buffer length / stride.
+    // Tail is `array<atomic<u32>>` with a single element — slot 0 is
+    // the count. atomicAdd returns the prior value (this producer's
+    // unique slot index).
+    out.push_str("    let slot = atomicAdd(&event_tail[0], 1u);\n");
+    // Bounds check — silently drop if ring full. Runtime sizes
+    // event_ring to `DEFAULT_EVENT_RING_CAP_SLOTS * stride * 4` bytes.
     out.push_str(&format!(
         "    if (slot < {}u) {{\n",
         DEFAULT_EVENT_RING_CAP_SLOTS
     ));
+    // Tag + tick header words also go through atomicStore since the
+    // binding is `array<atomic<u32>>`.
     out.push_str(&format!(
-        "        {buf}[slot * {stride}u + 0u] = {event_id}u;\n"
+        "        atomicStore(&{buf}[slot * {stride}u + 0u], {event_id}u);\n"
     ));
     out.push_str(&format!(
-        "        {buf}[slot * {stride}u + 1u] = tick;\n"
+        "        atomicStore(&{buf}[slot * {stride}u + 1u], tick);\n"
     ));
     for line in &field_writes {
         // Each `field_writes` entry already starts with 4-space
@@ -2356,23 +2356,23 @@ mod tests {
         );
         let ctx = EmitCtx::structural(&prog);
         let wgsl = lower_cg_stmt_to_wgsl(s, &ctx).unwrap();
-        // Real ring-append form: atomicAdd to event_tail, bounds-
-        // check, then tag/tick/payload writes. F32 fields wrap in
-        // bitcast<u32>.
+        // Real ring-append form: atomicAdd to event_tail[0], bounds-
+        // check, then atomicStore tag/tick/payload writes. F32
+        // fields wrap in bitcast<u32>.
         assert!(
-            wgsl.contains("let slot = atomicAdd(&event_tail, 1u);"),
+            wgsl.contains("let slot = atomicAdd(&event_tail[0], 1u);"),
             "expected atomicAdd-to-tail; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 0u] = 7u;"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 0u], 7u);"),
             "expected tag (event id 7) write; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 2u] = bitcast<u32>(agent_hp[agent_id]);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 2u], bitcast<u32>(agent_hp[agent_id]));"),
             "expected hp f32 bitcast write at offset 2; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 3u] = bitcast<u32>(0.0);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 3u], bitcast<u32>(0.0));"),
             "expected zero f32 bitcast write at offset 3; got:\n{wgsl}"
         );
     }
@@ -3285,9 +3285,9 @@ mod tests {
         let ctx = EmitCtx::structural(&prog);
         let wgsl = lower_cg_stmt_to_wgsl(stmt_id, &ctx).expect("Emit lowers");
 
-        // Atomic-add the slot off event_tail.
+        // Atomic-add the slot off event_tail[0].
         assert!(
-            wgsl.contains("let slot = atomicAdd(&event_tail, 1u);"),
+            wgsl.contains("let slot = atomicAdd(&event_tail[0], 1u);"),
             "expected atomicAdd-to-tail; got:\n{wgsl}"
         );
         // Bounds check before commit.
@@ -3295,24 +3295,24 @@ mod tests {
             wgsl.contains("if (slot < 65536u)"),
             "expected slot bounds check; got:\n{wgsl}"
         );
-        // Tag write at offset 0 (event_id is 1).
+        // Tag write at offset 0 (event_id is 1) via atomicStore.
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 0u] = 1u;"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 0u], 1u);"),
             "expected tag write at offset 0; got:\n{wgsl}"
         );
         // Tick write at offset 1.
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 1u] = tick;"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 1u], tick);"),
             "expected tick write at offset 1; got:\n{wgsl}"
         );
         // by AgentId at payload offset 0 (header+0 = 2).
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 2u] = (agent_id);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 2u], (agent_id));"),
             "expected `by` at offset 2; got:\n{wgsl}"
         );
         // prey AgentId at payload offset 1 (header+1 = 3).
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 3u] = (agent_id);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 3u], (agent_id));"),
             "expected `prey` at offset 3; got:\n{wgsl}"
         );
         // Vec3 pos with bitcast<u32>(.x/.y/.z) at offsets 4/5/6.
@@ -3321,11 +3321,11 @@ mod tests {
             "expected vec3 .x bitcast; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 4u] = bitcast<u32>(_emit_v_1_2.x);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 4u], bitcast<u32>(_emit_v_1_2.x));"),
             "expected vec3 .x at offset 4; got:\n{wgsl}"
         );
         assert!(
-            wgsl.contains("event_ring[slot * 10u + 6u] = bitcast<u32>(_emit_v_1_2.z);"),
+            wgsl.contains("atomicStore(&event_ring[slot * 10u + 6u], bitcast<u32>(_emit_v_1_2.z));"),
             "expected vec3 .z at offset 6; got:\n{wgsl}"
         );
         // No phony discard left over from the old B1 placeholder.
