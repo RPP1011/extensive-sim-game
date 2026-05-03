@@ -1,0 +1,35 @@
+// predator_prey_min — incremental working fixture for the PP staged
+// implementation (tasks #59-#69). The full design target lives at
+// `predator_prey.sim` and stays untouched as the spec; each PP stage
+// COPIES one surface from the full file into this minimal one as the
+// supporting compiler / runtime work lands. When this file matches
+// the full file, we delete this and rename — at which point all
+// stages are done.
+//
+// Stage 0 (current): two entities + one shared per-agent integrator.
+// Stage 1 will copy the per-handler `where self.creature_type == ...`
+// split — until that lands, two PerAgent rules both calling set_pos
+// surface as a write-write cycle in the schedule.
+
+event Tick { }
+
+entity Hare : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Wolf : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config hunt {
+  step_scale: f32 = 0.5,
+}
+
+physics MoveAll @phase(per_agent) {
+  on Tick {} {
+    let new_pos = self.pos + self.vel * config.hunt.step_scale;
+    agents.set_pos(self, new_pos);
+  }
+}
