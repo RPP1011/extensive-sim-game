@@ -97,7 +97,8 @@ impl ParticleCollisionState {
         });
         let cfg = physics_MoveParticle::PhysicsMoveParticleCfg {
             agent_cap: agent_count,
-            _pad: [0; 3],
+            tick: 0,
+            _pad: [0; 2],
         };
         let cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("particle_collision_runtime::cfg"),

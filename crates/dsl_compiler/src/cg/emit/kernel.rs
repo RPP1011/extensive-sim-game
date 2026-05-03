@@ -1403,15 +1403,23 @@ fn compute_op_kind_short(kind: &ComputeOpKind) -> &'static str {
 ///   Mask, scoring, physics, spatial, and plumbing kernels share this
 ///   placeholder today; Task 5.5 will refine.
 fn build_generic_cfg_struct_decl(cfg_struct: &str) -> String {
+    // `tick: u32` joined the layout when PerAgent rules with `emit
+    // <Event>` bodies started referencing `tick` in the per-tick
+    // event payload header. Backwards-compat note: every runtime
+    // constructs cfg manually (per-fixture lib.rs), so the new
+    // field surfaces as a missing-field error at the per-fixture
+    // build site — caller updates that in lockstep.
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub agent_cap: u32, pub _pad: [u32; 3] }}"
+         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub _pad: [u32; 2] }}"
     )
 }
 
 fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
-    format!("{cfg_struct} {{ agent_cap: state.agent_cap(), _pad: [0; 3] }}")
+    format!(
+        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, _pad: [0; 2] }}"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -2580,8 +2588,14 @@ fn plumbing_body_for_kind(kind: &PlumbingKind) -> String {
 fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
     match dispatch {
         DispatchShape::PerAgent => {
+            // `tick` is bound from the cfg uniform so PerAgent rules
+            // with `emit <Event>` bodies can write the tick header
+            // word into the event ring (every event payload starts
+            // with [tag, tick]). Always emitted even for non-emitting
+            // kernels — naga drops the unused let cleanly.
             "let agent_id = gid.x;\n\
-             if (agent_id >= cfg.agent_cap) { return; }\n\n"
+             if (agent_id >= cfg.agent_cap) { return; }\n\
+             let tick = cfg.tick;\n\n"
                 .to_string()
         }
         DispatchShape::PerEvent { source_ring } => format!(
