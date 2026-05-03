@@ -12,6 +12,19 @@
 
 event Tick { }
 
+// Stuck event — fires when a walker fails to make progress for too
+// long. The full design target uses this to switch the walker into
+// a Stuck mode (state-machine view); for now we just declare the
+// event + a fold that counts how often each walker has gotten
+// stuck. The `ticks` field is u32 (smaller payload than the
+// design target's full pos: vec3 — we trim to the GPU-emittable
+// scalar subset).
+@replayable
+event Stuck {
+  walker: AgentId,
+  ticks:  u32,
+}
+
 entity Walker : Agent {
   pos: vec3,
   vel: vec3,
@@ -19,6 +32,18 @@ entity Walker : Agent {
 
 config crowd {
   speed: f32 = 0.7,
+}
+
+// Per-walker stuck-event count. f32-typed (mirrors kill_count /
+// collision_count) because integer literals default to u32 and the
+// `self += 1` write would mismatch an i32-storage cell. No emitter
+// yet — Stage 2 will copy a per-tick stuck-detection rule from the
+// design target.
+@materialized(on_event = [Stuck])
+view stuck_count(w: Agent) -> f32 {
+  initial: 0.0,
+  on Stuck { walker: agent } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
 }
 
 physics MoveWalker @phase(per_agent) {

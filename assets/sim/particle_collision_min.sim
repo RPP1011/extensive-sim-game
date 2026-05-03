@@ -11,6 +11,19 @@
 
 event Tick { }
 
+// One Collision event per (a, b) pair. View-folds reduce off this
+// ring. Atomic-append from the per-pair kernel (when the
+// DetectCollisions rule lands at a later stage); for now the event
+// declaration exercises the per-event payload layout (a, b, vec3
+// impulse → 5 payload words).
+@replayable
+@gpu_amenable
+event Collision {
+  a:       AgentId,
+  b:       AgentId,
+  impulse: vec3,
+}
+
 entity Particle : Agent {
   pos: vec3,
   vel: vec3,
@@ -18,6 +31,22 @@ entity Particle : Agent {
 
 config particles {
   damping: f32 = 0.99,
+}
+
+// Per-particle collision count. Increments by 1.0 each time the
+// particle is `a` or `b` in a Collision event. f32-typed (mirrors
+// the kill_count view in predator_prey_min) because integer
+// literals in fold bodies default to u32 today and the view-fold
+// `self += <lit>` write would mismatch an `i32`-storage cell. No
+// emitter yet (Stage 2 will copy DetectCollisions from the design
+// target); until then the view-storage stays at 0 and the kernel
+// is a no-op against an empty ring.
+@materialized(on_event = [Collision])
+view collision_count(p: Agent) -> f32 {
+  initial: 0.0,
+  on Collision { a: agent } { self += 1.0 }
+  on Collision { b: agent } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
 }
 
 physics MoveParticle @phase(per_agent) {
