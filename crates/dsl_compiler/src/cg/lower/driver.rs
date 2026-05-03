@@ -1557,9 +1557,11 @@ fn collect_required_spatial_kinds(prog: &CgProgram) -> Vec<SpatialQueryKind> {
     // currently dormant in this fixture) were also wired against
     // the bounded layout; if a fixture re-enables them, they need
     // to be ported to the new starts/cells layout too.
-    let mut kinds = Vec::with_capacity(consumers.len() + 3);
+    let mut kinds = Vec::with_capacity(consumers.len() + 5);
     kinds.push(SpatialQueryKind::BuildHashCount);
-    kinds.push(SpatialQueryKind::BuildHashScan);
+    kinds.push(SpatialQueryKind::BuildHashScanLocal);
+    kinds.push(SpatialQueryKind::BuildHashScanCarry);
+    kinds.push(SpatialQueryKind::BuildHashScanAdd);
     kinds.push(SpatialQueryKind::BuildHashScatter);
     for k in consumers {
         kinds.push(k);

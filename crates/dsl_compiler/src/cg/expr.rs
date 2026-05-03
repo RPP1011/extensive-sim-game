@@ -831,7 +831,8 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
             // keeps the closed-set match exhaustive.
             SpatialStorageKind::NonemptyCells
             | SpatialStorageKind::NonemptyCellsIndirectArgs
-            | SpatialStorageKind::GridStarts => CgTy::U32,
+            | SpatialStorageKind::GridStarts
+            | SpatialStorageKind::ChunkSums => CgTy::U32,
         },
         H::Rng { .. } => CgTy::U32,
         // Plumbing-only handles. These are touched only by

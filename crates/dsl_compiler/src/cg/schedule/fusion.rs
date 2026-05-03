@@ -104,6 +104,13 @@ pub enum DispatchShapeKey {
     /// rewriting the cooperative-load preamble, so PerCell sits in
     /// its own key class today.
     PerCell,
+    /// Per-scan-chunk dispatch (parallel prefix scan). Each
+    /// workgroup owns one 256-cell chunk; lanes cooperate on the
+    /// Hillis-Steele in-shared-memory scan. Sits in its own key
+    /// class — fusion would require sharing the workgroup-shared
+    /// `scan_shared` array across ops, which the current emit
+    /// pipeline does not support.
+    PerScanChunk,
 }
 
 /// Project a [`DispatchShape`] to its [`DispatchShapeKey`]. The
@@ -117,6 +124,7 @@ pub fn dispatch_shape_key(shape: &DispatchShape) -> DispatchShapeKey {
         DispatchShape::OneShot => DispatchShapeKey::OneShot,
         DispatchShape::PerWord => DispatchShapeKey::PerWord,
         DispatchShape::PerCell => DispatchShapeKey::PerCell,
+        DispatchShape::PerScanChunk => DispatchShapeKey::PerScanChunk,
     }
 }
 
@@ -865,7 +873,8 @@ pub(super) fn classify(ops: &[OpId], shape: &DispatchShape) -> FusibilityClass {
         | DispatchShape::PerPair { .. }
         | DispatchShape::OneShot
         | DispatchShape::PerWord
-        | DispatchShape::PerCell => {
+        | DispatchShape::PerCell
+        | DispatchShape::PerScanChunk => {
             if ops.len() < 2 {
                 FusibilityClass::Split
             } else {

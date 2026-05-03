@@ -167,10 +167,16 @@ pub fn lower_spatial_queries(
     let mut op_ids = Vec::with_capacity(kinds.len());
     for &kind in kinds {
         let computekind = ComputeOpKind::SpatialQuery { kind };
-        // BuildHashScan runs single-threaded (serial scan over all
-        // cells); every other spatial-query kind is per-agent today.
+        // Three-phase parallel prefix scan:
+        //   - ScanLocal/ScanAdd dispatch one lane per cell, batched
+        //     into 256-cell scan chunks (`PerScanChunk`).
+        //   - ScanCarry is a tiny serial fix-up (~42 entries for
+        //     boids' 10 648-cell grid) and runs single-threaded.
+        // Every other spatial-query kind is per-agent today.
         let shape = match kind {
-            SpatialQueryKind::BuildHashScan => DispatchShape::OneShot,
+            SpatialQueryKind::BuildHashScanLocal
+            | SpatialQueryKind::BuildHashScanAdd => DispatchShape::PerScanChunk,
+            SpatialQueryKind::BuildHashScanCarry => DispatchShape::OneShot,
             _ => DispatchShape::PerAgent,
         };
         let op_id = ctx

@@ -752,16 +752,32 @@ fn handle_to_binding_metadata(h: &DataHandle, prog: &CgProgram) -> Option<Bindin
                     AccessMode::AtomicStorage,
                     "u32".to_string(),
                 ),
-                // GridStarts: prefix-scan output. Non-atomic — the
-                // scan kernel is single-threaded and writes
-                // sequentially; consumers (BuildHashScatter and the
-                // tiled MoveBoid kernel) only read. The size on the
-                // runtime side is `num_cells + 1` u32s; the WGSL
-                // type (`array<u32>`) doesn't bake in the length, so
-                // the per-fixture runtime is the source of truth for
-                // the buffer's length.
+                // GridStarts: prefix-scan output. The new parallel
+                // scan writes it cooperatively from many lanes
+                // (phase 2a writes per-chunk inclusive prefix; phase
+                // 2c adds the chunk base in place). Each cell slot
+                // is touched by exactly one lane in each phase, so
+                // the writes are conflict-free without atomics —
+                // the storage stays plain `array<u32>`. Consumers
+                // (BuildHashScatter + tiled MoveBoid) only read.
+                // Size on the runtime side is `num_cells + 1` u32s;
+                // the WGSL type doesn't bake in the length, so the
+                // per-fixture runtime is the source of truth.
                 SpatialStorageKind::GridStarts => (
                     "spatial_grid_starts".to_string(),
+                    AccessMode::ReadStorage,
+                    "array<u32>".to_string(),
+                ),
+                // ChunkSums: cross-workgroup carry buffer for the
+                // parallel prefix scan. Written by phase 2a (each
+                // chunk's last lane stores the chunk total),
+                // exclusive-scanned in place by phase 2b, read by
+                // phase 2c. Non-atomic — single writer per slot in
+                // every phase. Sized
+                // `ceil(num_cells / PER_SCAN_CHUNK_WORKGROUP_X)` on
+                // the runtime side.
+                SpatialStorageKind::ChunkSums => (
+                    "spatial_chunk_sums".to_string(),
                     AccessMode::ReadStorage,
                     "array<u32>".to_string(),
                 ),
@@ -1020,6 +1036,7 @@ fn structural_binding_name(h: &DataHandle) -> String {
                 "spatial_nonempty_indirect_args".into()
             }
             SpatialStorageKind::GridStarts => "spatial_grid_starts".into(),
+            SpatialStorageKind::ChunkSums => "spatial_chunk_sums".into(),
         },
         DataHandle::Rng { purpose } => format!("rng_{}", purpose.snake()),
         DataHandle::AliveBitmap => "alive_bitmap".into(),
@@ -1337,7 +1354,9 @@ fn spatial_kind_name(k: SpatialQueryKind) -> String {
             String::from("compact_nonempty_cells")
         }
         SpatialQueryKind::BuildHashCount => String::from("build_hash_count"),
-        SpatialQueryKind::BuildHashScan => String::from("build_hash_scan"),
+        SpatialQueryKind::BuildHashScanLocal => String::from("build_hash_scan_local"),
+        SpatialQueryKind::BuildHashScanCarry => String::from("build_hash_scan_carry"),
+        SpatialQueryKind::BuildHashScanAdd => String::from("build_hash_scan_add"),
         SpatialQueryKind::BuildHashScatter => String::from("build_hash_scatter"),
     }
 }
@@ -1860,36 +1879,122 @@ const SPATIAL_BUILD_HASH_COUNT_BODY: &str =
     "let cell = pos_to_cell(agent_pos[agent_id]);\n\
      atomicAdd(&spatial_grid_offsets[cell], 1u);";
 
-/// Real counting sort, **phase 2** (`SpatialQueryKind::BuildHashScan`).
+/// Real counting sort, **phase 2a — workgroup-local scan**
+/// (`SpatialQueryKind::BuildHashScanLocal`).
 ///
-/// OneShot dispatch — `@workgroup_size(1)`, dispatch_workgroups(1, 1, 1).
-/// A single thread serially scans `spatial_grid_offsets` (per-cell
-/// counts) into `spatial_grid_starts` (cumulative starts; sized
-/// `num_cells + 1`), then resets `spatial_grid_offsets` to zero so
-/// phase 3 can reuse it as a per-cell write cursor.
+/// PerScanChunk dispatch: each workgroup owns one
+/// `PER_SCAN_CHUNK_WORKGROUP_X`-sized cell chunk. The body performs
+/// a Hillis-Steele inclusive scan in workgroup-shared memory,
+/// writes the per-chunk inclusive prefix to
+/// `spatial_grid_starts[chunk_base + lane + 1]`, and writes the
+/// chunk's total to `spatial_chunk_sums[chunk_id]`. Lane 0 of
+/// workgroup 0 also writes `spatial_grid_starts[0] = 0u`.
 ///
-/// Cell `c`'s slice in `spatial_grid_cells` after phase 3 will be
-/// `[starts[c] .. starts[c + 1])`. The final `starts[num_cells]`
-/// equals the total agent count.
+/// `var<workgroup>` shared memory holds 256 × u32 = 1 KiB —
+/// well under any adapter's per-workgroup memory budget.
 ///
-/// **Why serial single-thread**: `num_cells` is fixed by the spatial
-/// configuration (~10k for boids' 22³ grid). A serial scan in one
-/// thread is O(num_cells) — microseconds at this scale. A parallel
-/// Hillis-Steele or Blelloch scan would amortize better at 100k+
-/// cells but adds substantial WGSL complexity for no gain at the
-/// fixture's actual cell count.
-fn spatial_build_hash_scan_body() -> String {
+/// Out-of-range cells (`chunk_base + lane >= num_cells`) read 0
+/// and skip their slot writes.
+fn spatial_build_hash_scan_local_body() -> String {
+    let chunk = crate::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
     let n = crate::cg::emit::spatial::num_cells();
     format!(
-        "var sum: u32 = 0u;\n\
-         spatial_grid_starts[0u] = 0u;\n\
-         for (var i: u32 = 0u; i < {n}u; i = i + 1u) {{\n\
-         \x20   let c = atomicLoad(&spatial_grid_offsets[i]);\n\
-         \x20   sum = sum + c;\n\
-         \x20   spatial_grid_starts[i + 1u] = sum;\n\
-         \x20   atomicStore(&spatial_grid_offsets[i], 0u);\n\
+        "// Hillis-Steele inclusive scan in workgroup-shared memory.\n\
+         // The shared array's bounds + the chunk size are both\n\
+         // PER_SCAN_CHUNK_WORKGROUP_X ({chunk}) so every lane has\n\
+         // exactly one slot.\n\
+         let cell = chunk_id * {chunk}u + lane;\n\
+         // Out-of-range lanes contribute 0 to the scan but still\n\
+         // participate in every barrier — the Hillis-Steele algorithm\n\
+         // requires uniform control flow across the workgroup.\n\
+         var v: u32 = 0u;\n\
+         if (cell < {n}u) {{\n\
+         \x20   v = atomicLoad(&spatial_grid_offsets[cell]);\n\
+         }}\n\
+         scan_shared[lane] = v;\n\
+         workgroupBarrier();\n\
+         // log2({chunk}) iterations of double-and-add.\n\
+         for (var step: u32 = 1u; step < {chunk}u; step = step << 1u) {{\n\
+         \x20   var added: u32 = scan_shared[lane];\n\
+         \x20   if (lane >= step) {{\n\
+         \x20       added = added + scan_shared[lane - step];\n\
+         \x20   }}\n\
+         \x20   workgroupBarrier();\n\
+         \x20   scan_shared[lane] = added;\n\
+         \x20   workgroupBarrier();\n\
+         }}\n\
+         // Now scan_shared[lane] = inclusive sum over lanes [0..=lane].\n\
+         // Write per-chunk inclusive prefix to grid_starts[cell+1] for\n\
+         // in-range cells (the +1 shift turns inclusive→exclusive at\n\
+         // the next position, matching the serial scan's output).\n\
+         if (cell < {n}u) {{\n\
+         \x20   spatial_grid_starts[cell + 1u] = scan_shared[lane];\n\
+         }}\n\
+         // Lane 0 of workgroup 0 sets the leading exclusive 0.\n\
+         if (chunk_id == 0u && lane == 0u) {{\n\
+         \x20   spatial_grid_starts[0u] = 0u;\n\
+         }}\n\
+         // Last lane in each workgroup records the chunk's total.\n\
+         if (lane == {chunk}u - 1u) {{\n\
+         \x20   spatial_chunk_sums[chunk_id] = scan_shared[lane];\n\
          }}",
-        n = n
+        chunk = chunk,
+        n = n,
+    )
+}
+
+/// Real counting sort, **phase 2b — cross-workgroup carry**
+/// (`SpatialQueryKind::BuildHashScanCarry`).
+///
+/// OneShot dispatch (single thread). Serially exclusive-scans
+/// `spatial_chunk_sums` in place: each entry overwritten with the
+/// sum of all preceding chunk totals. After this kernel,
+/// `chunk_sums[chunk_id]` is the global offset to add to every
+/// `grid_starts` entry the chunk owns.
+///
+/// `num_chunks = ceil(num_cells / PER_SCAN_CHUNK_WORKGROUP_X)` —
+/// 42 for boids' 22³=10 648 grid; 256 even at 16M cells. The
+/// serial loop is microseconds at this scale.
+fn spatial_build_hash_scan_carry_body() -> String {
+    let chunk = crate::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+    let n = crate::cg::emit::spatial::num_cells();
+    let num_chunks = n.div_ceil(chunk);
+    format!(
+        "// Serial exclusive scan over the (small) chunk_sums buffer.\n\
+         var running: u32 = 0u;\n\
+         for (var i: u32 = 0u; i < {num_chunks}u; i = i + 1u) {{\n\
+         \x20   let v = spatial_chunk_sums[i];\n\
+         \x20   spatial_chunk_sums[i] = running;\n\
+         \x20   running = running + v;\n\
+         }}",
+        num_chunks = num_chunks,
+    )
+}
+
+/// Real counting sort, **phase 2c — add per-chunk base**
+/// (`SpatialQueryKind::BuildHashScanAdd`).
+///
+/// PerScanChunk dispatch (same shape as phase 2a). Each lane reads
+/// the chunk base from `spatial_chunk_sums[chunk_id]` and adds it
+/// to its `spatial_grid_starts[cell + 1]` slot, where `cell =
+/// chunk_id * PER_SCAN_CHUNK_WORKGROUP_X + lane`. Also resets
+/// `spatial_grid_offsets[cell]` to zero so phase 3 can reuse it as
+/// a write cursor (mirrors the serial scan's combined behaviour).
+///
+/// Lane `cell == num_cells - 1` (the very last in-range lane) ends
+/// up with `starts[num_cells] = total agent count`, which the
+/// tiled-MoveBoid kernel + scatter consume.
+fn spatial_build_hash_scan_add_body() -> String {
+    let chunk = crate::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+    let n = crate::cg::emit::spatial::num_cells();
+    format!(
+        "let cell = chunk_id * {chunk}u + lane;\n\
+         if (cell >= {n}u) {{ return; }}\n\
+         let base = spatial_chunk_sums[chunk_id];\n\
+         spatial_grid_starts[cell + 1u] = spatial_grid_starts[cell + 1u] + base;\n\
+         atomicStore(&spatial_grid_offsets[cell], 0u);",
+        chunk = chunk,
+        n = n,
     )
 }
 
@@ -1979,7 +2084,8 @@ fn lower_op_body(
                 DispatchShape::PerEvent { .. }
                 | DispatchShape::OneShot
                 | DispatchShape::PerWord
-                | DispatchShape::PerCell => Err(KernelEmitError::InvalidDispatchForOpKind {
+                | DispatchShape::PerCell
+                | DispatchShape::PerScanChunk => Err(KernelEmitError::InvalidDispatchForOpKind {
                     op_kind: "MaskPredicate",
                     dispatch: format!("{dispatch}"),
                 }),
@@ -2019,7 +2125,9 @@ fn lower_op_body(
                     .to_string()
             }
             SpatialQueryKind::BuildHashCount => SPATIAL_BUILD_HASH_COUNT_BODY.to_string(),
-            SpatialQueryKind::BuildHashScan => spatial_build_hash_scan_body(),
+            SpatialQueryKind::BuildHashScanLocal => spatial_build_hash_scan_local_body(),
+            SpatialQueryKind::BuildHashScanCarry => spatial_build_hash_scan_carry_body(),
+            SpatialQueryKind::BuildHashScanAdd => spatial_build_hash_scan_add_body(),
             SpatialQueryKind::BuildHashScatter => SPATIAL_BUILD_HASH_SCATTER_BODY.to_string(),
         }),
         // Task 5.6d: per-`PlumbingKind` body dispatch. Exhaustive over
@@ -2506,6 +2614,19 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
             // index decode. We emit nothing here so the surrounding
             // body composer doesn't double-prefix.
             String::new()
+        }
+        DispatchShape::PerScanChunk => {
+            // PerScanChunk: chunk_id is the workgroup index, lane
+            // is the local thread within the workgroup. The body
+            // computes its absolute cell index as
+            // `chunk_id * CHUNK + lane` and bounds-checks against
+            // num_cells inside the body (not here) so the scan
+            // body can keep all 256 lanes participating in the
+            // shared-memory Hillis-Steele reduction even when the
+            // last chunk has out-of-range lanes.
+            "let chunk_id = workgroup_id.x;\n\
+             let lane = local_invocation_id.x;\n\n"
+                .to_string()
         }
     }
 }
