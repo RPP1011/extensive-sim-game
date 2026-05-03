@@ -20,6 +20,9 @@ sim_runtime = { path = "../boids_runtime", package = "boids_runtime" }
 # name (no rename) — the pp_app binary in src/pp_app.rs is fixture-
 # aware and introspects per-creature counts via the runtime API.
 predator_prey_runtime = { path = "../predator_prey_runtime" }
+# Particle collision sibling fixture — pc_app drives it through the
+# CompiledSim trait.
+particle_collision_runtime = { path = "../particle_collision_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -28,3 +31,7 @@ path = "src/main.rs"
 [[bin]]
 name = "pp_app"
 path = "src/pp_app.rs"
+
+[[bin]]
+name = "pc_app"
+path = "src/pc_app.rs"

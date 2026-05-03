@@ -1,0 +1,28 @@
+// particle_collision_min — incremental working fixture for the
+// per-pair / view-fold predator. The full design target lives at
+// `particle_collision.sim` and stays untouched as the spec; this
+// minimal companion grows by COPYING surfaces over until they match.
+//
+// Stage 0 (current): single Particle entity, single per-agent
+// integrator. Subsequent stages will copy: per-pair Collision event
+// declaration, view-fold accumulators (collision_count + vec3
+// impulse_received), DetectCollisions per-pair rule, MoveParticle
+// integrator that reads the impulse view, invariants/probes/metrics.
+
+event Tick { }
+
+entity Particle : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config particles {
+  damping: f32 = 0.99,
+}
+
+physics MoveParticle @phase(per_agent) {
+  on Tick {} {
+    let new_pos = self.pos + self.vel * config.particles.damping;
+    agents.set_pos(self, new_pos);
+  }
+}

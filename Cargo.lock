@@ -1103,6 +1103,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "particle_collision_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1535,6 +1548,7 @@ dependencies = [
  "boids_runtime",
  "engine",
  "glam",
+ "particle_collision_runtime",
  "predator_prey_runtime",
 ]
 
