@@ -13,11 +13,18 @@ edition = "2021"
 engine = { path = "../engine" }
 glam = "0.29"
 
-# The active per-fixture runtime, aliased to a fixture-agnostic name
-# so src/main.rs stays sim-agnostic. ↓ THIS LINE is the one-value
-# switch when changing fixtures.
+# The boids fixture, aliased to a fixture-agnostic name so the
+# original sim_app harness in src/main.rs stays sim-agnostic.
 sim_runtime = { path = "../boids_runtime", package = "boids_runtime" }
+# Sibling per-creature predator/prey demo. Imported under its real
+# name (no rename) — the pp_app binary in src/pp_app.rs is fixture-
+# aware and introspects per-creature counts via the runtime API.
+predator_prey_runtime = { path = "../predator_prey_runtime" }
 
 [[bin]]
 name = "sim_app"
 path = "src/main.rs"
+
+[[bin]]
+name = "pp_app"
+path = "src/pp_app.rs"

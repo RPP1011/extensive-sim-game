@@ -1535,6 +1535,7 @@ dependencies = [
  "boids_runtime",
  "engine",
  "glam",
+ "predator_prey_runtime",
 ]
 
 [[package]]
