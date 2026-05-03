@@ -50,11 +50,17 @@ fn boids_lowering_only_surfaces_known_followups() {
     let program = dsl_compiler::parse(&src).expect("parse boids.sim");
     let comp = dsl_ast::resolve::resolve(program).expect("resolve boids.sim");
 
-    let Err(outcome) = lower_compilation_to_cg(&comp) else {
-        // Best case: every body lowered cleanly through the new CG
-        // walk — no follow-up gaps left. The MOVEMENT_BODY stub
-        // deletion is fully validated.
-        return;
+    let outcome = match lower_compilation_to_cg(&comp) {
+        Ok(prog) => {
+            println!(
+                "boids_cg_lowering: CLEAN — {} ops, {} stmts, {} exprs",
+                prog.ops.len(),
+                prog.stmts.len(),
+                prog.exprs.len()
+            );
+            return;
+        }
+        Err(o) => o,
     };
 
     for diag in &outcome.diagnostics {

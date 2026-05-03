@@ -132,9 +132,11 @@
 
 use dsl_ast::ast::Span;
 use dsl_ast::ir::{
-    IrEmit, IrPattern, IrPatternBinding, IrPhysicsPattern, IrStmt, PhysicsHandlerIR, PhysicsIR,
+    IrEmit, IrExpr, IrExprNode, IrPattern, IrPatternBinding, IrPhysicsPattern, IrStmt,
+    NamespaceId, PhysicsHandlerIR, PhysicsIR,
 };
 
+use crate::cg::data_handle::{AgentFieldId, AgentRef, DataHandle};
 use crate::cg::dispatch::DispatchShape;
 use crate::cg::op::{ComputeOpKind, OpId, PhysicsRuleId};
 use crate::cg::stmt::{CgMatchArm, CgStmt, CgStmtId, CgStmtList, MatchArmBinding};
@@ -222,12 +224,37 @@ pub fn lower_physics(
 
     intern_rule_name(rule_id, ir, ctx)?;
 
+    // Detect `@phase(per_agent)` on the rule. When present, every
+    // handler lowers as a per-agent op (on_event = None, dispatch =
+    // PerAgent) — the on-pattern (`on Tick {} { ... }`) is treated as
+    // a syntactic placeholder satisfying the parser; per-agent
+    // dispatch fires the body once per alive agent per tick rather
+    // than per event-fire. See Phase 6 Task 3 + Phase 7 boids
+    // fixture (assets/sim/boids.sim).
+    let per_agent = is_per_agent_phase(&ir.annotations);
+
     let mut op_ids = Vec::with_capacity(ir.handlers.len());
     for (handler, resolution) in ir.handlers.iter().zip(handler_resolutions.iter()) {
-        let op_id = lower_one_handler(rule_id, replayable, handler, *resolution, ctx)?;
+        let op_id = lower_one_handler(rule_id, replayable, handler, *resolution, per_agent, ctx)?;
         op_ids.push(op_id);
     }
     Ok(op_ids)
+}
+
+/// Is the `@phase(per_agent)` annotation present on a physics rule?
+/// Returns `true` for `@phase(per_agent)`; `false` for any other
+/// phase annotation (or no annotation at all). Bare positional ident
+/// arg form only — `@phase(per_agent = true)` etc. ignored.
+fn is_per_agent_phase(annotations: &[dsl_ast::ast::Annotation]) -> bool {
+    use dsl_ast::ast::{AnnotationArg, AnnotationValue};
+    annotations.iter().any(|a| {
+        a.name == "phase"
+            && matches!(
+                a.args.as_slice(),
+                [AnnotationArg { key: None, value: AnnotationValue::Ident(s), .. }]
+                    if s == "per_agent"
+            )
+    })
 }
 
 /// Intern the rule's source-level name on the builder, surfacing a
@@ -252,11 +279,20 @@ fn intern_rule_name(
 // ---------------------------------------------------------------------------
 
 /// Lower a single physics handler to one [`ComputeOpKind::PhysicsRule`] op.
+///
+/// `per_agent` is true when the surrounding rule carries `@phase(per_agent)`
+/// — in that case the op's `on_event` is `None` and dispatch is
+/// `DispatchShape::PerAgent` (the body fires once per alive agent per
+/// tick), regardless of the handler's `on <Pattern>` clause. For
+/// `per_agent = false`, the standard per-event lowering applies:
+/// `on_event = Some(resolution.event_kind)`, dispatch
+/// `DispatchShape::PerEvent { source_ring }`.
 fn lower_one_handler(
     rule_id: PhysicsRuleId,
     replayable: ReplayabilityFlag,
     handler: &PhysicsHandlerIR,
     resolution: HandlerResolution,
+    per_agent: bool,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<OpId, LoweringError> {
     // The handler's `where_clause` is part of the dispatch predicate,
@@ -329,14 +365,21 @@ fn lower_one_handler(
     // Build the op. `add_op` validates every reference (the body list
     // id) and runs the auto-walker to populate reads/writes from the
     // body's `Assign` targets, expression reads, and Match arm bodies.
+    let (on_event, shape) = if per_agent {
+        (None, DispatchShape::PerAgent)
+    } else {
+        (
+            Some(resolution.event_kind),
+            DispatchShape::PerEvent {
+                source_ring: resolution.source_ring,
+            },
+        )
+    };
     let kind = ComputeOpKind::PhysicsRule {
         rule: rule_id,
-        on_event: Some(resolution.event_kind),
+        on_event,
         body: body_list_id,
         replayable,
-    };
-    let shape = DispatchShape::PerEvent {
-        source_ring: resolution.source_ring,
     };
     let op_id = ctx
         .builder
@@ -436,11 +479,7 @@ fn lower_stmt(
             ast_label: "For",
             span: *span,
         }),
-        IrStmt::Expr(e) => Err(LoweringError::UnsupportedPhysicsStmt {
-            rule: rule_id,
-            ast_label: "Expr",
-            span: e.span,
-        }),
+        IrStmt::Expr(e) => lower_expr_stmt(rule_id, e, ctx),
         IrStmt::SelfUpdate { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
             rule: rule_id,
             ast_label: "SelfUpdate",
@@ -594,6 +633,93 @@ fn lower_if(
 /// separate task (5.5d). Today's `Let` arm represents the binding
 /// structurally; consumers (later statements that read the local)
 /// are a follow-up.
+/// Lower an `IrStmt::Expr(NamespaceCall { ns: Agents, method, args })`
+/// to a `CgStmt::Assign` writing to the corresponding `AgentFieldId`
+/// slot. Today the only recognised mutators are `agents.set_pos` and
+/// `agents.set_vel`; the first arg must be a bare `self` local
+/// (writing to other agents from a per-agent body is deferred until
+/// a fixture actually needs it).
+///
+/// `set_<field>(self, value)` lowers to:
+///   `CgStmt::Assign {
+///       target: DataHandle::AgentField {
+///           field: AgentFieldId::<Field>,
+///           target: AgentRef::Self_,
+///       },
+///       value: <lowered value expr>,
+///   }`
+///
+/// Other expression-position statement shapes (function calls with
+/// side effects but no mutation surface, etc.) still surface as
+/// `UnsupportedPhysicsStmt`.
+fn lower_expr_stmt(
+    rule_id: PhysicsRuleId,
+    e: &IrExprNode,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgStmtId, LoweringError> {
+    if let IrExpr::NamespaceCall { ns: NamespaceId::Agents, method, args } = &e.kind {
+        if let Some(field) = agents_setter_field(method) {
+            return lower_agents_setter(rule_id, *field, args, e.span, ctx);
+        }
+    }
+    Err(LoweringError::UnsupportedPhysicsStmt {
+        rule: rule_id,
+        ast_label: "Expr",
+        span: e.span,
+    })
+}
+
+/// Map an `agents.set_<field>` method name to the `AgentFieldId` it
+/// writes. Returns `None` for any other method name. Today's recognised
+/// set is just position + velocity (the boids fixture's needs); extend
+/// here when new fixtures need to write more agent fields.
+fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
+    match method {
+        "set_pos" => Some(&AgentFieldId::Pos),
+        "set_vel" => Some(&AgentFieldId::Vel),
+        _ => None,
+    }
+}
+
+fn lower_agents_setter(
+    rule_id: PhysicsRuleId,
+    field: AgentFieldId,
+    args: &[dsl_ast::ir::IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgStmtId, LoweringError> {
+    if args.len() != 2 {
+        return Err(LoweringError::UnsupportedPhysicsStmt {
+            rule: rule_id,
+            ast_label: "Expr/agents.set_*-arity",
+            span,
+        });
+    }
+    // Arg 0: target. v1 only accepts a bare `self` local — writing to
+    // other agents from a per-agent kernel needs additional thought
+    // about cross-agent atomics, deferred until a fixture asks for it.
+    match &args[0].value.kind {
+        IrExpr::Local(_, name) if name == "self" => {}
+        _ => {
+            return Err(LoweringError::UnsupportedPhysicsStmt {
+                rule: rule_id,
+                ast_label: "Expr/agents.set_*-non-self-target",
+                span,
+            });
+        }
+    }
+    // Arg 1: the value to write.
+    let value_id = lower_expr(&args[1].value, ctx)?;
+    let stmt = CgStmt::Assign {
+        target: DataHandle::AgentField {
+            field,
+            target: AgentRef::Self_,
+        },
+        value: value_id,
+    };
+    push_stmt(stmt, span, ctx)
+}
+
 fn lower_let(
     _rule_id: PhysicsRuleId,
     ast_local: dsl_ast::ir::LocalRef,

@@ -1463,7 +1463,19 @@ fn type_check_list(
 /// Mask predicates / scoring argmax / physics rules / spatial queries
 /// must use `Emit` to write through events.
 fn p6_check_op(op: &ComputeOp, op_id: OpId, prog: &CgProgram, errors: &mut Vec<CgError>) {
-    let allow_agent_field_writes = matches!(op.kind, ComputeOpKind::ViewFold { .. });
+    let allow_agent_field_writes = matches!(op.kind, ComputeOpKind::ViewFold { .. })
+        // Per-agent physics rules (`on_event = None`, e.g. Movement,
+        // Boids' MoveBoid, future cooldown-tick / stun-expiry / regen
+        // sweeps) ARE the documented kernel API for per-tick state
+        // changes — P6 calls out "direct field writes OUTSIDE the
+        // documented kernel API"; inside it, AgentField writes are
+        // exactly the point of the dispatch shape. Per-event physics
+        // rules still go through the strict check (they should emit
+        // events for cross-agent communication, not write directly).
+        || matches!(
+            op.kind,
+            ComputeOpKind::PhysicsRule { on_event: None, .. }
+        );
     if allow_agent_field_writes {
         return;
     }
