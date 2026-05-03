@@ -107,6 +107,24 @@ view predator_focus(a: Agent, b: Agent) -> f32 {
   clamp: [0.0, 100.0],
 }
 
+// ---------------------------------------------------------------------------
+// Stage 10 — masks / verbs / scoring / invariant (declarative slice)
+// ---------------------------------------------------------------------------
+
+// Bounded-population invariant: per-predator kill count stays under
+// a saturation cap. `@debug_only` scopes the check to dev runs; the
+// invariant references the materialized kill_count view from Stage 5.
+//
+// Mask + verb + scoring rows from the design target stay deferred:
+// parametric mask heads (`mask Strike(t)`) need the `from <query>`
+// clause to lower today (UnsupportedMaskHeadShape), and the verb +
+// scoring infrastructure builds on the mask. They land once the
+// from-clause spatial-query routing wires up (Phase 7 Task 2.6's
+// PerPairSource variant for catalog-driven sources).
+invariant bounded_kill_count(a: Agent) @debug_only {
+  kill_count(a) < 1000.0
+}
+
 physics MoveAlive @phase(per_agent) {
   on Tick {} where (self.alive) {
     let new_pos = self.pos + self.vel * config.hunt.step_scale;
