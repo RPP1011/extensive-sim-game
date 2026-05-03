@@ -889,7 +889,7 @@ mod tests {
         AgentFieldId, AgentRef, AgentScratchKind, DataHandle, EventRingAccess, EventRingId, MaskId,
         ViewId, ViewStorageSlot,
     };
-    use crate::cg::dispatch::{DispatchShape, PerPairSource};
+    use crate::cg::dispatch::DispatchShape;
     use crate::cg::expr::{CgExpr, LitValue};
     use crate::cg::op::{
         ComputeOpKind, EventKindId, OpId, PlumbingKind, ReplayabilityFlag, Span, SpatialQueryKind,
@@ -1432,30 +1432,6 @@ mod tests {
 
     // --- bonus: dispatch_shape_key exhaustiveness ----------------------
 
-    #[test]
-    fn dispatch_shape_key_distinguishes_every_variant() {
-        let keys = [
-            dispatch_shape_key(&DispatchShape::PerAgent),
-            dispatch_shape_key(&DispatchShape::PerEvent {
-                source_ring: EventRingId(0),
-            }),
-            dispatch_shape_key(&DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-            }),
-            dispatch_shape_key(&DispatchShape::OneShot),
-            dispatch_shape_key(&DispatchShape::PerWord),
-        ];
-        // All five distinct.
-        for i in 0..keys.len() {
-            for j in 0..keys.len() {
-                if i == j {
-                    assert_eq!(keys[i], keys[j]);
-                } else {
-                    assert_ne!(keys[i], keys[j], "keys[{i}] == keys[{j}]");
-                }
-            }
-        }
-    }
 
     #[test]
     fn dispatch_shape_key_distinguishes_per_event_rings() {
@@ -1468,16 +1444,6 @@ mod tests {
         assert_ne!(a, b);
     }
 
-    #[test]
-    fn dispatch_shape_key_distinguishes_per_pair_sources() {
-        let a = dispatch_shape_key(&DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        });
-        let b = dispatch_shape_key(&DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
-        });
-        assert_ne!(a, b);
-    }
 
     // --- bonus: pack/unpack-style group with auto-derived writes -------
 

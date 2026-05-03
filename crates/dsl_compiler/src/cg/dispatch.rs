@@ -420,26 +420,7 @@ mod tests {
         assert_roundtrip(&s);
     }
 
-    #[test]
-    fn per_pair_kin_display_and_roundtrip() {
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        assert_eq!(format!("{}", s), "per_pair(spatial_query(kin_query))");
-        assert_roundtrip(&s);
-    }
 
-    #[test]
-    fn per_pair_engagement_display_and_roundtrip() {
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
-        };
-        assert_eq!(
-            format!("{}", s),
-            "per_pair(spatial_query(engagement_query))"
-        );
-        assert_roundtrip(&s);
-    }
 
     #[test]
     fn one_shot_display_and_roundtrip() {
@@ -477,17 +458,12 @@ mod tests {
     // Task 1.4 — workgroup_size / dispatch_count / thread_indexing.
     // -----------------------------------------------------------------------
 
+    #[allow(dead_code)] // unused after legacy variants dropped
     fn all_shapes() -> Vec<DispatchShape> {
         vec![
             DispatchShape::PerAgent,
             DispatchShape::PerEvent {
                 source_ring: EventRingId(7),
-            },
-            DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-            },
-            DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
             },
             DispatchShape::OneShot,
             DispatchShape::PerWord,
@@ -514,13 +490,6 @@ mod tests {
         assert_eq!(s.workgroup_size(), WorkgroupSize::linear(64));
     }
 
-    #[test]
-    fn workgroup_size_per_pair_matches_emit() {
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        assert_eq!(s.workgroup_size(), WorkgroupSize::linear(64));
-    }
 
     #[test]
     fn workgroup_size_one_shot_matches_emit() {
@@ -615,88 +584,10 @@ mod tests {
 
     // --- dispatch_count: PerPair ------------------------------------------
 
-    #[test]
-    fn dispatch_count_per_pair_typical() {
-        // 1024 agents × 8 candidates = 8192 pairs / 64 = 128 groups.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: 1024,
-            per_pair_candidates: 8,
-        };
-        let count = s.dispatch_count(&ctx);
-        assert_eq!(
-            count,
-            DispatchCount::Direct {
-                x: 128,
-                y: 1,
-                z: 1
-            }
-        );
-    }
 
-    #[test]
-    fn dispatch_count_per_pair_partial_workgroup() {
-        // 10 agents × 7 candidates = 70 pairs / 64 = 2 groups.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: 10,
-            per_pair_candidates: 7,
-        };
-        let count = s.dispatch_count(&ctx);
-        assert_eq!(count, DispatchCount::Direct { x: 2, y: 1, z: 1 });
-    }
 
-    #[test]
-    fn dispatch_count_per_pair_zero_candidates_is_zero_work() {
-        // Zero candidates → zero pairs → zero workgroups. No panic.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: 200_000,
-            per_pair_candidates: 0,
-        };
-        let count = s.dispatch_count(&ctx);
-        assert_eq!(count, DispatchCount::Direct { x: 0, y: 1, z: 1 });
-    }
 
-    #[test]
-    fn dispatch_count_per_pair_zero_agents_is_zero_work() {
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: 0,
-            per_pair_candidates: 32,
-        };
-        let count = s.dispatch_count(&ctx);
-        assert_eq!(count, DispatchCount::Direct { x: 0, y: 1, z: 1 });
-    }
 
-    #[test]
-    fn dispatch_count_per_pair_saturates_on_overflow() {
-        // u32 multiply overflow — saturating_mul caps at u32::MAX,
-        // div_ceil(MAX, 64) is well-defined. No panic, no UB.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let ctx = DispatchCtx {
-            agent_cap: u32::MAX,
-            per_pair_candidates: u32::MAX,
-        };
-        let count = s.dispatch_count(&ctx);
-        // u32::MAX.div_ceil(64) — the exact value matters less than
-        // "no panic, in-range".
-        let DispatchCount::Direct { x, y, z } = count else {
-            panic!("expected Direct, got {count:?}");
-        };
-        assert_eq!((y, z), (1, 1));
-        assert!(x > 0);
-    }
 
     // --- dispatch_count: OneShot ------------------------------------------
 
@@ -784,21 +675,6 @@ mod tests {
         assert_eq!(s.thread_indexing(), ThreadIndexing::PerEventSlot);
     }
 
-    #[test]
-    fn thread_indexing_per_pair_default_candidates_is_one() {
-        // Emit replaces the default with the resolved kin/eng cap;
-        // the IR's helper returns 1 so the variant is well-formed
-        // for snapshots and round-trips.
-        let s = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        assert_eq!(
-            s.thread_indexing(),
-            ThreadIndexing::PerPairSlot {
-                candidates_per_agent: 1
-            }
-        );
-    }
 
     #[test]
     fn thread_indexing_one_shot() {

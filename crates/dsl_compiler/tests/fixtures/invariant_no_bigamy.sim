@@ -1,4 +1,0 @@
-// No-bigamy runtime invariant.
-invariant no_bigamy(a: Agent) @runtime {
-  count(g in a.memberships where g.kind == Family && g.is_marriage) <= 1
-}

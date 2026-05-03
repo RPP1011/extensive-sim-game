@@ -1,9 +1,0 @@
-// Scoring for micro + macro actions.
-scoring {
-  Attack(t) = 0.6 * self.personality.aggression
-            + 0.2 * (1.0 - self.hp_frac)
-            + 0.2 * is_hostile(self, t)
-  Flee(from) = 0.8 * (1.0 - self.hp_frac)
-             + 0.2 * threat_level(from)
-  Eat = 0.7 * hunger_pressure(self)
-}

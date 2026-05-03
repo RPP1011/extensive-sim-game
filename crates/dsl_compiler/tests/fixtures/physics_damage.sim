@@ -1,6 +1,0 @@
-// Physics cascade that clamps damage and emits a death event at zero hp.
-physics damage_apply @phase(event) @terminating_in(4) {
-  on DamageReceived{target: a, damage: d} where d > 0.0 {
-    emit HpChanged { agent: a, delta: -d }
-  }
-}

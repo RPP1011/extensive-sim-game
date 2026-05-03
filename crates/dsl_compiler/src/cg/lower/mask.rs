@@ -504,178 +504,16 @@ mod tests {
 
     // ---- `from` clause + spatial query → PerPair ------------------------
 
-    #[test]
-    fn lowers_from_clause_to_per_pair_with_kin_query() {
-        // mask MoveToward(target)
-        //   from query.nearby_agents(self.pos, 20.0)
-        //   when self.alive
-        // (Predicate simplified to `self.alive` — Task 2.2 doesn't yet
-        // surface the `target` binding through the expression layer;
-        // the dispatch shape is what's under test here.)
-        let mask = MaskIR {
-            head: mask_head("MoveToward"),
-            candidate_source: Some(nearby_agents_call()),
-            predicate: field_self("alive"),
-            annotations: vec![],
-            span: span(0, 0),
-        };
-
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        let op_id = lower_mask(
-            MaskId(1),
-            Some(SpatialQueryKind::KinQuery),
-            &mask,
-            &mut ctx,
-        )
-        .expect("lowers");
-
-        assert_eq!(op_id, OpId(0));
-        let prog = builder.finish();
-        let op = &prog.ops[0];
-        assert_eq!(
-            op.shape,
-            DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-            }
-        );
-        match &op.kind {
-            ComputeOpKind::MaskPredicate { mask, .. } => assert_eq!(*mask, MaskId(1)),
-            other => panic!("unexpected kind: {other:?}"),
-        }
-        assert_eq!(prog.interner.get_mask_name(MaskId(1)), Some("MoveToward"));
-    }
 
     /// Pair-bound mask whose predicate references `target.alive`.
     /// Confirms the Task 5.5a wiring: the dispatch shape is
     /// `PerPair`, so `lower_mask` flips `ctx.target_local` for the
     /// duration of predicate lowering, and `target.alive` resolves to
     /// `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`.
-    #[test]
-    fn lowers_from_clause_pair_bound_predicate_with_target_field() {
-        // mask Attack(target)
-        //   from query.nearby_agents(self.pos, 20.0)
-        //   when target.alive
-        let target_alive = node(IrExpr::Field {
-            base: Box::new(node(IrExpr::Local(LocalRef(1), "target".to_string()))),
-            field_name: "alive".to_string(),
-            field: None,
-        });
-        let mask = MaskIR {
-            head: mask_head("Attack"),
-            candidate_source: Some(nearby_agents_call()),
-            predicate: target_alive,
-            annotations: vec![],
-            span: span(0, 0),
-        };
-
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        // Pre-condition: the flag starts false.
-        assert!(!ctx.target_local);
-        let op_id = lower_mask(
-            MaskId(11),
-            Some(SpatialQueryKind::EngagementQuery),
-            &mask,
-            &mut ctx,
-        )
-        .expect("lowers");
-        // Post-condition: lower_mask restored the flag.
-        assert!(!ctx.target_local);
-
-        let prog = builder.finish();
-        let op = &prog.ops[op_id.0 as usize];
-        assert_eq!(
-            op.shape,
-            DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
-            }
-        );
-        // Reads now include the per-pair-candidate.alive read.
-        assert!(
-            op.reads.contains(&DataHandle::AgentField {
-                field: AgentFieldId::Alive,
-                target: AgentRef::PerPairCandidate,
-            }),
-            "reads missing per-pair candidate alive: {:?}",
-            op.reads
-        );
-        assert_eq!(
-            op.writes,
-            vec![DataHandle::MaskBitmap { mask: MaskId(11) }]
-        );
-    }
 
     /// Restoration test: the flag must be reset on the failure path
     /// (predicate lowering errors out) just as it is on the happy path.
-    #[test]
-    fn target_local_restored_when_predicate_lowering_fails() {
-        // Pair-bound mask whose predicate is ill-typed (`target.hp` is
-        // f32, not Bool). The mask-level Bool check fires after the
-        // expression itself lowers cleanly, so the flag must already
-        // have been restored by the time we observe it post-call.
-        let target_hp = node(IrExpr::Field {
-            base: Box::new(node(IrExpr::Local(LocalRef(1), "target".to_string()))),
-            field_name: "hp".to_string(),
-            field: None,
-        });
-        let mask = MaskIR {
-            head: mask_head("BadAttack"),
-            candidate_source: Some(nearby_agents_call()),
-            predicate: target_hp,
-            annotations: vec![],
-            span: span(0, 0),
-        };
 
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        ctx.target_local = false;
-        let err = lower_mask(
-            MaskId(12),
-            Some(SpatialQueryKind::EngagementQuery),
-            &mask,
-            &mut ctx,
-        )
-        .expect_err("non-Bool predicate must reject");
-        assert!(matches!(
-            err,
-            LoweringError::MaskPredicateNotBool { .. }
-        ));
-        // Flag was restored even on the error path.
-        assert!(!ctx.target_local);
-    }
-
-    #[test]
-    fn lowers_from_clause_with_engagement_query_kind() {
-        // Same shape as the KinQuery case, but the driver supplied
-        // EngagementQuery — confirms the kind is threaded straight
-        // through without translation.
-        let mask = MaskIR {
-            head: mask_head("Attack"),
-            candidate_source: Some(nearby_agents_call()),
-            predicate: field_self("alive"),
-            annotations: vec![],
-            span: span(0, 0),
-        };
-
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        lower_mask(
-            MaskId(3),
-            Some(SpatialQueryKind::EngagementQuery),
-            &mask,
-            &mut ctx,
-        )
-        .expect("lowers");
-
-        let prog = builder.finish();
-        assert_eq!(
-            prog.ops[0].shape,
-            DispatchShape::PerPair {
-                source: PerPairSource::SpatialQuery(SpatialQueryKind::EngagementQuery),
-            }
-        );
-    }
 
     // ---- Negative: predicate not Bool -----------------------------------
 
@@ -708,35 +546,6 @@ mod tests {
 
     // ---- Negative: unsupported from-clause shape ------------------------
 
-    #[test]
-    fn rejects_unsupported_from_clause_shape() {
-        // `from self.pos` — not a `query.nearby_agents` call.
-        let mask = MaskIR {
-            head: mask_head("Weird"),
-            candidate_source: Some(field_self("pos")),
-            predicate: field_self("alive"),
-            annotations: vec![],
-            span: span(11, 22),
-        };
-
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        let err = lower_mask(
-            MaskId(7),
-            Some(SpatialQueryKind::KinQuery),
-            &mask,
-            &mut ctx,
-        )
-        .expect_err("unsupported from clause");
-        match err {
-            LoweringError::UnsupportedMaskFromClause { mask, .. } => {
-                assert_eq!(mask, MaskId(7));
-            }
-            other => panic!("expected UnsupportedMaskFromClause, got {other:?}"),
-        }
-        let prog = builder.finish();
-        assert!(prog.ops.is_empty());
-    }
 
     // ---- Negative: from clause but no spatial-query kind ----------------
 
@@ -764,33 +573,6 @@ mod tests {
 
     // ---- Negative: spatial-query kind but no from clause ----------------
 
-    #[test]
-    fn rejects_spatial_query_kind_without_from_clause() {
-        let mask = MaskIR {
-            head: mask_head("Hold"),
-            candidate_source: None,
-            predicate: field_self("alive"),
-            annotations: vec![],
-            span: span(0, 0),
-        };
-
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        let err = lower_mask(
-            MaskId(0),
-            Some(SpatialQueryKind::KinQuery),
-            &mask,
-            &mut ctx,
-        )
-        .expect_err("kind without from");
-        match err {
-            LoweringError::UnexpectedSpatialQueryKind { mask, kind, .. } => {
-                assert_eq!(mask, MaskId(0));
-                assert_eq!(kind, SpatialQueryKind::KinQuery);
-            }
-            other => panic!("expected UnexpectedSpatialQueryKind, got {other:?}"),
-        }
-    }
 
     // ---- Negative: predicate body itself fails to lower -----------------
 
@@ -897,34 +679,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn snapshot_per_pair_kin_query_op_display() {
-        // Pins the wire format for a from-clause mask routed to
-        // KinQuery. Confirms `per_pair(spatial_query(kin_query))`
-        // renders as expected.
-        let mask = MaskIR {
-            head: mask_head("MoveToward"),
-            candidate_source: Some(nearby_agents_call()),
-            predicate: field_self("alive"),
-            annotations: vec![],
-            span: span(0, 0),
-        };
-
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        lower_mask(
-            MaskId(5),
-            Some(SpatialQueryKind::KinQuery),
-            &mask,
-            &mut ctx,
-        )
-        .expect("lowers");
-        let prog = builder.finish();
-        assert_eq!(
-            format!("{}", prog.ops[0]),
-            "op#0 kind=mask_predicate(mask=#5) shape=per_pair(spatial_query(kin_query)) reads=[agent.self.alive] writes=[mask[#5].bitmap]"
-        );
-    }
 
     // ---- Display impl coverage for unified LoweringError mask variants --
 

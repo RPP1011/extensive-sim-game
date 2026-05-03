@@ -141,27 +141,13 @@ pub enum SpatialQueryKind {
     /// Build the per-cell agent index — reads agents (positions),
     /// writes the cell + offset arrays.
     BuildHash,
-    /// Per-agent kin-of-team neighborhood walk — reads the grid,
-    /// writes the per-agent query-results scratch.
-    ///
-    /// **DEPRECATED**: superseded by `FilteredWalk { filter }` once
-    /// the wolf-sim DSL fixtures migrate (Task 5). Variant remains
-    /// in the IR through Phase 7 to keep the additive migration
-    /// gate green; dropped in Task 6.
-    KinQuery,
-    /// Per-agent engagement-target neighborhood walk — reads the grid,
-    /// writes the per-agent query-results scratch.
-    ///
-    /// **DEPRECATED**: see `KinQuery`.
-    EngagementQuery,
     /// Per-agent neighborhood walk filtered by a per-candidate
     /// boolean expression. The filter is a `CgExprId` evaluated
     /// per-candidate at WGSL emit time; the expression has access
-    /// to `self` (the querying agent) and the per-pair
-    /// `candidate` (bound via the same `LoweringCtx::target_local`
-    /// flag the per-pair mask predicate uses). Replaces the
-    /// domain-specific `KinQuery`/`EngagementQuery` variants;
-    /// see `docs/superpowers/plans/2026-05-01-phase-7-general-spatial-queries.md`.
+    /// to `self` (the querying agent) and the per-pair `candidate`
+    /// (bound via the same `LoweringCtx::target_local` flag the
+    /// per-pair mask predicate uses). See
+    /// `docs/superpowers/plans/2026-05-01-phase-7-general-spatial-queries.md`.
     FilteredWalk { filter: CgExprId },
 }
 
@@ -189,32 +175,6 @@ impl SpatialQueryKind {
                     },
                 ],
             ),
-            SpatialQueryKind::KinQuery => (
-                vec![
-                    DataHandle::SpatialStorage {
-                        kind: SpatialStorageKind::GridCells,
-                    },
-                    DataHandle::SpatialStorage {
-                        kind: SpatialStorageKind::GridOffsets,
-                    },
-                ],
-                vec![DataHandle::SpatialStorage {
-                    kind: SpatialStorageKind::QueryResults,
-                }],
-            ),
-            SpatialQueryKind::EngagementQuery => (
-                vec![
-                    DataHandle::SpatialStorage {
-                        kind: SpatialStorageKind::GridCells,
-                    },
-                    DataHandle::SpatialStorage {
-                        kind: SpatialStorageKind::GridOffsets,
-                    },
-                ],
-                vec![DataHandle::SpatialStorage {
-                    kind: SpatialStorageKind::QueryResults,
-                }],
-            ),
             SpatialQueryKind::FilteredWalk { filter: _ } => (
                 vec![
                     DataHandle::SpatialStorage {
@@ -235,8 +195,6 @@ impl SpatialQueryKind {
     pub fn label(&self) -> String {
         match self {
             SpatialQueryKind::BuildHash => String::from("build_hash"),
-            SpatialQueryKind::KinQuery => String::from("kin_query"),
-            SpatialQueryKind::EngagementQuery => String::from("engagement_query"),
             SpatialQueryKind::FilteredWalk { filter } => {
                 format!("filtered_walk(filter=#{})", filter.0)
             }
@@ -873,18 +831,6 @@ mod tests {
 
     // ---- SpatialQueryKind ----
 
-    #[test]
-    fn spatial_query_kind_display_and_roundtrip() {
-        let cases = [
-            (SpatialQueryKind::BuildHash, "build_hash"),
-            (SpatialQueryKind::KinQuery, "kin_query"),
-            (SpatialQueryKind::EngagementQuery, "engagement_query"),
-        ];
-        for (kind, expected) in cases {
-            assert_eq!(format!("{}", kind), expected);
-            assert_roundtrip(&kind);
-        }
-    }
 
     #[test]
     fn spatial_query_kind_dependencies_build_hash() {
@@ -903,29 +849,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn spatial_query_kind_dependencies_kin_query() {
-        let (r, w) = SpatialQueryKind::KinQuery.dependencies();
-        assert_eq!(r.len(), 2);
-        assert_eq!(
-            w,
-            vec![DataHandle::SpatialStorage {
-                kind: SpatialStorageKind::QueryResults,
-            }]
-        );
-    }
 
-    #[test]
-    fn spatial_query_kind_dependencies_engagement_query() {
-        let (r, w) = SpatialQueryKind::EngagementQuery.dependencies();
-        assert_eq!(r.len(), 2);
-        assert_eq!(
-            w,
-            vec![DataHandle::SpatialStorage {
-                kind: SpatialStorageKind::QueryResults,
-            }]
-        );
-    }
 
     // ---- PlumbingKind (Task 2.7) ----
 
@@ -1375,23 +1299,6 @@ mod tests {
         assert!(w.is_empty(), "expected no writes, got {w:?}");
     }
 
-    #[test]
-    fn spatial_query_kind_op_deps_match_kind_signature() {
-        let exprs: Vec<CgExpr> = vec![];
-        let stmts: Vec<CgStmt> = vec![];
-        let lists: Vec<CgStmtList> = vec![];
-        for kind in [
-            SpatialQueryKind::BuildHash,
-            SpatialQueryKind::KinQuery,
-            SpatialQueryKind::EngagementQuery,
-        ] {
-            let op_kind = ComputeOpKind::SpatialQuery { kind };
-            let (op_r, op_w) = op_kind.compute_dependencies(&exprs, &stmts, &lists);
-            let (k_r, k_w) = kind.dependencies();
-            assert_eq!(op_r, k_r);
-            assert_eq!(op_w, k_w);
-        }
-    }
 
     #[test]
     fn plumbing_kind_op_deps_match_kind_signature() {

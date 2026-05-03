@@ -1270,8 +1270,6 @@ fn pascal_to_snake(s: &str) -> String {
 fn spatial_kind_name(k: SpatialQueryKind) -> String {
     match k {
         SpatialQueryKind::BuildHash => String::from("build_hash"),
-        SpatialQueryKind::KinQuery => String::from("kin_query"),
-        SpatialQueryKind::EngagementQuery => String::from("engagement_query"),
         SpatialQueryKind::FilteredWalk { filter } => {
             format!("filtered_walk_{}", filter.0)
         }
@@ -1642,66 +1640,6 @@ const SPATIAL_BUILD_HASH_BODY: &str = "// SpatialQuery::BuildHash — verbatim p
     _ = spatial_grid_offsets[0];\n\
     _ = cfg.agent_cap;";
 
-/// WGSL body fragment for [`SpatialQueryKind::KinQuery`].
-///
-/// Bindings consumed (per [`SpatialQueryKind::KinQuery::dependencies`] +
-/// auto-injected `cfg`):
-/// - `spatial_grid_cells`        (Pool, read)
-/// - `spatial_grid_offsets`      (Pool, read)
-/// - `spatial_query_results`     (Pool, read_write)
-/// - `cfg`                       (uniform, last slot)
-///
-/// # Limitations
-///
-/// - **Verbatim port from the legacy stub.** Mirrors
-///   `engine_gpu_rules/src/spatial_kin_query.wgsl`. The legacy file
-///   is itself a stub that touches all bindings — actual neighborhood
-///   walk + top-K kin filter is hand-written in engine_gpu's spatial
-///   path, not yet IR-driven.
-/// - **No IR-driven derivation.** Same rationale as
-///   [`SPATIAL_BUILD_HASH_BODY`].
-const SPATIAL_KIN_QUERY_BODY: &str = "// SpatialQuery::KinQuery — verbatim port from \
-    engine_gpu_rules/src/spatial_kin_query.wgsl.\n\
-    // Touches every binding so naga keeps them live. Real per-agent kin walk \
-    lives in the\n\
-    // hand-written engine_gpu spatial pipeline; this stub is a structural \
-    placeholder.\n\
-    _ = spatial_grid_cells[0];\n\
-    _ = spatial_grid_offsets[0];\n\
-    _ = spatial_query_results[0];\n\
-    _ = cfg.agent_cap;";
-
-/// WGSL body fragment for [`SpatialQueryKind::EngagementQuery`].
-///
-/// Bindings consumed (per
-/// [`SpatialQueryKind::EngagementQuery::dependencies`] +
-/// auto-injected `cfg`):
-/// - `spatial_grid_cells`        (Pool, read)
-/// - `spatial_grid_offsets`      (Pool, read)
-/// - `spatial_query_results`     (Pool, read_write)
-/// - `cfg`                       (uniform, last slot)
-///
-/// # Limitations
-///
-/// - **Verbatim port from the legacy stub.** Mirrors
-///   `engine_gpu_rules/src/spatial_engagement_query.wgsl`. Body shape
-///   is identical to [`SPATIAL_KIN_QUERY_BODY`] today — the kin vs
-///   engagement distinction is encoded in the kernel name + (future)
-///   per-kind filter logic. The legacy WGSL files are also identical;
-///   the differentiation happens in the hand-written CPU-side fold.
-/// - **No IR-driven derivation.** Same rationale as
-///   [`SPATIAL_BUILD_HASH_BODY`].
-const SPATIAL_ENGAGEMENT_QUERY_BODY: &str = "// SpatialQuery::EngagementQuery — verbatim port \
-    from engine_gpu_rules/src/spatial_engagement_query.wgsl.\n\
-    // Touches every binding so naga keeps them live. Real per-agent engagement \
-    walk lives in\n\
-    // the hand-written engine_gpu spatial pipeline; this stub is a structural \
-    placeholder.\n\
-    _ = spatial_grid_cells[0];\n\
-    _ = spatial_grid_offsets[0];\n\
-    _ = spatial_query_results[0];\n\
-    _ = cfg.agent_cap;";
-
 /// WGSL body template for [`SpatialQueryKind::FilteredWalk`].
 ///
 /// Walks the per-cell neighborhood for each agent, evaluates the
@@ -1873,10 +1811,6 @@ fn lower_op_body(
         // new variant forces an explicit body decision here.
         ComputeOpKind::SpatialQuery { kind } => Ok(match kind {
             SpatialQueryKind::BuildHash => SPATIAL_BUILD_HASH_BODY.to_string(),
-            SpatialQueryKind::KinQuery => SPATIAL_KIN_QUERY_BODY.to_string(),
-            SpatialQueryKind::EngagementQuery => {
-                SPATIAL_ENGAGEMENT_QUERY_BODY.to_string()
-            }
             SpatialQueryKind::FilteredWalk { filter } => {
                 let filter_wgsl = lower_cg_expr_to_wgsl(*filter, ctx)?;
                 spatial_filtered_walk_body(&filter_wgsl)
@@ -2825,64 +2759,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mask_predicate_per_pair_body_derives_agent_from_pair_and_writes_per_agent_bit() {
-        use crate::cg::dispatch::PerPairSource;
-        let mut prog = CgProgram::default();
-        let lit_true = push_expr(&mut prog, CgExpr::Lit(LitValue::Bool(true)));
-        let kind = ComputeOpKind::MaskPredicate {
-            mask: MaskId(11),
-            predicate: lit_true,
-        };
-        let pair_dispatch = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let op = ComputeOp::new(
-            OpId(0),
-            kind,
-            pair_dispatch,
-            Span::dummy(),
-            &prog,
-            &prog,
-            &prog,
-        );
-        let op_id = push_op(&mut prog, op);
-        let topology = KernelTopology::Split {
-            op: op_id,
-            dispatch: pair_dispatch,
-        };
-        let ctx = EmitCtx::structural(&prog);
-        let (_spec, body) =
-            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
-
-        assert!(body.contains("let pair = gid.x;"), "body: {body}");
-        assert!(body.contains("let mask_11_k = 1u;"), "body: {body}");
-        assert!(
-            body.contains("let mask_11_agent = pair / mask_11_k;"),
-            "body: {body}"
-        );
-        assert!(
-            body.contains("let mask_11_cand  = pair % mask_11_k;"),
-            "body: {body}"
-        );
-        assert!(
-            body.contains("if (mask_11_agent >= cfg.agent_cap) { return; }"),
-            "body: {body}"
-        );
-        assert!(body.contains("let mask_11_value: bool = true;"), "body: {body}");
-        assert!(
-            body.contains("let mask_11_word = mask_11_agent >> 5u;"),
-            "body: {body}"
-        );
-        assert!(
-            body.contains("let mask_11_bit  = 1u << (mask_11_agent & 31u);"),
-            "body: {body}"
-        );
-        assert!(
-            body.contains("atomicOr(&mask_11_bitmap[mask_11_word], mask_11_bit);"),
-            "body: {body}"
-        );
-    }
 
     #[test]
     fn mask_predicate_under_unsupported_dispatch_shape_errors() {
@@ -2943,59 +2819,6 @@ mod tests {
         assert!(!body.contains("\nlet word ="), "body: {body}");
     }
 
-    #[test]
-    fn mask_predicate_per_pair_body_passes_through_per_pair_candidate_target_read() {
-        use crate::cg::dispatch::PerPairSource;
-        let mut prog = CgProgram::default();
-        // Predicate: `target.hp < 5.0` (read of PerPairCandidate's hp).
-        let target_hp = push_expr(
-            &mut prog,
-            CgExpr::Read(DataHandle::AgentField {
-                field: AgentFieldId::Hp,
-                target: AgentRef::PerPairCandidate,
-            }),
-        );
-        let five = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(5.0)));
-        let lt = push_expr(
-            &mut prog,
-            CgExpr::Binary {
-                op: crate::cg::expr::BinaryOp::LtF32,
-                lhs: target_hp,
-                rhs: five,
-                ty: CgTy::Bool,
-            },
-        );
-        let kind = ComputeOpKind::MaskPredicate {
-            mask: MaskId(9),
-            predicate: lt,
-        };
-        let pair_dispatch = DispatchShape::PerPair {
-            source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-        };
-        let op = ComputeOp::new(
-            OpId(0),
-            kind,
-            pair_dispatch,
-            Span::dummy(),
-            &prog,
-            &prog,
-            &prog,
-        );
-        let op_id = push_op(&mut prog, op);
-        let topology = KernelTopology::Split {
-            op: op_id,
-            dispatch: pair_dispatch,
-        };
-        let ctx = EmitCtx::structural(&prog);
-        let (_spec, body) =
-            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
-
-        // The placeholder identifier from wgsl_body.rs flows through.
-        assert!(
-            body.contains("agent_per_pair_candidate_hp"),
-            "body: {body}"
-        );
-    }
 
     // ---- 9. Scoring argmax body (Task 5.6b) ----
 
@@ -3438,34 +3261,6 @@ mod tests {
         assert_eq!(spec_b.name, "fold_threat_level");
     }
 
-    #[test]
-    fn spatial_query_kinds_map_to_legacy_filenames() {
-        use crate::cg::op::SpatialQueryKind;
-        for (kind, expected) in [
-            (SpatialQueryKind::BuildHash, "spatial_build_hash"),
-            (SpatialQueryKind::KinQuery, "spatial_kin_query"),
-            (SpatialQueryKind::EngagementQuery, "spatial_engagement_query"),
-        ] {
-            let mut prog = CgProgram::default();
-            let op = ComputeOp::new(
-                OpId(0),
-                ComputeOpKind::SpatialQuery { kind },
-                DispatchShape::PerAgent,
-                Span::dummy(),
-                &prog,
-                &prog,
-                &prog,
-            );
-            let op_id = push_op(&mut prog, op);
-            let topology = KernelTopology::Split {
-                op: op_id,
-                dispatch: DispatchShape::PerAgent,
-            };
-            let ctx = EmitCtx::structural(&prog);
-            let spec = kernel_topology_to_spec(&topology, &prog, &ctx).unwrap();
-            assert_eq!(spec.name, expected, "kind={kind:?}");
-        }
-    }
 
     // ---- 12. SpatialQuery body templates (Task 5.6c) ----
 
@@ -3519,107 +3314,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn spatial_query_kin_query_emits_kin_query_body() {
-        let (_spec, body) = spatial_query_spec_and_body(SpatialQueryKind::KinQuery);
-        assert!(body.contains("SpatialQuery::KinQuery"), "body: {body}");
-        // KinQuery touches all three spatial-storage bindings (grid_cells
-        // + grid_offsets read; query_results read_write).
-        assert!(body.contains("spatial_grid_cells"), "body: {body}");
-        assert!(body.contains("spatial_grid_offsets"), "body: {body}");
-        assert!(body.contains("spatial_query_results"), "body: {body}");
-        assert!(
-            !body.contains("TODO(task-4.x): spatial_query body"),
-            "body still carries pre-5.6c TODO placeholder: {body}"
-        );
-    }
 
-    #[test]
-    fn spatial_query_engagement_query_emits_engagement_query_body() {
-        let (_spec, body) =
-            spatial_query_spec_and_body(SpatialQueryKind::EngagementQuery);
-        assert!(
-            body.contains("SpatialQuery::EngagementQuery"),
-            "body: {body}"
-        );
-        assert!(body.contains("spatial_grid_cells"), "body: {body}");
-        assert!(body.contains("spatial_grid_offsets"), "body: {body}");
-        assert!(body.contains("spatial_query_results"), "body: {body}");
-        assert!(
-            !body.contains("TODO(task-4.x): spatial_query body"),
-            "body still carries pre-5.6c TODO placeholder: {body}"
-        );
-    }
 
-    #[test]
-    fn spatial_query_body_includes_per_agent_preamble_and_op_comment() {
-        // Composition through `build_wgsl_body` should still wrap the
-        // per-kind body const with the PerAgent thread-indexing
-        // preamble + op-comment header — so the lowered body is a
-        // complete WGSL function body once the entry-point shell is
-        // wrapped around it by `compose_wgsl_file`.
-        let (_spec, body) = spatial_query_spec_and_body(SpatialQueryKind::KinQuery);
-        // PerAgent preamble.
-        assert!(body.contains("agent_id = gid.x"), "body: {body}");
-        assert!(
-            body.contains("if (agent_id >= cfg.agent_cap)"),
-            "body: {body}"
-        );
-        // Op-comment header from `build_wgsl_body`.
-        assert!(body.contains("// op#0 (spatial_query)"), "body: {body}");
-        // Cfg uniform reference — the body touches `cfg.agent_cap` so
-        // the cfg uniform stays live.
-        assert!(body.contains("cfg.agent_cap"), "body: {body}");
-    }
 
     /// Snapshot: pin the EngagementQuery body output through
     /// `kernel_topology_to_spec_and_body`. Any drift in the per-kind
     /// body const, the preamble shape, or the op-comment header surfaces
     /// here — the assertions below describe the exact expected form so
     /// the snapshot survives a body-content tweak with a one-site update.
-    #[test]
-    fn spatial_query_body_snapshot_engagement_query() {
-        let (spec, body) =
-            spatial_query_spec_and_body(SpatialQueryKind::EngagementQuery);
-        // Spec name + entry point are the legacy filenames (Task 5.2).
-        assert_eq!(spec.name, "spatial_engagement_query");
-        assert_eq!(spec.entry_point, "cs_spatial_engagement_query");
-        // Pin the body's structural sections in order: PerAgent preamble
-        // → op-comment header → per-kind body comment → binding touches
-        // → cfg touch. Each contains-check is order-independent, so we
-        // also verify the relative offsets to catch reordering.
-        let preamble_idx = body
-            .find("agent_id = gid.x")
-            .unwrap_or_else(|| panic!("missing PerAgent preamble: {body}"));
-        let op_comment_idx = body
-            .find("// op#0 (spatial_query)")
-            .unwrap_or_else(|| panic!("missing op-comment header: {body}"));
-        let kind_comment_idx = body
-            .find("SpatialQuery::EngagementQuery")
-            .unwrap_or_else(|| panic!("missing per-kind comment: {body}"));
-        let cfg_touch_idx = body
-            .find("cfg.agent_cap")
-            .unwrap_or_else(|| panic!("missing cfg touch: {body}"));
-        // Cfg touch lives in BOTH the preamble (`if (agent_id >=
-        // cfg.agent_cap)`) AND the body const (`let _c = cfg.agent_cap;`).
-        // That's fine for liveness; the preamble copy is what we find first.
-        assert!(
-            preamble_idx < op_comment_idx,
-            "preamble must precede op-comment: {body}"
-        );
-        assert!(
-            op_comment_idx < kind_comment_idx,
-            "op-comment must precede per-kind body: {body}"
-        );
-        assert!(
-            cfg_touch_idx < body.len(),
-            "cfg touch must appear in body: {body}"
-        );
-        // No TODO/unimplemented/panic markers anywhere.
-        assert!(!body.contains("todo!()"), "body: {body}");
-        assert!(!body.contains("unimplemented!"), "body: {body}");
-        assert!(!body.contains("panic!"), "body: {body}");
-    }
 
     #[test]
     fn plumbing_kinds_map_to_legacy_filenames() {

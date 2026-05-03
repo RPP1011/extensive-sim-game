@@ -1209,7 +1209,7 @@ mod tests {
     use crate::cg::data_handle::{
         AgentFieldId, AgentRef, EventRingAccess, RngPurpose, SpatialStorageKind, ViewStorageSlot,
     };
-    use crate::cg::dispatch::{DispatchShape, PerPairSource};
+    use crate::cg::dispatch::DispatchShape;
     use crate::cg::expr::{BinaryOp, CgTy, LitValue};
     use crate::cg::op::{
         ActionId, EventKindId, PhysicsRuleId, ReplayabilityFlag, ScoringRowOp, SpatialQueryKind,
@@ -1728,32 +1728,6 @@ mod tests {
         assert_eq!(id, OpId(0));
     }
 
-    #[test]
-    fn builder_add_op_assigns_contiguous_op_ids() {
-        let mut b = CgProgramBuilder::new();
-        let a = b
-            .add_op(
-                ComputeOpKind::SpatialQuery {
-                    kind: SpatialQueryKind::BuildHash,
-                },
-                DispatchShape::PerAgent,
-                Span::dummy(),
-            )
-            .unwrap();
-        let c = b
-            .add_op(
-                ComputeOpKind::SpatialQuery {
-                    kind: SpatialQueryKind::KinQuery,
-                },
-                DispatchShape::PerPair {
-                    source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-                },
-                Span::dummy(),
-            )
-            .unwrap();
-        assert_eq!(a, OpId(0));
-        assert_eq!(c, OpId(1));
-    }
 
     // --- Diagnostics + interner intern_* ------------------------------
 

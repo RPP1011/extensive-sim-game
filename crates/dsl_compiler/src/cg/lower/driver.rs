@@ -1173,114 +1173,13 @@ fn mask_spatial_kind(
             let filter_id = lower_filter_for_mask(&filter_with_args, ctx).ok()?;
             Some(SpatialQueryKind::FilteredWalk { filter: filter_id })
         }
-        // Legacy heuristic — Phase 7 Task 6 will drop this branch.
-        _ => {
-            if predicate_uses_engagement_relationship(&mask.predicate) {
-                Some(SpatialQueryKind::EngagementQuery)
-            } else {
-                Some(SpatialQueryKind::KinQuery)
-            }
-        }
+        // No other from-clause shapes recognised. Phase 7 dropped the
+        // legacy `query.nearby_agents` heuristic; only `spatial.<name>`
+        // (registered `spatial_query` decls) is supported.
+        _ => None,
     }
 }
 
-/// Scan `expr` for any access pattern indicating an
-/// engagement-target relationship in the candidate filter:
-///
-/// - `agents.is_hostile_to(_, _)` (stdlib hostility check).
-/// - `agents.engaged_with(_)` (engagement read).
-/// - Any `IrExpr::ViewCall` (conservative widening — every
-///   from-bearing mask in `assets/sim/masks.sim` that calls a
-///   view does so to filter for hostility today; if a future
-///   mask uses a non-hostility view in its predicate, this
-///   routing widens to `EngagementQuery` rather than
-///   `KinQuery`. Refining the check to gate on the resolved
-///   view's name is a follow-up).
-fn predicate_uses_engagement_relationship(expr: &IrExprNode) -> bool {
-    match &expr.kind {
-        IrExpr::NamespaceCall { ns: NamespaceId::Agents, method, args }
-            if method == "is_hostile_to" || method == "engaged_with" =>
-        {
-            // Defensive: still walk args in case a nested signal
-            // matters; the OR with this match makes it redundant
-            // for today's masks but future predicates may stack.
-            let _ = args
-                .iter()
-                .any(|a| predicate_uses_engagement_relationship(&a.value));
-            true
-        }
-        IrExpr::ViewCall(_, args) => {
-            // Conservative: treat any ViewCall in the predicate as
-            // an engagement-flavoured filter. See doc above. Still
-            // recurse into args so a nested non-view engagement
-            // signal gets caught in compositions.
-            let _ = args
-                .iter()
-                .any(|a| predicate_uses_engagement_relationship(&a.value));
-            true
-        }
-        // Recurse into children for every shape that carries
-        // sub-expressions.
-        IrExpr::Field { base, .. } => predicate_uses_engagement_relationship(base),
-        IrExpr::Binary(_, l, r) => {
-            predicate_uses_engagement_relationship(l)
-                || predicate_uses_engagement_relationship(r)
-        }
-        IrExpr::Unary(_, a) => predicate_uses_engagement_relationship(a),
-        IrExpr::If { cond, then_expr, else_expr } => {
-            predicate_uses_engagement_relationship(cond)
-                || predicate_uses_engagement_relationship(then_expr)
-                || else_expr
-                    .as_ref()
-                    .map(|e| predicate_uses_engagement_relationship(e))
-                    .unwrap_or(false)
-        }
-        IrExpr::BuiltinCall(_, args)
-        | IrExpr::NamespaceCall { args, .. }
-        | IrExpr::VerbCall(_, args)
-        | IrExpr::UnresolvedCall(_, args) => args
-            .iter()
-            .any(|a| predicate_uses_engagement_relationship(&a.value)),
-        IrExpr::Index(l, r) | IrExpr::In(l, r) | IrExpr::Contains(l, r) => {
-            predicate_uses_engagement_relationship(l)
-                || predicate_uses_engagement_relationship(r)
-        }
-        IrExpr::List(items) | IrExpr::Tuple(items) => items
-            .iter()
-            .any(|e| predicate_uses_engagement_relationship(e)),
-        // Leaves and binder-introducing forms — no engagement
-        // signal can hide in them given today's predicate
-        // surface (the resolver rejects quantifiers / folds /
-        // matches in mask predicates).
-        IrExpr::LitBool(_)
-        | IrExpr::LitInt(_)
-        | IrExpr::LitFloat(_)
-        | IrExpr::LitString(_)
-        | IrExpr::Local(_, _)
-        | IrExpr::Event(_)
-        | IrExpr::Entity(_)
-        | IrExpr::View(_)
-        | IrExpr::Verb(_)
-        | IrExpr::Namespace(_)
-        | IrExpr::NamespaceField { .. }
-        | IrExpr::EnumVariant { .. }
-        | IrExpr::Quantifier { .. }
-        | IrExpr::Fold { .. }
-        | IrExpr::StructLit { .. }
-        | IrExpr::Ctor { .. }
-        | IrExpr::Match { .. }
-        | IrExpr::PerUnit { .. }
-        | IrExpr::AbilityHint
-        | IrExpr::AbilityHintLit(_)
-        | IrExpr::AbilityRange
-        | IrExpr::AbilityOnCooldown(_)
-        | IrExpr::AbilityTag { .. }
-        | IrExpr::Raw(_)
-        | IrExpr::BeliefsAccessor { .. }
-        | IrExpr::BeliefsConfidence { .. }
-        | IrExpr::BeliefsView { .. } => false,
-    }
-}
 
 /// Lower every [`ViewIR`] in source order. Each materialized view
 /// produces one [`ComputeOpKind::ViewFold`] op per fold handler;
@@ -1903,52 +1802,6 @@ mod tests {
     /// `collect_required_spatial_kinds` returns an empty Vec when
     /// no user op shapes reference a spatial query, and a
     /// BuildHash-prefixed list when at least one does.
-    #[test]
-    fn collect_required_spatial_kinds_prepends_build_hash() {
-        use crate::cg::dispatch::{DispatchShape, PerPairSource};
-        use crate::cg::op::{ComputeOpKind, PlumbingKind};
-        use dsl_ast::ast::Span;
-
-        // Empty case.
-        let mut builder = CgProgramBuilder::new();
-        builder
-            .add_op(
-                ComputeOpKind::Plumbing {
-                    kind: PlumbingKind::PackAgents,
-                },
-                DispatchShape::PerAgent,
-                Span::dummy(),
-            )
-            .unwrap();
-        let prog = builder.finish();
-        assert!(collect_required_spatial_kinds(&prog).is_empty());
-
-        // One PerPair op referencing KinQuery.
-        let mut builder2 = CgProgramBuilder::new();
-        let pred = builder2
-            .add_expr(crate::cg::expr::CgExpr::Lit(
-                crate::cg::expr::LitValue::Bool(true),
-            ))
-            .unwrap();
-        builder2
-            .add_op(
-                ComputeOpKind::MaskPredicate {
-                    mask: MaskId(0),
-                    predicate: pred,
-                },
-                DispatchShape::PerPair {
-                    source: PerPairSource::SpatialQuery(SpatialQueryKind::KinQuery),
-                },
-                Span::dummy(),
-            )
-            .unwrap();
-        let prog2 = builder2.finish();
-        let kinds = collect_required_spatial_kinds(&prog2);
-        assert_eq!(
-            kinds,
-            vec![SpatialQueryKind::BuildHash, SpatialQueryKind::KinQuery]
-        );
-    }
 
     /// `populate_variants_from_enums` surfaces a typed
     /// `DuplicateVariantInRegistry` diagnostic when two enums declare
@@ -2147,71 +2000,9 @@ mod tests {
         (Compilation::default(), CgProgramBuilder::new())
     }
 
-    #[test]
-    fn mask_spatial_kind_routes_engagement_for_is_hostile_to() {
-        let mask = mk_mask(
-            IrExpr::NamespaceCall {
-                ns: NamespaceId::Agents,
-                method: "is_hostile_to".to_string(),
-                args: Vec::new(),
-            },
-            true,
-        );
-        let (comp, mut builder) = mk_test_ctx();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        assert_eq!(
-            mask_spatial_kind(&mask, &comp, &mut ctx),
-            Some(SpatialQueryKind::EngagementQuery)
-        );
-    }
 
-    #[test]
-    fn mask_spatial_kind_routes_engagement_for_view_call() {
-        use dsl_ast::ir::ViewRef;
-        let mask = mk_mask(IrExpr::ViewCall(ViewRef(0), Vec::new()), true);
-        let (comp, mut builder) = mk_test_ctx();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        assert_eq!(
-            mask_spatial_kind(&mask, &comp, &mut ctx),
-            Some(SpatialQueryKind::EngagementQuery)
-        );
-    }
 
-    #[test]
-    fn mask_spatial_kind_routes_engagement_for_engaged_with() {
-        let mask = mk_mask(
-            IrExpr::NamespaceCall {
-                ns: NamespaceId::Agents,
-                method: "engaged_with".to_string(),
-                args: Vec::new(),
-            },
-            true,
-        );
-        let (comp, mut builder) = mk_test_ctx();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        assert_eq!(
-            mask_spatial_kind(&mask, &comp, &mut ctx),
-            Some(SpatialQueryKind::EngagementQuery)
-        );
-    }
 
-    #[test]
-    fn mask_spatial_kind_routes_kin_for_alive_only() {
-        let mask = mk_mask(
-            IrExpr::NamespaceCall {
-                ns: NamespaceId::Agents,
-                method: "alive".to_string(),
-                args: Vec::new(),
-            },
-            true,
-        );
-        let (comp, mut builder) = mk_test_ctx();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        assert_eq!(
-            mask_spatial_kind(&mask, &comp, &mut ctx),
-            Some(SpatialQueryKind::KinQuery)
-        );
-    }
 
     #[test]
     fn mask_spatial_kind_returns_none_when_no_candidate_source() {
@@ -2221,38 +2012,6 @@ mod tests {
         assert_eq!(mask_spatial_kind(&mask, &comp, &mut ctx), None);
     }
 
-    #[test]
-    fn mask_spatial_kind_walks_into_binary_branches() {
-        // (alive && is_hostile_to) — engagement signal on rhs.
-        use dsl_ast::ast::{BinOp, Span};
-        use dsl_ast::ir::IrExprNode;
-        let alive = IrExprNode {
-            kind: IrExpr::NamespaceCall {
-                ns: NamespaceId::Agents,
-                method: "alive".to_string(),
-                args: Vec::new(),
-            },
-            span: Span::dummy(),
-        };
-        let hostile = IrExprNode {
-            kind: IrExpr::NamespaceCall {
-                ns: NamespaceId::Agents,
-                method: "is_hostile_to".to_string(),
-                args: Vec::new(),
-            },
-            span: Span::dummy(),
-        };
-        let mask = mk_mask(
-            IrExpr::Binary(BinOp::And, Box::new(alive), Box::new(hostile)),
-            true,
-        );
-        let (comp, mut builder) = mk_test_ctx();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        assert_eq!(
-            mask_spatial_kind(&mask, &comp, &mut ctx),
-            Some(SpatialQueryKind::EngagementQuery)
-        );
-    }
 
     /// `populate_views` surfaces a typed `DuplicateViewInRegistry`
     /// diagnostic if `register_view` ever observes the same AST view

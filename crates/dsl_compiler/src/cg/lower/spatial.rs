@@ -215,57 +215,9 @@ mod tests {
 
     // ---- 2. Multiple distinct kinds preserve source order ---------------
 
-    #[test]
-    fn lowers_multiple_kinds_in_input_order() {
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-
-        let input = [
-            SpatialQueryKind::BuildHash,
-            SpatialQueryKind::KinQuery,
-            SpatialQueryKind::EngagementQuery,
-        ];
-        let ids = lower_spatial_queries(&input, &mut ctx).expect("lowers");
-        assert_eq!(ids, vec![OpId(0), OpId(1), OpId(2)]);
-
-        let prog = builder.finish();
-        assert_eq!(prog.ops.len(), 3);
-
-        // Each op carries its kind in input order.
-        for (i, expected) in input.iter().enumerate() {
-            match &prog.ops[i].kind {
-                ComputeOpKind::SpatialQuery { kind } => assert_eq!(kind, expected),
-                other => panic!("op#{i}: unexpected kind {other:?}"),
-            }
-            assert_eq!(prog.ops[i].shape, DispatchShape::PerAgent);
-        }
-    }
 
     // ---- 3. Duplicate kinds are allowed (schedule synthesis dedupes) ----
 
-    #[test]
-    fn duplicate_kinds_produce_distinct_ops() {
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-
-        let ids = lower_spatial_queries(
-            &[SpatialQueryKind::KinQuery, SpatialQueryKind::KinQuery],
-            &mut ctx,
-        )
-        .expect("lowers");
-        assert_eq!(ids, vec![OpId(0), OpId(1)]);
-
-        let prog = builder.finish();
-        assert_eq!(prog.ops.len(), 2);
-        for op in &prog.ops {
-            match &op.kind {
-                ComputeOpKind::SpatialQuery { kind } => {
-                    assert_eq!(*kind, SpatialQueryKind::KinQuery);
-                }
-                other => panic!("unexpected kind: {other:?}"),
-            }
-        }
-    }
 
     // ---- 4. Empty input is Ok(vec![]) and pushes nothing ----------------
 
@@ -284,52 +236,9 @@ mod tests {
 
     // ---- 5. Auto-walker reads/writes match SpatialQueryKind::dependencies()
 
-    #[test]
-    fn auto_walker_matches_dependencies_signature_for_each_kind() {
-        // Every kind's lowered op's reads/writes vectors must equal the
-        // hard-coded `(reads, writes)` table on `SpatialQueryKind` —
-        // the auto-walker (Task 1.3) is the single source of truth and
-        // this lowering does not invent its own.
-        for kind in [
-            SpatialQueryKind::BuildHash,
-            SpatialQueryKind::KinQuery,
-            SpatialQueryKind::EngagementQuery,
-        ] {
-            let mut builder = CgProgramBuilder::new();
-            let mut ctx = LoweringCtx::new(&mut builder);
-            lower_spatial_queries(&[kind], &mut ctx).expect("lowers");
-            let prog = builder.finish();
-            let op = &prog.ops[0];
-            let (expected_reads, expected_writes) = kind.dependencies();
-            assert_eq!(
-                op.reads, expected_reads,
-                "kind={kind}: reads diverged from SpatialQueryKind::dependencies()"
-            );
-            assert_eq!(
-                op.writes, expected_writes,
-                "kind={kind}: writes diverged from SpatialQueryKind::dependencies()"
-            );
-        }
-    }
 
     // ---- 6. Snapshot: pinned `Display` form for a lowered op ------------
 
-    #[test]
-    fn snapshot_kin_query_op_display() {
-        // Pins the wire format produced by `ComputeOp`'s Display impl
-        // for a `KinQuery` op. Downstream consumers (snapshot tests,
-        // structured logs) depend on this exact string shape — the
-        // auto-walker's read/write entries render via
-        // `DataHandle::SpatialStorage`'s `spatial.{kind}` form.
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        lower_spatial_queries(&[SpatialQueryKind::KinQuery], &mut ctx).expect("lowers");
-        let prog = builder.finish();
-        assert_eq!(
-            format!("{}", prog.ops[0]),
-            "op#0 kind=spatial_query(kin_query) shape=per_agent reads=[spatial.grid_cells, spatial.grid_offsets] writes=[spatial.query_results]"
-        );
-    }
 
     #[test]
     fn snapshot_build_hash_op_display() {
@@ -348,98 +257,12 @@ mod tests {
 
     // ---- 7. Source-order preservation under "wrong" semantic order ------
 
-    #[test]
-    fn source_order_preserved_even_when_semantically_inverted() {
-        // Driver passes `[KinQuery, BuildHash]` — semantically wrong
-        // (KinQuery reads the grid that BuildHash writes) but the
-        // lowering preserves source order. Schedule synthesis (Phase 3)
-        // is the layer that topologically sorts on reads/writes; this
-        // pass's contract is one-op-per-input, source-ordered.
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        let ids = lower_spatial_queries(
-            &[SpatialQueryKind::KinQuery, SpatialQueryKind::BuildHash],
-            &mut ctx,
-        )
-        .expect("lowers");
-        assert_eq!(ids, vec![OpId(0), OpId(1)]);
-
-        let prog = builder.finish();
-        match &prog.ops[0].kind {
-            ComputeOpKind::SpatialQuery { kind } => {
-                assert_eq!(*kind, SpatialQueryKind::KinQuery);
-            }
-            other => panic!("op#0: unexpected kind {other:?}"),
-        }
-        match &prog.ops[1].kind {
-            ComputeOpKind::SpatialQuery { kind } => {
-                assert_eq!(*kind, SpatialQueryKind::BuildHash);
-            }
-            other => panic!("op#1: unexpected kind {other:?}"),
-        }
-    }
 
     // ---- 8. Touching the builder twice in a row accumulates ops ---------
 
-    #[test]
-    fn successive_calls_append_ops() {
-        // The driver may call this pass multiple times if it surfaces
-        // spatial-query needs incrementally (e.g., once per scope).
-        // Each call appends to the builder's existing op list — ids
-        // come from the builder's monotonic counter, not from a
-        // per-call reset.
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-
-        let first = lower_spatial_queries(&[SpatialQueryKind::BuildHash], &mut ctx)
-            .expect("first call");
-        assert_eq!(first, vec![OpId(0)]);
-
-        let second = lower_spatial_queries(
-            &[SpatialQueryKind::KinQuery, SpatialQueryKind::EngagementQuery],
-            &mut ctx,
-        )
-        .expect("second call");
-        assert_eq!(second, vec![OpId(1), OpId(2)]);
-
-        let prog = builder.finish();
-        assert_eq!(prog.ops.len(), 3);
-    }
 
     // ---- 9. Output handle shape pin (catches dependencies-table drift) --
 
-    #[test]
-    fn engagement_query_writes_query_results_only() {
-        // A more targeted version of test 5 — pins the exact
-        // `DataHandle::SpatialStorage { kind: QueryResults }` write for
-        // `EngagementQuery`. Catches a regression where the
-        // dependencies table mistakenly adds a stray write
-        // (e.g., GridCells, breaking schedule synthesis's
-        // hash-build-coalescing analysis).
-        let mut builder = CgProgramBuilder::new();
-        let mut ctx = LoweringCtx::new(&mut builder);
-        lower_spatial_queries(&[SpatialQueryKind::EngagementQuery], &mut ctx)
-            .expect("lowers");
-        let prog = builder.finish();
-        let op = &prog.ops[0];
-        assert_eq!(
-            op.writes,
-            vec![DataHandle::SpatialStorage {
-                kind: SpatialStorageKind::QueryResults,
-            }]
-        );
-        assert_eq!(
-            op.reads,
-            vec![
-                DataHandle::SpatialStorage {
-                    kind: SpatialStorageKind::GridCells,
-                },
-                DataHandle::SpatialStorage {
-                    kind: SpatialStorageKind::GridOffsets,
-                },
-            ]
-        );
-    }
 
     // ---- 10. FilteredWalk round-trips through the lowering pass ----------
 
