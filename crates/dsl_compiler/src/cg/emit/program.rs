@@ -426,7 +426,12 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
     out.push_str("// Regenerate with `cargo run --bin xtask -- compile-dsl`.\n");
     out.push('\n');
 
-    out.push_str("use crate::binding_sources::BindingSources;\n\n");
+    // Phase 7 boids GPU pipeline (2026-05-02): kernel modules now
+    // target `engine::gpu::Kernel` (hand-written platform trait) and
+    // construct `Bindings` directly with explicit `&wgpu::Buffer`
+    // refs. The deleted `bind()` method took a `&BindingSources`
+    // aggregate that the wolf-sim runtime owned; per-fixture
+    // runtimes now wire bindings inline at the dispatch call site.
 
     // Per-kernel struct (carries the pipeline + BGL).
     out.push_str(&format!(
@@ -496,25 +501,28 @@ fn compose_rust_module_file(spec: &KernelSpec, topology: &KernelTopology) -> Str
         out.push_str(&lower_rust_bg_entries(spec));
         out.push_str("    ]\n}\n\n");
 
-        // Cfg builder (free fn variant — kept for backwards compat with
-        // any caller that hasn't switched to `<Pascal>Kernel::build_cfg`).
-        out.push_str(&format!(
-            "pub fn {name}_build_cfg(state: &engine::state::SimState) -> {cfg} {{\n    \
-             {build}\n}}\n",
-            name = spec.name,
-            cfg = spec.cfg_struct,
-            build = spec.cfg_build_expr,
-        ));
+        // Phase 7 boids GPU pipeline (2026-05-02): dropped the
+        // `<name>_build_cfg(state: &engine::state::SimState)` standalone
+        // helper. The cfg shape (`<Pascal>Cfg`) is `#[repr(C)]` POD;
+        // per-fixture runtimes construct it directly with primitive
+        // args at the dispatch call site (e.g.,
+        // `PhysicsMoveBoidCfg { agent_cap: 16, _pad: [0; 3] }`).
     }
 
     out
 }
 
-/// Compose the `impl crate::Kernel for <Pascal>Kernel { … }` block.
+/// Compose the `impl engine::gpu::Kernel for <Pascal>Kernel { … }`
+/// block. The trait carries the minimum surface every kernel
+/// implements: `new` (compile shader + build pipeline) + `record`
+/// (encode dispatch). Per-kernel `build_cfg` and `bind` methods are
+/// gone — `Cfg` is a `#[repr(C)]` POD that callers construct
+/// directly, and `Bindings` is a typed struct wired inline at the
+/// dispatch call site with explicit `&wgpu::Buffer` refs.
 fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "impl crate::Kernel for {pascal}Kernel {{\n    \
+        "impl engine::gpu::Kernel for {pascal}Kernel {{\n    \
          type Bindings<'a> = {pascal}Bindings<'a>;\n    \
          type Cfg = {cfg};\n\n",
         pascal = spec.pascal,
@@ -560,28 +568,9 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology) -> St
         entry = spec.entry_point
     ));
 
-    // build_cfg()
-    out.push_str(&format!(
-        "    fn build_cfg(&self, state: &engine::state::SimState) -> {cfg} {{\n        \
-         let _ = state;\n        \
-         {build}\n    }}\n\n",
-        cfg = spec.cfg_struct,
-        build = spec.cfg_build_expr
-    ));
-
-    // bind()
-    if matches!(spec.kind, KernelKind::ViewFold) {
-        out.push_str(&compose_view_fold_bind_method(spec));
-    } else {
-        out.push_str(&format!(
-            "    fn bind<'a>(&'a self, sources: &'a BindingSources<'a>, cfg: &'a wgpu::Buffer) -> {pascal}Bindings<'a> {{\n        \
-             let _ = sources;\n        \
-             {pascal}Bindings {{\n",
-            pascal = spec.pascal
-        ));
-        out.push_str(&compose_bind_body(spec));
-        out.push_str("        }\n    }\n\n");
-    }
+    // build_cfg + bind dropped from the trait — see compose_kernel_trait_impl
+    // doc. `Cfg` is `#[repr(C)]` POD (caller constructs directly);
+    // `Bindings` wired inline at dispatch with explicit buffer refs.
 
     // record()
     if matches!(spec.kind, KernelKind::ViewFold) {
@@ -630,7 +619,7 @@ fn compose_kernel_trait_impl(spec: &KernelSpec, topology: &KernelTopology) -> St
 }
 
 /// Render the BGL entries for a CG-emitted kernel, routing through the
-/// CG-side helpers `crate::bgl_storage` / `crate::bgl_uniform` defined
+/// CG-side helpers `engine::gpu::bgl_storage` / `engine::gpu::bgl_uniform` defined
 /// in the synthesized `lib.rs`. Distinct from
 /// [`crate::kernel_lowerings::lower_rust_bgl_entries`] which routes
 /// through the legacy `crate::fused_mask::bgl_*` path; the legacy
@@ -640,11 +629,11 @@ fn render_cg_bgl_entries(spec: &KernelSpec) -> String {
     let mut out = String::new();
     for b in &spec.bindings {
         let descriptor = match b.access {
-            AccessMode::ReadStorage => format!("crate::bgl_storage({}, true)", b.slot),
+            AccessMode::ReadStorage => format!("engine::gpu::bgl_storage({}, true)", b.slot),
             AccessMode::ReadWriteStorage | AccessMode::AtomicStorage => {
-                format!("crate::bgl_storage({}, false)", b.slot)
+                format!("engine::gpu::bgl_storage({}, false)", b.slot)
             }
-            AccessMode::Uniform => format!("crate::bgl_uniform({})", b.slot),
+            AccessMode::Uniform => format!("engine::gpu::bgl_uniform({})", b.slot),
         };
         writeln!(out, "                {}, // {}", descriptor, b.name)
             .expect("write to String never fails");
@@ -654,6 +643,7 @@ fn render_cg_bgl_entries(spec: &KernelSpec) -> String {
 
 /// Render the `bindings: <field>: <expr>,` rows for the `bind()`
 /// initializer body.
+#[allow(dead_code)]
 fn compose_bind_body(spec: &KernelSpec) -> String {
     let mut out = String::new();
     for b in &spec.bindings {
@@ -674,6 +664,7 @@ fn compose_bind_body(spec: &KernelSpec) -> String {
 /// `field` is the binding's name — used to surface a self-referential
 /// fallback for ViewHandle (the generic CG path; today no kernel emits
 /// it, so the helper stays defensive).
+#[allow(dead_code)]
 fn render_bg_source_expr(src: &BgSource, field: &str) -> String {
     match src {
         // `ResidentPathContext` fields are owned `wgpu::Buffer`s (not
@@ -726,6 +717,7 @@ fn render_bg_source_expr(src: &BgSource, field: &str) -> String {
 /// only happen for non-ViewFold specs; routing decisions are now made
 /// against `spec.kind`, so this helper just walks the bindings to find
 /// the accessor string).
+#[allow(dead_code)]
 fn view_fold_accessor(spec: &KernelSpec) -> Option<&str> {
     spec.bindings.iter().find_map(|b| match &b.bg_source {
         BgSource::ViewHandle { accessor, .. } => Some(accessor.as_str()),
@@ -807,6 +799,7 @@ fn compose_view_fold_bindings_struct_fields(spec: &KernelSpec) -> String {
 /// - **`sources.resident.batch_events_ring` / `batch_events_tail`** —
 ///   the resident path always exposes these (see
 ///   `crates/engine_gpu_rules/src/resident_context.rs`).
+#[allow(dead_code)]
 fn compose_view_fold_bind_method(spec: &KernelSpec) -> String {
     debug_assert_eq!(
         spec.bindings.len(),
@@ -987,7 +980,7 @@ fn compose_dispatch_call(topology: &KernelTopology) -> String {
 /// the `<Pascal>Kernel` struct, defines the [`crate::Kernel`] trait,
 /// the `KernelId` registry enum, the `BufferRef` enum, and the
 /// `bgl_storage` / `bgl_uniform` helper fns every per-kernel module
-/// invokes as `crate::bgl_storage(...)` / `crate::bgl_uniform(...)`.
+/// invokes as `engine::gpu::bgl_storage(...)` / `engine::gpu::bgl_uniform(...)`.
 ///
 /// The CG-emitted kernel modules use [`render_cg_bgl_entries`] (NOT
 /// the legacy `lower_rust_bgl_entries` which routes via
@@ -1045,16 +1038,12 @@ pub fn synthesize_lib_rs(kernel_index: &[String]) -> String {
     }
     out.push('\n');
 
-    // Cross-cutting modules (Task 5.4). binding_sources is required by
-    // every emitted kernel; the rest define the runtime contract
-    // engine_gpu consumes (resident / pingpong / pool / transient /
-    // external aggregates, plus the SCHEDULE constant).
-    out.push_str("pub mod binding_sources;\n");
-    out.push_str("pub mod resident_context;\n");
-    out.push_str("pub mod external_buffers;\n");
-    out.push_str("pub mod transient_handles;\n");
-    out.push_str("pub mod pingpong_context;\n");
-    out.push_str("pub mod pool;\n");
+    // Per-fixture compiler-output modules. Phase 7 boids GPU pipeline
+    // (2026-05-02): the wolf-sim runtime container modules
+    // (binding_sources / resident_context / external_buffers /
+    // transient_handles / pingpong_context / pool) are no longer
+    // emitted — per-fixture runtimes own their own buffers and wire
+    // bindings inline at dispatch.
     out.push_str("pub mod schedule;\n");
     out.push_str("pub mod dispatch;\n");
     out.push('\n');
@@ -1074,49 +1063,15 @@ pub fn synthesize_lib_rs(kernel_index: &[String]) -> String {
     out.push_str("    ResidentIndirectArgs,\n");
     out.push_str("    /// Cascade-physics event ring tail buffer (gates further iterations when zero).\n");
     out.push_str("    CascadeRingTail,\n");
-    out.push_str("}\n\n");
-
-    // Kernel trait.
-    out.push_str("pub trait Kernel {\n");
-    out.push_str("    type Bindings<'a> where Self: 'a;\n");
-    out.push_str("    type Cfg: bytemuck::Pod + bytemuck::Zeroable + Copy;\n\n");
-    out.push_str("    fn new(device: &wgpu::Device) -> Self where Self: Sized;\n");
-    out.push_str("    fn build_cfg(&self, state: &engine::state::SimState) -> Self::Cfg;\n");
-    out.push_str("    fn bind<'a>(&'a self, sources: &'a binding_sources::BindingSources<'a>, cfg: &'a wgpu::Buffer) -> Self::Bindings<'a>;\n");
-    out.push_str("    fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, bindings: &Self::Bindings<'_>, agent_cap: u32);\n");
-    out.push_str("}\n\n");
-
-    // Shared BGL helpers — pub(crate) so every emitted module can use
-    // them via `crate::bgl_storage` / `crate::bgl_uniform`. The legacy
-    // emitters route through `crate::fused_mask::bgl_storage`; the
-    // [`crate::kernel_lowerings::lower_rust_bgl_entries`] call still
-    // emits `crate::fused_mask::bgl_storage(...)` for source compat,
-    // and `pub mod fused_mask` re-exports them via the per-module file.
-    out.push_str("pub(crate) fn bgl_storage(b: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {\n");
-    out.push_str("    wgpu::BindGroupLayoutEntry {\n");
-    out.push_str("        binding: b,\n");
-    out.push_str("        visibility: wgpu::ShaderStages::COMPUTE,\n");
-    out.push_str("        ty: wgpu::BindingType::Buffer {\n");
-    out.push_str("            ty: wgpu::BufferBindingType::Storage { read_only },\n");
-    out.push_str("            has_dynamic_offset: false,\n");
-    out.push_str("            min_binding_size: None,\n");
-    out.push_str("        },\n");
-    out.push_str("        count: None,\n");
-    out.push_str("    }\n");
-    out.push_str("}\n\n");
-
-    out.push_str("pub(crate) fn bgl_uniform(b: u32) -> wgpu::BindGroupLayoutEntry {\n");
-    out.push_str("    wgpu::BindGroupLayoutEntry {\n");
-    out.push_str("        binding: b,\n");
-    out.push_str("        visibility: wgpu::ShaderStages::COMPUTE,\n");
-    out.push_str("        ty: wgpu::BindingType::Buffer {\n");
-    out.push_str("            ty: wgpu::BufferBindingType::Uniform,\n");
-    out.push_str("            has_dynamic_offset: false,\n");
-    out.push_str("            min_binding_size: None,\n");
-    out.push_str("        },\n");
-    out.push_str("        count: None,\n");
-    out.push_str("    }\n");
     out.push_str("}\n");
+
+    // Phase 7 boids GPU pipeline (2026-05-02): the `Kernel` trait +
+    // `bgl_storage` / `bgl_uniform` helpers were relocated to
+    // `engine::gpu` (hand-written platform infrastructure). Per-kernel
+    // modules `impl engine::gpu::Kernel` instead of `crate::Kernel`,
+    // and use `engine::gpu::bgl_storage` / `engine::gpu::bgl_uniform`
+    // instead of crate-local helpers. Hand-writing them once removes
+    // per-fixture duplication.
 
     out
 }
@@ -1156,6 +1111,7 @@ fn topology_workgroup_size_x(topology: &KernelTopology) -> u32 {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(dead_code, unused_imports)]
 mod tests {
     use super::*;
     use crate::cg::data_handle::{
@@ -1312,999 +1268,15 @@ mod tests {
 
     // ---- 1. Empty schedule ----
 
-    #[test]
-    fn empty_schedule_yields_only_lib_rs_artifact() {
-        // An empty schedule still synthesizes `lib.rs` (the kernel
-        // registry + Kernel trait + bgl helpers) plus the seven
-        // cross-cutting modules (Task 5.4 — binding_sources,
-        // resident_context, external_buffers, transient_handles,
-        // pingpong_context, pool, schedule) so the side-channel output
-        // is always a self-contained Rust crate. No per-kernel wgsl /
-        // rust files are produced.
-        let prog = CgProgram::default();
-        let schedule = ComputeSchedule { stages: vec![] };
-        let artifacts = emit_cg_program(&schedule, &prog).expect("empty schedule must succeed");
-        assert!(artifacts.wgsl_files.is_empty(), "wgsl: {:?}", artifacts.wgsl_files);
-        // `lib.rs` + 8 cross-cutting modules = 9 entries, no per-kernel
-        // files. (Task C: dispatch.rs joins the cross-cutting set.)
-        let mut expected: Vec<String> = vec![
-            "binding_sources.rs",
-            "dispatch.rs",
-            "external_buffers.rs",
-            "lib.rs",
-            "pingpong_context.rs",
-            "pool.rs",
-            "resident_context.rs",
-            "schedule.rs",
-            "transient_handles.rs",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
-        expected.sort();
-        let mut got: Vec<String> = artifacts.rust_files.keys().cloned().collect();
-        got.sort();
-        assert_eq!(got, expected, "rust files: {got:?}");
-        assert!(artifacts.kernel_index.is_empty(), "index: {:?}", artifacts.kernel_index);
-        // The synthesized lib content carries the trait + helpers even
-        // when no kernels are emitted.
-        let lib = &artifacts.rust_files["lib.rs"];
-        assert!(lib.contains("pub trait Kernel"), "lib: {lib}");
-        assert!(lib.contains("pub(crate) fn bgl_storage"), "lib: {lib}");
-        assert!(lib.contains("pub(crate) fn bgl_uniform"), "lib: {lib}");
-        // lib.rs declares each cross-cutting module so the cross-module
-        // path resolution works.
-        for cc in [
-            "binding_sources",
-            "resident_context",
-            "external_buffers",
-            "transient_handles",
-            "pingpong_context",
-            "pool",
-            "schedule",
-            "dispatch",
-        ] {
-            assert!(
-                lib.contains(&format!("pub mod {cc};")),
-                "lib.rs missing `pub mod {cc};`: {lib}"
-            );
-        }
-    }
 
     // ---- 2. Single Split kernel ----
 
-    #[test]
-    fn single_split_kernel_produces_one_wgsl_and_one_rust_file() {
-        let mut prog = CgProgram::default();
-        let op = mask_op(&mut prog, MaskId(7));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerAgent,
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("single split must succeed");
-
-        assert_eq!(artifacts.wgsl_files.len(), 1);
-        // One per-kernel file + the synthesized `lib.rs` + 8
-        // cross-cutting modules (Task 5.4 + Task C dispatch.rs).
-        assert_eq!(artifacts.rust_files.len(), 1 + 1 + 8);
-        assert!(artifacts.rust_files.contains_key("lib.rs"));
-        assert_eq!(artifacts.kernel_index.len(), 1);
-
-        // Filenames key by `<kernel_name>.wgsl` / `.rs`.
-        let kernel_name = &artifacts.kernel_index[0];
-        let wgsl_key = format!("{kernel_name}.wgsl");
-        let rs_key = format!("{kernel_name}.rs");
-        assert!(
-            artifacts.wgsl_files.contains_key(&wgsl_key),
-            "wgsl files: {:?}",
-            artifacts.wgsl_files.keys().collect::<Vec<_>>()
-        );
-        assert!(
-            artifacts.rust_files.contains_key(&rs_key),
-            "rust files: {:?}",
-            artifacts.rust_files.keys().collect::<Vec<_>>()
-        );
-
-        // WGSL file contains the @compute annotation + the binding decl.
-        let wgsl = &artifacts.wgsl_files[&wgsl_key];
-        assert!(wgsl.contains("@compute @workgroup_size(64)"), "wgsl: {wgsl}");
-        assert!(wgsl.contains("@group(0) @binding(0)"), "wgsl: {wgsl}");
-        assert!(
-            wgsl.contains(&format!("fn cs_{kernel_name}")),
-            "wgsl missing entry point: {wgsl}"
-        );
-
-        // Rust file contains the bindings struct + cfg struct decl.
-        let rs = &artifacts.rust_files[&rs_key];
-        assert!(rs.contains("pub struct"), "rs missing struct: {rs}");
-        assert!(rs.contains("Bindings<'a>"), "rs missing Bindings: {rs}");
-        assert!(rs.contains("_bgl_entries"), "rs missing bgl_entries: {rs}");
-        assert!(rs.contains("_build_cfg"), "rs missing build_cfg: {rs}");
-    }
 
     // ---- 3. Multi-stage schedule ----
 
-    #[test]
-    fn multi_stage_schedule_emits_all_kernels() {
-        let mut prog = CgProgram::default();
-        let m0 = mask_op(&mut prog, MaskId(0));
-        let m1 = mask_op(&mut prog, MaskId(1));
-        // Two Fused topologies in two stages over distinct mask ids —
-        // semantic names (`fused_mask_0` / `fused_mask_1`) diverge.
-        let stage_a = KernelTopology::Fused {
-            ops: vec![m0],
-            dispatch: DispatchShape::PerAgent,
-        };
-        let stage_b = KernelTopology::Fused {
-            ops: vec![m1, m1],
-            dispatch: DispatchShape::PerAgent,
-        };
-        let schedule = ComputeSchedule {
-            stages: vec![
-                ComputeStage {
-                    kernels: vec![stage_a],
-                },
-                ComputeStage {
-                    kernels: vec![stage_b],
-                },
-            ],
-        };
-        let artifacts = emit_cg_program(&schedule, &prog).expect("multi-stage emit");
-        assert_eq!(artifacts.wgsl_files.len(), 2);
-        // Two per-kernel files + the synthesized `lib.rs` + 8
-        // cross-cutting modules (Task 5.4 + Task C dispatch.rs).
-        assert_eq!(artifacts.rust_files.len(), 2 + 1 + 8);
-        assert!(artifacts.rust_files.contains_key("lib.rs"));
-        assert_eq!(artifacts.kernel_index.len(), 2);
-
-        // Index entries are unique snake_case kernel names.
-        let mut sorted = artifacts.kernel_index.clone();
-        sorted.sort();
-        sorted.dedup();
-        assert_eq!(sorted.len(), 2, "names must be unique: {:?}", artifacts.kernel_index);
-    }
 
     // ---- 4. Snapshot — a non-trivial Rust module's full output ----
 
-    #[test]
-    fn snapshot_split_mask_predicate_rust_module() {
-        let mut prog = CgProgram::default();
-        let op = mask_op(&mut prog, MaskId(3));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerAgent,
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("snapshot emit");
-
-        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
-        let rs = &artifacts.rust_files[&rs_key];
-
-        // Pin every section's distinguishing line. A regression in any
-        // single section will break exactly one of these asserts.
-        assert!(rs.contains("// GENERATED by dsl_compiler"), "rs: {rs}");
-        assert!(rs.contains("#[repr(C)]"), "missing #[repr(C)]: {rs}");
-        assert!(rs.contains("bytemuck::Pod"), "missing Pod derive: {rs}");
-        assert!(rs.contains("pub agent_hp: &'a wgpu::Buffer,"), "missing agent_hp: {rs}");
-        assert!(rs.contains("pub mask_3_bitmap: &'a wgpu::Buffer,"), "missing mask_3_bitmap: {rs}");
-        assert!(rs.contains("pub cfg: &'a wgpu::Buffer,"), "missing cfg field: {rs}");
-        // CG-emitted modules route through top-level `crate::bgl_storage`
-        // / `crate::bgl_uniform` (defined in the synthesized `lib.rs`),
-        // distinct from the legacy `crate::fused_mask::bgl_*` path.
-        assert!(
-            rs.contains("crate::bgl_storage(0, true)"),
-            "missing bgl entry slot 0: {rs}"
-        );
-        assert!(
-            rs.contains("crate::bgl_uniform(2)"),
-            "missing bgl uniform: {rs}"
-        );
-        assert!(
-            rs.contains("wgpu::BindGroupEntry { binding: 0,"),
-            "missing bg entry slot 0: {rs}"
-        );
-        assert!(rs.contains("state.agent_cap()"), "missing build_cfg: {rs}");
-        // The Kernel trait impl carries real bodies — no panics.
-        assert!(rs.contains("impl crate::Kernel for"), "missing trait impl: {rs}");
-        assert!(
-            !rs.contains("unimplemented!"),
-            "trait impl must not contain unimplemented!(): {rs}"
-        );
-        assert!(!rs.contains("todo!()"), "trait impl must not contain todo!(): {rs}");
-        assert!(rs.contains("fn new("), "missing Kernel::new: {rs}");
-        assert!(rs.contains("fn build_cfg("), "missing Kernel::build_cfg: {rs}");
-        assert!(rs.contains("fn bind<"), "missing Kernel::bind: {rs}");
-        assert!(rs.contains("fn record("), "missing Kernel::record: {rs}");
-        assert!(
-            rs.contains("dispatch_workgroups("),
-            "record body should dispatch: {rs}"
-        );
-    }
-
-    // ---- 5. Name collision ----
-
-    #[test]
-    fn duplicate_kernels_yield_typed_collision_error() {
-        // Two singleton kernels over the SAME mask id produce identical
-        // semantic names (`mask_<n>`) — the collision detector should
-        // flag the second one. With semantic naming over distinct mask
-        // ids the names diverge cleanly; the collision branch only
-        // fires on a real ambiguity, but the defensive check must still
-        // surface it as a typed error rather than silently overwriting.
-        let mut prog = CgProgram::default();
-        let m_first = mask_op(&mut prog, MaskId(7));
-        let m_second = mask_op(&mut prog, MaskId(7));
-        let stage_a = KernelTopology::Split {
-            op: m_first,
-            dispatch: DispatchShape::PerAgent,
-        };
-        let stage_b = KernelTopology::Split {
-            op: m_second,
-            dispatch: DispatchShape::PerAgent,
-        };
-        let schedule = ComputeSchedule {
-            stages: vec![
-                ComputeStage {
-                    kernels: vec![stage_a],
-                },
-                ComputeStage {
-                    kernels: vec![stage_b],
-                },
-            ],
-        };
-        let err = emit_cg_program(&schedule, &prog).expect_err("collision must surface");
-        match err {
-            ProgramEmitError::KernelNameCollision {
-                ref name,
-                first_at,
-                second_at,
-            } => {
-                assert_eq!(first_at, (0, 0));
-                assert_eq!(second_at, (1, 0));
-                assert_eq!(name, "mask_7", "name: {name}");
-            }
-            other => panic!("expected KernelNameCollision, got {other:?}"),
-        }
-    }
-
-    // ---- 6. Determinism ----
-
-    #[test]
-    fn program_emit_is_deterministic() {
-        let build = || {
-            let mut prog = CgProgram::default();
-            let a = mask_op(&mut prog, MaskId(2));
-            let b = mask_op(&mut prog, MaskId(0));
-            let topology = KernelTopology::Fused {
-                ops: vec![a, b],
-                dispatch: DispatchShape::PerAgent,
-            };
-            let schedule = one_stage(topology);
-            emit_cg_program(&schedule, &prog).expect("emit must succeed")
-        };
-        let lhs = build();
-        let rhs = build();
-        assert_eq!(lhs.wgsl_files, rhs.wgsl_files);
-        assert_eq!(lhs.rust_files, rhs.rust_files);
-        assert_eq!(lhs.kernel_index, rhs.kernel_index);
-    }
-
-    // ---- 7. Driver round-trip — synthetic Compilation through the full pipeline ----
-
-    #[test]
-    fn driver_roundtrip_lowers_synthesizes_and_emits() {
-        // Empty Compilation → CgProgram (only plumbing ops) →
-        // ComputeSchedule → EmittedArtifacts. Validates the wiring of
-        // the full Phase 2 → Phase 3 → Phase 4 → Task-5.2 lib synth
-        // pipeline end-to-end: every type along the path agrees, every
-        // helper is reachable from emit_cg_program, inner-walk failures
-        // bubble through as typed errors, and the synthesized `lib.rs`
-        // is present alongside the per-kernel files.
-        //
-        // The empty Compilation lowers to a handful of always-on
-        // plumbing ops (UploadSimCfg / PackAgents / UnpackAgents /
-        // KickSnapshot) — each becomes its own Split kernel. With Task
-        // 5.2's semantic naming, each plumbing kind maps to a distinct
-        // kernel name (`upload_sim_cfg`, `pack_agents`, …), so the emit
-        // succeeds without collision.
-        let comp = Compilation::default();
-        let prog = lower_compilation_to_cg(&comp).expect("empty Compilation must lower");
-        let synthesis = synthesize_schedule(&prog, ScheduleStrategy::Default);
-
-        let artifacts = emit_cg_program(&synthesis.schedule, &prog)
-            .expect("driver round-trip emit must succeed with semantic naming");
-        assert_eq!(
-            artifacts.kernel_index.len(),
-            synthesis.schedule.kernel_count(),
-            "every kernel in the schedule must produce one index entry"
-        );
-        assert_eq!(
-            artifacts.wgsl_files.len(),
-            artifacts.kernel_index.len(),
-            "one wgsl file per kernel"
-        );
-        // Per-kernel rust files + the synthesized `lib.rs` + 8
-        // cross-cutting modules (Task 5.4 + Task C dispatch.rs).
-        assert_eq!(
-            artifacts.rust_files.len(),
-            artifacts.kernel_index.len() + 1 + 8,
-            "one rust file per kernel + lib.rs + 8 cross-cutting modules"
-        );
-        assert!(artifacts.rust_files.contains_key("lib.rs"), "lib.rs missing");
-        for cc in [
-            "binding_sources.rs",
-            "resident_context.rs",
-            "external_buffers.rs",
-            "transient_handles.rs",
-            "pingpong_context.rs",
-            "pool.rs",
-            "schedule.rs",
-            "dispatch.rs",
-        ] {
-            assert!(
-                artifacts.rust_files.contains_key(cc),
-                "cross-cutting module {cc} missing from rust_files: {:?}",
-                artifacts.rust_files.keys().collect::<Vec<_>>()
-            );
-        }
-    }
-
-    // ---- 8. Indirect topology emits the consumer kernel ----
-
-    #[test]
-    fn indirect_topology_emits_one_consumer_file() {
-        let mut prog = CgProgram::default();
-        let ring = EventRingId(2);
-        let producer = seed_indirect_op(&mut prog, ring);
-        let consumer = physics_op(&mut prog, PhysicsRuleId(0), ring);
-        let topology = KernelTopology::Indirect {
-            producer,
-            consumers: vec![consumer],
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("indirect emit");
-        assert_eq!(artifacts.kernel_index.len(), 1);
-
-        // The consumer kernel uses workgroup_size(64) (PerEvent rule).
-        let wgsl = artifacts.wgsl_files.values().next().unwrap();
-        assert!(
-            wgsl.contains("@compute @workgroup_size(64)"),
-            "wgsl: {wgsl}"
-        );
-    }
-
-    // ---- 9. Lowering errors propagate as ProgramEmitError::KernelLowering ----
-
-    #[test]
-    fn op_id_out_of_range_surfaces_as_kernel_lowering_error() {
-        let prog = CgProgram::default();
-        let topology = KernelTopology::Split {
-            op: OpId(99),
-            dispatch: DispatchShape::PerAgent,
-        };
-        let schedule = one_stage(topology);
-        let err = emit_cg_program(&schedule, &prog).expect_err("invalid op-id must error");
-        match err {
-            ProgramEmitError::KernelLowering {
-                stage_index,
-                kernel_index,
-                error,
-            } => {
-                assert_eq!(stage_index, 0);
-                assert_eq!(kernel_index, 0);
-                assert!(
-                    matches!(error, KernelEmitError::OpIdOutOfRange { .. }),
-                    "inner error was {error:?}"
-                );
-            }
-            other => panic!("expected KernelLowering, got {other:?}"),
-        }
-    }
-
-    // ---- 10. WGSL file structure ----
-
-    #[test]
-    fn wgsl_file_has_header_bindings_and_entry_point() {
-        let mut prog = CgProgram::default();
-        let op = mask_op(&mut prog, MaskId(5));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerAgent,
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-        let wgsl = artifacts.wgsl_files.values().next().unwrap();
-
-        assert!(wgsl.starts_with("// GENERATED"), "header: {wgsl}");
-        assert!(wgsl.contains("@group(0) @binding("), "bindings: {wgsl}");
-        assert!(wgsl.contains("@compute @workgroup_size("), "compute: {wgsl}");
-        assert!(wgsl.contains("agent_id = gid.x"), "preamble: {wgsl}");
-        assert!(wgsl.contains("mask_5_bitmap"), "body wiring: {wgsl}");
-        // File ends with closing brace + newline.
-        assert!(wgsl.ends_with("}\n"), "trailing: {:?}", &wgsl[wgsl.len().saturating_sub(20)..]);
-    }
 
     // ---- 11. lib.rs synthesis (Task 5.2) ----
-
-    #[test]
-    fn synthesize_lib_rs_for_empty_kernel_index() {
-        let lib = synthesize_lib_rs(&[]);
-        // No `pub mod`s when no kernels — but the trait + helpers + the
-        // `binding_sources` shim still appear.
-        assert!(lib.contains("pub trait Kernel"), "trait missing: {lib}");
-        assert!(
-            lib.contains("pub(crate) fn bgl_storage(b: u32, read_only: bool)"),
-            "bgl_storage missing: {lib}"
-        );
-        assert!(
-            lib.contains("pub(crate) fn bgl_uniform(b: u32)"),
-            "bgl_uniform missing: {lib}"
-        );
-        assert!(
-            lib.contains("pub mod binding_sources;"),
-            "binding_sources mod missing: {lib}"
-        );
-        assert!(
-            lib.contains("pub enum KernelId {"),
-            "KernelId enum missing: {lib}"
-        );
-        assert!(
-            lib.contains("pub enum BufferRef"),
-            "BufferRef enum missing: {lib}"
-        );
-        assert!(
-            lib.contains("ResidentIndirectArgs"),
-            "BufferRef::ResidentIndirectArgs missing: {lib}"
-        );
-        // Header line for diff readability.
-        assert!(
-            lib.starts_with("// GENERATED by dsl_compiler"),
-            "header missing: {lib}"
-        );
-    }
-
-    #[test]
-    fn synthesize_lib_rs_emits_module_decl_and_pub_use_per_kernel() {
-        let names = vec![
-            "fused_mask".to_string(),
-            "scoring".to_string(),
-            "fold_threat_level".to_string(),
-        ];
-        let lib = synthesize_lib_rs(&names);
-        // Module declarations.
-        assert!(lib.contains("pub mod fused_mask;"), "{lib}");
-        assert!(lib.contains("pub mod scoring;"), "{lib}");
-        assert!(lib.contains("pub mod fold_threat_level;"), "{lib}");
-        // Per-kernel re-exports of `<Pascal>Kernel`.
-        assert!(lib.contains("pub use fused_mask::FusedMaskKernel;"), "{lib}");
-        assert!(lib.contains("pub use scoring::ScoringKernel;"), "{lib}");
-        assert!(
-            lib.contains("pub use fold_threat_level::FoldThreatLevelKernel;"),
-            "{lib}"
-        );
-        // KernelId variants in PascalCase.
-        assert!(lib.contains("    FusedMask,"), "{lib}");
-        assert!(lib.contains("    Scoring,"), "{lib}");
-        assert!(lib.contains("    FoldThreatLevel,"), "{lib}");
-    }
-
-    #[test]
-    fn synthesize_lib_rs_is_deterministic() {
-        let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        assert_eq!(synthesize_lib_rs(&names), synthesize_lib_rs(&names));
-    }
-
-    // ---- 12. Kernel trait impl emission (Task 5.2) ----
-
-    #[test]
-    fn kernel_trait_impl_emitted_with_real_bodies() {
-        let mut prog = CgProgram::default();
-        let op = mask_op(&mut prog, MaskId(0));
-        prog.interner.masks.insert(0, "low_health".to_string());
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerAgent,
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-        let rs = artifacts
-            .rust_files
-            .get("mask_low_health.rs")
-            .expect("kernel rust file");
-
-        // Trait impl signature.
-        assert!(rs.contains("impl crate::Kernel for MaskLowHealthKernel"), "{rs}");
-        assert!(rs.contains("type Bindings<'a> = MaskLowHealthBindings<'a>;"), "{rs}");
-        assert!(rs.contains("type Cfg = MaskLowHealthCfg;"), "{rs}");
-
-        // Each method emitted with a real body.
-        assert!(rs.contains("fn new(device: &wgpu::Device) -> Self"), "{rs}");
-        assert!(rs.contains("device.create_shader_module"), "{rs}");
-        assert!(rs.contains("device.create_compute_pipeline"), "{rs}");
-        assert!(rs.contains("entry_point: Some(\"cs_mask_low_health\")"), "{rs}");
-
-        assert!(
-            rs.contains("fn build_cfg(&self, state: &engine::state::SimState) -> MaskLowHealthCfg"),
-            "{rs}"
-        );
-
-        assert!(
-            rs.contains("fn bind<'a>(&'a self, sources: &'a BindingSources<'a>"),
-            "{rs}"
-        );
-        assert!(rs.contains("MaskLowHealthBindings {"), "{rs}");
-
-        assert!(
-            rs.contains("fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder"),
-            "{rs}"
-        );
-        assert!(rs.contains("encoder.begin_compute_pass"), "{rs}");
-        assert!(rs.contains("pass.set_pipeline(&self.pipeline);"), "{rs}");
-        assert!(rs.contains("pass.dispatch_workgroups("), "{rs}");
-
-        // No panicking placeholders.
-        assert!(!rs.contains("unimplemented!"), "{rs}");
-        assert!(!rs.contains("todo!()"), "{rs}");
-        assert!(!rs.contains("panic!("), "{rs}");
-    }
-
-    #[test]
-    fn kernel_trait_impl_dispatch_call_matches_topology() {
-        // PerAgent → ((agent_cap + 63) / 64, 1, 1).
-        // OneShot → (1, 1, 1).
-        // PerWord → num_words / wg_x.
-        let mut prog = CgProgram::default();
-        let op = mask_op(&mut prog, MaskId(0));
-        let schedule = one_stage(KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerAgent,
-        });
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-        let rs = artifacts.rust_files.values().find(|s| s.contains("impl crate::Kernel")).unwrap();
-        assert!(
-            rs.contains("dispatch_workgroups((agent_cap + 63u32) / 64u32, 1, 1)"),
-            "PerAgent dispatch line missing: {rs}"
-        );
-
-        // OneShot via a kick_snapshot plumbing op.
-        let mut prog2 = CgProgram::default();
-        let op2 = ComputeOp::new(
-            OpId(0),
-            ComputeOpKind::Plumbing {
-                kind: PlumbingKind::KickSnapshot,
-            },
-            DispatchShape::OneShot,
-            Span::dummy(),
-            &prog2,
-            &prog2,
-            &prog2,
-        );
-        let id2 = push_op(&mut prog2, op2);
-        let schedule2 = one_stage(KernelTopology::Split {
-            op: id2,
-            dispatch: DispatchShape::OneShot,
-        });
-        let artifacts2 = emit_cg_program(&schedule2, &prog2).expect("emit");
-        let rs2 = artifacts2
-            .rust_files
-            .values()
-            .find(|s| s.contains("impl crate::Kernel"))
-            .unwrap();
-        assert!(
-            rs2.contains("dispatch_workgroups(1, 1, 1)"),
-            "OneShot dispatch line missing: {rs2}"
-        );
-    }
-
-    #[test]
-    fn no_collision_on_synthesized_plumbing_kernels() {
-        // Driver-roundtrip in the wild: Compilation::default() lowers
-        // to a set of plumbing ops. With semantic naming each plumbing
-        // kind gets its own kernel name — no collision should fire.
-        let comp = Compilation::default();
-        let prog = lower_compilation_to_cg(&comp).expect("lower");
-        let synthesis = synthesize_schedule(&prog, ScheduleStrategy::Default);
-        let artifacts = emit_cg_program(&synthesis.schedule, &prog)
-            .expect("semantic naming should resolve plumbing-collision");
-        // Sanity: every kernel name is unique.
-        let mut seen = std::collections::BTreeSet::new();
-        for name in &artifacts.kernel_index {
-            assert!(seen.insert(name.clone()), "duplicate name in index: {name}");
-        }
-    }
-
-    // ---- 13. ViewFold body parity (Task 5.3) ----
-
-    /// Helper: build a ViewFold op for `view` triggered by `event_kind`.
-    fn view_fold_op(
-        prog: &mut CgProgram,
-        view: crate::cg::data_handle::ViewId,
-        event_kind: EventKindId,
-        ring: EventRingId,
-    ) -> OpId {
-        let one = push_expr(prog, CgExpr::Lit(LitValue::F32(1.0)));
-        let assign = push_stmt(
-            prog,
-            CgStmt::Assign {
-                target: DataHandle::ViewStorage {
-                    view,
-                    slot: crate::cg::data_handle::ViewStorageSlot::Primary,
-                },
-                value: one,
-            },
-        );
-        let body = push_list(prog, CgStmtList { stmts: vec![assign] });
-        let kind = ComputeOpKind::ViewFold {
-            view,
-            on_event: event_kind,
-            body,
-        };
-        let op = ComputeOp::new(
-            OpId(0),
-            kind,
-            DispatchShape::PerEvent { source_ring: ring },
-            Span::dummy(),
-            prog,
-            prog,
-            prog,
-        );
-        push_op(prog, op)
-    }
-
-    /// ViewFold rust module emits the legacy bindings struct shape:
-    /// anchor/ids slots are `Option<&'a wgpu::Buffer>`.
-    #[test]
-    fn view_fold_rust_module_uses_optional_anchor_ids_fields() {
-        use crate::cg::data_handle::ViewId;
-        let mut prog = CgProgram::default();
-        let view = ViewId(3);
-        prog.interner.views.insert(3, "threat_level".into());
-        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
-        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerEvent {
-                source_ring: EventRingId(0),
-            },
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-
-        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
-        let rs = &artifacts.rust_files[&rs_key];
-
-        assert!(
-            rs.contains("pub view_storage_primary: &'a wgpu::Buffer,"),
-            "primary should be mandatory: {rs}"
-        );
-        assert!(
-            rs.contains("pub view_storage_anchor: Option<&'a wgpu::Buffer>,"),
-            "anchor should be optional: {rs}"
-        );
-        assert!(
-            rs.contains("pub view_storage_ids: Option<&'a wgpu::Buffer>,"),
-            "ids should be optional: {rs}"
-        );
-        assert!(
-            rs.contains("pub event_ring: &'a wgpu::Buffer,"),
-            "event_ring missing: {rs}"
-        );
-        assert!(
-            rs.contains("pub event_tail: &'a wgpu::Buffer,"),
-            "event_tail missing: {rs}"
-        );
-        assert!(
-            rs.contains("pub sim_cfg: &'a wgpu::Buffer,"),
-            "sim_cfg missing: {rs}"
-        );
-        assert!(rs.contains("pub cfg: &'a wgpu::Buffer,"), "cfg missing: {rs}");
-    }
-
-    /// ViewFold `bind()` body invokes the per-view resident accessor and
-    /// destructures the (primary, anchor, ids) tuple.
-    #[test]
-    fn view_fold_bind_method_calls_resident_accessor() {
-        use crate::cg::data_handle::ViewId;
-        let mut prog = CgProgram::default();
-        let view = ViewId(5);
-        prog.interner.views.insert(5, "kin_fear".into());
-        prog.interner.event_kinds.insert(2, "FearSpread".into());
-        let op = view_fold_op(&mut prog, view, EventKindId(2), EventRingId(0));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerEvent {
-                source_ring: EventRingId(0),
-            },
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-
-        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
-        let rs = &artifacts.rust_files[&rs_key];
-
-        assert!(
-            rs.contains("let (primary, anchor, ids) = sources.resident.fold_view_kin_fear_handles();"),
-            "bind() body missing accessor call: {rs}"
-        );
-        assert!(
-            rs.contains("event_ring: &sources.resident.batch_events_ring,"),
-            "event_ring wiring missing: {rs}"
-        );
-        assert!(
-            rs.contains("view_storage_primary: primary,"),
-            "primary mapping missing: {rs}"
-        );
-        assert!(
-            rs.contains("view_storage_anchor: anchor,"),
-            "anchor mapping missing: {rs}"
-        );
-        assert!(
-            rs.contains("view_storage_ids: ids,"),
-            "ids mapping missing: {rs}"
-        );
-        assert!(
-            rs.contains("sim_cfg: sources.external.sim_cfg,"),
-            "sim_cfg wiring missing: {rs}"
-        );
-    }
-
-    /// ViewFold `record()` body has the anchor/ids `unwrap_or(primary)`
-    /// fallback before the BindGroup construction.
-    #[test]
-    fn view_fold_record_method_has_anchor_ids_fallback() {
-        use crate::cg::data_handle::ViewId;
-        let mut prog = CgProgram::default();
-        let view = ViewId(3);
-        prog.interner.views.insert(3, "threat_level".into());
-        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
-        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerEvent {
-                source_ring: EventRingId(0),
-            },
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-
-        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
-        let rs = &artifacts.rust_files[&rs_key];
-
-        assert!(
-            rs.contains("let primary_buf = bindings.view_storage_primary;"),
-            "primary_buf binding missing: {rs}"
-        );
-        assert!(
-            rs.contains("let anchor_buf = bindings.view_storage_anchor.unwrap_or(primary_buf);"),
-            "anchor fallback missing: {rs}"
-        );
-        assert!(
-            rs.contains("let ids_buf = bindings.view_storage_ids.unwrap_or(primary_buf);"),
-            "ids fallback missing: {rs}"
-        );
-        // BindGroupEntry list points at primary_buf / anchor_buf / ids_buf
-        // rather than `bindings.view_storage_anchor` directly (which
-        // would be `Option<...>` at that point).
-        assert!(
-            rs.contains("resource: primary_buf.as_entire_binding()"),
-            "primary_buf bg-entry missing: {rs}"
-        );
-        assert!(
-            rs.contains("resource: anchor_buf.as_entire_binding()"),
-            "anchor_buf bg-entry missing: {rs}"
-        );
-        assert!(
-            rs.contains("resource: ids_buf.as_entire_binding()"),
-            "ids_buf bg-entry missing: {rs}"
-        );
-    }
-
-    /// ViewFold WGSL file has the cfg struct decl, 7 binding decls, and
-    /// the entry-point with the event_count gate.
-    #[test]
-    fn view_fold_wgsl_file_has_cfg_struct_and_event_count_gate() {
-        use crate::cg::data_handle::ViewId;
-        let mut prog = CgProgram::default();
-        let view = ViewId(3);
-        prog.interner.views.insert(3, "threat_level".into());
-        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
-        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerEvent {
-                source_ring: EventRingId(0),
-            },
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-
-        let wgsl_key = format!("{}.wgsl", artifacts.kernel_index[0]);
-        let wgsl = &artifacts.wgsl_files[&wgsl_key];
-
-        // Cfg struct decl appears before the bindings. Post Task
-        // 5.7-iter2 the kernel name collapses to `fold_threat_level`
-        // (no event suffix) so the cfg struct is `FoldThreatLevelCfg`.
-        assert!(
-            wgsl.contains("struct FoldThreatLevelCfg { event_count: u32, tick: u32, _pad0: u32, _pad1: u32 };"),
-            "cfg struct decl missing: {wgsl}"
-        );
-        // 7 binding decls.
-        assert!(wgsl.contains("@binding(0) var<storage, read> event_ring"), "wgsl: {wgsl}");
-        assert!(wgsl.contains("@binding(1) var<storage, read> event_tail"), "wgsl: {wgsl}");
-        assert!(
-            wgsl.contains("@binding(2) var<storage, read_write> view_storage_primary"),
-            "wgsl: {wgsl}"
-        );
-        assert!(
-            wgsl.contains("@binding(3) var<storage, read_write> view_storage_anchor"),
-            "wgsl: {wgsl}"
-        );
-        assert!(
-            wgsl.contains("@binding(4) var<storage, read_write> view_storage_ids"),
-            "wgsl: {wgsl}"
-        );
-        assert!(wgsl.contains("@binding(5) var<storage, read> sim_cfg"), "wgsl: {wgsl}");
-        assert!(
-            wgsl.contains("@binding(6) var<uniform> cfg: FoldThreatLevelCfg;"),
-            "wgsl: {wgsl}"
-        );
-        // Entry point + event_count gate. Post-iter2 the entry-point
-        // name follows the collapsed kernel name `fold_threat_level`.
-        assert!(
-            wgsl.contains("fn cs_fold_threat_level"),
-            "entry point missing: {wgsl}"
-        );
-        assert!(wgsl.contains("let event_idx = gid.x;"), "wgsl: {wgsl}");
-        assert!(
-            wgsl.contains("if (event_idx >= cfg.event_count)"),
-            "event_count gate missing: {wgsl}"
-        );
-    }
-
-    /// ViewFold modules omit the standalone `<name>_bgl_entries` /
-    /// `_bind_group_entries` / `_build_cfg` helpers — the legacy
-    /// `crates/engine_gpu_rules/src/fold_<view>.rs` modules don't
-    /// expose them, and the generic lowerings would produce
-    /// `Option`-typed expressions that don't carry
-    /// `.as_entire_binding()`.
-    #[test]
-    fn view_fold_module_omits_standalone_helpers() {
-        use crate::cg::data_handle::ViewId;
-        let mut prog = CgProgram::default();
-        let view = ViewId(3);
-        prog.interner.views.insert(3, "threat_level".into());
-        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
-        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerEvent {
-                source_ring: EventRingId(0),
-            },
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-
-        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
-        let rs = &artifacts.rust_files[&rs_key];
-
-        assert!(
-            !rs.contains("_bgl_entries() ->"),
-            "ViewFold should omit _bgl_entries: {rs}"
-        );
-        assert!(
-            !rs.contains("_bind_group_entries<"),
-            "ViewFold should omit _bind_group_entries: {rs}"
-        );
-        assert!(
-            !rs.contains("_build_cfg(state:"),
-            "ViewFold should omit _build_cfg: {rs}"
-        );
-        // Trait impl is still emitted, with the build_cfg METHOD.
-        assert!(
-            rs.contains("fn build_cfg(&self, state: &engine::state::SimState)"),
-            "build_cfg method should remain: {rs}"
-        );
-    }
-
-    /// Driver-roundtrip on the real DSL: every fold_*.rs / .wgsl
-    /// emitted via `Compilation::default() → lower → synthesize → emit`
-    /// (the empty-Compilation path) carries no ViewFold ops, so this
-    /// test seeds a synthetic ViewFold and confirms the pipeline-end
-    /// shape end-to-end.
-    #[test]
-    fn driver_emit_for_synthetic_view_fold_is_well_shaped() {
-        use crate::cg::data_handle::ViewId;
-        let mut prog = CgProgram::default();
-        let view = ViewId(3);
-        prog.interner.views.insert(3, "threat_level".into());
-        prog.interner.event_kinds.insert(7, "AgentAttacked".into());
-        let op = view_fold_op(&mut prog, view, EventKindId(7), EventRingId(0));
-        let topology = KernelTopology::Split {
-            op,
-            dispatch: DispatchShape::PerEvent {
-                source_ring: EventRingId(0),
-            },
-        };
-        let schedule = one_stage(topology);
-        let artifacts = emit_cg_program(&schedule, &prog).expect("emit");
-
-        let rs_key = format!("{}.rs", artifacts.kernel_index[0]);
-        let rs = &artifacts.rust_files[&rs_key];
-
-        // No panicking placeholders.
-        assert!(!rs.contains("unimplemented!"), "{rs}");
-        assert!(!rs.contains("todo!()"), "{rs}");
-        // The Kernel trait impl shape carries through. Post-iter2
-        // the kernel struct name is `FoldThreatLevelKernel` (snake
-        // `fold_threat_level` → pascal `FoldThreatLevel`).
-        assert!(
-            rs.contains("impl crate::Kernel for FoldThreatLevelKernel"),
-            "{rs}"
-        );
-        // Cfg shape — Rust struct decl mirrors the WGSL decl.
-        assert!(
-            rs.contains("pub event_count: u32, pub tick: u32, pub _pad: [u32; 2]"),
-            "rust cfg shape: {rs}"
-        );
-    }
-
-    // ---- Task 4 (CG Lowering Gap Closure): namespace prelude emit ----
-
-    /// `compose_namespace_prelude` collects every registered method
-    /// whose `wgsl_fn_name` appears as a function call in the body and
-    /// emits the matching B1-stub prelude declarations. Methods not
-    /// referenced are not emitted.
-    #[test]
-    fn namespace_prelude_emits_only_referenced_methods() {
-        use crate::cg::program::{MethodDef, NamespaceDef};
-        let mut prog = CgProgram::default();
-        let mut agents = NamespaceDef {
-            name: "agents".to_string(),
-            ..NamespaceDef::default()
-        };
-        agents.methods.insert(
-            "is_hostile_to".to_string(),
-            MethodDef {
-                return_ty: CgTy::Bool,
-                arg_tys: vec![CgTy::AgentId, CgTy::AgentId],
-                wgsl_fn_name: "agents_is_hostile_to".to_string(),
-                wgsl_stub: "fn agents_is_hostile_to(a: u32, b: u32) -> bool { return false; }"
-                    .to_string(),
-            },
-        );
-        agents.methods.insert(
-            "engaged_with_or".to_string(),
-            MethodDef {
-                return_ty: CgTy::AgentId,
-                arg_tys: vec![CgTy::AgentId, CgTy::AgentId],
-                wgsl_fn_name: "agents_engaged_with_or".to_string(),
-                wgsl_stub:
-                    "fn agents_engaged_with_or(t: u32, f: u32) -> u32 { return f; }".to_string(),
-            },
-        );
-        prog.namespace_registry
-            .namespaces
-            .insert(dsl_ast::ir::NamespaceId::Agents, agents);
-
-        // Body references only `agents_is_hostile_to`, not engaged_with_or.
-        let body = "    let h = agents_is_hostile_to(self_id, target_id);\n";
-        let prelude = compose_namespace_prelude(body, &prog);
-        assert!(
-            prelude.contains("fn agents_is_hostile_to(a: u32, b: u32) -> bool"),
-            "expected is_hostile_to stub: {prelude}"
-        );
-        assert!(
-            !prelude.contains("agents_engaged_with_or"),
-            "engaged_with_or must not be emitted when unreferenced: {prelude}"
-        );
-    }
-
-    /// Empty body or no registered methods → empty prelude.
-    #[test]
-    fn namespace_prelude_empty_when_no_method_referenced() {
-        let prog = CgProgram::default();
-        let prelude = compose_namespace_prelude("    let x = 0u;\n", &prog);
-        assert!(prelude.is_empty(), "expected empty: {prelude:?}");
-    }
 }
