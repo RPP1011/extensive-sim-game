@@ -438,6 +438,9 @@ fn builtin_name(id: BuiltinId) -> String {
         Log10 => "log10".to_string(),
         Entity => "entity".to_string(),
         ViewCall { view } => format!("view_{}_get", view.0),
+        // WGSL has a built-in `vec3<f32>` constructor; emit the call
+        // as-is so `vec3(x, y, z)` lowers to `vec3<f32>(x, y, z)`.
+        Vec3Ctor => "vec3<f32>".to_string(),
     }
 }
 

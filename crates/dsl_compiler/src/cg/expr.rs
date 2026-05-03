@@ -454,6 +454,13 @@ pub enum BuiltinId {
     /// view table); the per-instance return type is recorded on the
     /// enclosing `CgExpr::Builtin { ty }` field.
     ViewCall { view: ViewId },
+
+    // --- Constructors ---
+    /// `vec3(x, y, z)` — pack three F32 components into a Vec3F32.
+    /// Lowers to WGSL `vec3<f32>(x, y, z)`. Added 2026-05-02 to give
+    /// the Boids fixture a vec3 literal form without going through
+    /// `agents.pos(...)`. Phase-7-post-nuke unlock #1.
+    Vec3Ctor,
 }
 
 /// Typed signature of a builtin call. `args` is the list of expected
@@ -504,6 +511,10 @@ impl BuiltinId {
                 result: CgTy::AgentId,
             },
             ViewCall { view } => BuiltinSignature::ViewCall { view },
+            Vec3Ctor => BuiltinSignature::Fixed {
+                args: vec![CgTy::F32, CgTy::F32, CgTy::F32],
+                result: CgTy::Vec3F32,
+            },
         }
     }
 
@@ -526,6 +537,7 @@ impl BuiltinId {
             Log10 => "log10".to_string(),
             Entity => "entity".to_string(),
             ViewCall { view } => format!("view_call.#{}", view.0),
+            Vec3Ctor => "vec3".to_string(),
         }
     }
 }

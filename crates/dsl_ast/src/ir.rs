@@ -1118,6 +1118,10 @@ pub enum Builtin {
     /// expiry ticks (`tick + duration_ticks`) without reaching for a
     /// method-call syntax the DSL doesn't otherwise expose.
     SaturatingAdd,
+    /// `vec3(x, y, z)` — construct a Vec3 from three scalar components.
+    /// All three operands are F32; result is Vec3F32. The lone vec3
+    /// literal form supported by the DSL today.
+    Vec3,
 }
 
 impl Builtin {
@@ -1143,6 +1147,7 @@ impl Builtin {
             Builtin::Log10 => "log10",
             Builtin::Sqrt => "sqrt",
             Builtin::SaturatingAdd => "saturating_add",
+            Builtin::Vec3 => "vec3",
         }
     }
 
@@ -1153,6 +1158,7 @@ impl Builtin {
             Builtin::Distance | Builtin::PlanarDistance | Builtin::ZSeparation => Some(2),
             Builtin::Entity => Some(1),
             Builtin::Clamp => Some(3),
+            Builtin::Vec3 => Some(3),
             Builtin::Abs
             | Builtin::Floor
             | Builtin::Ceil

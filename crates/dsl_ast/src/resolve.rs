@@ -84,6 +84,8 @@ mod stdlib {
         symbols.builtins.insert("log10".into(), Builtin::Log10);
         symbols.builtins.insert("sqrt".into(), Builtin::Sqrt);
         symbols.builtins.insert("saturating_add".into(), Builtin::SaturatingAdd);
+        // Vec3 constructor. Three-arg call returning Vec3F32; operands are F32.
+        symbols.builtins.insert("vec3".into(), Builtin::Vec3);
 
         // Typed namespaces. Each has its own field / method schema below.
         for (name, id) in [
@@ -276,6 +278,12 @@ mod stdlib {
             // `docs/dsl/stdlib.md` for the canonical signatures.
             (NamespaceId::Agents, "alive") => Some((1, IrType::Bool)),
             (NamespaceId::Agents, "pos") => Some((1, IrType::Vec3)),
+            // Phase-7-post-nuke unlock #3: vec3 read + write surface so
+            // physics bodies can mutate per-agent position / velocity.
+            // Companion to `pos`; written by `set_pos` / `set_vel`.
+            (NamespaceId::Agents, "vel") => Some((1, IrType::Vec3)),
+            (NamespaceId::Agents, "set_pos") => Some((2, IrType::Unknown)),
+            (NamespaceId::Agents, "set_vel") => Some((2, IrType::Unknown)),
             (NamespaceId::Agents, "hp") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "max_hp") => Some((1, IrType::F32)),
             (NamespaceId::Agents, "shield_hp") => Some((1, IrType::F32)),

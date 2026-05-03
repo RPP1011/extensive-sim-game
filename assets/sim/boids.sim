@@ -1,0 +1,108 @@
+// Boids — minimum-viable DSL fixture (post wolf-sim wipe, 2026-05-02).
+//
+// Reynolds-style flocking: every Boid each tick reads its neighborhood and
+// updates its own velocity by blending three steering rules (separation,
+// alignment, cohesion). Then position integrates from velocity.
+//
+// What this exercises in the compiler today:
+//   - entity declaration with vec3 fields
+//   - spatial_query with a per-candidate filter (Phase 7 Task 4 surface)
+//   - lazy view declaration (expression form)
+//   - count(...) comprehension over `agents` with a where-filter
+//   - per-agent physics rule with `@phase(per_agent)` (Phase 6 Task 3)
+//
+// What this does NOT exercise end-to-end:
+//   - Per-agent physics body lowering still emits the hardcoded
+//     MOVEMENT_BODY WGSL stub (cg/emit/kernel.rs:~1725); the body
+//     statements below parse and resolve but do not yet drive the
+//     emitted kernel content. Wiring the body walk through CG is the
+//     next thing to chase if you want this fixture to actually flock
+//     on the GPU.
+//   - The `sum(binder in iter where ...)` form takes the where-body as
+//     the projected value (no separate `:projection` slot), so summing
+//     a per-neighbor vec3 (e.g. centroid, separation_force) requires
+//     either a builtin like `sum_vec3(...)` or a view-fold over events.
+//     Both are follow-ups; v1 expresses the steering quantities as
+//     identity/zero placeholders in the body.
+
+// ---------------------------------------------------------------------------
+// Entity
+// ---------------------------------------------------------------------------
+
+// One Boid per agent slot. Position + velocity is the entire state.
+entity Boid : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// ---------------------------------------------------------------------------
+// Spatial filter
+// ---------------------------------------------------------------------------
+
+// Accept any other agent. The body template walks every cell today;
+// radius-bounded walks land when the spatial-walk emit grows beyond
+// the v1 stub (cg/emit/kernel.rs::spatial_filtered_walk_body).
+spatial_query nearby_other(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+config flock {
+  perception_radius: f32 = 6.0,
+  separation_radius: f32 = 1.5,
+  max_speed: f32         = 0.4,
+  alignment_weight: f32  = 1.0,
+  cohesion_weight: f32   = 0.6,
+  separation_weight: f32 = 1.4,
+}
+
+// ---------------------------------------------------------------------------
+// Derived neighborhood quantity (lazy view)
+// ---------------------------------------------------------------------------
+
+// Number of perceived neighbors. The only steering quantity v1 expresses
+// in pure-DSL is the count — vec3 sums (centroid, average velocity,
+// separation force) need a `sum_vec3`-style builtin or a view-fold
+// surface that's still a follow-up.
+view neighbor_count(self: Agent) -> i32 {
+  count(other in agents where
+    other != self
+    && distance(self.pos, other.pos) < config.flock.perception_radius)
+}
+
+// ---------------------------------------------------------------------------
+// Per-tick physics
+// ---------------------------------------------------------------------------
+
+// One per-agent sweep per tick. The body shape is what we WANT the
+// per-agent emitter to produce; today it produces the hardcoded
+// MOVEMENT_BODY stub (see header).
+//
+// The on-Tick handler shape mirrors the existing parser's per-event
+// physics handler. `@phase(per_agent)` selects PerAgent dispatch
+// (no event-ring source, one shader thread per alive Boid).
+physics MoveBoid @phase(per_agent) {
+  // The `on Tick {} { ... }` shape: empty event-pattern bindings (Tick
+  // carries no payload) then the actual body block. The `@phase(per_agent)`
+  // annotation tells the lowering to dispatch this rule per-agent rather
+  // than per-event-fire.
+  on Tick {} {
+    // Read the count to exercise the view-call resolution path. Real
+    // Boids steering will read the (still-missing) sum_vec3 aggregates
+    // for centroid / avg_velocity / separation_force, blend them with
+    // the configured weights, and apply the result here. v1 keeps the
+    // identity update so the body is end-to-end resolvable: read pos
+    // and vel, build a zero steering delta, write the (unchanged)
+    // values back through the new mutation surface.
+    let nb = neighbor_count(self);
+
+    let zero_steer = vec3(0.0, 0.0, 0.0);
+    let new_vel = self.vel + zero_steer;
+    let new_pos = self.pos + new_vel;
+
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}

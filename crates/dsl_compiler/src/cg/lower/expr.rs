@@ -1491,6 +1491,31 @@ fn lower_builtin_call(
             span,
             ctx,
         ),
+        Builtin::Vec3 => {
+            // `vec3(x, y, z)` — three F32 operands → Vec3F32 result.
+            // BuiltinId::Vec3Ctor's signature() enforces the operand
+            // types at type-check time; the lowering just records the
+            // CgExpr::Builtin shape with the three arg ids.
+            expect_arity(builtin, 3, args.len(), span)?;
+            for arg_ty in &arg_tys {
+                if *arg_ty != CgTy::F32 {
+                    return Err(LoweringError::IllTypedExpression {
+                        expected: CgTy::F32,
+                        got: *arg_ty,
+                        span,
+                    });
+                }
+            }
+            add(
+                ctx,
+                CgExpr::Builtin {
+                    fn_id: BuiltinId::Vec3Ctor,
+                    args: arg_ids,
+                    ty: CgTy::Vec3F32,
+                },
+                span,
+            )
+        }
         // Already filtered above.
         Builtin::Forall | Builtin::Exists | Builtin::Count | Builtin::Sum => {
             unreachable!("filtered earlier in lower_builtin_call")
