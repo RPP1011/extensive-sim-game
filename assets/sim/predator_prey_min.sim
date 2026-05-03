@@ -59,8 +59,12 @@ config hunt {
   strike_radius:  f32 = 1.5,
   prey_speed:     f32 = 0.5,
   predator_speed: f32 = 0.6,
-  chase_weight:   f32 = 0.005,
-  flee_weight:    f32 = 0.008,
+  // N²-fold sums over all opposite-creature agents; with ~32 agents
+  // per side at the smoke scale, weights are scaled down so the
+  // per-tick velocity delta stays in roughly the prey/predator_speed
+  // range (otherwise the feedback explodes within a few ticks).
+  chase_weight:   f32 = 0.0001,
+  flee_weight:    f32 = 0.00015,
 }
 
 // Spatial filter for prey within strike distance. The compiler routes
@@ -148,45 +152,38 @@ invariant bounded_kill_count(a: Agent) @debug_only {
 // sets each spawned agent's CreatureType slot to its EntityRef
 // discriminant so the comparison resolves correctly per agent.
 
-// Stage-12 sketch: chase/flee folds over `spatial.nearby_other` are
-// staged but commented out — the runtime crate doesn't yet wire the
-// spatial-grid buffers (build_hash + scan + scatter dispatch chain
-// + the cell-tile cooperative-load infrastructure boids uses). When
-// the runtime adopts that path, uncomment the bodies below and the
-// integration drops back in.
-//
-//   physics MoveHare @phase(per_agent) {
-//     on Tick {} where (self.creature_type == Hare) {
-//       let flee_force = sum(other in spatial.nearby_other(self) where
-//         if (other.creature_type == Wolf) { self.pos - other.pos }
-//         else { vec3(0.0, 0.0, 0.0) });
-//       let new_vel = self.vel + flee_force * config.hunt.flee_weight;
-//       let new_pos = self.pos + new_vel * config.hunt.prey_speed;
-//       agents.set_vel(self, new_vel);
-//       agents.set_pos(self, new_pos);
-//     }
-//   }
-//   physics MoveWolf @phase(per_agent) {
-//     on Tick {} where (self.creature_type == Wolf) {
-//       let chase_force = sum(other in spatial.nearby_other(self) where
-//         if (other.creature_type == Hare) { other.pos - self.pos }
-//         else { vec3(0.0, 0.0, 0.0) });
-//       let new_vel = self.vel + chase_force * config.hunt.chase_weight;
-//       let new_pos = self.pos + new_vel * config.hunt.predator_speed;
-//       agents.set_vel(self, new_vel);
-//       agents.set_pos(self, new_pos);
-//     }
-//   }
+// Hares flee — sum (self.pos - other.pos) push-away vectors over
+// every Wolf in the bare-`agents` N²-fold. The fold-binder bare-read
+// (`other != self`) resolves to `per_pair_candidate` per the
+// `lower_bare_local` Step-0 guard.
 physics MoveHare @phase(per_agent) {
   on Tick {} where (self.creature_type == Hare) {
-    let new_pos = self.pos + self.vel * config.hunt.prey_speed;
+    let flee_force = sum(other in agents where
+      if (other != self) && (other.creature_type == Wolf) {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + flee_force * config.hunt.flee_weight;
+    let new_pos = self.pos + new_vel * config.hunt.prey_speed;
+    agents.set_vel(self, new_vel);
     agents.set_pos(self, new_pos);
   }
 }
 
+// Wolves chase — sum (other.pos - self.pos) pull-toward vectors
+// over every Hare. Same fold shape, opposite direction + speed.
 physics MoveWolf @phase(per_agent) {
   on Tick {} where (self.creature_type == Wolf) {
-    let new_pos = self.pos + self.vel * config.hunt.predator_speed;
+    let chase_force = sum(other in agents where
+      if (other != self) && (other.creature_type == Hare) {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+    let new_vel = self.vel + chase_force * config.hunt.chase_weight;
+    let new_pos = self.pos + new_vel * config.hunt.predator_speed;
+    agents.set_vel(self, new_vel);
     agents.set_pos(self, new_pos);
   }
 }

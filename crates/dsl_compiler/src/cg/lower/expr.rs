@@ -1033,6 +1033,22 @@ fn lower_bare_local(
     span: Span,
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgExprId, LoweringError> {
+    // Step 0: fold-binder name takes precedence over any conflicting
+    // let-bound local registration. The resolver may have given the
+    // outer-let's LocalRef the same numeric index as the fold binder
+    // (the AST scopes are independent — one numbers within the body,
+    // the other within the fold), and `local_ids` indexes by that
+    // numeric LocalRef. Without this guard a bare-binder read like
+    // `other != self` inside `for other in agents` resolves to
+    // `local_X` (the outer let) instead of `per_pair_candidate`,
+    // producing WGSL referencing an undefined identifier. The
+    // matching guard in `lower_field` already does this — see the
+    // `IrExpr::Local(_, local_name) if fold_binder_name == local_name`
+    // arm.
+    if ctx.fold_binder_name.as_deref() == Some(name) {
+        return add(ctx, CgExpr::PerPairCandidateId, span);
+    }
+
     // Step 1: let-bound local.
     if let Some(&local_id) = ctx.local_ids.get(&local_ref) {
         let ty = ctx.local_tys.get(&local_id).copied().ok_or(
