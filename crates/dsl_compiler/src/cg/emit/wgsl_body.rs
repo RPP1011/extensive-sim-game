@@ -133,6 +133,16 @@ pub struct EmitCtx<'a> {
     /// route through `lower_op_body` — those paths stay on the
     /// default per-agent shape.
     pub dispatch: std::cell::Cell<Option<crate::cg::dispatch::DispatchShape>>,
+    /// View-fold body emit scratch: the LocalId of the last
+    /// `Let { value: EventField, ty: AgentId, … }` emitted in the
+    /// current stmt list. ViewStorage assigns ("self += value")
+    /// pick up this local as the per-row index, so
+    /// `view_storage_primary[local_<N>] += value`. Cleared on every
+    /// stmt-list emit start so cross-list state can't leak.
+    ///
+    /// Tracking via interior mutability mirrors `tile_walk_index` —
+    /// keeps the existing `&EmitCtx` signature intact.
+    pub view_target_local: std::cell::Cell<Option<u32>>,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -144,6 +154,7 @@ impl<'a> EmitCtx<'a> {
             naming: HandleNamingStrategy::Structural,
             tile_walk_index: std::cell::RefCell::new(None),
             dispatch: std::cell::Cell::new(None),
+            view_target_local: std::cell::Cell::new(None),
         }
     }
 
@@ -256,6 +267,15 @@ fn agent_ref_token(target: &AgentRef) -> String {
         AgentRef::Target(id) => format!("target_expr_{}", id.0),
         AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
     }
+}
+
+/// True iff `expr` is a `CgExpr::EventField` read — the binder
+/// extraction shape that fold-handler bodies produce when they
+/// destructure event payload fields like `on Killed { by: predator }`.
+/// Used by the per-stmt emit to recognise the per-row index local
+/// for downstream `Assign { target: ViewStorage, … }` writes.
+fn is_event_field_read(expr: &CgExpr) -> bool {
+    matches!(expr, CgExpr::EventField { .. })
 }
 
 fn view_slot_token(slot: ViewStorageSlot) -> &'static str {
@@ -910,8 +930,34 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
             // we evaluate the RHS as a phony WGSL discard so the body
             // parses; for trivial fixtures the fold loop is empty so
             // this never runs.
-            if let DataHandle::ViewStorage { .. } = target {
+            if let DataHandle::ViewStorage { view, slot } = target {
                 let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;
+                // When the surrounding stmt list captured a per-row
+                // index local (e.g. `Let local_<N> = EventField(by,
+                // AgentId)` set `view_target_local` to N), emit the
+                // accumulator add directly: `view_storage_<slot>[
+                // local_<N>] = view_storage_<slot>[local_<N>] + rhs`.
+                // Without an index local fall back to the phony
+                // discard for now — non-fold callers (e.g. driver
+                // tests) drive Assign-to-ViewStorage in shapes that
+                // don't surface a binder yet.
+                if let Some(idx_local) = ctx.view_target_local.get() {
+                    let storage = format!(
+                        "view_storage_{}",
+                        view_slot_token(*slot),
+                    );
+                    let _ = view; // structural emit names by slot
+                    // The view storage binding is `array<u32>` (see
+                    // build_view_fold_bindings) but every shipped
+                    // view today is f32-typed. Bitcast through f32
+                    // for the read-modify-write so naga's type checker
+                    // accepts the load+add+store. When non-f32 view
+                    // storage lands, this branches on the view's
+                    // element type from `view_signatures`.
+                    return Ok(format!(
+                        "{storage}[local_{idx_local}] = bitcast<u32>(bitcast<f32>({storage}[local_{idx_local}]) + ({rhs}));"
+                    ));
+                }
                 return Ok(format!("_ = ({});", rhs));
             }
             // AgentField writes emit indexed access on the shared SoA
@@ -960,6 +1006,23 @@ pub fn lower_cg_stmt_to_wgsl(stmt_id: CgStmtId, ctx: &EmitCtx) -> Result<String,
             // `IrExpr::Local` resolution lands at the expression
             // layer (Task 5.5d).
             let v = lower_cg_expr_to_wgsl(*value, ctx)?;
+            // View-fold target-row capture: when the let extracts an
+            // event field of type AgentId (the `on Killed { by:
+            // predator }` binder shape), record the local id so any
+            // subsequent ViewStorage assign in the same stmt list
+            // uses it as the per-row index. See the Assign-to-
+            // ViewStorage arm above for the consumer.
+            if matches!(ty, CgTy::AgentId) {
+                if let Some(value_node) =
+                    <CgProgram as ExprArena>::get(ctx.prog, *value)
+                {
+                    if matches!(value_node, CgExpr::Read(DataHandle::EventRing { .. }))
+                        || is_event_field_read(value_node)
+                    {
+                        ctx.view_target_local.set(Some(local.0));
+                    }
+                }
+            }
             Ok(format!(
                 "let local_{}: {} = {};",
                 local.0,
@@ -1130,6 +1193,11 @@ pub fn lower_cg_stmt_list_to_wgsl(
             arena_len,
         },
     )?;
+    // Reset per-list scratch so the view-fold target-local capture
+    // from a previous stmt list (e.g. an earlier handler in the same
+    // op) can't leak into this one. The per-stmt Let/Assign sequence
+    // re-establishes the target_local for the current list.
+    let saved_view_target = ctx.view_target_local.replace(None);
 
     // Fold-fusion pre-pass: collect every `ForEachNeighbor` in the
     // list whose `init` + `projection` are pure (no `ReadLocal`
@@ -1193,6 +1261,10 @@ pub fn lower_cg_stmt_list_to_wgsl(
         let stmt_id = list.stmts[idx];
         parts.push(lower_cg_stmt_to_wgsl(stmt_id, ctx)?);
     }
+    // Restore the outer scope's view-fold target-local capture so a
+    // nested stmt list (e.g. an If branch inside a fold body) can't
+    // permanently reset it for the surrounding handler.
+    ctx.view_target_local.set(saved_view_target);
     Ok(parts.join("\n"))
 }
 

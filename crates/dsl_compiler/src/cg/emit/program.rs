@@ -203,6 +203,7 @@ pub fn emit_cg_program(
         naming: HandleNamingStrategy::Structural,
         tile_walk_index: std::cell::RefCell::new(None),
         dispatch: std::cell::Cell::new(None),
+        view_target_local: std::cell::Cell::new(None),
     };
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {
