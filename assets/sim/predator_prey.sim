@@ -1,0 +1,367 @@
+// predator_prey — exercises the event surface (P6 mutation channel)
+// that boids deliberately skips. Two creature types with predator/prey
+// relationship; predators hunt prey; prey die via emitted Killed
+// event; per-predator kill counts accumulate via a materialized view-fold;
+// chronicled "death cry" events go through the non-replayable channel.
+//
+// Surfaces this fixture lights up that boids does not:
+//   - event declarations with payload + @replayable / @non_replayable
+//   - emit from per-agent + per-event physics rules (P6 mutation channel)
+//   - @materialized view-folds with on Event { ... } handlers
+//   - @decay on a materialized view (anchor-pattern reduction)
+//   - @lazy view that calls into stdlib (predator_prey, distance)
+//   - mask + verb composition (the Strike action)
+//   - cross-replayability split between rules in the same phase
+//     (StrikePrey is replayable; ChronicleDeath is non-replayable)
+//   - per-pair @materialized view (threat_level keyed on (a, b))
+//   - invariant with @runtime check
+//   - spatial query with @top_k bounded output
+//
+// Scale: 4 predators + 200 prey is the smoke-test config; the fixture
+// runs without modification at 1k+ prey for stress testing.
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+event Tick { }
+
+// Replayable: the kill is part of the deterministic sim record. View-folds
+// + downstream `count_kills` consumers reduce off this ring.
+@replayable
+@gpu_amenable
+event Killed {
+  by:    AgentId,
+  prey:  AgentId,
+  // Position of the kill — useful for spatial views (e.g. "killing field"
+  // density heatmap). Carries vec3 not because the event-fold needs it,
+  // but because @traced consumers want to render it.
+  pos:   vec3,
+}
+
+// Non-replayable chronicle event. Carries a free-form string for the
+// in-game journal / external log. Fired alongside Killed but routed to
+// the chronicle ring so the deterministic replay isn't sensitive to
+// chronicle prose.
+@non_replayable
+@traced
+event DeathCry {
+  victim:    AgentId,
+  killer:    AgentId,
+  utterance: String,
+}
+
+// Per-predator combat-state delta. Event-fold target for `aggression`
+// view below. Replayable because aggression drives behavior; the
+// view-fold sums these into a per-tick decay-anchored value.
+@replayable
+@gpu_amenable
+event AggressionTick {
+  predator: AgentId,
+  delta:    f32,
+}
+
+// ---------------------------------------------------------------------------
+// Entities
+// ---------------------------------------------------------------------------
+
+entity Hare : Agent {
+  creature_type:        Hare,
+  capabilities:         Capabilities {
+    channels:    [PackSignal],
+    languages:   [],
+    can_fly:     false,
+    can_build:   false,
+    can_trade:   false,
+    can_climb:   false,
+    can_tunnel:  true,
+    can_marry:   false,
+    max_spouses: 0,
+  },
+  default_personality:  Personality::skittish,
+  default_needs:        Needs::default,
+  hunger_drives:        [Forage],
+  default_memberships:  [],
+  predator_prey:        { prey_of: [Wolf, Eagle], preys_on: [] },
+}
+
+entity Wolf : Agent {
+  creature_type:        Wolf,
+  capabilities:         Capabilities {
+    channels:    [PackSignal, Speech],
+    languages:   [],
+    can_fly:     false,
+    can_build:   false,
+    can_trade:   false,
+    can_climb:   false,
+    can_tunnel:  false,
+    can_marry:   true,
+    max_spouses: 1,
+  },
+  default_personality:  Personality::aggressive,
+  default_needs:        Needs::default,
+  hunger_drives:        [Hunt],
+  default_memberships:  [GroupSpec { kind: Pack, size: 6 }],
+  predator_prey:        { prey_of: [], preys_on: [Hare] },
+}
+
+// ---------------------------------------------------------------------------
+// Spatial queries
+// ---------------------------------------------------------------------------
+
+@spatial(radius = config.hunt.perception_radius, kind = [Agent])
+@top_k(8)
+query nearby_agents(self: Agent, radius: f32) -> [Agent]
+sort_by distance(self, _) limit 8 {
+  candidate != self
+}
+
+// Spatial filter for prey within strike distance — used by the
+// StrikePrey rule below. The compiler routes this through the existing
+// spatial-grid hash; @top_k(1) means only the single closest prey is
+// considered (so each predator emits at most one Killed per tick).
+@spatial(radius = config.hunt.strike_radius, kind = [Agent])
+@top_k(1)
+query closest_prey(self: Agent) -> [Agent]
+sort_by distance(self, _) limit 1 {
+  candidate != self
+  && predator_prey(self.creature_type, candidate.creature_type)
+  && candidate.alive
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+config hunt {
+  perception_radius:    f32 = 12.0,
+  strike_radius:        f32 = 1.5,
+  flee_radius:          f32 = 8.0,
+  prey_speed:           f32 = 0.5,
+  predator_speed:       f32 = 0.6,
+  predator_max_kills:   u32 = 32,
+  aggression_per_kill:  f32 = 1.0,
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+
+// Lazy: pure function over creature types + memberships. Consumed by
+// the StrikePrey mask below + by the `nearby_threats` query above.
+@lazy
+view is_prey_of(self: Agent, candidate: Agent) -> bool {
+  predator_prey(self.creature_type, candidate.creature_type)
+}
+
+// Materialized + decaying: per-predator kill count, decays at 0.95/tick
+// so a recently-prolific hunter ranks higher than one that killed long ago.
+// Drives downstream "predator pride" and "pack-leader" scoring (not
+// modelled in this fixture but the hook is here).
+@materialized(on_event = [Killed])
+@decay(rate = 0.95, per = tick)
+view kill_count(by: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { by: predator } where predator == by { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
+
+// Pair-storage materialized view: how aggressive predator `a` has been
+// toward prey `b` recently. Fed by AggressionTick events; decays per tick.
+// Pair-keyed views exercise the spatial pair-storage emit path.
+@materialized(on_event = [Killed],
+              storage = pair_map)
+@decay(rate = 0.98, per = tick)
+view predator_focus(a: Agent, b: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { by: predator, prey: victim } where predator == a && victim == b {
+    self += 1.0
+  }
+  clamp: [0.0, 100.0],
+}
+
+// ---------------------------------------------------------------------------
+// Per-tick physics
+// ---------------------------------------------------------------------------
+
+// Hares flee predators within flee_radius (separation-only steering).
+@phase(post)
+physics MoveHare {
+  on Tick {} where self.creature_type == Hare {
+    let flee_force = sum(other in spatial.nearby_agents(self, config.hunt.flee_radius) where
+      if is_prey_of(self, other) && distance(self.pos, other.pos) < config.hunt.flee_radius {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+
+    let new_vel = self.vel + flee_force * 0.2;
+    let new_pos = self.pos + new_vel;
+
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// Wolves chase nearest visible prey.
+@phase(post)
+physics MoveWolf {
+  on Tick {} where self.creature_type == Wolf {
+    let chase_target = sum(other in spatial.nearby_agents(self, config.hunt.perception_radius) where
+      if is_prey_of(other, self) && other.alive {
+        other.pos - self.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+
+    let new_vel = self.vel + chase_target * 0.1;
+    let new_pos = self.pos + new_vel;
+
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// Per-tick strike: each wolf checks for the closest hare within
+// strike_radius, emits Killed (+ DeathCry, + AggressionTick) if found.
+// @phase(event) so it runs after all movement (post phase) commits.
+@phase(event)
+@must_preserve(no_double_kill)
+physics StrikePrey {
+  on Tick {} where self.creature_type == Wolf {
+    for prey in spatial.closest_prey(self) {
+      emit Killed {
+        by:   self,
+        prey: prey,
+        pos:  self.pos,
+      }
+      emit AggressionTick {
+        predator: self,
+        delta:    config.hunt.aggression_per_kill,
+      }
+    }
+  }
+}
+
+// Chronicle emission. Splits to the non-replayable ring (@phase(post)
+// so the kill event has already landed). Shows cross-replayability
+// split: this rule fires off the same Killed event but emits to a
+// different ring with a String payload that's forbidden on replayable
+// events.
+@phase(post)
+physics ChronicleDeath {
+  on Killed { by: hunter, prey: victim, pos: _ } {
+    emit DeathCry {
+      victim:    victim,
+      killer:    hunter,
+      utterance: "the chase ends in stillness",
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Masks + verbs
+// ---------------------------------------------------------------------------
+
+// The Strike action is gated by: target alive, target is prey of self,
+// distance under strike_radius. Composed into the standard primitive
+// vocabulary via a `verb` declaration below.
+mask Strike(t)
+  when t.alive
+     ∧ is_prey_of(self, t)
+     ∧ distance(self.pos, t.pos) < config.hunt.strike_radius
+
+// `verb` composition: bundles the mask, an emit cascade, and a scoring
+// weight into a named gameplay action. Wolves' utility backend uses
+// Strike's score to pick targets when multiple prey are in range.
+verb Strike(self, target: Agent) =
+  action AttackTarget(target: target)
+  when  is_prey_of(self, target)
+      ∧ distance(self.pos, target.pos) < config.hunt.strike_radius
+  emit  Killed { by: self, prey: target, pos: self.pos }
+  score 1.0 + 0.5 * kill_count(self) + 0.2 * predator_focus(self, target)
+
+// ---------------------------------------------------------------------------
+// Scoring (utility backend)
+// ---------------------------------------------------------------------------
+
+scoring Wolf {
+  // Per-predator action-utility table. Personality weights bias toward
+  // aggressive vs defensive choices.
+  row Strike per_target {
+    base:        2.0,
+    weights:     personality.aggression * 1.5
+                + personality.hunger * 1.2,
+    cooldown:    0,  // wolves can strike every tick that has prey in range
+  }
+
+  row Hold {
+    base:        0.5,
+    weights:     personality.caution,
+  }
+
+  row Wander {
+    base:        1.0,
+    weights:     personality.curiosity,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Invariants
+// ---------------------------------------------------------------------------
+
+// A wolf cannot kill the same prey twice in one tick (well-defined
+// because the StrikePrey rule's @top_k(1) closest_prey query returns
+// at most one target per tick — but defending in depth here so a
+// future StrikePrey body change can't silently violate it).
+invariant no_double_kill(a: Agent) @runtime {
+  count(e in events.this_tick where e.kind == Killed && e.by == a) <= 1
+}
+
+// Bounded population: no predator should accumulate more than
+// `predator_max_kills` over the entire run (sanity check on runaway
+// hunting that would exhaust prey).
+invariant bounded_kill_count(a: Agent) @debug_only {
+  kill_count(a) < (config.hunt.predator_max_kills as f32)
+}
+
+// ---------------------------------------------------------------------------
+// Probes
+// ---------------------------------------------------------------------------
+
+// Regression: in the standard 4-wolf / 200-hare seeded scenario, prey
+// population should drop monotonically (no wolves spontaneously
+// disappearing). Behavioural check evaluated against seeded trajectory.
+probe prey_population_decreases {
+  scenario:  "scenarios/predator_prey/baseline_4w_200h.toml",
+  seed:      0xDEAD_BEEF,
+  ticks:     1000,
+  assert:    forall t in 1..ticks:
+                count(a in agents where a.creature_type == Hare && a.alive at t)
+                <= count(a in agents where a.creature_type == Hare && a.alive at t-1),
+}
+
+// Regression: at least one kill should happen by tick 100 with the
+// default hunt config. Catches regressions in spatial-query routing
+// or strike radius.
+probe at_least_one_kill_by_100 {
+  scenario:  "scenarios/predator_prey/baseline_4w_200h.toml",
+  seed:      0xCAFE_F00D,
+  ticks:     100,
+  assert:    count(e in events.range(0, 100) where e.kind == Killed) >= 1,
+}
+
+// ---------------------------------------------------------------------------
+// Metrics (runtime observability)
+// ---------------------------------------------------------------------------
+
+metric kills_per_tick {
+  value:           count(e in events.this_tick where e.kind == Killed),
+  emit_every:      1,
+}
+
+metric pack_aggression {
+  value:           mean(kill_count(a) for a in agents where a.creature_type == Wolf),
+  emit_every:      10,
+  alert_when:      pack_aggression > 50.0,
+}

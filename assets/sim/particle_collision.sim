@@ -1,0 +1,240 @@
+// particle_collision — exercises the per-pair dispatch + atomic
+// event-ring append + view-fold accumulator pattern that boids skips.
+// Each pair of overlapping particles emits one Collision event; a
+// per-particle materialized view-fold accumulates collision counts +
+// the integrated impulse the particle has absorbed.
+//
+// Surfaces this fixture lights up that boids does not:
+//   - per-pair physics rule (PerPairSource::SpatialQuery → FilteredWalk)
+//   - atomic event-ring append from a per-pair kernel (P11 reduction
+//     determinism: the emit-order across pairs must be stable across
+//     backends, which means sorted-pair-emit + tick-seq tagging)
+//   - @materialized view-fold with a vec3 accumulator (sum of impulse
+//     vectors, not just scalar counts) — exercises commutative-but-not-
+//     associative float-vec reduction with the sort-by-target pinned-
+//     order strategy
+//   - @gpu_amenable event with mixed scalar + vec3 payload
+//   - cross-tick read-write pattern: this-tick emit → next-tick view
+//     read (the per-particle bounce_force is computed from last-tick's
+//     accumulated impulse and applied this tick)
+//
+// Scale: smoke-test runs 1k particles at separation_radius=0.5; stress
+// runs 100k at the density-aware bench harness's spread.
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+event Tick { }
+
+// One Collision event per (a, b) pair with a < b. Atomic-append into
+// the collision ring; the view-fold below sums the impulse onto each
+// particle's bounce_force. Sorted by target_id (a → b) pre-reduction
+// for deterministic float sums (see P11).
+@replayable
+@gpu_amenable
+@high_volume                   // collision rings are dense at small radii
+event Collision {
+  a:        AgentId,
+  b:        AgentId,
+  // Per-pair impulse vector (a's perspective; b receives -impulse via
+  // a sibling Collision event in the symmetric direction). Carrying
+  // the impulse as part of the event payload — vs. recomputing it in
+  // the view-fold — keeps the event ring self-contained and lets the
+  // chronicle replay reconstruct exact dynamics without re-walking
+  // pos/vel state.
+  impulse:  vec3,
+}
+
+// ---------------------------------------------------------------------------
+// Entity
+// ---------------------------------------------------------------------------
+
+entity Particle : Agent {
+  creature_type:        Particle,
+  capabilities:         Capabilities {
+    channels:    [],
+    languages:   [],
+    can_fly:     true,           // particles aren't gravity-bound
+    can_build:   false,
+    can_trade:   false,
+    can_climb:   false,
+    can_tunnel:  false,
+    can_marry:   false,
+    max_spouses: 0,
+  },
+  default_personality:  Personality::neutral,
+  default_needs:        Needs::none,
+  hunger_drives:        [],
+  default_memberships:  [],
+  predator_prey:        { prey_of: [], preys_on: [] },
+}
+
+// ---------------------------------------------------------------------------
+// Spatial query
+// ---------------------------------------------------------------------------
+
+// Per-particle nearby-particles query bounded by collision_radius. The
+// per-pair physics rule below uses this as the candidate source —
+// each (self, candidate) pair where the predicate accepts becomes one
+// thread of the per-pair kernel.
+@spatial(radius = config.particles.collision_radius, kind = [Agent])
+@indexed_on(pos)
+query nearby_particles(self: Agent, radius: f32) -> [Agent]
+sort_by candidate.id limit 32 {                          // tile-budget cap
+  candidate != self
+  // Sort key on `candidate.id` (not distance) ensures the per-pair
+  // emit order is stable across runs — required for P11 reduction
+  // determinism on the impulse view-fold below.
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+config particles {
+  collision_radius:   f32 = 0.5,
+  bounce_strength:    f32 = 0.4,
+  damping:            f32 = 0.99,
+  max_speed:          f32 = 1.5,
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+
+// Per-particle collision count over the whole run (no decay) —
+// useful as a long-tail metric for bench reproducibility checks.
+@materialized(on_event = [Collision])
+view collision_count(p: Agent) -> i32 {
+  initial: 0,
+  on Collision { a: agent }     where agent == p { self += 1 }
+  on Collision { b: agent }     where agent == p { self += 1 }
+  clamp: [0, 1000000],
+}
+
+// Per-particle accumulated impulse for THIS TICK (decay rate 0 = full
+// reset every tick — view-storage holds only the latest tick's sum).
+// The MoveParticle physics rule below reads this to compute the
+// bounce response.
+//
+// Vec3 reductions need the sort-by-target pre-pass (P11) to stay
+// deterministic across backends. The compiler emit applies that
+// automatically when the storage type is vec3 and the on-Event
+// handler reduces with `+=`.
+@materialized(on_event = [Collision])
+@decay(rate = 0.0, per = tick)        // full reset each tick
+view impulse_received(p: Agent) -> vec3 {
+  initial: vec3(0.0, 0.0, 0.0),
+  on Collision { a: agent, impulse: imp } where agent == p { self += imp }
+  // Symmetric: when this particle is `b`, it receives the opposite
+  // impulse direction.
+  on Collision { b: agent, impulse: imp } where agent == p { self += -imp }
+  clamp_norm: 100.0,
+}
+
+// ---------------------------------------------------------------------------
+// Physics rules
+// ---------------------------------------------------------------------------
+
+// Per-pair collision detection. PerPair dispatch over the spatial-query
+// candidate stream — each (self, candidate) thread checks the radius
+// gate and, if it passes AND self.id < candidate.id, emits one
+// Collision event for the pair.
+//
+// The `self.id < candidate.id` guard makes the emit single-counted
+// per (a, b) pair; without it a 2-thread race would both emit
+// (a, b) and (b, a) and the view-fold would double-count.
+@phase(event)
+physics DetectCollisions {
+  on Tick {} {
+    for other in spatial.nearby_particles(self, config.particles.collision_radius) {
+      if self.id < other.id
+         && distance(self.pos, other.pos) < config.particles.collision_radius {
+        let direction = normalize(self.pos - other.pos);
+        emit Collision {
+          a:       self,
+          b:       other,
+          impulse: direction * config.particles.bounce_strength,
+        }
+      }
+    }
+  }
+}
+
+// Per-particle integrate. Reads last-tick's impulse_received (set by
+// the previous tick's DetectCollisions + view-fold), applies it to
+// velocity, integrates position. Damping keeps energy bounded so the
+// fixture doesn't explode.
+@phase(post)
+physics MoveParticle {
+  on Tick {} {
+    let bounce = impulse_received(self);
+    let new_vel = (self.vel + bounce) * config.particles.damping;
+    let clamped_vel = if length(new_vel) > config.particles.max_speed {
+      normalize(new_vel) * config.particles.max_speed
+    } else {
+      new_vel
+    };
+    let new_pos = self.pos + clamped_vel;
+
+    agents.set_vel(self, clamped_vel);
+    agents.set_pos(self, new_pos);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Invariants
+// ---------------------------------------------------------------------------
+
+// Energy is bounded — no particle should exceed max_speed after the
+// damping/clamp in MoveParticle.
+invariant velocity_bounded(p: Agent) @runtime {
+  length(p.vel) <= config.particles.max_speed * 1.001  // 0.1% slack for fp
+}
+
+// No self-collision: the DetectCollisions rule's id-guard should
+// prevent any Collision { a: x, b: x }. Defense in depth.
+invariant no_self_collision() @debug_only {
+  forall e in events.this_tick where e.kind == Collision: e.a != e.b
+}
+
+// ---------------------------------------------------------------------------
+// Probes
+// ---------------------------------------------------------------------------
+
+// Determinism regression: re-running the same seed produces a bit-
+// exact event stream up to N ticks. Exercises P11 (sort-then-fold
+// reduction order on the impulse view-fold).
+probe deterministic_collision_stream {
+  scenario:  "scenarios/particle_collision/baseline_1k.toml",
+  seed:      0xDEAD_BEEF,
+  ticks:     500,
+  assert:    forall (run_a, run_b) in [(0xDEAD_BEEF, 0xDEAD_BEEF)]:
+                events.kind_count(Collision, run_a) == events.kind_count(Collision, run_b)
+             && forall t in 0..500:
+                events.at_tick(t, run_a) == events.at_tick(t, run_b),
+}
+
+// Sanity: collision count is non-zero by tick 50. Catches regressions
+// in spatial-query routing or radius gating.
+probe collisions_happen_by_50 {
+  scenario:  "scenarios/particle_collision/baseline_1k.toml",
+  seed:      0xCAFE_F00D,
+  ticks:     50,
+  assert:    sum(collision_count(p) for p in agents) >= 100,
+}
+
+// ---------------------------------------------------------------------------
+// Metrics
+// ---------------------------------------------------------------------------
+
+metric collisions_per_tick {
+  value:           count(e in events.this_tick where e.kind == Collision),
+  emit_every:      1,
+}
+
+metric mean_kinetic_energy {
+  value:           mean(0.5 * length(p.vel) * length(p.vel) for p in agents),
+  emit_every:      10,
+}

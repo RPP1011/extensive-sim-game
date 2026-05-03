@@ -1,0 +1,383 @@
+// crowd_navigation — agents path toward per-agent goals while avoiding
+// each other. Closer to "actual game agent" than boids (which is a
+// swarm with no per-agent intent). Exercises the per-agent state-machine
+// + group-cohesion + invariant patterns the combat-sim eventually needs.
+//
+// Surfaces this fixture lights up that boids + predator_prey skip:
+//   - per-agent goal state stored in an AgentField (move_target: vec3)
+//   - mode-switching via @materialized state-machine view (Walking →
+//     Arrived → Wandering)
+//   - groups: Walkers travel in named groups; the group's destination
+//     bumps as the leader moves
+//   - quest-style goal handoff: groups can post / accept Travel quests
+//     that re-target every member's move_target
+//   - utility-backend scoring with cross-entity references (this walker
+//     scores its options against the group's mood)
+//   - hierarchical invariants (no walker ends up >MAX_LAG behind its
+//     group's centroid)
+//
+// Scale: 200 walkers in 8 groups is the smoke-test config; the
+// fixture is the closest to a tactical RPG party-of-units shape.
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+event Tick { }
+
+@replayable
+@gpu_amenable
+event GoalReached {
+  walker:    AgentId,
+  group:     GroupId,
+  pos:       vec3,
+}
+
+// Group-level event: the leader chose a new destination, every member
+// inherits it via the GoalAssign view-fold below.
+@replayable
+event NewGroupGoal {
+  group:     GroupId,
+  goal:      vec3,
+  poser:     AgentId,
+}
+
+@replayable
+event Stuck {
+  walker:    AgentId,
+  // How long has this walker been < min_progress moving away from
+  // last position? Drives a Stuck mode below.
+  ticks:     u32,
+}
+
+// ---------------------------------------------------------------------------
+// Entities
+// ---------------------------------------------------------------------------
+
+entity Walker : Agent {
+  creature_type:        Walker,
+  capabilities:         Capabilities {
+    channels:    [Speech],
+    languages:   [Common],
+    can_fly:     false,
+    can_build:   false,
+    can_trade:   true,
+    can_climb:   true,
+    can_tunnel:  false,
+    can_marry:   true,
+    max_spouses: 1,
+  },
+  default_personality:  Personality::neutral,
+  default_needs:        Needs::default,
+  hunger_drives:        [Forage, Social],
+  default_memberships:  [GroupSpec { kind: TravelParty, size: 8 }],
+  predator_prey:        { prey_of: [], preys_on: [] },
+}
+
+// ---------------------------------------------------------------------------
+// Spatial queries
+// ---------------------------------------------------------------------------
+
+@spatial(radius = config.nav.separation_radius, kind = [Agent])
+@indexed_on(pos)
+query nearby_walkers(self: Agent, radius: f32) -> [Agent]
+sort_by candidate.id limit 16 {
+  candidate != self
+}
+
+@spatial(radius = config.nav.lookahead_radius, kind = [Agent])
+@top_k(4)
+query path_obstructions(self: Agent, radius: f32) -> [Agent]
+sort_by distance(self, _) limit 4 {
+  candidate != self
+  // Only count walkers between self and goal as obstructions
+  && dot(candidate.pos - self.pos, normalize(self.move_target - self.pos)) > 0.0
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+config nav {
+  arrival_radius:        f32 = 0.5,
+  separation_radius:     f32 = 1.0,
+  lookahead_radius:      f32 = 4.0,
+  max_speed:             f32 = 0.4,
+  goal_weight:           f32 = 0.6,
+  separation_weight:     f32 = 1.5,
+  cohesion_weight:       f32 = 0.3,    // pull toward group centroid
+  stuck_threshold_ticks: u32 = 30,
+  min_progress_per_tick: f32 = 0.02,
+}
+
+// ---------------------------------------------------------------------------
+// Views
+// ---------------------------------------------------------------------------
+
+// Per-walker mode: Walking | Arrived | Stuck. State machine driven
+// by GoalReached + Stuck events. The MoveWalker rule below dispatches
+// on this mode.
+@materialized(on_event = [GoalReached, Stuck, NewGroupGoal])
+view walker_mode(w: Agent) -> WalkerMode {
+  initial: Walking,
+  on GoalReached { walker: agent } where agent == w        { self = Arrived }
+  on Stuck       { walker: agent } where agent == w        { self = Stuck }
+  on NewGroupGoal { group: g }     where w.group_id == g   { self = Walking }
+}
+
+// Per-walker stuck-counter: how many consecutive ticks has this
+// walker moved less than min_progress_per_tick. Lazily folded over
+// the position-delta history (engine maintains the per-tick delta).
+@materialized(on_event = [Tick])
+view stuck_ticks(w: Agent) -> u32 {
+  initial: 0,
+  on Tick {} where w.last_progress < config.nav.min_progress_per_tick { self += 1 }
+  on Tick {} where w.last_progress >= config.nav.min_progress_per_tick { self = 0 }
+  clamp: [0, 1000],
+}
+
+// Per-group centroid — the average of every member walker's position.
+// Materialized + recomputed each tick (cheap for small groups).
+@materialized(on_event = [Tick])
+view group_centroid(g: Group) -> vec3 {
+  initial: vec3(0.0, 0.0, 0.0),
+  on Tick {} {
+    self = mean(member.pos for member in g.members)
+  }
+}
+
+// Lazy: how cohesive is this walker's group right now? Used as
+// scoring weight — walkers score Wait higher when their group is
+// fragmented (so they wait for stragglers).
+@lazy
+view group_cohesion(w: Agent) -> f32 {
+  let centroid = group_centroid(w.group);
+  let max_lag = max(distance(member.pos, centroid) for member in w.group.members);
+  1.0 / (1.0 + max_lag)
+}
+
+// ---------------------------------------------------------------------------
+// Per-tick physics
+// ---------------------------------------------------------------------------
+
+// Default movement: blend goal-seek + separation + group-cohesion.
+// Hold on Arrived. Detour around obstructions on Stuck.
+@phase(post)
+physics MoveWalker {
+  on Tick {} {
+    let to_goal = self.move_target - self.pos;
+    let goal_dist = distance(self.pos, self.move_target);
+
+    // Separation force from nearby walkers
+    let separation = sum(other in spatial.nearby_walkers(self, config.nav.separation_radius) where
+      if distance(self.pos, other.pos) < config.nav.separation_radius {
+        self.pos - other.pos
+      } else {
+        vec3(0.0, 0.0, 0.0)
+      });
+
+    // Cohesion: pull toward group centroid (bounded — only fires
+    // when the walker is far from the group, avoiding constant pull
+    // when already centered).
+    let centroid = group_centroid(self.group);
+    let cohesion = if distance(self.pos, centroid) > config.nav.lookahead_radius {
+      centroid - self.pos
+    } else {
+      vec3(0.0, 0.0, 0.0)
+    };
+
+    let new_vel = match walker_mode(self) {
+      Walking => {
+        if goal_dist < config.nav.arrival_radius {
+          vec3(0.0, 0.0, 0.0)
+        } else {
+          to_goal * config.nav.goal_weight
+            + separation * config.nav.separation_weight
+            + cohesion * config.nav.cohesion_weight
+        }
+      },
+      Arrived => vec3(0.0, 0.0, 0.0),
+      Stuck => {
+        // Sidestep: push perpendicular to goal direction
+        let perp = vec3(-to_goal.z, 0.0, to_goal.x);
+        normalize(perp) * config.nav.max_speed * 0.5
+          + separation * config.nav.separation_weight
+      },
+    };
+
+    let clamped_vel = if length(new_vel) > config.nav.max_speed {
+      normalize(new_vel) * config.nav.max_speed
+    } else {
+      new_vel
+    };
+    let new_pos = self.pos + clamped_vel;
+
+    agents.set_vel(self, clamped_vel);
+    agents.set_pos(self, new_pos);
+
+    // Goal arrival check: emit GoalReached when within arrival_radius.
+    // Per-agent emit (not per-pair) so it fires at most once per
+    // walker per tick.
+    if goal_dist < config.nav.arrival_radius
+       && walker_mode(self) == Walking {
+      emit GoalReached {
+        walker: self,
+        group:  self.group,
+        pos:    self.pos,
+      }
+    }
+  }
+}
+
+// Stuck detection — emits Stuck event when the per-walker stuck-tick
+// counter passes the threshold. The view-fold above flips
+// walker_mode to Stuck on this event.
+@phase(post)
+physics DetectStuck {
+  on Tick {} where stuck_ticks(self) >= config.nav.stuck_threshold_ticks
+                && walker_mode(self) == Walking {
+    emit Stuck { walker: self, ticks: stuck_ticks(self) }
+  }
+}
+
+// Group-leader goal-handoff. When the group's centroid is within
+// arrival_radius of its current goal AND every member is Arrived,
+// the leader picks a new goal and broadcasts via NewGroupGoal.
+// (Goal selection is mocked here as `next_waypoint(self.group)` —
+// real implementation would consult quest state or random landmarks.)
+@phase(event)
+physics PickNewGroupGoal {
+  on Tick {} where self.is_group_leader
+                && distance(group_centroid(self.group), self.move_target) < config.nav.arrival_radius
+                && forall m in self.group.members: walker_mode(m) == Arrived {
+    let next = next_waypoint(self.group);
+    emit NewGroupGoal {
+      group: self.group,
+      goal:  next,
+      poser: self,
+    }
+  }
+}
+
+// On NewGroupGoal: every member walker re-targets its move_target.
+// Per-event physics rule iterating the group's members.
+@phase(post)
+physics AssignGoal {
+  on NewGroupGoal { group: g, goal: dest, poser: _ } {
+    for member in g.members {
+      agents.set_move_target(member, dest);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Masks + verbs
+// ---------------------------------------------------------------------------
+
+// Wait action — walker holds in place. Higher utility when the group
+// is fragmented (group_cohesion is low) so stragglers can catch up.
+mask Wait when self.alive
+mask MoveTo(t: vec3) when self.alive ∧ distance(self.pos, t) > config.nav.arrival_radius
+
+// Compose into the standard primitive vocabulary.
+verb Wait(self) =
+  action Hold
+  when  self.alive
+  emit  // (none — passive action)
+  score 0.5 + 0.5 * (1.0 - group_cohesion(self))
+
+verb MoveToward(self, t: vec3) =
+  action MoveToward(target: t)
+  when  distance(self.pos, t) > config.nav.arrival_radius
+  emit  // (movement is per-tick physics; verb just biases scoring)
+  score 1.0 + 0.3 * group_cohesion(self)
+
+// ---------------------------------------------------------------------------
+// Scoring
+// ---------------------------------------------------------------------------
+
+scoring Walker {
+  row Wait {
+    base:        0.5,
+    weights:     personality.patience
+                + 0.5 * (1.0 - group_cohesion(self)),
+  }
+
+  row MoveToward per_target {
+    base:        1.5,
+    weights:     personality.ambition * group_cohesion(self),
+  }
+
+  row Wander {
+    base:        0.2,
+    weights:     personality.curiosity,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Invariants
+// ---------------------------------------------------------------------------
+
+// No walker ends up more than MAX_LAG units behind its group's centroid.
+// If this fires the cohesion weight needs tuning OR the group needs to
+// wait for stragglers.
+invariant group_cohesion_bounded(w: Agent) @runtime {
+  distance(w.pos, group_centroid(w.group)) < 20.0
+}
+
+// Goal arrival is monotonic — once a walker emits GoalReached for a
+// goal, it should not move past arrival_radius before the group's
+// next NewGroupGoal handoff. Catches a flickery state-machine bug.
+invariant arrival_is_sticky(w: Agent) @debug_only {
+  walker_mode(w) == Arrived ⇒
+    distance(w.pos, w.move_target) < config.nav.arrival_radius * 2.0
+}
+
+// Speed cap respected.
+invariant speed_bounded(w: Agent) @runtime {
+  length(w.vel) <= config.nav.max_speed * 1.001
+}
+
+// ---------------------------------------------------------------------------
+// Probes
+// ---------------------------------------------------------------------------
+
+// Regression: a 200-walker / 8-group seeded scenario should see every
+// group reach its first goal within 500 ticks.
+probe groups_arrive_within_500 {
+  scenario:  "scenarios/crowd_navigation/baseline_200w_8g.toml",
+  seed:      0xDEAD_BEEF,
+  ticks:     500,
+  assert:    forall g in groups where g.kind == TravelParty:
+                exists t in 0..500: events.at_tick(t).contains(NewGroupGoal { group: g, .. }),
+}
+
+// Regression: at default config, no more than 5% of walkers should
+// enter Stuck mode in a 1k-tick run on the baseline scenario. Catches
+// regressions in obstruction routing.
+probe stuck_rate_bounded {
+  scenario:  "scenarios/crowd_navigation/baseline_200w_8g.toml",
+  seed:      0xCAFE_F00D,
+  ticks:     1000,
+  assert:    count(w in agents where walker_mode(w) == Stuck) < 0.05 * count(w in agents),
+}
+
+// ---------------------------------------------------------------------------
+// Metrics
+// ---------------------------------------------------------------------------
+
+metric goals_reached_per_tick {
+  value:           count(e in events.this_tick where e.kind == GoalReached),
+  emit_every:      1,
+}
+
+metric mean_group_cohesion {
+  value:           mean(group_cohesion(w) for w in agents),
+  emit_every:      10,
+  alert_when:      mean_group_cohesion < 0.3,
+}
+
+metric stuck_walkers {
+  value:           count(w in agents where walker_mode(w) == Stuck),
+  emit_every:      10,
+}
