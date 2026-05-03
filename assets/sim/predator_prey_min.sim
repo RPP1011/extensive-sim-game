@@ -55,8 +55,10 @@ entity Wolf : Agent {
 }
 
 config hunt {
-  step_scale:    f32 = 0.5,
-  strike_radius: f32 = 1.5,
+  step_scale:     f32 = 0.5,
+  strike_radius:  f32 = 1.5,
+  prey_speed:     f32 = 0.5,
+  predator_speed: f32 = 0.6,
 }
 
 // Spatial filter for prey within strike distance. The compiler routes
@@ -125,9 +127,29 @@ invariant bounded_kill_count(a: Agent) @debug_only {
   kill_count(a) < 1000.0
 }
 
-physics MoveAlive @phase(per_agent) {
-  on Tick {} where (self.alive) {
-    let new_pos = self.pos + self.vel * config.hunt.step_scale;
+// Per-creature movement split. Both rules dispatch PerAgent over the
+// shared SoA, gated by their `where (self.creature_type == <Entity>)`
+// guard so each thread only commits writes for matching agents. The
+// schedule's cycle detector treats two PerAgent guarded rules as
+// mutually exclusive (`detect_cycles` skips read→write edges between
+// them) — sequencing them in op-id order is safe because non-matching
+// threads early-return via the If wrap.
+//
+// The `Hare` / `Wolf` operands lower to their declaration-order
+// EntityRef discriminants (Hare = 0, Wolf = 1 — same order as the
+// `entity Hare` / `entity Wolf` declarations above). The runtime
+// sets each spawned agent's CreatureType slot to its EntityRef
+// discriminant so the comparison resolves correctly per agent.
+physics MoveHare @phase(per_agent) {
+  on Tick {} where (self.creature_type == Hare) {
+    let new_pos = self.pos + self.vel * config.hunt.prey_speed;
+    agents.set_pos(self, new_pos);
+  }
+}
+
+physics MoveWolf @phase(per_agent) {
+  on Tick {} where (self.creature_type == Wolf) {
+    let new_pos = self.pos + self.vel * config.hunt.predator_speed;
     agents.set_pos(self, new_pos);
   }
 }

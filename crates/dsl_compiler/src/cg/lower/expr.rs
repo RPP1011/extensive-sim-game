@@ -559,10 +559,28 @@ pub fn lower_expr(ast: &IrExprNode, ctx: &mut LoweringCtx<'_>) -> Result<CgExprI
             ast_label: "Event",
             span,
         }),
-        IrExpr::Entity(_) => Err(LoweringError::UnsupportedAstNode {
-            ast_label: "Entity",
-            span,
-        }),
+        IrExpr::Entity(r) => {
+            // Entity-name-as-value: lower to its declaration-order
+            // discriminant. Used in `where (self.creature_type ==
+            // <EntityName>)` per-handler filters; the per-creature
+            // SoA AgentField::CreatureType (`AgentFieldTy::OptEnumU32`,
+            // CgTy::U32 at the expression layer) is compared against
+            // this constant so the where-guard's body only fires for
+            // matching agents.
+            //
+            // Discriminant convention: EntityRef.0 (declaration order
+            // index). The runtime is responsible for setting
+            // `agent.creature_type = entity_ref_index` when spawning
+            // an agent of that entity declaration. Since the
+            // EntityRef index is stable across compiles for a given
+            // .sim, the runtime can hard-code or look up the mapping
+            // off `comp.entities` order.
+            add(
+                ctx,
+                CgExpr::Lit(LitValue::U32(r.0 as u32)),
+                span,
+            )
+        }
         IrExpr::View(_) => Err(LoweringError::UnsupportedAstNode {
             ast_label: "View",
             span,

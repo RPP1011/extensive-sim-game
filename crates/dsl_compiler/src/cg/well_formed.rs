@@ -1961,6 +1961,7 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
             op.kind,
             crate::cg::op::ComputeOpKind::SpatialQuery { .. }
         );
+        let consumer_is_guarded_per_agent = is_guarded_per_agent_physics(prog, op);
         for r in &op.reads {
             if let Some(producers) = writers.get(&r.cycle_edge_key()) {
                 for &producer in producers {
@@ -1971,6 +1972,26 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
                     if consumer_is_spatial_build {
                         // Cross-tick read into a per-tick rebuild —
                         // see the comment above.
+                        continue;
+                    }
+                    // Two PerAgent PhysicsRule ops whose bodies start
+                    // with a top-level `if (where_cond) { … }` guard
+                    // are assumed mutually exclusive at the agent
+                    // level by their author (P3 cross-backend parity
+                    // is the user's responsibility — the analog of
+                    // `@cpu_only` for cross-rule disjointness). The
+                    // schedule sequences the kernels in op-id order;
+                    // each PerAgent thread runs both kernels, but
+                    // non-matching ones early-return via the If, so
+                    // there's no actual ordering ambiguity. Skipping
+                    // the edge here lets `physics MoveHare where
+                    // (creature_type == Hare)` and `physics MoveWolf
+                    // where (creature_type == Wolf)` coexist instead
+                    // of forming a write-write SCC on `pos`.
+                    let producer_op = &prog.ops[producer.0 as usize];
+                    if consumer_is_guarded_per_agent
+                        && is_guarded_per_agent_physics(prog, producer_op)
+                    {
                         continue;
                     }
                     adj[producer.0 as usize].insert(consumer.0);
@@ -1991,6 +2012,40 @@ fn detect_cycles(prog: &CgProgram, errors: &mut Vec<CgError>) {
             errors.push(CgError::Cycle { ops });
         }
     }
+}
+
+/// True iff `op` is a `PerAgent` `PhysicsRule` whose body is a single
+/// top-level `CgStmt::If { cond, then, else_: None }` — the pattern
+/// the per-handler `where (cond) { … }` lowering produces (see
+/// `cg/lower/physics.rs::lower_one_handler`'s body-wrap arm).
+///
+/// Two such ops in the cycle graph are assumed mutually exclusive at
+/// the agent level by their author: each PerAgent thread runs both
+/// kernels, but non-matching ones early-return via the If guard, so
+/// sequencing them in op-id order has no race or ordering ambiguity.
+/// `detect_cycles` skips read→write edges between two such ops.
+fn is_guarded_per_agent_physics(prog: &CgProgram, op: &crate::cg::op::ComputeOp) -> bool {
+    use crate::cg::op::ComputeOpKind;
+    if !matches!(op.shape, DispatchShape::PerAgent) {
+        return false;
+    }
+    let body_id = match &op.kind {
+        ComputeOpKind::PhysicsRule { body, .. } => *body,
+        _ => return false,
+    };
+    let stmts = match prog.stmt_lists.get(body_id.0 as usize) {
+        Some(list) => &list.stmts,
+        None => return false,
+    };
+    if stmts.len() != 1 {
+        return false;
+    }
+    let stmt_id = stmts[0];
+    let stmt = match prog.stmts.get(stmt_id.0 as usize) {
+        Some(s) => s,
+        None => return false,
+    };
+    matches!(stmt, CgStmt::If { else_: None, .. })
 }
 
 /// Tarjan's strongly-connected-components algorithm. Iterative

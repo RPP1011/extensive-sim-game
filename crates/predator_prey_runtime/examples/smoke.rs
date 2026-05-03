@@ -17,9 +17,63 @@ use predator_prey_runtime::PredatorPreyState;
 
 fn main() {
     closed_form_trajectory_check();
+    per_creature_speed_check();
     determinism_check();
     throughput_report();
     println!("[smoke] OK");
+}
+
+/// With the per-creature MoveHare / MoveWolf split (Stage 11 work
+/// after the cycle-detector relax), each agent integrates pos by its
+/// own creature's speed: prey_speed = 0.5, predator_speed = 0.6. Over
+/// N ticks the displacement ratios should differ — check the mean
+/// displacement across Hares ≠ mean across Wolves.
+fn per_creature_speed_check() {
+    let agent_count = 64u32;
+    let seed = 0xFEED_BEEF_u64;
+    let mut sim = PredatorPreyState::new(seed, agent_count);
+    let pos_t0: Vec<Vec3> = sim.positions().to_vec();
+
+    let ticks = 100u64;
+    for _ in 0..ticks {
+        sim.step();
+    }
+    let pos_tn: Vec<Vec3> = sim.positions().to_vec();
+
+    // Even slots are Hare (creature_type = 0); odd slots are Wolf
+    // (creature_type = 1). Compare mean per-agent displacement.
+    let mut hare_total = 0.0f32;
+    let mut wolf_total = 0.0f32;
+    for (slot, (a, b)) in pos_t0.iter().zip(pos_tn.iter()).enumerate() {
+        let d = (*a - *b).length();
+        if slot % 2 == 0 {
+            hare_total += d;
+        } else {
+            wolf_total += d;
+        }
+    }
+    let hare_mean = hare_total / sim.hare_count() as f32;
+    let wolf_mean = wolf_total / sim.wolf_count() as f32;
+    let ratio = wolf_mean / hare_mean;
+    println!(
+        "[smoke] per-creature: {} Hares, {} Wolves, hare_mean = {:.4}, wolf_mean = {:.4}, wolf/hare = {:.4}",
+        sim.hare_count(),
+        sim.wolf_count(),
+        hare_mean,
+        wolf_mean,
+        ratio,
+    );
+    // predator_speed (0.6) / prey_speed (0.5) = 1.2 (cleanly).
+    // Real ratio is noisy across two 32-agent populations because
+    // their random per-agent |vel| draws aren't equal — the mean
+    // displacement scales with `speed × |vel|`, so the ratio
+    // deviates from 1.2 by the |vel|_wolf / |vel|_hare bias.
+    // Tolerance window ±5% catches the speed-split signal without
+    // being noise-sensitive at this scale.
+    assert!(
+        (ratio - 1.2).abs() < 0.06,
+        "expected wolf/hare displacement ratio ≈ 1.2 (predator_speed/prey_speed), got {ratio}"
+    );
 }
 
 fn closed_form_trajectory_check() {

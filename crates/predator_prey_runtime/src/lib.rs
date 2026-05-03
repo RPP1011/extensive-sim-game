@@ -63,14 +63,29 @@ pub struct PredatorPreyState {
     gpu: GpuContext,
     pos_buf: wgpu::Buffer,
     vel_buf: wgpu::Buffer,
-    /// Per-agent `alive` flag — `array<u32>` of length `agent_count`,
-    /// initialised to 1 for every slot. The Stage 1 fixture's
-    /// `where (self.alive)` clause reads this; later stages with
-    /// despawn semantics will flip slots to 0 via emitted `Despawned`
-    /// events.
-    alive_buf: wgpu::Buffer,
+    /// Per-agent `creature_type` discriminant — `array<u32>` of
+    /// length `agent_count`. Each slot holds the EntityRef
+    /// declaration-order index for that agent (Hare=0, Wolf=1 for
+    /// pp_min). The compiler's per-handler `where (self.creature_type
+    /// == <Entity>)` lowering compares this against the
+    /// EntityRef-derived literal at the WGSL layer; the runtime is
+    /// responsible for keeping the per-slot value in sync with the
+    /// declaration order.
+    creature_type_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
     pos_staging: wgpu::Buffer,
+
+    /// Hare and Wolf shapes share a single agent_cap uniform. The
+    /// emitted PhysicsMoveHareCfg / PhysicsMoveWolfCfg structs are
+    /// byte-identical (same fields, same padding), so one buffer is
+    /// safe to bind to both kernels.
+
+    /// Per-creature counts the smoke fixtures introspect to verify
+    /// the where-guarded dispatch routed correctly. Same agent_count
+    /// total — split 50/50 between Hare (slot index even → Hare) and
+    /// Wolf (odd → Wolf) at init time.
+    hare_count: u32,
+    wolf_count: u32,
 
     cache: dispatch::KernelCache,
 
@@ -141,15 +156,33 @@ impl PredatorPreyState {
             contents: bytemuck::cast_slice(&vel_padded),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
-        // Every slot starts alive (1u32). Future stages with despawn
-        // semantics flip individual slots to 0 via emitted events.
-        let alive_init: Vec<u32> = vec![1u32; n];
-        let alive_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("predator_prey_runtime::alive"),
-            contents: bytemuck::cast_slice(&alive_init),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-        });
-        let cfg = physics_MoveAlive::PhysicsMoveAliveCfg {
+        // Per-creature-type discriminants (matches EntityRef order
+        // in `predator_prey_min.sim`: Hare = 0, Wolf = 1). 50/50
+        // split — even slots are Hare, odd slots are Wolf. The
+        // compiler emits `if (creature_type == 0u) { … }` for the
+        // MoveHare kernel and `if (creature_type == 1u) { … }` for
+        // MoveWolf, so each per-agent thread runs both kernels but
+        // commits writes for exactly one.
+        let mut creature_init: Vec<u32> = Vec::with_capacity(n);
+        let mut hare_count = 0u32;
+        let mut wolf_count = 0u32;
+        for slot in 0..agent_count {
+            let disc = if slot % 2 == 0 {
+                hare_count += 1;
+                0u32 // Hare
+            } else {
+                wolf_count += 1;
+                1u32 // Wolf
+            };
+            creature_init.push(disc);
+        }
+        let creature_type_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("predator_prey_runtime::creature_type"),
+                contents: bytemuck::cast_slice(&creature_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            });
+        let cfg = physics_MoveHare::PhysicsMoveHareCfg {
             agent_cap: agent_count,
             _pad: [0; 3],
         };
@@ -169,7 +202,9 @@ impl PredatorPreyState {
             gpu,
             pos_buf,
             vel_buf,
-            alive_buf,
+            creature_type_buf,
+            hare_count,
+            wolf_count,
             cfg_buf,
             pos_staging,
             cache: dispatch::KernelCache::default(),
@@ -184,6 +219,16 @@ impl PredatorPreyState {
     /// Current simulation tick. Increments at the end of each `step()`.
     pub fn tick(&self) -> u64 {
         self.tick
+    }
+
+    /// Number of agents initialised as Hare (creature_type = 0).
+    pub fn hare_count(&self) -> u32 {
+        self.hare_count
+    }
+
+    /// Number of agents initialised as Wolf (creature_type = 1).
+    pub fn wolf_count(&self) -> u32 {
+        self.wolf_count
     }
 
     /// Seed used to derive initial state. Stable across the sim's
@@ -233,15 +278,33 @@ impl CompiledSim for PredatorPreyState {
             },
         );
 
-        let bindings = physics_MoveAlive::PhysicsMoveAliveBindings {
+        // Two PerAgent dispatches per tick, sequenced in op-id order
+        // (Hare → Wolf). Each kernel runs over every slot but the
+        // where-guarded If wrap from `cg/lower/physics.rs` early-
+        // returns for non-matching creature types, so each agent
+        // commits exactly one set_pos write per tick.
+        let hare_bindings = physics_MoveHare::PhysicsMoveHareBindings {
             agent_pos: &self.pos_buf,
-            agent_alive: &self.alive_buf,
+            agent_creature_type: &self.creature_type_buf,
             agent_vel: &self.vel_buf,
             cfg: &self.cfg_buf,
         };
-        dispatch::dispatch_physics_movealive(
+        dispatch::dispatch_physics_movehare(
             &mut self.cache,
-            &bindings,
+            &hare_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let wolf_bindings = physics_MoveWolf::PhysicsMoveWolfBindings {
+            agent_pos: &self.pos_buf,
+            agent_creature_type: &self.creature_type_buf,
+            agent_vel: &self.vel_buf,
+            cfg: &self.cfg_buf,
+        };
+        dispatch::dispatch_physics_movewolf(
+            &mut self.cache,
+            &wolf_bindings,
             &self.gpu.device,
             &mut encoder,
             self.agent_count,
