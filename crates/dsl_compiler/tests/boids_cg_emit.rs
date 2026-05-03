@@ -54,6 +54,15 @@ fn boids_fixture_emits_wgsl() {
         artifacts.rust_files.len(),
         artifacts.kernel_index.len(),
     );
+    // Dump the physics_MoveBoid Rust module so we can see what shape
+    // the compiler currently emits — informs the engine::gpu API that
+    // the generated dispatch helpers will target.
+    if let Some(rs) = artifacts.rust_files.get("physics_MoveBoid.rs") {
+        println!("\n--- physics_MoveBoid.rs ---");
+        for line in rs.lines() {
+            println!("{line}");
+        }
+    }
     for name in &artifacts.kernel_index {
         println!("  kernel: {name}");
     }

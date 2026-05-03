@@ -48,6 +48,11 @@ const ALLOWED_DIRS: &[&str] = &[
     // without a circular dep. ADR pending (P1b port, 2026-04-25).
     "evaluator",
     "event",
+    // gpu/: wgpu platform primitives (GpuContext, Kernel trait, BGL
+    // helpers). Sim-agnostic; per-fixture runtime crates' generated
+    // dispatch modules `impl engine::gpu::Kernel` against this surface.
+    // Phase 7 boids GPU pipeline (2026-05-02).
+    "gpu",
     "invariant",
     "obs",
     "policy",

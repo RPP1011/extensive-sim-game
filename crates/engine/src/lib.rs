@@ -13,6 +13,12 @@ pub mod debug;
 pub mod channel;
 pub mod creature;
 pub mod event;
+/// `gpu` — sim-agnostic GPU platform primitives. `GpuContext` (wgpu
+/// device + queue), `Kernel` trait, BGL-entry helpers. Per-fixture
+/// runtime crates depend on engine and `impl engine::gpu::Kernel`
+/// against this surface; engine itself knows nothing about specific
+/// fixtures.
+pub mod gpu;
 pub mod ids;
 pub mod invariant;
 pub mod mask;
@@ -44,6 +50,7 @@ pub mod trajectory;
 pub mod view;
 
 pub use backend::ComputeBackend;
+pub use gpu::{bgl_storage, bgl_uniform, GpuContext, GpuContextError, Kernel};
 pub use sim_trait::CompiledSim;
 /// Re-export SimScratch from its new home so call sites that previously
 /// wrote `engine::step::SimScratch` can be updated to `engine::scratch::SimScratch`.
