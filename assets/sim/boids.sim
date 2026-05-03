@@ -26,6 +26,19 @@
 //     identity/zero placeholders in the body.
 
 // ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+// Per-tick driver event. Carries no payload — the implicit `tick: u32`
+// field every event receives is enough. The `physics MoveBoid` rule
+// uses `on Tick {} { ... }` as a syntactic placeholder so the parser's
+// mandatory `on <pattern>` clause is satisfied; the `@phase(per_agent)`
+// annotation overrides per-event dispatch with per-agent dispatch, so
+// no `Tick` events ever actually fire — `Tick` exists purely so the
+// resolver can look up the event name in the registry.
+event Tick { }
+
+// ---------------------------------------------------------------------------
 // Entity
 // ---------------------------------------------------------------------------
 
