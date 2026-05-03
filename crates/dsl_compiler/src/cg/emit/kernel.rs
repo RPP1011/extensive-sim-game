@@ -1690,65 +1690,6 @@ fn spatial_filtered_walk_body(filter_wgsl: &str) -> String {
     )
 }
 
-/// WGSL body fragment for the synthesized PerAgent
-/// [`ComputeOpKind::PhysicsRule`] (Movement, Phase 6 Task 3).
-///
-/// Bindings consumed (per the recorded `(reads, writes)` signature
-/// in `cg/lower/driver.rs::synthesize_movement_op`):
-/// - `agent_pos`        — read + write (per-agent vec3 update).
-/// - `agent_alive`      — read (skip dead agents).
-/// - `scoring_output`   — read (action + target).
-/// - `sim_cfg`          — read (move_speed, tick).
-/// - `event_ring`       — append (AgentMoved / AgentFled).
-/// - `cfg`              — uniform (agent_cap).
-///
-/// # Limitations
-///
-/// - **Verbatim port from the legacy stub.** Mirrors the structural
-///   shape of `engine_gpu_rules/src/movement.wgsl` (the legacy
-///   hand-written movement kernel that the Route C splice produces).
-///   This template touches every binding so naga keeps them live;
-///   the actual per-agent position update + AgentMoved emit is
-///   stubbed pending runtime BGL wiring (KernelSpec → engine_gpu
-///   bind-source mapping). Position writes here are conditional on
-///   the action read but always non-mutating in the stub form
-///   (the `var<storage, read_write> agents` binding is touched via
-///   `_ = agents[0u]` to keep the BGL live; real position mutation
-///   needs the per-field SoA offsets the runtime carries, which the
-///   IR's structural-naming pass doesn't synthesize today).
-/// - **No IR-driven derivation.** Same rationale as
-///   [`SPATIAL_BUILD_HASH_BODY`]: the IR has no abstractions for
-///   per-agent vec3 deltas with action-conditional branches; future
-///   Phase 6 / Phase 7 work could replace this const with an IR
-///   walk once those abstractions exist (Task 4: Apply-actions
-///   chain, in particular).
-const MOVEMENT_BODY: &str = "// PhysicsRule (PerAgent, on_event=None) — Movement \
-    (Phase 6 Task 3).\n\
-    // Structural placeholder body. Touches every binding the recorded \
-    (reads, writes)\n\
-    // signature names so naga keeps them live; the real per-agent \
-    position update +\n\
-    // AgentMoved emit lives in the hand-written engine_gpu_rules \
-    movement.wgsl splice\n\
-    // (Route C) until the Apply-actions chain (Phase 6 Task 4) and \
-    runtime BGL wiring\n\
-    // (Phase 6 Task 5) land.\n\
-    //\n\
-    // Binding shapes (via handle_to_binding_metadata):\n\
-    //   agent_pos:        array<vec3<f32>>     (rw — sole AgentField alias)\n\
-    //   scoring_output:   array<u32>           (read; stride 4 per agent)\n\
-    //   sim_cfg:          array<u32>           (read)\n\
-    //   cfg:              uniform              (agent_cap)\n\
-    //\n\
-    // Single-AgentField binding shape avoids the runtime\n\
-    // STORAGE_READ_ONLY/READ_WRITE conflict every multi-AgentField CG\n\
-    // PhysicsRule kernel triggers; see synthesize_movement_op's docs.\n\
-    let _scoring_action = scoring_output[agent_id * 4u + 0u];\n\
-    let _scoring_target = scoring_output[agent_id * 4u + 1u];\n\
-    let _agent_self_pos = agent_pos[agent_id];\n\
-    let _sim_cfg_v = sim_cfg[0u];\n\
-    let _cap = cfg.agent_cap;";
-
 /// Per-op body lowering. Returns the WGSL fragment for the op without
 /// surrounding kernel boilerplate. `dispatch` carries the kernel's
 /// dispatch shape so per-op bodies that vary across shapes
@@ -1777,28 +1718,15 @@ fn lower_op_body(
                 }),
             }
         }
-        ComputeOpKind::PhysicsRule {
-            on_event, body, ..
-        } => {
-            // PerAgent PhysicsRule (on_event = None) is a per-agent
-            // sweep. Today the canonical instance is Movement
-            // (Phase 6 Task 3): reads scoring_output, conditionally
-            // updates `agent_pos` based on the chosen action.
-            // Emit a hand-written body fragment that mirrors the
-            // legacy `engine_gpu_rules/src/movement.wgsl` shape so
-            // the structural emit-quality contract (vec3 load
-            // patterns, branch-free direction deltas) is preserved.
-            //
-            // Future per-agent sweeps (cooldown ticks, stun expiry,
-            // need decay, regen) will dispatch through the CgStmt
-            // walk here once their bodies are expressible in IR.
-            // Until then, on_event=None is the per-rule template
-            // selector.
-            if on_event.is_none() {
-                Ok(MOVEMENT_BODY.to_string())
-            } else {
-                lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)
-            }
+        ComputeOpKind::PhysicsRule { body, .. } => {
+            // Both per-event (on_event = Some) and per-agent
+            // (on_event = None) PhysicsRules walk their CgStmtList
+            // body via the same lowering path. The kernel preamble
+            // differs by dispatch shape (per-agent binds `agent_id`
+            // — Phase 6 Task 3; per-event binds `event_idx` plus
+            // per-event payload locals), but the body itself is just
+            // a list of CG statements either way.
+            lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)
         }
         ComputeOpKind::ViewFold { body, .. } => {
             lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)
