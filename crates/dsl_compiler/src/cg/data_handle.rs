@@ -175,6 +175,17 @@ pub enum AgentFieldId {
     GridId,
     LocalPos,
     MoveTarget,
+
+    // --- Phase 7 boids fixture ---
+    /// Per-agent velocity (vec3). Added 2026-05-02 so `boids.sim`'s
+    /// `entity Boid : Agent { pos: vec3, vel: vec3 }` declaration can
+    /// resolve `self.vel` reads through the `IrExpr::Field` lowering.
+    /// The wolf-sim AgentSoA has no velocity slot today; per-fixture
+    /// runtime crates that don't need engine's SoA at all (e.g.
+    /// `boids_runtime`'s own `Vec<Vec3>` storage) ignore this entry.
+    /// When/if the wolf-sim runtime ever wants velocity, this is the
+    /// canonical name.
+    Vel,
 }
 
 impl AgentFieldId {
@@ -201,8 +212,8 @@ impl AgentFieldId {
             // bool — alive flag
             Alive => AgentFieldTy::Bool,
 
-            // Vec3 — position
-            Pos => AgentFieldTy::Vec3,
+            // Vec3 — position + velocity
+            Pos | Vel => AgentFieldTy::Vec3,
 
             // 8-bit packed enum tag
             MovementMode => AgentFieldTy::EnumU8,
@@ -217,6 +228,9 @@ impl AgentFieldId {
             LocalPos | MoveTarget => AgentFieldTy::Vec3,
         }
     }
+
+    // (Vel is included in the `Pos | Vel => Vec3` arm above; no
+    // additional entry needed here.)
 
     /// Stable snake_case name, used by `Display` and by external tools
     /// that need a human-readable handle. Matches the SoA field name
@@ -263,6 +277,7 @@ impl AgentFieldId {
             GridId => "grid_id",
             LocalPos => "local_pos",
             MoveTarget => "move_target",
+            Vel => "vel",
         }
     }
 
@@ -317,6 +332,7 @@ impl AgentFieldId {
             GridId,
             LocalPos,
             MoveTarget,
+            Vel,
         ]
     }
 
@@ -383,6 +399,7 @@ impl AgentFieldId {
             "grid_id" => GridId,
             "local_pos" => LocalPos,
             "move_target" => MoveTarget,
+            "vel" => Vel,
             _ => return None,
         })
     }
@@ -1371,10 +1388,12 @@ mod tests {
                 "all_variants entry {v:?} did not round-trip through snake"
             );
         }
-        // A spot-check on count — the enum has 38 variants today; if a
-        // new variant lands and `all_variants` isn't updated, this
-        // assertion fails before the round-trip loop above can.
-        assert_eq!(all.len(), 38);
+        // A spot-check on count — the enum has 39 variants today (38
+        // wolf-sim baseline + Vel added 2026-05-02 for the Boids
+        // fixture); if a new variant lands and `all_variants` isn't
+        // updated, this assertion fails before the round-trip loop
+        // above can.
+        assert_eq!(all.len(), 39);
     }
 
     #[test]
