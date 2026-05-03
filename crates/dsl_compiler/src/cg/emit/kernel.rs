@@ -352,13 +352,14 @@ pub fn kernel_topology_to_spec_and_body(
     let mut needs_event_tail = false;
     for (key, agg) in &handle_set {
         let canonical = canonical_handle(key, &agg.first_seen);
-        // Detect EventRing-Append → kernel writes events, must also
-        // bind `event_tail: atomic<u32>` so the WGSL emit body's
-        // `atomicAdd(&event_tail, 1u)` resolves. The producer's
-        // `event_ring` binding stays as `array<atomic<u32>>` (slots
-        // are owned via the tail; writes use direct indexing rather
-        // than atomicStore — slot uniqueness is the synchronization).
-        if let DataHandle::EventRing { kind: EventRingAccess::Append, .. } = &canonical {
+        // Any EventRing access — Read (consumer paths like
+        // SeedIndirectArgs that need to know the ring depth) or
+        // Append (producers that atomicAdd to acquire a slot) — needs
+        // the sibling `event_tail` binding. The fold path
+        // (build_view_fold_bindings) hardcodes event_tail in slot 1
+        // for its own bindings; the generic path here synthesizes
+        // the same binding shape post-loop.
+        if let DataHandle::EventRing { .. } = &canonical {
             needs_event_tail = true;
         }
         let Some(meta) = handle_to_binding_metadata(&canonical, prog) else {
@@ -2568,13 +2569,16 @@ fn seed_indirect_args_body(ring_id: u32) -> String {
     // suffix because there's still one args buffer per ring (today
     // single ring, so single buffer).
     format!(
-        "// PlumbingKind::SeedIndirectArgs (ring={ring_id}) — adapted from\n\
-        // engine_gpu_rules/src/seed_indirect.wgsl. Reads tail count from\n\
-        // event_ring[0] (post-iter-2 unified single ring); writes\n\
-        // (wg, 1, 1) into indirect_args_{ring_id} so the next per-event\n\
-        // dispatch on ring={ring_id} launches ceil(n/64) workgroups\n\
-        // (capped at CAP_WG=4096).\n\
-        let n = event_ring[0];\n\
+        "// PlumbingKind::SeedIndirectArgs (ring={ring_id}) — reads tail\n\
+        // count from event_tail[0] (the separate atomic counter\n\
+        // producers atomicAdd against; see the EventRing-Append emit\n\
+        // body in `lower_emit_to_wgsl`). The earlier convention read\n\
+        // event_ring[0] under a tail-at-offset-0 assumption that\n\
+        // overlapped event payload words; the separate-buffer split\n\
+        // resolves the conflict. Writes (wg, 1, 1) into\n\
+        // indirect_args_{ring_id} so the next per-event dispatch on\n\
+        // ring={ring_id} launches ceil(n/64) workgroups (CAP_WG=4096).\n\
+        let n = atomicLoad(&event_tail[0]);\n\
         let req = (n + 63u) / 64u;\n\
         var wg: u32 = req;\n\
         if (wg > 4096u) {{ wg = 4096u; }}\n\

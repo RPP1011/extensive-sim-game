@@ -42,6 +42,36 @@ fn main() {
         hare_count,
         wolf_count,
     );
+
+    // Read back per-Wolf kill_count accumulator. Each Wolf emits one
+    // Killed event per tick (the placeholder StrikePrey-shaped emit
+    // in MoveWolf), so after `TICKS` ticks every Wolf slot should
+    // hold approximately TICKS as its kill_count value. Hare slots
+    // (creature_type = 0, even slot indices) shouldn't appear in
+    // any Killed event's `by` field — their kill_count entries
+    // should stay at 0.
+    let kc = sim.kill_counts();
+    let mut hare_total = 0.0_f32;
+    let mut wolf_total = 0.0_f32;
+    let mut hare_max = 0.0_f32;
+    let mut wolf_min = f32::INFINITY;
+    let mut wolf_max = 0.0_f32;
+    for (slot, &v) in kc.iter().enumerate() {
+        if slot % 2 == 0 {
+            hare_total += v;
+            hare_max = hare_max.max(v);
+        } else {
+            wolf_total += v;
+            wolf_min = wolf_min.min(v);
+            wolf_max = wolf_max.max(v);
+        }
+    }
+    let wolf_mean = wolf_total / wolf_count as f32;
+    println!(
+        "pp_app: kill_count — hare total={:.2} (max={:.2}, expected 0); \
+         wolf total={:.2} (min={:.2}, mean={:.2}, max={:.2}, expected ~{} each)",
+        hare_total, hare_max, wolf_total, wolf_min, wolf_mean, wolf_max, TICKS,
+    );
 }
 
 /// Print one summary line: tick + per-creature centroid + axis-aligned

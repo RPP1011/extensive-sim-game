@@ -194,7 +194,7 @@ physics MoveWolf @phase(per_agent) {
     let new_pos = self.pos + new_vel * config.hunt.predator_speed;
     agents.set_vel(self, new_vel);
     agents.set_pos(self, new_pos);
-    // emit Killed { by: self, prey: self, pos: new_pos }
+    emit Killed { by: self, prey: self, pos: new_pos }
     //
     // Producer-side gap (~4-8h to land):
     //   1. `lower_emit_to_wgsl` is currently a B1 phony discard ("real
