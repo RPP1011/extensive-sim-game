@@ -208,6 +208,12 @@ megaswarm_10000_runtime = { path = "../megaswarm_10000_runtime" }
 # 10v10 (team-filtered targeting, movement-toward-objective, contest
 # scoring).
 objective_capture_10v10_runtime = { path = "../objective_capture_10v10_runtime" }
+# Scripted battle — eighteenth REAL fixture and FIRST sim with a one-way
+# scripted narrative arc. Three phases (peaceful gather → assault →
+# aftermath) gated on world.tick — different verbs fire in different
+# phases. Adds `world.tick >= L && world.tick < R` phase-gate predicates
+# in `when` clauses.
+scripted_battle_runtime = { path = "../scripted_battle_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -356,3 +362,7 @@ path = "src/megaswarm_10000_app.rs"
 [[bin]]
 name = "objective_capture_10v10_app"
 path = "src/objective_capture_app.rs"
+
+[[bin]]
+name = "scripted_battle_app"
+path = "src/scripted_battle_app.rs"

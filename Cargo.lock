@@ -1737,6 +1737,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "scripted_battle_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1844,6 +1857,7 @@ dependencies = [
  "predator_prey_runtime",
  "quest_arc_real_runtime",
  "quest_probe_runtime",
+ "scripted_battle_runtime",
  "stdlib_math_probe_runtime",
  "stochastic_probe_runtime",
  "swarm_storm_runtime",

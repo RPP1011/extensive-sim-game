@@ -1,0 +1,206 @@
+// scripted_battle — SECOND real gameplay-shaped fixture (after duel_1v1).
+//
+// FIRST sim with ONE-WAY scripted narrative arc and PHASE TRANSITIONS.
+// The 17 prior sims either run on a single rule set the whole time
+// (combat/lifecycle/economy duels, scale-ups) OR have cyclical loops.
+// This sim has THREE distinct one-way phases with DIFFERENT verbs
+// firing in each, all gated on `world.tick`:
+//
+//   - Phase 1 (ticks 0-199):   Peaceful — villagers gather food
+//                              (proxied as passive +1 hp/tick self-heal).
+//                              No combat verbs fire.
+//   - Phase 2 (ticks 200-499): Assault — enemy slots wake (CPU-side
+//                              alive=false→true), villagers attack
+//                              enemies, enemies attack villagers,
+//                              casualties occur.
+//   - Phase 3 (ticks 500-799): Aftermath — surviving villagers regroup
+//                              (CPU-side mass-clear of enemies; passive
+//                              heal resumes; no combat).
+//
+// SHAPE: 70 Combatant : Agent slots in a shared SoA (configurable in
+// `scripted_battle_app`; default 20 villagers + 50 enemies). Slots
+// 0..villager_count are Villagers (alive=1 from t=0, hp=80 so the
+// peaceful-phase forage actually fires). Slots
+// [villager_count..villager_count+enemy_count) are Enemy reserves
+// (alive=0 at start, flipped alive=1 by the host at tick 200, flipped
+// back alive=0 at tick 500). Phase-gated verbs use `(world.tick >= L
+// && world.tick < R)` predicates so the GPU emits no events outside
+// the window. The host-side flips are deterministic (stamped at
+// fixed ticks) so the run is bit-stable across replays.
+//
+// Compose primitives (all already wired by the duel_1v1 fixture):
+//   - Per-agent SoA reads/writes for HP and alive (commits a14965f0,
+//     ff1aa387)
+//   - Verb cascade with multiple competing rows (commit 23902b7d)
+//   - Multi-event-kind ring: Damaged + Healed
+//   - ApplyDamage chronicle with `if (hp <= 0) set_alive(t, false)`
+//
+// NEW for this sim: phase-gated verbs (`world.tick >= L && world.tick
+// < R` predicates in `when` clauses, not just `world.tick % N == 0`
+// cooldowns). Compiler arms reused — no new lowering needed.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config battle {
+  attack_damage:    f32 = 8.0,
+  enemy_damage:     f32 = 6.0,
+  forage_heal:      f32 = 1.0,
+  rest_heal:        f32 = 1.0,
+  // Phase boundaries. The when clauses inline these as literal
+  // u64 comparisons against world.tick. Keep matched with the
+  // host-side phase walker in `scripted_battle_runtime`.
+  // Phase 1: ticks [0, 200), Phase 2: [200, 500), Phase 3: [500, 800).
+}
+
+// -- Phase 1 verb: ForagePeaceful --
+// Villagers passively heal during the peaceful phase. Self-cast — the
+// chronicle emits `Healed { target: self, ... }` so ApplyHeal writes
+// the actor's own HP slot.
+//
+// Note on the missing `target == self` gate: today the PerPair mask
+// kernel hardcodes `mask_k = 1u` (verb-mask K placeholder, TODO
+// task-5.7 in dsl_compiler). That means only `per_pair_candidate = 0`
+// is iterated per actor, so any `target == self` predicate would only
+// fire for actor 0 (the single slot matching candidate 0). The
+// duel_1v1 Heal verb hits the same K=1 ceiling at 2-agent scale
+// (agent 0 always heals; agent 1 never heals — see duel_1v1_runtime
+// comments on the mask K placeholder). Workaround: drop the
+// `target == self` gate so the mask predicate is candidate-
+// independent; the chronicle's `target: self` emit field still
+// routes correctly so Healed events name the actor as their target.
+// The per-pair iteration is wasted work but the verb fires for
+// every alive villager.
+verb ForagePeaceful(self, target: Agent) =
+  action ForagePeacefulAction
+  when (self.alive
+        && (world.tick < 200)
+        && self.hp < 100.0)
+  emit Healed { source: self, target: self, amount: config.battle.forage_heal }
+  score 1.0
+
+// -- Phase 2 verb: VillagerStrike --
+// During the assault phase, villagers attack any alive non-self
+// combatant. Reuses the duel_1v1 Strike shape; the new wrinkle is
+// the phase gate `world.tick >= 200 && world.tick < 500`. Cooldown
+// of 2 ticks via `world.tick % 2 == 0` mod gate.
+verb VillagerStrike(self, target: Agent) =
+  action VillagerStrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick >= 200)
+        && (world.tick < 500)
+        && (world.tick % 2 == 0))
+  emit Damaged { source: self, target: target, amount: config.battle.attack_damage }
+  // Pair-field score: pick the lowest-HP target (200 - target.hp,
+  // so a 0-hp target maxes at 200, a 100-hp target scores 100).
+  // The `target.hp` reference forces the WGSL emitter to inject a
+  // per_pair_candidate inner loop into the scoring kernel — without
+  // it, best_target stays sentinel 0xFFFFFFFF and the chronicle's
+  // emitted Damaged events name an invalid target so ApplyDamage's
+  // `agent_hp[target] = ...` write goes out of bounds and is
+  // silently dropped by WGSL bounds-checking. The duel_1v1 Spell
+  // verb established this pattern (commit ff1aa387).
+  score (200.0 - target.hp)
+
+// -- Phase 2 verb: EnemyStrike --
+// Enemies retaliate during the assault phase. Identical shape to
+// VillagerStrike but offset by one tick (cooldown gate
+// `world.tick % 2 == 1`) so villagers and enemies don't both swing on
+// the same tick — keeps the per-tick casualty pattern legible and
+// avoids both factions emitting Damaged into the same tick's ring.
+verb EnemyStrike(self, target: Agent) =
+  action EnemyStrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick >= 200)
+        && (world.tick < 500)
+        && (world.tick % 2 == 1))
+  emit Damaged { source: self, target: target, amount: config.battle.enemy_damage }
+  // Pair-field score (see VillagerStrike for the rationale on why
+  // a target.* reference is load-bearing for ApplyDamage to actually
+  // write HP).
+  score (200.0 - target.hp)
+
+// -- Phase 3 verb: ForageAftermath --
+// Surviving villagers passively heal during the aftermath phase.
+// Same shape as ForagePeaceful but gated on world.tick >= 500.
+// (DSL doesn't have `||` today — splitting Phase 1 and Phase 3 into
+// two verbs is the workaround.)
+// Note: no `self.hp < 100.0` gate here. The peaceful-phase ForagePeaceful
+// uses one because villagers START below cap and we want them to top up
+// without drifting past it. By the time P3 fires (after surviving the
+// assault), survivors may already be at-cap (no damage taken if enemies
+// converged on a single victim) — gating on `< 100.0` would silently
+// skip the verb and make the aftermath phase invisible. Letting it fire
+// unconditionally surfaces the phase transition as a healing spike in
+// the per-phase verb-activity report; surviving villagers may drift
+// above 100 hp in P3, which is fine for the narrative proxy.
+verb ForageAftermath(self, target: Agent) =
+  action ForageAftermathAction
+  when (self.alive
+        && (world.tick >= 500))
+  emit Healed { source: self, target: self, amount: config.battle.rest_heal }
+  score 1.0
+
+// -- Apply damage chronicle (post phase). Mirrors duel_1v1. --
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// -- Apply heal chronicle (post phase). Mirrors duel_1v1. --
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) + a;
+    agents.set_hp(t, new_hp);
+  }
+}
+
+// -- Per-source observability views: damage_dealt + healing_done. --
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
