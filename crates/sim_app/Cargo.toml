@@ -48,6 +48,8 @@ foraging_runtime = { path = "../foraging_runtime" }
 auction_runtime = { path = "../auction_runtime" }
 # Verb-fire probe — discovery probe of the verb cascade end-to-end.
 verb_probe_runtime = { path = "../verb_probe_runtime" }
+# ToM probe — discovery probe of the Theory-of-Mind belief-read path.
+tom_probe_runtime = { path = "../tom_probe_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -92,3 +94,7 @@ path = "src/auction_app.rs"
 [[bin]]
 name = "verb_fire_app"
 path = "src/verb_fire_app.rs"
+
+[[bin]]
+name = "tom_probe_app"
+path = "src/tom_probe_app.rs"

@@ -1622,6 +1622,7 @@ dependencies = [
  "predator_prey_runtime",
  "swarm_storm_runtime",
  "target_chaser_runtime",
+ "tom_probe_runtime",
  "verb_probe_runtime",
 ]
 
@@ -1786,6 +1787,19 @@ checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tom_probe_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
 ]
 
 [[package]]

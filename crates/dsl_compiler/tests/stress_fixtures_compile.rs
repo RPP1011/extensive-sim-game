@@ -676,3 +676,86 @@ fn event_kind_filter_probe_compiles_with_tag_guard() {
         art.kernel_index.len(),
     );
 }
+
+/// `tom_probe.sim` is the discovery probe of the Theory-of-Mind
+/// belief-read path (see `docs/superpowers/notes/2026-05-04-tom-probe.md`).
+/// Pre-fix expected behaviour: BOTH belief-read surfaces drop out at
+/// CG-lower time:
+///   - `BeliefsAccessor` (sugar-free `beliefs(o).about(t).<field>`
+///     surface) → `LoweringError::UnsupportedAstNode { ast_label:
+///     "BeliefsAccessor", .. }` at `expr.rs:817`.
+///   - `theory_of_mind.believes_knows(...)` namespace fn (the bool
+///     bit-against-bitset surface from spec §6) → registry-fallback
+///     `LoweringError::UnsupportedNamespaceCall { ns: TheoryOfMind,
+///     .. }` at `expr.rs:2663`.
+///
+/// Both rejections surface as lower diagnostics (the `lower_compilation_to_cg`
+/// helper bundles them into the partial program and continues); the
+/// emit pass then produces the `fold_fact_witnesses` view-fold + the
+/// admin kernels but no producer kernel for either physics rule.
+///
+/// This test pins THE GAP CHAIN itself — when the lowering closes,
+/// the assertion strings flip from "expected diagnostic" to "expected
+/// kernel name", and that diff is the pull request that lands the
+/// follow-up work.
+#[test]
+fn tom_probe_surfaces_belief_read_lowering_gaps() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/tom_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse tom_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve tom_probe.sim");
+    let outcome = lower_compilation_to_cg(&comp);
+    let (cg, diags) = match outcome {
+        Ok(_) => panic!(
+            "tom_probe.sim lower unexpectedly clean — the probe expects \
+             BeliefsAccessor + believes_knows lowering gaps to surface as \
+             diagnostics. If you closed those gaps, update this test to \
+             assert the producer kernels exist instead."
+        ),
+        Err(o) => (o.program, o.diagnostics),
+    };
+    assert!(
+        !diags.is_empty(),
+        "expected at least one lower diagnostic (BeliefsAccessor + believes_knows)",
+    );
+    let diag_text = diags
+        .iter()
+        .map(|d| format!("{d}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        diag_text.contains("BeliefsAccessor"),
+        "expected BeliefsAccessor lower diagnostic; got:\n{diag_text}",
+    );
+    assert!(
+        diag_text.contains("believes_knows"),
+        "expected theory_of_mind.believes_knows lower diagnostic; got:\n{diag_text}",
+    );
+    // Schedule + emit on the partial program — the fold_fact_witnesses
+    // kernel + admin kernels should still be produced.
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit tom_probe partial program");
+    assert!(
+        art.kernel_index.iter().any(|k| k.contains("fact_witnesses")),
+        "expected fold_fact_witnesses kernel in artifacts; got: {:?}",
+        art.kernel_index,
+    );
+    assert!(
+        !art.kernel_index.iter().any(|k| k.starts_with("physics_CheckBelief")),
+        "expected NO physics_CheckBelief kernel (producer rule should drop \
+         at lower time); got: {:?}",
+        art.kernel_index,
+    );
+    eprintln!(
+        "[tom_probe] {} diagnostics, {} kernels: {:?}",
+        diags.len(),
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
