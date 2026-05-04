@@ -1527,6 +1527,19 @@ fn lower_emit_to_wgsl(
 /// per-rule cfg uniform.
 const DEFAULT_EVENT_RING_CAP_SLOTS: u32 = 65_536;
 
+/// Sibling-emitter accessor for [`DEFAULT_EVENT_RING_CAP_SLOTS`].
+///
+/// The scoring-argmax body emit (in `kernel.rs`) inlines its own
+/// ring-append for the verb-expander-injected `ActionSelected` event
+/// (it doesn't route through `lower_emit_to_wgsl` because the emit
+/// happens after the per-row argmax loop, outside any `CgStmt::Emit`
+/// in the IR). Both producers must agree on the same cap so the
+/// runtime's single-buffer sizing covers the worst case from either
+/// path.
+pub(crate) fn default_event_ring_cap_slots() -> u32 {
+    DEFAULT_EVENT_RING_CAP_SLOTS
+}
+
 /// Lower a [`CgStmt::Match`] as a scrutinee-bound `if`-chain. WGSL's
 /// `switch` would be a future-tense option; today the chain is the
 /// honest placeholder.
