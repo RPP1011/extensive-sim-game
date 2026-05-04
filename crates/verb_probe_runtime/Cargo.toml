@@ -1,0 +1,27 @@
+[package]
+name = "verb_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/verb_fire_probe.sim` — the
+# smallest end-to-end probe of the verb cascade (mask + scoring +
+# ActionSelected emit + chronicle physics + view-fold). Mirrors
+# `predator_prey_runtime`'s build.rs / src/lib.rs shape verbatim.
+#
+# This crate is a discovery probe — it intentionally has no smoke /
+# observable test that asserts > 0 faith because the cascade may not
+# yet fire. The accompanying `verb_fire_app` binary in `sim_app`
+# reports observed counts so gaps surface as data, not a panic.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

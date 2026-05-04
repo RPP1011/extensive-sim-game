@@ -1,0 +1,59 @@
+// verb_fire_probe — smallest end-to-end probe of the verb cascade.
+//
+// Goal: drive a single `verb` declaration through the full pipeline and
+// observe whether the verb's emit body actually fires at runtime, by
+// folding the emitted event into a per-agent view.
+//
+// Expected (if everything works):
+//   - Mask predicate `self.alive` is always true → mask bit set per agent
+//   - Scoring picks `verb_Pray` action_id=0 each tick (only row, util=1.0)
+//   - Scoring kernel atomically emits `ActionSelected{actor=agent, action_id=0, target=NO_TARGET}`
+//   - Synthesised `verb_chronicle_Pray` physics rule reads ActionSelected,
+//     gates on `if (action_id == 0)`, fires `emit PrayCompleted`
+//   - View-fold `faith` consumes PrayCompleted, accumulates `faith_delta=1.0`
+//     per agent per tick.
+//   - After 100 ticks: faith[i] ≈ 100.0 for every agent slot.
+//
+// Discovery focus: this fixture surfaces gaps in the verb-cascade
+// runtime path that the compiler-side tests in
+// `crates/dsl_compiler/tests/verb_emit.rs` don't catch (the existing
+// tests stop at IR shape; nothing drives a verb to fire end-to-end).
+
+event Tick { }
+
+@replayable
+@gpu_amenable
+event PrayCompleted {
+  prayer:      AgentId,
+  faith_delta: f32,
+}
+
+entity Devotee : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config probe {
+  faith_step: f32 = 1.0,
+}
+
+// Single-row scoring keeps this minimal: every agent's argmax picks
+// `verb_Pray` (action_id=0) every tick, so the scoring kernel emits
+// one ActionSelected event per agent per tick (~32 events/tick at
+// AGENT_COUNT=32).
+verb Pray(self) =
+  action PrayAction
+  when  self.alive
+  emit  PrayCompleted { prayer: self, faith_delta: config.probe.faith_step }
+  score 1.0
+
+// Per-prayer accumulator: each PrayCompleted bumps `faith[prayer]`
+// by faith_delta. With faith_step=1.0 and one PrayCompleted/agent/tick,
+// the analytical observable after N ticks is: faith[i] = N for every
+// alive agent slot.
+@materialized(on_event = [PrayCompleted])
+view faith(prayer: Agent) -> f32 {
+  initial: 0.0,
+  on PrayCompleted { prayer: who, faith_delta: delta } { self += delta }
+  clamp: [0.0, 1000000.0],
+}
