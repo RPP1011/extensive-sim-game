@@ -1,0 +1,234 @@
+// foraging_real — first LIFECYCLE fixture: ant colony foraging with
+// real births (alive=false → true) and deaths (alive=true → false)
+// firing during the run.
+//
+// Natural escalation from `duel_25v25.sim` (commit be52730f). Where
+// 25v25 demonstrated SCALE-UP via spatial body-form physics, foraging
+// demonstrates LIFECYCLE: the alive-bitmap actually flips both
+// directions during a run. Up to now, every fixture has had a fixed
+// `agent_count` set at construction with alive=1 for all slots —
+// duel_25v25 proved alive=true → false works through `agents.set_alive
+// (t, false)` from a chronicle physics; this fixture proves the other
+// direction (alive=false → true) via CPU-side birth slot allocation
+// driven by a sim-event view.
+//
+// SHAPE: shared Agent SoA discriminated by `creature_type`:
+//   - creature_type=0 → Ant. Hunger acts as energy (decays each
+//     tick, refilled on Eat). Hp acts as a stockpile-credit counter
+//     (incremented per Eat, summed CPU-side to drive births).
+//   - creature_type=1 → FoodPile. Hp acts as remaining quantity
+//     (decremented per Eat). On hp<=0, food is set alive=false
+//     (death by depletion).
+//
+// Per-tick chain:
+//
+//   1. spatial_build_hash (5 phases) — same as particle_collision /
+//      duel_25v25.
+//   2. AntFeed @phase(per_agent) — each alive Ant walks its 27-cell
+//      neighbourhood. For each neighbour that's an alive FoodPile
+//      with hp>0, emits one Eat event (gated every 4 ticks via
+//      `world.tick % 4 == 0`).
+//   3. ApplyEat @phase(post) — chronicle physics. For each Eat:
+//      - food.hp -= 1.0; if hp<=0 → set_alive(food, false).
+//      - ant.hunger += eat_gain (energy refill).
+//      - ant.hp += 1.0 (stockpile credit; CPU sums this into the
+//        colony stockpile via the eat_count view).
+//   4. EnergyDecay @phase(per_agent) — each alive Ant subtracts
+//      decay_rate from hunger. If hunger<=0 → set_alive(self, false)
+//      (death by starvation). Gated by creature_type==0u so food
+//      slots stay untouched.
+//   5. fold eat_count(source: Agent) — per-source f32 accumulator.
+//      Runtime sums this across all ant slots → total food eaten →
+//      colony stockpile → births.
+//
+// Lifecycle (the killer feature):
+//   - DEATHS in DSL: `agents.set_alive(self, false)` called by
+//     EnergyDecay when hunger<=0 AND by ApplyEat when food.hp<=0.
+//     Same pattern duel_1v1 + duel_25v25 proved out.
+//   - BIRTHS on CPU side: runtime reads `eat_count` view + alive
+//     buffer each tick. When (total_eats / eat_per_birth) exceeds
+//     the prior-tick birth count, runtime flips the next dead Ant
+//     slot to alive=1, hunger=initial_energy, hp=0. The next tick's
+//     spatial_build_hash + AntFeed + EnergyDecay all see the new
+//     ant naturally — the alive-bitmap is auto-refreshed by the
+//     scheduler's PlumbingKind::AliveBitmap pass.
+//
+// Termination: app reports either "colony grew to N stable ants"
+// (after MAX_TICKS), "colony collapsed at tick T" (last ant died),
+// or "colony exhausted food at tick T".
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Eat {
+  ant:  AgentId,
+  food: AgentId,
+}
+
+@replayable @gpu_amenable
+event Starved {
+  ant: AgentId,
+}
+
+@replayable @gpu_amenable
+event FoodDepleted {
+  food: AgentId,
+}
+
+// One entity per logical kind, both routed through the Agent SoA via
+// `creature_type` discriminant (0=Ant, 1=FoodPile). Same shared-SoA
+// pattern duel_25v25 used for Red/Blue Combatants.
+entity Ant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity FoodPile : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config foraging {
+  // Spatial perception radius (matches @spatial below).
+  forage_radius:    f32 = 1.5,
+  // Energy gain per Eat. Tuned LOW relative to per-cycle eat count
+  // (each ant can hit several food piles in its 27-cell window per
+  // active tick) so total energy stays bounded — otherwise hunger
+  // saturates at thousands and ants never starve once food runs out.
+  eat_gain:         f32 = 1.0,
+  // Per-tick energy decay. Each alive ant loses this much hunger
+  // per tick. With initial=50 + eat_gain=1 + every-4-tick feed,
+  // an ant in food-rich territory net-gains slowly; once food is
+  // gone, ants drain over ~5-15 ticks.
+  decay_rate:       f32 = 4.0,
+  // Food quantity per pile. Initial Hp on FoodPile slots; decremented
+  // by 1.0 per Eat event. With ~20 piles × 30 quantity = 600 food
+  // units total, sustains a 50-ant colony for many cycles.
+  food_per_pile:    f32 = 30.0,
+}
+
+// Spatial-grid filter. Same informational-only body-side pattern
+// duel_25v25 + particle_collision_min use; the body's `if` predicate
+// is what actually selects food piles.
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby_food(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// AntFeed — body-form spatial walk. Each alive Ant per tick (gated
+// every 4) walks its 27-cell neighbourhood. For each neighbour that
+// IS a FoodPile AND still has food (alive), emits one Eat event.
+//
+// Body-side filters (same shape as predator_prey_min Hunt + duel_25v25
+// ScanAndStrike):
+//   - other != self (skip self-pairing — the spatial filter is
+//     informational at the body-iter site today)
+//   - other.creature_type == FoodPile (only food piles, not other ants)
+//   - other.alive (skip depleted slots)
+//
+// Per-handler `where`: only ants act, not food piles, and only every
+// 4 ticks. Discriminator follows the predator_prey_min pattern:
+// `self.creature_type == Ant` resolves to the entity-declaration
+// discriminant for Ant (=0 by source order).
+physics AntFeed @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Ant
+                    && (world.tick % 4 == 0)) {
+    for other in spatial.nearby_food(self) {
+      if ((other != self)
+          && (other.creature_type == FoodPile)
+          && other.alive) {
+        emit Eat { ant: self, food: other }
+      }
+    }
+  }
+}
+
+// ApplyEat — chronicle physics. For each Eat event:
+//   - Decrement food.hp by 1.0 (consume one quantity unit).
+//   - If food.hp drops to/below 0, set_alive(food, false) +
+//     emit FoodDepleted (mirrors duel_1v1 ApplyDamage's defeat
+//     gate).
+//   - Increment ant.hunger by eat_gain (energy refill).
+//   - Increment ant.hp by 1.0 (stockpile credit, summed per-source
+//     by `eat_count` view).
+//
+// The `old_hp > 0.0` guard prevents repeated FoodDepleted emits when
+// multiple Eat events for the same already-empty pile land in the
+// same tick (same race-window guard duel_25v25 proved out).
+@phase(post)
+physics ApplyEat {
+  on Eat { ant: a, food: f } {
+    let old_food_hp = agents.hp(f);
+    let new_food_hp = old_food_hp - 1.0;
+    agents.set_hp(f, new_food_hp);
+    if (old_food_hp > 0.0 && new_food_hp <= 0.0) {
+      agents.set_alive(f, false);
+      emit FoodDepleted { food: f }
+    }
+    let cur_hunger = agents.hunger(a);
+    agents.set_hunger(a, cur_hunger + config.foraging.eat_gain);
+    let cur_credit = agents.hp(a);
+    agents.set_hp(a, cur_credit + 1.0);
+  }
+}
+
+// EnergyDecay — per-ant per-tick hunger drain. Only fires for live
+// Ants (creature_type==0u); food piles' hunger stays at zero.
+//
+// Death gate: when hunger drops to/below 0, set_alive(self, false)
+// + emit Starved. Same self-targeted setter pattern duel_1v1 used
+// for HealAction (target == self).
+//
+// The `old_hunger > 0.0` guard prevents repeated Starved emits if
+// the rule fires again on a slot with already-zero hunger between
+// the alive=false write and the next tick's alive-bitmap refresh.
+physics EnergyDecay @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == Ant) {
+    let old_hunger = agents.hunger(self);
+    let new_hunger = old_hunger - config.foraging.decay_rate;
+    agents.set_hunger(self, new_hunger);
+    if (old_hunger > 0.0 && new_hunger <= 0.0) {
+      agents.set_alive(self, false);
+      emit Starved { ant: self }
+    }
+  }
+}
+
+// Per-source eat_count — observability view. Summed CPU-side by
+// the runtime each tick to compute the colony stockpile, which in
+// turn drives births (CPU-side alive-bitmap flips).
+@materialized(on_event = [Eat])
+view eat_count(ant: Agent) -> f32 {
+  initial: 0.0,
+  on Eat { ant: a, food: _ } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-target food_consumed — accumulator on the FoodPile side. Used
+// by the runtime trace + assertions (sum across all food slots ==
+// total Eat count, validates the chronicle wired through both
+// directions).
+@materialized(on_event = [Eat])
+view food_consumed(food: Agent) -> f32 {
+  initial: 0.0,
+  on Eat { ant: _, food: f } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-ant starvation count (should be 0 or 1 per slot — a slot only
+// starves once before being potentially recycled by birth).
+@materialized(on_event = [Starved])
+view starved_count(ant: Agent) -> f32 {
+  initial: 0.0,
+  on Starved { ant: a } { self += 1.0 }
+  clamp: [0.0, 100.0],
+}
+
+// Per-pile depletion count (should be 0 or 1 per food slot — a
+// pile only depletes once unless the runtime respawns food).
+@materialized(on_event = [FoodDepleted])
+view depleted_count(food: Agent) -> f32 {
+  initial: 0.0,
+  on FoodDepleted { food: f } { self += 1.0 }
+  clamp: [0.0, 100.0],
+}

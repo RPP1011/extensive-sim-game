@@ -1,0 +1,31 @@
+[package]
+name = "foraging_real_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime for `assets/sim/foraging_real.sim` — first
+# LIFECYCLE fixture (alive=false → true births + alive=true → false
+# deaths actually flipping during a run).
+#
+# Mirrors `duel_25v25_runtime` for the spatial body-form +
+# chronicle-physics scaffolding. Adds CPU-side birth slot allocation:
+# each tick the runtime reads the `eat_count` view, sums it into a
+# colony stockpile, and flips dead Ant slots back to alive when the
+# stockpile crosses an integer multiple of `eat_per_birth`.
+#
+# build.rs lowers the .sim through the DSL compiler into
+# `OUT_DIR/generated.rs`; src/lib.rs owns the GPU context, per-buffer
+# storage, kernel cache, and per-tick dispatch chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

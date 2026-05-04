@@ -787,6 +787,24 @@ pub fn collect_stmt_dependencies(
             reads.push(DataHandle::SpatialStorage {
                 kind: super::data_handle::SpatialStorageKind::GridStarts,
             });
+            // The WGSL template (`emit_for_each_neighbor_body` in
+            // emit/wgsl_body.rs) reads `agent_pos[agent_id]` to
+            // compute `_self_cell_f` regardless of whether the body
+            // itself references `self.pos`. Surface the implicit
+            // self.pos read here so the BGL composer binds
+            // `agent_pos` to the kernel. Without this, fixtures
+            // whose body-form walk doesn't explicitly reference
+            // `self.pos` (e.g. `foraging_real`'s AntFeed — walks
+            // neighbours to emit Eat events but never reads its own
+            // position) emit naga-invalid WGSL that references an
+            // unbound `agent_pos` identifier. This same fix landed
+            // for the duel_25v25 fixture (commit be52730f) on a
+            // sibling branch; foraging_real surfaced it again
+            // because that commit hasn't merged into this worktree.
+            reads.push(DataHandle::AgentField {
+                field: super::data_handle::AgentFieldId::Pos,
+                target: super::data_handle::AgentRef::Self_,
+            });
         }
     }
 }
