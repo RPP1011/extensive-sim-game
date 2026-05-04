@@ -214,6 +214,11 @@ objective_capture_10v10_runtime = { path = "../objective_capture_10v10_runtime" 
 # phases. Adds `world.tick >= L && world.tick < R` phase-gate predicates
 # in `when` clauses.
 scripted_battle_runtime = { path = "../scripted_battle_runtime" }
+# Multi-zone world — nineteenth REAL fixture and FIRST sim with
+# per-agent location-based context (zone migration). Each agent's
+# `level` u32 encodes a zone id (Forest/Town/Dungeon); verbs gate on
+# `when self.level == X`. Migration is CPU-side per-tick.
+multi_zone_world_runtime = { path = "../multi_zone_world_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -374,3 +379,7 @@ path = "src/predator_prey_viz_app.rs"
 [[bin]]
 name = "flocking_viz_app"
 path = "src/flocking_viz_app.rs"
+
+[[bin]]
+name = "multi_zone_world_app"
+path = "src/multi_zone_world_app.rs"

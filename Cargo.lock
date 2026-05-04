@@ -1204,6 +1204,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c505b3e17ed6b70a7ed2e67fbb2c560ee327353556120d6e72f5232b6880d536"
 
 [[package]]
+name = "multi_zone_world_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "naga"
 version = "26.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1850,6 +1863,7 @@ dependencies = [
  "mass_battle_100v100_runtime",
  "megaswarm_10000_runtime",
  "megaswarm_1000_runtime",
+ "multi_zone_world_runtime",
  "objective_capture_10v10_runtime",
  "pair_scoring_probe_runtime",
  "particle_collision_runtime",
