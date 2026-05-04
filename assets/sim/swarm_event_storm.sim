@@ -1,0 +1,76 @@
+// swarm_event_storm — stress fixture for Phase 7+8 wired primitives
+// (event ring + view-fold storage + @decay) under high event
+// throughput. Each agent emits MULTIPLE events per tick (a
+// "Pulse" with a counter), feeding two folds:
+//
+//   1. pulse_count — straight scalar accumulator, counts pulses
+//      emitted per agent across the run. Hits the same shape as
+//      crowd_navigation's stuck_count, but with 4x the events per
+//      tick to push the event-ring's per-tick utilization.
+//   2. recent_pulse_intensity — @decay anchor pattern, accumulates
+//      pulse counts but with rate=0.85/tick so steady-state value
+//      reflects ~recent pulse activity (saturates at pulses_per_tick
+//      / (1 - decay_rate)). Stresses the @decay anchor RMW under
+//      event throughput where the anchor + delta both move per tick.
+//
+// Stresses what's wired (pp/pc/cn don't exercise either of these
+// load shapes today: pp emits 1 Killed/wolf/tick, pc emits 1
+// Collision/particle/tick, cn emits 1 Stuck/walker/tick).
+
+event Tick { }
+
+@replayable
+@gpu_amenable
+event Pulse {
+  source:    AgentId,
+  intensity: f32,
+}
+
+entity Pulser : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config pulses {
+  per_tick:        f32 = 4.0,
+  base_intensity:  f32 = 1.0,
+  step_scale:      f32 = 0.05,
+}
+
+// Per-agent integrator that ALSO emits 4 Pulse events per tick
+// (one per loop iteration manually unrolled — the DSL today lacks
+// a count-bounded for-loop in physics bodies, so unrolling is the
+// straight path). Each Pulse goes to the same event ring; both
+// folds consume from it.
+physics PulseAndDrift @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let new_pos = self.pos + self.vel * config.pulses.step_scale;
+    agents.set_pos(self, new_pos);
+    emit Pulse { source: self, intensity: config.pulses.base_intensity }
+    emit Pulse { source: self, intensity: config.pulses.base_intensity }
+    emit Pulse { source: self, intensity: config.pulses.base_intensity }
+    emit Pulse { source: self, intensity: config.pulses.base_intensity }
+  }
+}
+
+// Plain scalar accumulator: pulse_count += 1 per matched Pulse.
+// Same RMW shape as cn's stuck_count; just 4x the throughput.
+@materialized(on_event = [Pulse])
+view pulse_count(source: Agent) -> f32 {
+  initial: 0.0,
+  on Pulse { source: who } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// @decay-anchored intensity: same Pulse stream but the anchor is
+// scaled by 0.85 each tick before deltas land. Steady-state per
+// agent is ~per_tick / (1 - 0.85) = 4 / 0.15 ≈ 26.67. Stresses
+// the per-tick anchor multiplication + per-event delta sum on
+// the same view storage slot.
+@materialized(on_event = [Pulse])
+@decay(rate = 0.85, per = tick)
+view recent_pulse_intensity(source: Agent) -> f32 {
+  initial: 0.0,
+  on Pulse { source: who, intensity: amount } { self += amount }
+  clamp: [0.0, 1000.0],
+}

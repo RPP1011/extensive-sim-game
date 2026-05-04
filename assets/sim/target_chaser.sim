@@ -1,0 +1,49 @@
+// target_chaser — stress fixture for slice 1 of stdlib-into-CG-IR
+// (docs/superpowers/plans/2026-05-03-stdlib-into-cg-ir.md). Each
+// agent stores a target AgentId (`engaged_with`); the per-tick
+// physics rule reads `agents.pos(self.engaged_with)` and steers
+// toward it. The cross-agent read is the codepath slice 1 fixed:
+// `Read(AgentField{Pos, AgentRef::Target(<expr>)})` is no longer a
+// B1 typed-default placeholder — it lowers to a stmt-scope
+// `let target_expr_<N>: u32 = …;` + `agent_pos[target_expr_<N>]`.
+//
+// Without slice 1 this fixture would compile but emit chase forces
+// of zero (agents.pos(other) returning vec3(0.0)), so the agents
+// would just integrate their initial velocities — visible regression
+// signal if slice 1 ever bit-rots.
+
+event Tick { }
+
+entity Chaser : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config chase {
+  // Pull strength toward the target. Small so per-tick velocity
+  // delta stays in the same range as the predator_prey fixture.
+  pull:        f32 = 0.05,
+  // Damping on existing velocity each tick so chasers settle on
+  // their target rather than oscillating.
+  damping:     f32 = 0.9,
+  // Per-tick step size for the position integrator.
+  step_scale:  f32 = 0.5,
+}
+
+// Per-agent integrator. The body reads the target's position via
+// `agents.pos(self.engaged_with)` — this is the slice-1 codepath:
+// the target expression `self.engaged_with` lowers to an AgentId
+// read on the SoA, hoisted into a stmt-scope let, then used to
+// index `agent_pos[target_expr_<N>]`. The runtime initializes
+// `engaged_with` to a deterministic non-self target per slot
+// (typically `(slot + 1) mod cap`).
+physics ChaseTarget @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let target_pos = agents.pos(self.engaged_with);
+    let pull_vec = (target_pos - self.pos) * config.chase.pull;
+    let new_vel = self.vel * config.chase.damping + pull_vec;
+    let new_pos = self.pos + new_vel * config.chase.step_scale;
+    agents.set_vel(self, new_vel);
+    agents.set_pos(self, new_pos);
+  }
+}
