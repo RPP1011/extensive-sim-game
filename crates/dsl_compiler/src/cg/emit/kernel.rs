@@ -2786,6 +2786,38 @@ fn lower_op_body(
 /// 3. Write `(best_action, best_target, bitcast(best_utility), 0u)`
 ///    into `scoring_output[agent_id * 4 + …]`.
 ///
+/// **Pair-field rows (Gap #4 close).** A row whose utility / target /
+/// guard expressions transitively reference
+/// [`crate::cg::expr::CgExpr::PerPairCandidateId`] (or read any
+/// `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`) is
+/// emitted with an inner candidate loop:
+///
+/// ```text
+/// for (var per_pair_candidate: u32 = 0u;
+///      per_pair_candidate < cfg.agent_cap;
+///      per_pair_candidate = per_pair_candidate + 1u) {
+///     <row body — utility/target/guard reference per_pair_candidate>
+///     // best_target defaults to per_pair_candidate when the row's
+///     // explicit target is None (the verb-synth case).
+/// }
+/// ```
+///
+/// This implements per-(actor, candidate) scoring for pair-field rows
+/// like `Heal(target: Agent) score (1000.0 - target.cooldown_next_ready_tick)`
+/// — every actor evaluates the score against every candidate slot and
+/// argmaxes across candidates. Rows that don't reference the per-pair
+/// candidate side (the conventional `self`-only utility — `Hold`,
+/// `MoveToward`, etc.) skip the inner loop and behave exactly as
+/// before.
+///
+/// The mask gate (when an action's name matches a registered mask) sits
+/// OUTSIDE the inner loop — it filters at the actor level. The
+/// per-pair predicate (the verb's `when` clause) is captured in the
+/// mask body's PerPair dispatch (`atomicOr` sets the agent bit when
+/// any candidate satisfies); the scoring kernel's inner loop simply
+/// iterates every candidate slot and lets the score expression
+/// determine winning candidates.
+///
 /// Stride / sentinel constants are inlined (no module-scope `const`)
 /// so the fragment composes cleanly with sibling op bodies in a
 /// fused topology.
@@ -2808,9 +2840,23 @@ fn lower_scoring_argmax_body(
     out.push_str("var best_target: u32 = 0xFFFFFFFFu;\n\n");
 
     for (i, row) in rows.iter().enumerate() {
+        // Detect whether any of the row's expressions transitively
+        // reference the per-pair candidate side. If so, the row is a
+        // pair-field row and its body must execute inside an inner
+        // candidate loop — every candidate slot contributes one
+        // utility evaluation, and the argmax runs across (actor,
+        // candidate) pairs. See the module-level doc above.
+        let row_is_per_pair = row_references_per_pair_candidate(row, ctx);
+
         let utility_wgsl = lower_cg_expr_to_wgsl(row.utility, ctx)?;
         let target_wgsl = match row.target {
             Some(target_id) => lower_cg_expr_to_wgsl(target_id, ctx)?,
+            // Pair-field rows with no explicit target expression
+            // (the verb-synth case — `lower_standard_row` always
+            // produces `target: None`) default the winning target
+            // to the inner loop's `per_pair_candidate`. Non-pair
+            // rows fall through to the sentinel as before.
+            None if row_is_per_pair => "per_pair_candidate".to_string(),
             None => "0xFFFFFFFFu".to_string(),
         };
         let action_lit = format!("{}u", row.action.0);
@@ -2831,6 +2877,14 @@ fn lower_scoring_argmax_body(
         // driver records the corresponding `MaskBitmap` read on the
         // ScoringArgmax op so the binding scanner declares the
         // identifier (`cg::lower::driver::wire_scoring_mask_reads`).
+        //
+        // The mask gate sits OUTSIDE the inner candidate loop for
+        // pair-field rows — it filters at the actor level. (The
+        // per-pair `when` predicate is encoded in the mask's PerPair
+        // dispatch body, which sets the agent bit when any candidate
+        // satisfies; the scoring kernel does not re-check the
+        // per-pair predicate inside the inner loop in today's
+        // landing.)
         let mask_gate_open = mask_for_action(row.action, ctx).map(|mask_id| {
             format!(
                 "    let mask_{0}_word_for_row_{i} = agent_id >> 5u;\n\
@@ -2842,6 +2896,25 @@ fn lower_scoring_argmax_body(
         });
         let mask_gate_close = if mask_gate_open.is_some() { "    }\n" } else { "" };
 
+        // Pair-field rows wrap the row body in `for (var
+        // per_pair_candidate: u32 = 0u; per_pair_candidate <
+        // cfg.agent_cap; per_pair_candidate = per_pair_candidate +
+        // 1u) { ... }`. Iteration is in slot order to satisfy P11
+        // (Reduction Determinism — argmax over candidates is
+        // deterministic when the iteration order is fixed).
+        let (loop_open, loop_close) = if row_is_per_pair {
+            (
+                format!(
+                    "    for (var per_pair_candidate: u32 = 0u; \
+                     per_pair_candidate < cfg.agent_cap; \
+                     per_pair_candidate = per_pair_candidate + 1u) {{\n"
+                ),
+                "    }\n".to_string(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
+
         match row.guard {
             Some(guard_id) => {
                 let guard_wgsl = lower_cg_expr_to_wgsl(guard_id, ctx)?;
@@ -2850,6 +2923,7 @@ fn lower_scoring_argmax_body(
                 if let Some(open) = &mask_gate_open {
                     out.push_str(open);
                 }
+                out.push_str(&loop_open);
                 writeln!(out, "    let guard_{i}: bool = {guard_wgsl};").unwrap();
                 writeln!(out, "    if (guard_{i}) {{").unwrap();
                 writeln!(out, "        let utility_{i}: f32 = {utility_wgsl};").unwrap();
@@ -2859,6 +2933,7 @@ fn lower_scoring_argmax_body(
                 writeln!(out, "            best_target = {target_wgsl};").unwrap();
                 writeln!(out, "        }}").unwrap();
                 writeln!(out, "    }}").unwrap();
+                out.push_str(&loop_close);
                 out.push_str(mask_gate_close);
                 writeln!(out, "}}").unwrap();
             }
@@ -2868,12 +2943,14 @@ fn lower_scoring_argmax_body(
                 if let Some(open) = &mask_gate_open {
                     out.push_str(open);
                 }
+                out.push_str(&loop_open);
                 writeln!(out, "    let utility_{i}: f32 = {utility_wgsl};").unwrap();
                 writeln!(out, "    if (utility_{i} > best_utility) {{").unwrap();
                 writeln!(out, "        best_utility = utility_{i};").unwrap();
                 writeln!(out, "        best_action = {action_lit};").unwrap();
                 writeln!(out, "        best_target = {target_wgsl};").unwrap();
                 writeln!(out, "    }}").unwrap();
+                out.push_str(&loop_close);
                 out.push_str(mask_gate_close);
                 writeln!(out, "}}").unwrap();
             }
@@ -2974,6 +3051,103 @@ fn lower_scoring_argmax_body(
     }
 
     Ok(out)
+}
+
+/// True iff any of the row's expressions (utility / target / guard)
+/// transitively references the per-pair candidate side — either the
+/// bare candidate id ([`crate::cg::expr::CgExpr::PerPairCandidateId`])
+/// or any `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`.
+///
+/// Used by [`lower_scoring_argmax_body`] to decide whether the row's
+/// body must execute inside an inner candidate loop. See the doc on
+/// `lower_scoring_argmax_body` for the loop shape and rationale.
+fn row_references_per_pair_candidate(row: &ScoringRowOp, ctx: &EmitCtx<'_>) -> bool {
+    if expr_references_per_pair_candidate(row.utility, ctx) {
+        return true;
+    }
+    if let Some(target_id) = row.target {
+        if expr_references_per_pair_candidate(target_id, ctx) {
+            return true;
+        }
+    }
+    if let Some(guard_id) = row.guard {
+        if expr_references_per_pair_candidate(guard_id, ctx) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursive walker for [`row_references_per_pair_candidate`]. Returns
+/// true when the expression tree rooted at `expr_id` contains a
+/// [`crate::cg::expr::CgExpr::PerPairCandidateId`] node OR a
+/// `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`.
+///
+/// The walk is depth-first in operand order. `Read` of a non-pair
+/// `AgentField` short-circuits to false at that node (the field's
+/// target side is the read's identity — it doesn't synthesise a
+/// per-pair reference). `Read` of any other handle (`MaskBitmap`,
+/// `Rng`, `ConfigConst`, …) is structurally per-actor / global and
+/// returns false. The recursion terminates at literals, bare
+/// `AgentSelfId`, `ReadLocal`, `EventField`, `NamespaceField`, and
+/// `Rng` — none of which carry candidate-side semantics.
+fn expr_references_per_pair_candidate(
+    expr_id: crate::cg::data_handle::CgExprId,
+    ctx: &EmitCtx<'_>,
+) -> bool {
+    use crate::cg::expr::{CgExpr, ExprArena};
+    let Some(node) = ExprArena::get(ctx.prog, expr_id) else {
+        return false;
+    };
+    match node {
+        CgExpr::PerPairCandidateId => true,
+        CgExpr::Read(handle) => {
+            if let DataHandle::AgentField {
+                target: crate::cg::data_handle::AgentRef::PerPairCandidate,
+                ..
+            } = handle
+            {
+                return true;
+            }
+            // `AgentRef::Target(expr_id)` carries an embedded index
+            // expression — recurse into it so a `Read(AgentField {
+            // target: Target(per_pair_candidate_expr) })` form is
+            // detected (today's `lower_standard_row` produces
+            // `PerPairCandidate` directly, not `Target(...)`, but
+            // covering both keeps the walker future-proof for any
+            // upstream lowering that wraps the candidate in an
+            // explicit `Target(expr)`).
+            if let DataHandle::AgentField {
+                target: crate::cg::data_handle::AgentRef::Target(target_expr_id),
+                ..
+            } = handle
+            {
+                return expr_references_per_pair_candidate(*target_expr_id, ctx);
+            }
+            false
+        }
+        CgExpr::Lit(_)
+        | CgExpr::Rng { .. }
+        | CgExpr::AgentSelfId
+        | CgExpr::ReadLocal { .. }
+        | CgExpr::EventField { .. }
+        | CgExpr::NamespaceField { .. } => false,
+        CgExpr::Binary { lhs, rhs, .. } => {
+            expr_references_per_pair_candidate(*lhs, ctx)
+                || expr_references_per_pair_candidate(*rhs, ctx)
+        }
+        CgExpr::Unary { arg, .. } => expr_references_per_pair_candidate(*arg, ctx),
+        CgExpr::Builtin { args, .. } | CgExpr::NamespaceCall { args, .. } => {
+            args.iter().any(|a| expr_references_per_pair_candidate(*a, ctx))
+        }
+        CgExpr::Select {
+            cond, then, else_, ..
+        } => {
+            expr_references_per_pair_candidate(*cond, ctx)
+                || expr_references_per_pair_candidate(*then, ctx)
+                || expr_references_per_pair_candidate(*else_, ctx)
+        }
+    }
 }
 
 /// Find the [`MaskId`] whose interned name matches the given
@@ -4503,6 +4677,147 @@ mod tests {
         assert!(
             body.contains("let utility_0: f32 = "),
             "utility row should still emit; body: {body}"
+        );
+    }
+
+    /// Pair-field row (Gap #4 close) — when the row's utility expression
+    /// reads `Read(AgentField { target: AgentRef::PerPairCandidate, .. })`
+    /// the scoring kernel wraps the row body in an inner candidate loop
+    /// (`for (var per_pair_candidate ...; per_pair_candidate <
+    /// cfg.agent_cap; ...)`) and defaults the winning target to
+    /// `per_pair_candidate` when the row's explicit `target` is `None`
+    /// (the verb-synth shape — `lower_standard_row` always produces
+    /// `target: None`).
+    ///
+    /// This is the emit-side companion of the gap chain pinned by
+    /// `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md` —
+    /// per-(actor, candidate) scoring requires the inner loop to
+    /// argmax across candidates per actor.
+    #[test]
+    fn scoring_argmax_wraps_pair_field_row_in_per_pair_candidate_loop() {
+        use crate::cg::data_handle::{AgentFieldId, AgentRef, DataHandle};
+        let mut prog = CgProgram::default();
+        // Row utility: `agent_alive[per_pair_candidate]` — the canonical
+        // pair-field shape. Lowered as a `Read` of the `Alive`
+        // field with `target: PerPairCandidate`.
+        let pair_alive_read = push_expr(
+            &mut prog,
+            CgExpr::Read(DataHandle::AgentField {
+                field: AgentFieldId::Alive,
+                target: AgentRef::PerPairCandidate,
+            }),
+        );
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(0),
+            rows: vec![ScoringRowOp {
+                action: ActionId(0),
+                utility: pair_alive_read,
+                target: None,
+                guard: None,
+            }],
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        // The inner candidate loop wraps the row body. Iterating in
+        // slot order (P11 — Reduction Determinism).
+        assert!(
+            body.contains(
+                "for (var per_pair_candidate: u32 = 0u; \
+                 per_pair_candidate < cfg.agent_cap; \
+                 per_pair_candidate = per_pair_candidate + 1u)"
+            ),
+            "missing inner candidate loop; body: {body}"
+        );
+        // Pair-field rows with no explicit row.target default the
+        // winning target to per_pair_candidate (the slot the inner
+        // loop is currently visiting).
+        assert!(
+            body.contains("best_target = per_pair_candidate;"),
+            "pair-field row must default best_target to per_pair_candidate; body: {body}"
+        );
+        // The utility expression itself reads the candidate-side SoA
+        // (alive is a bool-stored-as-u32, hence the `(... != 0u)`
+        // coercion in `agent_field_access`).
+        assert!(
+            body.contains("agent_alive[per_pair_candidate]"),
+            "utility expression should read candidate-side SoA; body: {body}"
+        );
+        // The inner loop must sit AFTER the row block opens (so the
+        // running `best_*` updates compose correctly across siblings —
+        // the row block opens a fresh `{ ... }` local scope but reads +
+        // writes the function-scope `best_*` vars).
+        let block_open = body.find("// row 0: action=#0").unwrap();
+        let loop_open = body.find("for (var per_pair_candidate").unwrap();
+        assert!(
+            loop_open > block_open,
+            "inner loop must sit after the row block opens; body: {body}"
+        );
+    }
+
+    /// Negation of [`scoring_argmax_wraps_pair_field_row_in_per_pair_candidate_loop`]
+    /// — a row whose utility does NOT reference the per-pair candidate
+    /// side (e.g. a `self.<field>` read or a bare literal) MUST NOT be
+    /// wrapped in the inner candidate loop. The emit must remain a
+    /// strict no-op for non-pair rows.
+    #[test]
+    fn scoring_argmax_does_not_wrap_self_only_row_in_per_pair_candidate_loop() {
+        let mut prog = CgProgram::default();
+        let utility = push_expr(&mut prog, CgExpr::Lit(LitValue::F32(0.5)));
+        let kind = ComputeOpKind::ScoringArgmax {
+            scoring: ScoringId(0),
+            rows: vec![ScoringRowOp {
+                action: ActionId(0),
+                utility,
+                target: None,
+                guard: None,
+            }],
+        };
+        let op = ComputeOp::new(
+            OpId(0),
+            kind,
+            DispatchShape::PerAgent,
+            Span::dummy(),
+            &prog,
+            &prog,
+            &prog,
+        );
+        let op_id = push_op(&mut prog, op);
+        let topology = KernelTopology::Split {
+            op: op_id,
+            dispatch: DispatchShape::PerAgent,
+        };
+        let ctx = EmitCtx::structural(&prog);
+        let (_spec, body) =
+            kernel_topology_to_spec_and_body(&topology, &prog, &ctx).unwrap();
+
+        assert!(
+            !body.contains("per_pair_candidate"),
+            "self-only row must NOT reference per_pair_candidate; body: {body}"
+        );
+        assert!(
+            !body.contains("for (var per_pair_candidate"),
+            "self-only row must NOT emit an inner candidate loop; body: {body}"
+        );
+        // Standard sentinel target preserved.
+        assert!(
+            body.contains("best_target = 0xFFFFFFFFu;"),
+            "self-only row must keep the sentinel target default; body: {body}"
         );
     }
 
