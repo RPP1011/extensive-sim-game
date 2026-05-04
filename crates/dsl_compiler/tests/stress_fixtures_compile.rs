@@ -448,6 +448,14 @@ fn ecosystem_cascade_compiles() {
 /// fixture's GAP commentary); this test pins the resolve + emit
 /// shape so when the Item/Group SoA lower lands, the fixture's
 /// diff is bounded.
+///
+/// Also locks the Item-population-aware `pair_map` cfg shape:
+/// `pheromone_trail` carries `@materialized(storage = pair_map)`
+/// and the fold/decay kernels expose `second_key_pop` / `slot_count`
+/// fields the runtime sets to the Food entity's per-fixture
+/// population (decoupled from `agent_cap`). Without this assertion
+/// a regression that re-tied the dispatch sizing to `agent_cap`
+/// would silently restore the pre-fix `agent_count²` over-allocation.
 #[test]
 fn foraging_colony_compiles() {
     let path = workspace_path("assets/sim/foraging_colony.sim");
@@ -464,6 +472,37 @@ fn foraging_colony_compiles() {
         "expected pheromone_deposits fold kernel; available: {:?}",
         art.wgsl_files.keys().collect::<Vec<_>>(),
     );
+
+    // Item-population-aware pair_map sizing: the pheromone_trail
+    // view's decay kernel must early-return on `cfg.slot_count`
+    // (NOT `cfg.agent_cap`) so the runtime can over-allocate to
+    // `agent_cap × FOOD_COUNT` independently. Symmetrically the
+    // fold body must compose the 2-D index via `cfg.second_key_pop`.
+    let trail_decay = kernel_body_containing(&art, "decay_pheromone_trail")
+        .expect("expected decay_pheromone_trail kernel for pair_map view");
+    assert!(
+        trail_decay.contains("cfg.slot_count"),
+        "decay_pheromone_trail must early-return on cfg.slot_count \
+         (Item-population-aware sizing); got:\n{trail_decay}",
+    );
+    assert!(
+        trail_decay.contains("slot_count: u32"),
+        "decay_pheromone_trail cfg struct must declare slot_count: u32; \
+         got:\n{trail_decay}",
+    );
+    let trail_fold = kernel_body_containing(&art, "fold_pheromone_trail")
+        .expect("expected fold_pheromone_trail kernel for pair_map view");
+    assert!(
+        trail_fold.contains("cfg.second_key_pop"),
+        "fold_pheromone_trail must compose pair index via cfg.second_key_pop \
+         (Item-population-aware sizing); got:\n{trail_fold}",
+    );
+    assert!(
+        trail_fold.contains("second_key_pop: u32"),
+        "fold_pheromone_trail cfg struct must declare second_key_pop: u32; \
+         got:\n{trail_fold}",
+    );
+
     eprintln!(
         "[foraging_colony] {} kernels: {:?}",
         art.kernel_index.len(),

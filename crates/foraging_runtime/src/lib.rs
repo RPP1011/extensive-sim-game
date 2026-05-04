@@ -46,6 +46,24 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 use engine::gpu::{EventRing, ViewStorage};
 
+/// Per-fixture Food-entity population. Sets the `pair_map`
+/// `pheromone_trail` view's second-axis size: storage allocates
+/// `agent_count × FOOD_COUNT` slots and the fold body composes
+/// `view_storage_primary[ant * FOOD_COUNT + carried]`. Closes the
+/// "Item-population-aware pair_map sizing" gap (commit `cd93cb04`
+/// slice-2 wrap-up): before this fixture, the runtime hard-coded
+/// `second_key_pop = agent_count`, treating the Food key as if it
+/// were Agent-keyed and over-allocating storage to `agent_count²`.
+///
+/// The constant lives runtime-side (rather than as a `@cap(N)`
+/// annotation in the .sim) because Item population is a per-fixture
+/// allocation choice — the compiler stays population-agnostic and
+/// the runtime supplies the count via the `second_key_pop` /
+/// `slot_count` cfg fields the emit already consults. A future
+/// fixture wanting a different food count just edits this constant
+/// (and the matching `foraging_app` assertion).
+pub const FOOD_COUNT: u32 = 16;
+
 /// 16-byte WGSL `vec3<f32>` interop. Same shape as the sibling
 /// runtimes use; duplicated here to keep each fixture-runtime crate
 /// self-contained (no inter-fixture coupling beyond `engine` +
@@ -113,20 +131,25 @@ pub struct ForagingState {
     colony_intake_decay_cfg_buf: wgpu::Buffer,
 
     /// `pheromone_trail(ant: Agent, food: Food) -> f32` storage.
-    /// `@decay(rate=0.88)` → has_anchor=true. SLICE 2 PROBE for the
-    /// `pair_map` storage gap fix (2026-05-03): the view is keyed on
-    /// (Agent, Food) but Item-SoA storage hasn't landed, so today's
-    /// `Drop { carried: AgentId }` event makes the second key an
-    /// AgentId-typed slot. We size the storage as `agent_count ×
-    /// agent_count` and treat `second_key_pop = agent_count`. With
-    /// the WanderAndDrop emit `Drop { ant: self, carried: self }`,
-    /// only diagonal slots `(i, i)` accumulate at rate 1/tick — each
-    /// converges to `1 / (1 - 0.88) ≈ 8.33`. Off-diagonal stays at
-    /// 0 (no inter-ant Drop events).
+    /// `@decay(rate=0.88)` → has_anchor=true. Item-population-aware
+    /// pair_map sizing (closes the `cd93cb04` slice-2 wrap-up gap):
+    /// the view is keyed on `(Agent, Food)` and the fixture supplies
+    /// the per-Food population via [`FOOD_COUNT`], so storage
+    /// allocates `agent_count × FOOD_COUNT` slots (NOT
+    /// `agent_count²`) and `second_key_pop == FOOD_COUNT`. The
+    /// emit-side index composes
+    /// `view_storage_primary[ant * FOOD_COUNT + carried]`.
     ///
-    /// Once Item-SoA lowers, `second_key_pop` switches to the Food
-    /// entity's population and the storage shrinks to `agent_count ×
-    /// food_count`.
+    /// `Drop.carried` is still typed as `AgentId` in the event
+    /// schema (full Item-SoA lower hasn't arrived for
+    /// `self.engaged_with`-style reads), but the .sim hard-codes
+    /// `carried: 0` so every event lands on food slot 0 of its
+    /// ant's row. Steady state: per-`(ant, 0)` ≈ `1 / (1 - 0.88)
+    /// ≈ 8.33`; every other `(ant, k)` slot stays at 0 (no producer
+    /// targets them); total ≈ `agent_count × 8.33`. Once
+    /// `carried` swaps to a real `ItemId`, the per-(ant, food)
+    /// distribution emerges naturally from whatever target the
+    /// physics rule selects.
     pheromone_trail: ViewStorage,
     pheromone_trail_cfg_buf: wgpu::Buffer,
     pheromone_trail_decay_cfg_buf: wgpu::Buffer,
@@ -292,27 +315,32 @@ impl ForagingState {
             },
         );
 
-        // SLICE 2 — pair_map pheromone_trail storage. Sized
-        // `agent_count × agent_count` because the carried field is
-        // currently AgentId (Item-SoA storage hasn't landed). The
-        // fold body composes `view_storage_primary[ant *
-        // second_key_pop + carried]` with `second_key_pop ==
-        // agent_count` so the `(i, i)` diagonal accumulates per-tick
-        // and off-diagonal slots stay at 0.
+        // Item-population-aware pair_map pheromone_trail storage.
+        // Sized `agent_count × FOOD_COUNT` — the second axis is the
+        // Food entity's per-fixture population, decoupled from the
+        // Agent count. Closes the slice-2 wrap-up gap that previously
+        // forced `agent_count²` over-allocation. The fold body
+        // composes `view_storage_primary[ant * second_key_pop +
+        // carried]` with `second_key_pop == FOOD_COUNT`; with
+        // `Drop { carried: 0 }` from WanderAndDrop, only the
+        // `(ant, 0)` column accumulates (≈8.33/slot) while every
+        // `(ant, k)` for k != 0 stays at 0.
+        let trail_slots = agent_count * FOOD_COUNT;
         let pheromone_trail = ViewStorage::new(
             &gpu,
             "foraging_runtime::pheromone_trail",
-            agent_count * agent_count,
+            trail_slots,
             true,  // has_anchor (carries @decay rate=0.88)
             false, // no top-K storage hint
         );
         let pt_cfg = fold_pheromone_trail::FoldPheromoneTrailCfg {
             event_count: 0,
             tick: 0,
-            // pair_map: second key is currently AgentId (Drop.carried
-            // is AgentId until Item-SoA storage lowers), so
-            // second_key_pop == agent_count for now.
-            second_key_pop: agent_count,
+            // pair_map: second key sized to the Food entity's
+            // population (FOOD_COUNT), independent of agent_count —
+            // the runtime supplies this constant rather than
+            // hard-coding `agent_count`.
+            second_key_pop: FOOD_COUNT,
             _pad: 0,
         };
         let pheromone_trail_cfg_buf = gpu.device.create_buffer_init(
@@ -325,7 +353,7 @@ impl ForagingState {
         let pt_decay_cfg = decay_pheromone_trail::DecayPheromoneTrailCfg {
             agent_cap: agent_count,
             tick: 0,
-            slot_count: agent_count * agent_count, // pair_map: agent_cap × second_pop
+            slot_count: trail_slots, // pair_map: agent_cap × FOOD_COUNT
             _pad: 0,
         };
         let pheromone_trail_decay_cfg_buf = gpu.device.create_buffer_init(
@@ -387,13 +415,14 @@ impl ForagingState {
         self.colony_intake.readback(&self.gpu)
     }
 
-    /// Per-(ant, carried) pheromone_trail accumulator, flattened in
-    /// row-major order: slot `[ant * agent_count + carried]` holds
-    /// the decayed Drop count from `Drop { ant, carried }`. Length
-    /// = `agent_count × agent_count`. With WanderAndDrop emitting
-    /// `Drop { ant: self, carried: self }` only diagonal slots
-    /// `(i, i)` accumulate; each converges to ~8.33 (`@decay(rate
-    /// = 0.88)` steady state).
+    /// Per-(ant, food) pheromone_trail accumulator, flattened in
+    /// row-major order: slot `[ant * FOOD_COUNT + food]` holds the
+    /// decayed Drop count from `Drop { ant, carried = food }`.
+    /// Length = `agent_count × FOOD_COUNT`. With WanderAndDrop
+    /// emitting `Drop { ant: self, carried: 0 }` only the `(ant, 0)`
+    /// column accumulates; each cell there converges to ~8.33
+    /// (`@decay(rate = 0.88)` steady state). Every other
+    /// `(ant, k)` slot stays at exactly 0.
     pub fn pheromone_trail(&mut self) -> &[f32] {
         self.pheromone_trail.readback(&self.gpu)
     }
@@ -607,12 +636,13 @@ impl CompiledSim for ForagingState {
 
         // (5a) decay_pheromone_trail — pair_map decay multiplies
         // every (ant, carried) slot. Dispatch covers `slot_count`
-        // (= agent_cap × agent_cap) so the anchor reaches every
-        // pair, not just the diagonal `agent_cap` slots.
+        // (= agent_cap × FOOD_COUNT) so the anchor reaches every
+        // ant×food pair, not just the slot the per-tick emit
+        // touches.
         let pt_decay_cfg = decay_pheromone_trail::DecayPheromoneTrailCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            slot_count: self.agent_count * self.agent_count,
+            slot_count: self.agent_count * FOOD_COUNT,
             _pad: 0,
         };
         self.gpu.queue.write_buffer(
@@ -629,16 +659,16 @@ impl CompiledSim for ForagingState {
             &pt_decay_bindings,
             &self.gpu.device,
             &mut encoder,
-            self.agent_count * self.agent_count,
+            self.agent_count * FOOD_COUNT,
         );
 
         // (5b) fold_pheromone_trail — RMW
-        // `view_storage_primary[ant * agent_cap + carried] += 1.0`
+        // `view_storage_primary[ant * FOOD_COUNT + carried] += 1.0`
         // per Drop event.
         let pt_cfg = fold_pheromone_trail::FoldPheromoneTrailCfg {
             event_count,
             tick: self.tick as u32,
-            second_key_pop: self.agent_count,
+            second_key_pop: FOOD_COUNT,
             _pad: 0,
         };
         self.gpu.queue.write_buffer(
