@@ -3723,7 +3723,16 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
             // cooldown gates) lower cleanly. Mirror the PerAgent
             // / PerEvent preamble shape — pair-keyed dispatch has the
             // same access to the simulation clock.
-            "let pair = gid.x;\n\
+            //
+            // `cfg._pad` is repurposed as a `pair_offset` chunk base so
+            // runtimes that exceed `max_compute_workgroups_per_dimension`
+            // (typically 65535 → 4_194_240 pairs at workgroup_size=64)
+            // can issue chunked dispatches by overwriting `_pad` between
+            // calls. All current PerPair runtimes set `_pad: 0` for
+            // single-shot dispatch — adding 0 preserves prior behaviour
+            // bit-for-bit. megaswarm_10000 uses this to walk the 100M
+            // pair grid in ~32 chunks of ~50000 workgroups each.
+            "let pair = gid.x + cfg._pad0;\n\
              let tick = cfg.tick;\n\
              let seed = cfg.seed;\n\
              // PerPair: agent + cand resolution computed against per_pair_candidates.\n\n"
