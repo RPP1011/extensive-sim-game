@@ -1,0 +1,27 @@
+[package]
+name = "tower_defense_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/tower_defense.sim` — the
+# FIRST recognizable game-shaped sim (not a coverage probe, not a
+# duel). 1 Base + 10 Defenders + 100 Enemy slots in a shared agent
+# SoA. CPU-side wave spawner walks the enemy slot range every K ticks
+# and writes hp + alive + spawn position for the next batch (escalating
+# wave size). Mirrors `duel_1v1_runtime`'s shape: build.rs lowers the
+# .sim through the DSL compiler into `OUT_DIR/generated.rs`; src/lib.rs
+# owns GPU context, per-buffer storage, kernel cache, per-tick dispatch
+# chain, and the wave-spawn buffer-rewrite pass.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

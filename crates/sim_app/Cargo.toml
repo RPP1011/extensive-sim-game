@@ -181,6 +181,12 @@ trophic_3tier_runtime = { path = "../trophic_3tier_runtime" }
 # trigger flocking (alignment+cohesion+separation), opposing-team
 # neighbours trigger combat (chase/flee + HP attrition).
 flocking_skirmish_runtime = { path = "../flocking_skirmish_runtime" }
+# Tower defense — fourteenth REAL fixture and first GAME-SHAPED sim
+# (not a duel, not a probe). 1 base + 10 defenders + 100 enemy slots;
+# CPU-side wave spawner walks enemy slots every K ticks. Composes
+# verb cascade + per-agent physics + multi-event-kind ring +
+# non-self target setters into a recognizable TD gameplay loop.
+tower_defense_runtime = { path = "../tower_defense_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -313,3 +319,7 @@ path = "src/trophic_3tier_app.rs"
 [[bin]]
 name = "flocking_skirmish_app"
 path = "src/flocking_skirmish_app.rs"
+
+[[bin]]
+name = "tower_defense_app"
+path = "src/tower_defense_app.rs"
