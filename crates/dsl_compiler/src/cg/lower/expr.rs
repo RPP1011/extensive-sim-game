@@ -905,6 +905,17 @@ pub(super) fn typecheck_node(
 /// - Other bases (locals other than `self` / `target`, namespace
 ///   fields, builder-receiver chains) surface as the same
 ///   [`LoweringError::UnsupportedFieldBase`] typed deferral.
+/// - **Let-bound `AgentId` locals.** Event-pattern binders (and any
+///   other let-bound local whose CG type is `AgentId`) take precedence
+///   over the bare-name `self` / `target` arms. The base lowers to a
+///   `CgExprId` and the read routes through `AgentRef::Target(<that
+///   id>)`, semantically identical to `agents.<field>(<that_local>)`.
+///   This is the verb-cascade shape: the verb expander synthesises
+///   `on ActionSelected { actor: <self>, … }` whose handler body's
+///   `self.<field>` must address the actor's row, not the implicit
+///   kernel-row identity. Without this arm a `Local(_, "self")` base
+///   would be silently routed to `AgentRef::Self_` (the implicit
+///   `gid` of the dispatching kernel), miscompiling the cascade.
 fn lower_field(
     base: &IrExprNode,
     field_name: &str,
@@ -917,6 +928,61 @@ fn lower_field(
     // `UnsupportedFieldBase` deferral so a stray base reference can't
     // accidentally route through the per-pair candidate buffer.
     let target = match &base.kind {
+        // Let-bound `AgentId` local taking precedence over the bare
+        // structural-`self` arm. This is the verb-cascade shape: the
+        // verb expander synthesises `on ActionSelected { actor: <self>,
+        // action_id: …, target: <target> }` whose binders are
+        // event-pattern `LocalRef`s registered in `ctx.local_ids`
+        // (with `ctx.local_tys` carrying `CgTy::AgentId`) by
+        // `synthesize_pattern_binding_lets`. Inside the handler body,
+        // `self.pos` / `target.pos` are not the implicit kernel-row
+        // identity — they're the actor / target id read out of the
+        // event payload. A bare-name match against `"self"` /
+        // `"target"` would silently route them to `AgentRef::Self_` /
+        // `AgentRef::PerPairCandidate` and emit
+        // `agent_pos[gid]` / `agent_pos[per_pair_candidate]`, neither
+        // of which addresses the actor's row.
+        //
+        // Routing through the same `AgentRef::Target(<expr_id>)` shape
+        // as `agents.<field>(<expr>)` (the `(NamespaceId::Agents, _)`
+        // arm of `lower_namespace_call`) reuses the slice-1 stmt-prefix
+        // hoisting + binding-scanner recursion: the WGSL emit
+        // pre-binds `let target_expr_<N>: u32 = <local>;` and the body
+        // reads `agent_<field>[target_expr_<N>]`. Semantically
+        // identical to authoring `agents.<field>(<that_local>)` by
+        // hand.
+        //
+        // **Fold-binder exclusion.** The fold-body lowering registers
+        // its source-level binder (`other` in `sum(other in agents
+        // : other.pos)`, or the body-iter binder in
+        // `for other in agents { … }`) in BOTH `ctx.local_ids` AND
+        // `ctx.fold_binder_name`. The desired semantic for that name
+        // is `AgentRef::PerPairCandidate` (the per-pair / per-iter
+        // loop variable), NOT a Target-let read of the binder's
+        // value. The fold-binder arm below already handles the read;
+        // skipping the let-bound arm here keeps that path intact.
+        // (Without this guard, a fold-body's `other.pos` would route
+        // through Target and the WGSL emit would hoist `let
+        // target_expr_<N> = per_pair_candidate;` ahead of the
+        // for-loop that binds `per_pair_candidate` — a use-before-def
+        // scope error.)
+        IrExpr::Local(local_ref, local_name)
+            if ctx.local_ids.contains_key(local_ref)
+                && ctx.fold_binder_name.as_deref() != Some(local_name.as_str()) =>
+        {
+            let base_id = lower_expr(base, ctx)?;
+            let base_ty = typecheck_node(ctx, base_id, base.span)?;
+            if base_ty != CgTy::AgentId {
+                // Non-AgentId let-locals (`let dist: f32 = …; dist.foo`)
+                // have no field-access semantics — surface the same
+                // typed deferral as any other unbound base.
+                return Err(LoweringError::UnsupportedFieldBase {
+                    field_name: field_name.to_string(),
+                    span,
+                });
+            }
+            AgentRef::Target(base_id)
+        }
         IrExpr::Local(_, local_name) if local_name == "self" => AgentRef::Self_,
         IrExpr::Local(_, local_name)
             if (local_name == "target" || local_name == "candidate") && ctx.target_local =>
@@ -2972,6 +3038,228 @@ mod tests {
             }
             other => panic!("expected UnknownAgentField, got {other:?}"),
         }
+    }
+
+    // ---- Let-bound AgentId local as field-access base ----
+    //
+    // Verb-cascade follow-up (Phase 7 / 2026-05-03): the verb expander
+    // synthesises `physics verb_chronicle_<name> { on ActionSelected
+    // { actor: <self_local>, action_id: …, target: <target_local> } {
+    // emit Killed { … pos: self.pos } } }`. The handler body's
+    // `self.pos` reference must address the actor's row, NOT the
+    // implicit kernel-row identity. The fix routes a let-bound
+    // `AgentId` local base through `AgentRef::Target(<expr>)` —
+    // semantically identical to authoring `agents.<field>(<that_local>)`.
+
+    /// Test helper: register `local_ref` as a let-bound local of type
+    /// `AgentId`. Mirrors what `synthesize_pattern_binding_lets` does
+    /// for an event-pattern binder.
+    fn register_let_bound_agent_id_local(ctx: &mut LoweringCtx<'_>, local_ref: LocalRef) -> LocalId {
+        let local_id = ctx.allocate_local(local_ref);
+        ctx.record_local_ty(local_id, CgTy::AgentId);
+        local_id
+    }
+
+    #[test]
+    fn field_on_let_bound_agent_id_local_lowers_to_target_read() {
+        // Verb cascade: `self` is a let-bound LocalRef from the event
+        // binder (NOT the implicit `Self_` of the surrounding rule).
+        // `self.pos` must lower to `Read(AgentField { field: Pos,
+        // target: AgentRef::Target(<read_local>) })`.
+        let self_ref = LocalRef(7);
+        let ast = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(self_ref, "self".to_string()))),
+            field_name: "pos".to_string(),
+            field: None,
+        });
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let self_local_id = register_let_bound_agent_id_local(&mut ctx, self_ref);
+
+        let id = lower_expr(&ast, &mut ctx).expect("self.pos lowers under let-bound binder");
+        let prog = builder.finish();
+        let root = &prog.exprs[id.0 as usize];
+        match root {
+            CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                assert_eq!(*field, AgentFieldId::Pos);
+                match target {
+                    AgentRef::Target(expr_id) => {
+                        // The Target's expr_id must point at the
+                        // ReadLocal of the let-bound binder — NOT a
+                        // bare `AgentSelfId`.
+                        match &prog.exprs[expr_id.0 as usize] {
+                            CgExpr::ReadLocal { local, ty } => {
+                                assert_eq!(*local, self_local_id);
+                                assert_eq!(*ty, CgTy::AgentId);
+                            }
+                            other => panic!(
+                                "AgentRef::Target inner expr expected ReadLocal, got {other:?}"
+                            ),
+                        }
+                    }
+                    other => panic!("expected AgentRef::Target, got {other:?}"),
+                }
+            }
+            other => panic!("expected Read(AgentField), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_on_let_bound_target_local_lowers_to_target_read() {
+        // Symmetry: a let-bound `target` AgentId local (also
+        // synthesised by the verb expander's `target: <target_local>`
+        // binder) routes the same way. This is independent of
+        // `ctx.target_local` (the pair-bound flag) — the let-bound
+        // arm fires first.
+        let target_ref = LocalRef(11);
+        let ast = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(target_ref, "target".to_string()))),
+            field_name: "hp".to_string(),
+            field: None,
+        });
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // `ctx.target_local` left false — the let-bound arm wins
+        // regardless of the pair-bound flag.
+        register_let_bound_agent_id_local(&mut ctx, target_ref);
+
+        let id = lower_expr(&ast, &mut ctx).expect("target.hp lowers under let-bound binder");
+        let prog = builder.finish();
+        let root = &prog.exprs[id.0 as usize];
+        match root {
+            CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                assert_eq!(*field, AgentFieldId::Hp);
+                assert!(
+                    matches!(target, AgentRef::Target(_)),
+                    "expected AgentRef::Target, got {target:?}"
+                );
+            }
+            other => panic!("expected Read(AgentField), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_on_let_bound_non_agent_id_local_rejected() {
+        // A let-bound non-AgentId local (`let dist: f32 = …; dist.foo`)
+        // has no field-access semantics — surface the same typed
+        // deferral as any other unbound base.
+        let dist_ref = LocalRef(3);
+        let ast = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(dist_ref, "dist".to_string()))),
+            field_name: "anything".to_string(),
+            field: None,
+        });
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let dist_local_id = ctx.allocate_local(dist_ref);
+        ctx.record_local_ty(dist_local_id, CgTy::F32);
+
+        let err = lower_expr(&ast, &mut ctx).expect_err("non-AgentId local field-access rejects");
+        assert!(
+            matches!(err, LoweringError::UnsupportedFieldBase { .. }),
+            "expected UnsupportedFieldBase, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn field_on_let_bound_agent_id_local_virtual_field_synthesizes() {
+        // Virtual field (`hp_pct`) on a let-bound AgentId local: the
+        // synthesizer takes the resolved `AgentRef::Target(<expr>)` and
+        // produces `<read>.hp / <read>.max_hp`, both reads tagged with
+        // the same target.
+        let actor_ref = LocalRef(5);
+        let ast = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(actor_ref, "self".to_string()))),
+            field_name: "hp_pct".to_string(),
+            field: None,
+        });
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        register_let_bound_agent_id_local(&mut ctx, actor_ref);
+
+        let id = lower_expr(&ast, &mut ctx).expect("self.hp_pct synthesizes under let-bound binder");
+        let prog = builder.finish();
+        let root = &prog.exprs[id.0 as usize];
+        match root {
+            CgExpr::Binary { op, lhs, rhs, ty } => {
+                assert_eq!(*op, BinaryOp::DivF32);
+                assert_eq!(*ty, CgTy::F32);
+                // Both operands must be Reads tagged with the same
+                // AgentRef::Target(<expr_id>) — i.e., they share the
+                // actor's id, not the implicit Self_.
+                let lhs_target = match &prog.exprs[lhs.0 as usize] {
+                    CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                        assert_eq!(*field, AgentFieldId::Hp);
+                        target.clone()
+                    }
+                    other => panic!("unexpected lhs: {other:?}"),
+                };
+                let rhs_target = match &prog.exprs[rhs.0 as usize] {
+                    CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                        assert_eq!(*field, AgentFieldId::MaxHp);
+                        target.clone()
+                    }
+                    other => panic!("unexpected rhs: {other:?}"),
+                };
+                assert_eq!(lhs_target, rhs_target);
+                assert!(
+                    matches!(lhs_target, AgentRef::Target(_)),
+                    "expected AgentRef::Target on virtual-field operand, got {lhs_target:?}"
+                );
+            }
+            other => panic!("expected Binary, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_on_fold_binder_local_skips_target_let_arm() {
+        // Fold-binder exclusion: in a fold body, the source-level
+        // binder (`other`) is registered in BOTH `ctx.local_ids` AND
+        // `ctx.fold_binder_name`. The desired semantic is
+        // `AgentRef::PerPairCandidate` (the per-pair loop variable),
+        // not a Target-let read of the binder's value. Without the
+        // exclusion, the WGSL emit would hoist `let target_expr_<N> =
+        // per_pair_candidate;` ahead of the for-loop that binds
+        // `per_pair_candidate` (use-before-def). This test asserts
+        // the existing fold-binder arm wins for that name.
+        let other_ref = LocalRef(13);
+        let ast = node(IrExpr::Field {
+            base: Box::new(node(IrExpr::Local(other_ref, "other".to_string()))),
+            field_name: "pos".to_string(),
+            field: None,
+        });
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        // Mirror the fold-body lowering: register `other` in
+        // `local_ids` AND set the fold-binder slot to its name.
+        register_let_bound_agent_id_local(&mut ctx, other_ref);
+        ctx.fold_binder_name = Some("other".to_string());
+
+        let id = lower_expr(&ast, &mut ctx).expect("other.pos lowers under fold binder");
+        let prog = builder.finish();
+        let root = &prog.exprs[id.0 as usize];
+        match root {
+            CgExpr::Read(DataHandle::AgentField { field, target }) => {
+                assert_eq!(*field, AgentFieldId::Pos);
+                assert_eq!(*target, AgentRef::PerPairCandidate);
+            }
+            other => panic!("expected Read(AgentField, PerPairCandidate), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_on_bare_self_without_let_binding_still_routes_to_self_ref() {
+        // Regression: in the absence of a let-binding for the local,
+        // `self.<field>` continues to resolve to `AgentRef::Self_` —
+        // the existing self-side fast path is untouched. Only the
+        // verb-cascade case (let-bound `self`) takes the new arm.
+        let ast = node(IrExpr::Field {
+            base: Box::new(local_self()),
+            field_name: "pos".to_string(),
+            field: None,
+        });
+        let s = lower_to_string(&ast).expect("self.pos lowers without let-binding");
+        assert_eq!(s, "(read agent.self.pos)");
     }
 
     // ---- The plan's specific rejection — `agent.alive < 5` ----

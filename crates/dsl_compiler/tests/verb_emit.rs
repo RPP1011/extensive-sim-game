@@ -191,3 +191,94 @@ verb Strike(self, target: Agent) =
         skipped,
     );
 }
+
+/// Slice 5.7 acceptance probe: with the let-bound-AgentId-local
+/// field-access fix landed (Phase 7 follow-up to commit `38c4c969`),
+/// the verb cascade's body `pos: self.pos` no longer surfaces an
+/// `UnsupportedFieldBase` defect. The synthesised
+/// `verb_chronicle_Strike` physics handler binds `actor` as a
+/// let-bound LocalRef of type `AgentId`; the body's `self.pos` lowers
+/// to `Read(AgentField { Pos, AgentRef::Target(<actor_read>) })` —
+/// semantically identical to authoring `agents.pos(self)` by hand —
+/// and the emitted WGSL hoists `let target_expr_<N>: u32 = local_<M>;`
+/// followed by `agent_pos[target_expr_<N>]`.
+///
+/// The runtime-side closure (the scoring kernel writing
+/// `ActionSelected` per tick when a verb's row wins the per-agent
+/// argmax) is a separate slice; this test only asserts the compiler
+/// no longer trips on the body shape.
+#[test]
+fn verb_cascade_self_pos_lowers_without_unsupported_field_base() {
+    let src = r#"
+event Killed { by: AgentId, prey: AgentId, pos: vec3, }
+event Tick { }
+entity Agent_ : Agent { pos: vec3, alive: bool, }
+scoring {
+  AttackTarget = 1.0
+}
+verb Strike(self, target: Agent) =
+  action AttackTarget(target: target)
+  when  self.alive
+  emit  Killed { by: self, prey: target, pos: self.pos }
+  score 1.0
+"#;
+    let prog = dsl_compiler::parse(src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve");
+    let outcome = lower_compilation_to_cg(&comp);
+    let diagnostics: Vec<_> = match &outcome {
+        Ok(_) => Vec::new(),
+        Err(o) => o.diagnostics.clone(),
+    };
+    let unsupported_field_base: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d,
+                dsl_compiler::cg::lower::LoweringError::UnsupportedFieldBase { .. }
+            )
+        })
+        .collect();
+    assert!(
+        unsupported_field_base.is_empty(),
+        "expected zero UnsupportedFieldBase diagnostics from the verb cascade body; got {:?}",
+        unsupported_field_base,
+    );
+
+    // Probe the emitted WGSL: the synthesised `verb_chronicle_Strike`
+    // physics kernel should reference `agent_pos[target_expr_<N>]`
+    // (the slice-1 stmt-prefix hoisting shape) for `pos: self.pos`.
+    // This confirms the lowering produced the cross-agent Target-let
+    // form rather than a bare `agent_pos[gid]` (the Self_ shape) or a
+    // `agent_pos[per_pair_candidate]` (the per-pair shape).
+    // The driver may still surface unrelated downstream diagnostics
+    // (e.g., the verb's positional mask shape needing a `from`
+    // clause — Task 2.6 gap). Tolerate the partial-Err path and use
+    // `outcome.program` so emit + WGSL probing still proceeds.
+    let cg = match outcome {
+        Ok(cg) => cg,
+        Err(o) => o.program,
+    };
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg).expect("emit");
+    let chronicle_wgsl = art
+        .wgsl_files
+        .iter()
+        .find(|(name, _)| name.contains("verb_chronicle_Strike"))
+        .map(|(_, body)| body.clone())
+        .expect("expected verb_chronicle_Strike WGSL kernel emitted");
+    // The slice-1 stmt-prefix hoisting pattern: the body's `self.pos`
+    // read produces a `let target_expr_<N>: u32 = local_<M>;` line
+    // (where `local_<M>` is the actor binder from the event-pattern
+    // destructuring) followed by `agent_pos[target_expr_<N>]`. This
+    // confirms the lowering routed `self.pos` through
+    // `AgentRef::Target(<read of let-bound actor>)` rather than the
+    // bare `agent_pos[gid]` shape (which would silently address the
+    // implicit kernel-row identity).
+    assert!(
+        chronicle_wgsl.contains("target_expr_") && chronicle_wgsl.contains("agent_pos["),
+        "expected `agent_pos[target_expr_<N>]` cross-agent read in chronicle WGSL; got:\n{chronicle_wgsl}",
+    );
+}
