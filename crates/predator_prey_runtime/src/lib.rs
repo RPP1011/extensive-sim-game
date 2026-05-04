@@ -87,6 +87,12 @@ pub struct PredatorPreyState {
     /// [`Self::kill_counts`].
     kill_count: ViewStorage,
     kill_count_cfg_buf: wgpu::Buffer,
+    /// Cfg uniform for the per-tick `decay_kill_count` kernel (B2).
+    /// `kill_count` carries `@decay(rate = 0.95, per = tick)` — every
+    /// tick the kernel multiplies `view_storage_primary[k]` by 0.95
+    /// before the per-event fold lands. Steady-state per slot
+    /// converges to `1 / (1 - 0.95) = 20`.
+    kill_count_decay_cfg_buf: wgpu::Buffer,
 
     /// Per-Wolf predator-focus accumulator (separate view, separate
     /// storage; same Killed event source). Same shape as kill_count
@@ -94,6 +100,10 @@ pub struct PredatorPreyState {
     /// helper.
     predator_focus: ViewStorage,
     predator_focus_cfg_buf: wgpu::Buffer,
+    /// Cfg uniform for the per-tick `decay_predator_focus` kernel (B2).
+    /// `predator_focus` carries `@decay(rate = 0.98, per = tick)` —
+    /// steady-state per slot converges to `1 / (1 - 0.98) = 50`.
+    predator_focus_decay_cfg_buf: wgpu::Buffer,
 
     /// Hare and Wolf shapes share a single agent_cap uniform. The
     /// emitted PhysicsMoveHareCfg / PhysicsMoveWolfCfg structs are
@@ -261,6 +271,29 @@ impl PredatorPreyState {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
+        let kill_count_decay_cfg = decay_kill_count::DecayKillCountCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            _pad: [0; 2],
+        };
+        let kill_count_decay_cfg_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("predator_prey_runtime::kill_count_decay_cfg"),
+                contents: bytemuck::bytes_of(&kill_count_decay_cfg),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let predator_focus_decay_cfg = decay_predator_focus::DecayPredatorFocusCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            _pad: [0; 2],
+        };
+        let predator_focus_decay_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("predator_prey_runtime::predator_focus_decay_cfg"),
+                contents: bytemuck::bytes_of(&predator_focus_decay_cfg),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
 
         Self {
             gpu,
@@ -274,8 +307,10 @@ impl PredatorPreyState {
             event_ring,
             kill_count,
             kill_count_cfg_buf,
+            kill_count_decay_cfg_buf,
             predator_focus,
             predator_focus_cfg_buf,
+            predator_focus_decay_cfg_buf,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -451,7 +486,35 @@ impl CompiledSim for PredatorPreyState {
             bytemuck::bytes_of(&pf_cfg),
         );
 
-        // (4) fold_kill_count — RMWs view_storage_primary by 1.0 per
+        // (4a) decay_kill_count — B2 anchor multiply.
+        // PerAgent dispatch (one thread per slot). MUST run before
+        // the fold so the per-event deltas land on the decayed value.
+        // `kill_count` carries `@decay(rate = 0.95, per = tick)` →
+        // steady-state per slot ≈ 1 / (1 - 0.95) = 20 (with the
+        // current 1 Killed event/wolf/tick producer rate).
+        let kc_decay_cfg = decay_kill_count::DecayKillCountCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            _pad: [0; 2],
+        };
+        self.gpu.queue.write_buffer(
+            &self.kill_count_decay_cfg_buf,
+            0,
+            bytemuck::bytes_of(&kc_decay_cfg),
+        );
+        let kc_decay_bindings = decay_kill_count::DecayKillCountBindings {
+            view_storage_primary: self.kill_count.primary(),
+            cfg: &self.kill_count_decay_cfg_buf,
+        };
+        dispatch::dispatch_decay_kill_count(
+            &mut self.cache,
+            &kc_decay_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (4b) fold_kill_count — RMWs view_storage_primary by 1.0 per
         // Killed event whose `by` AgentId matches the slot.
         let kc_bindings = fold_kill_count::FoldKillCountBindings {
             event_ring: self.event_ring.ring(),
@@ -470,7 +533,32 @@ impl CompiledSim for PredatorPreyState {
             self.agent_count,
         );
 
-        // (5) fold_predator_focus — same shape, different storage.
+        // (5a) decay_predator_focus — B2 anchor multiply.
+        // `predator_focus` carries `@decay(rate = 0.98, per = tick)` →
+        // steady-state per slot ≈ 1 / (1 - 0.98) = 50.
+        let pf_decay_cfg = decay_predator_focus::DecayPredatorFocusCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            _pad: [0; 2],
+        };
+        self.gpu.queue.write_buffer(
+            &self.predator_focus_decay_cfg_buf,
+            0,
+            bytemuck::bytes_of(&pf_decay_cfg),
+        );
+        let pf_decay_bindings = decay_predator_focus::DecayPredatorFocusBindings {
+            view_storage_primary: self.predator_focus.primary(),
+            cfg: &self.predator_focus_decay_cfg_buf,
+        };
+        dispatch::dispatch_decay_predator_focus(
+            &mut self.cache,
+            &pf_decay_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (5b) fold_predator_focus — same shape, different storage.
         let pf_bindings = fold_predator_focus::FoldPredatorFocusBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),

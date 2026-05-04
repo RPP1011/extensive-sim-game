@@ -24,6 +24,14 @@ pub enum KernelKind {
     /// layout. Program-emitter composers fork to the ViewFold-specific
     /// helpers (`compose_view_fold_*`).
     ViewFold,
+    /// Spec was synthesised by the per-tick `@decay` anchor pattern:
+    /// one storage binding (`view_storage_primary`) + one uniform
+    /// (`cfg`). The per-slot body multiplies the primary slot by the
+    /// view's compile-time decay rate. Program-emitter composers fork
+    /// to the ViewDecay-specific record() body, which dispatches one
+    /// thread per agent-cap slot using a regular
+    /// `dispatch_workgroups(...)` call (not indirect).
+    ViewDecay,
 }
 
 impl Default for KernelKind {

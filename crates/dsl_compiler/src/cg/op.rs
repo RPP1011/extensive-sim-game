@@ -662,6 +662,24 @@ pub enum ComputeOpKind {
         body: CgStmtListId,
     },
 
+    /// Per-tick anchor multiplication for `@decay(rate, per=tick)` views.
+    /// One thread per slot; reads `view_storage_primary[k]`, multiplies by
+    /// `rate`, writes back. Synthesised by `lower_view` when the view's
+    /// `DecayHint` is present; runs before any [`ComputeOpKind::ViewFold`]
+    /// over the same view in the per-tick schedule (achieved via source-
+    /// order ⇒ smaller `OpId`; see `lower::view::lower_view`).
+    ///
+    /// The decay rate is carried as raw `u32` bits (`f32::to_bits()`) so
+    /// the variant remains `Eq + Hash + Ord` — the AST-side
+    /// [`dsl_ast::ir::DecayHint`] holds the validated `f32` (∈ (0.0, 1.0)),
+    /// the lowering converts via `f32::to_bits()` once.
+    ViewDecay {
+        view: ViewId,
+        /// `f32::to_bits()` of the validated decay rate. Convert back at
+        /// emit time via `f32::from_bits(rate_bits)`.
+        rate_bits: u32,
+    },
+
     /// Spatial query — dispatch shape determines hash-build vs
     /// query-walk.
     SpatialQuery { kind: SpatialQueryKind },
@@ -758,6 +776,20 @@ impl ComputeOpKind {
                 // writes nothing.
                 collect_list_dependencies(*body, exprs, stmts, lists, &mut reads, &mut writes);
             }
+            ComputeOpKind::ViewDecay { view, rate_bits: _ } => {
+                // Per-slot read-modify-write of the view's primary
+                // storage. Modeled as both a read AND a write of the
+                // same handle so the schedule sees it as touching the
+                // storage; the self-edge is filtered out by
+                // `detect_cycles` (RAW self-edges are the legitimate
+                // event-fold pattern, see `well_formed.rs`).
+                let handle = DataHandle::ViewStorage {
+                    view: *view,
+                    slot: super::data_handle::ViewStorageSlot::Primary,
+                };
+                reads.push(handle.clone());
+                writes.push(handle);
+            }
             ComputeOpKind::SpatialQuery { kind } => {
                 let (r, w) = kind.dependencies();
                 reads.extend(r);
@@ -811,6 +843,13 @@ impl ComputeOpKind {
             }
             ComputeOpKind::ViewFold { view, on_event, .. } => {
                 format!("view_fold(view=#{}, on_event=#{})", view.0, on_event.0)
+            }
+            ComputeOpKind::ViewDecay { view, rate_bits } => {
+                format!(
+                    "view_decay(view=#{}, rate={:?})",
+                    view.0,
+                    f32::from_bits(*rate_bits)
+                )
             }
             ComputeOpKind::SpatialQuery { kind } => {
                 format!("spatial_query({})", kind)

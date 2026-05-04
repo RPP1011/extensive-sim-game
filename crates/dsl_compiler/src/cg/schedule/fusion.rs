@@ -626,6 +626,30 @@ fn cross_domain_split_decision(
                 });
             Some(JoinDecision::SplitWrite(witness))
         }
+        // ViewDecay never fuses with anything. The per-tick anchor
+        // multiplication is its own dispatch — fusing with a sibling
+        // PerAgent op (e.g. a per-agent PhysicsRule sweep) would
+        // sequence the decay's RMW behind the sibling's body inside
+        // the same kernel, but the schedule's downstream ViewFold (a
+        // separate PerEvent stage) needs the decayed value visible
+        // before it runs. Pick a witness that names the decay's view-
+        // storage handle so the diagnostic reads sensibly. Mirrors the
+        // SpatialQuery special case directly above.
+        (ComputeOpKind::ViewDecay { .. }, _) | (_, ComputeOpKind::ViewDecay { .. }) => {
+            let witness = prev
+                .writes
+                .iter()
+                .chain(prev.reads.iter())
+                .chain(next.writes.iter())
+                .chain(next.reads.iter())
+                .find(|h| matches!(h, DataHandle::ViewStorage { .. }))
+                .cloned()
+                .unwrap_or(DataHandle::ViewStorage {
+                    view: crate::cg::data_handle::ViewId(0),
+                    slot: crate::cg::data_handle::ViewStorageSlot::Primary,
+                });
+            Some(JoinDecision::SplitWrite(witness))
+        }
         // All other prev/next combinations defer to the conventional
         // WAW check. List the remaining pairs explicitly so adding a
         // new `ComputeOpKind` variant forces an explicit decision
@@ -681,11 +705,13 @@ fn same_view_view_fold_accumulator(
         | (ComputeOpKind::PhysicsRule { .. }, _)
         | (ComputeOpKind::SpatialQuery { .. }, _)
         | (ComputeOpKind::Plumbing { .. }, _)
+        | (ComputeOpKind::ViewDecay { .. }, _)
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::MaskPredicate { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::ScoringArgmax { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::PhysicsRule { .. })
         | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::SpatialQuery { .. })
-        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::Plumbing { .. }) => return false,
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::Plumbing { .. })
+        | (ComputeOpKind::ViewFold { .. }, ComputeOpKind::ViewDecay { .. }) => return false,
     };
     match conflict_key {
         CycleEdgeKey::Other(DataHandle::ViewStorage {

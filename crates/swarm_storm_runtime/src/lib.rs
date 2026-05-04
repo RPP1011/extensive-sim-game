@@ -60,6 +60,11 @@ pub struct SwarmStormState {
     /// pattern needs.
     recent_pulse_intensity: ViewStorage,
     recent_pulse_intensity_cfg_buf: wgpu::Buffer,
+    /// Cfg uniform for the per-tick decay kernel (B2). One thread per
+    /// slot multiplies `view_storage_primary[k]` by the compile-time
+    /// rate (0.85) before the per-event fold lands. The kernel reads
+    /// `cfg.agent_cap` for the early-return.
+    recent_pulse_intensity_decay_cfg_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
     pos_cache: Vec<Vec3>,
@@ -178,6 +183,18 @@ impl SwarmStormState {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             },
         );
+        let rpi_decay_cfg = decay_recent_pulse_intensity::DecayRecentPulseIntensityCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            _pad: [0; 2],
+        };
+        let recent_pulse_intensity_decay_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("swarm_storm_runtime::recent_pulse_intensity_decay_cfg"),
+                contents: bytemuck::bytes_of(&rpi_decay_cfg),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
 
         Self {
             gpu,
@@ -191,6 +208,7 @@ impl SwarmStormState {
             pulse_count_cfg_buf,
             recent_pulse_intensity,
             recent_pulse_intensity_cfg_buf,
+            recent_pulse_intensity_decay_cfg_buf,
             cache: dispatch::KernelCache::default(),
             pos_cache: pos_host,
             dirty: false,
@@ -342,7 +360,37 @@ impl CompiledSim for SwarmStormState {
             event_count,
         );
 
-        // (3) fold_recent_pulse_intensity — same Pulse stream,
+        // (3a) decay_recent_pulse_intensity — B2 anchor multiply.
+        // PerAgent dispatch (one thread per slot). MUST run before
+        // the fold so the per-event deltas land on the decayed value.
+        // Steady-state per slot ≈ per_tick_emits / (1 - decay_rate)
+        //                       = 4 / 0.15 ≈ 26.67. Without this
+        // multiply the value grew unbounded across ticks (the prior
+        // "KNOWN GAP B2" diagnostic).
+        let rpi_decay_cfg = decay_recent_pulse_intensity::DecayRecentPulseIntensityCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            _pad: [0; 2],
+        };
+        self.gpu.queue.write_buffer(
+            &self.recent_pulse_intensity_decay_cfg_buf,
+            0,
+            bytemuck::bytes_of(&rpi_decay_cfg),
+        );
+        let rpi_decay_bindings =
+            decay_recent_pulse_intensity::DecayRecentPulseIntensityBindings {
+                view_storage_primary: self.recent_pulse_intensity.primary(),
+                cfg: &self.recent_pulse_intensity_decay_cfg_buf,
+            };
+        dispatch::dispatch_decay_recent_pulse_intensity(
+            &mut self.cache,
+            &rpi_decay_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (3b) fold_recent_pulse_intensity — same Pulse stream,
         // with @decay anchor. Same event-count dispatch sizing.
         let rpi_bindings =
             fold_recent_pulse_intensity::FoldRecentPulseIntensityBindings {

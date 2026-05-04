@@ -1676,6 +1676,10 @@ fn body_list_for_op_kind(kind: &ComputeOpKind) -> Option<CgStmtListId> {
         ComputeOpKind::ScoringArgmax { .. } => None,
         ComputeOpKind::SpatialQuery { .. } => None,
         ComputeOpKind::Plumbing { .. } => None,
+        // ViewDecay carries no `CgStmtList` body — the kernel is
+        // hand-synthesised at emit time from the `(view, rate_bits)`
+        // payload, so there's no Emit-walker work to do here.
+        ComputeOpKind::ViewDecay { .. } => None,
     }
 }
 

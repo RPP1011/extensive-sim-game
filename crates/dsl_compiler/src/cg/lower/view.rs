@@ -285,14 +285,31 @@ pub fn lower_view(
             // Note: view signatures for materialized views are
             // populated in Phase 1 (`populate_view_bodies_and_signatures`)
             // — see driver.rs.
-            lower_fold_handlers(
+
+            // B2: when the view carries `@decay(rate, per=tick)`, lower a
+            // singleton [`ComputeOpKind::ViewDecay`] op BEFORE any fold
+            // handler. The schedule synthesizer keys op ordering on
+            // OpId (Kahn's tie-breaking), and the fusion analyzer's
+            // ViewDecay split arm keeps the decay in its own kernel ⇒
+            // the per-tick stage order becomes:
+            //     ... -> decay_<view> -> fold_<view> -> ...
+            // which is the anchor-pattern's correctness invariant
+            // (multiply BEFORE the per-event deltas land).
+            let mut op_ids = Vec::with_capacity(handlers.len() + 1);
+            if let Some(decay) = ir.decay.as_ref() {
+                let decay_op = lower_decay_op(view_id, decay, ctx)?;
+                op_ids.push(decay_op);
+            }
+            let fold_ids = lower_fold_handlers(
                 view_id,
                 *hint,
                 ir.decay.as_ref(),
                 handlers,
                 handler_resolutions,
                 ctx,
-            )
+            )?;
+            op_ids.extend(fold_ids);
+            Ok(op_ids)
         }
 
         // ---- Kind/body mismatch arms ----
@@ -362,6 +379,32 @@ fn lower_fold_handlers(
         op_ids.push(op_id);
     }
     Ok(op_ids)
+}
+
+/// Lower a view's `@decay(rate, per=tick)` annotation into a
+/// singleton [`ComputeOpKind::ViewDecay`] op. PerAgent dispatch (one
+/// thread per slot). Synthesised BEFORE the view's fold handlers so
+/// the resulting OpId sorts decay → fold under the schedule's Kahn
+/// tie-breaking. The actual kernel body (atomic load, multiply,
+/// atomic store) is hand-synthesised at emit time from the
+/// `(view, rate_bits)` payload — there is no `CgStmtList` body to
+/// lower here.
+fn lower_decay_op(
+    view_id: ViewId,
+    decay: &DecayHint,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<OpId, LoweringError> {
+    let kind = ComputeOpKind::ViewDecay {
+        view: view_id,
+        rate_bits: decay.rate.to_bits(),
+    };
+    let shape = DispatchShape::PerAgent;
+    ctx.builder
+        .add_op(kind, shape, decay.span)
+        .map_err(|e| LoweringError::BuilderRejected {
+            error: e,
+            span: decay.span,
+        })
 }
 
 /// Lower a single fold handler to one [`ComputeOpKind::ViewFold`] op.

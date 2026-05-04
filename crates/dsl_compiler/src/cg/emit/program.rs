@@ -507,7 +507,9 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
     // (Rust side): { agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32 }.
     let fields = match spec.kind {
         KernelKind::ViewFold => "event_count: u32, tick: u32, _pad0: u32, _pad1: u32",
-        KernelKind::Generic => "agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32",
+        KernelKind::ViewDecay | KernelKind::Generic => {
+            "agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32"
+        }
     };
     format!("struct {ty} {{ {fields} }};\n", ty = cfg.wgsl_ty)
 }

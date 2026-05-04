@@ -45,11 +45,17 @@ fn main() {
 
     // Read back per-Wolf kill_count accumulator. Each Wolf emits one
     // Killed event per tick (the placeholder StrikePrey-shaped emit
-    // in MoveWolf), so after `TICKS` ticks every Wolf slot should
-    // hold approximately TICKS as its kill_count value. Hare slots
-    // (creature_type = 0, even slot indices) shouldn't appear in
-    // any Killed event's `by` field — their kill_count entries
-    // should stay at 0.
+    // in MoveWolf). The view carries `@decay(rate = 0.95, per = tick)`
+    // (assets/sim/predator_prey.sim:162) which the B2 lowering wires
+    // to a per-tick anchor multiplication BEFORE the per-event fold;
+    // steady-state per slot ≈ 1 / (1 - 0.95) = 20.0. Without B2 the
+    // kernel was a plain accumulator and grew to TICKS (= 200) per
+    // slot — the @decay annotation existed in the IR but never
+    // lowered into a kernel.
+    //
+    // Hare slots (creature_type = 0, even slot indices) shouldn't
+    // appear in any Killed event's `by` field — their kill_count
+    // entries stay at 0.
     let kc = sim.kill_counts();
     let mut hare_total = 0.0_f32;
     let mut wolf_total = 0.0_f32;
@@ -67,10 +73,23 @@ fn main() {
         }
     }
     let wolf_mean = wolf_total / wolf_count as f32;
+    // Steady-state per slot under @decay(rate=0.95): 1 / (1 - 0.95)
+    // = 20. The producer rate is 1 Killed event/wolf/tick, so the
+    // analytical fixed point is `producer_rate / (1 - decay_rate)`.
+    // 200 ticks is far past the ~60-tick mixing time at rate=0.95
+    // so the readback should land on the asymptote.
+    let kc_steady_state = 1.0_f32 / (1.0 - 0.95);
     println!(
         "pp_app: kill_count — hare total={:.2} (max={:.2}, expected 0); \
-         wolf total={:.2} (min={:.2}, mean={:.2}, max={:.2}, expected ~{} each)",
-        hare_total, hare_max, wolf_total, wolf_min, wolf_mean, wolf_max, TICKS,
+         wolf total={:.2} (min={:.2}, mean={:.2}, max={:.2}, \
+         expected steady-state ~{:.2} each via @decay(rate=0.95))",
+        hare_total,
+        hare_max,
+        wolf_total,
+        wolf_min,
+        wolf_mean,
+        wolf_max,
+        kc_steady_state,
     );
 }
 

@@ -1196,6 +1196,10 @@ impl CgProgramBuilder {
             }
             ComputeOpKind::PhysicsRule { body, .. } => self.check_list_id(*body),
             ComputeOpKind::ViewFold { body, .. } => self.check_list_id(*body),
+            // ViewDecay carries no `CgExprId` / `CgStmtListId` references —
+            // the kernel body is hand-synthesised at emit time from the
+            // `(view, rate_bits)` pair.
+            ComputeOpKind::ViewDecay { .. } => Ok(()),
             ComputeOpKind::SpatialQuery { kind } => {
                 if let SpatialQueryKind::FilteredWalk { filter } = kind {
                     self.check_expr_id(*filter)?;

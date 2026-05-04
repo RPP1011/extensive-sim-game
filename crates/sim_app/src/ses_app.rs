@@ -53,7 +53,13 @@ fn main() {
     );
     if (pc_mean - pc_expected_per_slot).abs() > 1.0 {
         println!(
-            "ses_app: KNOWN GAP B1 — view-fold storage writes are non-atomic (cg/emit/wgsl_body.rs::lower_cg_stmt's `bitcast<u32>(bitcast<f32>(...) + rhs)` RMW). With 4 emits/agent/tick, 3 of every 4 increments are lost to the race. P11 (Reduction Determinism) violation. pp/pc/cn don't surface this because they emit 1 event/agent/tick → no contention."
+            "ses_app: NOTE — pulse_count per-slot mean={pc_mean:.2} vs analytical \
+             4×100=400. B1 (atomic CAS RMW) is closed; the residual gap is \
+             cg/emit/program.rs::compose_view_fold_record_method hardcoding \
+             dispatch_workgroups(1, 1, 1) instead of (event_count + 63) / 64. \
+             So only the first 64 of 256 emitted Pulse events get folded per \
+             tick, capping per-slot at ~1×ticks regardless of how many fire. \
+             pp/pc/cn don't surface this because they emit 1 event/agent/tick."
         );
     }
 
@@ -78,7 +84,14 @@ fn main() {
     );
     if (rpi_mean - rpi_steady_state_per_slot).abs() > 1.0 {
         println!(
-            "ses_app: KNOWN GAP B2 — `@decay(rate, per=tick)` is not lowered to a per-tick anchor multiplication. The fold body just adds the delta; nothing applies the 0.85 anchor scale before each tick's events. Compounded with B1, the recent_pulse_intensity converges to the same 1×ticks behavior as pulse_count rather than to the steady-state 4/(1-0.85) ≈ 26.67."
+            "ses_app: NOTE — recent_pulse_intensity per-slot mean={rpi_mean:.2} \
+             vs analytical 4/(1-0.85)≈26.67 because of the still-open view-fold \
+             dispatch-size gap (cg/emit/program.rs::compose_view_fold_record_method \
+             hardcodes dispatch_workgroups(1, 1, 1) — only 1 of every 4 emitted Pulse \
+             events lands per tick). With that bottleneck the realised per-slot \
+             steady state is 1/(1-0.85)≈6.67. The @decay lowering itself is correct \
+             (gap B2 closed); ses_app once that dispatch-size gap closes will \
+             show ≈26.67."
         );
     }
 }

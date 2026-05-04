@@ -447,6 +447,7 @@ fn kind_label(kind: &ComputeOpKind) -> &'static str {
         ComputeOpKind::ScoringArgmax { .. } => "scoring_argmax",
         ComputeOpKind::PhysicsRule { .. } => "physics_rule",
         ComputeOpKind::ViewFold { .. } => "view_fold",
+        ComputeOpKind::ViewDecay { .. } => "view_decay",
         ComputeOpKind::SpatialQuery { .. } => "spatial_query",
         ComputeOpKind::Plumbing { .. } => "plumbing",
     }
@@ -485,6 +486,8 @@ fn allowed_shapes_for_kind(kind: &ComputeOpKind) -> &'static [DispatchShapeLabel
             DispatchShapeLabel::PerCell,
         ],
         ComputeOpKind::ViewFold { .. } => &[DispatchShapeLabel::PerEvent],
+        // Per-tick anchor multiplication runs one thread per slot.
+        ComputeOpKind::ViewDecay { .. } => &[DispatchShapeLabel::PerAgent],
         ComputeOpKind::SpatialQuery { kind } => match kind {
             // BuildHash hashes every agent into the grid — per-agent
             // dispatch.
@@ -803,10 +806,12 @@ fn check_op(
                 validate_expr_subtree(arena, *filter, op_id, expr_arena_len, errors);
             }
         }
-        // Plumbing kinds carry no embedded `CgExpr` / `CgStmt` — every
-        // variant's reads/writes are typed `DataHandle`s sourced from
-        // `PlumbingKind::dependencies()`. Nothing to walk.
-        ComputeOpKind::Plumbing { .. } => {}
+        // Plumbing + ViewDecay carry no embedded `CgExpr` / `CgStmt` — every
+        // variant's reads/writes are typed `DataHandle`s synthesised at
+        // construction (Plumbing via `PlumbingKind::dependencies()`,
+        // ViewDecay via the auto-walker arm in `compute_dependencies`).
+        // Nothing to walk.
+        ComputeOpKind::Plumbing { .. } | ComputeOpKind::ViewDecay { .. } => {}
     }
 
     // Validate AgentRef::Target ids on every read/write handle.
@@ -847,9 +852,9 @@ fn check_op(
         ComputeOpKind::MaskPredicate { .. }
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. } => {}
-        // Plumbing kinds reference no `CgStmtListId` — no list-range
+        // Plumbing + ViewDecay reference no `CgStmtListId` — no list-range
         // check to perform.
-        ComputeOpKind::Plumbing { .. } => {}
+        ComputeOpKind::Plumbing { .. } | ComputeOpKind::ViewDecay { .. } => {}
     }
 
     // --- DataHandle structural consistency on reads + writes ---------
@@ -1235,10 +1240,13 @@ fn type_check_op(
                 }
             }
         }
-        ComputeOpKind::Plumbing { .. } => {
-            // Plumbing kinds carry no embedded expressions; their
-            // structural reads/writes are typed `DataHandle`s sourced
-            // from `PlumbingKind::dependencies()`. Nothing to walk.
+        ComputeOpKind::Plumbing { .. } | ComputeOpKind::ViewDecay { .. } => {
+            // Plumbing + ViewDecay kinds carry no embedded expressions;
+            // their structural reads/writes are typed `DataHandle`s
+            // synthesised at construction (Plumbing via
+            // `PlumbingKind::dependencies()`, ViewDecay via the auto-
+            // walker arm in `ComputeOpKind::compute_dependencies`).
+            // Nothing to walk.
         }
     }
 }
@@ -1583,6 +1591,11 @@ fn p6_check_op(op: &ComputeOp, op_id: OpId, prog: &CgProgram, errors: &mut Vec<C
         // `CgStmt::Assign`, so the P6 walker — which only inspects
         // `Assign` statements — has nothing to flag here.
         ComputeOpKind::ViewFold { .. } => {}
+        // ViewDecay carries no statement body — the kernel is hand-
+        // synthesised at emit time. Its only surface is the synthetic
+        // `ViewStorage{view, Primary}` read+write the auto-walker
+        // recorded; there is no `CgStmt::Assign` to police.
+        ComputeOpKind::ViewDecay { .. } => {}
         ComputeOpKind::Plumbing { .. } => {}
     }
 }
@@ -1675,7 +1688,8 @@ fn event_field_scope_check_op(
         ComputeOpKind::MaskPredicate { .. }
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. }
-        | ComputeOpKind::Plumbing { .. } => return,
+        | ComputeOpKind::Plumbing { .. }
+        | ComputeOpKind::ViewDecay { .. } => return,
     };
     let kind = kind_label(&op.kind);
     let shape = DispatchShapeLabel::from_shape(&op.shape).snake();
@@ -1848,7 +1862,8 @@ fn match_uniqueness_check_op(
         ComputeOpKind::MaskPredicate { .. }
         | ComputeOpKind::ScoringArgmax { .. }
         | ComputeOpKind::SpatialQuery { .. }
-        | ComputeOpKind::Plumbing { .. } => return,
+        | ComputeOpKind::Plumbing { .. }
+        | ComputeOpKind::ViewDecay { .. } => return,
     };
     match_uniqueness_walk_list(body, op, op_id, prog, errors);
 }
