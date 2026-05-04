@@ -102,6 +102,14 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Tactical squad 5v5 — FIFTH real fixture (after duel_1v1, duel_25v25,
+# foraging_real, predator_prey_real). 5 vs 5 with role distribution
+# (Tank + Healer + 3 DPS per team). First fixture to actually exercise
+# pair-field scoring for target selection (DPS picks lowest-HP enemy;
+# Healer picks lowest-HP ally) — the duel_1v1 had pair-field scoring
+# but the 2-agent population trivialised the argmax. Closes the
+# verb-mask `mask_k=1u` placeholder gap inline (Task 5.7).
+tactical_squad_5v5_runtime = { path = "../tactical_squad_5v5_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +194,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "tactical_squad_5v5_app"
+path = "src/tactical_squad_5v5_app.rs"

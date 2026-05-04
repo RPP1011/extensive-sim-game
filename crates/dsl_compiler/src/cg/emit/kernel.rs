@@ -3228,8 +3228,25 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 
 /// PerPair dispatch — derive `(agent, cand)` from `pair = gid.x`,
 /// bound-check `agent`, evaluate the predicate, atomic-OR the
-/// agent's bit. `mask_<ID>_k` placeholder is `1u` until Task 5.7
-/// wires `cfg.per_pair_candidates`.
+/// agent's bit. `mask_<ID>_k` reads `cfg.agent_cap` so every (actor,
+/// candidate) pair gets a thread; with `mask_k = agent_cap`, the
+/// dispatch caller must enqueue `agent_cap * agent_cap` threads (the
+/// runtime helper currently dispatches only `agent_cap` for direct
+/// PerAgent kernels — PerPair callers must size the dispatch to the
+/// pair count themselves; see `tactical_squad_5v5_runtime` for the
+/// expected pattern). When the caller dispatches only `agent_cap`
+/// threads (as the duel_1v1_runtime does today) the kernel
+/// degenerates to `(actor=N, cand=0)` per thread for `N < agent_cap`,
+/// which matches the previous `mask_k=1u` behaviour.
+///
+/// Originally the literal `mask_k = 1u` (TODO task-5.7) — switched to
+/// `cfg.agent_cap` so pair-field mask predicates that reference
+/// `target.<field>` (e.g. team-membership filters via
+/// `target.level != self.level`) actually visit every candidate slot
+/// rather than collapsing to candidate=0 only. The previous behaviour
+/// silently miscompiled any mask predicate where the slot-0 candidate
+/// failed the predicate (e.g. team Red actors scanning team Red
+/// agent-0 → predicate false → entire actor's mask bit never sets).
 ///
 /// `agent_id` / `per_pair_candidate` are aliased to the per-mask
 /// derivations so the predicate body — which refers to those names
@@ -3240,7 +3257,7 @@ fn mask_predicate_per_agent_body(mask: MaskId, predicate_wgsl: &str) -> String {
 fn mask_predicate_per_pair_body(mask: MaskId, predicate_wgsl: &str) -> String {
     format!(
         "// PerPair MaskPredicate — derive (agent, cand) from `pair`.\n\
-         let mask_{0}_k = 1u; // TODO(task-5.7): read from cfg.per_pair_candidates.\n\
+         let mask_{0}_k = cfg.agent_cap; // pair-field predicate: visit every (actor, candidate) pair.\n\
          let mask_{0}_agent = pair / mask_{0}_k;\n\
          let mask_{0}_cand  = pair % mask_{0}_k;\n\
          if (mask_{0}_agent >= cfg.agent_cap) {{ return; }}\n\

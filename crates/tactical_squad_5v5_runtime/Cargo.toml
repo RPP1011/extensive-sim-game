@@ -1,0 +1,24 @@
+[package]
+name = "tactical_squad_5v5_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/tactical_squad_5v5.sim` —
+# the FIFTH real gameplay-shaped fixture (after duel_1v1, duel_25v25,
+# foraging_real, predator_prey_real). 5 vs 5 with role distribution
+# (1 Tank + 1 Healer + 3 DPS per team), exercising pair-field scoring
+# for actual target selection (DPS picks lowest-HP enemy; Healer picks
+# lowest-HP ally). Same build/include shape as `duel_1v1_runtime`.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

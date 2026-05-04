@@ -1,0 +1,213 @@
+// tactical_squad_5v5 — FIFTH real gameplay-shaped fixture (sequence:
+// duel_1v1 → duel_25v25 → foraging_real → predator_prey_real → THIS).
+//
+// First sim aimed at the actual game's combat surface (Deterministic
+// Tactical Orchestration RPG). Composition: 5 vs 5 with role split.
+//   - Per team: 1 Tank + 1 Healer + 3 DPS
+//   - 10 agents total, indexed: Red[0..5], Blue[5..10]
+//
+// ARCHITECTURAL DIFFERENTIATOR (vs duel_1v1 / duel_25v25):
+//
+// duel_1v1 had three verbs but TRIVIAL targeting (always self or
+// self.target). The Spell verb's `score (50 - target.hp)` was
+// pair-field but the duel only had two combatants — the per-pair
+// argmax trivially picked "the other guy" every time.
+//
+// THIS sim actually USES pair-field scoring for target selection:
+//   - DPS Snipe: argmax over `(200.0 - target.hp)` → picks lowest-HP enemy
+//   - Healer Heal: argmax over `(200.0 - target.hp)` → picks lowest-HP ally
+// The per-pair candidate enumeration is what differentiates the
+// scoring kernel from a per-agent scan; this sim drives 10 actors ×
+// 10 candidates per tick = 100 (actor, target) evaluations.
+//
+// ENCODING:
+//   - `creature_type` discriminant carries the ROLE: Tank=0, Healer=1, Dps=2.
+//     Three `entity X : Agent` declarations → declaration-order indices
+//     0/1/2 (per the `IrExpr::Entity(EntityRef)` lowering in
+//     `cg::lower::expr.rs:644`).
+//   - `level` (u32 SoA) carries the TEAM: Red=0, Blue=1. The runtime
+//     sets each agent's level slot at init.
+//
+// The verbs gate on `self.creature_type == <Role>` (only the matching
+// role fires) AND `target.level != self.level` (enemies) or
+// `target.level == self.level` (allies) — combining the two
+// discriminants gives full role × team routing without needing a
+// 6-entity-type Cartesian product.
+//
+// COMBAT EVENTS:
+//   - `Damaged{source, target, amount}` — Strike + Snipe both emit
+//   - `Healed {source, target, amount}` — Heal emits
+//   - `Defeated{combatant}` — chronicle ApplyDamage emits when HP <= 0
+//
+// CYCLE WARNINGS (deferred — same as duel_1v1):
+//   - chronicle ApplyDamage writes hp/alive; mask + scoring read hp/alive
+//   - this surfaces as a `cycle in read/write graph` lower warning that
+//     the build script tolerates (warning, not error)
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+// Three role entities — declaration order pins the discriminant
+// (Tank=0, Healer=1, Dps=2). The runtime writes each agent's
+// creature_type slot to the appropriate index at spawn.
+entity Tank   : Agent { pos: vec3, vel: vec3, }
+entity Healer : Agent { pos: vec3, vel: vec3, }
+entity Dps    : Agent { pos: vec3, vel: vec3, }
+
+config combat {
+  // Per-role attack / heal magnitudes. DPS hits hardest per shot
+  // but on a longer cooldown; Tank chips steadily; Healer keeps the
+  // front line up.
+  tank_damage:    f32 = 10.0,
+  dps_damage:     f32 = 22.0,
+  heal_amount:    f32 = 18.0,
+  // Cooldown gates expressed as `world.tick % N == 0` mod arms
+  // (literals inlined per the diplomacy_probe Gap #3 precedent —
+  // config.combat.<u32_field> still resolves as f32 at the
+  // expression layer, so the mod arms inline the integer literal).
+  // Tank fires every 3rd tick, DPS every 4th, Healer every 3rd.
+}
+
+// -------------------------------------------------------------------
+// Strike — Tank's basic attack. Pair-field score `(100.0 - target.hp)`
+// — picks the LOWEST-HP enemy, same shape as Snipe but with tank
+// damage (lower per hit) and a tighter cooldown. Pair-field score is
+// REQUIRED here even though Tank "any enemy in range" was the design
+// intent: a constant score (`score 1.0`) leaves `best_target` at the
+// `0xFFFFFFFFu` sentinel because the scoring kernel only writes
+// `best_target` inside the per-pair-candidate inner loop, and
+// constant scores don't trigger that loop. The Damaged event then
+// emits with `target = 0xFFFFFFFF`, which the ApplyDamage chronicle
+// dereferences as `agent_hp[0xFFFFFFFF]` — an out-of-bounds write
+// that silently nulls the damage. (Discovered when Tank dmg_dealt
+// view accumulated correctly but no agent's HP ever decremented from
+// Strike.)
+// -------------------------------------------------------------------
+verb Strike(self, target: Agent) =
+  action StrikeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == Tank
+        && target.level != self.level
+        && (world.tick % 3 == 0))
+  emit Damaged { source: self, target: target, amount: config.combat.tank_damage }
+  // Filter dead candidates: their hp is negative (driven down by
+  // continued post-mortem damage when no alive-check happens), so a
+  // dead target's `(C - target.hp)` term would dominate the argmax
+  // (e.g. dead at hp=-718 gives score ~818, way above any alive
+  // target). Multiply by `select(0.0, 1.0, target.alive)` to zero
+  // out dead candidates' utility. The `select(false_val, true_val,
+  // cond)` shape matches `cg::expr::CgExpr::Select` lowering (see
+  // `cg::lower::expr::lower_select`).
+  score (if target.alive { 100.0 - target.hp } else { -1000000.0 })
+
+// -------------------------------------------------------------------
+// Snipe — DPS picks the LOWEST-HP enemy. Pair-field score
+// `(200.0 - target.hp)` — the per-pair argmax sees every (actor,
+// candidate) pair, picks the candidate with the smallest hp value
+// (largest score under inversion). This is THE CORE DIFFERENTIATOR
+// of this sim from duel_1v1: with 5 enemies on the other team, the
+// argmax actually picks one specific target out of multiple.
+// -------------------------------------------------------------------
+verb Snipe(self, target: Agent) =
+  action SnipeAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.creature_type == Dps
+        && target.level != self.level
+        && (world.tick % 4 == 0))
+  emit Damaged { source: self, target: target, amount: config.combat.dps_damage }
+  // Same dead-target filter as Strike — without `target.alive` in the
+  // score expression, post-mortem `target.hp` driven negative by
+  // continued targeting would dominate the argmax forever.
+  score (if target.alive { 200.0 - target.hp } else { -1000000.0 })
+
+// -------------------------------------------------------------------
+// Heal — Healer picks the LOWEST-HP ally. Same pair-field score
+// shape as Snipe but inverted target predicate (`target.level ==
+// self.level` — same team). Targeting `self` is permitted so a
+// solo healer can heal themselves; the "skip if all allies above
+// 90%" gate is handled implicitly by the inverted score (high-HP
+// allies score low — Heal still fires but on the lowest-HP ally
+// regardless, because there's no urgency threshold gate today).
+// -------------------------------------------------------------------
+verb Heal(self, target: Agent) =
+  action HealAction
+  when (self.alive
+        && target.alive
+        && self.creature_type == Healer
+        && target.level == self.level
+        && (world.tick % 3 == 0))
+  emit Healed { source: self, target: target, amount: config.combat.heal_amount }
+  // Same dead-ally filter — once a healer's only ally drops below 0,
+  // we don't want to keep healing the corpse. Once an ally's alive=0,
+  // the score collapses to -infinity-ish and the next-lowest alive
+  // ally takes over.
+  score (if target.alive { 200.0 - target.hp } else { -1000000.0 })
+
+// -------------------------------------------------------------------
+// ApplyDamage chronicle — same shape as duel_1v1. Reduces target HP
+// per Damaged event; on HP <= 0 sets alive=false AND emits Defeated.
+// -------------------------------------------------------------------
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// -------------------------------------------------------------------
+// ApplyHeal chronicle — adds heal amount to target HP. No HP cap
+// today (no MaxHp clamp wired); steady-state Healer can over-heal
+// the tank, which is fine for the smoke run.
+// -------------------------------------------------------------------
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) + a;
+    agents.set_hp(t, new_hp);
+  }
+}
+
+// -------------------------------------------------------------------
+// Per-source observability views — `damage_dealt` totals per attacker,
+// `healing_done` totals per healer. Same shape as duel_1v1.
+// -------------------------------------------------------------------
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
