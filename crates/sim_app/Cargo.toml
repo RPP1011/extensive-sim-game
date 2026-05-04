@@ -102,6 +102,12 @@ quest_probe_runtime = { path = "../quest_probe_runtime" }
 # PerPair tick preamble, Bool LHS rewrite). See
 # `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
 duel_1v1_runtime = { path = "../duel_1v1_runtime" }
+# Boss fight — first ASYMMETRIC RPG combat fixture (1 Boss + 5 Heroes
+# in a shared Agent SoA, distinguished via the `creature_type`
+# discriminant). Composes the duel_1v1 verb cascade + creature_type
+# discriminant + multi-event-kind ring into multi-ability cooldown-
+# gated encounter combat.
+boss_fight_runtime = { path = "../boss_fight_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -186,3 +192,7 @@ path = "src/quest_probe_app.rs"
 [[bin]]
 name = "duel_1v1_app"
 path = "src/duel_1v1_app.rs"
+
+[[bin]]
+name = "boss_fight_app"
+path = "src/boss_fight_app.rs"

@@ -101,11 +101,28 @@ impl GpuContext {
             | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
         let supported = adapter.features();
         let required_features = supported & wanted;
+        // Bump per-shader-stage storage-buffer + uniform limits so
+        // sims with many bindings (boss_fight's scoring kernel needs
+        // 9 storage buffers — 4 mask bitmaps + 2 agent SoA fields +
+        // event_ring/tail + scoring_output) compile on the default
+        // adapter. We take min(adapter, raised-default) so software
+        // backends with low limits still produce a valid descriptor.
+        let adapter_limits = adapter.limits();
+        let mut required_limits = wgpu::Limits::default();
+        required_limits.max_storage_buffers_per_shader_stage = adapter_limits
+            .max_storage_buffers_per_shader_stage
+            .max(required_limits.max_storage_buffers_per_shader_stage);
+        required_limits.max_uniform_buffers_per_shader_stage = adapter_limits
+            .max_uniform_buffers_per_shader_stage
+            .max(required_limits.max_uniform_buffers_per_shader_stage);
+        required_limits.max_bindings_per_bind_group = adapter_limits
+            .max_bindings_per_bind_group
+            .max(required_limits.max_bindings_per_bind_group);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("engine::gpu::GpuContext::device"),
                 required_features,
-                required_limits: wgpu::Limits::default(),
+                required_limits,
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
             })
