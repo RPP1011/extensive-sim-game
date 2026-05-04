@@ -97,11 +97,16 @@ physics WanderAndDrop @phase(per_agent) {
   on Tick {} where (self.alive) {
     let new_pos = self.pos + self.vel * config.foraging.wander_scale;
     agents.set_pos(self, new_pos);
-    // Per-tick Drop emit. `carried` is self for now (so the
-    // pheromone view's pair-key is (self, self) — diagonal
-    // entries only). Real per-pair behavior lands once Items
-    // emit a real ItemId target.
-    emit Drop { ant: self, carried: self, pos: new_pos }
+    // Per-tick Drop emit. `carried` is hard-coded to slot 0 so
+    // every ant deposits onto the same food column — the
+    // pheromone_trail view's pair-key becomes `(ant, 0)`. This
+    // confirms the pair_map storage SIZING is correct
+    // (`agent_count × FOOD_COUNT`, not `agent_count × agent_count`)
+    // independently of how the second key gets typed at the
+    // event-schema level. Once Item-SoA landing makes `carried` a
+    // real `ItemId`, replace the literal with whatever expression
+    // produces the actual carried-food entity.
+    emit Drop { ant: self, carried: 0, pos: new_pos }
     // GAP: a `Deposited` emit gated on "ant just reached its
     // colony center" needs spatial body-iter in physics + Group
     // field access. Stubbed out here:
@@ -123,23 +128,27 @@ view pheromone_deposits(ant: Agent) -> f32 {
   clamp: [0.0, 1000.0],
 }
 
-// pair_map storage gap fix (2026-05-03): the WGSL emit now composes
-// `view_storage_primary[k1 * cfg.second_key_pop + k2]` for views
-// whose `@materialized(storage = pair_map)` flows through the CG-
-// side `CgStorageHint::PairMap` discriminator, and the decay kernel
-// iterates `cfg.slot_count` slots. The fixture runtimes set
-// `second_key_pop` + `slot_count` per the second-key entity
-// population (= `agent_count` for Agent×Agent; = `food_count` once
-// Item-SoA storage lands).
+// pair_map storage gap fix (2026-05-03 — Item-population sizing
+// closure): the WGSL emit composes `view_storage_primary[k1 *
+// cfg.second_key_pop + k2]` for views whose `@materialized(storage =
+// pair_map)` flows through the CG-side `CgStorageHint::PairMap`
+// discriminator, and the decay kernel iterates `cfg.slot_count`
+// slots. The fixture runtimes set `second_key_pop` + `slot_count`
+// per the second-key entity population independently of `agent_cap`
+// — so an Item-keyed second axis no longer over-allocates as
+// `agent_count × agent_count`.
 //
-// Today `Drop.carried` is `AgentId` (not yet `ItemId` — see Item-
-// SoA gap above), so `pheromone_trail`'s second key resolves to an
-// Agent slot. `foraging_runtime` over-allocates the storage as
-// `agent_count × agent_count` and asserts the per-`(i, i)` diagonal
-// converges to `1 / (1 - 0.88) ≈ 8.33` while every off-diagonal
-// stays at 0 (no inter-ant Drop events). Once Item-SoA lands, the
-// runtime swaps `second_key_pop` for the food count and the storage
-// shrinks accordingly.
+// `foraging_runtime` declares a per-fixture `FOOD_COUNT = 16`
+// constant and sizes `pheromone_trail` storage as
+// `agent_count × FOOD_COUNT`, with `second_key_pop = FOOD_COUNT`.
+// Today `Drop.carried` is still typed as `AgentId` in the event
+// schema (Item-SoA storage hasn't landed for `self.engaged_with`-
+// like reads), but the per-tick emit hard-codes `carried: 0` so
+// every Drop hashes onto food slot 0. The observable: per-`(ant, 0)`
+// converges to `1 / (1 - 0.88) ≈ 8.33`; every other `(ant, k)` stays
+// at 0; total ≈ `agent_count × 8.33`. Once full Item-SoA lowering
+// arrives, `carried` swaps to a real `ItemId` and the diagonal
+// shape returns naturally.
 //
 @materialized(on_event = [Drop], storage = pair_map)
 @decay(rate = 0.88, per = tick)
