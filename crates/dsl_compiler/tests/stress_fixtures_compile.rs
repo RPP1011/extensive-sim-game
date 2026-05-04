@@ -932,3 +932,211 @@ fn tom_probe_lowers_clean_and_emits_belief_kernels() {
         art.kernel_index,
     );
 }
+
+/// Gap #1 from `2026-05-04-trade_market_probe.md` — `config.<block>.
+/// <u32_field>` flowing into a `u32` event-ring slot must NOT crash
+/// the WGSL validator with an `f32 → u32` auto-conversion error.
+///
+/// Pre-fix: every config const was materialised as
+/// `const config_<id>: f32 = <v>;` regardless of the declared field
+/// type, so `atomicStore(&event_ring[...], (config_<id>))` (where the
+/// slot is `array<atomic<u32>>`) crashed naga's WGSL front-end.
+///
+/// Post-fix: a `u32`-declared config field emits as
+/// `const config_<id>: u32 = <n>u;`, and the `(config_<id>)` literal
+/// flows into the `u32` slot directly.
+///
+/// This is an inline-source stress test rather than a fixture-file
+/// test so it can be co-located with the gap doc reference and so the
+/// full DSL surface lives in one place. The shape is a single agent
+/// with a `u32`-declared config field referenced inline in the body
+/// of a physics rule that emits an event with a `u32` field.
+#[test]
+fn config_u32_field_emits_with_u32_suffix_in_kernel_const() {
+    let src = r#"
+event Tick { }
+
+@replayable
+@gpu_amenable
+event ObservationLogged {
+  observer:    AgentId,
+  observation: u32,
+}
+
+entity Trader : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config market {
+  // Mixed-type config block — the U32 field is the gap-#1 surface.
+  step_scale:      f32 = 0.05,
+  observation_bit: u32 = 5,
+  pulse_count:     i32 = -7,
+}
+
+physics LogObservation @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let new_pos = self.pos + self.vel * config.market.step_scale;
+    agents.set_pos(self, new_pos);
+    emit ObservationLogged {
+      observer:    self,
+      observation: config.market.observation_bit,
+    }
+  }
+}
+"#;
+    let prog = dsl_compiler::parse(src).expect("parse inline u32-config source");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve inline u32-config source");
+    let cg = dsl_compiler::cg::lower::lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        let diag_text = o
+            .diagnostics
+            .iter()
+            .map(|d| format!("{d}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        panic!(
+            "lower expected clean; got {} diagnostics:\n{diag_text}",
+            o.diagnostics.len(),
+        );
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit inline u32-config program");
+
+    let physics = kernel_body_containing(&art, "LogObservation")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no physics kernel found; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            )
+        });
+
+    // Find each config_<id> declaration and verify its type matches
+    // the declared field type. Expectations (in source-order id
+    // allocation): step_scale → f32, observation_bit → u32, pulse_count → i32.
+    assert!(
+        physics.contains("const config_0: f32 = 0.05;"),
+        "expected step_scale to materialise as f32; got physics body:\n{physics}",
+    );
+    assert!(
+        physics.contains("const config_1: u32 = 5u;"),
+        "expected observation_bit to materialise as `u32 = 5u` (gap #1); got physics body:\n{physics}",
+    );
+    // pulse_count is unused in the body, so its const may NOT appear in
+    // the physics kernel — the emit is conditional on body containment.
+    // The U32 + F32 cases above cover the gap-#1 surface; the I32 case
+    // is exercised separately by the `populate_config_consts_routes_*`
+    // unit test in `cg/lower/driver.rs`.
+
+    // The atomicStore for the u32 ring slot must consume `config_1`
+    // directly (no f32 cast / bitcast) — that's the validator-pass
+    // shape. The exact word offset depends on the event layout, but
+    // the substring is unambiguous.
+    assert!(
+        physics.contains("(config_1)"),
+        "expected atomicStore to consume `(config_1)` directly into u32 slot; got physics body:\n{physics}",
+    );
+    assert!(
+        !physics.contains("bitcast<u32>(config_1)"),
+        "u32-typed config_1 must NOT be bitcast — that would only be needed for f32→u32 routing; got physics body:\n{physics}",
+    );
+}
+
+/// Gap #6 from `2026-05-04-trade_market_probe.md` — an `event <Name>
+/// { ... }` declaration with no `emit <Name> { ... }` site anywhere in
+/// the program must surface a non-fatal
+/// `CgDiagnosticKind::DeclaredEventNeverEmitted` warning at compile
+/// time.
+///
+/// Pre-fix: the trade_market_probe declared a `Shipment` event whose
+/// only consumer was a future task — no rule body ever emitted it, and
+/// the compiler accepted the dead declaration silently. Post-fix the
+/// declaration produces a warning; a hard error would break the
+/// staged-work / placeholder pattern, so the diagnostic stays
+/// non-fatal.
+///
+/// Inline-source shape so the assertion is co-located with the
+/// expected behaviour without needing a fixture file.
+#[test]
+fn declared_event_never_emitted_surfaces_compiler_warning() {
+    use dsl_compiler::cg::program::CgDiagnosticKind;
+
+    let src = r#"
+event Tick { }
+
+@replayable
+@gpu_amenable
+event UsedEvent {
+  observer: AgentId,
+  pulse:    u32,
+}
+
+@replayable
+@gpu_amenable
+event NeverEmitted {
+  observer: AgentId,
+  payload:  u32,
+}
+
+entity Worker : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+physics PingOnce @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let new_pos = self.pos + self.vel * 0.05;
+    agents.set_pos(self, new_pos);
+    emit UsedEvent {
+      observer: self,
+      pulse:    1,
+    }
+  }
+}
+"#;
+    let prog = dsl_compiler::parse(src).expect("parse inline event-declaration source");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve inline event-declaration source");
+    let cg =
+        dsl_compiler::cg::lower::lower_compilation_to_cg(&comp).expect("lower expected clean");
+
+    // The `NeverEmitted` declaration should have produced exactly one
+    // `DeclaredEventNeverEmitted` warning. `UsedEvent` is emitted by
+    // the `PingOnce` physics rule, so it should NOT produce a warning.
+    let never_emitted_warnings: Vec<_> = cg
+        .diagnostics
+        .iter()
+        .filter_map(|d| match &d.kind {
+            CgDiagnosticKind::DeclaredEventNeverEmitted { event } => Some(*event),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        never_emitted_warnings.len(),
+        1,
+        "expected exactly one DeclaredEventNeverEmitted warning; got {} \
+         total diagnostics:\n{}",
+        cg.diagnostics.len(),
+        cg.diagnostics
+            .iter()
+            .map(|d| format!("  {d}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    let event_id = never_emitted_warnings[0];
+    let event_name = cg
+        .interner
+        .event_kinds
+        .get(&event_id.0)
+        .map(String::as_str)
+        .unwrap_or("<unnamed>");
+    assert_eq!(
+        event_name, "NeverEmitted",
+        "warning should fire for `NeverEmitted`, not `UsedEvent`; got `{event_name}`",
+    );
+}

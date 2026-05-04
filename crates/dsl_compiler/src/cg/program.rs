@@ -129,6 +129,15 @@ pub enum CgDiagnosticKind {
         handle: DataHandle,
         ops: Vec<OpId>,
     },
+    /// An `event <Name> { ... }` declaration that no rule body ever
+    /// emits via `emit <Name> { ... }`. Soft warning — non-emitted
+    /// events are sometimes intentional (placeholder for staged work,
+    /// declared-then-unblocked-later), so the gate is non-fatal.
+    /// Surfaced so the trade_market_probe-style "declared `Shipment`
+    /// event accepted silently" path no longer compiles silently.
+    /// See `docs/superpowers/notes/2026-05-04-trade_market_probe.md`
+    /// GAP #6.
+    DeclaredEventNeverEmitted { event: EventKindId },
 }
 
 impl fmt::Display for CgDiagnosticKind {
@@ -152,6 +161,9 @@ impl fmt::Display for CgDiagnosticKind {
                     write!(f, "op#{}", op.0)?;
                 }
                 f.write_str("])")
+            }
+            CgDiagnosticKind::DeclaredEventNeverEmitted { event } => {
+                write!(f, "declared_event_never_emitted(event=#{})", event.0)
             }
         }
     }
@@ -765,6 +777,59 @@ impl fmt::Display for BuilderError {
 impl std::error::Error for BuilderError {}
 
 // ---------------------------------------------------------------------------
+// ConfigConstValue — typed default for a `config <block>.<field>` literal
+// ---------------------------------------------------------------------------
+
+/// Typed payload for a `config <block> { <field>: <ty> = <default>, ... }`
+/// declaration's default literal. The variant pins the WGSL scalar type
+/// the [`crate::cg::emit::program`] surface emits as
+/// `const config_<id>: <ty> = <value>;`. Without this distinction every
+/// config const is materialised as `f32`, so a `u32`-declared field that
+/// flows into a `u32` ring slot (atomicStore / atomicAdd / atomicOr)
+/// would crash the WGSL validator with an `f32 → u32` auto-conversion
+/// error. See `docs/superpowers/notes/2026-05-04-trade_market_probe.md`
+/// GAP #1.
+///
+/// `Bool` and `String` defaults parse but currently have no kernel-side
+/// emission (no compute kernel reads them); they're tracked here only so
+/// the future surface can switch on the same enum.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ConfigConstValue {
+    /// Unsigned 32-bit integer — emitted as `<n>u`.
+    U32(u32),
+    /// Signed 32-bit integer — emitted as `<n>i`.
+    I32(i32),
+    /// Single-precision float — emitted via Rust's `{:?}` debug format
+    /// (preserves `1.0` shape rather than `1`).
+    F32(f32),
+}
+
+impl ConfigConstValue {
+    /// WGSL literal form for the constant's RHS, with the scalar-type
+    /// suffix (`u`, `i`, or none-with-decimal) baked in. Used by the
+    /// kernel composer's `const config_<id>: <ty> = <here>;` emission.
+    pub fn wgsl_literal(&self) -> String {
+        match self {
+            ConfigConstValue::U32(v) => format!("{v}u"),
+            ConfigConstValue::I32(v) => format!("{v}i"),
+            // `{:?}` keeps the `1.0` form for whole numbers; `{}` would
+            // render `1` which WGSL would parse as `i32`.
+            ConfigConstValue::F32(v) => format!("{v:?}"),
+        }
+    }
+
+    /// WGSL scalar type token (`u32` / `i32` / `f32`) for the
+    /// `const config_<id>: <here> = <lit>;` declaration.
+    pub fn wgsl_scalar_ty(&self) -> &'static str {
+        match self {
+            ConfigConstValue::U32(_) => "u32",
+            ConfigConstValue::I32(_) => "i32",
+            ConfigConstValue::F32(_) => "f32",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // CgProgram
 // ---------------------------------------------------------------------------
 
@@ -842,15 +907,16 @@ pub struct CgProgram {
     /// resolved DSL `config <block> { <field>: <ty> = <default>, ... }`
     /// declarations by the driver's `populate_config_consts`. Populated
     /// in id-allocation order; serialised + emitted as inline WGSL
-    /// `const config_<id>: f32 = <value>;` declarations at the top of
-    /// each kernel that references the id (today F32 only — Boids only
-    /// uses float configs and the parser surface accepts numeric forms
-    /// the cast can compress to f32). The runtime side stays inert for
-    /// these consts: they're baked into the WGSL at compile time
-    /// rather than passed via a runtime UBO. Per-tick / runtime-tunable
-    /// config goes through a future cfg-uniform extension; today every
-    /// config field is a compile-time constant.
-    pub config_const_values: BTreeMap<u32, f32>,
+    /// `const config_<id>: <ty> = <value>;` declarations at the top of
+    /// each kernel that references the id. The variant of
+    /// [`ConfigConstValue`] picks the WGSL scalar type (`u32` / `i32` /
+    /// `f32`) so a `u32`-declared config field flows into a `u32` slot
+    /// (atomic store / RMW) without requiring a `bitcast`. The runtime
+    /// side stays inert for these consts: they're baked into the WGSL
+    /// at compile time rather than passed via a runtime UBO. Per-tick /
+    /// runtime-tunable config goes through a future cfg-uniform
+    /// extension; today every config field is a compile-time constant.
+    pub config_const_values: BTreeMap<u32, ConfigConstValue>,
     /// Per-fixture catalog of `entity X : Item { ... }` and `entity Y :
     /// Group { ... }` field declarations. Resolves opaque
     /// [`crate::cg::data_handle::ItemFieldId`] /
@@ -1089,13 +1155,15 @@ impl CgProgramBuilder {
         )
     }
     /// Record the literal default value for a config const id. Used
-    /// by the WGSL emit's inline `const config_<id>: f32 = <v>;`
-    /// declarations. Inserts (or overwrites) the entry — the driver
-    /// only calls this once per id during `populate_config_consts`,
-    /// so overwrites would only happen if a downstream pass mutates
-    /// the same id with a new value, which is intentional last-write
-    /// semantics.
-    pub fn set_config_const_value(&mut self, id: ConfigConstId, value: f32) {
+    /// by the WGSL emit's inline `const config_<id>: <ty> = <v>;`
+    /// declarations. The [`ConfigConstValue`] variant pins the WGSL
+    /// scalar type (`u32` / `i32` / `f32`) so a u32-declared field
+    /// emits as `5u` not `5.0`. Inserts (or overwrites) the entry —
+    /// the driver only calls this once per id during
+    /// `populate_config_consts`, so overwrites would only happen if a
+    /// downstream pass mutates the same id with a new value, which is
+    /// intentional last-write semantics.
+    pub fn set_config_const_value(&mut self, id: ConfigConstId, value: ConfigConstValue) {
         self.inner.config_const_values.insert(id.0, value);
     }
     pub fn intern_event_ring_name(

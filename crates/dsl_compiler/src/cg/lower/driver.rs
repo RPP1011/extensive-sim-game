@@ -110,8 +110,8 @@ use crate::cg::op::{
     SpatialQueryKind,
 };
 use crate::cg::program::{
-    CgProgram, CgProgramBuilder, EventLayout, FieldDef, FieldLayout, MethodDef, NamespaceDef,
-    NamespaceRegistry, WgslAccessForm,
+    CgProgram, CgProgramBuilder, ConfigConstValue, EventLayout, FieldDef, FieldLayout, MethodDef,
+    NamespaceDef, NamespaceRegistry, WgslAccessForm,
 };
 use crate::cg::stmt::{CgStmt, CgStmtList, CgStmtListId, VariantId};
 use crate::cg::well_formed::check_well_formed;
@@ -329,6 +329,26 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     // unconditionally and the verb's mask predicate had no
     // observable effect on argmax.
     wire_scoring_mask_reads(&arena_snapshot, ctx.builder.ops_mut());
+
+    // -- Phase 4d: declared-but-never-emitted event-kind warning --------
+    //
+    // Walk every interned `EventKindId` and check whether at least one
+    // op body carries an `Emit { event: <id>, .. }` statement (or, for
+    // verb-cascade emit shapes that get injected at scoring-emit time
+    // via an `EventRing { Append }` write on a `ScoringArgmax` op,
+    // checks the implicit injection too).
+    //
+    // Anything that doesn't pass either gate gets a non-fatal
+    // [`CgDiagnosticKind::DeclaredEventNeverEmitted`] warning. This
+    // catches the trade_market_probe-style "declared `Shipment` event
+    // accepted silently" path (gap #6 in
+    // `docs/superpowers/notes/2026-05-04-trade_market_probe.md`).
+    //
+    // The check is intentionally non-fatal: declared-then-unused event
+    // kinds are sometimes intentional (placeholder for staged work,
+    // declared-then-unblocked-later). Promoting to a hard error would
+    // break the staged-work pattern.
+    warn_declared_events_never_emitted(comp, &arena_snapshot, &mut ctx);
 
     // -- Phase 5: cycle gate (user-op-only program) ---------------------
     //
@@ -1024,21 +1044,47 @@ fn populate_config_consts(
             }
             // Capture the literal default into the program's
             // `config_const_values` map so the WGSL emit can produce
-            // an inline `const config_<id>: f32 = <value>;` for every
-            // referenced const. Today F32-only — boids' fixture is
-            // all-float and the parser surface accepts numeric forms
-            // the cast can compress to f32; non-numeric defaults
+            // an inline `const config_<id>: <ty> = <value>;` for every
+            // referenced const. The declared field type (`fld.ty`) picks
+            // the WGSL scalar type via [`ConfigConstValue`]: a u32-
+            // declared field emits `<n>u`, an i32-declared field emits
+            // `<n>i`, otherwise f32 (the default for numeric defaults
+            // without a sharper type annotation). Non-numeric defaults
             // (Bool / String) skip silently because no compute kernel
-            // references them.
+            // references them. See trade_market_probe doc GAP #1 for
+            // the original symptom that motivated the type round-trip.
             use dsl_ast::ast::ConfigDefault;
-            let value: Option<f32> = match &fld.default {
-                ConfigDefault::Float(v) => Some(*v as f32),
-                ConfigDefault::Int(v) => Some(*v as f32),
-                ConfigDefault::Uint(v) => Some(*v as f32),
+            use dsl_ast::ir::IrType;
+            let raw: Option<f64> = match &fld.default {
+                ConfigDefault::Float(v) => Some(*v),
+                ConfigDefault::Int(v) => Some(*v as f64),
+                ConfigDefault::Uint(v) => Some(*v as f64),
                 ConfigDefault::Bool(_) | ConfigDefault::String(_) => None,
             };
-            if let Some(v) = value {
-                ctx.builder.set_config_const_value(id, v);
+            if let Some(raw) = raw {
+                let value = match &fld.ty {
+                    IrType::U32
+                    | IrType::U8
+                    | IrType::U16
+                    | IrType::U64
+                    | IrType::AgentId
+                    | IrType::ItemId
+                    | IrType::GroupId
+                    | IrType::QuestId
+                    | IrType::AuctionId
+                    | IrType::EventId
+                    | IrType::AbilityId => ConfigConstValue::U32(raw as u32),
+                    IrType::I8 | IrType::I16 | IrType::I32 | IrType::I64 => {
+                        ConfigConstValue::I32(raw as i32)
+                    }
+                    // Default: F32. Covers IrType::F32 / IrType::F64
+                    // explicitly plus every other shape that previously
+                    // routed through the f32 path. The f32 default is
+                    // safe — pre-this-fix every config const emitted
+                    // as f32 regardless of declared type.
+                    _ => ConfigConstValue::F32(raw as f32),
+                };
+                ctx.builder.set_config_const_value(id, value);
             }
         }
     }
@@ -2012,6 +2058,118 @@ fn body_list_for_op_kind(kind: &ComputeOpKind) -> Option<CgStmtListId> {
     }
 }
 
+/// Walk every interned [`EventKindId`] and surface a non-fatal
+/// [`crate::cg::program::CgDiagnosticKind::DeclaredEventNeverEmitted`]
+/// warning for any kind that is BOTH never produced (no `CgStmt::Emit`
+/// anywhere in the program) AND never consumed (no rule `on_event`
+/// handler subscribes to it).
+///
+/// The "never emitted AND never consumed" gate (rather than just "never
+/// emitted") matters because some event kinds — `Tick` is the canonical
+/// example — are produced HOST-side by the runtime, not via a DSL
+/// `emit` statement. Such kinds always have a `CgStmt::Emit` count of
+/// zero but ARE consumed by user rules; flagging them would produce a
+/// false positive on every fixture in the codebase.
+///
+/// The verb-injected `ActionSelected` shape is also exempted: its
+/// emit is inlined at the scoring-kernel emit level rather than via
+/// `CgStmt::Emit`, so the `emitted` set wouldn't catch it even when
+/// the kernel body DOES emit it.
+///
+/// Closes gap #6 from
+/// `docs/superpowers/notes/2026-05-04-trade_market_probe.md`: the
+/// trade_market_probe declares a `Shipment` event with no emit site
+/// AND no `on Shipment` handler, and pre-this-fix the compiler
+/// accepted it silently. Now the declaration surfaces as a warning so
+/// a future "declared then forgot to wire" defect is visible at
+/// compile time.
+///
+/// Soft warning rather than hard error because declared-then-unused
+/// events are sometimes intentional (placeholder for staged work).
+fn warn_declared_events_never_emitted(
+    comp: &Compilation,
+    prog: &CgProgram,
+    ctx: &mut LoweringCtx<'_>,
+) {
+    use crate::cg::lower::verb_expand::ACTION_SELECTED_EVENT_NAME;
+    use crate::cg::program::{CgDiagnostic, CgDiagnosticKind, Severity};
+
+    // Collect every event kind referenced by an `Emit` statement.
+    let mut emitted: std::collections::BTreeSet<EventKindId> =
+        std::collections::BTreeSet::new();
+    for op in &prog.ops {
+        let Some(list_id) = body_list_for_op_kind(&op.kind) else {
+            continue;
+        };
+        let mut buf: Vec<EventKindId> = Vec::new();
+        collect_emits_in_list(list_id, prog, &mut buf);
+        for kind in buf {
+            emitted.insert(kind);
+        }
+    }
+
+    // Collect every event kind a rule `on_event` handler subscribes to.
+    // The walk has two sources because `@phase(per_agent)` rules degrade
+    // the op-level `on_event` to `None` at lowering time even when the
+    // source `on Tick { }` pattern names a specific kind. The IR walk
+    // catches the source-level subscription so `Tick` (consumed by every
+    // per-agent rule via `on Tick { } where (...)`) doesn't trip the
+    // warning.
+    let mut consumed_names: std::collections::BTreeSet<&str> =
+        std::collections::BTreeSet::new();
+    for rule in &comp.physics {
+        for handler in &rule.handlers {
+            consumed_names.insert(handler.pattern.display_name());
+        }
+    }
+    // Materialised view fold-handlers are also consumers — same shape
+    // as physics handlers.
+    for view in &comp.views {
+        if let dsl_ast::ir::ViewBodyIR::Fold { handlers, .. } = &view.body {
+            for handler in handlers {
+                consumed_names.insert(handler.pattern.name.as_str());
+            }
+        }
+    }
+
+    let mut consumed: std::collections::BTreeSet<EventKindId> =
+        std::collections::BTreeSet::new();
+    for op in &prog.ops {
+        match &op.kind {
+            ComputeOpKind::PhysicsRule { on_event, .. } => {
+                if let Some(kind) = on_event {
+                    consumed.insert(*kind);
+                }
+            }
+            ComputeOpKind::ViewFold { on_event, .. } => {
+                consumed.insert(*on_event);
+            }
+            // Other op kinds (Mask, Scoring, ScoringArgmax, Movement,
+            // SpatialQuery, Plumbing) don't subscribe to event kinds.
+            _ => {}
+        }
+    }
+
+    // Walk every interned event kind. Skip `ActionSelected` — the verb
+    // expander injects it implicitly at the scoring-kernel emit level
+    // rather than via a `CgStmt::Emit`, so the `emitted` set above
+    // wouldn't see it even when it IS emitted by the kernel body.
+    for (id, name) in &prog.interner.event_kinds {
+        if name == ACTION_SELECTED_EVENT_NAME {
+            continue;
+        }
+        let kind = EventKindId(*id);
+        let consumed_at_op = consumed.contains(&kind);
+        let consumed_at_source = consumed_names.contains(name.as_str());
+        if !emitted.contains(&kind) && !consumed_at_op && !consumed_at_source {
+            ctx.builder.add_diagnostic(CgDiagnostic::new(
+                Severity::Warning,
+                CgDiagnosticKind::DeclaredEventNeverEmitted { event: kind },
+            ));
+        }
+    }
+}
+
 /// Recursively collect every [`CgStmt::Emit`]'s [`EventKindId`] from
 /// the statement list named by `list_id`, descending through `If`
 /// arms (both `then` and `else_`) and `Match` arm bodies.
@@ -2357,6 +2515,81 @@ mod tests {
             Some(("combat.attack_range".to_string(), 99, 0)),
             "expected DuplicateConfigConstInRegistry; diagnostics: {diagnostics:?}"
         );
+    }
+
+    /// Type-driven config-const default routing: a `u32`-declared field
+    /// emits as [`ConfigConstValue::U32`] (not `F32`), so the WGSL
+    /// composer materialises `const config_<id>: u32 = <n>u;`. Without
+    /// this routing the const would emit `f32 = <n>.0;` and a downstream
+    /// `atomicStore(&event_ring[...], (config_<id>))` (where the slot is
+    /// `array<atomic<u32>>`) would crash the WGSL validator with an
+    /// `f32 → u32` auto-conversion error. See trade_market_probe doc
+    /// GAP #1.
+    #[test]
+    fn populate_config_consts_routes_u32_default_to_u32_variant() {
+        use dsl_ast::ast::{ConfigDefault, Span};
+        use dsl_ast::ir::{ConfigFieldIR, ConfigIR, IrType};
+
+        let mut comp = Compilation::default();
+        comp.configs.push(ConfigIR {
+            name: "market".to_string(),
+            fields: vec![
+                ConfigFieldIR {
+                    name: "observation_bit".to_string(),
+                    ty: IrType::U32,
+                    default: ConfigDefault::Uint(5),
+                    span: Span::dummy(),
+                },
+                ConfigFieldIR {
+                    name: "trade_amount".to_string(),
+                    ty: IrType::F32,
+                    default: ConfigDefault::Float(1.5),
+                    span: Span::dummy(),
+                },
+                ConfigFieldIR {
+                    name: "delta".to_string(),
+                    ty: IrType::I32,
+                    default: ConfigDefault::Int(-3),
+                    span: Span::dummy(),
+                },
+            ],
+            annotations: Vec::new(),
+            span: Span::dummy(),
+        });
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        let mut diagnostics: Vec<LoweringError> = Vec::new();
+        populate_config_consts(&comp, &mut ctx, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "no diagnostics: {diagnostics:?}");
+
+        let prog = builder.finish();
+        let v0 = prog
+            .config_const_values
+            .get(&0)
+            .expect("config const 0 missing");
+        assert_eq!(
+            *v0,
+            ConfigConstValue::U32(5),
+            "expected ConfigConstValue::U32(5) for u32-declared observation_bit; got {v0:?}"
+        );
+        assert_eq!(v0.wgsl_scalar_ty(), "u32");
+        assert_eq!(v0.wgsl_literal(), "5u");
+
+        let v1 = prog
+            .config_const_values
+            .get(&1)
+            .expect("config const 1 missing");
+        assert_eq!(*v1, ConfigConstValue::F32(1.5));
+        assert_eq!(v1.wgsl_scalar_ty(), "f32");
+
+        let v2 = prog
+            .config_const_values
+            .get(&2)
+            .expect("config const 2 missing");
+        assert_eq!(*v2, ConfigConstValue::I32(-3));
+        assert_eq!(v2.wgsl_scalar_ty(), "i32");
+        assert_eq!(v2.wgsl_literal(), "-3i");
     }
 
     // ---- Task 5.5c, Patch 3: mask_spatial_kind routing --------------

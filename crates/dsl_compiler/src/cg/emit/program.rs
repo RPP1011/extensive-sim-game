@@ -310,19 +310,27 @@ fn compose_wgsl_file(
     out.push_str(&lower_wgsl_bindings(spec));
     out.push('\n');
 
-    // Emit `const config_<id>: f32 = <value>;` for every config-const
+    // Emit `const config_<id>: <ty> = <value>;` for every config-const
     // referenced in the kernel body. The substring scan keys on
     // `config_<id>` (the WGSL identifier `lower_cg_expr_to_wgsl`
     // produces for `CgExpr::Read(DataHandle::ConfigConst { id })`).
-    // Today every config field defaults to a numeric literal (Boids'
-    // `flock` block), so a single-pass `f32` emission covers it; non-
-    // numeric defaults skip silently because no kernel references
+    // The [`ConfigConstValue`] variant pins the WGSL scalar type:
+    // a `u32`-declared config field emits as `5u` and types the const
+    // as `u32`, so it can flow into a `u32` ring slot (atomicStore /
+    // atomicAdd / atomicOr) without crashing the WGSL validator with
+    // an `f32 → u32` auto-conversion error. Non-numeric defaults
+    // (Bool / String) skip silently because no kernel references
     // them. Sorted by id for deterministic output.
     let mut emitted_consts = false;
     for (id, value) in &prog.config_const_values {
         let needle = format!("config_{}", id);
         if body.contains(&needle) {
-            out.push_str(&format!("const config_{}: f32 = {:?};\n", id, value));
+            out.push_str(&format!(
+                "const config_{}: {} = {};\n",
+                id,
+                value.wgsl_scalar_ty(),
+                value.wgsl_literal()
+            ));
             emitted_consts = true;
         }
     }

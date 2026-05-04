@@ -5830,4 +5830,57 @@ mod tests {
         let kind = SpatialQueryKind::FilteredWalk { filter: filter_id };
         assert_eq!(spatial_kind_name(kind), "filtered_walk_0");
     }
+
+    /// Gap #2 / #3 from `2026-05-04-trade_market_probe.md` — the
+    /// per-Item / per-Group external binding name must disambiguate
+    /// when multiple Item / Group entities declare overlapping field
+    /// names. The naming rule is `<entity_snake>_<field_snake>`, so
+    /// `Wood.weight` → `wood_weight` and `Iron.weight` → `iron_weight`,
+    /// not a collision on a shared `weight` binding.
+    ///
+    /// Pre-this-test: the existing bartering fixture exercises ONE
+    /// Item field-read and ONE Group field-read, but no test pinned
+    /// the multi-entity disambiguation shape. This test pins it so a
+    /// future refactor that drops the entity-name half (e.g.
+    /// `format!("{field_name}")`) fires immediately.
+    #[test]
+    fn item_field_external_name_disambiguates_overlapping_field_names() {
+        // Same field name on 4 distinct Item entities — the trade-market
+        // probe shape (Wood / Iron / Grain / Cloth, all with
+        // `base_price: f32`).
+        assert_eq!(
+            item_field_external_name("Wood", "base_price"),
+            "wood_base_price"
+        );
+        assert_eq!(
+            item_field_external_name("Iron", "base_price"),
+            "iron_base_price"
+        );
+        assert_eq!(
+            item_field_external_name("Grain", "base_price"),
+            "grain_base_price"
+        );
+        assert_eq!(
+            item_field_external_name("Cloth", "base_price"),
+            "cloth_base_price"
+        );
+
+        // PascalCase entity names → snake_case (the to_snake_case
+        // helper). `MultiWord` becomes `multi_word`.
+        assert_eq!(
+            item_field_external_name("LegendaryArtifact", "weight"),
+            "legendary_artifact_weight"
+        );
+
+        // Same shape works for Group entities (the function is shared
+        // between item and group binding emission — the gap-#3 surface).
+        assert_eq!(
+            item_field_external_name("Guild", "size"),
+            "guild_size"
+        );
+        assert_eq!(
+            item_field_external_name("Faction", "size"),
+            "faction_size"
+        );
+    }
 }
