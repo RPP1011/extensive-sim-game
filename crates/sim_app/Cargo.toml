@@ -109,6 +109,12 @@ duel_1v1_runtime = { path = "../duel_1v1_runtime" }
 # Damaged for cross-team neighbours) → ApplyDamage chronicle.
 # Discovery doc: docs/superpowers/notes/2026-05-04-duel_25v25.md.
 duel_25v25_runtime = { path = "../duel_25v25_runtime" }
+# Foraging-real — first LIFECYCLE fixture. Demonstrates alive=false →
+# true births (CPU-side slot allocation) AND alive=true → false deaths
+# (DSL EnergyDecay) actually flipping during a single run. Surfaces
+# the alive-bitmap-flip-both-directions architectural surface no prior
+# fixture has exercised. See `assets/sim/foraging_real.sim`.
+foraging_real_runtime = { path = "../foraging_real_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -197,3 +203,7 @@ path = "src/duel_1v1_app.rs"
 [[bin]]
 name = "duel_25v25_app"
 path = "src/duel_25v25_app.rs"
+
+[[bin]]
+name = "foraging_real_app"
+path = "src/foraging_real_app.rs"

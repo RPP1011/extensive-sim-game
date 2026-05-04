@@ -755,6 +755,12 @@ fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
         "set_hp" => Some(&AgentFieldId::Hp),
         "set_alive" => Some(&AgentFieldId::Alive),
         "set_mana" => Some(&AgentFieldId::Mana),
+        // foraging_real fixture: per-ant `hunger` is repurposed as
+        // an energy counter (decays each tick, reset on Eat). Used
+        // by `EnergyDecay` (per_agent: agents.set_hunger(self,
+        // hunger - decay_rate)) and ApplyEat (chronicle:
+        // agents.set_hunger(t, hunger + gain)).
+        "set_hunger" => Some(&AgentFieldId::Hunger),
         _ => None,
     }
 }

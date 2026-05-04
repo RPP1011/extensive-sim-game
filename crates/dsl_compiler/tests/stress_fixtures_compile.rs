@@ -2747,3 +2747,145 @@ fn duel_25v25_compile_gate() {
         art.kernel_index,
     );
 }
+
+/// `foraging_real` compile-gate. Pins the structural surface of the
+/// FIRST LIFECYCLE fixture (the alive bitmap actually flips BOTH
+/// directions during a run) and locks the inline compiler fixes it
+/// surfaced:
+///
+///   - `agents.set_hunger(t, v)` is wired through the
+///     `agents_setter_field` map (newly added in this fixture's
+///     commit) so the EnergyDecay rule's `agents.set_hunger(self,
+///     hunger - decay_rate)` lowers cleanly.
+///   - `ForEachNeighborBody` walker surfaces the implicit
+///     `agent_pos[agent_id]` self-cell read so AntFeed (whose body
+///     doesn't reference `self.pos`) gets `agent_pos` bound. (Same
+///     fix that landed for `duel_25v25`'s ScanAndStrike — shared.)
+///
+/// Tolerates the same lower diagnostics duel_1v1 + duel_25v25 do
+/// (P6 false positive for @phase(post) chronicle physics writing
+/// agent fields). The op count is the structural fingerprint:
+///   - 4 ViewFold ops (eat_count + food_consumed + starved_count +
+///     depleted_count)
+///   - 3 PhysicsRule ops (AntFeed + ApplyEat + EnergyDecay)
+///   - 0 MaskPredicate, 0 ScoringArgmax (no verb cascade — all
+///     decision logic lives in physics rule bodies + chronicle)
+#[test]
+fn foraging_real_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/foraging_real.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse foraging_real.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve foraging_real.sim");
+    // Tolerate the inherited P6 false-positive warnings on
+    // chronicle physics writes to agent fields (same shape the
+    // duel_1v1 + duel_25v25 fixtures live with).
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[foraging_real lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit foraging_real");
+
+    // Op-level invariants — pin the count of physics rules + view
+    // folds. AntFeed + ApplyEat + EnergyDecay = 3 PhysicsRule ops;
+    // eat_count + food_consumed + starved_count + depleted_count = 4
+    // ViewFold ops; no verbs / scoring / masks.
+    let mut mask_count = 0;
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    let mut scoring_rows = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::MaskPredicate { .. } => mask_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ScoringArgmax { rows, .. } => {
+                scoring_rows = rows.len();
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(mask_count, 0, "foraging_real has no verbs → 0 MaskPredicate ops; got {mask_count}");
+    assert_eq!(scoring_rows, 0, "foraging_real has no verbs → 0 scoring rows; got {scoring_rows}");
+    assert_eq!(
+        physics_count, 3,
+        "expected 3 PhysicsRule ops (AntFeed + ApplyEat + EnergyDecay); got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 4,
+        "expected 4 ViewFold ops (eat_count + food_consumed + starved_count + depleted_count); got {viewfold_count}",
+    );
+
+    // ApplyEat must write agent_hp (food deplete) AND agent_alive
+    // (set_alive on food.hp<=0) AND agent_hunger (the
+    // newly-wired set_hunger setter — locks the inline compiler fix).
+    let apply_body = kernel_body_containing(&art, "ApplyEat")
+        .unwrap_or_else(|| panic!("no ApplyEat kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        apply_body.contains("agent_hp["),
+        "ApplyEat must write agent_hp (food.hp decrement); got body:\n{apply_body}",
+    );
+    assert!(
+        apply_body.contains("agent_alive["),
+        "ApplyEat must write agent_alive (set_alive on hp<=0); got body:\n{apply_body}",
+    );
+    assert!(
+        apply_body.contains("agent_hunger["),
+        "ApplyEat must write agent_hunger (newly-wired set_hunger setter); got body:\n{apply_body}",
+    );
+
+    // EnergyDecay must write agent_alive (set_alive(self, false) on
+    // hunger<=0) — the alive=true → false direction this fixture
+    // exercises in DSL.
+    let decay_body = kernel_body_containing(&art, "EnergyDecay")
+        .unwrap_or_else(|| panic!("no EnergyDecay kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        decay_body.contains("agent_alive["),
+        "EnergyDecay must write agent_alive (set_alive on hunger<=0); got body:\n{decay_body}",
+    );
+    assert!(
+        decay_body.contains("agent_hunger["),
+        "EnergyDecay must read+write agent_hunger; got body:\n{decay_body}",
+    );
+
+    // AntFeed (body-form spatial walk) must bind agent_pos — locks
+    // the `ForEachNeighborBody` implicit-self.pos-read fix added to
+    // `collect_stmt_dependencies`. Without this binding, AntFeed
+    // emits naga-invalid WGSL referencing an unbound `agent_pos`.
+    let antfeed_body = kernel_body_containing(&art, "AntFeed")
+        .unwrap_or_else(|| panic!("no AntFeed kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        antfeed_body.contains("agent_pos: array<vec3<f32>>")
+            || antfeed_body.contains("agent_pos: array<vec3"),
+        "AntFeed must bind agent_pos — ForEachNeighborBody implicit \
+         self.pos read fix; got body:\n{antfeed_body}",
+    );
+
+    // All emitted WGSL must be naga-clean.
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "foraging_real emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+
+    eprintln!(
+        "[foraging_real] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
