@@ -3013,7 +3013,14 @@ fn lower_scoring_argmax_body(
 
         out.push('\n');
         out.push_str("// emit ActionSelected { actor: agent_id, action_id: best_action, target: best_target }\n");
-        out.push_str("{\n");
+        // Gate the emit on `best_utility > -inf` — a row whose mask
+        // never set the agent's bit (no row passed argmax) leaves
+        // best_utility at the sentinel; emitting in that case
+        // produces a phantom ActionSelected whose target = NO_TARGET
+        // (0xFFFFFFFFu) which downstream chronicles + ApplyDamage
+        // dereference as `agent_<field>[0xFFFFFFFFu]` — out-of-bounds
+        // write. Surfaced by duel_1v1 (2026-05-04 discovery).
+        out.push_str("if (best_utility > -3.4028235e38) {\n");
         out.push_str("    let slot = atomicAdd(&event_tail[0], 1u);\n");
         writeln!(
             out,
@@ -3047,6 +3054,8 @@ fn lower_scoring_argmax_body(
         )
         .unwrap();
         out.push_str("    }\n");
+        // Closing brace for the `if (best_utility > -inf) { ... }`
+        // outer guard (replaces the prior unconditional emit block).
         out.push_str("}");
     }
 
@@ -3595,7 +3604,14 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
             source_ring.0
         ),
         DispatchShape::PerPair { source: _ } => {
+            // Bind `tick` + `seed` so PerPair mask-predicate bodies that
+            // reference `world.tick` (e.g. `(world.tick % cooldown == 0u)`
+            // cooldown gates) lower cleanly. Mirror the PerAgent
+            // / PerEvent preamble shape — pair-keyed dispatch has the
+            // same access to the simulation clock.
             "let pair = gid.x;\n\
+             let tick = cfg.tick;\n\
+             let seed = cfg.seed;\n\
              // PerPair: agent + cand resolution computed against per_pair_candidates.\n\n"
                 .to_string()
         }

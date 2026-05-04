@@ -1,0 +1,26 @@
+[package]
+name = "duel_1v1_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/duel_1v1.sim` — the FIRST
+# real gameplay-shaped fixture (not a coverage probe). Two Combatants
+# duel with three abilities (Strike, Spell, Heal) compiled through
+# the verb cascade + cooldown gates + pair-field scoring + multi-
+# event-kind ring. Mirrors `abilities_runtime` shape: build.rs lowers
+# the .sim through the DSL compiler into `OUT_DIR/generated.rs`;
+# src/lib.rs owns the GPU context, per-buffer storage, kernel cache,
+# and per-tick dispatch chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

@@ -341,6 +341,20 @@ fn agent_field_access(field: AgentFieldId, target: &AgentRef) -> String {
     }
 }
 
+/// Raw indexed access — no bool coercion. Used as the LHS of an
+/// assignment (`agent_alive[t] = u32(value);`) since the read-side
+/// `(x != 0u)` wrapper is not a valid lvalue.
+fn agent_field_access_lvalue(field: AgentFieldId, target: &AgentRef) -> String {
+    let index = match target {
+        AgentRef::Self_ => "agent_id".to_string(),
+        AgentRef::EventTarget => "event_target_id".to_string(),
+        AgentRef::Actor => "actor_id".to_string(),
+        AgentRef::PerPairCandidate => "per_pair_candidate".to_string(),
+        AgentRef::Target(id) => format!("target_expr_{}", id.0),
+    };
+    format!("agent_{}[{}]", field.snake(), index)
+}
+
 /// Identifier token for an [`AgentRef`]. `Target(expr_id)` maps to the
 /// placeholder `target_expr_<N>` per the module-level limitations note;
 /// [`AgentRef::PerPairCandidate`] maps to the placeholder
@@ -1414,8 +1428,16 @@ fn lower_cg_stmt_body_to_wgsl(
                             .insert(*target_expr_id);
                     }
                 }
-                let lhs = agent_field_access(*field, agent_ref);
-                return Ok(format!("{} = {};", lhs, rhs));
+                // LHS uses the raw indexed access (no `(x != 0u)`
+                // coercion — that wrapper is not a valid lvalue). For
+                // bool fields the RHS must be coerced to u32 since
+                // the storage is `array<u32>`.
+                let lhs = agent_field_access_lvalue(*field, agent_ref);
+                let coerced_rhs = match field.ty() {
+                    AgentFieldTy::Bool => format!("select(0u, 1u, {rhs})"),
+                    _ => rhs,
+                };
+                return Ok(format!("{} = {};", lhs, coerced_rhs));
             }
             let lhs = ctx.handle_name(target);
             let rhs = lower_cg_expr_to_wgsl(*value, ctx)?;

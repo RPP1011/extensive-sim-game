@@ -1,0 +1,158 @@
+// duel_1v1 — first REAL gameplay-shaped fixture (not a coverage probe).
+//
+// A 1-vs-1 combat duel that COMPOSES the recently-landed primitives
+// into actual gameplay:
+//
+//   - Per-agent SoA reads/writes for HP, mana, alive
+//   - Verb cascade for ability activation (commits 38c4c969, b90a43a4,
+//     a14965f0, 23902b7d)
+//   - Pair-field scoring: verb scores reference `target.hp`
+//     (commit 3f28febb, pair_scoring_probe precedent)
+//   - Cooldown gating using the `world.tick % cooldown == 0u`
+//     pattern (commit 7208912f mod arm + cooldown_probe precedent)
+//   - Multi-event-kind ring: Damaged, Healed, Defeated
+//   - Mod operator + IfStmt in physics body for HP <= 0 -> set_alive
+//
+// SHAPE: two `Combatant : Agent` entities (Hero A vs Hero B). Three
+// abilities, each implemented as a `verb`:
+//
+//   - Strike: cheap basic damage (cooldown 2). Default action.
+//   - Spell:  bigger damage on cooldown 5, mana cost. Higher utility
+//             when target HP is low (finisher).
+//   - Heal:   self-cast, only fires when self HP < threshold.
+//
+// Per tick: scoring picks the highest-utility ready verb per agent;
+// chronicle physics emits the appropriate event; ApplyDamage /
+// ApplyHeal physics rules read events and write per-agent HP.
+// When HP reaches 0, set_alive(target, false) and emit Defeated.
+//
+// PROBE FOCUS: surfaces likely gaps in the agents.* setter surface.
+// Pre-fixture today, only `set_pos` and `set_vel` are wired
+// (crates/dsl_compiler/src/cg/lower/physics.rs:752-754) AND the setter
+// arm rejects non-self targets (line 778). Both gaps need closing for
+// this fixture to FULL FIRE — see discovery doc.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  strike_damage:    f32 = 12.0,
+  spell_damage:     f32 = 25.0,
+  spell_cost:       f32 = 30.0,
+  heal_amount:      f32 = 18.0,
+  cooldown_strike:  u32 = 2,
+  cooldown_spell:   u32 = 5,
+  cooldown_heal:    u32 = 4,
+  hp_low_threshold: f32 = 30.0,
+}
+
+// Strike — basic damage, cheap cooldown (every other tick). Highest
+// priority when nothing more interesting is available.
+verb Strike(self, target: Agent) =
+  action StrikeAction
+  // Cooldown literals (2/5/4) inlined — `config.<ns>.<u32_field>`
+  // resolves to f32 at lowering today (diplomacy_probe Gap #3),
+  // so the config.cooldown_* fields stay declared but unreferenced
+  // until the config-type-resolution fix lands.
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 2 == 0))
+  emit Damaged { source: self, target: target, amount: config.combat.strike_damage }
+  score 1.0
+
+// Spell — bigger damage, longer cooldown, mana cost. Score peaks
+// when target HP is low (finisher logic).
+verb Spell(self, target: Agent) =
+  action SpellAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && (world.tick % 5 == 0)
+        && self.mana >= config.combat.spell_cost)
+  emit Damaged { source: self, target: target, amount: config.combat.spell_damage }
+  // Higher score when target HP is low — finisher.
+  score (config.combat.spell_damage * 2.0 - target.hp)
+
+// Heal — self-cast. Only fires when self HP is low. Score is a
+// constant high value so it dominates Strike whenever the gate
+// passes (gate already encodes the urgency: hp < threshold).
+//
+// NOTE — Gap E (deferred): the natural shape `score (threshold*2 -
+// self.hp)` lowers `self.hp` to `agent_hp[target_expr_<N>]` (no
+// matching `let` binding emitted). The verb expander's binder
+// shadowing routes `self` through PerPairCandidate when the verb
+// has a `target` param, even when the score body only references
+// `self.*` — the ScoringRow lowering needs a self-vs-target
+// disambiguation pass when the binder context permits both.
+// Workaround: constant score; the gate still encodes urgency.
+verb Heal(self, target: Agent) =
+  action HealAction
+  when (self.alive
+        && target == self
+        && (world.tick % 4 == 0)
+        && self.hp < config.combat.hp_low_threshold)
+  emit Healed { source: self, target: self, amount: config.combat.heal_amount }
+  score 100.0
+
+// Apply damage — chronicle physics. On Damaged event, reduce target HP.
+// If new HP <= 0, set the target dead AND emit Defeated.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// Apply healing.
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) + a;
+    agents.set_hp(t, new_hp);
+  }
+}
+
+// Per-source damage_dealt — observability view.
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source healing_done — observability view.
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}

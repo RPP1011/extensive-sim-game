@@ -94,6 +94,14 @@ stdlib_math_probe_runtime = { path = "../stdlib_math_probe_runtime" }
 # `atomicOr` per the result-type-only emit branch. See
 # `docs/superpowers/notes/2026-05-04-quest_probe.md`.
 quest_probe_runtime = { path = "../quest_probe_runtime" }
+# Duel 1v1 — first REAL gameplay-shaped fixture (not a coverage
+# probe). Two Combatants duel with three abilities (Strike, Spell,
+# Heal) compiled through the verb cascade + cooldown gates + pair-
+# field scoring + multi-event-kind ring. Surfaces 6 gaps and closes
+# 3 inline (set_hp/set_alive/set_mana setters + non-self target,
+# PerPair tick preamble, Bool LHS rewrite). See
+# `docs/superpowers/notes/2026-05-04-duel_1v1.md`.
+duel_1v1_runtime = { path = "../duel_1v1_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -174,3 +182,7 @@ path = "src/stdlib_math_probe_app.rs"
 [[bin]]
 name = "quest_probe_app"
 path = "src/quest_probe_app.rs"
+
+[[bin]]
+name = "duel_1v1_app"
+path = "src/duel_1v1_app.rs"

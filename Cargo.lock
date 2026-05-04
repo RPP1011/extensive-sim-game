@@ -531,6 +531,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "duel_1v1_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "ecosystem_runtime"
 version = "0.1.0"
 dependencies = [
@@ -1682,6 +1695,7 @@ dependencies = [
  "cooldown_probe_runtime",
  "crowd_navigation_runtime",
  "diplomacy_probe_runtime",
+ "duel_1v1_runtime",
  "ecosystem_runtime",
  "engine",
  "foraging_runtime",

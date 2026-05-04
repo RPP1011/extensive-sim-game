@@ -2470,3 +2470,162 @@ fn quest_probe_compile_gate() {
         art.kernel_index,
     );
 }
+
+/// `duel_1v1` compile-gate. Pins the structural surface of the FIRST
+/// real gameplay-shaped fixture (not a coverage probe):
+///
+///   - 3 MaskPredicate ops (one per verb's `when` clause: Strike,
+///     Spell, Heal — all pair-field rows because all verbs declare a
+///     `target: Agent` parameter).
+///   - 5 PhysicsRule ops (3 verb-synthesised chronicles + 2
+///     authored physics rules: ApplyDamage + ApplyHeal — these
+///     fuse into one `physics_ApplyDamage_and_ApplyHeal` kernel).
+///   - 2 ViewFold ops (damage_dealt + healing_done, both f32).
+///   - 1 ScoringArgmax with 3 competing rows (Strike + Spell + Heal).
+///
+/// Locks the surfaces this fixture closes inline:
+///   - `agents.set_hp` / `agents.set_alive` / `agents.set_mana`
+///     setters registered (extending the prior `set_pos` / `set_vel`
+///     set in `cg::lower::physics::agents_setter_field`).
+///   - Non-self target accepted by `lower_agents_setter` — routes
+///     the lowered AgentId expression via `AgentRef::Target(<expr>)`,
+///     mirroring the existing read-side path.
+///   - PerPair mask kernel preamble binds `let tick = cfg.tick;`
+///     (was missing pre-`duel_1v1` — only PerAgent / PerEvent
+///     preambles bound the simulation clock; PerPair `world.tick`
+///     references in mask predicates surfaced as `no definition in
+///     scope for identifier: tick`).
+///   - WGSL Bool LHS rewrite (`agent_alive[t] = select(0u, 1u, v)`)
+///     — pre-`duel_1v1` the LHS used `(agent_alive[t] != 0u)` (the
+///     read-form coercion) which is not a valid lvalue.
+///   - ScoringArgmax emits ActionSelected gated on `best_utility >
+///     -inf` — pre-`duel_1v1` the emit was unconditional, producing
+///     a phantom event whose target = NO_TARGET (0xFFFFFFFFu) for
+///     agents whose mask never set, leading to an out-of-bounds
+///     `agent_<field>[0xFFFFFFFFu]` write downstream.
+///
+/// Discovery doc: `docs/superpowers/notes/2026-05-04-duel_1v1.md`
+/// (gap punch list including the deferred P6 + cycle false positives
+/// for `@phase(post)` chronicle physics, and the Heal verb's
+/// `score (... - self.hp)` lowering `self.hp` to
+/// `agent_hp[target_expr_<N>]` under pair-field scoring).
+#[test]
+fn duel_1v1_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/duel_1v1.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse duel_1v1.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve duel_1v1.sim");
+    // Tolerate lower diagnostics — duel_1v1 has known-deferred
+    // well_formed warnings (P6 + cycle).
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[duel_1v1 lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit duel_1v1");
+
+    // Op-level invariants.
+    let mut mask_count = 0;
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    let mut scoring_rows = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::MaskPredicate { .. } => mask_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ScoringArgmax { rows, .. } => {
+                scoring_rows = rows.len();
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        mask_count, 3,
+        "expected 3 MaskPredicate ops (one per verb: Strike + Spell + Heal); got {mask_count}",
+    );
+    assert_eq!(
+        physics_count, 5,
+        "expected 5 PhysicsRule ops (3 verb chronicles + ApplyDamage + ApplyHeal); got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 2,
+        "expected 2 ViewFold ops (damage_dealt + healing_done); got {viewfold_count}",
+    );
+    assert_eq!(
+        scoring_rows, 3,
+        "expected 3 scoring rows (Strike + Spell + Heal competing); got {scoring_rows}",
+    );
+
+    // PerPair mask kernel must bind `let tick = cfg.tick;` so verb
+    // `when (world.tick % N == 0)` cooldown predicates lower cleanly.
+    // Locks the post-duel_1v1 PerPair preamble fix.
+    let mask_body = kernel_body_containing(&art, "fused_mask")
+        .unwrap_or_else(|| panic!("no fused_mask kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        mask_body.contains("let tick = cfg.tick;"),
+        "PerPair mask kernel must bind `tick`; got body:\n{mask_body}",
+    );
+
+    // ApplyDamage_and_ApplyHeal kernel must emit a select(...) for
+    // the bool agent_alive write (post-duel_1v1 LHS-coercion fix). The
+    // RHS coerces bool→u32 via `select(0u, 1u, value)` since
+    // agent_alive storage is array<u32>.
+    let apply_body = kernel_body_containing(&art, "ApplyDamage")
+        .unwrap_or_else(|| panic!("no ApplyDamage kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        apply_body.contains("agent_alive["),
+        "ApplyDamage must write agent_alive (set_alive); got body:\n{apply_body}",
+    );
+    assert!(
+        apply_body.contains("select(0u, 1u,"),
+        "ApplyDamage must coerce bool RHS via select(0u, 1u, ...) when writing \
+         agent_alive (post-duel_1v1 Bool LHS rewrite); got body:\n{apply_body}",
+    );
+    // The lvalue must NOT be wrapped in the read-form coercion `(x != 0u)` —
+    // that would produce an invalid WGSL assignment. Locks the
+    // `agent_field_access_lvalue` fix.
+    assert!(
+        !apply_body.contains("(agent_alive[") || !apply_body.contains(") = "),
+        "ApplyDamage must NOT use read-form `(agent_alive[t] != 0u)` as an LHS; \
+         got body:\n{apply_body}",
+    );
+
+    // Scoring kernel must gate the emit on best_utility > -inf so
+    // agents whose mask never set don't fire a phantom ActionSelected.
+    let scoring_body = kernel_body_containing(&art, "scoring")
+        .unwrap_or_else(|| panic!("no scoring kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        scoring_body.contains("if (best_utility > -3.4028235e38)"),
+        "scoring kernel must gate ActionSelected emit on best_utility > -inf; \
+         got body:\n{scoring_body}",
+    );
+
+    // All emitted WGSL must be naga-clean.
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "duel_1v1 emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+
+    eprintln!(
+        "[duel_1v1] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}

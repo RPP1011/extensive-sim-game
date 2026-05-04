@@ -745,16 +745,33 @@ fn lower_expr_stmt(
 
 /// Map an `agents.set_<field>` method name to the `AgentFieldId` it
 /// writes. Returns `None` for any other method name. Today's recognised
-/// set is just position + velocity (the boids fixture's needs); extend
-/// here when new fixtures need to write more agent fields.
+/// set covers position + velocity (the boids fixture's needs) plus
+/// the duel_1v1-fixture surface (HP, alive, mana). Extend here when
+/// new fixtures need to write more agent fields.
 fn agents_setter_field(method: &str) -> Option<&'static AgentFieldId> {
     match method {
         "set_pos" => Some(&AgentFieldId::Pos),
         "set_vel" => Some(&AgentFieldId::Vel),
+        "set_hp" => Some(&AgentFieldId::Hp),
+        "set_alive" => Some(&AgentFieldId::Alive),
+        "set_mana" => Some(&AgentFieldId::Mana),
         _ => None,
     }
 }
 
+/// Lower an `agents.set_<field>(<target>, <value>)` namespace call to
+/// a `CgStmt::Assign` writing the target slot of the SoA buffer.
+///
+/// `<target>` may be:
+///   - a bare `self` local → `AgentRef::Self_` (the kernel-bound
+///     `agent_id`)
+///   - any other expression of type `AgentId` → lowered as a CG
+///     expression, then routed via `AgentRef::Target(<expr_id>)`. The
+///     WGSL emit already handles `AgentRef::Target` writes via the
+///     `pending_target_lets` stmt-prefix binding (see
+///     `crates/dsl_compiler/src/cg/emit/wgsl_body.rs:1399`).
+///
+/// Arity is fixed at 2 args (target + value).
 fn lower_agents_setter(
     rule_id: PhysicsRuleId,
     field: AgentFieldId,
@@ -769,25 +786,21 @@ fn lower_agents_setter(
             span,
         });
     }
-    // Arg 0: target. v1 only accepts a bare `self` local — writing to
-    // other agents from a per-agent kernel needs additional thought
-    // about cross-agent atomics, deferred until a fixture asks for it.
-    match &args[0].value.kind {
-        IrExpr::Local(_, name) if name == "self" => {}
+    // Arg 0: target. Bare `self` collapses to `AgentRef::Self_`; any
+    // other expression lowers and routes via `AgentRef::Target(<expr>)`.
+    let agent_ref = match &args[0].value.kind {
+        IrExpr::Local(_, name) if name == "self" => AgentRef::Self_,
         _ => {
-            return Err(LoweringError::UnsupportedPhysicsStmt {
-                rule: rule_id,
-                ast_label: "Expr/agents.set_*-non-self-target",
-                span,
-            });
+            let target_id = lower_expr(&args[0].value, ctx)?;
+            AgentRef::Target(target_id)
         }
-    }
+    };
     // Arg 1: the value to write.
     let value_id = lower_expr(&args[1].value, ctx)?;
     let stmt = CgStmt::Assign {
         target: DataHandle::AgentField {
             field,
-            target: AgentRef::Self_,
+            target: agent_ref,
         },
         value: value_id,
     };
