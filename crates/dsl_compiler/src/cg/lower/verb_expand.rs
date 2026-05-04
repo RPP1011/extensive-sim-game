@@ -296,12 +296,20 @@ fn expand_one_verb(
     // compilation has none yet so a verb-only fixture still produces a
     // scoring kernel.
     if let Some(score_expr) = &verb.scoring {
+        // Mirror `build_mask_head`'s shape on the scoring entry's head
+        // so the scoring lowering's per-pair candidate binding flow
+        // (`scoring.rs:307-345` flips `ctx.target_local = true` when
+        // it sees a `Positional([("target", _, AgentId)])` head)
+        // resolves `target.<field>` reads in the score body to the
+        // per-pair candidate context. Hardcoding `IrActionHeadShape::None`
+        // here was Gap #3 in
+        // `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`;
+        // sharing the helper means the mask + scoring entries always
+        // declare the same head shape (so `target` resolves the same
+        // way on both sides of the verb expansion).
+        let scoring_head = build_mask_head(verb, &synthetic_name);
         let entry = ScoringEntryIR {
-            head: IrActionHead {
-                name: synthetic_name.clone(),
-                shape: IrActionHeadShape::None,
-                span: verb.span,
-            },
+            head: scoring_head,
             expr: score_expr.clone(),
             span: verb.span,
         };

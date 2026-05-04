@@ -168,22 +168,42 @@ pub enum DispatchShape {
 }
 
 /// What drives the per-agent candidate list for a [`DispatchShape::PerPair`]
-/// dispatch. Only spatial-query-driven pairing is surfaced today — every
-/// pair-shaped op emits via the spatial-grid neighborhood walk. Future
-/// pair sources (e.g. view-driven k-nearest, fully dense N×N) accrete
-/// here as variants.
+/// dispatch. Two pairing sources are surfaced today:
+///
+/// - [`PerPairSource::SpatialQuery`] — candidates come from a spatial-grid
+///   neighborhood walk; the embedded [`SpatialQueryKind`] selects which
+///   query (kin / engagement / future flavours) feeds the walk.
+/// - [`PerPairSource::AllAgents`] — every other agent slot is a candidate.
+///   Used by verb-synthesised masks whose `Positional([("target", _,
+///   AgentId)])` head lacks an explicit `from` clause; the implicit
+///   semantics are "iterate every agent as a candidate". The eventual
+///   per-pair argmax kernel (Gap #4 in
+///   `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`) will
+///   honour the full N×N enumeration; today the mask body emit shares
+///   the existing PerPair preamble (per-pair candidate count = 1u, see
+///   `mask_predicate_per_pair_body`'s TODO marker), so the dispatch
+///   landed by AllAgents reduces to "one (agent, agent)" per actor —
+///   structurally PerAgent, but typed as PerPair so future emit upgrades
+///   can route the variant to a true N×N kernel without changing the
+///   lowering layer.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum PerPairSource {
     /// Per-agent candidates come from a spatial-grid query. The
     /// embedded [`SpatialQueryKind`] selects which query (kin,
     /// engagement) feeds the pair walk.
     SpatialQuery(SpatialQueryKind),
+    /// Every other agent slot is a candidate — implicit "all agents"
+    /// pair source for verb-synthesised masks with a `Positional`
+    /// (`target: Agent`) head and no `from` clause. No spatial-grid
+    /// dependency.
+    AllAgents,
 }
 
 impl fmt::Display for PerPairSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PerPairSource::SpatialQuery(k) => write!(f, "spatial_query({})", k),
+            PerPairSource::AllAgents => write!(f, "all_agents"),
         }
     }
 }

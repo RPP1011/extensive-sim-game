@@ -41,7 +41,7 @@
 //! into the dispatch shape.
 
 use dsl_ast::ast::Span;
-use dsl_ast::ir::{IrActionHeadShape, IrExprNode, MaskIR};
+use dsl_ast::ir::{IrActionHeadShape, IrExprNode, IrType, MaskIR};
 
 use crate::cg::data_handle::{CgExprId, MaskId};
 use crate::cg::dispatch::{DispatchShape, PerPairSource};
@@ -127,8 +127,19 @@ pub fn lower_mask(
     // doc comment for the rationale; Task 2.6 (spatial query lowering)
     // is the harmonization point that will add the matching
     // `PerPairSource::AbilityCatalog` (or similar) variant.
+    //
+    // Exception: a `Positional([("target", _, AgentId)])` head — the
+    // canonical shape verb expansion synthesises for `verb V(self,
+    // target: Agent) = ...` — has implicit "iterate every other agent
+    // as a candidate" semantics. No `from` clause is needed; the
+    // dispatch shape resolves to `PerPair { source: AllAgents }`. Other
+    // parametric shapes (`Named`, multi-binder `Positional`, non-`target`
+    // binder name, non-`AgentId` binder type) keep the rejection — the
+    // implicit-candidate-source heuristic only covers the canonical
+    // verb-synthesised shape. See Gap #1 in
+    // `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`.
     if let Some(head_label) = parametric_head_label(&ir.head.shape) {
-        if ir.candidate_source.is_none() {
+        if ir.candidate_source.is_none() && !is_implicit_target_binder(&ir.head.shape) {
             return Err(LoweringError::UnsupportedMaskHeadShape {
                 mask: mask_id,
                 head_label,
@@ -249,8 +260,26 @@ fn resolve_dispatch_shape(
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<DispatchShape, LoweringError> {
     match (&ir.candidate_source, spatial_query_kind) {
-        // Self-only mask — no `from` clause, no spatial query.
-        (None, None) => Ok(DispatchShape::PerAgent),
+        // No `from` clause and no spatial query. Two sub-cases:
+        //
+        //   - Head is `None` (self-only mask) → `PerAgent`.
+        //   - Head is `Positional([("target", _, AgentId)])` (the
+        //     canonical verb-synthesised shape) → `PerPair { source:
+        //     AllAgents }`. The Step-1a gate above already filtered
+        //     out other parametric shapes (`Named`, multi-binder, etc.)
+        //     so reaching this arm with anything else is impossible.
+        //
+        // See Gap #1 in
+        // `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`.
+        (None, None) => {
+            if is_implicit_target_binder(&ir.head.shape) {
+                Ok(DispatchShape::PerPair {
+                    source: PerPairSource::AllAgents,
+                })
+            } else {
+                Ok(DispatchShape::PerAgent)
+            }
+        }
 
         // Pair-driven mask — `from query.nearby_agents(...)` resolves
         // to a per-pair dispatch over the named spatial query.
@@ -278,6 +307,31 @@ fn resolve_dispatch_shape(
             kind,
             span: ir.span,
         }),
+    }
+}
+
+/// Recognise the canonical verb-synthesised mask head:
+/// `Positional([("target", _, AgentId)])`. This is the shape produced
+/// by `verb_expand::build_mask_head` for any verb of the form
+/// `verb V(self, target: Agent) = ...` — exactly one positional binder
+/// named `target` with type `AgentId`. The mask's candidate source is
+/// implicit "every other agent" — the dispatch shape resolver routes
+/// this to `PerPair { source: AllAgents }`.
+///
+/// Other parametric shapes (`Named`, multi-binder positional, non-`target`
+/// binder name, non-`AgentId` binder type) intentionally fail the
+/// recogniser — they keep the existing rejection so the harmonization
+/// surface stays small. Future variants (e.g., per-ability mask heads)
+/// would extend the recogniser alongside their matching `PerPairSource`
+/// variant.
+fn is_implicit_target_binder(shape: &IrActionHeadShape) -> bool {
+    match shape {
+        IrActionHeadShape::Positional(binders) => {
+            binders.len() == 1
+                && binders[0].0 == "target"
+                && binders[0].2 == IrType::AgentId
+        }
+        _ => false,
     }
 }
 
