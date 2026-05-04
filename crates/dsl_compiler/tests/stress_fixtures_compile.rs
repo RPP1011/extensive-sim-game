@@ -1835,3 +1835,137 @@ verb Ping(self) =
         "config const must emit as `u32 = 3u` (typed-routing fingerprint); got body:\n{mask_body}",
     );
 }
+
+/// `pair_scoring_probe` compile-gate — NEGATIVE test pinning the gap
+/// chain that blocks PAIR-FIELD SCORING (spec §8.3) end-to-end.
+///
+/// The fixture's `verb Heal(self, target: Agent) = ... score (1000.0 -
+/// agents.cooldown_next_ready_tick(target))` exercises the canonical
+/// "pick both action AND target" pattern. Today the lower pass produces
+/// TWO diagnostics:
+///
+///   1. `mask#0 head shape \`positional\` ... requires a \`from\` clause`
+///      — the synthesised mask from the verb's `(self, target: Agent)`
+///      param list gets `IrActionHeadShape::Positional` head, but the
+///      verb syntax has NO `from` clause. `lower_mask` rejects until
+///      Task 2.6 lands a routing scheme for non-spatial pair-bound
+///      masks. (`LoweringError::UnsupportedMaskHeadShape`.)
+///
+///   2. `lowering: binary \`Sub\` ... mismatched operands — lhs is f32,
+///      rhs is u32` — the score expression `1000.0f32 - <u32 SoA read>`
+///      doesn't auto-promote. (`LoweringError::BinaryOperandTyMismatch`.)
+///      This is independent of #1 — the two surface together but only
+///      because the compiler doesn't bail at #1.
+///
+/// Pinning these as a NEGATIVE assertion means: the day a future
+/// commit closes Gap #1 (Task 2.6 mask routing), this test FAILS,
+/// surfacing the change as a structural shift. The test then needs
+/// updating to assert the new partial-emit shape (likely "1 mask + 1
+/// scoring + 1 chronicle + 1 fold all emit" — outcome (a) FULL FIRE).
+///
+/// Discovery doc:
+/// `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md`.
+#[test]
+fn pair_scoring_probe_negative_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/pair_scoring_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse pair_scoring_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve pair_scoring_probe.sim");
+
+    // Surface counts pre-lower — these confirm the parser + resolver
+    // accept `target.<field>` shape (Gaps #1+#2 are CG-pass, not
+    // parse/resolve gaps).
+    assert_eq!(
+        comp.verbs.len(),
+        1,
+        "expected 1 verb (Heal); got {}",
+        comp.verbs.len()
+    );
+    assert_eq!(
+        comp.verbs[0].params.len(),
+        2,
+        "expected 2 verb params (self, target); got {}",
+        comp.verbs[0].params.len()
+    );
+    assert_eq!(
+        comp.verbs[0].params[1].name, "target",
+        "second verb param must be named `target`"
+    );
+
+    // Lower MUST fail with the gap-chain diagnostics. If a future
+    // commit fixes Task 2.6, this assertion's `expect_err` flips.
+    let outcome = lower_compilation_to_cg(&comp);
+    let diags = match outcome {
+        Ok(_) => panic!(
+            "EXPECTED LOWER FAILURE (Gap #1 + Gap #2) — pair_scoring_probe.sim \
+             should fail lower with `UnsupportedMaskHeadShape` + \
+             `BinaryOperandTyMismatch`. Lower SUCCEEDED — this means a future \
+             commit closed both gaps; update this negative test to assert the \
+             FULL FIRE positive shape.",
+        ),
+        Err(o) => o.diagnostics,
+    };
+
+    let diag_strings: Vec<String> = diags.iter().map(|d| format!("{d}")).collect();
+
+    let has_mask_head_gap = diag_strings.iter().any(|s| {
+        s.contains("head shape `positional`") && s.contains("requires a `from` clause")
+    });
+    assert!(
+        has_mask_head_gap,
+        "Gap #1 (mask positional head + Task 2.6) must surface in lower diagnostics; got:\n{}",
+        diag_strings.join("\n  ")
+    );
+
+    let has_arith_gap = diag_strings.iter().any(|s| {
+        s.contains("binary `Sub`") && s.contains("lhs is f32, rhs is u32")
+    });
+    assert!(
+        has_arith_gap,
+        "Gap #2 (score-expression f32/u32 mismatch) must surface in lower diagnostics; got:\n{}",
+        diag_strings.join("\n  ")
+    );
+
+    // Even though lower failed, the partial program drives downstream
+    // schedule + emit. The PartialEmit set excludes mask + scoring but
+    // includes the chronicle + view-fold + plumbing — the runtime
+    // (pair_scoring_probe_runtime) drives this set and observes the
+    // (b) NO FIRE outcome.
+    let cg = lower_compilation_to_cg(&comp).err().expect("must fail").program;
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("partial CG emit should succeed even when lower failed");
+
+    let kernel_set: std::collections::BTreeSet<String> =
+        art.kernel_index.iter().cloned().collect();
+    assert!(
+        kernel_set.iter().any(|k| k.contains("physics_verb_chronicle_Heal")),
+        "partial-emit set MUST include the chronicle physics rule (the verb's \
+         emit body lowered cleanly even though mask/scoring didn't); got: {:?}",
+        kernel_set
+    );
+    assert!(
+        kernel_set.iter().any(|k| k.contains("fold_received")),
+        "partial-emit set MUST include the view-fold (declared at top level — \
+         independent of verb's mask/scoring failure); got: {:?}",
+        kernel_set
+    );
+    assert!(
+        !kernel_set.iter().any(|k| k.contains("mask")),
+        "partial-emit set MUST NOT include any mask kernel (Gap #1 dropped \
+         the verb's mask op); got: {:?}",
+        kernel_set
+    );
+    assert!(
+        !kernel_set.iter().any(|k| k == "scoring"),
+        "partial-emit set MUST NOT include a scoring kernel (verb scoring \
+         entry references target.<field>; the entire scoring op was \
+         dropped); got: {:?}",
+        kernel_set
+    );
+}

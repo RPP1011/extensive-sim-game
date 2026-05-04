@@ -73,6 +73,11 @@ diplomacy_probe_runtime = { path = "../diplomacy_probe_runtime" }
 # `rng.action()` end-to-end with a per-tick activation gate;
 # verifies P5 determinism and per-slot binomial convergence.
 stochastic_probe_runtime = { path = "../stochastic_probe_runtime" }
+# Pair-scoring probe — discovery probe of PAIR-FIELD SCORING (spec
+# §8.3). Attempts the canonical `target.<field>` pattern in a verb's
+# scoring expression. Outcome (b) NO FIRE — the gap chain is
+# documented in docs/superpowers/notes/2026-05-04-pair_scoring_probe.md.
+pair_scoring_probe_runtime = { path = "../pair_scoring_probe_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -141,3 +146,7 @@ path = "src/diplomacy_probe_app.rs"
 [[bin]]
 name = "stochastic_probe_app"
 path = "src/stochastic_probe_app.rs"
+
+[[bin]]
+name = "pair_scoring_probe_app"
+path = "src/pair_scoring_probe_app.rs"

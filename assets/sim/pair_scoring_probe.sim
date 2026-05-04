@@ -1,0 +1,100 @@
+// pair_scoring_probe — discovery probe for PAIR-FIELD SCORING (spec §8.3).
+//
+// Per the spec audit (early session): "Pair-field scoring (target.* in
+// scoring rows, spec §8.3) — scoring fixtures only use self.* fields."
+// Today every shipped scoring row reads `self.<field>` only; NO fixture
+// or test exercises `target.<field>` predicates in scoring expressions.
+//
+// This probe attempts the canonical "pick both an ACTION and a TARGET"
+// pattern that underlies RPG-style decision making (e.g. heal the most
+// injured ally; attack the lowest-HP enemy; assist the closest squadmate).
+//
+// SHAPE: each Medic, every tick, picks the OTHER Medic with the lowest
+// `cooldown_next_ready_tick` proxy (acting as a pseudo-HP indicator —
+// the field is u32 SoA so it's readable from both self and target context
+// per the cooldown_probe precedent). The score INVERTS the value
+// (`1000 - target.cooldown_next_ready_tick`) so lower-original = higher-
+// score; argmax should land on the slot with the smallest cooldown.
+//
+// PROBE FOCUS — four candidate gaps stacked from cheapest to costliest:
+//
+//   #1. PARSER: does `target.<field>` parse inside a verb's `score`
+//       expression? If parsing rejects, the gap chain stops here.
+//   #2. RESOLVER: with the verb's `target` param in scope, does
+//       `resolve_expr` produce a typed AST node? Likely yes — `target`
+//       resolves as `Local(LocalRef)` and field access is generic.
+//   #3. CG VERB EXPANSION: `verb_expand.rs:299-307` synthesises the
+//       scoring entry with `IrActionHeadShape::None` — NOT Positional.
+//       That means `lower_standard_row` won't flip `ctx.target_local`,
+//       so `target.<field>` in the score body will fail to lower
+//       (`UnsupportedLocalBinding` or similar — `Local("target")`
+//       hits the `target_local == false` arm in `lower_bare_local`).
+//       This is the LIKELY first failure point.
+//   #4. KERNEL DISPATCH SHAPE (BIGGEST): even if (3) is fixed, the
+//       scoring kernel today dispatches `agent_count` threads, each
+//       computing one row's utility per agent. A pair-field scoring
+//       row needs `agent_count × candidate_count` threads — every
+//       (self, target) pair — followed by an argmax across candidates
+//       per actor. The compiler's ScoringArgmax op shape would need
+//       a `target: Some(...)` slot populated AND the WGSL emitter
+//       would need a per-actor inner loop over candidates.
+//
+// FULL FIRE prediction (HYPOTHETICAL — outcome (a) NOT expected today):
+//
+//   With AGENT_COUNT=8, TICKS=100, init `cooldown_next_ready_tick[N] = N*10`
+//   (slot 0 = 0, slot 1 = 10, slot 2 = 20, ..., slot 7 = 70):
+//
+//   - Every Medic should pick slot 0 (lowest cooldown → highest score
+//     under the inversion).
+//   - `received[0]` = TICKS × (AGENT_COUNT - 1) × heal.amount
+//                   = 100 × 7 × 5.0 = 3500.0
+//   - `received[N]` = 0.0 for N > 0.
+//
+// LIKELY observable today (outcome (b)): the runtime will fail to
+// COMPILE with a compiler diagnostic at gap #3 — the verb's score
+// expression references `target.<field>` but the synthesised entry
+// has `IrActionHeadShape::None` so `target_local` never flips. The
+// build.rs will surface the `LoweringError`. See discovery doc for the
+// full gap chain.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Healed {
+  healer: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+entity Medic : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config heal {
+  amount: f32 = 5.0,
+}
+
+// Each tick, every Medic picks the most-"injured" OTHER Medic to heal.
+// "Most injured" is proxied by lowest `cooldown_next_ready_tick`. The
+// per-pair-candidate side `target` should bind to the AgentId of each
+// candidate; the score reads the candidate's u32 SoA slot and inverts
+// it so lowest-original = highest-score. Argmax across candidates
+// picks the most-injured target per healer per tick.
+verb Heal(self, target: Agent) =
+  action HealAction
+  when (target != self)
+  emit Healed { healer: self, target: target, amount: config.heal.amount }
+  // Pair-field score — reads candidate side. INVERTED so lower
+  // cooldown_next_ready_tick = higher utility.
+  score (1000.0 - agents.cooldown_next_ready_tick(target))
+
+// Per-target healing-received accumulator. Fed by Healed (kind tag
+// = 1u). Under FULL FIRE, slot 0 (lowest cooldown) absorbs all the
+// healing every tick: `received[0] = TICKS × (AGENT_COUNT-1) × amount`.
+@materialized(on_event = [Healed])
+view received(target: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { healer: _, target: t, amount: a } { self += a }
+  clamp: [0.0, 100000.0],
+}

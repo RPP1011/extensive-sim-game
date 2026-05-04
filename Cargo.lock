@@ -1184,6 +1184,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pair_scoring_probe_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1660,6 +1673,7 @@ dependencies = [
  "engine",
  "foraging_runtime",
  "glam",
+ "pair_scoring_probe_runtime",
  "particle_collision_runtime",
  "predator_prey_runtime",
  "stochastic_probe_runtime",

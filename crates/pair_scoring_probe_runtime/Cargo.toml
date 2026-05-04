@@ -1,0 +1,28 @@
+[package]
+name = "pair_scoring_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/pair_scoring_probe.sim` —
+# discovery probe of PAIR-FIELD SCORING (spec §8.3). Mirrors the
+# verb_probe_runtime / cooldown_probe_runtime shape but DEGRADES
+# gracefully — the lower pass rejects the verb's `Positional(target:
+# AgentId)` mask head (Task 2.6 still open) so the partial CG program
+# is missing the mask + scoring kernels. The runtime drives whatever
+# kernels DID emit (PartialEmit set: chronicle + view-fold + plumbing)
+# so the sim_app can report the (b) NO-FIRE observable. See
+# `docs/superpowers/notes/2026-05-04-pair_scoring_probe.md` for the
+# full gap chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
