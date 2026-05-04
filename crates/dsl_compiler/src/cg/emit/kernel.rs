@@ -496,10 +496,47 @@ pub fn kernel_topology_to_spec_and_body(
     });
 
     // 9. Build the cfg struct decl + cfg-construction expression — per
-    //    classified kind. ViewFold is handled above; non-ViewFold
-    //    kernels keep the placeholder shape today.
-    let cfg_struct_decl = build_generic_cfg_struct_decl(&cfg_struct);
-    let cfg_build_expr = build_generic_cfg_build_expr(&cfg_struct);
+    //    classified kind. ViewFold is handled above; PerEvent-dispatched
+    //    physics rules whose body contains an `Emit` (the verb-cascade
+    //    chronicle pattern) need the same `event_count + tick` cfg
+    //    shape ViewFold uses, so the body's `if event_idx >=
+    //    cfg.event_count { return; }` early-return guard resolves and
+    //    the `Emit` writes still see `tick`. Other generic kernels
+    //    keep the placeholder shape today.
+    let is_per_event_emit = matches!(dispatch, DispatchShape::PerEvent { .. })
+        && body_ops_have_emit(&body_ops, prog);
+    let (cfg_struct_decl, cfg_build_expr, kernel_kind) = if is_per_event_emit {
+        (
+            build_per_event_emit_cfg_struct_decl(&cfg_struct),
+            build_per_event_emit_cfg_build_expr(&cfg_struct),
+            KernelKind::PerEventEmit,
+        )
+    } else {
+        (
+            build_generic_cfg_struct_decl(&cfg_struct),
+            build_generic_cfg_build_expr(&cfg_struct),
+            KernelKind::Generic,
+        )
+    };
+
+    // PerEventEmit kernels share `event_ring` between producer-side
+    // `Emit` (atomicStore) and consumer-side `EventField` reads
+    // (atomicLoad). Force the EventRing-Read binding (declared today
+    // as `array<u32>` per `handle_to_binding_metadata`) up to
+    // `array<atomic<u32>>` so both surfaces type-check against the
+    // same WGSL declaration. Affects only the EventRing binding; the
+    // BGL entry stays `bgl_storage(N, false)` (atomic vs non-atomic
+    // is a WGSL-side distinction the BGL doesn't carry).
+    if is_per_event_emit {
+        for binding in bindings.iter_mut() {
+            if binding.name == "event_ring"
+                && matches!(binding.access, AccessMode::ReadStorage | AccessMode::ReadWriteStorage)
+            {
+                binding.access = AccessMode::AtomicStorage;
+                binding.wgsl_ty = "u32".to_string();
+            }
+        }
+    }
 
     // 10. Compose the WGSL body — one fragment per op, joined with
     //     blank lines. Computing the body here surfaces any inner-walk
@@ -510,7 +547,18 @@ pub fn kernel_topology_to_spec_and_body(
     //     consumes the spec) — Task 4.3 will redo body composition at
     //     that layer. We return it alongside the spec for tests + Task
     //     4.3 callers; [`kernel_topology_to_spec`] discards it.
-    let wgsl_body = build_wgsl_body(&body_ops, &dispatch, prog, ctx)?;
+    //
+    // PerEventEmit kernels declare `event_ring: array<atomic<u32>>`
+    // (above), which forces every payload-word read in the body to go
+    // through `atomicLoad`. Stash the flag on the emit context for the
+    // duration of the body emit so `CgExpr::EventField` and the
+    // per-handler tag-filter wrap both pick the atomic form, then
+    // restore on exit — defensive scoping in case the same `EmitCtx`
+    // instance is reused across multiple kernels.
+    let prior_atomic_loads = ctx.event_ring_atomic_loads.replace(is_per_event_emit);
+    let wgsl_body_result = build_wgsl_body(&body_ops, &dispatch, prog, ctx);
+    ctx.event_ring_atomic_loads.set(prior_atomic_loads);
+    let wgsl_body = wgsl_body_result?;
 
     let spec = KernelSpec {
         name,
@@ -520,7 +568,7 @@ pub fn kernel_topology_to_spec_and_body(
         cfg_build_expr,
         cfg_struct_decl,
         bindings,
-        kind: KernelKind::Generic,
+        kind: kernel_kind,
     };
 
     spec.validate()
@@ -1609,6 +1657,36 @@ fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// PerEventEmit-specific cfg synthesis
+// ---------------------------------------------------------------------------
+
+/// Build the cfg struct decl for a [`KernelKind::PerEventEmit`] kernel —
+/// `PerEvent`-dispatched physics rule whose body contains an `Emit`.
+/// Mirrors the [`KernelKind::ViewFold`] cfg layout (`event_count: u32,
+/// tick: u32`) so the kernel preamble's `if event_idx >= cfg.event_count
+/// { return; }` early-return guard and the body's emit-side `tick`
+/// header word both resolve. Two `_pad` fields preserve the 16-byte
+/// uniform alignment.
+fn build_per_event_emit_cfg_struct_decl(cfg_struct: &str) -> String {
+    format!(
+        "#[repr(C)]\n\
+         #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
+         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub _pad0: u32, pub _pad1: u32 }}"
+    )
+}
+
+/// Cfg builder expression for a [`KernelKind::PerEventEmit`] kernel.
+/// `event_count` defaults to 0 — the runtime overwrites it per dispatch
+/// with the actual per-tick event count from the source ring's tail
+/// (or an upper-bound estimate). This mirrors the
+/// [`build_view_fold_cfg_build_expr`] convention.
+fn build_per_event_emit_cfg_build_expr(cfg_struct: &str) -> String {
+    format!(
+        "{cfg_struct} {{ event_count: 0, tick: state.tick as u32, _pad0: 0, _pad1: 0 }}"
+    )
+}
+
+// ---------------------------------------------------------------------------
 // ViewFold-specific spec synthesis
 // ---------------------------------------------------------------------------
 
@@ -1921,6 +1999,98 @@ fn build_view_fold_wgsl_body(
 /// populates the layout, so the lookup hits.
 const EVENT_RING_DEFAULT_STRIDE_U32: u32 = 10;
 
+/// Per-event op-kind tag (= EventKindId.0) and per-record stride
+/// extracted from `op.kind`'s `on_event` discriminator, when present.
+/// Used by `build_wgsl_body` to wrap each per-op body in an
+/// `if (event_ring[..tag..] == kind_tag) { ... }` filter so a single
+/// PerEvent kernel handling multiple event kinds runs each handler
+/// only on its declared `on Kind { ... }` variant. The shared helper
+/// is also used by `build_view_fold_wgsl_body` (ViewFold path) — both
+/// paths derive the same `(kind_tag, stride)` shape from the op IR.
+///
+/// Returns `None` for op kinds without an `on_event` (PhysicsRule
+/// with `on_event = None` — pure per-agent rules — and the legacy
+/// non-event-bearing op kinds), in which case the caller emits the
+/// per-op body without a tag-filter wrap.
+fn per_event_op_kind_tag(
+    kind: &ComputeOpKind,
+    prog: &CgProgram,
+) -> Option<(u32, u32)> {
+    let on_event = match kind {
+        ComputeOpKind::ViewFold { on_event, .. } => Some(*on_event),
+        ComputeOpKind::PhysicsRule { on_event, .. } => *on_event,
+        ComputeOpKind::MaskPredicate { .. }
+        | ComputeOpKind::ScoringArgmax { .. }
+        | ComputeOpKind::SpatialQuery { .. }
+        | ComputeOpKind::Plumbing { .. }
+        | ComputeOpKind::ViewDecay { .. } => None,
+    }?;
+    let stride = prog
+        .event_layouts
+        .get(&on_event.0)
+        .map(|l| l.record_stride_u32)
+        .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
+    Some((on_event.0, stride))
+}
+
+/// Walk every body op's statement list and return `true` if any
+/// reachable [`CgStmt::Emit`] exists. Mirrors
+/// `cg::lower::driver::collect_emits_in_list` (private to that
+/// module) — duplicated here rather than re-exported so the emit
+/// layer's helper stays a leaf with no upstream coupling.
+fn body_ops_have_emit(body_ops: &[OpId], prog: &CgProgram) -> bool {
+    for op_id in body_ops {
+        let Ok(op) = resolve_op(prog, *op_id) else {
+            continue;
+        };
+        let body_list = match &op.kind {
+            ComputeOpKind::PhysicsRule { body, .. } => Some(*body),
+            ComputeOpKind::ViewFold { body, .. } => Some(*body),
+            _ => None,
+        };
+        if let Some(list_id) = body_list {
+            if stmt_list_has_emit(list_id, prog) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursive walk: `true` iff the statement list named by `list_id`
+/// contains at least one [`CgStmt::Emit`], descending through `If`
+/// arms, `Match` arms, and `ForEachNeighborBody`.
+fn stmt_list_has_emit(list_id: crate::cg::stmt::CgStmtListId, prog: &CgProgram) -> bool {
+    use crate::cg::stmt::CgStmt;
+    let Some(list) = prog.stmt_lists.get(list_id.0 as usize) else {
+        return false;
+    };
+    for &stmt_id in &list.stmts {
+        let Some(stmt) = prog.stmts.get(stmt_id.0 as usize) else {
+            continue;
+        };
+        let hit = match stmt {
+            CgStmt::Emit { .. } => true,
+            CgStmt::If { then, else_, .. } => {
+                stmt_list_has_emit(*then, prog)
+                    || else_.as_ref().is_some_and(|e| stmt_list_has_emit(*e, prog))
+            }
+            CgStmt::Match { arms, .. } => {
+                arms.iter().any(|arm| stmt_list_has_emit(arm.body, prog))
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => stmt_list_has_emit(*body, prog),
+            CgStmt::Assign { .. }
+            | CgStmt::Let { .. }
+            | CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighbor { .. } => false,
+        };
+        if hit {
+            return true;
+        }
+    }
+    false
+}
+
 // ---------------------------------------------------------------------------
 // ViewDecay-specific spec synthesis (B2 — `@decay(rate, per=tick)`)
 // ---------------------------------------------------------------------------
@@ -2067,6 +2237,7 @@ fn build_wgsl_body(
             .expect("write to String never fails");
     }
 
+    let is_per_event = matches!(dispatch, DispatchShape::PerEvent { .. });
     for (i, op_id) in body_ops.iter().enumerate() {
         if i > 0 {
             out.push_str("\n\n");
@@ -2076,6 +2247,24 @@ fn build_wgsl_body(
         // Comment header per op for traceability.
         writeln!(out, "// op#{} ({})", op.id.0, compute_op_kind_short(&op.kind))
             .expect("write to String never fails");
+        // Per-handler event-kind tag filter, mirroring
+        // `build_view_fold_wgsl_body`'s wrapping. PerEvent-dispatched
+        // ops carry an `on_event` discriminator (`Some(EventKindId)`
+        // for ViewFold and PhysicsRule); each per-op body runs only
+        // when the per-thread `event_ring[event_idx * stride + 0u]`
+        // tag word matches that kind. Without the guard, every event
+        // in the unified ring lands in every handler — multi-kind
+        // fixtures (ActionSelected vs PrayCompleted, etc.) would
+        // double-count any slot ranges the kinds share, and over-
+        // dispatched workgroup-rounding threads would index garbage
+        // payload words past the actual event count. Producer side
+        // writes the kind id at offset 0 (see `lower_emit_to_wgsl` in
+        // `wgsl_body.rs`).
+        let fold_meta = if is_per_event {
+            per_event_op_kind_tag(&op.kind, prog)
+        } else {
+            None
+        };
         // Wrap the per-op body in `{ ... }` so locals declared by Task 1's
         // event-pattern binding lowering (`let local_<N>: <ty> = ...;`)
         // live in their own WGSL scope. Without these braces, two ops in
@@ -2085,13 +2274,44 @@ fn build_wgsl_body(
         // `local_0` without collision. The brace itself sits flush-left
         // (matching the comment header above it) and the body is
         // indented one 4-space level inside.
+        //
+        // With a tag guard we add a third level (4 more spaces) for
+        // the body inside the if-block — same indent shape as the
+        // ViewFold path's per-op wrapping.
+        let extra_indent = if fold_meta.is_some() { 4 } else { 0 };
+        let body_indent = 4 + extra_indent;
         let indented = fragment
             .lines()
-            .map(|l| if l.is_empty() { String::new() } else { format!("    {l}") })
+            .map(|l| {
+                if l.is_empty() {
+                    String::new()
+                } else {
+                    format!("{:indent$}{l}", "", indent = body_indent)
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n");
         out.push_str("{\n");
-        out.push_str(&indented);
+        if let Some((kind_tag, stride)) = fold_meta {
+            // Read the per-event tag word. The producer-side `Emit`
+            // writes the kind id at offset 0 of each record (see
+            // `lower_emit_to_wgsl`); the consumer reads it the same
+            // way. Use `atomicLoad` when the binding is atomic
+            // (PerEventEmit kernels) — plain index reads on an
+            // atomic-typed binding fail WGSL validation.
+            let tag_read = if ctx.event_ring_atomic_loads.get() {
+                format!("atomicLoad(&event_ring[event_idx * {stride}u + 0u])")
+            } else {
+                format!("event_ring[event_idx * {stride}u + 0u]")
+            };
+            out.push_str(&format!(
+                "    if ({tag_read} == {kind_tag}u) {{\n"
+            ));
+            out.push_str(&indented);
+            out.push_str("\n    }");
+        } else {
+            out.push_str(&indented);
+        }
         out.push_str("\n}");
     }
 
@@ -3168,7 +3388,21 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
                 .to_string()
         }
         DispatchShape::PerEvent { source_ring } => format!(
+            // PerEvent kernels routed through the generic pipeline
+            // are always classified [`KernelKind::PerEventEmit`]
+            // today (see `kernel_topology_to_spec_and_body`'s
+            // `is_per_event_emit` gate), which stamps the
+            // `{ event_count, tick, ... }` cfg shape. Both
+            // `cfg.event_count` and `cfg.tick` references below
+            // resolve against that shape. The ViewFold path has its
+            // own preamble (`build_view_fold_wgsl_body`) and never
+            // routes through this branch. If a future PerEvent
+            // generic kernel without an `Emit` body surfaces, the
+            // gate above must extend to stamp PerEventEmit
+            // unconditionally for any PerEvent dispatch.
             "let event_idx = gid.x;\n\
+             if (event_idx >= cfg.event_count) {{ return; }}\n\
+             let tick = cfg.tick;\n\
              // Indirect dispatch on event_ring_{}; tail count bounds gid.x.\n\n",
             source_ring.0
         ),

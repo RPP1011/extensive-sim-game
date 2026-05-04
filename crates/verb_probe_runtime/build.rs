@@ -59,61 +59,7 @@ fn main() {
     }
 
     for (name, body) in &artifacts.wgsl_files {
-        // Runtime-side workarounds for known compiler emitter gaps
-        // in `physics_verb_chronicle_Pray.wgsl`. The chronicle is
-        // synthesised by the verb-cascade lowering but its WGSL body
-        // has three issues that wgpu validation rejects:
-        //
-        //   (1) `event_ring` is declared `array<u32>` (non-atomic)
-        //       but its emit body writes via `atomicStore` — wgpu
-        //       errors with "atomic operation is done on a pointer
-        //       to a non-atomic". Producer-side kernels (e.g.
-        //       scoring) declare the same buffer as
-        //       `array<atomic<u32>>`; chronicle just inherited the
-        //       wrong qualifier.
-        //   (2) The body references `tick` but never binds
-        //       `let tick = cfg.tick;`. Other handler bodies (mask,
-        //       scoring, fold) all declare it before the op block.
-        //   (3) Once (1) flips the binding to atomic, the load
-        //       lines that fetch payload words must use
-        //       `atomicLoad` rather than plain `event_ring[...]`
-        //       indexing — WGSL forbids non-atomic access through
-        //       an atomic-typed binding.
-        //
-        // Patch the WGSL source here so the runtime can dispatch
-        // the chronicle without touching the dsl_compiler. If the
-        // upstream emitter ever fixes any of these, the affected
-        // `replace` falls through (no-op) — no panic. This is a
-        // targeted unblock for Gap #4; the long-term fix lives in
-        // the compiler.
-        let patched = if name == "physics_verb_chronicle_Pray.wgsl" {
-            let p1 = body.replace(
-                "var<storage, read_write> event_ring: array<u32>;",
-                "var<storage, read_write> event_ring: array<atomic<u32>>;",
-            );
-            let p2 = p1.replace(
-                "let event_idx = gid.x;",
-                "let event_idx = gid.x;\nlet tick = cfg.tick;",
-            );
-            // Replace plain reads with atomicLoad. Hand-coded for
-            // the three offsets the current emit body uses (+2, +3,
-            // +4). Each occurs exactly once.
-            p2.replace(
-                "let local_2: u32 = event_ring[event_idx * 10u + 2u];",
-                "let local_2: u32 = atomicLoad(&event_ring[event_idx * 10u + 2u]);",
-            )
-            .replace(
-                "let local_1: u32 = event_ring[event_idx * 10u + 3u];",
-                "let local_1: u32 = atomicLoad(&event_ring[event_idx * 10u + 3u]);",
-            )
-            .replace(
-                "let local_0: u32 = event_ring[event_idx * 10u + 4u];",
-                "let local_0: u32 = atomicLoad(&event_ring[event_idx * 10u + 4u]);",
-            )
-        } else {
-            body.clone()
-        };
-        fs::write(out_dir.join(name), &patched)
+        fs::write(out_dir.join(name), body)
             .unwrap_or_else(|e| panic!("write {}: {e}", name));
     }
 

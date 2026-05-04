@@ -196,6 +196,19 @@ pub struct EmitCtx<'a> {
     /// function-scope let), so save+restore is the right asymmetry:
     /// inherit on entry, restore on exit.
     pub bound_target_exprs: std::cell::RefCell<std::collections::HashSet<CgExprId>>,
+
+    /// When set, `CgExpr::EventField` reads of `event_ring[...]` emit
+    /// via `atomicLoad(&event_ring[...])` instead of plain index
+    /// reads. Set by the kernel emit when the kernel's `event_ring`
+    /// binding has been declared `array<atomic<u32>>` (PerEvent-
+    /// dispatched physics rules whose body also `Emit`s — the same
+    /// buffer hosts both atomic stores from the producer-side `Emit`
+    /// and per-thread payload reads via `EventField`; WGSL forbids
+    /// non-atomic indexing on an atomic-typed binding). The view-fold
+    /// path keeps this `false` because its `build_view_fold_bindings`
+    /// declares `event_ring` as plain `array<u32>` (read-only
+    /// consumer side, no in-kernel `Emit`).
+    pub event_ring_atomic_loads: std::cell::Cell<bool>,
 }
 
 impl<'a> EmitCtx<'a> {
@@ -210,6 +223,7 @@ impl<'a> EmitCtx<'a> {
             view_target_locals: std::cell::RefCell::new(Vec::new()),
             pending_target_lets: std::cell::RefCell::new(Vec::new()),
             bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
+            event_ring_atomic_loads: std::cell::Cell::new(false),
         }
     }
 
@@ -972,30 +986,32 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             let total_offset = layout.header_word_count + word_offset_in_payload;
             let buf = layout.buffer_name.as_str();
             let stride = layout.record_stride_u32;
-            Ok(match ty {
-                CgTy::AgentId | CgTy::U32 | CgTy::Tick => {
-                    format!("{}[event_idx * {}u + {}u]", buf, stride, total_offset)
+            // PerEventEmit kernels declare `event_ring` as
+            // `array<atomic<u32>>` so the body's `Emit`-side
+            // `atomicStore` type-checks; in that mode every read of a
+            // payload word also has to go through `atomicLoad` (WGSL
+            // forbids non-atomic indexing on an atomic-typed binding).
+            // ViewFold's path keeps this `false` (its `event_ring`
+            // binding stays plain `array<u32>`), so the existing
+            // plain-index reads continue to compile.
+            let read_word = |off: u32| -> String {
+                if ctx.event_ring_atomic_loads.get() {
+                    format!("atomicLoad(&{}[event_idx * {}u + {}u])", buf, stride, off)
+                } else {
+                    format!("{}[event_idx * {}u + {}u]", buf, stride, off)
                 }
-                CgTy::I32 => format!(
-                    "bitcast<i32>({}[event_idx * {}u + {}u])",
-                    buf, stride, total_offset
-                ),
-                CgTy::F32 => format!(
-                    "bitcast<f32>({}[event_idx * {}u + {}u])",
-                    buf, stride, total_offset
-                ),
+            };
+            Ok(match ty {
+                CgTy::AgentId | CgTy::U32 | CgTy::Tick => read_word(total_offset),
+                CgTy::I32 => format!("bitcast<i32>({})", read_word(total_offset)),
+                CgTy::F32 => format!("bitcast<f32>({})", read_word(total_offset)),
                 CgTy::Vec3F32 => format!(
-                    "vec3<f32>(bitcast<f32>({buf}[event_idx * {s}u + {o}u]), bitcast<f32>({buf}[event_idx * {s}u + {o2}u]), bitcast<f32>({buf}[event_idx * {s}u + {o3}u]))",
-                    buf = buf,
-                    s = stride,
-                    o = total_offset,
-                    o2 = total_offset + 1,
-                    o3 = total_offset + 2,
+                    "vec3<f32>(bitcast<f32>({}), bitcast<f32>({}), bitcast<f32>({}))",
+                    read_word(total_offset),
+                    read_word(total_offset + 1),
+                    read_word(total_offset + 2),
                 ),
-                CgTy::Bool => format!(
-                    "({}[event_idx * {}u + {}u] != 0u)",
-                    buf, stride, total_offset
-                ),
+                CgTy::Bool => format!("({} != 0u)", read_word(total_offset)),
                 CgTy::ViewKey { .. } => {
                     return Err(EmitError::EventFieldUnsupportedType {
                         kind: *event_kind,

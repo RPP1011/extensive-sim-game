@@ -206,6 +206,7 @@ pub fn emit_cg_program(
         view_target_locals: std::cell::RefCell::new(Vec::new()),
         pending_target_lets: std::cell::RefCell::new(Vec::new()),
         bound_target_exprs: std::cell::RefCell::new(std::collections::HashSet::new()),
+        event_ring_atomic_loads: std::cell::Cell::new(false),
     };
 
     for (stage_idx, stage) in schedule.stages.iter().enumerate() {
@@ -520,6 +521,13 @@ fn compose_wgsl_cfg_struct(spec: &KernelSpec) -> String {
         // set `slot_count == agent_cap`. Mirrors
         // build_view_decay_cfg_struct_decl.
         KernelKind::ViewDecay => "agent_cap: u32, tick: u32, slot_count: u32, _pad0: u32",
+        // PerEventEmit (PerEvent-dispatched physics rule with `Emit`
+        // body) mirrors ViewFold's `event_count + tick` layout: the
+        // body's `if event_idx >= cfg.event_count { return; }`
+        // guard needs the per-tick event count from the runtime, and
+        // the `Emit` writes still need `tick` for the event header
+        // word. Mirrors `build_per_event_emit_cfg_struct_decl`.
+        KernelKind::PerEventEmit => "event_count: u32, tick: u32, _pad0: u32, _pad1: u32",
         KernelKind::Generic => "agent_cap: u32, tick: u32, _pad0: u32, _pad1: u32",
     };
     format!("struct {ty} {{ {fields} }};\n", ty = cfg.wgsl_ty)

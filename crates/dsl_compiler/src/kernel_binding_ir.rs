@@ -32,6 +32,19 @@ pub enum KernelKind {
     /// thread per agent-cap slot using a regular
     /// `dispatch_workgroups(...)` call (not indirect).
     ViewDecay,
+    /// Spec was synthesised by a `PerEvent`-dispatched physics rule
+    /// whose body contains at least one `Emit` statement. Carries the
+    /// same generic binding pipeline as [`Generic`] but stamps a
+    /// `{ event_count, tick, _pad0, _pad1 }` cfg shape (mirroring the
+    /// ViewFold cfg) so the body can early-return past the actual
+    /// per-tick event count, and forces the EventRing-Read binding to
+    /// `array<atomic<u32>>` so the body's `atomicLoad` payload reads
+    /// type-check against the same buffer the kernel may also
+    /// `atomicStore` to via `Emit`. Body wrapping (`event_idx >=
+    /// cfg.event_count` guard + per-handler tag filter) is the
+    /// PerEventEmit analogue of the ViewFold body wrapping in
+    /// `build_view_fold_wgsl_body`.
+    PerEventEmit,
 }
 
 impl Default for KernelKind {

@@ -52,7 +52,7 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage, EVENT_RING_CAP_SLOTS, EVENT_STRIDE_U32};
+use engine::gpu::{EventRing, ViewStorage};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -174,45 +174,13 @@ impl VerbProbeState {
             false, // no top-K ids
         );
 
-        // Sentinel pre-stamp of the event ring's `+3` slot in every
-        // record. The compiled `physics_verb_chronicle_Pray` kernel
-        // has neither an `event_count` bound nor a kind-tag check
-        // (the cb24fd69 fix only added that to view-fold bodies, not
-        // physics-rule bodies). When we direct-dispatch the chronicle
-        // with `agent_count` threads rounded up to a 64-thread
-        // workgroup, the rounding threads (e.g. 32..63 at
-        // agent_count=32) read past the actual scoring tail. If those
-        // slots were zero-initialised, their `action_id` (= u32 at
-        // `event_idx*10 + 3`) would be `0u`, the chronicle's
-        // `if (local_1 == 0u)` predicate would match, and they'd
-        // emit spurious `PrayCompleted` events with `actor = 0` —
-        // skewing `faith[0]` on tick 0. Stamping `0xFFFFFFFFu` into
-        // every slot's `+3` word makes the predicate fail for any
-        // unused/stale slot. From tick 1 onward, those slots hold
-        // prior-tick PrayCompleted payloads where `+3` is
-        // `bitcast<u32>(faith_delta)` ≈ `0x3f800000` — also non-zero,
-        // so the fix continues to hold past tick 0. Total upload:
-        // 65536 × 4 bytes = 256 KB, one-time.
-        {
-            let cap = EVENT_RING_CAP_SLOTS as usize;
-            let stride = EVENT_STRIDE_U32 as usize;
-            let mut sentinel = vec![0u32; cap * stride];
-            let mut i = 0usize;
-            while i < cap {
-                sentinel[i * stride + 3] = 0xFFFF_FFFFu32;
-                i += 1;
-            }
-            gpu.queue.write_buffer(
-                event_ring.ring(),
-                0,
-                bytemuck::cast_slice(&sentinel),
-            );
-        }
-
         // Per-kernel cfg uniforms. Each kernel's struct shape is
         // `{ agent_cap: u32, tick: u32, _pad: [u32; 2] }` (compatible
         // across mask/scoring/seed/snapshot — they all share the same
-        // layout per the compiler emit).
+        // layout per the compiler emit). The chronicle (PerEventEmit)
+        // kernel uses a distinct `{ event_count, tick, _pad0, _pad1 }`
+        // layout so the body's `if event_idx >= cfg.event_count
+        // { return; }` early-return resolves; built separately below.
         let cfg_init = mask_verb_Pray::MaskVerbPrayCfg {
             agent_cap: agent_count,
             tick: 0,
@@ -227,7 +195,18 @@ impl VerbProbeState {
         };
         let mask_cfg_buf = mk_cfg("verb_probe_runtime::mask_cfg");
         let scoring_cfg_buf = mk_cfg("verb_probe_runtime::scoring_cfg");
-        let chronicle_cfg_buf = mk_cfg("verb_probe_runtime::chronicle_cfg");
+        let chronicle_cfg_init = physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayCfg {
+            event_count: 0,
+            tick: 0,
+            _pad0: 0,
+            _pad1: 0,
+        };
+        let chronicle_cfg_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("verb_probe_runtime::chronicle_cfg"),
+                contents: bytemuck::bytes_of(&chronicle_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
         let seed_cfg_buf = mk_cfg("verb_probe_runtime::seed_cfg");
         let snapshot_cfg_buf = mk_cfg("verb_probe_runtime::snapshot_cfg");
 
@@ -369,13 +348,18 @@ impl CompiledSim for VerbProbeState {
         // emit count: one ActionSelected per alive slot). The
         // workgroup-rounding (next multiple of 64) gives extra
         // threads that read past the actual scoring tail; the
-        // sentinel pre-stamp at construction guarantees those slots'
-        // `+3` (action_id) word is non-zero, so the chronicle's
-        // predicate fails and no spurious emissions land.
+        // compiler-emitted body now wraps in `if event_idx >=
+        // cfg.event_count { return; }` AND a per-handler
+        // `if event_ring[..tag..] == ActionSelected` filter, so
+        // the rounding threads early-return correctly even if
+        // garbage payload words exist past `event_count`. We set
+        // `event_count = agent_count` because the scoring kernel
+        // emits exactly one ActionSelected per alive slot.
         let chronicle_cfg = physics_verb_chronicle_Pray::PhysicsVerbChroniclePrayCfg {
-            agent_cap: self.agent_count,
+            event_count: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            _pad0: 0,
+            _pad1: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_cfg_buf,
