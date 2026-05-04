@@ -61,6 +61,14 @@ impl From<Vec3Padded> for Vec3 {
 /// observable assertion keys on.
 pub const COIN_WEIGHT_VALUE: f32 = 2.0;
 
+/// Caravan entity SoA: a single Group slot whose `size: f32` field
+/// the IdleDrift physics rule also multiplies the per-tick velocity
+/// drift by. Sized to one record so `groups.size(0)` lands on a
+/// populated slot. The chosen value (`CARAVAN_SIZE_VALUE`) combines
+/// with `COIN_WEIGHT_VALUE` in the bartering_app drift assertion
+/// (expected drift ≈ baseline × COIN_WEIGHT_VALUE × CARAVAN_SIZE_VALUE).
+pub const CARAVAN_SIZE_VALUE: f32 = 1.5;
+
 pub struct BarteringState {
     gpu: GpuContext,
     pos_buf: wgpu::Buffer,
@@ -80,6 +88,15 @@ pub struct BarteringState {
     /// (entity_name "Coin" + field_name "weight" → snake_case
     /// `coin_weight`).
     coin_weight_buf: wgpu::Buffer,
+    /// Per-Group SoA — `caravan_size: array<f32>`. Symmetric mirror
+    /// of `coin_weight_buf` for the Group entity-root surface. The
+    /// .sim file's IdleDrift rule reads `groups.size(0)`, so this
+    /// buffer carries one record (`CARAVAN_SIZE_VALUE`). The
+    /// compiler-generated `PhysicsIdleDriftBindings` carries a
+    /// `caravan_size` slot whose name comes from the program's
+    /// `entity_field_catalog` (entity_name "Caravan" + field_name
+    /// "size" → snake_case `caravan_size`).
+    caravan_size_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
     pos_staging: wgpu::Buffer,
 
@@ -171,6 +188,21 @@ impl BarteringState {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             },
         );
+        // Per-Group SoA — the WGSL `caravan_size: array<f32>` binding
+        // produced by lowering the `entity Caravan : Group { size: f32 }`
+        // declaration + the `groups.size(0)` access in the IdleDrift
+        // physics rule. Sized to a single Group slot. This buffer is
+        // the runtime-side proof that the Group READ path is wired
+        // symmetrically to the Item READ path (compiler symmetric
+        // wiring claim from commit 524ae43f).
+        let caravan_size_init: Vec<f32> = vec![CARAVAN_SIZE_VALUE];
+        let caravan_size_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("bartering_runtime::caravan_size"),
+                contents: bytemuck::cast_slice(&caravan_size_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let cfg = physics_IdleDrift::PhysicsIdleDriftCfg {
             agent_cap: agent_count,
             tick: 0,
@@ -217,6 +249,7 @@ impl BarteringState {
             alive_buf,
             engaged_with_buf,
             coin_weight_buf,
+            caravan_size_buf,
             cfg_buf,
             pos_staging,
             event_ring,
@@ -294,6 +327,7 @@ impl CompiledSim for BarteringState {
             agent_engaged_with: &self.engaged_with_buf,
             agent_vel: &self.vel_buf,
             coin_weight: &self.coin_weight_buf,
+            caravan_size: &self.caravan_size_buf,
             cfg: &self.cfg_buf,
         };
         dispatch::dispatch_physics_idledrift(

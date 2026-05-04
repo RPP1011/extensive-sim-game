@@ -6,19 +6,26 @@
 // leaving the Item + Group entity-root surfaces untested end-to-end.
 // This fixture closes that gap minimally: it declares one of each
 // root kind, packs an ItemId into a typed event payload, folds
-// a per-receiver trade counter, AND reads an Item field from the
-// physics rule body (`items.weight(0u)`) — the lowering + WGSL
-// emit path now allocates per-Item SoA storage and routes the
-// catalog-resolved binding (`coin_weight`) through to the kernel.
+// a per-receiver trade counter, AND reads BOTH an Item field AND a
+// Group field from the physics rule body (`items.weight(0u)` +
+// `groups.size(0u)`) — the lowering + WGSL emit path now allocates
+// per-Item AND per-Group SoA storage and routes both catalog-resolved
+// bindings (`coin_weight`, `caravan_size`) through to the kernel.
 //
 // What this fixture exercises end-to-end:
 //   1. `entity Coin : Item { weight: f32 }`     — Item root kind, SoA field
-//   2. `entity Caravan : Group { size: f32 }`   — Group root kind
+//   2. `entity Caravan : Group { size: f32 }`   — Group root kind, SoA field
 //   3. `event Trade { ..., item: ItemId }`      — ItemId in payload
-//   4. `items.weight(<idx>)` inside a physics rule — the new
+//   4. `items.weight(<idx>)` inside a physics rule — the
 //      `(NamespaceId::Items, _)` lowering arm produces a typed
 //      `DataHandle::ItemField` read that the WGSL body emits as
 //      `coin_weight[<idx>]` against an external bind.
+//   5. `groups.size(<idx>)` inside a physics rule — the symmetric
+//      `(NamespaceId::Groups, _)` lowering arm produces a typed
+//      `DataHandle::GroupField` read that the WGSL body emits as
+//      `caravan_size[<idx>]` against an external bind. Without this
+//      probe the Group SoA path is wired but never exercised at
+//      runtime.
 
 event Tick { }
 
@@ -72,13 +79,16 @@ config trade {
 // `items.weight(0u)` reads slot 0 of the per-fixture Coin SoA
 // buffer — the lowering routes this to a typed
 // `DataHandle::ItemField` read whose binding name resolves through
-// the program's `entity_field_catalog` to `coin_weight`. The
-// per-fixture runtime allocates the buffer; the multiplier
-// scales the per-tick velocity drift so the steady-state observable
-// is `sum(pos drift over T ticks) ∝ weight`.
+// the program's `entity_field_catalog` to `coin_weight`.
+// `groups.size(0u)` reads slot 0 of the per-fixture Caravan SoA
+// buffer — the symmetric lowering produces a `DataHandle::GroupField`
+// read that resolves to `caravan_size`. The per-fixture runtime
+// allocates both buffers; the combined multiplier scales the per-tick
+// velocity drift so the steady-state observable is
+// `sum(pos drift over T ticks) ∝ weight × size`.
 physics IdleDrift @phase(per_agent) {
   on Tick {} where (self.alive) {
-    let new_pos = self.pos + self.vel * config.trade.step_scale * items.weight(0);
+    let new_pos = self.pos + self.vel * config.trade.step_scale * items.weight(0) * groups.size(0);
     agents.set_pos(self, new_pos);
     emit Trade { giver: self, receiver: self.engaged_with, item: self.engaged_with }
   }

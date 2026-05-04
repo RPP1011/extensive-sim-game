@@ -290,6 +290,41 @@ fn bartering_resolves_three_distinct_entity_roots() {
     assert!(saw_group, "expected a Group-rooted entity in bartering.sim");
 }
 
+/// `bartering.sim`'s IdleDrift physics rule reads BOTH
+/// `items.weight(0)` (Item-field read) AND `groups.size(0)`
+/// (Group-field read). Confirm the emitted physics WGSL contains
+/// indexed accesses against BOTH the `coin_weight[` and
+/// `caravan_size[` external bindings — the runtime-side proof that
+/// the Group-field READ path is wired symmetrically to the Item-field
+/// READ path through the entity-field catalog. Without this
+/// assertion a regression that silently collapsed the Group-field
+/// arm to a typed default (or routed it to the Item catalog) would
+/// pass other tests but break the bartering_app drift observable.
+#[test]
+fn bartering_emits_item_and_group_field_reads() {
+    let path = workspace_path("assets/sim/bartering.sim");
+    let art = compile_sim(&path).expect("bartering compiles");
+    let body = kernel_body_containing(&art, "IdleDrift")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no physics kernel found in artifacts; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            );
+        });
+    assert!(
+        body.contains("coin_weight["),
+        "expected indexed access against `coin_weight[…]` (Item-field read) \
+         in physics body; got:\n{body}",
+    );
+    assert!(
+        body.contains("caravan_size["),
+        "expected indexed access against `caravan_size[…]` (Group-field read) \
+         in physics body — confirms the Group-field READ path is symmetric \
+         with the Item-field READ path via the entity-field catalog; got:\n{body}",
+    );
+}
+
 /// `bartering.sim`'s `Trade` event payload contains
 /// `item: ItemId`. Confirm the IdleDrift physics body actually
 /// emits a record into the event ring whose payload reflects the
@@ -479,5 +514,110 @@ fn auction_market_compiles() {
         "[auction_market] {} kernels: {:?}",
         art.kernel_index.len(),
         art.kernel_index,
+    );
+}
+
+/// `event_kind_filter_probe.sim` is the focused regression-guard
+/// fixture for the per-handler event-kind filtering gap closed
+/// 2026-05-03 (see `cg/emit/kernel.rs::build_view_fold_wgsl_body`).
+///
+/// Pre-fix: the fold body iterated EVERY event in the unified ring
+/// without checking the per-event kind tag at offset 0, so any view
+/// declared `on KindA { ... }` also processed KindB events (and
+/// vice versa). In `ecosystem_cascade` the bug was masked because
+/// the per-tier disjointness (Plants don't emit; Herbivores emit
+/// only PlantEaten; Carnivores emit only HerbivoreEaten) made the
+/// per-slot ranges non-overlapping. This fixture overlaps the
+/// targets: every Probe agent emits one KindA + one KindB targeting
+/// `self`, so each view's slot range is the SAME as the other's.
+/// Without the tag-check guard, both `kind_a_count` and
+/// `kind_b_count` would accumulate from BOTH events (per-slot value
+/// = 2*ticks); with the guard, each view sees only its declared
+/// kind (per-slot value = ticks).
+///
+/// The compile-time invariant pinned here is structural: each fold
+/// body MUST contain an `if (event_ring[event_idx * <stride>u + 0u]
+/// == <kind_id>u)` line wrapping the storage RMW. The runtime
+/// observable check (per-slot count = ticks not 2*ticks) lands in
+/// a follow-up runtime test once the fixture has a runtime crate.
+#[test]
+fn event_kind_filter_probe_compiles_with_tag_guard() {
+    let path = workspace_path("assets/sim/event_kind_filter_probe.sim");
+    let art = compile_sim(&path).unwrap_or_else(|e| {
+        panic!("event_kind_filter_probe.sim failed at: {e}");
+    });
+    assert!(!art.kernel_index.is_empty(), "no kernels emitted");
+
+    // Two fold kernels, one per view. The runtime kernel-name
+    // pattern is `fold_<view>_<event>` (see semantic_kernel_name in
+    // cg/emit/kernel.rs); pull each by view-name substring.
+    let fold_a = kernel_body_containing(&art, "kind_a_count").unwrap_or_else(|| {
+        panic!(
+            "no kind_a_count fold kernel; available: {:?}",
+            art.wgsl_files.keys().collect::<Vec<_>>()
+        );
+    });
+    let fold_b = kernel_body_containing(&art, "kind_b_count").unwrap_or_else(|| {
+        panic!(
+            "no kind_b_count fold kernel; available: {:?}",
+            art.wgsl_files.keys().collect::<Vec<_>>()
+        );
+    });
+
+    // Each fold body must guard its handler block with a tag check:
+    // `if (event_ring[event_idx * 10u + 0u] == <kind>u)`. The exact
+    // kind id is allocator-determined; just confirm the structural
+    // shape is present.
+    let guard_pattern = "if (event_ring[event_idx * 10u + 0u] ==";
+    assert!(
+        fold_a.contains(guard_pattern),
+        "kind_a_count fold body must contain per-handler tag check; got:\n{fold_a}",
+    );
+    assert!(
+        fold_b.contains(guard_pattern),
+        "kind_b_count fold body must contain per-handler tag check; got:\n{fold_b}",
+    );
+
+    // The two folds must guard on DIFFERENT kind ids — otherwise
+    // both would accumulate from the same kind only and the probe
+    // wouldn't distinguish KindA vs KindB. Pull the kind id from
+    // each guard line.
+    let extract_kind = |body: &str| -> Option<String> {
+        let pat_idx = body.find(guard_pattern)?;
+        let after = &body[pat_idx + guard_pattern.len()..];
+        let close = after.find(')')?;
+        Some(after[..close].trim().trim_end_matches('u').trim().to_string())
+    };
+    let kind_a = extract_kind(fold_a).expect("guard line in kind_a_count body");
+    let kind_b = extract_kind(fold_b).expect("guard line in kind_b_count body");
+    assert_ne!(
+        kind_a, kind_b,
+        "expected DIFFERENT kind ids for KindA vs KindB folds; got both = {kind_a}",
+    );
+
+    // Sanity: the producer (EmitBoth) writes BOTH kind tags into
+    // the same ring, so the per-fold filter is the only thing
+    // separating which view sees which event. Confirm the producer
+    // body has two `atomicStore(&event_ring[slot * 10u + 0u], <id>u)`
+    // tag stores corresponding to KindA vs KindB.
+    let producer = kernel_body_containing(&art, "EmitBoth")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no EmitBoth physics kernel; available: {:?}",
+                art.wgsl_files.keys().collect::<Vec<_>>()
+            );
+        });
+    let tag_stores = producer
+        .matches("atomicStore(&event_ring[slot * 10u + 0u]")
+        .count();
+    assert_eq!(
+        tag_stores, 2,
+        "expected 2 tag stores in EmitBoth producer (one per emit); got {tag_stores} in:\n{producer}",
+    );
+
+    eprintln!(
+        "[event_kind_filter_probe] fold_a guards on kind {kind_a}, fold_b on kind {kind_b}; {} kernels",
+        art.kernel_index.len(),
     );
 }

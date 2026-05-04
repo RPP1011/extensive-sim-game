@@ -2,9 +2,10 @@
 //! integrator through the same generic harness shape as the other
 //! fixture binaries. The fixture is the entity-root coverage probe
 //! (declares `entity Coin : Item` + `entity Caravan : Group` plus
-//! a `Trade` event with an `item: ItemId` payload field), so the
-//! interesting part is whether the run reaches steady-state at all
-//! — the per-tick observable is the per-receiver Trade counter.
+//! a `Trade` event with an `item: ItemId` payload field), and now
+//! the Item AND Group READ probe — the IdleDrift physics rule reads
+//! BOTH `items.weight(0)` AND `groups.size(0)` so the centroid drift
+//! observable below pins both SoA buffer reads end-to-end.
 //!
 //! Engaged-with topology: every slot points at slot 0, so slot 0
 //! receives every Trade and all other slots receive none. After
@@ -21,7 +22,7 @@
 //! gap — see ses_app for context — but at 1 emit/agent/tick the
 //! event-count dispatch sizing handles it cleanly.)
 
-use bartering_runtime::{BarteringState, COIN_WEIGHT_VALUE};
+use bartering_runtime::{BarteringState, CARAVAN_SIZE_VALUE, COIN_WEIGHT_VALUE};
 use engine::CompiledSim;
 use glam::Vec3;
 
@@ -34,8 +35,8 @@ fn main() {
     let mut sim = BarteringState::new(SEED, AGENT_COUNT);
     let initial_centroid = centroid(sim.positions());
     println!(
-        "bartering_app: starting run — seed=0x{:016X} agents={} ticks={} coin_weight={:.2}",
-        SEED, AGENT_COUNT, TICKS, COIN_WEIGHT_VALUE,
+        "bartering_app: starting run — seed=0x{:016X} agents={} ticks={} coin_weight={:.2} caravan_size={:.2}",
+        SEED, AGENT_COUNT, TICKS, COIN_WEIGHT_VALUE, CARAVAN_SIZE_VALUE,
     );
     log_sample(&mut sim);
     for _ in 0..TICKS {
@@ -84,54 +85,62 @@ fn main() {
         "expected total ≈ {expected_total:.0}, got {total:.2}"
     );
 
-    // Item-field-read assertion: the IdleDrift physics rule body
-    // multiplies its per-tick velocity drift by `items.weight(0)`,
-    // which the per-fixture runtime backs with a single-record
-    // `coin_weight: array<f32>` SoA buffer (value
-    // `COIN_WEIGHT_VALUE`). With the multiplier in place every
-    // agent's centroid drift is `weight × baseline_drift`; with the
-    // multiplier silently dropped (the pre-fix gap) the drift would
-    // collapse to the baseline. We compare the centroid delta against
-    // the baseline-drift × `COIN_WEIGHT_VALUE` band — values in that
-    // band confirm the Item-field read landed on the right buffer
-    // and propagated the right value through the WGSL body.
+    // Item + Group field-read assertion: the IdleDrift physics rule
+    // body multiplies its per-tick velocity drift by BOTH
+    // `items.weight(0)` AND `groups.size(0)`, which the per-fixture
+    // runtime backs with single-record `coin_weight: array<f32>` and
+    // `caravan_size: array<f32>` SoA buffers (values
+    // `COIN_WEIGHT_VALUE` and `CARAVAN_SIZE_VALUE`). With both
+    // multipliers in place every agent's centroid drift is
+    // `weight × size × baseline_drift`; with either silently dropped
+    // the drift would collapse by the corresponding factor. We compare
+    // the centroid delta against the `baseline × COIN_WEIGHT_VALUE ×
+    // CARAVAN_SIZE_VALUE` band — values in that band confirm BOTH the
+    // Item-field read AND the Group-field read landed on the right
+    // buffers and propagated the right values through the WGSL body.
     //
     // Baseline drift per axis (collected with the runtime pinned to
-    // weight=1.0 for one calibration run):
+    // both multipliers = 1.0 for one calibration run):
     //   centroid drift over 100 ticks ≈ (-0.022, -0.013, +0.049)
-    // With weight=2.0 we expect:
-    //   ≈ (-0.044, -0.025, +0.098).
-    // We assert the magnitude of the drift exceeds the
-    // weight-1 baseline by a margin (drop the multiplier and the
-    // total-drift magnitude collapses by roughly 2× — a margin of
-    // > weight*0.6 vs weight*1*1.0 catches the regression
-    // unambiguously).
+    //   magnitude ≈ 0.054
+    // With weight=2.0 × size=1.5 we expect:
+    //   magnitude ≈ 0.054 × 2.0 × 1.5 ≈ 0.162.
+    // We assert the magnitude of the drift sits inside a tight band
+    // around the combined expected value. Silently dropping either
+    // multiplier collapses the drift to one of:
+    //   - drop both: ~0.054 (3× off)
+    //   - drop weight, keep size: ~0.081 (2× off)
+    //   - drop size, keep weight: ~0.108 (1.5× off)
+    // The band rejects all three regression scenarios.
     let drift = final_centroid - initial_centroid;
     let drift_mag = drift.length();
-    // Baseline (weight=1) drift magnitude over the full run, observed
-    // empirically with the `items.weight(0)` multiplier set to 1.0.
-    // The runtime today uses `COIN_WEIGHT_VALUE = 2.0`, so the expected
-    // observable is `baseline × 2.0 ≈ 0.108`. The bounds below
-    // intentionally REJECT the baseline-magnitude band — if a future
-    // regression silently drops the Item-field read (so the WGSL
-    // emits `... * 1.0` or skips the term entirely), drift collapses
-    // to the baseline and the assertion fires.
+    // Baseline (weight=size=1) drift magnitude over the full run,
+    // observed empirically with both multipliers pinned to 1.0.
     let baseline_drift_mag = 0.054_f32;
-    let expected_drift_mag = baseline_drift_mag * COIN_WEIGHT_VALUE;
-    // Tight band around the expected magnitude; explicitly tighter
-    // than `baseline × (weight - 1.0)` so accidentally falling back
-    // to weight=1.0 fails the assertion.
+    let expected_drift_mag = baseline_drift_mag * COIN_WEIGHT_VALUE * CARAVAN_SIZE_VALUE;
+    // Tight band around the expected magnitude. The narrowest
+    // regression to catch is "drop the Group-field read" which
+    // collapses drift to `baseline × COIN_WEIGHT_VALUE = 0.108`, a
+    // distance of `baseline × COIN_WEIGHT_VALUE × (CARAVAN_SIZE_VALUE
+    // - 1.0) = 0.054` from the expected value. A band of
+    // `baseline × 0.3 = 0.0162` is well inside that gap so a
+    // silent-drop regression on either field fails the assertion.
     let band = baseline_drift_mag * 0.3;
     let lower_bound = expected_drift_mag - band;
     let upper_bound = expected_drift_mag + band;
     println!(
-        "bartering_app: centroid drift     — magnitude={:.4} (expected ≈ {:.4} from coin_weight × baseline)",
+        "bartering_app: centroid drift     — magnitude={:.4} (expected ≈ {:.4} from coin_weight × caravan_size × baseline)",
         drift_mag, expected_drift_mag,
     );
     assert!(
         drift_mag > lower_bound && drift_mag < upper_bound,
-        "expected centroid drift magnitude in ({lower_bound:.4}, {upper_bound:.4}) (coin_weight={COIN_WEIGHT_VALUE}); got {drift_mag:.4}. \
-         A drift near baseline ({baseline_drift_mag:.4}) means `items.weight(0)` is silently dropping to 1.0 — the Item-field read isn't reaching the WGSL body."
+        "expected centroid drift magnitude in ({lower_bound:.4}, {upper_bound:.4}) \
+         (coin_weight={COIN_WEIGHT_VALUE}, caravan_size={CARAVAN_SIZE_VALUE}); got {drift_mag:.4}. \
+         A drift near {baseline_drift_mag:.4} means BOTH reads dropped; near \
+         {:.4} means `groups.size(0)` dropped (Group-field read regression); near \
+         {:.4} means `items.weight(0)` dropped (Item-field read regression).",
+        baseline_drift_mag * COIN_WEIGHT_VALUE,
+        baseline_drift_mag * CARAVAN_SIZE_VALUE,
     );
 
     println!("bartering_app: OK — all assertions passed");
