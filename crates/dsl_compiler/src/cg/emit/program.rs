@@ -1037,12 +1037,13 @@ fn compose_view_fold_record_method(spec: &KernelSpec) -> String {
     ));
     out.push_str("        pass.set_pipeline(&self.pipeline);\n");
     out.push_str("        pass.set_bind_group(0, &bg, &[]);\n");
-    out.push_str("        // Placeholder dispatch — real indirect-args wiring lands in Task 5.7.\n");
-    out.push_str("        // Today's direct dispatch over `agent_cap` matches the legacy stub\n");
-    out.push_str("        // form so the kernel records cleanly without the indirect-buffer\n");
-    out.push_str("        // plumbing the cascade-driven shape needs.\n");
-    out.push_str("        let _ = agent_cap;\n");
-    out.push_str("        pass.dispatch_workgroups(1, 1, 1);\n");
+    out.push_str("        // Direct dispatch over `agent_cap` (the call-site parameter holds\n");
+    out.push_str("        // event_count for fold kernels — see swarm_storm_runtime). One\n");
+    out.push_str("        // thread per event_idx; the kernel's `if (event_idx >= cfg.event_count)\n");
+    out.push_str("        // { return; }` early-return guards over-dispatch. Future indirect-\n");
+    out.push_str("        // args wiring via seed_indirect_0 would replace this with\n");
+    out.push_str("        // dispatch_workgroups_indirect against the args buffer.\n");
+    out.push_str("        pass.dispatch_workgroups((agent_cap + 63u32) / 64u32, 1, 1);\n");
     out.push_str("    }\n");
     out
 }
