@@ -155,6 +155,12 @@ quest_arc_real_runtime = { path = "../quest_arc_real_runtime" }
 # Midday Trade → Evening Eat → Night Rest) gated by `world.tick % 100`
 # arithmetic, plus periodic energy drain and starvation.
 village_day_cycle_runtime = { path = "../village_day_cycle_runtime" }
+# Megaswarm 1000 — TENTH real fixture and the second SCALE-UP for
+# pair-field scoring (1000 agents → 1M mask cells per tick, 5x the
+# per-tick workload of mass_battle_100v100). 500 Red + 500 Blue
+# free-for-all with ONE verb (Strike). Performance probe — answers
+# "does pair-field scoring scale to 1000² without spatial narrowing?"
+megaswarm_1000_runtime = { path = "../megaswarm_1000_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -271,3 +277,7 @@ path = "src/quest_arc_real_app.rs"
 [[bin]]
 name = "village_day_cycle_app"
 path = "src/village_day_cycle_app.rs"
+
+[[bin]]
+name = "megaswarm_1000_app"
+path = "src/megaswarm_1000_app.rs"
