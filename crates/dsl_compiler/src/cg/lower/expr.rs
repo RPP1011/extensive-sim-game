@@ -71,6 +71,15 @@ pub struct LoweringCtx<'a> {
     /// kernel-emit composer reads it back. Empty for tests that don't
     /// drive view emission.
     pub view_storage_hints: HashMap<ViewId, crate::cg::program::CgStorageHint>,
+    /// Per-view fold-body operator — `view_id → ViewFoldOp` (Add / Or).
+    /// Recorded by the view-body lowering at the same point it accepts
+    /// the `+=` / `|=` operator gate. Snapshotted onto
+    /// [`crate::cg::program::ViewSignature::fold_op`] alongside the
+    /// storage hint; emit branches on `(fold_op, result_ty)` to pick
+    /// `atomicAdd` vs `atomicOr` vs CAS+add. Without this, `+= 1u` on
+    /// a u32 view silently routes through `atomicOr` (Gap C from
+    /// `docs/superpowers/notes/2026-05-04-quest_probe.md`).
+    pub view_fold_ops: HashMap<ViewId, crate::cg::program::ViewFoldOp>,
     /// Sum-type variant-name → typed [`VariantId`] resolver, keyed on
     /// the source-level variant identifier (`"Damage"`, `"Heal"`, …).
     /// Used by physics-pass `Match` lowering to resolve arm patterns
@@ -261,6 +270,7 @@ impl<'a> LoweringCtx<'a> {
             view_ids: HashMap::new(),
             view_signatures: HashMap::new(),
             view_storage_hints: HashMap::new(),
+            view_fold_ops: HashMap::new(),
             variant_ids: HashMap::new(),
             event_kind_ids: HashMap::new(),
             event_field_indices: HashMap::new(),
@@ -417,6 +427,21 @@ impl<'a> LoweringCtx<'a> {
         hint: crate::cg::program::CgStorageHint,
     ) -> Option<crate::cg::program::CgStorageHint> {
         self.view_storage_hints.insert(view_id, hint)
+    }
+
+    /// Register the fold-body operator (`+=` / `|=`) for `view_id`.
+    /// Recorded by the view-body lowerer at the same point it
+    /// accepts the operator gate. Snapshotted by the driver onto
+    /// [`crate::cg::program::ViewSignature::fold_op`]; emit branches
+    /// on `(fold_op, result_ty)` to pick the right atomic primitive.
+    /// Returns the prior entry if any (caller-side defect; the
+    /// driver registers each view's fold body exactly once today).
+    pub fn register_view_fold_op(
+        &mut self,
+        view_id: ViewId,
+        op: crate::cg::program::ViewFoldOp,
+    ) -> Option<crate::cg::program::ViewFoldOp> {
+        self.view_fold_ops.insert(view_id, op)
     }
 
     /// Register a `(NamespaceId, "<block>.<field>")` → typed

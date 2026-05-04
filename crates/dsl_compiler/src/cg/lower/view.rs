@@ -561,13 +561,25 @@ fn lower_stmt(
             // The remaining canonical operators (`=`, `-=`, `*=`, `/=`)
             // would silently miscompile to `+=` semantics and surface
             // as typed deferrals.
-            if op_label != "+=" && op_label != "|=" {
-                return Err(LoweringError::UnsupportedFoldOperator {
-                    view: view_id,
-                    op_label,
-                    span: *span,
-                });
-            }
+            let fold_op = match op_label {
+                "+=" => crate::cg::program::ViewFoldOp::Add,
+                "|=" => crate::cg::program::ViewFoldOp::Or,
+                _ => {
+                    return Err(LoweringError::UnsupportedFoldOperator {
+                        view: view_id,
+                        op_label,
+                        span: *span,
+                    });
+                }
+            };
+            // Record the operator on the lowering context so the
+            // driver can snapshot it onto `ViewSignature::fold_op`.
+            // Emit then branches on `(fold_op, result_ty)` to pick
+            // `atomicAdd` (Add+u32) vs CAS+add (Add+f32) vs
+            // `atomicOr` (Or+u32). Without this, `+= 1u` on a u32
+            // view silently routed through `atomicOr` (Gap C —
+            // `docs/superpowers/notes/2026-05-04-quest_probe.md`).
+            ctx.register_view_fold_op(view_id, fold_op);
 
             // Lower the value expression. `lower_expr` does its own
             // type-checking and pushes the sub-tree into the builder.

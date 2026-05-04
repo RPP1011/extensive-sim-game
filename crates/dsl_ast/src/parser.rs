@@ -375,10 +375,16 @@ fn entity_decl(c: &mut Cursor, annotations: Vec<Annotation>, start: usize) -> PR
         "Agent" => EntityRoot::Agent,
         "Item" => EntityRoot::Item,
         "Group" => EntityRoot::Group,
+        // Spec `docs/spec/dsl.md:653-663` lists `Quest` as a typed
+        // entity root alongside the three above. Accepted at parse
+        // time as a declare-only root (no per-Quest SoA today; the
+        // catalog populator at `cg/lower/driver.rs::populate_entity_
+        // field_catalog` skips Quest the same way it skips Agent).
+        "Quest" => EntityRoot::Quest,
         other => {
             return Err(ParseErr::at(
                 here_back(c, other.len()),
-                format!("expected `Agent`, `Item`, or `Group`; got `{other}`"),
+                format!("expected `Agent`, `Item`, `Group`, or `Quest`; got `{other}`"),
             )
             .with_context("parsing entity root kind"))
         }

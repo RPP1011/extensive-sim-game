@@ -283,6 +283,10 @@ fn bartering_resolves_three_distinct_entity_roots() {
             dsl_compiler::ast::EntityRoot::Agent => saw_agent = true,
             dsl_compiler::ast::EntityRoot::Item => saw_item = true,
             dsl_compiler::ast::EntityRoot::Group => saw_group = true,
+            // Bartering doesn't declare any Quest-rooted entities;
+            // Quest is the post-2026-05-04 declare-only root used by
+            // quest_probe.sim. No-op here.
+            dsl_compiler::ast::EntityRoot::Quest => {}
         }
     }
     assert!(saw_agent, "expected an Agent-rooted entity in bartering.sim");
@@ -742,6 +746,9 @@ fn trade_market_probe_combines_landed_surfaces() {
             dsl_compiler::ast::EntityRoot::Agent => agents += 1,
             dsl_compiler::ast::EntityRoot::Item => items += 1,
             dsl_compiler::ast::EntityRoot::Group => groups += 1,
+            // trade_market_probe doesn't declare Quest entities; the
+            // post-2026-05-04 Quest root is exercised in quest_probe.
+            dsl_compiler::ast::EntityRoot::Quest => {}
         }
     }
     assert_eq!(agents, 2, "expected 2 Agent entities (Trader + Hub)");
@@ -2384,16 +2391,62 @@ fn quest_probe_compile_gate() {
             .collect::<Vec<_>>(),
     );
 
-    // The `progress` fold body must use `atomicOr` — the u32-view
-    // emit branch. Locks the LIVE GAP: `+= 1u` on a u32 view
-    // routes through the same emit branch as `|=`, so the
-    // operator-vs-result-type mismatch is silently elided.
+    // The `progress` fold body must use `atomicAdd` — post-2026-05-04
+    // (Gap C closure) the WGSL emitter branches on (fold_op,
+    // result_ty), so `+= 1u` on a u32 view picks the
+    // commutative-+-associative `atomicAdd` primitive. Pre-fix this
+    // assertion locked the regression: the emitter ignored the
+    // operator and routed every u32 view through `atomicOr`.
     let progress_body = kernel_body_containing(&art, "progress")
         .unwrap_or_else(|| panic!("no fold_progress kernel emitted: {:?}", art.kernel_index));
     assert!(
-        progress_body.contains("atomicOr"),
-        "fold_progress must use atomicOr (u32 view branch — `+= 1u` \
-         silently routes here). Got body:\n{progress_body}",
+        progress_body.contains("atomicAdd"),
+        "fold_progress must use atomicAdd post-Gap-C-fix (`+= 1u` on a \
+         u32 view — operator-aware emit branch). Got body:\n{progress_body}",
+    );
+    assert!(
+        !progress_body.contains("atomicOr"),
+        "fold_progress must NOT use atomicOr post-Gap-C-fix (`+= 1u` is \
+         add-shaped, not OR-shaped). Got body:\n{progress_body}",
+    );
+
+    // Quest-root entity declaration (Gap A closure). `MainQuest :
+    // Quest { ... }` must reach the resolved program as a Quest-
+    // rooted entity. The catalog populator skips Quest the same way
+    // it skips Agent (no per-Quest SoA today), so we assert on
+    // `comp.entities` directly via re-resolving from the source.
+    let comp_for_quest = dsl_ast::resolve::resolve(
+        dsl_compiler::parse(&src).expect("re-parse quest_probe.sim"),
+    )
+    .expect("re-resolve quest_probe.sim");
+    let saw_quest_entity = comp_for_quest
+        .entities
+        .iter()
+        .any(|e| matches!(e.root, dsl_compiler::ast::EntityRoot::Quest));
+    assert!(
+        saw_quest_entity,
+        "expected at least one Quest-rooted entity (Gap A closure — \
+         `entity MainQuest : Quest {{ ... }}`); got entities: {:?}",
+        comp_for_quest
+            .entities
+            .iter()
+            .map(|e| (&e.name, e.root))
+            .collect::<Vec<_>>(),
+    );
+
+    // `quests.is_active` namespace stub (Gap B closure). The B1
+    // method registration must surface as a `quests_is_active` WGSL
+    // helper somewhere in the emitted shaders (the physics body's
+    // `let active = quests.is_active(0u);` lowers to a call to it).
+    let saw_quests_helper = art
+        .wgsl_files
+        .values()
+        .any(|w| w.contains("quests_is_active"));
+    assert!(
+        saw_quests_helper,
+        "expected `quests_is_active` WGSL helper post-Gap-B-fix in any \
+         emitted shader; got kernels: {:?}",
+        art.kernel_index,
     );
 
     // All emitted WGSL must be naga-clean (the gap is a SEMANTIC

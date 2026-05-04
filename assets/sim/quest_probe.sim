@@ -75,11 +75,18 @@ event ProgressTick {
   quest: u32,         // quest id — synthetic, not bound to any entity
 }
 
-// COMMENTED OUT — see (1) above. This line would parse-fail today
-// with: "expected `Agent`, `Item`, or `Group`; got `Quest`" from
-// `crates/dsl_ast/src/parser.rs:381`. Uncomment to reproduce the
-// gap; the rest of the fixture compiles unchanged.
-// entity Mission : Quest { reward: f32 }
+// Quest-rooted entity declaration. Pre-2026-05-04 this line was
+// parse-rejected (`crates/dsl_ast/src/parser.rs:374-385` only
+// accepted `Agent`, `Item`, `Group`). Post-fix (Gap A from
+// `docs/superpowers/notes/2026-05-04-quest_probe.md`): `Quest` is
+// accepted as a declare-only root — no per-Quest SoA storage today
+// (the catalog populator skips Quest the same way it skips Agent),
+// no `quests.<field>(idx)` accessor on the namespace registry. The
+// declaration's purpose is to surface that the parser + IR stack
+// tolerate `:Quest` without rejecting the whole program. Distinct
+// name from the live `Mission : Item` analog below to avoid
+// duplicate-entity conflict at resolve time.
+entity MainQuest : Quest { reward: f32 }
 
 // Live Adventurer entity — Agent root, standard SoA shape that
 // every other probe uses. Holds `pos` + `vel` so the per-fixture
@@ -111,18 +118,20 @@ config quest {
 // ProgressTick per tick with `quest = 0u`. The view fold-body
 // (below) consumes ProgressTick and accumulates per-agent counts.
 //
-// COMMENTED OUT — would surface `LoweringError::UnsupportedNamespace
-// Call` because the CG namespace registry doesn't register a
-// `quests.*` method (`crates/dsl_compiler/src/cg/lower/driver.rs:672:
-// populate_namespace_registry`). Discovery gap documented in
-// `docs/superpowers/notes/2026-05-04-quest_probe.md`.
-//   let active = quests.is_active(0u);
-//   if (active) {
-//     emit ProgressTick { agent: self, quest: 0 }
-//   }
+// `quests.is_active(0u)` is the live B1 stub (Gap B closure from
+// `docs/superpowers/notes/2026-05-04-quest_probe.md`); it returns
+// `true` unconditionally so the `if (active)` gate fires every
+// tick. Pre-fix this would surface `LoweringError::UnsupportedName
+// spaceCall` — the resolver tagged `NamespaceId::Quests` but the
+// CG namespace registry registered ZERO methods. Post-fix the
+// `populate_namespace_registry` driver registers `is_active` as a
+// `(u32) -> bool` stub mirroring the auctions B1 pattern.
 physics ProgressAndComplete @phase(per_agent) {
   on Tick {} where (self.alive) {
-    emit ProgressTick { agent: self, quest: 0 }
+    let active = quests.is_active(0);
+    if (active) {
+      emit ProgressTick { agent: self, quest: 0 }
+    }
   }
 }
 

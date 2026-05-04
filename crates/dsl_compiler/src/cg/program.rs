@@ -386,6 +386,34 @@ pub struct ViewSignature {
     /// equivalent to "single-key dense_per_agent" for emit purposes.
     #[serde(default)]
     pub storage_hint: Option<CgStorageHint>,
+    /// Self-update operator on the view's fold body — `+=` (numeric
+    /// accumulator) or `|=` (bit-OR accumulator). Drives the WGSL
+    /// emit branch in `cg/emit/wgsl_body.rs`:
+    ///   - `Add` + u32 result → `atomicAdd(&storage[idx], rhs)`
+    ///     (commutative + associative, P11-trivial).
+    ///   - `Add` + f32 result → CAS+add loop (P11 via single-thread
+    ///     retry under contention).
+    ///   - `Or`  + u32 result → `atomicOr(&storage[idx], rhs)`
+    ///     (commutative + associative, P11-trivial).
+    /// `None` means the lowering didn't register the operator (older
+    /// fixtures, structural-strategy programs that build views
+    /// directly via the builder); emit falls back to the result-type
+    /// branch and treats u32 as `Or`-shaped (the pre-fix behavior).
+    /// Closes Gap C from `docs/superpowers/notes/2026-05-04-quest_
+    /// probe.md`.
+    #[serde(default)]
+    pub fold_op: Option<ViewFoldOp>,
+}
+
+/// CG-side fold operator — the `self <op> rhs` op recognized by the
+/// view-body lowerer. Drives the WGSL emit branch (atomicAdd vs
+/// atomicOr vs CAS+add).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewFoldOp {
+    /// `self += rhs` — numeric add accumulator.
+    Add,
+    /// `self |= rhs` — bit-OR accumulator (u32 only).
+    Or,
 }
 
 /// CG-side storage-hint enum mirroring the discriminator subset of

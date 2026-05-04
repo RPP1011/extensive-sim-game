@@ -44,6 +44,7 @@ fn schema_hash_input(entities: &[EntityIR]) -> Vec<SchemaHashRow> {
             ast::EntityRoot::Agent => "Agent",
             ast::EntityRoot::Item => "Item",
             ast::EntityRoot::Group => "Group",
+            ast::EntityRoot::Quest => "Quest",
         };
         rows.push(SchemaHashRow {
             entity: e.name.clone(),

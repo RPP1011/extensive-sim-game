@@ -148,6 +148,16 @@ pub enum EntityRoot {
     Agent,
     Item,
     Group,
+    /// Quest-rooted entity. Spec table at `docs/spec/dsl.md:653-663`
+    /// lists `Quest` alongside `Agent`/`Item`/`Group`. Today the
+    /// declaration parses + lowers as a declare-only entity (no
+    /// per-Quest SoA storage, no `quests.field(idx)` accessor) — the
+    /// `populate_entity_field_catalog` driver skips Quest entries the
+    /// same way it skips Agent ones. Closes Gap A from
+    /// `docs/superpowers/notes/2026-05-04-quest_probe.md`. Future
+    /// extension: add `EntityFieldCatalog::quests` when a fixture
+    /// surfaces a `quests.<field>(idx)` call site.
+    Quest,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

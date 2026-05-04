@@ -1323,16 +1323,56 @@ fn lower_cg_stmt_body_to_wgsl(
                     //     well-formed pass would have rejected the
                     //     fold body before reaching emit if the
                     //     types didn't line up.
-                    let view_result_ty = ctx
-                        .prog
-                        .view_signatures
-                        .get(&view.0)
-                        .map(|sig| sig.result);
-                    if matches!(view_result_ty, Some(crate::cg::expr::CgTy::U32)) {
+                    let sig = ctx.prog.view_signatures.get(&view.0);
+                    let view_result_ty = sig.map(|s| s.result);
+                    let fold_op = sig.and_then(|s| s.fold_op);
+                    // Branch on (fold_op, result_ty). Pre-fix
+                    // (Gap C — `docs/superpowers/notes/2026-05-04-
+                    // quest_probe.md`) the emitter branched on
+                    // result_ty alone, so `+= 1u` on a u32 view
+                    // silently routed through `atomicOr` (idempotent
+                    // — every emit left the slot at `1u`). The
+                    // operator is now snapshotted onto
+                    // `ViewSignature::fold_op` at lower time so this
+                    // branch can pick the right primitive:
+                    //
+                    //   - `Or`  + u32 → atomicOr (commutative + assoc).
+                    //   - `Add` + u32 → atomicAdd (commutative + assoc).
+                    //   - `Add` + f32 → CAS+add loop (P11 via retry).
+                    //   - `None` (structural-strategy programs that
+                    //     bypass the view-body lowerer) falls back to
+                    //     the legacy result-type branch — u32 routes
+                    //     through atomicOr (pre-fix shape). Today
+                    //     this only matters for the test builder
+                    //     paths that synthesize Assigns directly.
+                    let use_atomic_or = matches!(
+                        view_result_ty,
+                        Some(crate::cg::expr::CgTy::U32)
+                    ) && match fold_op {
+                        Some(crate::cg::program::ViewFoldOp::Or) => true,
+                        Some(crate::cg::program::ViewFoldOp::Add) => false,
+                        None => true,
+                    };
+                    let use_atomic_add = matches!(
+                        view_result_ty,
+                        Some(crate::cg::expr::CgTy::U32)
+                    ) && matches!(
+                        fold_op,
+                        Some(crate::cg::program::ViewFoldOp::Add)
+                    );
+                    if use_atomic_or {
                         return Ok(format!(
                             "{{\n\
                              \x20   let _idx = {idx_expr};\n\
                              \x20   atomicOr(&{storage}[_idx], ({rhs}));\n\
+                             }}"
+                        ));
+                    }
+                    if use_atomic_add {
+                        return Ok(format!(
+                            "{{\n\
+                             \x20   let _idx = {idx_expr};\n\
+                             \x20   atomicAdd(&{storage}[_idx], ({rhs}));\n\
                              }}"
                         ));
                     }

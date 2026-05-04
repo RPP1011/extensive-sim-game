@@ -375,12 +375,21 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
         .iter()
         .map(|(view_id, (args, result))| {
             let storage_hint = ctx.view_storage_hints.get(view_id).copied();
+            // Snapshot the fold-body operator alongside the storage
+            // hint. Materialized views with a `+=` / `|=` body have
+            // an entry; lazy / structurally-built views (test
+            // builders that don't run the view-body lowerer) carry
+            // `None` and emit falls back to the legacy result-type
+            // branch. Closes Gap C from `docs/superpowers/notes/
+            // 2026-05-04-quest_probe.md`.
+            let fold_op = ctx.view_fold_ops.get(view_id).copied();
             (
                 view_id.0,
                 crate::cg::program::ViewSignature {
                     args: args.clone(),
                     result: *result,
                     storage_hint,
+                    fold_op,
                 },
             )
         })
@@ -801,6 +810,39 @@ fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
     );
     registry.namespaces.insert(NamespaceId::Auctions, auctions);
 
+    // -- quests namespace --
+    //
+    // B1 stub (initial registration — the `quests.*` namespace was
+    // flagged in the spec audit / quest_probe report as having ZERO
+    // coverage anywhere: parser routed, resolver tagged
+    // `NamespaceId::Quests`, but no method registered, so any call
+    // site fell through to `UnsupportedNamespaceCall`). Mirrors the
+    // `auctions.*` B1 pattern: `is_active` is the simplest
+    // collection-shaped accessor and matches the spec's quest-state
+    // language. Real semantics (look up the runtime quest table,
+    // consult the lifecycle state machine) are runtime-format work;
+    // today the stub returns `true` so the shader compiles and the
+    // kernel runs without panicking. Closes Gap B from
+    // `docs/superpowers/notes/2026-05-04-quest_probe.md`.
+    let mut quests = NamespaceDef {
+        name: "quests".to_string(),
+        ..NamespaceDef::default()
+    };
+    // `quests.is_active(quest_id)` → `bool`. B1: returns `true`
+    // (always active — placeholder). Real semantics: lookup in the
+    // runtime quest table, check the lifecycle state.
+    quests.methods.insert(
+        "is_active".to_string(),
+        MethodDef {
+            return_ty: CgTy::Bool,
+            arg_tys: vec![CgTy::U32],
+            wgsl_fn_name: "quests_is_active".to_string(),
+            wgsl_stub: "fn quests_is_active(quest_id: u32) -> bool { return true; }"
+                .to_string(),
+        },
+    );
+    registry.namespaces.insert(NamespaceId::Quests, quests);
+
     ctx.namespace_registry = registry;
 }
 
@@ -844,6 +886,14 @@ fn populate_entity_field_catalog(comp: &Compilation, ctx: &mut LoweringCtx<'_>) 
             EntityRoot::Item => &mut catalog.items,
             EntityRoot::Group => &mut catalog.groups,
             EntityRoot::Agent => continue,
+            // Quest-rooted entities are accepted as declare-only today
+            // (no per-Quest SoA, no `quests.<field>(idx)` accessor on
+            // the namespace registry yet). Skip the same way Agent is
+            // skipped — the `quests` namespace exposes only stub
+            // method calls (`quests.is_active(...)` etc.). See Gap A
+            // closure note in `docs/superpowers/notes/2026-05-04-
+            // quest_probe.md`.
+            EntityRoot::Quest => continue,
         };
         let mut entries: Vec<EntityFieldEntry> = Vec::with_capacity(entity.fields.len());
         for f in &entity.fields {

@@ -3588,6 +3588,7 @@ mod tests {
                 args: vec![CgTy::AgentId],
                 result: CgTy::F32,
                 storage_hint: None,
+                fold_op: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -3636,6 +3637,7 @@ mod tests {
                 args: vec![CgTy::AgentId],
                 result: CgTy::U32,
                 storage_hint: None,
+                fold_op: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -3679,6 +3681,7 @@ mod tests {
                 args: vec![CgTy::AgentId],
                 result: CgTy::I32,
                 storage_hint: None,
+                fold_op: None,
             },
         );
         b.set_view_signatures(sigs);
@@ -3722,6 +3725,7 @@ mod tests {
                 args: vec![CgTy::AgentId],
                 result: CgTy::F32,
                 storage_hint: None,
+                fold_op: None,
             },
         );
         b.set_view_signatures(sigs);
