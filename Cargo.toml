@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/boids_runtime", "crates/crowd_navigation_runtime", "crates/dsl_ast", "crates/dsl_compiler", "crates/engine", "crates/engine_data", "crates/engine_gpu_rules", "crates/particle_collision_runtime", "crates/predator_prey_runtime", "crates/sim_app", "crates/target_chaser_runtime"]
+members = ["crates/boids_runtime", "crates/crowd_navigation_runtime", "crates/dsl_ast", "crates/dsl_compiler", "crates/engine", "crates/engine_data", "crates/engine_gpu_rules", "crates/particle_collision_runtime", "crates/predator_prey_runtime", "crates/sim_app", "crates/swarm_storm_runtime", "crates/target_chaser_runtime"]
 exclude = ["crates/world_sim_bench", "crates/ability_operator", "crates/ability-vae", "crates/combat-trainer"]
 resolver = "2"
 

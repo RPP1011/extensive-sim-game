@@ -27,6 +27,9 @@ particle_collision_runtime = { path = "../particle_collision_runtime" }
 crowd_navigation_runtime = { path = "../crowd_navigation_runtime" }
 # Target-chaser stress fixture for slice 1 (cross-agent target reads).
 target_chaser_runtime = { path = "../target_chaser_runtime" }
+# Swarm-event-storm stress fixture for Phase 7+8 primitives (multi-emit
+# producer + 2 view-folds with @decay anchor).
+swarm_storm_runtime = { path = "../swarm_storm_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -47,3 +50,7 @@ path = "src/cn_app.rs"
 [[bin]]
 name = "tc_app"
 path = "src/tc_app.rs"
+
+[[bin]]
+name = "ses_app"
+path = "src/ses_app.rs"
