@@ -329,6 +329,27 @@ impl PredatorPreyState {
         self.kill_count.readback(&self.gpu)
     }
 
+    /// Run every host-side invariant check the compiler synthesized
+    /// from `predator_prey_min.sim`'s `invariant <name>(<scope>) @<mode>
+    /// { <predicate> }` declarations. Today that's just
+    /// `bounded_kill_count(a: Agent) @debug_only` — it iterates the
+    /// kill_count storage readback and reports any slot whose value
+    /// has saturated past the predicate's bound (1000.0). The empty
+    /// vec is the steady-state expected return: a non-empty vec means
+    /// the @decay anchor stopped reining in the per-event fold.
+    ///
+    /// Pulls the generated check fns from the `invariants` module the
+    /// compiler emits next to the kernel modules; the build script
+    /// wraps them at `OUT_DIR/generated.rs::invariants` (see the
+    /// `for sibling in ["schedule", "dispatch", "invariants"]` loop in
+    /// `build.rs`). Determinism: the predicate is a pure scalar
+    /// comparator over the (already-deterministic) view readback —
+    /// the function reads no clocks, no RNG, no host time.
+    pub fn check_invariants(&mut self) -> Vec<invariants::Violation> {
+        let counts: Vec<f32> = self.kill_counts().to_vec();
+        invariants::check_bounded_kill_count(&counts)
+    }
+
     /// Current simulation tick. Increments at the end of each `step()`.
     pub fn tick(&self) -> u64 {
         self.tick

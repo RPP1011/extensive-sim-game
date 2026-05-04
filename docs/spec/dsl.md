@@ -314,6 +314,15 @@ Adding a `verb` does not bump the schema hash. Adding a new micro primitive does
 
 ### 2.8 `invariant` declaration
 
+> ⚠️ **Audit 2026-04-26 — partial close:** the silent-drop is closed for the **per-agent scalar-view-bounded shape** —
+> `invariant <name>(a: Agent) @<mode> { <view>(a) <op> <literal_f32> }` over a `@materialized` `f32` view. The
+> compiler synthesises a `pub fn check_<name>(view_storage: &[f32]) -> Vec<Violation>` into `invariants.rs` (added to
+> `EmittedArtifacts.rust_files`); per-fixture runtimes consume it via `state.check_invariants()`. Unsupported
+> shapes (multi-arg scope, quantifiers, field access, vec3 views) emit a `// SKIP <reason>` comment so the gap is
+> visible at build time rather than silent. Implementation: `crates/dsl_compiler/src/cg/emit/invariants.rs`,
+> stress test: `crates/predator_prey_runtime/tests/invariant_violation.rs`. The §2.6 `verb`, §2.9 `probe`, §2.11
+> `metric` callouts above remain accurate — those three are still silent-drop.
+
 ```
 invariant <name>(<scope>) @<mode> { <predicate> }
 

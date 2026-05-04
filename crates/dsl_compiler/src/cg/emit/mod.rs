@@ -66,6 +66,7 @@
 //! `wgsl_emit_is_deterministic` test pins this contract.
 
 pub mod cross_cutting;
+pub mod invariants;
 pub mod kernel;
 pub mod program;
 /// Spatial-grid configuration shared between compiler emit and per-
@@ -86,6 +87,7 @@ pub use kernel::{
     kernel_topology_to_spec, kernel_topology_to_spec_and_body, semantic_kernel_name_for_topology,
     KernelEmitError,
 };
+pub use invariants::{emit_cg_program_with_invariants, synthesize_invariants};
 pub use program::{emit_cg_program, EmittedArtifacts, ProgramEmitError};
 pub use wgsl_body::{
     lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl, EmitCtx, EmitError,
