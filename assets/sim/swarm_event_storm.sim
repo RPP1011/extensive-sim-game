@@ -74,3 +74,26 @@ view recent_pulse_intensity(source: Agent) -> f32 {
   on Pulse { source: who, intensity: amount } { self += amount }
   clamp: [0.0, 1000.0],
 }
+
+// Telemetry side-channel — Slice C of the verb/probe/metric emit plan
+// (`docs/superpowers/plans/2026-05-03-verb-probe-metric-emit.md`).
+// The four declarations below exercise every supported value-source
+// shape the metric emitter recognises today (constant + world.tick),
+// every wrapper kind (gauge / counter / histogram), and the
+// emit_every modifier. The compiler synthesises a `MetricsSink`
+// struct + `record_tick(world_tick)` driver into `metrics.rs`; the
+// runtime calls `record_tick` once per `step()` and the sink
+// accumulates the values the test harness reads.
+metric {
+  // Gauge that mirrors the runtime tick. Useful as a "metrics sink
+  // is alive" probe; `last` should equal the most recent tick + 1
+  // worth of update.
+  metric tick_gauge       = gauge(world.tick) emit_every 1
+  // Counter that increments by 1 each tick. After N steps the
+  // sink's `total` is exactly N (and `count` matches).
+  metric tick_counter     = counter(1.0) emit_every 1
+  // Histogram captures world.tick once every 10 ticks. After 100
+  // ticks the sink should hold ⌈100 / 10⌉ = 10 samples (ticks 0,
+  // 10, 20, ..., 90).
+  metric tick_histogram   = histogram(world.tick) emit_every 10
+}

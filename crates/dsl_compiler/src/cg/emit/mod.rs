@@ -68,6 +68,7 @@
 pub mod cross_cutting;
 pub mod invariants;
 pub mod kernel;
+pub mod metrics;
 pub mod program;
 /// Spatial-grid configuration shared between compiler emit and per-
 /// fixture runtime crates. See `spatial::compose_spatial_prelude` for
@@ -88,6 +89,7 @@ pub use kernel::{
     KernelEmitError,
 };
 pub use invariants::{emit_cg_program_with_invariants, synthesize_invariants};
+pub use metrics::{emit_cg_program_with_invariants_and_metrics, synthesize_metrics};
 pub use program::{emit_cg_program, EmittedArtifacts, ProgramEmitError};
 pub use wgsl_body::{
     lower_cg_expr_to_wgsl, lower_cg_stmt_list_to_wgsl, lower_cg_stmt_to_wgsl, EmitCtx, EmitError,

@@ -294,7 +294,7 @@ Compilation:
 
 ### 2.6 `verb` (composition sugar)
 
-> ❌ **Audit 2026-04-26 — silent-drop:** `verb` declarations parse and resolve to `VerbIR`, but **`EmittedArtifacts` has no verb output and no emit pass exists**. A `.sim` file with `verb` declarations compiles silently to nothing. Same status applies to §2.8 `invariant`, §2.9 `probe`, §2.11 `metric` — all parse + resolve, none emit.
+> ❌ **Audit 2026-04-26 — silent-drop:** `verb` declarations parse and resolve to `VerbIR`, but **`EmittedArtifacts` has no verb output and no emit pass exists**. A `.sim` file with `verb` declarations compiles silently to nothing. Same status applies to §2.9 `probe` (still silent-drop). §2.8 `invariant` was partially closed 2026-05-03 (see callout). §2.11 `metric` was partially closed 2026-05-03 by Slice C of the verb/probe/metric emit plan (see callout below for shape).
 > See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for detail.
 
 `verb` declares a named gameplay action that composes an existing micro primitive with additional mask predicates, cascades, and scoring entries. It does NOT add to the closed categorical action vocabulary.
@@ -385,6 +385,21 @@ probe LowHpFlees {
 Probes compile to trajectory queries over the trace ring-buffer format. Schema-hash mismatch between a probe's reference fields and the current DSL is a hard error.
 
 ### 2.11 `metric` declaration
+
+> ⚠️ **Audit 2026-04-26 — partial close (2026-05-03, Slice C):** the silent-drop is closed for the
+> **wrapped-scalar shape** — `metric <name> = <kind>(<inner>) [emit_every N]` where `<kind>` is one of
+> `gauge` / `counter` / `histogram` and `<inner>` is a numeric literal or `world.tick`. The compiler
+> synthesises a `pub struct MetricsSink` with one field per metric (`Counter` / `Gauge` / `Histogram`)
+> plus `pub fn record_tick(&mut self, world_tick: u64)` into `metrics.rs` (added to
+> `EmittedArtifacts.rust_files`); per-fixture runtimes consume it via `state.metrics()` after each
+> step. Per-metric `record_<name>(value: f32)` setters cover hand-driven cases. Unsupported value
+> shapes (aggregates like `count(... events.this_tick where ...)` / `mean(... for ... in agents)`,
+> view calls, quantifiers, the `conditioned_on` / `alert when` predicates) emit a `// SKIP <reason>`
+> comment so the gap is visible at build time rather than silent. Implementation:
+> `crates/dsl_compiler/src/cg/emit/metrics.rs`, stress test:
+> `crates/swarm_storm_runtime/tests/metric_records.rs`. The `MetricKind` lift from stdlib-call to
+> enum (audit at §7.3 below) is deliberately deferred — the emitter does the recognition today,
+> per the verb/probe/metric plan's open question §C resolution.
 
 ```
 metric {

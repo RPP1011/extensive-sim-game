@@ -72,6 +72,15 @@ pub struct SwarmStormState {
     tick: u64,
     agent_count: u32,
     seed: u64,
+
+    /// Compiler-emitted metrics sink (Slice C of the verb/probe/metric
+    /// emit plan). The `MetricsSink` struct comes from the
+    /// `metrics.rs` artifact `swarm_storm_runtime/build.rs` injects
+    /// alongside the kernel modules; per-tick `record_tick(self.tick)`
+    /// drives every metric whose value source the emitter recognises
+    /// (constant + `world.tick`). Tests + examples read fields off
+    /// the sink directly.
+    metrics_sink: metrics::MetricsSink,
 }
 
 fn normalise(u: u32) -> f32 {
@@ -215,7 +224,16 @@ impl SwarmStormState {
             tick: 0,
             agent_count,
             seed,
+            metrics_sink: metrics::MetricsSink::default(),
         }
+    }
+
+    /// Read-only handle to the compiler-emitted metrics sink. Tests
+    /// + examples introspect the sink fields (`tick_gauge.last`,
+    /// `tick_counter.total`, `tick_histogram.samples`, ...) to
+    /// observe the per-tick recorded values.
+    pub fn metrics(&self) -> &metrics::MetricsSink {
+        &self.metrics_sink
     }
 
     pub fn tick(&self) -> u64 {
@@ -414,6 +432,14 @@ impl CompiledSim for SwarmStormState {
         self.dirty = true;
         self.pulse_count.mark_dirty();
         self.recent_pulse_intensity.mark_dirty();
+
+        // Slice C metric emit — drive every auto-driveable metric the
+        // compiler synthesised. Pre-increment so `world.tick` mirrors
+        // the tick the just-completed step belonged to (tick 0 ran,
+        // record_tick(0) fires, then tick advances). The compiler-
+        // emitted `record_tick` honors per-metric `emit_every`.
+        self.metrics_sink.record_tick(self.tick);
+
         self.tick += 1;
     }
 
