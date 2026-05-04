@@ -2506,6 +2506,326 @@ fn lower_fold_over_agents(
     )
 }
 
+/// Lower a `rng.<method>(...)` call to its CG IR shape.
+///
+/// Two surface flavours are recognised:
+///
+/// 1. **Internal nullary purposes** (`action`, `sample`, `shuffle`,
+///    `conception`) — each lowers directly to a single
+///    `CgExpr::Rng { purpose, ty: U32 }` node. These are the
+///    lower-level surface used by the engine's per-stream
+///    derivation; arity is enforced as 0.
+///
+/// 2. **Spec-named typed surfaces** (`uniform`, `gauss`, `coin`,
+///    `uniform_int`) — match `docs/spec/dsl.md` §rng. Each addresses
+///    a distinct deterministic stream (its own
+///    [`RngPurpose`] variant, hashed from a unique purpose-byte tag
+///    via `per_agent_u32`), so adding the typed surface does not
+///    perturb existing fixtures that draw via the internal
+///    purposes.
+///
+///    The IR shapes:
+///    - `rng.coin()` → `CgExpr::Rng { Coin, Bool }` (nullary).
+///    - `rng.uniform(lo, hi)` → `lo + draw * (hi - lo)` where
+///      `draw = CgExpr::Rng { Uniform, F32 }` is a unit-interval
+///      sample. WGSL emit converts the underlying `u32` draw to
+///      `f32 / U32_MAX`.
+///    - `rng.gauss(mu, sigma)` → `mu + draw * sigma` where
+///      `draw = CgExpr::Rng { Gauss, F32 }` is a standard-normal
+///      sample. WGSL emit performs the Box-Muller (or equivalent)
+///      transform.
+///    - `rng.uniform_int(lo, hi)` → `lo + abs(draw) % (hi - lo)`
+///      where `draw = CgExpr::Rng { UniformInt, I32 }` is the
+///      raw-bit bitcast of the underlying `u32` draw to `i32`.
+///      `abs` keeps the modulo non-negative when `draw` is
+///      negative; the resulting sample is in `[lo, hi)` modulo the
+///      well-known modulo-bias. The DSL spec advertises
+///      `(i32, i32) -> i32`.
+///
+/// Arity + arg-type errors surface as
+/// [`LoweringError::NamespaceCallArityMismatch`] and
+/// [`LoweringError::IllTypedExpression`] respectively, using the
+/// same shape the surrounding namespace dispatch uses.
+fn lower_rng_call(
+    method: &str,
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    // Internal purposes — nullary, returning u32.
+    let internal_purpose = match method {
+        "action" => Some(RngPurpose::Action),
+        "sample" => Some(RngPurpose::Sample),
+        "shuffle" => Some(RngPurpose::Shuffle),
+        "conception" => Some(RngPurpose::Conception),
+        _ => None,
+    };
+    if let Some(purpose) = internal_purpose {
+        if !args.is_empty() {
+            return Err(LoweringError::NamespaceCallArityMismatch {
+                ns: NamespaceId::Rng,
+                method: method.to_string(),
+                expected: 0,
+                got: args.len(),
+                span,
+            });
+        }
+        return add(
+            ctx,
+            CgExpr::Rng {
+                purpose,
+                ty: CgTy::U32,
+            },
+            span,
+        );
+    }
+
+    // Spec-named purposes — each is shape-specific.
+    match method {
+        // `rng.coin()` — nullary; returns bool. The IR node carries
+        // the typed `Bool` result; the WGSL emitter is responsible
+        // for the `(per_agent_u32(...) & 1u) == 0u` shape.
+        "coin" => {
+            if !args.is_empty() {
+                return Err(LoweringError::NamespaceCallArityMismatch {
+                    ns: NamespaceId::Rng,
+                    method: method.to_string(),
+                    expected: 0,
+                    got: args.len(),
+                    span,
+                });
+            }
+            add(
+                ctx,
+                CgExpr::Rng {
+                    purpose: RngPurpose::Coin,
+                    ty: CgTy::Bool,
+                },
+                span,
+            )
+        }
+        // `rng.uniform(lo, hi)` — `(f32, f32) -> f32`.
+        // Lowered to `lo + draw * (hi - lo)` where `draw` is a
+        // unit-interval sample on the `Uniform` stream.
+        "uniform" => lower_rng_scaled_f32(
+            method,
+            args,
+            span,
+            ctx,
+            RngPurpose::Uniform,
+            ScaleShape::AffineLoHi,
+        ),
+        // `rng.gauss(mu, sigma)` — `(f32, f32) -> f32`. Lowered to
+        // `mu + draw * sigma` where `draw` is a standard-normal
+        // sample on the `Gauss` stream.
+        "gauss" => lower_rng_scaled_f32(
+            method,
+            args,
+            span,
+            ctx,
+            RngPurpose::Gauss,
+            ScaleShape::MeanStddev,
+        ),
+        // `rng.uniform_int(lo, hi)` — `(i32, i32) -> i32`.
+        // Lowered to `lo + abs(draw) % (hi - lo)` where `draw` is
+        // the raw u32 bitcast to i32 on the `UniformInt` stream.
+        "uniform_int" => lower_rng_uniform_int(method, args, span, ctx),
+        _ => Err(LoweringError::UnsupportedNamespaceCall {
+            ns: NamespaceId::Rng,
+            method: method.to_string(),
+            span,
+        }),
+    }
+}
+
+/// Variants of the `lo + draw * scale(lo, hi)` shape used by
+/// `rng.uniform` (`scale = hi - lo`) and `rng.gauss`
+/// (`scale = sigma`, `lo = mu`). Encoded as an enum so the shared
+/// helper picks one closed-form per call.
+enum ScaleShape {
+    /// `rng.uniform(lo, hi)`: result = `lo + draw * (hi - lo)`.
+    AffineLoHi,
+    /// `rng.gauss(mu, sigma)`: result = `mu + draw * sigma`.
+    MeanStddev,
+}
+
+/// Shared lowering for `rng.uniform(lo, hi)` and `rng.gauss(mu,
+/// sigma)`. Both surfaces take 2 `f32` args and produce `f32`; the
+/// difference is the inner expression that scales the unit-stream
+/// draw. The `ScaleShape` discriminator selects:
+///
+///   - `AffineLoHi` — `lo + draw * (hi - lo)` (uniform).
+///   - `MeanStddev` — `mu + draw * sigma` (gauss).
+fn lower_rng_scaled_f32(
+    method: &str,
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+    purpose: RngPurpose,
+    shape: ScaleShape,
+) -> Result<CgExprId, LoweringError> {
+    if args.len() != 2 {
+        return Err(LoweringError::NamespaceCallArityMismatch {
+            ns: NamespaceId::Rng,
+            method: method.to_string(),
+            expected: 2,
+            got: args.len(),
+            span,
+        });
+    }
+    let lhs_id = lower_expr(&args[0].value, ctx)?;
+    let rhs_id = lower_expr(&args[1].value, ctx)?;
+    // Both args must be f32. AgentId / U32 reject; the user can
+    // explicitly cast at the surface (no implicit coercion in the IR).
+    for (id, arg) in [(lhs_id, &args[0]), (rhs_id, &args[1])] {
+        let ty = typecheck_node(ctx, id, arg.span)?;
+        if ty != CgTy::F32 {
+            return Err(LoweringError::IllTypedExpression {
+                expected: CgTy::F32,
+                got: ty,
+                span: arg.span,
+            });
+        }
+    }
+    // Build `draw = CgExpr::Rng { purpose, F32 }`.
+    let draw_id = add(
+        ctx,
+        CgExpr::Rng {
+            purpose,
+            ty: CgTy::F32,
+        },
+        span,
+    )?;
+    // Inner scale factor depends on the shape:
+    //   AffineLoHi → hi - lo
+    //   MeanStddev → sigma   (`rhs_id` directly)
+    let scale_id = match shape {
+        ScaleShape::AffineLoHi => add(
+            ctx,
+            CgExpr::Binary {
+                op: BinaryOp::SubF32,
+                lhs: rhs_id,
+                rhs: lhs_id,
+                ty: CgTy::F32,
+            },
+            span,
+        )?,
+        ScaleShape::MeanStddev => rhs_id,
+    };
+    // `draw * scale`.
+    let scaled_id = add(
+        ctx,
+        CgExpr::Binary {
+            op: BinaryOp::MulF32,
+            lhs: draw_id,
+            rhs: scale_id,
+            ty: CgTy::F32,
+        },
+        span,
+    )?;
+    // `lo + draw * scale` (or `mu + draw * sigma`).
+    add(
+        ctx,
+        CgExpr::Binary {
+            op: BinaryOp::AddF32,
+            lhs: lhs_id,
+            rhs: scaled_id,
+            ty: CgTy::F32,
+        },
+        span,
+    )
+}
+
+/// Lower `rng.uniform_int(lo, hi)`. Spec advertises
+/// `(i32, i32) -> i32`; the surface IR is
+/// `lo + abs(draw) % (hi - lo)` where `draw` is the raw
+/// `per_agent_u32` bitcast to i32 (encoded by
+/// `RngPurpose::UniformInt` carrying `CgTy::I32` — the WGSL emit
+/// handles the bitcast). `abs` keeps the modulo non-negative when
+/// the bitcast bits land in the negative i32 half. The result has
+/// the standard modulo-bias for ranges that don't divide
+/// `2^32` evenly; this is documented behavior.
+fn lower_rng_uniform_int(
+    method: &str,
+    args: &[IrCallArg],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgExprId, LoweringError> {
+    if args.len() != 2 {
+        return Err(LoweringError::NamespaceCallArityMismatch {
+            ns: NamespaceId::Rng,
+            method: method.to_string(),
+            expected: 2,
+            got: args.len(),
+            span,
+        });
+    }
+    let lo_id = lower_expr(&args[0].value, ctx)?;
+    let hi_id = lower_expr(&args[1].value, ctx)?;
+    for (id, arg) in [(lo_id, &args[0]), (hi_id, &args[1])] {
+        let ty = typecheck_node(ctx, id, arg.span)?;
+        if ty != CgTy::I32 {
+            return Err(LoweringError::IllTypedExpression {
+                expected: CgTy::I32,
+                got: ty,
+                span: arg.span,
+            });
+        }
+    }
+    // `draw = CgExpr::Rng { UniformInt, I32 }`.
+    let draw_id = add(
+        ctx,
+        CgExpr::Rng {
+            purpose: RngPurpose::UniformInt,
+            ty: CgTy::I32,
+        },
+        span,
+    )?;
+    // `abs(draw)`.
+    let abs_id = add(
+        ctx,
+        CgExpr::Unary {
+            op: UnaryOp::AbsI32,
+            arg: draw_id,
+            ty: CgTy::I32,
+        },
+        span,
+    )?;
+    // `hi - lo`.
+    let range_id = add(
+        ctx,
+        CgExpr::Binary {
+            op: BinaryOp::SubI32,
+            lhs: hi_id,
+            rhs: lo_id,
+            ty: CgTy::I32,
+        },
+        span,
+    )?;
+    // `abs(draw) % (hi - lo)`.
+    let mod_id = add(
+        ctx,
+        CgExpr::Binary {
+            op: BinaryOp::ModI32,
+            lhs: abs_id,
+            rhs: range_id,
+            ty: CgTy::I32,
+        },
+        span,
+    )?;
+    // `lo + abs(draw) % (hi - lo)`.
+    add(
+        ctx,
+        CgExpr::Binary {
+            op: BinaryOp::AddI32,
+            lhs: lo_id,
+            rhs: mod_id,
+            ty: CgTy::I32,
+        },
+        span,
+    )
+}
+
 /// All other namespace/method pairs surface as
 /// [`LoweringError::UnsupportedNamespaceCall`] for now.
 fn lower_namespace_call(
@@ -2516,41 +2836,7 @@ fn lower_namespace_call(
     ctx: &mut LoweringCtx<'_>,
 ) -> Result<CgExprId, LoweringError> {
     match (ns, method) {
-        (NamespaceId::Rng, m) => {
-            // `rng.action()`, `rng.sample()`, etc. — argument list (if
-            // any) is consumed at op-level (the seed/agent/tick are
-            // implicit). We accept zero args here.
-            if !args.is_empty() {
-                return Err(LoweringError::NamespaceCallArityMismatch {
-                    ns,
-                    method: m.to_string(),
-                    expected: 0,
-                    got: args.len(),
-                    span,
-                });
-            }
-            let purpose = match m {
-                "action" => RngPurpose::Action,
-                "sample" => RngPurpose::Sample,
-                "shuffle" => RngPurpose::Shuffle,
-                "conception" => RngPurpose::Conception,
-                _ => {
-                    return Err(LoweringError::UnsupportedNamespaceCall {
-                        ns,
-                        method: method.to_string(),
-                        span,
-                    })
-                }
-            };
-            add(
-                ctx,
-                CgExpr::Rng {
-                    purpose,
-                    ty: CgTy::U32,
-                },
-                span,
-            )
-        }
+        (NamespaceId::Rng, m) => lower_rng_call(m, args, span, ctx),
         (NamespaceId::Items, field) if args.len() == 1 => {
             // `items.<field>(<expr>)` — typed Item-field read where the
             // target slot is computed by `<expr>`. Resolves `<field>`
@@ -4026,10 +4312,14 @@ mod tests {
     }
 
     #[test]
-    fn rng_unknown_purpose_rejected() {
+    fn rng_truly_unknown_purpose_rejected() {
+        // `rng.bogus()` is neither an internal purpose
+        // (`action`/`sample`/`shuffle`/`conception`) nor a spec-named
+        // surface (`uniform`/`gauss`/`coin`/`uniform_int`); must
+        // surface as `UnsupportedNamespaceCall`.
         let ast = node(IrExpr::NamespaceCall {
             ns: NamespaceId::Rng,
-            method: "uniform".to_string(),
+            method: "bogus".to_string(),
             args: vec![],
         });
         let err = lower_to_string(&ast).unwrap_err();
@@ -4037,6 +4327,236 @@ mod tests {
             err,
             LoweringError::UnsupportedNamespaceCall { .. }
         ));
+    }
+
+    // ---- Spec-named typed RNG surfaces (Gap #4 — stochastic_probe) ----
+    //
+    // Each test below pins the IR shape produced by lowering a
+    // `rng.<method>(...)` call from `docs/spec/dsl.md` §rng. The
+    // shapes match the contract documented on `lower_rng_call`.
+
+    #[test]
+    fn rng_coin_lowers_to_typed_bool_rng_node() {
+        // `rng.coin()` → `CgExpr::Rng { Coin, Bool }` (nullary).
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "coin".to_string(),
+            args: vec![],
+        });
+        assert_eq!(lower_to_string(&ast).unwrap(), "(rng coin)");
+    }
+
+    #[test]
+    fn rng_coin_with_extra_args_rejected() {
+        // `rng.coin(0)` — coin is nullary; extra args surface the
+        // same arity-mismatch error as `rng.action(<extra>)`.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "coin".to_string(),
+            args: vec![arg(node(IrExpr::LitInt(0)))],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::NamespaceCallArityMismatch {
+                ns,
+                method,
+                expected,
+                got,
+                ..
+            } => {
+                assert_eq!(ns, NamespaceId::Rng);
+                assert_eq!(method, "coin");
+                assert_eq!(expected, 0);
+                assert_eq!(got, 1);
+            }
+            other => panic!("expected NamespaceCallArityMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rng_uniform_lowers_to_lo_plus_draw_times_range() {
+        // `rng.uniform(0.0, 1.0)` → `0.0 + draw * (1.0 - 0.0)`.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "uniform".to_string(),
+            args: vec![arg(node(IrExpr::LitFloat(0.0))), arg(node(IrExpr::LitFloat(1.0)))],
+        });
+        // Affine shape: outermost AddF32, RHS is MulF32(draw, SubF32(hi, lo)).
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(add.f32 (lit 0.0f32) (mul.f32 (rng uniform) (sub.f32 (lit 1.0f32) (lit 0.0f32))))"
+        );
+    }
+
+    #[test]
+    fn rng_uniform_arity_mismatch_rejected() {
+        // `rng.uniform()` (zero args) — spec says (f32, f32); arity
+        // mismatch surfaces the typed `NamespaceCallArityMismatch`.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "uniform".to_string(),
+            args: vec![],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        match err {
+            LoweringError::NamespaceCallArityMismatch {
+                ns,
+                method,
+                expected,
+                got,
+                ..
+            } => {
+                assert_eq!(ns, NamespaceId::Rng);
+                assert_eq!(method, "uniform");
+                assert_eq!(expected, 2);
+                assert_eq!(got, 0);
+            }
+            other => panic!("expected NamespaceCallArityMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rng_uniform_with_non_f32_args_rejected() {
+        // `rng.uniform(0u32, 1u32)` — args must be f32.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "uniform".to_string(),
+            args: vec![arg(node(IrExpr::LitInt(0))), arg(node(IrExpr::LitInt(1)))],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    #[test]
+    fn rng_gauss_lowers_to_mu_plus_draw_times_sigma() {
+        // `rng.gauss(0.0, 2.5)` → `0.0 + draw * 2.5`.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "gauss".to_string(),
+            args: vec![arg(node(IrExpr::LitFloat(0.0))), arg(node(IrExpr::LitFloat(2.5)))],
+        });
+        // MeanStddev shape: outermost AddF32, RHS is MulF32(draw, sigma)
+        // with sigma threaded directly (no Sub wrapping).
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(add.f32 (lit 0.0f32) (mul.f32 (rng gauss) (lit 2.5f32)))"
+        );
+    }
+
+    #[test]
+    fn rng_gauss_arity_mismatch_rejected() {
+        // Single arg — spec is `(mu, sigma)`.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "gauss".to_string(),
+            args: vec![arg(node(IrExpr::LitFloat(0.0)))],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::NamespaceCallArityMismatch {
+                expected: 2,
+                got: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rng_uniform_int_lowers_to_lo_plus_abs_draw_mod_range() {
+        // `rng.uniform_int(-5, -1)` → `-5 + abs(draw) % (-1 - -5)`.
+        // Outermost AddI32; RHS is ModI32(AbsI32(draw), SubI32(hi, lo)).
+        //
+        // **Why both args negative?** `IrExpr::LitInt(v)` picks `u32`
+        // when `v >= 0` and `i32` when `v < 0` (see
+        // `literal_int_positive_picks_u32` /
+        // `literal_int_negative_picks_i32`). Mixing a positive
+        // literal with a negative one would surface as
+        // `IllTypedExpression { expected: I32, got: U32, .. }` from
+        // the lowering's per-arg type check. Surfacing two i32
+        // literals keeps the test focused on the arithmetic shape.
+        // Real .sim sources land i32 args via field reads or via a
+        // `let lo: i32 = -5` annotation.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "uniform_int".to_string(),
+            args: vec![arg(node(IrExpr::LitInt(-5))), arg(node(IrExpr::LitInt(-1)))],
+        });
+        assert_eq!(
+            lower_to_string(&ast).unwrap(),
+            "(add.i32 (lit -5i32) (mod.i32 (abs.i32 (rng uniform_int)) (sub.i32 (lit -1i32) (lit -5i32))))"
+        );
+    }
+
+    #[test]
+    fn rng_uniform_int_arity_mismatch_rejected() {
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "uniform_int".to_string(),
+            args: vec![],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::NamespaceCallArityMismatch {
+                expected: 2,
+                got: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rng_uniform_int_with_non_i32_args_rejected() {
+        // Float args reject — spec is `(i32, i32)`.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "uniform_int".to_string(),
+            args: vec![arg(node(IrExpr::LitFloat(0.0))), arg(node(IrExpr::LitFloat(1.0)))],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    #[test]
+    fn rng_purposes_use_distinct_streams() {
+        // Each spec-named purpose must map to its own `RngPurpose`
+        // variant so the underlying `per_agent_u32(seed, agent_id,
+        // tick, purpose)` call uses a distinct purpose-byte tag —
+        // i.e. drawing `rng.uniform()` and `rng.action()` in the same
+        // tick produces uncorrelated samples (P5 per-stream
+        // determinism). The pretty-printer surfaces the snake-case
+        // purpose name; check each spec-surface includes its own.
+        let cases = [
+            ("coin", "coin"),
+            // `uniform` / `gauss` / `uniform_int` are wrapped in
+            // arithmetic, so we just check the inner `(rng <name>)`
+            // token appears.
+            ("uniform", "uniform"),
+            ("gauss", "gauss"),
+            ("uniform_int", "uniform_int"),
+        ];
+        for (method, snake) in cases {
+            let args = match method {
+                "coin" => vec![],
+                "uniform_int" => vec![arg(node(IrExpr::LitInt(-1))), arg(node(IrExpr::LitInt(-2)))],
+                _ => vec![arg(node(IrExpr::LitFloat(0.0))), arg(node(IrExpr::LitFloat(1.0)))],
+            };
+            let ast = node(IrExpr::NamespaceCall {
+                ns: NamespaceId::Rng,
+                method: method.to_string(),
+                args,
+            });
+            let s = lower_to_string(&ast).unwrap();
+            let token = format!("(rng {})", snake);
+            assert!(
+                s.contains(&token),
+                "rng.{}() lowering missing `{}` token: {}",
+                method,
+                token,
+                s,
+            );
+        }
     }
 
     #[test]

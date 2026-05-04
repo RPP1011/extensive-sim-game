@@ -705,19 +705,55 @@ impl fmt::Display for AgentScratchKind {
 /// variants so emitters can produce stable byte literals; future
 /// purposes are added by extending this enum (no string keys).
 ///
-/// Variants mirror the documented purposes in
+/// **Internal purposes** (`Action`, `Sample`, `Shuffle`,
+/// `Conception`) mirror the documented purposes in
 /// `crates/engine/src/rng.rs` (`b"action"`, `b"sample"`,
-/// `b"shuffle"`, `b"conception"`).
+/// `b"shuffle"`, `b"conception"`). They each produce a raw `u32`
+/// and are addressed by the lower-level `rng.action()` /
+/// `rng.sample()` / `rng.shuffle()` / `rng.conception()` surface.
+///
+/// **Spec-named purposes** (`Uniform`, `Gauss`, `Coin`,
+/// `UniformInt`) mirror the four typed surfaces documented in
+/// `docs/spec/dsl.md` §rng (`rng.uniform(lo, hi) -> f32`,
+/// `rng.gauss(mu, sigma) -> f32`, `rng.coin() -> bool`,
+/// `rng.uniform_int(lo, hi) -> i32`). Each addresses an
+/// independent deterministic stream — i.e. drawing
+/// `rng.uniform()` and `rng.action()` in the same tick produces
+/// uncorrelated samples — so adding the typed surface does not
+/// disturb existing fixtures that draw via the lower-level
+/// purposes. The IR-level [`crate::cg::expr::CgExpr::Rng`] node
+/// carries the `ty` matching the purpose's natural result type
+/// (`U32` for the four internal purposes, `F32` for `Uniform` /
+/// `Gauss`, `Bool` for `Coin`, `I32` for `UniformInt`); the WGSL
+/// emitter is responsible for the per-purpose conversion shape
+/// (e.g. `f32(per_agent_u32(...)) / 4294967295.0` for `Uniform`).
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RngPurpose {
-    /// `b"action"` — action selection / tiebreak.
+    /// `b"action"` — action selection / tiebreak. Returns `u32`.
     Action,
-    /// `b"sample"` — generic sampling stream.
+    /// `b"sample"` — generic sampling stream. Returns `u32`.
     Sample,
-    /// `b"shuffle"` — agent-order shuffles within a step.
+    /// `b"shuffle"` — agent-order shuffles within a step. Returns `u32`.
     Shuffle,
-    /// `b"conception"` — reproduction roll.
+    /// `b"conception"` — reproduction roll. Returns `u32`.
     Conception,
+    /// `b"uniform"` — uniform sample in `[0, 1)`. Returns `f32`.
+    /// Backs `rng.uniform(lo, hi)` after lowering wraps with
+    /// `lo + draw * (hi - lo)`.
+    Uniform,
+    /// `b"gauss"` — standard-normal sample (mean 0, stddev 1).
+    /// Returns `f32`. Backs `rng.gauss(mu, sigma)` after lowering
+    /// wraps with `mu + draw * sigma`. WGSL emit is responsible
+    /// for the Box-Muller (or equivalent) transform.
+    Gauss,
+    /// `b"coin"` — fair coin flip. Returns `bool`. Backs
+    /// `rng.coin()` directly (nullary, no wrapping).
+    Coin,
+    /// `b"uniform_int"` — uniform integer sample. Returns `i32`
+    /// (interpreted as raw bits of the underlying `per_agent_u32`
+    /// draw, bitcast to `i32`). Backs `rng.uniform_int(lo, hi)`
+    /// after lowering wraps with `lo + abs(draw) % (hi - lo)`.
+    UniformInt,
 }
 
 impl RngPurpose {
@@ -728,6 +764,10 @@ impl RngPurpose {
             RngPurpose::Sample => b"sample",
             RngPurpose::Shuffle => b"shuffle",
             RngPurpose::Conception => b"conception",
+            RngPurpose::Uniform => b"uniform",
+            RngPurpose::Gauss => b"gauss",
+            RngPurpose::Coin => b"coin",
+            RngPurpose::UniformInt => b"uniform_int",
         }
     }
 
@@ -738,6 +778,27 @@ impl RngPurpose {
             RngPurpose::Sample => "sample",
             RngPurpose::Shuffle => "shuffle",
             RngPurpose::Conception => "conception",
+            RngPurpose::Uniform => "uniform",
+            RngPurpose::Gauss => "gauss",
+            RngPurpose::Coin => "coin",
+            RngPurpose::UniformInt => "uniform_int",
+        }
+    }
+
+    /// The IR-level result type of a [`crate::cg::expr::CgExpr::Rng`]
+    /// node carrying this purpose. Internal purposes return `U32`
+    /// (raw `per_agent_u32` draw); the spec-named purposes return
+    /// the type the spec advertises for their surface method.
+    pub fn result_ty(self) -> super::expr::CgTy {
+        use super::expr::CgTy;
+        match self {
+            RngPurpose::Action
+            | RngPurpose::Sample
+            | RngPurpose::Shuffle
+            | RngPurpose::Conception => CgTy::U32,
+            RngPurpose::Uniform | RngPurpose::Gauss => CgTy::F32,
+            RngPurpose::Coin => CgTy::Bool,
+            RngPurpose::UniformInt => CgTy::I32,
         }
     }
 }
@@ -1393,6 +1454,15 @@ mod tests {
                 "rng(conception)",
                 b"conception".as_slice(),
             ),
+            // Spec-named typed surfaces (Gap #4 — stochastic_probe).
+            (RngPurpose::Uniform, "rng(uniform)", b"uniform".as_slice()),
+            (RngPurpose::Gauss, "rng(gauss)", b"gauss".as_slice()),
+            (RngPurpose::Coin, "rng(coin)", b"coin".as_slice()),
+            (
+                RngPurpose::UniformInt,
+                "rng(uniform_int)",
+                b"uniform_int".as_slice(),
+            ),
         ];
         for (purpose, expected_display, expected_bytes) in purposes {
             let h = DataHandle::Rng { purpose };
@@ -1400,6 +1470,25 @@ mod tests {
             assert_eq!(purpose.as_bytes(), expected_bytes);
             assert_roundtrip(&h);
         }
+    }
+
+    /// Each `RngPurpose` carries its natural IR-level result type. The
+    /// internal purposes (drawn by the lower-level `rng.<name>()`
+    /// surface) all return `U32`; the spec-named purposes return the
+    /// type their surface method advertises (`f32` / `bool` / `i32`).
+    /// The lowering pass relies on this map when building the typed
+    /// `CgExpr::Rng { purpose, ty: purpose.result_ty() }` node.
+    #[test]
+    fn rng_purpose_result_ty_matches_spec_surface() {
+        use super::super::expr::CgTy;
+        assert_eq!(RngPurpose::Action.result_ty(), CgTy::U32);
+        assert_eq!(RngPurpose::Sample.result_ty(), CgTy::U32);
+        assert_eq!(RngPurpose::Shuffle.result_ty(), CgTy::U32);
+        assert_eq!(RngPurpose::Conception.result_ty(), CgTy::U32);
+        assert_eq!(RngPurpose::Uniform.result_ty(), CgTy::F32);
+        assert_eq!(RngPurpose::Gauss.result_ty(), CgTy::F32);
+        assert_eq!(RngPurpose::Coin.result_ty(), CgTy::Bool);
+        assert_eq!(RngPurpose::UniformInt.result_ty(), CgTy::I32);
     }
 
     // ---- Equality + Hash ----

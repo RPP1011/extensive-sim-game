@@ -833,7 +833,7 @@ pub fn data_handle_ty(h: &DataHandle) -> CgTy {
             | SpatialStorageKind::GridStarts
             | SpatialStorageKind::ChunkSums => CgTy::U32,
         },
-        H::Rng { .. } => CgTy::U32,
+        H::Rng { purpose } => purpose.result_ty(),
         // Plumbing-only handles. These are touched only by
         // [`crate::cg::op::PlumbingKind`] ops, which carry no embedded
         // `CgExpr` reads (their reads/writes are sourced structurally
@@ -1371,17 +1371,29 @@ pub fn type_check(
             }
         },
 
-        CgExpr::Rng { ty, .. } => {
-            // RNG always produces u32 (the underlying primitive returns
-            // u32; downstream consumers cast to f32/i32/etc.).
-            if *ty != CgTy::U32 {
+        CgExpr::Rng { purpose, ty } => {
+            // Each `RngPurpose` has a natural result type:
+            //  - `Action` / `Sample` / `Shuffle` / `Conception` →
+            //    `U32` (the raw `per_agent_u32` draw, exposed by the
+            //    lower-level surface).
+            //  - `Uniform` / `Gauss` → `F32` (unit interval / standard
+            //    normal — the WGSL emit performs the conversion from
+            //    the underlying `u32` draw).
+            //  - `Coin` → `Bool`.
+            //  - `UniformInt` → `I32` (raw bits bitcast).
+            //
+            // The lowering pass is responsible for setting the claimed
+            // `ty` to `purpose.result_ty()`; this check enforces the
+            // invariant.
+            let expected = purpose.result_ty();
+            if *ty != expected {
                 return Err(TypeError::ClaimedResultMismatch {
                     node: node_id,
-                    expected: CgTy::U32,
+                    expected,
                     got: *ty,
                 });
             }
-            Ok(CgTy::U32)
+            Ok(expected)
         }
 
         CgExpr::Select {
@@ -2210,6 +2222,55 @@ mod tests {
                 got: CgTy::F32,
             }
         );
+    }
+
+    #[test]
+    fn type_check_rng_purpose_natural_ty_pairing() {
+        // Each `RngPurpose` carries a per-purpose natural result type
+        // (`purpose.result_ty()`); the type checker's
+        // `ClaimedResultMismatch` arm enforces that the claimed `ty`
+        // on `CgExpr::Rng { purpose, ty }` matches it. Internal
+        // purposes return U32; spec-named purposes return the type
+        // their surface method advertises.
+        let cases = [
+            (RngPurpose::Action, CgTy::U32),
+            (RngPurpose::Sample, CgTy::U32),
+            (RngPurpose::Shuffle, CgTy::U32),
+            (RngPurpose::Conception, CgTy::U32),
+            (RngPurpose::Uniform, CgTy::F32),
+            (RngPurpose::Gauss, CgTy::F32),
+            (RngPurpose::Coin, CgTy::Bool),
+            (RngPurpose::UniformInt, CgTy::I32),
+        ];
+        for (purpose, expected_ty) in cases {
+            // Positive: claimed ty matches purpose.result_ty().
+            let arena: Vec<CgExpr> = vec![CgExpr::Rng {
+                purpose,
+                ty: expected_ty,
+            }];
+            let ctx = TypeCheckCtx::new(&arena);
+            let ok = type_check(&arena[0], CgExprId(0), &ctx)
+                .unwrap_or_else(|e| panic!("expected ok for {purpose:?}: {e:?}"));
+            assert_eq!(ok, expected_ty);
+            // Negative: claimed ty mismatches purpose.result_ty().
+            let wrong_ty = if expected_ty == CgTy::U32 {
+                CgTy::F32
+            } else {
+                CgTy::U32
+            };
+            let arena: Vec<CgExpr> = vec![CgExpr::Rng {
+                purpose,
+                ty: wrong_ty,
+            }];
+            let ctx = TypeCheckCtx::new(&arena);
+            let err = type_check(&arena[0], CgExprId(0), &ctx)
+                .expect_err("type-check should reject mismatched claimed ty");
+            assert!(matches!(
+                err,
+                TypeError::ClaimedResultMismatch { expected, got, .. }
+                    if expected == expected_ty && got == wrong_ty
+            ));
+        }
     }
 
     // ---- Task 5.5d: AgentSelfId / PerPairCandidateId / ReadLocal ----
