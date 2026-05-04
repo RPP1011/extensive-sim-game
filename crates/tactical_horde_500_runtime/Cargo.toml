@@ -1,0 +1,25 @@
+[package]
+name = "tactical_horde_500_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/tactical_horde_500.sim`.
+# Eleventh REAL gameplay-shaped fixture: 1000-agent SCALE-UP for
+# multi-verb pair-field cascade (3 verbs × 1M cells = 3M mask cells
+# per tick). Combines mass_battle_100v100's role distribution
+# (Tank/Healer/DPS) with megaswarm_1000's 1000-agent population +
+# CPU-side sweep_dead_to_sentinel workaround for the apply_damage
+# non-atomic RMW pile-on race.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

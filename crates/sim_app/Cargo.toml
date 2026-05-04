@@ -161,6 +161,13 @@ village_day_cycle_runtime = { path = "../village_day_cycle_runtime" }
 # free-for-all with ONE verb (Strike). Performance probe — answers
 # "does pair-field scoring scale to 1000² without spatial narrowing?"
 megaswarm_1000_runtime = { path = "../megaswarm_1000_runtime" }
+# Tactical horde 500 — ELEVENTH real fixture. Combines mass_battle_100v100's
+# 3-verb cascade (Tank Strike + DPS Snipe + Healer Heal) with megaswarm_1000's
+# 1000-agent population, so pair-field scoring runs THREE verbs against
+# 1M cells/verb = 3M mask cells/tick. Tests whether multi-verb cascade
+# at 1000-agent scale holds together — the load-bearing question for
+# unit-scale tactical strategy gameplay.
+tactical_horde_500_runtime = { path = "../tactical_horde_500_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -281,3 +288,7 @@ path = "src/village_day_cycle_app.rs"
 [[bin]]
 name = "megaswarm_1000_app"
 path = "src/megaswarm_1000_app.rs"
+
+[[bin]]
+name = "tactical_horde_500_app"
+path = "src/tactical_horde_500_app.rs"
