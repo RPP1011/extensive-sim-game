@@ -200,6 +200,14 @@ boss_fight_runtime = { path = "../boss_fight_runtime" }
 # repurposed as `pair_offset`. Performance probe: does pair-field
 # scoring stay competitive past the per-dispatch hardware ceiling?
 megaswarm_10000_runtime = { path = "../megaswarm_10000_runtime" }
+# Objective Capture 10v10 — seventeenth REAL fixture and first
+# COMPETITIVE OBJECTIVE-CONTROL gameplay. 10 Red vs 10 Blue race for
+# hold time on a central control point. Two-layer execution: GPU
+# runs the compiled .sim (verb cascade + chronicle + view-fold) for
+# end-to-end smoke; host-side authoritative layer drives the real
+# 10v10 (team-filtered targeting, movement-toward-objective, contest
+# scoring).
+objective_capture_10v10_runtime = { path = "../objective_capture_10v10_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -344,3 +352,7 @@ path = "src/boss_fight_app.rs"
 [[bin]]
 name = "megaswarm_10000_app"
 path = "src/megaswarm_10000_app.rs"
+
+[[bin]]
+name = "objective_capture_10v10_app"
+path = "src/objective_capture_app.rs"

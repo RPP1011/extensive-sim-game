@@ -1,0 +1,26 @@
+[package]
+name = "objective_capture_10v10_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/objective_capture_10v10.sim`
+# — first COMPETITIVE OBJECTIVE-CONTROL gameplay-shaped fixture.
+# 10 Red vs 10 Blue with combat + host-side movement + host-side
+# objective contest scoring (Option B from the agent prompt).
+# Mirrors `duel_1v1_runtime` shape: build.rs lowers the .sim through
+# the DSL compiler into `OUT_DIR/generated.rs`; src/lib.rs owns the
+# GPU context, per-buffer storage, kernel cache, per-tick dispatch,
+# AND the host-side position/objective bookkeeping.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }
