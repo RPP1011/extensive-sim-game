@@ -1,0 +1,180 @@
+// trade_market_real — second REAL gameplay-shaped fixture (after
+// duel_1v1) and FIRST sim to drive economic gameplay off real
+// pair-field reads on Item-flavoured agent slots.
+//
+// SHAPE
+// -----
+//
+// Two creature roles share a single Agent SoA via mana-marker
+// discrimination (Option A from the task brief: bypass real
+// `entity X : Item` storage writes since `agents.set_<field>`
+// covers the Agent SoA but no equivalent `items.set_<field>`
+// exists yet — the per-Item write surface would surface a fresh
+// gap chain. We KEEP the real `entity TradeGood : Item` decl
+// + a witness `items.base_price(0)` read so the Item-SoA path
+// stays genuinely lit, just not as the primary storage).
+//
+//   - alive=1u + mana < 500.0  →  Trader. hp = wealth.
+//   - alive=1u + mana >= 500.0 →  Good.   hp = price, mana = quantity+500.
+//
+// The runtime initialises slots 0..49 as Traders (mana = 1.0,
+// hp = 100.0 wealth) and slots 50..59 as Goods (mana = 1000.0 +
+// quantity, hp = 5.0 + slot*1.0 starting price).
+//
+// PER-TICK CHAIN
+// --------------
+//
+//   1. mask_verb_Buy — pair-field gates: self is trader, target is
+//      good with quantity > 0, self can afford it. Writes mask_0.
+//   2. scoring — pair-field argmax over candidates. Score is
+//      `(10000.0 - target.hp)` so the CHEAPEST in-stock good wins.
+//      Emits one ActionSelected{actor=trader, action_id=0,
+//      target=good_slot} per gated trader.
+//   3. physics_verb_chronicle_Buy — gates on action_id==0u, emits
+//      one Trade{buyer:self, seller:target, price:agents.hp(target),
+//      good_idx:0} per ActionSelected.
+//   4. physics ApplyTrade — on Trade event:
+//        - new_wealth = agents.hp(buyer) - price
+//        - agents.set_hp(buyer, new_wealth)
+//        - new_quantity = agents.mana(seller) - 1.0   (still >= 500
+//          because we start each good with mana = 500 + initial_qty)
+//        - agents.set_mana(seller, new_quantity)
+//        - new_price = agents.hp(seller) + price_step (supply/demand)
+//        - agents.set_hp(seller, new_price)
+//        - if (new_wealth <= 0.0) → bankruptcy: set_alive(buyer, false)
+//
+// OBSERVABLES
+// -----------
+//
+//   - trader_volume[i] (per-buyer Trade count): rises monotonically
+//     for any Trader who successfully bought at least once.
+//   - good_revenue[g] (per-seller Trade-price sum): rises for goods
+//     that sold; the cheapest goods initially sell first, so price
+//     rises (supply/demand) push the next-cheapest into the cheapest
+//     slot. The trace SHOULD show (a) total trade volume > 0,
+//     (b) at least one good's price drifted upward, (c) at least
+//     one trader's wealth dropped below the starting 100.0.
+//
+// DEFERRED GAP
+// ------------
+//
+// Real `items.set_price(g, x)` would let goods live as Item entities
+// (not Agent slots). Today only `agents.set_*` setters exist
+// (crates/dsl_compiler/src/cg/lower/physics.rs:751-759). Sidestepped
+// by Option A — real Item-SoA writes wait for a separate gap-close
+// session.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Trade {
+  buyer:    AgentId,
+  seller:   AgentId,
+  price:    f32,
+  good_idx: u32,
+}
+
+entity Trader : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Good : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+// Real Item declaration — kept as a witness so the Item-SoA read
+// path (lowered to `tradegood_base_price[idx]` WGSL binding) stays
+// exercised end-to-end. The runtime allocates a 10-slot
+// tradegood_base_price buffer; the verb's `when` clause floor-checks
+// each good's current price against `items.base_price(0)` so the
+// read is on the live execution path (not just declaration-only).
+entity TradeGood : Item {
+  base_price: f32,
+}
+
+config market {
+  // Threshold to discriminate trader (mana<500) from good
+  // (mana>=500). Init values keep traders at mana=1, goods at
+  // mana = 1000+initial_quantity.
+  role_marker:    f32 = 500.0,
+  // Per-trade price step — goods with successful sales see their
+  // price rise (basic supply/demand).
+  price_step:     f32 = 0.5,
+}
+
+// Buy verb — a Trader picks the CHEAPEST in-stock Good they can
+// afford. Pair-field scoring per pair_scoring_probe Gap-A close
+// (commit 3f28febb). The score reads target.hp = good's price;
+// inverted so cheapest = highest utility.
+//
+// Mask predicate: self is alive trader (mana<role_marker), target is
+// alive good (mana>=role_marker), good has stock (mana>=role_marker
+// is also "still in market"), self can afford (self.hp>=target.hp),
+// and target's price is at or above the floor (witness Item-SoA
+// read).
+verb Buy(self, target: Agent) =
+  action BuyAction
+  when (self.alive
+        && target.alive
+        && target != self
+        && self.mana < config.market.role_marker
+        && target.mana >= config.market.role_marker
+        && agents.hp(target) >= items.base_price(0)
+        && self.hp >= agents.hp(target))
+  emit Trade {
+    buyer:    self,
+    seller:   target,
+    price:    agents.hp(target),
+    good_idx: 0,
+  }
+  // Pair-field score — cheapest target.hp wins argmax. The
+  // `agents.mana(target)` term biases the score so goods (mana >=
+  // role_marker = 500) dominate traders (mana = 1) by a wide margin
+  // — the inner argmax loop would otherwise consider trader slots
+  // (whose hp is "wealth", typically 0..100) as candidates.
+  // Goods compete on `(10000.0 - target.hp)` after the bias, so the
+  // CHEAPEST in-stock good wins. Goods with quantity 0 (mana drops
+  // back to role_marker) lose by exactly `price_step` per spent
+  // unit — no perfect cutoff, but the surrounding mask gate
+  // captures the floor (`agents.hp(target) >= items.base_price(0)`)
+  // so a fully-priced-out good still has a sensible bid.
+  score (10000.0 - agents.hp(target) + agents.mana(target) * 100.0)
+
+// Apply trade — chronicle physics. On Trade event:
+//   - buyer wealth -= price; if wealth <= 0 set_alive(buyer,false)
+//   - seller (good) quantity -= 1 (encoded in mana)
+//   - seller (good) price += price_step (supply/demand)
+@phase(post)
+physics ApplyTrade {
+  on Trade { buyer: b, seller: s, price: p, good_idx: _ } {
+    let new_wealth = agents.hp(b) - p;
+    agents.set_hp(b, new_wealth);
+    if (new_wealth <= 0.0) {
+      agents.set_alive(b, false);
+    }
+    let new_quantity = agents.mana(s) - 1.0;
+    agents.set_mana(s, new_quantity);
+    let new_price = agents.hp(s) + config.market.price_step;
+    agents.set_hp(s, new_price);
+  }
+}
+
+// Per-buyer trade count — observability view. After T ticks with
+// successful trades, `trader_volume[i]` = number of buys i made.
+@materialized(on_event = [Trade])
+view trader_volume(buyer: Agent) -> f32 {
+  initial: 0.0,
+  on Trade { buyer: b, seller: _, price: _, good_idx: _ } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-seller (good) revenue — observability view. After T ticks
+// each Good slot's value = total wealth flowed into it.
+@materialized(on_event = [Trade])
+view good_revenue(seller: Agent) -> f32 {
+  initial: 0.0,
+  on Trade { buyer: _, seller: s, price: p, good_idx: _ } { self += p }
+  clamp: [0.0, 1000000.0],
+}
