@@ -1797,6 +1797,7 @@ dependencies = [
  "tom_probe_runtime",
  "trade_market_real_runtime",
  "trade_market_runtime",
+ "trophic_3tier_runtime",
  "verb_probe_runtime",
  "village_day_cycle_runtime",
 ]
@@ -2124,6 +2125,19 @@ dependencies = [
 
 [[package]]
 name = "trade_market_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
+name = "trophic_3tier_runtime"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
