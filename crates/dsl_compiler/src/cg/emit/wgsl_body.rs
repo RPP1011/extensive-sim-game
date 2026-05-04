@@ -141,9 +141,10 @@ pub struct EmitCtx<'a> {
     /// View-fold body emit scratch: the LocalId of the last
     /// `Let { value: EventField, ty: AgentId, … }` emitted in the
     /// current stmt list. ViewStorage assigns ("self += value")
-    /// pick up this local as the per-row index, so
-    /// `view_storage_primary[local_<N>] += value`. Cleared on every
-    /// stmt-list emit start so cross-list state can't leak.
+    /// pick up this local as the per-row index, so the assign
+    /// becomes a CAS-loop over `view_storage_primary[local_<N>]`
+    /// (`atomicLoad` + `atomicCompareExchangeWeak`). Cleared on
+    /// every stmt-list emit start so cross-list state can't leak.
     ///
     /// Tracking via interior mutability mirrors `tile_walk_index` —
     /// keeps the existing `&EmitCtx` signature intact.
@@ -1028,15 +1029,29 @@ fn lower_cg_stmt_body_to_wgsl(
                         view_slot_token(*slot),
                     );
                     let _ = view; // structural emit names by slot
-                    // The view storage binding is `array<u32>` (see
+                    // The view storage binding is
+                    // `array<atomic<u32>>` (see
                     // build_view_fold_bindings) but every shipped
-                    // view today is f32-typed. Bitcast through f32
-                    // for the read-modify-write so naga's type checker
-                    // accepts the load+add+store. When non-f32 view
-                    // storage lands, this branches on the view's
-                    // element type from `view_signatures`.
+                    // view today is f32-typed. The accumulator add
+                    // is racy under contention (multiple GPU threads
+                    // writing the same slot per tick) so we emit a
+                    // CAS loop: atomicLoad → bitcast<f32> → add rhs
+                    // → bitcast<u32> → atomicCompareExchangeWeak,
+                    // retrying on the weak-CAS failure path. This
+                    // satisfies P11 (Reduction Determinism) at the
+                    // cost of a per-thread spin under heavy
+                    // contention; sort-then-fold is a future
+                    // enhancement that side-steps the spin entirely.
+                    // When non-f32 view storage lands, this
+                    // branches on the view's element type from
+                    // `view_signatures`.
                     return Ok(format!(
-                        "{storage}[local_{idx_local}] = bitcast<u32>(bitcast<f32>({storage}[local_{idx_local}]) + ({rhs}));"
+                        "loop {{\n\
+                         \x20   let old = atomicLoad(&{storage}[local_{idx_local}]);\n\
+                         \x20   let new_val = bitcast<u32>(bitcast<f32>(old) + ({rhs}));\n\
+                         \x20   let result = atomicCompareExchangeWeak(&{storage}[local_{idx_local}], old, new_val);\n\
+                         \x20   if (result.exchanged) {{ break; }}\n\
+                         }}"
                     ));
                 }
                 return Ok(format!("_ = ({});", rhs));

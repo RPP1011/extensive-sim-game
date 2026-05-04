@@ -1539,8 +1539,18 @@ fn build_view_fold_bindings(view_name: &str, cfg_struct: &str) -> Vec<KernelBind
         KernelBinding {
             slot: 2,
             name: "view_storage_primary".into(),
-            access: AccessMode::ReadWriteStorage,
-            wgsl_ty: "array<u32>".into(),
+            // B1 fix: the fold body emits a CAS loop over this slot
+            // (`atomicLoad` + `atomicCompareExchangeWeak`) so the WGSL
+            // type must be `array<atomic<u32>>`. AccessMode::AtomicStorage
+            // wraps `wgsl_ty="u32"` into the atomic array form via
+            // `lower_wgsl_bindings`. Rust BGL entry is unchanged
+            // (`bgl_storage(N, false)` covers both atomic and
+            // non-atomic). Anchor/ids slots remain non-atomic — they
+            // alias primary's buffer via `unwrap_or(primary_buf)` at
+            // record time but the WGSL declarations are independent
+            // (the kernel body never indexes anchor/ids today).
+            access: AccessMode::AtomicStorage,
+            wgsl_ty: "u32".into(),
             bg_source: BgSource::ViewHandle {
                 accessor: accessor.clone(),
                 tuple_idx: 0,
@@ -4249,10 +4259,14 @@ mod tests {
                 "array<u32>".to_string(),
             ),
             (
+                // B1 fix: primary slot is AtomicStorage so the
+                // CAS-loop write-back type-checks. wgsl_ty="u32"
+                // is wrapped to `array<atomic<u32>>` by
+                // `lower_wgsl_bindings`.
                 2,
                 "view_storage_primary".to_string(),
-                "ReadWriteStorage".to_string(),
-                "array<u32>".to_string(),
+                "AtomicStorage".to_string(),
+                "u32".to_string(),
             ),
             (
                 3,
