@@ -37,6 +37,7 @@ For a complete DSL program, all four artefacts are produced from the same DSL so
 - **`invariant`** — static, runtime, or debug-only predicates over state.
 - **`probe`** — named scenario + behavioral assertion evaluated against seeded trajectories.
 - **`metric`** — runtime observability declaration.
+- **`spatial_query`** — named per-pair candidate filter referenced by mask `from`-clauses and physics fold-iter sources via `spatial.<name>(...)` (§2.12).
 
 ---
 
@@ -181,6 +182,15 @@ sort_by distance(self, _) limit K { ... }
 @fidelity(>= Medium)           // skip evaluation at lower fidelity
 ```
 
+##### Sibling view-shape annotations
+
+`@materialized` views may carry one of the following storage-shape annotations as a sibling (mutually exclusive with each other and with an explicit `storage = ...` argument inside `@materialized(...)`):
+
+- `@symmetric_pair_topk(K = N)` — pair-keyed storage with top-K bounded retention. Lowers to `StorageHint::SymmetricPairTopK { k: N }`. Equivalent to `@materialized(storage = symmetric_pair_topk(K = N))`.
+- `@per_entity_ring(K = N)` — per-entity ring buffer with capacity `N`. Lowers to `StorageHint::PerEntityRing { k: N }`. Equivalent to `@materialized(storage = per_entity_ring(K = N))`.
+
+Both forms require an integer literal `K` argument; `K` is clamped into `u16`. Verified: `crates/dsl_ast/src/resolve.rs::lower_view_kind`.
+
 The compiler emits:
 - For `@materialized`: a field on the corresponding entity + an event-dispatch table mapping each `on_event` to the update body. GPU-amenable materializations sort events by target before commutative reduction.
 - For `@lazy`: an inline function referenced from mask predicates, scoring expressions, and cascade bodies.
@@ -221,7 +231,7 @@ Constraints: requires a sibling `@materialized` annotation; `rate` is a compile-
 Cascade rules respond to events and emit further events. They never mutate state directly — all writes go through `emit`. Phase-tagged ordering prevents races.
 
 ```
-physics <name> @phase(pre | event | post) {
+physics <name> @phase(pre | event | post | per_agent) {
   on <EventPattern> where <predicate> {
     emit <EventName> { <field>: <expr>, ... }
     ...
@@ -239,7 +249,9 @@ physics collapse_chain @phase(event) {
 ```
 
 Annotations:
-- `@phase(pre | event | post)` — fixed three-phase ordering.
+- `@phase(pre | event | post)` — fixed three-phase ordering. Each rule fires once per matching event in the cascade.
+- `@phase(per_agent)` — extends the phase set: dispatch is `PerAgent` (one body invocation per alive agent per tick), and the handler's `on <Pattern>` clause is satisfied for every alive agent regardless of event-ring contents. Used by every per-tick movement / steering rule (`assets/sim/boids.sim`, `predator_prey_min.sim`, `target_chaser.sim`, `crowd_navigation_min.sim`, `particle_collision_min.sim`, `swarm_event_storm.sim`, `spatial_probe.sim`). Within the `per_agent` body, `self` is bound to the iterating agent slot and the lowering ignores `on_event`. Verified: `crates/dsl_compiler/src/cg/lower/physics.rs::is_per_agent_phase`.
+- `@cpu_only` — the rule is dispatched only on the host (scalar Rust) backend; the GPU lowering skips it entirely. Used for handlers whose bodies touch host-only surfaces (chronicle `String` payloads, dev-time logging) — example: `assets/sim/predator_prey_min.sim::ChronicleDeath`. Verified: `crates/dsl_compiler/src/cg/lower/driver.rs::lower_all_physics` (`if rule.cpu_only { continue; }`).
 - `@before(OtherRule)` / `@after(OtherRule)` — explicit ordering between rules in the same phase (parser accepted; enforcement pending — see audit callout above).
 - `@terminating_in(N)` — asserts the cascade converges within N hops when self-emission is possible.
 
@@ -384,6 +396,34 @@ metric {
 ```
 
 Alerts emit structured log records to the engine telemetry sink. Metrics are sim-observability only — no coupling to training.
+
+### 2.12 `spatial_query` declaration
+
+A `spatial_query` declares a named per-pair candidate filter that mask `from`-clauses and physics fold-iter sources reference via the `spatial.<name>(...)` namespace (§7.2).
+
+```
+spatial_query <name>(self: AgentId, candidate: AgentId [, <value_arg>: <type> ...])
+  = <filter_expr>
+```
+
+The body is a single expression returning `bool`. `self` is the iterating agent; `candidate` is the per-pair binder the spatial walk yields. Additional `value_arg` parameters are call-site arguments substituted into the filter at lowering time.
+
+```
+// assets/sim/boids.sim
+spatial_query nearby_other(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// assets/sim/spatial_probe.sim
+spatial_query nearby_probe(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// assets/sim/predator_prey_min.sim
+spatial_query nearby_other(self: AgentId, candidate: AgentId) = candidate != self
+```
+
+The compiler emits the filter into the spatial walker (today: full per-cell scan; radius-bounded walks pending — see `cg/emit/kernel.rs::spatial_filtered_walk_body`). At reference sites, the call shape `spatial.<name>(self [, value_args...])` is the only authoring surface — the resolver routes it through `NamespaceCall { ns: Spatial, method: <name>, ... }` and rejects unknown names with `ResolveError::UnknownSpatialQuery`.
+
+Verified: `crates/dsl_ast/src/parser.rs::spatial_query_decl`, `crates/dsl_compiler/src/cg/lower/driver.rs::mask_spatial_kind`.
 
 ---
 
@@ -825,6 +865,30 @@ Deterministic random sampling backed by `SimState.rng_state`.
 | `query.nearby_agents(pos, radius)` | `(Vec3, f32) -> [AgentId]` |
 | `query.within_planar(pos, radius)` | `(Vec3, f32) -> [AgentId]` — planar (XY) distance |
 | `query.nearby_items(pos, radius)` | `(Vec3, f32) -> [ItemId]` |
+| `query.nearest_hostile_to(actor, radius)` | `(AgentId, f32) -> Option<AgentId>` — nearest hostile (species predicate) within `radius`. Argmin on distance; ties broken on raw `AgentId`. CPU lowering: `crate::spatial::nearest_hostile_to`. |
+| `query.nearest_hostile_to_or(actor, radius, fallback)` | `(AgentId, f32, AgentId) -> AgentId` — sentinel-returning sibling of `nearest_hostile_to`. Returns `fallback` when no hostile is found, so the physics rule body can stay in the GPU-emittable subset (no `if let Some` narrowing). Verified: registered in `crates/dsl_compiler/src/cg/lower/driver.rs::populate_namespace_registry` and exercised by the CG-level spatial lowering. |
+| `query.nearby_kin(actor, radius)` | `(AgentId, f32) -> [AgentId]` — same-species spatial scan, returns every alive same-species neighbour within `radius`. Used by the `fear_spread_on_death` pattern to emit a `FearSpread` event per kin. Bounded by `SpatialHash::within_radius`'s cell-reach cap. |
+| `query.nearest_k(center, k, max_radius)` | `(AgentId, u32 literal, f32) -> [AgentId]` — top-K topological neighbour query. Returns up to `k` same-species neighbours sorted ascending by distance (ties broken on `AgentId`). The `k` arg MUST be a non-negative integer literal so the GPU emitter can bake the heap size into a compile-time `array<u32, K>`. CPU lowering: `crate::spatial::nearest_k`. |
+
+> Status: every entry above resolves through `stdlib::method_sig`; `nearest_hostile_to_or` additionally has a registered WGSL stub in `populate_namespace_registry`. The other three (`nearest_hostile_to`, `nearby_kin`, `nearest_k`) are CPU-only at present. Treat them as part of the spec contract — they back the engagement / kin-broadcast physics rules called out in the registry comments.
+
+#### `spatial`
+
+References to `spatial_query <name>(...)` declarations (§2.12). The method set is open-ended: every declared `spatial_query` adds one method to this namespace.
+
+| Method | Signature |
+|---|---|
+| `spatial.<name>(self [, value_args...])` | `(AgentId [, ...]) -> [AgentId]` — yields per-pair `candidate` bindings filtered by the named `spatial_query` body. Used as a `from`-clause source for masks and as an iter source inside fold / `for` bodies. |
+
+Examples (all from `assets/sim/`):
+
+```
+let n = sum(other in spatial.nearby_other(self) where ...) // boids.sim
+for prey in spatial.closest_prey(self) { ... }              // predator_prey.sim
+for other in spatial.nearby_particles(self, R) { ... }      // particle_collision.sim
+```
+
+Resolution: the symbol-table seeds `spatial` as `NamespaceId::Spatial`; method dispatch consults `symbols.spatial_queries`. Unknown names surface as `ResolveError::UnknownSpatialQuery`. The `query.<name>` namespace is NOT an alias for `spatial.<name>` — `query.*` is the older flat-call surface (the table above), and `spatial.*` is the user-declared filter surface introduced by Phase 7. Verified: `crates/dsl_ast/src/resolve.rs:104` (namespace seed), `crates/dsl_compiler/src/cg/lower/driver.rs::mask_spatial_kind` (lowering routes only `NamespaceId::Spatial`).
 
 #### `voxel`
 
@@ -847,7 +911,7 @@ Deterministic random sampling backed by `SimState.rng_state`.
 >
 > Active stun semantic: `world.tick < agents.stun_expires_at_tick(a)`. Task 143 changed the storage but did not update this spec.
 >
-> Audit also lists ~15 implementation-extra methods not catalogued here (`agents.creature_type`, `agents.is_hostile_to`, `agents.engaged_with*`, `agents.record_memory`, `agents.cooldown_next_ready*`, `query.nearest_hostile_to*`, `query.nearby_kin`, full `abilities.*` and `terrain.*` namespaces).
+> Audit's "implementation-extra" inventory (`agents.is_hostile_to`, `agents.engaged_with*`, `agents.record_memory`, `agents.cooldown_next_ready*`, `query.nearest_hostile_to*`, `query.nearby_kin`, `query.nearest_k`, full `abilities.*` and `terrain.*` namespaces) is now catalogued below in the Engagement / hostility / memory / cooldown extensions table and the new `abilities` / `terrain` namespace sections.
 > See `docs/superpowers/notes/2026-04-26-audit-language-stdlib.md` for full inventory (57 stdlib functions: 30 ✅ / 16 ⚠️ / 7 ❌ / 4 🤔).
 
 Per-agent slot accessors used by `physics` cascades.
@@ -856,6 +920,9 @@ Per-agent slot accessors used by `physics` cascades.
 |---|---|
 | `agents.alive(a)` | `(AgentId) -> bool` |
 | `agents.pos(a)` | `(AgentId) -> Vec3` |
+| `agents.vel(a)` | `(AgentId) -> Vec3` — per-agent velocity. Companion to `pos`; written by `set_vel`. |
+| `agents.set_pos(a, v)` | `(AgentId, Vec3) -> ()` — write-back of the per-agent position slot. The canonical `@phase(per_agent)` per-tick movement step (`set_vel` + `set_pos`) is exercised by every shipped fixture (boids, predator-prey, particle-collision, target-chaser, swarm-event-storm, crowd-navigation, spatial-probe). |
+| `agents.set_vel(a, v)` | `(AgentId, Vec3) -> ()` |
 | `agents.hp(a)` | `(AgentId) -> f32` |
 | `agents.max_hp(a)` | `(AgentId) -> f32` |
 | `agents.shield_hp(a)` | `(AgentId) -> f32` |
@@ -878,7 +945,64 @@ Per-agent slot accessors used by `physics` cascades.
 | `agents.thirst(a)` | `(AgentId) -> f32` — 0.0 sated … 1.0 parched |
 | `agents.rest_timer(a)` | `(AgentId) -> f32` — 0.0 rested … 1.0 exhausted |
 
+##### Engagement / hostility / memory / cooldown extensions
+
+These rows extend the `agents` namespace with the engagement-lock, hostility-predicate, memory-emit, and cooldown surfaces called out in the audit. All resolve through `crates/dsl_ast/src/resolve.rs::stdlib::method_sig`; the engagement and hostility predicates additionally appear in the CG namespace registry (`populate_namespace_registry`).
+
+| Method | Signature |
+|---|---|
+| `agents.is_hostile_to(a, b)` | `(AgentId, AgentId) -> bool` — species-level hostility predicate. Returns `false` when either slot is empty. The DSL-declared `view is_hostile(a, b)` body forwards here so the hostility matrix stays on `CreatureType::is_hostile_to` without a hand-written shim. |
+| `agents.engaged_with(a)` | `(AgentId) -> Option<AgentId>` — wraps `state.agent_engaged_with(a)`. Returns the engagement partner if any, else `None`. Used by mask predicates (the engagement-lock clause in `mask Cast`). |
+| `agents.engaged_with_or(a, default)` | `(AgentId, AgentId) -> AgentId` — unwrap-or-default sibling of `engaged_with`. Returns the partner if any, else `default`. Lets the rule body sentinel on the agent itself when no partner is set, keeping the body GPU-emittable. |
+| `agents.set_engaged_with(a, partner)` | `(AgentId, AgentId) -> ()` — eagerly writes the SoA `hot_engaged_with` slot to `Some(partner)` so same-tick cascade handlers observe the new partner before the view-fold rebuild. |
+| `agents.clear_engaged_with(a)` | `(AgentId) -> ()` — paired with `set_engaged_with`; clears the slot. Split form avoids needing an `Option` ctor on the DSL surface for the two-arg setter. |
+| `agents.record_memory(observer, source, payload, confidence, tick)` | `(AgentId, AgentId, _, f32, u32) -> ()` — quantises `confidence` to q8, constructs a `MemoryEvent`, and pushes it onto the observer's cold memory ring. Primitive used by the `record_memory` physics rule. |
+| `agents.cooldown_next_ready(a)` | `(AgentId) -> u32` — read of the per-agent global-cooldown cursor. |
+| `agents.set_cooldown_next_ready(a, tick)` | `(AgentId, u32) -> ()` — direct write of the same cursor (legacy single-cursor form). |
+| `agents.record_cast_cooldowns(caster, ability, now)` | `(AgentId, AbilityId, u32) -> ()` — split-primitive form (2026-04-22 ability-cooldowns subsystem): writes BOTH the per-agent global cursor (with `config.combat.global_cooldown_ticks`) and the per-(agent, slot) local cursor (with the ability's own `gate.cooldown_ticks`). Replaces `set_cooldown_next_ready` in the `physics cast` rule; fixes the shared-cursor bug. |
+
+> `agents.set_move_target(member, dest)` appears in `assets/sim/crowd_navigation.sim:268` (the full fixture; the runtime crate compiles `crowd_navigation_min.sim` instead). Parser accepts; lowering: TODO — verify before relying on this surface. Not present in `stdlib::method_sig` today.
+
 These map one-to-one to `SimState::agent_alive`, `agent_pos`, `agent_hp`, `agent_max_hp`, `agent_shield_hp`, `agent_attack_damage`, `set_agent_hp`, `set_agent_shield_hp`, `kill_agent`, etc. The compiler emits namespace calls as direct method invocations on the `&mut SimState` parameter passed to a cascade handler.
+
+#### `abilities`
+
+Ability-registry accessor used by the `cast` physics rule and by mask gates. The singular alias `ability::` shares the same method schema (added 2026-04-22 so designers can write `ability::on_cooldown(<slot>)` in mask / physics predicates with the natural singular form).
+
+| Method | Signature |
+|---|---|
+| `abilities.is_known(id)` | `(AbilityId) -> bool` — registry-membership predicate; lets the cast handler bail silently on an unregistered ability id. |
+| `abilities.cooldown_ticks(id)` | `(AbilityId) -> u32` — returns the program's `gate.cooldown_ticks`. |
+| `abilities.effects(id)` | `(AbilityId) -> [EffectOp]` — yields the program's ordered `EffectOp` list for the dispatch for-loop to iterate. |
+| `abilities.known(agent, ability)` | `(AgentId, AbilityId) -> bool` — 2-arg mask-side sibling of `is_known`. The emitter lowers it to a registry `get(...).is_some()`, ignoring the agent argument (mask-gate does not yet key on per-agent spellbooks). |
+| `abilities.cooldown_ready(agent, ability)` | `(AgentId, AbilityId) -> bool` — folds `state.tick >= agent_cooldown_next_ready` into a single boolean the mask predicate can `&&`-chain. |
+| `abilities.on_cooldown(slot)` | `(u8 literal) -> bool` — designer-facing inverted form of `cooldown_ready`. Returns `true` while the slot is still on cooldown (the natural "gate blocks" reading). The implicit subject is the rule's `self`; the slot arg coerces to `u8` via the argument lowering in the emitter. Use the `ability::on_cooldown(s)` singular form in mask / physics predicates. |
+| `abilities.hostile_only(ability)` | `(AbilityId) -> bool` — exposes the program's `Gate.hostile_only` field for target-side filters. |
+| `abilities.range(ability)` | `(AbilityId) -> f32` — exposes the program's `Area::SingleTarget.range` field for target-side filters. |
+
+#### `terrain`
+
+Terrain backend accessor (MVP Task 81). Routes through `SimState.terrain: Arc<dyn TerrainQuery>` at emit time. The flat-plane default keeps every legacy scoring / physics path unchanged; examples and future mask rows opt in by reading through this namespace.
+
+| Method | Signature |
+|---|---|
+| `terrain.line_of_sight(from, to)` | `(Vec3, Vec3) -> bool` |
+
+The `height_at` / `walkable` surface on `TerrainQuery` is intentionally not exposed at this slice — the smallest possible method set the height-bonus scoring gate needs.
+
+#### Roadmap-stub namespaces
+
+The following namespaces resolve in `stdlib::method_sig` (so calls type-check) but their backing runtime is not yet wired. Predicates evaluate against placeholder state; emitters return `Unsupported`. Each is keyed to a Roadmap subsystem; the grammar stub keeps the surface stable until the subsystem lands.
+
+| Namespace | Methods | Roadmap |
+|---|---|---|
+| `membership` | `is_group_member(agent, kind) -> bool`, `is_group_leader(agent) -> bool`, `can_join_group(agent, group) -> bool`, `is_outcast(agent, group) -> bool` | §1 (Memberships) |
+| `relationship` | `is_hostile(a, b) -> bool`, `is_friendly(a, b) -> bool`, `knows_well(a, b) -> bool` | §3 (Relationships) — replaces Combat Foundation's stub `is_hostile_to` once the relationship runtime lands |
+| `theory_of_mind` | `believes_knows(observer, subject, domain) -> bool`, `can_deceive(observer, subject, fact) -> bool`, `is_surprised_by(observer, subject, domain) -> bool` | §6 (Theory-of-mind) — bit reads against the 32-bit `Relationship.believed_knowledge` domain bitset |
+| `group` | `exists(id) -> bool`, `is_active(id) -> bool`, `has_leader(id) -> bool`, `can_afford_from_treasury(g, cost) -> bool` | §7 (Groups) — singular `group` is distinct from the legacy collection accessor `groups` |
+| `quest` | `can_accept(agent, q) -> bool`, `is_target(entity, q) -> bool`, `party_near_destination(party, q) -> bool` | §12 (Quests) — singular `quest` is distinct from the legacy collection accessor `quests` |
+
+Status: Parser accepts; resolver gives each call its declared return type. Lowering: TODO — verify the backing runtime before relying on these surfaces. See `docs/superpowers/roadmap.md` for the per-subsystem cutover plan.
 
 ### 7.3 Metric wrappers are NOT stdlib functions
 
