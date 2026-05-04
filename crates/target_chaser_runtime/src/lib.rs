@@ -141,7 +141,7 @@ impl TargetChaserState {
         let cfg = physics_ChaseTarget::PhysicsChaseTargetCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("target_chaser_runtime::cfg"),

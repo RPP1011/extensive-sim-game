@@ -935,14 +935,17 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             Ok(format!("{}({})", builtin_name(*fn_id), parts.join(", ")))
         }
         CgExpr::Rng { purpose, ty: _ } => {
-            // `per_agent_u32(seed, agent_id, tick, "<purpose>")` —
-            // matches the engine RNG primitive named in
-            // `engine::rng::per_agent_u32`. The seed/agent/tick names
-            // are placeholders for Task 4.2, which knows the kernel's
-            // local variable bindings.
+            // `per_agent_u32(seed, agent_id, tick, <purpose_id>u)` —
+            // calls the WGSL prelude function emitted by
+            // [`super::program::compose_rng_prelude`] when any kernel
+            // body references `per_agent_u32(`. `seed` / `agent_id` /
+            // `tick` are bound by `thread_indexing_preamble`; the
+            // purpose is a stable numeric id from
+            // `RngPurpose::wgsl_id()` (WGSL has no string literals —
+            // stochastic_probe Gap #3, 2026-05-04).
             Ok(format!(
-                "per_agent_u32(seed, agent_id, tick, \"{}\")",
-                rng_purpose_token(*purpose)
+                "per_agent_u32(seed, agent_id, tick, {}u)",
+                purpose.wgsl_id()
             ))
         }
         CgExpr::Select {
@@ -2609,23 +2612,28 @@ mod tests {
 
     #[test]
     fn lower_rng_every_purpose() {
+        // Purpose tags are emitted as numeric `<id>u` literals (WGSL has
+        // no string type; stochastic_probe Gap #3 close, 2026-05-04). The
+        // ids come from `RngPurpose::wgsl_id()` and are fixed forever
+        // (host parity helper `engine::rng::per_agent_u32_pcg` accepts
+        // the same ids — P11 cross-backend bit-equality).
         let mut prog = empty_prog();
         let cases = [
             (
                 RngPurpose::Action,
-                "per_agent_u32(seed, agent_id, tick, \"action\")",
+                "per_agent_u32(seed, agent_id, tick, 1u)",
             ),
             (
                 RngPurpose::Sample,
-                "per_agent_u32(seed, agent_id, tick, \"sample\")",
+                "per_agent_u32(seed, agent_id, tick, 2u)",
             ),
             (
                 RngPurpose::Shuffle,
-                "per_agent_u32(seed, agent_id, tick, \"shuffle\")",
+                "per_agent_u32(seed, agent_id, tick, 3u)",
             ),
             (
                 RngPurpose::Conception,
-                "per_agent_u32(seed, agent_id, tick, \"conception\")",
+                "per_agent_u32(seed, agent_id, tick, 4u)",
             ),
         ];
         for (purpose, expected) in cases {

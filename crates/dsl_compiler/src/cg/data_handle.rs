@@ -740,6 +740,25 @@ impl RngPurpose {
             RngPurpose::Conception => "conception",
         }
     }
+
+    /// Stable u32 discriminant emitted into WGSL kernel bodies as the
+    /// purpose tag for `per_agent_u32(seed, agent_id, tick, purpose_id)`.
+    /// WGSL has no string type (stochastic_probe Gap #3, 2026-05-04), so
+    /// the lowered call substitutes the variant's numeric id for the
+    /// would-be byte literal. The host parity helper
+    /// `engine::rng::per_agent_u32_pcg` accepts the same id so CPU/GPU
+    /// streams stay bit-equal under shared inputs (P11). Variant ids
+    /// are FIXED FOREVER — adding a new variant appends a fresh id;
+    /// reordering existing variants is a determinism-breaking change
+    /// requiring a schema-hash bump.
+    pub fn wgsl_id(self) -> u32 {
+        match self {
+            RngPurpose::Action => 1,
+            RngPurpose::Sample => 2,
+            RngPurpose::Shuffle => 3,
+            RngPurpose::Conception => 4,
+        }
+    }
 }
 
 impl fmt::Display for RngPurpose {

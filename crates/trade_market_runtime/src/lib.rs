@@ -209,7 +209,7 @@ impl TradeMarketState {
         let physics_cfg = physics_WanderAndTrade::PhysicsWanderAndTradeCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let physics_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -259,7 +259,7 @@ impl TradeMarketState {
         let mask_cfg_init = mask_verb_ExecuteTrade::MaskVerbExecuteTradeCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let mask_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -271,7 +271,7 @@ impl TradeMarketState {
         let scoring_cfg_init = scoring::ScoringCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let scoring_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -284,8 +284,8 @@ impl TradeMarketState {
             physics_verb_chronicle_ExecuteTrade::PhysicsVerbChronicleExecuteTradeCfg {
                 event_count: 0,
                 tick: 0,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         let chronicle_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -588,7 +588,7 @@ impl CompiledSim for TradeMarketState {
         let physics_cfg = physics_WanderAndTrade::PhysicsWanderAndTradeCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.physics_cfg_buf,
@@ -669,7 +669,7 @@ impl CompiledSim for TradeMarketState {
         let mask_cfg = mask_verb_ExecuteTrade::MaskVerbExecuteTradeCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.mask_cfg_buf,
@@ -692,7 +692,7 @@ impl CompiledSim for TradeMarketState {
         let scoring_cfg = scoring::ScoringCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf,
@@ -723,8 +723,8 @@ impl CompiledSim for TradeMarketState {
             physics_verb_chronicle_ExecuteTrade::PhysicsVerbChronicleExecuteTradeCfg {
                 event_count: self.agent_count,
                 tick: self.tick as u32,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         self.gpu.queue.write_buffer(
             &self.chronicle_cfg_buf,

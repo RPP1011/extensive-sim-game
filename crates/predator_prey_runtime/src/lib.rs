@@ -215,7 +215,7 @@ impl PredatorPreyState {
         let cfg = physics_MoveHare::PhysicsMoveHareCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let cfg_buf = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("predator_prey_runtime::cfg"),

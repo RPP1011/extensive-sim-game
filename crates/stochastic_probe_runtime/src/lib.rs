@@ -132,11 +132,16 @@ impl StochasticProbeState {
             false, // no top-K ids
         );
 
-        // Per-kernel cfg uniforms.
+        // Per-kernel cfg uniforms. `seed: u32` is the low 32 bits of
+        // the runtime's u64 world seed — the GPU primitive
+        // `per_agent_u32(seed, agent_id, tick, purpose_id)` keys on
+        // u32 (matches `RNG_WGSL_PRELUDE` in dsl_compiler).
+        let seed_lo = seed as u32;
         let physics_cfg_init = physics_MaybeFire::PhysicsMaybeFireCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: seed_lo,
+            _pad: 0,
         };
         let physics_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -148,7 +153,8 @@ impl StochasticProbeState {
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: seed_lo,
+            _pad: 0,
         };
         let seed_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -216,8 +222,17 @@ impl CompiledSim for StochasticProbeState {
 
         // (1) Per-tick clear of event_tail. Resets the host-side
         // `tail_value()` estimate to 0 so `note_emits` accumulates
-        // cleanly within the tick.
+        // cleanly within the tick. Also clear the ring header words
+        // for the first `agent_count` slots so stale `kind=1u` tags
+        // from previous ticks don't get re-folded — necessary because
+        // this fixture's producer emits a STOCHASTIC count (≈30% of
+        // agents per tick) but the consumer dispatches over the
+        // upper bound (`agent_count`); without clearing, slots past
+        // the actual producer tail still hold prior-tick tags. See
+        // `EventRing::clear_ring_headers_in` doc.
         self.event_ring.clear_tail_in(&mut encoder);
+        self.event_ring
+            .clear_ring_headers_in(&self.gpu, &mut encoder, self.agent_count);
 
         // (2) physics_MaybeFire — reads agent_alive. For each alive
         // agent: draws rng.action(), gates `(draw % 100) < 30`,
@@ -226,7 +241,8 @@ impl CompiledSim for StochasticProbeState {
         let physics_cfg = physics_MaybeFire::PhysicsMaybeFireCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: self.seed as u32,
+            _pad: 0,
         };
         self.gpu
             .queue
@@ -255,7 +271,8 @@ impl CompiledSim for StochasticProbeState {
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: self.seed as u32,
+            _pad: 0,
         };
         self.gpu
             .queue

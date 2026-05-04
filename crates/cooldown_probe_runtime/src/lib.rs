@@ -123,7 +123,7 @@ impl CooldownProbeState {
         let physics_cfg_init = physics_CheckAndCast::PhysicsCheckAndCastCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let physics_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -135,7 +135,7 @@ impl CooldownProbeState {
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let seed_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -212,7 +212,7 @@ impl CompiledSim for CooldownProbeState {
         let physics_cfg = physics_CheckAndCast::PhysicsCheckAndCastCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu
             .queue
@@ -238,7 +238,7 @@ impl CompiledSim for CooldownProbeState {
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu
             .queue

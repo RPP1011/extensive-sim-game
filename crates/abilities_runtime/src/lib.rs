@@ -211,7 +211,7 @@ impl AbilitiesProbeState {
         let mask_cfg_init = fused_mask_verb_Strike::FusedMaskVerbStrikeCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let mask_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -223,7 +223,7 @@ impl AbilitiesProbeState {
         let scoring_cfg_init = scoring::ScoringCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let scoring_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -236,8 +236,8 @@ impl AbilitiesProbeState {
             physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
                 event_count: 0,
                 tick: 0,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         let chronicle_strike_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -250,8 +250,8 @@ impl AbilitiesProbeState {
             physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
                 event_count: 0,
                 tick: 0,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         let chronicle_heal_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -263,7 +263,7 @@ impl AbilitiesProbeState {
         let seed_cfg_init = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let seed_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -275,7 +275,7 @@ impl AbilitiesProbeState {
         let snapshot_cfg_init = kick_snapshot::KickSnapshotCfg {
             agent_cap: agent_count,
             tick: 0,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         let snapshot_cfg_buf = gpu.device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -405,7 +405,7 @@ impl CompiledSim for AbilitiesProbeState {
         let mask_cfg = fused_mask_verb_Strike::FusedMaskVerbStrikeCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu
             .queue
@@ -431,7 +431,7 @@ impl CompiledSim for AbilitiesProbeState {
         let scoring_cfg = scoring::ScoringCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu.queue.write_buffer(
             &self.scoring_cfg_buf,
@@ -465,8 +465,8 @@ impl CompiledSim for AbilitiesProbeState {
             physics_verb_chronicle_Strike::PhysicsVerbChronicleStrikeCfg {
                 event_count: self.agent_count,
                 tick: self.tick as u32,
+                seed: 0,
                 _pad0: 0,
-                _pad1: 0,
             };
         self.gpu.queue.write_buffer(
             &self.chronicle_strike_cfg_buf,
@@ -496,8 +496,8 @@ impl CompiledSim for AbilitiesProbeState {
         let chronicle_cfg = physics_verb_chronicle_Heal::PhysicsVerbChronicleHealCfg {
             event_count: self.agent_count,
             tick: self.tick as u32,
+            seed: 0,
             _pad0: 0,
-            _pad1: 0,
         };
         self.gpu.queue.write_buffer(
             &self.chronicle_heal_cfg_buf,
@@ -523,7 +523,7 @@ impl CompiledSim for AbilitiesProbeState {
         let seed_cfg = seed_indirect_0::SeedIndirect0Cfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
-            _pad: [0; 2],
+            seed: 0, _pad: 0,
         };
         self.gpu
             .queue

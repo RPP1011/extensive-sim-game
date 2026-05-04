@@ -1639,20 +1639,25 @@ fn compute_op_kind_short(kind: &ComputeOpKind) -> &'static str {
 fn build_generic_cfg_struct_decl(cfg_struct: &str) -> String {
     // `tick: u32` joined the layout when PerAgent rules with `emit
     // <Event>` bodies started referencing `tick` in the per-tick
-    // event payload header. Backwards-compat note: every runtime
-    // constructs cfg manually (per-fixture lib.rs), so the new
-    // field surfaces as a missing-field error at the per-fixture
-    // build site — caller updates that in lockstep.
+    // event payload header. `seed: u32` joined when the rng.* surface
+    // wired through to GPU (stochastic_probe Gaps #1-#3 close,
+    // 2026-05-04): the WGSL kernel preamble binds `let seed =
+    // cfg.seed;` so any `per_agent_u32(seed, agent_id, tick, purpose)`
+    // call resolves. Backwards-compat note: every runtime
+    // constructs cfg manually (per-fixture lib.rs), so the renamed
+    // padding (`_pad: [u32; 2]` → `seed: u32, _pad: u32`) surfaces as
+    // a missing-field error at the per-fixture build site — caller
+    // updates that in lockstep.
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub _pad: [u32; 2] }}"
+         pub struct {cfg_struct} {{ pub agent_cap: u32, pub tick: u32, pub seed: u32, pub _pad: u32 }}"
     )
 }
 
 fn build_generic_cfg_build_expr(cfg_struct: &str) -> String {
     format!(
-        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, _pad: [0; 2] }}"
+        "{cfg_struct} {{ agent_cap: state.agent_cap(), tick: state.tick as u32, seed: state.seed as u32, _pad: 0 }}"
     )
 }
 
@@ -1671,7 +1676,7 @@ fn build_per_event_emit_cfg_struct_decl(cfg_struct: &str) -> String {
     format!(
         "#[repr(C)]\n\
          #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]\n\
-         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub _pad0: u32, pub _pad1: u32 }}"
+         pub struct {cfg_struct} {{ pub event_count: u32, pub tick: u32, pub seed: u32, pub _pad0: u32 }}"
     )
 }
 
@@ -1682,7 +1687,7 @@ fn build_per_event_emit_cfg_struct_decl(cfg_struct: &str) -> String {
 /// [`build_view_fold_cfg_build_expr`] convention.
 fn build_per_event_emit_cfg_build_expr(cfg_struct: &str) -> String {
     format!(
-        "{cfg_struct} {{ event_count: 0, tick: state.tick as u32, _pad0: 0, _pad1: 0 }}"
+        "{cfg_struct} {{ event_count: 0, tick: state.tick as u32, seed: state.seed as u32, _pad0: 0 }}"
     )
 }
 
@@ -3380,11 +3385,16 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
             // `tick` is bound from the cfg uniform so PerAgent rules
             // with `emit <Event>` bodies can write the tick header
             // word into the event ring (every event payload starts
-            // with [tag, tick]). Always emitted even for non-emitting
-            // kernels — naga drops the unused let cleanly.
+            // with [tag, tick]). `seed` is bound so any
+            // `per_agent_u32(seed, agent_id, tick, purpose)` call
+            // (lowered from `rng.*`) resolves against the cfg uniform
+            // (stochastic_probe Gap #1 close, 2026-05-04). Always
+            // emitted even for non-rng-touching kernels — naga drops
+            // the unused let cleanly.
             "let agent_id = gid.x;\n\
              if (agent_id >= cfg.agent_cap) { return; }\n\
-             let tick = cfg.tick;\n\n"
+             let tick = cfg.tick;\n\
+             let seed = cfg.seed;\n\n"
                 .to_string()
         }
         DispatchShape::PerEvent { source_ring } => format!(
@@ -3392,17 +3402,21 @@ fn thread_indexing_preamble(dispatch: &DispatchShape) -> String {
             // are always classified [`KernelKind::PerEventEmit`]
             // today (see `kernel_topology_to_spec_and_body`'s
             // `is_per_event_emit` gate), which stamps the
-            // `{ event_count, tick, ... }` cfg shape. Both
+            // `{ event_count, tick, seed, _pad0 }` cfg shape. Both
             // `cfg.event_count` and `cfg.tick` references below
-            // resolve against that shape. The ViewFold path has its
-            // own preamble (`build_view_fold_wgsl_body`) and never
-            // routes through this branch. If a future PerEvent
-            // generic kernel without an `Emit` body surfaces, the
-            // gate above must extend to stamp PerEventEmit
-            // unconditionally for any PerEvent dispatch.
+            // resolve against that shape; `cfg.seed` resolves any
+            // `per_agent_u32(...)` call lowered from `rng.*`
+            // (stochastic_probe Gap #1 close, 2026-05-04). The
+            // ViewFold path has its own preamble
+            // (`build_view_fold_wgsl_body`) and never routes through
+            // this branch. If a future PerEvent generic kernel
+            // without an `Emit` body surfaces, the gate above must
+            // extend to stamp PerEventEmit unconditionally for any
+            // PerEvent dispatch.
             "let event_idx = gid.x;\n\
              if (event_idx >= cfg.event_count) {{ return; }}\n\
              let tick = cfg.tick;\n\
+             let seed = cfg.seed;\n\
              // Indirect dispatch on event_ring_{}; tail count bounds gid.x.\n\n",
             source_ring.0
         ),
