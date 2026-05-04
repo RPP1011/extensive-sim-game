@@ -549,7 +549,19 @@ fn lower_stmt(
             // `String`, so unrecognised strings also route here under
             // the closed-set tag `"unknown"`.
             let op_label = canonical_self_update_op_label(op.as_str());
-            if op_label != "+=" {
+            // Two operators flow through the existing
+            // `ComputeOpKind::ViewFold` wrapper:
+            //   - `+=`: numeric accumulator (f32/i32/u32). Emits a
+            //     CAS+add loop in WGSL — see `wgsl_body.rs`.
+            //   - `|=`: bit-OR accumulator (u32). Emits a single
+            //     `atomicOr(&storage[idx], rhs)` — commutative +
+            //     associative so no CAS retry needed (P11). The emit
+            //     branches on the view's `result` type from
+            //     `view_signatures` (u32 → atomicOr; otherwise CAS+add).
+            // The remaining canonical operators (`=`, `-=`, `*=`, `/=`)
+            // would silently miscompile to `+=` semantics and surface
+            // as typed deferrals.
+            if op_label != "+=" && op_label != "|=" {
                 return Err(LoweringError::UnsupportedFoldOperator {
                     view: view_id,
                     op_label,
@@ -746,6 +758,11 @@ fn canonical_self_update_op_label(op: &str) -> &'static str {
         "-=" => "-=",
         "*=" => "*=",
         "/=" => "/=",
+        // Bit-OR accumulator — used by Theory-of-Mind belief fold to
+        // OR per-event fact bits into a per-(observer, subject) u32
+        // bitset. Lowers to WGSL `atomicOr(&storage[idx], rhs)` when
+        // the view's result type is `u32`.
+        "|=" => "|=",
         _ => "unknown",
     }
 }

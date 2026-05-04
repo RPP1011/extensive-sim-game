@@ -1,27 +1,29 @@
-//! Per-fixture runtime for `assets/sim/tom_probe.sim` — discovery probe
-//! of the Theory-of-Mind belief-read path.
+//! Per-fixture runtime for `assets/sim/tom_probe.sim` — Theory-of-Mind
+//! end-to-end probe (post-fix shape).
 //!
-//! NOTE: this crate exists primarily to surface the gap chain
-//! documented in `docs/superpowers/notes/2026-05-04-tom-probe.md`.
-//! Both physics rules in the .sim fixture (`CheckBelief` exercising
-//! `BeliefsAccessor` and `CheckBeliefBit` exercising
-//! `theory_of_mind.believes_knows()`) are dropped at CG-lower time
-//! today. The compiler still emits the `fact_witnesses` view-fold +
-//! the admin kernels, so this runtime stands up:
+//! ## What lights up
 //!
-//!   - the Knower SoA (pos, vel, alive)
-//!   - the LearnedFact event ring (which stays empty per tick)
-//!   - the fact_witnesses view storage (per-Knower f32, no @decay)
+//! - The Knower SoA (`agent_alive`).
+//! - The `BeliefAcquired` event ring + per-tick tail clear.
+//! - The `physics_WhatIBelieve` kernel (per-Knower; emits one
+//!   `BeliefAcquired { observer: self, subject: self, fact_bit: 1 }`
+//!   per tick into the ring).
+//! - The `fold_beliefs` kernel (per-event; OR's `fact_bit` into
+//!   `view_storage_primary[observer * agent_cap + subject]` via
+//!   WGSL native `atomicOr` — no CAS retry, P11 trivial).
+//! - Per-(observer, subject) belief storage: a single `u32` buffer
+//!   sized `agent_cap × agent_cap`, allocated locally (NOT through
+//!   `engine::gpu::ViewStorage` because that helper's host-side cache
+//!   is `Vec<f32>`; the bit pattern would be re-bitcast on every
+//!   readback). The buffer is the same `array<atomic<u32>>` BGL
+//!   shape the fold kernel expects, so binding parity holds.
 //!
-//! and dispatches the fold each tick. With no LearnedFact events
-//! ever written, fact_witnesses[i] = 0.0 for all i across all ticks
-//! — the OUTCOME (b) NO FIRE signal that the gap chain produces.
+//! ## Expected outcome (FULL FIRE)
 //!
-//! When the BeliefsAccessor + believes_knows lowering gaps close in
-//! follow-up work, this runtime needs ONE more thing the verb_probe
-//! runtime didn't: a per-(observer, target) belief storage SoA. The
-//! shape of that SoA is the OPEN DESIGN QUESTION surfaced by this
-//! probe (see the discovery doc, "Gap #3" — runtime infrastructure).
+//! After N ticks at agent_count = N: `beliefs(i, i) = 1u` for every
+//! alive Knower; every off-diagonal `beliefs(i, j != i) = 0u`. The
+//! tom_probe_app driver asserts both halves and reports OUTCOME (a)
+//! FULL FIRE on success.
 
 use engine::sim_trait::CompiledSim;
 use engine::GpuContext;
@@ -30,51 +32,37 @@ use wgpu::util::DeviceExt;
 
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-use engine::gpu::{EventRing, ViewStorage};
-
-#[repr(C)]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vec3Padded {
-    x: f32,
-    y: f32,
-    z: f32,
-    _pad: f32,
-}
-
-impl From<Vec3> for Vec3Padded {
-    fn from(v: Vec3) -> Self {
-        Self { x: v.x, y: v.y, z: v.z, _pad: 0.0 }
-    }
-}
+use engine::gpu::EventRing;
 
 /// Per-fixture state for the ToM probe. Carries the Knower SoA
-/// (`agent_alive`), the LearnedFact event ring, and the
-/// `fact_witnesses` view storage. Today the event ring stays empty
-/// every tick because both producer physics rules drop out at lower
-/// time.
+/// (`agent_alive`), the `BeliefAcquired` event ring, the `beliefs`
+/// per-(observer, subject) `u32` storage, and the cfg uniforms for
+/// the producer (`physics_WhatIBelieve`) + consumer (`fold_beliefs`)
+/// kernels.
 pub struct TomProbeState {
     gpu: GpuContext,
 
-    // -- Agent SoA (would be read by the producer rules if they
-    //    hadn't dropped out at lower time) --
-    /// 1 = alive, 0 = dead. Initialised all-1 so the (currently-
-    /// dropped) `self.alive` predicate would evaluate true.
-    #[allow(dead_code)]
+    // -- Agent SoA (read by physics_WhatIBelieve to gate `self.alive`) --
+    /// 1 = alive, 0 = dead. Initialised all-1 so every Knower fires
+    /// the producer rule each tick.
     agent_alive_buf: wgpu::Buffer,
 
-    // -- Per-(observer, target) belief storage placeholder --
+    // -- Per-(observer, subject) belief storage --
     //
-    // RUNTIME GAP #3 (see discovery doc): the lowered probe would
-    // need a per-(observer, target) f32 confidence buffer here, plus
-    // bind-group plumbing through the producer kernel. Today that
-    // shape is undecided (per-agent ring vs flattened pair grid vs
-    // BoundedMap mirror). Field stub kept so the design surface is
-    // visible in the runtime even though no buffer is allocated.
+    // `pair_map`-keyed: `agent_cap × agent_cap × u32`. The fold body
+    // indexes `view_storage_primary[observer * cfg.second_key_pop +
+    // subject]`. We allocate this locally (instead of via
+    // `engine::gpu::ViewStorage`) so the host-side readback can
+    // surface a `&[u32]` directly without an f32 bitcast round-trip.
+    beliefs_primary: wgpu::Buffer,
+    beliefs_staging: wgpu::Buffer,
+    beliefs_cache: Vec<u32>,
+    beliefs_dirty: bool,
 
-    // -- Event ring + per-view storage helpers --
+    // -- Event ring + per-kernel cfg uniforms --
     event_ring: EventRing,
-    fact_witnesses: ViewStorage,
-    fact_witnesses_cfg_buf: wgpu::Buffer,
+    physics_cfg_buf: wgpu::Buffer,
+    fold_cfg_buf: wgpu::Buffer,
 
     cache: dispatch::KernelCache,
 
@@ -87,10 +75,9 @@ impl TomProbeState {
     pub fn new(seed: u64, agent_count: u32) -> Self {
         let gpu = GpuContext::new_blocking().expect("init wgpu adapter + device");
 
-        // Knower SoA — only `alive` would be read by the (dropped)
-        // producer kernels. Allocate it for shape parity with
-        // verb_probe and so that when the lowering gap closes the
-        // binding is already in place.
+        // Knower SoA — `agent_alive` is the only field the producer
+        // rule reads (`where (self.alive)`). Every slot starts alive
+        // so every tick fires.
         let alive_init: Vec<u32> = vec![1u32; agent_count as usize];
         let agent_alive_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -99,41 +86,72 @@ impl TomProbeState {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
 
-        // Event-ring + fact_witnesses view storage (per-agent f32, no
-        // anchor, no ids — view declares no @decay).
-        let event_ring = EventRing::new(&gpu, "tom_probe_runtime");
-        let fact_witnesses = ViewStorage::new(
-            &gpu,
-            "tom_probe_runtime::fact_witnesses",
-            agent_count,
-            false, // no @decay anchor
-            false, // no top-K ids
-        );
+        // Per-(observer, subject) `beliefs` storage. `pair_map` →
+        // size = `agent_cap × agent_cap × u32`. The wgpu BGL is the
+        // same `array<atomic<u32>>` shape the fold kernel expects;
+        // we expose `STORAGE | COPY_SRC | COPY_DST` so the
+        // per-readback `copy_buffer_to_buffer → staging map` dance
+        // works.
+        let belief_slot_count = (agent_count as u64) * (agent_count as u64);
+        let belief_bytes = (belief_slot_count * 4).max(16);
+        let beliefs_primary = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tom_probe_runtime::beliefs_primary"),
+            size: belief_bytes,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let beliefs_staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tom_probe_runtime::beliefs_staging"),
+            size: belief_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
 
-        // The fold kernel's cfg uniform — same {event_count, tick,
-        // second_key_pop, _pad} layout that other view-folds use. We
-        // size event_count = 0 each tick because no producer rule
-        // emits today; if the gaps close, this becomes the ring
-        // tail count.
-        let fact_witnesses_cfg_init = fold_fact_witnesses::FoldFactWitnessesCfg {
+        let event_ring = EventRing::new(&gpu, "tom_probe_runtime");
+
+        let physics_cfg_init =
+            physics_WhatIBelieve::PhysicsWhatIBelieveCfg {
+                agent_cap: agent_count,
+                tick: 0,
+                _pad: [0, 0],
+            };
+        let physics_cfg_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("tom_probe_runtime::physics_WhatIBelieve_cfg"),
+                contents: bytemuck::bytes_of(&physics_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+        let fold_cfg_init = fold_beliefs::FoldBeliefsCfg {
             event_count: 0,
             tick: 0,
-            second_key_pop: 1,
+            // `beliefs(observer: Agent, subject: Agent)` — both keys
+            // are Agent, so second_key_pop = agent_count. The fold
+            // body composes `view_storage_primary[k1 *
+            // second_key_pop + k2]` so this MUST equal agent_count
+            // for the diagonal to land at index `i * N + i`.
+            second_key_pop: agent_count,
             _pad: 0,
         };
-        let fact_witnesses_cfg_buf =
+        let fold_cfg_buf =
             gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("tom_probe_runtime::fact_witnesses_cfg"),
-                contents: bytemuck::bytes_of(&fact_witnesses_cfg_init),
+                label: Some("tom_probe_runtime::fold_beliefs_cfg"),
+                contents: bytemuck::bytes_of(&fold_cfg_init),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
         Self {
             gpu,
             agent_alive_buf,
+            beliefs_primary,
+            beliefs_staging,
+            beliefs_cache: vec![0u32; belief_slot_count as usize],
+            beliefs_dirty: false,
             event_ring,
-            fact_witnesses,
-            fact_witnesses_cfg_buf,
+            physics_cfg_buf,
+            fold_cfg_buf,
             cache: dispatch::KernelCache::default(),
             tick: 0,
             agent_count,
@@ -141,11 +159,37 @@ impl TomProbeState {
         }
     }
 
-    /// Per-observer fact_witnesses accumulator (one f32 per Knower
-    /// slot). Stays at 0.0 today because both producer rules dropped
-    /// out at lower time.
-    pub fn fact_witnesses(&mut self) -> &[f32] {
-        self.fact_witnesses.readback(&self.gpu)
+    /// Per-(observer, subject) belief bitset, flattened row-major:
+    /// slot `[observer * agent_count + subject]` holds the OR-folded
+    /// fact bits the observer believes about the subject.
+    /// Length = `agent_count × agent_count`.
+    pub fn beliefs(&mut self) -> &[u32] {
+        if self.beliefs_dirty {
+            let mut encoder = self.gpu.device.create_command_encoder(
+                &wgpu::CommandEncoderDescriptor {
+                    label: Some("tom_probe_runtime::beliefs::readback"),
+                },
+            );
+            let bytes = (self.beliefs_cache.len() as u64) * 4;
+            encoder.copy_buffer_to_buffer(
+                &self.beliefs_primary,
+                0,
+                &self.beliefs_staging,
+                0,
+                bytes,
+            );
+            self.gpu.queue.submit(Some(encoder.finish()));
+            let slice = self.beliefs_staging.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |_| {});
+            self.gpu.device.poll(wgpu::PollType::Wait).expect("poll");
+            let mapped = slice.get_mapped_range();
+            let raw: &[u32] = bytemuck::cast_slice(&mapped);
+            self.beliefs_cache.copy_from_slice(raw);
+            drop(mapped);
+            self.beliefs_staging.unmap();
+            self.beliefs_dirty = false;
+        }
+        &self.beliefs_cache
     }
 
     pub fn agent_count(&self) -> u32 {
@@ -169,52 +213,87 @@ impl CompiledSim for TomProbeState {
             },
         );
 
-        // (1) Per-tick clear of event_tail. With no producer rule the
-        // ring stays empty, but we clear for shape parity.
+        // (1) Per-tick clear of event_tail. The producer rule
+        // atomicAdd's against it during physics_WhatIBelieve to
+        // acquire write slots; the count accumulates over the tick
+        // and the fold kernel reads it via cfg.event_count. Clearing
+        // here guarantees a fresh per-tick slot count even though
+        // event slots from prior ticks linger in the ring (the fold
+        // kernel's `event_idx >= cfg.event_count` early-return
+        // filters stale slots).
         self.event_ring.clear_tail_in(&mut encoder);
 
-        // (2) fold_fact_witnesses — reads LearnedFact events and
-        // accumulates into fact_witnesses[observer]. With no producer
-        // emitting LearnedFact today, the kernel's tag-check guard
-        // (event_ring[..0u] == LearnedFact_kind_id) finds zero
-        // matching slots and the storage stays at 0.0.
-        //
-        // event_count is sized to agent_count so that IF a producer
-        // ever lands and writes LearnedFact slots into the (currently
-        // pre-zeroed) ring, the fold would see them. With event_count
-        // = 0 today (the safe lower bound), the kernel early-returns
-        // on every thread and the ring is left untouched.
-        let event_count_estimate: u32 = 0;
-        let fact_witnesses_cfg = fold_fact_witnesses::FoldFactWitnessesCfg {
+        // (2) physics_WhatIBelieve — per-Knower; emits one
+        // `BeliefAcquired { observer: self, subject: self, fact_bit:
+        // 1 }` per tick when `self.alive`.
+        let physics_cfg = physics_WhatIBelieve::PhysicsWhatIBelieveCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            _pad: [0, 0],
+        };
+        self.gpu.queue.write_buffer(
+            &self.physics_cfg_buf,
+            0,
+            bytemuck::bytes_of(&physics_cfg),
+        );
+        let physics_bindings =
+            physics_WhatIBelieve::PhysicsWhatIBelieveBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                agent_alive: &self.agent_alive_buf,
+                cfg: &self.physics_cfg_buf,
+            };
+        dispatch::dispatch_physics_whatibelieve(
+            &mut self.cache,
+            &physics_bindings,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (3) fold_beliefs — per-event; OR's `fact_bit` into
+        // `beliefs_primary[observer * agent_cap + subject]` via
+        // `atomicOr`. We size event_count = agent_count: every alive
+        // Knower emits exactly one event per tick, so this is the
+        // exact upper bound (no skip / no over-dispatch). The
+        // kernel's `event_idx >= cfg.event_count` early-return
+        // filters anything beyond the producer's per-tick batch even
+        // if leftover slots from prior ticks remain in the ring.
+        let event_count_estimate = self.agent_count;
+        let fold_cfg = fold_beliefs::FoldBeliefsCfg {
             event_count: event_count_estimate,
             tick: self.tick as u32,
-            second_key_pop: 1,
+            second_key_pop: self.agent_count,
             _pad: 0,
         };
         self.gpu.queue.write_buffer(
-            &self.fact_witnesses_cfg_buf,
+            &self.fold_cfg_buf,
             0,
-            bytemuck::bytes_of(&fact_witnesses_cfg),
+            bytemuck::bytes_of(&fold_cfg),
         );
-        let fact_witnesses_bindings = fold_fact_witnesses::FoldFactWitnessesBindings {
+        let fold_bindings = fold_beliefs::FoldBeliefsBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
-            view_storage_primary: self.fact_witnesses.primary(),
-            view_storage_anchor: self.fact_witnesses.anchor(),
-            view_storage_ids: self.fact_witnesses.ids(),
+            view_storage_primary: &self.beliefs_primary,
+            // No `@decay` and no top-K → no anchor / no ids; the
+            // generated `record()` body falls back to primary via
+            // `unwrap_or(primary_buf)` per `kernel.rs`'s slot-aliasing
+            // convention.
+            view_storage_anchor: None,
+            view_storage_ids: None,
             sim_cfg: self.event_ring.sim_cfg(),
-            cfg: &self.fact_witnesses_cfg_buf,
+            cfg: &self.fold_cfg_buf,
         };
-        dispatch::dispatch_fold_fact_witnesses(
+        dispatch::dispatch_fold_beliefs(
             &mut self.cache,
-            &fact_witnesses_bindings,
+            &fold_bindings,
             &self.gpu.device,
             &mut encoder,
             event_count_estimate.max(1),
         );
 
         self.gpu.queue.submit(Some(encoder.finish()));
-        self.fact_witnesses.mark_dirty();
+        self.beliefs_dirty = true;
         self.tick += 1;
     }
 
@@ -227,8 +306,8 @@ impl CompiledSim for TomProbeState {
     }
 
     fn positions(&mut self) -> &[Vec3] {
-        // No positions tracked — return an empty slice. Same shape as
-        // verb_probe_runtime (which has the same comment).
+        // No positions tracked — return an empty slice. Same shape
+        // as verb_probe_runtime (which has the same comment).
         &[]
     }
 }

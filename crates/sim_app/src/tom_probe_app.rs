@@ -1,22 +1,32 @@
 //! ToM probe harness — drives `tom_probe_runtime` for N ticks and
-//! reports observed per-Knower fact_witnesses counts.
+//! asserts the per-(observer, subject) `beliefs` storage matches the
+//! seed bit pattern produced by `physics_WhatIBelieve`.
 //!
-//! ## Expected (belief-read cascade fires end-to-end, gap-free)
+//! ## Expected (FULL FIRE)
 //!
-//! With `agent_count = 32`, `ticks = 100`, every Knower's
-//! `beliefs(self).about(self).confidence > 0.5` predicate evaluates
-//! true (initial confidence = 1.0 by construction); every tick
-//! produces 32 `LearnedFact` events; after 100 ticks: fact_witnesses
-//! [i] = 100.0 for every i.
+//! With `agent_count = 32`, `ticks = 100`, every alive Knower emits
+//! one `BeliefAcquired { observer: self, subject: self, fact_bit: 1 }`
+//! per tick. The view's `self |= b` accumulator collapses every
+//! emission into the same diagonal cell, so after the FIRST tick:
 //!
-//! ## Observed today (BeliefsAccessor + believes_knows lowering gaps)
+//!   - `beliefs[i * N + i] == 1u` for every i in 0..N (diagonal).
+//!   - `beliefs[i * N + j] == 0u` for every i != j (off-diagonal).
 //!
-//! Both `CheckBelief` (BeliefsAccessor surface) and `CheckBeliefBit`
-//! (theory_of_mind.believes_knows surface) physics rules drop out at
-//! CG-lower time. No producer kernel is emitted; no LearnedFact
-//! events are ever written; fact_witnesses[i] = 0.0 for every slot.
+//! Subsequent ticks are idempotent (OR-ing a set bit is a no-op).
+//! The probe runs for TICKS=100 anyway to exercise the per-tick
+//! producer + fold dispatch chain end-to-end.
 //!
-//! Discovery write-up: `docs/superpowers/notes/2026-05-04-tom-probe.md`.
+//! ## OUTCOME classification
+//!
+//! - **(a) FULL FIRE** — diagonal == 1 everywhere AND off-diagonal
+//!   == 0 everywhere. The belief read/write path is end-to-end.
+//! - **(b) NO FIRE** — diagonal stayed 0; producer or fold kernel
+//!   dropped at compile time. (See git history for the pre-fix
+//!   discovery shape that surfaced this outcome.)
+//! - **(c) PARTIAL FIRE** — anything else; fold landed but the bit
+//!   pattern doesn't match the producer's emit. Indicates a
+//!   second_key_pop / event-field-offset mismatch between the
+//!   compiler's emit and the runtime's cfg uniform.
 
 use engine::CompiledSim;
 use tom_probe_runtime::TomProbeState;
@@ -24,13 +34,6 @@ use tom_probe_runtime::TomProbeState;
 const SEED: u64 = 0xCAFE_BABE_DEAD_BEEF;
 const AGENT_COUNT: u32 = 32;
 const TICKS: u64 = 100;
-// Each LearnedFact emit would bump fact_witnesses[observer] by 1.0
-// (per the view's `self += 1.0` body), so the analytical observable
-// after N ticks is N per slot. With 2 producer rules dropping (both
-// emit LearnedFact for the same observer/tick), the gap-free run
-// would produce 2 × N per slot — but the simpler 1-rule case is the
-// success threshold for the probe's OUTCOME (a) classification.
-const EMITS_PER_TICK: f32 = 1.0;
 
 fn main() {
     let mut sim = TomProbeState::new(SEED, AGENT_COUNT);
@@ -43,67 +46,99 @@ fn main() {
         sim.step();
     }
 
-    let fact_witnesses = sim.fact_witnesses().to_vec();
+    let beliefs = sim.beliefs().to_vec();
+    let n = AGENT_COUNT as usize;
     println!(
-        "tom_probe_app: finished — final tick={} agents={} fact_witnesses.len()={}",
+        "tom_probe_app: finished — final tick={} agents={} beliefs.len()={}",
         sim.tick(),
         sim.agent_count(),
-        fact_witnesses.len(),
+        beliefs.len(),
+    );
+    assert_eq!(
+        beliefs.len(),
+        n * n,
+        "beliefs must be sized agent_count^2 = {}",
+        n * n,
     );
 
-    // Expected analytical observable: fact_witnesses[i] = TICKS *
-    // EMITS_PER_TICK (one rule firing).
-    let expected_per_slot = (TICKS as f32) * EMITS_PER_TICK;
-
-    let mut min = f32::INFINITY;
-    let mut max = 0.0_f32;
-    let mut sum = 0.0_f32;
-    let mut zero_slots = 0usize;
-    for &v in &fact_witnesses {
-        min = min.min(v);
-        max = max.max(v);
-        sum += v;
-        if v == 0.0 {
-            zero_slots += 1;
+    // Diagonal: every (i, i) cell must equal 1u (the producer's
+    // `fact_bit = 1` OR'd into every (self, self) slot every tick).
+    let mut diagonal_ok = 0usize;
+    let mut diagonal_bad: Vec<(usize, u32)> = Vec::new();
+    for i in 0..n {
+        let v = beliefs[i * n + i];
+        if v == 1 {
+            diagonal_ok += 1;
+        } else {
+            diagonal_bad.push((i, v));
         }
     }
-    let mean = sum / fact_witnesses.len() as f32;
-    let nonzero_slots = fact_witnesses.len() - zero_slots;
-    let observed_fraction = (nonzero_slots as f32) / (fact_witnesses.len() as f32);
+
+    // Off-diagonal: every (i, j != i) cell must stay 0u (no producer
+    // ever emits `BeliefAcquired { observer: i, subject: j }` for i
+    // != j).
+    let mut offdiag_ok = 0usize;
+    let mut offdiag_bad: Vec<(usize, usize, u32)> = Vec::new();
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let v = beliefs[i * n + j];
+            if v == 0 {
+                offdiag_ok += 1;
+            } else {
+                offdiag_bad.push((i, j, v));
+            }
+        }
+    }
 
     println!(
-        "tom_probe_app: fact_witnesses readback — min={:.3} mean={:.3} max={:.3}",
-        min, mean, max,
+        "tom_probe_app: diagonal — {}/{} slots == 1u",
+        diagonal_ok, n,
     );
     println!(
-        "tom_probe_app: nonzero slots: {}/{} (fraction = {:.3}%)",
-        nonzero_slots,
-        fact_witnesses.len(),
-        observed_fraction * 100.0,
+        "tom_probe_app: off-diagonal — {}/{} slots == 0u",
+        offdiag_ok,
+        n * (n - 1),
     );
-    println!(
-        "tom_probe_app: expected per-slot value (single rule firing): {:.3} \
-         (= TICKS={} × emits_per_tick={:.3})",
-        expected_per_slot, TICKS, EMITS_PER_TICK,
-    );
+    if !diagonal_bad.is_empty() {
+        println!(
+            "tom_probe_app: diagonal mismatches (first 8): {:?}",
+            &diagonal_bad[..diagonal_bad.len().min(8)],
+        );
+    }
+    if !offdiag_bad.is_empty() {
+        println!(
+            "tom_probe_app: off-diagonal mismatches (first 8): {:?}",
+            &offdiag_bad[..offdiag_bad.len().min(8)],
+        );
+    }
 
-    if min >= expected_per_slot * 0.99 {
+    let diagonal_total = beliefs.iter().filter(|&&v| v != 0).count();
+    if diagonal_ok == n && offdiag_ok == n * (n - 1) {
         println!(
-            "tom_probe_app: OUTCOME = (a) FULL FIRE — every slot ≈ expected value; \
-             the BeliefsAccessor + believes_knows lowering gaps closed!",
+            "tom_probe_app: OUTCOME = (a) FULL FIRE — diagonal == 1u, \
+             off-diagonal == 0u; ToM belief read/write path lights up \
+             end-to-end (atomicOr fold body, pair_map storage, u32 \
+             view return type, |= self-update operator)",
         );
-    } else if max == 0.0 {
+    } else if diagonal_total == 0 {
         println!(
-            "tom_probe_app: OUTCOME = (b) NO FIRE — every slot stayed at 0.0; \
-             see docs/superpowers/notes/2026-05-04-tom-probe.md for the gap chain",
+            "tom_probe_app: OUTCOME = (b) NO FIRE — every cell stayed 0u; \
+             producer rule or fold kernel dropped at compile time. See \
+             docs/superpowers/notes/2026-05-04-tom-probe.md for the \
+             original gap-chain discovery doc.",
         );
+        std::process::exit(1);
     } else {
         println!(
-            "tom_probe_app: OUTCOME = (b) PARTIAL FIRE — {:.1}% of slots fired \
-             (mean = {:.3} vs expected {:.3})",
-            observed_fraction * 100.0,
-            mean,
-            expected_per_slot,
+            "tom_probe_app: OUTCOME = (c) PARTIAL FIRE — diagonal_ok={} \
+             offdiag_ok={} (total nonzero = {}). Likely cfg mismatch \
+             (second_key_pop or event-field offsets) between compiler \
+             emit and runtime cfg uniform.",
+            diagonal_ok, offdiag_ok, diagonal_total,
         );
+        std::process::exit(1);
     }
 }

@@ -1907,11 +1907,13 @@ fn parse_stmt(c: &mut Cursor) -> PResult<Stmt> {
         return Ok(Stmt::BeliefObserve(parse_belief_observe_stmt(c)?));
     }
     if c.starts_with("self") {
-        // Check for `self += / -= / *=` operators.
+        // Check for `self += / -= / *= / |=` operators.
         let save = c.pos;
         c.bump("self".len());
         c.skip_ws();
-        for op in ["+=", "-=", "*=", "/=", "="] {
+        // `|=` ordered before `=` so the lookahead `|` consumes both bytes
+        // (a bare `=` would also match `|=`'s tail otherwise).
+        for op in ["+=", "-=", "*=", "/=", "|=", "="] {
             if c.starts_with(op) {
                 c.bump(op.len());
                 c.skip_ws();

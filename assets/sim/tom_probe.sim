@@ -1,59 +1,48 @@
-// tom_probe — smallest end-to-end probe of the Theory-of-Mind read path.
+// tom_probe — Theory-of-Mind end-to-end probe (post-fix shape).
 //
-// Goal: drive a single belief-read expression through parse → resolve →
-// CG-lower and observe whether the lowering pass actually emits a real
-// per-(observer, target) belief storage read, by gating an event emit
-// on the read's value.
+// **Outcome target: (a) FULL FIRE.** Per-(observer, subject) belief
+// bitset is materialized as a `pair_map`-storage `view beliefs(...)
+// -> u32`. Each tick every alive Knower emits a `BeliefAcquired`
+// event with `fact_bit = 1`; the view's bit-OR accumulator
+// (`self |= b`) folds them into `beliefs(self, self)`. The runtime
+// reads back the primary storage and asserts the diagonal converged
+// to `1u` while every off-diagonal slot stayed `0u`.
 //
-// Today (baseline `b90a43a4`):
-//   - `IrExpr::BeliefsAccessor { observer, target, field }` exists in the
-//     IR (`crates/dsl_ast/src/ir.rs:360`).
-//   - The schema-hash already covers it (`crates/dsl_compiler/src/
-//     schema_hash.rs:832`).
-//   - The CG-lower expr arm at `crates/dsl_compiler/src/cg/lower/
-//     expr.rs:817` REJECTS with `LoweringError::UnsupportedAstNode {
-//     ast_label: "BeliefsAccessor", .. }` — there is no GPU/CPU
-//     lowering route for any belief read today.
-//   - The per-(observer, target) `BeliefState` storage is hand-written
-//     CPU-side (`crates/engine_data/src/belief.rs` →
-//     `SimState::cold_beliefs[observer]: BoundedMap<AgentId,
-//     BeliefState, 8>`) — but no GPU SoA buffer is allocated, no
-//     binding is generated, no kernel can read it.
-//   - The `theory_of_mind.believes_knows(observer, subject, domain) ->
-//     bool` namespace function (spec §6, dsl.md §7.2) is declared in
-//     the resolver's `method_sig` table but is NOT registered in the
-//     CG `namespace_registry` — so a call lowers via
-//     `lower_namespace_call`'s fallback to
-//     `LoweringError::UnsupportedNamespaceCall { ns: TheoryOfMind, .. }`.
-//   - The `theory-of-mind = []` feature in `crates/engine/Cargo.toml:
-//     55` exists but gates no code today (no `#[cfg(feature =
-//     "theory-of-mind")]` blocks anywhere in the engine outside the
-//     hand-written `cold_beliefs` field).
+// Sidesteps the AST-level `BeliefsAccessor` + `theory_of_mind.
+// believes_knows` namespace gaps by routing belief mutations through
+// regular events + view-fold infrastructure (P6: events ARE the
+// mutation channel). The pre-fix version of this file probed those
+// AST surfaces directly and dropped at lower time — see git history
+// for the discovery shape and `docs/superpowers/notes/2026-05-04-
+// tom-probe.md` for the gap chain.
 //
-// Discovery focus: this fixture probes BOTH belief-read surface
-// shapes:
-//   (A) `beliefs(self).about(self).confidence` — the sugar-free
-//       `BeliefsAccessor` IR shape, the closest analogue to the task's
-//       "agent.beliefs(other, fact_id) -> bool" specification (only it
-//       reads an `f32 confidence` slot instead of a `bool` bit, because
-//       no fact-id bitset surface exists in the IR).
-//   (B) `theory_of_mind.believes_knows(self, self, config.tom.
-//       fact_to_check)` — the namespace fn surface from spec §7.2 (a
-//       genuine `bool` bit-read against the per-(observer, subject)
-//       `Relationship.believed_knowledge: Bitset<32>` that the spec
-//       claims exists but the engine does not implement).
-//
-// EXPECTED OUTCOME: (b) NO FIRE — both physics rules drop out at
-// CG-lower time; `fact_witnesses[i] = 0.0` for every slot across all
-// 100 ticks. This fixture exists to surface the gap chain.
+// Compiler extensions this fixture exercises (all landed by the same
+// PR that flipped this fixture's outcome):
+//   1. `view <name>(...) -> u32` return type plumbed through
+//      `populate_view_bodies_and_signatures` → `view_signatures.
+//      result == CgTy::U32`.
+//   2. `|=` self-update operator accepted at parse + resolve + view
+//      lower (alongside the existing `+=` family).
+//   3. `pair_map` storage hint composes a 2-D index
+//      `local_obs * cfg.second_key_pop + local_sub` per the existing
+//      predator_focus fold-body shape.
+//   4. WGSL emit branches on `view_signatures.result` — `u32` views
+//      use `atomicOr(&storage[idx], rhs)` (commutative + associative
+//      → P11 trivial); `f32` views keep the existing CAS+add loop.
 
 event Tick { }
 
+// Per-event belief acquisition record. Each emission OR's `fact_bit`
+// into `beliefs(observer, subject)`. `fact_bit` is pre-shifted by the
+// producer (e.g. `1u << fact_id`) so the view body itself doesn't
+// need shift-arithmetic — matches the bare-bones u32 accumulator
+// shape the probe targets.
 @replayable
 @gpu_amenable
-event LearnedFact {
+event BeliefAcquired {
   observer: AgentId,
-  fact_id:  u32,
+  subject:  AgentId,
+  fact_bit: u32,
 }
 
 entity Knower : Agent {
@@ -61,57 +50,30 @@ entity Knower : Agent {
   vel: vec3,
 }
 
-config tom {
-  fact_to_check: u32 = 0,
+// Per-(observer, subject) belief bitset. Storage = `pair_map`, so the
+// fold body indexes `view_storage_primary[observer * agent_cap +
+// subject]`. With agent_cap = N the storage is N×N×u32. Initial 0 (no
+// beliefs); clamp covers the full u32 range (the bit-OR accumulator
+// can never exceed 0xFFFFFFFFu).
+@materialized(on_event = [BeliefAcquired], storage = pair_map)
+view beliefs(observer: Agent, subject: Agent) -> u32 {
+  initial: 0,
+  on BeliefAcquired { observer: o, subject: s, fact_bit: b } { self |= b }
+  clamp: [0, 4294967295],
 }
 
-// (A) Probe the `BeliefsAccessor` IR shape via the sugar-free read
-//     `beliefs(<observer>).about(<target>).<field>`. This is the
-//     closest existing surface to "agent.beliefs(other, fact_id)" —
-//     the field is one of the 6 BELIEF_FIELDS allowlisted in
-//     `crates/dsl_ast/src/resolve.rs:2134-2141` (last_known_pos,
-//     last_known_hp, last_known_max_hp, last_known_creature_type,
-//     last_updated_tick, confidence).
+// Producer: every alive Knower emits one `BeliefAcquired { self,
+// self, 1 }` per tick. The view's bit-OR fold turns this into
+// "beliefs(i, i) has bit 0 set" after the first tick — and stays that
+// way (bit-OR is idempotent on a bit that's already set). The
+// off-diagonal `beliefs(i, j != i)` cells stay at 0 forever because
+// no event with (observer=i, subject=j) is ever emitted.
 //
-// We pick `.confidence` because it's a scalar f32 in [0, 1] — easy to
-// gate a `where` predicate on (`> 0.5`). For the smallest probe we
-// route observer == subject == self so we exercise the lowering path
-// without needing a cross-agent target read.
-//
-// Today this rule is dropped at lower time with diagnostic:
-//   `LoweringError::UnsupportedAstNode { ast_label: "BeliefsAccessor" }`
-// → no `physics_CheckBelief` kernel exists in the artifact set.
-physics CheckBelief @phase(per_agent) {
-  on Tick {} where (self.alive && beliefs(self).about(self).confidence > 0.5) {
-    emit LearnedFact { observer: self, fact_id: config.tom.fact_to_check }
+// FULL FIRE observable (asserted by tom_probe_app):
+//   - beliefs[i * N + i] == 1u for every i in 0..N
+//   - beliefs[i * N + j] == 0u for every i != j
+physics WhatIBelieve @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    emit BeliefAcquired { observer: self, subject: self, fact_bit: 1 }
   }
-}
-
-// (B) Probe the `theory_of_mind.believes_knows(...)` namespace-call
-//     surface (spec §7.2 / dsl.md:1070). Per the resolver
-//     `method_sig` table this returns `bool` and accepts arity 3
-//     (observer, subject, domain). Today this rule is also dropped
-//     at lower time — `theory_of_mind` is not in the CG
-//     `namespace_registry` so it falls through to
-//     `LoweringError::UnsupportedNamespaceCall { ns: TheoryOfMind,
-//     method: "believes_knows" }`.
-//
-// Either rule firing would produce a `LearnedFact` event per agent
-// per tick → fact_witnesses[i] would advance toward 100 over the
-// 100-tick run. Neither does today.
-physics CheckBeliefBit @phase(per_agent) {
-  on Tick {} where (self.alive && theory_of_mind.believes_knows(self, self, config.tom.fact_to_check)) {
-    emit LearnedFact { observer: self, fact_id: config.tom.fact_to_check }
-  }
-}
-
-// Per-observer accumulator: each LearnedFact bumps fact_witnesses
-// [observer] by 1.0. With both producer rules dropped at lower time,
-// no LearnedFact events ever land in the ring → this view's storage
-// stays at 0.0 forever, which is the OUTCOME (b) NO FIRE signal.
-@materialized(on_event = [LearnedFact])
-view fact_witnesses(observer: Agent) -> f32 {
-  initial: 0.0,
-  on LearnedFact { observer: who, fact_id: _ } { self += 1.0 }
-  clamp: [0.0, 1000000.0],
 }

@@ -1218,20 +1218,43 @@ fn lower_cg_stmt_body_to_wgsl(
                     };
                     // The view storage binding is
                     // `array<atomic<u32>>` (see
-                    // build_view_fold_bindings) but every shipped
-                    // view today is f32-typed. The accumulator add
-                    // is racy under contention (multiple GPU threads
-                    // writing the same slot per tick) so we emit a
-                    // CAS loop: atomicLoad → bitcast<f32> → add rhs
-                    // → bitcast<u32> → atomicCompareExchangeWeak,
-                    // retrying on the weak-CAS failure path. This
-                    // satisfies P11 (Reduction Determinism) at the
-                    // cost of a per-thread spin under heavy
-                    // contention; sort-then-fold is a future
-                    // enhancement that side-steps the spin entirely.
-                    // When non-f32 view storage lands, this
-                    // branches on the view's element type from
-                    // `view_signatures`.
+                    // build_view_fold_bindings); the per-element
+                    // semantics depend on the view's declared
+                    // `result` type from `view_signatures`:
+                    //   - `f32` (most shipped views): the
+                    //     accumulator-add is racy under contention
+                    //     (multiple GPU threads writing the same
+                    //     slot per tick) so we emit a CAS loop —
+                    //     atomicLoad → bitcast<f32> → add rhs →
+                    //     bitcast<u32> → atomicCompareExchangeWeak,
+                    //     retrying on the weak-CAS failure path.
+                    //     Satisfies P11 (Reduction Determinism) at
+                    //     the cost of a per-thread spin under heavy
+                    //     contention.
+                    //   - `u32` (Theory-of-Mind `beliefs` view):
+                    //     bit-OR accumulator. WGSL's native
+                    //     `atomicOr` is commutative + associative so
+                    //     no CAS retry is needed — one atomic op per
+                    //     event, no per-thread spin. P11 (Reduction
+                    //     Determinism) is satisfied trivially.
+                    //   - other element types: not supported yet;
+                    //     fall through to the f32 CAS shape and the
+                    //     well-formed pass would have rejected the
+                    //     fold body before reaching emit if the
+                    //     types didn't line up.
+                    let view_result_ty = ctx
+                        .prog
+                        .view_signatures
+                        .get(&view.0)
+                        .map(|sig| sig.result);
+                    if matches!(view_result_ty, Some(crate::cg::expr::CgTy::U32)) {
+                        return Ok(format!(
+                            "{{\n\
+                             \x20   let _idx = {idx_expr};\n\
+                             \x20   atomicOr(&{storage}[_idx], ({rhs}));\n\
+                             }}"
+                        ));
+                    }
                     return Ok(format!(
                         "loop {{\n\
                          \x20   let _idx = {idx_expr};\n\

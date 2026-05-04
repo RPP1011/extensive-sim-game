@@ -3230,7 +3230,7 @@ fn validate_fold_stmt(view_name: &str, s: &IrStmt) -> Result<(), ResolveError> {
     match s {
         IrStmt::Let { value, .. } => validate_fold_expr(view_name, value),
         IrStmt::SelfUpdate { op, value, span } => {
-            if !matches!(op.as_str(), "=" | "+=" | "-=" | "*=" | "/=") {
+            if !matches!(op.as_str(), "=" | "+=" | "-=" | "*=" | "/=" | "|=") {
                 return Err(ResolveError::UdfInViewFoldBody {
                     view_name: view_name.to_string(),
                     offending_construct: format!("self-update operator `{op}`"),
