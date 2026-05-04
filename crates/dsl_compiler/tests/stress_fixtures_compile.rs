@@ -2062,15 +2062,11 @@ fn pair_scoring_probe_full_fire_compile_gate() {
 ///   - 1 ViewFold (`sampled_count`) on `Sampled` (kind = 1u),
 ///     accumulating per-slot fire count = TICKS.
 ///
-/// The probe surfaced FIVE compiler gaps (Gaps #A-#E in
-/// `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`).
-/// Three are now closed (Gaps #A, #B, #D); two remain (Gap #C
-/// `rng.uniform_int` — needs i32 source surface; Gap #E
-/// `rng.uniform`/`rng.gauss` — needs per-purpose abstract-type-clean
-/// conversion). The fixture body retains every surface whose
-/// emit-side close has landed; the still-open gap surfaces stay as
-/// commented-out `let` bindings in the .sim with citations. This
-/// test pins:
+/// The probe originally surfaced FIVE compiler gaps (Gaps #A-#E in
+/// `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`). ALL
+/// FIVE are now closed: Gaps #A + #B + #D in 8d7c2673, Gaps #C + #E
+/// in the followup commit. The fixture body now exercises every
+/// advertised stdlib + RNG surface end-to-end. This test pins:
 ///
 ///   (a) the structural surface (1 PhysicsRule + 1 ViewFold);
 ///   (b) the math stdlib lowering — the physics WGSL body must
@@ -2090,10 +2086,12 @@ fn pair_scoring_probe_full_fire_compile_gate() {
 ///   (e) every emitted WGSL kernel passes naga TEXT validation —
 ///       this also verifies the spatial-builtin prelude is injected
 ///       (any missing prelude ⇒ "no definition in scope" error).
-///       (Note: this does NOT catch Gap #E's full-validator-only
-///       reject — the wgpu validator runs only at runtime in
-///       `create_shader_module`. The sim_app harness catches that
-///       via `catch_unwind`.)
+///       The wgpu FULL validator (which previously rejected the
+///       open Gap #E surfaces with "Abstract types may only appear
+///       in constant expressions") runs only at runtime in
+///       `create_shader_module`; the `stdlib_math_probe_app`
+///       harness catches any FULL-validator regression via
+///       `catch_unwind`.
 ///
 /// Discovery doc: `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`.
 #[test]
@@ -2221,25 +2219,52 @@ fn stdlib_math_probe_compile_gate() {
          u32 bit-extract); missing fingerprint in body:\n{body}",
     );
 
-    // Gap #C / Gap #E REMAIN OPEN — the `rng.uniform_int` / `rng.uniform`
-    // / `rng.gauss` purposes (8 / 5 / 6) MUST NOT appear in the
-    // physics body. If a future edit re-introduces one without
-    // first closing the corresponding compiler gap, the runtime
-    // panics in `create_shader_module` (Gap #E) or the lower step
-    // drops the rule outright (Gap #C).
-    for (gap, purpose_id) in [
-        ("Gap #E (rng.uniform)", 5u32),
-        ("Gap #E (rng.gauss)", 6u32),
-        ("Gap #C (rng.uniform_int)", 8u32),
-    ] {
-        let needle = format!(", {purpose_id}u)");
-        assert!(
-            !body.contains(&needle),
-            "{gap} regression — purpose id {purpose_id}u (per RngPurpose::wgsl_id) \
-             reappeared in physics_SampleAndBucket without first closing the \
-             responsible WGSL emit gap. Got body:\n{body}",
-        );
-    }
+    // Gap #E close (this commit): `rng.uniform(lo, hi)` and
+    // `rng.gauss(mu, sigma)` now emit per-purpose conversion at the
+    // `CgExpr::Rng` site so the surrounding f32 arithmetic is
+    // concretely-typed (the wgpu FULL validator no longer rejects
+    // abstract-type binary ops). Pin the new emit shapes:
+    //   - Uniform (purpose 5): the conversion `f32(per_agent_u32(...
+    //     5u)) / f32(4294967295u)` is the unit-interval f32 draw.
+    //   - Gauss (purpose 6): the Box-Muller pair-draw uses BOTH
+    //     purpose 6 (Gauss) and purpose 9 (GaussB, internal sibling
+    //     for the second draw); the canonical `sqrt(-2.0 * log(...))`
+    //     prefix is the fingerprint.
+    assert!(
+        body.contains("f32(per_agent_u32(seed, agent_id, tick, 5u)) / f32(4294967295u)"),
+        "Gap #E close (rng.uniform) — expected `f32(per_agent_u32(seed, agent_id, \
+         tick, 5u)) / f32(4294967295u)` (unit-interval f32 conversion at the Uniform \
+         emit site); missing from body:\n{body}",
+    );
+    assert!(
+        body.contains("per_agent_u32(seed, agent_id, tick, 6u)")
+            && body.contains("per_agent_u32(seed, agent_id, tick, 9u)")
+            && body.contains("sqrt(-2.0 * log("),
+        "Gap #E close (rng.gauss) — expected Box-Muller pair-draw using purposes 6 \
+         (Gauss) + 9 (GaussB) with `sqrt(-2.0 * log(...))` prefix; missing fingerprint \
+         in body:\n{body}",
+    );
+
+    // Gap #C close (this commit): `rng.uniform_int(lo, hi)` flipped
+    // signature from the unreachable `(i32, i32) -> i32` to
+    // `(u32, u32) -> u32`. The IR shape is `lo + (draw % (hi - lo))`
+    // on the UniformInt u32 stream; the WGSL emit is bare
+    // `per_agent_u32(...)` (purpose 8u) since the surface IS u32 —
+    // no per-purpose conversion needed.
+    assert!(
+        body.contains("per_agent_u32(seed, agent_id, tick, 8u)"),
+        "Gap #C close (rng.uniform_int) — expected bare \
+         `per_agent_u32(seed, agent_id, tick, 8u)` (UniformInt u32 stream); missing \
+         from body:\n{body}",
+    );
+    // The `lo + (draw % (hi - lo))` shape with concrete u32 ops:
+    // `(0u + (per_agent_u32(...) % (4u - 0u)))`.
+    assert!(
+        body.contains("(per_agent_u32(seed, agent_id, tick, 8u) % (4u - 0u))"),
+        "Gap #C close (rng.uniform_int) — expected `lo + (draw % (hi - lo))` shape \
+         with U32 ops `(per_agent_u32(seed, agent_id, tick, 8u) % (4u - 0u))`; missing \
+         from body:\n{body}",
+    );
 
     // Naga TEXT validation MUST be clean across all kernels. (Gap
     // #E's full-validator reject is NOT caught here — wgpu's

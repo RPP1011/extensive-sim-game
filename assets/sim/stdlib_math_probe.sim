@@ -5,28 +5,41 @@
 // that no other workspace fixture exercises end-to-end through the
 // GPU pipeline.
 //
-// PROBE DESIGN — keep ONLY the surfaces that actually wire through:
+// PROBE DESIGN — every advertised stdlib math + RNG conversion
+// surface now wires end-to-end (ALL FIVE original gaps closed —
+// Gaps #A + #B + #D in 8d7c2673; Gaps #C + #E in this followup
+// commit). Tiers retained for inspectability; each surface lives in
+// its own `let` so the emit shape is greppable per-surface.
 //
-//   Tier 1 (RETAINED): math stdlib `floor` / `ceil` / `round` /
-//     `log2` / `log10` / `abs` — all are WGSL natives or, for
-//     `log10`, emit-time rewritten to `log2(x) / log2(10.0)` (Gap
-//     #A close). All FULL-validator clean. Probe runs each in its
-//     own `let` binding so the emit shape is inspectable per-surface.
+//   Tier 1: math stdlib `floor` / `ceil` / `round` / `log2` /
+//     `log10` / `abs` — all are WGSL natives or, for `log10`,
+//     emit-time rewritten to `log2(x) / log2(10.0)` (Gap #A close).
 //
-//   Tier 2 (RETAINED): bucket emit via `rng.action() % 4` —
-//     proven-safe (closed by stochastic_probe Gaps #1/#2/#3, 2026-
-//     05-04). The bucket field carries 0..3 per slot per tick.
-//
-//   Tier 3 (RETAINED): spatial stdlib `planar_distance(a, b)` and
+//   Tier 2: spatial stdlib `planar_distance(a, b)` and
 //     `z_separation(a, b)` — emitted as bare calls plus a kernel-
 //     prelude shim (Gap #B close, mirror of `RNG_WGSL_PRELUDE`).
 //
-//   Tier 4 (RETAINED): `rng.coin()` — emits
+//   Tier 3: `rng.coin()` — emits
 //     `((per_agent_u32(...) & 1u) == 0u)` (Gap #D close).
 //
-// THREE compiler gaps remain (Gap #C uniform_int — needs i32 source
-// surface; Gap #E rng.uniform/rng.gauss — needs per-purpose abstract-
-// type-clean conversion). Surfaces stay commented with citations.
+//   Tier 4: `rng.uniform(lo, hi)` and `rng.gauss(mu, sigma)` —
+//     per-purpose conversion at the `CgExpr::Rng` emit site
+//     produces a concretely-typed f32 expression
+//     (`f32(per_agent_u32(...)) / f32(4294967295u)` for Uniform,
+//     Box-Muller pair-draw using purpose 6 + purpose 9 for Gauss)
+//     so the surrounding f32 arithmetic types clean against the
+//     wgpu FULL validator (Gap #E close).
+//
+//   Tier 5: `rng.uniform_int(lo, hi)` — surface signature changed
+//     from the spec's original `(i32, i32) -> i32` to
+//     `(u32, u32) -> u32` because the DSL has no i32 source surface
+//     (no literal suffix, no cast). Lowers to `lo + (draw % (hi -
+//     lo))` on the `UniformInt` u32 stream (Gap #C close).
+//
+//   Tier 6: bucket emit via `rng.action() % 4` —
+//     proven-safe (closed by stochastic_probe Gaps #1/#2/#3, 2026-
+//     05-04). The bucket field carries 0..3 per slot per tick.
+//
 // Full punch list: `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`.
 //
 // FULL FIRE OBSERVABLE (TICKS=100, AGENT_COUNT=32, log_amount=1.0):
@@ -85,27 +98,35 @@ physics SampleAndBucket @phase(per_agent) {
     let m_pdist = planar_distance(self.pos, self.pos);
     let m_zsep  = z_separation(self.pos, self.pos);
 
-    // ---- Tier 3: typed RNG (partial close) ----
-    // `rng.coin()` (Gap #D close, 2026-05-04): lowers to
-    // `CgExpr::Rng { Coin, Bool }`; the `wgsl_body.rs::CgExpr::Rng`
-    // arm now wraps the u32 draw in `((per_agent_u32(...) & 1u) ==
-    // 0u)` so the result types as bool.
+    // ---- Tier 3: typed RNG `rng.coin()` (Gap #D close, 2026-05-04) ----
+    // Lowers to `CgExpr::Rng { Coin, Bool }`; the
+    // `wgsl_body.rs::CgExpr::Rng` arm wraps the u32 draw in
+    // `((per_agent_u32(...) & 1u) == 0u)` so the result types as bool.
     let r_coin = rng.coin();
-    // `rng.uniform(lo, hi)` STILL OMITTED — Gap #E (typed F32 wrapped
-    // over u32 draw; full validator rejects abstract-type binary ops).
-    // Fix: per-purpose conversion at the `CgExpr::Rng` emit site
-    // (e.g. `(f32(per_agent_u32(...)) / 4294967295.0) * (hi-lo) + lo`).
-    // let r_uniform = rng.uniform(0.0, 1.0);
-    // `rng.gauss(mu, sigma)` STILL OMITTED — same shape as Gap #E;
-    // Box-Muller would need a per-purpose pair-draw.
-    // let r_gauss = rng.gauss(0.0, 1.0);
-    // `rng.uniform_int(lo, hi)` STILL OMITTED — Gap #C. Its lowering
-    // at `expr.rs::lower_rng_uniform_int` requires both args to
-    // typecheck as `CgTy::I32`, but the DSL has no surface to
-    // source an i32 (no i32 literal suffix, no explicit cast, no
-    // i32 config/SoA fields). Fix: typecheck promotion in
-    // `lower_rng_uniform_int` to accept U32 + synthesise a Cast.
-    // let r_uniform_int = rng.uniform_int(0, 4);
+
+    // ---- Tier 4: typed RNG `rng.uniform` / `rng.gauss` (Gap #E close) ----
+    // Per-purpose conversion at the `CgExpr::Rng` emit site:
+    //   - `rng.uniform(lo, hi)` lowers to `lo + draw * (hi - lo)`
+    //     where the `Uniform` purpose now emits as
+    //     `(f32(per_agent_u32(...)) / f32(4294967295u))` — a
+    //     concretely-typed unit-interval f32. The whole
+    //     subexpression is pure-f32, so the wgpu FULL validator no
+    //     longer flags abstract-type binary ops.
+    //   - `rng.gauss(mu, sigma)` lowers to `mu + draw * sigma` where
+    //     the `Gauss` purpose now emits the standard Box-Muller
+    //     pair-draw using purpose 6 (`Gauss`) + purpose 9
+    //     (`GaussB`, an internal sibling).
+    let r_uniform = rng.uniform(0.0, 1.0);
+    let r_gauss   = rng.gauss(0.0, 1.0);
+
+    // ---- Tier 5: typed RNG `rng.uniform_int(lo, hi)` (Gap #C close) ----
+    // Surface signature changed from the spec's original
+    // `(i32, i32) -> i32` to `(u32, u32) -> u32` — bare positive
+    // integer literals (`IrExpr::LitInt(v)` with `v >= 0`) lower to
+    // `LitValue::U32`, so no surface workaround is needed. The IR
+    // shape is `lo + (draw % (hi - lo))` on the `UniformInt` u32
+    // stream.
+    let r_uniform_int = rng.uniform_int(0, 4);
 
     // ---- Bucket value: proven-safe rng.action() % 4u ----
     // `rng.action()` lowers to `per_agent_u32(seed, agent_id, tick,

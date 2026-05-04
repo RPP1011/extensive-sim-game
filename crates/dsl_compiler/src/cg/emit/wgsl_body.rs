@@ -967,14 +967,62 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
             // naga text parser ("expected `bool`, but got `u32`").
             // Wrap the u32 draw in a bit-extract `(... & 1u) == 0u`
             // so the expression types as bool.
+            //
+            // Gap #E close (stdlib_math_probe, 2026-05-04): the
+            // typed-RNG `Uniform` / `Gauss` purposes carry `CgTy::F32`.
+            // The surrounding lowering builds an f32-arithmetic
+            // wrapper (`lo + draw * (hi - lo)` for Uniform; `mu +
+            // draw * sigma` for Gauss). If `draw` emits as a bare
+            // `per_agent_u32(...)` u32 expression, the surrounding
+            // `0.0` / `1.0` literals stay abstract-floats — the wgpu
+            // FULL validator rejects "Abstract types may only appear
+            // in constant expressions". Per-purpose conversion at
+            // THIS site (the expression emit) makes the whole
+            // subexpression concretely-typed f32:
+            //   - Uniform → `(f32(per_agent_u32(...)) / 4294967295.0)`
+            //     yields a unit-interval `f32` (in `[0, 1]`); the
+            //     surrounding `lo + draw * (hi - lo)` is then pure
+            //     f32 arithmetic.
+            //   - Gauss → standard Box-Muller pair-draw using two
+            //     independent streams (`Gauss` purpose + `GaussB`
+            //     purpose at id 9). Computes `sqrt(-2*log(u1)) *
+            //     cos(2π*u2)` for a unit-normal `f32`. `max(u1, 1e-9)`
+            //     guards against `log(0) = -inf`.
+            //   - UniformInt → bare u32 (post Gap #C the surface IS
+            //     u32; no bitcast needed).
             let raw = format!(
                 "per_agent_u32(seed, agent_id, tick, {}u)",
                 purpose.wgsl_id()
             );
-            if matches!(purpose, RngPurpose::Coin) {
-                Ok(format!("(({} & 1u) == 0u)", raw))
-            } else {
-                Ok(raw)
+            match purpose {
+                RngPurpose::Coin => Ok(format!("(({} & 1u) == 0u)", raw)),
+                RngPurpose::Uniform => {
+                    // Cast u32 to f32 then normalise to `[0, 1]` by
+                    // dividing by `u32::MAX as f32`. The divisor
+                    // literal carries an explicit `f32(...)` cast so
+                    // it's a concrete f32, not an abstract-float.
+                    Ok(format!("(f32({}) / f32(4294967295u))", raw))
+                }
+                RngPurpose::Gauss => {
+                    // Box-Muller pair-draw — see the prelude doc on
+                    // `RngPurpose::GaussB` and the gap report.
+                    // `Gauss` (purpose 6) is u1; `GaussB` (purpose 9)
+                    // is u2. The `max(..., 1e-9)` guards against
+                    // `log(0) = -inf` if `u1 == 0`. The constant
+                    // `6.283185307179586` is `2π` to ~17 digits so
+                    // f32 truncation lands on the nearest
+                    // representable value.
+                    let raw_b = format!(
+                        "per_agent_u32(seed, agent_id, tick, {}u)",
+                        RngPurpose::GaussB.wgsl_id()
+                    );
+                    Ok(format!(
+                        "(sqrt(-2.0 * log(max(f32({}) / f32(4294967295u), 1e-9))) \
+                         * cos(6.283185307179586 * (f32({}) / f32(4294967295u))))",
+                        raw, raw_b
+                    ))
+                }
+                _ => Ok(raw),
             }
         }
         CgExpr::Select {

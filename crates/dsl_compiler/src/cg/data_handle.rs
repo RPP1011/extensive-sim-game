@@ -743,17 +743,31 @@ pub enum RngPurpose {
     Uniform,
     /// `b"gauss"` — standard-normal sample (mean 0, stddev 1).
     /// Returns `f32`. Backs `rng.gauss(mu, sigma)` after lowering
-    /// wraps with `mu + draw * sigma`. WGSL emit is responsible
-    /// for the Box-Muller (or equivalent) transform.
+    /// wraps with `mu + draw * sigma`. WGSL emit performs the
+    /// Box-Muller transform pulling u1 from `Gauss` (purpose 6) and
+    /// u2 from the [`Self::GaussB`] sibling stream (purpose 9) so
+    /// the pair-draw stays independent.
     Gauss,
     /// `b"coin"` — fair coin flip. Returns `bool`. Backs
     /// `rng.coin()` directly (nullary, no wrapping).
     Coin,
-    /// `b"uniform_int"` — uniform integer sample. Returns `i32`
-    /// (interpreted as raw bits of the underlying `per_agent_u32`
-    /// draw, bitcast to `i32`). Backs `rng.uniform_int(lo, hi)`
-    /// after lowering wraps with `lo + abs(draw) % (hi - lo)`.
+    /// `b"uniform_int"` — uniform integer sample. Returns `u32`.
+    /// Backs `rng.uniform_int(lo, hi)` after lowering wraps with
+    /// `lo + draw % (hi - lo)` (Gap #C close, 2026-05-04).
+    /// The signature is `(u32, u32) -> u32` — taking u32 mirrors the
+    /// surface-side default (`IrExpr::LitInt(v)` with `v >= 0`
+    /// lowers to `LitValue::U32`, so a `.sim` author writes
+    /// `rng.uniform_int(0, 4)` without needing an i32 source).
     UniformInt,
+    /// `b"gauss_b"` — secondary stream for the Box-Muller pair
+    /// inside `rng.gauss`. Internal — no surface method draws this
+    /// purpose directly; the WGSL emit site at
+    /// `wgsl_body.rs::CgExpr::Rng` references it by id alongside
+    /// `Gauss` (purpose 6) so the two halves of the pair-draw use
+    /// independent streams. Returns `f32` (same convention as
+    /// [`Self::Gauss`]); never appears as a `CgExpr::Rng` purpose
+    /// in the IR — only at emit time.
+    GaussB,
 }
 
 impl RngPurpose {
@@ -768,6 +782,7 @@ impl RngPurpose {
             RngPurpose::Gauss => b"gauss",
             RngPurpose::Coin => b"coin",
             RngPurpose::UniformInt => b"uniform_int",
+            RngPurpose::GaussB => b"gauss_b",
         }
     }
 
@@ -782,6 +797,7 @@ impl RngPurpose {
             RngPurpose::Gauss => "gauss",
             RngPurpose::Coin => "coin",
             RngPurpose::UniformInt => "uniform_int",
+            RngPurpose::GaussB => "gauss_b",
         }
     }
 
@@ -796,9 +812,17 @@ impl RngPurpose {
             | RngPurpose::Sample
             | RngPurpose::Shuffle
             | RngPurpose::Conception => CgTy::U32,
-            RngPurpose::Uniform | RngPurpose::Gauss => CgTy::F32,
+            RngPurpose::Uniform | RngPurpose::Gauss | RngPurpose::GaussB => CgTy::F32,
             RngPurpose::Coin => CgTy::Bool,
-            RngPurpose::UniformInt => CgTy::I32,
+            // Gap #C close (stdlib_math_probe, 2026-05-04): the
+            // `rng.uniform_int(lo, hi)` surface now takes
+            // `(u32, u32) -> u32` rather than the previous `(i32, i32)
+            // -> i32`. Bare integer literals in `.sim` lower to
+            // `LitValue::U32` (positive), so this is the only signature
+            // an author can actually exercise without an i32 surface
+            // (which the DSL has none — no literal suffix, no cast). See
+            // gap report `2026-05-04-stdlib_math_probe.md` §Gap #C.
+            RngPurpose::UniformInt => CgTy::U32,
         }
     }
 
@@ -822,6 +846,11 @@ impl RngPurpose {
             RngPurpose::Gauss => 6,
             RngPurpose::Coin => 7,
             RngPurpose::UniformInt => 8,
+            // Gap #E close (stdlib_math_probe, 2026-05-04): the
+            // `rng.gauss(mu, sigma)` Box-Muller pair-draw needs two
+            // independent draws; `Gauss` (id 6) is u1 and `GaussB`
+            // (id 9) is u2. Stable id — fixed forever.
+            RngPurpose::GaussB => 9,
         }
     }
 }
@@ -1486,6 +1515,12 @@ mod tests {
                 "rng(uniform_int)",
                 b"uniform_int".as_slice(),
             ),
+            // Internal sibling for the Box-Muller pair-draw inside
+            // `rng.gauss` (Gap #E close, 2026-05-04). Never appears as
+            // a `CgExpr::Rng` purpose in the IR — only at WGSL emit
+            // time. Listed here so the byte/snake roundtrip + Display
+            // map stays exhaustive.
+            (RngPurpose::GaussB, "rng(gauss_b)", b"gauss_b".as_slice()),
         ];
         for (purpose, expected_display, expected_bytes) in purposes {
             let h = DataHandle::Rng { purpose };
@@ -1510,8 +1545,11 @@ mod tests {
         assert_eq!(RngPurpose::Conception.result_ty(), CgTy::U32);
         assert_eq!(RngPurpose::Uniform.result_ty(), CgTy::F32);
         assert_eq!(RngPurpose::Gauss.result_ty(), CgTy::F32);
+        assert_eq!(RngPurpose::GaussB.result_ty(), CgTy::F32);
         assert_eq!(RngPurpose::Coin.result_ty(), CgTy::Bool);
-        assert_eq!(RngPurpose::UniformInt.result_ty(), CgTy::I32);
+        // Gap #C close (stdlib_math_probe, 2026-05-04): UniformInt
+        // surface is `(u32, u32) -> u32` — see RngPurpose::UniformInt.
+        assert_eq!(RngPurpose::UniformInt.result_ty(), CgTy::U32);
     }
 
     // ---- Equality + Hash ----

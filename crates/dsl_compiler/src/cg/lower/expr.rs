@@ -2610,13 +2610,13 @@ fn lower_fold_over_agents(
 ///      `draw = CgExpr::Rng { Gauss, F32 }` is a standard-normal
 ///      sample. WGSL emit performs the Box-Muller (or equivalent)
 ///      transform.
-///    - `rng.uniform_int(lo, hi)` → `lo + abs(draw) % (hi - lo)`
-///      where `draw = CgExpr::Rng { UniformInt, I32 }` is the
-///      raw-bit bitcast of the underlying `u32` draw to `i32`.
-///      `abs` keeps the modulo non-negative when `draw` is
-///      negative; the resulting sample is in `[lo, hi)` modulo the
-///      well-known modulo-bias. The DSL spec advertises
-///      `(i32, i32) -> i32`.
+///    - `rng.uniform_int(lo, hi)` → `lo + draw % (hi - lo)` where
+///      `draw = CgExpr::Rng { UniformInt, U32 }` is the raw u32
+///      `per_agent_u32` draw. The signature is `(u32, u32) -> u32`
+///      (Gap #C close, 2026-05-04 — the prior `(i32, i32) -> i32`
+///      surface was unreachable from any `.sim` because the parser
+///      has no i32 source). The result is in `[lo, hi)` modulo the
+///      well-known modulo-bias.
 ///
 /// Arity + arg-type errors surface as
 /// [`LoweringError::NamespaceCallArityMismatch`] and
@@ -2702,9 +2702,14 @@ fn lower_rng_call(
             RngPurpose::Gauss,
             ScaleShape::MeanStddev,
         ),
-        // `rng.uniform_int(lo, hi)` — `(i32, i32) -> i32`.
-        // Lowered to `lo + abs(draw) % (hi - lo)` where `draw` is
-        // the raw u32 bitcast to i32 on the `UniformInt` stream.
+        // `rng.uniform_int(lo, hi)` — `(u32, u32) -> u32`. Lowered
+        // to `lo + draw % (hi - lo)` where `draw` is the raw
+        // `per_agent_u32` u32 on the `UniformInt` stream. The u32
+        // signature was picked at the Gap #C close (stdlib_math_probe,
+        // 2026-05-04) because the DSL has no i32 source surface
+        // (no literal suffix, no cast); positive bare integer
+        // literals lower to `LitValue::U32` so `rng.uniform_int(0, 4)`
+        // typechecks straight through.
         "uniform_int" => lower_rng_uniform_int(method, args, span, ctx),
         _ => Err(LoweringError::UnsupportedNamespaceCall {
             ns: NamespaceId::Rng,
@@ -2812,15 +2817,16 @@ fn lower_rng_scaled_f32(
     )
 }
 
-/// Lower `rng.uniform_int(lo, hi)`. Spec advertises
-/// `(i32, i32) -> i32`; the surface IR is
-/// `lo + abs(draw) % (hi - lo)` where `draw` is the raw
-/// `per_agent_u32` bitcast to i32 (encoded by
-/// `RngPurpose::UniformInt` carrying `CgTy::I32` — the WGSL emit
-/// handles the bitcast). `abs` keeps the modulo non-negative when
-/// the bitcast bits land in the negative i32 half. The result has
-/// the standard modulo-bias for ranges that don't divide
-/// `2^32` evenly; this is documented behavior.
+/// Lower `rng.uniform_int(lo, hi)`. Surface signature is
+/// `(u32, u32) -> u32` (Gap #C close, 2026-05-04). The IR shape is
+/// `lo + draw % (hi - lo)` where `draw` is the raw `per_agent_u32`
+/// u32 (encoded by `RngPurpose::UniformInt` carrying `CgTy::U32`).
+/// The result is in `[lo, hi)` with the standard modulo-bias for
+/// ranges that don't divide `2^32` evenly; this is documented
+/// behavior. The u32 signature was picked over the previous
+/// `(i32, i32) -> i32` because the DSL has no i32 source surface —
+/// see the gap report at
+/// `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md` §Gap #C.
 fn lower_rng_uniform_int(
     method: &str,
     args: &[IrCallArg],
@@ -2840,30 +2846,20 @@ fn lower_rng_uniform_int(
     let hi_id = lower_expr(&args[1].value, ctx)?;
     for (id, arg) in [(lo_id, &args[0]), (hi_id, &args[1])] {
         let ty = typecheck_node(ctx, id, arg.span)?;
-        if ty != CgTy::I32 {
+        if ty != CgTy::U32 {
             return Err(LoweringError::IllTypedExpression {
-                expected: CgTy::I32,
+                expected: CgTy::U32,
                 got: ty,
                 span: arg.span,
             });
         }
     }
-    // `draw = CgExpr::Rng { UniformInt, I32 }`.
+    // `draw = CgExpr::Rng { UniformInt, U32 }`.
     let draw_id = add(
         ctx,
         CgExpr::Rng {
             purpose: RngPurpose::UniformInt,
-            ty: CgTy::I32,
-        },
-        span,
-    )?;
-    // `abs(draw)`.
-    let abs_id = add(
-        ctx,
-        CgExpr::Unary {
-            op: UnaryOp::AbsI32,
-            arg: draw_id,
-            ty: CgTy::I32,
+            ty: CgTy::U32,
         },
         span,
     )?;
@@ -2871,32 +2867,32 @@ fn lower_rng_uniform_int(
     let range_id = add(
         ctx,
         CgExpr::Binary {
-            op: BinaryOp::SubI32,
+            op: BinaryOp::SubU32,
             lhs: hi_id,
             rhs: lo_id,
-            ty: CgTy::I32,
+            ty: CgTy::U32,
         },
         span,
     )?;
-    // `abs(draw) % (hi - lo)`.
+    // `draw % (hi - lo)`.
     let mod_id = add(
         ctx,
         CgExpr::Binary {
-            op: BinaryOp::ModI32,
-            lhs: abs_id,
+            op: BinaryOp::ModU32,
+            lhs: draw_id,
             rhs: range_id,
-            ty: CgTy::I32,
+            ty: CgTy::U32,
         },
         span,
     )?;
-    // `lo + abs(draw) % (hi - lo)`.
+    // `lo + draw % (hi - lo)`.
     add(
         ctx,
         CgExpr::Binary {
-            op: BinaryOp::AddI32,
+            op: BinaryOp::AddU32,
             lhs: lo_id,
             rhs: mod_id,
-            ty: CgTy::I32,
+            ty: CgTy::U32,
         },
         span,
     )
@@ -4631,28 +4627,22 @@ mod tests {
     }
 
     #[test]
-    fn rng_uniform_int_lowers_to_lo_plus_abs_draw_mod_range() {
-        // `rng.uniform_int(-5, -1)` → `-5 + abs(draw) % (-1 - -5)`.
-        // Outermost AddI32; RHS is ModI32(AbsI32(draw), SubI32(hi, lo)).
-        //
-        // **Why both args negative?** `IrExpr::LitInt(v)` picks `u32`
-        // when `v >= 0` and `i32` when `v < 0` (see
-        // `literal_int_positive_picks_u32` /
-        // `literal_int_negative_picks_i32`). Mixing a positive
-        // literal with a negative one would surface as
-        // `IllTypedExpression { expected: I32, got: U32, .. }` from
-        // the lowering's per-arg type check. Surfacing two i32
-        // literals keeps the test focused on the arithmetic shape.
-        // Real .sim sources land i32 args via field reads or via a
-        // `let lo: i32 = -5` annotation.
+    fn rng_uniform_int_lowers_to_lo_plus_draw_mod_range() {
+        // Gap #C close (stdlib_math_probe, 2026-05-04): the surface is
+        // now `(u32, u32) -> u32`. `rng.uniform_int(0, 4)` → `0 +
+        // (draw % (4 - 0))`. Outermost AddU32; RHS is ModU32(draw,
+        // SubU32(hi, lo)). Positive `IrExpr::LitInt` picks `u32`
+        // (see `literal_int_positive_picks_u32`), so a bare-literal
+        // pair just types straight through — which is the whole
+        // point of the surface change.
         let ast = node(IrExpr::NamespaceCall {
             ns: NamespaceId::Rng,
             method: "uniform_int".to_string(),
-            args: vec![arg(node(IrExpr::LitInt(-5))), arg(node(IrExpr::LitInt(-1)))],
+            args: vec![arg(node(IrExpr::LitInt(0))), arg(node(IrExpr::LitInt(4)))],
         });
         assert_eq!(
             lower_to_string(&ast).unwrap(),
-            "(add.i32 (lit -5i32) (mod.i32 (abs.i32 (rng uniform_int)) (sub.i32 (lit -1i32) (lit -5i32))))"
+            "(add.u32 (lit 0u32) (mod.u32 (rng uniform_int) (sub.u32 (lit 4u32) (lit 0u32))))"
         );
     }
 
@@ -4675,8 +4665,8 @@ mod tests {
     }
 
     #[test]
-    fn rng_uniform_int_with_non_i32_args_rejected() {
-        // Float args reject — spec is `(i32, i32)`.
+    fn rng_uniform_int_with_non_u32_args_rejected() {
+        // Float args reject — surface is `(u32, u32)` post Gap #C.
         let ast = node(IrExpr::NamespaceCall {
             ns: NamespaceId::Rng,
             method: "uniform_int".to_string(),
@@ -4684,6 +4674,24 @@ mod tests {
         });
         let err = lower_to_string(&ast).unwrap_err();
         assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
+    }
+
+    #[test]
+    fn rng_uniform_int_with_negative_literal_rejected_as_i32() {
+        // Negative `LitInt` lowers to I32, which now mismatches the
+        // U32 signature — surfaces as IllTypedExpression. Authors who
+        // want signed-style ranges can express them as bare u32
+        // ranges (the bias is the same).
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Rng,
+            method: "uniform_int".to_string(),
+            args: vec![arg(node(IrExpr::LitInt(-1))), arg(node(IrExpr::LitInt(-2)))],
+        });
+        let err = lower_to_string(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::IllTypedExpression { expected: CgTy::U32, got: CgTy::I32, .. }
+        ));
     }
 
     #[test]
@@ -4707,7 +4715,9 @@ mod tests {
         for (method, snake) in cases {
             let args = match method {
                 "coin" => vec![],
-                "uniform_int" => vec![arg(node(IrExpr::LitInt(-1))), arg(node(IrExpr::LitInt(-2)))],
+                // Gap #C close: uniform_int now takes `(u32, u32)`; bare
+                // positive literals lower to U32 directly.
+                "uniform_int" => vec![arg(node(IrExpr::LitInt(0))), arg(node(IrExpr::LitInt(4)))],
                 _ => vec![arg(node(IrExpr::LitFloat(0.0))), arg(node(IrExpr::LitFloat(1.0)))],
             };
             let ast = node(IrExpr::NamespaceCall {

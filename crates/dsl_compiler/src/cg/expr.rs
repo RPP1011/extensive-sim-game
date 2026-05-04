@@ -1393,11 +1393,15 @@ pub fn type_check(
             //  - `Action` / `Sample` / `Shuffle` / `Conception` →
             //    `U32` (the raw `per_agent_u32` draw, exposed by the
             //    lower-level surface).
-            //  - `Uniform` / `Gauss` → `F32` (unit interval / standard
-            //    normal — the WGSL emit performs the conversion from
-            //    the underlying `u32` draw).
+            //  - `Uniform` / `Gauss` / `GaussB` → `F32` (unit interval /
+            //    standard normal — the WGSL emit performs the conversion
+            //    from the underlying `u32` draw; `GaussB` is the
+            //    secondary stream of the Box-Muller pair-draw, never
+            //    appears as a `CgExpr::Rng` purpose in the IR — the
+            //    emit references it by id at the `Gauss` site).
             //  - `Coin` → `Bool`.
-            //  - `UniformInt` → `I32` (raw bits bitcast).
+            //  - `UniformInt` → `U32` (Gap #C close, stdlib_math_probe
+            //    2026-05-04 — surface signature is `(u32, u32) -> u32`).
             //
             // The lowering pass is responsible for setting the claimed
             // `ty` to `purpose.result_ty()`; this check enforces the
@@ -2256,8 +2260,11 @@ mod tests {
             (RngPurpose::Conception, CgTy::U32),
             (RngPurpose::Uniform, CgTy::F32),
             (RngPurpose::Gauss, CgTy::F32),
+            (RngPurpose::GaussB, CgTy::F32),
             (RngPurpose::Coin, CgTy::Bool),
-            (RngPurpose::UniformInt, CgTy::I32),
+            // Gap #C close (stdlib_math_probe, 2026-05-04): UniformInt
+            // surface is `(u32, u32) -> u32` — see RngPurpose::UniformInt.
+            (RngPurpose::UniformInt, CgTy::U32),
         ];
         for (purpose, expected_ty) in cases {
             // Positive: claimed ty matches purpose.result_ty().

@@ -2,17 +2,30 @@
 //! N ticks across two seeded runs, asserts per-slot count = TICKS
 //! and byte-identical determinism (P5).
 //!
-//! Outcome (a) FULL FIRE for every RETAINED surface: Tier 1 math
-//! stdlib (`floor` / `ceil` / `round` / `log2` / `log10` / `abs`),
-//! Tier 2 spatial stdlib (`planar_distance` / `z_separation`), Tier 3
-//! `rng.coin()`, and Tier 4 `rng.action() % 4u` bucket emit. Three
-//! of the five originally-surfaced gaps are closed (Gaps #A, #B, #D,
-//! 2026-05-04); two remain (Gap #C `rng.uniform_int`, Gap #E
-//! `rng.uniform`/`rng.gauss`) and stay as commented-out `let`s in
-//! the .sim with citations to the responsible compiler arms. The
-//! catch_unwind wrappers below surface any regression that
-//! re-introduces a still-open gap surface as OUTCOME (b) WGSL
-//! VALIDATION FAILED.
+//! Outcome (a) FULL FIRE for every advertised stdlib math + RNG
+//! surface — ALL FIVE original gaps are now closed:
+//!
+//!   - Tier 1 math stdlib (`floor` / `ceil` / `round` / `log2` /
+//!     `log10` / `abs`) — Gap #A close (8d7c2673) inlined `log10` to
+//!     `log2(x) / log2(10.0)`.
+//!   - Tier 2 spatial stdlib (`planar_distance` / `z_separation`) —
+//!     Gap #B close (8d7c2673) injected the kernel-prelude shim.
+//!   - Tier 3 `rng.coin()` — Gap #D close (8d7c2673) wraps the u32
+//!     draw in `((per_agent_u32(...) & 1u) == 0u)`.
+//!   - Tier 4 `rng.uniform` / `rng.gauss` — Gap #E close (this
+//!     followup) emits per-purpose `f32(per_agent_u32(...)) /
+//!     f32(4294967295u)` for Uniform, plus a Box-Muller pair-draw
+//!     for Gauss using purposes 6 + 9.
+//!   - Tier 5 `rng.uniform_int(lo, hi)` — Gap #C close (this
+//!     followup) flipped the surface signature from `(i32, i32) ->
+//!     i32` (unreachable from any `.sim` — DSL has no i32 source)
+//!     to `(u32, u32) -> u32`, so bare-positive-literal pairs
+//!     typecheck straight through.
+//!   - Tier 6 `rng.action() % 4u` bucket emit — closed by
+//!     stochastic_probe Gaps #1/#2/#3 (2026-05-04).
+//!
+//! The catch_unwind wrappers below surface any regression as
+//! OUTCOME (b) WGSL VALIDATION FAILED.
 //!
 //! Discovery doc: `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`.
 
@@ -148,20 +161,25 @@ fn report_outcome(counts1: &[f32], counts2: &[f32]) {
     // OUTCOME classification.
     if det_ok && exact_matches == counts1.len() {
         println!(
-            "stdlib_math_probe_app: OUTCOME = (a) FULL FIRE — every retained surface \
-             wired end-to-end:\n  \
+            "stdlib_math_probe_app: OUTCOME = (a) FULL FIRE — every advertised stdlib \
+             math + RNG surface wired end-to-end (ALL FIVE original gaps closed):\n  \
              1. Tier 1 math stdlib (floor/ceil/round/log2/log10/abs) lowers + emits + \
                 FULL-validator-clean (log10 via Gap #A inline rewrite to \
                 log2(x)/log2(10.0))\n  \
              2. Tier 2 spatial stdlib (planar_distance / z_separation) lowers + emits + \
                 FULL-validator-clean (Gap #B prelude-shim inject in cg/emit/program.rs)\n  \
-             3. Tier 3 rng.coin() emits ((per_agent_u32(...) & 1u) == 0u) (Gap #D bool-from-u32)\n  \
-             4. Tier 4 bucket emit via rng.action() % 4 fires every tick (proven \
+             3. Tier 3 rng.coin() emits ((per_agent_u32(...) & 1u) == 0u) \
+                (Gap #D bool-from-u32)\n  \
+             4. Tier 4 rng.uniform/rng.gauss emit per-purpose f32 conversion at the \
+                CgExpr::Rng site so the surrounding f32 arithmetic is concretely-typed \
+                (Gap #E close, this commit; Box-Muller pair-draw uses purposes 6 + 9)\n  \
+             5. Tier 5 rng.uniform_int(lo, hi) lowers cleanly with the new (u32, u32) \
+                -> u32 signature — bare positive literals typecheck straight through \
+                (Gap #C close, this commit)\n  \
+             6. Tier 6 bucket emit via rng.action() % 4 fires every tick (proven \
                 pure-by-stochastic-probe Action purpose)\n  \
-             5. P5 determinism holds (byte-identical sampled_count across two runs)\n  \
-             6. Per-slot count = TICKS = {} on every slot\n  \
-             — Gaps #C (rng.uniform_int — needs i32 source) and #E (rng.uniform / \
-             rng.gauss — needs per-purpose abstract-type-clean conversion) remain open",
+             7. P5 determinism holds (byte-identical sampled_count across two runs)\n  \
+             8. Per-slot count = TICKS = {} on every slot",
             EXPECTED_PER_SLOT as u32,
         );
     } else if !det_ok {

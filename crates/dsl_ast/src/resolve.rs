@@ -254,7 +254,17 @@ mod stdlib {
             (NamespaceId::Rng, "uniform") => Some((2, IrType::F32)),
             (NamespaceId::Rng, "gauss") => Some((2, IrType::F32)),
             (NamespaceId::Rng, "coin") => Some((0, IrType::Bool)),
-            (NamespaceId::Rng, "uniform_int") => Some((2, IrType::I32)),
+            // Gap #C close (stdlib_math_probe, 2026-05-04): the
+            // `rng.uniform_int(lo, hi)` surface advertised
+            // `(i32, i32) -> i32`, but the DSL has no i32 source
+            // (no literal suffix, no cast surface, no fixture with
+            // an i32 field), making the call unreachable. Switched
+            // to `(u32, u32) -> u32` so a bare-positive-literal pair
+            // (e.g. `rng.uniform_int(0, 4)`) — which lowers to
+            // `LitValue::U32` per `IrExpr::LitInt` — typechecks
+            // straight through. See gap report
+            // `docs/superpowers/notes/2026-05-04-stdlib_math_probe.md`.
+            (NamespaceId::Rng, "uniform_int") => Some((2, IrType::U32)),
             (NamespaceId::Query, "nearby_agents") => {
                 Some((2, IrType::List(Box::new(IrType::AgentId))))
             }
