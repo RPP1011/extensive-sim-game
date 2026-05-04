@@ -1001,6 +1001,18 @@ fn walk_body_expr_subtrees(
                 validate_expr_subtree(arena, *init, op_id, expr_arena_len, errors);
                 validate_expr_subtree(arena, *projection, op_id, expr_arena_len, errors);
             }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                if body.0 < list_arena_len {
+                    walk_body_expr_subtrees(
+                        *body,
+                        op_id,
+                        prog,
+                        expr_arena_len,
+                        list_arena_len,
+                        errors,
+                    );
+                }
+            }
         }
     }
 }
@@ -1107,6 +1119,25 @@ fn walk_list_id_ranges(
                             errors,
                         );
                     }
+                }
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                if body.0 >= list_arena_len {
+                    errors.push(CgError::StmtListIdOutOfRange {
+                        op: op_id,
+                        referenced: *body,
+                        arena_len: list_arena_len,
+                    });
+                } else {
+                    walk_list_id_ranges(
+                        *body,
+                        op_id,
+                        prog,
+                        expr_arena_len,
+                        stmt_arena_len,
+                        list_arena_len,
+                        errors,
+                    );
                 }
             }
         }
@@ -1563,6 +1594,12 @@ fn type_check_list(
                     }
                 }
             }
+            CgStmt::ForEachNeighborBody { .. } => {
+                // No directly-embedded expressions to type-check —
+                // the body's stmts are walked via the parallel
+                // `walk_body_expr_subtrees` pass which descends into
+                // each nested stmt list's expressions.
+            }
         }
     }
 }
@@ -1661,6 +1698,15 @@ fn p6_walk_list(
                 // (they're lowered as `Read(AgentField)` reads only);
                 // the statements carry no nested stmt-list to walk.
             }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                // Body-form spatial walk: descend into the nested
+                // stmt list to police any `Assign { target:
+                // AgentField, .. }` smuggled inside the body. Per-
+                // pair physics rules emit through `Emit` (the P6
+                // mutation channel); a body-direct AgentField write
+                // would skip the channel — surface as P6Violation.
+                p6_walk_list(*body, op_id, kind_label, prog, errors);
+            }
             CgStmt::If { then, else_, .. } => {
                 p6_walk_list(*then, op_id, kind_label, prog, errors);
                 if let Some(else_id) = else_ {
@@ -1751,6 +1797,9 @@ fn event_field_scope_walk_list(
                     prog,
                     errors,
                 );
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                event_field_scope_walk_list(*body, op_id, kind_label, shape_label, prog, errors);
             }
             CgStmt::Emit { fields, .. } => {
                 for (_, expr_id) in fields {
@@ -1913,6 +1962,9 @@ fn match_uniqueness_walk_list(
             | CgStmt::ForEachAgent { .. }
             | CgStmt::ForEachNeighbor { .. } => {
                 // Leaves — no nested bodies to descend into.
+            }
+            CgStmt::ForEachNeighborBody { body, .. } => {
+                match_uniqueness_walk_list(*body, op, op_id, prog, errors);
             }
             CgStmt::If { then, else_, .. } => {
                 match_uniqueness_walk_list(*then, op, op_id, prog, errors);

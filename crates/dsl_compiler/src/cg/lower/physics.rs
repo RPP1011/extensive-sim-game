@@ -536,11 +536,23 @@ fn lower_stmt(
             span,
             ..
         } => lower_let(rule_id, *local, value, *span, ctx),
-        IrStmt::For { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
-            rule: rule_id,
-            ast_label: "For",
-            span: *span,
-        }),
+        IrStmt::For {
+            binder,
+            binder_name,
+            iter,
+            filter,
+            body,
+            span,
+        } => lower_for_spatial_body(
+            rule_id,
+            *binder,
+            binder_name,
+            iter,
+            filter.as_ref(),
+            body,
+            *span,
+            ctx,
+        ),
         IrStmt::Expr(e) => lower_expr_stmt(rule_id, e, ctx),
         IrStmt::SelfUpdate { span, .. } => Err(LoweringError::UnsupportedPhysicsStmt {
             rule: rule_id,
@@ -851,6 +863,141 @@ fn lower_match(
     push_stmt(stmt, span, ctx)
 }
 
+/// Lower an `IrStmt::For { binder, iter: spatial.<query>(self),
+/// filter, body, .. }` to [`CgStmt::ForEachNeighborBody`].
+///
+/// Slice 2b of the stdlib-into-CG-IR plan: the body-form companion
+/// to the fold-form `ForEachNeighbor`. Today only the
+/// `spatial.<method>(self, ...)` iter is recognised — bare `agents`
+/// or non-spatial iter shapes surface as
+/// [`LoweringError::UnsupportedPhysicsStmt`] (a future task lights
+/// up the N²-walk body iter when a fixture asks for it).
+///
+/// `filter` (the `for x in spatial.X(self) where <pred> { … }` clause)
+/// is lifted into a top-level `if (<pred>) { <body> }` inside the
+/// body — the per-candidate predicate gates the body's emit/assign,
+/// matching the fold form's `where` semantics.
+///
+/// The `binder` lowers via the existing `fold_binder_name` channel:
+/// reads of `<binder>` / `<binder>.<field>` inside the body resolve
+/// to [`crate::cg::data_handle::AgentRef::PerPairCandidate`] /
+/// [`crate::cg::expr::CgExpr::PerPairCandidateId`] just like the
+/// fold form. The binder's `LocalRef` is also registered in
+/// `ctx.local_ids` (with type `AgentId`) for defense-in-depth.
+fn lower_for_spatial_body(
+    rule_id: PhysicsRuleId,
+    binder: dsl_ast::ir::LocalRef,
+    binder_name: &str,
+    iter: &dsl_ast::ir::IrExprNode,
+    filter: Option<&dsl_ast::ir::IrExprNode>,
+    body: &[IrStmt],
+    span: Span,
+    ctx: &mut LoweringCtx<'_>,
+) -> Result<CgStmtId, LoweringError> {
+    // Recognise the iter shape. Today only `spatial.<method>(self, ...)`
+    // (and the legacy `query.nearby_agents(<pos>, <radius>)`) lower
+    // to a body-form spatial walk; any other iter shape surfaces as
+    // an unsupported physics stmt.
+    let shape = super::spatial::try_recognise_spatial_iter(iter, ctx)?
+        .ok_or(LoweringError::UnsupportedPhysicsStmt {
+            rule: rule_id,
+            ast_label: "For/non-spatial-iter",
+            span,
+        })?;
+
+    // Register the binder in `ctx.local_ids` (so any future read-side
+    // resolution can find it via the standard let-bound path) and
+    // record its type as AgentId. Both registries are scoped to the
+    // surrounding op's body — restoring on return is unnecessary
+    // because the resolver scopes the LocalRef numerically per body.
+    let binder_local = ctx.allocate_local(binder);
+    ctx.record_local_ty(binder_local, crate::cg::expr::CgTy::AgentId);
+
+    // Push the source-level binder name onto the fold-binder slot so
+    // body reads of `<binder>` / `<binder>.<field>` resolve to
+    // per-pair candidate. Mirrors `lower_fold_over_agents`'s
+    // mechanism — restored on return so an outer fold's binder isn't
+    // shadowed.
+    let prev_binder = ctx.fold_binder_name.replace(binder_name.to_string());
+
+    // Lower the body statements in source order.
+    let body_ids_res = lower_stmt_list(rule_id, body, ctx);
+
+    let body_ids = match body_ids_res {
+        Ok(ids) => ids,
+        Err(e) => {
+            ctx.fold_binder_name = prev_binder;
+            return Err(e);
+        }
+    };
+
+    // If the for-clause carried `where <pred>`, wrap the body in
+    // `if (<pred>) { ... }` so the per-candidate guard lives inside
+    // the per-thread inner loop — same shape the WGSL emit produces
+    // for filtered fold-bodies. Lower the predicate AFTER the body
+    // so the binder is already in scope (it should be — fold-binder
+    // slot is set above), and the predicate's own pre-stmts (if
+    // any) interleave correctly through `pending_pre_stmts`.
+    let final_ids = if let Some(pred_node) = filter {
+        let cond_id = match lower_expr(pred_node, ctx) {
+            Ok(id) => id,
+            Err(e) => {
+                ctx.fold_binder_name = prev_binder;
+                return Err(e);
+            }
+        };
+        // Drain any fold-injected pre-stmts the predicate produced
+        // so they execute BEFORE the if-guard inside the per-pair
+        // loop (matches the where-clause handling on per-handler
+        // bodies).
+        let pre = std::mem::take(&mut ctx.pending_pre_stmts);
+        let body_inner_id = match ctx
+            .builder
+            .add_stmt_list(CgStmtList::new(body_ids))
+            .map_err(|e| LoweringError::BuilderRejected { error: e, span })
+        {
+            Ok(id) => id,
+            Err(e) => {
+                ctx.fold_binder_name = prev_binder;
+                return Err(e);
+            }
+        };
+        let if_stmt = CgStmt::If {
+            cond: cond_id,
+            then: body_inner_id,
+            else_: None,
+        };
+        let if_id = match push_stmt(if_stmt, span, ctx) {
+            Ok(id) => id,
+            Err(e) => {
+                ctx.fold_binder_name = prev_binder;
+                return Err(e);
+            }
+        };
+        let mut combined = pre;
+        combined.push(if_id);
+        combined
+    } else {
+        body_ids
+    };
+
+    // Restore prior fold-binder slot before exiting.
+    ctx.fold_binder_name = prev_binder;
+
+    let inner_list = CgStmtList::new(final_ids);
+    let inner_list_id = ctx
+        .builder
+        .add_stmt_list(inner_list)
+        .map_err(|e| LoweringError::BuilderRejected { error: e, span })?;
+
+    let stmt = CgStmt::ForEachNeighborBody {
+        binder: binder_local,
+        body: inner_list_id,
+        radius_cells: shape.radius_cells,
+    };
+    push_stmt(stmt, span, ctx)
+}
+
 /// Lower a single match arm. Returns the typed [`CgMatchArm`].
 fn lower_match_arm(
     rule_id: PhysicsRuleId,
@@ -1049,9 +1196,15 @@ fn is_tile_eligible_body(
                 // agent fields (set_pos / set_vel).
             }
             CgStmt::ForEachAgent { .. }
+            | CgStmt::ForEachNeighborBody { .. }
             | CgStmt::If { .. }
             | CgStmt::Match { .. }
             | CgStmt::Emit { .. } => {
+                // ForEachNeighborBody carries an emit-bearing body —
+                // not a pure fold over fields. The tiled-MoveBoid
+                // optimisation only applies to fold-shaped bodies; a
+                // body-form spatial walk falls back to the
+                // PerAgent global-memory cell-walk emit.
                 return false;
             }
         }
@@ -1466,10 +1619,15 @@ mod tests {
     // ---- 5. Negative: For loop in body → typed deferral -----------------
 
     #[test]
-    fn rejects_for_loop_in_body() {
+    fn rejects_for_loop_with_non_spatial_iter() {
         // physics cast @phase(event) {
-        //   on E { ... } { for op in ... { ... } }
+        //   on E { ... } { for op in <lit> { ... } }
         // }
+        // Slice 2b lit up `for x in spatial.<query>(self) { ... }` —
+        // the `cast` rule's `for op in abilities.effects(ab)` shape
+        // (and any other non-spatial iter) still surfaces as
+        // unsupported until a future task lights up the matching
+        // physics-body iter form.
         let rule = rule_with_body(
             "cast",
             "E",
@@ -1492,7 +1650,7 @@ mod tests {
             &standard_resolutions(),
             &mut ctx,
         )
-        .expect_err("For unsupported in physics body");
+        .expect_err("For/non-spatial-iter unsupported in physics body");
         match err {
             LoweringError::UnsupportedPhysicsStmt {
                 rule,
@@ -1500,12 +1658,109 @@ mod tests {
                 span,
             } => {
                 assert_eq!(rule, PhysicsRuleId(0));
-                assert_eq!(ast_label, "For");
+                assert_eq!(ast_label, "For/non-spatial-iter");
                 assert_eq!(span.start, 5);
                 assert_eq!(span.end, 12);
             }
-            other => panic!("expected UnsupportedPhysicsStmt(For), got {other:?}"),
+            other => panic!("expected UnsupportedPhysicsStmt, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lowers_for_loop_with_spatial_iter_to_for_each_neighbor_body() {
+        // Slice 2b body-form spatial walk:
+        //   physics MoveParticle @phase(per_agent) {
+        //     on Tick {} {
+        //       for other in spatial.nearby_particles(self) {
+        //         emit Collision {}
+        //       }
+        //     }
+        //   }
+        //
+        // The For-arm of `lower_stmt` recognises the spatial iter
+        // shape and lowers to `CgStmt::ForEachNeighborBody { binder,
+        // body, radius_cells }` whose body is a CgStmtList holding
+        // the (payload-free for the test) Emit. The binder's source-
+        // level name pushes onto `ctx.fold_binder_name` for the body
+        // walk so reads of `other` / `other.<field>` resolve to per-
+        // pair candidate.
+        use dsl_ast::ir::{IrCallArg, NamespaceId};
+        let spatial_iter = IrExprNode {
+            kind: IrExpr::NamespaceCall {
+                ns: NamespaceId::Spatial,
+                method: "nearby_particles".to_string(),
+                args: vec![IrCallArg {
+                    name: None,
+                    value: IrExprNode {
+                        kind: IrExpr::Local(LocalRef(0), "self".to_string()),
+                        span: span(0, 0),
+                    },
+                    span: span(0, 0),
+                }],
+            },
+            span: span(0, 0),
+        };
+        let rule = rule_with_body(
+            "MoveParticle",
+            "Tick",
+            vec![IrStmt::For {
+                binder: LocalRef(1),
+                binder_name: "other".to_string(),
+                iter: spatial_iter,
+                filter: None,
+                body: vec![IrStmt::Emit(IrEmit {
+                    event_name: "Collision".to_string(),
+                    event: None,
+                    fields: vec![],
+                    span: span(20, 40),
+                })],
+                span: span(10, 50),
+            }],
+        );
+
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = LoweringCtx::new(&mut builder);
+        ctx.register_event_kind("Collision", EventKindId(7));
+
+        let ops = lower_physics(
+            PhysicsRuleId(0),
+            ReplayabilityFlag::Replayable,
+            &rule,
+            &standard_resolutions(),
+            &mut ctx,
+        )
+        .expect("for-spatial-body lowers");
+        assert_eq!(ops.len(), 1);
+
+        let prog = builder.finish();
+        // The body list of the lowered op contains one
+        // CgStmt::ForEachNeighborBody whose body holds the inner Emit.
+        let mut found_for_each = false;
+        let mut found_inner_emit = false;
+        for stmt in &prog.stmts {
+            match stmt {
+                CgStmt::ForEachNeighborBody { radius_cells, body, .. } => {
+                    assert_eq!(*radius_cells, 1, "spatial iter shape pins radius_cells = 1");
+                    let inner_list = &prog.stmt_lists[body.0 as usize];
+                    for inner_id in &inner_list.stmts {
+                        if let CgStmt::Emit { event, .. } = &prog.stmts[inner_id.0 as usize] {
+                            assert_eq!(*event, EventKindId(7));
+                            found_inner_emit = true;
+                        }
+                    }
+                    found_for_each = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            found_for_each,
+            "expected a CgStmt::ForEachNeighborBody in the lowered body"
+        );
+        assert!(
+            found_inner_emit,
+            "expected the inner Emit to be the body's only statement"
+        );
     }
 
     // ---- 6. Negative: handler-resolution length mismatch ---------------
@@ -1947,7 +2202,8 @@ mod tests {
                 | CgStmt::If { .. }
                 | CgStmt::Let { .. }
                 | CgStmt::ForEachAgent { .. }
-                | CgStmt::ForEachNeighbor { .. } => {
+                | CgStmt::ForEachNeighbor { .. }
+                | CgStmt::ForEachNeighborBody { .. } => {
                     // Other body shapes — not produced by this fixture.
                 }
             }
