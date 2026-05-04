@@ -1,0 +1,29 @@
+[package]
+name = "abilities_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/abilities_probe.sim` — the
+# smallest end-to-end probe of the ABILITY SYSTEM. Mirrors the
+# `verb_probe_runtime` shape: build.rs lowers the .sim through the
+# DSL compiler into `OUT_DIR/generated.rs`; src/lib.rs owns the GPU
+# context, per-buffer storage, kernel cache, and per-tick dispatch
+# chain.
+#
+# This crate is a discovery probe. The accompanying `abilities_app`
+# binary in `sim_app` reports observed totals per view so gaps surface
+# as data, not panics. See `docs/superpowers/notes/2026-05-04-abilities_probe.md`
+# for the gap chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

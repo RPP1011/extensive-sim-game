@@ -1,0 +1,146 @@
+// abilities_probe — smallest end-to-end probe of the ABILITY SYSTEM.
+//
+// The user has been asking since early in the session: "do we have the
+// ability system yet?" The answer per CLAUDE.md / spec is: the ability
+// SURFACE exists in the spec (per-agent abilities + cooldowns +
+// activation through verb cascade — see docs/spec/dsl.md §abilities.*
+// and §agents.cooldown_*) but no end-to-end fixture exercises it.
+//
+// This probe is the minimal end-to-end exercise:
+//
+//   - TWO competing verbs (Strike + Heal) emit DISTINCT event kinds
+//     (DamageDealt + Healed) on every alive agent every tick.
+//   - Verb cascade scoring picks the WINNER per agent per tick via
+//     argmax over `score` expressions.
+//   - Two chronicle physics rules synthesised from the verbs each
+//     gate on the verb's stable `action_id` and emit the verb's
+//     event into the shared ring.
+//   - Two view-folds (`damage_total`, `healing_done`) accumulate the
+//     per-attacker / per-healer totals from those event kinds.
+//
+// Discovery focus differs from verb_fire_probe (single verb only) and
+// trade_market_probe (verb + multi-emit physics rule). This probe is
+// the SMALLEST shape that exercises:
+//
+//   1. Two `verb` declarations in one program (action_id = 0, 1).
+//   2. Scoring competition between two verbs (argmax picks the
+//      higher-scoring one — Strike at 10.0 wins over Heal at 5.0).
+//   3. Two separate chronicle physics rules each emitting their own
+//      event kind into the SAME ring.
+//   4. Two view-folds keyed on per-attacker / per-healer fields,
+//      driven by two distinct event tags (DamageDealt, Healed).
+//
+// IDEAL probe shape (BLOCKED — see Gap #1 in discovery doc):
+//
+//   The natural ability-system shape uses cooldowns to gate verb
+//   readiness — Strike fires every 3rd tick, Heal fires on the
+//   off-ticks. The mask predicate would read `tick % cooldown == 0u`
+//   and the chronicle would record the next-ready-tick. But CG
+//   lowering rejects `BinOp::Mod` with `UnsupportedBinaryOp` (see
+//   `crates/dsl_compiler/src/cg/lower/expr.rs:1547`), so this probe
+//   uses score-only competition and surfaces the modulo gap as
+//   discovered finding #1.
+//
+// FULL FIRE observable predictions (asserted by abilities_app):
+//
+//   - damage_total[i]   per slot = T * strike_damage = 100 * 10 = 1000.0
+//   - healing_done[i]   per slot = 0.0  (Heal never wins argmax —
+//                                        score 5.0 < Strike's 10.0)
+//
+// If both views fire as predicted, the verb-cascade scoring kernel is
+// correctly choosing the higher-scored verb per agent per tick AND
+// both verbs can structurally co-exist (action_id allocation,
+// chronicle synthesis, multi-event-kind ring partitioning). If
+// healing_done is non-zero on any slot, scoring is broken (Heal
+// shouldn't ever win); if damage_total is zero, the verb cascade is
+// not reaching the chronicle for either verb (compounded gap).
+
+event Tick { }
+
+@replayable @gpu_amenable
+event DamageDealt {
+  attacker: AgentId,
+  target:   AgentId,
+  amount:   f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  healer:   AgentId,
+  target:   AgentId,
+  amount:   f32,
+}
+
+entity Combatant : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Strike scores higher than Heal so argmax always picks Strike.
+  // See FULL FIRE prediction above for the per-slot observable.
+  strike_damage: f32 = 10.0,
+  heal_amount:   f32 = 5.0,
+}
+
+// Strike verb — higher score, wins argmax every tick. Mask predicate
+// is `self.alive` (always true). Score is `config.combat.strike_damage`
+// = 10.0. Per-agent emit per tick: one DamageDealt event with
+// attacker=self placeholder (target=self too — the verb body has no
+// target-resolution access today; the chronicle for Strike fires on
+// the per-agent ActionSelected entry it just won).
+verb Strike(self) =
+  action StrikeAction
+  when  self.alive
+  emit  DamageDealt {
+    attacker: self,
+    target:   self,
+    amount:   config.combat.strike_damage,
+  }
+  score config.combat.strike_damage
+
+// Heal verb — lower score, NEVER wins argmax under the score-only
+// competition. Kept in the program to exercise:
+//   - Two verbs allocate distinct action_ids (Strike=0, Heal=1).
+//   - Two chronicle physics rules synthesise cleanly without name
+//     collision.
+//   - The competing-row scoring path picks the max — healing_done
+//     should remain at 0 for every slot.
+//
+// If a future commit teaches the CG lowering pass to handle
+// `BinOp::Mod`, the natural cooldown-gated shape becomes:
+//
+//   when (tick % config.combat.cooldown_ticks == 0u)
+//
+// and Strike + Heal alternate ticks. Today that path is blocked —
+// see gap #1 in the discovery doc.
+verb Heal(self) =
+  action HealAction
+  when  self.alive
+  emit  Healed {
+    healer: self,
+    target: self,
+    amount: config.combat.heal_amount,
+  }
+  score config.combat.heal_amount
+
+// Per-attacker damage dealt counter — one f32 per Combatant slot,
+// no decay. With Strike winning argmax every tick and emitting one
+// DamageDealt per agent per tick (`amount = 10.0`), per-slot value
+// after T ticks = T * strike_damage = 100 * 10 = 1000.0.
+@materialized(on_event = [DamageDealt])
+view damage_total(attacker: Agent) -> f32 {
+  initial: 0.0,
+  on DamageDealt { attacker: a, target: _, amount: amt } { self += amt }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-healer healing dispensed — fed by `Healed` event kind. Heal
+// loses argmax to Strike every tick, so this view stays at 0.0 for
+// every slot. If non-zero, scoring competition is broken.
+@materialized(on_event = [Healed])
+view healing_done(healer: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { healer: h, target: _, amount: amt } { self += amt }
+  clamp: [0.0, 1000000.0],
+}

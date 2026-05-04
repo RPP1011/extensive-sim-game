@@ -55,6 +55,10 @@ tom_probe_runtime = { path = "../tom_probe_runtime" }
 # mixed view-fold storage (u32 + f32 @decay + f32 no-decay) +
 # multiple Item entity declarations in one program.
 trade_market_runtime = { path = "../trade_market_runtime" }
+# Abilities probe — smallest end-to-end probe of the ability system
+# (two competing verbs Strike+Heal, two event kinds DamageDealt+Healed,
+# two view-folds damage_total+healing_done).
+abilities_runtime = { path = "../abilities_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -107,3 +111,7 @@ path = "src/tom_probe_app.rs"
 [[bin]]
 name = "trade_market_app"
 path = "src/trade_market_app.rs"
+
+[[bin]]
+name = "abilities_app"
+path = "src/abilities_app.rs"

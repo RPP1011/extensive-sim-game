@@ -1140,3 +1140,157 @@ physics PingOnce @phase(per_agent) {
         "warning should fire for `NeverEmitted`, not `UsedEvent`; got `{event_name}`",
     );
 }
+
+/// `abilities_probe` compile-gate. Pins the structural surface that
+/// the smallest end-to-end ability-system probe exercises:
+///
+///   - 2 `verb` declarations (Strike, Heal) → 2 mask predicates +
+///     2 chronicle physics rules (PhysicsRule on ActionSelected).
+///   - 1 ScoringArgmax with 2 competing rows.
+///   - 2 view-folds keyed on distinct event tags (DamageDealt,
+///     Healed) — one fed by the verb that wins argmax, one by the
+///     verb that loses.
+///
+/// Locks the verb-cascade multi-verb codepath so a regression that
+/// silently dropped a second verb's mask / chronicle / scoring row
+/// fails here.
+///
+/// SURFACES the discovered emit-side gap (2026-05-04 abilities probe
+/// discovery): the schedule fuses `fold_healing_done` (consumer of
+/// `Healed`) with the Strike chronicle (producer of `DamageDealt`) into
+/// `fused_fold_healing_done_healed`, and the WGSL body in that fused
+/// kernel references an undeclared identifier `view_storage_primary`
+/// — the bindings struct only exposes `view_1_primary`. The naga
+/// validation assertion below fails today; once the rename pass is
+/// fixed, the assertion flips to "all kernels naga-clean".
+#[test]
+fn abilities_probe_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/abilities_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse abilities_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve abilities_probe.sim");
+    // Lower may emit `well_formedness` cycle diag (gap — see discovery
+    // doc). Tolerate the diag and proceed with the partial program so
+    // the rest of the pipeline still surfaces.
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[abilities lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit abilities_probe");
+
+    // Op-level invariants: verb expansion produced exactly 2 mask
+    // predicates + 2 chronicle physics rules + 1 scoring with 2
+    // rows + 2 view folds.
+    let mut mask_count = 0;
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    let mut scoring_rows = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::MaskPredicate { .. } => mask_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ScoringArgmax { rows, .. } => {
+                scoring_rows = rows.len();
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        mask_count, 2,
+        "expected 2 MaskPredicate ops (one per verb's `when` clause); got {mask_count}",
+    );
+    assert_eq!(
+        physics_count, 2,
+        "expected 2 PhysicsRule ops (verb-synthesised chronicles for Strike + Heal); got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 2,
+        "expected 2 ViewFold ops (damage_total + healing_done); got {viewfold_count}",
+    );
+    assert_eq!(
+        scoring_rows, 2,
+        "expected 2 scoring rows (Strike + Heal competing); got {scoring_rows}",
+    );
+
+    // Both Strike and Heal must have entries in the kernel index. The
+    // exact kernel names drift as the schedule fuses pairs together;
+    // we look for the substring "Strike" or "Heal" anywhere in the
+    // emitted set.
+    let has_strike = art
+        .kernel_index
+        .iter()
+        .any(|n| n.to_lowercase().contains("strike"));
+    let has_heal = art
+        .kernel_index
+        .iter()
+        .any(|n| n.to_lowercase().contains("heal"));
+    assert!(
+        has_strike,
+        "expected at least one kernel name to mention Strike; got {:?}",
+        art.kernel_index,
+    );
+    assert!(
+        has_heal,
+        "expected at least one kernel name to mention Heal; got {:?}",
+        art.kernel_index,
+    );
+
+    eprintln!(
+        "[abilities_probe] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
+
+/// Probe Gap #1 — naga validation of the abilities probe surfaces a
+/// fused-kernel binding-rename gap. The schedule fuses
+/// `fold_healing_done` (consumer of `Healed`) with the Strike
+/// chronicle (producer of `DamageDealt`) into
+/// `fused_fold_healing_done_healed`. The fused kernel's bindings
+/// struct exposes `view_1_primary`, but the WGSL body still
+/// references the un-renamed `view_storage_primary` from the fold's
+/// pre-fusion emit template.
+///
+/// This test PINS the gap as a known-failing assertion. When the
+/// emit pass is fixed (likely in `kernel.rs::build_view_fold_wgsl_
+/// body` or the fusion-rename pass), the `naga_err_msgs` count drops
+/// to zero and this test starts to PASS — which is the trigger to
+/// remove the `#[ignore]` and convert it into a "must stay clean"
+/// invariant.
+#[test]
+#[ignore = "Gap #1: fused kernel references undeclared `view_storage_primary` — see docs/superpowers/notes/2026-05-04-abilities_probe.md"]
+fn abilities_probe_naga_clean() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/abilities_probe.sim");
+    let src = std::fs::read_to_string(&path).expect("read");
+    let prog = dsl_compiler::parse(&src).expect("parse");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve");
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| o.program);
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg).expect("emit");
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "abilities_probe emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+}

@@ -3,6 +3,19 @@
 version = 4
 
 [[package]]
+name = "abilities_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1610,6 +1623,7 @@ dependencies = [
 name = "sim_app"
 version = "0.1.0"
 dependencies = [
+ "abilities_runtime",
  "auction_runtime",
  "bartering_runtime",
  "boids_runtime",
