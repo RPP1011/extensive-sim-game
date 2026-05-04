@@ -328,6 +328,63 @@ fn agent_ref_token(target: &AgentRef) -> String {
     }
 }
 
+/// Resolve an Item / Group field's binding name via the program's
+/// catalog. Returns `<entity_snake>_<field_snake>` (e.g. `coin_weight`)
+/// when the (entity, slot) pair has a catalog entry; falls back to the
+/// opaque structural form `item_<entity>_<slot>` /
+/// `group_<entity>_<slot>` so the WGSL still parses if the catalog is
+/// missing the entry (a lowering defect).
+pub(crate) fn item_field_binding_name(
+    prog: &CgProgram,
+    entity_ref: u16,
+    slot: u16,
+    is_item: bool,
+) -> String {
+    let resolved = if is_item {
+        prog.entity_field_catalog
+            .resolve_item(crate::cg::data_handle::ItemFieldId {
+                entity: entity_ref,
+                slot,
+                ty: crate::cg::data_handle::AgentFieldTy::U32,
+            })
+    } else {
+        prog.entity_field_catalog
+            .resolve_group(crate::cg::data_handle::GroupFieldId {
+                entity: entity_ref,
+                slot,
+                ty: crate::cg::data_handle::AgentFieldTy::U32,
+            })
+    };
+    match resolved {
+        Some((entity_name, field_name, _)) => {
+            format!("{}_{}", to_snake_case(entity_name), field_name)
+        }
+        None => {
+            let prefix = if is_item { "item" } else { "group" };
+            format!("{}_{}_{}", prefix, entity_ref, slot)
+        }
+    }
+}
+
+/// Convert a PascalCase / camelCase identifier to snake_case. Mirrors
+/// the helper of the same name in `cg/emit/kernel.rs` — kept here so
+/// the body emit doesn't need to depend on the kernel emit's private
+/// helpers. Adding the kernel-side helper to `pub(crate)` would couple
+/// the two files; the duplicated four-line helper is the lower-friction
+/// choice.
+fn to_snake_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_uppercase() && i != 0 {
+            out.push('_');
+        }
+        for low in ch.to_lowercase() {
+            out.push(low);
+        }
+    }
+    out
+}
+
 /// True iff `expr` is a `CgExpr::EventField` read — the binder
 /// extraction shape that fold-handler bodies produce when they
 /// destructure event payload fields like `on Killed { by: predator }`.
@@ -750,6 +807,58 @@ pub fn lower_cg_expr_to_wgsl(expr_id: CgExprId, ctx: &EmitCtx) -> Result<String,
                     }
                 }
                 return Ok(agent_field_access(*field, target));
+            }
+            // Item / Group fields: emit `<entity_snake>_<field>[<idx>]`.
+            // The binding name is sourced from the program's
+            // `entity_field_catalog` so kernel binding names + body
+            // accesses agree on the same identifier (e.g. `coin_weight`).
+            // The `<idx>` expression is the catalog-resolved target id;
+            // it lowers identically to the AgentField `Target(_)` path
+            // (recursive lowering with stmt-prefix `let item_target_<N>`
+            // hoisting via `pending_target_lets`).
+            if let DataHandle::ItemField { field, target } = handle {
+                let already_bound = ctx
+                    .bound_target_exprs
+                    .borrow()
+                    .contains(target);
+                if !already_bound {
+                    let target_wgsl = lower_cg_expr_to_wgsl(*target, ctx)?;
+                    ctx.pending_target_lets
+                        .borrow_mut()
+                        .push((*target, target_wgsl));
+                    ctx.bound_target_exprs
+                        .borrow_mut()
+                        .insert(*target);
+                }
+                let bind_name = item_field_binding_name(
+                    ctx.prog,
+                    field.entity,
+                    field.slot,
+                    /* is_item */ true,
+                );
+                return Ok(format!("{}[target_expr_{}]", bind_name, target.0));
+            }
+            if let DataHandle::GroupField { field, target } = handle {
+                let already_bound = ctx
+                    .bound_target_exprs
+                    .borrow()
+                    .contains(target);
+                if !already_bound {
+                    let target_wgsl = lower_cg_expr_to_wgsl(*target, ctx)?;
+                    ctx.pending_target_lets
+                        .borrow_mut()
+                        .push((*target, target_wgsl));
+                    ctx.bound_target_exprs
+                        .borrow_mut()
+                        .insert(*target);
+                }
+                let bind_name = item_field_binding_name(
+                    ctx.prog,
+                    field.entity,
+                    field.slot,
+                    /* is_item */ false,
+                );
+                return Ok(format!("{}[target_expr_{}]", bind_name, target.0));
             }
             Ok(ctx.handle_name(handle))
         }

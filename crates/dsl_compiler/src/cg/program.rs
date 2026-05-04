@@ -543,6 +543,47 @@ impl EntityFieldCatalog {
         let fld = rec.fields.get(id.slot as usize)?;
         Some((rec.entity_name.as_str(), fld.name.as_str(), fld.ty))
     }
+
+    /// Resolve an Item field by its source-level name (e.g. `"weight"`).
+    /// Returns the (entity ref, slot, primitive type) triple of the
+    /// first declaration carrying a field with that name. Used by the
+    /// `items.<field>(idx)` lowering arm to fill a typed
+    /// [`crate::cg::data_handle::ItemFieldId`] without forcing the
+    /// caller to know which entity owns the field.
+    ///
+    /// The current contract is "field names are unique across all
+    /// Item entities" — a future ambiguity (two Item entities both
+    /// declaring `weight`) would surface here as the first match
+    /// winning; the resolve pass is the right place to forbid that.
+    pub fn resolve_item_by_name(
+        &self,
+        field_name: &str,
+    ) -> Option<(u16, u16, super::data_handle::AgentFieldTy)> {
+        for (entity_ref, rec) in &self.items {
+            for (slot_idx, fld) in rec.fields.iter().enumerate() {
+                if fld.name == field_name {
+                    return Some((*entity_ref, slot_idx as u16, fld.ty));
+                }
+            }
+        }
+        None
+    }
+
+    /// Resolve a Group field by its source-level name — same shape as
+    /// [`Self::resolve_item_by_name`].
+    pub fn resolve_group_by_name(
+        &self,
+        field_name: &str,
+    ) -> Option<(u16, u16, super::data_handle::AgentFieldTy)> {
+        for (entity_ref, rec) in &self.groups {
+            for (slot_idx, fld) in rec.fields.iter().enumerate() {
+                if fld.name == field_name {
+                    return Some((*entity_ref, slot_idx as u16, fld.ty));
+                }
+            }
+        }
+        None
+    }
 }
 
 /// Helper — record a name in an interner table. Idempotent: passing

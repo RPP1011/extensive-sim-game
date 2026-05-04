@@ -53,6 +53,14 @@ impl From<Vec3Padded> for Vec3 {
     }
 }
 
+/// Coin entity SoA: a single Item slot whose `weight: f32` field the
+/// IdleDrift physics rule multiplies the per-tick velocity drift by.
+/// Sized to one record so `items.weight(0)` (the only access pattern
+/// in the .sim file) lands on a populated slot. The chosen value
+/// (`COIN_WEIGHT_VALUE`) is the multiplier the bartering_app
+/// observable assertion keys on.
+pub const COIN_WEIGHT_VALUE: f32 = 2.0;
+
 pub struct BarteringState {
     gpu: GpuContext,
     pos_buf: wgpu::Buffer,
@@ -64,6 +72,14 @@ pub struct BarteringState {
     /// receives N*T trades, every other slot receives 0", which
     /// makes the observable trivially predictable.
     engaged_with_buf: wgpu::Buffer,
+    /// Per-Item SoA — `coin_weight: array<f32>`. The .sim file's
+    /// IdleDrift rule reads `items.weight(0)`, so this buffer carries
+    /// one record (`COIN_WEIGHT_VALUE`). The compiler-generated
+    /// `PhysicsIdleDriftBindings` carries a `coin_weight` slot whose
+    /// name comes from the program's `entity_field_catalog`
+    /// (entity_name "Coin" + field_name "weight" → snake_case
+    /// `coin_weight`).
+    coin_weight_buf: wgpu::Buffer,
     cfg_buf: wgpu::Buffer,
     pos_staging: wgpu::Buffer,
 
@@ -143,6 +159,18 @@ impl BarteringState {
                 contents: bytemuck::cast_slice(&engaged_with_init),
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             });
+        // Per-Item SoA — the WGSL `coin_weight: array<f32>` binding
+        // produced by lowering the `entity Coin : Item { weight: f32 }`
+        // declaration + the `items.weight(0)` access in the IdleDrift
+        // physics rule. Sized to a single Item slot.
+        let coin_weight_init: Vec<f32> = vec![COIN_WEIGHT_VALUE];
+        let coin_weight_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("bartering_runtime::coin_weight"),
+                contents: bytemuck::cast_slice(&coin_weight_init),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            },
+        );
         let cfg = physics_IdleDrift::PhysicsIdleDriftCfg {
             agent_cap: agent_count,
             tick: 0,
@@ -187,6 +215,7 @@ impl BarteringState {
             vel_buf,
             alive_buf,
             engaged_with_buf,
+            coin_weight_buf,
             cfg_buf,
             pos_staging,
             event_ring,
@@ -263,6 +292,7 @@ impl CompiledSim for BarteringState {
             agent_alive: &self.alive_buf,
             agent_engaged_with: &self.engaged_with_buf,
             agent_vel: &self.vel_buf,
+            coin_weight: &self.coin_weight_buf,
             cfg: &self.cfg_buf,
         };
         dispatch::dispatch_physics_idledrift(

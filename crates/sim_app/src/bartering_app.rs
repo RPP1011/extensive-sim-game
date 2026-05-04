@@ -21,7 +21,7 @@
 //! gap — see ses_app for context — but at 1 emit/agent/tick the
 //! event-count dispatch sizing handles it cleanly.)
 
-use bartering_runtime::BarteringState;
+use bartering_runtime::{BarteringState, COIN_WEIGHT_VALUE};
 use engine::CompiledSim;
 use glam::Vec3;
 
@@ -32,9 +32,10 @@ const LOG_INTERVAL_TICKS: u64 = 25;
 
 fn main() {
     let mut sim = BarteringState::new(SEED, AGENT_COUNT);
+    let initial_centroid = centroid(sim.positions());
     println!(
-        "bartering_app: starting run — seed=0x{:016X} agents={} ticks={}",
-        SEED, AGENT_COUNT, TICKS,
+        "bartering_app: starting run — seed=0x{:016X} agents={} ticks={} coin_weight={:.2}",
+        SEED, AGENT_COUNT, TICKS, COIN_WEIGHT_VALUE,
     );
     log_sample(&mut sim);
     for _ in 0..TICKS {
@@ -49,6 +50,7 @@ fn main() {
         sim.agent_count(),
     );
 
+    let final_centroid = centroid(sim.positions());
     let tc = sim.trade_counts().to_vec();
     let total: f32 = tc.iter().sum();
     let slot0 = tc.first().copied().unwrap_or(0.0);
@@ -81,7 +83,69 @@ fn main() {
         (total - expected_total).abs() < 1.0,
         "expected total ≈ {expected_total:.0}, got {total:.2}"
     );
+
+    // Item-field-read assertion: the IdleDrift physics rule body
+    // multiplies its per-tick velocity drift by `items.weight(0)`,
+    // which the per-fixture runtime backs with a single-record
+    // `coin_weight: array<f32>` SoA buffer (value
+    // `COIN_WEIGHT_VALUE`). With the multiplier in place every
+    // agent's centroid drift is `weight × baseline_drift`; with the
+    // multiplier silently dropped (the pre-fix gap) the drift would
+    // collapse to the baseline. We compare the centroid delta against
+    // the baseline-drift × `COIN_WEIGHT_VALUE` band — values in that
+    // band confirm the Item-field read landed on the right buffer
+    // and propagated the right value through the WGSL body.
+    //
+    // Baseline drift per axis (collected with the runtime pinned to
+    // weight=1.0 for one calibration run):
+    //   centroid drift over 100 ticks ≈ (-0.022, -0.013, +0.049)
+    // With weight=2.0 we expect:
+    //   ≈ (-0.044, -0.025, +0.098).
+    // We assert the magnitude of the drift exceeds the
+    // weight-1 baseline by a margin (drop the multiplier and the
+    // total-drift magnitude collapses by roughly 2× — a margin of
+    // > weight*0.6 vs weight*1*1.0 catches the regression
+    // unambiguously).
+    let drift = final_centroid - initial_centroid;
+    let drift_mag = drift.length();
+    // Baseline (weight=1) drift magnitude over the full run, observed
+    // empirically with the `items.weight(0)` multiplier set to 1.0.
+    // The runtime today uses `COIN_WEIGHT_VALUE = 2.0`, so the expected
+    // observable is `baseline × 2.0 ≈ 0.108`. The bounds below
+    // intentionally REJECT the baseline-magnitude band — if a future
+    // regression silently drops the Item-field read (so the WGSL
+    // emits `... * 1.0` or skips the term entirely), drift collapses
+    // to the baseline and the assertion fires.
+    let baseline_drift_mag = 0.054_f32;
+    let expected_drift_mag = baseline_drift_mag * COIN_WEIGHT_VALUE;
+    // Tight band around the expected magnitude; explicitly tighter
+    // than `baseline × (weight - 1.0)` so accidentally falling back
+    // to weight=1.0 fails the assertion.
+    let band = baseline_drift_mag * 0.3;
+    let lower_bound = expected_drift_mag - band;
+    let upper_bound = expected_drift_mag + band;
+    println!(
+        "bartering_app: centroid drift     — magnitude={:.4} (expected ≈ {:.4} from coin_weight × baseline)",
+        drift_mag, expected_drift_mag,
+    );
+    assert!(
+        drift_mag > lower_bound && drift_mag < upper_bound,
+        "expected centroid drift magnitude in ({lower_bound:.4}, {upper_bound:.4}) (coin_weight={COIN_WEIGHT_VALUE}); got {drift_mag:.4}. \
+         A drift near baseline ({baseline_drift_mag:.4}) means `items.weight(0)` is silently dropping to 1.0 — the Item-field read isn't reaching the WGSL body."
+    );
+
     println!("bartering_app: OK — all assertions passed");
+}
+
+fn centroid(positions: &[Vec3]) -> Vec3 {
+    if positions.is_empty() {
+        return Vec3::ZERO;
+    }
+    let mut sum = Vec3::ZERO;
+    for p in positions {
+        sum += *p;
+    }
+    sum / positions.len() as f32
 }
 
 fn log_sample(sim: &mut BarteringState) {

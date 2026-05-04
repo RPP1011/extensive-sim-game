@@ -395,7 +395,7 @@ pub fn kernel_topology_to_spec_and_body(
             continue;
         };
         let access = upgrade_access(meta.base_access, agg.was_written);
-        let name = structural_binding_name(&canonical);
+        let name = structural_binding_name(&canonical, Some(prog));
         typed_bindings.push(TypedBinding {
             sort_key: key.clone(),
             name,
@@ -1154,7 +1154,7 @@ struct TypedBinding {
 /// For `AgentField`, we drop the `target` discriminator from the
 /// binding name — the binding identifies the storage buffer, not the
 /// per-thread access expression. `agent_<field>` is the form.
-fn structural_binding_name(h: &DataHandle) -> String {
+fn structural_binding_name(h: &DataHandle, prog: Option<&CgProgram>) -> String {
     match h {
         DataHandle::AgentField { field, target: _ } => {
             // The storage is shared across all per-thread accesses;
@@ -1162,19 +1162,30 @@ fn structural_binding_name(h: &DataHandle) -> String {
             format!("agent_{}", field.snake())
         }
         DataHandle::ItemField { field, target: _ } => {
-            // Per-Item SoA: `<entity_snake>_<field_snake>` keyed on
-            // the entity-ref + slot. The structural form delegates
-            // the (name, name) lookup to `item_field_structural_name`
-            // since `structural_binding_name` doesn't have a CgProgram
-            // handle (BGL composer-side calls do; this helper is used
-            // by the IR-walk that lacks one). Falls back to the opaque
-            // `item_<entity>_<slot>` form when no name is interned;
-            // the BGL composer's `handle_to_binding_metadata` arm
-            // produces the catalog-resolved form for the external
-            // bind group declaration.
+            // Per-Item SoA: prefer the catalog-resolved form
+            // `<entity_snake>_<field_snake>` (e.g. `coin_weight`) so
+            // the BGL binding name matches the WGSL body's access
+            // form (set by `item_field_binding_name` in
+            // `cg/emit/wgsl_body.rs`). Falls back to the opaque
+            // `item_<entity>_<slot>` form when no program / catalog is
+            // available (e.g. structural debug rendering).
+            if let Some(p) = prog {
+                if let Some((entity_name, field_name, _)) =
+                    p.entity_field_catalog.resolve_item(*field)
+                {
+                    return item_field_external_name(entity_name, field_name);
+                }
+            }
             format!("item_{}_{}", field.entity, field.slot)
         }
         DataHandle::GroupField { field, target: _ } => {
+            if let Some(p) = prog {
+                if let Some((entity_name, field_name, _)) =
+                    p.entity_field_catalog.resolve_group(*field)
+                {
+                    return item_field_external_name(entity_name, field_name);
+                }
+            }
             format!("group_{}_{}", field.entity, field.slot)
         }
         DataHandle::ViewStorage { view, slot } => {

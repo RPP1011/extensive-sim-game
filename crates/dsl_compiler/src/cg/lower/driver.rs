@@ -179,6 +179,7 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
     populate_views(comp, &mut ctx, &mut diagnostics);
     populate_view_bodies_and_signatures(comp, &mut ctx, &mut diagnostics);
     populate_namespace_registry(&mut ctx);
+    populate_entity_field_catalog(comp, &mut ctx);
 
     // -- Phase 2: per-construct lowering --------------------------------
     lower_all_masks(comp, &mut ctx, &mut diagnostics);
@@ -332,10 +333,12 @@ pub fn lower_compilation_to_cg(comp: &Compilation) -> Result<CgProgram, DriverOu
         .map(|(k, v)| (k.0, v.clone()))
         .collect();
     let namespace_registry_snapshot = ctx.namespace_registry.clone();
+    let entity_field_catalog_snapshot = ctx.entity_field_catalog.clone();
 
     let mut prog = builder.finish();
     prog.event_layouts = event_layouts_snapshot;
     prog.namespace_registry = namespace_registry_snapshot;
+    prog.entity_field_catalog = entity_field_catalog_snapshot;
     // `view_signatures` was set on the builder's program BEFORE the
     // cycle gate (above); `finish()` preserves it. No re-snapshot
     // needed here.
@@ -653,6 +656,88 @@ fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
     registry.namespaces.insert(NamespaceId::World, world);
 
     ctx.namespace_registry = registry;
+}
+
+/// Walk every `entity X : Item { ... }` and `entity X : Group { ... }`
+/// declaration in `comp.entities`, recording each field's name + type
+/// into the per-fixture
+/// [`crate::cg::program::EntityFieldCatalog`]. The catalog is consumed
+/// by:
+///   - The `(NamespaceId::Items, _)` / `(NamespaceId::Groups, _)` arms
+///     of [`crate::cg::lower::expr::lower_namespace_call`] — `items.<field>(idx)`
+///     looks up the field by name to produce a typed
+///     [`crate::cg::data_handle::ItemFieldId`].
+///   - The kernel-binding metadata in `cg/emit/kernel.rs` —
+///     `<entity_snake>_<field_snake>` is the binding's external name on
+///     the per-fixture runtime.
+///
+/// Agent-rooted entities are skipped: their fields are already covered
+/// by the closed [`crate::cg::data_handle::AgentFieldId`] enum and the
+/// engine's SoA. Only the user-declared catalog entities (Item, Group)
+/// need this per-fixture record.
+///
+/// `EntityRef::0` is the entity's index in `comp.entities`, used as the
+/// stable id key for the catalog. Field shape on the IR side is
+/// [`dsl_ast::ir::EntityFieldValueIR::Type`] with an [`dsl_ast::ir::IrType`]
+/// payload; we only handle the bare-type form (no struct literals, no
+/// list literals). Fields whose value is anything else are silently
+/// skipped — the resolver already accepts them, but they have no SoA
+/// shape today.
+fn populate_entity_field_catalog(comp: &Compilation, ctx: &mut LoweringCtx<'_>) {
+    use crate::cg::data_handle::AgentFieldTy;
+    use crate::cg::program::{EntityFieldCatalog, EntityFieldEntry, EntityFieldRecord};
+    use dsl_ast::ast::EntityRoot;
+    use dsl_ast::ir::{EntityFieldValueIR, IrType};
+
+    let mut catalog = EntityFieldCatalog::default();
+
+    for (idx, entity) in comp.entities.iter().enumerate() {
+        // Skip Agent-rooted entities — their SoA storage is the
+        // engine's closed AgentFieldId / AgentFieldTy schema.
+        let target = match entity.root {
+            EntityRoot::Item => &mut catalog.items,
+            EntityRoot::Group => &mut catalog.groups,
+            EntityRoot::Agent => continue,
+        };
+        let mut entries: Vec<EntityFieldEntry> = Vec::with_capacity(entity.fields.len());
+        for f in &entity.fields {
+            let ty = match &f.value {
+                EntityFieldValueIR::Type(t) => match t {
+                    IrType::F32 => Some(AgentFieldTy::F32),
+                    IrType::U32 => Some(AgentFieldTy::U32),
+                    IrType::Bool => Some(AgentFieldTy::Bool),
+                    IrType::Vec3 => Some(AgentFieldTy::Vec3),
+                    IrType::AgentId | IrType::ItemId | IrType::GroupId => {
+                        Some(AgentFieldTy::U32)
+                    }
+                    _ => None,
+                },
+                // Struct literals, list literals, and bare-expression
+                // values don't have a single-primitive SoA shape. Skip
+                // them for now — a future extension might emit one
+                // record per leaf field.
+                _ => None,
+            };
+            if let Some(ty) = ty {
+                entries.push(EntityFieldEntry {
+                    name: f.name.clone(),
+                    ty,
+                });
+            }
+        }
+        if entries.is_empty() {
+            continue;
+        }
+        target.insert(
+            idx as u16,
+            EntityFieldRecord {
+                entity_name: entity.name.clone(),
+                fields: entries,
+            },
+        );
+    }
+
+    ctx.entity_field_catalog = catalog;
 }
 
 /// Allocate one [`VariantId`] per enum variant across every

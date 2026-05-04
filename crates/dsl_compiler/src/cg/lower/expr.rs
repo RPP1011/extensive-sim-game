@@ -210,6 +210,17 @@ pub struct LoweringCtx<'a> {
     /// stack and the fold lowering to save / restore around the
     /// nested call.
     pub fold_binder_name: Option<String>,
+    /// Per-fixture catalog of `entity X : Item { ... }` and
+    /// `entity Y : Group { ... }` field declarations. Walked by the
+    /// `(NamespaceId::Items, _)` / `(NamespaceId::Groups, _)` arms of
+    /// [`lower_namespace_call`] so an `items.<field>(idx)` call resolves
+    /// the field name against the catalog and produces a typed
+    /// [`DataHandle::ItemField`] / [`DataHandle::GroupField`] read.
+    /// At `finish()` time the driver copies this onto
+    /// [`crate::cg::program::CgProgram::entity_field_catalog`] so the
+    /// kernel binding metadata can resolve (entity ref, slot) →
+    /// (entity name, field name, ty) without a separate registry walk.
+    pub entity_field_catalog: super::super::program::EntityFieldCatalog,
 }
 
 /// Captured form of a `@lazy` view's resolved AST: enough to
@@ -255,6 +266,7 @@ impl<'a> LoweringCtx<'a> {
             namespace_registry: super::super::program::NamespaceRegistry::default(),
             pending_pre_stmts: Vec::new(),
             fold_binder_name: None,
+            entity_field_catalog: super::super::program::EntityFieldCatalog::default(),
         }
     }
 
@@ -2416,6 +2428,83 @@ fn lower_namespace_call(
                 span,
             )
         }
+        (NamespaceId::Items, field) if args.len() == 1 => {
+            // `items.<field>(<expr>)` — typed Item-field read where the
+            // target slot is computed by `<expr>`. Resolves `<field>`
+            // against the per-fixture entity-field catalog: each Item
+            // declaration's field list is recorded by name + type, and
+            // the lookup returns the (entity ref, slot, primitive type)
+            // triple that fills the typed [`crate::cg::data_handle::ItemFieldId`].
+            //
+            // Currently each `<field>` name must be unique across all
+            // Item entities in the program (one Item entity per field
+            // name). The first match wins; a future ambiguity would
+            // surface as a typed error here.
+            let target_expr = &args[0].value;
+            let target_id = lower_expr(target_expr, ctx)?;
+            let target_ty = typecheck_node(ctx, target_id, target_expr.span)?;
+            // Accept U32 / AgentId / ItemId — all are u32 at the IR
+            // level. The catalog index is the literal value passed in.
+            if !matches!(target_ty, CgTy::U32 | CgTy::AgentId) {
+                return Err(LoweringError::IllTypedExpression {
+                    expected: CgTy::U32,
+                    got: target_ty,
+                    span,
+                });
+            }
+            let (entity_ref, slot, ty) = ctx
+                .entity_field_catalog
+                .resolve_item_by_name(field)
+                .ok_or_else(|| LoweringError::UnsupportedNamespaceCall {
+                    ns,
+                    method: field.to_string(),
+                    span,
+                })?;
+            let item_field_id = crate::cg::data_handle::ItemFieldId {
+                entity: entity_ref,
+                slot,
+                ty,
+            };
+            let handle = DataHandle::ItemField {
+                field: item_field_id,
+                target: target_id,
+            };
+            let _ty = data_handle_ty(&handle);
+            add(ctx, CgExpr::Read(handle), span)
+        }
+        (NamespaceId::Groups, field) if args.len() == 1 => {
+            // `groups.<field>(<expr>)` — same shape as `items.<field>`
+            // but resolves against the Group half of the catalog.
+            let target_expr = &args[0].value;
+            let target_id = lower_expr(target_expr, ctx)?;
+            let target_ty = typecheck_node(ctx, target_id, target_expr.span)?;
+            if !matches!(target_ty, CgTy::U32 | CgTy::AgentId) {
+                return Err(LoweringError::IllTypedExpression {
+                    expected: CgTy::U32,
+                    got: target_ty,
+                    span,
+                });
+            }
+            let (entity_ref, slot, ty) = ctx
+                .entity_field_catalog
+                .resolve_group_by_name(field)
+                .ok_or_else(|| LoweringError::UnsupportedNamespaceCall {
+                    ns,
+                    method: field.to_string(),
+                    span,
+                })?;
+            let group_field_id = crate::cg::data_handle::GroupFieldId {
+                entity: entity_ref,
+                slot,
+                ty,
+            };
+            let handle = DataHandle::GroupField {
+                field: group_field_id,
+                target: target_id,
+            };
+            let _ty = data_handle_ty(&handle);
+            add(ctx, CgExpr::Read(handle), span)
+        }
         (NamespaceId::Agents, field) if args.len() == 1 => {
             // `agents.<field>(<expr>)` — typed agent-field read where
             // the target slot is computed by `<expr>`. The DSL surfaces
@@ -4230,5 +4319,110 @@ mod tests {
         };
         let s = format!("{}", e);
         assert!(s.contains("Fold"));
+    }
+
+    // ---- Items / Groups namespace lowering ----------------------------
+
+    /// Build a `LoweringCtx` with a one-Item / one-Group entity-field
+    /// catalog populated, so `items.weight(0)` and `groups.size(0)`
+    /// resolve to typed handles. Mirrors what
+    /// `populate_entity_field_catalog` does for a real `Compilation`.
+    fn ctx_with_entity_catalog<'a>(
+        builder: &'a mut CgProgramBuilder,
+    ) -> LoweringCtx<'a> {
+        use crate::cg::data_handle::AgentFieldTy;
+        use crate::cg::program::{EntityFieldCatalog, EntityFieldEntry, EntityFieldRecord};
+        let mut ctx = LoweringCtx::new(builder);
+        let mut catalog = EntityFieldCatalog::default();
+        catalog.items.insert(
+            5,
+            EntityFieldRecord {
+                entity_name: "Coin".to_string(),
+                fields: vec![EntityFieldEntry {
+                    name: "weight".to_string(),
+                    ty: AgentFieldTy::F32,
+                }],
+            },
+        );
+        catalog.groups.insert(
+            7,
+            EntityFieldRecord {
+                entity_name: "Caravan".to_string(),
+                fields: vec![EntityFieldEntry {
+                    name: "size".to_string(),
+                    ty: AgentFieldTy::F32,
+                }],
+            },
+        );
+        ctx.entity_field_catalog = catalog;
+        ctx
+    }
+
+    fn lower_with_catalog(ast: &IrExprNode) -> Result<String, LoweringError> {
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = ctx_with_entity_catalog(&mut builder);
+        let id = lower_expr(ast, &mut ctx)?;
+        let prog = builder.finish();
+        let node = &prog.exprs[id.0 as usize];
+        Ok(crate::cg::expr::pretty(node, &prog.exprs))
+    }
+
+    #[test]
+    fn items_weight_lowers_to_item_field_read() {
+        // `items.weight(0u32)` resolves against the catalog's Coin /
+        // weight entry → `Read(ItemField { entity: 5, slot: 0, ty:
+        // F32 })`. The target expression (the literal `0u32`) is the
+        // catalog index.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Items,
+            method: "weight".to_string(),
+            args: vec![arg(node(IrExpr::LitInt(0)))],
+        });
+        let s = lower_with_catalog(&ast).unwrap();
+        assert!(
+            s.starts_with("(read item[#5.0]"),
+            "unexpected lowering: {s}"
+        );
+    }
+
+    #[test]
+    fn groups_size_lowers_to_group_field_read() {
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Groups,
+            method: "size".to_string(),
+            args: vec![arg(node(IrExpr::LitInt(0)))],
+        });
+        let s = lower_with_catalog(&ast).unwrap();
+        assert!(
+            s.starts_with("(read group[#7.0]"),
+            "unexpected lowering: {s}"
+        );
+    }
+
+    #[test]
+    fn items_unknown_field_surfaces_typed_error() {
+        // `items.bogus(0)` — no Coin field by that name.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Items,
+            method: "bogus".to_string(),
+            args: vec![arg(node(IrExpr::LitInt(0)))],
+        });
+        let err = lower_with_catalog(&ast).unwrap_err();
+        assert!(matches!(
+            err,
+            LoweringError::UnsupportedNamespaceCall { .. }
+        ));
+    }
+
+    #[test]
+    fn items_with_non_id_arg_rejected() {
+        // `items.weight(self.hp)` — arg is f32, not an id.
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Items,
+            method: "weight".to_string(),
+            args: vec![arg(field_self("hp"))],
+        });
+        let err = lower_with_catalog(&ast).unwrap_err();
+        assert!(matches!(err, LoweringError::IllTypedExpression { .. }));
     }
 }

@@ -5,32 +5,20 @@
 // swarm_event_storm, spatial_probe) only declare Agent entities,
 // leaving the Item + Group entity-root surfaces untested end-to-end.
 // This fixture closes that gap minimally: it declares one of each
-// root kind, packs an ItemId into a typed event payload, and folds
-// a per-receiver trade counter. The intent is "regression catcher
-// for what works today", not "full economy simulation".
+// root kind, packs an ItemId into a typed event payload, folds
+// a per-receiver trade counter, AND reads an Item field from the
+// physics rule body (`items.weight(0u)`) — the lowering + WGSL
+// emit path now allocates per-Item SoA storage and routes the
+// catalog-resolved binding (`coin_weight`) through to the kernel.
 //
-// What this fixture exercises that today's fixtures don't:
-//   1. `entity Coin : Item { ... }`             — Item root kind
-//   2. `entity Caravan : Group { ... }`         — Group root kind
+// What this fixture exercises end-to-end:
+//   1. `entity Coin : Item { weight: f32 }`     — Item root kind, SoA field
+//   2. `entity Caravan : Group { size: f32 }`   — Group root kind
 //   3. `event Trade { ..., item: ItemId }`      — ItemId in payload
-//
-// What this fixture does NOT do:
-//   - Read or write Item / Group fields from a physics rule.
-//   - Emit per-Item or per-Group SoA buffers.
-//   - Spawn Item / Group entities at runtime.
-//
-//   GAP: `entity X : Item` and `entity X : Group` parse + resolve
-//   end-to-end (the `EntityRoot::{Item,Group}` enum variants get
-//   threaded into `EntityIR.root`), but the CG lowering + WGSL
-//   emit path treats them as no-ops. There is no `ItemFieldId` or
-//   `GroupFieldId` companion to `cg::data_handle::AgentFieldId`,
-//   so no per-Item / per-Group SoA storage is allocated, and
-//   physics rule bodies cannot read or write Item / Group fields.
-//   Folding a view by `(item: Item)` or iterating `Group.members`
-//   would surface the same gap. This fixture intentionally avoids
-//   those surfaces so it actually compiles and runs today; closing
-//   the gap is future work for whichever phase wires Item + Group
-//   storage into the CG IR.
+//   4. `items.weight(<idx>)` inside a physics rule — the new
+//      `(NamespaceId::Items, _)` lowering arm produces a typed
+//      `DataHandle::ItemField` read that the WGSL body emits as
+//      `coin_weight[<idx>]` against an external bind.
 
 event Tick { }
 
@@ -80,9 +68,17 @@ config trade {
 // type-coerced into an ItemId payload. Both routings exercise the
 // existing event-field-packing codepath; what's new here is that
 // one of those fields is typed as `ItemId` rather than `AgentId`.
+//
+// `items.weight(0u)` reads slot 0 of the per-fixture Coin SoA
+// buffer — the lowering routes this to a typed
+// `DataHandle::ItemField` read whose binding name resolves through
+// the program's `entity_field_catalog` to `coin_weight`. The
+// per-fixture runtime allocates the buffer; the multiplier
+// scales the per-tick velocity drift so the steady-state observable
+// is `sum(pos drift over T ticks) ∝ weight`.
 physics IdleDrift @phase(per_agent) {
   on Tick {} where (self.alive) {
-    let new_pos = self.pos + self.vel * config.trade.step_scale;
+    let new_pos = self.pos + self.vel * config.trade.step_scale * items.weight(0);
     agents.set_pos(self, new_pos);
     emit Trade { giver: self, receiver: self.engaged_with, item: self.engaged_with }
   }
