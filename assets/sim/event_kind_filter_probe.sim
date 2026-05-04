@@ -1,0 +1,76 @@
+// event_kind_filter_probe — minimal fixture that PROVES per-handler
+// event-kind filtering works in the view-fold body emit.
+//
+// Setup: one Agent type (Probe), TWO event kinds (KindA, KindB).
+// Both events carry a `target: AgentId` field. Each tick every
+// agent emits one KindA AND one KindB targeting `self`. Two views
+// each subscribe to ONE kind:
+//
+//   - kind_a_count: `on KindA { target: who } { self += 1.0 }`
+//   - kind_b_count: `on KindB { target: who } { self += 1.0 }`
+//
+// Without per-handler kind filtering in the fold-body emit, both
+// views would accumulate from BOTH kinds — observed per-slot count
+// would be 2*ticks instead of ticks. With filtering, each view
+// only folds its declared kind and per-slot count = ticks.
+//
+// This is the dual-kind, overlapping-target probe that
+// `ecosystem_cascade.sim`'s per-tier disjointness happened to
+// mask: the bug was real, but the eaten-vs-eater chain naturally
+// segregated which slot ranges each event kind targeted, so the
+// double-count never showed up in the analytical observables.
+// This probe puts both kinds on the same slot range and exposes
+// the gap.
+
+event Tick { }
+
+@replayable
+@gpu_amenable
+event KindA {
+  target: AgentId,
+}
+
+@replayable
+@gpu_amenable
+event KindB {
+  target: AgentId,
+}
+
+entity Probe : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config probe {
+  step_scale: f32 = 0.0,
+}
+
+// Per-agent rule: emit one of each kind per tick, both targeting
+// self. The pos integration is a no-op (step_scale = 0) — we
+// don't care about motion, just the event accumulation.
+physics EmitBoth @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let new_pos = self.pos + self.vel * config.probe.step_scale;
+    agents.set_pos(self, new_pos);
+    emit KindA { target: self }
+    emit KindB { target: self }
+  }
+}
+
+// View A counts only KindA events. After N ticks each agent's
+// slot should hold exactly N (one increment per tick) — NOT 2N,
+// which is what the unfiltered fold would produce.
+@materialized(on_event = [KindA])
+view kind_a_count(target: Agent) -> f32 {
+  initial: 0.0,
+  on KindA { target: who } { self += 1.0 }
+  clamp: [0.0, 100000.0],
+}
+
+// View B counts only KindB events. Same shape — pure-kind filter.
+@materialized(on_event = [KindB])
+view kind_b_count(target: Agent) -> f32 {
+  initial: 0.0,
+  on KindB { target: who } { self += 1.0 }
+  clamp: [0.0, 100000.0],
+}

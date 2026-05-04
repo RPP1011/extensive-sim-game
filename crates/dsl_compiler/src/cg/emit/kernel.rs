@@ -1805,9 +1805,34 @@ fn build_view_fold_wgsl_body(
         }
         let op = resolve_op(prog, *op_id)?;
         // ViewFold body is a CgStmtList; lower via Task 4.1.
-        let fragment = match &op.kind {
-            ComputeOpKind::ViewFold { body, .. } => {
-                lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)?
+        // For ViewFold ops, also extract the matched event kind so the
+        // body can be guarded by a tag-check (event_ring offset 0 == kind).
+        // Without the guard, every event in the unified ring lands in
+        // every handler — multi-kind fixtures (e.g. ecosystem_cascade
+        // emits PlantEaten + HerbivoreEaten) double-count any slot
+        // ranges the two kinds share. Today the producer writes the
+        // kind tag as the raw `EventKindId.0` (see lower_emit_to_wgsl
+        // in wgsl_body.rs: `atomicStore(&event_ring[slot * stride + 0u],
+        // <event_id>u)`); the consumer here mirrors that constant.
+        let (fragment, fold_meta) = match &op.kind {
+            ComputeOpKind::ViewFold { body, on_event, .. } => {
+                let body_wgsl =
+                    lower_cg_stmt_list_to_wgsl(*body, ctx).map_err(KernelEmitError::from)?;
+                // Stride for the kind tag offset. The runtime today
+                // packs every kind into a single ring with stride 10
+                // (= 2 header + 8 payload); per-kind layouts may
+                // diverge once ring fanout lands. Look up the per-kind
+                // stride when registered, fall back to the runtime's
+                // hard-coded constant otherwise (test harnesses that
+                // build ViewFold ops directly without populating
+                // event_layouts hit the fallback — same value, no
+                // observable diff).
+                let stride = prog
+                    .event_layouts
+                    .get(&on_event.0)
+                    .map(|l| l.record_stride_u32)
+                    .unwrap_or(EVENT_RING_DEFAULT_STRIDE_U32);
+                (body_wgsl, Some((on_event.0, stride)))
             }
             ComputeOpKind::MaskPredicate { .. }
             | ComputeOpKind::PhysicsRule { .. }
@@ -1819,9 +1844,12 @@ fn build_view_fold_wgsl_body(
                 // op into a ViewFold-classed kernel — the classifier
                 // returns Generic in that case, so this is structurally
                 // unreachable. Emit a documented TODO instead of panicking.
-                "// TODO(task-5.5): non-ViewFold op in ViewFold kernel — \
-                 classifier should have routed through generic path."
-                    .to_string()
+                (
+                    "// TODO(task-5.5): non-ViewFold op in ViewFold kernel — \
+                     classifier should have routed through generic path."
+                        .to_string(),
+                    None,
+                )
             }
         };
         writeln!(
@@ -1837,21 +1865,61 @@ fn build_view_fold_wgsl_body(
         // the same fused kernel both emit `let local_0` at the function
         // top level, which naga rejects as a redefinition. WGSL handles
         // nested scopes cleanly, so siblings can each carry their own
-        // `local_0` without collision. Indent the fragment by 8 spaces:
-        // 4 for the kernel-body level (the brace lives at 4) plus 4 for
-        // the inner block. Keep the trailing brace at 4-space indent.
+        // `local_0` without collision.
+        //
+        // For ViewFold ops, also wrap the body in an `if (tag == kind)`
+        // guard inside the per-op brace so each handler only processes
+        // events of its declared `on Kind { ... }` variant. The Let
+        // statements that bind event-pattern locals (`let local_0: u32
+        // = event_ring[event_idx * 10u + 2u]`) move INSIDE the guard so
+        // they only execute when the tag matches — a non-matching
+        // event's payload may not be a valid AgentId and reading it
+        // before the guard would index storage with garbage.
+        //
+        // Indent: kernel-body is at 4-space indent, the per-op brace
+        // adds another 4. With a tag guard we add a third level (4
+        // more) for the body inside the if-block.
+        let extra_indent = if fold_meta.is_some() { 4 } else { 0 };
+        let body_indent = 8 + extra_indent;
         let indented = fragment
             .lines()
-            .map(|l| if l.is_empty() { String::new() } else { format!("        {l}") })
+            .map(|l| {
+                if l.is_empty() {
+                    String::new()
+                } else {
+                    format!("{:indent$}{l}", "", indent = body_indent)
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n");
         out.push_str("    {\n");
-        out.push_str(&indented);
+        if let Some((kind_tag, stride)) = fold_meta {
+            // Guard the body on the per-event tag word. The producer
+            // writes the kind id as a plain u32 at offset 0 (see
+            // `lower_emit_to_wgsl`); the consumer reads it the same
+            // way (the fold ring binding is `array<u32>`, not atomic,
+            // so a plain index read is correct).
+            out.push_str(&format!(
+                "        if (event_ring[event_idx * {stride}u + 0u] == {kind_tag}u) {{\n"
+            ));
+            out.push_str(&indented);
+            out.push_str("\n        }");
+        } else {
+            out.push_str(&indented);
+        }
         out.push_str("\n    }");
     }
 
     Ok(out)
 }
+
+/// Default u32-words-per-event stride for the unified event ring.
+/// Mirrors the schema constant in `EventLayout::record_stride_u32`
+/// (today: 2 header + 8 payload = 10). Used as a fallback when a
+/// ViewFold op is built without populating `event_layouts` (test
+/// harnesses that bypass the lowering). Real compilation always
+/// populates the layout, so the lookup hits.
+const EVENT_RING_DEFAULT_STRIDE_U32: u32 = 10;
 
 // ---------------------------------------------------------------------------
 // ViewDecay-specific spec synthesis (B2 — `@decay(rate, per=tick)`)
@@ -4469,13 +4537,27 @@ mod tests {
         );
         // Each occurrence must be wrapped in its own `{ ... }` block —
         // i.e. an open brace appears between the op-comment header and
-        // the `let local_0` line. We pin this by counting `{\n`-then-
-        // (possibly indented)-`let local_0` pairs. Two such pairs prove
-        // the per-op scoping.
-        let scoped_lets = body.matches("{\n        let local_0").count();
+        // the `let local_0` line. With the per-handler tag-check guard
+        // in place (event-kind filtering for multi-kind rings), the
+        // body shape is `{\n        if (...) {\n            let
+        // local_0 ...`. We pin two such nested-`let local_0` lines —
+        // one per op — at the 12-space indent the inner-guard scope
+        // produces.
+        let scoped_lets = body.matches("            let local_0").count();
         assert_eq!(
             scoped_lets, 2,
             "expected two scoped `let local_0` blocks; body:\n{body}"
+        );
+        // Both per-op blocks have a tag-check `if` line. The exact
+        // event-kind tags differ (op_a uses kind 0, op_b uses kind 1)
+        // — count the structural prefix for each.
+        assert!(
+            body.contains("if (event_ring[event_idx * 10u + 0u] == 0u)"),
+            "expected tag-check guard for event kind 0; body:\n{body}"
+        );
+        assert!(
+            body.contains("if (event_ring[event_idx * 10u + 0u] == 1u)"),
+            "expected tag-check guard for event kind 1; body:\n{body}"
         );
         // And every per-op block closes — the body has at least two
         // `\n    }` closers (one per op).

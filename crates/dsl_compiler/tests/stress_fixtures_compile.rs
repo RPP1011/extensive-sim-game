@@ -423,6 +423,22 @@ fn ecosystem_cascade_compiles() {
         art.kernel_index.len(),
         art.kernel_index,
     );
+    // Per-handler event-kind filter check (2026-05-03): each fold
+    // kernel must guard its body on the event tag at offset 0 so a
+    // multi-kind ring (PlantEaten + HerbivoreEaten in this fixture)
+    // doesn't double-count overlapping slot ranges. The exact kind
+    // ids vary with allocator order; the structural guard text is
+    // the invariant.
+    for view_name in ["recent_browse", "predator_pressure", "plant_pressure"] {
+        let kernel_name = format!("fold_{view_name}");
+        let body = kernel_body_containing(&art, &kernel_name).unwrap_or_else(|| {
+            panic!("expected {kernel_name} kernel");
+        });
+        assert!(
+            body.contains("if (event_ring[event_idx * 10u + 0u] =="),
+            "{kernel_name} body must guard on per-handler event-kind tag; got:\n{body}",
+        );
+    }
 }
 
 /// `foraging_colony.sim` declares Ant : Agent, Food : Item, Colony :
