@@ -1498,6 +1498,142 @@ fn diplomacy_probe_compile_gate() {
     );
 }
 
+/// `stochastic_probe` compile-gate. Pins the structural surface of the
+/// smallest end-to-end probe of the `rng.*` namespace in a real
+/// per-agent physics body:
+///
+///   - 1 PhysicsRule (`MaybeFire`) per-agent, drawing `rng.action()`
+///     and gating an `emit Activated` on `(draw % 100) < 30`.
+///   - 1 ViewFold (`activations`) on `Activated` (kind = 1u),
+///     accumulating per-slot fire counts.
+///
+/// FIRST fixture combining all of:
+///   - `rng.*` namespace call in a real physics body (lowering arm
+///     at `crates/dsl_compiler/src/cg/lower/expr.rs:2532-2544`).
+///   - IfStmt with an RNG-derived comparison on the LHS (no
+///     DataHandle on the predicate).
+///
+/// **WGSL gap (HIGH severity, surfaced by this probe):** the physics
+/// body emits the literal call `per_agent_u32(seed, agent_id, tick,
+/// "action")` per `cg/emit/wgsl_body.rs:944`, but neither `seed`,
+/// `per_agent_u32`, nor the string-literal purpose tag is bound by
+/// the WGSL emit pipeline. Naga rejects the kernel at
+/// `parse_str` time. This test asserts:
+///
+///  (a) the body contains the `per_agent_u32(` call (proves the
+///      lowering arm fired);
+///  (b) naga validation FAILS today on `physics_MaybeFire` (locks the
+///      observed-broken shape — flip to `is_empty()` once the gap
+///      closes).
+///
+/// Discovery doc: `docs/superpowers/notes/2026-05-04-stochastic_probe.md`.
+#[test]
+fn stochastic_probe_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/stochastic_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse stochastic_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve stochastic_probe.sim");
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[stochastic_probe lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit stochastic_probe");
+
+    // Op-level invariants: physics rule + view fold present.
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        physics_count, 1,
+        "expected 1 PhysicsRule op (MaybeFire); got {physics_count}",
+    );
+    assert_eq!(
+        viewfold_count, 1,
+        "expected 1 ViewFold op (activations); got {viewfold_count}",
+    );
+
+    // The MaybeFire physics body must reference per_agent_u32 — proves
+    // the rng.action() lowering arm fired through to wgsl_body emit.
+    let body = kernel_body_containing(&art, "MaybeFire")
+        .or_else(|| kernel_body_containing(&art, "physics"))
+        .unwrap_or_else(|| panic!(
+            "no physics_MaybeFire kernel in artifacts: {:?}",
+            art.kernel_index,
+        ));
+    assert!(
+        body.contains("per_agent_u32("),
+        "physics_MaybeFire must lower `rng.action()` to a `per_agent_u32(...)` call \
+         in WGSL; got body without that token:\n{body}",
+    );
+    assert!(
+        body.contains("\"action\""),
+        "physics_MaybeFire must emit the purpose tag as `\"action\"` (today's broken \
+         string-literal form — once Gap #3 closes this assertion flips to a u32 const \
+         lookup); got body:\n{body}",
+    );
+
+    // Naga validation MUST FAIL on `physics_MaybeFire` today — the
+    // WGSL has THREE undeclared symbols (`seed`, `per_agent_u32`, and
+    // the string literal `"action"`). This locks the observed broken
+    // shape; when any of Gaps #1–#3 close this assertion flips and
+    // the gap punch list in the discovery doc shrinks.
+    let physics_kernel_name = art
+        .wgsl_files
+        .keys()
+        .find(|k| k.contains("MaybeFire"))
+        .cloned()
+        .expect("physics_MaybeFire wgsl key present");
+    let physics_body = art.wgsl_files.get(&physics_kernel_name).unwrap();
+    let physics_naga = naga::front::wgsl::parse_str(physics_body);
+    assert!(
+        physics_naga.is_err(),
+        "physics_MaybeFire WGSL is unexpectedly naga-clean — Gap #1/#2/#3 in \
+         docs/superpowers/notes/2026-05-04-stochastic_probe.md may have closed. \
+         Update this assertion to `physics_naga.is_ok()` and add positive \
+         assertions on the new RNG lowering shape.",
+    );
+
+    // Every OTHER kernel (the fold + the plumbing kernels) must
+    // remain naga-clean — the gap is contained to the rng-touching
+    // physics body.
+    let mut other_errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if name == &physics_kernel_name {
+            continue;
+        }
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            other_errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        other_errs.is_empty(),
+        "stochastic_probe non-physics kernels emitted {} naga-invalid WGSL:\n{}",
+        other_errs.len(),
+        other_errs.join("\n"),
+    );
+
+    eprintln!(
+        "[stochastic_probe] {} kernels emitted: {:?}; physics_MaybeFire naga-FAILS as expected",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}
+
 /// Gap #1 follow-up from `2026-05-04-diplomacy_probe.md`: a bare
 /// `tick` token in a verb's `when` clause must surface a typed
 /// `BareNamespaceInExpression` diagnostic naming the qualified-form

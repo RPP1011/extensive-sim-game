@@ -1,0 +1,120 @@
+// stochastic_probe — discovery probe for the `rng.*` namespace in a
+// real physics body. The first .sim fixture in the workspace that
+// exercises the per-agent deterministic RNG primitive end-to-end.
+//
+// FOLLOW-UP to the rng-namespace audit: the spec table at
+// `docs/spec/dsl.md:922` advertises `rng.uniform(lo, hi) -> f32`,
+// `rng.coin() -> bool`, `rng.gauss(mu, sigma) -> f32`, and
+// `rng.uniform_int(lo, hi) -> i32`. The AST resolver registers all
+// four (`crates/dsl_ast/src/resolve.rs:254-257`). The CG lowering pass
+// at `crates/dsl_compiler/src/cg/lower/expr.rs:2519-2553` only
+// recognises the four NULLARY purposes used by the engine's
+// per-agent stream derivation: `rng.action()`, `rng.sample()`,
+// `rng.shuffle()`, `rng.conception()` — each returning u32. The
+// spec-advertised f32/bool surfaces lower to `UnsupportedNamespaceCall`
+// (test pinning at `crates/dsl_compiler/src/cg/lower/expr.rs:4029`).
+//
+// The probe uses the lowering surface that EXISTS today:
+// `rng.action() % 100 < 30` as a 30% per-agent per-tick gate.
+// Per-slot activation count over T ticks converges to T × 0.30.
+// (No `u` suffix on integer literals — the parser doesn't accept
+// it. Cooldown / diplomacy fixtures use bare `0`, `3` against u32
+// operands and the type checker resolves through `IrType::I32` →
+// CG `CgTy::U32` coercion at the binop boundary.)
+//
+// PROBE FOCUS — three surfaces:
+//
+//   1. `rng.action()` lowering — exercises the
+//      `(NamespaceId::Rng, "action")` arm. Result is u32; downstream
+//      composes with `% 100u` (BinaryOp::ModU32) and `< 30u`
+//      (BinaryOp::LtU32). The lowered body emits
+//      `per_agent_u32(seed, agent_id, tick, "action")` per
+//      `crates/dsl_compiler/src/cg/emit/wgsl_body.rs:937-947`.
+//
+//   2. Determinism (P5) — same seed must yield byte-identical
+//      observables across two independent runs. The runtime
+//      constructs two `StochasticProbeState`s with the same seed,
+//      runs each TICKS times, and asserts the activations buffers
+//      are equal element-wise.
+//
+//   3. IfStmt gating on a u32 comparison — already exercised by
+//      cooldown_probe (`tick >= ready_at`) but here the gating
+//      expression is RNG-derived rather than read from per-agent
+//      SoA, so the IfStmt's condition has no DataHandle on the LHS
+//      side.
+//
+// PREDICTED FULL FIRE (TICKS=1000, AGENT_COUNT=32, threshold=30%):
+//
+//   per-slot activations[N] ≈ TICKS × 0.30 = 300
+//   sum                     ≈ 32 × 300 = 9600
+//
+// The PCG-driven `per_agent_u32` is uniformly distributed; per-slot
+// counts should fall within ±5% (i.e. [285, 315]) over 1000 trials
+// with high probability.
+//
+// LIKELY GAP — outcome (b): the WGSL emit references `seed` and the
+// host function `per_agent_u32` directly:
+//
+//   per_agent_u32(seed, agent_id, tick, "action")
+//
+// but neither symbol is bound in the emitted module:
+//
+//   - `seed` is NOT in the kernel preamble (only `agent_id`, `tick`
+//     are bound by `thread_indexing_preamble` —
+//     `crates/dsl_compiler/src/cg/emit/kernel.rs:3385`).
+//   - `cfg.seed` is NOT a field on `PhysicsRuleCfg`.
+//   - `fn per_agent_u32(...)` is NOT emitted into any kernel module
+//     (no WGSL prelude / built-in shim).
+//
+// Naga validation fails on first reference. The discovery doc walks
+// the gap punch list.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Activated {
+  agent: AgentId,
+  amount: f32,
+}
+
+entity Trigger : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config stochastic {
+  // Threshold scaled to integer space so the comparison stays in u32.
+  // `rng.action() % 100u < activation_threshold_q100u` is a 30/100
+  // gate when threshold = 30u.
+  activation_threshold_q100u: u32 = 30,
+  // Marker amount per fired event. The fold sums these per slot, so
+  // per-slot count = activations[N] / log_amount = N_fires.
+  log_amount:                  f32 = 1.0,
+}
+
+// Per-Trigger physics rule. Each tick: draw a deterministic RNG slot
+// keyed on (seed, agent_id, tick, "action"); gate emit on the
+// modulo-100 comparison against the activation threshold.
+//
+// `rng.action()` lowers via the `(NamespaceId::Rng, "action")` arm
+// in `crates/dsl_compiler/src/cg/lower/expr.rs:2532`. The result is
+// u32. The `% 100u` and `< 30u` operands compose via the standard
+// BinaryOp::ModU32 + BinaryOp::LtU32 paths.
+physics MaybeFire @phase(per_agent) {
+  on Tick {} where (self.alive) {
+    let draw = rng.action();
+    if ((draw % 100) < 30) {
+      emit Activated { agent: self, amount: config.stochastic.log_amount }
+    }
+  }
+}
+
+// Per-Trigger activation counter. Each Activated emit bumps the
+// owning slot by `log_amount = 1.0`. After T ticks the per-slot
+// count converges to T × P(fire) = T × 0.30.
+@materialized(on_event = [Activated])
+view activations(agent: Agent) -> f32 {
+  initial: 0.0,
+  on Activated { agent: a, amount: x } { self += x }
+  clamp: [0.0, 100000.0],
+}

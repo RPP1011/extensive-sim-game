@@ -68,6 +68,11 @@ cooldown_probe_runtime = { path = "../cooldown_probe_runtime" }
 # disjoint Mod-tick predicates, three distinct event kinds in one
 # ring with per-handler tag filters, two Group entity declarations.
 diplomacy_probe_runtime = { path = "../diplomacy_probe_runtime" }
+# Stochastic probe — discovery probe of the `rng.*` namespace in a
+# real per-agent physics body. First fixture to exercise
+# `rng.action()` end-to-end with a per-tick activation gate;
+# verifies P5 determinism and per-slot binomial convergence.
+stochastic_probe_runtime = { path = "../stochastic_probe_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -132,3 +137,7 @@ path = "src/cooldown_probe_app.rs"
 [[bin]]
 name = "diplomacy_probe_app"
 path = "src/diplomacy_probe_app.rs"
+
+[[bin]]
+name = "stochastic_probe_app"
+path = "src/stochastic_probe_app.rs"
