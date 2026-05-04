@@ -100,10 +100,17 @@ physics WanderAndBid @phase(per_agent) {
       good:   self,
       amount: config.market.bid_amount,
     }
+    // Probe the `auctions.*` namespace lowering. The B1 stub
+    // (`fn auctions_place_bid(...) -> bool { return true; }`) is a
+    // semantic no-op today — real bid placement is runtime-format
+    // work. We bind the result to `_did_bid` so the WGSL body actually
+    // emits the `auctions_place_bid(` call (otherwise dead-code
+    // elimination at the IR level would drop the expression).
+    let _did_bid = auctions.place_bid(self, self, config.market.bid_amount);
     // GAP: per-tick allocation rule needs `auctions.allocate(...)`
-    // namespace call. Today the auctions namespace parses but no
-    // lowering — fold below operates on Bid events directly so a
-    // counter still accumulates.
+    // namespace call. The namespace now lowers (B1 stub returns the
+    // `good` argument as-is) but we don't wire the Allocated event
+    // emit until real auction-resolution semantics land.
   }
 }
 

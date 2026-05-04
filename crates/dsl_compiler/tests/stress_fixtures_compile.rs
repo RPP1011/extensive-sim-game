@@ -459,6 +459,22 @@ fn auction_market_compiles() {
         payload_stores, 3,
         "expected 3 Bid payload stores (trader, good, amount); got {payload_stores}",
     );
+    // The `auctions.*` namespace registration probe: WanderAndBid
+    // calls `auctions.place_bid(self, self, config.market.bid_amount)`
+    // which must lower to a `auctions_place_bid(` call in the emitted
+    // body. The B1 stub `fn auctions_place_bid(...) -> bool { return
+    // true; }` is also injected via the namespace-prelude scan. This
+    // confirms the auctions namespace is end-to-end registered +
+    // lowerable + emittable; without the registry entry this would
+    // surface as a `LoweringError::UnsupportedNamespaceCall` upstream.
+    assert!(
+        bid_producer.contains("auctions_place_bid("),
+        "expected auctions_place_bid(...) call in WanderAndBid body; got: {bid_producer}",
+    );
+    assert!(
+        bid_producer.contains("fn auctions_place_bid("),
+        "expected B1-stub fn auctions_place_bid declaration in WanderAndBid prelude",
+    );
     eprintln!(
         "[auction_market] {} kernels: {:?}",
         art.kernel_index.len(),

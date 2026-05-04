@@ -3809,6 +3809,72 @@ mod tests {
         }
     }
 
+    /// Build a `LoweringCtx` whose namespace registry has the
+    /// `auctions.place_bid(bidder, good, amount)` method registered.
+    /// Mirrors the driver's `populate_namespace_registry`. Used by
+    /// the registry-path test below to confirm the catch-all arm of
+    /// `lower_namespace_call` (line ~2566) handles auctions through
+    /// the registry-fallback path with no special-case needed.
+    fn ctx_with_auctions_place_bid_registered<'a>(
+        builder: &'a mut CgProgramBuilder,
+    ) -> LoweringCtx<'a> {
+        use crate::cg::program::{MethodDef, NamespaceDef};
+        let mut ctx = LoweringCtx::new(builder);
+        let mut auctions = NamespaceDef {
+            name: "auctions".to_string(),
+            ..NamespaceDef::default()
+        };
+        auctions.methods.insert(
+            "place_bid".to_string(),
+            MethodDef {
+                return_ty: CgTy::Bool,
+                arg_tys: vec![CgTy::AgentId, CgTy::AgentId, CgTy::F32],
+                wgsl_fn_name: "auctions_place_bid".to_string(),
+                wgsl_stub:
+                    "fn auctions_place_bid(bidder: u32, good: u32, amount: f32) -> bool { return true; }"
+                        .to_string(),
+            },
+        );
+        ctx.namespace_registry
+            .namespaces
+            .insert(NamespaceId::Auctions, auctions);
+        ctx
+    }
+
+    #[test]
+    fn auctions_place_bid_registry_lowers_to_namespace_call() {
+        // `auctions.place_bid(self, self, 10.0)` with the registry
+        // entry present → `CgExpr::NamespaceCall { ns: Auctions,
+        // method: "place_bid", args: [self, self, 10.0], ty: Bool }`.
+        // Confirms the registry-fallback arm of
+        // `lower_namespace_call` handles `(NamespaceId::Auctions, _)`
+        // without a dedicated dispatch arm — the `auctions` namespace
+        // is end-to-end lowerable via registry alone.
+        let mut builder = CgProgramBuilder::new();
+        let mut ctx = ctx_with_auctions_place_bid_registered(&mut builder);
+
+        let amount_arg = arg(node(IrExpr::LitFloat(10.0)));
+        let ast = node(IrExpr::NamespaceCall {
+            ns: NamespaceId::Auctions,
+            method: "place_bid".to_string(),
+            args: vec![arg(local_self()), arg(local_self()), amount_arg],
+        });
+        let id = lower_expr(&ast, &mut ctx).expect("lowers");
+        let prog = builder.finish();
+        let lowered = &prog.exprs[id.0 as usize];
+        match lowered {
+            CgExpr::NamespaceCall {
+                ns, method, args, ty,
+            } => {
+                assert_eq!(*ns, NamespaceId::Auctions);
+                assert_eq!(method, "place_bid");
+                assert_eq!(args.len(), 3);
+                assert_eq!(*ty, CgTy::Bool);
+            }
+            other => panic!("expected NamespaceCall, got {other:?}"),
+        }
+    }
+
     #[test]
     fn world_tick_registry_lowers_to_namespace_field() {
         // `world.tick` with a `World.tick` field registered → typed

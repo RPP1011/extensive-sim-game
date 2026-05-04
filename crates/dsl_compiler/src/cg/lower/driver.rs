@@ -573,6 +573,15 @@ fn cg_ty_for_event_field(ty: &IrType) -> Option<(CgTy, u32)> {
 /// * `query.nearest_hostile_to_or(actor, range, fallback)` →
 ///   `AgentId`. B1: returns `fallback`. Real semantics: spatial-
 ///   query walk for nearest hostile, sentinel on miss.
+/// * `auctions.place_bid(bidder, good, amount)` → `bool`. B1: returns
+///   `true`. Real semantics: validate bidder funds, write into
+///   auction state.
+/// * `auctions.allocate(good)` → `AgentId`. B1: returns `good`
+///   itself. Real semantics: walk the good's bid list, return
+///   highest-bidder agent.
+/// * `auctions.last_winner(good)` → `AgentId`. B1: returns the
+///   `NoneAgentId` sentinel. Real semantics: lookup the most recent
+///   `Allocated` event for `good`.
 ///
 /// And the registered fields:
 ///
@@ -654,6 +663,65 @@ fn populate_namespace_registry(ctx: &mut LoweringCtx<'_>) {
         },
     );
     registry.namespaces.insert(NamespaceId::World, world);
+
+    // -- auctions namespace --
+    //
+    // B1 stubs (initial registration — the `auctions.*` namespace was
+    // flagged in the spec audit as having ZERO coverage anywhere:
+    // parser routed but no method registered, so any call site fell
+    // through to `UnsupportedNamespaceCall`). These three methods make
+    // the namespace resolvable + lowerable + emittable end-to-end so
+    // the auction_market fixture can probe the path. Real auction
+    // semantics (sealed-bid clearing, reserve prices, treasury debits)
+    // are runtime-format work; today the stubs are semantic no-ops
+    // chosen so the shader compiles and the kernel runs without
+    // panicking — same pattern as `agents.is_hostile_to`.
+    let mut auctions = NamespaceDef {
+        name: "auctions".to_string(),
+        ..NamespaceDef::default()
+    };
+    // `auctions.place_bid(bidder, good, amount)` → `bool`. B1: returns
+    // `true` (always succeeds — placeholder). Real semantics: validate
+    // bidder funds, write into auction state, return ack.
+    auctions.methods.insert(
+        "place_bid".to_string(),
+        MethodDef {
+            return_ty: CgTy::Bool,
+            arg_tys: vec![CgTy::AgentId, CgTy::AgentId, CgTy::F32],
+            wgsl_fn_name: "auctions_place_bid".to_string(),
+            wgsl_stub:
+                "fn auctions_place_bid(bidder: u32, good: u32, amount: f32) -> bool { return true; }"
+                    .to_string(),
+        },
+    );
+    // `auctions.allocate(good)` → `AgentId`. B1: returns the good
+    // itself (placeholder — no real winner-selection algorithm yet).
+    // Real semantics: walk the good's bid list, return highest-bidder
+    // agent.
+    auctions.methods.insert(
+        "allocate".to_string(),
+        MethodDef {
+            return_ty: CgTy::AgentId,
+            arg_tys: vec![CgTy::AgentId],
+            wgsl_fn_name: "auctions_allocate".to_string(),
+            wgsl_stub: "fn auctions_allocate(good: u32) -> u32 { return good; }".to_string(),
+        },
+    );
+    // `auctions.last_winner(good)` → `AgentId`. B1: returns the
+    // `NoneAgentId` sentinel (`0xFFFFFFFFu`) since no auction has
+    // ever cleared. Real semantics: lookup the most recent
+    // `Allocated` event for `good`.
+    auctions.methods.insert(
+        "last_winner".to_string(),
+        MethodDef {
+            return_ty: CgTy::AgentId,
+            arg_tys: vec![CgTy::AgentId],
+            wgsl_fn_name: "auctions_last_winner".to_string(),
+            wgsl_stub: "fn auctions_last_winner(good: u32) -> u32 { return 0xFFFFFFFFu; }"
+                .to_string(),
+        },
+    );
+    registry.namespaces.insert(NamespaceId::Auctions, auctions);
 
     ctx.namespace_registry = registry;
 }
