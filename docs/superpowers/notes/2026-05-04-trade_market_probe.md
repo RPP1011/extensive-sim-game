@@ -425,3 +425,245 @@ Each is a standalone follow-up probe; none block the others:
   `atomicOr` (u32) and CAS+add (f32) primitives; no new fold
   primitives invented. The compile-gate test asserts the EXISTING
   primitives are still emitted in the right places.
+
+---
+
+# v2 follow-up — close gaps #4 (verb cascade) + #5 (spatial body-form) (2026-05-04)
+
+This is the v2 update of the trade_market probe (commit baseline
+`f4d51052`). The v1 ran with placeholder `seller=self/hub=self`
+routing throughout; v2 closes the two highest-priority "deferred"
+gaps from the v1 doc by wiring REAL dynamics — verb cascade producing
+TradeExecuted, multi-emit physics with body-form spatial walk
+producing per-(self, neighbour) PriceObserved + PriceGossip pairs.
+
+**Outcome: (a) FULL FIRE** — every analytical prediction holds on
+first run, no NEW compiler/runtime gaps surfaced.
+
+```
+trade_market_app: starting — seed=0xBEEFFEEDCAFEF00D agents=32 ticks=100
+trade_market_app: finished — final tick=100 agents=32
+trade_market_app: trader_volume   (verb chronicle, decay=0.95, steady ~20.000/slot) — total=636.21 (expected 640.00); per-slot min=19.882 mean=19.882 max=19.882
+trade_market_app: hub_volume      (verb chronicle, no decay, +1.00/tick/slot) — total=3200.00 (expected 3200.00); per-slot min=100.000 mean=100.000 max=100.000
+trade_market_app: price_belief    diagonal 32/32 == 1u, off-diagonal 992/992 == 1u (zero=0, other=0)
+trade_market_app: per-view checks — trader_volume=OK hub_volume=OK price_belief=OK
+trade_market_app: OUTCOME = (a) FULL FIRE — verb cascade end-to-end (mask -> scoring -> chronicle -> TradeExecuted -> trader/hub_volume folds) integrated with multi-emit spatial body-form physics (WanderAndTrade emits PriceObserved + PriceGossip per spatial-neighbour candidate; both fold into the same price_belief pair_map u32 view via per-handler tag filter).
+trade_market_app: OK — all assertions passed
+```
+
+## What changed structurally (gap #4 + gap #5 closure)
+
+- **Verb cascade end-to-end** (gap #4 closure). The verb `ExecuteTrade`
+  is uncommented and now the SOLE producer of `TradeExecuted` events
+  (option (a) from the v1 doc — verb-only emit, no two-producer fold
+  ambiguity). Cascade order per tick: `mask_verb_ExecuteTrade` ->
+  `scoring` (single-row argmax, emits ActionSelected kind=5u per
+  agent) -> `physics_verb_chronicle_ExecuteTrade` (PerEventEmit
+  kernel, gates on `event_ring[event_idx*10+0] == 5u` per the
+  `cb24fd69` per-handler tag filter, then `event_ring[+3]==0u`
+  for action_id Trade, emits TradeExecuted kind=1u). The
+  `trader_volume` + `hub_volume` folds read TradeExecuted (kind=1u)
+  and produce identical per-slot dynamics to v1 (verb body has no
+  spatial access — buyer=seller=self placeholder).
+
+- **Spatial body-form INSIDE multi-emit physics** (gap #5 closure).
+  `WanderAndTrade` now contains a `for hub in spatial.nearby_hubs(
+  self) { emit PriceObserved {..hub..} ; emit PriceGossip
+  {..hub..} }` body. The compiler emits the slice-2b body-form
+  3³-cell loop scaffold (per `134c5df8`) — the per-pair candidate
+  variable `per_pair_candidate` is bound from the spatial grid's
+  cell stream, and BOTH emits inside the inner loop atomicAdd ring
+  slots and atomicStore tag/payload. Two emits, same loop body —
+  the gap-#5 combination. Build emit-stats:
+  `physics_WanderAndTrade: 5546 B, 9 bindings` (vs v1's `2308 B,
+  6 bindings` — the +3 bindings are spatial_grid_cells / offsets /
+  starts; the +3.2 KB is the spatial walk scaffold + the second
+  emit body).
+
+- **PriceGossip event** (new). `PriceGossip { teller, listener,
+  hub, resource, price_q8 }` is the rumor-propagation event:
+  every spatial-neighbour pair (self, hub) emits one, the
+  listener (= hub in the placeholder) accumulates the bit pattern
+  in their `price_belief` row via the existing `|=` accumulator.
+  The view's `@materialized(on_event = [PriceObserved, PriceGossip])`
+  declaration multi-event-handler shape — TWO `on <Event>`
+  handlers in the body, each scoping to its own kind tag. The
+  emitted `fold_price_belief.wgsl` carries TWO sequential blocks,
+  each gated on the per-handler kind tag (commit `cb24fd69`):
+
+  ```wgsl
+  // op#1 (view_fold) — PriceObserved kind=2u
+  if (event_ring[event_idx * 10u + 0u] == 2u) { ... atomicOr ... }
+  // op#2 (view_fold) — PriceGossip kind=3u
+  if (event_ring[event_idx * 10u + 0u] == 3u) { ... atomicOr ... }
+  ```
+
+  Same `atomicOr(&view_storage_primary[...])` write in both
+  blocks — a SINGLE pair_map u32 view fed by TWO event kinds via
+  per-handler tag partition.
+
+## Analytical predictions (revised for v2 dynamics)
+
+With `agent_count = 32`, `ticks = 100`, `trade_amount = 1.0`,
+`observation_bit = 1u`, `decay = 0.95`:
+
+| View | Per-slot expected | Per-slot observed | Slots converged |
+|------|-------------------|-------------------|-----------------|
+| `trader_volume[i]` | 20.000 (geo. series limit) | 19.882 (within 0.6%) | 32/32 |
+| `hub_volume[i]`    | 100.0 (= T × trade_amount) | 100.000 (exact)    | 32/32 |
+| `price_belief[i*N + i]` (diagonal) | 1u | 1u | **32/32** |
+| `price_belief[i*N + j]`, i≠j (off-diagonal) | **1u (NEW)** | **1u** | **992/992** |
+
+The off-diagonal flip from "0u everywhere (v1 placeholder)" to
+"1u everywhere (v2 spatial walk)" is the directly-observable proof
+that the body-form spatial walk is firing inside the multi-emit
+physics rule. With auto-spread cube-root scatter across 32 agents
+(spread radius ≈ 3.17) and `CELL_SIZE = 6.0`, every agent fits
+inside a single 6.0-edge cell, so every (i, j) pair's spatial
+walk encounters every other agent — the per-pair body emits both
+PriceObserved (sets `[i, j]` = 1u via the PriceObserved handler:
+observer=i, hub=j) and PriceGossip (sets `[j, j]` = 1u via the
+PriceGossip handler: listener=j, hub=j — the placeholder routing
+folds the bit into the `[hub, hub]` cell).
+
+## Inspection of emitted WGSL (acceptance criterion 4)
+
+`physics_WanderAndTrade.wgsl` body (redacted, key shape):
+
+```wgsl
+@compute @workgroup_size(64)
+fn cs_physics_WanderAndTrade(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let agent_id = gid.x;
+    if (agent_id >= cfg.agent_cap) { return; }
+    if ((agent_alive[agent_id] != 0u)) {
+        let local_3 = agent_pos[agent_id] + agent_vel[agent_id] * config_0;
+        agent_pos[agent_id] = local_3;
+        // body-form spatial walk: 3 cell-axis loops + 1 candidate loop
+        for (var dz: i32 = -1; dz <= 1; dz = dz + 1) {
+            for (var dy: i32 = -1; dy <= 1; dy = dy + 1) {
+                for (var dx: i32 = -1; dx <= 1; dx = dx + 1) {
+                    let _cell = cell_index(_self_cx + dx, _self_cy + dy, _self_cz + dz);
+                    let _start = spatial_grid_starts[_cell];
+                    let _end = spatial_grid_starts[_cell + 1u];
+                    for (var _i: u32 = _start; _i < _end; _i = _i + 1u) {
+                        let per_pair_candidate = spatial_grid_cells[_i];
+                        // emit PriceObserved (kind=2u, 4 fields)
+                        { let slot = atomicAdd(&event_tail[0], 1u);
+                          atomicStore(&event_ring[slot * 10u + 0u], 2u); ... }
+                        // emit PriceGossip (kind=3u, 5 fields)
+                        { let slot = atomicAdd(&event_tail[0], 1u);
+                          atomicStore(&event_ring[slot * 10u + 0u], 3u); ... }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+`physics_verb_chronicle_ExecuteTrade.wgsl` body (redacted):
+
+```wgsl
+@compute @workgroup_size(64)
+fn cs_physics_verb_chronicle_ExecuteTrade(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let event_idx = gid.x;
+    if (event_idx >= cfg.event_count) { return; }
+    if (atomicLoad(&event_ring[event_idx * 10u + 0u]) == 5u) {
+        // ActionSelected: actor=local_5, action_id=local_4, target=local_3
+        if ((local_4 == 0u)) {
+            // emit TradeExecuted (kind=1u, 5 fields), buyer=seller=actor
+            let slot = atomicAdd(&event_tail[0], 1u);
+            atomicStore(&event_ring[slot * 10u + 0u], 1u); ... 
+        }
+    }
+}
+```
+
+Both spatial body-form (slice 2b) and verb chronicle (PerEventEmit)
+kernels are present and their bodies match the expected shapes.
+`mask_verb_ExecuteTrade.wgsl` (881 B, 3 bindings) + `scoring.wgsl`
+(2209 B, 5 bindings) close the verb cascade.
+
+## Per-tick event-count budget
+
+Each alive agent contributes:
+- 1 ActionSelected (kind=5u, scoring)
+- 1 TradeExecuted (kind=1u, chronicle gated on ActionSelected)
+- K_per_agent PriceObserved (kind=2u, body-form spatial walk per candidate)
+- K_per_agent PriceGossip (kind=3u, same)
+
+K_per_agent = candidates in the agent's 27-cell neighbourhood. At
+agent_count=32 with cube-root spread, all agents end up in 1 cell
+so K_per_agent ≈ 32 (every other agent is a neighbour). Per-tick
+ring usage ≈ 32 × (2 + 2 × 32) = 2112 slots/tick. Well under the
+ring's 65536 slot capacity. The fold dispatch sizes
+`event_count = min(N + N + 2 * N * MAX_PER_CELL * 27, 65536)` =
+55298 — generous upper bound; the per-handler tag filter inside
+each fold partitions the ring into the correct event-kind subset.
+
+## What did NOT surface (no new gaps)
+
+- The two-producer-same-kind-tag question stays sidestepped by
+  picking option (a) (verb-only TradeExecuted emit).
+- The Item field-read in multi-Item programs (gap #2 from v1) and
+  Group field-read (gap #3) remain untested — the active rule body
+  doesn't read `items.base_price(...)` or `groups.size(...)` today.
+- The Shipment event remains declared-but-never-emitted; the
+  parallel agent on GAP #1 added a "declared event never emitted"
+  warning surface in dsl_compiler that catches this exact pattern
+  (see the in-flight `crates/dsl_compiler/src/cg/lower/driver.rs`
+  changes — that work is OUT OF SCOPE for this task per the
+  guardrail).
+
+## Files modified (v2 only — surgical edits inside scope guardrails)
+
+- `assets/sim/trade_market_probe.sim` — replaced placeholder rule
+  bodies with verb declaration + body-form spatial walk; added
+  PriceGossip event; extended `price_belief` view's `on_event`
+  list + handlers to handle both `PriceObserved` and `PriceGossip`
+  by per-kind tag.
+- `crates/trade_market_runtime/src/lib.rs` — wired the 5-phase
+  spatial counting sort, the verb cascade (mask + scoring +
+  chronicle), and the bigger physics binding shape (now includes
+  `spatial_grid_cells/offsets/starts`). Kept the three view
+  storages (price_belief / trader_volume / hub_volume) shape-
+  identical to v1; the compiler's per-handler tag filter takes
+  care of routing PriceObserved + PriceGossip to the same fold.
+- `crates/sim_app/src/trade_market_app.rs` — updated analytical
+  predictions for the new dynamics. The off-diagonal `price_belief`
+  predicate flipped from "all 0u" to "all 1u" (every spatial pair
+  is a neighbour at agent_count=32 cube-root spread).
+- `docs/superpowers/notes/2026-05-04-trade_market_probe.md` (this
+  file) — appended this v2 follow-up section.
+
+## Existing fixture apps unchanged (acceptance criterion 6)
+
+Smoke-checked all 12 sibling sim_app binaries against their pre-task
+baselines: `pp_app`, `pc_app`, `cn_app`, `tc_app`, `ses_app`,
+`bartering_app`, `ecosystem_app`, `foraging_app`, `auction_app`,
+`verb_fire_app`, `tom_probe_app` — all report their respective
+`OUTCOME = OK` / `FULL FIRE` lines unchanged. `cargo test
+--workspace` reports zero failures across all 700+ unit tests.
+
+The trade_market_runtime build emits 18 kernels (was 10 in v1):
++5 spatial sort kernels (count, scan_local, scan_carry, scan_add,
+scatter), +1 mask_verb_ExecuteTrade, +1 scoring, +1
+physics_verb_chronicle_ExecuteTrade. The 10 baseline v1 kernels
+remain emitted with the same shapes plus the new dual-handler
+fold body in `fold_price_belief.wgsl`.
+
+## Constitution adherence (v2)
+
+- **P1 Compiler-First**: no compiler edits in this task. Gap #1 (the
+  config u32 round-trip) is being closed by a parallel sibling task;
+  this task does not touch dsl_compiler.
+- **P5 Determinism**: no new RNG sites. Spatial walk is deterministic
+  (same agent positions ⇒ same cell layout ⇒ same per-pair emit
+  order modulo atomic-add ordering, which the OR/CAS folds tolerate
+  per P11).
+- **P9 Verified commit**: lands the .sim + runtime + app + this
+  doc update together; all assertions green; existing fixtures
+  unchanged.
+- **P11 Reduction Determinism**: atomicOr (price_belief) and CAS+add
+  (trader_volume / hub_volume) are commutative — multi-producer
+  ordering is observably independent of dispatch ordering.

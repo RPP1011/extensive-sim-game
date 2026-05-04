@@ -1,60 +1,65 @@
 //! Per-fixture runtime for `assets/sim/trade_market_probe.sim` —
-//! multi-resource market discovery probe combining ALL the recently-
-//! landed compiler surfaces:
+//! v2 of the multi-resource market discovery probe. Closes gap #4
+//! (verb cascade integration) and gap #5 (spatial body-form INSIDE
+//! a multi-emit physics rule) from the v1 discovery doc.
 //!
-//!   - 4 distinct Item entity declarations (Wood/Iron/Grain/Cloth) +
-//!     1 Group entity (Guild) — declaration-only today; the active
-//!     rule body doesn't read the per-Item base_price fields, so the
-//!     compiler doesn't emit external bindings for them. The catalog
-//!     populates correctly (verified by lower diagnostics + the
-//!     compile-gate test); a follow-up probe with `items.base_price(
-//!     <id>)` reads in the rule body would surface 4 distinct
-//!     `wood_base_price` / `iron_base_price` / `grain_base_price` /
-//!     `cloth_base_price` external bindings via
-//!     `cg/emit/kernel.rs::item_field_external_name` (commit
-//!     524ae43f).
+//! ## Per-tick chain
 //!
-//!   - **Multi-event-kind producer**: physics_WanderAndTrade emits
-//!     ONE TradeExecuted (kind=1u, 7 ring slots used: kind+tick+
-//!     buyer+seller+resource+amount+price) AND ONE PriceObserved
-//!     (kind=2u, 6 ring slots used: kind+tick+observer+hub+resource+
-//!     price_q8) per alive agent per tick. Both events share the
-//!     same event ring (no per-kind ring partitioning yet); the
-//!     consumer-side per-handler tag filter (commit cb24fd69)
-//!     guards each fold body on the kind tag at offset 0:
-//!       - `fold_trader_volume`  — `if (... + 0u] == 1u)` (tag=1)
-//!       - `fold_hub_volume`     — `if (... + 0u] == 1u)` (tag=1)
-//!       - `fold_price_belief`   — `if (... + 0u] == 2u)` (tag=2)
-//!     Per-tick event count = 2 × agent_count (each agent emits 2).
+//! Three chained subsystems share a single event ring:
 //!
-//!   - **Three views with mixed storage**:
-//!       - `price_belief` — `view ... -> u32`, `pair_map` storage.
-//!         Atomically OR'd via `atomicOr` in the compiler-emitted
-//!         fold (post-`51b5853b`, the same shape as tom_probe).
-//!         Allocated locally as an `agent_cap × agent_cap × u32`
-//!         buffer (NOT through `engine::gpu::ViewStorage`, whose
-//!         host-side cache is `Vec<f32>`).
-//!       - `trader_volume` — `view ... -> f32` with `@decay(0.95)`.
-//!         The ViewStorage helper handles the f32 case + the
-//!         per-decay anchor binding fallback.
-//!       - `hub_volume` — `view ... -> f32`, no decay. Same f32
-//!         path, has_anchor=false.
+//! 1. **Spatial-grid build** (5 phases — count, scan_local, scan_carry,
+//!    scan_add, scatter). Required input for the body-form spatial
+//!    walk in `physics_WanderAndTrade`.
 //!
-//! ## Expected (FULL FIRE) observable
+//! 2. **Verb cascade** (mask -> scoring -> chronicle). The verb
+//!    `ExecuteTrade` is the SOLE producer of `TradeExecuted` events
+//!    (option (a) from the gap doc — verb-only emit, no two-producer
+//!    fold ambiguity):
+//!     - `mask_verb_ExecuteTrade` — sets bitmap bit when `self.alive`.
+//!     - `scoring` — argmax picks `ExecuteTrade` (action_id=0) per
+//!       agent, atomically appends one `ActionSelected{actor=agent,
+//!       action_id=0, target=NO_TARGET}` event (kind tag = 5u).
+//!     - `physics_verb_chronicle_ExecuteTrade` — reads each
+//!       ActionSelected slot, gates on `action_id == 0u` (Trade),
+//!       emits one `TradeExecuted{buyer:self, seller:self, amount:1.0,
+//!       price:1.0, resource:0u}` (kind tag = 1u). Placeholder buyer
+//!       == seller == self (the verb body has no spatial access).
 //!
-//! After T=100 ticks at agent_count = 32:
-//!   - `trader_volume[i]` per slot ≈ `trade_amount / (1 - 0.95)` =
-//!     `1.0 / 0.05` = 20.0 (geometric series steady state; with
-//!     `0.95^100 ≈ 5.9e-3`, the per-slot value is within 0.6% of
-//!     the analytical limit).
-//!   - `hub_volume[i]` per slot = `T * trade_amount` = 100.0 (no
-//!     decay, monotonic accumulator).
-//!   - `price_belief[i*N + i]` == 1u (diagonal — observation_bit
-//!     OR'd into the (self, self) cell every tick; idempotent on
-//!     the second-and-subsequent ticks).
-//!   - `price_belief[i*N + j]` == 0u for every i != j (off-diagonal
-//!     stays at 0u because no event with observer != hub is ever
-//!     emitted under the placeholder routing).
+//! 3. **Multi-emit physics + spatial walk** (`physics_WanderAndTrade`).
+//!    Per alive agent: integrate position, then walk the 27-cell
+//!    spatial neighbourhood (slice-2b body-form, commit `134c5df8`)
+//!    and per candidate emit BOTH a PriceObserved (kind tag = 2u, 4
+//!    fields) AND a PriceGossip (kind tag = 3u, 5 fields). Two emits
+//!    inside one for-body — the gap-#5 combination.
+//!
+//! ## Per-tick event count
+//!
+//! Per alive agent the events are:
+//!   - 1 ActionSelected (scoring)
+//!   - 1 TradeExecuted (chronicle, gated on ActionSelected.action_id)
+//!   - K_per_agent PriceObserved (one per spatial-neighbour candidate)
+//!   - K_per_agent PriceGossip   (one per spatial-neighbour candidate)
+//!
+//! K_per_agent = number of candidate slots in the agent's 27-cell
+//! neighbourhood. With auto-spread + 32 agents the density is sparse
+//! (~1/cell where occupied), so K_per_agent is typically a small
+//! constant per agent. Total per-tick ≈ N * (2 + 2 * K). The fold
+//! event_count uses a generous upper bound (`N * MAX_PER_CELL * 27 *
+//! 2 + N * 2`) capped at the ring's 65536-slot capacity.
+//!
+//! ## Three-view shape (unchanged storage layout, new dynamics)
+//!
+//!   - `price_belief` — pair_map u32 view, atomicOr-folded. NOW
+//!     populated from BOTH `PriceObserved` (kind 2) and `PriceGossip`
+//!     (kind 3) by per-handler tag filter inside fold_price_belief.
+//!     Off-diagonal cells are NO LONGER zero — every spatial-neighbour
+//!     pair flips its bit to 1u.
+//!   - `trader_volume` — f32 with @decay, fed by TradeExecuted
+//!     (kind 1) from the verb chronicle. Per-slot dynamics
+//!     unchanged from v1 (steady ≈ 20.0 with decay=0.95).
+//!   - `hub_volume` — f32 no-decay, fed by TradeExecuted (kind 1)
+//!     from the verb chronicle. Per-slot grows by 1.0 per tick =
+//!     100.0 after 100 ticks.
 
 use engine::ids::AgentId;
 use engine::rng::per_agent_u32;
@@ -67,9 +72,6 @@ include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 use engine::gpu::{EventRing, ViewStorage};
 
-/// 16-byte WGSL `vec3<f32>` interop. Same shape as the sibling
-/// runtimes use; duplicated here so each fixture-runtime crate stays
-/// self-contained.
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vec3Padded {
@@ -91,38 +93,56 @@ impl From<Vec3Padded> for Vec3 {
     }
 }
 
-/// Per-fixture state for the trade_market probe.
+/// Per-fixture state for the v2 trade_market probe.
 pub struct TradeMarketState {
     gpu: GpuContext,
 
-    // -- Agent SoA (read by physics_WanderAndTrade) --
+    // -- Agent SoA --
     pos_buf: wgpu::Buffer,
     vel_buf: wgpu::Buffer,
-    /// Per-agent alive flag; the `where (self.alive)` guard reads
-    /// this. All slots start alive so every tick fires both emits.
+    /// Per-agent alive flag. All slots start alive so every tick fires
+    /// the verb cascade + the multi-emit physics.
     alive_buf: wgpu::Buffer,
     physics_cfg_buf: wgpu::Buffer,
     pos_staging: wgpu::Buffer,
 
-    // -- Shared event ring (TradeExecuted + PriceObserved) --
+    // -- Shared event ring (TradeExecuted + PriceObserved +
+    //    PriceGossip + ActionSelected) --
     event_ring: EventRing,
 
-    // -- price_belief storage (pair_map u32, allocated locally) --
-    /// `agent_cap × agent_cap × u32` buffer. Indexed
-    /// `[observer * agent_cap + subject]` per the compiler-emitted
-    /// fold body (`local_0 * cfg.second_key_pop + local_1`).
+    // -- Verb cascade state --
+    /// Mask bitmap (one bit per agent in u32 words). Cleared per tick.
+    mask_bitmap_buf: wgpu::Buffer,
+    mask_bitmap_zero_buf: wgpu::Buffer,
+    mask_bitmap_words: u32,
+    /// Scoring output (4 × u32 per agent). Mostly inert here — the
+    /// scoring kernel populates it but the chronicle reads from the
+    /// event ring (ActionSelected) instead.
+    scoring_output_buf: wgpu::Buffer,
+    mask_cfg_buf: wgpu::Buffer,
+    scoring_cfg_buf: wgpu::Buffer,
+    chronicle_cfg_buf: wgpu::Buffer,
+
+    // -- Spatial grid (slice 2b body-form spatial query) --
+    spatial_grid_cells: wgpu::Buffer,
+    spatial_grid_offsets: wgpu::Buffer,
+    spatial_grid_starts: wgpu::Buffer,
+    spatial_chunk_sums: wgpu::Buffer,
+    spatial_offsets_zero: wgpu::Buffer,
+
+    // -- price_belief (pair_map u32, atomicOr) --
     price_belief_primary: wgpu::Buffer,
     price_belief_staging: wgpu::Buffer,
     price_belief_cache: Vec<u32>,
     price_belief_dirty: bool,
     price_belief_cfg_buf: wgpu::Buffer,
 
-    // -- trader_volume storage (f32, @decay) --
+    // -- trader_volume (f32 with @decay) --
     trader_volume: ViewStorage,
     trader_volume_cfg_buf: wgpu::Buffer,
     trader_volume_decay_cfg_buf: wgpu::Buffer,
 
-    // -- hub_volume storage (f32, no decay) --
+    // -- hub_volume (f32 no decay) --
     hub_volume: ViewStorage,
     hub_volume_cfg_buf: wgpu::Buffer,
 
@@ -205,13 +225,119 @@ impl TradeMarketState {
             mapped_at_creation: false,
         });
 
+        // Event ring — the chronicle WGSL gates on the event-kind tag
+        // (`if (atomicLoad(&event_ring[event_idx * 10u + 0u]) == 5u)`,
+        // commit b90a43a4 — the per-handler tag filter inside
+        // PerEventEmit kernels). Empty slots have tag 0u so they
+        // skip the chronicle's body, eliminating the need for
+        // the older sentinel-pre-stamp pattern.
         let event_ring = EventRing::new(&gpu, "trade_market_runtime");
 
+        // ---- Verb cascade buffers ----
+        let mask_bitmap_words = (agent_count + 31) / 32;
+        let mask_bitmap_bytes = (mask_bitmap_words as u64) * 4;
+        let mask_bitmap_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("trade_market_runtime::mask_0_bitmap"),
+            size: mask_bitmap_bytes.max(16),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let zero_words: Vec<u32> = vec![0u32; mask_bitmap_words.max(4) as usize];
+        let mask_bitmap_zero_buf =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("trade_market_runtime::mask_0_bitmap_zero"),
+                contents: bytemuck::cast_slice(&zero_words),
+                usage: wgpu::BufferUsages::COPY_SRC,
+            });
+        let scoring_output_bytes = (agent_count as u64) * 4 * 4;
+        let scoring_output_buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("trade_market_runtime::scoring_output"),
+            size: scoring_output_bytes.max(16),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mask_cfg_init = mask_verb_ExecuteTrade::MaskVerbExecuteTradeCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            _pad: [0; 2],
+        };
+        let mask_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("trade_market_runtime::mask_cfg"),
+                contents: bytemuck::bytes_of(&mask_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+        let scoring_cfg_init = scoring::ScoringCfg {
+            agent_cap: agent_count,
+            tick: 0,
+            _pad: [0; 2],
+        };
+        let scoring_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("trade_market_runtime::scoring_cfg"),
+                contents: bytemuck::bytes_of(&scoring_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+        let chronicle_cfg_init =
+            physics_verb_chronicle_ExecuteTrade::PhysicsVerbChronicleExecuteTradeCfg {
+                event_count: 0,
+                tick: 0,
+                _pad0: 0,
+                _pad1: 0,
+            };
+        let chronicle_cfg_buf = gpu.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("trade_market_runtime::chronicle_cfg"),
+                contents: bytemuck::bytes_of(&chronicle_cfg_init),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            },
+        );
+
+        // ---- Spatial grid buffers (mirrors particle_collision_runtime)
+        use dsl_compiler::cg::emit::spatial as sp;
+        let agent_cap_bytes = (agent_count as u64) * 4;
+        let offsets_size = sp::offsets_bytes();
+        let starts_size = ((sp::num_cells() as u64) + 1) * 4;
+        let spatial_grid_cells = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("trade_market_runtime::spatial_grid_cells"),
+            size: agent_cap_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let spatial_grid_offsets = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("trade_market_runtime::spatial_grid_offsets"),
+            size: offsets_size,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let spatial_grid_starts = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("trade_market_runtime::spatial_grid_starts"),
+            size: starts_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let chunk_size = dsl_compiler::cg::dispatch::PER_SCAN_CHUNK_WORKGROUP_X;
+        let num_chunks = sp::num_cells().div_ceil(chunk_size);
+        let chunk_sums_size = (num_chunks as u64) * 4;
+        let spatial_chunk_sums = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("trade_market_runtime::spatial_chunk_sums"),
+            size: chunk_sums_size,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let zeros: Vec<u8> = vec![0u8; offsets_size as usize];
+        let spatial_offsets_zero =
+            gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("trade_market_runtime::spatial_offsets_zero"),
+                contents: &zeros,
+                usage: wgpu::BufferUsages::COPY_SRC,
+            });
+
         // ---- price_belief: pair_map u32 storage allocated locally ----
-        // Tom_probe shape: NxN u32 buffer + staging. atomicOr fold
-        // body indexes `[observer * agent_cap + subject]`. We expose
-        // STORAGE | COPY_SRC | COPY_DST so the readback round-trip
-        // through the staging buffer works.
         let belief_slot_count = (agent_count as u64) * (agent_count as u64);
         let belief_bytes = (belief_slot_count * 4).max(16);
         let price_belief_primary = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -247,8 +373,8 @@ impl TradeMarketState {
             &gpu,
             "trade_market_runtime::trader_volume",
             agent_count,
-            true,  // has_anchor (carries @decay)
-            false, // no top-K storage hint
+            true,
+            false,
         );
         let tv_cfg_init = fold_trader_volume::FoldTraderVolumeCfg {
             event_count: 0,
@@ -282,8 +408,8 @@ impl TradeMarketState {
             &gpu,
             "trade_market_runtime::hub_volume",
             agent_count,
-            false, // no @decay
-            false, // no top-K storage hint
+            false,
+            false,
         );
         let hv_cfg_init = fold_hub_volume::FoldHubVolumeCfg {
             event_count: 0,
@@ -307,6 +433,18 @@ impl TradeMarketState {
             physics_cfg_buf,
             pos_staging,
             event_ring,
+            mask_bitmap_buf,
+            mask_bitmap_zero_buf,
+            mask_bitmap_words,
+            scoring_output_buf,
+            mask_cfg_buf,
+            scoring_cfg_buf,
+            chronicle_cfg_buf,
+            spatial_grid_cells,
+            spatial_grid_offsets,
+            spatial_grid_starts,
+            spatial_chunk_sums,
+            spatial_offsets_zero,
             price_belief_primary,
             price_belief_staging,
             price_belief_cache: vec![0u32; belief_slot_count as usize],
@@ -338,23 +476,24 @@ impl TradeMarketState {
         self.agent_count
     }
 
-    /// Per-Trader trade volume accumulator. With @decay(0.95) and
-    /// trade_amount=1.0, per-slot steady state ≈ 20.0.
+    /// Per-Trader trade volume accumulator (verb chronicle TradeExecuted
+    /// with placeholder buyer=self). With @decay(0.95) and trade_amount
+    /// = 1.0, per-slot steady ≈ 20.0 (same as v1).
     pub fn trader_volumes(&mut self) -> &[f32] {
         self.trader_volume.readback(&self.gpu)
     }
 
-    /// Per-Trader hub volume accumulator (no decay). Per-slot grows
-    /// by trade_amount=1.0 every tick under placeholder routing
-    /// (seller=self) — after T ticks per slot = T.
+    /// Per-Trader hub volume accumulator (verb chronicle TradeExecuted
+    /// with placeholder seller=self). After T ticks per slot = T *
+    /// trade_amount = 100.0 (same as v1).
     pub fn hub_volumes(&mut self) -> &[f32] {
         self.hub_volume.readback(&self.gpu)
     }
 
     /// Per-(observer, hub) belief bitset, flattened row-major.
-    /// Length = `agent_count × agent_count`. Diagonal slots
-    /// `[i * N + i] == observation_bit (1u)`; off-diagonal stay
-    /// at 0u under the placeholder routing.
+    /// Length = `agent_count × agent_count`. v2 dynamic: every
+    /// spatial-neighbour pair flips its bit; off-diagonal cells are
+    /// no longer all-zero.
     pub fn price_belief(&mut self) -> &[u32] {
         if self.price_belief_dirty {
             let mut encoder = self.gpu.device.create_command_encoder(
@@ -424,11 +563,28 @@ impl CompiledSim for TradeMarketState {
                 label: Some("trade_market_runtime::step"),
             });
 
-        // (1) Per-tick clear of event_tail.
+        // (0) Per-tick clears.
         self.event_ring.clear_tail_in(&mut encoder);
+        let mask_bytes = (self.mask_bitmap_words as u64) * 4;
+        encoder.copy_buffer_to_buffer(
+            &self.mask_bitmap_zero_buf,
+            0,
+            &self.mask_bitmap_buf,
+            0,
+            mask_bytes.max(4),
+        );
+        let offsets_size = dsl_compiler::cg::emit::spatial::offsets_bytes();
+        encoder.copy_buffer_to_buffer(
+            &self.spatial_offsets_zero,
+            0,
+            &self.spatial_grid_offsets,
+            0,
+            offsets_size,
+        );
 
-        // (2) WanderAndTrade physics — 2 emits per alive agent per
-        // tick (TradeExecuted kind=1u + PriceObserved kind=2u).
+        // Common cfg upload — the spatial-build kernels and the
+        // physics/chronicle kernels share `physics_cfg_buf` for
+        // `agent_cap` + `tick`.
         let physics_cfg = physics_WanderAndTrade::PhysicsWanderAndTradeCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
@@ -439,25 +595,181 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&physics_cfg),
         );
-        let physics_bindings =
-            physics_WanderAndTrade::PhysicsWanderAndTradeBindings {
-                event_ring: self.event_ring.ring(),
-                event_tail: self.event_ring.tail(),
-                agent_pos: &self.pos_buf,
-                agent_alive: &self.alive_buf,
-                agent_vel: &self.vel_buf,
+
+        // (1) Spatial-hash counting sort (5 phases). Same shape as
+        // particle_collision_runtime — sort agents into 27-cell grid
+        // for the body-form spatial walk in WanderAndTrade.
+        let count_b = spatial_build_hash_count::SpatialBuildHashCountBindings {
+            agent_pos: &self.pos_buf,
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            cfg: &self.physics_cfg_buf,
+        };
+        dispatch::dispatch_spatial_build_hash_count(
+            &mut self.cache,
+            &count_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scan_local_b =
+            spatial_build_hash_scan_local::SpatialBuildHashScanLocalBindings {
+                spatial_grid_offsets: &self.spatial_grid_offsets,
+                spatial_grid_starts: &self.spatial_grid_starts,
+                spatial_chunk_sums: &self.spatial_chunk_sums,
                 cfg: &self.physics_cfg_buf,
             };
-        dispatch::dispatch_physics_wanderandtrade(
+        dispatch::dispatch_spatial_build_hash_scan_local(
             &mut self.cache,
-            &physics_bindings,
+            &scan_local_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scan_carry_b =
+            spatial_build_hash_scan_carry::SpatialBuildHashScanCarryBindings {
+                spatial_chunk_sums: &self.spatial_chunk_sums,
+                cfg: &self.physics_cfg_buf,
+            };
+        dispatch::dispatch_spatial_build_hash_scan_carry(
+            &mut self.cache,
+            &scan_carry_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scan_add_b = spatial_build_hash_scan_add::SpatialBuildHashScanAddBindings {
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
+            spatial_chunk_sums: &self.spatial_chunk_sums,
+            cfg: &self.physics_cfg_buf,
+        };
+        dispatch::dispatch_spatial_build_hash_scan_add(
+            &mut self.cache,
+            &scan_add_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+        let scatter_b = spatial_build_hash_scatter::SpatialBuildHashScatterBindings {
+            agent_pos: &self.pos_buf,
+            spatial_grid_cells: &self.spatial_grid_cells,
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
+            cfg: &self.physics_cfg_buf,
+        };
+        dispatch::dispatch_spatial_build_hash_scatter(
+            &mut self.cache,
+            &scatter_b,
             &self.gpu.device,
             &mut encoder,
             self.agent_count,
         );
 
-        // (3) seed_indirect_0 — keeps indirect-args buffer warm.
-        let seed_bindings = seed_indirect_0::SeedIndirect0Bindings {
+        // (2) Verb cascade — Round 1: mask -> scoring.
+        let mask_cfg = mask_verb_ExecuteTrade::MaskVerbExecuteTradeCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            _pad: [0; 2],
+        };
+        self.gpu.queue.write_buffer(
+            &self.mask_cfg_buf,
+            0,
+            bytemuck::bytes_of(&mask_cfg),
+        );
+        let mask_b = mask_verb_ExecuteTrade::MaskVerbExecuteTradeBindings {
+            agent_alive: &self.alive_buf,
+            mask_0_bitmap: &self.mask_bitmap_buf,
+            cfg: &self.mask_cfg_buf,
+        };
+        dispatch::dispatch_mask_verb_executetrade(
+            &mut self.cache,
+            &mask_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        let scoring_cfg = scoring::ScoringCfg {
+            agent_cap: self.agent_count,
+            tick: self.tick as u32,
+            _pad: [0; 2],
+        };
+        self.gpu.queue.write_buffer(
+            &self.scoring_cfg_buf,
+            0,
+            bytemuck::bytes_of(&scoring_cfg),
+        );
+        let scoring_b = scoring::ScoringBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            mask_0_bitmap: &self.mask_bitmap_buf,
+            scoring_output: &self.scoring_output_buf,
+            cfg: &self.scoring_cfg_buf,
+        };
+        dispatch::dispatch_scoring(
+            &mut self.cache,
+            &scoring_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (3) Verb cascade — Round 2: chronicle. Reads ActionSelected
+        // events, gates on action_id == 0u, emits TradeExecuted.
+        // Sized to `agent_count` since scoring emits exactly one
+        // ActionSelected per alive slot (and the ring is sentinel-
+        // pre-stamped so workgroup-rounding threads early-exit).
+        let chronicle_cfg =
+            physics_verb_chronicle_ExecuteTrade::PhysicsVerbChronicleExecuteTradeCfg {
+                event_count: self.agent_count,
+                tick: self.tick as u32,
+                _pad0: 0,
+                _pad1: 0,
+            };
+        self.gpu.queue.write_buffer(
+            &self.chronicle_cfg_buf,
+            0,
+            bytemuck::bytes_of(&chronicle_cfg),
+        );
+        let chronicle_b =
+            physics_verb_chronicle_ExecuteTrade::PhysicsVerbChronicleExecuteTradeBindings {
+                event_ring: self.event_ring.ring(),
+                event_tail: self.event_ring.tail(),
+                cfg: &self.chronicle_cfg_buf,
+            };
+        dispatch::dispatch_physics_verb_chronicle_executetrade(
+            &mut self.cache,
+            &chronicle_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (4) WanderAndTrade — multi-emit physics + spatial body-form
+        // walk. Per alive agent: integrate position, then walk the
+        // 27-cell neighbourhood; per candidate emit one PriceObserved
+        // (kind=2u) AND one PriceGossip (kind=3u).
+        let physics_b = physics_WanderAndTrade::PhysicsWanderAndTradeBindings {
+            event_ring: self.event_ring.ring(),
+            event_tail: self.event_ring.tail(),
+            agent_pos: &self.pos_buf,
+            agent_alive: &self.alive_buf,
+            agent_vel: &self.vel_buf,
+            spatial_grid_cells: &self.spatial_grid_cells,
+            spatial_grid_offsets: &self.spatial_grid_offsets,
+            spatial_grid_starts: &self.spatial_grid_starts,
+            cfg: &self.physics_cfg_buf,
+        };
+        dispatch::dispatch_physics_wanderandtrade(
+            &mut self.cache,
+            &physics_b,
+            &self.gpu.device,
+            &mut encoder,
+            self.agent_count,
+        );
+
+        // (5) seed_indirect_0 — keeps indirect-args buffer warm.
+        let seed_b = seed_indirect_0::SeedIndirect0Bindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             indirect_args_0: self.event_ring.indirect_args_0(),
@@ -465,24 +777,37 @@ impl CompiledSim for TradeMarketState {
         };
         dispatch::dispatch_seed_indirect_0(
             &mut self.cache,
-            &seed_bindings,
+            &seed_b,
             &self.gpu.device,
             &mut encoder,
             self.agent_count,
         );
 
-        // Per-tick event count = 2 × agent_count (each alive agent
-        // emits exactly one TradeExecuted + one PriceObserved). The
-        // per-handler tag filter inside each fold partitions the
-        // ring by event kind, so the dispatch sizing is the EXACT
-        // upper bound (no per-kind subdivision needed at the
-        // dispatch level).
-        let event_count = self.agent_count * 2;
+        // (6) Folds — sized generously to cover all event kinds:
+        //   - N ActionSelected (kind 5u, scoring)
+        //   - N TradeExecuted  (kind 1u, chronicle)
+        //   - up to N * MAX_PER_CELL * 27 PriceObserved (kind 2u,
+        //     physics body-form spatial walk per candidate)
+        //   - up to N * MAX_PER_CELL * 27 PriceGossip (kind 3u, same)
+        //
+        // Cap at the ring's 65536 slots (DEFAULT_EVENT_RING_CAP_SLOTS);
+        // the kernel `if (event_idx >= cfg.event_count) return;`
+        // gate skips empty slots, and the per-handler tag filter
+        // partitions events into the correct fold body.
+        use dsl_compiler::cg::emit::spatial as sp;
+        let upper_per_kind =
+            self.agent_count.saturating_mul(sp::MAX_PER_CELL).saturating_mul(27);
+        let event_count = std::cmp::min(
+            self.agent_count
+                .saturating_mul(2) // ActionSelected + TradeExecuted
+                .saturating_add(upper_per_kind.saturating_mul(2)), // 2 emits per pair
+            65536,
+        );
 
-        // (4) fold_price_belief — atomicOr u32 fold filtered on tag
-        // 2u (PriceObserved). Indexes pair_map storage as
-        // `[observer * agent_cap + subject]`; second_key_pop must
-        // equal agent_count for the diagonal to land at i*N+i.
+        // (6a) fold_price_belief — atomicOr u32 fold filtered on tags
+        // 2u (PriceObserved) and 3u (PriceGossip). second_key_pop =
+        // agent_count so the `[obs * N + hub]` index lands at the
+        // pair_map flat offset.
         let pb_cfg = fold_price_belief::FoldPriceBeliefCfg {
             event_count,
             tick: self.tick as u32,
@@ -494,12 +819,10 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&pb_cfg),
         );
-        let pb_bindings = fold_price_belief::FoldPriceBeliefBindings {
+        let pb_b = fold_price_belief::FoldPriceBeliefBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             view_storage_primary: &self.price_belief_primary,
-            // No @decay, no top-K → anchor / ids fall back to primary
-            // per the kernel's `unwrap_or(primary)` shape.
             view_storage_anchor: None,
             view_storage_ids: None,
             sim_cfg: self.event_ring.sim_cfg(),
@@ -507,14 +830,13 @@ impl CompiledSim for TradeMarketState {
         };
         dispatch::dispatch_fold_price_belief(
             &mut self.cache,
-            &pb_bindings,
+            &pb_b,
             &self.gpu.device,
             &mut encoder,
             event_count.max(1),
         );
 
-        // (5a) decay_trader_volume — anchor multiply BEFORE the fold.
-        // `view_storage_primary[slot] *= 0.95`.
+        // (6b) decay_trader_volume — anchor multiply pre-pass.
         let tv_decay_cfg = decay_trader_volume::DecayTraderVolumeCfg {
             agent_cap: self.agent_count,
             tick: self.tick as u32,
@@ -526,21 +848,19 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&tv_decay_cfg),
         );
-        let tv_decay_bindings = decay_trader_volume::DecayTraderVolumeBindings {
+        let tv_decay_b = decay_trader_volume::DecayTraderVolumeBindings {
             view_storage_primary: self.trader_volume.primary(),
             cfg: &self.trader_volume_decay_cfg_buf,
         };
         dispatch::dispatch_decay_trader_volume(
             &mut self.cache,
-            &tv_decay_bindings,
+            &tv_decay_b,
             &self.gpu.device,
             &mut encoder,
             self.agent_count,
         );
 
-        // (5b) fold_trader_volume — RMW
-        // `view_storage_primary[event.buyer] += event.amount` per
-        // TradeExecuted (filtered on tag 1u).
+        // (6c) fold_trader_volume — RMW per TradeExecuted (kind=1u).
         let tv_cfg = fold_trader_volume::FoldTraderVolumeCfg {
             event_count,
             tick: self.tick as u32,
@@ -552,7 +872,7 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&tv_cfg),
         );
-        let tv_bindings = fold_trader_volume::FoldTraderVolumeBindings {
+        let tv_b = fold_trader_volume::FoldTraderVolumeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             view_storage_primary: self.trader_volume.primary(),
@@ -563,16 +883,13 @@ impl CompiledSim for TradeMarketState {
         };
         dispatch::dispatch_fold_trader_volume(
             &mut self.cache,
-            &tv_bindings,
+            &tv_b,
             &self.gpu.device,
             &mut encoder,
             event_count.max(1),
         );
 
-        // (6) fold_hub_volume — RMW
-        // `view_storage_primary[event.seller] += event.amount` per
-        // TradeExecuted (filtered on tag 1u). No decay → no anchor
-        // multiply pre-pass.
+        // (6d) fold_hub_volume — RMW per TradeExecuted (kind=1u).
         let hv_cfg = fold_hub_volume::FoldHubVolumeCfg {
             event_count,
             tick: self.tick as u32,
@@ -584,7 +901,7 @@ impl CompiledSim for TradeMarketState {
             0,
             bytemuck::bytes_of(&hv_cfg),
         );
-        let hv_bindings = fold_hub_volume::FoldHubVolumeBindings {
+        let hv_b = fold_hub_volume::FoldHubVolumeBindings {
             event_ring: self.event_ring.ring(),
             event_tail: self.event_ring.tail(),
             view_storage_primary: self.hub_volume.primary(),
@@ -595,7 +912,7 @@ impl CompiledSim for TradeMarketState {
         };
         dispatch::dispatch_fold_hub_volume(
             &mut self.cache,
-            &hv_bindings,
+            &hv_b,
             &self.gpu.device,
             &mut encoder,
             event_count.max(1),
@@ -622,8 +939,7 @@ impl CompiledSim for TradeMarketState {
     }
 }
 
-/// Build a boxed `CompiledSim` so the `sim_app` runner can switch
-/// between fixture runtimes via a one-line constructor swap.
+/// Build a boxed `CompiledSim`.
 pub fn make_sim(seed: u64, agent_count: u32) -> Box<dyn CompiledSim> {
     Box::new(TradeMarketState::new(seed, agent_count))
 }

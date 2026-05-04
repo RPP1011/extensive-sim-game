@@ -1,35 +1,59 @@
 //! Trade-market probe harness — drives `trade_market_runtime` for
 //! N ticks and asserts the per-Trader trade volume + per-hub volume +
 //! per-(observer, hub) belief bitset all converge to the analytical
-//! observable shape under the placeholder routing (every emit binds
-//! its key fields to `self`).
+//! observable shape under the v2 dynamics:
 //!
-//! ## Expected (FULL FIRE)
+//! - **trader_volume** + **hub_volume** are fed by `TradeExecuted`
+//!   events emitted by the verb chronicle (`physics_verb_chronicle_
+//!   ExecuteTrade`). The verb fires once per agent per tick (single-
+//!   row scoring picks `ExecuteTrade` action_id=0; mask gates on
+//!   `self.alive`). Same per-slot dynamics as v1 (the verb body has
+//!   no spatial access — buyer=self, seller=self placeholders).
+//!
+//! - **price_belief** is fed by BOTH `PriceObserved` (kind=2u) AND
+//!   `PriceGossip` (kind=3u) events emitted by the multi-emit
+//!   physics rule `physics_WanderAndTrade`. That rule walks the
+//!   27-cell spatial neighbourhood (slice 2b body-form) and per
+//!   candidate emits BOTH event kinds — so EVERY (observer, hub)
+//!   cell where the two agents are spatial neighbours flips its
+//!   belief bit to 1u. With AGENT_COUNT=32 auto-spread (cube-root
+//!   spread = ~3.17) inside a 6.0-cell-edge spatial grid, all
+//!   agents land within 1 cell of each other — so the belief
+//!   matrix's off-diagonal IS NO LONGER zero. Every off-diagonal
+//!   cell flips to 1u.
+//!
+//! ## Expected (FULL FIRE) — v2 dynamics
 //!
 //! With agent_count = 32, ticks = 100, trade_amount = 1.0,
 //! observation_bit = 1u, decay = 0.95:
 //!
-//!   - trader_volume[i] (f32 with @decay) per slot ≈
-//!     `trade_amount / (1 - 0.95)` = 20.0. The geometric series
-//!     `Σ_{k=0..T-1} 0.95^k` converges to 20.0 with `0.95^100 ≈
-//!     5.9e-3`, so per-slot is within 0.6% of the analytical limit.
-//!   - hub_volume[i] (f32 no decay) per slot = `T * trade_amount`
-//!     = 100.0 (monotonic accumulator, placeholder seller=self).
-//!   - price_belief[i*N + i] (u32 pair_map) == 1u (diagonal —
-//!     observation_bit OR'd into (self, self) every tick; idempotent).
-//!   - price_belief[i*N + j] == 0u for every i != j (off-diagonal
-//!     stays at 0u under placeholder routing observer=hub=self).
+//!   - trader_volume[i] (f32 with @decay) per slot ≈ 20.000 (geometric
+//!     series limit; per-tick `+= 1.0` then `*= 0.95`).
+//!   - hub_volume[i]    (f32 no-decay) per slot = `T * 1.0` = 100.0.
+//!   - price_belief[i*N + j]            == 1u for ALL i, j (diagonal +
+//!     off-diagonal). Auto-spread layout puts every agent within
+//!     every other agent's 27-cell neighbourhood, so the spatial
+//!     walk's per-pair emit hits every cell.
+//!
+//! ## Verb cascade integration confirmation
+//!
+//! If `trader_volume` and `hub_volume` are non-zero, the verb cascade
+//! end-to-end fires: mask -> scoring -> chronicle -> fold. Without
+//! the chronicle path running (and emitting `TradeExecuted`), both
+//! views would stay at their initial 0.0.
+//!
+//! ## Spatial body-form integration confirmation
+//!
+//! If `price_belief` has any off-diagonal cell == 1u, the slice-2b
+//! body-form spatial walk inside `WanderAndTrade` is firing. Without
+//! the spatial loop, the only emit would be a placeholder per agent
+//! (one PriceObserved per (self, self) cell) and the off-diagonal
+//! would stay 0u.
 //!
 //! ## OUTCOME classification
 //!
-//! - **(a) FULL FIRE** — all three views converge to expected shape.
-//! - **(b) NO FIRE** — every slot stayed at 0; producer or fold
-//!   kernel dropped at compile time, OR multi-event-kind ring
-//!   partition broken (filter on tag mismatched producer's emit).
-//! - **(b) PARTIAL FIRE** — some views fire, others don't; or
-//!   off-diagonal price_belief slots have garbage (would indicate
-//!   second_key_pop / event-field-offset mismatch between compiler
-//!   emit and runtime cfg).
+//! - **(a) FULL FIRE** — all three views converge to expected v2 shape.
+//! - **(b) PARTIAL** — at least one view didn't converge.
 //!
 //! Discovery write-up:
 //! `docs/superpowers/notes/2026-05-04-trade_market_probe.md`.
@@ -40,9 +64,9 @@ use trade_market_runtime::TradeMarketState;
 const SEED: u64 = 0xBEEF_FEED_CAFE_F00D;
 const AGENT_COUNT: u32 = 32;
 const TICKS: u64 = 100;
-const TRADE_AMOUNT: f32 = 1.0; // matches config.market.trade_amount
-const DECAY_RATE: f32 = 0.95;  // matches @decay(rate=0.95) on trader_volume
-const OBSERVATION_BIT: u32 = 1; // matches config.market.observation_bit
+const TRADE_AMOUNT: f32 = 1.0;
+const DECAY_RATE: f32 = 0.95;
+const OBSERVATION_BIT: u32 = 1;
 
 fn main() {
     let mut sim = TradeMarketState::new(SEED, AGENT_COUNT);
@@ -69,7 +93,7 @@ fn main() {
     let tv_total: f32 = tv.iter().sum();
     let tv_total_expected = AGENT_COUNT as f32 * tv_steady;
     println!(
-        "trade_market_app: trader_volume   (decay={:.2}, steady ~{:.3}/slot) — \
+        "trade_market_app: trader_volume   (verb chronicle, decay={:.2}, steady ~{:.3}/slot) — \
          total={:.2} (expected {:.2}); per-slot min={:.3} mean={:.3} max={:.3}",
         DECAY_RATE, tv_steady, tv_total, tv_total_expected, tv_min, tv_mean, tv_max,
     );
@@ -81,12 +105,24 @@ fn main() {
     let hv_total: f32 = hv.iter().sum();
     let hv_total_expected = AGENT_COUNT as f32 * hv_per_slot_expected;
     println!(
-        "trade_market_app: hub_volume      (no decay, +{:.2}/tick/slot) — \
+        "trade_market_app: hub_volume      (verb chronicle, no decay, +{:.2}/tick/slot) — \
          total={:.2} (expected {:.2}); per-slot min={:.3} mean={:.3} max={:.3}",
         TRADE_AMOUNT, hv_total, hv_total_expected, hv_min, hv_mean, hv_max,
     );
 
     // ---- View 3: price_belief (u32, pair_map, atomicOr) ----
+    //
+    // v2 prediction: at AGENT_COUNT=32 the cube-root spread (~3.17)
+    // fits well inside one 6.0-edge spatial cell, so every agent is
+    // a spatial neighbour of every other agent. The body-form spatial
+    // walk emits one PriceObserved + one PriceGossip per (self,
+    // candidate) candidate slot in the 27-cell neighbourhood; every
+    // candidate sets a bit in the observer's row of `price_belief`
+    // via the `|=` accumulator. Result: ALL N×N cells flip to 1u
+    // (diagonal AND off-diagonal). The diagonal flips because each
+    // agent's spatial walk encounters its own slot in its own cell
+    // (no per-pair "exclude self" filter at the body-iter site
+    // today; same as particle_collision_min's emit pattern).
     let pb = sim.price_belief().to_vec();
     assert_eq!(
         pb.len(),
@@ -105,6 +141,7 @@ fn main() {
         }
     }
     let mut offdiag_ok = 0usize;
+    let mut offdiag_zero = 0usize;
     let mut offdiag_bad: Vec<(usize, usize, u32)> = Vec::new();
     for i in 0..n {
         for j in 0..n {
@@ -112,20 +149,26 @@ fn main() {
                 continue;
             }
             let v = pb[i * n + j];
-            if v == 0 {
+            if v == OBSERVATION_BIT {
                 offdiag_ok += 1;
+            } else if v == 0 {
+                offdiag_zero += 1;
             } else {
                 offdiag_bad.push((i, j, v));
             }
         }
     }
     println!(
-        "trade_market_app: price_belief    diagonal {}/{} == {}u, off-diagonal {}/{} == 0u",
+        "trade_market_app: price_belief    diagonal {}/{} == {}u, \
+         off-diagonal {}/{} == {}u (zero={}, other={})",
         diag_ok,
         n,
         OBSERVATION_BIT,
         offdiag_ok,
         n * (n - 1),
+        OBSERVATION_BIT,
+        offdiag_zero,
+        offdiag_bad.len(),
     );
     if !diag_bad.is_empty() {
         println!(
@@ -135,20 +178,27 @@ fn main() {
     }
     if !offdiag_bad.is_empty() {
         println!(
-            "trade_market_app: price_belief off-diagonal mismatches (first 8): {:?}",
+            "trade_market_app: price_belief off-diagonal unexpected values (first 8): {:?}",
             &offdiag_bad[..offdiag_bad.len().min(8)],
         );
     }
 
     // ---- Outcome classification ----
-    let trader_band = tv_steady * 0.05; // ±5%
+    let trader_band = tv_steady * 0.05;
     let trader_ok = (tv_mean - tv_steady).abs() <= trader_band
         && (tv_min - tv_steady).abs() <= trader_band
         && (tv_max - tv_steady).abs() <= trader_band;
-    let hub_band = hv_per_slot_expected * 0.05; // ±5%
+    let hub_band = hv_per_slot_expected * 0.05;
     let hub_ok = (hv_mean - hv_per_slot_expected).abs() <= hub_band
         && (hv_min - hv_per_slot_expected).abs() <= hub_band
         && (hv_max - hv_per_slot_expected).abs() <= hub_band;
+    // v2: every diagonal AND off-diagonal cell flips to 1u under the
+    // auto-spread + 6.0-cell-edge spatial grid (all 32 agents fit
+    // inside one cell ⇒ every pair is a spatial neighbour). If a
+    // future seed/agent_count combination spreads agents across
+    // multiple cells, the predicate would weaken to "≥ N off-
+    // diagonal cells flipped" + "diagonal fully set"; for the
+    // pinned probe seed we keep the strict full-fire predicate.
     let belief_ok = diag_ok == n && offdiag_ok == n * (n - 1);
 
     println!(
@@ -160,10 +210,12 @@ fn main() {
 
     if trader_ok && hub_ok && belief_ok {
         println!(
-            "trade_market_app: OUTCOME = (a) FULL FIRE — multi-event-kind ring \
-             (TradeExecuted + PriceObserved) partitions cleanly via per-handler \
-             tag filter; mixed view-fold storage (u32 pair_map atomicOr + f32 \
-             with @decay + f32 no-decay) coexists in one program."
+            "trade_market_app: OUTCOME = (a) FULL FIRE — verb cascade end-to-end \
+             (mask -> scoring -> chronicle -> TradeExecuted -> trader/hub_volume folds) \
+             integrated with multi-emit spatial body-form physics (WanderAndTrade \
+             emits PriceObserved + PriceGossip per spatial-neighbour candidate; \
+             both fold into the same price_belief pair_map u32 view via per-handler \
+             tag filter)."
         );
     } else {
         let mut what = Vec::new();
@@ -198,9 +250,7 @@ fn main() {
     }
 
     // The hard asserts come last so the human-readable OUTCOME line
-    // prints first regardless of which view fails. These mirror the
-    // auction_app pattern (analytical assertions on per-slot mean +
-    // bounds within a 5% tolerance band).
+    // prints first regardless of which view fails.
     assert!(
         trader_ok,
         "trader_volume per-slot mean {:.4} not within ±5% of analytical {:.4}",
