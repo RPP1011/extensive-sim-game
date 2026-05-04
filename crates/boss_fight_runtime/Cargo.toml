@@ -1,0 +1,24 @@
+[package]
+name = "boss_fight_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/boss_fight.sim` — first
+# ASYMMETRIC RPG combat fixture. 1 Boss + 5 Heroes share an Agent SoA
+# but use the `creature_type` discriminant to route per-creature
+# verbs. Mirrors `duel_1v1_runtime` shape verbatim except for: agent
+# count = 6, additional `agent_creature_type` SoA buffer, larger
+# starting HPs (boss=5000, heroes=200).
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

@@ -1,0 +1,225 @@
+// boss_fight — first ASYMMETRIC RPG combat fixture.
+//
+// Composes the duel_1v1 verb cascade + creature_type discriminant
+// + multi-event-kind ring into a real RPG-shaped encounter:
+//
+//   - 1 Boss   (slot 0,        HP=5000, two abilities)
+//   - 5 Heroes (slots 1..=5,   HP=200,  two abilities each)
+//
+// The entity declarations Boss / Hero produce stable u32
+// discriminants in EntityRef declaration order:
+//   Boss = 0, Hero = 1
+// The runtime sets `agent.creature_type[i]` to the corresponding
+// discriminant at init so verb predicates `self.creature_type ==
+// Boss` / `self.creature_type == Hero` route per-agent verbs to
+// the right slot.
+//
+// SHAPE — four verbs, each gated on `self.creature_type ==
+// <expected>` so per-tick only the relevant rules participate:
+//
+//   BossStrike   — cooldown 10 ticks. Boss-only. Damages picked
+//                  hero (scoring iterates per-pair candidates and
+//                  argmaxes valid hero targets).
+//   BossSelfHeal — cooldown 50 ticks. Boss-only. Self-cast when
+//                  self.hp < 1500. Restores 500 HP.
+//   HeroAttack   — cooldown 3 ticks. Hero-only. Damages boss
+//                  (scoring picks the boss as the only valid
+//                  candidate).
+//   HeroHeal     — cooldown 20 ticks. Hero-only. Self-cast.
+//                  Restores 60 HP. (Picking lowest-HP ally would
+//                  hit duel Gap E (target.hp in score routes
+//                  through self in PerPair binder shadowing) —
+//                  workaround: target == self, score constant.)
+//
+// Per duel_1v1 docs the per-pair mask hardcodes mask_k=1u
+// (TODO task-5.7) so verb `when` clauses MUST NOT reference the
+// `target` binder — otherwise the mask predicate evaluates only
+// candidate=0 (the Boss), breaking heroes/boss alike. All `when`
+// clauses here are pure self-checks. Target validity is enforced
+// by score expressions that read `target.creature_type` and
+// `target.alive` (the scoring kernel iterates EVERY candidate
+// per actor and argmaxes — see kernel.rs:2790-2820).
+//
+// PROBE FOCUS — first asymmetric multi-creature-type combat. New
+// surfaces vs duel_1v1:
+//   1. `creature_type` SoA read in mask + scoring predicates
+//      (the field is declared in the AgentSoA but no fixture
+//      exercises it as an emit-gate today).
+//   2. Non-self target scoring — Boss strikes one of 5 heroes,
+//      heroes all strike the same Boss. Tests scoring's per-pair
+//      candidate loop with N>2 candidates.
+//   3. Multi-phase boss behavior — SelfHeal verb activates only
+//      when boss HP is below threshold (composes the cooldown
+//      gate with an HP threshold gate, like duel's Heal verb but
+//      for Boss against a much higher HP pool).
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Damaged {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Healed {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Defeated {
+  combatant: AgentId,
+}
+
+// IMPORTANT — declaration order pins creature_type discriminants:
+//   Boss = 0
+//   Hero = 1
+// Runtime initialises agent_creature_type[0] = 0 (Boss),
+// agent_creature_type[1..6] = 1 (Hero).
+entity Boss : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Hero : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config combat {
+  // Boss abilities
+  boss_strike_damage: f32 = 50.0,
+  boss_heal_amount:   f32 = 400.0,
+  boss_heal_threshold: f32 = 1500.0,
+  // Hero abilities (tuned so 3-4 heroes alive can outpace boss
+  // self-heal: per 50 ticks, 4 alive heroes deal 4 × 35 × 50/3 ≈
+  // 2333 dmg vs +400 boss heal per 50 ticks ≈ net -1933 per cycle).
+  hero_attack_damage: f32 = 35.0,
+  hero_heal_amount:   f32 = 60.0,
+  // Cooldown literals — kept for reference; today the .sim hardcodes
+  // numeric ticks in the `when` clauses because `world.tick % config...`
+  // would resolve `config.combat.<u32>` to f32 at lowering (per
+  // diplomacy_probe Gap #3).
+  cooldown_boss_strike: u32 = 10,
+  cooldown_boss_heal:   u32 = 50,
+  cooldown_hero_attack: u32 = 3,
+  cooldown_hero_heal:   u32 = 20,
+}
+
+// ---------------------------------------------------------------------------
+// Boss verbs
+// ---------------------------------------------------------------------------
+
+// BossStrike — Boss attacks a hero every 10 ticks. Score expression
+// validates target type + alive (scoring kernel iterates all
+// candidates; only candidates whose check returns the high score
+// win argmax). Invalid candidates (other Boss / dead heroes / self)
+// receive a sentinel-low score and never win.
+//
+// Score returns 1.0 when target is an alive Hero, -1000.0 otherwise.
+// argmax across 6 candidates picks the first alive hero (deterministic
+// — slot order). Hero damage is uniformly 50 per strike.
+verb BossStrike(self, target: Agent) =
+  action BossStrikeAction
+  when (self.alive
+        && self.creature_type == Boss
+        && (world.tick % 10 == 0))
+  emit Damaged { source: self, target: target, amount: config.combat.boss_strike_damage }
+  score (if (target.alive && target.creature_type == Hero) { 1.0 } else { -1000.0 })
+
+// BossSelfHeal — Boss heals self when low. Target binder is unused
+// in the emit (target = self structurally), but the verb still
+// declares `target: Agent` so the mask routes through PerPair (the
+// only way to access score / scoring on a verb today). Score is a
+// large constant so SelfHeal beats BossStrike on the heal tick when
+// the HP gate fires.
+//
+// HP gate is in `when` (self-only — keeps mask predicate PerAgent-
+// equivalent under the mask_k=1u hardcoding).
+verb BossSelfHeal(self, target: Agent) =
+  action BossSelfHealAction
+  when (self.alive
+        && self.creature_type == Boss
+        && (world.tick % 50 == 0)
+        && self.hp < config.combat.boss_heal_threshold)
+  emit Healed { source: self, target: self, amount: config.combat.boss_heal_amount }
+  score 100.0
+
+// ---------------------------------------------------------------------------
+// Hero verbs
+// ---------------------------------------------------------------------------
+
+// HeroAttack — every 3 ticks each Hero attacks the Boss. The score
+// expression picks the boss (slot whose creature_type == Boss).
+verb HeroAttack(self, target: Agent) =
+  action HeroAttackAction
+  when (self.alive
+        && self.creature_type == Hero
+        && (world.tick % 3 == 0))
+  emit Damaged { source: self, target: target, amount: config.combat.hero_attack_damage }
+  score (if (target.alive && target.creature_type == Boss) { 1.0 } else { -1000.0 })
+
+// HeroHeal — every 20 ticks each Hero self-heals (60 HP). Picking
+// lowest-HP-percentage ally would hit Gap E (binder shadowing on
+// `target.hp` in PerPair scoring) — workaround: self-cast, constant
+// score. The `when` clause does not use a HP threshold so HeroHeal
+// fires on every multiple of 20; this gives heroes a steady drip
+// of healing throughout the fight.
+verb HeroHeal(self, target: Agent) =
+  action HeroHealAction
+  when (self.alive
+        && self.creature_type == Hero
+        && (world.tick % 20 == 0))
+  emit Healed { source: self, target: self, amount: config.combat.hero_heal_amount }
+  score 50.0
+
+// ---------------------------------------------------------------------------
+// Chronicle physics (mirrors duel_1v1 shape)
+// ---------------------------------------------------------------------------
+
+// Apply damage. On Damaged event, reduce target HP. If <= 0, set
+// alive = false and emit Defeated.
+@phase(post)
+physics ApplyDamage {
+  on Damaged { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) - a;
+    agents.set_hp(t, new_hp);
+    if (new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Defeated { combatant: t }
+    }
+  }
+}
+
+// Apply healing. No HP cap clamp today (duel doesn't either).
+@phase(post)
+physics ApplyHeal {
+  on Healed { source: _, target: t, amount: a } {
+    let new_hp = agents.hp(t) + a;
+    agents.set_hp(t, new_hp);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Observability views
+// ---------------------------------------------------------------------------
+
+// Per-source damage_dealt — accumulator for ability fire-counts
+// (since each verb deals fixed damage, count = damage / amount).
+@materialized(on_event = [Damaged])
+view damage_dealt(source: Agent) -> f32 {
+  initial: 0.0,
+  on Damaged { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-source healing_done — same shape.
+@materialized(on_event = [Healed])
+view healing_done(source: Agent) -> f32 {
+  initial: 0.0,
+  on Healed { source: s, target: _, amount: a } { self += a }
+  clamp: [0.0, 1000000.0],
+}

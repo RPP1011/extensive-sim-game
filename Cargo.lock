@@ -194,6 +194,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "boss_fight_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1783,6 +1796,7 @@ dependencies = [
  "auction_runtime",
  "bartering_runtime",
  "boids_runtime",
+ "boss_fight_runtime",
  "cooldown_probe_runtime",
  "crowd_navigation_runtime",
  "diplomacy_probe_runtime",

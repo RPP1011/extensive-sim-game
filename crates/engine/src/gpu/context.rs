@@ -102,16 +102,12 @@ impl GpuContext {
         let supported = adapter.features();
         let required_features = supported & wanted;
         // Use the adapter's reported limits as the floor (defaults
-        // to 8 storage buffers per stage; a single multi-verb fixture
-        // like tactical_horde_500 binds 11 storage buffers in its
-        // scoring kernel — agent_hp + agent_level + 6 mask bitmaps
-        // + scoring_output + event_ring + event_tail). Adapters
-        // exposing higher limits will see them honoured; adapters
-        // that don't are still fed the default downlevel set.
+        // to 8 storage buffers per stage; multi-verb fixtures like
+        // tactical_horde_500 bind 11 storage buffers and boss_fight
+        // binds 9). Adapters exposing higher limits see them
+        // honoured; adapters that don't are still fed the default
+        // downlevel set.
         let mut required_limits = adapter.limits();
-        // Floor on the dimensions that fixtures depend on; without
-        // these floors a downlevel adapter would force a smaller
-        // limit than the kernel emits.
         required_limits.max_storage_buffers_per_shader_stage = required_limits
             .max_storage_buffers_per_shader_stage
             .max(12);

@@ -187,6 +187,11 @@ flocking_skirmish_runtime = { path = "../flocking_skirmish_runtime" }
 # verb cascade + per-agent physics + multi-event-kind ring +
 # non-self target setters into a recognizable TD gameplay loop.
 tower_defense_runtime = { path = "../tower_defense_runtime" }
+# Boss fight — fifteenth REAL fixture and first ASYMMETRIC RPG combat
+# (1 Boss vs 5 Heroes with cooldown-gated abilities + phase-based
+# boss self-heal). Closest approximation to actual game encounter
+# combat across all prior sims.
+boss_fight_runtime = { path = "../boss_fight_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -323,3 +328,7 @@ path = "src/flocking_skirmish_app.rs"
 [[bin]]
 name = "tower_defense_app"
 path = "src/tower_defense_app.rs"
+
+[[bin]]
+name = "boss_fight_app"
+path = "src/boss_fight_app.rs"
