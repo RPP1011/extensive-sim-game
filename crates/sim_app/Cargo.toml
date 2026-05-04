@@ -168,6 +168,13 @@ megaswarm_1000_runtime = { path = "../megaswarm_1000_runtime" }
 # at 1000-agent scale holds together — the load-bearing question for
 # unit-scale tactical strategy gameplay.
 tactical_horde_500_runtime = { path = "../tactical_horde_500_runtime" }
+# Trophic 3-tier — TWELFTH REAL fixture and FIRST three-tier food web.
+# Grass (creature_type=0) + Herbivore (1) + Carnivore (2) all in a
+# single shared Agent SoA. Builds on predator_prey_real but replaces
+# the uniform graze_rate proxy with a real Grass entity that herbivores
+# actually deplete via Eat→ApplyEat chronicle. 1000-tick run probes
+# long-term ecological equilibrium.
+trophic_3tier_runtime = { path = "../trophic_3tier_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -292,3 +299,7 @@ path = "src/megaswarm_1000_app.rs"
 [[bin]]
 name = "tactical_horde_500_app"
 path = "src/tactical_horde_500_app.rs"
+
+[[bin]]
+name = "trophic_3tier_app"
+path = "src/trophic_3tier_app.rs"

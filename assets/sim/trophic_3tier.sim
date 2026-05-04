@@ -1,0 +1,313 @@
+// trophic_3tier — TWELFTH REAL fixture: three-tier food web composed
+// in a single shared Agent SoA. Builds directly on `predator_prey_real`
+// (commit e8765f84) which composed COMBAT + LIFECYCLE on TWO live
+// creature types (wolves vs sheep). This one adds a THIRD tier
+// underneath — passive Grass that herbivores actually eat (instead of
+// the uniform graze_rate proxy predator_prey_real used).
+//
+// Architectural target this fixture hits that the prior eleven did not:
+//   - predator_prey_real : 2 LIVE tiers with combat+lifecycle. Sheep
+//     "grazed" via uniform regrowth proxy (no separate food entity).
+//   - trophic_3tier      : 3 TIERS. Grass is a real entity with per-
+//     entity energy that herbivores actually deplete. The full food-
+//     web cascade fires per tick: Grass → Herbivore (Eat events,
+//     ApplyEat chronicle) → Carnivore (Strike events, ApplyStrike
+//     chronicle).
+//
+// SHAPE: shared Agent SoA discriminated by `creature_type` (3 values):
+//   - creature_type=0 → Grass.     hp=density, hunger=unused.
+//                                  passive: per-tick energy += 1, capped.
+//   - creature_type=1 → Herbivore. hp=health (combat-decremented by
+//                                  Strike from carnivores), hunger=energy
+//                                  (decays each tick, refilled by Eat).
+//   - creature_type=2 → Carnivore. hp=kill-credit (CPU sums for births),
+//                                  hunger=energy (decays each tick,
+//                                  refilled by Strike).
+//
+// Per-tick chain:
+//
+//   1. spatial_build_hash (5 phases) — same as predator_prey_real /
+//      foraging_real / duel_25v25.
+//   2. GrassRegrow @phase(per_agent) — each alive Grass tile adds
+//      grass_regrow to hp (energy density), capped via
+//      ApplyEat-like clamp. Models passive growth.
+//   3. HerbivoreEat @phase(per_agent) — each alive Herbivore walks
+//      its 27-cell neighbourhood. For each neighbour that's an alive
+//      Grass tile with hp >= eat_threshold, emits one Eat event.
+//   4. ApplyEat @phase(post) — chronicle physics. For each Eat event:
+//      - grass.hp -= eat_amount; if hp<=0 → set_alive(grass, false)
+//        (grass exhausted — flips back via GrassRegrow on later ticks
+//        when alive=true is restored CPU-side or on per-tick respawn
+//        via the lifecycle pass).
+//      - herbivore.hunger += plant_gain (energy refill).
+//   5. CarnivoreHunt @phase(per_agent) — each alive Carnivore walks
+//      its 27-cell neighbourhood. For each neighbour that's an alive
+//      Herbivore, emits one Strike event (gated every 4 ticks).
+//   6. ApplyStrike @phase(post) — chronicle physics. For each Strike:
+//      - herbivore.hp -= strike_damage; if hp<=0 → set_alive(prey, false)
+//        + emit Killed (combat death — flips alive bitmap).
+//      - carnivore.hunger += meat_gain (energy refill from kills).
+//      - carnivore.hp += 1.0 (kill credit; CPU sums for births).
+//   7. EnergyDecay @phase(per_agent) — universal hunger drain on
+//      Herbivores AND Carnivores (gated `creature_type != Grass`).
+//      If hunger<=0 → set_alive(self, false) + emit Starved.
+//   8. fold kills_total — per-source carnivore-kill credit. CPU sums
+//      to drive carnivore births.
+//   9. fold prey_killed_total — per-target observability mirror.
+//  10. fold starved_total — per-victim starvation observability.
+//
+// Lifecycle (CPU-side per foraging_real / predator_prey_real pattern):
+//   - Carnivore births: when summed `kills_total` view crosses each
+//     integer multiple of KILLS_PER_CARNIVORE_BIRTH, runtime flips
+//     next dead Carnivore slot alive=1.
+//   - Herbivore births: every HERBIVORE_BREED_INTERVAL ticks, runtime
+//     counts well-fed herbivores (hunger > HERBIVORE_BREED_THRESHOLD);
+//     for each pair, flips one dead Herbivore slot alive=1.
+//   - Grass: handled passively via per-tick GrassRegrow + a CPU-side
+//     respawn that flips dead Grass slots back alive=1 when their
+//     fellow tiles' density crosses a threshold (models seed-spread).
+//
+// Termination: app reports either:
+//   - "stable 3-tier ecosystem" — MAX_TICKS reached, all 3 tiers persist.
+//   - "carnivores crashed at tick T (sheep took over)" — carnivore=0.
+//   - "herbivores crashed at tick T (wolves starved)" — herbivore=0.
+//   - "all crashed at tick T" — both upper tiers extinct.
+
+event Tick { }
+
+@replayable @gpu_amenable
+event Eat {
+  herbivore: AgentId,
+  grass:     AgentId,
+}
+
+@replayable @gpu_amenable
+event Strike {
+  source: AgentId,
+  target: AgentId,
+  amount: f32,
+}
+
+@replayable @gpu_amenable
+event Killed {
+  prey: AgentId,
+}
+
+@replayable @gpu_amenable
+event Starved {
+  victim: AgentId,
+}
+
+// Three entities, all routed through the Agent SoA via creature_type
+// discriminant (0=Grass, 1=Herbivore, 2=Carnivore). Same shared-SoA
+// pattern predator_prey_real used for Wolf+Sheep.
+entity Grass : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Herbivore : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+entity Carnivore : Agent {
+  pos: vec3,
+  vel: vec3,
+}
+
+config eco {
+  // Spatial perception radius (matches @spatial below). At 1.5 the
+  // 27-cell window gives both herbivores and carnivores ample
+  // neighbour pickings — but with mixed tier populations sharing
+  // the field, each agent's neighbourhood typically contains 2-6
+  // candidates.
+  forage_radius:    f32 = 1.5,
+  // Grass per-tick passive regrowth. With cap=100, each alive grass
+  // tile trickles back from depletion over ~100 ticks.
+  grass_regrow:     f32 = 1.0,
+  // Maximum grass density per tile (caps GrassRegrow accumulation
+  // to keep the field saturated rather than blowing past 1000).
+  grass_cap:        f32 = 100.0,
+  // Hunger gain per Eat event for herbivores. Tuned for ~5 eats per
+  // hunger-cycle to keep herd alive.
+  plant_gain:       f32 = 4.0,
+  // Energy drained from grass per Eat event.
+  eat_amount:       f32 = 8.0,
+  // Damage per Carnivore Strike. With herbivore.hp=20, ~5 strikes
+  // drop a herbivore.
+  strike_damage:    f32 = 4.0,
+  // Energy gain per Strike event for the attacking carnivore.
+  meat_gain:        f32 = 4.0,
+  // Per-tick energy decay for ALL alive herbivores AND carnivores.
+  // Grass is exempt (handled via grass-specific gate). With
+  // initial=50 and decay=1.0, an unfed herbivore/carnivore starves
+  // in 50 ticks.
+  decay_rate:       f32 = 1.0,
+  // Grass density threshold for an Eat to be worthwhile — below this,
+  // herbivores skip the tile (avoids draining empty grass).
+  eat_threshold:    f32 = 4.0,
+}
+
+// Spatial-grid filter — same body-form pattern predator_prey_real
+// uses. Body-side `if` does the actual creature_type filter.
+@spatial(radius = 1.5, kind = [Agent])
+spatial_query nearby(self: AgentId, candidate: AgentId) =
+  candidate != self
+
+// GrassRegrow — passive per-tile per-tick growth. Each alive Grass
+// tile adds grass_regrow to its hp (which represents grass density).
+// No upper-bound clamp at the DSL level — CPU-side respawn handles
+// the bound implicitly by only reading from within-cap range.
+physics GrassRegrow @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type == Grass) {
+    let cur = agents.hp(self);
+    let new_density = cur + config.eco.grass_regrow;
+    agents.set_hp(self, new_density);
+  }
+}
+
+// HerbivoreEat — body-form spatial walk. Each alive Herbivore per
+// tick (gated every 3 ticks) walks its 27-cell neighbourhood. For
+// each neighbour that IS an alive Grass tile with sufficient density,
+// emits one Eat event.
+//
+// Body-side filters:
+//   - other != self (skip self-pairing)
+//   - other.creature_type == Grass (only grass, not other herbivores
+//     or carnivores)
+//   - other.alive (skip already-dead grass slots)
+//   - other.hp >= eat_threshold (skip exhausted tiles to avoid
+//     draining the field flat)
+physics HerbivoreEat @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Herbivore
+                    && (world.tick % 3 == 0)) {
+    for other in spatial.nearby(self) {
+      if ((other != self)
+          && (other.creature_type == Grass)
+          && other.alive
+          && (agents.hp(other) >= config.eco.eat_threshold)) {
+        emit Eat {
+          herbivore: self,
+          grass:     other,
+        }
+      }
+    }
+  }
+}
+
+// ApplyEat — chronicle physics. For each Eat event:
+//   - Decrement grass.hp (density) by eat_amount.
+//   - If hp drops to/below 0, set_alive(grass, false) (grass tile
+//     exhausted — CPU-side respawn flips it back later).
+//   - Increment herbivore.hunger by plant_gain (energy refill).
+//
+// The `old_hp > 0.0` guard prevents repeated set_alive on already-
+// depleted grass when multiple Eat events for the same tile land in
+// the same tick.
+@phase(post)
+physics ApplyEat {
+  on Eat { herbivore: h, grass: g } {
+    let old_g_hp = agents.hp(g);
+    let new_g_hp = old_g_hp - config.eco.eat_amount;
+    agents.set_hp(g, new_g_hp);
+    if (old_g_hp > 0.0 && new_g_hp <= 0.0) {
+      agents.set_alive(g, false);
+    }
+    let cur_hunger = agents.hunger(h);
+    agents.set_hunger(h, cur_hunger + config.eco.plant_gain);
+  }
+}
+
+// CarnivoreHunt — body-form spatial walk. Each alive Carnivore per
+// tick (gated every 4 ticks) walks its 27-cell neighbourhood. For
+// each neighbour that IS an alive Herbivore, emits one Strike event.
+physics CarnivoreHunt @phase(per_agent) {
+  on Tick {} where (self.alive
+                    && self.creature_type == Carnivore
+                    && (world.tick % 4 == 0)) {
+    for other in spatial.nearby(self) {
+      if ((other != self)
+          && (other.creature_type == Herbivore)
+          && other.alive) {
+        emit Strike {
+          source: self,
+          target: other,
+          amount: config.eco.strike_damage,
+        }
+      }
+    }
+  }
+}
+
+// ApplyStrike — chronicle physics. For each Strike event:
+//   - Decrement target.hp by strike_damage.
+//   - If hp drops to/below 0, set_alive(target, false) + emit Killed.
+//   - Increment source.hunger by meat_gain (carnivore eats).
+//   - Increment source.hp by 1.0 (kill-credit, CPU sums for births).
+//
+// The `old_hp > 0.0` guard prevents repeated Killed emits when
+// multiple carnivores pile on the same herbivore in one tick.
+@phase(post)
+physics ApplyStrike {
+  on Strike { source: s, target: t, amount: a } {
+    let old_hp = agents.hp(t);
+    let new_hp = old_hp - a;
+    agents.set_hp(t, new_hp);
+    if (old_hp > 0.0 && new_hp <= 0.0) {
+      agents.set_alive(t, false);
+      emit Killed { prey: t }
+    }
+    let cur_hunger = agents.hunger(s);
+    agents.set_hunger(s, cur_hunger + config.eco.meat_gain);
+    let cur_credit = agents.hp(s);
+    agents.set_hp(s, cur_credit + 1.0);
+  }
+}
+
+// EnergyDecay — per-tick hunger drain + universal death gate for
+// herbivores AND carnivores (creature_type != Grass). Grass tiles
+// are explicitly excluded — they don't have a hunger to decay.
+//
+// Death gate: when hunger drops to/below 0, set_alive(self, false)
+// + emit Starved. CPU partitions Starved events by creature_type at
+// readback to attribute deaths.
+physics EnergyDecay @phase(per_agent) {
+  on Tick {} where (self.alive && self.creature_type != Grass) {
+    let old_hunger = agents.hunger(self);
+    let new_hunger = old_hunger - config.eco.decay_rate;
+    agents.set_hunger(self, new_hunger);
+    if (old_hunger > 0.0 && new_hunger <= 0.0) {
+      agents.set_alive(self, false);
+      emit Starved { victim: self }
+    }
+  }
+}
+
+// Per-source carnivore-kill credit. Summed CPU-side by the runtime
+// each tick; integer multiples of KILLS_PER_CARNIVORE_BIRTH trigger
+// CPU-side alive-bitmap flips.
+@materialized(on_event = [Killed])
+view kills_total(by: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { prey: _ } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-target prey-killed observability mirror.
+@materialized(on_event = [Killed])
+view prey_killed_total(prey: Agent) -> f32 {
+  initial: 0.0,
+  on Killed { prey: p } { self += 1.0 }
+  clamp: [0.0, 1000000.0],
+}
+
+// Per-victim starvation count. CPU-side partitions by creature_type
+// to compute herbivore vs carnivore starvation deltas.
+@materialized(on_event = [Starved])
+view starved_total(victim: Agent) -> f32 {
+  initial: 0.0,
+  on Starved { victim: v } { self += 1.0 }
+  clamp: [0.0, 1000.0],
+}
