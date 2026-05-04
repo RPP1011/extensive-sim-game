@@ -63,6 +63,11 @@ abilities_runtime = { path = "../abilities_runtime" }
 # per-agent cooldown_next_ready_tick SoA + world.tick preamble +
 # `if (tick >= ready_at) { emit }` gating end-to-end.
 cooldown_probe_runtime = { path = "../cooldown_probe_runtime" }
+# Diplomacy probe — first fixture combining ALL of: pair_map u32 view
+# (ToM shape), verb cascade with TWO competing verbs gated on
+# disjoint Mod-tick predicates, three distinct event kinds in one
+# ring with per-handler tag filters, two Group entity declarations.
+diplomacy_probe_runtime = { path = "../diplomacy_probe_runtime" }
 
 [[bin]]
 name = "sim_app"
@@ -123,3 +128,7 @@ path = "src/abilities_app.rs"
 [[bin]]
 name = "cooldown_probe_app"
 path = "src/cooldown_probe_app.rs"
+
+[[bin]]
+name = "diplomacy_probe_app"
+path = "src/diplomacy_probe_app.rs"

@@ -1389,3 +1389,111 @@ fn cooldown_probe_compile_gate() {
         art.kernel_index,
     );
 }
+
+/// `diplomacy_probe` compile-gate. Pins the structural surface of the
+/// smallest end-to-end probe of DIPLOMACY / COALITION FORMATION:
+///
+///   - 2 MaskPredicate ops (one per verb's `when (world.tick % 3 == X)`),
+///     gated on disjoint Mod-tick predicates so EXACTLY ONE verb wins
+///     argmax per tick.
+///   - 1 PhysicsRule (`ObserveAndAct`) per-agent, emitting `Observed`
+///     into the shared event ring every tick.
+///   - 2 PhysicsRule chronicles synthesised from the verbs (each gated
+///     on `action_id == <verb_id>`, emitting AllianceProposed +
+///     Betrayed).
+///   - 1 ScoringArgmax with 2 competing rows (ProposeAlliance + Betray).
+///   - 3 ViewFold ops:
+///       - `trust` — pair_map u32 fed by `Observed` (atomicOr fold)
+///       - `alliances_proposed` — f32 fed by `AllianceProposed`
+///       - `betrayals_committed` — f32 fed by `Betrayed`
+///
+/// FIRST fixture combining all of:
+///   - 2 Group entity declarations (Faction + Coalition)
+///   - pair_map u32 view (ToM-shape, post `51b5853b` landing)
+///   - verb cascade with TWO competing verbs (post `cd007370` landing)
+///   - per-handler tag-filter scaling to THREE event kinds in one ring
+///     (post `cb24fd69` landing)
+///   - verb `when` clauses referencing `world.tick % N == 0` (Mod
+///     operator post `7208912f` landing)
+///
+/// Discovery doc: `docs/superpowers/notes/2026-05-04-diplomacy_probe.md`.
+#[test]
+fn diplomacy_probe_compile_gate() {
+    use dsl_compiler::cg::lower::lower_compilation_to_cg;
+    let path = workspace_path("assets/sim/diplomacy_probe.sim");
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let prog = dsl_compiler::parse(&src).expect("parse diplomacy_probe.sim");
+    let comp = dsl_ast::resolve::resolve(prog).expect("resolve diplomacy_probe.sim");
+    let cg = lower_compilation_to_cg(&comp).unwrap_or_else(|o| {
+        for d in &o.diagnostics {
+            eprintln!("[diplomacy_probe lower diag] {d}");
+        }
+        o.program
+    });
+    let sched = dsl_compiler::cg::schedule::synthesize_schedule(
+        &cg,
+        dsl_compiler::cg::schedule::ScheduleStrategy::Default,
+    );
+    let art = dsl_compiler::cg::emit::emit_cg_program(&sched.schedule, &cg)
+        .expect("emit diplomacy_probe");
+
+    // Op-level invariants.
+    let mut mask_count = 0;
+    let mut physics_count = 0;
+    let mut viewfold_count = 0;
+    let mut scoring_rows = 0;
+    for op in &cg.ops {
+        match &op.kind {
+            dsl_compiler::cg::op::ComputeOpKind::MaskPredicate { .. } => mask_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::PhysicsRule { .. } => physics_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ViewFold { .. } => viewfold_count += 1,
+            dsl_compiler::cg::op::ComputeOpKind::ScoringArgmax { rows, .. } => {
+                scoring_rows = rows.len();
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(mask_count, 2, "expected 2 MaskPredicate ops (one per verb's `when` clause); got {mask_count}");
+    assert_eq!(physics_count, 3, "expected 3 PhysicsRule ops (ObserveAndAct + 2 verb chronicles); got {physics_count}");
+    assert_eq!(viewfold_count, 3, "expected 3 ViewFold ops (trust + alliances_proposed + betrayals_committed); got {viewfold_count}");
+    assert_eq!(scoring_rows, 2, "expected 2 scoring rows (ProposeAlliance + Betray competing); got {scoring_rows}");
+
+    // Mask kernel must reference `tick % 3u` — locks the verb-`when`
+    // Mod-predicate lowering path that dropped pre-Mod-landing.
+    let mask_body = kernel_body_containing(&art, "mask")
+        .unwrap_or_else(|| panic!("no mask kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        mask_body.contains("(tick % 3u)"),
+        "mask kernel must lower `world.tick % 3` to `(tick % 3u)`; got body:\n{mask_body}",
+    );
+
+    // The `trust` fold body must use `atomicOr` — pair_map u32 storage
+    // path. Locks the post-`51b5853b` landing.
+    let trust_body = kernel_body_containing(&art, "trust")
+        .unwrap_or_else(|| panic!("no fold_trust kernel emitted: {:?}", art.kernel_index));
+    assert!(
+        trust_body.contains("atomicOr"),
+        "fold_trust must use atomicOr (u32 view, |= self-update); got body:\n{trust_body}",
+    );
+
+    // All emitted WGSL must be naga-clean.
+    let mut errs = Vec::new();
+    for (name, body) in &art.wgsl_files {
+        if let Err(e) = naga::front::wgsl::parse_str(body) {
+            errs.push(format!("  {name}: {e}"));
+        }
+    }
+    assert!(
+        errs.is_empty(),
+        "diplomacy_probe emitted {} naga-invalid WGSL kernels:\n{}",
+        errs.len(),
+        errs.join("\n"),
+    );
+
+    eprintln!(
+        "[diplomacy_probe] {} kernels emitted: {:?}",
+        art.kernel_index.len(),
+        art.kernel_index,
+    );
+}

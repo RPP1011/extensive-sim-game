@@ -1,0 +1,29 @@
+[package]
+name = "diplomacy_probe_runtime"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# Per-fixture runtime crate for `assets/sim/diplomacy_probe.sim` —
+# smallest end-to-end probe combining the recently-landed surfaces:
+# pair_map u32 view (ToM shape), verb cascade with TWO competing
+# verbs gated on disjoint Mod-tick predicates, three distinct event
+# kinds in one ring with per-handler tag filters, and two Group
+# entity declarations.
+#
+# Mirrors the abilities_runtime + tom_probe_runtime + cooldown_probe_runtime
+# shapes: build.rs lowers the .sim through the DSL compiler into
+# `OUT_DIR/generated.rs`; src/lib.rs owns the GPU context, per-buffer
+# storage, kernel cache, and per-tick dispatch chain.
+
+[dependencies]
+engine = { path = "../engine" }
+wgpu = "=26.0.1"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.29"
+pollster = "0.4"
+dsl_compiler = { path = "../dsl_compiler" }
+
+[build-dependencies]
+dsl_ast = { path = "../dsl_ast" }
+dsl_compiler = { path = "../dsl_compiler" }

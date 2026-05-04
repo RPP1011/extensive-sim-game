@@ -488,6 +488,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "diplomacy_probe_runtime"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "dsl_ast",
+ "dsl_compiler",
+ "engine",
+ "glam",
+ "pollster",
+ "wgpu",
+]
+
+[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1642,6 +1655,7 @@ dependencies = [
  "boids_runtime",
  "cooldown_probe_runtime",
  "crowd_navigation_runtime",
+ "diplomacy_probe_runtime",
  "ecosystem_runtime",
  "engine",
  "foraging_runtime",
